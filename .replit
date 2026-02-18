@@ -1,14 +1,8 @@
 entrypoint = "README.md"
-modules = ["nodejs-22"]
 
 [nix]
 channel = "stable-24_05"
 packages = ["go", "flutter", "chromium"]
-
-[deployment]
-deploymentTarget = "cloudrun"
-build = ["sh", "-c", "npm run expo:static:build && npm run server:build"]
-run = ["npm", "run", "server:prod"]
 
 [[ports]]
 localPort = 5000
@@ -20,9 +14,6 @@ externalPort = 80
 
 [env]
 PORT = "5000"
-
-[agent]
-stack = "EXPO"
 
 [workflows]
 runButton = "Project"
@@ -66,6 +57,4 @@ mode = "sequential"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "npm run expo:dev"
-waitForPort = 8081
-ensurePreviewReachable = "/status"
+args = "npm run flutter:build"
