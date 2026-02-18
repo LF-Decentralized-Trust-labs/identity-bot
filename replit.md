@@ -2,9 +2,9 @@
 
 ## Overview
 
-The Identity Agent is a self-sovereign digital identity platform that unifies identity, data, communications, and assets into a single environment. It implements the KERI (Key Event Receipt Infrastructure) protocol for decentralized identity management. The system uses a "Decoupled-but-Bundled" architecture with a Go backend (the "Core") handling cryptography, key event logs, and data persistence, and a Flutter frontend (the "Controller") providing the cross-platform UI and secure key management via device hardware.
+The Identity Agent is a self-sovereign digital identity platform that unifies identity, data, communications, and assets into a single environment. It implements the KERI (Key Event Receipt Infrastructure) protocol for decentralized identity management. The system uses a three-layer architecture: Go backend (the "Core") for orchestration and persistence, a Python KERI driver (the "Driver") for protocol-correct KERI operations, and a Flutter frontend (the "Controller") for the cross-platform UI.
 
-The project is currently in **Phase 1 ("The Skeleton")** — completed. Go HTTP server, Flutter dashboard, and health check handshake are all working end-to-end. Ready for Phase 2.
+The project is currently in **Phase 2 ("Inception")** — identity creation, BIP-39 mnemonic, KERI inception events, and KEL persistence are all working end-to-end.
 
 ## User Preferences
 
@@ -13,101 +13,131 @@ Design theme: Dark cyberpunk aesthetic with monospace fonts, dark blue/green col
 
 ## System Architecture
 
-### Pure Go + Flutter Architecture (No Node.js Runtime)
+### Three-Layer Architecture: Go + Python Driver + Flutter
 
-The system has two components that communicate via HTTP:
+The system has three components that communicate via HTTP:
 
-1. **Go Backend (`identity-agent-core/`)** — A compiled Go binary that acts as the persistent "Agent." It handles:
-   - KERI protocol operations (KEL — Key Event Log, TEL, IPEX credentials)
-   - Cryptographic key management (delegated operational keys)
-   - Database persistence (default: embedded key-value store like BadgerDB/BoltDB, swappable to PostgreSQL)
-   - Access Control List (ACL) management
-   - Network-facing gateway (single public entry point, cryptographically authenticated)
-   - Listens on port 5000, serves both the API (`/api/*`) and the Flutter web build as static files
-   - API endpoints: `/api/health` (health check), `/api/info` (system info)
+1. **Go Backend (`identity-agent-core/`)** — The orchestration layer. Compiled Go binary that:
+   - Serves the public API on port 5000 (`/api/*`)
+   - Manages data persistence (file-based store, swappable to BadgerDB/PostgreSQL)
+   - Spawns and manages the Python KERI driver process
+   - Bridges Flutter requests to the KERI driver
+   - Serves Flutter web build as static files
+   - API endpoints: `/api/health`, `/api/info`, `/api/inception`, `/api/identity`
 
-2. **Flutter Frontend (`identity_agent_ui/`)** — A Flutter/Dart application compiled for web (and eventually mobile/desktop). It handles:
+2. **Python KERI Driver (`drivers/keri-core/`)** — The KERI protocol engine. Internal HTTP microservice that:
+   - Runs on `127.0.0.1:9999` (never exposed publicly)
+   - Handles all KERI protocol operations (inception events, SAID computation, key digests)
+   - Uses keripy (WebOfTrust reference library) when available, falls back to built-in implementation
+   - Endpoints: `/status`, `/inception`
+   - Spawned by Go in development; runs as separate service in production
+
+3. **Flutter Frontend (`identity_agent_ui/`)** — The controller UI. Flutter/Dart app that:
    - User interface and dashboard (dark cyberpunk theme)
-   - Secure key generation and storage via device Secure Enclave/Keychain
    - BIP-39 mnemonic seed phrase generation and backup flow
-   - Biometric authentication (FaceID/TouchID)
-   - QR code scanning for OOBI (Out-of-Band Introduction) resolution
-   - Does NOT store the full KEL — queries the Go Core for state
-   - Backend URL configurable via `AgentConfig` class (`--dart-define=CORE_URL`)
+   - Ed25519 key derivation from mnemonic
+   - Setup Wizard for new identity creation
+   - Only talks to Go on port 5000 — never directly to the Python driver
+   - Backend URL configurable via `AgentConfig` class
+
+### Driver Pattern (Mobile-Ready Architecture)
+
+The Python KERI driver uses an "Internal Network Driver" pattern designed for cross-platform deployment:
+
+- **Development/Replit (Linux):** Go spawns Python as a child process via `exec.Command()`. Communication via `localhost:9999`.
+- **Production (Server):** Python driver runs as a separate service. Go connects via `KERI_DRIVER_URL` environment variable.
+- **Future Mobile (iOS/Android):** Flutter talks to Go backend over the internet. Go + Python driver remain server-side. Mobile devices never need to run Python.
+
+Key environment variables:
+- `KERI_DRIVER_URL` — If set, Go connects to this URL instead of spawning Python (production/external mode)
+- `KERI_DRIVER_PORT` — Port for the managed Python driver (default: 9999)
+- `KERI_DRIVER_SCRIPT` — Path to server.py (default: `./drivers/keri-core/server.py`)
+- `KERI_DRIVER_PYTHON` — Python binary path (default: `python3`)
 
 ### Build System (Shell Scripts, No Node.js)
 
-- `scripts/start-backend.sh` — Builds Go binary, launches Go server on port 5000 (does NOT build Flutter — they are independent)
-- `scripts/build-flutter.sh` — Builds Flutter web assets only; Go picks them up automatically from the build directory
-- No package.json, no npm, no node_modules — pure shell scripts called directly
-- Go gracefully handles Flutter not being built yet (shows a fallback page at root while API remains fully functional)
+- `scripts/start-backend.sh` — Installs Python deps, builds Go binary, launches Go server (which spawns the KERI driver)
+- `scripts/build-flutter.sh` — Builds Flutter web assets only; Go picks them up automatically
+- No package.json, no npm, no node_modules — pure shell scripts
 
 ### Workflows (Fully Decoupled)
 
-- **Start Backend** (`sh ./scripts/start-backend.sh`) — Builds Go and starts the server. API is available immediately. If Flutter has been built, serves the dashboard too; if not, shows a "not yet built" fallback page.
-- **Start Frontend** (`sh ./scripts/build-flutter.sh`) — Builds Flutter web assets independently. Go serves them once they exist in the build directory.
-- Both workflows run in parallel via the "Start App" parent workflow. Neither depends on the other.
+- **Start Backend** (`sh ./scripts/start-backend.sh`) — Installs Python deps, builds Go, starts Go server + KERI driver. API available immediately.
+- **Start Frontend** (`sh ./scripts/build-flutter.sh`) — Builds Flutter web assets independently. Go serves them once they exist.
 
 ### Cryptographic Key Hierarchy (3-Level)
 
-- **Level 1 — Root Authority:** 128-bit salt / 12-word BIP-39 mnemonic. Never stored on active devices. Used only for recovery and authorizing new controllers.
-- **Level 2 — Device Authority:** Keys generated in device Secure Enclave. Signs daily operations. Managed via ACL on the backend.
-- **Level 3 — Delegated Agent:** Operational keys stored in the backend's encrypted database. Signs data as authorized by controllers.
+- **Level 1 — Root Authority:** 128-bit salt / 12-word BIP-39 mnemonic. Never stored on active devices.
+- **Level 2 — Device Authority:** Keys generated in device Secure Enclave. Signs daily operations.
+- **Level 3 — Delegated Agent:** Operational keys stored in the backend's encrypted database.
 
 ### Persistence Layer
 
-- **Default:** Embedded local key-value store (BadgerDB or BoltDB) — zero configuration, no external dependencies
-- **Configurable:** Modular storage layer supports swapping to PostgreSQL or other databases
-- **Migration:** Built-in tool for atomic "hot-swap" between storage providers
+- **Default:** File-based JSON store in `./data/` directory (identity.json, kel.json)
+- **Configurable:** Modular storage interface (`store.Store`) supports swapping backends
+- **Data files:** `data/identity.json` (current identity state), `data/kel.json` (Key Event Log)
 
 ### Implementation Roadmap (follow strictly in order)
 
-- **Phase 1 (COMPLETE):** Skeleton — Go HTTP server, Flutter dashboard, bridge between them, health check endpoint
-- **Phase 2 (next):** Inception — Secure Enclave key generation, BIP-39 mnemonic, KERI inception event, KEL persistence
-- **Phase 3:** Connectivity — Public URL tunneling, OOBI generation, QR scanning, contact resolution
+- **Phase 1 (COMPLETE):** Skeleton — Go HTTP server, Flutter dashboard, bridge between them, health check
+- **Phase 2 (COMPLETE):** Inception — BIP-39 mnemonic, KERI inception event via Python driver, KEL persistence, Setup Wizard
+- **Phase 3 (next):** Connectivity — Public URL tunneling, OOBI generation, QR scanning, contact resolution
 - **Phase 4:** Credentials — Credential schemas, IPEX protocol, organization mode, verification logic
 
 ### Key Design Decisions
 
-- **Why Go for backend:** High-performance cryptography, strict type safety, compiles to single binary, existing `keri-go` library from WebOfTrust
-- **Why Flutter for frontend:** Cross-platform (mobile + desktop + web), native hardware access plugins (NFC, biometrics), strong typing with Dart
-- **Why local-first storage:** Sovereignty by default — no third-party accounts required, zero cost, works offline
-- **Why split-key architecture:** Root authority is never exposed to daily operations, compromising one device doesn't compromise the identity
-- **Why no Node.js:** Eliminated unnecessary JavaScript layer; Go serves Flutter web directly, shell scripts handle builds
+- **Why Go for backend:** Orchestration layer, high-performance, compiles to single binary, manages driver lifecycle
+- **Why Python for KERI:** Reference keripy library is the most battle-tested KERI implementation; Python driver pattern allows using it without embedding Python in mobile
+- **Why Driver Pattern:** HTTP-based internal communication means the same Go code works whether Python is spawned locally or running remotely; mobile devices never need Python
+- **Why Flutter for frontend:** Cross-platform (mobile + desktop + web), native hardware access
+- **Why local-first storage:** Sovereignty by default — no third-party accounts required
+- **Why no Node.js:** Eliminated unnecessary JavaScript layer; Go serves Flutter web directly
 
 ## Key Files
 
-- `identity-agent-core/main.go` — Go backend entry point, HTTP server, API routes, static file serving
-- `identity_agent_ui/lib/main.dart` — Flutter app entry point
+- `identity-agent-core/main.go` — Go backend entry point, HTTP server, API routes, driver lifecycle
+- `identity-agent-core/drivers/keri_driver.go` — Go HTTP client for the Python KERI driver
+- `identity-agent-core/store/store.go` — File-based persistence (Store interface + FileStore implementation)
+- `drivers/keri-core/server.py` — Python Flask HTTP server for KERI operations
+- `drivers/keri-core/requirements.txt` — Python dependencies (flask, keri)
+- `identity_agent_ui/lib/main.dart` — Flutter app entry point + routing logic
+- `identity_agent_ui/lib/screens/setup_wizard_screen.dart` — Setup Wizard (mnemonic + inception)
 - `identity_agent_ui/lib/screens/dashboard_screen.dart` — Main dashboard UI
+- `identity_agent_ui/lib/crypto/bip39.dart` — BIP-39 mnemonic generator
+- `identity_agent_ui/lib/crypto/keys.dart` — Ed25519 key derivation from mnemonic
 - `identity_agent_ui/lib/services/core_service.dart` — HTTP client for Go API
 - `identity_agent_ui/lib/config/agent_config.dart` — Backend URL configuration
-- `scripts/start-backend.sh` — Build + launch script
+- `scripts/start-backend.sh` — Build + launch script (Go + Python driver)
 - `scripts/build-flutter.sh` — Flutter web build script
-- `docs/adr/001-core-architecture-stack.md` — Architecture decision record
-- `roadmap.md` — Phase roadmap
 
 ## External Dependencies
 
 ### Backend (Go)
-- Standard library only (net/http, encoding/json, etc.)
-- Future: `keri-go` (WebOfTrust KERI protocol), BadgerDB/BoltDB (embedded storage)
+- `github.com/go-chi/chi/v5` — HTTP router
+- `github.com/go-chi/cors` — CORS middleware
+- Standard library (net/http, encoding/json, crypto/ed25519, os/exec)
+
+### KERI Driver (Python)
+- `flask` — Lightweight HTTP server
+- `keri` (optional) — WebOfTrust reference KERI library (falls back to built-in implementation)
 
 ### Frontend (Flutter/Dart)
 - Flutter SDK (v3.22.0)
-- `cupertino_icons` — iOS-style icons
 - `http` — HTTP client for API calls
-- Future: `nfc_manager`, `biometric_storage`, `mobile_scanner` — hardware access plugins
+- `crypto` — SHA-256 for key derivation
+- `ed25519_edwards` — Ed25519 key generation
 
 ### Infrastructure
 - Replit hosting environment
-- Future: tunneling client (ngrok-go or similar) for public HTTPS URLs
+- Python 3.11 runtime (for KERI driver)
 
 ## Recent Changes
 
-- 2026-02-18: Decoupled Go and Flutter builds — Go starts independently, Flutter builds separately, neither depends on the other
-- 2026-02-18: Removed package.json and all npm/Node.js dependencies — workflows call shell scripts directly
-- 2026-02-18: Completed Phase 1 — Go server + Flutter dashboard + health check handshake working
-- 2026-02-18: Created shell-script-based build system (no Node.js involvement)
-- 2026-02-18: Made Flutter backend URL configurable via AgentConfig class
-- 2026-02-18: Added dark cyberpunk theme to Flutter dashboard
+- 2026-02-18: Replaced custom Go KERI logic with Python KERI driver (Driver Pattern)
+- 2026-02-18: Created `drivers/keri-core/server.py` — Flask-based internal KERI microservice
+- 2026-02-18: Created `identity-agent-core/drivers/keri_driver.go` — Go HTTP bridge to Python driver
+- 2026-02-18: Go now spawns Python driver on boot, connects via localhost:9999
+- 2026-02-18: Added KERI_DRIVER_URL env var for production/external driver mode
+- 2026-02-18: Updated start-backend.sh to install Python deps and manage driver lifecycle
+- 2026-02-18: Completed Phase 2 — inception events, KEL persistence, Setup Wizard all working
+- 2026-02-18: Decoupled Go and Flutter builds — shell script workflows, no Node.js
