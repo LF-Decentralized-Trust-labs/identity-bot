@@ -44,23 +44,25 @@ class KeriHelperClient {
 
   Future<FormatCredentialResult> formatCredential({
     required Map<String, dynamic> claims,
-    required String schemaId,
+    required String schemaSaid,
+    required String issuerAid,
   }) async {
     final response = await _client.post(
-      Uri.parse('$_helperUrl/format-credential'),
+      Uri.parse('$_helperUrl/helper/format-credential'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({
         'claims': claims,
-        'schema_id': schemaId,
+        'schema_said': schemaSaid,
+        'issuer_aid': issuerAid,
       }),
     );
 
     if (response.statusCode == 200) {
       final json = jsonDecode(response.body);
-      final rawBytesB64 = json['raw_bytes'] as String;
+      final rawBytesB64 = json['raw_bytes_b64'] as String;
       return FormatCredentialResult(
         rawBytes: base64Decode(rawBytesB64),
-        schemaId: json['schema_id'] ?? schemaId,
+        schemaId: json['said'] ?? schemaSaid,
       );
     } else {
       final body = jsonDecode(response.body);
@@ -72,18 +74,18 @@ class KeriHelperClient {
     required String oobiUrl,
   }) async {
     final response = await _client.post(
-      Uri.parse('$_helperUrl/resolve-oobi'),
+      Uri.parse('$_helperUrl/helper/resolve-oobi'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({
-        'oobi_url': oobiUrl,
+        'url': oobiUrl,
       }),
     );
 
     if (response.statusCode == 200) {
       final json = jsonDecode(response.body);
       return ResolvedOobi(
-        url: json['url'] ?? oobiUrl,
-        witnesses: List<Map<String, dynamic>>.from(json['witnesses'] ?? []),
+        url: json['oobi_url'] ?? oobiUrl,
+        witnesses: List<Map<String, dynamic>>.from(json['endpoints'] ?? []),
       );
     } else {
       final body = jsonDecode(response.body);
@@ -92,25 +94,28 @@ class KeriHelperClient {
   }
 
   Future<MultisigEventResult> generateMultisigEvent({
-    required List<String> participantAids,
-    required Map<String, dynamic> payload,
+    required List<String> aids,
+    required int threshold,
+    required List<String> currentKeys,
   }) async {
     final response = await _client.post(
-      Uri.parse('$_helperUrl/generate-multisig-event'),
+      Uri.parse('$_helperUrl/helper/generate-multisig-event'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({
-        'participant_aids': participantAids,
-        'payload': payload,
+        'aids': aids,
+        'threshold': threshold,
+        'current_keys': currentKeys,
+        'event_type': 'inception',
       }),
     );
 
     if (response.statusCode == 200) {
       final json = jsonDecode(response.body);
-      final eventBytesB64 = json['event_bytes'] as String;
+      final eventBytesB64 = json['raw_bytes_b64'] as String;
       return MultisigEventResult(
         eventBytes: base64Decode(eventBytesB64),
         eventType: json['event_type'] ?? '',
-        participantAids: List<String>.from(json['participant_aids'] ?? participantAids),
+        participantAids: aids,
       );
     } else {
       final body = jsonDecode(response.body);
