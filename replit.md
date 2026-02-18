@@ -28,7 +28,7 @@ The system has three components that communicate via HTTP:
 2. **Python KERI Driver (`drivers/keri-core/`)** — The KERI protocol engine. Internal HTTP microservice that:
    - Runs on `127.0.0.1:9999` (never exposed publicly)
    - Handles all KERI protocol operations (inception events, SAID computation, key digests)
-   - Uses keripy (WebOfTrust reference library) when available, falls back to built-in implementation
+   - Uses keripy (WebOfTrust reference library) as a hard requirement — no fallback
    - Endpoints: `/status`, `/inception`
    - Spawned by Go in development; runs as separate service in production
 
@@ -109,6 +109,8 @@ Key environment variables:
 - `identity_agent_ui/lib/config/agent_config.dart` — Backend URL configuration
 - `scripts/start-backend.sh` — Build + launch script (Go + Python driver)
 - `scripts/build-flutter.sh` — Flutter web build script
+- `docs/adr/001-core-architecture-stack.md` — ADR: original architecture decisions
+- `docs/adr/002-keri-driver-pattern.md` — ADR: Python driver pattern, keripy requirement, libsodium detection
 
 ## External Dependencies
 
@@ -119,7 +121,7 @@ Key environment variables:
 
 ### KERI Driver (Python)
 - `flask` — Lightweight HTTP server
-- `keri` (optional) — WebOfTrust reference KERI library (falls back to built-in implementation)
+- `keri` (required) — WebOfTrust reference KERI library v1.1.17 (hard requirement, no fallback)
 
 ### Frontend (Flutter/Dart)
 - Flutter SDK (v3.22.0)
@@ -133,6 +135,9 @@ Key environment variables:
 
 ## Recent Changes
 
+- 2026-02-18: Removed all fallback KERI code — keripy is now a hard requirement (no degraded mode)
+- 2026-02-18: Refactored server.py — clean sections for libsodium detection, keripy imports, HTTP routes
+- 2026-02-18: Created ADR 002 documenting the Python driver pattern and keripy decision
 - 2026-02-18: Replaced custom Go KERI logic with Python KERI driver (Driver Pattern)
 - 2026-02-18: Created `drivers/keri-core/server.py` — Flask-based internal KERI microservice
 - 2026-02-18: Created `identity-agent-core/drivers/keri_driver.go` — Go HTTP bridge to Python driver

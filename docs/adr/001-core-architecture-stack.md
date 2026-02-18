@@ -1,7 +1,7 @@
 # ADR 001: Core Architecture & Language Stack
 
 ## Status
-Accepted
+Accepted (KERI-related sections superseded by [ADR 002](002-keri-driver-pattern.md))
 
 ## Context
 We are building a "Identity Agent" (v1.5 Spec) that functions as a self-sovereign digital territory. The system requires:
