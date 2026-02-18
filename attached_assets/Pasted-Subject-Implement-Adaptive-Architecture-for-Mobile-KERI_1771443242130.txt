@@ -1,0 +1,71 @@
+Subject: Implement "Adaptive Architecture" for Mobile KERI Support
+
+I need to restructure our Identity Agent application to support mobile devices (iOS/Android) where running the local Python sidecar is impossible.
+
+The Goal:
+Update the Flutter Frontend and Go Backend logic to implement an "Adaptive Routing" strategy. The app must detect its environment and choose the correct KERI implementation dynamically.
+
+Requirements:
+
+1. Environment Detection:
+
+In the Flutter initialization (main.dart), add a check for Platform.isAndroid || Platform.isIOS.
+
+If Desktop: Continue using the existing logic (sending commands to the local Go backend which spawns Python).
+
+If Mobile: Switch to the "Mobile Strategy" below.
+
+2. The Mobile Strategy (Hybrid Mode):
+
+A. Primary Backend Check:
+
+Check for a user configuration (e.g., primary_server_url).
+
+If present, route ALL traffic to that remote URL (treating the phone as a remote control).
+
+B. Standalone Fallback (The Rust Bridge):
+
+If no remote server is configured, the app must function independently using a hybrid approach.
+
+Part 1: The Rust Bridge (Local Security Layer)
+
+You must integrate flutter_rust_bridge with the keri-core crate to handle all private key operations locally.
+
+Required Mapped Functions: Please expose the following specific functions from Rust to Dart:
+
+incept_aid(name, code): Generates keys and creates the Inception Event.
+
+rotate_aid(name): Performs a key rotation and updates the local KEL.
+
+sign_payload(name, data): Signs arbitrary data (used for authentication).
+
+get_current_kel(name): Returns the current Key Event Log.
+
+verify_signature(data, signature, public_key): Verifies external data.
+
+Part 2: The Remote Helper (Stateless Logic Layer)
+
+For complex logic that Rust cannot yet handle, implement a Dart API Client that calls a PUBLIC_KERI_HELPER_URL (a stateless external Python service).
+
+Required Helper Endpoints: The client should be able to call these specific stateless endpoints:
+
+POST /format-credential: Accepts public claims (Name, DAO, etc.) and schema ID; returns the raw CESR-encoded bytes for the Rust bridge to sign.
+
+POST /resolve-oobi: Accepts an OOBI URL; returns the resolved Witness endpoints (IP/Port).
+
+POST /generate-multisig-event: Accepts a list of participant AIDs and a payload; returns the rotation/interaction event bytes for the Rust bridge to sign.
+
+Constraint: This API client must ONLY send public data for formatting. It must receive the raw bytes back and pass them to the Rust Bridge for signing. Never send private keys to the helper.
+
+3. Implementation Steps:
+
+Please set up the rust/ directory structure for the bridge.
+
+Create the Dart abstract class that defines this routing logic (e.g., KeriService interface with LocalPythonImpl, RemoteServerImpl, and RustBridgeImpl).
+
+Update the Dependency Injection setup to choose the correct implementation at runtime.
+
+IMPORTANT DEPLOYMENT NOTE:
+Do not attempt to run, compile, or test this code on a mobile simulator or device within Replit, as I know Replit cannot handle mobile binaries. Do not create a "Mock Mode" for web testing either; I want the actual production logic implemented.
+
+I will manually download the code, compile it locally, and deploy it to a physical Android device myself to test the Rust integration. If I encounter build errors or runtime crashes, I will copy/paste the error logs or provide screenshots back to you for debugging. Please focus solely on writing the correct code structure and logic.
