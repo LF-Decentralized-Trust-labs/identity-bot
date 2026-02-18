@@ -37,15 +37,16 @@ The system has two components that communicate via HTTP:
 
 ### Build System (Shell Scripts, No Node.js)
 
-- `scripts/start-backend.sh` — Builds Go binary, builds Flutter web, launches Go server on port 5000
-- `scripts/build-flutter.sh` — Builds Flutter web assets only (for standalone rebuilds)
-- A minimal `package.json` exists only as a workflow script adapter (maps npm scripts to shell scripts)
-- Zero Node.js runtime dependencies — no node_modules needed at runtime
+- `scripts/start-backend.sh` — Builds Go binary, launches Go server on port 5000 (does NOT build Flutter — they are independent)
+- `scripts/build-flutter.sh` — Builds Flutter web assets only; Go picks them up automatically from the build directory
+- No package.json, no npm, no node_modules — pure shell scripts called directly
+- Go gracefully handles Flutter not being built yet (shows a fallback page at root while API remains fully functional)
 
-### Workflows
+### Workflows (Fully Decoupled)
 
-- **Start Backend** (`npm run server:dev` → `sh ./scripts/start-backend.sh`) — Builds everything and starts the Go server
-- **Start Frontend** (`npm run expo:dev`) — No-op; echoes that Flutter is served by Go backend
+- **Start Backend** (`sh ./scripts/start-backend.sh`) — Builds Go and starts the server. API is available immediately. If Flutter has been built, serves the dashboard too; if not, shows a "not yet built" fallback page.
+- **Start Frontend** (`sh ./scripts/build-flutter.sh`) — Builds Flutter web assets independently. Go serves them once they exist in the build directory.
+- Both workflows run in parallel via the "Start App" parent workflow. Neither depends on the other.
 
 ### Cryptographic Key Hierarchy (3-Level)
 
@@ -104,8 +105,9 @@ The system has two components that communicate via HTTP:
 
 ## Recent Changes
 
+- 2026-02-18: Decoupled Go and Flutter builds — Go starts independently, Flutter builds separately, neither depends on the other
+- 2026-02-18: Removed package.json and all npm/Node.js dependencies — workflows call shell scripts directly
 - 2026-02-18: Completed Phase 1 — Go server + Flutter dashboard + health check handshake working
-- 2026-02-18: Removed ALL Expo/React Native/Node.js runtime dependencies
 - 2026-02-18: Created shell-script-based build system (no Node.js involvement)
 - 2026-02-18: Made Flutter backend URL configurable via AgentConfig class
 - 2026-02-18: Added dark cyberpunk theme to Flutter dashboard

@@ -1,1 +1,0 @@
-{"name":"identity-agent","version":"0.1.0","private":true,"description":"Self-sovereign Identity Agent - Go backend + Flutter frontend","scripts":{"server:dev":"sh ./scripts/start-backend.sh","expo:dev":"echo Flutter web is served by the Go backend. Use Build Flutter Web workflow to rebuild."}}
