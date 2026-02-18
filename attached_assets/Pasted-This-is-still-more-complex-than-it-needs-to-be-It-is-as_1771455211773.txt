@@ -1,0 +1,28 @@
+This is still more complex than it needs to be. It is as simple as this. For any installation on Mac OS windows and Linux, either the front end or the back end simply calls the keri driver URL. If the front end needs it and it's not on then it turns it on and when if the front end turns off or shuts down then it closes or kills the child process. If the back end service turns on or off I mean if the back end process turns off then or if the back end process needs to use akeri function and this driver is not on then it turns it on and then whenever it stops running or exits then it stops this process. That's it for those apps that you call desktop apps which they are. And we don't want to get that confused with how it works on mobile. 
+
+On mobile operating systems then the process is as follows. It simply calls the dart flutter Bridge for these STATEFUL functions: 
+"incept_aid(name, code): Generates keys and creates the Inception Event.
+
+rotate_aid(name): Performs a key rotation and updates the local KEL.
+
+sign_payload(name, data): Signs arbitrary data (used for authentication).
+
+get_current_kel(name): Returns the current Key Event Log.
+
+verify_signature(data, signature, public_key): Verifies external data."
+
+And it calls a URL for these STATELESS functions: 
+
+"POST /format-credential: Accepts public claims (Name, DAO, etc.) and schema ID; returns the raw CESR-encoded bytes for the Rust bridge to sign.
+
+POST /resolve-oobi: Accepts an OOBI URL; returns the resolved Witness endpoints (IP/Port).
+
+POST /generate-multisig-event: Accepts a list of participant AIDs and a payload; returns the rotation/interaction event bytes for the Rust bridge to sign."
+
+The URL it calls is either the identity's EXTERNAL primary backend/server URL, or if the primary backend/server is INTERNAL (not capable of running Python since this is mobile), then it has to call the KERI Remote Helper.
+
+So on mobile operating systems iOS /Android, the Rust/Flutter bridge always needs to be available to call the stateful KERI functions mentioned above. And for the stateless KERI functions, a URL needs to always be configured. 
+
+The URL that will be called points to one of two places depending on where the Primary Backend is located. If the KERI identity has an EXTERNAL Primary Backend (where Python can execute), then the URL points to that. This is preferred. But if the identity's Primary Backend is INTERNAL (the backend is running locally and marked as "internal"), it means there is no Python-capable KERI library available (since this mobile device can't run Python, and the statelss functions are not available on the Rust/Flutter bridge). So then the URL points to the Remote Helper's URL found in the codebase somewhere. 
+
+Please update your plan to fix the ADR and code accordingly, but let me know if something isn't clear or if you have questions. 
