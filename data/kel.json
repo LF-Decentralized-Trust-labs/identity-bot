@@ -1,0 +1,11 @@
+[
+  {
+    "aid": "EC2V8iYoZJHWG0Kvi7Mf9SOGg-MYsHd_FFo7vU_0VDj8",
+    "sequence_number": 0,
+    "event_type": "icp",
+    "event_json": "{\"a\":[],\"b\":[],\"bt\":\"0\",\"c\":[],\"d\":\"EC2V8iYoZJHWG0Kvi7Mf9SOGg-MYsHd_FFo7vU_0VDj8\",\"i\":\"EC2V8iYoZJHWG0Kvi7Mf9SOGg-MYsHd_FFo7vU_0VDj8\",\"k\":[\"DHRoW2cUhFd_lTYUbDiG0kSzapz11iGOi5CSqjMLyiyn\"],\"kt\":\"1\",\"n\":[\"EHCSsLyyizapz11iGOi5P1TYUbDiG0kXRoW2cUhFdySq\"],\"nt\":\"1\",\"s\":\"0\",\"t\":\"icp\",\"v\":\"KERI10JSON00012b_\"}",
+    "public_key": "DHRoW2cUhFd_lTYUbDiG0kSzapz11iGOi5CSqjMLyiyn",
+    "next_key_digest": "EHCSsLyyizapz11iGOi5P1TYUbDiG0kXRoW2cUhFdySq",
+    "timestamp": "2026-02-18T09:27:05Z"
+  }
+]
