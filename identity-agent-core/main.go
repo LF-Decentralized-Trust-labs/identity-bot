@@ -131,8 +131,17 @@ func main() {
         r.Route("/api", func(r chi.Router) {
                 r.Get("/health", handleHealth)
                 r.Get("/info", handleInfo)
-                r.Post("/inception", handleInception)
                 r.Get("/identity", handleIdentity)
+
+                r.Post("/inception", handleInception)
+                r.Post("/rotation", handleRotation)
+                r.Post("/sign", handleSign)
+                r.Get("/kel", handleKel)
+                r.Post("/verify", handleVerify)
+
+                r.Post("/format-credential", handleFormatCredential)
+                r.Post("/resolve-oobi", handleResolveOobi)
+                r.Post("/generate-multisig-event", handleGenerateMultisigEvent)
         })
 
         webDir := os.Getenv("FLUTTER_WEB_DIR")
@@ -181,7 +190,7 @@ func main() {
 
         addr := fmt.Sprintf("0.0.0.0:%s", port)
         log.Printf("[identity-agent-core] Starting Go Core on %s", addr)
-        log.Printf("[identity-agent-core] API endpoints: /api/health, /api/info, /api/inception, /api/identity")
+        log.Printf("[identity-agent-core] API endpoints: /api/health, /api/info, /api/identity, /api/inception, /api/rotation, /api/sign, /api/kel, /api/verify, /api/format-credential, /api/resolve-oobi, /api/generate-multisig-event")
         log.Printf("[identity-agent-core] KERI driver: %s", keriDriver.BaseURL)
         log.Printf("[identity-agent-core] Phase 2: Inception - Identity Creation Ready")
 
@@ -353,6 +362,206 @@ func handleIdentity(w http.ResponseWriter, r *http.Request) {
 
         w.Header().Set("Content-Type", "application/json")
         json.NewEncoder(w).Encode(resp)
+}
+
+func handleRotation(w http.ResponseWriter, r *http.Request) {
+        var req struct {
+                Name             string `json:"name"`
+                NewPublicKey     string `json:"new_public_key"`
+                NewNextPublicKey string `json:"new_next_public_key"`
+        }
+        if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+                writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+                return
+        }
+
+        if req.Name == "" || req.NewPublicKey == "" || req.NewNextPublicKey == "" {
+                writeError(w, http.StatusBadRequest, "Missing required fields", "name, new_public_key, and new_next_public_key are required")
+                return
+        }
+
+        result, err := keriDriver.RotateAid(req.Name, req.NewPublicKey, req.NewNextPublicKey)
+        if err != nil {
+                writeError(w, http.StatusInternalServerError, "Rotation failed", err.Error())
+                return
+        }
+
+        now := time.Now().UTC().Format(time.RFC3339)
+        eventJSON, _ := json.Marshal(result.RotationEvent)
+        eventRecord := store.EventRecord{
+                AID:            result.AID,
+                SequenceNumber: result.SequenceNumber,
+                EventType:      "rot",
+                EventJSON:      string(eventJSON),
+                PublicKey:       result.NewPublicKey,
+                NextKeyDigest:  result.NewNextKeyDigest,
+                Timestamp:      now,
+        }
+        if err := dataStore.SaveEvent(eventRecord); err != nil {
+                log.Printf("[identity-agent-core] Warning: failed to persist rotation event: %v", err)
+        }
+
+        identity, _ := dataStore.GetIdentity()
+        if identity != nil {
+                identity.PublicKey = result.NewPublicKey
+                identity.NextKeyDigest = result.NewNextKeyDigest
+                identity.EventCount = result.SequenceNumber + 1
+                dataStore.SaveIdentity(*identity)
+        }
+
+        log.Printf("[identity-agent-core] ROTATION: Key rotated for AID: %s (sn: %d)", result.AID, result.SequenceNumber)
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(result)
+}
+
+func handleSign(w http.ResponseWriter, r *http.Request) {
+        var req struct {
+                Name string `json:"name"`
+                Data string `json:"data"`
+        }
+        if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+                writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+                return
+        }
+
+        if req.Name == "" || req.Data == "" {
+                writeError(w, http.StatusBadRequest, "Missing required fields", "name and data (base64) are required")
+                return
+        }
+
+        result, err := keriDriver.SignPayload(req.Name, req.Data)
+        if err != nil {
+                writeError(w, http.StatusInternalServerError, "Signing failed", err.Error())
+                return
+        }
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(result)
+}
+
+func handleKel(w http.ResponseWriter, r *http.Request) {
+        name := r.URL.Query().Get("name")
+        if name == "" {
+                writeError(w, http.StatusBadRequest, "Missing required parameter", "name query parameter is required")
+                return
+        }
+
+        result, err := keriDriver.GetKel(name)
+        if err != nil {
+                writeError(w, http.StatusInternalServerError, "Failed to retrieve KEL", err.Error())
+                return
+        }
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(result)
+}
+
+func handleVerify(w http.ResponseWriter, r *http.Request) {
+        var req struct {
+                Data      string `json:"data"`
+                Signature string `json:"signature"`
+                PublicKey string `json:"public_key"`
+        }
+        if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+                writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+                return
+        }
+
+        if req.Data == "" || req.Signature == "" || req.PublicKey == "" {
+                writeError(w, http.StatusBadRequest, "Missing required fields", "data, signature, and public_key are required")
+                return
+        }
+
+        result, err := keriDriver.VerifySignature(req.Data, req.Signature, req.PublicKey)
+        if err != nil {
+                writeError(w, http.StatusInternalServerError, "Verification failed", err.Error())
+                return
+        }
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(result)
+}
+
+func handleFormatCredential(w http.ResponseWriter, r *http.Request) {
+        var req struct {
+                Claims     map[string]interface{} `json:"claims"`
+                SchemaSaid string                 `json:"schema_said"`
+                IssuerAid  string                 `json:"issuer_aid"`
+        }
+        if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+                writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+                return
+        }
+
+        if len(req.Claims) == 0 || req.SchemaSaid == "" || req.IssuerAid == "" {
+                writeError(w, http.StatusBadRequest, "Missing required fields", "claims, schema_said, and issuer_aid are required")
+                return
+        }
+
+        result, err := keriDriver.FormatCredential(req.Claims, req.SchemaSaid, req.IssuerAid)
+        if err != nil {
+                writeError(w, http.StatusInternalServerError, "Format credential failed", err.Error())
+                return
+        }
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(result)
+}
+
+func handleResolveOobi(w http.ResponseWriter, r *http.Request) {
+        var req struct {
+                URL string `json:"url"`
+        }
+        if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+                writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+                return
+        }
+
+        if req.URL == "" {
+                writeError(w, http.StatusBadRequest, "Missing required fields", "url is required")
+                return
+        }
+
+        result, err := keriDriver.ResolveOobi(req.URL)
+        if err != nil {
+                writeError(w, http.StatusInternalServerError, "OOBI resolution failed", err.Error())
+                return
+        }
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(result)
+}
+
+func handleGenerateMultisigEvent(w http.ResponseWriter, r *http.Request) {
+        var req struct {
+                AIDs        []string `json:"aids"`
+                Threshold   int      `json:"threshold"`
+                CurrentKeys []string `json:"current_keys"`
+                EventType   string   `json:"event_type"`
+        }
+        if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+                writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+                return
+        }
+
+        if len(req.AIDs) == 0 || len(req.CurrentKeys) == 0 {
+                writeError(w, http.StatusBadRequest, "Missing required fields", "aids and current_keys are required")
+                return
+        }
+
+        if req.EventType == "" {
+                req.EventType = "inception"
+        }
+
+        result, err := keriDriver.GenerateMultisigEvent(req.AIDs, req.Threshold, req.CurrentKeys, req.EventType)
+        if err != nil {
+                writeError(w, http.StatusInternalServerError, "Multisig event generation failed", err.Error())
+                return
+        }
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(result)
 }
 
 func writeError(w http.ResponseWriter, status int, errMsg string, details string) {

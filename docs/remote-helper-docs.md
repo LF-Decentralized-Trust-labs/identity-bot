@@ -6,6 +6,7 @@ This microservice is a stateless Python FastAPI server that acts as a computatio
 - **Stateless**: No data is persisted between requests.
 - **Privacy-First**: Never accepts or handles private keys; only processes public data.
 - **KERI Integration**: Built on `keripy` (v1.1.17) for authentic KERI protocol handling.
+- **Path-compatible**: Endpoint paths match the Python KERI driver exactly (driver is source of truth for naming).
 
 ## API Endpoints
 
@@ -27,7 +28,7 @@ Returns the server status and the version of the KERI library being used.
 ### 2. Format ACDC Credential
 Formats an Authentic Chained Data Container (ACDC) credential.
 
-- **URL**: `/helper/format-credential`
+- **URL**: `/format-credential`
 - **Method**: `POST`
 - **Request Body**:
   ```json
@@ -55,7 +56,7 @@ Formats an Authentic Chained Data Container (ACDC) credential.
 ### 3. Resolve OOBI
 Resolves an Out-Of-Band Introduction (OOBI) URL to find service endpoints.
 
-- **URL**: `/helper/resolve-oobi`
+- **URL**: `/resolve-oobi`
 - **Method**: `POST`
 - **Request Body**:
   ```json
@@ -79,7 +80,7 @@ Resolves an Out-Of-Band Introduction (OOBI) URL to find service endpoints.
 ### 4. Generate Multisig Event
 Generates KERI events (Inception, Rotation, Interaction) for multisig identifiers.
 
-- **URL**: `/helper/generate-multisig-event`
+- **URL**: `/generate-multisig-event`
 - **Method**: `POST`
 - **Request Body (Inception)**:
   ```json
@@ -105,3 +106,4 @@ Generates KERI events (Inception, Rotation, Interaction) for multisig identifier
 - **Base URL**: `https://keri-helper-microservice.replit.app`
 - **Dependencies**: Requires `libsodium` system library.
 - **Implementation**: Uses FastAPI and `uvicorn`. Temporary workspace directories are used per-request to satisfy KERI library requirements without persisting data.
+- **Naming**: All endpoint paths match the Python KERI driver (`server.py`) — the driver is the source of truth for path naming across the entire system.

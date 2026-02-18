@@ -4,42 +4,54 @@ import '../config/agent_config.dart';
 
 class FormatCredentialResult {
   final List<int> rawBytes;
-  final String schemaId;
+  final String said;
+  final int size;
 
   FormatCredentialResult({
     required this.rawBytes,
-    required this.schemaId,
+    required this.said,
+    required this.size,
   });
 }
 
 class ResolvedOobi {
-  final String url;
-  final List<Map<String, dynamic>> witnesses;
+  final String oobiUrl;
+  final List<String> endpoints;
+  final String cid;
+  final String eid;
+  final String role;
 
   ResolvedOobi({
-    required this.url,
-    required this.witnesses,
+    required this.oobiUrl,
+    required this.endpoints,
+    required this.cid,
+    required this.eid,
+    required this.role,
   });
 }
 
 class MultisigEventResult {
-  final List<int> eventBytes;
+  final List<int> rawBytes;
+  final String said;
+  final String pre;
   final String eventType;
-  final List<String> participantAids;
+  final int size;
 
   MultisigEventResult({
-    required this.eventBytes,
+    required this.rawBytes,
+    required this.said,
+    required this.pre,
     required this.eventType,
-    required this.participantAids,
+    required this.size,
   });
 }
 
 class KeriHelperClient {
-  final String _helperUrl;
+  final String _baseUrl;
   final http.Client _client;
 
-  KeriHelperClient({String? helperUrl})
-      : _helperUrl = helperUrl ?? AgentConfig.keriHelperUrl,
+  KeriHelperClient({String? baseUrl})
+      : _baseUrl = baseUrl ?? AgentConfig.keriHelperUrl,
         _client = http.Client();
 
   Future<FormatCredentialResult> formatCredential({
@@ -48,7 +60,7 @@ class KeriHelperClient {
     required String issuerAid,
   }) async {
     final response = await _client.post(
-      Uri.parse('$_helperUrl/helper/format-credential'),
+      Uri.parse('$_baseUrl/format-credential'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({
         'claims': claims,
@@ -62,7 +74,8 @@ class KeriHelperClient {
       final rawBytesB64 = json['raw_bytes_b64'] as String;
       return FormatCredentialResult(
         rawBytes: base64Decode(rawBytesB64),
-        schemaId: json['said'] ?? schemaSaid,
+        said: json['said'] ?? '',
+        size: json['size'] ?? 0,
       );
     } else {
       final body = jsonDecode(response.body);
@@ -74,7 +87,7 @@ class KeriHelperClient {
     required String oobiUrl,
   }) async {
     final response = await _client.post(
-      Uri.parse('$_helperUrl/helper/resolve-oobi'),
+      Uri.parse('$_baseUrl/resolve-oobi'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({
         'url': oobiUrl,
@@ -84,8 +97,11 @@ class KeriHelperClient {
     if (response.statusCode == 200) {
       final json = jsonDecode(response.body);
       return ResolvedOobi(
-        url: json['oobi_url'] ?? oobiUrl,
-        witnesses: List<Map<String, dynamic>>.from(json['endpoints'] ?? []),
+        oobiUrl: json['oobi_url'] ?? oobiUrl,
+        endpoints: List<String>.from(json['endpoints'] ?? []),
+        cid: json['cid'] ?? '',
+        eid: json['eid'] ?? '',
+        role: json['role'] ?? '',
       );
     } else {
       final body = jsonDecode(response.body);
@@ -97,25 +113,28 @@ class KeriHelperClient {
     required List<String> aids,
     required int threshold,
     required List<String> currentKeys,
+    String eventType = 'inception',
   }) async {
     final response = await _client.post(
-      Uri.parse('$_helperUrl/helper/generate-multisig-event'),
+      Uri.parse('$_baseUrl/generate-multisig-event'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({
         'aids': aids,
         'threshold': threshold,
         'current_keys': currentKeys,
-        'event_type': 'inception',
+        'event_type': eventType,
       }),
     );
 
     if (response.statusCode == 200) {
       final json = jsonDecode(response.body);
-      final eventBytesB64 = json['raw_bytes_b64'] as String;
+      final rawBytesB64 = json['raw_bytes_b64'] as String;
       return MultisigEventResult(
-        eventBytes: base64Decode(eventBytesB64),
+        rawBytes: base64Decode(rawBytesB64),
+        said: json['said'] ?? '',
+        pre: json['pre'] ?? '',
         eventType: json['event_type'] ?? '',
-        participantAids: aids,
+        size: json['size'] ?? 0,
       );
     } else {
       final body = jsonDecode(response.body);

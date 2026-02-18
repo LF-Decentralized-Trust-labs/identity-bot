@@ -1,6 +1,7 @@
 # ADR 002: Python KERI Driver Pattern with keripy
 
 **Date:** 2026-02-18
+**Updated:** 2026-02-18
 **Status:** Accepted
 **Supersedes:** KERI-related sections of ADR 001
 
@@ -44,6 +45,14 @@ commands, the driver executes KERI protocol operations, and returns results.
 └──────────────┘
 ```
 
+The Python driver is ALWAYS a local child process spawned by Go on any
+Python-capable OS (Linux, macOS, Windows). Go spawns it via `exec.Command()`,
+monitors it, and kills it on exit. There is no "external driver" mode — the
+driver always runs on `127.0.0.1:9999`.
+
+On mobile OS (iOS/Android), Python cannot run. Mobile devices use the Rust bridge
+for KERI operations instead (see ADR 003).
+
 ### 2. keripy as a Hard Requirement (No Fallback)
 
 The driver **requires** keripy and will refuse to start without it. This is a
@@ -67,41 +76,192 @@ The driver uses a detection strategy:
 4. Monkey-patch `ctypes.util.find_library` to return the discovered path for
    `sodium` lookups, so pysodium's initialization succeeds
 
-### 4. Driver Lifecycle Management
+### 4. Driver Lifecycle
 
-The Go Core manages the Python driver's lifecycle:
+Go always spawns Python as a local child process:
+- `exec.Command(pythonBin, scriptPath)` starts the driver
+- The driver binds to `127.0.0.1:{KERI_DRIVER_PORT}` (default 9999)
+- Go waits up to 15 seconds for the driver to become ready (`/status` returns `active`)
+- On shutdown (SIGINT/SIGTERM), Go kills the driver process
 
-- **Development (Replit/Linux):** Go spawns Python as a child process via
-  `os/exec.Command()`. The process is killed when Go exits.
-- **Production (Server):** Set `KERI_DRIVER_URL` environment variable. Go connects
-  to that URL instead of spawning a child process.
-- **Future Mobile:** Flutter on iOS/Android talks to Go over the internet. Go and
-  the Python driver stay server-side. Mobile devices never run Python.
+### 5. Driver API — Source of Truth for Naming
 
-### 5. Driver API
+The Python KERI driver defines the canonical path names. All other components
+(Rust bridge, Remote Helper, Dart code) match the driver's naming exactly.
 
-The driver exposes two HTTP endpoints:
+#### Stateful Endpoints (require identity state)
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
 | `/status` | GET | Health check and library info |
-| `/inception` | POST | Create a KERI inception event from an Ed25519 key pair |
+| `/inception` | POST | Create a KERI inception event (incept_aid) |
+| `/rotation` | POST | Rotate keys for an existing AID (rotate_aid) |
+| `/sign` | POST | Sign arbitrary data with an AID's current key (sign_payload) |
+| `/kel` | GET | Retrieve the Key Event Log (get_current_kel) |
+| `/verify` | POST | Verify a signature against a public key (verify_signature) |
 
-**POST /inception** request body:
+#### Stateless Endpoints (public data only, no private keys)
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/format-credential` | POST | Format an ACDC credential for client-side signing |
+| `/resolve-oobi` | POST | Resolve an OOBI URL to service endpoints |
+| `/generate-multisig-event` | POST | Generate a multisig KERI event (icp/rot/ixn) |
+
+### 6. Endpoint Details
+
+**POST /inception**
+
+Request:
 ```json
 {
   "public_key": "<CESR-encoded Ed25519 public key>",
-  "next_public_key": "<CESR-encoded Ed25519 next rotation key>"
+  "next_public_key": "<CESR-encoded Ed25519 next rotation key>",
+  "name": "<optional identity name>"
 }
 ```
 
-**POST /inception** response body:
+Response (201):
 ```json
 {
   "aid": "<KERI Autonomic Identifier>",
   "inception_event": { "v": "KERI10JSON...", "t": "icp", ... },
   "public_key": "<CESR verfer qb64>",
   "next_key_digest": "<Blake3 digest of next key>"
+}
+```
+
+**POST /rotation**
+
+Request:
+```json
+{
+  "name": "<identity name>",
+  "new_public_key": "<CESR-encoded new Ed25519 public key>",
+  "new_next_public_key": "<CESR-encoded new next rotation key>"
+}
+```
+
+Response (200):
+```json
+{
+  "aid": "<AID>",
+  "new_public_key": "<CESR verfer qb64>",
+  "new_next_key_digest": "<Blake3 digest>",
+  "rotation_event": { ... },
+  "sequence_number": 1
+}
+```
+
+**POST /sign**
+
+Request:
+```json
+{
+  "name": "<identity name>",
+  "data": "<base64-encoded payload>"
+}
+```
+
+Response (200):
+```json
+{
+  "signature": "<base64-encoded Ed25519 signature>",
+  "public_key": "<CESR verfer qb64>"
+}
+```
+
+**GET /kel?name=<identity_name>**
+
+Response (200):
+```json
+{
+  "aid": "<AID>",
+  "kel": [ { ... icp event ... }, { ... rot event ... } ],
+  "sequence_number": 1,
+  "event_count": 2
+}
+```
+
+**POST /verify**
+
+Request:
+```json
+{
+  "data": "<base64-encoded payload>",
+  "signature": "<base64-encoded signature>",
+  "public_key": "<CESR-encoded public key>"
+}
+```
+
+Response (200):
+```json
+{
+  "valid": true,
+  "public_key": "<CESR verfer qb64>"
+}
+```
+
+**POST /format-credential**
+
+Request:
+```json
+{
+  "claims": { "name": "Alice", "role": "Engineer" },
+  "schema_said": "<SAID of credential schema>",
+  "issuer_aid": "<AID of issuing agent>"
+}
+```
+
+Response (200):
+```json
+{
+  "raw_bytes_b64": "<base64-encoded CESR credential bytes>",
+  "said": "<Blake3 SAID of credential>",
+  "size": 235
+}
+```
+
+**POST /resolve-oobi**
+
+Request:
+```json
+{
+  "url": "http://example.com/oobi/AID/witness/WITNESS_AID"
+}
+```
+
+Response (200):
+```json
+{
+  "endpoints": ["http://1.2.3.4:5642"],
+  "oobi_url": "http://example.com/...",
+  "cid": "<AID>",
+  "eid": "<WITNESS_AID>",
+  "role": "witness"
+}
+```
+
+**POST /generate-multisig-event**
+
+Request:
+```json
+{
+  "aids": ["AID1", "AID2"],
+  "threshold": 2,
+  "current_keys": ["PublicKey1...", "PublicKey2..."],
+  "event_type": "inception"
+}
+```
+
+Response (200):
+```json
+{
+  "raw_bytes_b64": "<base64-encoded event bytes>",
+  "said": "<SAID>",
+  "pre": "<prefix>",
+  "event_type": "icp",
+  "size": 487
 }
 ```
 
@@ -118,6 +278,8 @@ The driver exposes two HTTP endpoints:
 - **Upgradeable:** When keripy releases new versions, only the Python driver needs
   updating. Go and Flutter are unaffected.
 - **Testable:** The driver's HTTP API can be tested independently of Go or Flutter.
+- **Path consistency:** All components (Remote Helper, Rust bridge) use the same
+  path names defined by the Python driver.
 
 ### Negative
 
@@ -133,21 +295,19 @@ The driver exposes two HTTP endpoints:
   driver's protocol helpers will need updating. Mitigated by pinning to v1.1.17.
 - **libsodium detection fragility:** The `/proc/maps` inspection approach is
   Linux-specific. macOS and Windows would need different detection strategies.
-  Acceptable because the driver only runs server-side (Linux in production).
 
 ## Environment Variables
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `KERI_DRIVER_URL` | *(none)* | If set, Go connects to this URL instead of spawning Python |
-| `KERI_DRIVER_PORT` | `9999` | Port for the managed Python driver |
+| `KERI_DRIVER_PORT` | `9999` | Port for the Python driver |
 | `KERI_DRIVER_SCRIPT` | `./drivers/keri-core/server.py` | Path to the driver script |
 | `KERI_DRIVER_PYTHON` | `python3` | Python binary to use |
-| `KERI_DRIVER_HOST` | `127.0.0.1` | Host the driver binds to |
+| `KERI_DRIVER_HOST` | `127.0.0.1` | Host the driver binds to (always localhost) |
 
 ## Key Files
 
-- `drivers/keri-core/server.py` — The Python KERI driver (Flask HTTP server)
+- `drivers/keri-core/server.py` — The Python KERI driver (Flask HTTP server, 9 endpoints)
 - `drivers/keri-core/requirements.txt` — Python dependencies (flask, keri)
 - `identity-agent-core/drivers/keri_driver.go` — Go HTTP client for the driver
-- `identity-agent-core/main.go` — Driver lifecycle management (spawn/connect)
+- `identity-agent-core/main.go` — Driver lifecycle management (spawn/kill)
