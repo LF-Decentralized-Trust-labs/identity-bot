@@ -1,0 +1,257 @@
+﻿Identity Agent Specification v1.5
+The Identity Agent unifies your entire digital life—identity, data, communications, and assets—into a single environment running on hardware you control. It is not just a tool, but a sovereign territory for your digital existence. By consolidating your digital footprint into a secure, active runtime, the Agent ensures you are the sole authority over who accesses your information. Its architecture is designed to enforce your ownership, protect your privacy, and uphold your digital rights in every interaction.
+Group 1: The Core (Infrastructure)
+Everything about "Running the box," key architecture, and network flow.
+1. The Container: Deterministic Runtime Environment
+* Concept: The Identity Agent is a Deterministic Active Runtime Environment acting as the "digital self."
+* Foundation: The server is not a "user account" on a platform; it is a standalone instance anchored by a KERI AID (Autonomic Identifier).
+* Identity Proof: It holds a secure Key Event Log (KEL) that cryptographically proves ownership and history.
+* Gateway: It has a single public entry point that rejects any connection not signed by a recognized or allowed cryptographic key.
+2. Component-Based Operational Modes (The Lifecycle Bundle) The Identity Agent utilizes a Decoupled-but-Bundled Architecture distributed as a single installable package.
+* Go Core (The Backend): The backend is a compiled Go (Golang) binary running the KERIGO implementation. It runs persistently as a background service, ensuring high-concurrency handling of the "Pipes" and maintaining the KEL/TEL state even when the UI is closed.
+* Flutter Dashboard (The Frontend): The Controller is a Flutter application compiled for Mobile (iOS/Android) and Desktop. It embeds the Signify library for secure client-side key management. Upon launch, it attempts to handshake with the Go Core via localhost:8080.
+2.1 Frontend Modes (User Interface & Keys)
+* Active Controller: The application renders a local UI (Mobile/Desktop) and accesses Controller Keys via the device's Secure Enclave/Keychain. (Use Case: Normal App usage).
+* Web Host: The application runs a lightweight HTTP server to deliver the Signify Web Client assets to a remote browser. Note: In this mode, keys are held in the remote browser's ephemeral storage, not on the server.
+* Disabled: No UI or Web Server is running.
+2.2 Backend Modes (Network & Storage)
+* Primary Active: The instance acts as the authoritative Agent. It holds the Delegated Operational Keys, manages the IPEX inbox, maintains the Access Control List (ACL), and maintains the primary KEL/TEL.
+* Backup Inactive: The instance runs in a "Follower" mode. It maintains a real-time, read-only mirror of the KEL/TEL and Credential Store for disaster recovery but does not respond to external traffic.
+* Stopped: The backend service is terminated to conserve system resources.
+2.3 Persistence Layer (Swappable Storage) To ensure the Agent is free, instant, and sovereign by default, while remaining scalable for enterprise use:
+* Default Local Mode: By default, the Agent runs on an embedded local Key-Value store (e.g., BadgerDB or BoltDB). This requires no setup, no third-party accounts, and zero cost.
+* Configurable Database Service: The storage layer is modular. Users may configure the Agent to swap the underlying storage provider (e.g., switching from Local to a self-hosted PostgreSQL, a managed cloud database, or a decentralized storage node).
+* Automated Migration Tool: The Agent includes a native utility to "hot-swap" databases. This tool automates the atomic transfer of the entire state (KEL, Credentials, and Data Vault) from one provider to another (e.g., Local -> Cloud) without data loss.
+
+
+3. Cryptographic Key Architecture & Authority Decoupling
+The Agent utilizes a hierarchical split-key architecture to ensure the Root Authority is never exposed to daily operations or specific devices.
+3.1 Hierarchy of Authority
+* Level 1: Root Authority (The Identity Owner):
+   * Source: A 128-bit Salt represented as a human-readable 12-word Mnemonic (BIP-39).
+   * Role: The "CEO." Used only to recover the system or authorize new Controllers. It is never stored persistently on any active device.
+* Level 2: Device Authority (Authorized Controllers):
+   * Source: Unique, isolated private keys generated inside the Secure Enclave of each device (Phone, Laptop).
+   * Role: The "Employee." Signs daily commands (e.g., "Check Email").
+   * Validation: The Backend Server maintains an Access Control List (ACL) of Authorized Controllers. The Root Authority signs the "Hiring" (Adding) or "Firing" (Removing) of these devices.
+* Level 3: Delegated Agent (The Worker):
+   * Source: Keys stored in the Backend Server's encrypted database.
+   * Role: Signs operational data (communications, data access) as authorized by the Controllers.
+3.2 Initialization & Setup Wizard The setup process prioritizes "Secure Defaults" while offering "Sovereign Control" for advanced users.
+* Step 1: Generation: The App generates the 128-bit Salt and displays the 12-word Mnemonic.
+* Step 2: Seed Phrase Backup (Mandatory):
+   * User must prove they have backed up the phrase (e.g., re-enter word #4 and #9).
+   * Option: "Write to NFC Tag" (if hardware supported).
+* Step 3: Root Key Storage (The "Admin" Key):
+   * Default Mode (Biometric Admin): The Root Private Key is derived and stored in the device's Secure Enclave / Keychain, protected by Biometrics (FaceID/TouchID).
+      * Benefit: The user can authorize new devices (Section 4A) simply by scanning a QR code and confirming with FaceID.
+   * Sovereign Mode (Cold Admin): The user selects "Do not store Root Key on device."
+      * Benefit: Maximum security. The device holds only a Level 2 Device Key.
+      * Trade-off: To authorize any new device or server in the future, the user must physically re-enter their 12-word Seed Phrase or scan their backup NFC tag to temporarily reconstruct the Root Key.
+* Step 4: Device Authorization: The App generates a unique Level 2 Device Key for the current device and adds it to the Access Control List (ACL).
+4. Traffic Control: Ingress & Egress Architecture
+Every request follows a strict "Deterministic First" path.
+* Phase 1: Ingress (Entry Checkpoint):
+   * Logic: The Governance Engine validates the cryptographic signature against the Access Control List (ACL) and checks Stateful Rules.
+   * Outcome: If the signature is not from an Authorized Controller or the rule fails, the request is rejected immediately.
+* Phase 2: Execution (Secure Work Zone):
+   * Constraint: This layer is Air-Gapped from the outside world. It cannot "send" anything out; it can only "propose" an action.
+* Phase 3: Egress (Exit Inspection):
+   * Logic: The Engine enforces Strict Data Minimization (Whitelisting).
+   * The "Whitelist" Approach: If the output schema allows {"status": boolean}, and the AI tries to output a paragraph containing secrets, the engine strips everything except the boolean status.
+   * Deterministic Feedback: If an action is blocked by the ACL or Policy, the engine returns a structured error (e.g., error: limit_exceeded) rather than a generic failure. This allows the calling AI to recognize the constraint and autonomously replan its strategy.
+5. Agent Migration & Redundancy Protocol
+5.1 Migration Workflow (Mobile to Server) When a user provisions a new dedicated server, the following transition occurs:
+1. Provisioning: Server starts (Backend: Primary Active | Frontend: Web Host).
+2. Handshake: Mobile (Active Controller) scans Server QR.
+3. Authorization: Mobile signs a Delegated Inception authorizing the Server's Agent Keys and adds the Server to its trust list.
+4. Transfer: Mobile pushes full Data Vault (ACDCs, Contacts) to Server.
+5. The Cutover:
+   * Server Backend: Remains Primary Active.
+   * Mobile Backend: Automatically transitions to Backup Inactive.
+   * Mobile Frontend: Remains Active Controller, sending commands to the Server.
+6. NAT Traversal & Relay Architecture
+Concept: The Identity Agent must be reachable from the public internet regardless of the network environment it runs in (home router, mobile carrier NAT, corporate firewall). This is solved via a Relay/Tunnel layer that provides a stable public Base URL without requiring DNS management or a static IP.
+6.1 Tunnel Modes (ordered by preference)
+Managed Tunnel (Default): On first startup, the Agent establishes an outbound persistent tunnel to a Relay Service (e.g., Cloudflare Tunnel, ngrok, or a self-hosted frp/rathole instance). The Relay Service assigns a stable public HTTPS URL (e.g., https://abc123.relay.example). This URL is published in the Agent's KERI OOBI record and serves as the canonical Base URL for all inbound CESR-over-HTTP traffic.
+Self-Hosted Relay: For users running a dedicated server with a public IP, the Agent can act as its own relay, binding directly to a port. The Base URL is manually configured.
+Local-Only Mode: For development and LAN-only deployments, the Agent operates without a public tunnel. OOBI resolution is limited to the local network.
+6.2 OOBI Publication
+Upon tunnel establishment, the Agent automatically generates and publishes a KERI OOBI record of the form: https://[Base_URL]/oobi/[AID]/agent
+This OOBI is the canonical introduction mechanism. All peer discovery, contact addition, and witness registration use this OOBI URL. The OOBI is re-published automatically if the Base URL changes.
+6.3 Relay Security Constraints
+The Relay layer is transport-only. It forwards raw HTTPS traffic to the local Agent process. No credentials, keys, or decrypted data ever pass through the relay in plaintext. The Agent's Ingress Checkpoint (Section 4, Phase 1) validates cryptographic signatures on all inbound requests before any processing occurs, meaning a compromised relay cannot inject valid requests.
+7. Witness Architecture
+7.1 Witness Policy
+Every Identity Agent participates in a hybrid witness pool combining professional witness services and peer witnesses drawn from trusted contacts.
+Default Configuration: 2 professional witness services (external, always-on infrastructure) + up to 5 peer witnesses drawn from contacts designated as "Trusted" (see Contacts Manager, Group 2 Section 6). A minimum threshold of 3 witnesses (of any type) must countersign a KEL event for it to be considered valid.
+Witness Cap: Peer witnesses are capped at 5 to bound the social graph exposure and keep KEL event sizes manageable.
+7.2 Peer Witness Lifecycle
+When Contact A designates Contact B as "Trusted," the Agent sends a Witness Invitation over a KERI OOBI/CESR session. Contact B's Agent presents the invitation to the user for explicit acceptance. Upon mutual acceptance, each Agent adds the other to its witness pool and begins countersigning KEL events for each other. If either party downgrades the contact from "Trusted" or removes the contact entirely, the witness relationship is terminated and a KEL rotation event removes that witness from the configuration.
+7.3 Professional Witness Services
+Professional witness services are configured at setup via a URL + AID pair. The Agent verifies the service's AID against a known KEL before trusting it. The default setup wizard pre-populates two recommended public witness services but allows the user to substitute their own.
+
+
+________________
+
+
+Group 2: The Brain (Governance & Data)
+Everything about "Decisions and Memory."
+1. Data Storage Architecture
+* Layer 1: Raw Archive (Data Lake): Immutable storage of raw imports (Google/FB exports). Air-gapped from AI agents.
+* Layer 2: Data Vault (Canonical Store): Clean, structured data mapped to the Master Taxonomy. This is the primary layer for AI/App access.
+* Layer 3: Insight Store (Knowledge Graph): Derived patterns and vector embeddings.
+1.1 Encrypted Backup Artifact To facilitate "Automated Credential Recovery," the Agent must periodically export a Recovery Blob encrypted via a key derived from the User's Root Salt.
+* Contents: ACDC Store (Credential Files), Contact/Issuer List ("Rolodex"), and Governance Policy.
+2. System Integrity & Self-Regulation
+* Stateful Governance: The engine maintains context to prevent "Salami Attacks" (leaking data in small chunks).
+* The Shadow Auditor: An offline, read-only AI that reviews system logs against "Gold Standard" safety rules and proposes governance updates to the Human Owner.
+3. Policy Hierarchy & Scoping
+To provide both absolute safety and flexible autonomy, the Governance Engine employs a Hierarchical Inheritance Model.
+* Master Identity Policy (Root): Unbreakable rules (e.g., "Max daily spend $500").
+* Capability Sub-Policy (Scoped): Rules specific to a Service Pipe.
+* Task Delegation (Ephemeral): Short-lived rules for a single mission.
+* The Action-Level "Call Sandwich": Every internal tool invocation by an AI triggers a secondary Ingress/Egress check.
+4. Taxonomy & Schema Enforcement
+* Schema-on-Write: No data enters the Vault unless it matches a pre-approved Schema. Unknown data is diverted to the Raw Archive.
+* Master Dictionary: All Apps must use the system's standardized field names to ensure interoperability.
+5. Data Access Layer (DAL) & Mediation
+* Service Pipe Proxy: Apps cannot access the database directly. They must request data via the Data Pipe (GET /identity/data/tax_docs).
+* Mediation: The Governance Engine retrieves the data, applies the Master Taxonomy Schema, and strips unauthorized fields before returning the "minimized" object to the App.
+6. Contacts Manager
+6.1 Contact Record Schema
+Each contact entry contains: Display Name, AID (primary identifier), OOBI URL (for re-resolution), Contact Type (see 6.2), Verification Status (Unverified / OOBI-Resolved / Credential-Verified), Date Added, and an optional Notes field. A contact may have secondary AIDs (e.g., a separate organizational AID) linked to the primary record.
+6.2 Contact Types
+Trusted: Reserved for close friends and family. Grants eligibility for peer witness designation (Section 7, Group 1). Trusted contacts may also be granted elevated Data Access permissions in the Governance Policy.
+General: Default type for individuals with no established relationship context.
+Professional: Colleagues, clients, or professional counterparties. Enables business-context routing rules in the Governance Engine (e.g., applying stricter data minimization on outbound comm).
+Organization: AIDs belonging to legal entities, companies, or institutions rather than natural persons. Organization contacts are subject to the B2C Consent Card workflow by default (Group 3, Section 4).
+6.3 Contact Addition Workflow
+Contacts are added by scanning or pasting an OOBI URL. The Agent resolves the OOBI, fetches and validates the contact's KEL against the witness pool, and creates a contact record with status "OOBI-Resolved." The user then assigns a Contact Type. Optional: the user may request a Credential Presentation from the contact to elevate status to "Credential-Verified."
+6.4 Contact Type Change Rules
+Downgrading a contact from "Trusted" to any other type automatically triggers the peer witness termination flow (Section 7.2, Group 1) and queues a governance review of any elevated Data Access permissions previously granted to that contact.
+7. Identity Assurance & Scoring Logic The "Confidence Score" displayed in the UI is calculated by the Governance Engine using one of three pluggable algorithms. The user selects the algorithm based on their security needs.
+* Default State: Upon AID creation, the score defaults to 0% until the user satisfies the requirements of the active algorithm.
+* Algorithm Levels:
+   * Basic (Dev Mode): Relies solely on a Username and Password.
+      * Scoring: Binary (0% or 100%).
+      * Use Case: Development and low-security deployments.
+   * Manual (NIST Standard): A native implementation of NIST IAL/AAL standards.
+      * Requirements: User must manually configure external gateways (e.g., SMTP, Twilio) to prove possession of control channels.
+      * Scoring: Stepped intervals (0, 20, 40, 60, 80, 100) corresponding to assurance levels.
+   * Grape Score (Advanced): An advanced heuristic engine running as a Sandboxed App.
+      * Scoring: Granular integer precision (0–100) based on real-time behavioral and cryptographic factors.
+
+
+________________
+
+
+Group 3: The Hands (Capabilities)
+Everything the agent "Does."
+1. Capability Router (The "Pipes")
+We organize capabilities into standardized "Pipes." If you know the person's Identity (AID), you know exactly where to send the request.
+* Universal URL Schema: https://[Host_Address]/[Identity_AID]/[Service_Pipe]/[Action]
+* Pipe Metadata & Protocol Binding: To ensure interoperability, every Pipe must be registered with a standardized metadata object containing:
+   * Definition: Functional route (e.g., /comm/email).
+   * Protocol Binding: The underlying transport protocols (e.g., SMTP, IMAP, CDP) and data format (MIME, JSON-LD).
+   * Data Schema: Link to the JSON-LD or KERI-based schema for the payload.
+* Dual-Access Routing:
+   * External Gateway: Accesses pipes via Public URL + Crypto Signature.
+   * Internal Bus (IPC): Child processes communicate via local Unix Socket or localhost REST bridge.
+2. Universal Communication Pipe (/comm)
+A universal interface for human-to-human interaction, abstracting the underlying transport layer.
+* Methods: /comm/transmit (Async messaging) and /comm/connect (Real-time session).
+* Routing Logic:
+   * API Mode (Legacy Bridge): If the channel is external (e.g., "Call +1-555..."), the Agent acts as a client utilizing installed Driver Apps (e.g., a Vonage or Twilio Plugin) to bridge the request to the legacy telecom network.
+   * Direct Mode: Agent attempts a direct Peer-to-Peer encrypted KERI session.
+2.1 DIDComm Integration
+The /comm pipe is designed to be transport-agnostic. A DIDComm v2 driver will be added as an installable Driver App in a future phase, enabling interoperability with the broader SSI ecosystem (Aries agents, wallets, etc.). DIDComm routing will be handled as an additional routing option within the existing Routing Logic (API Mode / Direct Mode), selected automatically when the recipient's AID resolves to a DID Document rather than a KERI OOBI. No architectural changes to the core comm pipe are required to support this; it is purely an additional driver. 
+3. Browser Automation & Vision (/browser)
+Provides the agent with a "Digital Eye" and the ability to interact with legacy web interfaces.
+* Capabilities: 
+   * /browser/browse: Initializes a Playwright instance. Supports navigation, state persistence, and "Stealth Mode" where session cookies stay within the Browser Pipe’s secure memory, never exposed to the calling App.
+   * /browser/observe: Uses the Open Claw Snapshot System to generate a semantic map of the DOM.
+   * /browser/vision: Triggers a screenshot processed via a Multi-Modal model to identify coordinates for clicking non-standard UI elements.
+   * /browser/act: Executes clicks, typing, or scrolls via CDP (Chrome DevTools Protocol) for low-level precision.
+* Vision Sandbox: Egress Control can mask sensitive areas (passwords/PII) before Vision data is handed to the child process.
+4. Organization & Entity Architecture (Business Mode)
+* The Delegated Hierarchical Model:
+   * Corporate Root: Multi-Sig AID held by the Board/Owners.
+   * Operational Nodes: Servers run KERIGO as Delegated Agents in the ACL.
+   * Context Switching & Identity Separation: Employees do not have separate "Work Accounts." Access is governed by Cryptographic Binding and strict data sovereignty:
+      * Human Authentication: The user authenticates to their own Personal Identity Agent using their established Identity Confidence Score (biometrics + keys).
+      * Authority Handshake: The Personal Agent presents a Delegated Credential (issued by the Org) to the Organizational Agent. This proves the "Human Identity" is authorized to act as an "Organizational Member."
+      * Dual-Vault Architecture: The Flutter UI toggles between "Personal Mode" and "Organization Mode." While the Personal Agent acts as the key, all data generated in Org Mode is stored in a separate Organization Vault encrypted to the Organization's keys.
+      * Revocation: If the Organization revokes the Delegate Credential in the KEL, the Personal Agent instantly loses the ability to decrypt or access the Organization Vault.
+* The Organization Pipe (/org): Methods to Invite, Revoke, and Update Policy.
+* App-Driven Infrastructure: Business Plugins (CRMs/HR) installed on the Org Agent.
+   * Standardization: Organization Apps must use the standard Identity Agent Protocol (IAP) to interact with consumers. This ensures that regardless of the software vendor, the interaction renders as a standard Consent Card on the user's device.
+* B2C Interaction Logic: Organizations must use the standard Consent Card workflow; they cannot force data extraction.
+5. Application Lifecycle & Sandboxing
+* The App Manifest: Every app must include a manifest.json defining its Requested Capabilities (Required Pipes) and requested Sub-Policy.
+* Installation Workflow: The user reviews a plain-English summary of the Manifest. Upon consent, the system generates a constrained Capability Sub-Policy for that specific App ID.
+* The "Jailer" Execution Model: Apps are launched as Sandboxed Child Processes. 
+   * Environment Injection: The Identity Agent (Parent) injects specific environment variables (e.g., OPENAI_BASE_URL or PROXY_PORT) into the Child process to configure its connectivity.
+   * Autopilot Select: The Agent can "Auto-Select" the appropriate pipe based on the intent of the child process's request, mapping a generic "read email" prompt to the specific /comm/email/inbox pipe.
+   * Governance Interceptor: forces the App to use the Identity Agent as its only "eye and ear" to the world.
+________________
+
+
+Group 4: The Interface (Human & Recovery)
+Everything the user "Sees."
+1. User Interface Architecture
+The user interaction model consists of two distinct interfaces: a Mobile Controller (Flutter App) for daily operations, and a Desktop Dashboard (Flutter/Web/Local) for deep management.
+1.1 Mobile User Interface (The Controller) This is the primary interface. The main screen is organized vertically:
+* A. Identity Section (Top):
+   * Visual: Displays the current Confidence Score (0-100%) and a badge count of Verified Credentials.
+   * Concept: This is the "Health Bar" of the identity, showing the statistical probability that the user is the authorized owner at this specific moment.
+* B. Notification Hub (Middle):
+   * Alerts: Pending consent requests for high-priority tasks.
+   * Tasks: Progress bars for background jobs (e.g., ETL, Normalization).
+   * Activity Ledger: A scrolling, human-readable log of recent Egress events.
+* C. Interaction Section (Bottom):
+   * Share (Emitter Mode): Opens a transaction pipe, generates a QR/Token, and broadcasts presence.
+   * Scan (Receiver Mode): Enters "Listener State" to capture a broadcast or QR code to initiate a handshake.
+   * Chatbot: The direct command interface to the AI Secure Work Zone.
+* D. Global Navigation (Slide-out Menu): Accessible via the "Hamburger" icon or swipe gesture. Provides access to persistent environment state:
+   * My Profile: Core identity data and public-facing profile information.
+   * Contacts: Trusted AIDs and relationship management (Rolodex).
+   * Digital Wallet: Management of Verifiable Credentials (ACDCs) and Payment methods.
+   * Data Vault: A browser for the user's structured Knowledge Graph and raw archives.
+   * Server Management: Status dashboard for connected Agent Nodes (Active/Backup) and Access Control List (ACL) management.
+   * Security Settings: Master Policy controls and Root Seed backup status.
+1.2 Desktop & Web Dashboard (The Management Console) A high-granularity interface for "Deep Dive" management. This view is generated by the Server (Localhost or Secure Web Tunnel) and is stateless regarding identity keys.
+* Authentication (Scan-to-Log-in):
+   * No Passwords: The Desktop interface has no native login screen. It displays a unique, rotating QR Code session token.
+   * Handshake: The user must open their Mobile Controller, scan the Desktop QR code, and cryptographically sign a session authorization. This logs the browser in as the "Owner."
+* Expanded Hubs:
+   * Dashboard: High-level system health, recent activity, and agent performance metrics.
+   * AI Hub: Configuration of AI models, prompt libraries, and agent personality settings.
+   * Communications Hub: A unified inbox for Email, Chat, and Voice logs.
+   * Health Hub: Visualization of biometric and medical data streams.
+   * Finance Hub: Detailed ledger of assets, transactions, and automated spending rules.
+2. Digital Guardianship & Delegation
+2.1 Dependent Categories & Governance Logic
+* Person Dependents (Care & Consent): Target: Children/Elders. Governance focuses on Safety & Authorization (e.g., Co-signing interactions, location monitoring).
+* Managed Devices (Infrastructure): Target: Headless hardware/IoT. Governance focuses on Command Authority (Subservient Nodes that execute orders).
+* Software Agents (Bots): Target: Autonomous software loops. Governance focuses on Resource Capping (e.g., Strict budget limits or API rate limits).
+2.2 Governance Over Dependence The Dependent Agent inherits the Guardian’s Master Policy. All Egress attempts trigger a "Shadow Alert" to the Guardian’s UI.
+2.3 Capability Delegation (The "Grandparent" Protocol) A Guardian can issue ephemeral Verifiable Credentials to third parties (e.g., a Grandparent or Nanny) authorizing specific actions (e.g., "School Pickup" or "Emergency Medical Access") for a limited time and scope.
+3. Identity Recovery & Safety (The Sandbox)
+* Pre-Flight Verification: Before any key rotation or recovery broadcast is sent to the network, the UI must perform a Local State Check.
+* Logic: The App derives the keys locally from the entered Passcode and compares the hash against the KEL. If the hashes do not match, the "Submit" button remains disabled to prevent the user from broadcasting an invalid rotation event.
+4. Automated Credential Recovery
+When a Root Identity is compromised or lost, the user must migrate to a new AID. The Agent automates this via the following workflow:
+1. Grant Request: The new Identity Agent iterates through the backed-up "Rolodex" (Section 6.1). It sends a formal issuance request (e.g., an IPEX Grant Message) to each Issuer.
+2. Context: The message includes the Old AID (for reference) and the New AID (for issuance).
+3. Verification: The Agent prompts the user to perform an Out-Of-Band authentication if automated verification fails.
+5. End of Identity (Terminal Rotation)
+To cryptographically signal the permanent end of an Identity's lifecycle.
+* Mechanism: The user signs a Terminal Rotation Event.
+* Key State: The keys are rotated to a null value.
+* The Tombstone: The event includes a standard Anchor to the New AID serving as a forwarding address.
+6. Core System Workflows
+* Multi-Modal Handshake: Peer-to-peer connection flow where Emitter broadcasts Route URL + Token.
+* Taxonomy Update: "Shadow Sync" process where unknown data is quarantined.
+* Transparency Audit: Every external interaction logged with a "Transparency Receipt."
+* Dynamic Categorization: Ledger automatically tags events.
