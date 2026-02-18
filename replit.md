@@ -23,7 +23,7 @@ Flutter UI → Go Backend (port 5000) → Python KERI Driver (port 9999/keripy)
 ```
 - Go backend handles orchestration, persistence, API serving
 - Python KERI driver performs all KERI operations using keripy v1.1.17 (hard requirement)
-- Go spawns Python as child process (dev) or connects via KERI_DRIVER_URL (prod)
+- Go always spawns Python as a local child process via exec.Command()
 
 #### 2. Mobile Remote Mode (iOS/Android + PRIMARY_SERVER_URL)
 ```
@@ -65,7 +65,7 @@ UI code is completely mode-agnostic — no platform branching in screens.
    - Spawns and manages the Python KERI driver process (desktop only)
    - Bridges Flutter requests to the KERI driver
    - Serves Flutter web build as static files
-   - API endpoints: `/api/health`, `/api/info`, `/api/inception`, `/api/identity`
+   - API endpoints: `/api/health`, `/api/info`, `/api/identity`, `/api/inception`, `/api/rotation`, `/api/sign`, `/api/kel`, `/api/verify`, `/api/format-credential`, `/api/resolve-oobi`, `/api/generate-multisig-event`
    - Available on BOTH desktop and mobile (but Python driver only on desktop)
 
 2. **Python KERI Driver (`drivers/keri-core/`)** — The KERI protocol engine (desktop only):
@@ -92,12 +92,12 @@ UI code is completely mode-agnostic — no platform branching in screens.
 
 ### Driver Pattern (Desktop)
 
-- **Development/Replit (Linux):** Go spawns Python as a child process via `exec.Command()`. Communication via `localhost:9999`.
-- **Production (Server):** Python driver runs as a separate service. Go connects via `KERI_DRIVER_URL` environment variable.
+Go always spawns Python as a local child process via `exec.Command()`. The driver binds to `127.0.0.1:9999` and is killed when Go exits. There is no external driver mode.
+
+The Python driver is the source of truth for endpoint naming. All other components (Rust bridge, Remote Helper, Dart services) match the driver's paths exactly.
 
 Key environment variables:
-- `KERI_DRIVER_URL` — If set, Go connects to this URL instead of spawning Python
-- `KERI_DRIVER_PORT` — Port for the managed Python driver (default: 9999)
+- `KERI_DRIVER_PORT` — Port for the Python driver (default: 9999)
 - `KERI_DRIVER_SCRIPT` — Path to server.py (default: `./drivers/keri-core/server.py`)
 - `KERI_DRIVER_PYTHON` — Python binary path (default: `python3`)
 - `PRIMARY_SERVER_URL` — Remote server URL for Mobile Remote Mode
@@ -200,16 +200,20 @@ Key environment variables:
 
 ## Recent Changes
 
+- 2026-02-18: Added 4 stateful endpoints to Python KERI driver: /rotation, /sign, /kel, /verify
+- 2026-02-18: Added 3 stateless endpoints to Python KERI driver: /format-credential, /resolve-oobi, /generate-multisig-event
+- 2026-02-18: Added Go proxy routes for all 8 new endpoints (/api/rotation, /api/sign, /api/kel, /api/verify, /api/format-credential, /api/resolve-oobi, /api/generate-multisig-event)
+- 2026-02-18: Updated Go keri_driver.go with methods for all new endpoints (RotateAid, SignPayload, GetKel, VerifySignature, FormatCredential, ResolveOobi, GenerateMultisigEvent)
+- 2026-02-18: Removed dev/prod dichotomy — driver is always a local child process, no KERI_DRIVER_URL
+- 2026-02-18: Dropped /helper/ prefix from KeriHelperClient paths to match Python driver naming
+- 2026-02-18: Updated KeriHelperClient response types to match actual Remote Helper/driver responses
+- 2026-02-18: Rewrote ADR 002 with all 9 endpoints documented, clarified driver lifecycle
+- 2026-02-18: Rewrote ADR 003 with simplified mobile architecture (stateless URL resolution)
+- 2026-02-18: Established Python KERI driver as source of truth for all endpoint naming
 - 2026-02-18: Created adaptive architecture with three operating modes (Desktop, Mobile Remote, Mobile Standalone)
 - 2026-02-18: Created KeriService abstract interface + AgentEnvironment enum for mode-agnostic UI
 - 2026-02-18: Created DesktopKeriService, RemoteServerKeriService, MobileStandaloneKeriService implementations
 - 2026-02-18: Created KeriHelperClient for public stateless Remote Helper (zero trust, public data only)
 - 2026-02-18: Created Rust bridge infrastructure (Cargo.toml, keri_bridge.rs) with THCLab keriox/keri-core
 - 2026-02-18: Created Dart KeriBridge interface for flutter_rust_bridge FFI bindings
-- 2026-02-18: Updated main.dart with runtime environment detection and KeriService dependency injection
-- 2026-02-18: Updated AgentConfig with PRIMARY_SERVER_URL and KERI_HELPER_URL configuration
-- 2026-02-18: Refactored SetupWizard and Dashboard to accept KeriService parameter (mode-agnostic)
-- 2026-02-18: Created ADR 003 documenting adaptive architecture, trust boundaries, and Remote Helper constraint
-- 2026-02-18: Removed all fallback KERI code — keripy is now a hard requirement (no degraded mode)
-- 2026-02-18: Replaced custom Go KERI logic with Python KERI driver (Driver Pattern)
 - 2026-02-18: Completed Phase 2 — inception events, KEL persistence, Setup Wizard, mobile architecture
