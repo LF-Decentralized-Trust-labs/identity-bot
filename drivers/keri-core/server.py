@@ -4,6 +4,34 @@ import json
 import hashlib
 import base64
 import time
+import ctypes
+import ctypes.util
+import glob
+
+def _ensure_libsodium():
+    if ctypes.util.find_library("sodium"):
+        return
+    found_path = None
+    for so_name in ["libsodium.so.26", "libsodium.so.23", "libsodium.so"]:
+        try:
+            lib = ctypes.CDLL(so_name)
+            with open(f"/proc/{os.getpid()}/maps") as f:
+                for line in f:
+                    if "sodium" in line:
+                        parts = line.strip().split()
+                        if len(parts) >= 6:
+                            found_path = parts[-1]
+                            break
+            break
+        except OSError:
+            continue
+    if found_path:
+        ctypes.util.find_library = lambda name, _orig=ctypes.util.find_library, _path=found_path: (
+            _path if name in ("sodium", "libsodium") else _orig(name)
+        )
+
+_ensure_libsodium()
+
 from flask import Flask, request, jsonify
 
 KERI_AVAILABLE = False
@@ -11,8 +39,8 @@ try:
     from keri.core import coring, eventing
     from keri.core.coring import MtrDex, Matter
     KERI_AVAILABLE = True
-except ImportError:
-    pass
+except (ImportError, ValueError, OSError) as e:
+    print(f"[keri-driver] keripy not available: {e}", file=sys.stderr)
 
 app = Flask(__name__)
 start_time = time.time()

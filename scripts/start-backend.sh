@@ -28,6 +28,22 @@ echo "============================================"
 echo ""
 
 cd "$WORKSPACE"
+
+SODIUM_LIB=$(python3 -c "
+import ctypes, os
+lib = ctypes.CDLL('libsodium.so.26')
+for line in open(f'/proc/{os.getpid()}/maps'):
+    if 'sodium' in line:
+        parts = line.strip().split()
+        if len(parts) >= 6:
+            print(os.path.dirname(parts[-1]))
+            break
+" 2>/dev/null)
+if [ -n "$SODIUM_LIB" ]; then
+    export LD_LIBRARY_PATH="${SODIUM_LIB}:${LD_LIBRARY_PATH}"
+    echo "      libsodium: $SODIUM_LIB"
+fi
+
 export FLUTTER_WEB_DIR="$WORKSPACE/identity_agent_ui/build/web"
 export KERI_DRIVER_SCRIPT="$WORKSPACE/drivers/keri-core/server.py"
 exec "$WORKSPACE/bin/identity-agent-core"
