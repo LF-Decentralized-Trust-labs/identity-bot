@@ -1,18 +1,17 @@
 package main
 
 import (
-	"crypto/ed25519"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
-	"strings"
+	"syscall"
 	"time"
 
-	"identity-agent-core/keri"
+	"identity-agent-core/drivers"
 	"identity-agent-core/store"
 
 	"github.com/go-chi/chi/v5"
@@ -36,6 +35,7 @@ type CoreInfoResponse struct {
 	Phase        string      `json:"phase"`
 	Capabilities []string    `json:"capabilities"`
 	Backend      BackendInfo `json:"backend"`
+	Driver       DriverInfo  `json:"driver,omitempty"`
 }
 
 type BackendInfo struct {
@@ -45,25 +45,31 @@ type BackendInfo struct {
 	StartedAt string `json:"started_at"`
 }
 
+type DriverInfo struct {
+	Status      string `json:"status"`
+	Library     string `json:"library"`
+	URL         string `json:"url"`
+}
+
 type InceptionRequest struct {
 	PublicKey     string `json:"public_key"`
 	NextPublicKey string `json:"next_public_key"`
 }
 
 type InceptionResponse struct {
-	AID       string              `json:"aid"`
-	Event     keri.InceptionEvent `json:"inception_event"`
-	PublicKey string              `json:"public_key"`
-	Created   string              `json:"created"`
+	AID            string                 `json:"aid"`
+	InceptionEvent map[string]interface{} `json:"inception_event"`
+	PublicKey      string                 `json:"public_key"`
+	Created        string                 `json:"created"`
 }
 
 type IdentityResponse struct {
-	Initialized   bool                `json:"initialized"`
-	AID           string              `json:"aid,omitempty"`
-	PublicKey     string              `json:"public_key,omitempty"`
-	NextKeyDigest string             `json:"next_key_digest,omitempty"`
-	Created       string              `json:"created,omitempty"`
-	EventCount    int                 `json:"event_count,omitempty"`
+	Initialized   bool   `json:"initialized"`
+	AID           string `json:"aid,omitempty"`
+	PublicKey     string `json:"public_key,omitempty"`
+	NextKeyDigest string `json:"next_key_digest,omitempty"`
+	Created       string `json:"created,omitempty"`
+	EventCount    int    `json:"event_count,omitempty"`
 }
 
 type ErrorResponse struct {
@@ -74,6 +80,7 @@ type ErrorResponse struct {
 var (
 	startTime  time.Time
 	dataStore  store.Store
+	keriDriver *drivers.KeriDriver
 )
 
 func main() {
@@ -90,6 +97,21 @@ func main() {
 		log.Fatalf("[identity-agent-core] Failed to initialize store: %v", err)
 	}
 	defer dataStore.Close()
+
+	keriDriver = drivers.NewKeriDriver()
+	if err := keriDriver.Start(); err != nil {
+		log.Fatalf("[identity-agent-core] Failed to start KERI driver: %v", err)
+	}
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigChan
+		log.Println("[identity-agent-core] Shutting down...")
+		keriDriver.Stop()
+		dataStore.Close()
+		os.Exit(0)
+	}()
 
 	r := chi.NewRouter()
 
@@ -159,6 +181,7 @@ func main() {
 	addr := fmt.Sprintf("0.0.0.0:%s", port)
 	log.Printf("[identity-agent-core] Starting Go Core on %s", addr)
 	log.Printf("[identity-agent-core] API endpoints: /api/health, /api/info, /api/inception, /api/identity")
+	log.Printf("[identity-agent-core] KERI driver: %s", keriDriver.BaseURL)
 	log.Printf("[identity-agent-core] Phase 2: Inception - Identity Creation Ready")
 
 	if err := http.ListenAndServe(addr, r); err != nil {
@@ -169,13 +192,19 @@ func main() {
 func handleHealth(w http.ResponseWriter, r *http.Request) {
 	uptime := time.Since(startTime).Round(time.Second)
 
+	driverStatus := "unknown"
+	status, err := keriDriver.GetStatus()
+	if err == nil {
+		driverStatus = status.Status
+	}
+
 	resp := HealthResponse{
 		Status:    "active",
 		Agent:     "keri-go",
 		Version:   "0.1.0",
 		Uptime:    uptime.String(),
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
-		Mode:      "primary_active",
+		Mode:      fmt.Sprintf("primary_active (driver: %s)", driverStatus),
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -189,6 +218,18 @@ func handleInfo(w http.ResponseWriter, r *http.Request) {
 		phase = "Phase 2: Inception (Identity Active)"
 	}
 
+	driverInfo := DriverInfo{
+		Status:  "unknown",
+		Library: "unknown",
+		URL:     keriDriver.BaseURL,
+	}
+
+	status, err := keriDriver.GetStatus()
+	if err == nil {
+		driverInfo.Status = status.Status
+		driverInfo.Library = status.KeriLibrary
+	}
+
 	resp := CoreInfoResponse{
 		Name:        "Identity Agent Core",
 		Description: "Self-sovereign identity runtime powered by KERI",
@@ -198,6 +239,7 @@ func handleInfo(w http.ResponseWriter, r *http.Request) {
 			"health_check",
 			"inception",
 			"kel_storage",
+			"keri_driver",
 		},
 		Backend: BackendInfo{
 			Mode:      "primary_active",
@@ -205,6 +247,7 @@ func handleInfo(w http.ResponseWriter, r *http.Request) {
 			Port:      5000,
 			StartedAt: startTime.UTC().Format(time.RFC3339),
 		},
+		Driver: driverInfo,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -229,19 +272,7 @@ func handleInception(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	signingPub, err := decodePublicKey(req.PublicKey)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "Invalid public_key", err.Error())
-		return
-	}
-
-	nextPub, err := decodePublicKey(req.NextPublicKey)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "Invalid next_public_key", err.Error())
-		return
-	}
-
-	result, err := keri.CreateInceptionEvent(signingPub, nextPub)
+	result, err := keriDriver.CreateInception(req.PublicKey, req.NextPublicKey)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to create inception event", err.Error())
 		return
@@ -249,13 +280,14 @@ func handleInception(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
+	eventJSON, _ := json.Marshal(result.InceptionEvent)
 	eventRecord := store.EventRecord{
 		AID:            result.AID,
 		SequenceNumber: 0,
 		EventType:      "icp",
-		EventJSON:      result.EventJSON,
+		EventJSON:      string(eventJSON),
 		PublicKey:       result.PublicKey,
-		NextKeyDigest:  result.NextPublicKey,
+		NextKeyDigest:  result.NextKeyDigest,
 		Timestamp:      now,
 	}
 	if err := dataStore.SaveEvent(eventRecord); err != nil {
@@ -266,7 +298,7 @@ func handleInception(w http.ResponseWriter, r *http.Request) {
 	identityState := store.IdentityState{
 		AID:           result.AID,
 		PublicKey:     result.PublicKey,
-		NextKeyDigest: result.NextPublicKey,
+		NextKeyDigest: result.NextKeyDigest,
 		Created:       now,
 		EventCount:    1,
 	}
@@ -278,10 +310,10 @@ func handleInception(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[identity-agent-core] INCEPTION: New identity created - AID: %s", result.AID)
 
 	resp := InceptionResponse{
-		AID:       result.AID,
-		Event:     result.Event,
-		PublicKey: result.PublicKey,
-		Created:   now,
+		AID:            result.AID,
+		InceptionEvent: result.InceptionEvent,
+		PublicKey:      result.PublicKey,
+		Created:        now,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -316,30 +348,6 @@ func handleIdentity(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
-}
-
-func decodePublicKey(encoded string) (ed25519.PublicKey, error) {
-	var keyBytes []byte
-	var err error
-
-	if strings.HasPrefix(encoded, "B") {
-		keyBytes, err = base64.URLEncoding.WithPadding(base64.NoPadding).DecodeString(encoded[1:])
-	} else {
-		keyBytes, err = base64.URLEncoding.WithPadding(base64.NoPadding).DecodeString(encoded)
-		if err != nil {
-			keyBytes, err = base64.StdEncoding.DecodeString(encoded)
-		}
-	}
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode public key: %w", err)
-	}
-
-	if len(keyBytes) != ed25519.PublicKeySize {
-		return nil, fmt.Errorf("invalid public key size: got %d bytes, expected %d", len(keyBytes), ed25519.PublicKeySize)
-	}
-
-	return ed25519.PublicKey(keyBytes), nil
 }
 
 func writeError(w http.ResponseWriter, status int, errMsg string, details string) {

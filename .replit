@@ -1,8 +1,9 @@
 entrypoint = "README.md"
+modules = ["python-3.11"]
 
 [nix]
 channel = "stable-24_05"
-packages = ["go", "flutter", "chromium"]
+packages = ["chromium", "flutter", "go"]
 
 [[ports]]
 localPort = 5000
