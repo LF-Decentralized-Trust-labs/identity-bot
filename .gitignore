@@ -1,41 +1,37 @@
-# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
+# Go
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
 
-# dependencies
-node_modules/
+# Flutter
+identity_agent_ui/build/
+identity_agent_ui/.dart_tool/
+identity_agent_ui/.packages
+identity_agent_ui/.pub-cache/
+identity_agent_ui/.pub/
+*.dart.js
+*.dart.js.deps
+*.dart.js.map
 
-# Expo
-.expo/
-dist/
-web-build/
-expo-env.d.ts
-
-# Native
-ios/
-android/
-*.orig.*
-*.jks
-*.p8
-*.p12
-*.key
-*.mobileprovision
-
-# Metro
-.metro-health-check*
-
-# debug
-npm-debug.*
-yarn-debug.*
-yarn-error.*
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
 
 # macOS
 .DS_Store
-*.pem
 
-# local env files
+# Environment
+.env
 .env*.local
 
-# typescript
-*.tsbuildinfo
-.vercel
-
-.env
+# Replit
+.cache/
+.config/
