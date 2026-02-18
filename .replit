@@ -9,6 +9,10 @@ packages = ["borgbackup", "chromium", "flutter", "go", "libsodium"]
 localPort = 5000
 externalPort = 5000
 
+[[ports]]
+localPort = 5001
+externalPort = 80
+
 [env]
 PORT = "5000"
 
@@ -55,3 +59,8 @@ mode = "sequential"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "sh ./scripts/build-flutter.sh"
+
+[userenv]
+
+[userenv.shared]
+PORT = "5000"
