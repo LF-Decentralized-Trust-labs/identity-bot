@@ -19,6 +19,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   CoreConnectionState _connectionState = CoreConnectionState.disconnected;
   HealthResponse? _healthData;
   CoreInfoResponse? _coreInfo;
+  IdentityResponse? _identity;
   String? _errorMessage;
   final List<LogEntry> _logs = [];
   Timer? _healthTimer;
@@ -63,10 +64,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
     try {
       final health = await _coreService.getHealth();
       final info = await _coreService.getInfo();
+      IdentityResponse? identity;
+      try {
+        identity = await _coreService.getIdentity();
+      } catch (_) {}
 
       setState(() {
         _healthData = health;
         _coreInfo = info;
+        _identity = identity;
         _connectionState = health.isActive
             ? CoreConnectionState.connected
             : CoreConnectionState.error;
@@ -77,6 +83,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
         _addLog('Core version: ${health.version}', LogLevel.info);
         _addLog('Backend mode: ${health.mode}', LogLevel.info);
         _addLog('Phase: ${info.phase}', LogLevel.info);
+        if (identity != null && identity.initialized) {
+          _addLog('Identity active: ${identity.aid!.substring(0, 12)}...', LogLevel.success);
+        }
         _startHealthPolling();
       } else {
         _addLog('Core responded but status is: ${health.status}', LogLevel.warning);
@@ -130,6 +139,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     _buildCoreStatusCard(),
                     const SizedBox(height: 20),
                     if (_connectionState == CoreConnectionState.connected) ...[
+                      if (_identity != null && _identity!.initialized)
+                        _buildIdentityCard(),
+                      if (_identity != null && _identity!.initialized)
+                        const SizedBox(height: 20),
                       _buildInfoGrid(),
                       const SizedBox(height: 20),
                     ],
@@ -406,6 +419,117 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ],
         );
     }
+  }
+
+  Widget _buildIdentityCard() {
+    final aid = _identity!.aid ?? '';
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: AppColors.coreActive.withOpacity(0.3),
+          width: 1,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 28,
+                height: 28,
+                decoration: BoxDecoration(
+                  color: AppColors.coreActive.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: const Icon(
+                  Icons.fingerprint,
+                  color: AppColors.coreActive,
+                  size: 16,
+                ),
+              ),
+              const SizedBox(width: 10),
+              const Text(
+                'AUTONOMOUS IDENTIFIER',
+                style: TextStyle(
+                  color: AppColors.textMuted,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 1.5,
+                  fontFamily: 'monospace',
+                ),
+              ),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: AppColors.coreActive.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: const Text(
+                  'ACTIVE',
+                  style: TextStyle(
+                    color: AppColors.coreActive,
+                    fontSize: 9,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.0,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppColors.primary,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: AppColors.border, width: 1),
+            ),
+            child: SelectableText(
+              aid,
+              style: const TextStyle(
+                color: AppColors.accent,
+                fontSize: 11,
+                fontFamily: 'monospace',
+                height: 1.5,
+              ),
+            ),
+          ),
+          if (_identity!.created != null) ...[
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                const Icon(Icons.access_time, color: AppColors.textMuted, size: 12),
+                const SizedBox(width: 6),
+                Text(
+                  'Created: ${_identity!.created}',
+                  style: const TextStyle(
+                    color: AppColors.textMuted,
+                    fontSize: 10,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+                const Spacer(),
+                Text(
+                  'Events: ${_identity!.eventCount ?? 0}',
+                  style: const TextStyle(
+                    color: AppColors.textMuted,
+                    fontSize: 10,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
   }
 
   Widget _buildInfoGrid() {
