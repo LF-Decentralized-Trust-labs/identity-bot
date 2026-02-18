@@ -118,16 +118,15 @@ def create_inception_event_fallback(public_key: str, next_public_key: str) -> di
     }
 
 
-def create_inception_event_keri(public_key: str, next_public_key: str) -> dict:
-    if public_key.startswith("B"):
-        pub_bytes = b64url_decode(public_key[1:])
-    else:
-        pub_bytes = b64url_decode(public_key)
+def _extract_raw_key(cesr_key: str) -> bytes:
+    if cesr_key[0] in ("B", "D") and len(cesr_key) > 1:
+        return b64url_decode(cesr_key[1:])
+    return b64url_decode(cesr_key)
 
-    if next_public_key.startswith("B"):
-        next_bytes = b64url_decode(next_public_key[1:])
-    else:
-        next_bytes = b64url_decode(next_public_key)
+
+def create_inception_event_keri(public_key: str, next_public_key: str) -> dict:
+    pub_bytes = _extract_raw_key(public_key)
+    next_bytes = _extract_raw_key(next_public_key)
 
     verfer = coring.Verfer(raw=pub_bytes, code=MtrDex.Ed25519)
     diger = coring.Diger(raw=next_bytes, code=MtrDex.Blake3_256)
