@@ -1,6 +1,6 @@
 import 'dart:convert';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
+import '../config/agent_config.dart';
 
 class HealthResponse {
   final String status;
@@ -71,15 +71,8 @@ class CoreService {
   final http.Client _client;
 
   CoreService({String? baseUrl})
-      : baseUrl = baseUrl ?? _defaultBaseUrl(),
+      : baseUrl = baseUrl ?? AgentConfig.coreBaseUrl,
         _client = http.Client();
-
-  static String _defaultBaseUrl() {
-    if (kIsWeb) {
-      return '';
-    }
-    return 'http://localhost:5000';
-  }
 
   Future<HealthResponse> getHealth() async {
     final response = await _client.get(

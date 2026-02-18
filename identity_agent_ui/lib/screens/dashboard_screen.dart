@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
 import '../theme/app_theme.dart';
+import '../config/agent_config.dart';
 import '../services/core_service.dart';
 import '../widgets/status_indicator.dart';
 import '../widgets/info_card.dart';
@@ -91,7 +92,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   void _startHealthPolling() {
     _healthTimer?.cancel();
-    _healthTimer = Timer.periodic(const Duration(seconds: 15), (_) async {
+    _healthTimer = Timer.periodic(Duration(seconds: AgentConfig.healthPollIntervalSeconds), (_) async {
       try {
         final health = await _coreService.getHealth();
         setState(() {
@@ -281,7 +282,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
             const SizedBox(width: 12),
             const Text(
-              'Attempting handshake with Go Core on :8080...',
+              'Attempting handshake with Go Core...',
               style: TextStyle(
                 color: AppColors.corePending,
                 fontSize: 13,
