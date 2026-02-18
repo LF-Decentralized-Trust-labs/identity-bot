@@ -3,12 +3,15 @@ import 'dart:async';
 import '../theme/app_theme.dart';
 import '../config/agent_config.dart';
 import '../services/core_service.dart';
+import '../services/keri_service.dart';
 import '../widgets/status_indicator.dart';
 import '../widgets/info_card.dart';
 import '../widgets/log_entry.dart';
 
 class DashboardScreen extends StatefulWidget {
-  const DashboardScreen({super.key});
+  final KeriService keriService;
+
+  const DashboardScreen({super.key, required this.keriService});
 
   @override
   State<DashboardScreen> createState() => _DashboardScreenState();

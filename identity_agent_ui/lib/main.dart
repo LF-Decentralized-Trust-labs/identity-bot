@@ -3,6 +3,12 @@ import 'theme/app_theme.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/setup_wizard_screen.dart';
 import 'services/core_service.dart';
+import 'services/keri_service.dart';
+import 'services/desktop_keri_service.dart';
+import 'services/remote_server_keri_service.dart';
+import 'services/mobile_standalone_keri_service.dart';
+import 'services/keri_helper_client.dart';
+import 'config/agent_config.dart';
 
 void main() {
   runApp(const IdentityAgentApp());
@@ -33,11 +39,35 @@ class _AgentRouterState extends State<AgentRouter> {
   bool _loading = true;
   bool _identityExists = false;
   String? _error;
+  late final KeriService _keriService;
+  late final AgentEnvironment _environment;
 
   @override
   void initState() {
     super.initState();
+    _initializeServices();
     _checkIdentity();
+  }
+
+  void _initializeServices() {
+    final primaryUrl = AgentConfig.primaryServerUrl;
+    _environment = KeriService.detectEnvironment(
+      primaryServerUrl: primaryUrl,
+    );
+
+    switch (_environment) {
+      case AgentEnvironment.desktop:
+        _keriService = DesktopKeriService();
+        break;
+      case AgentEnvironment.mobileRemote:
+        _keriService = RemoteServerKeriService(serverUrl: primaryUrl);
+        break;
+      case AgentEnvironment.mobileStandalone:
+        _keriService = MobileStandaloneKeriService(
+          helper: KeriHelperClient(),
+        );
+        break;
+    }
   }
 
   Future<void> _checkIdentity() async {
@@ -66,6 +96,12 @@ class _AgentRouterState extends State<AgentRouter> {
   }
 
   @override
+  void dispose() {
+    _keriService.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     if (_loading) {
       return Scaffold(
@@ -83,9 +119,11 @@ class _AgentRouterState extends State<AgentRouter> {
                 ),
               ),
               const SizedBox(height: 16),
-              const Text(
-                'CONNECTING TO CORE...',
-                style: TextStyle(
+              Text(
+                _environment == AgentEnvironment.mobileStandalone
+                    ? 'INITIALIZING RUST BRIDGE...'
+                    : 'CONNECTING TO CORE...',
+                style: const TextStyle(
                   color: AppColors.textMuted,
                   fontSize: 12,
                   letterSpacing: 1.5,
@@ -99,9 +137,12 @@ class _AgentRouterState extends State<AgentRouter> {
     }
 
     if (_identityExists) {
-      return const DashboardScreen();
+      return DashboardScreen(keriService: _keriService);
     }
 
-    return SetupWizardScreen(onComplete: _onSetupComplete);
+    return SetupWizardScreen(
+      onComplete: _onSetupComplete,
+      keriService: _keriService,
+    );
   }
 }

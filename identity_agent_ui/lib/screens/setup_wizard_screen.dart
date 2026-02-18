@@ -4,6 +4,7 @@ import '../theme/app_theme.dart';
 import '../crypto/bip39.dart';
 import '../crypto/keys.dart';
 import '../services/core_service.dart';
+import '../services/keri_service.dart';
 
 enum WizardStep {
   welcome,
@@ -15,8 +16,13 @@ enum WizardStep {
 
 class SetupWizardScreen extends StatefulWidget {
   final VoidCallback onComplete;
+  final KeriService keriService;
 
-  const SetupWizardScreen({super.key, required this.onComplete});
+  const SetupWizardScreen({
+    super.key,
+    required this.onComplete,
+    required this.keriService,
+  });
 
   @override
   State<SetupWizardScreen> createState() => _SetupWizardScreenState();
