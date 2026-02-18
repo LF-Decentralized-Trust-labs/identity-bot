@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 
 class HealthResponse {
@@ -70,12 +71,19 @@ class CoreService {
   final http.Client _client;
 
   CoreService({String? baseUrl})
-      : baseUrl = baseUrl ?? 'http://localhost:8080',
+      : baseUrl = baseUrl ?? _defaultBaseUrl(),
         _client = http.Client();
+
+  static String _defaultBaseUrl() {
+    if (kIsWeb) {
+      return '';
+    }
+    return 'http://localhost:5000';
+  }
 
   Future<HealthResponse> getHealth() async {
     final response = await _client.get(
-      Uri.parse('$baseUrl/health'),
+      Uri.parse('$baseUrl/api/health'),
     );
 
     if (response.statusCode == 200) {
@@ -87,7 +95,7 @@ class CoreService {
 
   Future<CoreInfoResponse> getInfo() async {
     final response = await _client.get(
-      Uri.parse('$baseUrl/info'),
+      Uri.parse('$baseUrl/api/info'),
     );
 
     if (response.statusCode == 200) {
