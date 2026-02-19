@@ -10,6 +10,8 @@ echo "============================================"
 echo ""
 echo "Building Flutter Web..."
 cd "$WORKSPACE/identity_agent_ui"
+flutter clean
+flutter pub get
 flutter build web --release --base-href="/"
 echo ""
 echo "Flutter Web built successfully."
