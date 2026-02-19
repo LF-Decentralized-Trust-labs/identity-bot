@@ -64,3 +64,5 @@ KERI_HELPER_URL = "https://keri-helper-microservice.replit.app"
 
 [deployment]
 deploymentTarget = "cloudrun"
+build = "sh ./scripts/build-flutter.sh && cd identity-agent-core && go build -o /home/runner/workspace/bin/identity-agent-core . && cd /home/runner/workspace"
+run = "sh ./scripts/start-backend.sh"
