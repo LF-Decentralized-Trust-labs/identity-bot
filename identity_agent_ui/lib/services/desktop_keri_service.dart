@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../config/agent_config.dart';
+import '../crypto/keys.dart';
 import 'keri_service.dart';
 
 class DesktopKeriService extends KeriService {
@@ -19,12 +20,15 @@ class DesktopKeriService extends KeriService {
     required String name,
     required String code,
   }) async {
+    final mnemonic = code.split(' ');
+    final keys = KeyManager.generateKeysFromMnemonic(mnemonic);
+
     final response = await _client.post(
       Uri.parse('$_baseUrl/api/inception'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({
-        'name': name,
-        'code': code,
+        'public_key': keys.signing.publicKeyEncoded,
+        'next_public_key': keys.next.publicKeyEncoded,
       }),
     );
 
