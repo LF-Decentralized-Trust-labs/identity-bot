@@ -2,24 +2,27 @@
 set -e
 
 WORKSPACE="/home/runner/workspace"
+BINARY="$WORKSPACE/identity-agent-core/bin/identity-agent-core"
 
 echo "============================================"
 echo " IDENTITY AGENT - Go Core + KERI Driver"
 echo "============================================"
 
 echo ""
-echo "[1/3] Installing Python dependencies for KERI driver..."
+echo "[1/3] Python dependencies..."
 cd "$WORKSPACE"
 pip install -q flask 2>/dev/null || pip3 install -q flask 2>/dev/null || echo "      Warning: flask install skipped"
 echo "      Python dependencies ready."
 
 echo ""
-echo "[2/3] Building Go Core..."
-if [ -f "$WORKSPACE/bin/identity-agent-core" ]; then
+echo "[2/3] Go Core binary..."
+if [ -f "$BINARY" ]; then
     echo "      Go Core binary found (pre-built). Skipping build."
 else
+    echo "      Go Core binary not found. Building..."
     cd "$WORKSPACE/identity-agent-core"
-    go build -o "$WORKSPACE/bin/identity-agent-core" .
+    mkdir -p "$WORKSPACE/identity-agent-core/bin"
+    go build -o "$BINARY" .
     echo "      Go Core built successfully."
 fi
 
@@ -50,4 +53,4 @@ fi
 
 export FLUTTER_WEB_DIR="$WORKSPACE/identity_agent_ui/build/web"
 export KERI_DRIVER_SCRIPT="$WORKSPACE/drivers/keri-core/server.py"
-exec "$WORKSPACE/bin/identity-agent-core"
+exec "$BINARY"
