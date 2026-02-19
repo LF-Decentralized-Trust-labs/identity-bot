@@ -3,6 +3,8 @@
 // during the Codemagic CI/CD build. It exists so that flutter analyze passes
 // during development without a compiled native library.
 
+// ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
+
 import 'dart:async';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'api/keri_bridge.dart' as keri_api;
