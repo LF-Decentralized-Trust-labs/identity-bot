@@ -1,0 +1,23 @@
+I have considered the mobile OS limitations, and I do not want to build a Mailbox, Relay, or queuing server. We are going to stick to a strict peer-to-peer architecture.
+
+The Architecture Decision:
+
+Desktop Mode (Always On): If a user wants their Identity Agent to be reachable 24/7, they must host the Go backend on a Desktop (Linux/Mac/Windows).
+
+Mobile Standalone Mode (Live Only): If a user runs the backend entirely on their phone, the tunnel will only be active while the app is open in the foreground. When the app is closed, their URL goes offline. This is an intentional design choice for this application.
+
+The Technical Solution for Mobile (No Subprocesses):
+I understand we cannot use os/exec to spawn a cloudflared binary on iOS/Android. Therefore, the tunneling on mobile must run as part of the app. It must be executed in-memory as a Go routine (e.g., embedding the tunnel logic directly using Go modules) rather than spawning an external child process.
+
+Instructions for This Milestone:
+Please proceed with implementing the Tunneling feature with the following requirements:
+
+Abstract the Tunnel: Create a TunnelProvider interface in the Go backend so we can swap implementations based on the operating system.
+
+Desktop Implementation: Implement Cloudflare Tunnel as the primary default. You may use os/exec to spawn the cloudflared binary for Desktop targets. Support 'Quick Tunnels' (no account) by default, and authenticated tunnels if a CLOUDFLARE_TUNNEL_TOKEN is in the config. Keep ngrok as the fallback.
+
+Mobile Preparation: Structure the Go code so that the TunnelProvider can easily accept an in-memory/embedded Go implementation later when we compile the mobile binaries.
+
+Settings UI: Add a dropdown in the Flutter Settings screen for 'Tunneling Provider' with the options: Cloudflare (Default), Ngrok, and None / Local.
+
+Let's get the Desktop implementation and the Flutter UI selector working now, with the architecture properly decoupled for the embedded mobile version.
