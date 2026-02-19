@@ -1,11 +1,13 @@
 #!/bin/sh
 set -e
 
-WORKSPACE="/home/runner/workspace"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+WORKSPACE="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 echo "============================================"
 echo " IDENTITY AGENT - Build Pipeline"
 echo "============================================"
+echo "      Workspace: $WORKSPACE"
 
 echo ""
 echo "[1/4] Installing Python dependencies for KERI driver..."
@@ -22,12 +24,13 @@ flutter build web --release --base-href="/"
 echo "      Flutter Web built successfully."
 
 echo ""
-echo "[3/4] Building Go Core..."
+echo "[3/4] Building Go Core (static binary, no CGO)..."
 cd "$WORKSPACE/identity-agent-core"
 mkdir -p "$WORKSPACE/identity-agent-core/bin"
-go build -o "$WORKSPACE/identity-agent-core/bin/identity-agent-core" .
+CGO_ENABLED=0 go build -o "$WORKSPACE/identity-agent-core/bin/identity-agent-core" .
+chmod +x "$WORKSPACE/identity-agent-core/bin/identity-agent-core"
 echo "      Go Core built successfully."
-echo "      Binary: $WORKSPACE/identity-agent-core/bin/identity-agent-core"
+ls -la "$WORKSPACE/identity-agent-core/bin/identity-agent-core"
 
 echo ""
 echo "[4/4] Build complete."

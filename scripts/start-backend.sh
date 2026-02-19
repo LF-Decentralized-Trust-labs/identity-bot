@@ -1,12 +1,14 @@
 #!/bin/sh
 set -e
 
-WORKSPACE="/home/runner/workspace"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+WORKSPACE="$(cd "$SCRIPT_DIR/.." && pwd)"
 BINARY="$WORKSPACE/identity-agent-core/bin/identity-agent-core"
 
 echo "============================================"
 echo " IDENTITY AGENT - Go Core + KERI Driver"
 echo "============================================"
+echo "      Workspace: $WORKSPACE"
 
 echo ""
 echo "[1/3] Python dependencies..."
@@ -16,15 +18,22 @@ echo "      Python dependencies ready."
 
 echo ""
 echo "[2/3] Go Core binary..."
+echo "      Looking for: $BINARY"
+ls -la "$WORKSPACE/identity-agent-core/bin/" 2>/dev/null || echo "      WARNING: bin directory does not exist"
+
 if [ -f "$BINARY" ]; then
     echo "      Go Core binary found (pre-built). Skipping build."
 else
     echo "      Go Core binary not found. Building..."
     cd "$WORKSPACE/identity-agent-core"
     mkdir -p "$WORKSPACE/identity-agent-core/bin"
-    go build -o "$BINARY" .
+    CGO_ENABLED=0 go build -o "$BINARY" .
+    chmod +x "$BINARY"
     echo "      Go Core built successfully."
 fi
+
+file "$BINARY" 2>/dev/null || true
+ldd "$BINARY" 2>/dev/null || echo "      Binary is statically linked (good for production)"
 
 echo ""
 echo "[3/3] Starting Identity Agent..."
