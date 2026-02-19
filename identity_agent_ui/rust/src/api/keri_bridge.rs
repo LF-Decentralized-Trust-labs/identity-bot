@@ -1,6 +1,7 @@
 use flutter_rust_bridge::frb;
 use keri_core::actor::prelude::*;
-use keri_core::event::sections::key_config::nxt_commitment;
+use keri_core::event::event_data::inception::InceptionEvent;
+use keri_core::event::sections::key_config::{nxt_commitment, KeyConfig};
 use keri_core::event::sections::threshold::SignatureThreshold;
 use keri_core::keys::PublicKey;
 use keri_core::prefix::{BasicPrefix, IdentifierPrefix, SelfSigningPrefix};
@@ -46,7 +47,7 @@ pub struct SignResult {
 }
 
 #[frb(sync)]
-pub fn incept_aid(name: String, code: String) -> Result<InceptionResult, String> {
+pub fn incept_aid(name: String, _code: String) -> Result<InceptionResult, String> {
     let crypto_box = CryptoBox::new().map_err(|e| format!("Key generation failed: {}", e))?;
 
     let current_pk = crypto_box.public_key();
@@ -58,20 +59,30 @@ pub fn incept_aid(name: String, code: String) -> Result<InceptionResult, String>
         &HashFunction::from(HashFunctionCode::Blake3_256),
     );
 
-    let icp_event = keri_core::event::event_data::inception::InceptionEvent::new(
-        keri_core::event::sections::key_config::KeyConfig::new(
-            vec![BasicPrefix::Ed25519(PublicKey::new(current_pk.to_vec()))],
-            nxt,
-            Some(SignatureThreshold::Simple(1)),
-        ),
-        None,
-        None,
+    let key_config = KeyConfig::new(
+        vec![BasicPrefix::Ed25519(PublicKey::new(current_pk.to_vec()))],
+        nxt,
+        Some(SignatureThreshold::Simple(1)),
     );
 
-    let prefix = icp_event.event.get_prefix();
+    let icp_data = InceptionEvent::new(key_config, None, None);
+
+    let derivation = HashFunction::from(HashFunctionCode::Blake3_256);
+    let format = SerializationFormats::JSON;
+
+    let keri_event = icp_data
+        .incept_self_addressing(derivation, format)
+        .map_err(|e| format!("Inception failed: {}", e))?;
+
+    let prefix = keri_event.data.get_prefix();
     let aid = prefix.to_string();
-    let kel_entry = serde_json::to_string(&icp_event)
-        .map_err(|e| format!("KEL serialization failed: {}", e))?;
+
+    let kel_entry = String::from_utf8(
+        keri_event
+            .encode()
+            .map_err(|e| format!("KEL encoding failed: {}", e))?,
+    )
+    .map_err(|e| format!("KEL UTF-8 conversion failed: {}", e))?;
 
     let mut instances = get_or_init_instances();
     let map = instances.as_mut().unwrap();

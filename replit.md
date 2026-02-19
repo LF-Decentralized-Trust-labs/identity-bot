@@ -91,9 +91,10 @@ Defaults to a file-based JSON store in `./data/` (`identity.json`, `kel.json`, `
 
 ### Rust Bridge (mobile only)
 
--   `keri-core` 0.11: THCLab KERI implementation (EUPL-1.2 licensed).
+-   `keri-core` 0.11.1: THCLab KERI implementation (EUPL-1.2 licensed). Transitively provides `cesrox` 0.1.4 (CESR primitives), `said` 0.4.0 (self-addressing identifiers), `base64` 0.13, `rand` 0.7.3.
 -   `flutter_rust_bridge` 2.11.1: Dart ↔ Rust FFI bridge.
--   `said` 0.5, `cesrox` 0.6: KERI supporting crates.
+-   `base64` 0.13: Base64 encoding/decoding (matches keri-core's version for API compatibility).
+-   `serde` 1.0 + `serde_json` 1.0: JSON serialization for bridge results.
 
 ### Frontend (Flutter/Dart)
 
