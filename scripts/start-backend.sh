@@ -15,9 +15,13 @@ echo "      Python dependencies ready."
 
 echo ""
 echo "[2/3] Building Go Core..."
-cd "$WORKSPACE/identity-agent-core"
-go build -o "$WORKSPACE/bin/identity-agent-core" .
-echo "      Go Core built successfully."
+if [ -f "$WORKSPACE/bin/identity-agent-core" ]; then
+    echo "      Go Core binary found (pre-built). Skipping build."
+else
+    cd "$WORKSPACE/identity-agent-core"
+    go build -o "$WORKSPACE/bin/identity-agent-core" .
+    echo "      Go Core built successfully."
+fi
 
 echo ""
 echo "[3/3] Starting Identity Agent..."
