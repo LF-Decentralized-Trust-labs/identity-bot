@@ -1,6 +1,7 @@
 use flutter_rust_bridge::frb;
 use keri_core::actor::prelude::*;
 use keri_core::event::sections::key_config::nxt_commitment;
+use keri_core::event::sections::threshold::SignatureThreshold;
 use keri_core::keys::PublicKey;
 use keri_core::prefix::{BasicPrefix, IdentifierPrefix, SelfSigningPrefix};
 use keri_core::signer::CryptoBox;
@@ -52,16 +53,16 @@ pub fn incept_aid(name: String, code: String) -> Result<InceptionResult, String>
     let next_pk = crypto_box.next_pub_key();
 
     let nxt = nxt_commitment(
-        1,
+        SignatureThreshold::Simple(1),
         &[BasicPrefix::Ed25519(PublicKey::new(next_pk.to_vec()))],
-        &cesrox::primitives::codes::self_addressing::SelfAddressing::Blake3_256,
+        &HashFunction::from(HashFunctionCode::Blake3_256),
     );
 
     let icp_event = keri_core::event::event_data::inception::InceptionEvent::new(
         keri_core::event::sections::key_config::KeyConfig::new(
             vec![BasicPrefix::Ed25519(PublicKey::new(current_pk.to_vec()))],
             nxt,
-            Some(1),
+            Some(SignatureThreshold::Simple(1)),
         ),
         None,
         None,
