@@ -1,6 +1,7 @@
 package main
 
 import (
+        "context"
         "encoding/json"
         "fmt"
         "io"
@@ -16,6 +17,7 @@ import (
 
         "identity-agent-core/drivers"
         "identity-agent-core/store"
+        "identity-agent-core/tunnel"
 
         "github.com/go-chi/chi/v5"
         "github.com/go-chi/chi/v5/middleware"
@@ -29,6 +31,7 @@ type HealthResponse struct {
         Uptime    string `json:"uptime"`
         Timestamp string `json:"timestamp"`
         Mode      string `json:"mode"`
+        TunnelURL string `json:"tunnel_url,omitempty"`
 }
 
 type CoreInfoResponse struct {
@@ -84,6 +87,7 @@ var (
         startTime  time.Time
         dataStore  store.Store
         keriDriver *drivers.KeriDriver
+        tunnelURL  string
 )
 
 func main() {
@@ -206,6 +210,25 @@ func main() {
         log.Printf("[identity-agent-core] KERI driver: %s", keriDriver.BaseURL)
         log.Printf("[identity-agent-core] Phase 3: Connectivity - OOBI & Contacts Ready")
 
+        ctx := context.Background()
+        tun, tunErr := tunnel.Start(ctx)
+        if tunErr != nil {
+                log.Printf("[identity-agent-core] Tunnel failed (non-fatal): %v", tunErr)
+        }
+        if tun != nil {
+                tunnelURL = tun.URL()
+                log.Printf("[identity-agent-core] OOBI public URL: %s", tunnelURL)
+                defer tun.Close()
+
+                go func() {
+                        if err := http.Serve(tun.Listener(), r); err != nil {
+                                log.Printf("[identity-agent-core] Tunnel server stopped: %v", err)
+                        }
+                }()
+        } else {
+                log.Println("[identity-agent-core] No tunnel configured. OOBI URLs use request-derived host or PUBLIC_URL env var.")
+        }
+
         listener, err := net.Listen("tcp4", addr)
         if err != nil {
                 log.Fatalf("[identity-agent-core] Failed to bind on %s: %v", addr, err)
@@ -231,6 +254,7 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
                 Uptime:    uptime.String(),
                 Timestamp: time.Now().UTC().Format(time.RFC3339),
                 Mode:      fmt.Sprintf("primary_active (driver: %s)", driverStatus),
+                TunnelURL: tunnelURL,
         }
 
         w.Header().Set("Content-Type", "application/json")
@@ -579,6 +603,10 @@ func handleGenerateMultisigEvent(w http.ResponseWriter, r *http.Request) {
 func getPublicURL(r *http.Request) string {
         if envURL := os.Getenv("PUBLIC_URL"); envURL != "" {
                 return strings.TrimRight(envURL, "/")
+        }
+
+        if tunnelURL != "" {
+                return tunnelURL
         }
 
         scheme := "https"
