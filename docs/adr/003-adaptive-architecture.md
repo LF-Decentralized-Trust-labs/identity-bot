@@ -3,7 +3,7 @@
 **Date:** 2026-02-18
 **Updated:** 2026-02-19
 **Status:** Accepted
-**Context:** Phase 2 (Inception) — enabling identity creation across all device types
+**Context:** Phase 3 (Connectivity) — OOBI serving, contact management, and tunneling
 
 ## The Problem This Solves
 
@@ -154,6 +154,40 @@ The Python KERI driver (`server.py`) defines the canonical names for all endpoin
 
 "Stateful" means the operation involves private keys or identity state that must stay on a trusted device. "Stateless" means the operation is pure data formatting — no secrets involved, safe to delegate to any server.
 
+## Phase 3: Connectivity — OOBI, Contacts, and Tunneling
+
+Phase 3 adds the ability for Identity Agents to discover and connect with each other using OOBI (Out-of-Band Introduction) URLs. An OOBI URL is a web address that points to an agent's public identity data (its Key Event Log). When Agent A shares its OOBI URL with Agent B, Agent B can fetch Agent A's public keys and verify its identity.
+
+### OOBI Endpoints
+
+- **`GET /oobi/{aid}`** — Public OOBI serving endpoint. Returns the KEL (Key Event Log) for the given AID. This is what other agents fetch when resolving an OOBI URL.
+- **`GET /api/oobi`** — Returns this agent's own OOBI URL, constructed using the public URL (tunnel URL > `PUBLIC_URL` env var > auto-detected from request headers).
+
+### Contact Management Endpoints
+
+- **`GET /api/contacts`** — List all saved contacts.
+- **`POST /api/contacts`** — Add a contact by providing an OOBI URL. The backend resolves the URL, fetches the remote agent's KEL, and saves the contact. Blocks self-adds.
+- **`GET /api/contacts/{aid}`** — Get a specific contact by AID.
+- **`DELETE /api/contacts/{aid}`** — Remove a contact.
+
+### Tunneling
+
+For OOBI URLs to work, the agent needs a publicly accessible URL. In environments like Replit, this is provided automatically by the platform's proxy. For users running the agent on their own machine (Desktop Mode), the Go backend includes optional tunneling via **ngrok-go**:
+
+- If the `NGROK_AUTHTOKEN` environment variable is set, the backend automatically creates a public HTTPS tunnel on startup.
+- The tunnel URL is used in OOBI generation so the agent's identity is discoverable from anywhere.
+- If no tunnel is configured, the backend falls back to the `PUBLIC_URL` env var or auto-detection from request headers (`X-Forwarded-Proto`, `X-Forwarded-Host`).
+- Tunneling is non-fatal — if it fails, the backend continues running normally on the local port.
+
+### URL Priority for OOBI Generation
+
+The `getPublicURL()` function resolves the agent's externally-reachable URL in this order:
+
+1. `PUBLIC_URL` environment variable (explicit override, highest priority)
+2. Active tunnel URL (if ngrok tunnel is running)
+3. Auto-detected from request headers (`X-Forwarded-Proto` + `X-Forwarded-Host`)
+4. Fallback to `https://{request.Host}`
+
 ## Configuration Variables
 
 | Variable | What it does | Which mode uses it |
@@ -161,6 +195,8 @@ The Python KERI driver (`server.py`) defines the canonical names for all endpoin
 | `CORE_URL` | URL of the local Go backend (default: `http://localhost:5000`) | Desktop Mode |
 | `PRIMARY_SERVER_URL` | URL of the user's remote server running Desktop Mode | Mobile Remote Mode |
 | `KERI_HELPER_URL` | URL of the public stateless Remote Helper service | Mobile Standalone Mode (fallback only) |
+| `PUBLIC_URL` | Explicit public URL override for OOBI generation | Desktop Mode |
+| `NGROK_AUTHTOKEN` | ngrok auth token for automatic tunnel creation | Desktop Mode (optional) |
 
 ## Consequences
 

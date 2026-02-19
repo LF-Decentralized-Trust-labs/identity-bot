@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Identity Agent is a self-sovereign digital identity platform designed to unify identity, data, communications, and assets. It leverages the KERI (Key Event Receipt Infrastructure) protocol for decentralized identity management, aiming to provide a single, integrated environment for digital identity. The project is currently in **Phase 2 ("Inception")**, with core functionalities like identity creation, BIP-39 mnemonic generation, KERI inception events, Key Event Log (KEL) persistence, and an adaptive mobile architecture already implemented. The business vision is to empower users with full control over their digital identities, enhancing privacy and security across various digital interactions.
+The Identity Agent is a self-sovereign digital identity platform designed to unify identity, data, communications, and assets. It leverages the KERI (Key Event Receipt Infrastructure) protocol for decentralized identity management, aiming to provide a single, integrated environment for digital identity. The project is currently in **Phase 3 ("Connectivity")**, with core functionalities like identity creation, BIP-39 mnemonic generation, KERI inception events, Key Event Log (KEL) persistence, adaptive mobile architecture, OOBI serving/sharing, contact management, and optional ngrok tunneling already implemented. The business vision is to empower users with full control over their digital identities, enhancing privacy and security across various digital interactions.
 
 ## User Preferences
 
@@ -32,11 +32,12 @@ A `KeriService` Dart abstract class provides a mode-agnostic interface for KERI 
 
 ### Component Details
 
--   **Go Backend (`identity-agent-core/`):** The core orchestration layer, serving the public API on port 5000, managing file-based data persistence, spawning the Python KERI driver (desktop), and serving Flutter web assets.
+-   **Go Backend (`identity-agent-core/`):** The core orchestration layer, serving the public API on port 5000, managing file-based data persistence, spawning the Python KERI driver (desktop), serving Flutter web assets, OOBI serving/generation, contact management, and optional ngrok tunneling for public HTTPS URL acquisition.
 -   **Python KERI Driver (`drivers/keri-core/`):** The KERI protocol engine (keripy v1.1.17) for desktop, running locally on `127.0.0.1:9999`.
--   **Flutter Frontend (`identity_agent_ui/`):** The cross-platform user interface featuring a dark cyberpunk theme, BIP-39 mnemonic generation, and a Setup Wizard for identity creation, utilizing `KeriService` for backend interaction.
+-   **Flutter Frontend (`identity_agent_ui/`):** The cross-platform user interface featuring a dark cyberpunk theme, BIP-39 mnemonic generation, Setup Wizard for identity creation, bottom navigation with Dashboard/Contacts/OOBI tabs, contact management, and OOBI URL sharing, utilizing `KeriService` for backend interaction.
 -   **Rust Bridge (`identity_agent_ui/rust/`):** The mobile KERI engine (THCLab `keriox/keri-core`) integrated via `flutter_rust_bridge` for Dart ↔ Rust FFI.
 -   **KeriHelperClient:** An HTTP client for the remote helper, used for stateless operations in Mobile Standalone Mode.
+-   **Tunnel Module (`identity-agent-core/tunnel/`):** Optional ngrok-go integration for automatic public HTTPS URL acquisition. Activated when `NGROK_AUTHTOKEN` env var is set.
 
 ### Driver Pattern
 
@@ -51,7 +52,7 @@ A 3-level hierarchy:
 
 ### Persistence Layer
 
-Defaults to a file-based JSON store in `./data/` (`identity.json`, `kel.json`), with a modular `store.Store` interface allowing for swappable backends (e.g., BadgerDB, PostgreSQL).
+Defaults to a file-based JSON store in `./data/` (`identity.json`, `kel.json`, `contacts.json`), with a modular `store.Store` interface allowing for swappable backends (e.g., BadgerDB, PostgreSQL).
 
 ### Key Design Decisions
 
@@ -68,6 +69,7 @@ Defaults to a file-based JSON store in `./data/` (`identity.json`, `kel.json`), 
 
 -   `github.com/go-chi/chi/v5`: HTTP router.
 -   `github.com/go-chi/cors`: CORS middleware.
+-   `golang.ngrok.com/ngrok`: Optional tunnel client for automatic public HTTPS URL.
 -   Standard Go library for networking, JSON encoding, cryptography, and process execution.
 
 ### KERI Driver (Python, desktop only)
