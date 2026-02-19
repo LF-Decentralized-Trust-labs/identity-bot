@@ -3,12 +3,14 @@ package main
 import (
         "encoding/json"
         "fmt"
+        "io"
         "log"
         "net"
         "net/http"
         "os"
         "os/signal"
         "path/filepath"
+        "strings"
         "syscall"
         "time"
 
@@ -142,7 +144,16 @@ func main() {
                 r.Post("/format-credential", handleFormatCredential)
                 r.Post("/resolve-oobi", handleResolveOobi)
                 r.Post("/generate-multisig-event", handleGenerateMultisigEvent)
+
+                r.Get("/oobi", handleOobiGenerate)
+
+                r.Get("/contacts", handleGetContacts)
+                r.Post("/contacts", handleAddContact)
+                r.Get("/contacts/{aid}", handleGetContact)
+                r.Delete("/contacts/{aid}", handleDeleteContact)
         })
+
+        r.Get("/oobi/{aid}", handleOobiServe)
 
         webDir := os.Getenv("FLUTTER_WEB_DIR")
         if webDir == "" {
@@ -190,9 +201,10 @@ func main() {
 
         addr := fmt.Sprintf("0.0.0.0:%s", port)
         log.Printf("[identity-agent-core] Starting Go Core on %s", addr)
-        log.Printf("[identity-agent-core] API endpoints: /api/health, /api/info, /api/identity, /api/inception, /api/rotation, /api/sign, /api/kel, /api/verify, /api/format-credential, /api/resolve-oobi, /api/generate-multisig-event")
+        log.Printf("[identity-agent-core] KERI endpoints: /api/inception, /api/rotation, /api/sign, /api/kel, /api/verify, /api/format-credential, /api/resolve-oobi, /api/generate-multisig-event")
+        log.Printf("[identity-agent-core] Connectivity endpoints: /api/oobi, /api/contacts, /oobi/{aid}")
         log.Printf("[identity-agent-core] KERI driver: %s", keriDriver.BaseURL)
-        log.Printf("[identity-agent-core] Phase 2: Inception - Identity Creation Ready")
+        log.Printf("[identity-agent-core] Phase 3: Connectivity - OOBI & Contacts Ready")
 
         listener, err := net.Listen("tcp4", addr)
         if err != nil {
@@ -562,6 +574,223 @@ func handleGenerateMultisigEvent(w http.ResponseWriter, r *http.Request) {
 
         w.Header().Set("Content-Type", "application/json")
         json.NewEncoder(w).Encode(result)
+}
+
+func getPublicURL(r *http.Request) string {
+        if envURL := os.Getenv("PUBLIC_URL"); envURL != "" {
+                return strings.TrimRight(envURL, "/")
+        }
+
+        scheme := "https"
+        if r.TLS == nil {
+                if fwdProto := r.Header.Get("X-Forwarded-Proto"); fwdProto != "" {
+                        scheme = fwdProto
+                }
+        }
+
+        host := r.Host
+        if fwdHost := r.Header.Get("X-Forwarded-Host"); fwdHost != "" {
+                host = fwdHost
+        }
+
+        return fmt.Sprintf("%s://%s", scheme, host)
+}
+
+func handleOobiGenerate(w http.ResponseWriter, r *http.Request) {
+        identity, err := dataStore.GetIdentity()
+        if err != nil {
+                writeError(w, http.StatusInternalServerError, "Failed to read identity", err.Error())
+                return
+        }
+        if identity == nil {
+                writeError(w, http.StatusNotFound, "No identity created", "Create an identity first using /api/inception")
+                return
+        }
+
+        baseURL := getPublicURL(r)
+        oobiURL := fmt.Sprintf("%s/oobi/%s", baseURL, identity.AID)
+
+        resp := map[string]interface{}{
+                "oobi_url":   oobiURL,
+                "aid":        identity.AID,
+                "public_key": identity.PublicKey,
+                "base_url":   baseURL,
+        }
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(resp)
+}
+
+func handleOobiServe(w http.ResponseWriter, r *http.Request) {
+        requestedAID := chi.URLParam(r, "aid")
+        if requestedAID == "" {
+                writeError(w, http.StatusBadRequest, "Missing AID", "AID parameter is required")
+                return
+        }
+
+        identity, err := dataStore.GetIdentity()
+        if err != nil {
+                writeError(w, http.StatusInternalServerError, "Failed to read identity", err.Error())
+                return
+        }
+        if identity == nil || identity.AID != requestedAID {
+                writeError(w, http.StatusNotFound, "AID not found", fmt.Sprintf("No identity found for AID: %s", requestedAID))
+                return
+        }
+
+        events, err := dataStore.GetEvents(requestedAID)
+        if err != nil {
+                writeError(w, http.StatusInternalServerError, "Failed to read KEL", err.Error())
+                return
+        }
+
+        resp := map[string]interface{}{
+                "aid":        identity.AID,
+                "public_key": identity.PublicKey,
+                "kel":        events,
+                "event_count": identity.EventCount,
+                "created":    identity.Created,
+        }
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(resp)
+}
+
+func handleGetContacts(w http.ResponseWriter, r *http.Request) {
+        contacts, err := dataStore.GetContacts()
+        if err != nil {
+                writeError(w, http.StatusInternalServerError, "Failed to read contacts", err.Error())
+                return
+        }
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(map[string]interface{}{
+                "contacts": contacts,
+                "count":    len(contacts),
+        })
+}
+
+func handleGetContact(w http.ResponseWriter, r *http.Request) {
+        aid := chi.URLParam(r, "aid")
+        if aid == "" {
+                writeError(w, http.StatusBadRequest, "Missing AID", "AID parameter is required")
+                return
+        }
+
+        contact, err := dataStore.GetContact(aid)
+        if err != nil {
+                writeError(w, http.StatusInternalServerError, "Failed to read contact", err.Error())
+                return
+        }
+        if contact == nil {
+                writeError(w, http.StatusNotFound, "Contact not found", fmt.Sprintf("No contact found for AID: %s", aid))
+                return
+        }
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(contact)
+}
+
+func handleAddContact(w http.ResponseWriter, r *http.Request) {
+        var req struct {
+                OobiURL string `json:"oobi_url"`
+                Alias   string `json:"alias"`
+        }
+        if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+                writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+                return
+        }
+
+        if req.OobiURL == "" {
+                writeError(w, http.StatusBadRequest, "Missing required fields", "oobi_url is required")
+                return
+        }
+
+        identity, _ := dataStore.GetIdentity()
+        if identity != nil && strings.Contains(req.OobiURL, identity.AID) {
+                writeError(w, http.StatusBadRequest, "Cannot add yourself", "The OOBI URL points to your own identity")
+                return
+        }
+
+        client := &http.Client{Timeout: 15 * time.Second}
+        resp, err := client.Get(req.OobiURL)
+        if err != nil {
+                writeError(w, http.StatusBadGateway, "Failed to resolve OOBI", fmt.Sprintf("Could not reach %s: %v", req.OobiURL, err))
+                return
+        }
+        defer resp.Body.Close()
+
+        if resp.StatusCode != http.StatusOK {
+                body, _ := io.ReadAll(resp.Body)
+                writeError(w, http.StatusBadGateway, "OOBI resolution failed", fmt.Sprintf("Remote returned %d: %s", resp.StatusCode, string(body)))
+                return
+        }
+
+        var oobiData struct {
+                AID       string `json:"aid"`
+                PublicKey string `json:"public_key"`
+        }
+        if err := json.NewDecoder(resp.Body).Decode(&oobiData); err != nil {
+                writeError(w, http.StatusBadGateway, "Invalid OOBI response", fmt.Sprintf("Could not parse response: %v", err))
+                return
+        }
+
+        if oobiData.AID == "" {
+                writeError(w, http.StatusBadGateway, "Invalid OOBI response", "Response did not contain an AID")
+                return
+        }
+
+        alias := req.Alias
+        if alias == "" {
+                alias = oobiData.AID[:12] + "..."
+        }
+
+        contact := store.ContactRecord{
+                AID:          oobiData.AID,
+                Alias:        alias,
+                PublicKey:    oobiData.PublicKey,
+                OobiURL:      req.OobiURL,
+                Verified:     true,
+                DiscoveredAt: time.Now().UTC().Format(time.RFC3339),
+        }
+
+        if err := dataStore.SaveContact(contact); err != nil {
+                writeError(w, http.StatusInternalServerError, "Failed to save contact", err.Error())
+                return
+        }
+
+        log.Printf("[identity-agent-core] CONTACT: Added %s (AID: %s)", alias, oobiData.AID)
+
+        w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(http.StatusCreated)
+        json.NewEncoder(w).Encode(contact)
+}
+
+func handleDeleteContact(w http.ResponseWriter, r *http.Request) {
+        aid := chi.URLParam(r, "aid")
+        if aid == "" {
+                writeError(w, http.StatusBadRequest, "Missing AID", "AID parameter is required")
+                return
+        }
+
+        contact, err := dataStore.GetContact(aid)
+        if err != nil {
+                writeError(w, http.StatusInternalServerError, "Failed to read contact", err.Error())
+                return
+        }
+        if contact == nil {
+                writeError(w, http.StatusNotFound, "Contact not found", fmt.Sprintf("No contact found for AID: %s", aid))
+                return
+        }
+
+        if err := dataStore.DeleteContact(aid); err != nil {
+                writeError(w, http.StatusInternalServerError, "Failed to delete contact", err.Error())
+                return
+        }
+
+        log.Printf("[identity-agent-core] CONTACT: Removed %s (AID: %s)", contact.Alias, aid)
+
+        w.WriteHeader(http.StatusNoContent)
 }
 
 func writeError(w http.ResponseWriter, status int, errMsg string, details string) {
