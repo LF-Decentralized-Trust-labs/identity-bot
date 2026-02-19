@@ -41,3 +41,10 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+/android/local.properties
+
+# Rust build artifacts
+/rust/target/
+
+# JNI libraries (built by Rust cross-compilation)
+/android/app/src/main/jniLibs/

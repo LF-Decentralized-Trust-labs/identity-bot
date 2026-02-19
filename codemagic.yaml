@@ -1,0 +1,116 @@
+workflows:
+  android-release:
+    name: Android Release
+    max_build_duration: 60
+    instance_type: linux_x2
+    environment:
+      flutter: 3.22.0
+      java: 17
+    scripts:
+      - name: Set up local properties
+        script: |
+          cd identity_agent_ui
+          echo "flutter.sdk=$HOME/programs/flutter" > android/local.properties
+          echo "sdk.dir=$ANDROID_SDK_ROOT" >> android/local.properties
+
+      - name: Get Flutter packages
+        script: |
+          cd identity_agent_ui
+          flutter pub get
+
+      - name: Build debug APK
+        script: |
+          cd identity_agent_ui
+          flutter build apk --debug
+
+      - name: Build release APK
+        script: |
+          cd identity_agent_ui
+          flutter build apk --release
+
+    artifacts:
+      - identity_agent_ui/build/app/outputs/flutter-apk/*.apk
+
+  # ------------------------------------------------------------------
+  # FUTURE: Uncomment this workflow when the Rust KERI bridge is ready.
+  # This builds the Rust native library for Android and includes it in
+  # the APK for Mobile Standalone mode.
+  # ------------------------------------------------------------------
+  # android-standalone:
+  #   name: Android Standalone (with Rust KERI)
+  #   max_build_duration: 90
+  #   instance_type: linux_x2
+  #   environment:
+  #     flutter: 3.22.0
+  #     java: 17
+  #   scripts:
+  #     - name: Install Rust toolchain
+  #       script: |
+  #         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+  #         source "$HOME/.cargo/env"
+  #         rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+  #
+  #     - name: Set up Android NDK for Rust cross-compilation
+  #       script: |
+  #         source "$HOME/.cargo/env"
+  #         export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/$(ls $ANDROID_SDK_ROOT/ndk/ | sort -V | tail -1)"
+  #         TOOLCHAIN_BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+  #         export PATH="$TOOLCHAIN_BIN:$PATH"
+  #         mkdir -p identity_agent_ui/rust/.cargo
+  #         cat > identity_agent_ui/rust/.cargo/config.toml << 'CARGO_EOF'
+  #         [target.aarch64-linux-android]
+  #         linker = "aarch64-linux-android21-clang"
+  #         [target.armv7-linux-androideabi]
+  #         linker = "armv7a-linux-androideabi21-clang"
+  #         [target.x86_64-linux-android]
+  #         linker = "x86_64-linux-android21-clang"
+  #         [target.i686-linux-android]
+  #         linker = "i686-linux-android21-clang"
+  #         CARGO_EOF
+  #
+  #     - name: Build Rust library for Android
+  #       script: |
+  #         source "$HOME/.cargo/env"
+  #         export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/$(ls $ANDROID_SDK_ROOT/ndk/ | sort -V | tail -1)"
+  #         TOOLCHAIN_BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+  #         export PATH="$TOOLCHAIN_BIN:$PATH"
+  #         cd identity_agent_ui/rust
+  #         declare -A TARGET_MAP=(
+  #           ["aarch64-linux-android"]="arm64-v8a"
+  #           ["armv7-linux-androideabi"]="armeabi-v7a"
+  #           ["x86_64-linux-android"]="x86_64"
+  #         )
+  #         for TARGET in "${!TARGET_MAP[@]}"; do
+  #           ABI="${TARGET_MAP[$TARGET]}"
+  #           echo "=== Building for $TARGET ($ABI) ==="
+  #           cargo build --release --target "$TARGET"
+  #           JNILIB_DIR="../android/app/src/main/jniLibs/$ABI"
+  #           mkdir -p "$JNILIB_DIR"
+  #           cp "target/$TARGET/release/libidentity_agent_keri.so" "$JNILIB_DIR/"
+  #         done
+  #
+  #     - name: Generate flutter_rust_bridge bindings
+  #       script: |
+  #         source "$HOME/.cargo/env"
+  #         dart pub global activate flutter_rust_bridge_codegen
+  #         cd identity_agent_ui
+  #         flutter_rust_bridge_codegen generate
+  #
+  #     - name: Set up local properties
+  #       script: |
+  #         cd identity_agent_ui
+  #         echo "flutter.sdk=$HOME/programs/flutter" > android/local.properties
+  #         echo "sdk.dir=$ANDROID_SDK_ROOT" >> android/local.properties
+  #
+  #     - name: Get Flutter packages
+  #       script: |
+  #         cd identity_agent_ui
+  #         flutter pub get
+  #
+  #     - name: Build APK
+  #       script: |
+  #         cd identity_agent_ui
+  #         flutter build apk --release
+  #
+  #   artifacts:
+  #     - identity_agent_ui/build/app/outputs/flutter-apk/*.apk
