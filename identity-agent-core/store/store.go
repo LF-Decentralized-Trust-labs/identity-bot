@@ -36,6 +36,12 @@ type ContactRecord struct {
         DiscoveredAt string `json:"discovered_at"`
 }
 
+type SettingsData struct {
+        TunnelProvider        string `json:"tunnel_provider"`
+        NgrokAuthToken        string `json:"ngrok_auth_token,omitempty"`
+        CloudflareTunnelToken string `json:"cloudflare_tunnel_token,omitempty"`
+}
+
 type Store interface {
         SaveEvent(record EventRecord) error
         GetEvents(aid string) ([]EventRecord, error)
@@ -45,6 +51,8 @@ type Store interface {
         GetContacts() ([]ContactRecord, error)
         GetContact(aid string) (*ContactRecord, error)
         DeleteContact(aid string) error
+        GetSettings() (*SettingsData, error)
+        SaveSettings(settings SettingsData) error
         Close() error
 }
 
@@ -185,6 +193,33 @@ func (s *FileStore) DeleteContact(aid string) error {
         }
 
         return s.writeJSON(filepath.Join(s.dir, "contacts.json"), filtered)
+}
+
+func (s *FileStore) GetSettings() (*SettingsData, error) {
+        s.mu.RLock()
+        defer s.mu.RUnlock()
+
+        path := filepath.Join(s.dir, "settings.json")
+        data, err := os.ReadFile(path)
+        if err != nil {
+                if os.IsNotExist(err) {
+                        return nil, nil
+                }
+                return nil, fmt.Errorf("failed to read settings: %w", err)
+        }
+
+        var settings SettingsData
+        if err := json.Unmarshal(data, &settings); err != nil {
+                return nil, fmt.Errorf("failed to parse settings: %w", err)
+        }
+        return &settings, nil
+}
+
+func (s *FileStore) SaveSettings(settings SettingsData) error {
+        s.mu.Lock()
+        defer s.mu.Unlock()
+
+        return s.writeJSON(filepath.Join(s.dir, "settings.json"), settings)
 }
 
 func (s *FileStore) Close() error {

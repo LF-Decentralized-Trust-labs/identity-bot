@@ -84,10 +84,11 @@ type ErrorResponse struct {
 }
 
 var (
-        startTime  time.Time
-        dataStore  store.Store
-        keriDriver *drivers.KeriDriver
-        tunnelURL  string
+        startTime     time.Time
+        dataStore     store.Store
+        keriDriver    *drivers.KeriDriver
+        tunnelManager *tunnel.Manager
+        appCtx        context.Context
 )
 
 func main() {
@@ -155,6 +156,11 @@ func main() {
                 r.Post("/contacts", handleAddContact)
                 r.Get("/contacts/{aid}", handleGetContact)
                 r.Delete("/contacts/{aid}", handleDeleteContact)
+
+                r.Get("/settings/tunnel", handleGetTunnelSettings)
+                r.Put("/settings/tunnel", handlePutTunnelSettings)
+                r.Get("/tunnel/status", handleTunnelStatus)
+                r.Post("/tunnel/restart", handleTunnelRestart)
         })
 
         r.Get("/oobi/{aid}", handleOobiServe)
@@ -210,24 +216,29 @@ func main() {
         log.Printf("[identity-agent-core] KERI driver: %s", keriDriver.BaseURL)
         log.Printf("[identity-agent-core] Phase 3: Connectivity - OOBI & Contacts Ready")
 
-        ctx := context.Background()
-        tun, tunErr := tunnel.Start(ctx)
-        if tunErr != nil {
-                log.Printf("[identity-agent-core] Tunnel failed (non-fatal): %v", tunErr)
-        }
-        if tun != nil {
-                tunnelURL = tun.URL()
-                log.Printf("[identity-agent-core] OOBI public URL: %s", tunnelURL)
-                defer tun.Close()
+        appCtx = context.Background()
 
-                go func() {
-                        if err := http.Serve(tun.Listener(), r); err != nil {
-                                log.Printf("[identity-agent-core] Tunnel server stopped: %v", err)
+        tunnelCfg := loadTunnelConfig()
+        tunnelManager = tunnel.NewManager(tunnelCfg, portInt)
+        if tunnelCfg.Provider != tunnel.ProviderNone {
+                if err := tunnelManager.Start(appCtx); err != nil {
+                        log.Printf("[identity-agent-core] Tunnel failed (non-fatal): %v", err)
+                } else if tunnelManager.URL() != "" {
+                        log.Printf("[identity-agent-core] OOBI public URL: %s", tunnelManager.URL())
+
+                        provider := tunnelManager.Provider()
+                        if provider != nil && provider.Listener() != nil {
+                                go func() {
+                                        if err := http.Serve(provider.Listener(), r); err != nil {
+                                                log.Printf("[identity-agent-core] Tunnel server stopped: %v", err)
+                                        }
+                                }()
                         }
-                }()
+                }
         } else {
                 log.Println("[identity-agent-core] No tunnel configured. OOBI URLs use request-derived host or PUBLIC_URL env var.")
         }
+        defer tunnelManager.Stop()
 
         listener, err := net.Listen("tcp4", addr)
         if err != nil {
@@ -254,7 +265,7 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
                 Uptime:    uptime.String(),
                 Timestamp: time.Now().UTC().Format(time.RFC3339),
                 Mode:      fmt.Sprintf("primary_active (driver: %s)", driverStatus),
-                TunnelURL: tunnelURL,
+                TunnelURL: tunnelManager.URL(),
         }
 
         w.Header().Set("Content-Type", "application/json")
@@ -605,8 +616,8 @@ func getPublicURL(r *http.Request) string {
                 return strings.TrimRight(envURL, "/")
         }
 
-        if tunnelURL != "" {
-                return tunnelURL
+        if tunnelManager != nil && tunnelManager.URL() != "" {
+                return tunnelManager.URL()
         }
 
         scheme := "https"
@@ -819,6 +830,97 @@ func handleDeleteContact(w http.ResponseWriter, r *http.Request) {
         log.Printf("[identity-agent-core] CONTACT: Removed %s (AID: %s)", contact.Alias, aid)
 
         w.WriteHeader(http.StatusNoContent)
+}
+
+func loadTunnelConfig() tunnel.Config {
+        saved, err := dataStore.GetSettings()
+        if err == nil && saved != nil && saved.TunnelProvider != "" {
+                return tunnel.Config{
+                        Provider:              tunnel.ProviderType(saved.TunnelProvider),
+                        NgrokAuthToken:        saved.NgrokAuthToken,
+                        CloudflareTunnelToken: saved.CloudflareTunnelToken,
+                }
+        }
+        return tunnel.DefaultConfig()
+}
+
+func handleGetTunnelSettings(w http.ResponseWriter, r *http.Request) {
+        cfg := tunnelManager.GetConfig()
+        status := tunnelManager.GetStatus()
+
+        resp := map[string]interface{}{
+                "provider": cfg.Provider,
+                "status":   status,
+                "has_ngrok_token":      cfg.NgrokAuthToken != "",
+                "has_cloudflare_token": cfg.CloudflareTunnelToken != "",
+                "cloudflared_available": func() bool {
+                        _, err := tunnel.LookupCloudflared()
+                        return err == nil
+                }(),
+        }
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(resp)
+}
+
+func handlePutTunnelSettings(w http.ResponseWriter, r *http.Request) {
+        var req struct {
+                Provider              string `json:"provider"`
+                NgrokAuthToken        string `json:"ngrok_auth_token,omitempty"`
+                CloudflareTunnelToken string `json:"cloudflare_tunnel_token,omitempty"`
+        }
+
+        if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+                writeError(w, http.StatusBadRequest, "Invalid request", err.Error())
+                return
+        }
+
+        provider := tunnel.ProviderType(req.Provider)
+        switch provider {
+        case tunnel.ProviderCloudflare, tunnel.ProviderNgrok, tunnel.ProviderNone:
+        default:
+                writeError(w, http.StatusBadRequest, "Invalid provider", fmt.Sprintf("Provider must be one of: cloudflare, ngrok, none. Got: %s", req.Provider))
+                return
+        }
+
+        settings := store.SettingsData{
+                TunnelProvider:        req.Provider,
+                NgrokAuthToken:        req.NgrokAuthToken,
+                CloudflareTunnelToken: req.CloudflareTunnelToken,
+        }
+
+        if err := dataStore.SaveSettings(settings); err != nil {
+                writeError(w, http.StatusInternalServerError, "Failed to save settings", err.Error())
+                return
+        }
+
+        log.Printf("[identity-agent-core] Tunnel settings updated: provider=%s", req.Provider)
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(map[string]string{"status": "saved", "provider": req.Provider})
+}
+
+func handleTunnelStatus(w http.ResponseWriter, r *http.Request) {
+        status := tunnelManager.GetStatus()
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(status)
+}
+
+func handleTunnelRestart(w http.ResponseWriter, r *http.Request) {
+        cfg := loadTunnelConfig()
+        log.Printf("[identity-agent-core] Restarting tunnel with provider: %s", cfg.Provider)
+
+        if err := tunnelManager.Restart(appCtx, cfg); err != nil {
+                log.Printf("[identity-agent-core] Tunnel restart failed: %v", err)
+                writeError(w, http.StatusInternalServerError, "Tunnel restart failed", err.Error())
+                return
+        }
+
+        status := tunnelManager.GetStatus()
+        log.Printf("[identity-agent-core] Tunnel restarted: active=%v url=%s", status.Active, status.URL)
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(status)
 }
 
 func writeError(w http.ResponseWriter, status int, errMsg string, details string) {

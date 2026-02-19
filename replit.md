@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Identity Agent is a self-sovereign digital identity platform designed to unify identity, data, communications, and assets. It leverages the KERI (Key Event Receipt Infrastructure) protocol for decentralized identity management, aiming to provide a single, integrated environment for digital identity. The project is currently in **Phase 3 ("Connectivity")**, with core functionalities like identity creation, BIP-39 mnemonic generation, KERI inception events, Key Event Log (KEL) persistence, adaptive mobile architecture, OOBI serving/sharing, contact management, and optional ngrok tunneling already implemented. The business vision is to empower users with full control over their digital identities, enhancing privacy and security across various digital interactions.
+The Identity Agent is a self-sovereign digital identity platform designed to unify identity, data, communications, and assets. It leverages the KERI (Key Event Receipt Infrastructure) protocol for decentralized identity management, aiming to provide a single, integrated environment for digital identity. The project is currently in **Phase 3 ("Connectivity")**, with core functionalities like identity creation, BIP-39 mnemonic generation, KERI inception events, Key Event Log (KEL) persistence, adaptive mobile architecture, OOBI serving/sharing, contact management, multi-provider tunneling (Cloudflare + ngrok), Settings UI, and tunnel configuration persistence already implemented. The business vision is to empower users with full control over their digital identities, enhancing privacy and security across various digital interactions.
 
 ## User Preferences
 
@@ -37,7 +37,7 @@ A `KeriService` Dart abstract class provides a mode-agnostic interface for KERI 
 -   **Flutter Frontend (`identity_agent_ui/`):** The cross-platform user interface featuring a dark cyberpunk theme, BIP-39 mnemonic generation, Setup Wizard for identity creation, bottom navigation with Dashboard/Contacts/OOBI tabs, contact management, and OOBI URL sharing, utilizing `KeriService` for backend interaction.
 -   **Rust Bridge (`identity_agent_ui/rust/`):** The mobile KERI engine (THCLab `keriox/keri-core`) integrated via `flutter_rust_bridge` for Dart ↔ Rust FFI.
 -   **KeriHelperClient:** An HTTP client for the remote helper, used for stateless operations in Mobile Standalone Mode.
--   **Tunnel Module (`identity-agent-core/tunnel/`):** Optional ngrok-go integration for automatic public HTTPS URL acquisition. Activated when `NGROK_AUTHTOKEN` env var is set.
+-   **Tunnel Module (`identity-agent-core/tunnel/`):** Multi-provider tunnel system with `TunnelProvider` interface. Supports Cloudflare (desktop via os/exec cloudflared binary, quick tunnel or authenticated), ngrok (in-memory via ngrok-go library, mobile-ready), and None (disabled). Settings persisted in `data/settings.json`. Provider selection, token config, and restart available via Settings UI and API (`/api/settings/tunnel`, `/api/tunnel/status`, `/api/tunnel/restart`). CloudflareEmbeddedProvider stub ready for when Cloudflare releases a Go SDK (issue #986).
 
 ### Driver Pattern
 
@@ -52,7 +52,7 @@ A 3-level hierarchy:
 
 ### Persistence Layer
 
-Defaults to a file-based JSON store in `./data/` (`identity.json`, `kel.json`, `contacts.json`), with a modular `store.Store` interface allowing for swappable backends (e.g., BadgerDB, PostgreSQL).
+Defaults to a file-based JSON store in `./data/` (`identity.json`, `kel.json`, `contacts.json`, `settings.json`), with a modular `store.Store` interface allowing for swappable backends (e.g., BadgerDB, PostgreSQL).
 
 ### Key Design Decisions
 
@@ -69,7 +69,8 @@ Defaults to a file-based JSON store in `./data/` (`identity.json`, `kel.json`, `
 
 -   `github.com/go-chi/chi/v5`: HTTP router.
 -   `github.com/go-chi/cors`: CORS middleware.
--   `golang.ngrok.com/ngrok`: Optional tunnel client for automatic public HTTPS URL.
+-   `golang.ngrok.com/ngrok`: In-memory tunnel client (mobile-ready, used by NgrokProvider).
+-   System dependency: `cloudflared` (Nix package) for Cloudflare desktop tunnels via os/exec.
 -   Standard Go library for networking, JSON encoding, cryptography, and process execution.
 
 ### KERI Driver (Python, desktop only)

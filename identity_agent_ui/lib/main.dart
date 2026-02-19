@@ -3,6 +3,7 @@ import 'theme/app_theme.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/contacts_screen.dart';
 import 'screens/oobi_screen.dart';
+import 'screens/settings_screen.dart';
 import 'screens/setup_wizard_screen.dart';
 import 'services/core_service.dart';
 import 'services/keri_service.dart';
@@ -170,6 +171,7 @@ class _AgentMainScreenState extends State<AgentMainScreen> {
       DashboardScreen(keriService: widget.keriService),
       ContactsScreen(keriService: widget.keriService),
       OobiScreen(keriService: widget.keriService),
+      SettingsScreen(keriService: widget.keriService),
     ];
   }
 
@@ -220,6 +222,11 @@ class _AgentMainScreenState extends State<AgentMainScreen> {
               icon: Icon(Icons.qr_code),
               activeIcon: Icon(Icons.qr_code),
               label: 'OOBI',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.settings_outlined),
+              activeIcon: Icon(Icons.settings),
+              label: 'SETTINGS',
             ),
           ],
         ),

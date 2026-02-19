@@ -273,6 +273,54 @@ class CoreService {
     }
   }
 
+  Future<Map<String, dynamic>> getTunnelSettings() async {
+    final response = await _client.get(Uri.parse('$baseUrl/api/settings/tunnel'));
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    } else {
+      throw Exception('Failed to get tunnel settings: ${response.statusCode}');
+    }
+  }
+
+  Future<void> saveTunnelSettings({
+    required String provider,
+    String? ngrokAuthToken,
+    String? cloudflareTunnelToken,
+  }) async {
+    final response = await _client.put(
+      Uri.parse('$baseUrl/api/settings/tunnel'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'provider': provider,
+        if (ngrokAuthToken != null) 'ngrok_auth_token': ngrokAuthToken,
+        if (cloudflareTunnelToken != null) 'cloudflare_tunnel_token': cloudflareTunnelToken,
+      }),
+    );
+    if (response.statusCode != 200) {
+      final body = jsonDecode(response.body);
+      throw Exception(body['error'] ?? 'Save settings failed: ${response.statusCode}');
+    }
+  }
+
+  Future<Map<String, dynamic>> getTunnelStatus() async {
+    final response = await _client.get(Uri.parse('$baseUrl/api/tunnel/status'));
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    } else {
+      throw Exception('Failed to get tunnel status: ${response.statusCode}');
+    }
+  }
+
+  Future<Map<String, dynamic>> restartTunnel() async {
+    final response = await _client.post(Uri.parse('$baseUrl/api/tunnel/restart'));
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    } else {
+      final body = jsonDecode(response.body);
+      throw Exception(body['error'] ?? 'Tunnel restart failed: ${response.statusCode}');
+    }
+  }
+
   void dispose() {
     _client.close();
   }
