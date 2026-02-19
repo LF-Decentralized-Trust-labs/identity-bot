@@ -74,6 +74,14 @@ class _AgentRouterState extends State<AgentRouter> {
   }
 
   Future<void> _checkIdentity() async {
+    if (_environment == AgentEnvironment.mobileStandalone) {
+      setState(() {
+        _identityExists = false;
+        _loading = false;
+      });
+      return;
+    }
+
     try {
       final coreService = CoreService();
       final identity = await coreService.getIdentity();

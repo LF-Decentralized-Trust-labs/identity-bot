@@ -1,9 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import '../theme/app_theme.dart';
 import '../crypto/bip39.dart';
-import '../crypto/keys.dart';
-import '../services/core_service.dart';
 import '../services/keri_service.dart';
 
 enum WizardStep {
@@ -40,13 +37,10 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
   final _verifyController2 = TextEditingController();
   bool _verifyError = false;
 
-  final CoreService _coreService = CoreService();
-
   @override
   void dispose() {
     _verifyController1.dispose();
     _verifyController2.dispose();
-    _coreService.dispose();
     super.dispose();
   }
 
@@ -90,6 +84,118 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
       return;
     }
 
+    await _performInception();
+  }
+
+  Future<void> _skipVerificationWithWarning() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(color: AppColors.corePending, width: 1),
+        ),
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: AppColors.corePending, size: 28),
+            SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'SKIP BACKUP VERIFICATION',
+                style: TextStyle(
+                  color: AppColors.corePending,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.0,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'If you skip verification and lose your seed phrase, your identity CANNOT be recovered. This means:',
+              style: TextStyle(
+                color: AppColors.textPrimary,
+                fontSize: 13,
+                height: 1.6,
+                fontFamily: 'monospace',
+              ),
+            ),
+            SizedBox(height: 12),
+            Text(
+              '- All credentials tied to this identity will be permanently lost\n'
+              '- All signed data will become unverifiable\n'
+              '- No one, including you, can restore access',
+              style: TextStyle(
+                color: AppColors.coreInactive,
+                fontSize: 12,
+                height: 1.6,
+                fontFamily: 'monospace',
+              ),
+            ),
+            SizedBox(height: 16),
+            Text(
+              'By proceeding, you accept full liability for any loss resulting from an unverified backup.',
+              style: TextStyle(
+                color: AppColors.textSecondary,
+                fontSize: 12,
+                height: 1.5,
+                fontFamily: 'monospace',
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text(
+              'GO BACK',
+              style: TextStyle(
+                color: AppColors.textMuted,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 1.0,
+                fontFamily: 'monospace',
+              ),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.corePending,
+              foregroundColor: AppColors.primary,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            child: const Text(
+              'I ACCEPT THE RISK',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1.0,
+                fontFamily: 'monospace',
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await _performInception();
+    }
+  }
+
+  Future<void> _performInception() async {
     setState(() {
       _verifyError = false;
       _currentStep = WizardStep.creatingIdentity;
@@ -97,11 +203,9 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
     });
 
     try {
-      final keys = KeyManager.generateKeysFromMnemonic(_mnemonic);
-
-      final result = await _coreService.createInception(
-        publicKey: keys.signing.publicKeyEncoded,
-        nextPublicKey: keys.next.publicKeyEncoded,
+      final result = await widget.keriService.inceptAid(
+        name: 'default',
+        code: _mnemonic.join(' '),
       );
 
       setState(() {
@@ -594,6 +698,30 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w700,
+                letterSpacing: 1.5,
+                fontFamily: 'monospace',
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton(
+            onPressed: _skipVerificationWithWarning,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.corePending,
+              side: const BorderSide(color: AppColors.corePending, width: 1),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            child: const Text(
+              'SKIP VERIFICATION',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
                 letterSpacing: 1.5,
                 fontFamily: 'monospace',
               ),
