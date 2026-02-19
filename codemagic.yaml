@@ -47,7 +47,7 @@ workflows:
       - name: Generate flutter_rust_bridge bindings
         script: |
           source "$HOME/.cargo/env"
-          cargo install flutter_rust_bridge_codegen --version 2.7.0
+          cargo install flutter_rust_bridge_codegen --version 2.11.1
           cd identity_agent_ui
           flutter_rust_bridge_codegen generate
 

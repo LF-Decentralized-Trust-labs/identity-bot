@@ -15,7 +15,7 @@ This ADR records the decisions made to complete the FFI bridge and create a func
 
 ### 1. flutter_rust_bridge for FFI
 
-We use **flutter_rust_bridge (FRB) v2.7.0** to generate Dart↔Rust FFI bindings. FRB handles:
+We use **flutter_rust_bridge (FRB) v2.11.1** to generate Dart↔Rust FFI bindings. FRB handles:
 - C-ABI symbol exports from Rust
 - Dart `dart:ffi` bindings and type marshalling
 - Memory safety for strings, `Vec<u8>`, and `Result<T, E>` types

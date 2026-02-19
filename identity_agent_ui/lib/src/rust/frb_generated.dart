@@ -44,7 +44,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
       );
 
   @override
-  String get codegenVersion => '2.7.0';
+  String get codegenVersion => '2.11.1';
 
   @override
   int get rustContentHash => 0;
