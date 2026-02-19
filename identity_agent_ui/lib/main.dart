@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'theme/app_theme.dart';
 import 'screens/dashboard_screen.dart';
+import 'screens/contacts_screen.dart';
+import 'screens/oobi_screen.dart';
 import 'screens/setup_wizard_screen.dart';
 import 'services/core_service.dart';
 import 'services/keri_service.dart';
@@ -137,12 +139,91 @@ class _AgentRouterState extends State<AgentRouter> {
     }
 
     if (_identityExists) {
-      return DashboardScreen(keriService: _keriService);
+      return AgentMainScreen(keriService: _keriService);
     }
 
     return SetupWizardScreen(
       onComplete: _onSetupComplete,
       keriService: _keriService,
+    );
+  }
+}
+
+class AgentMainScreen extends StatefulWidget {
+  final KeriService keriService;
+
+  const AgentMainScreen({super.key, required this.keriService});
+
+  @override
+  State<AgentMainScreen> createState() => _AgentMainScreenState();
+}
+
+class _AgentMainScreenState extends State<AgentMainScreen> {
+  int _currentIndex = 0;
+
+  late final List<Widget> _screens;
+
+  @override
+  void initState() {
+    super.initState();
+    _screens = [
+      DashboardScreen(keriService: widget.keriService),
+      ContactsScreen(keriService: widget.keriService),
+      OobiScreen(keriService: widget.keriService),
+    ];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: IndexedStack(
+        index: _currentIndex,
+        children: _screens,
+      ),
+      bottomNavigationBar: Container(
+        decoration: const BoxDecoration(
+          border: Border(
+            top: BorderSide(color: AppColors.border, width: 1),
+          ),
+        ),
+        child: BottomNavigationBar(
+          currentIndex: _currentIndex,
+          onTap: (index) => setState(() => _currentIndex = index),
+          backgroundColor: AppColors.surface,
+          selectedItemColor: AppColors.accent,
+          unselectedItemColor: AppColors.textMuted,
+          selectedLabelStyle: const TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 1.0,
+            fontFamily: 'monospace',
+          ),
+          unselectedLabelStyle: const TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w500,
+            letterSpacing: 1.0,
+            fontFamily: 'monospace',
+          ),
+          type: BottomNavigationBarType.fixed,
+          items: const [
+            BottomNavigationBarItem(
+              icon: Icon(Icons.shield_outlined),
+              activeIcon: Icon(Icons.shield),
+              label: 'DASHBOARD',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.people_outlined),
+              activeIcon: Icon(Icons.people),
+              label: 'CONTACTS',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.qr_code),
+              activeIcon: Icon(Icons.qr_code),
+              label: 'OOBI',
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

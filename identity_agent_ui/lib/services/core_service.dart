@@ -108,6 +108,60 @@ class InceptionResponse {
   }
 }
 
+class OobiResponse {
+  final String oobiUrl;
+  final String aid;
+  final String publicKey;
+  final String baseUrl;
+
+  OobiResponse({required this.oobiUrl, required this.aid, required this.publicKey, required this.baseUrl});
+
+  factory OobiResponse.fromJson(Map<String, dynamic> json) {
+    return OobiResponse(
+      oobiUrl: json['oobi_url'] ?? '',
+      aid: json['aid'] ?? '',
+      publicKey: json['public_key'] ?? '',
+      baseUrl: json['base_url'] ?? '',
+    );
+  }
+}
+
+class ContactResponse {
+  final String aid;
+  final String alias;
+  final String publicKey;
+  final String oobiUrl;
+  final bool verified;
+  final String discoveredAt;
+
+  ContactResponse({required this.aid, required this.alias, required this.publicKey, required this.oobiUrl, required this.verified, required this.discoveredAt});
+
+  factory ContactResponse.fromJson(Map<String, dynamic> json) {
+    return ContactResponse(
+      aid: json['aid'] ?? '',
+      alias: json['alias'] ?? '',
+      publicKey: json['public_key'] ?? '',
+      oobiUrl: json['oobi_url'] ?? '',
+      verified: json['verified'] ?? false,
+      discoveredAt: json['discovered_at'] ?? '',
+    );
+  }
+}
+
+class ContactsListResponse {
+  final List<ContactResponse> contacts;
+  final int count;
+
+  ContactsListResponse({required this.contacts, required this.count});
+
+  factory ContactsListResponse.fromJson(Map<String, dynamic> json) {
+    return ContactsListResponse(
+      contacts: (json['contacts'] as List<dynamic>?)?.map((c) => ContactResponse.fromJson(c)).toList() ?? [],
+      count: json['count'] ?? 0,
+    );
+  }
+}
+
 enum CoreConnectionState {
   disconnected,
   connecting,
@@ -177,6 +231,45 @@ class CoreService {
     } else {
       final body = jsonDecode(response.body);
       throw Exception(body['error'] ?? 'Inception failed: ${response.statusCode}');
+    }
+  }
+
+  Future<OobiResponse> getOobi() async {
+    final response = await _client.get(Uri.parse('$baseUrl/api/oobi'));
+    if (response.statusCode == 200) {
+      return OobiResponse.fromJson(jsonDecode(response.body));
+    } else {
+      throw Exception('OOBI request failed: ${response.statusCode}');
+    }
+  }
+
+  Future<ContactsListResponse> getContacts() async {
+    final response = await _client.get(Uri.parse('$baseUrl/api/contacts'));
+    if (response.statusCode == 200) {
+      return ContactsListResponse.fromJson(jsonDecode(response.body));
+    } else {
+      throw Exception('Contacts request failed: ${response.statusCode}');
+    }
+  }
+
+  Future<ContactResponse> addContact({required String oobiUrl, String? alias}) async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/api/contacts'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'oobi_url': oobiUrl, if (alias != null) 'alias': alias}),
+    );
+    if (response.statusCode == 201) {
+      return ContactResponse.fromJson(jsonDecode(response.body));
+    } else {
+      final body = jsonDecode(response.body);
+      throw Exception(body['error'] ?? 'Add contact failed: ${response.statusCode}');
+    }
+  }
+
+  Future<void> deleteContact(String aid) async {
+    final response = await _client.delete(Uri.parse('$baseUrl/api/contacts/$aid'));
+    if (response.statusCode != 204) {
+      throw Exception('Delete contact failed: ${response.statusCode}');
     }
   }
 
