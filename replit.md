@@ -2,9 +2,7 @@
 
 ## Overview
 
-The Identity Agent is a self-sovereign digital identity platform that unifies identity, data, communications, and assets into a single environment. It implements the KERI (Key Event Receipt Infrastructure) protocol for decentralized identity management. The system uses an adaptive architecture with three operating modes: Desktop (Go + Python keripy), Mobile Remote (remote primary server), and Mobile Standalone (Rust bridge + Remote Helper).
-
-The project is currently in **Phase 2 ("Inception")** — identity creation, BIP-39 mnemonic, KERI inception events, KEL persistence, and adaptive mobile architecture are all working.
+The Identity Agent is a self-sovereign digital identity platform designed to unify identity, data, communications, and assets. It leverages the KERI (Key Event Receipt Infrastructure) protocol for decentralized identity management, aiming to provide a single, integrated environment for digital identity. The project is currently in **Phase 2 ("Inception")**, with core functionalities like identity creation, BIP-39 mnemonic generation, KERI inception events, Key Event Log (KEL) persistence, and an adaptive mobile architecture already implemented. The business vision is to empower users with full control over their digital identities, enhancing privacy and security across various digital interactions.
 
 ## User Preferences
 
@@ -15,205 +13,77 @@ Design theme: Dark cyberpunk aesthetic with monospace fonts, dark blue/green col
 
 ### Adaptive Architecture: Three Operating Modes
 
-The system detects the runtime environment and selects the appropriate KERI service implementation:
+The system uses an adaptive architecture to integrate the KERI engine, primarily due to `keripy` (Python) not being mobile-compatible. This results in three distinct operating modes:
 
-#### 1. Desktop Mode (Linux/macOS/Windows/Web)
-```
-Flutter UI → Go Backend (port 5000) → Python KERI Driver (port 9999/keripy)
-```
-- Go backend handles orchestration, persistence, API serving
-- Python KERI driver performs all KERI operations using keripy v1.1.17 (hard requirement)
-- Go always spawns Python as a local child process via exec.Command()
+1.  **Desktop Mode (Linux/macOS/Windows):** The full stack runs on a single machine. The Flutter UI communicates with a Go backend (port 5000), which in turn drives a Python KERI engine (`keripy` v1.1.17) running as a local child process (port 9999). The Go backend handles orchestration, persistence, and API serving, while Python performs all KERI operations.
 
-#### 2. Mobile Remote Mode (iOS/Android + PRIMARY_SERVER_URL)
-```
-Flutter UI → Remote Primary Server (user's own server running Desktop Mode)
-```
-- Mobile device acts as remote controller for user's primary server
-- All KERI operations routed to remote server's API
-- Local Go backend on mobile enters Backup Mode or is stopped
+2.  **Mobile Remote Mode (iOS/Android):** For users with their own server running Desktop Mode. The mobile Flutter UI sends all KERI requests over HTTPS to the user's remote primary server, which executes the operations. No KERI engine runs on the phone.
 
-#### 3. Mobile Standalone Mode (iOS/Android, no PRIMARY_SERVER_URL)
-```
-Flutter UI → Rust Bridge (FFI, local) + Remote Helper (stateless, public)
-```
-- Rust bridge (THCLab keriox/keri-core) handles private key operations locally via FFI
-- Go backend runs on mobile in Primary Mode but without Python driver
-- Remote Helper is a separate public stateless service for formatting tasks only (zero trust)
+3.  **Mobile Standalone Mode (iOS/Android):** For users without a personal server. The Flutter UI interacts with a local Rust KERI library (THCLab `keriox/keri-core`) via a Foreign Function Interface (FFI) for private key operations. Stateless tasks (e.g., formatting, parsing) are offloaded to an external server, which can be the user's publicly accessible Go backend or a zero-trust public Remote Helper service.
 
 ### Trust Boundaries
-- **Primary Server:** Full trust — user's own server, handles all key material
-- **Remote Helper:** Zero trust — public utility, never sees private keys. Only does: format-credential, resolve-oobi, generate-multisig-event
-- **Rust Bridge:** Full trust — runs locally on device, handles all crypto
+
+-   **User's own server (Desktop/Mobile Remote) & Rust Bridge (Mobile Standalone):** Full trust, as key material is handled directly by the user's owned infrastructure or local device.
+-   **Remote Helper (Mobile Standalone fallback):** Zero trust, only handles stateless tasks without access to private keys.
 
 ### KeriService Abstraction Layer
 
-All three modes implement the same `KeriService` Dart abstract class:
-- `inceptAid()` — Create a new Autonomous Identifier
-- `rotateAid()` — Rotate keys for an existing AID
-- `signPayload()` — Sign arbitrary data
-- `getCurrentKel()` — Retrieve the Key Event Log
-- `verifySignature()` — Verify a signature against a public key
-
-UI code is completely mode-agnostic — no platform branching in screens.
+A `KeriService` Dart abstract class provides a mode-agnostic interface for KERI operations (`inceptAid`, `rotateAid`, `signPayload`, `getCurrentKel`, `verifySignature`), ensuring UI code remains independent of the underlying operating mode.
 
 ### Component Details
 
-1. **Go Backend (`identity-agent-core/`)** — The orchestration layer:
-   - Serves the public API on port 5000 (`/api/*`)
-   - Manages data persistence (file-based store, swappable to BadgerDB/PostgreSQL)
-   - Spawns and manages the Python KERI driver process (desktop only)
-   - Bridges Flutter requests to the KERI driver
-   - Serves Flutter web build as static files
-   - API endpoints: `/api/health`, `/api/info`, `/api/identity`, `/api/inception`, `/api/rotation`, `/api/sign`, `/api/kel`, `/api/verify`, `/api/format-credential`, `/api/resolve-oobi`, `/api/generate-multisig-event`
-   - Available on BOTH desktop and mobile (but Python driver only on desktop)
+-   **Go Backend (`identity-agent-core/`):** The core orchestration layer, serving the public API on port 5000, managing file-based data persistence, spawning the Python KERI driver (desktop), and serving Flutter web assets.
+-   **Python KERI Driver (`drivers/keri-core/`):** The KERI protocol engine (keripy v1.1.17) for desktop, running locally on `127.0.0.1:9999`.
+-   **Flutter Frontend (`identity_agent_ui/`):** The cross-platform user interface featuring a dark cyberpunk theme, BIP-39 mnemonic generation, and a Setup Wizard for identity creation, utilizing `KeriService` for backend interaction.
+-   **Rust Bridge (`identity_agent_ui/rust/`):** The mobile KERI engine (THCLab `keriox/keri-core`) integrated via `flutter_rust_bridge` for Dart ↔ Rust FFI.
+-   **KeriHelperClient:** An HTTP client for the remote helper, used for stateless operations in Mobile Standalone Mode.
 
-2. **Python KERI Driver (`drivers/keri-core/`)** — The KERI protocol engine (desktop only):
-   - Runs on `127.0.0.1:9999` (never exposed publicly)
-   - Uses keripy v1.1.17 (hard requirement, no fallback)
-   - Cannot run on mobile OS
+### Driver Pattern
 
-3. **Flutter Frontend (`identity_agent_ui/`)** — The controller UI:
-   - Dark cyberpunk theme, monospace fonts
-   - BIP-39 mnemonic seed phrase generation and backup flow
-   - Setup Wizard for new identity creation
-   - KeriService dependency injection — mode-agnostic
+The Go backend always spawns the Python KERI driver as a local child process, communicating via HTTP on `127.0.0.1:9999`. The Python driver dictates the naming and functionality of all KERI-related endpoints across all implementations (Go proxy, Rust bridge, Remote Helper).
 
-4. **Rust Bridge (`identity_agent_ui/rust/`)** — Mobile KERI engine:
-   - THCLab keriox/keri-core (EUPL-1.2 licensed)
-   - flutter_rust_bridge v2 for Dart ↔ Rust FFI
-   - 5 bridge functions: incept_aid, rotate_aid, sign_payload, get_current_kel, verify_signature
-   - Compiled locally with native toolchains (Xcode/NDK), not on Replit
+### Cryptographic Key Hierarchy
 
-5. **KeriHelperClient** — Remote Helper HTTP client:
-   - Separate from primary server — distinct trust boundary
-   - Configurable via KERI_HELPER_URL
-   - Operations: format-credential, resolve-oobi, generate-multisig-event
-
-### Driver Pattern (Desktop)
-
-Go always spawns Python as a local child process via `exec.Command()`. The driver binds to `127.0.0.1:9999` and is killed when Go exits. There is no external driver mode.
-
-The Python driver is the source of truth for endpoint naming. All other components (Rust bridge, Remote Helper, Dart services) match the driver's paths exactly.
-
-Key environment variables:
-- `KERI_DRIVER_PORT` — Port for the Python driver (default: 9999)
-- `KERI_DRIVER_SCRIPT` — Path to server.py (default: `./drivers/keri-core/server.py`)
-- `KERI_DRIVER_PYTHON` — Python binary path (default: `python3`)
-- `PRIMARY_SERVER_URL` — Remote server URL for Mobile Remote Mode
-- `KERI_HELPER_URL` — Public stateless Remote Helper URL for Mobile Standalone Mode
-
-### Build System (Shell Scripts, No Node.js)
-
-- `scripts/start-backend.sh` — Installs Python deps, builds Go binary, launches Go server
-- `scripts/build-flutter.sh` — Builds Flutter web assets only; Go picks them up automatically
-- No package.json, no npm, no node_modules — pure shell scripts
-
-### Workflows (Fully Decoupled)
-
-- **Start Backend** (`sh ./scripts/start-backend.sh`) — Installs Python deps, builds Go, starts Go server + KERI driver
-- **Start Frontend** (`sh ./scripts/build-flutter.sh`) — Builds Flutter web assets independently
-
-### Cryptographic Key Hierarchy (3-Level)
-
-- **Level 1 — Root Authority:** 128-bit salt / 12-word BIP-39 mnemonic. Never stored on active devices.
-- **Level 2 — Device Authority:** Keys generated in device Secure Enclave. Signs daily operations.
-- **Level 3 — Delegated Agent:** Operational keys stored in the backend's encrypted database.
+A 3-level hierarchy:
+1.  **Root Authority:** 128-bit salt / 12-word BIP-39 mnemonic (never stored on active devices).
+2.  **Device Authority:** Keys generated in device Secure Enclave for daily operations.
+3.  **Delegated Agent:** Operational keys stored in the backend's encrypted database.
 
 ### Persistence Layer
 
-- **Default:** File-based JSON store in `./data/` directory (identity.json, kel.json)
-- **Configurable:** Modular storage interface (`store.Store`) supports swapping backends
-- **Data files:** `data/identity.json` (current identity state), `data/kel.json` (Key Event Log)
-
-### Implementation Roadmap (follow strictly in order)
-
-- **Phase 1 (COMPLETE):** Skeleton — Go HTTP server, Flutter dashboard, bridge between them, health check
-- **Phase 2 (COMPLETE):** Inception — BIP-39 mnemonic, KERI inception event via Python driver, KEL persistence, Setup Wizard, adaptive mobile architecture (KeriService abstraction, Rust bridge, Remote Helper client)
-- **Phase 3 (next):** Connectivity — Public URL tunneling, OOBI generation, QR scanning, contact resolution
-- **Phase 4:** Credentials — Credential schemas, IPEX protocol, organization mode, verification logic
+Defaults to a file-based JSON store in `./data/` (`identity.json`, `kel.json`), with a modular `store.Store` interface allowing for swappable backends (e.g., BadgerDB, PostgreSQL).
 
 ### Key Design Decisions
 
-- **Why Go for backend:** Orchestration layer, compiles to single binary, manages driver lifecycle, available on mobile
-- **Why Python for KERI (desktop):** keripy is the most battle-tested KERI implementation; cannot run on mobile
-- **Why Rust for KERI (mobile):** THCLab keriox provides native KERI on mobile via FFI; no Python needed
-- **Why Driver Pattern:** HTTP-based internal communication means same Go code works everywhere
-- **Why Remote Helper is separate:** Zero-trust public service distinct from user's primary server
-- **Why Flutter for frontend:** Cross-platform (mobile + desktop + web), native hardware access
-- **Why local-first storage:** Sovereignty by default — no third-party accounts required
-- **Why no Node.js:** Eliminated unnecessary JavaScript layer; Go serves Flutter web directly
-
-## Key Files
-
-- `identity-agent-core/main.go` — Go backend entry point, HTTP server, API routes, driver lifecycle
-- `identity-agent-core/drivers/keri_driver.go` — Go HTTP client for the Python KERI driver
-- `identity-agent-core/store/store.go` — File-based persistence (Store interface + FileStore implementation)
-- `drivers/keri-core/server.py` — Python Flask HTTP server for KERI operations
-- `drivers/keri-core/requirements.txt` — Python dependencies (flask, keri)
-- `identity_agent_ui/lib/main.dart` — Flutter app entry point, environment detection, DI routing
-- `identity_agent_ui/lib/services/keri_service.dart` — Abstract KeriService interface + AgentEnvironment enum
-- `identity_agent_ui/lib/services/desktop_keri_service.dart` — Desktop mode: Flutter → Go → Python keripy
-- `identity_agent_ui/lib/services/remote_server_keri_service.dart` — Mobile Remote mode: Flutter → Remote Server
-- `identity_agent_ui/lib/services/mobile_standalone_keri_service.dart` — Mobile Standalone: Rust bridge + Helper
-- `identity_agent_ui/lib/services/keri_helper_client.dart` — HTTP client for public stateless Remote Helper
-- `identity_agent_ui/lib/bridge/keri_bridge.dart` — Dart interface for Rust FFI (flutter_rust_bridge)
-- `identity_agent_ui/rust/src/api/keri_bridge.rs` — Rust KERI implementation (THCLab keriox)
-- `identity_agent_ui/rust/Cargo.toml` — Rust dependencies (keri-core, flutter_rust_bridge, said, cesrox)
-- `identity_agent_ui/lib/services/core_service.dart` — HTTP client for Go API (health, info, identity)
-- `identity_agent_ui/lib/screens/setup_wizard_screen.dart` — Setup Wizard (mnemonic + inception)
-- `identity_agent_ui/lib/screens/dashboard_screen.dart` — Main dashboard UI
-- `identity_agent_ui/lib/crypto/bip39.dart` — BIP-39 mnemonic generator
-- `identity_agent_ui/lib/crypto/keys.dart` — Ed25519 key derivation from mnemonic
-- `identity_agent_ui/lib/config/agent_config.dart` — Backend URL + PRIMARY_SERVER_URL + KERI_HELPER_URL config
-- `scripts/start-backend.sh` — Build + launch script (Go + Python driver)
-- `scripts/build-flutter.sh` — Flutter web build script
-- `docs/adr/001-core-architecture-stack.md` — ADR: original architecture decisions
-- `docs/adr/002-keri-driver-pattern.md` — ADR: Python driver pattern, keripy requirement
-- `docs/adr/003-adaptive-architecture.md` — ADR: Three operating modes, trust boundaries, Remote Helper
+-   **Go for Backend:** Selected for orchestration, single binary compilation, and driver lifecycle management.
+-   **Python for KERI (Desktop):** Leverages `keripy` as the battle-tested KERI implementation.
+-   **Rust for KERI (Mobile):** Provides native mobile KERI capabilities via FFI with `keriox`.
+-   **Driver Pattern:** Ensures consistent HTTP-based internal communication across modes.
+-   **Flutter for Frontend:** Chosen for its cross-platform capabilities (mobile, desktop, web).
+-   **Local-First Storage:** Emphasizes user sovereignty and eliminates third-party account requirements.
 
 ## External Dependencies
 
 ### Backend (Go)
-- `github.com/go-chi/chi/v5` — HTTP router
-- `github.com/go-chi/cors` — CORS middleware
-- Standard library (net/http, encoding/json, crypto/ed25519, os/exec)
+
+-   `github.com/go-chi/chi/v5`: HTTP router.
+-   `github.com/go-chi/cors`: CORS middleware.
+-   Standard Go library for networking, JSON encoding, cryptography, and process execution.
 
 ### KERI Driver (Python, desktop only)
-- `flask` — Lightweight HTTP server
-- `keri` (required) — WebOfTrust reference KERI library v1.1.17 (hard requirement, no fallback)
+
+-   `flask`: Lightweight HTTP server.
+-   `keri`: WebOfTrust reference KERI library v1.1.17 (hard requirement).
 
 ### Rust Bridge (mobile only)
-- `keri-core` 0.11 — THCLab KERI implementation (EUPL-1.2)
-- `flutter_rust_bridge` 2.7.0 — Dart ↔ Rust FFI bridge
-- `said` 0.5, `cesrox` 0.6 — KERI supporting crates
+
+-   `keri-core` 0.11: THCLab KERI implementation (EUPL-1.2 licensed).
+-   `flutter_rust_bridge` 2.7.0: Dart ↔ Rust FFI bridge.
+-   `said` 0.5, `cesrox` 0.6: KERI supporting crates.
 
 ### Frontend (Flutter/Dart)
-- Flutter SDK (v3.22.0)
-- `http` — HTTP client for API calls
-- `crypto` — SHA-256 for key derivation
-- `ed25519_edwards` — Ed25519 key generation
 
-### Infrastructure
-- Replit hosting environment
-- Python 3.11 runtime (for KERI driver, desktop only)
-
-## Recent Changes
-
-- 2026-02-18: Added 4 stateful endpoints to Python KERI driver: /rotation, /sign, /kel, /verify
-- 2026-02-18: Added 3 stateless endpoints to Python KERI driver: /format-credential, /resolve-oobi, /generate-multisig-event
-- 2026-02-18: Added Go proxy routes for all 8 new endpoints (/api/rotation, /api/sign, /api/kel, /api/verify, /api/format-credential, /api/resolve-oobi, /api/generate-multisig-event)
-- 2026-02-18: Updated Go keri_driver.go with methods for all new endpoints (RotateAid, SignPayload, GetKel, VerifySignature, FormatCredential, ResolveOobi, GenerateMultisigEvent)
-- 2026-02-18: Removed dev/prod dichotomy — driver is always a local child process, no KERI_DRIVER_URL
-- 2026-02-18: Dropped /helper/ prefix from KeriHelperClient paths to match Python driver naming
-- 2026-02-18: Updated KeriHelperClient response types to match actual Remote Helper/driver responses
-- 2026-02-18: Rewrote ADR 002 with all 9 endpoints documented, clarified driver lifecycle
-- 2026-02-18: Rewrote ADR 003 with simplified mobile architecture (stateless URL resolution)
-- 2026-02-18: Established Python KERI driver as source of truth for all endpoint naming
-- 2026-02-18: Created adaptive architecture with three operating modes (Desktop, Mobile Remote, Mobile Standalone)
-- 2026-02-18: Created KeriService abstract interface + AgentEnvironment enum for mode-agnostic UI
-- 2026-02-18: Created DesktopKeriService, RemoteServerKeriService, MobileStandaloneKeriService implementations
-- 2026-02-18: Created KeriHelperClient for public stateless Remote Helper (zero trust, public data only)
-- 2026-02-18: Created Rust bridge infrastructure (Cargo.toml, keri_bridge.rs) with THCLab keriox/keri-core
-- 2026-02-18: Created Dart KeriBridge interface for flutter_rust_bridge FFI bindings
-- 2026-02-18: Completed Phase 2 — inception events, KEL persistence, Setup Wizard, mobile architecture
+-   Flutter SDK (v3.22.0).
+-   `http`: HTTP client for API calls.
+-   `crypto`: SHA-256 for key derivation.
+-   `ed25519_edwards`: Ed25519 key generation.
