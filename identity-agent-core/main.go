@@ -220,12 +220,25 @@ func main() {
 
         tunnelCfg := loadTunnelConfig()
         tunnelManager = tunnel.NewManager(tunnelCfg, portInt)
-        if tunnelCfg.Provider != tunnel.ProviderNone {
+        defer tunnelManager.Stop()
+
+        listener, err := net.Listen("tcp4", addr)
+        if err != nil {
+                log.Fatalf("[identity-agent-core] Failed to bind on %s: %v", addr, err)
+        }
+        log.Printf("[identity-agent-core] Server listening on %s", addr)
+
+        go func() {
+                if tunnelCfg.Provider == tunnel.ProviderNone {
+                        log.Println("[identity-agent-core] No tunnel configured. OOBI URLs use request-derived host or PUBLIC_URL env var.")
+                        return
+                }
                 if err := tunnelManager.Start(appCtx); err != nil {
                         log.Printf("[identity-agent-core] Tunnel failed (non-fatal): %v", err)
-                } else if tunnelManager.URL() != "" {
+                        return
+                }
+                if tunnelManager.URL() != "" {
                         log.Printf("[identity-agent-core] OOBI public URL: %s", tunnelManager.URL())
-
                         provider := tunnelManager.Provider()
                         if provider != nil && provider.Listener() != nil {
                                 go func() {
@@ -235,15 +248,8 @@ func main() {
                                 }()
                         }
                 }
-        } else {
-                log.Println("[identity-agent-core] No tunnel configured. OOBI URLs use request-derived host or PUBLIC_URL env var.")
-        }
-        defer tunnelManager.Stop()
+        }()
 
-        listener, err := net.Listen("tcp4", addr)
-        if err != nil {
-                log.Fatalf("[identity-agent-core] Failed to bind on %s: %v", addr, err)
-        }
         if err := http.Serve(listener, r); err != nil {
                 log.Fatalf("[identity-agent-core] Failed to start server: %v", err)
         }

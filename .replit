@@ -61,3 +61,6 @@ args = "sh ./scripts/build-flutter.sh"
 [userenv.shared]
 PORT = "5000"
 KERI_HELPER_URL = "https://keri-helper-microservice.replit.app"
+
+[deployment]
+deploymentTarget = "cloudrun"
