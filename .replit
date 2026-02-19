@@ -3,7 +3,7 @@ modules = ["python-3.11"]
 
 [nix]
 channel = "stable-24_05"
-packages = ["borgbackup", "chromium", "flutter", "go", "libsodium", "cloudflared"]
+packages = ["flutter", "go", "python-3.11", "libsodium", "cloudflared"]
 
 [[ports]]
 localPort = 5000
