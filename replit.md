@@ -65,14 +65,33 @@ Defaults to a file-based JSON store in `./data/` (`identity.json`, `kel.json`, `
 
 ## CI/CD Pipeline (Codemagic)
 
--   **Workflow:** `android-release` — single unified pipeline producing debug + release APKs with full Rust KERI bridge.
+### Android Workflow (`android-release`)
+
+-   **Pipeline:** Single unified workflow producing debug + release APKs with full Rust KERI bridge.
 -   **Build steps:** Install Rust + Android targets → `cargo-ndk` cross-compile to 4 ABIs (arm64-v8a, armeabi-v7a, x86_64, x86) → FRB codegen → Flutter build.
 -   **Key tool:** `cargo-ndk` handles Android NDK discovery and places `.so` files into `jniLibs/` automatically.
 -   **FRB codegen version:** Pinned to 2.11.1 matching the Rust crate dependency.
 -   **Instance type:** `linux_x2` with Flutter 3.22.0, Java 17.
 -   **Artifacts:** `identity_agent_ui/build/app/outputs/flutter-apk/*.apk`
+
+### iOS Workflow (`ios-release`)
+
+-   **Pipeline:** Unified workflow producing a signed IPA with full Rust KERI bridge, auto-submitting to TestFlight.
+-   **Build steps:** Install Rust + iOS targets (`aarch64-apple-ios`, `aarch64-apple-ios-sim`) → `cargo build --release` for each target → copy `.a` static libraries to `ios/Frameworks/RustKeri/` → FRB codegen → CocoaPods install → code signing via Codemagic CLI → `flutter build ipa --release`.
+-   **Key difference from Android:** iOS uses static libraries (`.a`) linked via `LIBRARY_SEARCH_PATHS` + `OTHER_LDFLAGS` in Xcode, vs Android's dynamic shared objects (`.so`) placed in `jniLibs/`.
+-   **Rust crate-type:** `Cargo.toml` specifies both `cdylib` (Android `.so`) and `staticlib` (iOS `.a`).
+-   **Instance type:** `mac_mini_m2` with Flutter 3.22.0, latest Xcode, CocoaPods.
+-   **Minimum iOS version:** 15.0 (set in all 3 Xcode build configurations: Debug, Release, Profile).
+-   **Code signing:** Requires `ios_credentials` environment group in Codemagic with App Store Connect API key. Uses Codemagic CLI tools (`keychain initialize`, `app-store-connect fetch-signing-files`, `xcode-project use-profiles`).
+-   **Artifacts:** `identity_agent_ui/build/ios/ipa/*.ipa`
+-   **Publishing:** Auto-submits to TestFlight for "Internal Testers" beta group.
+-   **Local build script:** `scripts/build-rust-ios.sh` for local macOS development (requires Rust iOS targets installed).
+
+### Shared
+
+-   **FRB codegen version:** Pinned to 2.11.1 matching the Rust crate dependency across both platforms.
 -   **ADR:** See `docs/adr/004-ffi-bridge-and-ci-pipeline.md` for full rationale.
--   **Future platforms:** iOS, Windows, macOS builds to be added as separate workflows.
+-   **Future platforms:** Windows, macOS desktop builds to be added as separate workflows.
 
 ## External Dependencies
 
