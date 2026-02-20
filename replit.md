@@ -1,148 +1,81 @@
-# Identity Agent
+# Identity Agent - Control Plane
 
 ## Overview
+Identity Agent is a sandboxed governance wrapper for AI agents. This Replit project serves as the **Control Plane** — the App Store UI and Management API. The actual execution engine (Docker containers, iptables proxy) will be built separately on a VPS.
 
-The Identity Agent is a self-sovereign digital identity platform designed to unify identity, data, communications, and assets. It leverages the KERI (Key Event Receipt Infrastructure) protocol for decentralized identity management, aiming to provide a single, integrated environment for digital identity. The project is currently in **Phase 3 ("Connectivity")**, with core functionalities like identity creation, BIP-39 mnemonic generation, KERI inception events, Key Event Log (KEL) persistence, adaptive mobile architecture, OOBI serving/sharing, contact management, multi-provider tunneling (Cloudflare + ngrok), Settings UI, and tunnel configuration persistence already implemented. The business vision is to empower users with full control over their digital identities, enhancing privacy and security across various digital interactions.
+The architecture follows a **Control Plane / Data Plane** split:
+- **Control Plane (this project):** App Store UI, governance policy management, audit log viewer, management API
+- **Data Plane (external VPS):** Real sandbox containers, iptables network interception, execution engine (future)
 
-## User Preferences
+## Project Architecture
 
-Preferred communication style: Simple, everyday language.
-Design theme: Dark cyberpunk aesthetic with monospace fonts, dark blue/green color scheme.
+### Go Backend (`identity-agent-core/`)
+- Chi router HTTP server on port 5000
+- KERI protocol endpoints: inception, rotation, signing, verification, KEL, OOBI, contacts
+- **App Store API:** `/api/apps`, `/api/policies`, `/api/audit-log`, `/api/audit-log/ingest`
+- File-based JSON storage in `data/`
+- Tunnel management (ngrok/cloudflare)
+- Serves both Flutter web UI and App Store dashboard
 
-## System Architecture
+### Python KERI Driver (`drivers/keri-core/`)
+- Flask microservice on port 9999 (internal only)
+- Uses keripy reference library for KERI cryptographic operations
+- Spawned as a child process by the Go backend
 
-### Adaptive Architecture: Three Operating Modes
+### Flutter UI (`identity_agent_ui/`)
+- Mobile/web app for identity management
+- Pre-built web bundle served by Go backend at `/`
 
-The system uses an adaptive architecture to integrate the KERI engine, primarily due to `keripy` (Python) not being mobile-compatible. This results in three distinct operating modes:
+### App Store Dashboard (`app-store-ui/`)
+- HTML/CSS/JS dashboard served at `/app-store`
+- Shows installed apps, governance policies, audit log
+- Communicates with Go backend via REST API
 
-1.  **Desktop Mode (Linux/macOS/Windows):** The full stack runs on a single machine. The Flutter UI communicates with a Go backend (port 5000), which in turn drives a Python KERI engine (`keripy` v1.1.17) running as a local child process (port 9999). The Go backend handles orchestration, persistence, and API serving, while Python performs all KERI operations.
+### Key Files
+- `identity-agent-core/main.go` — Main Go server with routing
+- `identity-agent-core/appstore.go` — App Store API handlers
+- `identity-agent-core/store/store.go` — Data models and file-based storage
+- `identity-agent-core/drivers/keri_driver.go` — KERI driver client
+- `app-store-ui/index.html` — App Store dashboard
+- `scripts/start-backend.sh` — Startup script
 
-2.  **Mobile Remote Mode (iOS/Android):** For users with their own server running Desktop Mode. The mobile Flutter UI sends all KERI requests over HTTPS to the user's remote primary server, which executes the operations. No KERI engine runs on the phone.
+## How to Run
+The workflow "Start application" runs `bash scripts/start-backend.sh` which:
+1. Installs Python dependencies (flask, keri)
+2. Builds the Go binary if not present
+3. Starts the Go server on port 5000, which spawns the Python KERI driver on port 9999
 
-3.  **Mobile Standalone Mode (iOS/Android):** For users without a personal server. The Flutter UI interacts with a local Rust KERI library (THCLab `keriox/keri-core`) via a Foreign Function Interface (FFI) for private key operations. Stateless tasks (e.g., formatting, parsing) are offloaded to an external server, which can be the user's publicly accessible Go backend or a zero-trust public Remote Helper service.
+## API Endpoints
 
-### Trust Boundaries
+### App Store (Control Plane)
+- `POST /api/apps` — Register a new app
+- `GET /api/apps` — List all apps
+- `GET /api/apps/{id}` — Get app details
+- `DELETE /api/apps/{id}` — Remove an app
+- `POST /api/apps/{id}/launch` — Launch app (stubbed, will webhook to VPS)
+- `POST /api/apps/{id}/stop` — Stop app
+- `PUT /api/apps/{id}/policy` — Assign policy to app
+- `POST /api/policies` — Create governance policy
+- `GET /api/policies` — List policies
+- `DELETE /api/policies/{id}` — Delete policy
+- `GET /api/audit-log` — Get audit log entries
+- `POST /api/audit-log/ingest` — Webhook endpoint for VPS to send audit events
 
--   **User's own server (Desktop/Mobile Remote) & Rust Bridge (Mobile Standalone):** Full trust, as key material is handled directly by the user's owned infrastructure or local device.
--   **Remote Helper (Mobile Standalone fallback):** Zero trust, only handles stateless tasks without access to private keys.
+### Identity (KERI)
+- `GET /api/health` — Health check
+- `POST /api/inception` — Create identity
+- `POST /api/rotation` — Rotate keys
+- `POST /api/sign` — Sign data
+- `GET /api/kel` — Get key event log
+- `POST /api/verify` — Verify signature
 
-### KeriService Abstraction Layer
+## Deployment
+Configured as autoscale deployment running the Go binary.
 
-A `KeriService` Dart abstract class provides a mode-agnostic interface for KERI operations (`inceptAid`, `rotateAid`, `signPayload`, `getCurrentKel`, `verifySignature`), ensuring UI code remains independent of the underlying operating mode.
-
-### Component Details
-
--   **Go Backend (`identity-agent-core/`):** The core orchestration layer, serving the public API on port 5000, managing file-based data persistence, spawning the Python KERI driver (desktop), serving Flutter web assets, OOBI serving/generation, contact management, and optional ngrok tunneling for public HTTPS URL acquisition.
--   **Python KERI Driver (`drivers/keri-core/`):** The KERI protocol engine (keripy v1.1.17) for desktop, running locally on `127.0.0.1:9999`.
--   **Flutter Frontend (`identity_agent_ui/`):** The cross-platform user interface featuring a dark cyberpunk theme, BIP-39 mnemonic generation, Setup Wizard for identity creation, bottom navigation with Dashboard/Contacts/OOBI tabs, contact management, and OOBI URL sharing, utilizing `KeriService` for backend interaction.
--   **Rust Bridge (`identity_agent_ui/rust/`):** The mobile KERI engine (THCLab `keriox/keri-core`) integrated via `flutter_rust_bridge` v2.11.1 for Dart ↔ Rust FFI. The bridge is fully wired with 5 functions (`inceptAid`, `rotateAid`, `signPayload`, `getCurrentKel`, `verifySignature`) matching the Python driver's canonical API. Placeholder Dart files exist in `lib/src/rust/` for development; real FFI bindings are generated by `flutter_rust_bridge_codegen` during CI/CD builds. Platform detection in `lib/bridge/keri_bridge.dart` gates native calls to mobile only.
--   **KeriHelperClient:** An HTTP client for the remote helper, used for stateless operations in Mobile Standalone Mode.
--   **Tunnel Module (`identity-agent-core/tunnel/`):** Multi-provider tunnel system with `TunnelProvider` interface. Supports Cloudflare (desktop via os/exec cloudflared binary, quick tunnel or authenticated), ngrok (in-memory via ngrok-go library, mobile-ready), and None (disabled). Settings persisted in `data/settings.json`. Provider selection, token config, and restart available via Settings UI and API (`/api/settings/tunnel`, `/api/tunnel/status`, `/api/tunnel/restart`). CloudflareEmbeddedProvider stub ready for when Cloudflare releases a Go SDK (issue #986).
-
-### Driver Pattern
-
-The Go backend always spawns the Python KERI driver as a local child process, communicating via HTTP on `127.0.0.1:9999`. The Python driver dictates the naming and functionality of all KERI-related endpoints across all implementations (Go proxy, Rust bridge, Remote Helper).
-
-### Cryptographic Key Hierarchy
-
-A 3-level hierarchy:
-1.  **Root Authority:** 128-bit salt / 12-word BIP-39 mnemonic (never stored on active devices).
-2.  **Device Authority:** Keys generated in device Secure Enclave for daily operations.
-3.  **Delegated Agent:** Operational keys stored in the backend's encrypted database.
-
-### Persistence Layer
-
-Defaults to a file-based JSON store in `./data/` (`identity.json`, `kel.json`, `contacts.json`, `settings.json`), with a modular `store.Store` interface allowing for swappable backends (e.g., BadgerDB, PostgreSQL).
-
-### Key Design Decisions
-
--   **Go for Backend:** Selected for orchestration, single binary compilation, and driver lifecycle management.
--   **Python for KERI (Desktop):** Leverages `keripy` as the battle-tested KERI implementation.
--   **Rust for KERI (Mobile):** Provides native mobile KERI capabilities via FFI with `keriox`.
--   **Driver Pattern:** Ensures consistent HTTP-based internal communication across modes.
--   **Flutter for Frontend:** Chosen for its cross-platform capabilities (mobile, desktop, web).
--   **Local-First Storage:** Emphasizes user sovereignty and eliminates third-party account requirements.
-
-## CI/CD Pipeline (Codemagic)
-
-### Android Workflow (`android-release`)
-
--   **Pipeline:** Single unified workflow producing debug + release APKs with full Rust KERI bridge.
--   **Build steps:** Install Rust + Android targets → `cargo-ndk` cross-compile to 4 ABIs (arm64-v8a, armeabi-v7a, x86_64, x86) → FRB codegen → Flutter build.
--   **Key tool:** `cargo-ndk` handles Android NDK discovery and places `.so` files into `jniLibs/` automatically.
--   **FRB codegen version:** Pinned to 2.11.1 matching the Rust crate dependency.
--   **Instance type:** `linux_x2` with Flutter 3.22.0, Java 17.
--   **Artifacts:** `identity_agent_ui/build/app/outputs/flutter-apk/*.apk`
-
-### iOS Workflow (`ios-release`)
-
--   **Pipeline:** Unified workflow producing a signed IPA with full Rust KERI bridge, auto-submitting to TestFlight.
--   **Build steps:** Install Rust + iOS targets (`aarch64-apple-ios`, `aarch64-apple-ios-sim`) → `cargo build --release` for each target → copy `.a` static libraries to `ios/Frameworks/RustKeri/` → FRB codegen → CocoaPods install → code signing via Codemagic CLI → `flutter build ipa --release`.
--   **Key difference from Android:** iOS uses static libraries (`.a`) linked via `LIBRARY_SEARCH_PATHS` + `OTHER_LDFLAGS` in Xcode, vs Android's dynamic shared objects (`.so`) placed in `jniLibs/`.
--   **Rust crate-type:** `Cargo.toml` specifies both `cdylib` (Android `.so`) and `staticlib` (iOS `.a`).
--   **Instance type:** `mac_mini_m2` with Flutter 3.22.0, latest Xcode, CocoaPods.
--   **Minimum iOS version:** 15.0 (set in all 3 Xcode build configurations: Debug, Release, Profile).
--   **Code signing:** Requires `ios_credentials` environment group in Codemagic with App Store Connect API key. Uses Codemagic CLI tools (`keychain initialize`, `app-store-connect fetch-signing-files`, `xcode-project use-profiles`).
--   **Artifacts:** `identity_agent_ui/build/ios/ipa/*.ipa`
--   **Publishing:** Auto-submits to TestFlight for "Internal Testers" beta group.
--   **Local build script:** `scripts/build-rust-ios.sh` for local macOS development (requires Rust iOS targets installed).
-
-### Windows Workflow (`windows-release`)
-
--   **Pipeline:** Builds Flutter Windows desktop app bundled with Go backend + Python KERI driver.
--   **Build steps:** Install Go via Chocolatey → cross-compile Go backend for Windows/amd64 → Flutter build windows → bundle Go binary + keri-core driver into release directory → create ZIP archive.
--   **Architecture:** Desktop mode — no Rust FFI. App spawns Go backend as child process, which manages Python KERI driver.
--   **Instance type:** `windows_x2` with Flutter 3.22.0.
--   **Artifacts:** `identity-agent-windows-x64.zip`
-
-### macOS Workflow (`macos-release`)
-
--   **Pipeline:** Builds Flutter macOS desktop app bundled with Go backend (universal binary) + Python KERI driver, packaged as DMG.
--   **Build steps:** Install Go via Homebrew → build Go universal binary (arm64 + amd64 via `lipo`) → Flutter build macos → bundle Go binary + keri-core driver into .app/Contents/Resources/backend/ → create DMG via `hdiutil`.
--   **Architecture:** Desktop mode — no Rust FFI. Universal binary supports both Apple Silicon and Intel Macs.
--   **Minimum macOS version:** 10.15 (Catalina).
--   **Instance type:** `mac_mini_m2` with Flutter 3.22.0, latest Xcode.
--   **Artifacts:** `identity-agent-macos.dmg`
-
-### Linux Workflow (`linux-release`)
-
--   **Pipeline:** Builds Flutter Linux desktop app bundled with Go backend + Python KERI driver, packaged as tarball.
--   **Build steps:** Install system deps (GTK3, clang, cmake, Go, Python) → build Go backend for linux/amd64 → Flutter build linux → bundle Go binary + keri-core driver into release bundle → create `.tar.gz`.
--   **Architecture:** Desktop mode — no Rust FFI. Standard GTK3-based Flutter desktop app.
--   **Instance type:** `linux_x2` with Flutter 3.22.0.
--   **Artifacts:** `identity-agent-linux-x64.tar.gz`
-
-### Shared
-
--   **FRB codegen version:** Pinned to 2.11.1 matching the Rust crate dependency across mobile platforms.
--   **ADR:** See `docs/adr/004-ffi-bridge-and-ci-pipeline.md` for full rationale.
--   **Desktop vs Mobile architecture:** Desktop workflows (Windows/macOS/Linux) bundle Go backend + Python KERI driver alongside Flutter app. Mobile workflows (Android/iOS) compile Rust KERI bridge via FFI. This split reflects the adaptive architecture where desktop uses the Go→Python driver pattern and mobile uses native Rust.
-
-## External Dependencies
-
-### Backend (Go)
-
--   `github.com/go-chi/chi/v5`: HTTP router.
--   `github.com/go-chi/cors`: CORS middleware.
--   `golang.ngrok.com/ngrok`: In-memory tunnel client (mobile-ready, used by NgrokProvider).
--   System dependency: `cloudflared` (Nix package) for Cloudflare desktop tunnels via os/exec.
--   Standard Go library for networking, JSON encoding, cryptography, and process execution.
-
-### KERI Driver (Python, desktop only)
-
--   `flask`: Lightweight HTTP server.
--   `keri`: WebOfTrust reference KERI library v1.1.17 (hard requirement).
-
-### Rust Bridge (mobile only)
-
--   `keri-core` 0.11.1: THCLab KERI implementation (EUPL-1.2 licensed). Transitively provides `cesrox` 0.1.4 (CESR primitives), `said` 0.4.0 (self-addressing identifiers), `base64` 0.13, `rand` 0.7.3.
--   `flutter_rust_bridge` 2.11.1: Dart ↔ Rust FFI bridge.
--   `base64` 0.13: Base64 encoding/decoding (matches keri-core's version for API compatibility).
--   `serde` 1.0 + `serde_json` 1.0: JSON serialization for bridge results.
-
-### Frontend (Flutter/Dart)
-
--   Flutter SDK (v3.22.0).
--   `http`: HTTP client for API calls.
--   `crypto`: SHA-256 for key derivation.
--   `ed25519_edwards`: Ed25519 key generation.
+## Recent Changes
+- 2026-02-20: Added App Store Control Plane (Milestone 1)
+  - New data models: AppRecord, PolicyRecord, AuditLogEntry
+  - App Store REST API with full CRUD + launch/stop/policy assignment
+  - App Store Dashboard UI at /app-store with dark theme
+  - Audit log with webhook ingest endpoint for future VPS integration
+  - Stats dashboard with total apps, running count, policies, events

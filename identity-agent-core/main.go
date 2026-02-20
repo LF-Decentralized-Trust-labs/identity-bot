@@ -161,9 +161,43 @@ func main() {
                 r.Put("/settings/tunnel", handlePutTunnelSettings)
                 r.Get("/tunnel/status", handleTunnelStatus)
                 r.Post("/tunnel/restart", handleTunnelRestart)
+
+                r.Post("/apps", handleRegisterApp)
+                r.Get("/apps", handleListApps)
+                r.Get("/apps/{id}", handleGetApp)
+                r.Delete("/apps/{id}", handleDeleteApp)
+                r.Post("/apps/{id}/launch", handleLaunchApp)
+                r.Post("/apps/{id}/stop", handleStopApp)
+                r.Put("/apps/{id}/policy", handleAssignPolicy)
+
+                r.Post("/policies", handleCreatePolicy)
+                r.Get("/policies", handleListPolicies)
+                r.Get("/policies/{id}", handleGetPolicy)
+                r.Delete("/policies/{id}", handleDeletePolicy)
+
+                r.Get("/audit-log", handleGetAuditLog)
+                r.Post("/audit-log/ingest", handleIngestAuditWebhook)
         })
 
         r.Get("/oobi/{aid}", handleOobiServe)
+
+        appStoreDir := os.Getenv("APP_STORE_DIR")
+        if appStoreDir == "" {
+                appStoreDir = filepath.Join("..", "app-store-ui")
+        }
+        absAppStoreDir, _ := filepath.Abs(appStoreDir)
+
+        appStoreFS := http.FileServer(http.Dir(absAppStoreDir))
+        appStoreHandler := http.StripPrefix("/app-store/", appStoreFS)
+
+        r.Get("/app-store", func(w http.ResponseWriter, req *http.Request) {
+                w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+                http.ServeFile(w, req, filepath.Join(absAppStoreDir, "index.html"))
+        })
+        r.Get("/app-store/*", func(w http.ResponseWriter, req *http.Request) {
+                w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+                appStoreHandler.ServeHTTP(w, req)
+        })
 
         webDir := os.Getenv("FLUTTER_WEB_DIR")
         if webDir == "" {
@@ -180,6 +214,7 @@ func main() {
                 log.Printf("[identity-agent-core] Serving Flutter web from: %s", absWebDir)
                 fileServer := http.FileServer(http.Dir(absWebDir))
                 r.Get("/*", func(w http.ResponseWriter, r *http.Request) {
+                        w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
                         path := filepath.Join(absWebDir, r.URL.Path)
                         if _, err := os.Stat(path); os.IsNotExist(err) {
                                 http.ServeFile(w, r, filepath.Join(absWebDir, "index.html"))
@@ -191,13 +226,14 @@ func main() {
                 log.Printf("[identity-agent-core] Flutter web build not found at: %s", absWebDir)
                 r.Get("/*", func(w http.ResponseWriter, r *http.Request) {
                         w.Header().Set("Content-Type", "text/html")
+                        w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
                         w.WriteHeader(200)
                         fmt.Fprintf(w, `<!DOCTYPE html>
 <html><head><title>Identity Agent</title>
 <style>body{background:#0A1628;color:#F0F4F8;font-family:monospace;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;}
-.c{text-align:center;}.t{color:#00E5A0;font-size:14px;margin-top:12px;}</style></head>
+.c{text-align:center;}.t{color:#00E5A0;font-size:14px;margin-top:12px;}a{color:#00E5A0;}</style></head>
 <body><div class="c"><h1>IDENTITY AGENT CORE</h1><p style="color:#8B9DC3;">Go Core is running. Flutter web build not yet available.</p>
-<p class="t">Run the Start Frontend workflow to build Flutter web.</p></div></body></html>`)
+<p class="t"><a href="/app-store">Open App Store</a></p></div></body></html>`)
                 })
         }
 

@@ -1,5 +1,6 @@
 # Go
 bin/
+identity-agent-core/bin/
 *.exe
 *.exe~
 *.dll

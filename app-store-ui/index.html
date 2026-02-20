@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Identity Agent - App Store</title>
+  <link rel="stylesheet" href="/app-store/style.css">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h1>IDENTITY AGENT</h1>
+        <div class="subtitle">App Store &middot; Control Plane</div>
+      </div>
+      <nav class="nav-items">
+        <div class="nav-item active" data-section="apps">
+          <span class="icon">&#128230;</span> Installed Apps
+        </div>
+        <div class="nav-item" data-section="policies">
+          <span class="icon">&#128274;</span> Policies
+        </div>
+        <div class="nav-item" data-section="audit">
+          <span class="icon">&#128220;</span> Audit Log
+        </div>
+      </nav>
+      <div class="sidebar-footer">
+        <a href="/">&#8592; Back to Dashboard</a>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <div class="stats-row">
+        <div class="stat-card">
+          <div class="stat-value" id="stat-total">0</div>
+          <div class="stat-label">Total Apps</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="stat-running">0</div>
+          <div class="stat-label">Running</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="stat-policies">0</div>
+          <div class="stat-label">Policies</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="stat-events">0</div>
+          <div class="stat-label">Audit Events</div>
+        </div>
+      </div>
+
+      <div id="section-apps" class="section">
+        <div class="page-header">
+          <h2>Installed Apps</h2>
+          <button class="btn btn-primary" onclick="showModal('modal-register-app')">+ Register App</button>
+        </div>
+        <div class="card-grid" id="apps-grid"></div>
+      </div>
+
+      <div id="section-policies" class="section section-hidden">
+        <div class="page-header">
+          <h2>Governance Policies</h2>
+          <button class="btn btn-primary" onclick="showModal('modal-create-policy')">+ Create Policy</button>
+        </div>
+        <div id="policies-list"></div>
+      </div>
+
+      <div id="section-audit" class="section section-hidden">
+        <div class="page-header">
+          <h2>Audit Log</h2>
+          <button class="btn btn-secondary" onclick="loadAuditLog()">&#8635; Refresh</button>
+        </div>
+        <div class="card" style="padding:0;overflow-x:auto;">
+          <table class="audit-table">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>App</th>
+                <th>Type</th>
+                <th>Target</th>
+                <th>Details</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="audit-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <div class="modal-overlay" id="modal-register-app">
+    <div class="modal">
+      <h3>Register New App</h3>
+      <form id="form-register-app">
+        <div class="form-group">
+          <label>App Name *</label>
+          <input type="text" name="name" required placeholder="e.g. OpenClaw Agent">
+        </div>
+        <div class="form-group">
+          <label>Description</label>
+          <textarea name="description" placeholder="What does this app do?"></textarea>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Language</label>
+            <select name="language">
+              <option value="python">Python</option>
+              <option value="nodejs">Node.js</option>
+              <option value="go">Go</option>
+              <option value="rust">Rust</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Entry Point</label>
+            <input type="text" name="entry_point" placeholder="e.g. main.py">
+          </div>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" onclick="hideModal('modal-register-app')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Register</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="modal-create-policy">
+    <div class="modal">
+      <h3>Create Governance Policy</h3>
+      <form id="form-create-policy">
+        <div class="form-group">
+          <label>Policy Name *</label>
+          <input type="text" name="name" required placeholder="e.g. Strict Sandbox">
+        </div>
+        <div class="form-group">
+          <label>Description</label>
+          <textarea name="description" placeholder="Describe what this policy enforces"></textarea>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Allowed Domains (comma separated)</label>
+            <input type="text" name="allowed_domains" placeholder="google.com, api.openai.com">
+          </div>
+          <div class="form-group">
+            <label>Blocked Domains (comma separated)</label>
+            <input type="text" name="blocked_domains" placeholder="evil.com, malware.net">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Max Spend ($)</label>
+          <input type="number" name="max_spend" step="0.01" min="0" value="0" placeholder="0.00">
+        </div>
+        <div class="form-group">
+          <div class="toggle-group">
+            <div class="toggle active" id="toggle-net-access" onclick="toggleSwitch('toggle-net-access')"></div>
+            <span class="toggle-label">Allow Network Access</span>
+          </div>
+          <div class="toggle-group">
+            <div class="toggle" id="toggle-file-write" onclick="toggleSwitch('toggle-file-write')"></div>
+            <span class="toggle-label">Allow File Write (outside /tmp/workspace)</span>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" onclick="hideModal('modal-create-policy')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Create Policy</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="modal-assign-policy">
+    <div class="modal">
+      <h3>Assign Policy to App</h3>
+      <form id="form-assign-policy">
+        <input type="hidden" id="assign-policy-app-id">
+        <div class="form-group">
+          <label>Select Policy</label>
+          <select id="assign-policy-select"></select>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" onclick="hideModal('modal-assign-policy')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Assign</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="/app-store/app.js"></script>
+</body>
+</html>
