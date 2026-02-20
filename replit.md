@@ -87,11 +87,36 @@ Defaults to a file-based JSON store in `./data/` (`identity.json`, `kel.json`, `
 -   **Publishing:** Auto-submits to TestFlight for "Internal Testers" beta group.
 -   **Local build script:** `scripts/build-rust-ios.sh` for local macOS development (requires Rust iOS targets installed).
 
+### Windows Workflow (`windows-release`)
+
+-   **Pipeline:** Builds Flutter Windows desktop app bundled with Go backend + Python KERI driver.
+-   **Build steps:** Install Go via Chocolatey → cross-compile Go backend for Windows/amd64 → Flutter build windows → bundle Go binary + keri-core driver into release directory → create ZIP archive.
+-   **Architecture:** Desktop mode — no Rust FFI. App spawns Go backend as child process, which manages Python KERI driver.
+-   **Instance type:** `windows_x2` with Flutter 3.22.0.
+-   **Artifacts:** `identity-agent-windows-x64.zip`
+
+### macOS Workflow (`macos-release`)
+
+-   **Pipeline:** Builds Flutter macOS desktop app bundled with Go backend (universal binary) + Python KERI driver, packaged as DMG.
+-   **Build steps:** Install Go via Homebrew → build Go universal binary (arm64 + amd64 via `lipo`) → Flutter build macos → bundle Go binary + keri-core driver into .app/Contents/Resources/backend/ → create DMG via `hdiutil`.
+-   **Architecture:** Desktop mode — no Rust FFI. Universal binary supports both Apple Silicon and Intel Macs.
+-   **Minimum macOS version:** 10.15 (Catalina).
+-   **Instance type:** `mac_mini_m2` with Flutter 3.22.0, latest Xcode.
+-   **Artifacts:** `identity-agent-macos.dmg`
+
+### Linux Workflow (`linux-release`)
+
+-   **Pipeline:** Builds Flutter Linux desktop app bundled with Go backend + Python KERI driver, packaged as tarball.
+-   **Build steps:** Install system deps (GTK3, clang, cmake, Go, Python) → build Go backend for linux/amd64 → Flutter build linux → bundle Go binary + keri-core driver into release bundle → create `.tar.gz`.
+-   **Architecture:** Desktop mode — no Rust FFI. Standard GTK3-based Flutter desktop app.
+-   **Instance type:** `linux_x2` with Flutter 3.22.0.
+-   **Artifacts:** `identity-agent-linux-x64.tar.gz`
+
 ### Shared
 
--   **FRB codegen version:** Pinned to 2.11.1 matching the Rust crate dependency across both platforms.
+-   **FRB codegen version:** Pinned to 2.11.1 matching the Rust crate dependency across mobile platforms.
 -   **ADR:** See `docs/adr/004-ffi-bridge-and-ci-pipeline.md` for full rationale.
--   **Future platforms:** Windows, macOS desktop builds to be added as separate workflows.
+-   **Desktop vs Mobile architecture:** Desktop workflows (Windows/macOS/Linux) bundle Go backend + Python KERI driver alongside Flutter app. Mobile workflows (Android/iOS) compile Rust KERI bridge via FFI. This split reflects the adaptive architecture where desktop uses the Go→Python driver pattern and mobile uses native Rust.
 
 ## External Dependencies
 
