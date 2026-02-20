@@ -66,3 +66,6 @@ KERI_HELPER_URL = "https://keri-helper-microservice.replit.app"
 deploymentTarget = "cloudrun"
 build = "sh ./scripts/build-flutter.sh"
 run = "sh ./scripts/start-backend.sh"
+
+[agent]
+expertMode = true

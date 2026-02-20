@@ -1,0 +1,49 @@
+Project Context & Architecture Shift:
+We are building "Identity Agent," a sandboxed governance wrapper for AI agents. We are shifting our strategy to an "Audit-to-Enforce" model.
+
+We realize that a true Zero-Trust Sandbox must govern both Network Traffic (API calls, web requests) and System Traffic (file reads/writes, system calls). Before we can enforce a universal policy, we need to observe what these apps actually do.
+
+Therefore, our immediate goal is to build an "Observation Sandbox." We will run multiple third-party apps (written in different languages) wide open inside an isolated container, silently intercepting and logging everything they do. Once we analyze that data, we will build the enforcement policy.
+
+Core Sandbox Mechanics:
+
+Network Observation (Transparent Proxy): The guest container must be placed on an internal network with zero direct external internet access. We will use iptables rules within the container to transparently redirect all outbound TCP/UDP traffic to our Identity Agent Go proxy (Port 5000). The proxy will log the destination and payload, then forward the request.
+
+System Observation (File System Limits): The guest container must run with a strictly read-only root filesystem. We will mount a single /tmp/workspace directory for write access and monitor all file modifications within that directory.
+
+Milestones & Action Plan:
+Please acknowledge these instructions and begin executing Milestone 1. Do not move to the next milestone until the current one is tested and proven.
+
+Milestone 1: Infrastructure Setup (The Observation Sandbox)
+
+Configure the Replit environment to spin up an isolated container (via Docker, Podman, or Replit's native Nix containers).
+
+Configure the container to use an internal-only network interface.
+
+Configure the container's filesystem to be read-only, exposing only a /tmp/workspace volume.
+
+Milestone 2: The Network Interceptor
+
+Write the networking script (using iptables or equivalent) that runs inside the guest container.
+
+This script must transparently route all outbound traffic (port 80, 443, etc.) to the Identity Agent Go backend proxy running on the host.
+
+Update the Go backend to accept these transparently proxied requests, log the original destination URL, and complete the request on the app's behalf.
+
+Milestone 3: The Multi-Language Audit Test
+
+We will test three simple "Victim" scripts inside our new Observation Sandbox:
+
+A Python script that tries to scrape google.com and write the HTML to a file.
+
+A Node.js script that tries to call the OpenAI API.
+
+A simple Go binary that tries to write a file outside the /tmp/workspace directory.
+
+Success Criterion: The Go Gateway must successfully log the Python and Node network requests, and the container runtime must successfully block the Go binary's unauthorized file write.
+
+Milestone 4: Policy Enforcement (Next Steps)
+
+Once Milestone 3 proves we can successfully track and log both system and network behaviors across multiple languages, we will use that data to write the actual "Default Deny" policy engine.
+
+Please confirm your understanding of the "Audit-to-Enforce" strategy, the transparent proxy requirement, and let me know how you plan to tackle the container network setup in Milestone 1.
