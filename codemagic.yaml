@@ -74,3 +74,99 @@ workflows:
 
     artifacts:
       - identity_agent_ui/build/app/outputs/flutter-apk/*.apk
+
+  ios-release:
+    name: iOS Release (with Rust KERI Bridge)
+    max_build_duration: 120
+    instance_type: mac_mini_m2
+    environment:
+      flutter: 3.22.0
+      xcode: latest
+      cocoapods: default
+      groups:
+        - ios_credentials
+      vars:
+        BUNDLE_ID: "com.identityagent.identityAgentUi"
+    scripts:
+      - name: Install Rust toolchain and iOS targets
+        script: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          source "$HOME/.cargo/env"
+          rustup target add aarch64-apple-ios
+          rustup target add aarch64-apple-ios-sim
+          echo "--- Rust version ---"
+          rustc --version
+          cargo --version
+
+      - name: Build Rust static library for iOS (device)
+        script: |
+          source "$HOME/.cargo/env"
+          cd identity_agent_ui/rust
+          cargo build --release --target aarch64-apple-ios
+          echo "--- Built device static library ---"
+          ls -lh target/aarch64-apple-ios/release/libidentity_agent_keri.a
+
+      - name: Build Rust static library for iOS (simulator)
+        script: |
+          source "$HOME/.cargo/env"
+          cd identity_agent_ui/rust
+          cargo build --release --target aarch64-apple-ios-sim
+          echo "--- Built simulator static library ---"
+          ls -lh target/aarch64-apple-ios-sim/release/libidentity_agent_keri.a
+
+      - name: Copy Rust libraries to iOS Frameworks
+        script: |
+          RUST_DIR="identity_agent_ui/rust"
+          IOS_DIR="identity_agent_ui/ios"
+          LIB="libidentity_agent_keri.a"
+          mkdir -p "$IOS_DIR/Frameworks/RustKeri/device"
+          mkdir -p "$IOS_DIR/Frameworks/RustKeri/simulator"
+          cp "$RUST_DIR/target/aarch64-apple-ios/release/$LIB" \
+             "$IOS_DIR/Frameworks/RustKeri/device/$LIB"
+          cp "$RUST_DIR/target/aarch64-apple-ios-sim/release/$LIB" \
+             "$IOS_DIR/Frameworks/RustKeri/simulator/$LIB"
+          echo "--- Libraries placed ---"
+          ls -lh "$IOS_DIR/Frameworks/RustKeri/device/$LIB"
+          ls -lh "$IOS_DIR/Frameworks/RustKeri/simulator/$LIB"
+
+      - name: Generate flutter_rust_bridge bindings
+        script: |
+          source "$HOME/.cargo/env"
+          cargo install flutter_rust_bridge_codegen --version 2.11.1
+          cd identity_agent_ui
+          flutter_rust_bridge_codegen generate
+
+      - name: Get Flutter packages
+        script: |
+          cd identity_agent_ui
+          flutter pub get
+
+      - name: Install CocoaPods dependencies
+        script: |
+          cd identity_agent_ui/ios
+          pod install
+
+      - name: Set up iOS code signing
+        script: |
+          keychain initialize
+          app-store-connect fetch-signing-files "$BUNDLE_ID" \
+            --type IOS_APP_STORE \
+            --create
+          keychain add-certificates
+          xcode-project use-profiles
+
+      - name: Build iOS IPA (release)
+        script: |
+          cd identity_agent_ui
+          flutter build ipa --release \
+            --export-options-plist=/Users/builder/export_options.plist
+
+    artifacts:
+      - identity_agent_ui/build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+        beta_groups:
+          - "Internal Testers"
