@@ -170,3 +170,167 @@ workflows:
         submit_to_testflight: true
         beta_groups:
           - "Internal Testers"
+
+  windows-release:
+    name: Windows Release (Desktop)
+    max_build_duration: 60
+    instance_type: windows_x2
+    environment:
+      flutter: 3.22.0
+    scripts:
+      - name: Install Go toolchain
+        script: |
+          choco install golang -y
+          refreshenv
+          go version
+
+      - name: Build Go backend (Windows)
+        script: |
+          $env:CGO_ENABLED = "0"
+          $env:GOOS = "windows"
+          $env:GOARCH = "amd64"
+          cd identity-agent-core
+          go build -o bin\identity-agent-core.exe .
+          Write-Host "--- Go binary ---"
+          Get-Item bin\identity-agent-core.exe
+
+      - name: Get Flutter packages
+        script: |
+          cd identity_agent_ui
+          flutter pub get
+
+      - name: Build Flutter Windows app
+        script: |
+          cd identity_agent_ui
+          flutter build windows --release
+
+      - name: Bundle Go backend and KERI driver with Flutter app
+        script: |
+          $BUNDLE = "identity_agent_ui\build\windows\x64\runner\Release"
+          mkdir -p "$BUNDLE\backend"
+          Copy-Item "identity-agent-core\bin\identity-agent-core.exe" "$BUNDLE\backend\"
+          Copy-Item -Recurse "drivers\keri-core" "$BUNDLE\backend\keri-driver"
+          Write-Host "--- Bundle contents ---"
+          Get-ChildItem -Recurse "$BUNDLE\backend"
+
+      - name: Create ZIP archive
+        script: |
+          $BUNDLE = "identity_agent_ui\build\windows\x64\runner\Release"
+          Compress-Archive -Path "$BUNDLE\*" -DestinationPath "identity-agent-windows-x64.zip"
+          Write-Host "--- Archive ---"
+          Get-Item "identity-agent-windows-x64.zip"
+
+    artifacts:
+      - identity-agent-windows-x64.zip
+
+  macos-release:
+    name: macOS Release (Desktop)
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    environment:
+      flutter: 3.22.0
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Install Go toolchain
+        script: |
+          brew install go
+          go version
+
+      - name: Build Go backend (macOS universal)
+        script: |
+          cd identity-agent-core
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -o bin/identity-agent-core-arm64 .
+          CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -o bin/identity-agent-core-amd64 .
+          lipo -create -output bin/identity-agent-core bin/identity-agent-core-arm64 bin/identity-agent-core-amd64
+          echo "--- Go universal binary ---"
+          file bin/identity-agent-core
+          ls -lh bin/identity-agent-core
+
+      - name: Get Flutter packages
+        script: |
+          cd identity_agent_ui
+          flutter pub get
+
+      - name: Build Flutter macOS app
+        script: |
+          cd identity_agent_ui
+          flutter build macos --release
+
+      - name: Bundle Go backend and KERI driver into .app
+        script: |
+          APP="identity_agent_ui/build/macos/Build/Products/Release/Identity Agent.app"
+          RESOURCES="$APP/Contents/Resources"
+          mkdir -p "$RESOURCES/backend"
+          cp identity-agent-core/bin/identity-agent-core "$RESOURCES/backend/"
+          cp -r drivers/keri-core "$RESOURCES/backend/keri-driver"
+          chmod +x "$RESOURCES/backend/identity-agent-core"
+          echo "--- Bundle contents ---"
+          ls -la "$RESOURCES/backend/"
+
+      - name: Create DMG archive
+        script: |
+          APP="identity_agent_ui/build/macos/Build/Products/Release/Identity Agent.app"
+          hdiutil create -volname "Identity Agent" \
+            -srcfolder "$APP" \
+            -ov -format UDZO \
+            "identity-agent-macos.dmg"
+          echo "--- DMG ---"
+          ls -lh identity-agent-macos.dmg
+
+    artifacts:
+      - identity-agent-macos.dmg
+
+  linux-release:
+    name: Linux Release (Desktop)
+    max_build_duration: 60
+    instance_type: linux_x2
+    environment:
+      flutter: 3.22.0
+    scripts:
+      - name: Install system dependencies
+        script: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang cmake ninja-build pkg-config \
+            libgtk-3-dev liblzma-dev libstdc++-12-dev \
+            golang-go python3 python3-pip python3-venv
+          go version
+
+      - name: Build Go backend (Linux)
+        script: |
+          cd identity-agent-core
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/identity-agent-core .
+          echo "--- Go binary ---"
+          file bin/identity-agent-core
+          ls -lh bin/identity-agent-core
+
+      - name: Get Flutter packages
+        script: |
+          cd identity_agent_ui
+          flutter pub get
+
+      - name: Build Flutter Linux app
+        script: |
+          cd identity_agent_ui
+          flutter build linux --release
+
+      - name: Bundle Go backend and KERI driver with Flutter app
+        script: |
+          BUNDLE="identity_agent_ui/build/linux/x64/release/bundle"
+          mkdir -p "$BUNDLE/backend"
+          cp identity-agent-core/bin/identity-agent-core "$BUNDLE/backend/"
+          cp -r drivers/keri-core "$BUNDLE/backend/keri-driver"
+          chmod +x "$BUNDLE/backend/identity-agent-core"
+          echo "--- Bundle contents ---"
+          ls -la "$BUNDLE/backend/"
+
+      - name: Create tarball archive
+        script: |
+          BUNDLE="identity_agent_ui/build/linux/x64/release/bundle"
+          tar -czf identity-agent-linux-x64.tar.gz -C "$BUNDLE" .
+          echo "--- Archive ---"
+          ls -lh identity-agent-linux-x64.tar.gz
+
+    artifacts:
+      - identity-agent-linux-x64.tar.gz
