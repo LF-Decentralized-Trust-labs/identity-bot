@@ -368,6 +368,15 @@
                                         "$(inherited)",
                                         "@executable_path/Frameworks",
                                 );
+                                LIBRARY_SEARCH_PATHS = (
+                                        "$(inherited)",
+                                        "$(PROJECT_DIR)/Frameworks/RustKeri/device",
+                                );
+                                OTHER_LDFLAGS = (
+                                        "$(inherited)",
+                                        "-lidentity_agent_keri",
+                                        "-lresolv",
+                                );
                                 PRODUCT_BUNDLE_IDENTIFIER = com.identityagent.identityAgentUi;
                                 PRODUCT_NAME = "$(TARGET_NAME)";
                                 SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
@@ -547,6 +556,15 @@
                                         "$(inherited)",
                                         "@executable_path/Frameworks",
                                 );
+                                LIBRARY_SEARCH_PATHS = (
+                                        "$(inherited)",
+                                        "$(PROJECT_DIR)/Frameworks/RustKeri/device",
+                                );
+                                OTHER_LDFLAGS = (
+                                        "$(inherited)",
+                                        "-lidentity_agent_keri",
+                                        "-lresolv",
+                                );
                                 PRODUCT_BUNDLE_IDENTIFIER = com.identityagent.identityAgentUi;
                                 PRODUCT_NAME = "$(TARGET_NAME)";
                                 SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
@@ -568,6 +586,15 @@
                                 LD_RUNPATH_SEARCH_PATHS = (
                                         "$(inherited)",
                                         "@executable_path/Frameworks",
+                                );
+                                LIBRARY_SEARCH_PATHS = (
+                                        "$(inherited)",
+                                        "$(PROJECT_DIR)/Frameworks/RustKeri/device",
+                                );
+                                OTHER_LDFLAGS = (
+                                        "$(inherited)",
+                                        "-lidentity_agent_keri",
+                                        "-lresolv",
                                 );
                                 PRODUCT_BUNDLE_IDENTIFIER = com.identityagent.identityAgentUi;
                                 PRODUCT_NAME = "$(TARGET_NAME)";
