@@ -37,25 +37,6 @@ args = "Start Backend"
 task = "workflow.run"
 args = "Start Frontend"
 
-[[workflows.workflow]]
-name = "Start Backend"
-author = "agent"
-mode = "sequential"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "sh ./scripts/start-backend.sh"
-waitForPort = 5000
-
-[[workflows.workflow]]
-name = "Start Frontend"
-author = "agent"
-mode = "sequential"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "sh ./scripts/build-flutter.sh"
-
 [userenv]
 
 [userenv.shared]
