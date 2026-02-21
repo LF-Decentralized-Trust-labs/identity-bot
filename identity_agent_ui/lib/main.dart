@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import 'theme/app_theme.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/contacts_screen.dart';
@@ -16,11 +16,19 @@ import 'services/remote_server_keri_service.dart';
 import 'services/mobile_standalone_keri_service.dart';
 import 'services/keri_helper_client.dart';
 import 'services/preferences_service.dart';
+import 'services/backend_process_service.dart';
 import 'config/agent_config.dart';
 import 'bridge/keri_bridge.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  if (!kIsWeb && BackendProcessService.isDesktopPlatform) {
+    debugPrint('[Agent] Desktop platform detected — starting bundled backend...');
+    final started = await BackendProcessService.instance.start();
+    debugPrint('[Agent] Backend process started: $started');
+  }
+
   runApp(const IdentityAgentApp());
 }
 
