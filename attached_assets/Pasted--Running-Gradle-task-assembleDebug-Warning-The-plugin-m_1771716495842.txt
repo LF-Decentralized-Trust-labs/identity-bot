@@ -1,0 +1,264 @@
+
+Running Gradle task 'assembleDebug'...                          
+Warning: The plugin mobile_scanner requires Android SDK version 36 or higher.
+For more information about build configuration, see https://docs.flutter.dev/deployment/android#reviewing-the-gradle-build-configuration.
+One or more plugins require a higher Android SDK version.
+Fix this issue by adding the following to /home/builder/clone/identity_agent_ui/android/app/build.gradle:
+android {
+  compileSdkVersion 36
+  ...
+}
+
+Checking the license for package Android SDK Platform 36 in /usr/local/share/android-sdk/licenses
+License for package Android SDK Platform 36 accepted.
+Preparing "Install Android SDK Platform 36 (revision: 2)".
+"Install Android SDK Platform 36 (revision: 2)" ready.
+Installing Android SDK Platform 36 in /usr/local/share/android-sdk/platforms/android-36
+"Install Android SDK Platform 36 (revision: 2)" complete.
+"Install Android SDK Platform 36 (revision: 2)" finished.
+
+Running Gradle task 'assembleDebug'...                          
+Warning: The plugin mobile_scanner requires Android SDK version 36 or higher.
+For more information about build configuration, see https://docs.flutter.dev/deployment/android#reviewing-the-gradle-build-configuration.
+One or more plugins require a higher Android SDK version.
+Fix this issue by adding the following to /home/builder/clone/identity_agent_ui/android/app/build.gradle:
+android {
+  compileSdkVersion 36
+  ...
+}
+
+Checking the license for package Android SDK Platform 36 in /usr/local/share/android-sdk/licenses
+License for package Android SDK Platform 36 accepted.
+Preparing "Install Android SDK Platform 36 (revision: 2)".
+"Install Android SDK Platform 36 (revision: 2)" ready.
+Installing Android SDK Platform 36 in /usr/local/share/android-sdk/platforms/android-36
+"Install Android SDK Platform 36 (revision: 2)" complete.
+"Install Android SDK Platform 36 (revision: 2)" finished.
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:checkDebugAarMetadata'.
+> A failure occurred while executing com.android.build.gradle.internal.tasks.CheckAarMetadataWorkAction
+   > 8 issues were found when checking AAR metadata:
+
+       1.  Dependency 'androidx.camera:camera-core:1.5.0' requires libraries and applications that
+           depend on it to compile against version 35 or later of the
+           Android APIs.
+
+           :app is currently compiled against android-34.
+
+           Also, the maximum recommended compile SDK version for Android Gradle
+           plugin 7.3.0 is 33.
+
+           Recommended action: Update this project's version of the Android Gradle
+           plugin to one that supports 35, then update this project to use
+           compileSdkVerion of at least 35.
+
+           Note that updating a library or application's compileSdkVersion (which
+           allows newer APIs to be used) can be done separately from updating
+           targetSdkVersion (which opts the app in to new runtime behavior) and
+           minSdkVersion (which determines which devices the app can be installed
+           on).
+
+       2.  Dependency 'androidx.camera:camera-core:1.5.0' requires Android Gradle plugin 8.6.0 or higher.
+
+           This build currently uses Android Gradle plugin 7.3.0.
+
+       3.  Dependency 'androidx.camera:camera-camera2:1.5.0' requires libraries and applications that
+           depend on it to compile against version 35 or later of the
+           Android APIs.
+
+           :app is currently compiled against android-34.
+
+           Also, the maximum recommended compile SDK version for Android Gradle
+           plugin 7.3.0 is 33.
+
+           Recommended action: Update this project's version of the Android Gradle
+           plugin to one that supports 35, then update this project to use
+           compileSdkVerion of at least 35.
+
+           Note that updating a library or application's compileSdkVersion (which
+           allows newer APIs to be used) can be done separately from updating
+           targetSdkVersion (which opts the app in to new runtime behavior) and
+           minSdkVersion (which determines which devices the app can be installed
+           on).
+
+       4.  Dependency 'androidx.camera:camera-camera2:1.5.0' requires Android Gradle plugin 8.6.0 or higher.
+
+           This build currently uses Android Gradle plugin 7.3.0.
+
+       5.  Dependency 'androidx.camera:camera-lifecycle:1.5.0' requires libraries and applications that
+           depend on it to compile against version 35 or later of the
+           Android APIs.
+
+           :app is currently compiled against android-34.
+
+           Also, the maximum recommended compile SDK version for Android Gradle
+           plugin 7.3.0 is 33.
+
+           Recommended action: Update this project's version of the Android Gradle
+           plugin to one that supports 35, then update this project to use
+           compileSdkVerion of at least 35.
+
+           Note that updating a library or application's compileSdkVersion (which
+           allows newer APIs to be used) can be done separately from updating
+           targetSdkVersion (which opts the app in to new runtime behavior) and
+           minSdkVersion (which determines which devices the app can be installed
+           on).
+
+       6.  Dependency 'androidx.camera:camera-lifecycle:1.5.0' requires Android Gradle plugin 8.6.0 or higher.
+
+           This build currently uses Android Gradle plugin 7.3.0.
+
+       7.  Dependency 'androidx.camera.featurecombinationquery:featurecombinationquery:1.5.0' requires libraries and applications that
+           depend on it to compile against version 35 or later of the
+           Android APIs.
+
+           :app is currently compiled against android-34.
+
+           Also, the maximum recommended compile SDK version for Android Gradle
+           plugin 7.3.0 is 33.
+
+           Recommended action: Update this project's version of the Android Gradle
+           plugin to one that supports 35, then update this project to use
+           compileSdkVerion of at least 35.
+
+           Note that updating a library or application's compileSdkVersion (which
+           allows newer APIs to be used) can be done separately from updating
+           targetSdkVersion (which opts the app in to new runtime behavior) and
+           minSdkVersion (which determines which devices the app can be installed
+           on).
+
+       8.  Dependency 'androidx.camera.featurecombinationquery:featurecombinationquery:1.5.0' requires Android Gradle plugin 8.6.0 or higher.
+
+           This build currently uses Android Gradle plugin 7.3.0.
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+
+* Get more help at https://help.gradle.org
+
+BUILD FAILED in 1m 43s
+Running Gradle task 'assembleDebug'...                            104.5s
+Gradle task assembleDebug failed with exit code 1
+
+
+Build failed :|
+Step 9 script `Build debug APK` exited with status code 1
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:checkDebugAarMetadata'.
+> A failure occurred while executing com.android.build.gradle.internal.tasks.CheckAarMetadataWorkAction
+   > 8 issues were found when checking AAR metadata:
+
+       1.  Dependency 'androidx.camera:camera-core:1.5.0' requires libraries and applications that
+           depend on it to compile against version 35 or later of the
+           Android APIs.
+
+           :app is currently compiled against android-34.
+
+           Also, the maximum recommended compile SDK version for Android Gradle
+           plugin 7.3.0 is 33.
+
+           Recommended action: Update this project's version of the Android Gradle
+           plugin to one that supports 35, then update this project to use
+           compileSdkVerion of at least 35.
+
+           Note that updating a library or application's compileSdkVersion (which
+           allows newer APIs to be used) can be done separately from updating
+           targetSdkVersion (which opts the app in to new runtime behavior) and
+           minSdkVersion (which determines which devices the app can be installed
+           on).
+
+       2.  Dependency 'androidx.camera:camera-core:1.5.0' requires Android Gradle plugin 8.6.0 or higher.
+
+           This build currently uses Android Gradle plugin 7.3.0.
+
+       3.  Dependency 'androidx.camera:camera-camera2:1.5.0' requires libraries and applications that
+           depend on it to compile against version 35 or later of the
+           Android APIs.
+
+           :app is currently compiled against android-34.
+
+           Also, the maximum recommended compile SDK version for Android Gradle
+           plugin 7.3.0 is 33.
+
+           Recommended action: Update this project's version of the Android Gradle
+           plugin to one that supports 35, then update this project to use
+           compileSdkVerion of at least 35.
+
+           Note that updating a library or application's compileSdkVersion (which
+           allows newer APIs to be used) can be done separately from updating
+           targetSdkVersion (which opts the app in to new runtime behavior) and
+           minSdkVersion (which determines which devices the app can be installed
+           on).
+
+       4.  Dependency 'androidx.camera:camera-camera2:1.5.0' requires Android Gradle plugin 8.6.0 or higher.
+
+           This build currently uses Android Gradle plugin 7.3.0.
+
+       5.  Dependency 'androidx.camera:camera-lifecycle:1.5.0' requires libraries and applications that
+           depend on it to compile against version 35 or later of the
+           Android APIs.
+
+           :app is currently compiled against android-34.
+
+           Also, the maximum recommended compile SDK version for Android Gradle
+           plugin 7.3.0 is 33.
+
+           Recommended action: Update this project's version of the Android Gradle
+           plugin to one that supports 35, then update this project to use
+           compileSdkVerion of at least 35.
+
+           Note that updating a library or application's compileSdkVersion (which
+           allows newer APIs to be used) can be done separately from updating
+           targetSdkVersion (which opts the app in to new runtime behavior) and
+           minSdkVersion (which determines which devices the app can be installed
+           on).
+
+       6.  Dependency 'androidx.camera:camera-lifecycle:1.5.0' requires Android Gradle plugin 8.6.0 or higher.
+
+           This build currently uses Android Gradle plugin 7.3.0.
+
+       7.  Dependency 'androidx.camera.featurecombinationquery:featurecombinationquery:1.5.0' requires libraries and applications that
+           depend on it to compile against version 35 or later of the
+           Android APIs.
+
+           :app is currently compiled against android-34.
+
+           Also, the maximum recommended compile SDK version for Android Gradle
+           plugin 7.3.0 is 33.
+
+           Recommended action: Update this project's version of the Android Gradle
+           plugin to one that supports 35, then update this project to use
+           compileSdkVerion of at least 35.
+
+           Note that updating a library or application's compileSdkVersion (which
+           allows newer APIs to be used) can be done separately from updating
+           targetSdkVersion (which opts the app in to new runtime behavior) and
+           minSdkVersion (which determines which devices the app can be installed
+           on).
+
+       8.  Dependency 'androidx.camera.featurecombinationquery:featurecombinationquery:1.5.0' requires Android Gradle plugin 8.6.0 or higher.
+
+           This build currently uses Android Gradle plugin 7.3.0.
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+
+* Get more help at https://help.gradle.org
+
+BUILD FAILED in 1m 43s
+Running Gradle task 'assembleDebug'...                            104.5s
+Gradle task assembleDebug failed with exit code 1
+
+
+Build failed :|
+Step 9 script `Build debug APK` exited with status code 1
