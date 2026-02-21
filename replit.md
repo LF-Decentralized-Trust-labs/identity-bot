@@ -73,6 +73,19 @@ The workflow "Start application" runs `bash scripts/start-backend.sh` which:
 Configured as autoscale deployment running the Go binary.
 
 ## Recent Changes
+- 2026-02-21: Fixed UI/backend field name contract mismatches
+  - Aligned telemetry summary fields (total_network_events, total_file_events)
+  - Aligned event display fields (syscall_name, comm, bytes_sent/bytes_recv, success)
+  - Aligned Rego policy CRUD fields (module, rego)
+  - Aligned simulation/evaluate response parsing (details, allow, decision)
+- 2026-02-21: Added Phase 1 Control Plane features (Milestone 2)
+  - PostgreSQL storage layer replacing file-based JSON (11 tables)
+  - Telemetry schema: SyscallEvent, NetworkEvent, FileAccessEvent types
+  - Telemetry ingest webhook (POST /api/telemetry/ingest) for VPS data plane
+  - Telemetry summary aggregation (top syscalls, destinations, file paths, protocol/direction)
+  - OPA policy engine with Rego storage, evaluation, validation, simulation
+  - Telemetry Analysis dashboard with bar charts, event tables, app filtering
+  - Policy Editor UI with Rego code editor, syntax validation, simulation panel
 - 2026-02-20: Added App Store Control Plane (Milestone 1)
   - New data models: AppRecord, PolicyRecord, AuditLogEntry
   - App Store REST API with full CRUD + launch/stop/policy assignment
