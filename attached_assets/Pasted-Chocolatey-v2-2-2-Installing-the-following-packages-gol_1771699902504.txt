@@ -1,0 +1,46 @@
+Chocolatey v2.2.2
+Installing the following packages:
+golang
+By installing, you accept licenses for the packages.
+
+Progress: Downloading golang 1.26.0... 17%
+Progress: Downloading golang 1.26.0... 50%
+Progress: Downloading golang 1.26.0... 83%
+Progress: Downloading golang 1.26.0... 100%
+
+golang v1.26.0 [Approved]
+golang package files install completed. Performing other installation steps.
+Downloading golang 64 bit
+  from 'https://golang.org/dl/go1.26.0.windows-amd64.msi'
+
+Download of go1.26.0.windows-amd64.msi (-1 B) completed.
+Hashes match.
+Installing golang...
+golang has been installed.
+  golang may be able to be automatically uninstalled.
+Environment Vars (like PATH) have changed. Close/reopen your shell to
+ see the changes (or in powershell/cmd.exe just type `refreshenv`).
+ The install of golang was successful.
+  Software installed as 'msi', install location is likely default.
+
+Chocolatey installed 1/1 packages. 
+ See the log for details (C:\ProgramData\chocolatey\logs\chocolatey.log).
+
+Did you know the proceeds of Pro (and some proceeds from other
+ licensed editions) go into bettering the community infrastructure?
+ Your support ensures an active community, keeps Chocolatey tip-top,
+ plus it nets you some awesome features!
+ https://chocolatey.org/compare
+RefreshEnv.cmd does not work when run from this process. If you're in PowerShell, please 'Import-Module $env:ChocolateyInstall\helpers\chocolateyProfile.psm1' and try again.
+go : The term 'go' is not recognized as the name of a cmdlet, function, script file, or operable program. Check the 
+spelling of the name, or if a path was included, verify that the path is correct and try again.
+At C:\Users\builder\AppData\Local\Temp\build_script_3_1_9p68f0tl.ps1:3 char:1
++ go version
++ ~~
+    + CategoryInfo          : ObjectNotFound: (go:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+ 
+
+
+Build failed :|
+Step 3 script `Install Go toolchain` exited with status code 1

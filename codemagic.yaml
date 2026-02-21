@@ -165,11 +165,12 @@ workflows:
       - name: Install Go toolchain
         script: |
           choco install golang -y
-          refreshenv
+          $env:Path = "C:\Program Files\Go\bin;$env:Path"
           go version
 
       - name: Build Go backend (Windows)
         script: |
+          $env:Path = "C:\Program Files\Go\bin;$env:Path"
           $env:CGO_ENABLED = "0"
           $env:GOOS = "windows"
           $env:GOARCH = "amd64"
