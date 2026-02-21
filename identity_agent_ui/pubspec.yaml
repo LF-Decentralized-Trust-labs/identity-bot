@@ -39,6 +39,7 @@ dependencies:
   crypto: ^3.0.7
   pointycastle: ^4.0.0
   ed25519_edwards: ^0.3.1
+  shared_preferences: ^2.2.3
   flutter_rust_bridge: ^2.7.0
   freezed_annotation: ^2.4.1
   meta: ^1.11.0

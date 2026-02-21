@@ -3,11 +3,21 @@ import 'package:flutter/services.dart';
 import '../theme/app_theme.dart';
 import '../services/core_service.dart';
 import '../services/keri_service.dart';
+import '../services/preferences_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   final KeriService keriService;
+  final AgentMode? mode;
+  final EntityType? entityType;
+  final String? serverUrl;
 
-  const SettingsScreen({super.key, required this.keriService});
+  const SettingsScreen({
+    super.key,
+    required this.keriService,
+    this.mode,
+    this.entityType,
+    this.serverUrl,
+  });
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -151,17 +161,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       fontFamily: 'monospace',
                     ),
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 24),
+                  _buildAgentInfoCard(),
+                  const SizedBox(height: 24),
                   const Text(
                     'TUNNEL & CONNECTIVITY',
                     style: TextStyle(
                       color: AppColors.textMuted,
                       fontSize: 11,
+                      fontWeight: FontWeight.w600,
                       letterSpacing: 1.5,
                       fontFamily: 'monospace',
                     ),
                   ),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 12),
                   _buildTunnelStatusCard(),
                   const SizedBox(height: 16),
                   _buildProviderSelector(),
@@ -177,6 +190,85 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ],
               ),
             ),
+    );
+  }
+
+  Widget _buildAgentInfoCard() {
+    final modeName = widget.mode != null
+        ? PreferencesService.modeDisplayName(widget.mode!)
+        : 'Unknown';
+    final entityName = widget.entityType != null
+        ? PreferencesService.entityTypeDisplayName(widget.entityType!)
+        : null;
+    final envName = widget.keriService.environment.name.toUpperCase();
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border, width: 1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'AGENT CONFIGURATION',
+            style: TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 1.5,
+              fontFamily: 'monospace',
+            ),
+          ),
+          const SizedBox(height: 14),
+          _buildInfoRow('MODE', modeName),
+          if (entityName != null) ...[
+            const SizedBox(height: 8),
+            _buildInfoRow('IDENTITY TYPE', entityName),
+          ],
+          const SizedBox(height: 8),
+          _buildInfoRow('ENGINE', envName),
+          if (widget.serverUrl != null && widget.serverUrl!.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            _buildInfoRow('SERVER', widget.serverUrl!),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInfoRow(String label, String value) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 110,
+          child: Text(
+            label,
+            style: const TextStyle(
+              color: AppColors.textMuted,
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 1.0,
+              fontFamily: 'monospace',
+            ),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            style: const TextStyle(
+              color: AppColors.textPrimary,
+              fontSize: 11,
+              fontFamily: 'monospace',
+            ),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
     );
   }
 

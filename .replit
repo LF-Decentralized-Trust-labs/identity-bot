@@ -1,5 +1,5 @@
 entrypoint = "README.md"
-modules = ["python-3.11"]
+modules = ["python-3.11", "dart"]
 
 [nix]
 channel = "stable-24_05"

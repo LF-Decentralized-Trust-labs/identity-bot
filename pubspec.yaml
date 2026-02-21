@@ -1,0 +1,5 @@
+name: MyApp
+description: ""
+dependencies:
+  shared_preferences: null
+dev_dependencies: {}
