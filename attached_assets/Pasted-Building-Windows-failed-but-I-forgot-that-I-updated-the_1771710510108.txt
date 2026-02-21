@@ -1,0 +1,40 @@
+Building Windows failed, but I forgot that I updated the Windows build bug on another branch that I ended up not merging. Here's the conversation from the other Replit Agent on the other branch. Can you fix it? I'm also sending the latest set of logs I'm getting right now from the latest build attempt in case there is additional insight that's needed: "Chocolatey v2.2.2
+Installing the following packages:
+golang
+By installing, you accept licenses for the packages.
+
+Progress: Downloading golang 1.26.0... 17%
+Progress: Downloading golang 1.26.0... 50%
+Progress: Downloading golang 1.26.0... 83%
+Progress: Downloading golang 1.26.0... 100%
+
+golang v1.26.0 [Approved]
+golang package files install completed. Performing other installation steps.
+Downloading golang 64 bit
+  from 'https://golang.org/dl/go1.26.0.windows-amd64.msi'
+
+Download of go1.26.0.windows-amd64.msi (-1 B) completed.
+Hashes match.
+Installing golang...
+golang has been installed.
+  golang may be able to be automatically uninstalled.
+Environment Vars (like PATH) have changed. Close/reopen your shell to
+ see the changes (or in powershell/cmd.exe just type `refreshenv`).
+ The install of golang was successful.
+  Software installed as 'msi', install location is likely default.
+
+Chocolatey installed 1/1 packages. 
+ See the log for details (C:\ProgramData\chocolatey\logs\chocolatey.log).
+RefreshEnv.cmd does not work when run from this process. If you're in PowerShell, please 'Import-Module $env:ChocolateyInstall\helpers\chocolateyProfile.psm1' and try again.
+go : The term 'go' is not recognized as the name of a cmdlet, function, script file, or operable program. Check the 
+spelling of the name, or if a path was included, verify that the path is correct and try again.
+At C:\Users\builder\AppData\Local\Temp\build_script_3_1_f00ofd74.ps1:3 char:1
++ go version
++ ~~
+    + CategoryInfo          : ObjectNotFound: (go:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+ 
+
+
+Build failed :|
+Step 3 script `Install Go toolchain` exited with status code 1"
