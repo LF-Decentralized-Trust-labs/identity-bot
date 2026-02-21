@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import '../theme/app_theme.dart';
 import '../crypto/bip39.dart';
 import '../services/keri_service.dart';
+import '../services/backend_process_service.dart';
 
 enum WizardStep {
   welcome,
@@ -213,8 +215,30 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
         _currentStep = WizardStep.complete;
       });
     } catch (e) {
+      String errorMsg = e.toString();
+
+      if (errorMsg.contains('SocketException') ||
+          errorMsg.contains('Connection refused') ||
+          errorMsg.contains('connection refused')) {
+        if (!kIsWeb && BackendProcessService.isDesktopPlatform) {
+          final backendError = BackendProcessService.instance.startupError;
+          if (backendError != null) {
+            errorMsg = backendError;
+          } else {
+            errorMsg =
+                'Cannot connect to the identity backend (localhost:5000). '
+                'The backend service may not be running. '
+                'Please ensure Python 3 is installed and try restarting the app.';
+          }
+        } else {
+          errorMsg =
+              'Cannot connect to the identity backend. '
+              'Please check your network connection and try again.';
+        }
+      }
+
       setState(() {
-        _errorMessage = e.toString();
+        _errorMessage = errorMsg;
         _currentStep = WizardStep.verifySeed;
       });
     }

@@ -27,6 +27,10 @@ void main() async {
     debugPrint('[Agent] Desktop platform detected — starting bundled backend...');
     final started = await BackendProcessService.instance.start();
     debugPrint('[Agent] Backend process started: $started');
+    if (!started) {
+      final err = BackendProcessService.instance.startupError;
+      debugPrint('[Agent] Backend startup error: $err');
+    }
   }
 
   runApp(const IdentityAgentApp());
