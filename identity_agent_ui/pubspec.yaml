@@ -43,6 +43,8 @@ dependencies:
   flutter_rust_bridge: ^2.7.0
   freezed_annotation: ^2.4.1
   meta: ^1.11.0
+  qr_flutter: ^4.1.0
+  mobile_scanner: ^6.0.11
 
 dependency_overrides:
   vector_math: 2.1.3

@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'dart:io' show Platform;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import '../theme/app_theme.dart';
 import '../services/core_service.dart';
 import '../services/keri_service.dart';
+import 'qr_scanner_screen.dart';
 
 class ContactsScreen extends StatefulWidget {
   final KeriService keriService;
@@ -69,8 +72,30 @@ class _ContactsScreenState extends State<ContactsScreen> {
     }
   }
 
-  void _showAddContactDialog() {
-    final oobiController = TextEditingController();
+  bool get _isMobilePlatform {
+    if (kIsWeb) return false;
+    try {
+      return Platform.isIOS || Platform.isAndroid;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  void _openQrScanner() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => QrScannerScreen(
+          onScanned: (scannedData) {
+            Navigator.of(context).pop();
+            _showAddContactDialog(prefillOobiUrl: scannedData);
+          },
+        ),
+      ),
+    );
+  }
+
+  void _showAddContactDialog({String? prefillOobiUrl}) {
+    final oobiController = TextEditingController(text: prefillOobiUrl ?? '');
     final aliasController = TextEditingController();
     bool isSubmitting = false;
 
@@ -387,9 +412,28 @@ class _ContactsScreenState extends State<ContactsScreen> {
               child: const Icon(Icons.refresh, color: AppColors.textSecondary, size: 18),
             ),
           ),
+          if (_isMobilePlatform) ...[
+            const SizedBox(width: 8),
+            InkWell(
+              onTap: _openQrScanner,
+              borderRadius: BorderRadius.circular(6),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: AppColors.accent.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(
+                    color: AppColors.accent.withOpacity(0.3),
+                    width: 1,
+                  ),
+                ),
+                child: const Icon(Icons.qr_code_scanner, color: AppColors.accent, size: 18),
+              ),
+            ),
+          ],
           const SizedBox(width: 8),
           InkWell(
-            onTap: _showAddContactDialog,
+            onTap: () => _showAddContactDialog(),
             borderRadius: BorderRadius.circular(6),
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),

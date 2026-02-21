@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import '../theme/app_theme.dart';
 import '../services/core_service.dart';
 import '../services/keri_service.dart';
@@ -204,7 +205,7 @@ class _OobiScreenState extends State<OobiScreen> {
           const SizedBox(height: 20),
           _buildAidCard(),
           const SizedBox(height: 20),
-          _buildQrPlaceholder(),
+          _buildQrCode(),
           const SizedBox(height: 24),
         ],
       ),
@@ -364,7 +365,8 @@ class _OobiScreenState extends State<OobiScreen> {
     );
   }
 
-  Widget _buildQrPlaceholder() {
+  Widget _buildQrCode() {
+    final oobiUrl = _oobi?.oobiUrl ?? '';
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -385,38 +387,37 @@ class _OobiScreenState extends State<OobiScreen> {
               fontFamily: 'monospace',
             ),
           ),
-          const SizedBox(height: 14),
-          Container(
-            width: double.infinity,
-            height: 200,
-            decoration: BoxDecoration(
-              color: AppColors.primary,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(
-                color: AppColors.border,
-                width: 1,
-              ),
+          const SizedBox(height: 6),
+          const Text(
+            'Scan this code from another device to add this identity as a contact',
+            style: TextStyle(
+              color: AppColors.textMuted,
+              fontSize: 10,
+              fontFamily: 'monospace',
+              height: 1.4,
             ),
-            child: Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.qr_code_2,
-                    color: AppColors.textMuted.withOpacity(0.3),
-                    size: 64,
-                  ),
-                  const SizedBox(height: 12),
-                  const Text(
-                    'QR Code - Coming Soon',
-                    style: TextStyle(
-                      color: AppColors.textMuted,
-                      fontSize: 12,
-                      fontFamily: 'monospace',
-                      letterSpacing: 0.5,
-                    ),
-                  ),
-                ],
+          ),
+          const SizedBox(height: 14),
+          Center(
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: QrImageView(
+                data: oobiUrl,
+                version: QrVersions.auto,
+                size: 200,
+                backgroundColor: Colors.white,
+                eyeStyle: const QrEyeStyle(
+                  eyeShape: QrEyeShape.square,
+                  color: Color(0xFF0a0e1a),
+                ),
+                dataModuleStyle: const QrDataModuleStyle(
+                  dataModuleShape: QrDataModuleShape.square,
+                  color: Color(0xFF0a0e1a),
+                ),
               ),
             ),
           ),
