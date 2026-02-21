@@ -29,7 +29,12 @@ workflows:
           echo "Using NDK: $ANDROID_NDK_HOME"
           echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME" >> $CM_ENV
 
-      - name: Build Rust library for Android via cargo-ndk
+      - name: Install FRB codegen
+        script: |
+          source "$HOME/.cargo/env"
+          cargo install flutter_rust_bridge_codegen --version 2.11.1
+
+      - name: Build Rust library for Android via cargo-ndk with FRB codegen
         script: |
           source "$HOME/.cargo/env"
           cd identity_agent_ui/rust
@@ -37,6 +42,26 @@ workflows:
           mkdir -p ../android/app/src/main/jniLibs/armeabi-v7a
           mkdir -p ../android/app/src/main/jniLibs/x86_64
           mkdir -p ../android/app/src/main/jniLibs/x86
+
+          # Phase 1: Build with dev_skip_frb so FRB codegen can inspect symbols
+          echo "--- Phase 1: Building with dev_skip_frb for FRB codegen ---"
+          cargo ndk \
+            --target aarch64-linux-android \
+            --target armv7-linux-androideabi \
+            --target x86_64-linux-android \
+            --target i686-linux-android \
+            --platform 21 \
+            --output-dir ../android/app/src/main/jniLibs \
+            build --release --features dev_skip_frb
+
+          # Phase 2: Generate FRB bindings (creates src/frb_generated.rs)
+          echo "--- Phase 2: Generating FRB bindings ---"
+          cd ..
+          flutter_rust_bridge_codegen generate
+          cd rust
+
+          # Phase 3: Rebuild without dev_skip_frb to include frb_generated.rs
+          echo "--- Phase 3: Final build with FRB bindings ---"
           cargo ndk \
             --target aarch64-linux-android \
             --target armv7-linux-androideabi \
@@ -45,15 +70,9 @@ workflows:
             --platform 21 \
             --output-dir ../android/app/src/main/jniLibs \
             build --release
+
           echo "--- Built .so files ---"
           find ../android/app/src/main/jniLibs -name "*.so" -ls
-
-      - name: Generate flutter_rust_bridge bindings
-        script: |
-          source "$HOME/.cargo/env"
-          cargo install flutter_rust_bridge_codegen --version 2.11.1
-          cd identity_agent_ui
-          flutter_rust_bridge_codegen generate
 
       - name: Set up local properties
         script: |
@@ -102,20 +121,36 @@ workflows:
           rustc --version
           cargo --version
 
-      - name: Build Rust static library for iOS (device)
+      - name: Install FRB codegen
         script: |
           source "$HOME/.cargo/env"
-          cd identity_agent_ui/rust
-          cargo build --release --target aarch64-apple-ios
-          echo "--- Built device static library ---"
-          ls -lh target/aarch64-apple-ios/release/libidentity_agent_keri.a
+          cargo install flutter_rust_bridge_codegen --version 2.11.1
 
-      - name: Build Rust static library for iOS (simulator)
+      - name: Build Rust static library for iOS (device + simulator) with FRB codegen
         script: |
           source "$HOME/.cargo/env"
           cd identity_agent_ui/rust
+
+          # Step 1: Initial build with dev_skip_frb to compile the crate
+          # without the frb_generated module (which doesn't exist yet).
+          # FRB codegen needs the compiled library to inspect exported symbols.
+          echo "--- Phase 1: Building with dev_skip_frb for FRB codegen inspection ---"
+          cargo build --release --target aarch64-apple-ios --features dev_skip_frb
+          cargo build --release --target aarch64-apple-ios-sim --features dev_skip_frb
+
+          # Step 2: Run FRB codegen — this generates src/frb_generated.rs
+          echo "--- Phase 2: Generating FRB bindings ---"
+          cd ..
+          flutter_rust_bridge_codegen generate
+          cd rust
+
+          # Step 3: Rebuild WITHOUT dev_skip_frb so frb_generated.rs is included
+          echo "--- Phase 3: Final build with FRB bindings ---"
+          cargo build --release --target aarch64-apple-ios
           cargo build --release --target aarch64-apple-ios-sim
-          echo "--- Built simulator static library ---"
+
+          echo "--- Built static libraries ---"
+          ls -lh target/aarch64-apple-ios/release/libidentity_agent_keri.a
           ls -lh target/aarch64-apple-ios-sim/release/libidentity_agent_keri.a
 
       - name: Copy Rust libraries to iOS Frameworks
@@ -132,13 +167,6 @@ workflows:
           echo "--- Libraries placed ---"
           ls -lh "$IOS_DIR/Frameworks/RustKeri/device/$LIB"
           ls -lh "$IOS_DIR/Frameworks/RustKeri/simulator/$LIB"
-
-      - name: Generate flutter_rust_bridge bindings
-        script: |
-          source "$HOME/.cargo/env"
-          cargo install flutter_rust_bridge_codegen --version 2.11.1
-          cd identity_agent_ui
-          flutter_rust_bridge_codegen generate
 
       - name: Get Flutter packages
         script: |

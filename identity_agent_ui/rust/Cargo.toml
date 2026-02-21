@@ -7,6 +7,9 @@ description = "KERI bridge for Identity Agent Flutter app"
 [lib]
 crate-type = ["cdylib", "staticlib"]
 
+[features]
+dev_skip_frb = []
+
 [dependencies]
 flutter_rust_bridge = "=2.11.1"
 keri-core = "0.11"
