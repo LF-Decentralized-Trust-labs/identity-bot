@@ -1,5 +1,5 @@
 import 'dart:io' show Platform;
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, debugPrint;
 import '../src/rust/frb_generated.dart';
 import '../src/rust/api/keri_bridge.dart' as rust_api;
 
@@ -44,12 +44,26 @@ bool get _isMobilePlatform {
 
 class KeriBridge {
   static bool _rustInitialized = false;
+  static bool _rustAvailable = false;
+  static String? _loadError;
+
+  static bool get isAvailable => _rustAvailable;
+  static String? get loadError => _loadError;
 
   static Future<void> ensureInitialized() async {
     if (_rustInitialized) return;
     if (!_isMobilePlatform) return;
-    await RustLib.init();
-    _rustInitialized = true;
+    try {
+      await RustLib.init();
+      _rustAvailable = true;
+      _rustInitialized = true;
+      debugPrint('[KeriBridge] Rust library loaded successfully');
+    } catch (e) {
+      _rustInitialized = true;
+      _rustAvailable = false;
+      _loadError = e.toString();
+      debugPrint('[KeriBridge] Rust library NOT available: $e');
+    }
   }
 
   Future<BridgeInceptionResult> inceptAid({

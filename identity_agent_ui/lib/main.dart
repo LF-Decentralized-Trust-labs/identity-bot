@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'theme/app_theme.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/contacts_screen.dart';
@@ -12,6 +13,7 @@ import 'services/remote_server_keri_service.dart';
 import 'services/mobile_standalone_keri_service.dart';
 import 'services/keri_helper_client.dart';
 import 'config/agent_config.dart';
+import 'bridge/keri_bridge.dart';
 
 void main() {
   runApp(const IdentityAgentApp());
@@ -42,34 +44,43 @@ class _AgentRouterState extends State<AgentRouter> {
   bool _loading = true;
   bool _identityExists = false;
   String? _error;
-  late final KeriService _keriService;
-  late final AgentEnvironment _environment;
+  late KeriService _keriService;
+  late AgentEnvironment _environment;
 
   @override
   void initState() {
     super.initState();
-    _initializeServices();
-    _checkIdentity();
+    _initializeAsync();
   }
 
-  void _initializeServices() {
+  Future<void> _initializeAsync() async {
+    await _initializeServices();
+    await _checkIdentity();
+  }
+
+  Future<void> _initializeServices() async {
     final primaryUrl = AgentConfig.primaryServerUrl;
     _environment = KeriService.detectEnvironment(
       primaryServerUrl: primaryUrl,
     );
 
-    switch (_environment) {
-      case AgentEnvironment.desktop:
-        _keriService = DesktopKeriService();
-        break;
-      case AgentEnvironment.mobileRemote:
-        _keriService = RemoteServerKeriService(serverUrl: primaryUrl);
-        break;
-      case AgentEnvironment.mobileStandalone:
+    if (_environment == AgentEnvironment.mobileStandalone) {
+      await KeriBridge.ensureInitialized();
+
+      if (KeriBridge.isAvailable) {
+        debugPrint('[Agent] Mobile Standalone mode — Rust bridge loaded');
         _keriService = MobileStandaloneKeriService(
           helper: KeriHelperClient(),
         );
-        break;
+      } else {
+        debugPrint('[Agent] Rust bridge unavailable (${KeriBridge.loadError}), falling back to Desktop/Remote mode');
+        _environment = AgentEnvironment.desktop;
+        _keriService = DesktopKeriService();
+      }
+    } else if (_environment == AgentEnvironment.mobileRemote) {
+      _keriService = RemoteServerKeriService(serverUrl: primaryUrl);
+    } else {
+      _keriService = DesktopKeriService();
     }
   }
 
