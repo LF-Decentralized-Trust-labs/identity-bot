@@ -5,7 +5,7 @@ use keri_core::event::sections::key_config::{nxt_commitment, KeyConfig};
 use keri_core::event::sections::threshold::SignatureThreshold;
 use keri_core::keys::PublicKey;
 use keri_core::prefix::{BasicPrefix, IdentifierPrefix, SelfSigningPrefix};
-use keri_core::signer::CryptoBox;
+use keri_core::signer::{CryptoBox, KeyManager};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -51,7 +51,7 @@ pub fn incept_aid(name: String, _code: String) -> Result<InceptionResult, String
     let crypto_box = CryptoBox::new().map_err(|e| format!("Key generation failed: {}", e))?;
 
     let current_pk = crypto_box.public_key();
-    let next_pk = crypto_box.next_pub_key();
+    let next_pk = crypto_box.next_public_key();
 
     let nxt = nxt_commitment(
         SignatureThreshold::Simple(1),
