@@ -41,6 +41,9 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
         stem: 'identity_agent_keri',
         ioDirectory: 'rust/target/release/',
         webPrefix: 'pkg/',
+        override: {
+          LibraryPlatform.android: 'libidentity_agent_keri.so',
+        },
       );
 
   @override
