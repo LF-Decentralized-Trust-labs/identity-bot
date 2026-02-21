@@ -89,6 +89,7 @@ var (
         keriDriver    *drivers.KeriDriver
         tunnelManager *tunnel.Manager
         appCtx        context.Context
+        opaEngine     *OPAEngine
 )
 
 func main() {
@@ -100,11 +101,31 @@ func main() {
         }
 
         var err error
-        dataStore, err = store.NewFileStore(storeDir)
-        if err != nil {
-                log.Fatalf("[identity-agent-core] Failed to initialize store: %v", err)
+        dbURL := os.Getenv("DATABASE_URL")
+        if dbURL != "" {
+                dataStore, err = store.NewPostgresStore(dbURL)
+                if err != nil {
+                        log.Printf("[identity-agent-core] Postgres unavailable, falling back to file store: %v", err)
+                        dataStore, err = store.NewFileStore(storeDir)
+                        if err != nil {
+                                log.Fatalf("[identity-agent-core] Failed to initialize store: %v", err)
+                        }
+                }
+        } else {
+                dataStore, err = store.NewFileStore(storeDir)
+                if err != nil {
+                        log.Fatalf("[identity-agent-core] Failed to initialize store: %v", err)
+                }
         }
         defer dataStore.Close()
+
+        opaEngine = NewOPAEngine()
+        regoPolicies, err := dataStore.GetRegoPolicies()
+        if err == nil && len(regoPolicies) > 0 {
+                if err := opaEngine.LoadPolicies(regoPolicies); err != nil {
+                        log.Printf("[identity-agent-core] Warning: failed to load OPA policies: %v", err)
+                }
+        }
 
         keriDriver = drivers.NewKeriDriver()
         if err := keriDriver.Start(); err != nil {
@@ -177,6 +198,20 @@ func main() {
 
                 r.Get("/audit-log", handleGetAuditLog)
                 r.Post("/audit-log/ingest", handleIngestAuditWebhook)
+
+                r.Post("/opa/policies", handleCreateRegoPolicy)
+                r.Get("/opa/policies", handleListRegoPolicies)
+                r.Get("/opa/policies/{id}", handleGetRegoPolicy)
+                r.Delete("/opa/policies/{id}", handleDeleteRegoPolicy)
+                r.Post("/opa/evaluate", handleEvaluatePolicy)
+                r.Post("/opa/validate", handleValidateRego)
+                r.Post("/opa/simulate", handleSimulatePolicy)
+
+                r.Post("/telemetry/ingest", handleIngestTelemetry)
+                r.Get("/telemetry/summary", handleGetTelemetrySummary)
+                r.Get("/telemetry/network", handleGetNetworkEvents)
+                r.Get("/telemetry/syscalls", handleGetSyscallEvents)
+                r.Get("/telemetry/files", handleGetFileEvents)
         })
 
         r.Get("/oobi/{aid}", handleOobiServe)

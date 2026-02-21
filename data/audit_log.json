@@ -1,0 +1,24 @@
+[
+  {
+    "id": "566d42e2984efc1c",
+    "app_id": "012ca031ba50ae0e",
+    "app_name": "Test Agent",
+    "event_type": "system",
+    "direction": "internal",
+    "target": "app-store",
+    "details": "App 'Test Agent' registered (language: python)",
+    "action": "allowed",
+    "timestamp": "2026-02-21T08:17:33Z"
+  },
+  {
+    "id": "0053ec360c3fff0e",
+    "app_id": "012ca031ba50ae0e",
+    "app_name": "Test Agent",
+    "event_type": "system",
+    "direction": "internal",
+    "target": "app-store",
+    "details": "App 'Test Agent' removed",
+    "action": "allowed",
+    "timestamp": "2026-02-21T08:17:41Z"
+  }
+]

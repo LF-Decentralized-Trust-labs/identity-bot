@@ -20,15 +20,25 @@ echo ""
 echo "[2/3] Go Core binary..."
 echo "      Looking for: $BINARY"
 
-if [ -f "$BINARY" ]; then
-    echo "      Go Core binary found (pre-built). Skipping build."
+NEEDS_BUILD=false
+if [ ! -f "$BINARY" ]; then
+    NEEDS_BUILD=true
 else
-    echo "      Go Core binary not found. Building..."
+    NEWEST_SRC=$(find "$WORKSPACE/identity-agent-core" -name '*.go' -newer "$BINARY" 2>/dev/null | head -1)
+    if [ -n "$NEWEST_SRC" ]; then
+        NEEDS_BUILD=true
+    fi
+fi
+
+if [ "$NEEDS_BUILD" = "true" ]; then
+    echo "      Building Go Core binary..."
     cd "$WORKSPACE/identity-agent-core"
     mkdir -p "$WORKSPACE/bin"
     CGO_ENABLED=0 go build -o "$BINARY" .
     chmod +x "$BINARY"
     echo "      Go Core built successfully."
+else
+    echo "      Go Core binary up to date."
 fi
 
 echo ""

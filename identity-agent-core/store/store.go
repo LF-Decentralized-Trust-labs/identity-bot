@@ -105,6 +105,19 @@ type Store interface {
         AppendAuditLog(entry AuditLogEntry) error
         GetAuditLog(appID string, limit int) ([]AuditLogEntry, error)
 
+        SaveSyscallEvents(events []SyscallEvent) error
+        SaveNetworkEvents(events []NetworkEvent) error
+        SaveFileAccessEvents(events []FileAccessEvent) error
+        GetTelemetrySummary(appID string) (*TelemetrySummary, error)
+        GetNetworkEvents(appID string, limit int) ([]NetworkEvent, error)
+        GetSyscallEvents(appID string, limit int) ([]SyscallEvent, error)
+        GetFileAccessEvents(appID string, limit int) ([]FileAccessEvent, error)
+
+        SaveRegoPolicy(policy RegoPolicy) error
+        GetRegoPolicies() ([]RegoPolicy, error)
+        GetRegoPolicy(id string) (*RegoPolicy, error)
+        DeleteRegoPolicy(id string) error
+
         Close() error
 }
 
@@ -445,6 +458,50 @@ func (s *FileStore) GetAuditLog(appID string, limit int) ([]AuditLogEntry, error
         }
 
         return entries, nil
+}
+
+func (s *FileStore) SaveSyscallEvents(events []SyscallEvent) error {
+        return fmt.Errorf("telemetry not supported in file store — use PostgresStore")
+}
+
+func (s *FileStore) SaveNetworkEvents(events []NetworkEvent) error {
+        return fmt.Errorf("telemetry not supported in file store — use PostgresStore")
+}
+
+func (s *FileStore) SaveFileAccessEvents(events []FileAccessEvent) error {
+        return fmt.Errorf("telemetry not supported in file store — use PostgresStore")
+}
+
+func (s *FileStore) GetTelemetrySummary(appID string) (*TelemetrySummary, error) {
+        return &TelemetrySummary{AppID: appID}, nil
+}
+
+func (s *FileStore) GetNetworkEvents(appID string, limit int) ([]NetworkEvent, error) {
+        return []NetworkEvent{}, nil
+}
+
+func (s *FileStore) GetSyscallEvents(appID string, limit int) ([]SyscallEvent, error) {
+        return []SyscallEvent{}, nil
+}
+
+func (s *FileStore) GetFileAccessEvents(appID string, limit int) ([]FileAccessEvent, error) {
+        return []FileAccessEvent{}, nil
+}
+
+func (s *FileStore) SaveRegoPolicy(policy RegoPolicy) error {
+        return fmt.Errorf("rego policies not supported in file store — use PostgresStore")
+}
+
+func (s *FileStore) GetRegoPolicies() ([]RegoPolicy, error) {
+        return []RegoPolicy{}, nil
+}
+
+func (s *FileStore) GetRegoPolicy(id string) (*RegoPolicy, error) {
+        return nil, nil
+}
+
+func (s *FileStore) DeleteRegoPolicy(id string) error {
+        return fmt.Errorf("rego policies not supported in file store — use PostgresStore")
 }
 
 func (s *FileStore) Close() error {

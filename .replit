@@ -1,5 +1,5 @@
 entrypoint = "README.md"
-modules = ["python-3.11", "go-1.25"]
+modules = ["python-3.11", "go-1.25", "postgresql-16"]
 
 [nix]
 channel = "stable-24_05"

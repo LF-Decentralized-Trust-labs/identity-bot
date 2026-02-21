@@ -23,6 +23,12 @@
         <div class="nav-item" data-section="audit">
           <span class="icon">&#128220;</span> Audit Log
         </div>
+        <div class="nav-item" data-section="telemetry">
+          <span class="icon">&#128202;</span> Telemetry
+        </div>
+        <div class="nav-item" data-section="rego">
+          <span class="icon">&#9999;&#65039;</span> Policy Editor
+        </div>
       </nav>
       <div class="sidebar-footer">
         <a href="/">&#8592; Back to Dashboard</a>
@@ -84,6 +90,150 @@
             </thead>
             <tbody id="audit-tbody"></tbody>
           </table>
+        </div>
+      </div>
+
+      <div id="section-telemetry" class="section section-hidden">
+        <div class="page-header">
+          <h2>Telemetry Analysis</h2>
+          <div class="telemetry-filter">
+            <select id="telemetry-app-filter" onchange="loadTelemetry()">
+              <option value="">All Apps</option>
+            </select>
+            <button class="btn btn-secondary" onclick="loadTelemetry()">&#8635; Refresh</button>
+          </div>
+        </div>
+
+        <div class="stats-row" id="telemetry-stats">
+          <div class="stat-card">
+            <div class="stat-value" id="tstat-syscalls">0</div>
+            <div class="stat-label">Total Syscalls</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="tstat-network">0</div>
+            <div class="stat-label">Total Network Events</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="tstat-files">0</div>
+            <div class="stat-label">Total File Events</div>
+          </div>
+        </div>
+
+        <div class="telemetry-grid">
+          <div class="card">
+            <h4 class="card-title">Top Destinations</h4>
+            <div id="tel-top-destinations" class="bar-chart-vertical"></div>
+          </div>
+          <div class="card">
+            <h4 class="card-title">Syscall Frequency</h4>
+            <div id="tel-top-syscalls" class="bar-chart-horizontal"></div>
+          </div>
+        </div>
+
+        <div class="telemetry-grid">
+          <div class="card">
+            <h4 class="card-title">File Access Patterns</h4>
+            <div id="tel-top-files" class="file-list"></div>
+          </div>
+          <div class="card">
+            <h4 class="card-title">Protocol Breakdown</h4>
+            <div id="tel-protocols" class="bar-chart-horizontal"></div>
+            <h4 class="card-title" style="margin-top:1rem;">Direction Breakdown</h4>
+            <div id="tel-directions" class="bar-chart-horizontal"></div>
+          </div>
+        </div>
+
+        <div class="card" style="padding:0;overflow-x:auto;">
+          <h4 class="card-title" style="padding:1rem 1rem 0;">Recent Network Events</h4>
+          <table class="audit-table">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Direction</th>
+                <th>Protocol</th>
+                <th>Destination</th>
+                <th>DNS Query</th>
+                <th>Bytes</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="tel-network-tbody"></tbody>
+          </table>
+        </div>
+
+        <div class="card" style="padding:0;overflow-x:auto;">
+          <h4 class="card-title" style="padding:1rem 1rem 0;">Recent Syscall Events</h4>
+          <table class="audit-table">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>PID</th>
+                <th>Syscall</th>
+                <th>Args</th>
+                <th>Return</th>
+                <th>Process</th>
+              </tr>
+            </thead>
+            <tbody id="tel-syscall-tbody"></tbody>
+          </table>
+        </div>
+
+        <div class="card" style="padding:0;overflow-x:auto;">
+          <h4 class="card-title" style="padding:1rem 1rem 0;">Recent File Events</h4>
+          <table class="audit-table">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>PID</th>
+                <th>Path</th>
+                <th>Operation</th>
+                <th>Process</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="tel-file-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div id="section-rego" class="section section-hidden">
+        <div class="page-header">
+          <h2>Policy Editor (OPA/Rego)</h2>
+          <button class="btn btn-primary" onclick="showModal('modal-create-rego')">+ Create Rego Policy</button>
+        </div>
+
+        <div id="rego-policies-list"></div>
+
+        <div class="card">
+          <h4 class="card-title">Policy Simulation</h4>
+          <div class="form-group">
+            <label>Rego Code</label>
+            <textarea id="sim-rego-code" class="code-textarea" rows="8" placeholder="package sandbox&#10;&#10;default allow = false&#10;&#10;allow {&#10;  input.action == &quot;read&quot;&#10;}"></textarea>
+          </div>
+          <div class="form-group">
+            <label>JSON Events (array)</label>
+            <textarea id="sim-events-input" class="code-textarea" rows="6" placeholder='[{"action":"read","path":"/tmp/data"},{"action":"write","path":"/etc/passwd"}]'></textarea>
+          </div>
+          <div class="form-group">
+            <label>Query</label>
+            <input type="text" id="sim-query" value="data.sandbox.allow" style="width:100%;padding:0.5rem 0.75rem;background:var(--bg-primary);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:0.85rem;">
+          </div>
+          <button class="btn btn-primary" onclick="runSimulation()">&#9654; Run Simulation</button>
+          <div id="sim-results" style="margin-top:1rem;"></div>
+        </div>
+
+        <div class="card">
+          <h4 class="card-title">Live Evaluate</h4>
+          <div class="form-group">
+            <label>Query</label>
+            <input type="text" id="eval-query" value="data.sandbox.allow" style="width:100%;padding:0.5rem 0.75rem;background:var(--bg-primary);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:0.85rem;">
+          </div>
+          <div class="form-group">
+            <label>JSON Input</label>
+            <textarea id="eval-input" class="code-textarea" rows="5" placeholder='{"action":"read","path":"/tmp/data"}'></textarea>
+          </div>
+          <button class="btn btn-primary" onclick="runEvaluate()">&#9654; Evaluate</button>
+          <div id="eval-result" style="margin-top:1rem;"></div>
         </div>
       </div>
     </main>
@@ -181,6 +331,35 @@
         <div class="form-actions">
           <button type="button" class="btn btn-secondary" onclick="hideModal('modal-assign-policy')">Cancel</button>
           <button type="submit" class="btn btn-primary">Assign</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="modal-create-rego">
+    <div class="modal" style="max-width:680px;">
+      <h3>Create Rego Policy</h3>
+      <form id="form-create-rego">
+        <div class="form-group">
+          <label>Name *</label>
+          <input type="text" name="name" required placeholder="e.g. strict_sandbox" oninput="this.form.module_name.value='policy.'+this.value.toLowerCase().replace(/[^a-z0-9_]/g,'_')">
+        </div>
+        <div class="form-group">
+          <label>Description</label>
+          <textarea name="description" placeholder="What does this policy enforce?"></textarea>
+        </div>
+        <div class="form-group">
+          <label>Module Name</label>
+          <input type="text" name="module_name" placeholder="policy.strict_sandbox" readonly style="opacity:0.7;">
+        </div>
+        <div class="form-group">
+          <label>Rego Code *</label>
+          <textarea name="rego_code" class="code-textarea" rows="14" required placeholder="package sandbox&#10;&#10;default allow = false&#10;&#10;allow {&#10;  not blocked_destination&#10;}"></textarea>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" onclick="hideModal('modal-create-rego')">Cancel</button>
+          <button type="button" class="btn btn-secondary" onclick="validateRegoFromModal()">&#10003; Validate</button>
+          <button type="submit" class="btn btn-primary">Save Policy</button>
         </div>
       </form>
     </div>
