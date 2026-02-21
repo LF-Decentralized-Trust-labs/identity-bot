@@ -1,0 +1,41 @@
+🔄 5. Operational Lifecycle: From Audit to Enforcement
+To ensure complex apps do not break immediately upon installation, and to properly build the user-consent governance system, the orchestrator will transition through a three-phase execution lifecycle.
+
+Phase 1: Discovery & Audit Mode (The Transparent Pass-Through)
+Goal: The sandbox starts in an "allow-all" state. The untrusted app can access the internet and requested resources normally, but every single bit of data is recorded to build a behavioral baseline.
+
+Implementation Strategy: The orchestrator must act as an invisible middleman.
+
+Network Sniffing: By configuring the MicroVM/Namespace's virtual network interface to route through the Go orchestrator, you create a Transparent Proxy.
+
+System Tracking: eBPF probes are attached to the sandbox to log exact system calls (e.g., "App X tried to read /etc/passwd").
+
+Go Libraries Required:
+
+github.com/cilium/ebpf: To load pure-Go eBPF probes into the kernel to passively sniff network and file events with zero performance overhead.
+
+github.com/google/gopacket: To decode, read, and log the intercepted packet payloads (DNS requests, HTTP headers).
+
+Action: All telemetry (destination IPs, ports, file paths) is streamed into a local SQLite database.
+
+Phase 2: The Governance & Policy Engine (Rule Creation)
+Goal: Analyze the Phase 1 data stream to build a robust, consent-driven policy. The engine must evaluate requests against the user's rights to their digital identity, data, and hardware.
+
+Implementation Strategy: Do not write a custom if/else policy engine from scratch. The agent must integrate Open Policy Agent (OPA), the cloud-native industry standard for policy-as-code, natively into the Go orchestrator.
+
+Go Libraries Required:
+
+github.com/open-policy-agent/opa/v1/sdk: The official OPA Go SDK allows the policy engine to run completely locally inside the Go app, requiring zero cloud dependencies.
+
+Action: Policies will be written in Rego (OPA's declarative language). A policy can be as specific as: "If App = 'OpenClaw' AND Target_IP = 'https://www.google.com/search?q=api.openai.com' AND User_Consent = 'True', return ALLOW. Else, DENY."
+
+Phase 3: Active Enforcement (The "Deny-by-Default" Switch)
+Goal: Transition the sandbox from a passive observer to an active, impenetrable firewall. The system is now deny-by-default.
+
+Implementation Strategy: The same hooks used in Phase 1 now enforce the rules defined in Phase 2.
+
+Action: 1.  The app inside the MicroVM attempts to open a network socket or request a user file.
+2.  The eBPF hook or Transparent Proxy intercepts the attempt before it leaves the host system.
+3.  The Go orchestrator instantly packages the request metadata (App ID, Target IP, Requested Resource) into JSON and queries the embedded OPA engine.
+4.  OPA evaluates the JSON against the user's Rego policy.
+5.  If OPA returns deny, the Go orchestrator drops the network packet (via eBPF XDP) or blocks the host function, returning a standard "Access Denied" error to the app.

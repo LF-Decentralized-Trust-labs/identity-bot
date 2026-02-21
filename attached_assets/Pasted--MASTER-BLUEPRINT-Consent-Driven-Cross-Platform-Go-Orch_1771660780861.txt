@@ -1,0 +1,59 @@
+🏗️ MASTER BLUEPRINT: Consent-Driven Cross-Platform Go Orchestrator
+Agent Role & Mission: You are to build a Go-based desktop orchestrator. Its primary purpose is to run third-party applications in a "deny-by-default" isolated sandbox. These apps must physically not be able to access the host system, network, or user data unless the orchestrator explicitly grants access based on a strict, consent-driven user policy.
+
+📦 1. Supported Application Formats
+The orchestrator will accept exactly two types of compiled application formats. (Note: If users upload raw code like Node.js or Python, it will be packaged into an OCI image via a cloud-side Buildpack partner before reaching this local orchestrator).
+
+Format A: WebAssembly (.wasm) Modules
+
+Use Case: Pure compute, data processing, and simple logic apps that do not need system dependencies (like bash or a browser).
+
+Execution: Run directly inside the Go orchestrator using a pure-Go Wasm runtime (like wazero).
+
+Format B: OCI Container Images (Docker Images)
+
+Use Case: Complex, agentic apps (like OpenClaw) or apps with web UIs that require deep OS dependencies (Node.js, Python, Puppeteer).
+
+Execution: The orchestrator will pull the OCI image, extract its root filesystem (rootfs), and boot it inside a strict platform-specific isolated environment (see Section 2).
+
+🖥️ 2. Platform-Specific Isolation Strategy (Phase 1)
+To run the complex OCI (Docker) images securely, the orchestrator must provision a "Fake OS" boundary. For cross-platform consistency, the guest environment will always be Linux.
+
+Linux Host (Native Execution)
+Mechanism: No Virtual Machine is required. Linux can natively sandbox Linux OCI images.
+
+Implementation: Use Go’s os/exec with Linux Namespaces (CLONE_NEWNET, CLONE_NEWNS, CLONE_NEWPID).
+
+Tracking/Trap: Attach eBPF probes (using cilium/ebpf) to the sandboxed process to intercept and evaluate every network and filesystem system call against the user's consent policy.
+
+Windows Host (The MicroVM Approach)
+Mechanism: Windows cannot natively run Linux OCI images, so the orchestrator must use a MicroVM.
+
+Implementation: Programmatically interface with WSL2 (Windows Subsystem for Linux) or the Windows Host Compute Service (HCS) to spin up a lightweight, headless Linux instance.
+
+Execution: Drop the extracted OCI image into this WSL2/HCS instance.
+
+macOS Host (The MicroVM Approach)
+Mechanism: macOS cannot natively run Linux OCI images.
+
+Implementation: Use Apple's native Virtualization Framework (via Go bindings like Code-Hex/vz).
+
+Execution: Boot a minimal, lightweight ARM64 Linux guest kernel in milliseconds. Map the OCI image's rootfs into the guest via virtio-fs and execute it.
+
+🌐 3. Networking & User Interface (UI) Exposure
+By default, the sandbox has no internet access. If the user policy allows it, here is how the orchestrator handles network routing and UI exposure:
+
+Wasm Apps: No native network. All HTTP requests are passed to the Go orchestrator via WASI (WebAssembly System Interface), and the Go orchestrator makes the web request on the app's behalf.
+
+OCI Apps (MicroVMs): The orchestrator acts as a virtual NAT router.
+
+Exposing a UI: If the app runs a web frontend on port 8080, the orchestrator will map that port to the host. On Windows, use netsh interface portproxy to forward the WSL2 IP to the Windows localhost. On Mac, use the Virtualization Framework's VZNATNetworkDeviceAttachment to bridge the guest port to the Mac localhost.
+
+The user experience: The user simply types http://localhost:8080 into their normal host browser to use the app securely.
+
+🔐 4. The Data Governance Bridge (How Apps Ask for Permission)
+Apps will inevitably need to ask the orchestrator for consented user data.
+
+For Wasm Apps: Inject Custom Host Functions (e.g., request_user_email()) directly into the Wasm memory space. When the app calls this, execution pauses, the Go orchestrator checks the user's consent policy, and if approved, writes the data directly into the Wasm app.
+
+For OCI/MicroVM Apps: The Go orchestrator will host a highly secured, local HTTP API on the host machine (e.g., 10.0.2.2:9999). The app inside the MicroVM sends a JSON request for data to this API. The orchestrator checks the policy and returns the data via HTTP response.
