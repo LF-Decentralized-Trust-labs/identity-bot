@@ -71,6 +71,8 @@ Defaults to a file-based JSON store in `./data/` (`identity.json`, `kel.json`, `
 -   **Build steps:** Install Rust + Android targets → `cargo-ndk` cross-compile to 4 ABIs (arm64-v8a, armeabi-v7a, x86_64, x86) → FRB codegen → Flutter build.
 -   **Key tool:** `cargo-ndk` handles Android NDK discovery and places `.so` files into `jniLibs/` automatically.
 -   **FRB codegen version:** Pinned to 2.11.1 matching the Rust crate dependency.
+-   **Android Gradle Plugin:** 8.7.3 with Gradle 8.9, Kotlin 1.9.24, Java 17.
+-   **compileSdk:** 36, **targetSdk:** 35, **minSdk:** 21.
 -   **Instance type:** `linux_x2` with Flutter 3.22.0, Java 17.
 -   **Artifacts:** `identity_agent_ui/build/app/outputs/flutter-apk/*.apk`
 
