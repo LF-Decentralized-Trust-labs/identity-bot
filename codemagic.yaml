@@ -146,30 +146,14 @@ workflows:
           cd identity_agent_ui/ios
           pod install
 
-      - name: Set up iOS code signing
-        script: |
-          keychain initialize
-          app-store-connect fetch-signing-files "$BUNDLE_ID" \
-            --type IOS_APP_STORE \
-            --create
-          keychain add-certificates
-          xcode-project use-profiles
-
       - name: Build iOS IPA (release)
         script: |
           cd identity_agent_ui
-          flutter build ipa --release \
-            --export-options-plist=/Users/builder/export_options.plist
+          flutter build ipa --release --no-codesign
 
     artifacts:
       - identity_agent_ui/build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
-    publishing:
-      app_store_connect:
-        auth: integration
-        submit_to_testflight: true
-        beta_groups:
-          - "Internal Testers"
 
   windows-release:
     name: Windows Release (Desktop)
