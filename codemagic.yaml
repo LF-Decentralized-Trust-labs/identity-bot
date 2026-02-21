@@ -34,6 +34,17 @@ workflows:
           source "$HOME/.cargo/env"
           cargo install flutter_rust_bridge_codegen --version 2.11.1
 
+      - name: Set up local properties
+        script: |
+          cd identity_agent_ui
+          echo "flutter.sdk=$HOME/programs/flutter" > android/local.properties
+          echo "sdk.dir=$ANDROID_SDK_ROOT" >> android/local.properties
+
+      - name: Get Flutter packages
+        script: |
+          cd identity_agent_ui
+          flutter pub get
+
       - name: Build Rust library for Android via cargo-ndk with FRB codegen
         script: |
           source "$HOME/.cargo/env"
@@ -55,6 +66,7 @@ workflows:
             build --release --features dev_skip_frb
 
           # Phase 2: Generate FRB bindings (creates src/frb_generated.rs)
+          # Requires flutter pub get to have been run first.
           echo "--- Phase 2: Generating FRB bindings ---"
           cd ..
           flutter_rust_bridge_codegen generate
@@ -73,17 +85,6 @@ workflows:
 
           echo "--- Built .so files ---"
           find ../android/app/src/main/jniLibs -name "*.so" -ls
-
-      - name: Set up local properties
-        script: |
-          cd identity_agent_ui
-          echo "flutter.sdk=$HOME/programs/flutter" > android/local.properties
-          echo "sdk.dir=$ANDROID_SDK_ROOT" >> android/local.properties
-
-      - name: Get Flutter packages
-        script: |
-          cd identity_agent_ui
-          flutter pub get
 
       - name: Build debug APK
         script: |
@@ -126,25 +127,33 @@ workflows:
           source "$HOME/.cargo/env"
           cargo install flutter_rust_bridge_codegen --version 2.11.1
 
+      - name: Get Flutter packages
+        script: |
+          cd identity_agent_ui
+          flutter pub get
+
       - name: Build Rust static library for iOS (device + simulator) with FRB codegen
         script: |
           source "$HOME/.cargo/env"
           cd identity_agent_ui/rust
 
-          # Step 1: Initial build with dev_skip_frb to compile the crate
-          # without the frb_generated module (which doesn't exist yet).
-          # FRB codegen needs the compiled library to inspect exported symbols.
+          # Phase 1: Build with dev_skip_frb so FRB codegen can inspect
+          # the compiled library's exported symbols. frb_generated.rs
+          # doesn't exist yet, so we skip that module.
           echo "--- Phase 1: Building with dev_skip_frb for FRB codegen inspection ---"
           cargo build --release --target aarch64-apple-ios --features dev_skip_frb
           cargo build --release --target aarch64-apple-ios-sim --features dev_skip_frb
 
-          # Step 2: Run FRB codegen — this generates src/frb_generated.rs
+          # Phase 2: Run FRB codegen from the Flutter project root.
+          # This generates rust/src/frb_generated.rs and Dart bindings.
+          # Requires flutter pub get to have been run first.
           echo "--- Phase 2: Generating FRB bindings ---"
           cd ..
           flutter_rust_bridge_codegen generate
           cd rust
 
-          # Step 3: Rebuild WITHOUT dev_skip_frb so frb_generated.rs is included
+          # Phase 3: Rebuild WITHOUT dev_skip_frb so frb_generated.rs
+          # is compiled into the final library.
           echo "--- Phase 3: Final build with FRB bindings ---"
           cargo build --release --target aarch64-apple-ios
           cargo build --release --target aarch64-apple-ios-sim
@@ -167,11 +176,6 @@ workflows:
           echo "--- Libraries placed ---"
           ls -lh "$IOS_DIR/Frameworks/RustKeri/device/$LIB"
           ls -lh "$IOS_DIR/Frameworks/RustKeri/simulator/$LIB"
-
-      - name: Get Flutter packages
-        script: |
-          cd identity_agent_ui
-          flutter pub get
 
       - name: Install CocoaPods dependencies
         script: |
@@ -197,11 +201,12 @@ workflows:
       - name: Install Go toolchain
         script: |
           choco install golang -y
-          refreshenv
+          $env:Path = "C:\Program Files\Go\bin;$env:Path"
           go version
 
       - name: Build Go backend (Windows)
         script: |
+          $env:Path = "C:\Program Files\Go\bin;$env:Path"
           $env:CGO_ENABLED = "0"
           $env:GOOS = "windows"
           $env:GOARCH = "amd64"
