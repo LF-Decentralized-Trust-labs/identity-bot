@@ -1,0 +1,61 @@
+Running Gradle task 'assembleDebug'...                          
+lib/src/rust/frb_generated.dart:44:9: Error: No named parameter with the name 'override'.
+        override: {
+        ^^^^^^^^
+../../.pub-cache/hosted/pub.dev/flutter_rust_bridge-2.11.1/lib/src/loader/_common.dart:13:9: Context: Found this candidate, but the arguments don't match.
+  const ExternalLibraryLoaderConfig({
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Target kernel_snapshot failed: Exception
+
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:compileFlutterBuildDebug'.
+> Process 'command '/home/builder/programs/flutter/bin/flutter'' finished with non-zero exit value 1
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+
+* Get more help at https://help.gradle.org
+
+BUILD FAILED in 1m 17s
+Running Gradle task 'assembleDebug'...                             78.2s
+Gradle task assembleDebug failed with exit code 1
+
+
+Build failed :|
+Step 9 script `Build debug APK` exited with status code 1
+
+Running Gradle task 'assembleDebug'...                          
+lib/src/rust/frb_generated.dart:44:9: Error: No named parameter with the name 'override'.
+        override: {
+        ^^^^^^^^
+../../.pub-cache/hosted/pub.dev/flutter_rust_bridge-2.11.1/lib/src/loader/_common.dart:13:9: Context: Found this candidate, but the arguments don't match.
+  const ExternalLibraryLoaderConfig({
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Target kernel_snapshot failed: Exception
+
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:compileFlutterBuildDebug'.
+> Process 'command '/home/builder/programs/flutter/bin/flutter'' finished with non-zero exit value 1
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+
+* Get more help at https://help.gradle.org
+
+BUILD FAILED in 1m 17s
+Running Gradle task 'assembleDebug'...                             78.2s
+Gradle task assembleDebug failed with exit code 1
+
+
+Build failed :|
+Step 9 script `Build debug APK` exited with status code 1
