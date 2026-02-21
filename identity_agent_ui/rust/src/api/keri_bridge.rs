@@ -153,7 +153,7 @@ pub fn sign_payload(name: String, data: Vec<u8>) -> Result<SignResult, String> {
     let pk = instance.crypto_box.public_key();
 
     Ok(SignResult {
-        signature: base64::encode(signature.as_ref()),
+        signature: base64::encode(signature.as_ref() as &[u8]),
         public_key: base64::encode(&pk.public_key),
     })
 }
