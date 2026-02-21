@@ -55,12 +55,12 @@ pub fn incept_aid(name: String, _code: String) -> Result<InceptionResult, String
 
     let nxt = nxt_commitment(
         SignatureThreshold::Simple(1),
-        &[BasicPrefix::Ed25519(PublicKey::new(next_pk.to_vec()))],
+        &[BasicPrefix::Ed25519(PublicKey::new(next_pk.public_key.to_vec()))],
         &HashFunction::from(HashFunctionCode::Blake3_256),
     );
 
     let key_config = KeyConfig::new(
-        vec![BasicPrefix::Ed25519(PublicKey::new(current_pk.to_vec()))],
+        vec![BasicPrefix::Ed25519(PublicKey::new(current_pk.public_key.to_vec()))],
         nxt,
         Some(SignatureThreshold::Simple(1)),
     );
@@ -97,7 +97,7 @@ pub fn incept_aid(name: String, _code: String) -> Result<InceptionResult, String
 
     Ok(InceptionResult {
         aid,
-        public_key: base64::encode(current_pk),
+        public_key: base64::encode(&current_pk.public_key),
         kel: kel_entry,
     })
 }
@@ -118,7 +118,7 @@ pub fn rotate_aid(name: String) -> Result<RotationResult, String> {
     let rot_event = serde_json::json!({
         "type": "rot",
         "aid": instance.prefix.to_string(),
-        "new_public_key": base64::encode(&new_pk),
+        "new_public_key": base64::encode(&new_pk.public_key),
         "sn": instance.kel.len(),
     });
 
@@ -131,7 +131,7 @@ pub fn rotate_aid(name: String) -> Result<RotationResult, String> {
 
     Ok(RotationResult {
         aid,
-        new_public_key: base64::encode(new_pk),
+        new_public_key: base64::encode(&new_pk.public_key),
         kel: kel_entry,
     })
 }
@@ -154,7 +154,7 @@ pub fn sign_payload(name: String, data: Vec<u8>) -> Result<SignResult, String> {
 
     Ok(SignResult {
         signature: base64::encode(signature.as_ref()),
-        public_key: base64::encode(pk),
+        public_key: base64::encode(&pk.public_key),
     })
 }
 
