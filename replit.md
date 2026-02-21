@@ -81,7 +81,7 @@ Defaults to a file-based JSON store in `./data/` (`identity.json`, `kel.json`, `
 -   **Key difference from Android:** iOS uses static libraries (`.a`) linked via `LIBRARY_SEARCH_PATHS` + `OTHER_LDFLAGS` in Xcode, vs Android's dynamic shared objects (`.so`) placed in `jniLibs/`.
 -   **Rust crate-type:** `Cargo.toml` specifies both `cdylib` (Android `.so`) and `staticlib` (iOS `.a`).
 -   **Instance type:** `mac_mini_m2` with Flutter 3.22.0, latest Xcode, CocoaPods.
--   **Minimum iOS version:** 15.0 (set in all 3 Xcode build configurations: Debug, Release, Profile).
+-   **Minimum iOS version:** 15.5 (set in all 3 Xcode build configurations: Debug, Release, Profile). Bumped from 15.0 to support `mobile_scanner` (Google ML Kit dependency).
 -   **Code signing:** Requires `ios_credentials` environment group in Codemagic with App Store Connect API key. Uses Codemagic CLI tools (`keychain initialize`, `app-store-connect fetch-signing-files`, `xcode-project use-profiles`).
 -   **Artifacts:** `identity_agent_ui/build/ios/ipa/*.ipa`
 -   **Publishing:** Auto-submits to TestFlight for "Internal Testers" beta group.
