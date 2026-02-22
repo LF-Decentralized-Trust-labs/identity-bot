@@ -1,7 +1,7 @@
 workflows:
   android-release:
-    name: Android Release (with Rust KERI Bridge)
-    max_build_duration: 90
+    name: Android Release (with Rust KERI Bridge + Go Core)
+    max_build_duration: 120
     instance_type: linux_x2
     environment:
       flutter: 3.22.0
@@ -22,12 +22,38 @@ workflows:
           cargo --version
           cargo ndk --version
 
-      - name: Configure Android NDK for Rust
+      - name: Install Go toolchain and gomobile
+        script: |
+          GO_VERSION="1.22.5"
+          curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" -o /tmp/go.tar.gz
+          sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf /tmp/go.tar.gz
+          export PATH="/usr/local/go/bin:$HOME/go/bin:$PATH"
+          echo "PATH=/usr/local/go/bin:$HOME/go/bin:$PATH" >> $CM_ENV
+          go version
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          go install golang.org/x/mobile/cmd/gobind@latest
+          gomobile version || echo "gomobile installed"
+
+      - name: Configure Android NDK for Rust and Go
         script: |
           source "$HOME/.cargo/env"
           export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/$(ls $ANDROID_SDK_ROOT/ndk/ | sort -V | tail -1)"
           echo "Using NDK: $ANDROID_NDK_HOME"
           echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME" >> $CM_ENV
+          gomobile init
+
+      - name: Build Go Core as Android AAR via gomobile
+        script: |
+          cd identity-agent-core
+          echo "--- Building Go Core for Android via gomobile bind ---"
+          gomobile bind \
+            -target=android/arm64,android/arm,android/amd64,android/386 \
+            -androidapi 21 \
+            -o ../identity_agent_ui/android/app/libs/mobilecore.aar \
+            ./mobilecore
+          echo "--- Go Core AAR ---"
+          ls -lh ../identity_agent_ui/android/app/libs/mobilecore.aar
+          ls -lh ../identity_agent_ui/android/app/libs/mobilecore-sources.jar 2>/dev/null || true
 
       - name: Install FRB codegen
         script: |
@@ -147,8 +173,8 @@ workflows:
       - identity_agent_ui/build/app/outputs/flutter-apk/*.apk
 
   ios-release:
-    name: iOS Release (with Rust KERI Bridge)
-    max_build_duration: 120
+    name: iOS Release (with Rust KERI Bridge + Go Core)
+    max_build_duration: 150
     instance_type: mac_mini_m2
     environment:
       flutter: 3.22.0
@@ -168,6 +194,28 @@ workflows:
           echo "--- Rust version ---"
           rustc --version
           cargo --version
+
+      - name: Install Go toolchain and gomobile
+        script: |
+          brew install go
+          go version
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          go install golang.org/x/mobile/cmd/gobind@latest
+          export PATH="$HOME/go/bin:$PATH"
+          echo "PATH=$HOME/go/bin:$PATH" >> $CM_ENV
+          gomobile init
+
+      - name: Build Go Core as iOS XCFramework via gomobile
+        script: |
+          cd identity-agent-core
+          echo "--- Building Go Core for iOS via gomobile bind ---"
+          gomobile bind \
+            -target=ios/arm64,iossimulator/arm64 \
+            -o ../identity_agent_ui/ios/Frameworks/Mobilecore.xcframework \
+            ./mobilecore
+          echo "--- Go Core XCFramework ---"
+          ls -la ../identity_agent_ui/ios/Frameworks/Mobilecore.xcframework/
+          find ../identity_agent_ui/ios/Frameworks/Mobilecore.xcframework -name "*.framework" -type d
 
       - name: Install FRB codegen
         script: |

@@ -22,6 +22,12 @@ if (flutterVersionName == null) {
     flutterVersionName = "1.0"
 }
 
+repositories {
+    flatDir {
+        dirs "libs"
+    }
+}
+
 android {
     namespace = "com.example.identity_agent_ui"
     compileSdk = 36
@@ -49,6 +55,10 @@ android {
             signingConfig = signingConfigs.debug
         }
     }
+}
+
+dependencies {
+    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar"))))
 }
 
 flutter {
