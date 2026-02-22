@@ -1,7 +1,7 @@
-# ADR 003: Adaptive Architecture — Three Operating Modes
+# ADR 003: Adaptive Architecture — Four Operating Modes
 
 **Date:** 2026-02-18
-**Updated:** 2026-02-19
+**Updated:** 2026-02-22
 **Status:** Accepted
 **Context:** Phase 3 (Connectivity) — OOBI serving, contact management, and tunneling
 
@@ -11,15 +11,16 @@ The Identity Agent is software that people install on their own devices — lapt
 
 The best KERI engine available today is **keripy**, a Python library. Python runs fine on laptops and servers (Linux, macOS, Windows), but it **cannot run on phones** (iOS or Android). This creates a problem: how does the Identity Agent perform KERI operations on a phone?
 
-The answer is **three operating modes**. Each mode is a different strategy for connecting the Identity Agent's user interface to a KERI engine, depending on what the device is capable of running:
+The answer is **four operating modes**. Each mode is a different strategy for connecting the Identity Agent's user interface to a KERI engine and backend services, depending on what the device is capable of running and how the user configures their setup:
 
-| Mode | When it's used | How KERI operations happen |
-|---|---|---|
-| **Desktop Mode** | Laptops, servers (Linux/macOS/Windows) | Python keripy runs locally on the same machine |
-| **Mobile Remote Mode** | Phones connected to a personal server | Phone sends requests to the user's own server, which runs keripy |
-| **Mobile Standalone Mode** | Phones with no personal server | A Rust KERI library runs directly on the phone |
+| Mode | When it's used | How KERI operations happen | How backend services work |
+|---|---|---|---|
+| **Desktop Mode** | Laptops, servers (Linux/macOS/Windows) | Python keripy runs locally on the same machine | Go Core runs locally |
+| **Mobile Standalone Mode** | Phones with no personal server ("Create New Identity" onboarding) | Rust KERI bridge runs directly on the phone via FFI | Go Core runs embedded on the phone via gomobile platform channels |
+| **Mobile Remote Controller WITHOUT Keys** | Phones connecting to an existing server ("Connect to Existing Identity" onboarding) | Rust bridge creates a delegated child AID locally; remote server handles parent AID operations | Remote server provides backend services |
+| **Mobile Remote Controller WITH Keys** | Phones migrated from Standalone mode ("Migrate to External Server" dashboard button) | Rust bridge manages the primary parent AID locally (keys stay on phone) | Remote server provides compute-heavy backend services |
 
-All three modes present the same user interface. The user doesn't need to know which mode is active — the app detects it automatically based on the device and configuration.
+All four modes present the same user interface through the abstract `KeriService` interface. The user chooses their mode during onboarding (or via migration), and the app configures the correct service implementation.
 
 ## How Each Mode Works
 
@@ -49,89 +50,141 @@ All three modes present the same user interface. The user doesn't need to know w
 
 **Note about the web build:** The Flutter UI can also be compiled as a web app. When it is, the Go backend serves it as static files. The web UI runs in the user's browser, but the Go + Python backend still runs on a Linux/macOS/Windows machine. So the web build is really just Desktop Mode accessed through a browser rather than a native app window.
 
-### Mode 2: Mobile Remote Mode
+### Mode 2: Mobile Standalone Mode
 
-**Used on:** iOS or Android phones, when the user has configured `PRIMARY_SERVER_URL` to point to their own server.
+**Used on:** iOS or Android phones, when the user chooses "Create New Identity" during onboarding.
 
-**What happens:** The user has a personal server somewhere (a laptop, a home server, a cloud VM) running the Identity Agent in Desktop Mode. Their phone connects to that server over the network. The phone's Flutter UI sends all KERI requests to the remote server's API. The phone itself does not run any KERI engine — it's acting as a remote control for the server.
+**What happens:** This is the primary mobile onboarding path. BOTH the Rust KERI bridge AND the Go Core backend run locally on the phone:
 
-```
-┌───────────────────┐         ┌──────────────────────────────────┐
-│  User's Phone     │         │  User's Server (Desktop Mode)    │
-│  (iOS / Android)  │         │                                  │
-│                   │  HTTPS  │  Go Backend ──→ Python KERI      │
-│  Flutter UI ──────┼────────→│  (port 5000)    Driver (9999)    │
-│                   │         │                                  │
-│  No KERI engine   │         │  All KERI work happens here.     │
-│  on the phone.    │         │  User owns and controls this.    │
-└───────────────────┘         └──────────────────────────────────┘
-```
+- **Rust bridge** (`keriox/keri-core` via `flutter_rust_bridge` FFI) handles all cryptographic KERI operations (inception, rotation, signing, verification, KEL retrieval) directly on the device.
+- **Go Core** (compiled via gomobile into `.aar` for Android and `.xcframework` for iOS) runs as an embedded server on the phone, providing data persistence, OOBI serving, contact management, and tunneling. It communicates with the Flutter layer through platform channels (Kotlin `MethodChannel` on Android, Swift `FlutterMethodChannel` on iOS).
 
-- The phone acts as a remote controller for the user's own server.
-- All KERI operations are performed by the server's Python keripy instance.
-- The user must own and control the remote server — it has full access to their keys.
-- This mode requires network connectivity between the phone and the server.
-
-### Mode 3: Mobile Standalone Mode
-
-**Used on:** iOS or Android phones, when the user has **not** configured `PRIMARY_SERVER_URL` (no personal server available).
-
-**What happens:** The phone runs KERI operations locally using a Rust library (keriox by THCLab) instead of Python keripy. The Rust code is compiled into the app as a native library and called through FFI (Foreign Function Interface — a way for Dart code to call Rust code directly). This handles all sensitive operations like key creation and signing.
-
-However, some KERI operations are "stateless" — they don't involve private keys and are just formatting or parsing tasks. These stateless operations are sent to an external server because they don't need to be trusted with secrets. The external server is either the user's own backend (if they've made it publicly accessible) or a public helper service.
+The Go Core's KERI driver is **disabled** on mobile (`ServerConfig.EnableKeriDriver = false`). All crypto operations go through the Rust bridge instead, while the Go Core provides everything else.
 
 ```
-┌──────────────────────────────────────────────┐
-│  User's Phone (iOS / Android)                │
-│                                              │
-│  Flutter UI ──→ Rust Bridge (FFI)            │
-│                 Handles private key           │
-│                 operations locally.           │
-│                                              │        ┌──────────────────┐
-│  For stateless tasks ────────────────────────┼──────→ │ External Server  │
-│  (formatting, parsing — no secrets)          │        │ (zero trust)     │
-│                                              │        └──────────────────┘
-└──────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────┐
+│  User's Phone (iOS / Android)                      │
+│                                                    │
+│  Flutter UI ──→ Rust Bridge (FFI)                  │
+│  │               Handles KERI crypto locally:      │
+│  │               inception, rotation, signing,     │
+│  │               verification, KEL retrieval.      │
+│  │                                                 │
+│  └─→ Go Core (gomobile, via platform channels)     │
+│       Handles backend services locally:            │
+│       data persistence, OOBI serving,              │
+│       contact management, tunneling.               │
+│       KERI driver DISABLED.                        │
+│                                                    │
+│  Both engines run entirely on the phone.           │
+│  No external server required.                      │
+└────────────────────────────────────────────────────┘
 ```
 
-- The Rust bridge handles 5 stateful (security-sensitive) operations locally on the phone.
-- Stateless operations (3 endpoints: format-credential, resolve-oobi, generate-multisig-event) are sent to an external server.
-- The Rust library is compiled locally by the developer using native toolchains (Xcode for iOS, Android NDK for Android). This compilation does not happen on Replit.
+- The `MobileStandaloneKeriService` coordinates between the Rust bridge (for KERI) and Go Core (for persistence).
+- After inception via the Rust bridge, the service stores the identity and events in Go Core's file-based JSON store.
+- The `MobileCoreService` Dart wrapper manages starting/stopping the Go Core via platform channels.
+- For stateless operations (format-credential, resolve-oobi, generate-multisig-event), the embedded Go Core or a public Remote Helper service at a configured URL handles them.
 
-**Which external server handles stateless operations?**
+### Mode 3: Mobile Remote Controller WITHOUT Keys
 
-The app decides which server to use for stateless work in this order:
+**Used on:** iOS or Android phones, when the user chooses "Connect to Existing Identity" during onboarding.
 
-1. **User's own Go backend, if it's publicly accessible** (preferred) — If the user has configured their Go backend as an external-facing "Primary Backend" (meaning other devices can reach it over the network), its public URL is used. This is ideal because the user controls it.
-2. **Public Remote Helper service** (fallback) — If the Go backend is only running locally on the phone (internal mode, the default), a public helper service at `KERI_HELPER_URL` is used instead. This helper is a stateless utility that never sees private keys — it only does formatting and parsing.
+**What happens:** The user has a personal server somewhere (a laptop, a home server, a cloud VM) running the Identity Agent in Desktop Mode. Their phone connects to that server by entering the server's URL during onboarding. The Rust bridge creates a **delegated child AID** locally — the phone holds only the child AID's keys, while the parent AID and its keys remain on the remote server.
 
-The Go backend is internal (serves only the local device) by default. It becomes external only when the user explicitly configures it as a Primary Backend during initial setup.
+Backend operations (data persistence, OOBI serving, contacts) are handled by the remote server. The phone is acting as a remote controller with a limited, delegated identity.
+
+```
+┌───────────────────────────┐       ┌──────────────────────────────────┐
+│  User's Phone             │       │  User's Server (Desktop Mode)    │
+│  (iOS / Android)          │       │                                  │
+│                           │ HTTPS │  Go Backend ──→ Python KERI      │
+│  Rust Bridge (FFI)        │──────→│  (port 5000)    Driver (9999)    │
+│  Creates delegated child  │       │                                  │
+│  AID locally. Phone has   │       │  Parent AID and full KEL live    │
+│  child keys only.         │       │  here. User owns and controls    │
+│                           │       │  this server.                    │
+│  Remote server provides   │       │                                  │
+│  backend services.        │       │                                  │
+└───────────────────────────┘       └──────────────────────────────────┘
+```
+
+- Entered via "Connect to Existing Identity" onboarding flow.
+- The `RemoteServerKeriService` forwards backend operations to the remote server.
+- The Rust bridge is always initialized on mobile for local key management.
+- The user must own and control the remote server.
+- Network connectivity between phone and server is required.
+
+### Mode 4: Mobile Remote Controller WITH Keys
+
+**Used on:** iOS or Android phones, migrated from Mobile Standalone Mode.
+
+**What happens:** The user initially set up their identity in Standalone Mode (all local). They later decide to offload compute-heavy backend operations to an external server while keeping their primary parent AID and keys on the phone. This is reached via the "Migrate to External Server" button on the dashboard (visible only in Standalone mode with an active identity).
+
+```
+┌───────────────────────────┐       ┌──────────────────────────────────┐
+│  User's Phone             │       │  User's Server (Desktop Mode)    │
+│  (iOS / Android)          │       │                                  │
+│                           │ HTTPS │  Go Backend provides compute-    │
+│  Rust Bridge (FFI)        │──────→│  heavy backend services:         │
+│  Manages primary parent   │       │  OOBI, contacts, tunneling.      │
+│  AID locally. Phone has   │       │                                  │
+│  the primary keys.        │       │  Server does NOT hold the        │
+│                           │       │  phone's private keys.           │
+│  All signing happens      │       │                                  │
+│  on the phone.            │       │                                  │
+└───────────────────────────┘       └──────────────────────────────────┘
+```
+
+- Reached via dashboard "Migrate to External Server" button (currently shows informational dialog; full migration flow is planned).
+- The phone retains full key sovereignty — the remote server never receives private keys.
+- The remote server handles OOBI serving, contact management, and tunneling on behalf of the phone.
+- This is the most sovereign mobile mode: user keeps their keys locally but gains the network presence of a server.
 
 ## How the App Chooses a Mode
 
-The Flutter app detects the mode automatically at startup. No user action is needed — the logic runs in `KeriService.detectEnvironment()`:
+Mode selection happens through the **onboarding flow**, not automatic environment detection. The user makes an explicit choice:
 
-1. **Is this a desktop operating system?** (Linux, macOS, Windows, or web browser) → **Desktop Mode**
-2. **Is this a phone (iOS/Android) with `PRIMARY_SERVER_URL` configured?** → **Mobile Remote Mode**
-3. **Is this a phone (iOS/Android) without `PRIMARY_SERVER_URL`?** → **Mobile Standalone Mode**
+1. **Desktop platforms** (Linux, macOS, Windows, web) → Always **Desktop Mode**. No user choice needed — the `BackendProcessService` starts the bundled Go binary with the Python KERI driver automatically.
 
-The user interface code doesn't know or care which mode is active. All three modes implement the same set of operations through a shared interface (`KeriService`), so screens and buttons work identically regardless of mode.
+2. **Mobile platforms** (iOS, Android) → User chooses during onboarding:
+   - "Create New Identity" → **Mobile Standalone Mode** (Rust bridge + embedded Go Core)
+   - "Connect to Existing Identity" → **Mobile Remote Controller WITHOUT Keys** (Rust bridge + remote server URL)
+   - After identity creation in Standalone mode, "Migrate to External Server" dashboard button → **Mobile Remote Controller WITH Keys** (planned)
+
+The user's choice is persisted via `PreferencesService` (SharedPreferences). On subsequent app launches, `_loadSavedState()` in `main.dart` restores the saved mode and initializes the correct `KeriService` implementation.
+
+The `_initializeServiceForMode()` method in `main.dart` handles the mode-to-service mapping:
+- Desktop: `DesktopKeriService` (talks to local Go Core on port 5000)
+- Mobile Standalone: `MobileStandaloneKeriService` (Rust bridge + embedded Go Core)
+- Mobile Remote (Connect to Existing): `RemoteServerKeriService` (Rust bridge + remote server URL)
 
 ## Trust Boundaries
 
 Different components in the system have different levels of trust, depending on who controls them and what data they can see:
 
-### User's Own Server (used in Desktop Mode and Mobile Remote Mode)
+### User's Own Server (Desktop Mode, target of Remote Controller modes)
 - **Trust level:** Full trust — the user owns and operates this machine.
-- **Access:** Handles private keys, signing operations, and the full Key Event Log.
+- **Access:** Handles private keys (in Desktop Mode), the full Key Event Log, contacts, and OOBI serving.
 - **Why it's trusted:** It's the user's own hardware running their own software.
 
-### Rust Bridge (used in Mobile Standalone Mode)
+### Rust Bridge (all mobile modes)
 - **Trust level:** Full trust — it runs directly on the user's phone.
 - **Access:** Handles private key creation, signing, and key rotation locally.
 - **Why it's trusted:** The code is compiled into the app and never sends private data elsewhere.
 
-### Remote Helper (fallback in Mobile Standalone Mode)
+### Go Core on Mobile (Mobile Standalone Mode)
+- **Trust level:** Full trust — it runs embedded on the user's phone via gomobile.
+- **Access:** Handles data persistence (file-based JSON store in the app's documents directory), OOBI serving, contact management, and tunneling.
+- **Why it's trusted:** It runs locally with no network exposure by default. The KERI driver is disabled; it only provides backend services.
+- **Platform channels:** Accessed via Dart `MobileCoreService` → Kotlin/Swift `MethodChannel` → gomobile-compiled Go library.
+
+### Remote Server (in Remote Controller modes)
+- **Trust level:** Full trust for "WITHOUT Keys" (server holds parent AID keys). Partial trust for "WITH Keys" (server only provides backend services, no keys).
+- **Access (WITHOUT Keys):** Server manages the parent AID and provides backend services. Phone has a delegated child AID.
+- **Access (WITH Keys):** Server provides OOBI, contacts, and tunneling only. Phone retains the primary AID and all keys.
+
+### Remote Helper (stateless fallback)
 - **Trust level:** Zero trust — this is a public service the user does not control.
 - **Access:** Only receives public data for formatting and parsing. Never sees private keys.
 - **Operations:** format-credential, resolve-oobi, generate-multisig-event.
@@ -172,19 +225,21 @@ Phase 3 adds the ability for Identity Agents to discover and connect with each o
 
 ### Tunneling
 
-For OOBI URLs to work, the agent needs a publicly accessible URL. In environments like Replit, this is provided automatically by the platform's proxy. For users running the agent on their own machine (Desktop Mode), the Go backend includes optional tunneling via **ngrok-go**:
+For OOBI URLs to work, the agent needs a publicly accessible URL. In environments like Replit, this is provided automatically by the platform's proxy. For users running the agent on their own machine, the Go backend includes a multi-provider tunnel system:
 
-- If the `NGROK_AUTHTOKEN` environment variable is set, the backend automatically creates a public HTTPS tunnel on startup.
-- The tunnel URL is used in OOBI generation so the agent's identity is discoverable from anywhere.
-- If no tunnel is configured, the backend falls back to the `PUBLIC_URL` env var or auto-detection from request headers (`X-Forwarded-Proto`, `X-Forwarded-Host`).
-- Tunneling is non-fatal — if it fails, the backend continues running normally on the local port.
+- **Cloudflare (`cloudflared`):** The default tunnel provider. Uses the `cloudflared` binary to create a quick tunnel without requiring an account or auth token. Preferred for its simplicity and reliability.
+- **ngrok:** Alternative tunnel provider. Requires `NGROK_AUTHTOKEN` environment variable. Uses the `ngrok-go` library for in-process tunnel creation.
+
+Tunnel provider selection and settings are managed via the Settings UI and persisted in `settings.json`. The active tunnel URL is used in OOBI generation so the agent's identity is discoverable from anywhere.
+
+If no tunnel is configured, the backend falls back to the `PUBLIC_URL` env var or auto-detection from request headers (`X-Forwarded-Proto`, `X-Forwarded-Host`). Tunneling is non-fatal — if it fails, the backend continues running normally on the local port.
 
 ### URL Priority for OOBI Generation
 
 The `getPublicURL()` function resolves the agent's externally-reachable URL in this order:
 
 1. `PUBLIC_URL` environment variable (explicit override, highest priority)
-2. Active tunnel URL (if ngrok tunnel is running)
+2. Active tunnel URL (if a Cloudflare or ngrok tunnel is running)
 3. Auto-detected from request headers (`X-Forwarded-Proto` + `X-Forwarded-Host`)
 4. Fallback to `https://{request.Host}`
 
@@ -193,15 +248,18 @@ The `getPublicURL()` function resolves the agent's externally-reachable URL in t
 | Variable | What it does | Which mode uses it |
 |---|---|---|
 | `CORE_URL` | URL of the local Go backend (default: `http://localhost:5000`) | Desktop Mode |
-| `PRIMARY_SERVER_URL` | URL of the user's remote server running Desktop Mode | Mobile Remote Mode |
-| `KERI_HELPER_URL` | URL of the public stateless Remote Helper service | Mobile Standalone Mode (fallback only) |
 | `PUBLIC_URL` | Explicit public URL override for OOBI generation | Desktop Mode |
 | `NGROK_AUTHTOKEN` | ngrok auth token for automatic tunnel creation | Desktop Mode (optional) |
+| `TUNNEL_PROVIDER` | Which tunnel provider to use (`cloudflare` or `ngrok`) | Desktop Mode (optional) |
+
+Note: Server URLs for Remote Controller modes are entered by the user during onboarding and stored in SharedPreferences, not in environment variables.
 
 ## Consequences
 
-- The Flutter UI is completely mode-agnostic — screen code never checks which mode is active.
-- All three modes implement the same abstract `KeriService` interface with 5 stateful + 3 stateless methods.
-- Rust native compilation (for Mobile Standalone) requires local developer toolchains (Xcode for iOS, Android NDK for Android) and does not happen on Replit.
+- The Flutter UI is mode-agnostic — screen code interacts with the abstract `KeriService` interface regardless of which mode is active.
+- All four modes implement the same `KeriService` interface with 5 stateful methods.
+- Mobile Standalone mode runs BOTH Rust bridge (KERI crypto) AND Go Core (backend services) locally on the phone.
+- Remote Controller modes use the Rust bridge locally for key management while connecting to a remote server for backend services.
+- Rust native compilation (for the bridge) and Go mobile compilation (for Go Core) require local developer toolchains and CI/CD (Codemagic). These do not happen on Replit.
 - The Python driver's endpoint paths are the single source of truth — all other components match them exactly.
-- The Go backend defaults to internal mode (serving only the local device). It only becomes externally accessible when the user explicitly configures it during setup.
+- Mode selection happens through explicit user choice during onboarding, not automatic environment detection.
