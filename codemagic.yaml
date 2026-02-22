@@ -174,7 +174,7 @@ workflows:
 
   ios-release:
     name: iOS Release (with Rust KERI Bridge + Go Core)
-    max_build_duration: 150
+    max_build_duration: 120
     instance_type: mac_mini_m2
     environment:
       flutter: 3.22.0
