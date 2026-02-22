@@ -3,8 +3,9 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 
 enum AgentEnvironment {
   desktop,
-  mobileRemote,
   mobileStandalone,
+  mobileRemoteWithKeys,
+  mobileRemoteWithoutKeys,
 }
 
 class InceptionResult {
@@ -72,7 +73,10 @@ abstract class KeriService {
 
   void dispose();
 
-  static AgentEnvironment detectEnvironment({String? primaryServerUrl}) {
+  static AgentEnvironment detectEnvironment({
+    String? primaryServerUrl,
+    bool hasLocalKeys = false,
+  }) {
     if (kIsWeb) {
       return AgentEnvironment.desktop;
     }
@@ -84,7 +88,9 @@ abstract class KeriService {
     }
 
     if (primaryServerUrl != null && primaryServerUrl.isNotEmpty) {
-      return AgentEnvironment.mobileRemote;
+      return hasLocalKeys
+          ? AgentEnvironment.mobileRemoteWithKeys
+          : AgentEnvironment.mobileRemoteWithoutKeys;
     }
 
     return AgentEnvironment.mobileStandalone;

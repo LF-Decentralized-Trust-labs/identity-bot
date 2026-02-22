@@ -11,7 +11,7 @@ class RemoteServerKeriService extends KeriService {
         _client = http.Client();
 
   @override
-  AgentEnvironment get environment => AgentEnvironment.mobileRemote;
+  AgentEnvironment get environment => AgentEnvironment.mobileRemoteWithoutKeys;
 
   @override
   Future<InceptionResult> inceptAid({

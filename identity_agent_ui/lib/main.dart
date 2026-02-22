@@ -16,6 +16,7 @@ import 'services/desktop_keri_service.dart';
 import 'services/remote_server_keri_service.dart';
 import 'services/mobile_standalone_keri_service.dart';
 import 'services/keri_helper_client.dart';
+import 'services/mobile_core_service.dart';
 import 'services/preferences_service.dart';
 import 'services/backend_process_service.dart';
 import 'config/agent_config.dart';
@@ -127,11 +128,10 @@ class _AgentRouterState extends State<AgentRouter> {
 
       if (mode == AgentMode.connectExisting && serverUrl != null) {
         if (KeriBridge.isAvailable) {
-          debugPrint('[Agent] Mobile Remote Controller — Rust bridge for '
-              'stateful ops, remote server ($serverUrl) for stateless ops');
-          _keriService = MobileStandaloneKeriService(
-            helper: KeriHelperClient(baseUrl: serverUrl),
-          );
+          debugPrint('[Agent] Mobile Remote Controller WITHOUT Keys — '
+              'Rust bridge for local delegated AID, '
+              'remote server ($serverUrl) for backend ops');
+          _keriService = RemoteServerKeriService(serverUrl: serverUrl);
         } else {
           debugPrint('[Agent] Mobile Remote Controller — Rust bridge '
               'unavailable (${KeriBridge.loadError}), falling back to '
@@ -142,9 +142,19 @@ class _AgentRouterState extends State<AgentRouter> {
         debugPrint('[Agent] Mobile Standalone — Rust bridge available: '
             '${KeriBridge.isAvailable}'
             '${KeriBridge.isAvailable ? '' : ' (error: ${KeriBridge.loadError})'}');
-        _keriService = MobileStandaloneKeriService(
-          helper: KeriHelperClient(),
-        );
+
+        final standaloneService = MobileStandaloneKeriService();
+
+        try {
+          debugPrint('[Agent] Starting embedded Go Core...');
+          await standaloneService.startGoCore();
+          debugPrint('[Agent] Go Core started on port '
+              '${standaloneService.mobileCore.port}');
+        } catch (e) {
+          debugPrint('[Agent] Go Core start failed (non-fatal): $e');
+        }
+
+        _keriService = standaloneService;
       }
     } else {
       if (mode == AgentMode.connectExisting && serverUrl != null) {
@@ -166,9 +176,19 @@ class _AgentRouterState extends State<AgentRouter> {
     }
 
     try {
-      final coreService = CoreService(
-        baseUrl: _serverUrl ?? AgentConfig.coreBaseUrl,
-      );
+      String baseUrl;
+      if (_keriService is MobileStandaloneKeriService) {
+        final standalone = _keriService as MobileStandaloneKeriService;
+        if (standalone.isCoreReady) {
+          baseUrl = standalone.mobileCore.baseUrl;
+        } else {
+          return false;
+        }
+      } else {
+        baseUrl = _serverUrl ?? AgentConfig.coreBaseUrl;
+      }
+
+      final coreService = CoreService(baseUrl: baseUrl);
       final identity = await coreService.getIdentity();
       coreService.dispose();
       return identity.initialized;
