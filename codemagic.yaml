@@ -47,6 +47,8 @@ workflows:
           set -e
           cd identity-agent-core
           mkdir -p ../identity_agent_ui/android/app/libs
+          echo "--- Adding gomobile bind dependency ---"
+          go get golang.org/x/mobile/bind
           echo "--- Go module info ---"
           go list -m all | head -5
           echo "--- Building Go Core for Android via gomobile bind ---"
@@ -218,6 +220,8 @@ workflows:
           set -e
           cd identity-agent-core
           mkdir -p ../identity_agent_ui/ios/Frameworks
+          echo "--- Adding gomobile bind dependency ---"
+          go get golang.org/x/mobile/bind
           echo "--- Go module info ---"
           go list -m all | head -5
           echo "--- Building Go Core for iOS via gomobile bind ---"
