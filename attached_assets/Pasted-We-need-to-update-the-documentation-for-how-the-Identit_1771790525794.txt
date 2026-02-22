@@ -1,0 +1,62 @@
+We need to update the documentation for how the Identity Agent fucntions, including standardizing the terminology, specifying the operating modes more clearly, and describing the migration process of backend process from one device to another. Here is the information to use: 
+
+"Identity Agent Operating Modes (Topology)
+Regardless of whether the Identity Agent is installed on a phone or a laptop, it can only exist in one of three fundamental states regarding its relationship to the Root Keys and the Backend Brain:
+
+Standalone: The device holds the Root Keys AND acts as its own Backend Brain.
+
+Remote Controller Without Root Keys (Delegated Device): The device holds Child Keys (delegated authority) and relies on a remote parent server for the Backend Brain.
+
+Remote Controller With Root Keys (Sovereign Controller): The device holds the Root Keys, but outsources the heavy Backend Brain processing to an external server (which acts under delegated authority)."
+
+Here's the comprehensive architecture mapping: 
+"User Interface (Onboarding Choice)	Target Device	Technical Mode	Architecture & Logic (What is actually happening)
+"Create New Identity"	Mobile	Mobile Standalone	"Local KERI: Parent Identity
+KERI Keys: Root keys held locally via Rust Bridge.
+Stateless KERI Ops: Sent to default public Remote Helper.
+Backend: Embedded Go Mobile runs locally."
+"Create New Identity"	Desktop	Desktop Standalone	"Local KERI: Parent Identity
+Keys: Root keys held locally via Go + Python.
+Stateless Ops: Handled locally by Python engine.
+Backend: Go Core runs locally."
+"Use External Server" (Migration Button via Settings)	Mobile	Mobile Remote Controller (With Root Keys)	"Local KERI: Parent Identity
+Keys: Root keys retained locally via Rust Bridge.
+Stateless Ops: Handled by the new external child server's Python engine.
+Backend: Embedded Go Mobile is disabled/bypassed. Outsourced to new external child server."
+"Use External Server" (Migration Button via Settings)	Desktop	Desktop Remote Controller (With Root Keys)	"Local KERI: Parent Identity
+Keys: Root keys retained locally via Go + Python.
+Stateless Ops: If needed by the local child identity, it's handled locally by Python engine. Primary identity handles its own on the external server.
+Backend: Local Go Core bypassed. Outsourced to new external child server."
+"Connect to Existing"	Mobile	Mobile Remote Controller (Without Root Keys)	"Local KERI: Child Identity
+Keys: Child keys created/held locally via Rust Bridge.
+Stateless Ops: Outsourced to Remote Parent Server.
+Backend: Outsourced to Remote Parent Server."
+"Connect to Existing"	Desktop	Desktop Remote Controller (Without Root Keys)	"Local KERI: Child Identity
+Keys: Child keys created/held locally via Go + Python (keripy). Correcting ADR 003: It does NOT forward all operations; it must manage its child AID locally.
+Stateless Ops: Outsourced to Remote Parent Server.
+Backend: Outsourced to Remote Parent Server."
+"
+
+Also, we need to document the migration flow. Perhaps another ADR just for this makes sense? Or do we want an ADR 006 to supercede all other ADRs, or try to update existing ADRs that discuss this architecture?
+
+"Migration Flow: Mobile Standalone to External Server
+This sequence ensures a smooth UX, accounts for physical hardware limitations (desktops lacking agile cameras), and provides a manual fallback.
+
+1. Initiation (Mobile): The user taps "Use External Server" in their Mobile app settings.
+
+2. Instructions (Mobile): The Mobile app displays: "1. Install the Identity Agent on your server. 2. Select 'Connect to Existing Identity'. 3. Tap 'Scan' below to scan the QR code shown on your server."
+
+3. Setup (Desktop): The user installs the app on their Desktop and selects "Connect to Existing Identity".
+
+4. Bootstrapping (Desktop): The Desktop starts its Go backend, automatically spins up a tunnel (e.g., Cloudflare) to get a public URL, and uses its local Python KERI engine to create a new Child AID.
+
+5. Display (Desktop): The Desktop displays a QR code containing a payload with its new public Tunnel URL and its Child AID. Below the QR code, it displays the raw text (URL + pairing code) as a manual fallback.
+
+6. Pairing (Mobile): The user scans the Desktop's QR code using the Mobile app (or manually types the displayed URL/code if the camera is unavailable).
+
+7. Delegation (Mobile): The Mobile app resolves the Desktop's URL, verifies the Desktop's Child AID, and uses its local Rust Bridge to cryptographically sign a delegation event (authorizing the Desktop's Child AID to act as its backend).
+
+8. Data Sync (Mobile → Desktop): The Mobile device pushes this delegation event along with its backend state (Key Event Log, contacts, OOBI data) to the Desktop server.
+
+9. Finalization: The Desktop confirms receipt and active status. The Mobile app switches its internal state to Mobile Remote Controller (With Root Keys), disables its local Go Mobile backend, and routes future stateless calls to the new Desktop server."
+"
