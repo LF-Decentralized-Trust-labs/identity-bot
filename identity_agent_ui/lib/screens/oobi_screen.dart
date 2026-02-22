@@ -7,15 +7,16 @@ import '../services/keri_service.dart';
 
 class OobiScreen extends StatefulWidget {
   final KeriService keriService;
+  final String? serverUrl;
 
-  const OobiScreen({super.key, required this.keriService});
+  const OobiScreen({super.key, required this.keriService, this.serverUrl});
 
   @override
   State<OobiScreen> createState() => _OobiScreenState();
 }
 
 class _OobiScreenState extends State<OobiScreen> {
-  final CoreService _coreService = CoreService();
+  late final CoreService _coreService = CoreService(baseUrl: widget.serverUrl);
   OobiResponse? _oobi;
   bool _loading = true;
   String? _error;

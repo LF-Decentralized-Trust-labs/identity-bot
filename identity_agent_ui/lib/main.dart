@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
+import 'dart:io' show Platform;
 import 'theme/app_theme.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/contacts_screen.dart';
@@ -9,6 +10,7 @@ import 'screens/setup_wizard_screen.dart';
 import 'screens/mode_selection_screen.dart';
 import 'screens/entity_type_screen.dart';
 import 'screens/connect_server_screen.dart';
+import 'screens/server_config_screen.dart';
 import 'services/core_service.dart';
 import 'services/keri_service.dart';
 import 'services/desktop_keri_service.dart';
@@ -54,9 +56,19 @@ enum OnboardingStep {
   loading,
   modeSelection,
   entityTypeSelection,
+  serverConfig,
   connectServer,
   setupWizard,
   dashboard,
+}
+
+bool get _isMobilePlatform {
+  if (kIsWeb) return false;
+  try {
+    return Platform.isAndroid || Platform.isIOS;
+  } catch (_) {
+    return false;
+  }
 }
 
 class AgentRouter extends StatefulWidget {
@@ -112,37 +124,36 @@ class _AgentRouterState extends State<AgentRouter> {
 
   Future<void> _initializeServiceForMode(
       AgentMode mode, String? serverUrl) async {
-    if (mode == AgentMode.connectExisting && serverUrl != null) {
+    if (serverUrl != null && serverUrl.isNotEmpty) {
       _keriService = DesktopKeriService(baseUrl: serverUrl);
-      debugPrint('[Agent] Initialized in Connect mode → $serverUrl');
-    } else {
-      final env = KeriService.detectEnvironment(
-        primaryServerUrl: AgentConfig.primaryServerUrl,
-      );
+      debugPrint('[Agent] Initialized with remote server → $serverUrl');
+      return;
+    }
 
-      if (env == AgentEnvironment.mobileStandalone) {
-        await KeriBridge.ensureInitialized();
-        if (KeriBridge.isAvailable) {
-          debugPrint('[Agent] Mobile Standalone — Rust bridge loaded');
-          _keriService = MobileStandaloneKeriService(
-            helper: KeriHelperClient(),
-          );
-        } else {
-          debugPrint(
-              '[Agent] Rust bridge unavailable, falling back to Desktop mode');
-          _keriService = DesktopKeriService();
-        }
+    if (_isMobilePlatform) {
+      await KeriBridge.ensureInitialized();
+      if (KeriBridge.isAvailable) {
+        debugPrint('[Agent] Mobile Standalone — Rust bridge loaded');
+        _keriService = MobileStandaloneKeriService(
+          helper: KeriHelperClient(),
+        );
       } else {
+        debugPrint(
+            '[Agent] Mobile — Rust bridge unavailable (${KeriBridge.loadError}), '
+            'need server URL for backend operations');
         _keriService = DesktopKeriService();
-        debugPrint('[Agent] Desktop mode');
       }
+    } else {
+      _keriService = DesktopKeriService();
+      debugPrint('[Agent] Desktop mode → ${AgentConfig.coreBaseUrl}');
     }
   }
 
   Future<bool> _checkIdentityExists() async {
     if (_keriService == null) return false;
 
-    if (_keriService!.environment == AgentEnvironment.mobileStandalone) {
+    if (_keriService!.environment == AgentEnvironment.mobileStandalone &&
+        (_serverUrl == null || _serverUrl!.isEmpty)) {
       return false;
     }
 
@@ -174,8 +185,18 @@ class _AgentRouterState extends State<AgentRouter> {
     _selectedEntityType = type;
     await PreferencesService.setEntityType(type);
 
-    await _initializeServiceForMode(AgentMode.createNew, null);
+    if (_isMobilePlatform) {
+      setState(() => _step = OnboardingStep.serverConfig);
+    } else {
+      await _initializeServiceForMode(AgentMode.createNew, null);
+      setState(() => _step = OnboardingStep.setupWizard);
+    }
+  }
 
+  void _onMobileServerConfigured(String serverUrl) async {
+    _serverUrl = serverUrl;
+    await PreferencesService.setServerUrl(serverUrl);
+    await _initializeServiceForMode(AgentMode.createNew, serverUrl);
     setState(() => _step = OnboardingStep.setupWizard);
   }
 
@@ -196,6 +217,10 @@ class _AgentRouterState extends State<AgentRouter> {
 
   void _goBackToModeSelection() {
     setState(() => _step = OnboardingStep.modeSelection);
+  }
+
+  void _goBackToEntityType() {
+    setState(() => _step = OnboardingStep.entityTypeSelection);
   }
 
   @override
@@ -244,6 +269,12 @@ class _AgentRouterState extends State<AgentRouter> {
         return EntityTypeScreen(
           onEntityTypeSelected: _onEntityTypeSelected,
           onBack: _goBackToModeSelection,
+        );
+
+      case OnboardingStep.serverConfig:
+        return ServerConfigScreen(
+          onServerConfigured: _onMobileServerConfigured,
+          onBack: _goBackToEntityType,
         );
 
       case OnboardingStep.connectServer:
@@ -296,9 +327,9 @@ class _AgentMainScreenState extends State<AgentMainScreen> {
   void initState() {
     super.initState();
     _screens = [
-      DashboardScreen(keriService: widget.keriService),
-      ContactsScreen(keriService: widget.keriService),
-      OobiScreen(keriService: widget.keriService),
+      DashboardScreen(keriService: widget.keriService, serverUrl: widget.serverUrl),
+      ContactsScreen(keriService: widget.keriService, serverUrl: widget.serverUrl),
+      OobiScreen(keriService: widget.keriService, serverUrl: widget.serverUrl),
       SettingsScreen(
         keriService: widget.keriService,
         mode: widget.mode,

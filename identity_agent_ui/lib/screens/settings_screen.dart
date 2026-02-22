@@ -24,7 +24,7 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  final CoreService _coreService = CoreService();
+  late final CoreService _coreService = CoreService(baseUrl: widget.serverUrl);
   final TextEditingController _ngrokTokenController = TextEditingController();
   final TextEditingController _cfTokenController = TextEditingController();
 

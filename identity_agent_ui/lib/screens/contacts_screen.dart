@@ -8,15 +8,16 @@ import 'qr_scanner_screen.dart';
 
 class ContactsScreen extends StatefulWidget {
   final KeriService keriService;
+  final String? serverUrl;
 
-  const ContactsScreen({super.key, required this.keriService});
+  const ContactsScreen({super.key, required this.keriService, this.serverUrl});
 
   @override
   State<ContactsScreen> createState() => _ContactsScreenState();
 }
 
 class _ContactsScreenState extends State<ContactsScreen> {
-  final CoreService _coreService = CoreService();
+  late final CoreService _coreService = CoreService(baseUrl: widget.serverUrl);
   List<ContactResponse> _contacts = [];
   bool _loading = true;
   String? _error;

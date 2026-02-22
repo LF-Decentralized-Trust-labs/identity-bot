@@ -219,7 +219,9 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
 
       if (errorMsg.contains('SocketException') ||
           errorMsg.contains('Connection refused') ||
-          errorMsg.contains('connection refused')) {
+          errorMsg.contains('connection refused') ||
+          errorMsg.contains('Connection reset') ||
+          errorMsg.contains('TimeoutException')) {
         if (!kIsWeb && BackendProcessService.isDesktopPlatform) {
           final backendError = BackendProcessService.instance.startupError;
           if (backendError != null) {
@@ -232,9 +234,15 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
           }
         } else {
           errorMsg =
-              'Cannot connect to the identity backend. '
-              'Please check your network connection and try again.';
+              'Cannot reach the Identity Agent server. '
+              'Please make sure your server is running and accessible, '
+              'then go back and re-enter the server URL.';
         }
+      } else if (errorMsg.contains('UnimplementedError') ||
+                 errorMsg.contains('Placeholder')) {
+        errorMsg =
+            'The native KERI engine is not available in this build. '
+            'Please connect to a server that has the Identity Agent backend running.';
       }
 
       setState(() {

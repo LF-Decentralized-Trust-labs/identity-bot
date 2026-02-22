@@ -10,15 +10,16 @@ import '../widgets/log_entry.dart';
 
 class DashboardScreen extends StatefulWidget {
   final KeriService keriService;
+  final String? serverUrl;
 
-  const DashboardScreen({super.key, required this.keriService});
+  const DashboardScreen({super.key, required this.keriService, this.serverUrl});
 
   @override
   State<DashboardScreen> createState() => _DashboardScreenState();
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
-  final CoreService _coreService = CoreService();
+  late final CoreService _coreService = CoreService(baseUrl: widget.serverUrl);
   CoreConnectionState _connectionState = CoreConnectionState.disconnected;
   HealthResponse? _healthData;
   CoreInfoResponse? _coreInfo;
