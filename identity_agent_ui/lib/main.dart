@@ -14,6 +14,7 @@ import 'services/core_service.dart';
 import 'services/keri_service.dart';
 import 'services/desktop_keri_service.dart';
 import 'services/remote_server_keri_service.dart';
+import 'services/mobile_remote_keri_service.dart';
 import 'services/mobile_standalone_keri_service.dart';
 import 'services/mobile_core_service.dart';
 import 'services/preferences_service.dart';
@@ -128,14 +129,14 @@ class _AgentRouterState extends State<AgentRouter> {
       if (mode == AgentMode.connectExisting && serverUrl != null) {
         if (KeriBridge.isAvailable) {
           debugPrint('[Agent] Mobile Remote Controller WITHOUT Keys — '
-              'Rust bridge for local delegated AID, '
-              'remote server ($serverUrl) for backend ops');
-          _keriService = RemoteServerKeriService(serverUrl: serverUrl);
+              'Rust bridge for local child AID, '
+              'remote parent server ($serverUrl) for backend/stateless ops');
+          _keriService = MobileRemoteKeriService(parentServerUrl: serverUrl);
         } else {
           debugPrint('[Agent] Mobile Remote Controller — Rust bridge '
               'unavailable (${KeriBridge.loadError}), falling back to '
-              'DesktopKeriService pointed at remote server');
-          _keriService = DesktopKeriService(baseUrl: serverUrl);
+              'RemoteServerKeriService (all ops forwarded to remote server)');
+          _keriService = RemoteServerKeriService(serverUrl: serverUrl);
         }
       } else {
         debugPrint('[Agent] Mobile Standalone — Rust bridge available: '
@@ -157,8 +158,10 @@ class _AgentRouterState extends State<AgentRouter> {
       }
     } else {
       if (mode == AgentMode.connectExisting && serverUrl != null) {
-        _keriService = DesktopKeriService(baseUrl: serverUrl);
-        debugPrint('[Agent] Desktop Connect mode → $serverUrl');
+        _keriService = DesktopKeriService();
+        debugPrint('[Agent] Desktop Remote Controller WITHOUT Keys — '
+            'local Go+Python for child AID, '
+            'remote parent server ($serverUrl) for backend/stateless ops');
       } else {
         _keriService = DesktopKeriService();
         debugPrint('[Agent] Desktop mode → ${AgentConfig.coreBaseUrl}');
