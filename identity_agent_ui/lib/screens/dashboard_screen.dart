@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:async';
+import 'dart:io' show Platform;
 import '../theme/app_theme.dart';
 import '../config/agent_config.dart';
 import '../services/core_service.dart';
 import '../services/keri_service.dart';
+import '../services/mobile_standalone_keri_service.dart';
 import '../widgets/status_indicator.dart';
 import '../widgets/info_card.dart';
 import '../widgets/log_entry.dart';
@@ -41,6 +44,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _healthTimer?.cancel();
     _coreService.dispose();
     super.dispose();
+  }
+
+  bool get _isStandaloneMode {
+    return widget.keriService is MobileStandaloneKeriService;
   }
 
   String _timeNow() {
@@ -147,6 +154,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         _buildIdentityCard(),
                       if (_identity != null && _identity!.initialized)
                         const SizedBox(height: 20),
+                      if (_isStandaloneMode && _identity != null && _identity!.initialized)
+                        ...[
+                          _buildMigrateButton(),
+                          const SizedBox(height: 20),
+                        ],
                       _buildInfoGrid(),
                       const SizedBox(height: 20),
                     ],
@@ -532,6 +544,118 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
           ],
         ],
+      ),
+    );
+  }
+
+  Widget _buildMigrateButton() {
+    return InkWell(
+      onTap: () {
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: AppColors.surface,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+              side: const BorderSide(color: AppColors.border),
+            ),
+            title: const Text(
+              'MIGRATE TO EXTERNAL SERVER',
+              style: TextStyle(
+                color: AppColors.textPrimary,
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1.5,
+                fontFamily: 'monospace',
+              ),
+            ),
+            content: const Text(
+              'This feature will allow you to migrate your identity '
+              'to an external server while keeping your keys on this device.\n\n'
+              'Your phone will become a Remote Controller WITH Keys, '
+              'maintaining full cryptographic authority over your identity '
+              'while delegating compute-heavy tasks to the server.\n\n'
+              'Coming soon.',
+              style: TextStyle(
+                color: AppColors.textSecondary,
+                fontSize: 13,
+                fontFamily: 'monospace',
+                height: 1.5,
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text(
+                  'OK',
+                  style: TextStyle(
+                    color: AppColors.accent,
+                    fontFamily: 'monospace',
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: AppColors.corePending.withOpacity(0.3),
+            width: 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: AppColors.corePending.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(
+                Icons.cloud_upload_outlined,
+                color: AppColors.corePending,
+                size: 18,
+              ),
+            ),
+            const SizedBox(width: 14),
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'MIGRATE TO EXTERNAL SERVER',
+                    style: TextStyle(
+                      color: AppColors.textPrimary,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 1.0,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                  SizedBox(height: 2),
+                  Text(
+                    'Move backend to a server, keep keys here',
+                    style: TextStyle(
+                      color: AppColors.textMuted,
+                      fontSize: 10,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right, color: AppColors.textMuted, size: 20),
+          ],
+        ),
       ),
     );
   }
