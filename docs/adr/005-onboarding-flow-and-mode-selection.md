@@ -1,6 +1,7 @@
 # ADR 005: Onboarding Flow and Mode Selection
 
 **Date:** 2026-02-21
+**Updated:** 2026-02-22
 **Status:** Accepted
 **Related:** ADR-003 (Adaptive Architecture — Three Operating Modes)
 
@@ -63,9 +64,9 @@ The flow is a state machine with five states:
 
 The user sees two options:
 
-- **"Create New Identity"** (recommended) — For users setting up a brand new digital identity on this device. This is the primary path for first-time users. The app will generate a BIP-39 mnemonic seed phrase and create a root identity.
+- **"Create New Identity"** (recommended) — For users setting up a brand new digital identity on this device. This is the primary path for first-time users. The app will generate a BIP-39 mnemonic seed phrase and create a root identity. On mobile, this operates in **Standalone Mode** — the phone creates and holds the identity keys locally via the Rust KERI bridge. No remote server is required.
 
-- **"Connect to Existing Identity"** — For users who already have an Identity Agent running on another machine (their laptop, a cloud server, etc.) and want this device to connect to it as an additional device. No new identity is created locally — the device becomes a remote interface to the existing server.
+- **"Connect to Existing Identity"** — For users who already have an Identity Agent running on another machine (their laptop, a cloud server, etc.) and want this device to connect to it as an additional device. On mobile, the phone still uses the **local Rust KERI bridge** to create its own AID, which becomes a delegated identity under the parent server's identity. The remote server is used for stateless KERI operations (formatting, OOBI resolution, etc.).
 
 ### Step 2a: Entity Type Selection (for "Create New Identity")
 
@@ -81,7 +82,7 @@ If the user chose "Create New Identity," they are asked what kind of entity this
 2. Avoid requiring a migration or identity re-creation later.
 3. Potentially customize the KERI inception event structure in the future (single-sig for individuals, multi-sig threshold for organizations).
 
-After selecting an entity type, the user proceeds to the existing Setup Wizard (BIP-39 mnemonic generation → identity creation).
+After selecting an entity type, the user proceeds to the existing Setup Wizard (BIP-39 mnemonic generation → identity creation). On mobile, no server URL is needed — the Rust bridge handles all KERI operations locally.
 
 ### Step 2b: Server Connection (for "Connect to Existing Identity")
 
@@ -101,17 +102,68 @@ If the server cannot be reached, returns an error, or has a non-"active" status,
 
 The server URL can be any publicly reachable address: a Cloudflare tunnel URL, an ngrok URL, a static IP, or a domain name. The app automatically prepends `https://` if no protocol is specified.
 
+## Three Mobile Operating Modes
+
+On mobile devices, there are actually **three** operating modes, though only two are presented to the user during onboarding. The third mode is a natural evolution of the first:
+
+### 1. Standalone Mode (user-facing: "Create New Identity")
+
+The phone creates and holds its own identity locally. The Rust KERI bridge handles all stateful operations (key creation, signing, rotation) directly on-device via FFI. Stateless operations (formatting, parsing) are sent to a default helper service or, if available, the user's own publicly accessible backend.
+
+This is the default mobile experience. The phone is the primary key holder and identity owner.
+
+### 2. Remote Controller WITH Keys (user-facing: migration from Standalone)
+
+This is **not** a setup option — it is a **migration path** from Standalone Mode. When the user decides to offload computing power to a dedicated server, they migrate their backend to a separate machine. When this happens:
+
+- The **keys remain on the phone**. The phone continues to be the primary key holder and identity owner.
+- The remote server creates **its own AID** that becomes a **delegated identity** acting on behalf of the phone's root identity.
+- The phone delegates heavy computation (OOBI resolution, credential formatting, etc.) to the remote server while retaining full authority over the identity.
+- The Rust KERI bridge on the phone continues to handle all local stateful operations (signing, key rotation).
+
+This mode is the natural upgrade path for users who start with Standalone and later want dedicated server infrastructure.
+
+### 3. Remote Controller WITHOUT Keys (user-facing: "Connect to Existing Identity")
+
+The phone connects to an existing Identity Agent running on another device. The existing device retains the root identity and keys. The phone:
+
+- Uses the **local Rust KERI bridge** to create its own AID, which becomes a **delegated device** under the parent identity.
+- Uses the **remote parent server** for all stateless KERI operations (formatting, OOBI resolution, etc.).
+- Does not hold the root identity keys — it operates under delegated authority.
+
+### How the user-facing options map to these modes:
+
+| User's Choice | Initial Mode | Future Migration |
+|---|---|---|
+| "Create New Identity" | Standalone Mode | Can migrate to Remote Controller WITH Keys |
+| "Connect to Existing Identity" | Remote Controller WITHOUT Keys | N/A (already connected) |
+
+### Key insight: The Rust KERI bridge is always needed on mobile
+
+Both "Create New" and "Connect to Existing" on mobile require the local Rust KERI bridge:
+
+- **Create New (Standalone):** The bridge creates and manages the root identity locally.
+- **Connect to Existing (Remote Controller WITHOUT Keys):** The bridge creates a local delegated AID that connects to the parent identity on the remote server.
+
+The difference is in what the **remote server** provides:
+
+- **Standalone:** No remote server needed for core operations. A stateless helper handles formatting/parsing only.
+- **Remote Controller WITHOUT Keys:** The parent server provides stateless KERI operations AND is the target for delegation.
+
 ## How Mode Selection Relates to Operating Modes (ADR-003)
 
 The onboarding mode selection ("Create New" vs. "Connect to Existing") is a **user-facing** concept that sits above the **technical** operating modes from ADR-003. They are related but not the same:
 
-| User's Onboarding Choice | Technical Mode Used | What Happens |
-|---|---|---|
-| "Create New Identity" on a laptop | Desktop Mode | Go + Python run locally, identity created on this machine |
-| "Create New Identity" on a phone | Mobile Standalone Mode | Rust bridge handles KERI locally (or falls back to Go backend if Rust lib unavailable) |
-| "Connect to Existing" on any device | Desktop Mode (pointed at remote URL) | `DesktopKeriService` initialized with the remote server's URL; all KERI operations forwarded there |
+| User's Onboarding Choice | Device | Technical Mode | What Happens |
+|---|---|---|---|
+| "Create New Identity" | Desktop | Desktop Mode | Go + Python run locally, identity created on this machine |
+| "Create New Identity" | Mobile | Mobile Standalone | Rust bridge handles KERI locally; stateless ops go to default helper |
+| "Connect to Existing" | Desktop | Desktop Mode (remote URL) | `DesktopKeriService` initialized with the remote server's URL; all KERI operations forwarded there |
+| "Connect to Existing" | Mobile | Mobile Standalone + Remote | Rust bridge for stateful ops (delegated AID creation); remote server for stateless ops |
 
-**Key insight:** "Connect to Existing Identity" always results in the `DesktopKeriService` being used, regardless of device type. This is because the phone is simply acting as a remote interface to the server — it doesn't need a local KERI engine. The `DesktopKeriService` already supports configurable `baseUrl`, so pointing it at a remote server works identically to pointing it at `localhost:5000`.
+**Desktop "Connect to Existing"** uses `DesktopKeriService` pointed at the remote URL — all operations (stateful and stateless) are forwarded to the remote server. This works because the desktop doesn't need local key operations when connecting to an existing identity.
+
+**Mobile "Connect to Existing"** uses `MobileStandaloneKeriService` with the remote server URL as the stateless helper — stateful operations (AID creation for delegation) happen locally via the Rust bridge, while stateless operations go to the parent server.
 
 ## Persistence
 
@@ -131,6 +183,8 @@ A `clearAll()` method exists on `PreferencesService` for future use — for exam
 ## Graceful Degradation on Mobile
 
 When the user selects "Create New Identity" on a mobile device, the app attempts to load the Rust KERI library via FFI (as described in ADR-003 and ADR-004). If the native library is not available — which happens during development because the Rust cross-compilation only runs in the Codemagic CI/CD pipeline — the app falls back to Desktop Mode, communicating with the Go backend over HTTP.
+
+The same graceful degradation applies to "Connect to Existing" on mobile. If the Rust bridge is unavailable, the app falls back to `DesktopKeriService` pointed at the remote server, forwarding all operations (including stateful ones) to the remote server. This means the phone loses local key management but remains functional.
 
 This fallback is handled in `KeriBridge.ensureInitialized()`, which catches library load failures gracefully:
 
@@ -175,3 +229,4 @@ This gives the user visibility into how their agent is configured without requir
 - All onboarding state is persisted locally — the app never asks the same questions twice after a successful setup.
 - The onboarding flow is purely a UI-layer concern. It does not change any backend APIs, KERI protocol logic, or the three operating modes themselves. It simply determines which `KeriService` implementation gets initialized and with what parameters.
 - Back navigation is supported at every step, so users can change their mind without restarting the app.
+- The "Remote Controller with Keys" mode (migration from Standalone to delegated server) is intentionally omitted from the onboarding UI. It will be implemented as a migration feature accessible from Settings, allowing users to upgrade their Standalone setup to a server-backed configuration without re-creating their identity.
