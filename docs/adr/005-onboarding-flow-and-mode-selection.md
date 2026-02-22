@@ -2,8 +2,10 @@
 
 **Date:** 2026-02-21
 **Updated:** 2026-02-22
-**Status:** Accepted
-**Related:** ADR-003 (Adaptive Architecture — Three Operating Modes)
+**Status:** Accepted (mode definitions superseded by ADR-006 — Standardized Topology)
+**Related:** ADR-003 (Adaptive Architecture), ADR-006 (Standardized Topology)
+
+> **Note:** The mobile mode definitions in this ADR (Standalone, Remote WITH Keys, Remote WITHOUT Keys) have been superseded by the 3-state × 2-device-type topology model in ADR-006. This ADR remains the authoritative source for the onboarding flow UI, state machine, persistence keys, and graceful degradation behavior. See ADR-006 for the current architectural topology.
 
 ## The Problem This Solves
 
@@ -158,12 +160,12 @@ The onboarding mode selection ("Create New" vs. "Connect to Existing") is a **us
 |---|---|---|---|
 | "Create New Identity" | Desktop | Desktop Mode | Go + Python run locally, identity created on this machine |
 | "Create New Identity" | Mobile | Mobile Standalone | Rust bridge handles KERI locally; stateless ops go to default helper |
-| "Connect to Existing" | Desktop | Desktop Mode (remote URL) | `DesktopKeriService` initialized with the remote server's URL; all KERI operations forwarded there |
-| "Connect to Existing" | Mobile | Mobile Standalone + Remote | Rust bridge for stateful ops (delegated AID creation); remote server for stateless ops |
+| "Connect to Existing" | Desktop | Desktop Remote WITHOUT Keys | `DesktopKeriService()` (local Go+Python for child AID); remote serverUrl passed to screens for backend/stateless ops |
+| "Connect to Existing" | Mobile | Mobile Remote WITHOUT Keys | `MobileRemoteKeriService` (Rust bridge for local child AID); remote parentServerUrl for backend/stateless ops |
 
-**Desktop "Connect to Existing"** uses `DesktopKeriService` pointed at the remote URL — all operations (stateful and stateless) are forwarded to the remote server. This works because the desktop doesn't need local key operations when connecting to an existing identity.
+**Desktop "Connect to Existing"** uses `DesktopKeriService()` with the LOCAL Go+Python engine to create a delegated child AID. The remote server URL is passed to screens for backend and stateless operations. Stateful KERI operations always use the local engine.
 
-**Mobile "Connect to Existing"** uses `MobileStandaloneKeriService` with the remote server URL as the stateless helper — stateful operations (AID creation for delegation) happen locally via the Rust bridge, while stateless operations go to the parent server.
+**Mobile "Connect to Existing"** uses `MobileRemoteKeriService` with the Rust bridge to create a local child AID. The remote parent server URL is stored for backend delegation. If the Rust bridge is unavailable (development builds), falls back to `RemoteServerKeriService`.
 
 ## Persistence
 

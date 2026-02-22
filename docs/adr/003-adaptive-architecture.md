@@ -2,8 +2,10 @@
 
 **Date:** 2026-02-18
 **Updated:** 2026-02-22
-**Status:** Accepted
+**Status:** Accepted (mode definitions superseded by ADR-006 — Standardized Topology)
 **Context:** Phase 3 (Connectivity) — OOBI serving, contact management, and tunneling
+
+> **Note:** The four-mode model described in this ADR has been superseded by the 3-state × 2-device-type topology model in ADR-006. This ADR remains the authoritative source for OOBI serving, contact management, tunneling, endpoint naming conventions, trust boundaries, and configuration variables. See ADR-006 for the current architectural topology.
 
 ## The Problem This Solves
 
@@ -154,10 +156,11 @@ Mode selection happens through the **onboarding flow**, not automatic environmen
 
 The user's choice is persisted via `PreferencesService` (SharedPreferences). On subsequent app launches, `_loadSavedState()` in `main.dart` restores the saved mode and initializes the correct `KeriService` implementation.
 
-The `_initializeServiceForMode()` method in `main.dart` handles the mode-to-service mapping:
-- Desktop: `DesktopKeriService` (talks to local Go Core on port 5000)
+The `_initializeServiceForMode()` method in `main.dart` handles the topology-to-service mapping:
+- Desktop (all topologies): `DesktopKeriService()` (local Go+Python for KERI ops; remote serverUrl passed to screens for backend ops in Remote topologies)
 - Mobile Standalone: `MobileStandaloneKeriService` (Rust bridge + embedded Go Core)
-- Mobile Remote (Connect to Existing): `RemoteServerKeriService` (Rust bridge + remote server URL)
+- Mobile Remote WITHOUT Keys: `MobileRemoteKeriService` (Rust bridge for local child AID + remote parent server URL)
+- Fallback (Rust bridge unavailable): `RemoteServerKeriService` (all ops forwarded to remote server)
 
 ## Trust Boundaries
 
