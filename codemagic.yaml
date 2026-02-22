@@ -54,6 +54,11 @@ workflows:
           mkdir -p ../android/app/src/main/jniLibs/x86_64
           mkdir -p ../android/app/src/main/jniLibs/x86
 
+          # Force libsodium to be statically linked (required for Android)
+          export SODIUM_STATIC=1
+          export SODIUM_LIB_DIR=""
+          export SODIUM_SHARED=0
+
           # Phase 1: Build with dev_skip_frb so FRB codegen can inspect symbols
           echo "--- Phase 1: Building with dev_skip_frb for FRB codegen ---"
           cargo ndk \
@@ -85,6 +90,10 @@ workflows:
 
           echo "--- Built .so files ---"
           find ../android/app/src/main/jniLibs -name "*.so" -ls
+
+          # Verify no dynamic libsodium dependency
+          echo "--- Checking dynamic dependencies (arm64) ---"
+          readelf -d ../android/app/src/main/jniLibs/arm64-v8a/libidentity_agent_keri.so 2>/dev/null | grep NEEDED || echo "readelf not available"
 
       - name: Build debug APK
         script: |
@@ -136,6 +145,10 @@ workflows:
         script: |
           source "$HOME/.cargo/env"
           cd identity_agent_ui/rust
+
+          # Force libsodium to be statically linked (required for iOS)
+          export SODIUM_STATIC=1
+          export SODIUM_SHARED=0
 
           # Phase 1: Build with dev_skip_frb so FRB codegen can inspect
           # the compiled library's exported symbols. frb_generated.rs

@@ -20,5 +20,5 @@ base64 = "0.13"
 [profile.release]
 lto = true
 opt-level = "z"
-strip = true
+strip = "debuginfo"
 codegen-units = 1
