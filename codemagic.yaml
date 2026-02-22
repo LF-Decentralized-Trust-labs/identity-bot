@@ -318,13 +318,13 @@ workflows:
           cd identity_agent_ui/ios
           pod install
 
-      - name: Build iOS (no codesign, for Codemagic simulator testing)
+      - name: Build iOS for Simulator testing
         script: |
           cd identity_agent_ui
-          flutter build ipa --release --no-codesign
+          flutter build ios --debug --simulator
 
     artifacts:
-      - identity_agent_ui/build/ios/ipa/*.ipa
+      - identity_agent_ui/build/ios/iphonesimulator/*.app
       - /tmp/xcodebuild_logs/*.log
 
   windows-release:
