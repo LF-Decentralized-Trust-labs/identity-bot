@@ -1,5 +1,5 @@
 rust_input: rust/src/api/**/*.rs
-dart_output: lib/src/rust/api
+dart_output: lib/src/rust
 rust_root: rust/
 rust_output: rust/src/frb_generated.rs
 dart_entrypoint_class_name: RustLib

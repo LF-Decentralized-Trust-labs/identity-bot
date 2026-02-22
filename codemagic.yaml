@@ -73,7 +73,7 @@ workflows:
             echo "--- Rust source files ---"
             find rust/src -name "*.rs" -ls
             echo "--- Dart output dir ---"
-            ls -la lib/src/rust/ 2>/dev/null || echo "Dir does not exist"
+            find lib/src/rust -name "*.dart" -ls 2>/dev/null || echo "Dir does not exist"
             exit 1
           fi
 
@@ -85,14 +85,17 @@ workflows:
           ls -la rust/src/frb_generated.rs 2>/dev/null || echo "frb_generated.rs NOT FOUND"
           echo ""
           echo "Dart hash line:"
-          grep 'rustContentHash' lib/src/rust/frb_generated.dart || echo "No hash line found!"
+          grep 'rustContentHash' lib/src/rust/frb_generated.dart || echo "No hash line found in frb_generated.dart!"
           echo ""
 
           if grep -q 'rustContentHash => 0' lib/src/rust/frb_generated.dart; then
             echo "ERROR: FRB codegen did not update the Dart hash (still 0)!"
-            echo "The placeholder was not overwritten."
-            echo "--- Dart frb_generated.dart (first 80 lines) ---"
-            head -80 lib/src/rust/frb_generated.dart
+            echo "The placeholder was not overwritten by FRB codegen."
+            echo "--- frb_generated.dart (first 30 lines) ---"
+            head -30 lib/src/rust/frb_generated.dart
+            echo ""
+            echo "Check flutter_rust_bridge.yaml dart_output points to lib/src/rust"
+            grep dart_output flutter_rust_bridge.yaml
             exit 1
           fi
 
@@ -201,10 +204,12 @@ workflows:
           fi
 
           echo "--- Post-codegen: Verifying generated files ---"
+          find lib/src/rust -name "*.dart" -ls
           grep 'rustContentHash' lib/src/rust/frb_generated.dart || echo "No hash line found!"
           if grep -q 'rustContentHash => 0' lib/src/rust/frb_generated.dart; then
             echo "ERROR: FRB codegen did not update the Dart hash (still 0)!"
-            head -80 lib/src/rust/frb_generated.dart
+            head -30 lib/src/rust/frb_generated.dart
+            grep dart_output flutter_rust_bridge.yaml
             exit 1
           fi
           echo "--- FRB codegen completed successfully ---"
