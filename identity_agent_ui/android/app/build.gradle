@@ -23,7 +23,7 @@ if (flutterVersionName == null) {
 }
 
 android {
-    namespace = "com.identityagent.app"
+    namespace = "com.example.identity_agent_ui"
     compileSdk = 36
     ndkVersion = "27.0.12077973"
 
