@@ -299,11 +299,18 @@ class _AgentRouterState extends State<AgentRouter> {
         );
 
       case OnboardingStep.dashboard:
+        String? effectiveServerUrl = _serverUrl;
+        if (effectiveServerUrl == null && _keriService is MobileStandaloneKeriService) {
+          final standalone = _keriService as MobileStandaloneKeriService;
+          if (standalone.isCoreReady) {
+            effectiveServerUrl = standalone.mobileCore.baseUrl;
+          }
+        }
         return AgentMainScreen(
           keriService: _keriService!,
           mode: _selectedMode,
           entityType: _selectedEntityType,
-          serverUrl: _serverUrl,
+          serverUrl: effectiveServerUrl,
         );
     }
   }
