@@ -217,7 +217,20 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
     } catch (e) {
       String errorMsg = e.toString();
 
-      if (errorMsg.contains('SocketException') ||
+      if (errorMsg.contains('KERI_BRIDGE_NOT_AVAILABLE')) {
+        errorMsg =
+            'The native KERI engine could not be loaded on this device. '
+            'Identity creation requires the Rust KERI library to be '
+            'compiled and included in the app. Please rebuild the app '
+            'using the Codemagic CI/CD pipeline, which compiles the '
+            'Rust library for your device.';
+      } else if (errorMsg.contains('UnimplementedError') ||
+                 errorMsg.contains('Placeholder')) {
+        errorMsg =
+            'The native KERI engine is not available in this build. '
+            'The app was built without running the Rust bridge code '
+            'generator. Please rebuild using the Codemagic CI/CD pipeline.';
+      } else if (errorMsg.contains('SocketException') ||
           errorMsg.contains('Connection refused') ||
           errorMsg.contains('connection refused') ||
           errorMsg.contains('Connection reset') ||
@@ -238,11 +251,6 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
               'Please make sure your server is running and accessible, '
               'then go back and re-enter the server URL.';
         }
-      } else if (errorMsg.contains('UnimplementedError') ||
-                 errorMsg.contains('Placeholder')) {
-        errorMsg =
-            'The native KERI engine is not available in this build. '
-            'Please connect to a server that has the Identity Agent backend running.';
       }
 
       setState(() {

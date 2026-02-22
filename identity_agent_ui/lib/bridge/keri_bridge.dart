@@ -66,17 +66,30 @@ class KeriBridge {
     }
   }
 
+  void _ensureBridgeReady(String operation) {
+    if (!_isMobilePlatform) {
+      throw UnsupportedError(
+        'KeriBridge.$operation is only available on mobile (iOS/Android). '
+        'Desktop uses the Python KERI driver via the Go backend.',
+      );
+    }
+    if (!_rustAvailable) {
+      final reason = _loadError ?? 'unknown error';
+      throw StateError(
+        'KERI_BRIDGE_NOT_AVAILABLE: The native KERI engine could not be '
+        'loaded on this device ($reason). This is required for local '
+        'identity creation. The app was built without a working Rust '
+        'KERI library — please rebuild with flutter_rust_bridge_codegen.',
+      );
+    }
+  }
+
   Future<BridgeInceptionResult> inceptAid({
     required String name,
     required String code,
   }) async {
-    if (!_isMobilePlatform) {
-      throw UnsupportedError(
-        'KeriBridge.inceptAid is only available on mobile (iOS/Android). '
-        'Desktop uses the Python KERI driver via the Go backend.',
-      );
-    }
     await ensureInitialized();
+    _ensureBridgeReady('inceptAid');
     final result = rust_api.inceptAid(name: name, code: code);
     return BridgeInceptionResult(
       aid: result.aid,
@@ -88,12 +101,8 @@ class KeriBridge {
   Future<BridgeRotationResult> rotateAid({
     required String name,
   }) async {
-    if (!_isMobilePlatform) {
-      throw UnsupportedError(
-        'KeriBridge.rotateAid is only available on mobile (iOS/Android).',
-      );
-    }
     await ensureInitialized();
+    _ensureBridgeReady('rotateAid');
     final result = rust_api.rotateAid(name: name);
     return BridgeRotationResult(
       aid: result.aid,
@@ -106,12 +115,8 @@ class KeriBridge {
     required String name,
     required List<int> data,
   }) async {
-    if (!_isMobilePlatform) {
-      throw UnsupportedError(
-        'KeriBridge.signPayload is only available on mobile (iOS/Android).',
-      );
-    }
     await ensureInitialized();
+    _ensureBridgeReady('signPayload');
     final result = rust_api.signPayload(name: name, data: data);
     return BridgeSignatureResult(
       signature: result.signature,
@@ -122,12 +127,8 @@ class KeriBridge {
   Future<String> getCurrentKel({
     required String name,
   }) async {
-    if (!_isMobilePlatform) {
-      throw UnsupportedError(
-        'KeriBridge.getCurrentKel is only available on mobile (iOS/Android).',
-      );
-    }
     await ensureInitialized();
+    _ensureBridgeReady('getCurrentKel');
     return rust_api.getCurrentKel(name: name);
   }
 
@@ -136,12 +137,8 @@ class KeriBridge {
     required String signature,
     required String publicKey,
   }) async {
-    if (!_isMobilePlatform) {
-      throw UnsupportedError(
-        'KeriBridge.verifySignature is only available on mobile (iOS/Android).',
-      );
-    }
     await ensureInitialized();
+    _ensureBridgeReady('verifySignature');
     return rust_api.verifySignature(
       data: data,
       signature: signature,

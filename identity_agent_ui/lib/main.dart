@@ -139,16 +139,12 @@ class _AgentRouterState extends State<AgentRouter> {
           _keriService = DesktopKeriService(baseUrl: serverUrl);
         }
       } else {
-        if (KeriBridge.isAvailable) {
-          debugPrint('[Agent] Mobile Standalone — Rust bridge loaded');
-          _keriService = MobileStandaloneKeriService(
-            helper: KeriHelperClient(),
-          );
-        } else {
-          debugPrint('[Agent] Mobile Standalone — Rust bridge unavailable '
-              '(${KeriBridge.loadError}), falling back to DesktopKeriService');
-          _keriService = DesktopKeriService();
-        }
+        debugPrint('[Agent] Mobile Standalone — Rust bridge available: '
+            '${KeriBridge.isAvailable}'
+            '${KeriBridge.isAvailable ? '' : ' (error: ${KeriBridge.loadError})'}');
+        _keriService = MobileStandaloneKeriService(
+          helper: KeriHelperClient(),
+        );
       }
     } else {
       if (mode == AgentMode.connectExisting && serverUrl != null) {
