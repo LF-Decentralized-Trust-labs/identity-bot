@@ -11,14 +11,31 @@ Design theme: Dark cyberpunk aesthetic with monospace fonts, dark blue/green col
 
 ## System Architecture
 
-The system uses an adaptive architecture to integrate the KERI engine, resulting in four distinct operating modes:
+The system uses a standardized topology model: **3 topological states × 2 device types = 6 architectural combinations** (see ADR-006 for full details).
 
-1.  **Desktop Mode (Linux/macOS/Windows):** The Flutter UI communicates with a Go backend (`identity-agent-core`), which drives a Python KERI engine (`keripy`) running as a local child process. Full-featured mode with tunneling, OOBI serving, contact management, and all KERI operations.
-2.  **Mobile Standalone Mode (iOS/Android):** BOTH the Rust KERI bridge (crypto/key operations via FFI) AND the Go Core backend (data persistence, OOBI, contacts, tunneling via gomobile platform channel) run locally on the device. This is the primary mobile onboarding path ("Create New Identity").
-3.  **Mobile Remote Controller WITHOUT Keys:** The phone creates a delegated child AID locally using the Rust bridge, then connects to a remote Identity Agent server URL for backend operations. The server manages the parent AID; the phone holds only the child AID keys. Entered via "Connect to Existing Identity" onboarding flow.
-4.  **Mobile Remote Controller WITH Keys:** The phone retains the primary parent AID and its keys locally (via Rust bridge), connecting to a remote server URL for compute-heavy backend operations. Reached by migrating from Standalone mode via the "Migrate to External Server" dashboard button.
+### Three Topological States
 
-A `KeriService` Dart abstract class provides a mode-agnostic interface for KERI operations, ensuring UI code remains independent of the underlying operating mode.
+1.  **Standalone** (Root Keys + Backend Brain): Device holds root AID keys AND runs all backend services locally.
+2.  **Remote Controller WITHOUT Root Keys** (Delegated Device): Device creates a delegated child AID locally, connects to remote parent server for backend services.
+3.  **Remote Controller WITH Root Keys** (Sovereign Controller): Device retains primary parent AID and keys locally, uses remote server for compute-heavy backend operations.
+
+### Two Device Types
+
+-   **Desktop** (Linux/macOS/Windows): Go backend → Python keripy for KERI, Go Core for backend services.
+-   **Mobile** (iOS/Android): Rust bridge via FFI for KERI, Go Core via gomobile for backend services (Standalone only).
+
+### Critical Architecture Invariant
+
+In ALL combinations, stateful KERI operations (inception, rotation, signing, verification, KEL retrieval) ALWAYS use the LOCAL engine. The remote server is only for backend services and stateless operations. The remote server NEVER performs stateful KERI operations on behalf of the local device.
+
+A `KeriService` Dart abstract class provides a topology-agnostic interface for KERI operations, ensuring UI code remains independent of the underlying topology.
+
+### KeriService Implementations
+
+-   `DesktopKeriService`: All desktop topologies — talks to local Go+Python. Remote serverUrl passed to screens for backend ops in Remote topologies.
+-   `MobileStandaloneKeriService`: Mobile Standalone — Rust bridge (KERI) + embedded Go Core (backend).
+-   `MobileRemoteKeriService`: Mobile Remote WITHOUT Keys — Rust bridge for local child AID, stores parentServerUrl for backend delegation. No embedded Go Core.
+-   `RemoteServerKeriService`: Fallback only — forwards all ops to remote server when local KERI engine unavailable.
 
 ### Component Details
 
@@ -57,6 +74,13 @@ Defaults to a file-based JSON store in `./data/` (`identity.json`, `kel.json`, `
 
 ## Recent Changes
 
+-   **2026-02-22:** Standardized topology model and architecture fixes.
+    -   Created ADR 006 (Standardized Topology): 3 topological states × 2 device types = 6 architectural combinations. Supersedes mode definitions in ADR 003 and ADR 005.
+    -   Created `MobileRemoteKeriService`: Uses Rust bridge for local child AID operations, stores `parentServerUrl` for backend delegation. No embedded Go Core.
+    -   Fixed Desktop "Connect to Existing": Now uses `DesktopKeriService()` (local Go+Python) instead of `DesktopKeriService(baseUrl: serverUrl)`. Child AID created locally, remote server used only for backend/stateless ops.
+    -   Fixed Mobile "Connect to Existing": Now uses `MobileRemoteKeriService` (Rust bridge) instead of `RemoteServerKeriService`. `RemoteServerKeriService` demoted to fallback-only.
+    -   Updated ADR 003: Added superseded note, fixed mode-to-service mapping to reflect new `MobileRemoteKeriService`.
+    -   Updated ADR 005: Added superseded note, fixed Desktop/Mobile "Connect to Existing" code references.
 -   **2026-02-22:** ADR documentation audit and dead code cleanup.
     -   Updated ADR 001 to fix outdated references (keri-go → keripy/keriox, BadgerDB → file-based JSON, port 8080 → 5000). AI governance kept as future work.
     -   Updated ADR 002 to document optional KERI driver (`ServerConfig.EnableKeriDriver`), extracted `server` package, and updated Key Files section.
