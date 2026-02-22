@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Identity Agent is a self-sovereign digital identity platform designed to unify identity, data, communications, and assets using the KERI (Key Event Receipt Infrastructure) protocol. The project aims to provide a single, integrated environment for digital identity, empowering users with full control over their digital identities, enhancing privacy and security across various digital interactions. Key capabilities include identity creation, BIP-39 mnemonic generation, KERI inception events, Key Event Log (KEL) persistence, adaptive mobile architecture, OOBI serving/sharing, QR code generation/scanning, contact management, multi-provider tunneling, Settings UI, tunnel configuration persistence, user onboarding flows, and OOBI-based server connection for cryptographic trust establishment. The project is currently in **Phase 3 ("Connectivity")**.
+The Identity Agent is a self-sovereign digital identity platform designed to unify identity, data, communications, and assets using the KERI (Key Event Receipt Infrastructure) protocol. The project aims to provide a single, integrated environment for digital identity, empowering users with full control over their digital identities, enhancing privacy and security across various digital interactions. Key capabilities include identity creation, KERI inception events, Key Event Log (KEL) persistence, adaptive mobile architecture, OOBI serving/sharing, QR code generation/scanning, contact management, multi-provider tunneling, and user onboarding flows with OOBI-based server connection for cryptographic trust establishment.
 
 ## User Preferences
 
@@ -11,40 +11,34 @@ Design theme: Dark cyberpunk aesthetic with monospace fonts, dark blue/green col
 
 ## System Architecture
 
-The system utilizes an adaptive architecture to integrate the KERI engine, primarily due to `keripy` (Python) not being mobile-compatible, leading to distinct operating modes:
+The system uses an adaptive architecture to integrate the KERI engine, resulting in distinct operating modes:
 
--   **Desktop Mode:** The full stack (Flutter UI, Go backend, Python KERI engine) runs on a single machine. The Go backend orchestrates, persists data, and serves the API, while the Python KERI engine handles core KERI operations.
--   **Mobile Standalone Mode:** The Flutter UI interacts with a local Rust KERI library via FFI for all stateful/private key operations. The phone acts as the primary key holder and identity owner.
--   **Mobile Remote Controller WITH Keys:** A migration path where keys remain on the phone, but a remote server creates a delegated AID, offloading computing.
--   **Mobile Remote Controller WITHOUT Keys:** The phone connects to an existing Identity Agent server, and the remote server retains the root keys and handles most KERI operations.
+1.  **Desktop Mode (Linux/macOS/Windows):** The Flutter UI communicates with a Go backend, which drives a Python KERI engine (`keripy`) running as a local child process.
+2.  **Mobile Standalone Mode (iOS/Android):** The Flutter UI interacts with a local Rust KERI library (`keriox/keri-core`) via FFI for all stateful/private key operations.
+3.  **Mobile Remote Controller Modes (With/Without Keys):** These modes allow the phone to connect to an existing Identity Agent server, delegating computing power while potentially retaining root keys or relying on the server for key management.
 
 A `KeriService` Dart abstract class provides a mode-agnostic interface for KERI operations, ensuring UI code remains independent of the underlying operating mode.
 
-**Trust Boundaries:**
--   **User's own server & Rust Bridge:** Full trust, as key material is handled directly by user-owned infrastructure or local device.
--   **Remote Helper:** Zero trust, only handles stateless tasks.
+### Component Details
 
-**Component Details:**
--   **Go Backend:** Orchestration layer, public API (port 5000), data persistence (file-based), Python KERI driver management (desktop), Flutter web asset serving, OOBI handling, contact management, and optional ngrok tunneling.
--   **Python KERI Driver:** KERI protocol engine (`keripy` v1.1.17) for desktop, running locally.
--   **Flutter Frontend:** Cross-platform UI with a dark cyberpunk theme, multi-step onboarding (mode selection → entity type → setup wizard / server connection), BIP-39 mnemonic generation, contact management, and OOBI URL sharing. On mobile, "Create New" goes directly to the Setup Wizard (Standalone mode, Rust bridge handles KERI locally, no server URL needed). "Connect to Existing" prompts for a server URL, validates via `/api/health`, and uses `MobileStandaloneKeriService` with the remote server as the stateless helper (Rust bridge for stateful ops, remote server for stateless ops). On desktop, "Connect to Existing" uses `DesktopKeriService` pointed at the remote URL. All dashboard screens accept an optional `serverUrl` parameter for proper backend connectivity. See ADR-005.
--   **Rust Bridge:** Mobile KERI engine (`keriox/keri-core`) integrated via `flutter_rust_bridge` for Dart ↔ Rust FFI.
--   **KeriHelperClient:** HTTP client for stateless operations in Mobile Standalone Mode.
--   **Tunnel Module:** Multi-provider tunnel system supporting Cloudflare and ngrok, with configuration persistence.
+-   **Go Backend (`identity-agent-core/`):** Core orchestration, public API serving, file-based data persistence, spawning the Python KERI driver (desktop), serving Flutter web assets, OOBI serving/generation, contact management, and optional tunnel providers.
+-   **Python KERI Driver (`drivers/keri-core/`):** The KERI protocol engine (`keripy` v1.1.17) for desktop, exposing stateful and stateless KERI endpoints.
+-   **Flutter Frontend (`identity_agent_ui/`):** Cross-platform UI with a dark cyberpunk theme, multi-step onboarding, BIP-39 mnemonic generation, contact management, and OOBI URL sharing.
+-   **Rust Bridge (`identity_agent_ui/rust/`):** The mobile KERI engine (THCLab `keriox/keri-core`) integrated via `flutter_rust_bridge` for Dart ↔ Rust FFI, providing core KERI functions.
+-   **Tunnel Module (`identity-agent-core/tunnel/`):** Multi-provider tunnel system (e.g., Cloudflare, ngrok) for public HTTPS URL acquisition, with settings persisted and configurable via the Settings UI and API.
 
-**Driver Pattern:** The Go backend always spawns the Python KERI driver as a local child process, communicating via HTTP. The Python driver dictates KERI-related endpoint naming and functionality across all implementations.
+### Key Design Decisions
 
-**Cryptographic Key Hierarchy:** A 3-level hierarchy consisting of Root Authority (BIP-39 mnemonic), Device Authority (Secure Enclave keys), and Delegated Agent (encrypted database keys).
+-   **Go for Backend:** Orchestration, single binary compilation, and driver lifecycle management.
+-   **Python for KERI (Desktop):** Leverages `keripy` as the established KERI implementation.
+-   **Rust for KERI (Mobile):** Provides native mobile KERI capabilities via FFI with `keriox`.
+-   **Driver Pattern:** Ensures consistent HTTP-based internal communication across modes.
+-   **Flutter for Frontend:** Cross-platform UI development.
+-   **Local-First Storage:** Emphasizes user sovereignty and data control.
 
-**Persistence Layer:** Defaults to a file-based JSON store in `./data/`, with a modular `store.Store` interface for swappable backends.
+### Persistence Layer
 
-**Key Design Decisions:**
--   **Go for Backend:** Orchestration, single binary.
--   **Python for KERI (Desktop):** Leverages `keripy`.
--   **Rust for KERI (Mobile):** Native mobile KERI via FFI with `keriox`.
--   **Driver Pattern:** Consistent internal communication.
--   **Flutter for Frontend:** Cross-platform capabilities.
--   **Local-First Storage:** User sovereignty, no third-party accounts.
+Defaults to a file-based JSON store in `./data/` (`identity.json`, `kel.json`, `contacts.json`, `settings.json`), with a modular `store.Store` interface for swappable backends.
 
 ## External Dependencies
 
@@ -62,7 +56,7 @@ A `KeriService` Dart abstract class provides a mode-agnostic interface for KERI 
 
 ### Rust Bridge (mobile only)
 
--   `keri-core` 0.11.1: THCLab KERI implementation.
+-   `keri-core` 0.11: THCLab KERI implementation.
 -   `flutter_rust_bridge` 2.11.1: Dart ↔ Rust FFI bridge.
 -   `base64` 0.13: Base64 encoding/decoding.
 -   `serde` 1.0 + `serde_json` 1.0: JSON serialization.
@@ -73,3 +67,6 @@ A `KeriService` Dart abstract class provides a mode-agnostic interface for KERI 
 -   `http`: HTTP client.
 -   `crypto`: SHA-256 for key derivation.
 -   `ed25519_edwards`: Ed25519 key generation.
+-   `shared_preferences`: Onboarding state persistence.
+-   `mobile_scanner`: QR code scanning.
+-   `qr_flutter`: QR code generation.
