@@ -1,0 +1,55 @@
+Is mobile remote keri service the rust bridge and remote server keri service is the basically the desktop keri service? I mean it seems like they could be simplified so that it just says mobile keri service and desktop keri service. Does that make sense or does it conflict with other naming schemes? Because the mobile keri service is just the list of five functions that are stateful and that's perfect and then the desktop keri service includes all of the stateful and stateless functions. And of course if mobile needs the stateless functions then it just uses the public keri remote helper. But all of that is already explained in the adr006 I believe. So mainly asking about the naming of it so that it can be so it can make more sense in the future.
+
+Also there is a build error on Android please address this.
+
+"Running Gradle task 'assembleDebug'...                          
+
+FAILURE: Build failed with an exception.
+
+* Where:
+Build file '/home/builder/clone/identity_agent_ui/android/app/build.gradle' line: 61
+
+* What went wrong:
+A problem occurred evaluating project ':app'.
+> No signature of method: java.lang.String.to() is applicable for argument types: (String, String) values: [libs, include]
+  Possible solutions: tr(java.lang.CharSequence, java.lang.CharSequence), trim(), toURI(), toURI(), md5(), any()
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 1m 30s
+Running Gradle task 'assembleDebug'...                             90.9s
+Gradle task assembleDebug failed with exit code 1
+
+
+Build failed :|
+Step 12 script `Build debug APK` exited with status code 1
+
+Running Gradle task 'assembleDebug'...                          
+
+FAILURE: Build failed with an exception.
+
+* Where:
+Build file '/home/builder/clone/identity_agent_ui/android/app/build.gradle' line: 61
+
+* What went wrong:
+A problem occurred evaluating project ':app'.
+> No signature of method: java.lang.String.to() is applicable for argument types: (String, String) values: [libs, include]
+  Possible solutions: tr(java.lang.CharSequence, java.lang.CharSequence), trim(), toURI(), toURI(), md5(), any()
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 1m 30s
+Running Gradle task 'assembleDebug'...                             90.9s
+Gradle task assembleDebug failed with exit code 1
+
+
+Build failed :|
+Step 12 script `Build debug APK` exited with status code 1"
