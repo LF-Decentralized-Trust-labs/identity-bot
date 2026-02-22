@@ -218,12 +218,16 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
       String errorMsg = e.toString();
 
       if (errorMsg.contains('KERI_BRIDGE_NOT_AVAILABLE')) {
+        final loadReason = RegExp(r'\((.+?)\)\. This is required')
+            .firstMatch(errorMsg)
+            ?.group(1) ?? 'unknown';
         errorMsg =
             'The native KERI engine could not be loaded on this device. '
             'Identity creation requires the Rust KERI library to be '
             'compiled and included in the app. Please rebuild the app '
             'using the Codemagic CI/CD pipeline, which compiles the '
-            'Rust library for your device.';
+            'Rust library for your device.\n\n'
+            'Diagnostic: $loadReason';
       } else if (errorMsg.contains('UnimplementedError') ||
                  errorMsg.contains('Placeholder')) {
         errorMsg =
