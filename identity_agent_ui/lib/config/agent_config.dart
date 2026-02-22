@@ -16,15 +16,5 @@ class AgentConfig {
     return 'http://localhost:$_defaultLocalPort';
   }
 
-  static String get primaryServerUrl {
-    const url = String.fromEnvironment('PRIMARY_SERVER_URL', defaultValue: '');
-    return url;
-  }
-
-  static String get keriHelperUrl {
-    const url = String.fromEnvironment('KERI_HELPER_URL', defaultValue: '');
-    return url;
-  }
-
   static const int healthPollIntervalSeconds = 15;
 }

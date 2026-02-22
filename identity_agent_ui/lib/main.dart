@@ -15,7 +15,6 @@ import 'services/keri_service.dart';
 import 'services/desktop_keri_service.dart';
 import 'services/remote_server_keri_service.dart';
 import 'services/mobile_standalone_keri_service.dart';
-import 'services/keri_helper_client.dart';
 import 'services/mobile_core_service.dart';
 import 'services/preferences_service.dart';
 import 'services/backend_process_service.dart';

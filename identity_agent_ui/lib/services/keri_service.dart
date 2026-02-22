@@ -1,6 +1,3 @@
-import 'dart:io' show Platform;
-import 'package:flutter/foundation.dart' show kIsWeb;
-
 enum AgentEnvironment {
   desktop,
   mobileStandalone,
@@ -72,27 +69,4 @@ abstract class KeriService {
   });
 
   void dispose();
-
-  static AgentEnvironment detectEnvironment({
-    String? primaryServerUrl,
-    bool hasLocalKeys = false,
-  }) {
-    if (kIsWeb) {
-      return AgentEnvironment.desktop;
-    }
-
-    final isMobile = Platform.isAndroid || Platform.isIOS;
-
-    if (!isMobile) {
-      return AgentEnvironment.desktop;
-    }
-
-    if (primaryServerUrl != null && primaryServerUrl.isNotEmpty) {
-      return hasLocalKeys
-          ? AgentEnvironment.mobileRemoteWithKeys
-          : AgentEnvironment.mobileRemoteWithoutKeys;
-    }
-
-    return AgentEnvironment.mobileStandalone;
-  }
 }
