@@ -148,8 +148,10 @@ class _AgentRouterState extends State<AgentRouter> {
         try {
           debugPrint('[Agent] Starting embedded Go Core...');
           await standaloneService.startGoCore();
+          final coreUrl = standaloneService.mobileCore.baseUrl;
           debugPrint('[Agent] Go Core started on port '
-              '${standaloneService.mobileCore.port}');
+              '${standaloneService.mobileCore.port} → $coreUrl');
+          _serverUrl = coreUrl;
         } catch (e) {
           debugPrint('[Agent] Go Core start failed (non-fatal): $e');
         }

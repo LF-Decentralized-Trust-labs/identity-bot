@@ -22,7 +22,7 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
-  late final CoreService _coreService = CoreService(baseUrl: widget.serverUrl);
+  late final CoreService _coreService = CoreService(baseUrl: _resolveServerUrl());
   CoreConnectionState _connectionState = CoreConnectionState.disconnected;
   HealthResponse? _healthData;
   CoreInfoResponse? _coreInfo;
@@ -30,6 +30,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String? _errorMessage;
   final List<LogEntry> _logs = [];
   Timer? _healthTimer;
+
+  String? _resolveServerUrl() {
+    if (widget.serverUrl != null) return widget.serverUrl;
+    if (widget.keriService is MobileStandaloneKeriService) {
+      final standalone = widget.keriService as MobileStandaloneKeriService;
+      if (standalone.isCoreReady) {
+        return standalone.mobileCore.baseUrl;
+      }
+    }
+    return null;
+  }
 
   @override
   void initState() {
