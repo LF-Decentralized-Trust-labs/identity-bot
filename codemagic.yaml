@@ -44,14 +44,22 @@ workflows:
 
       - name: Build Go Core as Android AAR via gomobile
         script: |
+          set -e
           cd identity-agent-core
+          mkdir -p ../identity_agent_ui/android/app/libs
+          echo "--- Go module info ---"
+          go list -m all | head -5
           echo "--- Building Go Core for Android via gomobile bind ---"
-          gomobile bind \
+          gomobile bind -v \
             -target=android/arm64,android/arm,android/amd64,android/386 \
             -androidapi 21 \
             -o ../identity_agent_ui/android/app/libs/mobilecore.aar \
             ./mobilecore
-          echo "--- Go Core AAR ---"
+          echo "--- Verifying Go Core AAR ---"
+          if [ ! -f ../identity_agent_ui/android/app/libs/mobilecore.aar ]; then
+            echo "ERROR: mobilecore.aar was not produced by gomobile bind!"
+            exit 1
+          fi
           ls -lh ../identity_agent_ui/android/app/libs/mobilecore.aar
           ls -lh ../identity_agent_ui/android/app/libs/mobilecore-sources.jar 2>/dev/null || true
 
@@ -207,13 +215,21 @@ workflows:
 
       - name: Build Go Core as iOS XCFramework via gomobile
         script: |
+          set -e
           cd identity-agent-core
+          mkdir -p ../identity_agent_ui/ios/Frameworks
+          echo "--- Go module info ---"
+          go list -m all | head -5
           echo "--- Building Go Core for iOS via gomobile bind ---"
-          gomobile bind \
+          gomobile bind -v \
             -target=ios/arm64,iossimulator/arm64 \
             -o ../identity_agent_ui/ios/Frameworks/Mobilecore.xcframework \
             ./mobilecore
-          echo "--- Go Core XCFramework ---"
+          echo "--- Verifying Go Core XCFramework ---"
+          if [ ! -d ../identity_agent_ui/ios/Frameworks/Mobilecore.xcframework ]; then
+            echo "ERROR: Mobilecore.xcframework was not produced by gomobile bind!"
+            exit 1
+          fi
           ls -la ../identity_agent_ui/ios/Frameworks/Mobilecore.xcframework/
           find ../identity_agent_ui/ios/Frameworks/Mobilecore.xcframework -name "*.framework" -type d
 
