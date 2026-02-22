@@ -8,6 +8,7 @@ The Identity Agent is a self-sovereign digital identity platform designed to uni
 
 Preferred communication style: Simple, everyday language.
 Design theme: Dark cyberpunk aesthetic with monospace fonts, dark blue/green color scheme.
+Build/Distribution: No App Store or Play Store submissions. All builds are for local testing only — iOS uses Codemagic's built-in simulator/virtual testing (no TestFlight, no Apple Developer account signing). Android produces unsigned APKs/debug builds. Do not add code signing, provisioning profiles, or store-related configuration.
 
 ## System Architecture
 

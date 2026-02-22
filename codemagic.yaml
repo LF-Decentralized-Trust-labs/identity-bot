@@ -190,8 +190,6 @@ workflows:
       flutter: 3.22.0
       xcode: latest
       cocoapods: default
-      groups:
-        - ios_credentials
       vars:
         BUNDLE_ID: "com.identityagent.identityAgentUi"
     scripts:
@@ -320,19 +318,10 @@ workflows:
           cd identity_agent_ui/ios
           pod install
 
-      - name: Set up iOS code signing
-        script: |
-          keychain initialize
-          app-store-connect fetch-signing-files "$BUNDLE_ID" \
-            --type IOS_APP_DEVELOPMENT \
-            --create
-          keychain add-certificates
-          xcode-project use-profiles --project identity_agent_ui/ios/Runner.xcodeproj
-
-      - name: Build iOS IPA (release)
+      - name: Build iOS (no codesign, for Codemagic simulator testing)
         script: |
           cd identity_agent_ui
-          flutter build ipa --release --export-options-plist=/Users/builder/export_options.plist
+          flutter build ipa --release --no-codesign
 
     artifacts:
       - identity_agent_ui/build/ios/ipa/*.ipa
