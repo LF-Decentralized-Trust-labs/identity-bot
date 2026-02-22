@@ -55,6 +55,15 @@ A `KeriService` Dart abstract class provides a mode-agnostic interface for KERI 
 
 Defaults to a file-based JSON store in `./data/` (`identity.json`, `kel.json`, `contacts.json`, `settings.json`), with a modular `store.Store` interface for swappable backends. On mobile standalone, Go Core stores data in the app's documents directory.
 
+## Recent Changes
+
+-   **2026-02-22:** ADR documentation audit and dead code cleanup.
+    -   Updated ADR 001 to fix outdated references (keri-go → keripy/keriox, BadgerDB → file-based JSON, port 8080 → 5000). AI governance kept as future work.
+    -   Updated ADR 002 to document optional KERI driver (`ServerConfig.EnableKeriDriver`), extracted `server` package, and updated Key Files section.
+    -   Rewrote ADR 003 from "Three Operating Modes" to "Four Operating Modes" — added Go Core on mobile via gomobile/platform channels, split old "Mobile Remote Mode" into Remote Controller WITH Keys and WITHOUT Keys, added Cloudflare as default tunnel provider, updated trust boundaries.
+    -   Updated ADR 004 to include Go Mobile Core (gomobile builds, platform channel bridge, MobileCoreService wrapper) alongside the existing Rust bridge documentation.
+    -   Removed dead code: `keri_helper_client.dart` (unused HTTP client), `server_config_screen.dart` (superseded by `connect_server_screen.dart`), `AgentConfig.primaryServerUrl` and `AgentConfig.keriHelperUrl` (unused env var configs), `KeriService.detectEnvironment()` (unused static method — mode detection now happens through onboarding flow in `main.dart`).
+
 ## CI/CD (Codemagic)
 
 Defined in `codemagic.yaml`. Builds include:
