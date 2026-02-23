@@ -89,6 +89,14 @@ Defaults to a file-based JSON store in `./data/` (`identity.json`, `kel.json`, `
     -   Updated ADR 004 to include Go Mobile Core (gomobile builds, platform channel bridge, MobileCoreService wrapper) alongside the existing Rust bridge documentation.
     -   Removed dead code: `keri_helper_client.dart` (unused HTTP client), `server_config_screen.dart` (superseded by `connect_server_screen.dart`), `AgentConfig.primaryServerUrl` and `AgentConfig.keriHelperUrl` (unused env var configs), `KeriService.detectEnvironment()` (unused static method — mode detection now happens through onboarding flow in `main.dart`).
 
+## Recent Changes (continued)
+
+-   **2026-02-23:** iOS Mobilecore integration fix — bypass CocoaPods for gomobile framework.
+    -   Removed `Mobilecore` pod from Podfile; deleted `Mobilecore.podspec`.
+    -   Added `FRAMEWORK_SEARCH_PATHS` and `-framework Mobilecore` linker flags directly to `project.pbxproj` (Debug/Release/Profile configs), mirroring the Rust library approach.
+    -   Added codemagic.yaml step "Extract Mobilecore.framework from XCFramework" to copy simulator slice to flat `ios/Frameworks/Mobilecore/Mobilecore.framework/` directory.
+    -   CocoaPods EXCLUDED_ARCHS fixes retained for other pods (Google MLKit, etc.).
+
 ## CI/CD (Codemagic)
 
 Defined in `codemagic.yaml`. Builds include:
@@ -96,6 +104,7 @@ Defined in `codemagic.yaml`. Builds include:
 -   Rust bridge compilation via cargo-ndk (Android) and cargo-lipo (iOS)
 -   Flutter build for all platforms (Android, iOS, macOS, Windows, Linux, Web)
 -   Gomobile outputs placed in `identity_agent_ui/android/app/libs/mobilecore.aar` and `identity_agent_ui/ios/Frameworks/Mobilecore.xcframework`
+-   iOS: Mobilecore.framework extracted from xcframework to `ios/Frameworks/Mobilecore/` (bypasses CocoaPods); linked directly via project.pbxproj FRAMEWORK_SEARCH_PATHS
 
 ## External Dependencies
 
