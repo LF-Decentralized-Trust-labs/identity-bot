@@ -367,6 +367,27 @@ workflows:
           cat Podfile
           echo "--- Running pod install ---"
           pod install
+          echo "--- Verifying workspace includes Pods project ---"
+          cat Runner.xcworkspace/contents.xcworkspacedata
+          if ! grep -q "Pods.xcodeproj" Runner.xcworkspace/contents.xcworkspacedata; then
+            echo "ERROR: Workspace missing Pods reference! Adding it..."
+            cat > Runner.xcworkspace/contents.xcworkspacedata << 'WSEOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<Workspace
+   version = "1.0">
+   <FileRef
+      location = "group:Runner.xcodeproj">
+   </FileRef>
+   <FileRef
+      location = "group:Pods/Pods.xcodeproj">
+   </FileRef>
+</Workspace>
+WSEOF
+            echo "--- Fixed workspace ---"
+            cat Runner.xcworkspace/contents.xcworkspacedata
+          else
+            echo "OK: Workspace correctly references Pods project"
+          fi
           echo "--- Checking EXCLUDED_ARCHS in Pods xcconfigs (after post_install fix) ---"
           grep "EXCLUDED_ARCHS" "Pods/Target Support Files/Pods-Runner/Pods-Runner.debug.xcconfig" || echo "No EXCLUDED_ARCHS in debug xcconfig"
           grep "EXCLUDED_ARCHS" "Pods/Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig" || echo "No EXCLUDED_ARCHS in release xcconfig"
