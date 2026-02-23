@@ -47,4 +47,16 @@ post_install do |installer|
       config.build_settings['EXCLUDED_ARCHS[sdk=iphonesimulator*]'] = 'x86_64'
     end
   end
+
+  # Fix: CocoaPods/Google MLKit sets EXCLUDED_ARCHS = arm64 for simulator in
+  # the aggregate xcconfigs, but our gomobile xcframework only provides arm64
+  # for the simulator (Apple Silicon). Override to exclude x86_64 instead.
+  aggregate_dir = File.join(installer.sandbox.root, 'Target Support Files')
+  Dir.glob(File.join(aggregate_dir, 'Pods-*', '*.xcconfig')).each do |path|
+    content = File.read(path)
+    if content.include?('EXCLUDED_ARCHS[sdk=iphonesimulator*] = arm64')
+      content.gsub!('EXCLUDED_ARCHS[sdk=iphonesimulator*] = arm64', 'EXCLUDED_ARCHS[sdk=iphonesimulator*] = x86_64')
+      File.write(path, content)
+    end
+  end
 end
