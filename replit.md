@@ -91,10 +91,12 @@ Defaults to a file-based JSON store in `./data/` (`identity.json`, `kel.json`, `
 
 ## Recent Changes (continued)
 
--   **2026-02-23:** iOS Mobilecore integration fix — bypass CocoaPods for gomobile framework.
-    -   Removed `Mobilecore` pod from Podfile; deleted `Mobilecore.podspec`.
-    -   Added `FRAMEWORK_SEARCH_PATHS` and `-framework Mobilecore` linker flags directly to `project.pbxproj` (Debug/Release/Profile configs), mirroring the Rust library approach.
-    -   Added codemagic.yaml step "Extract Mobilecore.framework from XCFramework" to copy simulator slice to flat `ios/Frameworks/Mobilecore/Mobilecore.framework/` directory.
+-   **2026-02-23:** iOS Mobilecore integration fix — CocoaPods-managed with pre-extracted .framework.
+    -   **Architectural lesson:** Never bypass CocoaPods with manual project.pbxproj FRAMEWORK_SEARCH_PATHS — it breaks CocoaPods integration for ALL pods (caused `Module 'mobile_scanner' not found`). CocoaPods must manage ALL native dependencies uniformly.
+    -   Mobilecore restored as a CocoaPods pod with podspec referencing pre-extracted `.framework` (not `.xcframework`).
+    -   Podspec at `ios/Frameworks/Mobilecore.podspec` uses `vendored_frameworks = 'Mobilecore/Mobilecore.framework'`.
+    -   Codemagic.yaml step "Extract Mobilecore.framework from XCFramework" runs BEFORE pod install, copying simulator slice to `ios/Frameworks/Mobilecore/Mobilecore.framework/`.
+    -   Reverted all manual FRAMEWORK_SEARCH_PATHS and `-framework Mobilecore` linker flags from project.pbxproj.
     -   CocoaPods EXCLUDED_ARCHS fixes retained for other pods (Google MLKit, etc.).
 
 ## CI/CD (Codemagic)
@@ -104,7 +106,7 @@ Defined in `codemagic.yaml`. Builds include:
 -   Rust bridge compilation via cargo-ndk (Android) and cargo-lipo (iOS)
 -   Flutter build for all platforms (Android, iOS, macOS, Windows, Linux, Web)
 -   Gomobile outputs placed in `identity_agent_ui/android/app/libs/mobilecore.aar` and `identity_agent_ui/ios/Frameworks/Mobilecore.xcframework`
--   iOS: Mobilecore.framework extracted from xcframework to `ios/Frameworks/Mobilecore/` (bypasses CocoaPods); linked directly via project.pbxproj FRAMEWORK_SEARCH_PATHS
+-   iOS: Mobilecore.framework extracted from xcframework to `ios/Frameworks/Mobilecore/` before pod install; integrated via CocoaPods podspec (vendored_frameworks)
 
 ## External Dependencies
 
