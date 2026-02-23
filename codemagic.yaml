@@ -371,18 +371,7 @@ workflows:
           cat Runner.xcworkspace/contents.xcworkspacedata
           if ! grep -q "Pods.xcodeproj" Runner.xcworkspace/contents.xcworkspacedata; then
             echo "ERROR: Workspace missing Pods reference! Adding it..."
-            cat > Runner.xcworkspace/contents.xcworkspacedata << 'WSEOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<Workspace
-   version = "1.0">
-   <FileRef
-      location = "group:Runner.xcodeproj">
-   </FileRef>
-   <FileRef
-      location = "group:Pods/Pods.xcodeproj">
-   </FileRef>
-</Workspace>
-WSEOF
+            printf '<?xml version="1.0" encoding="UTF-8"?>\n<Workspace\n   version = "1.0">\n   <FileRef\n      location = "group:Runner.xcodeproj">\n   </FileRef>\n   <FileRef\n      location = "group:Pods/Pods.xcodeproj">\n   </FileRef>\n</Workspace>\n' > Runner.xcworkspace/contents.xcworkspacedata
             echo "--- Fixed workspace ---"
             cat Runner.xcworkspace/contents.xcworkspacedata
           else
