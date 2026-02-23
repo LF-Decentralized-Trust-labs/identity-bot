@@ -396,8 +396,14 @@ workflows:
           sed -i '' 's/EXCLUDED_ARCHS\[sdk=iphonesimulator\*\]=i386/EXCLUDED_ARCHS[sdk=iphonesimulator*]=i386 x86_64/' ios/Flutter/Generated.xcconfig || true
           echo "--- Updated Generated.xcconfig ---"
           cat ios/Flutter/Generated.xcconfig
-          echo "--- Building Flutter iOS for simulator ---"
-          flutter build ios --debug --simulator
+          echo "--- Listing workspace schemes and targets ---"
+          xcodebuild -workspace ios/Runner.xcworkspace -list 2>&1 || true
+          echo "--- Release.xcconfig contents ---"
+          cat ios/Flutter/Release.xcconfig
+          echo "--- Debug.xcconfig contents ---"
+          cat ios/Flutter/Debug.xcconfig
+          echo "--- Building Flutter iOS for simulator (verbose) ---"
+          flutter build ios --debug --simulator --verbose 2>&1 | tail -80
 
     artifacts:
       - identity_agent_ui/build/ios/iphonesimulator/*.app
