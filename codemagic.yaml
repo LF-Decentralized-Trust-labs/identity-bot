@@ -330,6 +330,14 @@ workflows:
           pod install
           echo "--- Checking EXCLUDED_ARCHS in Pods project ---"
           grep -r "EXCLUDED_ARCHS" Pods/Pods.xcodeproj/project.pbxproj | head -5 || echo "No EXCLUDED_ARCHS found in Pods project"
+          echo "--- Checking Pods-Runner xcconfig exists ---"
+          ls -la "Pods/Target Support Files/Pods-Runner/" || echo "WARNING: Pods-Runner support files not found"
+          echo "--- Pods-Runner.debug.xcconfig contents ---"
+          cat "Pods/Target Support Files/Pods-Runner/Pods-Runner.debug.xcconfig" || echo "WARNING: debug xcconfig not found"
+          echo "--- Flutter Debug.xcconfig contents ---"
+          cat Flutter/Debug.xcconfig
+          echo "--- Flutter Generated.xcconfig contents ---"
+          cat Flutter/Generated.xcconfig
 
       - name: Build iOS for Simulator testing
         script: |
@@ -338,6 +346,10 @@ workflows:
           uname -m
           echo "--- Xcode version ---"
           xcodebuild -version
+          echo "--- Ensuring x86_64 excluded for simulator ---"
+          sed -i '' 's/EXCLUDED_ARCHS\[sdk=iphonesimulator\*\]=i386/EXCLUDED_ARCHS[sdk=iphonesimulator*]=i386 x86_64/' ios/Flutter/Generated.xcconfig || true
+          echo "--- Updated Generated.xcconfig ---"
+          cat ios/Flutter/Generated.xcconfig
           echo "--- Building Flutter iOS for simulator ---"
           flutter build ios --debug --simulator
 
