@@ -363,6 +363,10 @@
                                 CLANG_ENABLE_MODULES = YES;
                                 CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
                                 ENABLE_BITCODE = NO;
+                                FRAMEWORK_SEARCH_PATHS = (
+                                        "$(inherited)",
+                                        "$(PROJECT_DIR)/Frameworks/Mobilecore",
+                                );
                                 INFOPLIST_FILE = Runner/Info.plist;
                                 LD_RUNPATH_SEARCH_PATHS = (
                                         "$(inherited)",
@@ -376,6 +380,8 @@
                                         "$(inherited)",
                                         "-lidentity_agent_keri",
                                         "-lresolv",
+                                        "-framework",
+                                        Mobilecore,
                                 );
                                 PRODUCT_BUNDLE_IDENTIFIER = com.identityagent.identityAgentUi;
                                 PRODUCT_NAME = "$(TARGET_NAME)";
@@ -551,6 +557,10 @@
                                 CLANG_ENABLE_MODULES = YES;
                                 CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
                                 ENABLE_BITCODE = NO;
+                                FRAMEWORK_SEARCH_PATHS = (
+                                        "$(inherited)",
+                                        "$(PROJECT_DIR)/Frameworks/Mobilecore",
+                                );
                                 INFOPLIST_FILE = Runner/Info.plist;
                                 LD_RUNPATH_SEARCH_PATHS = (
                                         "$(inherited)",
@@ -564,6 +574,8 @@
                                         "$(inherited)",
                                         "-lidentity_agent_keri",
                                         "-lresolv",
+                                        "-framework",
+                                        Mobilecore,
                                 );
                                 PRODUCT_BUNDLE_IDENTIFIER = com.identityagent.identityAgentUi;
                                 PRODUCT_NAME = "$(TARGET_NAME)";
@@ -582,6 +594,10 @@
                                 CLANG_ENABLE_MODULES = YES;
                                 CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
                                 ENABLE_BITCODE = NO;
+                                FRAMEWORK_SEARCH_PATHS = (
+                                        "$(inherited)",
+                                        "$(PROJECT_DIR)/Frameworks/Mobilecore",
+                                );
                                 INFOPLIST_FILE = Runner/Info.plist;
                                 LD_RUNPATH_SEARCH_PATHS = (
                                         "$(inherited)",
@@ -595,6 +611,8 @@
                                         "$(inherited)",
                                         "-lidentity_agent_keri",
                                         "-lresolv",
+                                        "-framework",
+                                        Mobilecore,
                                 );
                                 PRODUCT_BUNDLE_IDENTIFIER = com.identityagent.identityAgentUi;
                                 PRODUCT_NAME = "$(TARGET_NAME)";
