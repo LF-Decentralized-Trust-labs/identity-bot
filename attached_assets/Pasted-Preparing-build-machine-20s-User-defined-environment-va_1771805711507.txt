@@ -1,0 +1,114 @@
+Preparing build machine
+20s
+
+
+
+== User-defined environment variables ==
+BUNDLE_ID=com.identityagent.identityAgentUi
+
+== Use Xcode 26.2 ==
+> xcodebuild -version
+Xcode 26.2
+Build version 17C52
+
+== Use default version of CocoaPods ==
+> gem list '^cocoapods$' --no-verbose
+cocoapods (1.16.2)
+
+== Use Java version 17 ==
+> java -version
+openjdk version "17.0.17" 2025-10-21 LTS
+OpenJDK Runtime Environment Zulu17.62+17-CA (build 17.0.17+10-LTS)
+OpenJDK 64-Bit Server VM Zulu17.62+17-CA (build 17.0.17+10-LTS, mixed mode, sharing)
+
+== Codemagic CLI tools ==
+> codemagic-cli-tools version
+codemagic-cli-tools 0.64.0
+identity-bot
+identity-bot
+github.com/LF-Decentralized-Trust-labs/identity-bot.git
+
+
+Start new build
+Build overview
+Click on the build steps for details.
+Fetching app sources
+3s
+Installing SDKs
+28s
+Install Rust toolchain and iOS targets
+15s
+Install Go toolchain and gomobile
+29s
+Build Go Core as iOS XCFramework via gomobile
+17s
+Install FRB codegen
+47s
+Get Flutter packages
+35s
+Run FRB codegen to generate Dart and Rust bindings
+46s
+Build Rust static library for iOS (device + simulator)
+51s
+Copy Rust libraries to iOS Frameworks
+< 1s
+Install CocoaPods dependencies
+9s
+Build iOS for Simulator testing
+26s
+
+
+
+Show command
+Building com.identityagent.identityAgentUi for simulator (ios)...
+Running pod install...                                             707ms
+Running Xcode build...                                          
+Xcode build done.                                           20.1s
+Failed to build iOS app
+Error output from Xcode build:
+↳
+    /Users/builder/clone/identity_agent_ui/ios/Runner/AppDelegate.swift:3:8: error: Unable to find module dependency: 'Mobilecore'
+    import Mobilecore
+           ^
+    /Users/builder/clone/identity_agent_ui/ios/Runner/AppDelegate.swift:3:8: note: a dependency of main module 'Runner'
+    import Mobilecore
+           ^
+    ** BUILD FAILED **
+
+
+Xcode's output:
+↳
+    Writing result bundle at path:
+    	/var/folders/w2/rrf5p87d1bbfyphxc7jdnyvh0000gn/T/flutter_tools.CyzT1E/flutter_ios_build_temp_dirXrQ2aL/temporary_xcresult_bundle
+
+    warning: [CP] Mobilecore.xcframework: Unable to find matching slice in 'ios-arm64 ios-arm64-simulator' for the current build architectures (arm64 x86_64) and platform (-iphonesimulator).
+    /Users/builder/clone/identity_agent_ui/ios/Runner/AppDelegate.swift:3:8: error: Unable to find module dependency: 'Mobilecore'
+    import Mobilecore
+           ^ (in target 'Runner' from project 'Runner')
+    /Users/builder/clone/identity_agent_ui/ios/Runner/AppDelegate.swift:3:8: note: A dependency of main module 'Runner'
+    import Mobilecore
+           ^ (in target 'Runner' from project 'Runner')
+    note: Run script build phase 'Run Script' will be run during every build because the option to run the script phase "Based on dependency analysis" is unchecked. (in target 'Runner' from project 'Runner')
+    note: Run script build phase 'Thin Binary' will be run during every build because the option to run the script phase "Based on dependency analysis" is unchecked. (in target 'Runner' from project 'Runner')
+
+Encountered error while building for simulator.
+
+
+Build failed :|
+Step 12 script `Build iOS for Simulator testing` exited with status code 1
+Publishing
+< 1s
+Cleaning up
+< 1s
+Step 12 script `Build iOS for Simulator testing` exited with status code 1
+
+Applications
+Builds
+OTA Updates
+App Preview
+Teams
+Billing
+
+
+Log out
+

@@ -232,8 +232,16 @@ workflows:
             echo "ERROR: Mobilecore.xcframework was not produced by gomobile bind!"
             exit 1
           fi
+          echo "--- XCFramework contents ---"
           ls -la ../identity_agent_ui/ios/Frameworks/Mobilecore.xcframework/
           find ../identity_agent_ui/ios/Frameworks/Mobilecore.xcframework -name "*.framework" -type d
+          echo "--- XCFramework Info.plist (supported architectures) ---"
+          cat ../identity_agent_ui/ios/Frameworks/Mobilecore.xcframework/Info.plist || true
+          echo "--- Checking framework binary architectures ---"
+          for fw in $(find ../identity_agent_ui/ios/Frameworks/Mobilecore.xcframework -name "Mobilecore" -type f); do
+            echo "Binary: $fw"
+            lipo -info "$fw" || file "$fw"
+          done
 
       - name: Install FRB codegen
         script: |
@@ -316,11 +324,21 @@ workflows:
       - name: Install CocoaPods dependencies
         script: |
           cd identity_agent_ui/ios
+          echo "--- Podfile contents ---"
+          cat Podfile
+          echo "--- Running pod install ---"
           pod install
+          echo "--- Checking EXCLUDED_ARCHS in Pods project ---"
+          grep -r "EXCLUDED_ARCHS" Pods/Pods.xcodeproj/project.pbxproj | head -5 || echo "No EXCLUDED_ARCHS found in Pods project"
 
       - name: Build iOS for Simulator testing
         script: |
           cd identity_agent_ui
+          echo "--- Build machine architecture ---"
+          uname -m
+          echo "--- Xcode version ---"
+          xcodebuild -version
+          echo "--- Building Flutter iOS for simulator ---"
           flutter build ios --debug --simulator
 
     artifacts:
