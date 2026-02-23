@@ -13,9 +13,7 @@ workflows:
           source "$HOME/.cargo/env"
           rustup target add \
             aarch64-linux-android \
-            armv7-linux-androideabi \
-            x86_64-linux-android \
-            i686-linux-android
+            x86_64-linux-android
           cargo install cargo-ndk
           echo "--- Rust version ---"
           rustc --version
@@ -143,21 +141,17 @@ workflows:
           source "$HOME/.cargo/env"
           cd identity_agent_ui/rust
           mkdir -p ../android/app/src/main/jniLibs/arm64-v8a
-          mkdir -p ../android/app/src/main/jniLibs/armeabi-v7a
           mkdir -p ../android/app/src/main/jniLibs/x86_64
-          mkdir -p ../android/app/src/main/jniLibs/x86
 
           # Force libsodium to be statically linked (required for Android)
           export SODIUM_STATIC=1
           export SODIUM_LIB_DIR=""
           export SODIUM_SHARED=0
 
-          echo "--- Building Rust library with FRB bindings ---"
+          echo "--- Building Rust library with FRB bindings (arm64 + x86_64 only) ---"
           cargo ndk \
             --target aarch64-linux-android \
-            --target armv7-linux-androideabi \
             --target x86_64-linux-android \
-            --target i686-linux-android \
             --platform 21 \
             --output-dir ../android/app/src/main/jniLibs \
             build --release
@@ -169,15 +163,15 @@ workflows:
           echo "--- Checking dynamic dependencies (arm64) ---"
           readelf -d ../android/app/src/main/jniLibs/arm64-v8a/libidentity_agent_keri.so 2>/dev/null | grep NEEDED || echo "readelf not available"
 
-      - name: Build debug APK
+      - name: Build debug APK (arm64 + x86_64)
         script: |
           cd identity_agent_ui
-          flutter build apk --debug
+          flutter build apk --debug --split-per-abi --target-platform android-arm64,android-x64
 
-      - name: Build release APK
+      - name: Build release APK (arm64 + x86_64)
         script: |
           cd identity_agent_ui
-          flutter build apk --release
+          flutter build apk --release --split-per-abi --target-platform android-arm64,android-x64
 
     artifacts:
       - identity_agent_ui/build/app/outputs/flutter-apk/*.apk
