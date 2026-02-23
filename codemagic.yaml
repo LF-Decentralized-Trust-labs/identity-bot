@@ -243,6 +243,45 @@ workflows:
             lipo -info "$fw" || file "$fw"
           done
 
+      - name: Extract Mobilecore.framework from XCFramework
+        script: |
+          set -e
+          XCFW="identity_agent_ui/ios/Frameworks/Mobilecore.xcframework"
+          DEST="identity_agent_ui/ios/Frameworks/Mobilecore"
+          mkdir -p "$DEST"
+
+          echo "--- XCFramework slices ---"
+          ls -la "$XCFW/"
+
+          # For simulator builds, extract the simulator slice
+          # gomobile produces ios-arm64-simulator/ for Apple Silicon simulators
+          SIMULATOR_SLICE=$(find "$XCFW" -type d -name "*.framework" -path "*simulator*" | head -1)
+          DEVICE_SLICE=$(find "$XCFW" -type d -name "*.framework" ! -path "*simulator*" | head -1)
+
+          if [ -n "$SIMULATOR_SLICE" ]; then
+            echo "--- Found simulator framework: $SIMULATOR_SLICE ---"
+            cp -R "$SIMULATOR_SLICE" "$DEST/"
+            echo "--- Extracted to $DEST/Mobilecore.framework ---"
+            ls -la "$DEST/Mobilecore.framework/"
+            echo "--- Binary architecture ---"
+            lipo -info "$DEST/Mobilecore.framework/Mobilecore"
+          else
+            echo "WARNING: No simulator slice found in xcframework, using device slice"
+            if [ -n "$DEVICE_SLICE" ]; then
+              cp -R "$DEVICE_SLICE" "$DEST/"
+              ls -la "$DEST/Mobilecore.framework/"
+            else
+              echo "ERROR: No framework slices found in xcframework!"
+              find "$XCFW" -type d
+              exit 1
+            fi
+          fi
+
+          echo "--- Checking module map ---"
+          cat "$DEST/Mobilecore.framework/Modules/module.modulemap" 2>/dev/null || \
+            cat "$DEST/Mobilecore.framework/Headers/module.modulemap" 2>/dev/null || \
+            echo "No module.modulemap found"
+
       - name: Install FRB codegen
         script: |
           source "$HOME/.cargo/env"
@@ -328,18 +367,13 @@ workflows:
           cat Podfile
           echo "--- Running pod install ---"
           pod install
-          echo "--- Checking EXCLUDED_ARCHS in Pods project ---"
-          grep -r "EXCLUDED_ARCHS" Pods/Pods.xcodeproj/project.pbxproj | head -5 || echo "No EXCLUDED_ARCHS found in Pods project"
-          echo "--- Checking Pods-Runner xcconfig exists ---"
-          ls -la "Pods/Target Support Files/Pods-Runner/" || echo "WARNING: Pods-Runner support files not found"
-          echo "--- Pods-Runner.debug.xcconfig EXCLUDED_ARCHS (after post_install fix) ---"
+          echo "--- Checking EXCLUDED_ARCHS in Pods xcconfigs (after post_install fix) ---"
           grep "EXCLUDED_ARCHS" "Pods/Target Support Files/Pods-Runner/Pods-Runner.debug.xcconfig" || echo "No EXCLUDED_ARCHS in debug xcconfig"
-          echo "--- Pods-Runner.release.xcconfig EXCLUDED_ARCHS (after post_install fix) ---"
           grep "EXCLUDED_ARCHS" "Pods/Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig" || echo "No EXCLUDED_ARCHS in release xcconfig"
-          echo "--- Flutter Debug.xcconfig contents ---"
-          cat Flutter/Debug.xcconfig
-          echo "--- Verifying XCFrameworkIntermediates will be created ---"
-          echo "PODS_ROOT=$(grep PODS_ROOT 'Pods/Target Support Files/Pods-Runner/Pods-Runner.debug.xcconfig' | head -1)"
+          echo "--- Verifying Mobilecore.framework in Frameworks/Mobilecore/ ---"
+          ls -la Frameworks/Mobilecore/Mobilecore.framework/ || echo "WARNING: Mobilecore.framework not found!"
+          echo "--- Verifying Rust static library ---"
+          ls -la Frameworks/RustKeri/device/libidentity_agent_keri.a || echo "WARNING: Rust library not found!"
 
       - name: Build iOS for Simulator testing
         script: |
