@@ -91,6 +91,12 @@ Defaults to a file-based JSON store in `./data/` (`identity.json`, `kel.json`, `
 
 ## Recent Changes (continued)
 
+-   **2026-02-24:** Mutual OOBI contact relationships with jCard schema (RFC 7095).
+    -   **Backend (Go Core):** `ContactRecord` expanded with `Status` (pending_outbound, pending_inbound, mutual, rejected), `Role` (default "agent"), and `JCard` struct (fn, family_name, given_name, org, title, email, tel, note, uid, x-keri-aid, x-keri-oobi, x-keri-role). New `GetContactsByStatus` store method.
+    -   **New endpoints:** `POST /api/exchange` (receives exn introduction/acceptance messages), `POST /api/contacts/{aid}/accept`, `POST /api/contacts/{aid}/reject`, `GET /api/alerts` (returns pending_inbound contacts).
+    -   **Reverse introduction flow:** When Alice adds Bob via OOBI, her agent auto-sends an `exn` introduction message to Bob's `/api/exchange` endpoint (background goroutine). Bob sees Alice as `pending_inbound`. Bob accepts → both sides become `mutual`.
+    -   **Frontend (Flutter/Dart):** `ContactResponse` model updated with status, role, jcard fields. `JCardResponse` and `AlertsResponse` models added. Dashboard shows CONTACT REQUESTS card with Accept/Reject buttons when alerts exist (15-second polling). Contacts screen shows status badges (MUTUAL/PENDING/INCOMING/REJECTED), role tags, status icons, and mutual/pending counts in header. Inline Accept/Reject for incoming requests on Contacts screen.
+    -   **OOBI serve** now includes `alias` field in response for display purposes.
 -   **2026-02-23:** iOS Mobilecore integration fix — CocoaPods-managed with pre-extracted .framework.
     -   **Architectural lesson:** Never bypass CocoaPods with manual project.pbxproj FRAMEWORK_SEARCH_PATHS — it breaks CocoaPods integration for ALL pods (caused `Module 'mobile_scanner' not found`). CocoaPods must manage ALL native dependencies uniformly.
     -   Mobilecore restored as a CocoaPods pod with podspec referencing pre-extracted `.framework` (not `.xcframework`).
