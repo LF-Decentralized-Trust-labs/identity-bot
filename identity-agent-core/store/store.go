@@ -28,12 +28,30 @@ type IdentityState struct {
 }
 
 type ContactRecord struct {
-        AID        string `json:"aid"`
-        Alias      string `json:"alias"`
-        PublicKey  string `json:"public_key"`
-        OobiURL    string `json:"oobi_url"`
-        Verified   bool   `json:"verified"`
+        AID          string `json:"aid"`
+        Alias        string `json:"alias"`
+        PublicKey    string `json:"public_key"`
+        OobiURL      string `json:"oobi_url"`
+        Verified     bool   `json:"verified"`
         DiscoveredAt string `json:"discovered_at"`
+        Status       string `json:"status"`
+        Role         string `json:"role"`
+        JCard        *JCard `json:"jcard,omitempty"`
+}
+
+type JCard struct {
+        FullName     string `json:"fn"`
+        FamilyName   string `json:"family_name,omitempty"`
+        GivenName    string `json:"given_name,omitempty"`
+        Org          string `json:"org,omitempty"`
+        Title        string `json:"title,omitempty"`
+        Email        string `json:"email,omitempty"`
+        Tel          string `json:"tel,omitempty"`
+        Note         string `json:"note,omitempty"`
+        UID          string `json:"uid,omitempty"`
+        XKeriAID     string `json:"x-keri-aid"`
+        XKeriOOBI    string `json:"x-keri-oobi,omitempty"`
+        XKeriRole    string `json:"x-keri-role"`
 }
 
 type SettingsData struct {
@@ -51,6 +69,7 @@ type Store interface {
         GetContacts() ([]ContactRecord, error)
         GetContact(aid string) (*ContactRecord, error)
         DeleteContact(aid string) error
+        GetContactsByStatus(status string) ([]ContactRecord, error)
         GetSettings() (*SettingsData, error)
         SaveSettings(settings SettingsData) error
         Close() error
@@ -193,6 +212,24 @@ func (s *FileStore) DeleteContact(aid string) error {
         }
 
         return s.writeJSON(filepath.Join(s.dir, "contacts.json"), filtered)
+}
+
+func (s *FileStore) GetContactsByStatus(status string) ([]ContactRecord, error) {
+        s.mu.RLock()
+        defer s.mu.RUnlock()
+
+        contacts, err := s.loadContacts()
+        if err != nil {
+                return nil, err
+        }
+
+        var filtered []ContactRecord
+        for _, c := range contacts {
+                if c.Status == status {
+                        filtered = append(filtered, c)
+                }
+        }
+        return filtered, nil
 }
 
 func (s *FileStore) GetSettings() (*SettingsData, error) {
