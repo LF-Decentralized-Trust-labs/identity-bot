@@ -238,14 +238,90 @@ class ContactsListResponse {
 
 class AlertsResponse {
   final List<ContactResponse> alerts;
+  final List<PendingRequestResponse> pendingRequests;
   final int count;
 
-  AlertsResponse({required this.alerts, required this.count});
+  AlertsResponse({required this.alerts, this.pendingRequests = const [], required this.count});
 
   factory AlertsResponse.fromJson(Map<String, dynamic> json) {
     return AlertsResponse(
       alerts: (json['alerts'] as List<dynamic>?)?.map((c) => ContactResponse.fromJson(c)).toList() ?? [],
+      pendingRequests: (json['pending_requests'] as List<dynamic>?)?.map((p) => PendingRequestResponse.fromJson(p)).toList() ?? [],
       count: json['count'] ?? 0,
+    );
+  }
+}
+
+class PendingRequestResponse {
+  final String aid;
+  final String oobiUrl;
+  final String alias;
+  final String errorReason;
+  final String receivedAt;
+  final String expiresAt;
+
+  PendingRequestResponse({
+    required this.aid,
+    required this.oobiUrl,
+    this.alias = '',
+    required this.errorReason,
+    required this.receivedAt,
+    this.expiresAt = '',
+  });
+
+  String get displayName {
+    if (alias.isNotEmpty) return alias;
+    return aid.length > 12 ? '${aid.substring(0, 12)}...' : aid;
+  }
+
+  factory PendingRequestResponse.fromJson(Map<String, dynamic> json) {
+    return PendingRequestResponse(
+      aid: json['aid'] ?? '',
+      oobiUrl: json['oobi_url'] ?? '',
+      alias: json['alias'] ?? '',
+      errorReason: json['error_reason'] ?? '',
+      receivedAt: json['received_at'] ?? '',
+      expiresAt: json['expires_at'] ?? '',
+    );
+  }
+}
+
+class ResolvedContactResponse {
+  final bool resolved;
+  final String aid;
+  final String publicKey;
+  final String alias;
+  final String oobiUrl;
+  final int eventCount;
+  final String created;
+  final bool kelVerified;
+
+  ResolvedContactResponse({
+    required this.resolved,
+    required this.aid,
+    required this.publicKey,
+    this.alias = '',
+    required this.oobiUrl,
+    this.eventCount = 0,
+    this.created = '',
+    this.kelVerified = false,
+  });
+
+  String get displayName {
+    if (alias.isNotEmpty) return alias;
+    return aid.length > 12 ? '${aid.substring(0, 12)}...' : aid;
+  }
+
+  factory ResolvedContactResponse.fromJson(Map<String, dynamic> json) {
+    return ResolvedContactResponse(
+      resolved: json['resolved'] ?? false,
+      aid: json['aid'] ?? '',
+      publicKey: json['public_key'] ?? '',
+      alias: json['alias'] ?? '',
+      oobiUrl: json['oobi_url'] ?? '',
+      eventCount: json['event_count'] ?? 0,
+      created: json['created'] ?? '',
+      kelVerified: json['kel_verified'] ?? false,
     );
   }
 }
@@ -337,6 +413,20 @@ class CoreService {
       return ContactsListResponse.fromJson(jsonDecode(response.body));
     } else {
       throw Exception('Contacts request failed: ${response.statusCode}');
+    }
+  }
+
+  Future<ResolvedContactResponse> resolveOobiContact({required String oobiUrl}) async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/api/contacts/resolve'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'oobi_url': oobiUrl}),
+    );
+    if (response.statusCode == 200) {
+      return ResolvedContactResponse.fromJson(jsonDecode(response.body));
+    } else {
+      final body = jsonDecode(response.body);
+      throw Exception(body['error'] ?? 'OOBI resolution failed: ${response.statusCode}');
     }
   }
 

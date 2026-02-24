@@ -31,6 +31,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final List<LogEntry> _logs = [];
   Timer? _healthTimer;
   List<ContactResponse> _alerts = [];
+  List<PendingRequestResponse> _pendingRequests = [];
   Timer? _alertTimer;
 
   String? _resolveServerUrl() {
@@ -130,9 +131,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
       if (mounted) {
         setState(() {
           _alerts = result.alerts;
+          _pendingRequests = result.pendingRequests;
         });
-        if (result.count > 0) {
-          _addLog('${result.count} pending contact request${result.count == 1 ? '' : 's'}', LogLevel.warning);
+        final totalCount = result.alerts.length + result.pendingRequests.length;
+        if (totalCount > 0) {
+          _addLog('$totalCount pending alert${totalCount == 1 ? '' : 's'}', LogLevel.warning);
         }
       }
     } catch (_) {}
@@ -209,7 +212,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         _buildIdentityCard(),
                       if (_identity != null && _identity!.initialized)
                         const SizedBox(height: 20),
-                      if (_alerts.isNotEmpty)
+                      if (_alerts.isNotEmpty || _pendingRequests.isNotEmpty)
                         ...[
                           _buildAlertsCard(),
                           const SizedBox(height: 20),
@@ -721,6 +724,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildAlertsCard() {
+    final totalCount = _alerts.length + _pendingRequests.length;
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -751,7 +755,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
               const SizedBox(width: 10),
               const Text(
-                'CONTACT REQUESTS',
+                'ALERTS',
                 style: TextStyle(
                   color: AppColors.textMuted,
                   fontSize: 11,
@@ -768,7 +772,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Text(
-                  '${_alerts.length}',
+                  '$totalCount',
                   style: const TextStyle(
                     color: AppColors.corePending,
                     fontSize: 11,
@@ -784,7 +788,35 @@ class _DashboardScreenState extends State<DashboardScreen> {
             padding: const EdgeInsets.only(bottom: 10),
             child: _buildAlertItem(alert),
           )),
+          ..._pendingRequests.map((req) => Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: _buildPendingRequestItem(req),
+          )),
         ],
+      ),
+    );
+  }
+
+  Widget _buildAlertAvatar(String name) {
+    final initial = name.isNotEmpty ? name[0].toUpperCase() : '?';
+    return Container(
+      width: 36,
+      height: 36,
+      decoration: BoxDecoration(
+        color: AppColors.corePending.withOpacity(0.12),
+        border: Border.all(color: AppColors.corePending.withOpacity(0.25), width: 1.5),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Center(
+        child: Text(
+          initial,
+          style: const TextStyle(
+            color: AppColors.corePending,
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            fontFamily: 'monospace',
+          ),
+        ),
       ),
     );
   }
@@ -803,15 +835,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         children: [
           Row(
             children: [
-              Container(
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(
-                  color: AppColors.corePending.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Icon(Icons.person_add_outlined, color: AppColors.corePending, size: 18),
-              ),
+              _buildAlertAvatar(alert.displayName),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
@@ -836,6 +860,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ),
                     ),
                   ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: AppColors.corePending.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(3),
+                ),
+                child: const Text(
+                  'INCOMING',
+                  style: TextStyle(
+                    color: AppColors.corePending,
+                    fontSize: 8,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.8,
+                    fontFamily: 'monospace',
+                  ),
                 ),
               ),
             ],
@@ -890,6 +931,109 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPendingRequestItem(PendingRequestResponse req) {
+    final aidShort = req.aid.length > 16 ? req.aid.substring(0, 16) : req.aid;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.primary,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.error.withOpacity(0.3), width: 1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: AppColors.error.withOpacity(0.12),
+                  border: Border.all(color: AppColors.error.withOpacity(0.25), width: 1.5),
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: const Center(
+                  child: Icon(Icons.link_off, color: AppColors.error, size: 16),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      req.displayName,
+                      style: const TextStyle(
+                        color: AppColors.textPrimary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      aidShort,
+                      style: const TextStyle(
+                        color: AppColors.textMuted,
+                        fontSize: 10,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: AppColors.error.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(3),
+                ),
+                child: const Text(
+                  'FAILED',
+                  style: TextStyle(
+                    color: AppColors.error,
+                    fontSize: 8,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.8,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: AppColors.error.withOpacity(0.06),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.warning_amber_rounded, color: AppColors.corePending, size: 14),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    req.errorReason.isNotEmpty
+                        ? req.errorReason
+                        : 'Could not verify sender identity. They may need to set up tunneling to make their OOBI reachable.',
+                    style: const TextStyle(
+                      color: AppColors.textSecondary,
+                      fontSize: 10,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
