@@ -233,6 +233,7 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
                 r.Get("/oobi", s.handleOobiGenerate)
 
                 r.Get("/contacts", s.handleGetContacts)
+                r.Post("/contacts/resolve", s.handleResolveOobiContact)
                 r.Post("/contacts", s.handleAddContact)
                 r.Get("/contacts/{aid}", s.handleGetContact)
                 r.Delete("/contacts/{aid}", s.handleDeleteContact)
@@ -952,6 +953,82 @@ func (s *CoreServer) handleGetContact(w http.ResponseWriter, r *http.Request) {
         json.NewEncoder(w).Encode(contact)
 }
 
+func (s *CoreServer) handleResolveOobiContact(w http.ResponseWriter, r *http.Request) {
+        var req struct {
+                OobiURL string `json:"oobi_url"`
+        }
+        if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+                writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+                return
+        }
+        if req.OobiURL == "" {
+                writeError(w, http.StatusBadRequest, "Missing required fields", "oobi_url is required")
+                return
+        }
+
+        identity, _ := s.DataStore.GetIdentity()
+        if identity != nil && strings.Contains(req.OobiURL, identity.AID) {
+                writeError(w, http.StatusBadRequest, "Cannot add yourself", "The OOBI URL points to your own identity")
+                return
+        }
+
+        log.Printf("[identity-agent-core] OOBI-RESOLVE: Resolving OOBI at %s", req.OobiURL)
+
+        client := &http.Client{Timeout: 15 * time.Second}
+        resp, err := client.Get(req.OobiURL)
+        if err != nil {
+                log.Printf("[identity-agent-core] OOBI-RESOLVE: Failed to reach %s: %v", req.OobiURL, err)
+                writeError(w, http.StatusBadGateway, "Failed to resolve OOBI", fmt.Sprintf("Could not reach %s: %v", req.OobiURL, err))
+                return
+        }
+        defer resp.Body.Close()
+
+        if resp.StatusCode != http.StatusOK {
+                body, _ := io.ReadAll(resp.Body)
+                log.Printf("[identity-agent-core] OOBI-RESOLVE: Remote returned %d: %s", resp.StatusCode, string(body))
+                writeError(w, http.StatusBadGateway, "OOBI resolution failed", fmt.Sprintf("Remote returned %d: %s", resp.StatusCode, string(body)))
+                return
+        }
+
+        var oobiData struct {
+                AID        string      `json:"aid"`
+                PublicKey  string      `json:"public_key"`
+                Alias      string      `json:"alias"`
+                KEL        interface{} `json:"kel"`
+                EventCount int         `json:"event_count"`
+                Created    string      `json:"created"`
+        }
+        if err := json.NewDecoder(resp.Body).Decode(&oobiData); err != nil {
+                writeError(w, http.StatusBadGateway, "Invalid OOBI response", fmt.Sprintf("Could not parse response: %v", err))
+                return
+        }
+
+        if oobiData.AID == "" {
+                writeError(w, http.StatusBadGateway, "Invalid OOBI response", "Response did not contain an AID")
+                return
+        }
+
+        kelCount := 0
+        if events, ok := oobiData.KEL.([]interface{}); ok {
+                kelCount = len(events)
+        }
+
+        log.Printf("[identity-agent-core] OOBI-RESOLVE: Success — AID=%s, alias=%s, KEL events=%d", oobiData.AID, oobiData.Alias, kelCount)
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(map[string]interface{}{
+                "resolved":     true,
+                "aid":          oobiData.AID,
+                "public_key":   oobiData.PublicKey,
+                "alias":        oobiData.Alias,
+                "oobi_url":     req.OobiURL,
+                "kel":          oobiData.KEL,
+                "event_count":  oobiData.EventCount,
+                "created":      oobiData.Created,
+                "kel_verified": kelCount > 0,
+        })
+}
+
 func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
         var req struct {
                 OobiURL string `json:"oobi_url"`
@@ -1013,7 +1090,7 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
                 OobiURL:      req.OobiURL,
                 Verified:     true,
                 DiscoveredAt: time.Now().UTC().Format(time.RFC3339),
-                Status:       "pending_outbound",
+                Status:       "verified",
                 Role:         "agent",
                 JCard: &store.JCard{
                         FullName:  alias,
@@ -1028,7 +1105,7 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
                 return
         }
 
-        log.Printf("[identity-agent-core] CONTACT: Added %s (AID: %s) status=pending_outbound", alias, oobiData.AID)
+        log.Printf("[identity-agent-core] CONTACT: Added %s (AID: %s) status=verified", alias, oobiData.AID)
 
         publicURL := s.getPublicURL(r)
         go func() {
@@ -1047,11 +1124,15 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
                 }
                 exchangeURL := remoteBase + "/api/exchange"
 
+                log.Printf("[identity-agent-core] EXCHANGE: Preparing reverse introduction to %s", exchangeURL)
+                log.Printf("[identity-agent-core] EXCHANGE: Our OOBI: %s", ourOOBI)
+                log.Printf("[identity-agent-core] EXCHANGE: Our AID: %s", ourIdentity.AID)
+
                 payload := map[string]string{
-                        "type":             "introduction",
-                        "sender_aid":       ourIdentity.AID,
-                        "sender_oobi":      ourOOBI,
-                        "sender_alias":     ourAlias,
+                        "type":              "introduction",
+                        "sender_aid":        ourIdentity.AID,
+                        "sender_oobi":       ourOOBI,
+                        "sender_alias":      ourAlias,
                         "sender_public_key": ourIdentity.PublicKey,
                 }
                 body, _ := json.Marshal(payload)
@@ -1059,11 +1140,13 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
                 exnClient := &http.Client{Timeout: 15 * time.Second}
                 exnResp, err := exnClient.Post(exchangeURL, "application/json", bytes.NewReader(body))
                 if err != nil {
-                        log.Printf("[identity-agent-core] EXCHANGE: Failed to send introduction to %s: %v", exchangeURL, err)
+                        log.Printf("[identity-agent-core] EXCHANGE: FAILED to send introduction to %s: %v", exchangeURL, err)
+                        log.Printf("[identity-agent-core] EXCHANGE: This may mean the remote agent is not reachable. The contact was saved locally but the remote agent will not know about us.")
                         return
                 }
                 defer exnResp.Body.Close()
-                log.Printf("[identity-agent-core] EXCHANGE: Introduction sent to %s (status: %d)", exchangeURL, exnResp.StatusCode)
+                respBody, _ := io.ReadAll(exnResp.Body)
+                log.Printf("[identity-agent-core] EXCHANGE: Introduction sent to %s — response: %d %s", exchangeURL, exnResp.StatusCode, string(respBody))
         }()
 
         w.Header().Set("Content-Type", "application/json")
@@ -1144,7 +1227,7 @@ func (s *CoreServer) handleExchange(w http.ResponseWriter, r *http.Request) {
                         json.NewEncoder(w).Encode(map[string]string{"status": "already_mutual", "aid": req.SenderAID})
                         return
                 }
-                if existing.Status == "pending_outbound" {
+                if existing.Status == "pending_outbound" || existing.Status == "verified" {
                         existing.Status = "mutual"
                         s.DataStore.SaveContact(*existing)
                         log.Printf("[identity-agent-core] EXCHANGE: Introduction received — contact %s auto-upgraded to mutual", req.SenderAID)
@@ -1154,17 +1237,76 @@ func (s *CoreServer) handleExchange(w http.ResponseWriter, r *http.Request) {
                 }
         }
 
+        log.Printf("[identity-agent-core] EXCHANGE: Attempting to resolve sender OOBI: %s", req.SenderOOBI)
+
         client := &http.Client{Timeout: 15 * time.Second}
         oobiResp, err := client.Get(req.SenderOOBI)
+        oobiReachable := false
+        kelPresent := false
+        var oobiErrorMsg string
+
         if err != nil {
-                log.Printf("[identity-agent-core] EXCHANGE: Failed to resolve sender OOBI %s: %v", req.SenderOOBI, err)
+                oobiErrorMsg = fmt.Sprintf("Could not reach OOBI: %v", err)
+                log.Printf("[identity-agent-core] EXCHANGE: OOBI unreachable — %s", oobiErrorMsg)
         } else {
-                oobiResp.Body.Close()
+                defer oobiResp.Body.Close()
+                if oobiResp.StatusCode == http.StatusOK {
+                        var oobiBody struct {
+                                AID string      `json:"aid"`
+                                KEL interface{} `json:"kel"`
+                        }
+                        if err := json.NewDecoder(oobiResp.Body).Decode(&oobiBody); err == nil {
+                                oobiReachable = true
+                                if events, ok := oobiBody.KEL.([]interface{}); ok && len(events) > 0 {
+                                        kelPresent = true
+                                        log.Printf("[identity-agent-core] EXCHANGE: OOBI resolved — AID=%s, KEL events=%d", oobiBody.AID, len(events))
+                                } else {
+                                        log.Printf("[identity-agent-core] EXCHANGE: OOBI resolved but KEL is empty for AID=%s", oobiBody.AID)
+                                }
+                        }
+                } else {
+                        oobiErrorMsg = fmt.Sprintf("OOBI returned status %d", oobiResp.StatusCode)
+                        log.Printf("[identity-agent-core] EXCHANGE: OOBI returned non-200: %d", oobiResp.StatusCode)
+                }
         }
 
         alias := req.SenderAlias
-        if alias == "" {
+        if alias == "" && len(req.SenderAID) >= 12 {
                 alias = req.SenderAID[:12] + "..."
+        } else if alias == "" {
+                alias = req.SenderAID
+        }
+
+        if !oobiReachable {
+                pendingReq := store.PendingRequest{
+                        AID:         req.SenderAID,
+                        Alias:       alias,
+                        PublicKey:   req.SenderPublicKey,
+                        OobiURL:     req.SenderOOBI,
+                        ReceivedAt:  time.Now().UTC().Format(time.RFC3339),
+                        ExpiresAt:   time.Now().AddDate(0, 0, 90).UTC().Format(time.RFC3339),
+                        ErrorReason: oobiErrorMsg,
+                        JCard: &store.JCard{
+                                FullName:  alias,
+                                XKeriAID:  req.SenderAID,
+                                XKeriOOBI: req.SenderOOBI,
+                                XKeriRole: "agent",
+                        },
+                }
+                if err := s.DataStore.SavePendingRequest(pendingReq); err != nil {
+                        writeError(w, http.StatusInternalServerError, "Failed to save pending request", err.Error())
+                        return
+                }
+                log.Printf("[identity-agent-core] EXCHANGE: Saved as PENDING REQUEST (OOBI unreachable) — AID=%s, error=%s", req.SenderAID, oobiErrorMsg)
+
+                w.Header().Set("Content-Type", "application/json")
+                json.NewEncoder(w).Encode(map[string]interface{}{
+                        "status":  "received_pending",
+                        "aid":     req.SenderAID,
+                        "error":   "sender_oobi_unreachable",
+                        "message": "Contact request received but sender OOBI could not be reached. Sender needs to set up tunneling.",
+                })
+                return
         }
 
         contact := store.ContactRecord{
@@ -1172,7 +1314,7 @@ func (s *CoreServer) handleExchange(w http.ResponseWriter, r *http.Request) {
                 Alias:        alias,
                 PublicKey:    req.SenderPublicKey,
                 OobiURL:      req.SenderOOBI,
-                Verified:     true,
+                Verified:     kelPresent,
                 DiscoveredAt: time.Now().UTC().Format(time.RFC3339),
                 Status:       "pending_inbound",
                 Role:         "agent",
@@ -1189,7 +1331,7 @@ func (s *CoreServer) handleExchange(w http.ResponseWriter, r *http.Request) {
                 return
         }
 
-        log.Printf("[identity-agent-core] EXCHANGE: Introduction received from %s (AID: %s) — saved as pending_inbound", alias, req.SenderAID)
+        log.Printf("[identity-agent-core] EXCHANGE: Introduction received from %s (AID: %s) — saved as pending_inbound, kel_verified=%v", alias, req.SenderAID, kelPresent)
 
         w.Header().Set("Content-Type", "application/json")
         json.NewEncoder(w).Encode(map[string]string{"status": "received", "aid": req.SenderAID})
@@ -1217,6 +1359,8 @@ func (s *CoreServer) handleAcceptContact(w http.ResponseWriter, r *http.Request)
                 return
         }
 
+        log.Printf("[identity-agent-core] CONTACT-ACCEPT: Upgrading contact %s (%s) from pending_inbound to mutual", contact.Alias, aid)
+
         contact.Status = "mutual"
         if err := s.DataStore.SaveContact(*contact); err != nil {
                 writeError(w, http.StatusInternalServerError, "Failed to update contact", err.Error())
@@ -1237,6 +1381,8 @@ func (s *CoreServer) handleAcceptContact(w http.ResponseWriter, r *http.Request)
                         remoteBase = remoteBase[:idx]
                 }
                 exchangeURL := remoteBase + "/api/exchange"
+
+                log.Printf("[identity-agent-core] EXCHANGE: Sending acceptance confirmation to %s", exchangeURL)
 
                 payload := map[string]string{
                         "type":       "acceptance",
@@ -1288,20 +1434,26 @@ func (s *CoreServer) handleRejectContact(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *CoreServer) handleGetAlerts(w http.ResponseWriter, r *http.Request) {
-        alerts, err := s.DataStore.GetContactsByStatus("pending_inbound")
+        contacts, err := s.DataStore.GetContactsByStatus("pending_inbound")
         if err != nil {
                 writeError(w, http.StatusInternalServerError, "Failed to read alerts", err.Error())
                 return
         }
+        if contacts == nil {
+                contacts = []store.ContactRecord{}
+        }
 
-        if alerts == nil {
-                alerts = []store.ContactRecord{}
+        pendingReqs, err := s.DataStore.GetPendingRequests()
+        if err != nil {
+                pendingReqs = []store.PendingRequest{}
         }
 
         w.Header().Set("Content-Type", "application/json")
         json.NewEncoder(w).Encode(map[string]interface{}{
-                "alerts": alerts,
-                "count":  len(alerts),
+                "alerts":           contacts,
+                "count":            len(contacts),
+                "pending_requests": pendingReqs,
+                "pending_count":    len(pendingReqs),
         })
 }
 

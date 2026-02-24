@@ -7,6 +7,7 @@ import (
         "os"
         "path/filepath"
         "sync"
+        "time"
 )
 
 type EventRecord struct {
@@ -60,6 +61,17 @@ type SettingsData struct {
         CloudflareTunnelToken string `json:"cloudflare_tunnel_token,omitempty"`
 }
 
+type PendingRequest struct {
+        AID         string `json:"aid"`
+        Alias       string `json:"alias"`
+        PublicKey   string `json:"public_key"`
+        OobiURL     string `json:"oobi_url"`
+        ReceivedAt  string `json:"received_at"`
+        ExpiresAt   string `json:"expires_at"`
+        ErrorReason string `json:"error_reason,omitempty"`
+        JCard       *JCard `json:"jcard,omitempty"`
+}
+
 type Store interface {
         SaveEvent(record EventRecord) error
         GetEvents(aid string) ([]EventRecord, error)
@@ -72,6 +84,9 @@ type Store interface {
         GetContactsByStatus(status string) ([]ContactRecord, error)
         GetSettings() (*SettingsData, error)
         SaveSettings(settings SettingsData) error
+        SavePendingRequest(req PendingRequest) error
+        GetPendingRequests() ([]PendingRequest, error)
+        DeletePendingRequest(aid string) error
         Close() error
 }
 
@@ -295,6 +310,98 @@ func (s *FileStore) loadEvents() ([]EventRecord, error) {
                 return nil, fmt.Errorf("failed to parse KEL: %w", err)
         }
         return events, nil
+}
+
+func (s *FileStore) SavePendingRequest(req PendingRequest) error {
+        s.mu.Lock()
+        defer s.mu.Unlock()
+
+        requests, err := s.loadPendingRequests()
+        if err != nil {
+                requests = []PendingRequest{}
+        }
+
+        updated := false
+        for i, r := range requests {
+                if r.AID == req.AID {
+                        requests[i] = req
+                        updated = true
+                        break
+                }
+        }
+        if !updated {
+                requests = append(requests, req)
+        }
+
+        return s.writeJSON(filepath.Join(s.dir, "pending_requests.json"), requests)
+}
+
+func (s *FileStore) GetPendingRequests() ([]PendingRequest, error) {
+        s.mu.Lock()
+        defer s.mu.Unlock()
+
+        requests, err := s.loadPendingRequests()
+        if err != nil {
+                return nil, err
+        }
+
+        now := time.Now()
+        var active []PendingRequest
+        var expired []string
+        for _, r := range requests {
+                expiry, err := time.Parse(time.RFC3339, r.ExpiresAt)
+                if err != nil || now.Before(expiry) {
+                        active = append(active, r)
+                } else {
+                        expired = append(expired, r.AID)
+                }
+        }
+
+        if len(expired) > 0 {
+                s.writeJSON(filepath.Join(s.dir, "pending_requests.json"), active)
+                log.Printf("[store] Auto-deleted %d expired pending requests", len(expired))
+        }
+
+        if active == nil {
+                active = []PendingRequest{}
+        }
+        return active, nil
+}
+
+func (s *FileStore) DeletePendingRequest(aid string) error {
+        s.mu.Lock()
+        defer s.mu.Unlock()
+
+        requests, err := s.loadPendingRequests()
+        if err != nil {
+                return err
+        }
+
+        var filtered []PendingRequest
+        for _, r := range requests {
+                if r.AID != aid {
+                        filtered = append(filtered, r)
+                }
+        }
+
+        return s.writeJSON(filepath.Join(s.dir, "pending_requests.json"), filtered)
+}
+
+func (s *FileStore) loadPendingRequests() ([]PendingRequest, error) {
+        path := filepath.Join(s.dir, "pending_requests.json")
+        data, err := os.ReadFile(path)
+        if err != nil {
+                if os.IsNotExist(err) {
+                        return []PendingRequest{}, nil
+                }
+                return nil, fmt.Errorf("failed to read pending requests: %w", err)
+        }
+
+        var requests []PendingRequest
+        if err := json.Unmarshal(data, &requests); err != nil {
+                return nil, fmt.Errorf("failed to parse pending requests: %w", err)
+        }
+        return requests, nil
 }
 
 func (s *FileStore) writeJSON(path string, v interface{}) error {
