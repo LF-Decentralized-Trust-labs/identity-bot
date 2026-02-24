@@ -1,0 +1,241 @@
+Install CocoaPods dependencies
+16s
+
+
+
+Show command
+--- Podfile contents ---
+platform :ios, '15.5'
+
+# CocoaPods analytics sends network stats synchronously affecting flutter build latency.
+ENV['COCOAPODS_DISABLE_STATS'] = 'true'
+
+project 'Runner', {
+  'Debug' => :debug,
+  'Profile' => :release,
+  'Release' => :release,
+}
+
+def flutter_root
+  generated_xcode_build_settings_path = File.expand_path(File.join('..', 'Flutter', 'Generated.xcconfig'), __FILE__)
+  unless File.exist?(generated_xcode_build_settings_path)
+    raise "#{generated_xcode_build_settings_path} must exist. If you're running pod install manually, make sure flutter pub get is executed first"
+  end
+
+  File.foreach(generated_xcode_build_settings_path) do |line|
+    matches = line.match(/FLUTTER_ROOT\=(.*)/)
+    return matches[1].strip if matches
+  end
+  raise "FLUTTER_ROOT not found in #{generated_xcode_build_settings_path}. Try deleting Generated.xcconfig, then run flutter pub get"
+end
+
+require File.expand_path(File.join('packages', 'flutter_tools', 'bin', 'podhelper'), flutter_root)
+
+flutter_ios_podfile_setup
+
+target 'Runner' do
+  use_frameworks!
+  use_modular_headers!
+
+  flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
+
+  pod 'Mobilecore', :path => 'Frameworks'
+
+  target 'RunnerTests' do
+    inherit! :search_paths
+  end
+end
+
+post_install do |installer|
+  installer.pods_project.targets.each do |target|
+    flutter_additional_ios_build_settings(target)
+    target.build_configurations.each do |config|
+      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.5'
+      config.build_settings['EXCLUDED_ARCHS[sdk=iphonesimulator*]'] = 'x86_64'
+    end
+  end
+
+  # Fix: CocoaPods/Google MLKit sets EXCLUDED_ARCHS = arm64 for simulator in
+  # the aggregate xcconfigs, but our gomobile xcframework only provides arm64
+  # for the simulator (Apple Silicon). Override to exclude x86_64 instead.
+  aggregate_dir = File.join(installer.sandbox.root, 'Target Support Files')
+  Dir.glob(File.join(aggregate_dir, 'Pods-*', '*.xcconfig')).each do |path|
+    content = File.read(path)
+    if content.include?('EXCLUDED_ARCHS[sdk=iphonesimulator*] = arm64')
+      content.gsub!('EXCLUDED_ARCHS[sdk=iphonesimulator*] = arm64', 'EXCLUDED_ARCHS[sdk=iphonesimulator*] = x86_64')
+      File.write(path, content)
+    end
+  end
+end
+--- Running pod install ---
+Analyzing dependencies
+Adding spec repo `trunk` with CDN `https://cdn.cocoapods.org/`
+Downloading dependencies
+Installing Flutter (1.0.0)
+Installing GTMSessionFetcher (3.5.0)
+Installing GoogleDataTransport (10.1.0)
+Installing GoogleMLKit (7.0.0)
+Installing GoogleToolboxForMac (4.2.1)
+Installing GoogleUtilities (8.1.0)
+Installing MLImage (1.0.0-beta6)
+Installing MLKitBarcodeScanning (6.0.0)
+Installing MLKitCommon (12.0.0)
+Installing MLKitVision (8.0.0)
+Installing Mobilecore (0.1.0)
+Installing PromisesObjC (2.4.0)
+Installing mobile_scanner (6.0.2)
+Installing nanopb (3.30910.0)
+Installing shared_preferences_foundation (0.0.1)
+Generating Pods project
+Integrating client project
+Pod installation complete! There are 4 dependencies from the Podfile and 15 total pods installed.
+
+[!] CocoaPods did not set the base configuration of your project because your project already has a custom config set. In order for CocoaPods integration to work at all, please either set the base configurations of the target `Runner` to `Target Support Files/Pods-Runner/Pods-Runner.profile.xcconfig` or include the `Target Support Files/Pods-Runner/Pods-Runner.profile.xcconfig` in your build configuration (`Flutter/Release.xcconfig`).
+
+[!] Your project does not explicitly specify the CocoaPods master specs repo. Since CDN is now used as the default, you may safely remove it from your repos directory via `pod repo remove master`. To suppress this warning please add `warn_for_unused_master_specs_repo => false` to your Podfile.
+--- Checking EXCLUDED_ARCHS in Pods project ---
+Pods/Pods.xcodeproj/project.pbxproj:				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
+Pods/Pods.xcodeproj/project.pbxproj:				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
+Pods/Pods.xcodeproj/project.pbxproj:				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
+Pods/Pods.xcodeproj/project.pbxproj:				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
+Pods/Pods.xcodeproj/project.pbxproj:				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
+--- Checking Pods-Runner xcconfig exists ---
+total 456
+drwxr-xr-x  25 builder  staff    800 Feb 23 01:14 .
+drwxr-xr-x  19 builder  staff    608 Feb 23 01:14 ..
+-rw-r--r--   1 builder  staff  62458 Feb 23 01:14 Pods-Runner-acknowledgements.markdown
+-rw-r--r--   1 builder  staff  65767 Feb 23 01:14 Pods-Runner-acknowledgements.plist
+-rw-r--r--   1 builder  staff    126 Feb 23 01:14 Pods-Runner-dummy.m
+-rw-r--r--   1 builder  staff    542 Feb 23 01:14 Pods-Runner-frameworks-Debug-input-files.xcfilelist
+-rw-r--r--   1 builder  staff    514 Feb 23 01:14 Pods-Runner-frameworks-Debug-output-files.xcfilelist
+-rw-r--r--   1 builder  staff    542 Feb 23 01:14 Pods-Runner-frameworks-Profile-input-files.xcfilelist
+-rw-r--r--   1 builder  staff    514 Feb 23 01:14 Pods-Runner-frameworks-Profile-output-files.xcfilelist
+-rw-r--r--   1 builder  staff    542 Feb 23 01:14 Pods-Runner-frameworks-Release-input-files.xcfilelist
+-rw-r--r--   1 builder  staff    514 Feb 23 01:14 Pods-Runner-frameworks-Release-output-files.xcfilelist
+-rwxr-xr-x   1 builder  staff  10272 Feb 23 01:14 Pods-Runner-frameworks.sh
+-rw-r--r--   1 builder  staff    854 Feb 23 01:14 Pods-Runner-Info.plist
+-rw-r--r--   1 builder  staff    147 Feb 23 01:14 Pods-Runner-resources-Debug-input-files.xcfilelist
+-rw-r--r--   1 builder  staff     86 Feb 23 01:14 Pods-Runner-resources-Debug-output-files.xcfilelist
+-rw-r--r--   1 builder  staff    147 Feb 23 01:14 Pods-Runner-resources-Profile-input-files.xcfilelist
+-rw-r--r--   1 builder  staff     86 Feb 23 01:14 Pods-Runner-resources-Profile-output-files.xcfilelist
+-rw-r--r--   1 builder  staff    147 Feb 23 01:14 Pods-Runner-resources-Release-input-files.xcfilelist
+-rw-r--r--   1 builder  staff     86 Feb 23 01:14 Pods-Runner-resources-Release-output-files.xcfilelist
+-rwxr-xr-x   1 builder  staff   6881 Feb 23 01:14 Pods-Runner-resources.sh
+-rw-r--r--   1 builder  staff    314 Feb 23 01:14 Pods-Runner-umbrella.h
+-rw-r--r--   1 builder  staff   4001 Feb 23 01:14 Pods-Runner.debug.xcconfig
+-rw-r--r--   1 builder  staff    112 Feb 23 01:14 Pods-Runner.modulemap
+-rw-r--r--   1 builder  staff   4001 Feb 23 01:14 Pods-Runner.profile.xcconfig
+-rw-r--r--   1 builder  staff   4001 Feb 23 01:14 Pods-Runner.release.xcconfig
+--- Pods-Runner.debug.xcconfig EXCLUDED_ARCHS (after post_install fix) ---
+EXCLUDED_ARCHS[sdk=iphonesimulator*] = x86_64
+--- Pods-Runner.release.xcconfig EXCLUDED_ARCHS (after post_install fix) ---
+EXCLUDED_ARCHS[sdk=iphonesimulator*] = x86_64
+--- Flutter Debug.xcconfig contents ---
+#include? "../Pods/Target Support Files/Pods-Runner/Pods-Runner.debug.xcconfig"
+#include "Generated.xcconfig"
+--- Verifying XCFrameworkIntermediates will be created ---
+PODS_ROOT=FRAMEWORK_SEARCH_PATHS = $(inherited) "${PODS_CONFIGURATION_BUILD_DIR}/GTMSessionFetcher" "${PODS_CONFIGURATION_BUILD_DIR}/GoogleDataTransport" "${PODS_CONFIGURATION_BUILD_DIR}/GoogleToolboxForMac" "${PODS_CONFIGURATION_BUILD_DIR}/GoogleUtilities" "${PODS_CONFIGURATION_BUILD_DIR}/PromisesObjC" "${PODS_CONFIGURATION_BUILD_DIR}/mobile_scanner" "${PODS_CONFIGURATION_BUILD_DIR}/nanopb" "${PODS_CONFIGURATION_BUILD_DIR}/shared_preferences_foundation" "${PODS_ROOT}/../Frameworks" "${PODS_ROOT}/MLImage/Frameworks" "${PODS_ROOT}/MLKitBarcodeScanning/Frameworks" "${PODS_ROOT}/MLKitCommon/Frameworks" "${PODS_ROOT}/MLKitVision/Frameworks" "${PODS_XCFRAMEWORKS_BUILD_DIR}/Mobilecore"
+
+identity-bot
+identity-bot
+github.com/LF-Decentralized-Trust-labs/identity-bot.git
+
+
+Start new build
+Build overview
+Click on the build steps for details.
+Preparing build machine
+26s
+Fetching app sources
+4s
+Installing SDKs
+37s
+Install Rust toolchain and iOS targets
+22s
+Install Go toolchain and gomobile
+37s
+Build Go Core as iOS XCFramework via gomobile
+30s
+Install FRB codegen
+1m 31s
+Get Flutter packages
+1m 7s
+Run FRB codegen to generate Dart and Rust bindings
+1m 36s
+Build Rust static library for iOS (device + simulator)
+1m 26s
+Copy Rust libraries to iOS Frameworks
+< 1s
+Build iOS for Simulator testing
+24s
+
+
+
+Show command
+Showing the last 50 lines. Click this button to load the full log
+    /Users/builder/clone/identity_agent_ui/ios/Runner/AppDelegate.swift:3:8: note: a dependency of main module 'Runner'
+    import Mobilecore
+           ^
+    ** BUILD FAILED **
+
+
+Xcode's output:
+↳
+    Writing result bundle at path:
+    	/var/folders/w2/rrf5p87d1bbfyphxc7jdnyvh0000gn/T/flutter_tools.1L178F/flutter_ios_build_temp_dirCRo97X/temporary_xcresult_bundle
+
+    ld: warning: search path '/Users/builder/clone/identity_agent_ui/build/ios/Debug-iphonesimulator/GTMSessionFetcher' not found
+    ld: warning: search path '/Users/builder/clone/identity_agent_ui/build/ios/Debug-iphonesimulator/GoogleDataTransport' not found
+    ld: warning: search path '/Users/builder/clone/identity_agent_ui/build/ios/Debug-iphonesimulator/GoogleToolboxForMac' not found
+    ld: warning: search path '/Users/builder/clone/identity_agent_ui/build/ios/Debug-iphonesimulator/GoogleUtilities' not found
+    ld: warning: search path '/Users/builder/clone/identity_agent_ui/build/ios/Debug-iphonesimulator/PromisesObjC' not found
+    ld: warning: search path '/Users/builder/clone/identity_agent_ui/build/ios/Debug-iphonesimulator/mobile_scanner' not found
+    ld: warning: search path '/Users/builder/clone/identity_agent_ui/build/ios/Debug-iphonesimulator/nanopb' not found
+    ld: warning: search path '/Users/builder/clone/identity_agent_ui/build/ios/Debug-iphonesimulator/shared_preferences_foundation' not found
+    ld: warning: search path '/Users/builder/clone/identity_agent_ui/build/ios/Debug-iphonesimulator/XCFrameworkIntermediates/Mobilecore' not found
+    ld: warning: search path '/Users/builder/clone/identity_agent_ui/build/ios/Debug-iphonesimulator/GTMSessionFetcher' not found
+    ld: warning: search path '/Users/builder/clone/identity_agent_ui/build/ios/Debug-iphonesimulator/GoogleDataTransport' not found
+    ld: warning: search path '/Users/builder/clone/identity_agent_ui/build/ios/Debug-iphonesimulator/GoogleToolboxForMac' not found
+    ld: warning: search path '/Users/builder/clone/identity_agent_ui/build/ios/Debug-iphonesimulator/GoogleUtilities' not found
+    ld: warning: search path '/Users/builder/clone/identity_agent_ui/build/ios/Debug-iphonesimulator/PromisesObjC' not found
+    ld: warning: search path '/Users/builder/clone/identity_agent_ui/build/ios/Debug-iphonesimulator/mobile_scanner' not found
+    ld: warning: search path '/Users/builder/clone/identity_agent_ui/build/ios/Debug-iphonesimulator/nanopb' not found
+    ld: warning: search path '/Users/builder/clone/identity_agent_ui/build/ios/Debug-iphonesimulator/shared_preferences_foundation' not found
+    ld: warning: search path '/Users/builder/clone/identity_agent_ui/build/ios/Debug-iphonesimulator/XCFrameworkIntermediates/Mobilecore' not found
+    /Users/builder/clone/identity_agent_ui/ios/Runner/AppDelegate.swift:3:8: error: Unable to find module dependency: 'Mobilecore'
+    import Mobilecore
+           ^ (in target 'Runner' from project 'Runner')
+    /Users/builder/clone/identity_agent_ui/ios/Runner/AppDelegate.swift:3:8: note: A dependency of main module 'Runner'
+    import Mobilecore
+           ^ (in target 'Runner' from project 'Runner')
+    /Users/builder/clone/identity_agent_ui/ios/Runner/AppDelegate.swift:3:8: error: Unable to find module dependency: 'Mobilecore'
+    import Mobilecore
+           ^ (in target 'Runner' from project 'Runner')
+    /Users/builder/clone/identity_agent_ui/ios/Runner/AppDelegate.swift:3:8: note: A dependency of main module 'Runner'
+    import Mobilecore
+           ^ (in target 'Runner' from project 'Runner')
+    note: Run script build phase 'Run Script' will be run during every build because the option to run the script phase "Based on dependency analysis" is unchecked. (in target 'Runner' from project 'Runner')
+    note: Run script build phase 'Thin Binary' will be run during every build because the option to run the script phase "Based on dependency analysis" is unchecked. (in target 'Runner' from project 'Runner')
+
+Encountered error while building for simulator.
+
+
+Build failed :|
+Step 12 script `Build iOS for Simulator testing` exited with status code 1
+
+Publishing
+< 1s
+Cleaning up
+< 1s
+Step 12 script `Build iOS for Simulator testing` exited with status code 1
+
+Applications
+Builds
+OTA Updates
+App Preview
+Teams
+Billing
+
+
+Log out
+

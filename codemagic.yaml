@@ -1,0 +1,566 @@
+workflows:
+  android-release:
+    name: Android Release (with Rust KERI Bridge + Go Core)
+    max_build_duration: 120
+    instance_type: linux_x2
+    environment:
+      flutter: 3.22.0
+      java: 17
+    scripts:
+      - name: Install Rust toolchain and Android targets
+        script: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          source "$HOME/.cargo/env"
+          rustup target add \
+            aarch64-linux-android
+          cargo install cargo-ndk
+          echo "--- Rust version ---"
+          rustc --version
+          cargo --version
+          cargo ndk --version
+
+      - name: Install Go toolchain and gomobile
+        script: |
+          GO_VERSION="1.22.5"
+          curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" -o /tmp/go.tar.gz
+          sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf /tmp/go.tar.gz
+          export PATH="/usr/local/go/bin:$HOME/go/bin:$PATH"
+          echo "PATH=/usr/local/go/bin:$HOME/go/bin:$PATH" >> $CM_ENV
+          go version
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          go install golang.org/x/mobile/cmd/gobind@latest
+          gomobile version || echo "gomobile installed"
+
+      - name: Configure Android NDK for Rust and Go
+        script: |
+          source "$HOME/.cargo/env"
+          export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/$(ls $ANDROID_SDK_ROOT/ndk/ | sort -V | tail -1)"
+          echo "Using NDK: $ANDROID_NDK_HOME"
+          echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME" >> $CM_ENV
+          gomobile init
+
+      - name: Build Go Core as Android AAR via gomobile
+        script: |
+          set -e
+          cd identity-agent-core
+          mkdir -p ../identity_agent_ui/android/app/libs
+          echo "--- Adding gomobile bind dependency ---"
+          go get golang.org/x/mobile/bind
+          echo "--- Go module info ---"
+          go list -m all | head -5
+          echo "--- Building Go Core for Android via gomobile bind ---"
+          gomobile bind -v \
+            -target=android/arm64,android/arm,android/amd64,android/386 \
+            -androidapi 21 \
+            -o ../identity_agent_ui/android/app/libs/mobilecore.aar \
+            ./mobilecore
+          echo "--- Verifying Go Core AAR ---"
+          if [ ! -f ../identity_agent_ui/android/app/libs/mobilecore.aar ]; then
+            echo "ERROR: mobilecore.aar was not produced by gomobile bind!"
+            exit 1
+          fi
+          ls -lh ../identity_agent_ui/android/app/libs/mobilecore.aar
+          ls -lh ../identity_agent_ui/android/app/libs/mobilecore-sources.jar 2>/dev/null || true
+
+      - name: Install FRB codegen
+        script: |
+          source "$HOME/.cargo/env"
+          cargo install flutter_rust_bridge_codegen --version 2.11.1
+
+      - name: Set up local properties
+        script: |
+          cd identity_agent_ui
+          echo "flutter.sdk=$HOME/programs/flutter" > android/local.properties
+          echo "sdk.dir=$ANDROID_SDK_ROOT" >> android/local.properties
+
+      - name: Get Flutter packages
+        script: |
+          cd identity_agent_ui
+          flutter pub get
+
+      - name: Run FRB codegen to generate Dart and Rust bindings
+        script: |
+          source "$HOME/.cargo/env"
+          cd identity_agent_ui
+
+          echo "--- Pre-codegen: Dart placeholder hash ---"
+          grep 'rustContentHash' lib/src/rust/frb_generated.dart || echo "No hash found"
+
+          # Create a minimal frb_generated.rs stub so the Rust project is
+          # compilable when FRB codegen runs cargo check internally.
+          # FRB codegen will overwrite this with the real generated code.
+          if [ ! -f rust/src/frb_generated.rs ]; then
+            echo "// temporary stub for FRB codegen" > rust/src/frb_generated.rs
+            echo "Created temporary frb_generated.rs stub"
+          fi
+
+          echo "--- Running flutter_rust_bridge_codegen generate ---"
+          flutter_rust_bridge_codegen generate 2>&1 | tee /tmp/frb_codegen.log
+          FRB_EXIT=${PIPESTATUS[0]}
+          if [ $FRB_EXIT -ne 0 ]; then
+            echo "ERROR: FRB codegen failed! Exit code: $FRB_EXIT"
+            echo "--- Full codegen output ---"
+            cat /tmp/frb_codegen.log
+            echo "--- flutter_rust_bridge.yaml ---"
+            cat flutter_rust_bridge.yaml
+            echo "--- Rust source files ---"
+            find rust/src -name "*.rs" -ls
+            echo "--- Dart output dir ---"
+            find lib/src/rust -name "*.dart" -ls 2>/dev/null || echo "Dir does not exist"
+            exit 1
+          fi
+
+          echo "--- Post-codegen: Verifying generated files ---"
+          echo "Generated Dart files:"
+          find lib/src/rust -name "*.dart" -ls
+          echo ""
+          echo "Generated Rust files:"
+          ls -la rust/src/frb_generated.rs 2>/dev/null || echo "frb_generated.rs NOT FOUND"
+          echo ""
+          echo "Dart hash line:"
+          grep 'rustContentHash' lib/src/rust/frb_generated.dart || echo "No hash line found in frb_generated.dart!"
+          echo ""
+
+          if grep -q 'rustContentHash => 0' lib/src/rust/frb_generated.dart; then
+            echo "ERROR: FRB codegen did not update the Dart hash (still 0)!"
+            echo "The placeholder was not overwritten by FRB codegen."
+            echo "--- frb_generated.dart (first 30 lines) ---"
+            head -30 lib/src/rust/frb_generated.dart
+            echo ""
+            echo "Check flutter_rust_bridge.yaml dart_output points to lib/src/rust"
+            grep dart_output flutter_rust_bridge.yaml
+            exit 1
+          fi
+
+          echo "--- FRB codegen completed successfully ---"
+
+      - name: Build Rust library for Android via cargo-ndk
+        script: |
+          set -eo pipefail
+          source "$HOME/.cargo/env"
+          cd identity_agent_ui/rust
+          mkdir -p ../android/app/src/main/jniLibs/arm64-v8a
+
+          # Force libsodium to be statically linked (required for Android)
+          export SODIUM_STATIC=1
+          export SODIUM_LIB_DIR=""
+          export SODIUM_SHARED=0
+
+          echo "--- Building Rust library with FRB bindings (arm64 only) ---"
+          cargo ndk \
+            --target aarch64-linux-android \
+            --platform 21 \
+            --output-dir ../android/app/src/main/jniLibs \
+            build --release
+
+          echo "--- Built .so files ---"
+          find ../android/app/src/main/jniLibs -name "*.so" -ls
+
+          # Verify no dynamic libsodium dependency
+          echo "--- Checking dynamic dependencies (arm64) ---"
+          readelf -d ../android/app/src/main/jniLibs/arm64-v8a/libidentity_agent_keri.so 2>/dev/null | grep NEEDED || echo "readelf not available"
+
+      - name: Build debug APK (arm64)
+        script: |
+          cd identity_agent_ui
+          flutter build apk --debug --target-platform android-arm64
+
+      - name: Build release APK (arm64)
+        script: |
+          cd identity_agent_ui
+          flutter build apk --release --target-platform android-arm64
+
+    artifacts:
+      - identity_agent_ui/build/app/outputs/flutter-apk/*.apk
+
+  ios-release:
+    name: iOS Release (with Rust KERI Bridge + Go Core)
+    max_build_duration: 120
+    instance_type: mac_mini_m2
+    environment:
+      flutter: 3.22.0
+      xcode: latest
+      cocoapods: default
+      vars:
+        BUNDLE_ID: "com.identityagent.identityAgentUi"
+    scripts:
+      - name: Install Rust toolchain and iOS targets
+        script: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          source "$HOME/.cargo/env"
+          rustup target add aarch64-apple-ios
+          rustup target add aarch64-apple-ios-sim
+          echo "--- Rust version ---"
+          rustc --version
+          cargo --version
+
+      - name: Install Go toolchain and gomobile
+        script: |
+          brew install go
+          go version
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          go install golang.org/x/mobile/cmd/gobind@latest
+          export PATH="$HOME/go/bin:$PATH"
+          echo "PATH=$HOME/go/bin:$PATH" >> $CM_ENV
+          gomobile init
+
+      - name: Build Go Core as iOS XCFramework via gomobile
+        script: |
+          set -e
+          cd identity-agent-core
+          mkdir -p ../identity_agent_ui/ios/Frameworks
+          echo "--- Adding gomobile bind dependency ---"
+          go get golang.org/x/mobile/bind
+          echo "--- Go module info ---"
+          go list -m all | head -5
+          echo "--- Building Go Core for iOS via gomobile bind ---"
+          gomobile bind -v \
+            -target=ios/arm64,iossimulator/arm64 \
+            -o ../identity_agent_ui/ios/Frameworks/Mobilecore.xcframework \
+            ./mobilecore
+          echo "--- Verifying Go Core XCFramework ---"
+          if [ ! -d ../identity_agent_ui/ios/Frameworks/Mobilecore.xcframework ]; then
+            echo "ERROR: Mobilecore.xcframework was not produced by gomobile bind!"
+            exit 1
+          fi
+          echo "--- XCFramework contents ---"
+          ls -la ../identity_agent_ui/ios/Frameworks/Mobilecore.xcframework/
+          find ../identity_agent_ui/ios/Frameworks/Mobilecore.xcframework -name "*.framework" -type d
+          echo "--- XCFramework Info.plist (supported architectures) ---"
+          cat ../identity_agent_ui/ios/Frameworks/Mobilecore.xcframework/Info.plist || true
+          echo "--- Checking framework binary architectures ---"
+          for fw in $(find ../identity_agent_ui/ios/Frameworks/Mobilecore.xcframework -name "Mobilecore" -type f); do
+            echo "Binary: $fw"
+            lipo -info "$fw" || file "$fw"
+          done
+
+      - name: Extract Mobilecore.framework from XCFramework
+        script: |
+          set -e
+          XCFW="identity_agent_ui/ios/Frameworks/Mobilecore.xcframework"
+          DEST="identity_agent_ui/ios/Frameworks/Mobilecore"
+          mkdir -p "$DEST"
+
+          echo "--- XCFramework slices ---"
+          ls -la "$XCFW/"
+
+          # For simulator builds, extract the simulator slice
+          # gomobile produces ios-arm64-simulator/ for Apple Silicon simulators
+          SIMULATOR_SLICE=$(find "$XCFW" -type d -name "*.framework" -path "*simulator*" | head -1)
+          DEVICE_SLICE=$(find "$XCFW" -type d -name "*.framework" ! -path "*simulator*" | head -1)
+
+          if [ -n "$SIMULATOR_SLICE" ]; then
+            echo "--- Found simulator framework: $SIMULATOR_SLICE ---"
+            cp -R "$SIMULATOR_SLICE" "$DEST/"
+            echo "--- Extracted to $DEST/Mobilecore.framework ---"
+            ls -la "$DEST/Mobilecore.framework/"
+            echo "--- Binary architecture ---"
+            lipo -info "$DEST/Mobilecore.framework/Mobilecore"
+          else
+            echo "WARNING: No simulator slice found in xcframework, using device slice"
+            if [ -n "$DEVICE_SLICE" ]; then
+              cp -R "$DEVICE_SLICE" "$DEST/"
+              ls -la "$DEST/Mobilecore.framework/"
+            else
+              echo "ERROR: No framework slices found in xcframework!"
+              find "$XCFW" -type d
+              exit 1
+            fi
+          fi
+
+          echo "--- Checking module map ---"
+          cat "$DEST/Mobilecore.framework/Modules/module.modulemap" 2>/dev/null || \
+            cat "$DEST/Mobilecore.framework/Headers/module.modulemap" 2>/dev/null || \
+            echo "No module.modulemap found"
+
+      - name: Install FRB codegen
+        script: |
+          source "$HOME/.cargo/env"
+          cargo install flutter_rust_bridge_codegen --version 2.11.1
+
+      - name: Get Flutter packages
+        script: |
+          cd identity_agent_ui
+          flutter pub get
+
+      - name: Run FRB codegen to generate Dart and Rust bindings
+        script: |
+          source "$HOME/.cargo/env"
+          cd identity_agent_ui
+
+          echo "--- Pre-codegen: Dart placeholder hash ---"
+          grep 'rustContentHash' lib/src/rust/frb_generated.dart || echo "No hash found"
+
+          if [ ! -f rust/src/frb_generated.rs ]; then
+            echo "// temporary stub for FRB codegen" > rust/src/frb_generated.rs
+            echo "Created temporary frb_generated.rs stub"
+          fi
+
+          echo "--- Running flutter_rust_bridge_codegen generate ---"
+          flutter_rust_bridge_codegen generate 2>&1 | tee /tmp/frb_codegen.log
+          FRB_EXIT=${PIPESTATUS[0]}
+          if [ $FRB_EXIT -ne 0 ]; then
+            echo "ERROR: FRB codegen failed! Exit code: $FRB_EXIT"
+            cat /tmp/frb_codegen.log
+            cat flutter_rust_bridge.yaml
+            find rust/src -name "*.rs" -ls
+            exit 1
+          fi
+
+          echo "--- Post-codegen: Verifying generated files ---"
+          find lib/src/rust -name "*.dart" -ls
+          grep 'rustContentHash' lib/src/rust/frb_generated.dart || echo "No hash line found!"
+          if grep -q 'rustContentHash => 0' lib/src/rust/frb_generated.dart; then
+            echo "ERROR: FRB codegen did not update the Dart hash (still 0)!"
+            head -30 lib/src/rust/frb_generated.dart
+            grep dart_output flutter_rust_bridge.yaml
+            exit 1
+          fi
+          echo "--- FRB codegen completed successfully ---"
+
+      - name: Build Rust static library for iOS (device + simulator)
+        script: |
+          set -eo pipefail
+          source "$HOME/.cargo/env"
+          cd identity_agent_ui/rust
+
+          # Force libsodium to be statically linked (required for iOS)
+          export SODIUM_STATIC=1
+          export SODIUM_SHARED=0
+
+          echo "--- Building Rust library with FRB bindings ---"
+          cargo build --release --target aarch64-apple-ios
+          cargo build --release --target aarch64-apple-ios-sim
+
+          echo "--- Built static libraries ---"
+          ls -lh target/aarch64-apple-ios/release/libidentity_agent_keri.a
+          ls -lh target/aarch64-apple-ios-sim/release/libidentity_agent_keri.a
+
+      - name: Copy Rust libraries to iOS Frameworks
+        script: |
+          RUST_DIR="identity_agent_ui/rust"
+          IOS_DIR="identity_agent_ui/ios"
+          LIB="libidentity_agent_keri.a"
+          mkdir -p "$IOS_DIR/Frameworks/RustKeri/device"
+          mkdir -p "$IOS_DIR/Frameworks/RustKeri/simulator"
+          cp "$RUST_DIR/target/aarch64-apple-ios/release/$LIB" \
+             "$IOS_DIR/Frameworks/RustKeri/device/$LIB"
+          cp "$RUST_DIR/target/aarch64-apple-ios-sim/release/$LIB" \
+             "$IOS_DIR/Frameworks/RustKeri/simulator/$LIB"
+          echo "--- Libraries placed ---"
+          ls -lh "$IOS_DIR/Frameworks/RustKeri/device/$LIB"
+          ls -lh "$IOS_DIR/Frameworks/RustKeri/simulator/$LIB"
+
+      - name: Install CocoaPods dependencies
+        script: |
+          cd identity_agent_ui/ios
+          echo "--- Podfile contents ---"
+          cat Podfile
+          echo "--- Running pod install ---"
+          pod install
+          echo "--- Verifying workspace includes Pods project ---"
+          cat Runner.xcworkspace/contents.xcworkspacedata
+          if ! grep -q "Pods.xcodeproj" Runner.xcworkspace/contents.xcworkspacedata; then
+            echo "ERROR: Workspace missing Pods reference! Adding it..."
+            printf '<?xml version="1.0" encoding="UTF-8"?>\n<Workspace\n   version = "1.0">\n   <FileRef\n      location = "group:Runner.xcodeproj">\n   </FileRef>\n   <FileRef\n      location = "group:Pods/Pods.xcodeproj">\n   </FileRef>\n</Workspace>\n' > Runner.xcworkspace/contents.xcworkspacedata
+            echo "--- Fixed workspace ---"
+            cat Runner.xcworkspace/contents.xcworkspacedata
+          else
+            echo "OK: Workspace correctly references Pods project"
+          fi
+          echo "--- Checking EXCLUDED_ARCHS in Pods xcconfigs (after post_install fix) ---"
+          grep "EXCLUDED_ARCHS" "Pods/Target Support Files/Pods-Runner/Pods-Runner.debug.xcconfig" || echo "No EXCLUDED_ARCHS in debug xcconfig"
+          grep "EXCLUDED_ARCHS" "Pods/Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig" || echo "No EXCLUDED_ARCHS in release xcconfig"
+          echo "--- Verifying Mobilecore.framework in Frameworks/Mobilecore/ ---"
+          ls -la Frameworks/Mobilecore/Mobilecore.framework/ || echo "WARNING: Mobilecore.framework not found!"
+          echo "--- Verifying Rust static library ---"
+          ls -la Frameworks/RustKeri/device/libidentity_agent_keri.a || echo "WARNING: Rust library not found!"
+
+      - name: Build iOS for Simulator testing
+        script: |
+          cd identity_agent_ui
+          echo "--- Build machine architecture ---"
+          uname -m
+          echo "--- Xcode version ---"
+          xcodebuild -version
+          echo "--- Ensuring x86_64 excluded for simulator ---"
+          sed -i '' 's/EXCLUDED_ARCHS\[sdk=iphonesimulator\*\]=i386/EXCLUDED_ARCHS[sdk=iphonesimulator*]=i386 x86_64/' ios/Flutter/Generated.xcconfig || true
+          echo "--- Updated Generated.xcconfig ---"
+          cat ios/Flutter/Generated.xcconfig
+          echo "--- Listing workspace schemes and targets ---"
+          xcodebuild -workspace ios/Runner.xcworkspace -list 2>&1 || true
+          echo "--- Release.xcconfig contents ---"
+          cat ios/Flutter/Release.xcconfig
+          echo "--- Debug.xcconfig contents ---"
+          cat ios/Flutter/Debug.xcconfig
+          echo "--- Building Flutter iOS for simulator (verbose) ---"
+          flutter build ios --debug --simulator --verbose 2>&1 | tail -80
+
+    artifacts:
+      - identity_agent_ui/build/ios/iphonesimulator/*.app
+      - /tmp/xcodebuild_logs/*.log
+
+  windows-release:
+    name: Windows Release (Desktop)
+    max_build_duration: 60
+    instance_type: windows_x2
+    environment:
+      flutter: 3.22.0
+    scripts:
+      - name: Install Go toolchain
+        script: |
+          choco install golang -y
+          $env:Path = "C:\Program Files\Go\bin;$env:Path"
+          go version
+
+      - name: Build Go backend (Windows)
+        script: |
+          $env:Path = "C:\Program Files\Go\bin;$env:Path"
+          $env:CGO_ENABLED = "0"
+          $env:GOOS = "windows"
+          $env:GOARCH = "amd64"
+          cd identity-agent-core
+          go build -o bin\identity-agent-core.exe .
+          Write-Host "--- Go binary ---"
+          Get-Item bin\identity-agent-core.exe
+
+      - name: Get Flutter packages
+        script: |
+          cd identity_agent_ui
+          flutter pub get
+
+      - name: Build Flutter Windows app
+        script: |
+          cd identity_agent_ui
+          flutter build windows --release
+
+      - name: Bundle Go backend and KERI driver with Flutter app
+        script: |
+          $BUNDLE = "identity_agent_ui\build\windows\x64\runner\Release"
+          mkdir -p "$BUNDLE\backend"
+          Copy-Item "identity-agent-core\bin\identity-agent-core.exe" "$BUNDLE\backend\"
+          Copy-Item -Recurse "drivers\keri-core" "$BUNDLE\backend\keri-driver"
+          Write-Host "--- Bundle contents ---"
+          Get-ChildItem -Recurse "$BUNDLE\backend"
+
+      - name: Create ZIP archive
+        script: |
+          $BUNDLE = "identity_agent_ui\build\windows\x64\runner\Release"
+          Compress-Archive -Path "$BUNDLE\*" -DestinationPath "identity-agent-windows-x64.zip"
+          Write-Host "--- Archive ---"
+          Get-Item "identity-agent-windows-x64.zip"
+
+    artifacts:
+      - identity-agent-windows-x64.zip
+
+  macos-release:
+    name: macOS Release (Desktop)
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    environment:
+      flutter: 3.22.0
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Install Go toolchain
+        script: |
+          brew install go
+          go version
+
+      - name: Build Go backend (macOS universal)
+        script: |
+          cd identity-agent-core
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -o bin/identity-agent-core-arm64 .
+          CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -o bin/identity-agent-core-amd64 .
+          lipo -create -output bin/identity-agent-core bin/identity-agent-core-arm64 bin/identity-agent-core-amd64
+          echo "--- Go universal binary ---"
+          file bin/identity-agent-core
+          ls -lh bin/identity-agent-core
+
+      - name: Get Flutter packages
+        script: |
+          cd identity_agent_ui
+          flutter pub get
+
+      - name: Build Flutter macOS app
+        script: |
+          cd identity_agent_ui
+          flutter build macos --release
+
+      - name: Bundle Go backend and KERI driver into .app
+        script: |
+          APP="identity_agent_ui/build/macos/Build/Products/Release/Identity Agent.app"
+          RESOURCES="$APP/Contents/Resources"
+          mkdir -p "$RESOURCES/backend"
+          cp identity-agent-core/bin/identity-agent-core "$RESOURCES/backend/"
+          cp -r drivers/keri-core "$RESOURCES/backend/keri-driver"
+          chmod +x "$RESOURCES/backend/identity-agent-core"
+          echo "--- Bundle contents ---"
+          ls -la "$RESOURCES/backend/"
+
+      - name: Create DMG archive
+        script: |
+          APP="identity_agent_ui/build/macos/Build/Products/Release/Identity Agent.app"
+          hdiutil create -volname "Identity Agent" \
+            -srcfolder "$APP" \
+            -ov -format UDZO \
+            "identity-agent-macos.dmg"
+          echo "--- DMG ---"
+          ls -lh identity-agent-macos.dmg
+
+    artifacts:
+      - identity-agent-macos.dmg
+
+  linux-release:
+    name: Linux Release (Desktop)
+    max_build_duration: 60
+    instance_type: linux_x2
+    environment:
+      flutter: 3.22.0
+    scripts:
+      - name: Install system dependencies
+        script: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang cmake ninja-build pkg-config \
+            libgtk-3-dev liblzma-dev libstdc++-12-dev \
+            golang-go python3 python3-pip python3-venv
+          go version
+
+      - name: Build Go backend (Linux)
+        script: |
+          cd identity-agent-core
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/identity-agent-core .
+          echo "--- Go binary ---"
+          file bin/identity-agent-core
+          ls -lh bin/identity-agent-core
+
+      - name: Get Flutter packages
+        script: |
+          cd identity_agent_ui
+          flutter pub get
+
+      - name: Build Flutter Linux app
+        script: |
+          cd identity_agent_ui
+          flutter build linux --release
+
+      - name: Bundle Go backend and KERI driver with Flutter app
+        script: |
+          BUNDLE="identity_agent_ui/build/linux/x64/release/bundle"
+          mkdir -p "$BUNDLE/backend"
+          cp identity-agent-core/bin/identity-agent-core "$BUNDLE/backend/"
+          cp -r drivers/keri-core "$BUNDLE/backend/keri-driver"
+          chmod +x "$BUNDLE/backend/identity-agent-core"
+          echo "--- Bundle contents ---"
+          ls -la "$BUNDLE/backend/"
+
+      - name: Create tarball archive
+        script: |
+          BUNDLE="identity_agent_ui/build/linux/x64/release/bundle"
+          tar -czf identity-agent-linux-x64.tar.gz -C "$BUNDLE" .
+          echo "--- Archive ---"
+          ls -lh identity-agent-linux-x64.tar.gz
+
+    artifacts:
+      - identity-agent-linux-x64.tar.gz

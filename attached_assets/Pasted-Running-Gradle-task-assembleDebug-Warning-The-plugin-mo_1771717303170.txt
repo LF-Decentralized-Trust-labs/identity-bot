@@ -1,0 +1,125 @@
+Running Gradle task 'assembleDebug'...                          
+Warning: The plugin mobile_scanner requires Android SDK version 36 or higher.
+For more information about build configuration, see https://docs.flutter.dev/deployment/android#reviewing-the-gradle-build-configuration.
+One or more plugins require a higher Android SDK version.
+Fix this issue by adding the following to /home/builder/clone/identity_agent_ui/android/app/build.gradle:
+android {
+  compileSdkVersion 36
+  ...
+}
+
+Checking the license for package Android SDK Platform 35 in /usr/local/share/android-sdk/licenses
+License for package Android SDK Platform 35 accepted.
+Preparing "Install Android SDK Platform 35 (revision: 2)".
+"Install Android SDK Platform 35 (revision: 2)" ready.
+Installing Android SDK Platform 35 in /usr/local/share/android-sdk/platforms/android-35
+"Install Android SDK Platform 35 (revision: 2)" complete.
+"Install Android SDK Platform 35 (revision: 2)" finished.
+Checking the license for package Android SDK Platform 36 in /usr/local/share/android-sdk/licenses
+License for package Android SDK Platform 36 accepted.
+Preparing "Install Android SDK Platform 36 (revision: 2)".
+"Install Android SDK Platform 36 (revision: 2)" ready.
+Installing Android SDK Platform 36 in /usr/local/share/android-sdk/platforms/android-36
+"Install Android SDK Platform 36 (revision: 2)" complete.
+"Install Android SDK Platform 36 (revision: 2)" finished.
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:checkDebugAarMetadata'.
+> A failure occurred while executing com.android.build.gradle.internal.tasks.CheckAarMetadataWorkAction
+   > 4 issues were found when checking AAR metadata:
+
+       1.  Dependency 'androidx.camera:camera-core:1.5.0' requires Android Gradle plugin 8.6.0 or higher.
+
+           This build currently uses Android Gradle plugin 7.3.0.
+
+       2.  Dependency 'androidx.camera:camera-camera2:1.5.0' requires Android Gradle plugin 8.6.0 or higher.
+
+           This build currently uses Android Gradle plugin 7.3.0.
+
+       3.  Dependency 'androidx.camera:camera-lifecycle:1.5.0' requires Android Gradle plugin 8.6.0 or higher.
+
+           This build currently uses Android Gradle plugin 7.3.0.
+
+       4.  Dependency 'androidx.camera.featurecombinationquery:featurecombinationquery:1.5.0' requires Android Gradle plugin 8.6.0 or higher.
+
+           This build currently uses Android Gradle plugin 7.3.0.
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+
+* Get more help at https://help.gradle.org
+
+BUILD FAILED in 1m 43s
+
+Running Gradle task 'assembleDebug'...                          
+Warning: The plugin mobile_scanner requires Android SDK version 36 or higher.
+For more information about build configuration, see https://docs.flutter.dev/deployment/android#reviewing-the-gradle-build-configuration.
+One or more plugins require a higher Android SDK version.
+Fix this issue by adding the following to /home/builder/clone/identity_agent_ui/android/app/build.gradle:
+android {
+  compileSdkVersion 36
+  ...
+}
+
+Checking the license for package Android SDK Platform 35 in /usr/local/share/android-sdk/licenses
+License for package Android SDK Platform 35 accepted.
+Preparing "Install Android SDK Platform 35 (revision: 2)".
+"Install Android SDK Platform 35 (revision: 2)" ready.
+Installing Android SDK Platform 35 in /usr/local/share/android-sdk/platforms/android-35
+"Install Android SDK Platform 35 (revision: 2)" complete.
+"Install Android SDK Platform 35 (revision: 2)" finished.
+Checking the license for package Android SDK Platform 36 in /usr/local/share/android-sdk/licenses
+License for package Android SDK Platform 36 accepted.
+Preparing "Install Android SDK Platform 36 (revision: 2)".
+"Install Android SDK Platform 36 (revision: 2)" ready.
+Installing Android SDK Platform 36 in /usr/local/share/android-sdk/platforms/android-36
+"Install Android SDK Platform 36 (revision: 2)" complete.
+"Install Android SDK Platform 36 (revision: 2)" finished.
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:checkDebugAarMetadata'.
+> A failure occurred while executing com.android.build.gradle.internal.tasks.CheckAarMetadataWorkAction
+   > 4 issues were found when checking AAR metadata:
+
+       1.  Dependency 'androidx.camera:camera-core:1.5.0' requires Android Gradle plugin 8.6.0 or higher.
+
+           This build currently uses Android Gradle plugin 7.3.0.
+
+       2.  Dependency 'androidx.camera:camera-camera2:1.5.0' requires Android Gradle plugin 8.6.0 or higher.
+
+           This build currently uses Android Gradle plugin 7.3.0.
+
+       3.  Dependency 'androidx.camera:camera-lifecycle:1.5.0' requires Android Gradle plugin 8.6.0 or higher.
+
+           This build currently uses Android Gradle plugin 7.3.0.
+
+       4.  Dependency 'androidx.camera.featurecombinationquery:featurecombinationquery:1.5.0' requires Android Gradle plugin 8.6.0 or higher.
+
+           This build currently uses Android Gradle plugin 7.3.0.
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+
+* Get more help at https://help.gradle.org
+
+BUILD FAILED in 1m 43s
+Running Gradle task 'assembleDebug'...                            103.8s
+Gradle task assembleDebug failed with exit code 1
+
+
+Build failed :|
+Step 9 script `Build debug APK` exited with status code 1
+Running Gradle task 'assembleDebug'...                            103.8s
+Gradle task assembleDebug failed with exit code 1
+
+
+Build failed :|
+Step 9 script `Build debug APK` exited with status code 1

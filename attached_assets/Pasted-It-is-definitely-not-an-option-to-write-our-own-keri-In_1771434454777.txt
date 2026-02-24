@@ -1,0 +1,49 @@
+It is definitely not an option to write our own keri Inception code. We need to use the library. I'm very strict on this because we have to guarantee it works with every other keri implementation. So with that in mind, here are the two options below that I think are the best solution. What are your thoughts on the best approach?
+
+"Here is the ranking of the best libraries and strategies to create a KERI AID on mobile with Flutter, from most recommended to least.
+
+1. The "Performance" Option: Rust + Flutter (Recommended)
+This is the most robust path. You use the existing Rust KERI libraries and bridge them to Dart using flutter_rust_bridge. This gives you native performance, type safety, and access to the core libraries used by the KERI development teams.
+
+Library: keriox or keri-core (Rust)
+
+Bridge Tool: flutter_rust_bridge
+
+Why it's #1:
+
+Performance: Rust handles the heavy cryptography (hashing, signing) much faster than Dart or JS.
+
+Safety: Rust's memory safety is critical for key management.
+
+Ecosystem Alignment: The KERI core team is heavily invested in Rust (keriox is a major implementation).
+
+How to do it:
+
+Create a Rust crate inside your Flutter project.
+
+Import keri-core in your Cargo.toml.
+
+Expose functions like create_aid(), sign_event(), and rotate_key() via flutter_rust_bridge.
+
+Flutter calls these functions as if they were native Dart async functions.
+
+2. The "Standard Client" Option: Signify-TS + JS Runtime
+The "Web of Trust" community has standardized on a pattern called Signify. Signify is a "light client" protocol designed specifically for edge devices (like mobile phones) to hold keys while offloading heavy storage to a cloud agent (KERIA).
+
+Library: signify-ts (TypeScript)
+
+Bridge Tool: flutter_js or a hidden InAppWebView.
+
+Why it's #2:
+
+Official Client Logic: signify-ts is the reference implementation for how a mobile app should talk to a KERI agent. You don't have to reinvent the logic for key rotation or event receipts.
+
+Ease of Use: If you know TypeScript, you can use the library exactly as documented.
+
+How to do it:
+
+Bundle the signify-ts library (compiled to a single JS file) into your Flutter assets.
+
+Spin up a headless JS runtime in Flutter.
+
+Pass commands like "Create AID" into the JS runtime and get the result back as a JSON string."

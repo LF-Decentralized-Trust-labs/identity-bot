@@ -1,0 +1,54 @@
+Now, regarding the Tunneling, I want to adjust the strategy slightly to make it more robust and cost-effective for users by default.
+
+The Goal:
+I want to add Cloudflare Tunnel as the Default tunneling provider, while keeping your existing ngrok implementation as a configurable alternative.
+
+Requirements:
+
+1. Add Cloudflare Tunnel Support (Backend):
+
+Please integrate cloudflared (Cloudflare Tunnel) support into the Go backend, similar to how you added ngrok.
+
+Default Behavior (Quick Tunnel): If no token is provided, the app should attempt to start a free 'Quick Tunnel' (using cloudflared tunnel --url localhost:8080) to get a public URL immediately without user signup.
+
+Authenticated Behavior: If a CLOUDFLARE_TUNNEL_TOKEN is present in the config/env, use it to start a stable, authenticated tunnel.
+
+2. Settings UI Update (Frontend):
+
+In the Settings screen (or a new 'Network' section), please add a 'Tunneling Provider' Dropdown.
+
+Options:
+
+Cloudflare (Default)
+
+Ngrok
+
+None / Local
+
+Logic: Changing this setting should update the backend config and restart the tunnel service if necessary.
+
+Note: If 'Ngrok' is selected but no AuthToken is provided, show a UI warning/error or fallback to Cloudflare.
+
+3. Startup Priority Logic:
+The app should determine its public URL in this order:
+
+PUBLIC_URL env var (Manual Override).
+
+Cloudflare Tunnel (If selected in settings OR default).
+
+Ngrok Tunnel (If selected in settings).
+
+Replit Auto-Detect (If running on Replit).
+
+Localhost.
+
+4. Mobile Correction (Crucial):
+
+Please ensure this tunneling logic works on Mobile (Android/iOS) as well.
+
+Correction to previous assumption: When the Mobile App is in 'Standalone Mode' (holding keys and acting as the agent), it does need a tunnel so other users can send OOBI requests to the phone (e.g., via a push notification or polling mechanism connected to the tunnel).
+
+Therefore, the Go backend on mobile must be able to spawn the cloudflared (or ngrok) process just like the Desktop version does.
+
+Next Steps:
+Please implement the Cloudflare Tunnel integration in the Go backend and add the selector to the Flutter Settings UI."

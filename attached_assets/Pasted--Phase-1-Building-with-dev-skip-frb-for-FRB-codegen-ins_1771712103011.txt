@@ -1,0 +1,1067 @@
+--- Phase 1: Building with dev_skip_frb for FRB codegen inspection ---
+    Updating crates.io index
+     Locking 202 packages to latest compatible versions
+      Adding base64 v0.13.1 (available: v0.22.1)
+      Adding curve25519-dalek v3.2.0 (available: v3.2.1)
+      Adding generic-array v0.14.7 (available: v0.14.9)
+      Adding keri-core v0.11.1 (available: v0.17.10)
+      Adding signature v1.3.2 (available: v1.6.4)
+      Adding subtle v2.4.1 (available: v2.6.1)
+      Adding zeroize v1.4.3 (available: v1.8.2)
+ Downloading crates ...
+  Downloaded adler2 v2.0.1
+  Downloaded digest v0.9.0
+  Downloaded block-buffer v0.9.0
+  Downloaded zeroize v1.4.3
+  Downloaded const-oid v0.6.2
+  Downloaded zeroize_derive v1.4.3
+  Downloaded subtle v2.4.1
+  Downloaded threadpool v1.8.1
+  Downloaded thiserror v1.0.69
+  Downloaded bitflags v1.3.2
+  Downloaded strsim v0.10.0
+  Downloaded fs2 v0.4.3
+  Downloaded textwrap v0.16.2
+  Downloaded signature v1.3.2
+  Downloaded shlex v1.3.0
+  Downloaded smallvec v0.6.14
+  Downloaded serde_cbor v0.11.2
+  Downloaded getrandom v0.2.17
+  Downloaded num-bigint v0.2.6
+  Downloaded indexmap v1.9.3
+  Downloaded zerocopy v0.8.39
+  Downloaded keri-core v0.11.1
+  Downloaded rand v0.7.3
+  Downloaded nom v7.1.3
+  Downloaded blake3 v1.8.3
+  Downloaded http v0.2.12
+  Downloaded clap v3.2.25
+  Downloaded hashbrown v0.12.3
+  Downloaded flutter_rust_bridge v2.11.1
+  Downloaded gimli v0.32.3
+  Downloaded dart-sys v4.1.5
+  Downloaded object v0.37.3
+  Downloaded bytes v1.11.1
+  Downloaded miniz_oxide v0.8.9
+  Downloaded minimal-lexical v0.2.1
+  Downloaded k256 v0.9.6
+  Downloaded fraction v0.9.0
+  Downloaded cc v1.2.56
+  Downloaded backtrace v0.3.76
+  Downloaded elliptic-curve v0.10.6
+  Downloaded sled v0.34.7
+  Downloaded sha3 v0.9.1
+  Downloaded curve25519-dalek v3.2.0
+  Downloaded crossbeam-epoch v0.9.18
+  Downloaded blake2 v0.9.2
+  Downloaded base64 v0.13.1
+  Downloaded serde-hex v0.1.0
+  Downloaded rmp-serde v1.3.1
+  Downloaded os_str_bytes v6.6.1
+  Downloaded half v1.8.3
+  Downloaded flutter_rust_bridge_macros v2.11.1
+  Downloaded ed25519 v1.5.3
+  Downloaded crypto-bigint v0.2.11
+  Downloaded crc32fast v1.5.0
+  Downloaded addr2line v0.25.1
+  Downloaded rmp v0.8.15
+  Downloaded tokio v1.49.0
+  Downloaded rand_core v0.6.4
+  Downloaded pkcs8 v0.7.6
+  Downloaded parking_lot v0.11.2
+  Downloaded num-integer v0.1.46
+  Downloaded num-complex v0.2.4
+  Downloaded find-msvc-tools v0.1.9
+  Downloaded ed25519-dalek v1.0.1
+  Downloaded arrayref v0.3.9
+  Downloaded sha2 v0.9.9
+  Downloaded rand_core v0.5.1
+  Downloaded ppv-lite86 v0.2.21
+  Downloaded parking_lot_core v0.8.6
+  Downloaded opaque-debug v0.3.1
+  Downloaded num-rational v0.2.4
+  Downloaded getrandom v0.1.16
+  Downloaded ecdsa v0.12.4
+  Downloaded der v0.4.5
+  Downloaded crypto-mac v0.11.1
+  Downloaded constant_time_eq v0.4.2
+  Downloaded byteorder v1.5.0
+  Downloaded atty v0.2.14
+  Downloaded allo-isolate v0.1.27
+  Downloaded sad_macros v0.2.0
+  Downloaded rustc-demangle v0.1.27
+  Downloaded rand_chacha v0.2.2
+  Downloaded oslog v0.2.0
+  Downloaded num_cpus v1.17.0
+  Downloaded num v0.2.1
+  Downloaded nodrop v0.1.14
+  Downloaded md-5 v0.10.6
+  Downloaded maybe-uninit v2.0.0
+  Downloaded keccak v0.1.6
+  Downloaded hmac v0.11.0
+  Downloaded group v0.10.0
+  Downloaded fxhash v0.2.1
+  Downloaded futures-macro v0.3.32
+  Downloaded delegate-attr v0.3.0
+  Downloaded cesrox v0.1.8
+  Downloaded atomic v0.5.3
+  Downloaded arrayvec v0.7.6
+  Downloaded array-init v0.0.4
+  Downloaded spki v0.4.1
+  Downloaded said v0.4.3
+  Downloaded num-iter v0.1.45
+  Downloaded instant v0.1.13
+  Downloaded fnv v1.0.7
+  Downloaded block-padding v0.2.1
+  Downloaded ff v0.10.1
+  Downloaded crypto-mac v0.8.0
+  Downloaded thiserror-impl v1.0.69
+  Downloaded clap_lex v0.2.4
+  Downloaded build-target v0.4.0
+  Downloaded termcolor v1.4.1
+   Compiling libc v0.2.182
+   Compiling proc-macro2 v1.0.106
+   Compiling unicode-ident v1.0.24
+   Compiling quote v1.0.44
+   Compiling cfg-if v1.0.4
+   Compiling version_check v0.9.5
+   Compiling typenum v1.19.0
+   Compiling autocfg v1.5.0
+   Compiling serde_core v1.0.228
+   Compiling serde v1.0.228
+   Compiling generic-array v0.14.7
+   Compiling subtle v2.4.1
+   Compiling num-traits v0.2.19
+   Compiling find-msvc-tools v0.1.9
+   Compiling shlex v1.3.0
+   Compiling memchr v2.8.0
+   Compiling cc v1.2.56
+   Compiling getrandom v0.2.17
+   Compiling syn v2.0.117
+   Compiling rand_core v0.6.4
+   Compiling getrandom v0.1.16
+   Compiling digest v0.9.0
+   Compiling smallvec v1.15.1
+   Compiling cpufeatures v0.2.17
+   Compiling zerocopy v0.8.39
+   Compiling opaque-debug v0.3.1
+   Compiling scopeguard v1.2.0
+   Compiling block-padding v0.2.1
+   Compiling const-oid v0.6.2
+   Compiling block-buffer v0.9.0
+   Compiling num-integer v0.1.46
+   Compiling der v0.4.5
+   Compiling lock_api v0.4.14
+   Compiling num-bigint v0.2.6
+   Compiling zmij v1.0.21
+   Compiling byteorder v1.5.0
+   Compiling rand_core v0.5.1
+   Compiling spki v0.4.1
+   Compiling signature v1.3.2
+   Compiling ff v0.10.1
+   Compiling indexmap v1.9.3
+   Compiling num-rational v0.2.4
+   Compiling num-complex v0.2.4
+   Compiling parking_lot_core v0.9.12
+   Compiling object v0.37.3
+   Compiling futures-sink v0.3.32
+   Compiling parking_lot_core v0.8.6
+   Compiling itoa v1.0.17
+   Compiling thiserror v1.0.69
+   Compiling maybe-uninit v2.0.0
+   Compiling pin-project-lite v0.2.16
+   Compiling crossbeam-utils v0.8.21
+   Compiling serde_json v1.0.149
+   Compiling core-foundation-sys v0.8.7
+   Compiling futures-core v0.3.32
+   Compiling futures-channel v0.3.32
+   Compiling iana-time-zone v0.1.65
+   Compiling crypto-common v0.1.7
+   Compiling block-buffer v0.10.4
+   Compiling group v0.10.0
+   Compiling pkcs8 v0.7.6
+   Compiling blake3 v1.8.3
+   Compiling sha2 v0.9.9
+   Compiling rmp v0.8.15
+   Compiling crypto-mac v0.11.1
+   Compiling instant v0.1.13
+   Compiling adler2 v2.0.1
+   Compiling anyhow v1.0.102
+   Compiling half v1.8.3
+   Compiling os_str_bytes v6.6.1
+   Compiling hashbrown v0.12.3
+   Compiling crc32fast v1.5.0
+   Compiling slab v0.4.12
+   Compiling minimal-lexical v0.2.1
+   Compiling futures-io v0.3.32
+   Compiling gimli v0.32.3
+   Compiling futures-task v0.3.32
+   Compiling log v0.4.29
+   Compiling nom v7.1.3
+   Compiling clap_lex v0.2.4
+   Compiling miniz_oxide v0.8.9
+   Compiling hmac v0.11.0
+   Compiling digest v0.10.7
+   Compiling oslog v0.2.0
+   Compiling ppv-lite86 v0.2.21
+   Compiling dart-sys v4.1.5
+   Compiling num-iter v0.1.45
+   Compiling rand_chacha v0.2.2
+   Compiling addr2line v0.25.1
+   Compiling keccak v0.1.6
+   Compiling crypto-mac v0.8.0
+   Compiling atty v0.2.14
+   Compiling base64 v0.13.1
+   Compiling lazy_static v1.5.0
+   Compiling serde_derive v1.0.228
+   Compiling zeroize_derive v1.4.3
+   Compiling futures-macro v0.3.32
+   Compiling thiserror-impl v1.0.69
+   Compiling constant_time_eq v0.4.2
+   Compiling hashbrown v0.16.1
+   Compiling zeroize v1.4.3
+   Compiling once_cell v1.21.3
+   Compiling crypto-bigint v0.2.11
+   Compiling portable-atomic v1.13.1
+   Compiling futures-util v0.3.32
+   Compiling build-target v0.4.0
+   Compiling equivalent v1.0.2
+   Compiling rustc-demangle v0.1.27
+   Compiling arrayvec v0.7.6
+   Compiling elliptic-curve v0.10.6
+   Compiling arrayref v0.3.9
+   Compiling bitflags v1.3.2
+   Compiling strsim v0.10.0
+   Compiling nodrop v0.1.14
+   Compiling termcolor v1.4.1
+   Compiling hashbrown v0.14.5
+   Compiling textwrap v0.16.2
+   Compiling clap v3.2.25
+   Compiling array-init v0.0.4
+   Compiling dashmap v5.5.3
+   Compiling backtrace v0.3.76
+   Compiling ecdsa v0.12.4
+   Compiling indexmap v2.13.0
+   Compiling flutter_rust_bridge v2.11.1
+   Compiling curve25519-dalek v3.2.0
+   Compiling md-5 v0.10.6
+   Compiling sad_macros v0.2.0
+   Compiling blake2 v0.9.2
+   Compiling sha3 v0.9.1
+   Compiling chrono v0.4.43
+   Compiling serde_cbor v0.11.2
+   Compiling rmp-serde v1.3.1
+   Compiling futures-executor v0.3.32
+   Compiling rand v0.7.3
+   Compiling cesrox v0.1.8
+   Compiling num v0.2.1
+   Compiling smallvec v0.6.14
+   Compiling crossbeam-epoch v0.9.18
+   Compiling parking_lot v0.11.2
+   Compiling ed25519 v1.5.3
+   Compiling fxhash v0.2.1
+   Compiling num_cpus v1.17.0
+   Compiling hex v0.4.3
+   Compiling fnv v1.0.7
+   Compiling atomic v0.5.3
+   Compiling bytes v1.11.1
+   Compiling threadpool v1.8.1
+   Compiling flutter_rust_bridge_macros v2.11.1
+   Compiling allo-isolate v0.1.27
+   Compiling sled v0.34.7
+   Compiling ed25519-dalek v1.0.1
+   Compiling http v0.2.12
+   Compiling said v0.4.3
+   Compiling serde-hex v0.1.0
+   Compiling fraction v0.9.0
+   Compiling futures v0.3.32
+   Compiling k256 v0.9.6
+   Compiling delegate-attr v0.3.0
+   Compiling tokio v1.49.0
+   Compiling ryu v1.0.23
+   Compiling keri-core v0.11.1
+   Compiling identity_agent_keri v0.1.0 (/Users/builder/clone/identity_agent_ui/rust)
+warning: unexpected `cfg` condition name: `frb_expand`
+  --> src/api/keri_bridge.rs:49:1
+   |
+49 | #[frb(sync)]
+   | ^^^^^^^^^^^^
+   |
+   = help: expected names are: `docsrs`, `feature`, and `test` and 31 more
+   = note: using a cfg inside a attribute macro will use the cfgs from the destination crate and not the ones from the defining crate
+   = help: try referring to `frb` crate for guidance on how handle this unexpected cfg
+   = help: the attribute macro `frb` may come from an old version of the `flutter_rust_bridge_macros` crate, try updating your dependency with `cargo update -p flutter_rust_bridge_macros`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+   = note: `#[warn(unexpected_cfgs)]` on by default
+   = note: this warning originates in the attribute macro `frb` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unexpected `cfg` condition name: `frb_expand`
+   --> src/api/keri_bridge.rs:105:1
+    |
+105 | #[frb(sync)]
+    | ^^^^^^^^^^^^
+    |
+    = note: using a cfg inside a attribute macro will use the cfgs from the destination crate and not the ones from the defining crate
+    = help: try referring to `frb` crate for guidance on how handle this unexpected cfg
+    = help: the attribute macro `frb` may come from an old version of the `flutter_rust_bridge_macros` crate, try updating your dependency with `cargo update -p flutter_rust_bridge_macros`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+    = note: this warning originates in the attribute macro `frb` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unexpected `cfg` condition name: `frb_expand`
+   --> src/api/keri_bridge.rs:139:1
+    |
+139 | #[frb(sync)]
+    | ^^^^^^^^^^^^
+    |
+    = note: using a cfg inside a attribute macro will use the cfgs from the destination crate and not the ones from the defining crate
+    = help: try referring to `frb` crate for guidance on how handle this unexpected cfg
+    = help: the attribute macro `frb` may come from an old version of the `flutter_rust_bridge_macros` crate, try updating your dependency with `cargo update -p flutter_rust_bridge_macros`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+    = note: this warning originates in the attribute macro `frb` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unexpected `cfg` condition name: `frb_expand`
+   --> src/api/keri_bridge.rs:161:1
+    |
+161 | #[frb(sync)]
+    | ^^^^^^^^^^^^
+    |
+    = note: using a cfg inside a attribute macro will use the cfgs from the destination crate and not the ones from the defining crate
+    = help: try referring to `frb` crate for guidance on how handle this unexpected cfg
+    = help: the attribute macro `frb` may come from an old version of the `flutter_rust_bridge_macros` crate, try updating your dependency with `cargo update -p flutter_rust_bridge_macros`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+    = note: this warning originates in the attribute macro `frb` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unexpected `cfg` condition name: `frb_expand`
+   --> src/api/keri_bridge.rs:176:1
+    |
+176 | #[frb(sync)]
+    | ^^^^^^^^^^^^
+    |
+    = note: using a cfg inside a attribute macro will use the cfgs from the destination crate and not the ones from the defining crate
+    = help: try referring to `frb` crate for guidance on how handle this unexpected cfg
+    = help: the attribute macro `frb` may come from an old version of the `flutter_rust_bridge_macros` crate, try updating your dependency with `cargo update -p flutter_rust_bridge_macros`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+    = note: this warning originates in the attribute macro `frb` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0599]: no method named `public_key` found for struct `CryptoBox` in the current scope
+  --> src/api/keri_bridge.rs:53:33
+   |
+53 |     let current_pk = crypto_box.public_key();
+   |                                 ^^^^^^^^^^
+   |
+  ::: /Users/builder/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keri-core-0.11.1/src/signer/mod.rs:10:8
+   |
+10 |     fn public_key(&self) -> PublicKey;
+   |        ---------- the method is available for `CryptoBox` here
+   |
+   = help: items from traits can only be used if the trait is in scope
+help: trait `KeyManager` which provides `public_key` is implemented but not in scope; perhaps you want to import it
+   |
+ 1 + use keri_core::signer::KeyManager;
+   |
+help: there is a method `next_public_key` with a similar name
+   |
+53 |     let current_pk = crypto_box.next_public_key();
+   |                                 +++++
+
+error[E0599]: no method named `next_pub_key` found for struct `CryptoBox` in the current scope
+  --> src/api/keri_bridge.rs:54:30
+   |
+54 |     let next_pk = crypto_box.next_pub_key();
+   |                              ^^^^^^^^^^^^ field, not a method
+   |
+help: there is a method `next_public_key` with a similar name
+   |
+54 |     let next_pk = crypto_box.next_public_key();
+   |                                      +++
+
+error[E0599]: no method named `public_key` found for struct `CryptoBox` in the current scope
+   --> src/api/keri_bridge.rs:116:33
+    |
+116 |     let new_pk = new_crypto_box.public_key();
+    |                                 ^^^^^^^^^^
+    |
+   ::: /Users/builder/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keri-core-0.11.1/src/signer/mod.rs:10:8
+    |
+ 10 |     fn public_key(&self) -> PublicKey;
+    |        ---------- the method is available for `CryptoBox` here
+    |
+    = help: items from traits can only be used if the trait is in scope
+help: trait `KeyManager` which provides `public_key` is implemented but not in scope; perhaps you want to import it
+    |
+  1 + use keri_core::signer::KeyManager;
+    |
+help: there is a method `next_public_key` with a similar name
+    |
+116 |     let new_pk = new_crypto_box.next_public_key();
+    |                                 +++++
+
+error[E0599]: no method named `sign` found for struct `CryptoBox` in the current scope
+   --> src/api/keri_bridge.rs:150:10
+    |
+150 |         .sign(&data)
+    |          ^^^^ method not found in `CryptoBox`
+    |
+   ::: /Users/builder/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keri-core-0.11.1/src/signer/mod.rs:9:8
+    |
+  9 |     fn sign(&self, msg: &[u8]) -> Result<Vec<u8>, Error>;
+    |        ---- the method is available for `CryptoBox` here
+    |
+    = help: items from traits can only be used if the trait is in scope
+help: trait `KeyManager` which provides `sign` is implemented but not in scope; perhaps you want to import it
+    |
+  1 + use keri_core::signer::KeyManager;
+    |
+
+error[E0599]: no method named `public_key` found for struct `CryptoBox` in the current scope
+   --> src/api/keri_bridge.rs:153:34
+    |
+153 |     let pk = instance.crypto_box.public_key();
+    |                                  ^^^^^^^^^^
+    |
+   ::: /Users/builder/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keri-core-0.11.1/src/signer/mod.rs:10:8
+    |
+ 10 |     fn public_key(&self) -> PublicKey;
+    |        ---------- the method is available for `CryptoBox` here
+    |
+    = help: items from traits can only be used if the trait is in scope
+help: trait `KeyManager` which provides `public_key` is implemented but not in scope; perhaps you want to import it
+    |
+  1 + use keri_core::signer::KeyManager;
+    |
+help: there is a method `next_public_key` with a similar name
+    |
+153 |     let pk = instance.crypto_box.next_public_key();
+    |                                  +++++
+
+For more information about this error, try `rustc --explain E0599`.
+warning: `identity_agent_keri` (lib) generated 5 warnings
+error: could not compile `identity_agent_keri` (lib) due to 5 previous errors; 5 warnings emitted
+   Compiling libc v0.2.182
+   Compiling cfg-if v1.0.4
+   Compiling typenum v1.19.0
+   Compiling generic-array v0.14.7
+   Compiling serde_core v1.0.228
+   Compiling num-traits v0.2.19
+   Compiling serde v1.0.228
+   Compiling subtle v2.4.1
+   Compiling memchr v2.8.0
+   Compiling smallvec v1.15.1
+   Compiling getrandom v0.1.16
+   Compiling zeroize v1.4.3
+   Compiling opaque-debug v0.3.1
+   Compiling scopeguard v1.2.0
+   Compiling block-padding v0.2.1
+   Compiling const-oid v0.6.2
+   Compiling lock_api v0.4.14
+   Compiling zerocopy v0.8.39
+   Compiling getrandom v0.2.17
+   Compiling cpufeatures v0.2.17
+   Compiling der v0.4.5
+   Compiling byteorder v1.5.0
+   Compiling rand_core v0.6.4
+   Compiling zmij v1.0.21
+   Compiling num-integer v0.1.46
+   Compiling rand_core v0.5.1
+   Compiling num-bigint v0.2.6
+   Compiling ff v0.10.1
+   Compiling digest v0.9.0
+   Compiling block-buffer v0.9.0
+   Compiling futures-sink v0.3.32
+   Compiling core-foundation-sys v0.8.7
+   Compiling pin-project-lite v0.2.16
+   Compiling signature v1.3.2
+   Compiling futures-core v0.3.32
+   Compiling itoa v1.0.17
+   Compiling spki v0.4.1
+   Compiling futures-channel v0.3.32
+   Compiling parking_lot_core v0.9.12
+   Compiling sha2 v0.9.9
+   Compiling iana-time-zone v0.1.65
+   Compiling pkcs8 v0.7.6
+   Compiling maybe-uninit v2.0.0
+   Compiling object v0.37.3
+   Compiling serde_json v1.0.149
+   Compiling thiserror v1.0.69
+   Compiling parking_lot_core v0.8.6
+   Compiling crossbeam-utils v0.8.21
+   Compiling num-rational v0.2.4
+   Compiling indexmap v1.9.3
+   Compiling num-complex v0.2.4
+   Compiling group v0.10.0
+   Compiling crypto-bigint v0.2.11
+   Compiling crypto-mac v0.11.1
+   Compiling rmp v0.8.15
+   Compiling instant v0.1.13
+   Compiling futures-io v0.3.32
+   Compiling hashbrown v0.12.3
+   Compiling gimli v0.32.3
+   Compiling log v0.4.29
+   Compiling minimal-lexical v0.2.1
+   Compiling slab v0.4.12
+   Compiling adler2 v2.0.1
+   Compiling half v1.8.3
+   Compiling os_str_bytes v6.6.1
+   Compiling futures-task v0.3.32
+   Compiling futures-util v0.3.32
+   Compiling clap_lex v0.2.4
+   Compiling anyhow v1.0.102
+   Compiling miniz_oxide v0.8.9
+   Compiling nom v7.1.3
+   Compiling elliptic-curve v0.10.6
+   Compiling serde_cbor v0.11.2
+   Compiling chrono v0.4.43
+   Compiling ppv-lite86 v0.2.21
+   Compiling addr2line v0.25.1
+   Compiling rmp-serde v1.3.1
+   Compiling crc32fast v1.5.0
+   Compiling blake3 v1.8.3
+   Compiling rand_chacha v0.2.2
+   Compiling hmac v0.11.0
+   Compiling num-iter v0.1.45
+   Compiling crypto-mac v0.8.0
+   Compiling keccak v0.1.6
+   Compiling atty v0.2.14
+   Compiling hashbrown v0.14.5
+   Compiling nodrop v0.1.14
+   Compiling termcolor v1.4.1
+   Compiling constant_time_eq v0.4.2
+   Compiling arrayvec v0.7.6
+   Compiling once_cell v1.21.3
+   Compiling strsim v0.10.0
+   Compiling base64 v0.13.1
+   Compiling textwrap v0.16.2
+   Compiling equivalent v1.0.2
+   Compiling hashbrown v0.16.1
+   Compiling rustc-demangle v0.1.27
+   Compiling arrayref v0.3.9
+   Compiling bitflags v1.3.2
+   Compiling lazy_static v1.5.0
+   Compiling clap v3.2.25
+   Compiling cesrox v0.1.8
+   Compiling dashmap v5.5.3
+   Compiling crossbeam-epoch v0.9.18
+   Compiling indexmap v2.13.0
+   Compiling array-init v0.0.4
+   Compiling sha3 v0.9.1
+   Compiling portable-atomic v1.13.1
+   Compiling oslog v0.2.0
+   Compiling dart-sys v4.1.5
+   Compiling blake2 v0.9.2
+   Compiling num v0.2.1
+   Compiling smallvec v0.6.14
+   Compiling ecdsa v0.12.4
+   Compiling parking_lot v0.11.2
+   Compiling rand v0.7.3
+   Compiling backtrace v0.3.76
+   Compiling futures-executor v0.3.32
+   Compiling ed25519 v1.5.3
+   Compiling curve25519-dalek v3.2.0
+   Compiling fxhash v0.2.1
+   Compiling num_cpus v1.17.0
+   Compiling bytes v1.11.1
+   Compiling fnv v1.0.7
+   Compiling atomic v0.5.3
+   Compiling allo-isolate v0.1.27
+   Compiling ed25519-dalek v1.0.1
+   Compiling http v0.2.12
+   Compiling sled v0.34.7
+   Compiling threadpool v1.8.1
+   Compiling futures v0.3.32
+   Compiling said v0.4.3
+   Compiling k256 v0.9.6
+   Compiling serde-hex v0.1.0
+   Compiling fraction v0.9.0
+   Compiling flutter_rust_bridge v2.11.1
+   Compiling tokio v1.49.0
+   Compiling ryu v1.0.23
+   Compiling keri-core v0.11.1
+   Compiling identity_agent_keri v0.1.0 (/Users/builder/clone/identity_agent_ui/rust)
+warning: unexpected `cfg` condition name: `frb_expand`
+  --> src/api/keri_bridge.rs:49:1
+   |
+49 | #[frb(sync)]
+   | ^^^^^^^^^^^^
+   |
+   = help: expected names are: `docsrs`, `feature`, and `test` and 31 more
+   = note: using a cfg inside a attribute macro will use the cfgs from the destination crate and not the ones from the defining crate
+   = help: try referring to `frb` crate for guidance on how handle this unexpected cfg
+   = help: the attribute macro `frb` may come from an old version of the `flutter_rust_bridge_macros` crate, try updating your dependency with `cargo update -p flutter_rust_bridge_macros`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+   = note: `#[warn(unexpected_cfgs)]` on by default
+   = note: this warning originates in the attribute macro `frb` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unexpected `cfg` condition name: `frb_expand`
+   --> src/api/keri_bridge.rs:105:1
+    |
+105 | #[frb(sync)]
+    | ^^^^^^^^^^^^
+    |
+    = note: using a cfg inside a attribute macro will use the cfgs from the destination crate and not the ones from the defining crate
+    = help: try referring to `frb` crate for guidance on how handle this unexpected cfg
+    = help: the attribute macro `frb` may come from an old version of the `flutter_rust_bridge_macros` crate, try updating your dependency with `cargo update -p flutter_rust_bridge_macros`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+    = note: this warning originates in the attribute macro `frb` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unexpected `cfg` condition name: `frb_expand`
+   --> src/api/keri_bridge.rs:139:1
+    |
+139 | #[frb(sync)]
+    | ^^^^^^^^^^^^
+    |
+    = note: using a cfg inside a attribute macro will use the cfgs from the destination crate and not the ones from the defining crate
+    = help: try referring to `frb` crate for guidance on how handle this unexpected cfg
+    = help: the attribute macro `frb` may come from an old version of the `flutter_rust_bridge_macros` crate, try updating your dependency with `cargo update -p flutter_rust_bridge_macros`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+    = note: this warning originates in the attribute macro `frb` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unexpected `cfg` condition name: `frb_expand`
+   --> src/api/keri_bridge.rs:161:1
+    |
+161 | #[frb(sync)]
+    | ^^^^^^^^^^^^
+    |
+    = note: using a cfg inside a attribute macro will use the cfgs from the destination crate and not the ones from the defining crate
+    = help: try referring to `frb` crate for guidance on how handle this unexpected cfg
+    = help: the attribute macro `frb` may come from an old version of the `flutter_rust_bridge_macros` crate, try updating your dependency with `cargo update -p flutter_rust_bridge_macros`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+    = note: this warning originates in the attribute macro `frb` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unexpected `cfg` condition name: `frb_expand`
+   --> src/api/keri_bridge.rs:176:1
+    |
+176 | #[frb(sync)]
+    | ^^^^^^^^^^^^
+    |
+    = note: using a cfg inside a attribute macro will use the cfgs from the destination crate and not the ones from the defining crate
+    = help: try referring to `frb` crate for guidance on how handle this unexpected cfg
+    = help: the attribute macro `frb` may come from an old version of the `flutter_rust_bridge_macros` crate, try updating your dependency with `cargo update -p flutter_rust_bridge_macros`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+    = note: this warning originates in the attribute macro `frb` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0599]: no method named `public_key` found for struct `CryptoBox` in the current scope
+  --> src/api/keri_bridge.rs:53:33
+   |
+53 |     let current_pk = crypto_box.public_key();
+   |                                 ^^^^^^^^^^
+   |
+  ::: /Users/builder/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keri-core-0.11.1/src/signer/mod.rs:10:8
+   |
+10 |     fn public_key(&self) -> PublicKey;
+   |        ---------- the method is available for `CryptoBox` here
+   |
+   = help: items from traits can only be used if the trait is in scope
+help: trait `KeyManager` which provides `public_key` is implemented but not in scope; perhaps you want to import it
+   |
+ 1 + use keri_core::signer::KeyManager;
+   |
+help: there is a method `next_public_key` with a similar name
+   |
+53 |     let current_pk = crypto_box.next_public_key();
+   |                                 +++++
+
+error[E0599]: no method named `next_pub_key` found for struct `CryptoBox` in the current scope
+  --> src/api/keri_bridge.rs:54:30
+   |
+54 |     let next_pk = crypto_box.next_pub_key();
+   |                              ^^^^^^^^^^^^ field, not a method
+   |
+help: there is a method `next_public_key` with a similar name
+   |
+54 |     let next_pk = crypto_box.next_public_key();
+   |                                      +++
+
+error[E0599]: no method named `public_key` found for struct `CryptoBox` in the current scope
+   --> src/api/keri_bridge.rs:116:33
+    |
+116 |     let new_pk = new_crypto_box.public_key();
+    |                                 ^^^^^^^^^^
+    |
+   ::: /Users/builder/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keri-core-0.11.1/src/signer/mod.rs:10:8
+    |
+ 10 |     fn public_key(&self) -> PublicKey;
+    |        ---------- the method is available for `CryptoBox` here
+    |
+    = help: items from traits can only be used if the trait is in scope
+help: trait `KeyManager` which provides `public_key` is implemented but not in scope; perhaps you want to import it
+    |
+  1 + use keri_core::signer::KeyManager;
+    |
+help: there is a method `next_public_key` with a similar name
+    |
+116 |     let new_pk = new_crypto_box.next_public_key();
+    |                                 +++++
+
+error[E0599]: no method named `sign` found for struct `CryptoBox` in the current scope
+   --> src/api/keri_bridge.rs:150:10
+    |
+150 |         .sign(&data)
+    |          ^^^^ method not found in `CryptoBox`
+    |
+   ::: /Users/builder/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keri-core-0.11.1/src/signer/mod.rs:9:8
+    |
+  9 |     fn sign(&self, msg: &[u8]) -> Result<Vec<u8>, Error>;
+    |        ---- the method is available for `CryptoBox` here
+    |
+    = help: items from traits can only be used if the trait is in scope
+help: trait `KeyManager` which provides `sign` is implemented but not in scope; perhaps you want to import it
+    |
+  1 + use keri_core::signer::KeyManager;
+    |
+
+error[E0599]: no method named `public_key` found for struct `CryptoBox` in the current scope
+   --> src/api/keri_bridge.rs:153:34
+    |
+153 |     let pk = instance.crypto_box.public_key();
+    |                                  ^^^^^^^^^^
+    |
+   ::: /Users/builder/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keri-core-0.11.1/src/signer/mod.rs:10:8
+    |
+ 10 |     fn public_key(&self) -> PublicKey;
+    |        ---------- the method is available for `CryptoBox` here
+    |
+    = help: items from traits can only be used if the trait is in scope
+help: trait `KeyManager` which provides `public_key` is implemented but not in scope; perhaps you want to import it
+    |
+  1 + use keri_core::signer::KeyManager;
+    |
+help: there is a method `next_public_key` with a similar name
+    |
+153 |     let pk = instance.crypto_box.next_public_key();
+    |                                  +++++
+
+For more information about this error, try `rustc --explain E0599`.
+warning: `identity_agent_keri` (lib) generated 5 warnings
+error: could not compile `identity_agent_keri` (lib) due to 5 previous errors; 5 warnings emitted
+--- Phase 2: Generating FRB bindings ---
+[2026-02-21T22:03:53.171Z INFO /Users/builder/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/flutter_rust_bridge_codegen-2.11.1/src/library/commands/fvm.rs:15] Has .fvmrc but no fvm binary installation, thus skip using fvm.
+[2026-02-21T22:03:53.447Z WARN /Users/builder/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/flutter_rust_bridge_codegen-2.11.1/src/library/commands/command_runner.rs:161] command=cd "/Users/builder/clone/identity_agent_ui/rust" && RUSTFLAGS="--cfg frb_expand" "cargo" "expand" "--lib" "--theme=none" "--ugly" stdout= stderr=error: no such command: `expand`
+
+help: view all installed commands with `cargo --list`
+help: find a package to install `expand` with `cargo search cargo-expand`
+
+[2026-02-21T22:03:53.448Z INFO /Users/builder/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/flutter_rust_bridge_codegen-2.11.1/src/library/commands/cargo_expand/real.rs:111] Cargo expand is not installed. Automatically install and re-run.
+[2026-02-21T22:04:31.243Z INFO /Users/builder/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/flutter_rust_bridge_codegen-2.11.1/src/library/codegen/parser/mir/parser/ty/lifetimeable.rs:52] To handle some types, `enable_lifetime: true` may need to be set. Please visit https://fzyzcjy.github.io/flutter_rust_bridge/guides/lifetimes for more details
+Done!
+--- Phase 3: Final build with FRB bindings ---
+   Compiling identity_agent_keri v0.1.0 (/Users/builder/clone/identity_agent_ui/rust)
+warning: unexpected `cfg` condition name: `frb_expand`
+  --> src/api/keri_bridge.rs:49:1
+   |
+49 | #[frb(sync)]
+   | ^^^^^^^^^^^^
+   |
+   = help: expected names are: `docsrs`, `feature`, and `test` and 31 more
+   = note: using a cfg inside a attribute macro will use the cfgs from the destination crate and not the ones from the defining crate
+   = help: try referring to `frb` crate for guidance on how handle this unexpected cfg
+   = help: the attribute macro `frb` may come from an old version of the `flutter_rust_bridge_macros` crate, try updating your dependency with `cargo update -p flutter_rust_bridge_macros`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+   = note: `#[warn(unexpected_cfgs)]` on by default
+   = note: this warning originates in the attribute macro `frb` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unexpected `cfg` condition name: `frb_expand`
+   --> src/api/keri_bridge.rs:105:1
+    |
+105 | #[frb(sync)]
+    | ^^^^^^^^^^^^
+    |
+    = note: using a cfg inside a attribute macro will use the cfgs from the destination crate and not the ones from the defining crate
+    = help: try referring to `frb` crate for guidance on how handle this unexpected cfg
+    = help: the attribute macro `frb` may come from an old version of the `flutter_rust_bridge_macros` crate, try updating your dependency with `cargo update -p flutter_rust_bridge_macros`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+    = note: this warning originates in the attribute macro `frb` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unexpected `cfg` condition name: `frb_expand`
+   --> src/api/keri_bridge.rs:139:1
+    |
+139 | #[frb(sync)]
+    | ^^^^^^^^^^^^
+    |
+    = note: using a cfg inside a attribute macro will use the cfgs from the destination crate and not the ones from the defining crate
+    = help: try referring to `frb` crate for guidance on how handle this unexpected cfg
+    = help: the attribute macro `frb` may come from an old version of the `flutter_rust_bridge_macros` crate, try updating your dependency with `cargo update -p flutter_rust_bridge_macros`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+    = note: this warning originates in the attribute macro `frb` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unexpected `cfg` condition name: `frb_expand`
+   --> src/api/keri_bridge.rs:161:1
+    |
+161 | #[frb(sync)]
+    | ^^^^^^^^^^^^
+    |
+    = note: using a cfg inside a attribute macro will use the cfgs from the destination crate and not the ones from the defining crate
+    = help: try referring to `frb` crate for guidance on how handle this unexpected cfg
+    = help: the attribute macro `frb` may come from an old version of the `flutter_rust_bridge_macros` crate, try updating your dependency with `cargo update -p flutter_rust_bridge_macros`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+    = note: this warning originates in the attribute macro `frb` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unexpected `cfg` condition name: `frb_expand`
+   --> src/api/keri_bridge.rs:176:1
+    |
+176 | #[frb(sync)]
+    | ^^^^^^^^^^^^
+    |
+    = note: using a cfg inside a attribute macro will use the cfgs from the destination crate and not the ones from the defining crate
+    = help: try referring to `frb` crate for guidance on how handle this unexpected cfg
+    = help: the attribute macro `frb` may come from an old version of the `flutter_rust_bridge_macros` crate, try updating your dependency with `cargo update -p flutter_rust_bridge_macros`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+    = note: this warning originates in the attribute macro `frb` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0599]: no method named `public_key` found for struct `CryptoBox` in the current scope
+  --> src/api/keri_bridge.rs:53:33
+   |
+53 |     let current_pk = crypto_box.public_key();
+   |                                 ^^^^^^^^^^
+   |
+  ::: /Users/builder/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keri-core-0.11.1/src/signer/mod.rs:10:8
+   |
+10 |     fn public_key(&self) -> PublicKey;
+   |        ---------- the method is available for `CryptoBox` here
+   |
+   = help: items from traits can only be used if the trait is in scope
+help: trait `KeyManager` which provides `public_key` is implemented but not in scope; perhaps you want to import it
+   |
+ 1 + use keri_core::signer::KeyManager;
+   |
+help: there is a method `next_public_key` with a similar name
+   |
+53 |     let current_pk = crypto_box.next_public_key();
+   |                                 +++++
+
+error[E0599]: no method named `next_pub_key` found for struct `CryptoBox` in the current scope
+  --> src/api/keri_bridge.rs:54:30
+   |
+54 |     let next_pk = crypto_box.next_pub_key();
+   |                              ^^^^^^^^^^^^ field, not a method
+   |
+help: there is a method `next_public_key` with a similar name
+   |
+54 |     let next_pk = crypto_box.next_public_key();
+   |                                      +++
+
+error[E0599]: no method named `public_key` found for struct `CryptoBox` in the current scope
+   --> src/api/keri_bridge.rs:116:33
+    |
+116 |     let new_pk = new_crypto_box.public_key();
+    |                                 ^^^^^^^^^^
+    |
+   ::: /Users/builder/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keri-core-0.11.1/src/signer/mod.rs:10:8
+    |
+ 10 |     fn public_key(&self) -> PublicKey;
+    |        ---------- the method is available for `CryptoBox` here
+    |
+    = help: items from traits can only be used if the trait is in scope
+help: trait `KeyManager` which provides `public_key` is implemented but not in scope; perhaps you want to import it
+    |
+  1 + use keri_core::signer::KeyManager;
+    |
+help: there is a method `next_public_key` with a similar name
+    |
+116 |     let new_pk = new_crypto_box.next_public_key();
+    |                                 +++++
+
+error[E0599]: no method named `sign` found for struct `CryptoBox` in the current scope
+   --> src/api/keri_bridge.rs:150:10
+    |
+150 |         .sign(&data)
+    |          ^^^^ method not found in `CryptoBox`
+    |
+   ::: /Users/builder/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keri-core-0.11.1/src/signer/mod.rs:9:8
+    |
+  9 |     fn sign(&self, msg: &[u8]) -> Result<Vec<u8>, Error>;
+    |        ---- the method is available for `CryptoBox` here
+    |
+    = help: items from traits can only be used if the trait is in scope
+help: trait `KeyManager` which provides `sign` is implemented but not in scope; perhaps you want to import it
+    |
+  1 + use keri_core::signer::KeyManager;
+    |
+
+error[E0599]: no method named `public_key` found for struct `CryptoBox` in the current scope
+   --> src/api/keri_bridge.rs:153:34
+    |
+153 |     let pk = instance.crypto_box.public_key();
+    |                                  ^^^^^^^^^^
+    |
+   ::: /Users/builder/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keri-core-0.11.1/src/signer/mod.rs:10:8
+    |
+ 10 |     fn public_key(&self) -> PublicKey;
+    |        ---------- the method is available for `CryptoBox` here
+    |
+    = help: items from traits can only be used if the trait is in scope
+help: trait `KeyManager` which provides `public_key` is implemented but not in scope; perhaps you want to import it
+    |
+  1 + use keri_core::signer::KeyManager;
+    |
+help: there is a method `next_public_key` with a similar name
+    |
+153 |     let pk = instance.crypto_box.next_public_key();
+    |                                  +++++
+
+For more information about this error, try `rustc --explain E0599`.
+warning: `identity_agent_keri` (lib) generated 5 warnings
+error: could not compile `identity_agent_keri` (lib) due to 5 previous errors; 5 warnings emitted
+   Compiling identity_agent_keri v0.1.0 (/Users/builder/clone/identity_agent_ui/rust)
+warning: unexpected `cfg` condition name: `frb_expand`
+  --> src/api/keri_bridge.rs:49:1
+   |
+49 | #[frb(sync)]
+   | ^^^^^^^^^^^^
+   |
+   = help: expected names are: `docsrs`, `feature`, and `test` and 31 more
+   = note: using a cfg inside a attribute macro will use the cfgs from the destination crate and not the ones from the defining crate
+   = help: try referring to `frb` crate for guidance on how handle this unexpected cfg
+   = help: the attribute macro `frb` may come from an old version of the `flutter_rust_bridge_macros` crate, try updating your dependency with `cargo update -p flutter_rust_bridge_macros`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+   = note: `#[warn(unexpected_cfgs)]` on by default
+   = note: this warning originates in the attribute macro `frb` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unexpected `cfg` condition name: `frb_expand`
+   --> src/api/keri_bridge.rs:105:1
+    |
+105 | #[frb(sync)]
+    | ^^^^^^^^^^^^
+    |
+    = note: using a cfg inside a attribute macro will use the cfgs from the destination crate and not the ones from the defining crate
+    = help: try referring to `frb` crate for guidance on how handle this unexpected cfg
+    = help: the attribute macro `frb` may come from an old version of the `flutter_rust_bridge_macros` crate, try updating your dependency with `cargo update -p flutter_rust_bridge_macros`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+    = note: this warning originates in the attribute macro `frb` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unexpected `cfg` condition name: `frb_expand`
+   --> src/api/keri_bridge.rs:139:1
+    |
+139 | #[frb(sync)]
+    | ^^^^^^^^^^^^
+    |
+    = note: using a cfg inside a attribute macro will use the cfgs from the destination crate and not the ones from the defining crate
+    = help: try referring to `frb` crate for guidance on how handle this unexpected cfg
+    = help: the attribute macro `frb` may come from an old version of the `flutter_rust_bridge_macros` crate, try updating your dependency with `cargo update -p flutter_rust_bridge_macros`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+    = note: this warning originates in the attribute macro `frb` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unexpected `cfg` condition name: `frb_expand`
+   --> src/api/keri_bridge.rs:161:1
+    |
+161 | #[frb(sync)]
+    | ^^^^^^^^^^^^
+    |
+    = note: using a cfg inside a attribute macro will use the cfgs from the destination crate and not the ones from the defining crate
+    = help: try referring to `frb` crate for guidance on how handle this unexpected cfg
+    = help: the attribute macro `frb` may come from an old version of the `flutter_rust_bridge_macros` crate, try updating your dependency with `cargo update -p flutter_rust_bridge_macros`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+    = note: this warning originates in the attribute macro `frb` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unexpected `cfg` condition name: `frb_expand`
+   --> src/api/keri_bridge.rs:176:1
+    |
+176 | #[frb(sync)]
+    | ^^^^^^^^^^^^
+    |
+    = note: using a cfg inside a attribute macro will use the cfgs from the destination crate and not the ones from the defining crate
+    = help: try referring to `frb` crate for guidance on how handle this unexpected cfg
+    = help: the attribute macro `frb` may come from an old version of the `flutter_rust_bridge_macros` crate, try updating your dependency with `cargo update -p flutter_rust_bridge_macros`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+    = note: this warning originates in the attribute macro `frb` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0599]: no method named `public_key` found for struct `CryptoBox` in the current scope
+  --> src/api/keri_bridge.rs:53:33
+   |
+53 |     let current_pk = crypto_box.public_key();
+   |                                 ^^^^^^^^^^
+   |
+  ::: /Users/builder/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keri-core-0.11.1/src/signer/mod.rs:10:8
+   |
+10 |     fn public_key(&self) -> PublicKey;
+   |        ---------- the method is available for `CryptoBox` here
+   |
+   = help: items from traits can only be used if the trait is in scope
+help: trait `KeyManager` which provides `public_key` is implemented but not in scope; perhaps you want to import it
+   |
+ 1 + use keri_core::signer::KeyManager;
+   |
+help: there is a method `next_public_key` with a similar name
+   |
+53 |     let current_pk = crypto_box.next_public_key();
+   |                                 +++++
+
+error[E0599]: no method named `next_pub_key` found for struct `CryptoBox` in the current scope
+  --> src/api/keri_bridge.rs:54:30
+   |
+54 |     let next_pk = crypto_box.next_pub_key();
+   |                              ^^^^^^^^^^^^ field, not a method
+   |
+help: there is a method `next_public_key` with a similar name
+   |
+54 |     let next_pk = crypto_box.next_public_key();
+   |                                      +++
+
+error[E0599]: no method named `public_key` found for struct `CryptoBox` in the current scope
+   --> src/api/keri_bridge.rs:116:33
+    |
+116 |     let new_pk = new_crypto_box.public_key();
+    |                                 ^^^^^^^^^^
+    |
+   ::: /Users/builder/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keri-core-0.11.1/src/signer/mod.rs:10:8
+    |
+ 10 |     fn public_key(&self) -> PublicKey;
+    |        ---------- the method is available for `CryptoBox` here
+    |
+    = help: items from traits can only be used if the trait is in scope
+help: trait `KeyManager` which provides `public_key` is implemented but not in scope; perhaps you want to import it
+    |
+  1 + use keri_core::signer::KeyManager;
+    |
+help: there is a method `next_public_key` with a similar name
+    |
+116 |     let new_pk = new_crypto_box.next_public_key();
+    |                                 +++++
+
+error[E0599]: no method named `sign` found for struct `CryptoBox` in the current scope
+   --> src/api/keri_bridge.rs:150:10
+    |
+150 |         .sign(&data)
+    |          ^^^^ method not found in `CryptoBox`
+    |
+   ::: /Users/builder/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keri-core-0.11.1/src/signer/mod.rs:9:8
+    |
+  9 |     fn sign(&self, msg: &[u8]) -> Result<Vec<u8>, Error>;
+    |        ---- the method is available for `CryptoBox` here
+    |
+    = help: items from traits can only be used if the trait is in scope
+help: trait `KeyManager` which provides `sign` is implemented but not in scope; perhaps you want to import it
+    |
+  1 + use keri_core::signer::KeyManager;
+    |
+
+error[E0599]: no method named `public_key` found for struct `CryptoBox` in the current scope
+   --> src/api/keri_bridge.rs:153:34
+    |
+153 |     let pk = instance.crypto_box.public_key();
+    |                                  ^^^^^^^^^^
+    |
+   ::: /Users/builder/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keri-core-0.11.1/src/signer/mod.rs:10:8
+    |
+ 10 |     fn public_key(&self) -> PublicKey;
+    |        ---------- the method is available for `CryptoBox` here
+    |
+    = help: items from traits can only be used if the trait is in scope
+help: trait `KeyManager` which provides `public_key` is implemented but not in scope; perhaps you want to import it
+    |
+  1 + use keri_core::signer::KeyManager;
+    |
+help: there is a method `next_public_key` with a similar name
+    |
+153 |     let pk = instance.crypto_box.next_public_key();
+    |                                  +++++
+
+For more information about this error, try `rustc --explain E0599`.
+warning: `identity_agent_keri` (lib) generated 5 warnings
+error: could not compile `identity_agent_keri` (lib) due to 5 previous errors; 5 warnings emitted
+--- Built static libraries ---
+ls: target/aarch64-apple-ios/release/libidentity_agent_keri.a: No such file or directory
+ls: target/aarch64-apple-ios-sim/release/libidentity_agent_keri.a: No such file or directory
+
+
+Build failed :|
+Step 6 script `Build Rust static library for iOS (device + simulator) with FRB codegen` exited with status code 1

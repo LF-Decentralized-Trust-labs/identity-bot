@@ -1,0 +1,129 @@
+2026-02-19T19:03:05Z info: Deployment: 6dd635f8-1de6-42e9-9a92-9bdedf754d93
+2026-02-19T19:03:05Z info: Running Security Scan
+2026-02-19T19:03:11Z info: Security Scan Complete
+2026-02-19T19:03:11Z info: Connecting to builder
+2026-02-19T19:03:11Z info: Builder connected
+2026-02-19T19:03:11Z info: Installing packages
+2026-02-19T19:03:12Z info: Starting Build
+============================================
+ IDENTITY AGENT - Flutter Web Build
+============================================
+
+Building Flutter Web...
+
+Deleting build...                                               
+     7ms
+The Flutter CLI developer tool uses Google Analytics to report usage and diagnostic
+data along with package dependencies, and crash reporting to send basic crash
+reports. This data is used to help improve the Dart platform, Flutter framework,
+and related tools.
+
+Telemetry is not sent on the very first run. To disable reporting of telemetry,
+run this terminal command:
+
+    flutter --disable-analytics
+
+If you opt out of telemetry, an opt-out event will be sent, and then no further
+information will be sent. This data is collected in accordance with the Google
+Privacy Policy (https://policies.google.com/privacy).
+
+
+Resolving dependencies...
+Downloading packages...
+
+  async 2.11.0 (2.13.0 available)
+  boolean_selector 2.1.1 (2.1.2 available)
+  characters 1.3.0 (1.4.1 available)
+  clock 1.1.1 (1.1.2 available)
+25 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+
+Compiling lib/main.dart for the Web...                          
+Font asset "CupertinoIcons.ttf" was tree-shaken, reducing it from 257628 to 1172 bytes (99.5% reduction). Tree-shaking can be disabled by providing the --no-tree-shake-icons flag when building your app.
+
+Font asset "MaterialIcons-Regular.otf" was tree-shaken, reducing it from 1645184 to 11768 bytes (99.3% reduction). Tree-shaking can be disabled by providing the --no-tree-shake-icons flag when building your app.
+
+Compiling lib/main.dart for the Web...                          
+   43.2s
+✓ Built build/web
+
+
+Flutter Web built successfully.
+Output: /home/runner/workspace/identity_agent_ui/build/web/
+
+The Go backend serves these static files automatically.
+Restart the Go backend to pick up the new build.
+============================================
+
+go: downloading github.com/go-chi/cors v1.2.2
+
+go: downloading github.com/go-chi/chi/v5 v5.2.5
+
+go: downloading golang.ngrok.com/ngrok v1.13.0
+
+go: downloading go.uber.org/multierr v1.11.0
+
+go: downloading gopkg.in/yaml.v3 v3.0.1
+
+go: downloading github.com/jpillora/backoff v1.0.0
+
+go: downloading gopkg.in/yaml.v2 v2.4.0
+
+go: downloading github.com/mattn/go-colorable v0.1.13
+
+go: downloading golang.org/x/term v0.25.0
+
+go: downloading github.com/go-stack/stack v1.8.1
+
+go: downloading github.com/mattn/go-isatty v0.0.20
+
+go: downloading golang.org/x/sys v0.26.0
+
+2026-02-19T19:04:06Z info: Pushing pid1 binary layer...
+2026-02-19T19:04:08Z info: Pushing Repl layer...
+2026-02-19T19:04:08Z info: Pushing hosting layer...
+2026-02-19T19:04:08Z info: Nix layers for this Repl are uncached.
+2026-02-19T19:04:08Z info: Pushing nix-0 layer...
+2026-02-19T19:04:08Z info: Created hosting layer
+2026-02-19T19:04:09Z info: Created pid1 binary layer
+2026-02-19T19:04:17Z info: Created Repl layer
+2026-02-19T19:04:17Z info: Pushing Repl (cache) layer...
+2026-02-19T19:04:17Z info: Created Repl (cache) layer
+2026-02-19T19:07:21Z info: Created nix-0 layer
+2026-02-19T19:07:21Z info: uploading image for cached layer
+2026-02-19T19:07:22Z info: pushed cache image manifest
+2026-02-19T19:07:23Z info: pushed cache soci index manifest
+2026-02-19T19:07:23Z info: uploading cached layer
+2026-02-19T19:07:23Z info: successfully uploaded cached layer
+2026-02-19T19:07:28Z info: Pushed image manifest
+2026-02-19T19:07:29Z info: Pushed soci index manifest
+2026-02-19T19:07:33Z info: Creating Autoscale service
+
+============================================
+============================================
+      Go Core:     http://0.0.0.0:5000/api/health
+./scripts/start-backend.sh: 53: exec: /home/runner/workspace/bin/identity-agent-core: not found
+[1/3] Installing Python dependencies for KERI driver...
+============================================
+[2/3] Building Go Core...
+ IDENTITY AGENT - Go Core + KERI Driver
+      KERI Driver: http://127.0.0.1:9999/status
+[2/3] Building Go Core...
+ IDENTITY AGENT - Go Core + KERI Driver
+      KERI Driver: http://127.0.0.1:9999/status
+
+============================================
+ IDENTITY AGENT - Go Core + KERI Driver
+[3/3] Starting Identity Agent...
+      libsodium: /nix/store/iykq7pdw9vci34nr2f3jl6rv901ivx8h-libsodium-1.0.19/lib
+ IDENTITY AGENT - Go Core + KERI Driver
+============================================
+
+      Go Core binary found (pre-built). Skipping build.
+      Go Core:     http://0.0.0.0:5000/api/health
+============================================
+command finished with error [sh -c sh ./scripts/start-backend.sh]: exit status 127
+      Go Core binary found (pre-built). Skipping build.
+
+crash loop detected
+2026-02-19T19:12:33Z error: The deployment is crash looping. This can happen if the run command fails or exits immediately after starting. Check the logs for more information.

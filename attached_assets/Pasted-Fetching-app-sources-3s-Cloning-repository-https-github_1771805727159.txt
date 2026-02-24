@@ -1,0 +1,505 @@
+Fetching app sources
+3s
+
+
+
+== Cloning repository https://github.com/LF-Decentralized-Trust-labs/identity-bot.git for initial-commit ==
+> /usr/bin/git clone --progress --branch initial-commit --depth 50 https://bobert600@github.com/LF-Decentralized-Trust-labs/identity-bot.git /Users/builder/clone
+Cloning into '/Users/builder/clone'...
+remote: Enumerating objects: 575, done.        
+remote: Counting objects:   0% (1/575)        
+remote: Counting objects:   1% (6/575)        
+remote: Counting objects:   2% (12/575)        
+remote: Counting objects:   3% (18/575)        
+remote: Counting objects:   4% (23/575)        
+remote: Counting objects:   5% (29/575)        
+remote: Counting objects:   6% (35/575)        
+remote: Counting objects:   7% (41/575)        
+remote: Counting objects:   8% (46/575)        
+remote: Counting objects:   9% (52/575)        
+remote: Counting objects:  10% (58/575)        
+remote: Counting objects:  11% (64/575)        
+remote: Counting objects:  12% (69/575)        
+remote: Counting objects:  13% (75/575)        
+remote: Counting objects:  14% (81/575)        
+remote: Counting objects:  15% (87/575)        
+remote: Counting objects:  16% (92/575)        
+remote: Counting objects:  17% (98/575)        
+remote: Counting objects:  18% (104/575)        
+remote: Counting objects:  19% (110/575)        
+remote: Counting objects:  20% (115/575)        
+remote: Counting objects:  21% (121/575)        
+remote: Counting objects:  22% (127/575)        
+remote: Counting objects:  23% (133/575)        
+remote: Counting objects:  24% (138/575)        
+remote: Counting objects:  25% (144/575)        
+remote: Counting objects:  26% (150/575)        
+remote: Counting objects:  27% (156/575)        
+remote: Counting objects:  28% (161/575)        
+remote: Counting objects:  29% (167/575)        
+remote: Counting objects:  30% (173/575)        
+remote: Counting objects:  31% (179/575)        
+remote: Counting objects:  32% (184/575)        
+remote: Counting objects:  33% (190/575)        
+remote: Counting objects:  34% (196/575)        
+remote: Counting objects:  35% (202/575)        
+remote: Counting objects:  36% (207/575)        
+remote: Counting objects:  37% (213/575)        
+remote: Counting objects:  38% (219/575)        
+remote: Counting objects:  39% (225/575)        
+remote: Counting objects:  40% (230/575)        
+remote: Counting objects:  41% (236/575)        
+remote: Counting objects:  42% (242/575)        
+remote: Counting objects:  43% (248/575)        
+remote: Counting objects:  44% (253/575)        
+remote: Counting objects:  45% (259/575)        
+remote: Counting objects:  46% (265/575)        
+remote: Counting objects:  47% (271/575)        
+remote: Counting objects:  48% (276/575)        
+remote: Counting objects:  49% (282/575)        
+remote: Counting objects:  50% (288/575)        
+remote: Counting objects:  51% (294/575)        
+remote: Counting objects:  52% (299/575)        
+remote: Counting objects:  53% (305/575)        
+remote: Counting objects:  54% (311/575)        
+remote: Counting objects:  55% (317/575)        
+remote: Counting objects:  56% (322/575)        
+remote: Counting objects:  57% (328/575)        
+remote: Counting objects:  58% (334/575)        
+remote: Counting objects:  59% (340/575)        
+remote: Counting objects:  60% (345/575)        
+remote: Counting objects:  61% (351/575)        
+remote: Counting objects:  62% (357/575)        
+remote: Counting objects:  63% (363/575)        
+remote: Counting objects:  64% (368/575)        
+remote: Counting objects:  65% (374/575)        
+remote: Counting objects:  66% (380/575)        
+remote: Counting objects:  67% (386/575)        
+remote: Counting objects:  68% (391/575)        
+remote: Counting objects:  69% (397/575)        
+remote: Counting objects:  70% (403/575)        
+remote: Counting objects:  71% (409/575)        
+remote: Counting objects:  72% (414/575)        
+remote: Counting objects:  73% (420/575)        
+remote: Counting objects:  74% (426/575)        
+remote: Counting objects:  75% (432/575)        
+remote: Counting objects:  76% (437/575)        
+remote: Counting objects:  77% (443/575)        
+remote: Counting objects:  78% (449/575)        
+remote: Counting objects:  79% (455/575)        
+remote: Counting objects:  80% (460/575)        
+remote: Counting objects:  81% (466/575)        
+remote: Counting objects:  82% (472/575)        
+remote: Counting objects:  83% (478/575)        
+remote: Counting objects:  84% (483/575)        
+remote: Counting objects:  85% (489/575)        
+remote: Counting objects:  86% (495/575)        
+remote: Counting objects:  87% (501/575)        
+remote: Counting objects:  88% (506/575)        
+remote: Counting objects:  89% (512/575)        
+remote: Counting objects:  90% (518/575)        
+remote: Counting objects:  91% (524/575)        
+remote: Counting objects:  92% (529/575)        
+remote: Counting objects:  93% (535/575)        
+remote: Counting objects:  94% (541/575)        
+remote: Counting objects:  95% (547/575)        
+remote: Counting objects:  96% (552/575)        
+remote: Counting objects:  97% (558/575)        
+remote: Counting objects:  98% (564/575)        
+remote: Counting objects:  99% (570/575)        
+remote: Counting objects: 100% (575/575)        
+remote: Counting objects: 100% (575/575), done.        
+remote: Compressing objects:   0% (1/377)        
+remote: Compressing objects:   1% (4/377)        
+remote: Compressing objects:   2% (8/377)        
+remote: Compressing objects:   3% (12/377)        
+remote: Compressing objects:   4% (16/377)        
+remote: Compressing objects:   5% (19/377)        
+remote: Compressing objects:   6% (23/377)        
+remote: Compressing objects:   7% (27/377)        
+remote: Compressing objects:   8% (31/377)        
+remote: Compressing objects:   9% (34/377)        
+remote: Compressing objects:  10% (38/377)        
+remote: Compressing objects:  11% (42/377)        
+remote: Compressing objects:  12% (46/377)        
+remote: Compressing objects:  13% (50/377)        
+remote: Compressing objects:  14% (53/377)        
+remote: Compressing objects:  15% (57/377)        
+remote: Compressing objects:  16% (61/377)        
+remote: Compressing objects:  17% (65/377)        
+remote: Compressing objects:  18% (68/377)        
+remote: Compressing objects:  19% (72/377)        
+remote: Compressing objects:  20% (76/377)        
+remote: Compressing objects:  21% (80/377)        
+remote: Compressing objects:  22% (83/377)        
+remote: Compressing objects:  23% (87/377)        
+remote: Compressing objects:  24% (91/377)        
+remote: Compressing objects:  25% (95/377)        
+remote: Compressing objects:  26% (99/377)        
+remote: Compressing objects:  27% (102/377)        
+remote: Compressing objects:  28% (106/377)        
+remote: Compressing objects:  29% (110/377)        
+remote: Compressing objects:  30% (114/377)        
+remote: Compressing objects:  31% (117/377)        
+remote: Compressing objects:  32% (121/377)        
+remote: Compressing objects:  33% (125/377)        
+remote: Compressing objects:  34% (129/377)        
+remote: Compressing objects:  35% (132/377)        
+remote: Compressing objects:  36% (136/377)        
+remote: Compressing objects:  37% (140/377)        
+remote: Compressing objects:  38% (144/377)        
+remote: Compressing objects:  39% (148/377)        
+remote: Compressing objects:  40% (151/377)        
+remote: Compressing objects:  41% (155/377)        
+remote: Compressing objects:  42% (159/377)        
+remote: Compressing objects:  43% (163/377)        
+remote: Compressing objects:  44% (166/377)        
+remote: Compressing objects:  45% (170/377)        
+remote: Compressing objects:  46% (174/377)        
+remote: Compressing objects:  47% (178/377)        
+remote: Compressing objects:  48% (181/377)        
+remote: Compressing objects:  49% (185/377)        
+remote: Compressing objects:  50% (189/377)        
+remote: Compressing objects:  51% (193/377)        
+remote: Compressing objects:  52% (197/377)        
+remote: Compressing objects:  53% (200/377)        
+remote: Compressing objects:  54% (204/377)        
+remote: Compressing objects:  55% (208/377)        
+remote: Compressing objects:  56% (212/377)        
+remote: Compressing objects:  57% (215/377)        
+remote: Compressing objects:  58% (219/377)        
+remote: Compressing objects:  59% (223/377)        
+remote: Compressing objects:  60% (227/377)        
+remote: Compressing objects:  61% (230/377)        
+remote: Compressing objects:  62% (234/377)        
+remote: Compressing objects:  63% (238/377)        
+remote: Compressing objects:  64% (242/377)        
+remote: Compressing objects:  65% (246/377)        
+remote: Compressing objects:  66% (249/377)        
+remote: Compressing objects:  67% (253/377)        
+remote: Compressing objects:  68% (257/377)        
+remote: Compressing objects:  69% (261/377)        
+remote: Compressing objects:  70% (264/377)        
+remote: Compressing objects:  71% (268/377)        
+remote: Compressing objects:  72% (272/377)        
+remote: Compressing objects:  73% (276/377)        
+remote: Compressing objects:  74% (279/377)        
+remote: Compressing objects:  75% (283/377)        
+remote: Compressing objects:  76% (287/377)        
+remote: Compressing objects:  77% (291/377)        
+remote: Compressing objects:  78% (295/377)        
+remote: Compressing objects:  79% (298/377)        
+remote: Compressing objects:  80% (302/377)        
+remote: Compressing objects:  81% (306/377)        
+remote: Compressing objects:  82% (310/377)        
+remote: Compressing objects:  83% (313/377)        
+remote: Compressing objects:  84% (317/377)        
+remote: Compressing objects:  85% (321/377)        
+remote: Compressing objects:  86% (325/377)        
+remote: Compressing objects:  87% (328/377)        
+remote: Compressing objects:  88% (332/377)        
+remote: Compressing objects:  89% (336/377)        
+remote: Compressing objects:  90% (340/377)        
+remote: Compressing objects:  91% (344/377)        
+remote: Compressing objects:  92% (347/377)        
+remote: Compressing objects:  93% (351/377)        
+remote: Compressing objects:  94% (355/377)        
+remote: Compressing objects:  95% (359/377)        
+remote: Compressing objects:  96% (362/377)        
+remote: Compressing objects:  97% (366/377)        
+remote: Compressing objects:  98% (370/377)        
+remote: Compressing objects:  99% (374/377)        
+remote: Compressing objects: 100% (377/377)        
+remote: Compressing objects: 100% (377/377), done.        
+Receiving objects:   0% (1/575)
+Receiving objects:   1% (6/575)
+Receiving objects:   2% (12/575)
+Receiving objects:   3% (18/575)
+Receiving objects:   4% (23/575)
+Receiving objects:   5% (29/575)
+Receiving objects:   6% (35/575)
+Receiving objects:   7% (41/575)
+Receiving objects:   8% (46/575)
+Receiving objects:   9% (52/575)
+Receiving objects:  10% (58/575)
+Receiving objects:  11% (64/575)
+Receiving objects:  12% (69/575)
+Receiving objects:  13% (75/575)
+Receiving objects:  14% (81/575)
+Receiving objects:  15% (87/575)
+Receiving objects:  16% (92/575)
+Receiving objects:  17% (98/575)
+Receiving objects:  18% (104/575)
+Receiving objects:  19% (110/575)
+Receiving objects:  20% (115/575)
+Receiving objects:  21% (121/575)
+Receiving objects:  22% (127/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  23% (133/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  24% (138/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  25% (144/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  26% (150/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  27% (156/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  28% (161/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  29% (167/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  30% (173/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  31% (179/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  32% (184/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  33% (190/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  34% (196/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  35% (202/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  36% (207/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  37% (213/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  38% (219/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  39% (225/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  40% (230/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  41% (236/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  42% (242/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  43% (248/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  44% (253/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  45% (259/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  46% (265/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  47% (271/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  48% (276/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  49% (282/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  50% (288/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  51% (294/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  52% (299/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  53% (305/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  54% (311/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  55% (317/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  56% (322/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  57% (328/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  58% (334/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  59% (340/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  60% (345/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  61% (351/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  62% (357/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  63% (363/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  64% (368/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  65% (374/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  66% (380/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  67% (386/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  68% (391/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  69% (397/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  70% (403/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  71% (409/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  72% (414/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  73% (420/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  74% (426/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  75% (432/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  76% (437/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  77% (443/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  78% (449/575), 3.49 MiB | 4.82 MiB/s
+remote: Total 575 (delta 224), reused 471 (delta 140), pack-reused 0 (from 0)        
+Receiving objects:  79% (455/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  80% (460/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  81% (466/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  82% (472/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  83% (478/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  84% (483/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  85% (489/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  86% (495/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  87% (501/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  88% (506/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  89% (512/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  90% (518/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  91% (524/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  92% (529/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  93% (535/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  94% (541/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  95% (547/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  96% (552/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  97% (558/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  98% (564/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects:  99% (570/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects: 100% (575/575), 3.49 MiB | 4.82 MiB/s
+Receiving objects: 100% (575/575), 10.70 MiB | 12.52 MiB/s, done.
+Resolving deltas:   0% (0/224)
+Resolving deltas:   1% (3/224)
+Resolving deltas:   2% (5/224)
+Resolving deltas:   3% (7/224)
+Resolving deltas:   4% (9/224)
+Resolving deltas:   6% (14/224)
+Resolving deltas:   7% (16/224)
+Resolving deltas:   8% (18/224)
+Resolving deltas:   9% (22/224)
+Resolving deltas:  10% (23/224)
+Resolving deltas:  11% (25/224)
+Resolving deltas:  12% (27/224)
+Resolving deltas:  13% (30/224)
+Resolving deltas:  15% (34/224)
+Resolving deltas:  16% (36/224)
+Resolving deltas:  17% (39/224)
+Resolving deltas:  18% (42/224)
+Resolving deltas:  19% (43/224)
+Resolving deltas:  20% (46/224)
+Resolving deltas:  21% (48/224)
+Resolving deltas:  22% (50/224)
+Resolving deltas:  23% (52/224)
+Resolving deltas:  24% (54/224)
+Resolving deltas:  25% (56/224)
+Resolving deltas:  26% (59/224)
+Resolving deltas:  27% (61/224)
+Resolving deltas:  28% (63/224)
+Resolving deltas:  29% (65/224)
+Resolving deltas:  30% (69/224)
+Resolving deltas:  31% (70/224)
+Resolving deltas:  32% (72/224)
+Resolving deltas:  33% (74/224)
+Resolving deltas:  34% (77/224)
+Resolving deltas:  35% (79/224)
+Resolving deltas:  36% (81/224)
+Resolving deltas:  37% (83/224)
+Resolving deltas:  39% (88/224)
+Resolving deltas:  40% (90/224)
+Resolving deltas:  41% (92/224)
+Resolving deltas:  42% (95/224)
+Resolving deltas:  43% (97/224)
+Resolving deltas:  44% (99/224)
+Resolving deltas:  45% (101/224)
+Resolving deltas:  46% (104/224)
+Resolving deltas:  47% (106/224)
+Resolving deltas:  48% (108/224)
+Resolving deltas:  49% (111/224)
+Resolving deltas:  50% (112/224)
+Resolving deltas:  51% (116/224)
+Resolving deltas:  52% (117/224)
+Resolving deltas:  53% (120/224)
+Resolving deltas:  54% (121/224)
+Resolving deltas:  55% (124/224)
+Resolving deltas:  56% (126/224)
+Resolving deltas:  57% (128/224)
+Resolving deltas:  58% (130/224)
+Resolving deltas:  59% (134/224)
+Resolving deltas:  60% (135/224)
+Resolving deltas:  62% (139/224)
+Resolving deltas:  63% (142/224)
+Resolving deltas:  64% (144/224)
+Resolving deltas:  65% (146/224)
+Resolving deltas:  66% (148/224)
+Resolving deltas:  67% (151/224)
+Resolving deltas:  68% (153/224)
+Resolving deltas:  69% (155/224)
+Resolving deltas:  70% (157/224)
+Resolving deltas:  71% (161/224)
+Resolving deltas:  72% (163/224)
+Resolving deltas:  73% (164/224)
+Resolving deltas:  74% (166/224)
+Resolving deltas:  75% (168/224)
+Resolving deltas:  76% (172/224)
+Resolving deltas:  77% (173/224)
+Resolving deltas:  78% (175/224)
+Resolving deltas:  79% (177/224)
+Resolving deltas:  81% (182/224)
+Resolving deltas:  82% (184/224)
+Resolving deltas:  83% (186/224)
+Resolving deltas:  84% (190/224)
+Resolving deltas:  85% (191/224)
+Resolving deltas:  86% (193/224)
+Resolving deltas:  87% (196/224)
+Resolving deltas:  88% (199/224)
+Resolving deltas:  89% (200/224)
+Resolving deltas:  90% (202/224)
+Resolving deltas:  91% (204/224)
+Resolving deltas:  92% (207/224)
+Resolving deltas:  93% (209/224)
+Resolving deltas:  94% (212/224)
+Resolving deltas:  95% (213/224)
+Resolving deltas:  96% (217/224)
+Resolving deltas:  97% (218/224)
+Resolving deltas:  98% (221/224)
+Resolving deltas:  99% (222/224)
+Resolving deltas: 100% (224/224)
+Resolving deltas: 100% (224/224), done.
+
+== Checking out commit hash dc1eb4670833cc2bc702fe5bf6fc560a035f5d79 ==
+> /usr/bin/git reset --hard dc1eb4670833cc2bc702fe5bf6fc560a035f5d79
+HEAD is now at dc1eb46 Saved progress at the end of the loop
+identity-bot
+identity-bot
+github.com/LF-Decentralized-Trust-labs/identity-bot.git
+
+
+Start new build
+Build overview
+Click on the build steps for details.
+Preparing build machine
+20s
+Installing SDKs
+28s
+Install Rust toolchain and iOS targets
+15s
+Install Go toolchain and gomobile
+29s
+Build Go Core as iOS XCFramework via gomobile
+17s
+Install FRB codegen
+47s
+Get Flutter packages
+35s
+Run FRB codegen to generate Dart and Rust bindings
+46s
+Build Rust static library for iOS (device + simulator)
+51s
+Copy Rust libraries to iOS Frameworks
+< 1s
+Install CocoaPods dependencies
+9s
+Build iOS for Simulator testing
+26s
+
+
+
+Show command
+Building com.identityagent.identityAgentUi for simulator (ios)...
+Running pod install...                                             707ms
+Running Xcode build...                                          
+Xcode build done.                                           20.1s
+Failed to build iOS app
+Error output from Xcode build:
+↳
+    /Users/builder/clone/identity_agent_ui/ios/Runner/AppDelegate.swift:3:8: error: Unable to find module dependency: 'Mobilecore'
+    import Mobilecore
+           ^
+    /Users/builder/clone/identity_agent_ui/ios/Runner/AppDelegate.swift:3:8: note: a dependency of main module 'Runner'
+    import Mobilecore
+           ^
+    ** BUILD FAILED **
+
+
+Xcode's output:
+↳
+    Writing result bundle at path:
+    	/var/folders/w2/rrf5p87d1bbfyphxc7jdnyvh0000gn/T/flutter_tools.CyzT1E/flutter_ios_build_temp_dirXrQ2aL/temporary_xcresult_bundle
+
+    warning: [CP] Mobilecore.xcframework: Unable to find matching slice in 'ios-arm64 ios-arm64-simulator' for the current build architectures (arm64 x86_64) and platform (-iphonesimulator).
+    /Users/builder/clone/identity_agent_ui/ios/Runner/AppDelegate.swift:3:8: error: Unable to find module dependency: 'Mobilecore'
+    import Mobilecore
+           ^ (in target 'Runner' from project 'Runner')
+    /Users/builder/clone/identity_agent_ui/ios/Runner/AppDelegate.swift:3:8: note: A dependency of main module 'Runner'
+    import Mobilecore
+           ^ (in target 'Runner' from project 'Runner')
+    note: Run script build phase 'Run Script' will be run during every build because the option to run the script phase "Based on dependency analysis" is unchecked. (in target 'Runner' from project 'Runner')
+    note: Run script build phase 'Thin Binary' will be run during every build because the option to run the script phase "Based on dependency analysis" is unchecked. (in target 'Runner' from project 'Runner')
+
+Encountered error while building for simulator.
+
+
+Build failed :|
+Step 12 script `Build iOS for Simulator testing` exited with status code 1
+Publishing
+< 1s
+Cleaning up
+< 1s
+Step 12 script `Build iOS for Simulator testing` exited with status code 1
+
+Applications
+Builds
+OTA Updates
+App Preview
+Teams
+Billing
+
+
+Log out
+

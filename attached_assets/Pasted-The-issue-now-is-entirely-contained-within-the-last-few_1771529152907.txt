@@ -1,0 +1,29 @@
+The issue now is entirely contained within the last few lines of start-backend.sh. When the production server turns on, it tries to run your app, and it hits this wall:
+
+exec: /home/runner/workspace/identity-agent-core/bin/identity-agent-core: not found
+
+Here are the two reasons this specific error happens in Replit deployments, and exactly how to have the Agent fix it.
+
+1. The Absolute Path Trap
+The Replit Agent hardcoded an absolute path (/home/runner/workspace/...) into your startup script. While your files always live at /home/runner/workspace in your development environment, Replit's production deployment servers sometimes mount your project in a different directory structure. If the script blindly looks for /home/runner/workspace, it will crash. It needs to use relative paths (like ./identity-agent-core/bin/...).
+
+2. The "Phantom Not Found" (CGO & Libsodium)
+In Linux environments (which Replit runs on), if you try to run an executable file and it throws a "not found" error, it doesn't always mean the file itself is missing. It often means a dynamic library the file relies on is missing.
+Because your Go app uses libsodium (a C-based cryptography library), Go uses something called CGO to link them together. If the compiled Go binary cannot find the exact Nix pathway to libsodium at runtime, Linux will confusingly say the Go binary is "not found."
+
+The Fix: Prompt for the Replit Agent
+Copy and paste this exact prompt to the Replit Agent. This forces it to fix the pathing, add a safety check, and handle the dynamic linking correctly.
+
+"The deployment successfully built the app, but it crash-looped on startup with this error: exec: /home/runner/workspace/identity-agent-core/bin/identity-agent-core: not found on line 56 of start-backend.sh.
+
+This is likely due to either an absolute pathing issue in production, or a dynamic linking (CGO/libsodium) 'not found' error. Please update start-backend.sh and the deployment configuration with the following fixes:
+
+Use Relative Paths: Stop using absolute paths like /home/runner/workspace/... in the startup script. Use relative paths (e.g., ./identity-agent-core/bin/identity-agent-core) or dynamically resolve the working directory using $(pwd).
+
+Add a Sanity Check: Right before the exec command on line 56, add an ls -la ./identity-agent-core/bin/ (or equivalent relative path) to print out the directory contents in the logs. This will prove whether the file physically exists in the production container.
+
+Fix CGO Linking: Ensure that the production environment knows exactly where libsodium is located so the Go binary doesn't throw a phantom 'not found' error. Make sure LD_LIBRARY_PATH includes the Nix store path for libsodium before executing the Go binary.
+
+Please update the script to reflect these resilient startup practices."
+
+Once the agent implements these changes, the logs will at least spit out an ls -la directory list right before it tries to run the app. If it crashes again, that directory list will instantly tell us if the file is truly missing, or if it's a library linking issue.

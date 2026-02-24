@@ -1,0 +1,22 @@
+You are absolutely right to pause and question this. I strongly advise against the agent's suggestion. What the agent is suggesting is a classic "AI shortcut." It is trying to avoid figuring out a one-time CI/CD configuration step in codemagic.yaml by shifting a massive amount of technical debt, performance overhead, and complexity directly into your application's architecture.
+​While replacing flutter_rust_bridge (FRB) with hand-rolled C-FFI passing JSON strings will technically work, it defeats the purpose of using Rust and introduces several major risks, especially for an architecture where a backend is running simultaneously to handle a protocol like KERI.
+​Here is a breakdown of why you should push back on the agent and stick with flutter_rust_bridge, along with the specific issues its proposed approach will cause:
+​1. The Performance Penalty (JSON Overhead)
+​The agent wants to serialize Rust structs into JSON, send them across the FFI boundary as C-strings, and then deserialize that JSON in Dart.
+​The Issue: FFI is supposed to be lightning-fast (nanoseconds). Forcing JSON serialization on every single call adds massive latency and CPU overhead. If your KERI bridge is handling heavy cryptographic operations, continuous streams of identity data, or frequent state updates, this JSON bottleneck will make your app sluggish and drain the mobile device's battery.
+​The FRB Advantage: flutter_rust_bridge uses highly optimized, zero-copy binary serialization. It passes data at near-native speeds without the JSON overhead.
+​2. Memory Leaks and Pointer Nightmares
+​Writing a "pure C-compatible FFI" means dealing with raw memory pointers.
+​The Issue: When Rust sends a JSON string to Dart, that string lives in memory. Someone has to manually clean it up. If Dart doesn't explicitly tell Rust to free that memory pointer after it reads the JSON, your app will quietly leak memory until it crashes. Hand-rolling memory management across the FFI boundary is notoriously error-prone.
+​The FRB Advantage: flutter_rust_bridge automatically generates memory-safe bindings. It ensures that memory allocated in Rust is safely freed when Dart is done with it, leveraging Rust's safety guarantees.
+​3. Blocking the UI Thread (Async/Concurrency)
+​You mentioned that your backend runs simultaneously to handle the KERI protocol. This implies long-running tasks, streaming events, or continuous background processing.
+​The Issue: Standard Dart FFI is synchronous. If you call a Rust C-function from Dart, it blocks the Flutter UI thread until Rust finishes. To fix this without FRB, the agent would have to write complex Dart Isolate logic and pass C-function pointers as callbacks. This is incredibly difficult to get right.
+​The FRB Advantage: flutter_rust_bridge natively handles asynchronous Rust code (async fn) and automatically runs Rust tasks on background threads, returning Dart Futures or Streams. It never blocks your Flutter UI.
+​4. CodeMagic Packaging Complexity
+​The agent thinks skipping codegen makes CI simpler, but it actually makes building the APK harder.
+​The Issue: The agent says it will compile the .so (Android), .dylib (iOS), and .dll (Windows) files. But just compiling them isn't enough; they have to be properly injected into Flutter's specific build directories (e.g., Android's jniLibs) so they get bundled into the APK.
+​The FRB Advantage: FRB provides hooks (via CMakeLists.txt and build.gradle) that handle all of this cross-platform bundling automatically.
+​How to Guide the Agent (Next Steps)
+​You have a multi-language stack (Go, Flutter, Rust KERI bridge). You need the foundation to be rock-solid. Tell the agent to abandon the manual JSON FFI approach and restore flutter_rust_bridge.
+​The "fix" for CodeMagic is actually very simple. The agent just needs to add a few lines to your codemagic.yaml to install Rust and run the codegen command before running flutter build apk.

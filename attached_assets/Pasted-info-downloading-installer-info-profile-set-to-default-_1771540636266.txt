@@ -1,0 +1,262 @@
+info: downloading installer
+info: profile set to 'default'
+info: default host triple is x86_64-unknown-linux-gnu
+info: syncing channel updates for 'stable-x86_64-unknown-linux-gnu'
+info: latest update on 2026-02-12, rust version 1.93.1 (01f6ddf75 2026-02-11)
+info: downloading component 'cargo'
+info: downloading component 'clippy'
+info: downloading component 'rust-docs'
+info: downloading component 'rust-std'
+info: downloading component 'rustc'
+info: downloading component 'rustfmt'
+info: installing component 'cargo'
+info: installing component 'clippy'
+info: installing component 'rust-docs'
+info: installing component 'rust-std'
+info: installing component 'rustc'
+info: installing component 'rustfmt'
+info: default toolchain set to 'stable-x86_64-unknown-linux-gnu'
+
+  stable-x86_64-unknown-linux-gnu installed - rustc 1.93.1 (01f6ddf75 2026-02-11)
+
+
+Rust is installed now. Great!
+
+To get started you may need to restart your current shell.
+This would reload your PATH environment variable to include
+Cargo's bin directory ($HOME/.cargo/bin).
+
+To configure your current shell, you need to source
+the corresponding env file under $HOME/.cargo.
+
+This is usually done by running one of the following (note the leading DOT):
+. "$HOME/.cargo/env"            # For sh/bash/zsh/ash/dash/pdksh
+source "$HOME/.cargo/env.fish"  # For fish
+source $"($nu.home-path)/.cargo/env.nu"  # For nushell
+info: downloading component 'rust-std' for 'aarch64-linux-android'
+info: installing component 'rust-std' for 'aarch64-linux-android'
+info: downloading component 'rust-std' for 'armv7-linux-androideabi'
+info: installing component 'rust-std' for 'armv7-linux-androideabi'
+info: downloading component 'rust-std' for 'x86_64-linux-android'
+info: installing component 'rust-std' for 'x86_64-linux-android'
+info: downloading component 'rust-std' for 'i686-linux-android'
+info: installing component 'rust-std' for 'i686-linux-android'
+    Updating crates.io index
+ Downloading crates ...
+  Downloaded cargo-ndk v4.1.2
+  Installing cargo-ndk v4.1.2
+    Updating crates.io index
+     Locking 125 packages to latest compatible versions
+      Adding cargo_metadata v0.21.0 (available: v0.23.1)
+      Adding toml v0.9.12+spec-1.1.0 (available: v1.0.3+spec-1.1.0)
+      Adding windows-sys v0.60.2 (available: v0.61.2)
+ Downloading crates ...
+  Downloaded cargo-platform v0.2.0
+  Downloaded anstream v0.6.21
+  Downloaded anyhow v1.0.101
+  Downloaded is_terminal_polyfill v1.70.2
+  Downloaded anstyle v1.0.13
+  Downloaded heck v0.5.0
+  Downloaded clap_lex v1.0.0
+  Downloaded thiserror-impl v1.0.69
+  Downloaded anstyle-parse v0.2.7
+  Downloaded eieio v1.0.0
+  Downloaded dunce v1.0.5
+  Downloaded colorchoice v1.0.4
+  Downloaded cargo-util-schemas v0.8.2
+  Downloaded equivalent v1.0.2
+  Downloaded cfg-if v1.0.4
+  Downloaded is-terminal v0.4.17
+  Downloaded idna_adapter v1.2.1
+  Downloaded anstyle-query v1.1.5
+  Downloaded form_urlencoded v1.2.2
+  Downloaded typeid v1.0.3
+  Downloaded strsim v0.11.1
+  Downloaded version_check v0.9.5
+  Downloaded serde_spanned v0.6.9
+  Downloaded potential_utf v0.1.4
+  Downloaded utf8parse v0.2.2
+  Downloaded iref v1.4.3
+  Downloaded filetime v0.2.27
+  Downloaded zerofrom-derive v0.1.6
+  Downloaded utf8_iter v1.0.4
+  Downloaded yoke-derive v0.8.1
+  Downloaded utf8-decode v1.0.1
+  Downloaded zerovec-derive v0.11.2
+  Downloaded quote v1.0.44
+  Downloaded writeable v0.6.2
+  Downloaded unicode-xid v0.2.6
+  Downloaded zmij v1.0.21
+  Downloaded unicode-ident v1.0.24
+  Downloaded zerotrie v0.2.3
+  Downloaded url v2.5.8
+  Downloaded toml_edit v0.22.27
+  Downloaded zerovec v0.11.5
+  Downloaded idna v1.1.0
+  Downloaded winnow v0.7.14
+  Downloaded serde_json v1.0.149
+  Downloaded clap_builder v4.5.60
+  Downloaded icu_properties_data v2.1.2
+  Downloaded hashbrown v0.16.1
+  Downloaded indexmap v2.13.0
+  Downloaded serde v1.0.228
+  Downloaded icu_collections v2.1.1
+  Downloaded proc-macro2 v1.0.106
+  Downloaded syn v2.0.116
+  Downloaded log v0.4.29
+  Downloaded icu_normalizer_data v2.1.1
+  Downloaded icu_normalizer v2.1.1
+  Downloaded toml_parser v1.0.9+spec-1.1.0
+  Downloaded toml v0.9.12+spec-1.1.0
+  Downloaded toml v0.8.23
+  Downloaded serde_derive v1.0.228
+  Downloaded serde_core v1.0.228
+  Downloaded serde-untagged v0.1.9
+  Downloaded once_cell v1.21.3
+  Downloaded num-traits v0.2.19
+  Downloaded litemap v0.8.1
+  Downloaded icu_provider v2.1.1
+  Downloaded icu_properties v2.1.2
+  Downloaded yoke v0.8.1
+  Downloaded thiserror v2.0.18
+  Downloaded termcolor v1.4.1
+  Downloaded smallvec v1.15.1
+  Downloaded toml_writer v1.0.6+spec-1.1.0
+  Downloaded toml_datetime v0.7.5+spec-1.1.0
+  Downloaded tinystr v0.8.2
+  Downloaded thiserror-impl v2.0.18
+  Downloaded thiserror v1.0.69
+  Downloaded semver v1.0.27
+  Downloaded os_str_bytes v2.4.0
+  Downloaded clap_derive v4.5.55
+  Downloaded camino v1.2.2
+  Downloaded libc v0.2.182
+  Downloaded memchr v2.8.0
+  Downloaded toml_datetime v0.6.11
+  Downloaded synstructure v0.13.2
+  Downloaded icu_locale_core v2.1.1
+  Downloaded displaydoc v0.2.5
+  Downloaded toml_write v0.1.2
+  Downloaded stable_deref_trait v1.2.1
+  Downloaded serde_spanned v1.0.4
+  Downloaded percent-encoding v2.3.2
+  Downloaded itoa v1.0.17
+  Downloaded zerofrom v0.1.6
+  Downloaded serde-value v0.7.0
+  Downloaded cargo_metadata v0.21.0
+  Downloaded autocfg v1.5.0
+  Downloaded erased-serde v0.4.9
+  Downloaded pathos v0.3.0
+  Downloaded ordered-float v2.10.1
+  Downloaded pct-str v1.2.0
+  Downloaded clap v4.5.60
+   Compiling proc-macro2 v1.0.106
+   Compiling unicode-ident v1.0.24
+   Compiling quote v1.0.44
+   Compiling serde_core v1.0.228
+   Compiling stable_deref_trait v1.2.1
+   Compiling serde v1.0.228
+   Compiling litemap v0.8.1
+   Compiling writeable v0.6.2
+   Compiling icu_normalizer_data v2.1.1
+   Compiling smallvec v1.15.1
+   Compiling icu_properties_data v2.1.2
+   Compiling autocfg v1.5.0
+   Compiling winnow v0.7.14
+   Compiling typeid v1.0.3
+   Compiling erased-serde v0.4.9
+   Compiling equivalent v1.0.2
+   Compiling percent-encoding v2.3.2
+   Compiling hashbrown v0.16.1
+   Compiling libc v0.2.182
+   Compiling zmij v1.0.21
+   Compiling num-traits v0.2.19
+   Compiling thiserror v2.0.18
+   Compiling utf8parse v0.2.2
+   Compiling utf8_iter v1.0.4
+   Compiling toml_write v0.1.2
+   Compiling anstyle-parse v0.2.7
+   Compiling syn v2.0.116
+   Compiling form_urlencoded v1.2.2
+   Compiling anstyle-query v1.1.5
+   Compiling colorchoice v1.0.4
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling indexmap v2.13.0
+   Compiling camino v1.2.2
+   Compiling serde_json v1.0.149
+   Compiling utf8-decode v1.0.1
+   Compiling anstyle v1.0.13
+   Compiling thiserror v1.0.69
+   Compiling ordered-float v2.10.1
+   Compiling anstream v0.6.21
+   Compiling pct-str v1.2.0
+   Compiling anyhow v1.0.101
+   Compiling itoa v1.0.17
+   Compiling heck v0.5.0
+   Compiling clap_lex v1.0.0
+   Compiling memchr v2.8.0
+   Compiling unicode-xid v0.2.6
+   Compiling strsim v0.11.1
+   Compiling iref v1.4.3
+   Compiling toml_writer v1.0.6+spec-1.1.0
+   Compiling clap_builder v4.5.60
+   Compiling toml_parser v1.0.9+spec-1.1.0
+   Compiling cfg-if v1.0.4
+   Compiling once_cell v1.21.3
+   Compiling semver v1.0.27
+   Compiling serde-untagged v0.1.9
+   Compiling toml_datetime v0.7.5+spec-1.1.0
+   Compiling serde_spanned v1.0.4
+   Compiling eieio v1.0.0
+   Compiling os_str_bytes v2.4.0
+   Compiling cargo-ndk v4.1.2
+   Compiling log v0.4.29
+   Compiling toml v0.9.12+spec-1.1.0
+   Compiling filetime v0.2.27
+   Compiling is-terminal v0.4.17
+   Compiling dunce v1.0.5
+   Compiling termcolor v1.4.1
+   Compiling version_check v0.9.5
+   Compiling synstructure v0.13.2
+   Compiling zerofrom-derive v0.1.6
+   Compiling yoke-derive v0.8.1
+   Compiling zerovec-derive v0.11.2
+   Compiling displaydoc v0.2.5
+   Compiling serde_derive v1.0.228
+   Compiling zerofrom v0.1.6
+   Compiling thiserror-impl v2.0.18
+   Compiling yoke v0.8.1
+   Compiling zerotrie v0.2.3
+   Compiling thiserror-impl v1.0.69
+   Compiling clap_derive v4.5.55
+   Compiling zerovec v0.11.5
+   Compiling tinystr v0.8.2
+   Compiling potential_utf v0.1.4
+   Compiling icu_locale_core v2.1.1
+   Compiling icu_collections v2.1.1
+   Compiling pathos v0.3.0
+   Compiling icu_provider v2.1.1
+   Compiling clap v4.5.60
+   Compiling icu_properties v2.1.2
+   Compiling icu_normalizer v2.1.1
+   Compiling toml_datetime v0.6.11
+   Compiling serde_spanned v0.6.9
+   Compiling serde-value v0.7.0
+   Compiling cargo-platform v0.2.0
+   Compiling toml_edit v0.22.27
+   Compiling idna_adapter v1.2.1
+   Compiling idna v1.1.0
+   Compiling url v2.5.8
+   Compiling toml v0.8.23
+   Compiling cargo-util-schemas v0.8.2
+   Compiling cargo_metadata v0.21.0
+    Finished `release` profile [optimized] target(s) in 22.91s
+  Installing /home/builder/.cargo/bin/cargo-ndk
+  Installing /home/builder/.cargo/bin/cargo-ndk-env
+  Installing /home/builder/.cargo/bin/cargo-ndk-runner
+  Installing /home/builder/.cargo/bin/cargo-ndk-test
+   Installed package `cargo-ndk v4.1.2` (executables `cargo-ndk`, `cargo-ndk-env`, `cargo-ndk-runner`, `cargo-ndk-test`)
+--- Rust version ---
+rustc 1.93.1 (01f6ddf75 2026-02-11)
+cargo 1.93.1 (083ac5135 2025-12-15)
+cargo-ndk 4.1.2

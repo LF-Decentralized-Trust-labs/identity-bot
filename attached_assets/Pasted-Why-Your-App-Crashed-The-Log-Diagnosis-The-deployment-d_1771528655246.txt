@@ -1,0 +1,38 @@
+Why Your App Crashed (The Log Diagnosis)
+The deployment didn't fail because of the Nix packages this time. It failed because of a logic error the Replit Agent wrote into your ./scripts/start-backend.sh script.
+
+Look at these exact lines from your logs:
+
+Go Core binary found (pre-built). Skipping build.
+./scripts/start-backend.sh: 53: exec: /home/runner/workspace/bin/identity-agent-core: not found
+crash loop detected
+
+What this means: The script checked to see if it should build your Go app. It falsely believed the app was already built, so it skipped the build process to save time. But when it went to line 53 to actually start the app, the executable file (/bin/identity-agent-core) did not exist. Because it couldn't find the file to run, the system threw an "exit status 127" (command not found) and crash-looped.
+
+Development URL vs. Preview Window vs. Production
+To clear up the confusion about your environments:
+
+Development URL: This is a live tunnel directly into your active Replit editing workspace. It works because your code is running fine in your development environment.
+
+Preview Window: This is just Replit's internal mini-browser. It is notoriously buggy. If your app is running on the Dev URL but not the Preview Window, Replit's webview router is just failing to latch onto port 5000 internally. You can safely ignore the Preview Window as long as the Dev URL works.
+
+Production (Deployment): When you hit "Deploy/Publish", Replit creates a brand-new, isolated server. It copies your files over, bundles them up (the long loading time you saw), and tries to run your startup script. Your app works in Dev, but the startup script in Production is looking for a file in the wrong folder, causing the crash.
+
+The Prompt for the Replit Agent
+To fix this crash and speed up your deployment process, copy and paste this exact prompt to the Replit Agent. It gives the agent the exact context it needs to fix its own script error and optimize the pipeline.
+
+Copy/Paste this to the Agent:
+
+"I attempted to deploy the app, but the deployment failed and entered a crash loop.
+
+The logs show that ./scripts/start-backend.sh skipped the Go build because it thought the pre-built binary existed, but then it crashed on line 53 with this error: exec: /home/runner/workspace/bin/identity-agent-core: not found.
+
+We need to fix the deployment script and optimize it for speed. Please do the following:
+
+Fix the Go Binary Path: Check the logic in start-backend.sh. If it is skipping the Go build, it must ensure that the compiled binary is actually located at /home/runner/workspace/bin/identity-agent-core (or wherever it expects it to be) before trying to execute it. If it's not there, it should force a build.
+
+Optimize Python Start-up: The logs show Installing Python dependencies for KERI driver... running during the startup phase. Can we move the pip install step into the deployment build phase rather than running it every time the server starts? This will make the app boot up significantly faster and prevent timeouts.
+
+Verify Port Bindings: Ensure the Go server is definitively binding to 0.0.0.0:5000 and not 127.0.0.1, so the Replit proxy can correctly route traffic to it.
+
+Please update start-backend.sh and any necessary configuration files to implement these fixes."

@@ -1,0 +1,37 @@
+# Go
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+
+# Flutter
+identity_agent_ui/build/
+identity_agent_ui/.dart_tool/
+identity_agent_ui/.packages
+identity_agent_ui/.pub-cache/
+identity_agent_ui/.pub/
+*.dart.js
+*.dart.js.deps
+*.dart.js.map
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+
+# Environment
+.env
+.env*.local
+
+# Replit
+.cache/
+.config/

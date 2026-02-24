@@ -1,0 +1,89 @@
+Build Go Core as Android AAR via gomobile
+2s
+
+
+
+Show command
+--- Go module info ---
+identity-agent-core
+github.com/davecgh/go-spew v1.1.1
+github.com/go-chi/chi/v5 v5.2.5
+github.com/go-chi/cors v1.2.2
+github.com/go-stack/stack v1.8.1
+--- Building Go Core for Android via gomobile bind ---
+unable to import bind: no Go package in golang.org/x/mobile/bind
+unable to import bind: no Go package in golang.org/x/mobile/bind
+"golang.org/x/mobile/bind" is not found; run go get golang.org/x/mobile/bind: no Go package in golang.org/x/mobile/bind
+gomobile: /home/builder/go/bin/gobind -lang=go,java -outdir=/tmp/gomobile-work-584434608 identity-agent-core/mobilecore failed: exit status 1
+
+
+
+Build failed :|
+Step 6 script `Build Go Core as Android AAR via gomobile` exited with status code 1
+--- Go module info ---
+identity-agent-core
+github.com/davecgh/go-spew v1.1.1
+github.com/go-chi/chi/v5 v5.2.5
+github.com/go-chi/cors v1.2.2
+github.com/go-stack/stack v1.8.1
+--- Building Go Core for Android via gomobile bind ---
+unable to import bind: no Go package in golang.org/x/mobile/bind
+unable to import bind: no Go package in golang.org/x/mobile/bind
+"golang.org/x/mobile/bind" is not found; run go get golang.org/x/mobile/bind: no Go package in golang.org/x/mobile/bind
+gomobile: /home/builder/go/bin/gobind -lang=go,java -outdir=/tmp/gomobile-work-584434608 identity-agent-core/mobilecore failed: exit status 1
+
+
+
+Build failed :|
+Step 6 script `Build Go Core as Android AAR via gomobile` exited with status code 1
+
+identity-bot
+identity-bot
+github.com/LF-Decentralized-Trust-labs/identity-bot.git
+
+
+Start new build
+Build overview
+Click on the build steps for details.
+Preparing build machine
+16s
+Fetching app sources
+2s
+Installing SDKs
+39s
+Install Rust toolchain and Android targets
+50s
+Install Go toolchain and gomobile
+17s
+Configure Android NDK for Rust and Go
+< 1s
+Install FRB codegen
+< 1s
+Set up local properties
+< 1s
+Get Flutter packages
+< 1s
+Run FRB codegen to generate Dart and Rust bindings
+< 1s
+Build Rust library for Android via cargo-ndk
+< 1s
+Build debug APK
+< 1s
+Build release APK
+< 1s
+Publishing
+< 1s
+Cleaning up
+< 1s
+Step 6 script `Build Go Core as Android AAR via gomobile` exited with status code 1
+
+Applications
+Builds
+OTA Updates
+App Preview
+Teams
+Billing
+
+
+Log out
+
