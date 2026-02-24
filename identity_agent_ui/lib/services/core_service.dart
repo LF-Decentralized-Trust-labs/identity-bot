@@ -126,6 +126,53 @@ class OobiResponse {
   }
 }
 
+class JCardResponse {
+  final String fullName;
+  final String familyName;
+  final String givenName;
+  final String org;
+  final String title;
+  final String email;
+  final String tel;
+  final String note;
+  final String uid;
+  final String xKeriAid;
+  final String xKeriOobi;
+  final String xKeriRole;
+
+  JCardResponse({
+    required this.fullName,
+    this.familyName = '',
+    this.givenName = '',
+    this.org = '',
+    this.title = '',
+    this.email = '',
+    this.tel = '',
+    this.note = '',
+    this.uid = '',
+    this.xKeriAid = '',
+    this.xKeriOobi = '',
+    this.xKeriRole = '',
+  });
+
+  factory JCardResponse.fromJson(Map<String, dynamic> json) {
+    return JCardResponse(
+      fullName: json['fn'] ?? '',
+      familyName: json['family_name'] ?? '',
+      givenName: json['given_name'] ?? '',
+      org: json['org'] ?? '',
+      title: json['title'] ?? '',
+      email: json['email'] ?? '',
+      tel: json['tel'] ?? '',
+      note: json['note'] ?? '',
+      uid: json['uid'] ?? '',
+      xKeriAid: json['x-keri-aid'] ?? '',
+      xKeriOobi: json['x-keri-oobi'] ?? '',
+      xKeriRole: json['x-keri-role'] ?? '',
+    );
+  }
+}
+
 class ContactResponse {
   final String aid;
   final String alias;
@@ -133,8 +180,32 @@ class ContactResponse {
   final String oobiUrl;
   final bool verified;
   final String discoveredAt;
+  final String status;
+  final String role;
+  final JCardResponse? jcard;
 
-  ContactResponse({required this.aid, required this.alias, required this.publicKey, required this.oobiUrl, required this.verified, required this.discoveredAt});
+  ContactResponse({
+    required this.aid,
+    required this.alias,
+    required this.publicKey,
+    required this.oobiUrl,
+    required this.verified,
+    required this.discoveredAt,
+    this.status = '',
+    this.role = 'agent',
+    this.jcard,
+  });
+
+  bool get isMutual => status == 'mutual';
+  bool get isPendingInbound => status == 'pending_inbound';
+  bool get isPendingOutbound => status == 'pending_outbound';
+  bool get isRejected => status == 'rejected';
+
+  String get displayName {
+    if (jcard != null && jcard!.fullName.isNotEmpty) return jcard!.fullName;
+    if (alias.isNotEmpty) return alias;
+    return aid.length > 12 ? '${aid.substring(0, 12)}...' : aid;
+  }
 
   factory ContactResponse.fromJson(Map<String, dynamic> json) {
     return ContactResponse(
@@ -144,6 +215,9 @@ class ContactResponse {
       oobiUrl: json['oobi_url'] ?? '',
       verified: json['verified'] ?? false,
       discoveredAt: json['discovered_at'] ?? '',
+      status: json['status'] ?? '',
+      role: json['role'] ?? 'agent',
+      jcard: json['jcard'] != null ? JCardResponse.fromJson(json['jcard']) : null,
     );
   }
 }
@@ -157,6 +231,20 @@ class ContactsListResponse {
   factory ContactsListResponse.fromJson(Map<String, dynamic> json) {
     return ContactsListResponse(
       contacts: (json['contacts'] as List<dynamic>?)?.map((c) => ContactResponse.fromJson(c)).toList() ?? [],
+      count: json['count'] ?? 0,
+    );
+  }
+}
+
+class AlertsResponse {
+  final List<ContactResponse> alerts;
+  final int count;
+
+  AlertsResponse({required this.alerts, required this.count});
+
+  factory AlertsResponse.fromJson(Map<String, dynamic> json) {
+    return AlertsResponse(
+      alerts: (json['alerts'] as List<dynamic>?)?.map((c) => ContactResponse.fromJson(c)).toList() ?? [],
       count: json['count'] ?? 0,
     );
   }
@@ -270,6 +358,33 @@ class CoreService {
     final response = await _client.delete(Uri.parse('$baseUrl/api/contacts/$aid'));
     if (response.statusCode != 204) {
       throw Exception('Delete contact failed: ${response.statusCode}');
+    }
+  }
+
+  Future<ContactResponse> acceptContact(String aid) async {
+    final response = await _client.post(Uri.parse('$baseUrl/api/contacts/$aid/accept'));
+    if (response.statusCode == 200) {
+      return ContactResponse.fromJson(jsonDecode(response.body));
+    } else {
+      final body = jsonDecode(response.body);
+      throw Exception(body['error'] ?? 'Accept contact failed: ${response.statusCode}');
+    }
+  }
+
+  Future<void> rejectContact(String aid) async {
+    final response = await _client.post(Uri.parse('$baseUrl/api/contacts/$aid/reject'));
+    if (response.statusCode != 200) {
+      final body = jsonDecode(response.body);
+      throw Exception(body['error'] ?? 'Reject contact failed: ${response.statusCode}');
+    }
+  }
+
+  Future<AlertsResponse> getAlerts() async {
+    final response = await _client.get(Uri.parse('$baseUrl/api/alerts'));
+    if (response.statusCode == 200) {
+      return AlertsResponse.fromJson(jsonDecode(response.body));
+    } else {
+      throw Exception('Alerts request failed: ${response.statusCode}');
     }
   }
 
