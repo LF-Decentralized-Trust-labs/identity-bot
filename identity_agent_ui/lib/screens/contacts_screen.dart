@@ -525,21 +525,68 @@ class _ContactsScreenState extends State<ContactsScreen> {
   }
 
   Widget _buildContactsList() {
+    final mutualCount = _contacts.where((c) => c.isMutual).length;
+    final pendingCount = _contacts.where((c) => c.isPendingOutbound || c.isPendingInbound).length;
+
     return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const SizedBox(height: 8),
-          Text(
-            '${_contacts.length} CONTACT${_contacts.length == 1 ? '' : 'S'}',
-            style: const TextStyle(
-              color: AppColors.textMuted,
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 1.5,
-              fontFamily: 'monospace',
-            ),
+          Row(
+            children: [
+              Text(
+                '${_contacts.length} CONTACT${_contacts.length == 1 ? '' : 'S'}',
+                style: const TextStyle(
+                  color: AppColors.textMuted,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 1.5,
+                  fontFamily: 'monospace',
+                ),
+              ),
+              if (mutualCount > 0) ...[
+                const SizedBox(width: 10),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: AppColors.coreActive.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    '$mutualCount MUTUAL',
+                    style: const TextStyle(
+                      color: AppColors.coreActive,
+                      fontSize: 9,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.5,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ),
+              ],
+              if (pendingCount > 0) ...[
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: AppColors.corePending.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    '$pendingCount PENDING',
+                    style: const TextStyle(
+                      color: AppColors.corePending,
+                      fontSize: 9,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.5,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ),
+              ],
+            ],
           ),
           const SizedBox(height: 12),
           ..._contacts.map((contact) => Padding(
@@ -552,49 +599,96 @@ class _ContactsScreenState extends State<ContactsScreen> {
     );
   }
 
+  Color _statusColor(ContactResponse contact) {
+    if (contact.isMutual) return AppColors.coreActive;
+    if (contact.isPendingInbound || contact.isPendingOutbound) return AppColors.corePending;
+    if (contact.isRejected) return AppColors.coreInactive;
+    return AppColors.textMuted;
+  }
+
+  String _statusLabel(ContactResponse contact) {
+    if (contact.isMutual) return 'MUTUAL';
+    if (contact.isPendingOutbound) return 'PENDING';
+    if (contact.isPendingInbound) return 'INCOMING';
+    if (contact.isRejected) return 'REJECTED';
+    return contact.verified ? 'VERIFIED' : 'UNVERIFIED';
+  }
+
+  IconData _statusIcon(ContactResponse contact) {
+    if (contact.isMutual) return Icons.handshake_outlined;
+    if (contact.isPendingOutbound) return Icons.call_made;
+    if (contact.isPendingInbound) return Icons.call_received;
+    if (contact.isRejected) return Icons.block;
+    return Icons.person_outlined;
+  }
+
   Widget _buildContactCard(ContactResponse contact) {
     final aidDisplay = contact.aid.length > 16
         ? contact.aid.substring(0, 16)
         : contact.aid;
+    final statusColor = _statusColor(contact);
+    final borderColor = contact.isMutual
+        ? AppColors.coreActive.withOpacity(0.25)
+        : AppColors.border;
 
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.border, width: 1),
+        border: Border.all(color: borderColor, width: 1),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: statusColor.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(_statusIcon(contact), color: statusColor, size: 18),
+              ),
+              const SizedBox(width: 10),
               Expanded(
-                child: Text(
-                  aidDisplay,
-                  style: const TextStyle(
-                    color: AppColors.accent,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    fontFamily: 'monospace',
-                    letterSpacing: 0.5,
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      contact.displayName,
+                      style: const TextStyle(
+                        color: AppColors.textPrimary,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      aidDisplay,
+                      style: const TextStyle(
+                        color: AppColors.accent,
+                        fontSize: 10,
+                        fontFamily: 'monospace',
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ],
                 ),
               ),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
-                  color: contact.verified
-                      ? AppColors.coreActive.withOpacity(0.12)
-                      : AppColors.corePending.withOpacity(0.12),
+                  color: statusColor.withOpacity(0.12),
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Text(
-                  contact.verified ? 'VERIFIED' : 'UNVERIFIED',
+                  _statusLabel(contact),
                   style: TextStyle(
-                    color: contact.verified
-                        ? AppColors.coreActive
-                        : AppColors.corePending,
+                    color: statusColor,
                     fontSize: 9,
                     fontWeight: FontWeight.w700,
                     letterSpacing: 1.0,
@@ -617,21 +711,27 @@ class _ContactsScreenState extends State<ContactsScreen> {
               ),
             ],
           ),
-          if (contact.alias.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Text(
-              contact.alias,
-              style: const TextStyle(
-                color: AppColors.textPrimary,
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                fontFamily: 'monospace',
-              ),
-            ),
-          ],
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
           Row(
             children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: AppColors.accent.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(3),
+                ),
+                child: Text(
+                  contact.role.toUpperCase(),
+                  style: const TextStyle(
+                    color: AppColors.accent,
+                    fontSize: 9,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 1.0,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+              ),
+              const Spacer(),
               const Icon(Icons.access_time, color: AppColors.textMuted, size: 12),
               const SizedBox(width: 6),
               Text(
@@ -646,6 +746,81 @@ class _ContactsScreenState extends State<ContactsScreen> {
               ),
             ],
           ),
+          if (contact.isPendingInbound) ...[
+            const SizedBox(height: 10),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                InkWell(
+                  onTap: () async {
+                    try {
+                      await _coreService.rejectContact(contact.aid);
+                      _loadContacts();
+                    } catch (e) {
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text(e.toString()), backgroundColor: AppColors.error),
+                        );
+                      }
+                    }
+                  },
+                  borderRadius: BorderRadius.circular(6),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: AppColors.coreInactive.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: AppColors.coreInactive.withOpacity(0.3)),
+                    ),
+                    child: const Text(
+                      'REJECT',
+                      style: TextStyle(
+                        color: AppColors.coreInactive,
+                        fontSize: 9,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 1.0,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                InkWell(
+                  onTap: () async {
+                    try {
+                      await _coreService.acceptContact(contact.aid);
+                      _loadContacts();
+                    } catch (e) {
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text(e.toString()), backgroundColor: AppColors.error),
+                        );
+                      }
+                    }
+                  },
+                  borderRadius: BorderRadius.circular(6),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: AppColors.coreActive.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: AppColors.coreActive.withOpacity(0.3)),
+                    ),
+                    child: const Text(
+                      'ACCEPT',
+                      style: TextStyle(
+                        color: AppColors.coreActive,
+                        fontSize: 9,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 1.0,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
