@@ -13,7 +13,7 @@ echo "      Workspace: $WORKSPACE"
 echo ""
 echo "[1/3] Python dependencies..."
 cd "$WORKSPACE"
-pip install -q flask 2>/dev/null || pip3 install -q flask 2>/dev/null || echo "      Warning: flask install skipped"
+pip install -q flask keri 2>/dev/null || pip3 install -q flask keri 2>/dev/null || echo "      Warning: pip install skipped"
 echo "      Python dependencies ready."
 
 echo ""

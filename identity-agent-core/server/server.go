@@ -91,9 +91,8 @@ func New(cfg Config) (*CoreServer, error) {
         if cfg.EnableKeriDriver {
                 s.KeriDriver = drivers.NewKeriDriver()
                 if err := s.KeriDriver.Start(); err != nil {
-                        cancel()
-                        dataStore.Close()
-                        return nil, fmt.Errorf("failed to start KERI driver: %w", err)
+                        log.Printf("[identity-agent-core] KERI driver failed to start (non-fatal): %v", err)
+                        s.KeriDriver = nil
                 }
         }
 
