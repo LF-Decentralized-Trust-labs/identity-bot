@@ -74,3 +74,16 @@ The system employs a standardized topology model based on three topological stat
 -   `shared_preferences`: Onboarding state persistence.
 -   `mobile_scanner`: QR code scanning.
 -   `qr_flutter`: QR code generation.
+
+## Specification Documents
+
+-   `docs/spec-backend-migration.md`: Backend migration specification (mobile-to-desktop). Living document tracking all data and settings that must transfer during migration, including tunnel settings, identity data, contacts, and provider continuity requirements. New features should append their migration requirements to the "Future Additions" table.
+
+## Grape ID Tunnel Integration
+
+The Grape ID tunnel provider uses a Chisel reverse proxy to expose the agent's OOBI endpoints via a permanent public URL (e.g., `https://grapeid.org/alice`). Works on both desktop and mobile platforms via the Go Core tunnel module.
+
+-   **Connection flow:** Agent claims a name via `POST /claim-name` on the hub → receives allocated port and tunnel path → Chisel client connects via `wss://grapeid.org/tunnel` → public traffic at `grapeid.org/<name>/*` routes to the local agent.
+-   **Mobile reconnection:** On mobile, the tunnel drops when the app closes or the phone sleeps. When the app reopens, Go Core restarts, re-claims the same name (names persist in the hub's database), and re-establishes the tunnel. The public URL remains reserved but returns 502 while disconnected.
+-   **UI requirement (pending):** Dashboard needs a tunnel status indicator — connected (green), disconnected (amber), error (red) — so the user can confirm their agent is reachable.
+-   **Migration:** Tunnel settings (provider, domain, extension) must transfer during backend migration so the same URL continues working on the new device. See `docs/spec-backend-migration.md`.
