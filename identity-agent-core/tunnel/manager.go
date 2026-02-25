@@ -126,6 +126,13 @@ func (m *Manager) createProvider() Provider {
 		}
 		return NewNgrokProvider(authToken)
 
+	case ProviderGrapeID:
+		if m.config.TunnelExtension == "" {
+			log.Println("[tunnel] WARNING: grapeid selected but no tunnel extension provided")
+			return NewNoneProvider()
+		}
+		return NewGrapeIDProvider(m.config)
+
 	case ProviderNone:
 		return NewNoneProvider()
 

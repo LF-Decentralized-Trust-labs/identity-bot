@@ -487,10 +487,24 @@ class CoreService {
     }
   }
 
+  Future<bool> checkGrapeIdName(String domain, String name) async {
+    final domainUrl = domain.isNotEmpty ? domain : 'grapeid.org';
+    final scheme = domainUrl.contains('localhost') ? 'http' : 'https';
+    final url = Uri.parse('$scheme://$domainUrl/check-name?name=$name');
+    final response = await http.get(url);
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      return data['available'] == true;
+    }
+    return false;
+  }
+
   Future<void> saveTunnelSettings({
     required String provider,
     String? ngrokAuthToken,
     String? cloudflareTunnelToken,
+    String? tunnelDomain,
+    String? tunnelExtension,
   }) async {
     final response = await _client.put(
       Uri.parse('$baseUrl/api/settings/tunnel'),
@@ -499,6 +513,8 @@ class CoreService {
         'provider': provider,
         if (ngrokAuthToken != null) 'ngrok_auth_token': ngrokAuthToken,
         if (cloudflareTunnelToken != null) 'cloudflare_tunnel_token': cloudflareTunnelToken,
+        if (tunnelDomain != null) 'tunnel_domain': tunnelDomain,
+        if (tunnelExtension != null) 'tunnel_extension': tunnelExtension,
       }),
     );
     if (response.statusCode != 200) {

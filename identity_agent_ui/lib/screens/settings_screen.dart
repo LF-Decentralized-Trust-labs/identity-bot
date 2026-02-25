@@ -27,6 +27,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late final CoreService _coreService = CoreService(baseUrl: widget.serverUrl);
   final TextEditingController _ngrokTokenController = TextEditingController();
   final TextEditingController _cfTokenController = TextEditingController();
+  final TextEditingController _grapeIdDomainController = TextEditingController(text: 'grapeid.org');
+  final TextEditingController _grapeIdExtController = TextEditingController();
 
   String _selectedProvider = 'none';
   bool _loading = true;
@@ -37,6 +39,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _cloudflaredAvailable = false;
   bool _hasNgrokToken = false;
   bool _hasCfToken = false;
+  
+  bool _isCheckingGrapeId = false;
+  bool? _isGrapeIdAvailable;
+  String? _grapeIdCheckError;
 
   @override
   void initState() {
@@ -58,6 +64,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _cloudflaredAvailable = settings['cloudflared_available'] == true;
         _hasNgrokToken = settings['has_ngrok_token'] == true;
         _hasCfToken = settings['has_cloudflare_token'] == true;
+        
+        if (settings['tunnel_domain'] != null && settings['tunnel_domain'].toString().isNotEmpty) {
+          _grapeIdDomainController.text = settings['tunnel_domain'].toString();
+        }
+        if (settings['tunnel_extension'] != null) {
+          _grapeIdExtController.text = settings['tunnel_extension'].toString();
+        }
         _loading = false;
       });
     } catch (e) {
@@ -79,6 +92,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         provider: _selectedProvider,
         ngrokAuthToken: _ngrokTokenController.text.isNotEmpty ? _ngrokTokenController.text : null,
         cloudflareTunnelToken: _cfTokenController.text.isNotEmpty ? _cfTokenController.text : null,
+        tunnelDomain: _grapeIdDomainController.text.trim().isNotEmpty ? _grapeIdDomainController.text.trim() : null,
+        tunnelExtension: _grapeIdExtController.text.trim().isNotEmpty ? _grapeIdExtController.text.trim() : null,
       );
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -136,6 +151,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void dispose() {
     _ngrokTokenController.dispose();
     _cfTokenController.dispose();
+    _grapeIdDomainController.dispose();
+    _grapeIdExtController.dispose();
     _coreService.dispose();
     super.dispose();
   }
@@ -179,6 +196,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   const SizedBox(height: 16),
                   _buildProviderSelector(),
                   const SizedBox(height: 16),
+                  if (_selectedProvider == 'grapeid') _buildGrapeIdConfig(),
                   if (_selectedProvider == 'ngrok') _buildNgrokConfig(),
                   if (_selectedProvider == 'cloudflare') _buildCloudflareConfig(),
                   const SizedBox(height: 16),
@@ -429,6 +447,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(height: 8),
           _buildProviderOption(
+            'grapeid',
+            'GRAPE ID',
+            'Custom permanent URLs via GrapeID Tunneling Hub (e.g. grapeid.org/alice).',
+            Icons.vpn_key_outlined,
+            enabled: true,
+          ),
+          const SizedBox(height: 8),
+          _buildProviderOption(
             'ngrok',
             'NGROK',
             'In-memory tunnel. Works on desktop & mobile. Requires auth token.',
@@ -535,6 +561,177 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Future<void> _checkGrapeIdAvailability() async {
+    final domain = _grapeIdDomainController.text.trim();
+    final ext = _grapeIdExtController.text.trim();
+    
+    if (ext.isEmpty) {
+      setState(() {
+        _isGrapeIdAvailable = null;
+        _grapeIdCheckError = null;
+      });
+      return;
+    }
+
+    setState(() {
+      _isCheckingGrapeId = true;
+      _grapeIdCheckError = null;
+    });
+
+    try {
+      final available = await _coreService.checkGrapeIdName(domain, ext);
+      setState(() {
+        _isCheckingGrapeId = false;
+        _isGrapeIdAvailable = available;
+      });
+    } catch (e) {
+      setState(() {
+        _isCheckingGrapeId = false;
+        _isGrapeIdAvailable = null;
+        _grapeIdCheckError = 'Check failed: ${e.toString()}';
+      });
+    }
+  }
+
+  Widget _buildGrapeIdConfig() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border, width: 1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'GRAPE ID TUNNEL CONFIGURATION',
+            style: TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 1.5,
+              fontFamily: 'monospace',
+            ),
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'DOMAIN',
+            style: TextStyle(
+              color: AppColors.textMuted,
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 1.0,
+              fontFamily: 'monospace',
+            ),
+          ),
+          const SizedBox(height: 6),
+          TextField(
+            controller: _grapeIdDomainController,
+            style: const TextStyle(color: AppColors.textPrimary, fontSize: 12, fontFamily: 'monospace'),
+            decoration: InputDecoration(
+              hintText: 'e.g. grapeid.org, myagent.com...',
+              hintStyle: const TextStyle(color: AppColors.textMuted, fontSize: 12),
+              filled: true,
+              fillColor: AppColors.primary,
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppColors.border)),
+              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppColors.border)),
+              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppColors.accent)),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            ),
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'EXTENSION (e.g. alice, cool-dragon)',
+            style: TextStyle(
+              color: AppColors.textMuted,
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 1.0,
+              fontFamily: 'monospace',
+            ),
+          ),
+          const SizedBox(height: 6),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _grapeIdExtController,
+                  style: const TextStyle(color: AppColors.textPrimary, fontSize: 12, fontFamily: 'monospace'),
+                  decoration: InputDecoration(
+                    prefixText: '/',
+                    prefixStyle: const TextStyle(color: AppColors.textMuted, fontSize: 12, fontFamily: 'monospace'),
+                    hintText: 'your-preferred-name',
+                    hintStyle: const TextStyle(color: AppColors.textMuted, fontSize: 12),
+                    filled: true,
+                    fillColor: AppColors.primary,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppColors.border)),
+                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppColors.border)),
+                    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppColors.accent)),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              OutlinedButton(
+                onPressed: _isCheckingGrapeId ? null : _checkGrapeIdAvailability,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.accent,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  side: const BorderSide(color: AppColors.border),
+                ),
+                child: _isCheckingGrapeId
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.accent))
+                    : const Text(
+                        'CHECK AVAILABILITY',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 1.0,
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+              ),
+            ],
+          ),
+          if (_isGrapeIdAvailable != null || _grapeIdCheckError != null) ...[
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                if (_grapeIdCheckError != null) ...[
+                  const Icon(Icons.error_outline, size: 14, color: AppColors.error),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      _grapeIdCheckError!,
+                      style: const TextStyle(color: AppColors.error, fontSize: 10, fontFamily: 'monospace'),
+                    ),
+                  ),
+                ] else if (_isGrapeIdAvailable == true) ...[
+                  const Icon(Icons.check_circle_outline, size: 14, color: AppColors.coreActive),
+                  const SizedBox(width: 6),
+                  const Text(
+                    'This name is available!',
+                    style: TextStyle(color: AppColors.coreActive, fontSize: 10, fontFamily: 'monospace'),
+                  ),
+                ] else if (_isGrapeIdAvailable == false) ...[
+                  const Icon(Icons.cancel_outlined, size: 14, color: AppColors.error),
+                  const SizedBox(width: 6),
+                  const Text(
+                    'This name is already taken. Please choose another.',
+                    style: TextStyle(color: AppColors.error, fontSize: 10, fontFamily: 'monospace'),
+                  ),
+                ],
+              ],
+            ),
+          ],
+        ],
       ),
     );
   }
@@ -792,6 +989,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           SizedBox(height: 8),
           Text(
             'Tunnels create a public HTTPS URL so your OOBI endpoints are reachable from anywhere. This lets other agents discover and verify your identity.\n\n'
+            'Grape ID: Uses a dedicated Chisel/Caddy tunneling hub assigned to a custom URL path (e.g. grapeid.org/alice).\n\n'
             'Cloudflare: Free quick tunnels or authenticated tunnels via cloudflared binary (desktop only).\n\n'
             'ngrok: Pure in-memory tunnel via Go library. Works on desktop and mobile. Requires a free ngrok account.\n\n'
             'None: No tunnel. OOBI URLs use the PUBLIC_URL env var or the request host header.',
