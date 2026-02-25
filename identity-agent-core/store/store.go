@@ -59,6 +59,8 @@ type SettingsData struct {
         TunnelProvider        string `json:"tunnel_provider"`
         NgrokAuthToken        string `json:"ngrok_auth_token,omitempty"`
         CloudflareTunnelToken string `json:"cloudflare_tunnel_token,omitempty"`
+        TunnelDomain          string `json:"tunnel_domain,omitempty"`
+        TunnelExtension       string `json:"tunnel_extension,omitempty"`
 }
 
 type PendingRequest struct {

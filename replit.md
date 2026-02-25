@@ -31,7 +31,7 @@ The system employs a standardized topology model based on three topological stat
 -   **Python KERI Driver (`drivers/keri-core/`):** The `keripy` (v1.1.17) engine for desktop KERI operations.
 -   **Flutter Frontend (`identity_agent_ui/`):** Cross-platform UI featuring a dark cyberpunk theme, multi-step onboarding, BIP-39 mnemonic generation, contact management, OOBI sharing, and a mode-aware dashboard.
 -   **Rust Bridge (`identity_agent_ui/rust/`):** Implements the mobile KERI engine (`keriox/keri-core`) via `flutter_rust_bridge` for Dart ↔ Rust FFI, providing core KERI crypto functions.
--   **Tunnel Module (`identity-agent-core/tunnel/`):** Manages multi-provider tunnels (e.g., Cloudflare, ngrok) for public HTTPS URL acquisition.
+-   **Tunnel Module (`identity-agent-core/tunnel/`):** Manages multi-provider tunnels (Cloudflare, ngrok, Grape ID) for public HTTPS URL acquisition.
 
 ### Key Design Decisions
 
@@ -50,6 +50,7 @@ The system employs a standardized topology model based on three topological stat
 -   `github.com/go-chi/chi/v5`: HTTP router.
 -   `github.com/go-chi/cors`: CORS middleware.
 -   `golang.ngrok.com/ngrok`: In-memory tunnel client.
+-   `github.com/jpillora/chisel` v1.9.1: Chisel client for Grape ID reverse proxy tunnels.
 -   `cloudflared`: System dependency for Cloudflare desktop tunnels.
 
 ### KERI Driver (Python, desktop only)

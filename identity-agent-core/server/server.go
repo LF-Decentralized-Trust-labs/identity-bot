@@ -1464,6 +1464,8 @@ func (s *CoreServer) loadTunnelConfig() tunnel.Config {
                         Provider:              tunnel.ProviderType(saved.TunnelProvider),
                         NgrokAuthToken:        saved.NgrokAuthToken,
                         CloudflareTunnelToken: saved.CloudflareTunnelToken,
+                        TunnelDomain:          saved.TunnelDomain,
+                        TunnelExtension:       saved.TunnelExtension,
                 }
         }
         return tunnel.DefaultConfig()
@@ -1478,6 +1480,8 @@ func (s *CoreServer) handleGetTunnelSettings(w http.ResponseWriter, r *http.Requ
                 "status":   status,
                 "has_ngrok_token":      cfg.NgrokAuthToken != "",
                 "has_cloudflare_token": cfg.CloudflareTunnelToken != "",
+                "tunnel_domain":        cfg.TunnelDomain,
+                "tunnel_extension":     cfg.TunnelExtension,
                 "cloudflared_available": func() bool {
                         _, err := tunnel.LookupCloudflared()
                         return err == nil
@@ -1493,6 +1497,8 @@ func (s *CoreServer) handlePutTunnelSettings(w http.ResponseWriter, r *http.Requ
                 Provider              string `json:"provider"`
                 NgrokAuthToken        string `json:"ngrok_auth_token,omitempty"`
                 CloudflareTunnelToken string `json:"cloudflare_tunnel_token,omitempty"`
+                TunnelDomain          string `json:"tunnel_domain,omitempty"`
+                TunnelExtension       string `json:"tunnel_extension,omitempty"`
         }
 
         if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -1502,9 +1508,9 @@ func (s *CoreServer) handlePutTunnelSettings(w http.ResponseWriter, r *http.Requ
 
         provider := tunnel.ProviderType(req.Provider)
         switch provider {
-        case tunnel.ProviderCloudflare, tunnel.ProviderNgrok, tunnel.ProviderNone:
+        case tunnel.ProviderCloudflare, tunnel.ProviderNgrok, tunnel.ProviderGrapeID, tunnel.ProviderNone:
         default:
-                writeError(w, http.StatusBadRequest, "Invalid provider", fmt.Sprintf("Provider must be one of: cloudflare, ngrok, none. Got: %s", req.Provider))
+                writeError(w, http.StatusBadRequest, "Invalid provider", fmt.Sprintf("Provider must be one of: cloudflare, ngrok, grapeid, none. Got: %s", req.Provider))
                 return
         }
 
@@ -1512,6 +1518,8 @@ func (s *CoreServer) handlePutTunnelSettings(w http.ResponseWriter, r *http.Requ
                 TunnelProvider:        req.Provider,
                 NgrokAuthToken:        req.NgrokAuthToken,
                 CloudflareTunnelToken: req.CloudflareTunnelToken,
+                TunnelDomain:          req.TunnelDomain,
+                TunnelExtension:       req.TunnelExtension,
         }
 
         if err := s.DataStore.SaveSettings(settings); err != nil {

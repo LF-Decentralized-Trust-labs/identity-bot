@@ -42,7 +42,6 @@ func (p *GrapeIDProvider) Start(ctx context.Context, localPort int) error {
 	if domain == "" {
 		domain = "grapeid.org"
 	}
-	// Default to WSS unless explicitly localhost for local testing
 	scheme := "https"
 	wsScheme := "wss"
 	if strings.Contains(domain, "localhost") {
@@ -55,19 +54,28 @@ func (p *GrapeIDProvider) Start(ctx context.Context, localPort int) error {
 		return fmt.Errorf("grapeid tunnel extension is required")
 	}
 
-	// 1. Claim the name
 	claimURL := fmt.Sprintf("%s://%s/claim-name", scheme, domain)
 	claimBody, _ := json.Marshal(map[string]string{"name": extension})
-	resp, err := http.Post(claimURL, "application/json", bytes.NewBuffer(claimBody))
+
+	httpClient := &http.Client{Timeout: 15 * time.Second}
+	resp, err := httpClient.Post(claimURL, "application/json", bytes.NewBuffer(claimBody))
 	if err != nil {
-		return fmt.Errorf("failed to reach GrapeID hub: %v", err)
+		return fmt.Errorf("failed to reach GrapeID hub at %s: %v", domain, err)
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode == 525 {
+		return fmt.Errorf("GrapeID hub at %s returned SSL error (525). The server may have an SSL misconfiguration — contact the hub administrator", domain)
+	}
 
 	if resp.StatusCode != http.StatusOK {
 		var errResp map[string]interface{}
 		json.NewDecoder(resp.Body).Decode(&errResp)
-		return fmt.Errorf("failed to claim name '%s': %v", extension, errResp["error"])
+		errMsg := errResp["error"]
+		if errMsg == nil {
+			errMsg = fmt.Sprintf("HTTP %d", resp.StatusCode)
+		}
+		return fmt.Errorf("failed to claim name '%s' on %s: %v", extension, domain, errMsg)
 	}
 
 	var claimResp struct {
@@ -83,14 +91,18 @@ func (p *GrapeIDProvider) Start(ctx context.Context, localPort int) error {
 	publicURL := fmt.Sprintf("%s://%s/%s", scheme, domain, claimResp.Name)
 	log.Printf("[tunnel] GrapeID name claimed successfully. Port: %d. Public URL: %s", p.allocPort, publicURL)
 
-	// 2. Start Chisel client
 	serverURL := fmt.Sprintf("%s://%s:8080", wsScheme, domain)
 	remoteStr := fmt.Sprintf("R:%d:localhost:%d", p.allocPort, localPort)
+
+	auth := p.config.TunnelAuth
+	if auth == "" {
+		auth = "user:secret-token"
+	}
 
 	chConfig := &chclient.Config{
 		Server:        serverURL,
 		Remotes:       []string{remoteStr},
-		Auth:          "user:secret-token",
+		Auth:          auth,
 		KeepAlive:     25 * time.Second,
 		MaxRetryCount: -1,
 	}
@@ -107,7 +119,6 @@ func (p *GrapeIDProvider) Start(ctx context.Context, localPort int) error {
 	p.status.URL = publicURL
 	p.status.Error = ""
 
-	// Run Chisel in background
 	go func() {
 		log.Printf("[tunnel] Starting GrapeID tunnel connection to %s", serverURL)
 		err := client.Start(clientCtx)
