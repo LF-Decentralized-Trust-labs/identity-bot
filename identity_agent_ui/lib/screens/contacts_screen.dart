@@ -721,9 +721,10 @@ class _ContactsScreenState extends State<ContactsScreen> {
     final aidDisplay = contact.aid.length > 16
         ? contact.aid.substring(0, 16)
         : contact.aid;
+    final displayName = contact.alias.isNotEmpty ? contact.alias : 'Unknown Contact';
     final statusColor = _statusColor(contact);
-    final borderColor = contact.isMutual
-        ? AppColors.coreActive.withOpacity(0.25)
+    final borderColor = contact.isMutual 
+        ? AppColors.coreActive.withOpacity(0.3) 
         : AppColors.border;
 
     return Container(
@@ -741,29 +742,15 @@ class _ContactsScreenState extends State<ContactsScreen> {
               _buildContactAvatar(contact),
               const SizedBox(width: 10),
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      contact.displayName,
-                      style: const TextStyle(
-                        color: AppColors.textPrimary,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        fontFamily: 'monospace',
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      aidDisplay,
-                      style: const TextStyle(
-                        color: AppColors.accent,
-                        fontSize: 10,
-                        fontFamily: 'monospace',
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                  ],
+                child: Text(
+                  displayName,
+                  style: const TextStyle(
+                    color: AppColors.textPrimary,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    fontFamily: 'monospace',
+                    letterSpacing: 0.5,
+                  ),
                 ),
               ),
               Container(
@@ -798,7 +785,18 @@ class _ContactsScreenState extends State<ContactsScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
+          Text(
+            aidDisplay,
+            style: const TextStyle(
+              color: AppColors.accent,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              fontFamily: 'monospace',
+              letterSpacing: 0.5,
+            ),
+          ),
+          const SizedBox(height: 8),
           Row(
             children: [
               Container(
