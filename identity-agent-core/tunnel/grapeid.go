@@ -77,9 +77,10 @@ func (p *GrapeIDProvider) Start(ctx context.Context, localPort int) error {
         }
 
         var claimResp struct {
-                Name    string `json:"name"`
-                Port    int    `json:"port"`
-                Message string `json:"message"`
+                Name       string `json:"name"`
+                Port       int    `json:"port"`
+                TunnelPath string `json:"tunnel_path"`
+                Message    string `json:"message"`
         }
         if err := json.NewDecoder(resp.Body).Decode(&claimResp); err != nil {
                 return fmt.Errorf("failed to parse claim response: %v", err)
@@ -89,7 +90,11 @@ func (p *GrapeIDProvider) Start(ctx context.Context, localPort int) error {
         publicURL := fmt.Sprintf("%s://%s/%s", scheme, domain, claimResp.Name)
         log.Printf("[tunnel] GrapeID name claimed successfully. Port: %d. Public URL: %s", p.allocPort, publicURL)
 
-        serverURL := fmt.Sprintf("%s://%s:8080", scheme, domain)
+        tunnelPath := claimResp.TunnelPath
+        if tunnelPath == "" {
+                tunnelPath = "/tunnel"
+        }
+        serverURL := fmt.Sprintf("%s://%s%s", scheme, domain, tunnelPath)
         remoteStr := fmt.Sprintf("R:%d:localhost:%d", p.allocPort, localPort)
 
         auth := p.config.TunnelAuth
