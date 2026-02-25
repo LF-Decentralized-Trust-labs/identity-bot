@@ -75,6 +75,27 @@ The system employs a standardized topology model based on three topological stat
 -   `mobile_scanner`: QR code scanning.
 -   `qr_flutter`: QR code generation.
 
+### Onboarding Modes
+
+The app initializes services based on saved mode and platform:
+-   `desktop` — Full Go Core + Python KERI driver
+-   `mobileStandalone` — Go Core (via gomobile) + Rust bridge, both local
+-   `mobileRemoteWithKeys` — Rust bridge (parent AID) + remote server URL
+-   `mobileRemoteWithoutKeys` — Rust bridge (child AID) + remote server URL
+
+### Persistence Layer
+
+Defaults to a file-based JSON store in `./data/` (`identity.json`, `kel.json`, `contacts.json`, `settings.json`, `pending_requests.json`), with a modular `store.Store` interface for swappable backends. On mobile standalone, Go Core stores data in the app's documents directory. Onboarding state (mode, entity type, setup completion) is persisted via SharedPreferences.
+
+## CI/CD (Codemagic)
+
+Defined in `codemagic.yaml`. Builds include:
+-   Go Core compilation via gomobile for Android (.aar) and iOS (.xcframework)
+-   Rust bridge compilation via cargo-ndk (Android) and cargo-lipo (iOS)
+-   Flutter build for all platforms (Android, iOS, macOS, Windows, Linux, Web)
+-   Gomobile outputs placed in `identity_agent_ui/android/app/libs/mobilecore.aar` and `identity_agent_ui/ios/Frameworks/Mobilecore.xcframework`
+-   iOS: Mobilecore.framework extracted from xcframework to `ios/Frameworks/Mobilecore/` before pod install; integrated via CocoaPods podspec (vendored_frameworks)
+
 ## Specification Documents
 
 -   `docs/spec-backend-migration.md`: Backend migration specification (mobile-to-desktop). Living document tracking all data and settings that must transfer during migration, including tunnel settings, identity data, contacts, and provider continuity requirements. New features should append their migration requirements to the "Future Additions" table.

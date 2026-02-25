@@ -174,11 +174,6 @@ class _AgentRouterState extends State<AgentRouter> {
   Future<bool> _checkIdentityExists() async {
     if (_keriService == null) return false;
 
-    if (_keriService!.environment == AgentEnvironment.mobileStandalone &&
-        _selectedMode == AgentMode.createNew) {
-      return false;
-    }
-
     try {
       String baseUrl;
       if (_keriService is MobileStandaloneKeriService) {
