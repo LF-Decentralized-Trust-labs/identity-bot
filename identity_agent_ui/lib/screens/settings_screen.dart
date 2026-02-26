@@ -4,6 +4,7 @@ import '../theme/app_theme.dart';
 import '../services/core_service.dart';
 import '../services/keri_service.dart';
 import '../services/preferences_service.dart';
+import '../main.dart';
 
 class SettingsScreen extends StatefulWidget {
   final KeriService keriService;
