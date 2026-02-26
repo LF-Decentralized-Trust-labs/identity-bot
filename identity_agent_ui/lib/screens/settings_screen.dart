@@ -205,6 +205,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   _buildActionButtons(),
                   const SizedBox(height: 24),
                   _buildInfoSection(),
+                  const SizedBox(height: 24),
+                  _buildResetSection(),
                 ],
               ),
             ),
@@ -963,6 +965,137 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       ],
     );
+  }
+
+  bool _resetting = false;
+
+  Widget _buildResetSection() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.error.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.error.withOpacity(0.3), width: 1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'DEVELOPER TOOLS',
+            style: TextStyle(
+              color: AppColors.error,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 1.5,
+              fontFamily: 'monospace',
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Reset all data and return to the beginning of the setup process. This will delete your identity, contacts, settings, and all stored events.',
+            style: TextStyle(
+              color: AppColors.textMuted,
+              fontSize: 10,
+              height: 1.5,
+              fontFamily: 'monospace',
+            ),
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: _resetting ? null : _handleReset,
+              icon: _resetting
+                  ? const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Icon(Icons.restart_alt, size: 16),
+              label: Text(
+                _resetting ? 'RESETTING...' : 'RESET IDENTITY',
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.0,
+                  fontFamily: 'monospace',
+                ),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.error,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _handleReset() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: const Text(
+          'Reset Identity?',
+          style: TextStyle(
+            color: AppColors.textPrimary,
+            fontFamily: 'monospace',
+          ),
+        ),
+        content: const Text(
+          'This will permanently delete your identity, contacts, key event log, and all settings. You will need to go through the setup process again.',
+          style: TextStyle(
+            color: AppColors.textSecondary,
+            fontFamily: 'monospace',
+            fontSize: 12,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text(
+              'CANCEL',
+              style: TextStyle(color: AppColors.textMuted, fontFamily: 'monospace'),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text(
+              'RESET',
+              style: TextStyle(color: AppColors.error, fontFamily: 'monospace'),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    setState(() => _resetting = true);
+    try {
+      await _coreService.resetAll();
+      await PreferencesService.clearAll();
+      if (mounted) {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const IdentityAgentApp()),
+          (route) => false,
+        );
+      }
+    } catch (e) {
+      setState(() {
+        _resetting = false;
+        _error = 'Reset failed: $e';
+      });
+    }
   }
 
   Widget _buildInfoSection() {

@@ -249,6 +249,9 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 
                 r.Post("/store/identity", s.handleStoreIdentity)
                 r.Post("/store/event", s.handleStoreEvent)
+
+                r.Delete("/pending-requests/{aid}", s.handleDeletePendingRequest)
+                r.Post("/reset", s.handleReset)
         })
 
         r.Get("/oobi/{aid}", s.handleOobiServe)
@@ -1554,6 +1557,34 @@ func (s *CoreServer) handleTunnelRestart(w http.ResponseWriter, r *http.Request)
 
         w.Header().Set("Content-Type", "application/json")
         json.NewEncoder(w).Encode(status)
+}
+
+func (s *CoreServer) handleDeletePendingRequest(w http.ResponseWriter, r *http.Request) {
+        aid := chi.URLParam(r, "aid")
+        if aid == "" {
+                writeError(w, http.StatusBadRequest, "Missing AID", "")
+                return
+        }
+
+        if err := s.DataStore.DeletePendingRequest(aid); err != nil {
+                writeError(w, http.StatusInternalServerError, "Failed to delete pending request", err.Error())
+                return
+        }
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(map[string]interface{}{"deleted": true, "aid": aid})
+}
+
+func (s *CoreServer) handleReset(w http.ResponseWriter, r *http.Request) {
+        if err := s.DataStore.ResetAll(); err != nil {
+                writeError(w, http.StatusInternalServerError, "Failed to reset", err.Error())
+                return
+        }
+
+        log.Println("[identity-agent-core] All data reset — identity, contacts, settings, KEL cleared")
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(map[string]interface{}{"reset": true})
 }
 
 func writeError(w http.ResponseWriter, status int, errMsg string, details string) {

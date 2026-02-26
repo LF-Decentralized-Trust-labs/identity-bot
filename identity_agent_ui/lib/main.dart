@@ -107,11 +107,16 @@ class _AgentRouterState extends State<AgentRouter> {
 
         final hasIdentity = await _checkIdentityExists();
 
-        setState(() {
-          _step = hasIdentity
-              ? OnboardingStep.dashboard
-              : OnboardingStep.setupWizard;
-        });
+        if (hasIdentity) {
+          setState(() => _step = OnboardingStep.dashboard);
+        } else {
+          await PreferencesService.clearAll();
+          _selectedMode = null;
+          _selectedEntityType = null;
+          _serverUrl = null;
+          debugPrint('[Agent] Setup was marked complete but no identity found — resetting onboarding');
+          setState(() => _step = OnboardingStep.modeSelection);
+        }
       } else {
         setState(() => _step = OnboardingStep.modeSelection);
       }

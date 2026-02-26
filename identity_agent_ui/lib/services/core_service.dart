@@ -542,6 +542,24 @@ class CoreService {
     }
   }
 
+  Future<void> deletePendingRequest(String aid) async {
+    final response = await _client.delete(
+      Uri.parse('$baseUrl/api/pending-requests/${Uri.encodeComponent(aid)}'),
+    );
+    if (response.statusCode != 200) {
+      final body = jsonDecode(response.body);
+      throw Exception(body['error'] ?? 'Failed to delete pending request');
+    }
+  }
+
+  Future<void> resetAll() async {
+    final response = await _client.post(Uri.parse('$baseUrl/api/reset'));
+    if (response.statusCode != 200) {
+      final body = jsonDecode(response.body);
+      throw Exception(body['error'] ?? 'Failed to reset');
+    }
+  }
+
   void dispose() {
     _client.close();
   }

@@ -89,6 +89,7 @@ type Store interface {
         SavePendingRequest(req PendingRequest) error
         GetPendingRequests() ([]PendingRequest, error)
         DeletePendingRequest(aid string) error
+        ResetAll() error
         Close() error
 }
 
@@ -404,6 +405,20 @@ func (s *FileStore) loadPendingRequests() ([]PendingRequest, error) {
                 return nil, fmt.Errorf("failed to parse pending requests: %w", err)
         }
         return requests, nil
+}
+
+func (s *FileStore) ResetAll() error {
+        s.mu.Lock()
+        defer s.mu.Unlock()
+
+        files := []string{"identity.json", "kel.json", "contacts.json", "settings.json", "pending_requests.json"}
+        for _, f := range files {
+                path := filepath.Join(s.dir, f)
+                if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+                        return fmt.Errorf("failed to remove %s: %w", f, err)
+                }
+        }
+        return nil
 }
 
 func (s *FileStore) writeJSON(path string, v interface{}) error {

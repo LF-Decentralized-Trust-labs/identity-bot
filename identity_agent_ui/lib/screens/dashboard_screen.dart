@@ -1035,9 +1035,44 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ],
             ),
           ),
+          const SizedBox(height: 10),
+          Align(
+            alignment: Alignment.centerRight,
+            child: InkWell(
+              onTap: () => _dismissPendingRequest(req.aid),
+              borderRadius: BorderRadius.circular(6),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                decoration: BoxDecoration(
+                  color: AppColors.textMuted.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: AppColors.textMuted.withOpacity(0.3)),
+                ),
+                child: const Text(
+                  'DISMISS',
+                  style: TextStyle(
+                    color: AppColors.textMuted,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.0,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );
+  }
+
+  Future<void> _dismissPendingRequest(String aid) async {
+    try {
+      await _coreService.deletePendingRequest(aid);
+      _fetchAlerts();
+    } catch (e) {
+      debugPrint('[Dashboard] Failed to dismiss pending request: $e');
+    }
   }
 
   Widget _buildInfoGrid() {
