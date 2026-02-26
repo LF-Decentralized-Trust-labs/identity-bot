@@ -113,8 +113,19 @@ class OobiResponse {
   final String aid;
   final String publicKey;
   final String baseUrl;
+  final bool tunnelActive;
+  final String tunnelProvider;
+  final String tunnelError;
 
-  OobiResponse({required this.oobiUrl, required this.aid, required this.publicKey, required this.baseUrl});
+  OobiResponse({
+    required this.oobiUrl,
+    required this.aid,
+    required this.publicKey,
+    required this.baseUrl,
+    this.tunnelActive = false,
+    this.tunnelProvider = '',
+    this.tunnelError = '',
+  });
 
   factory OobiResponse.fromJson(Map<String, dynamic> json) {
     return OobiResponse(
@@ -122,6 +133,9 @@ class OobiResponse {
       aid: json['aid'] ?? '',
       publicKey: json['public_key'] ?? '',
       baseUrl: json['base_url'] ?? '',
+      tunnelActive: json['tunnel_active'] == true,
+      tunnelProvider: json['tunnel_provider'] ?? '',
+      tunnelError: json['tunnel_error'] ?? '',
     );
   }
 }

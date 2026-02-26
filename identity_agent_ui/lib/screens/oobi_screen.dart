@@ -201,7 +201,11 @@ class _OobiScreenState extends State<OobiScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SizedBox(height: 24),
+          if (_oobi != null && _oobi!.tunnelProvider.isNotEmpty && _oobi!.tunnelProvider != 'none' && !_oobi!.tunnelActive)
+            _buildTunnelWarningBanner(),
+          if (_oobi != null && _oobi!.tunnelActive)
+            _buildTunnelActiveBanner(),
+          const SizedBox(height: 16),
           _buildOobiUrlCard(),
           const SizedBox(height: 20),
           _buildAidCard(),
@@ -420,6 +424,85 @@ class _OobiScreenState extends State<OobiScreen> {
                   color: Color(0xFF0a0e1a),
                 ),
               ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTunnelWarningBanner() {
+    final provider = _oobi!.tunnelProvider.toUpperCase();
+    final errorDetail = _oobi!.tunnelError.isNotEmpty
+        ? _oobi!.tunnelError
+        : 'The $provider tunnel provider is not connected.';
+    return Container(
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.warning.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.warning.withOpacity(0.4), width: 1),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.warning_amber_rounded, color: AppColors.warning, size: 18),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '$provider TUNNEL UNAVAILABLE',
+                  style: TextStyle(
+                    color: AppColors.warning,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.0,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '$errorDetail\nThe OOBI URL below uses your default server address, which may not be reachable externally.',
+                  style: const TextStyle(
+                    color: AppColors.textSecondary,
+                    fontSize: 10,
+                    fontFamily: 'monospace',
+                    height: 1.4,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTunnelActiveBanner() {
+    final provider = _oobi!.tunnelProvider.toUpperCase();
+    return Container(
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppColors.coreActive.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.coreActive.withOpacity(0.3), width: 1),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.cloud_done, color: AppColors.coreActive, size: 16),
+          const SizedBox(width: 8),
+          Text(
+            '$provider TUNNEL ACTIVE',
+            style: TextStyle(
+              color: AppColors.coreActive,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.0,
+              fontFamily: 'monospace',
             ),
           ),
         ],

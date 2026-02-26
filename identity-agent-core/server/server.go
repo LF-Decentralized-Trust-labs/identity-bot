@@ -874,11 +874,24 @@ func (s *CoreServer) handleOobiGenerate(w http.ResponseWriter, r *http.Request) 
         baseURL := s.getPublicURL(r)
         oobiURL := fmt.Sprintf("%s/oobi/%s", baseURL, identity.AID)
 
+        tunnelActive := false
+        tunnelProvider := ""
+        tunnelError := ""
+        if s.TunnelManager != nil {
+                status := s.TunnelManager.GetStatus()
+                tunnelActive = status.Active
+                tunnelProvider = string(status.Provider)
+                tunnelError = status.Error
+        }
+
         resp := map[string]interface{}{
-                "oobi_url":   oobiURL,
-                "aid":        identity.AID,
-                "public_key": identity.PublicKey,
-                "base_url":   baseURL,
+                "oobi_url":        oobiURL,
+                "aid":             identity.AID,
+                "public_key":      identity.PublicKey,
+                "base_url":        baseURL,
+                "tunnel_active":   tunnelActive,
+                "tunnel_provider": tunnelProvider,
+                "tunnel_error":    tunnelError,
         }
 
         w.Header().Set("Content-Type", "application/json")
