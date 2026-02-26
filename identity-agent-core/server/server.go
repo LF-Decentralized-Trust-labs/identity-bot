@@ -1530,10 +1530,39 @@ func (s *CoreServer) handlePutTunnelSettings(w http.ResponseWriter, r *http.Requ
                 return
         }
 
-        log.Printf("[identity-agent-core] Tunnel settings updated: provider=%s", req.Provider)
+        log.Printf("[identity-agent-core] Tunnel settings updated: provider=%s — restarting tunnel", req.Provider)
+
+        if s.TunnelManager == nil {
+                w.Header().Set("Content-Type", "application/json")
+                json.NewEncoder(w).Encode(map[string]interface{}{
+                        "status":   "saved",
+                        "provider": req.Provider,
+                        "tunnel":   map[string]interface{}{"active": false, "error": "tunnel manager not initialized"},
+                })
+                return
+        }
+
+        cfg := s.loadTunnelConfig()
+        if err := s.TunnelManager.Restart(s.AppCtx, cfg); err != nil {
+                log.Printf("[identity-agent-core] Tunnel restart after settings change failed: %v", err)
+                w.Header().Set("Content-Type", "application/json")
+                json.NewEncoder(w).Encode(map[string]interface{}{
+                        "status":   "saved",
+                        "provider": req.Provider,
+                        "tunnel":   map[string]interface{}{"active": false, "error": err.Error()},
+                })
+                return
+        }
+
+        status := s.TunnelManager.GetStatus()
+        log.Printf("[identity-agent-core] Tunnel restarted after settings change: active=%v url=%s", status.Active, status.URL)
 
         w.Header().Set("Content-Type", "application/json")
-        json.NewEncoder(w).Encode(map[string]string{"status": "saved", "provider": req.Provider})
+        json.NewEncoder(w).Encode(map[string]interface{}{
+                "status":   "saved",
+                "provider": req.Provider,
+                "tunnel":   status,
+        })
 }
 
 func (s *CoreServer) handleTunnelStatus(w http.ResponseWriter, r *http.Request) {

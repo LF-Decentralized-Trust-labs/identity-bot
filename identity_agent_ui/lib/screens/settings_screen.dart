@@ -89,7 +89,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
 
     try {
-      await _coreService.saveTunnelSettings(
+      final result = await _coreService.saveTunnelSettings(
         provider: _selectedProvider,
         ngrokAuthToken: _ngrokTokenController.text.isNotEmpty ? _ngrokTokenController.text : null,
         cloudflareTunnelToken: _cfTokenController.text.isNotEmpty ? _cfTokenController.text : null,
@@ -97,15 +97,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
         tunnelExtension: _grapeIdExtController.text.trim().isNotEmpty ? _grapeIdExtController.text.trim() : null,
       );
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Settings saved', style: TextStyle(fontFamily: 'monospace')),
-          backgroundColor: AppColors.accent.withOpacity(0.9),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-
       await _loadSettings();
+
+      if (mounted) {
+        final tunnel = result['tunnel'];
+        final tunnelActive = tunnel is Map && tunnel['active'] == true;
+        final tunnelUrl = tunnel is Map ? (tunnel['url'] ?? '') : '';
+        final tunnelError = tunnel is Map ? (tunnel['error'] ?? '') : '';
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              tunnelActive
+                  ? 'Saved & tunnel active: $tunnelUrl'
+                  : tunnelError.toString().isNotEmpty
+                      ? 'Saved — tunnel failed: $tunnelError'
+                      : 'Settings saved — tunnel stopped',
+              style: const TextStyle(fontFamily: 'monospace'),
+            ),
+            backgroundColor: tunnelActive
+                ? AppColors.accent.withOpacity(0.9)
+                : AppColors.warning.withOpacity(0.9),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
     } catch (e) {
       setState(() => _error = e.toString());
     } finally {
@@ -441,20 +457,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(height: 12),
           _buildProviderOption(
+            'grapeid',
+            'GRAPE ID',
+            'Custom permanent URLs via GrapeID Tunneling Hub (e.g. grapeid.org/alice).',
+            Icons.vpn_key_outlined,
+            enabled: true,
+          ),
+          const SizedBox(height: 8),
+          _buildProviderOption(
             'cloudflare',
             'CLOUDFLARE',
             'Free quick tunnels or authenticated. Desktop only (requires cloudflared binary).',
             Icons.cloud_outlined,
             enabled: _cloudflaredAvailable,
             badge: _cloudflaredAvailable ? 'AVAILABLE' : 'NOT FOUND',
-          ),
-          const SizedBox(height: 8),
-          _buildProviderOption(
-            'grapeid',
-            'GRAPE ID',
-            'Custom permanent URLs via GrapeID Tunneling Hub (e.g. grapeid.org/alice).',
-            Icons.vpn_key_outlined,
-            enabled: true,
           ),
           const SizedBox(height: 8),
           _buildProviderOption(

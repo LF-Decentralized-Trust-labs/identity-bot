@@ -499,7 +499,7 @@ class CoreService {
     return false;
   }
 
-  Future<void> saveTunnelSettings({
+  Future<Map<String, dynamic>> saveTunnelSettings({
     required String provider,
     String? ngrokAuthToken,
     String? cloudflareTunnelToken,
@@ -521,6 +521,7 @@ class CoreService {
       final body = jsonDecode(response.body);
       throw Exception(body['error'] ?? 'Save settings failed: ${response.statusCode}');
     }
+    return jsonDecode(response.body) as Map<String, dynamic>;
   }
 
   Future<Map<String, dynamic>> getTunnelStatus() async {
