@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import '../theme/app_theme.dart';
 import '../services/core_service.dart';
 import '../services/keri_service.dart';
+import '../services/mobile_standalone_keri_service.dart';
 import '../widgets/consent_modal.dart';
 import 'qr_scanner_screen.dart';
 
@@ -18,7 +19,18 @@ class ContactsScreen extends StatefulWidget {
 }
 
 class _ContactsScreenState extends State<ContactsScreen> {
-  late final CoreService _coreService = CoreService(baseUrl: widget.serverUrl);
+  late final CoreService _coreService = CoreService(baseUrl: _resolveServerUrl());
+
+  String? _resolveServerUrl() {
+    if (widget.serverUrl != null) return widget.serverUrl;
+    if (widget.keriService is MobileStandaloneKeriService) {
+      final standalone = widget.keriService as MobileStandaloneKeriService;
+      if (standalone.isCoreReady) {
+        return standalone.mobileCore.baseUrl;
+      }
+    }
+    return null;
+  }
   List<ContactResponse> _contacts = [];
   bool _loading = true;
   String? _error;

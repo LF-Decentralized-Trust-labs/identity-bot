@@ -33,6 +33,7 @@ The system employs a standardized topology model based on three topological stat
 -   **Rust Bridge (`identity_agent_ui/rust/`):** Implements the mobile KERI engine (`keriox/keri-core`) via `flutter_rust_bridge` for Dart ↔ Rust FFI, providing core KERI crypto functions.
 -   **Tunnel Module (`identity-agent-core/tunnel/`):** Manages multi-provider tunnels (Cloudflare, ngrok, Grape ID) for public HTTPS URL acquisition.
 -   **Endpoint Service (`identity-agent-core/endpoint/`):** Single source of truth for the agent's current public base URL. Provider hierarchy: override URL → active tunnel → `PUBLIC_URL` env → local network IP → localhost fallback. Persists to `endpoint.json`; all consumers (OOBI generation, OOBI serving, exchange introductions) call `EndpointService.CurrentURL()`. Exposed via `GET /api/endpoint` returning `{url, source, updated_at}`.
+-   **AgentConfig (`identity_agent_ui/lib/config/agent_config.dart`):** Platform-aware Go backend URL for Flutter UI ↔ Go Core communication. Desktop = `localhost:5000`, Mobile = `127.0.0.1:8642`, Web = relative (same origin). Uses conditional import (`platform_helper_stub.dart` / `platform_helper_io.dart`) for web-safe `dart:io` Platform detection. All screens resolve server URL via `_resolveServerUrl()` → `widget.serverUrl` → `MobileStandaloneKeriService.baseUrl` → `AgentConfig.coreBaseUrl` fallback chain.
 
 ### Key Design Decisions
 

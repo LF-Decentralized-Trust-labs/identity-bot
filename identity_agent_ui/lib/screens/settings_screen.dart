@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import '../theme/app_theme.dart';
 import '../services/core_service.dart';
 import '../services/keri_service.dart';
+import '../services/mobile_standalone_keri_service.dart';
 import '../services/preferences_service.dart';
 import '../main.dart';
 
@@ -25,7 +26,18 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  late final CoreService _coreService = CoreService(baseUrl: widget.serverUrl);
+  late final CoreService _coreService = CoreService(baseUrl: _resolveServerUrl());
+
+  String? _resolveServerUrl() {
+    if (widget.serverUrl != null) return widget.serverUrl;
+    if (widget.keriService is MobileStandaloneKeriService) {
+      final standalone = widget.keriService as MobileStandaloneKeriService;
+      if (standalone.isCoreReady) {
+        return standalone.mobileCore.baseUrl;
+      }
+    }
+    return null;
+  }
   final TextEditingController _ngrokTokenController = TextEditingController();
   final TextEditingController _cfTokenController = TextEditingController();
   final TextEditingController _grapeIdDomainController = TextEditingController(text: 'grapeid.org');
@@ -119,10 +131,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
           SnackBar(
             content: Text(
               tunnelActive
-                  ? 'Saved & endpoint: $endpointUrl'
+                  ? 'Saved — tunnel active: $endpointUrl'
                   : tunnelError.toString().isNotEmpty
-                      ? 'Saved — tunnel failed: $tunnelError'
-                      : 'Settings saved — tunnel stopped',
+                      ? 'Saved — tunnel error: $tunnelError'
+                      : _selectedProvider == 'none'
+                          ? 'Settings saved — no tunnel configured'
+                          : 'Settings saved — tunnel not connected',
               style: const TextStyle(fontFamily: 'monospace'),
             ),
             backgroundColor: tunnelActive

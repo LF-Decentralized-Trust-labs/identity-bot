@@ -4,6 +4,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import '../theme/app_theme.dart';
 import '../services/core_service.dart';
 import '../services/keri_service.dart';
+import '../services/mobile_standalone_keri_service.dart';
 
 class OobiScreen extends StatefulWidget {
   final KeriService keriService;
@@ -17,7 +18,18 @@ class OobiScreen extends StatefulWidget {
 }
 
 class _OobiScreenState extends State<OobiScreen> {
-  late final CoreService _coreService = CoreService(baseUrl: widget.serverUrl);
+  late final CoreService _coreService = CoreService(baseUrl: _resolveServerUrl());
+
+  String? _resolveServerUrl() {
+    if (widget.serverUrl != null) return widget.serverUrl;
+    if (widget.keriService is MobileStandaloneKeriService) {
+      final standalone = widget.keriService as MobileStandaloneKeriService;
+      if (standalone.isCoreReady) {
+        return standalone.mobileCore.baseUrl;
+      }
+    }
+    return null;
+  }
   OobiResponse? _oobi;
   bool _loading = true;
   String? _error;
@@ -460,20 +472,20 @@ class _OobiScreenState extends State<OobiScreen> {
     } else if (isLocal) {
       bannerColor = AppColors.warning;
       bannerIcon = Icons.wifi;
-      bannerLabel = 'LOCAL NETWORK';
-      subtitle = 'This URL is only reachable on your local network.';
+      bannerLabel = 'LOCAL NETWORK ONLY';
+      subtitle = 'Your OOBI URL is only reachable on your local network. To share it externally, configure a tunnel provider in Settings.';
       if (_oobi!.tunnelProvider.isNotEmpty && _oobi!.tunnelProvider != 'none') {
         final provider = _oobi!.tunnelProvider.toUpperCase();
         final errorDetail = _oobi!.tunnelError.isNotEmpty
             ? _oobi!.tunnelError
             : 'The $provider tunnel is not connected.';
-        subtitle = '$errorDetail\nFalling back to local network address.';
+        subtitle = '$errorDetail\nFalling back to local network address — not reachable externally.';
       }
     } else {
-      bannerColor = AppColors.warning;
-      bannerIcon = Icons.warning_amber_rounded;
-      bannerLabel = 'LOCALHOST ONLY';
-      subtitle = 'No tunnel or network address available. This URL is not reachable externally.';
+      bannerColor = AppColors.coreInactive;
+      bannerIcon = Icons.cloud_off;
+      bannerLabel = 'NO EXTERNAL URL';
+      subtitle = 'No tunnel or network address available. Go to Settings and configure a Grape ID tunnel so others can reach your agent.';
     }
 
     return Container(
