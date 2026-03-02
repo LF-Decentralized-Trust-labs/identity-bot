@@ -40,6 +40,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _cloudflaredAvailable = false;
   bool _hasNgrokToken = false;
   bool _hasCfToken = false;
+  String _endpointUrl = '';
+  String _endpointSource = '';
   
   bool _isCheckingGrapeId = false;
   bool? _isGrapeIdAvailable;
@@ -59,6 +61,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     try {
       final settings = await _coreService.getTunnelSettings();
+      Map<String, dynamic>? endpointData;
+      try {
+        endpointData = await _coreService.getEndpoint();
+      } catch (_) {}
       setState(() {
         _selectedProvider = (settings['provider'] ?? 'none').toString();
         _tunnelStatus = settings['status'] as Map<String, dynamic>?;
@@ -71,6 +77,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
         }
         if (settings['tunnel_extension'] != null) {
           _grapeIdExtController.text = settings['tunnel_extension'].toString();
+        }
+        if (endpointData != null) {
+          _endpointUrl = endpointData['url']?.toString() ?? '';
+          _endpointSource = endpointData['source']?.toString() ?? '';
         }
         _loading = false;
       });
@@ -102,14 +112,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (mounted) {
         final tunnel = result['tunnel'];
         final tunnelActive = tunnel is Map && tunnel['active'] == true;
-        final tunnelUrl = tunnel is Map ? (tunnel['url'] ?? '') : '';
+        final endpointUrl = result['endpoint_url']?.toString() ?? '';
         final tunnelError = tunnel is Map ? (tunnel['error'] ?? '') : '';
 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
               tunnelActive
-                  ? 'Saved & tunnel active: $tunnelUrl'
+                  ? 'Saved & endpoint: $endpointUrl'
                   : tunnelError.toString().isNotEmpty
                       ? 'Saved — tunnel failed: $tunnelError'
                       : 'Settings saved — tunnel stopped',
@@ -428,6 +438,67 @@ class _SettingsScreenState extends State<SettingsScreen> {
               maxLines: 3,
               overflow: TextOverflow.ellipsis,
             ),
+          ],
+          if (_endpointUrl.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            const Text(
+              'ACTIVE ENDPOINT',
+              style: TextStyle(
+                color: AppColors.textMuted,
+                fontSize: 9,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 1.5,
+                fontFamily: 'monospace',
+              ),
+            ),
+            const SizedBox(height: 4),
+            GestureDetector(
+              onTap: () {
+                Clipboard.setData(ClipboardData(text: _endpointUrl));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Endpoint URL copied', style: TextStyle(fontFamily: 'monospace')),
+                    duration: Duration(seconds: 1),
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: AppColors.primary,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        _endpointUrl,
+                        style: const TextStyle(
+                          color: AppColors.accent,
+                          fontSize: 11,
+                          fontFamily: 'monospace',
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    const Icon(Icons.copy, size: 14, color: AppColors.textMuted),
+                  ],
+                ),
+              ),
+            ),
+            if (_endpointSource.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                'source: $_endpointSource',
+                style: const TextStyle(
+                  color: AppColors.textMuted,
+                  fontSize: 9,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ],
           ],
         ],
       ),

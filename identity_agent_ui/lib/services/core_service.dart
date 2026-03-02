@@ -116,6 +116,8 @@ class OobiResponse {
   final bool tunnelActive;
   final String tunnelProvider;
   final String tunnelError;
+  final String endpointUrl;
+  final String endpointSource;
 
   OobiResponse({
     required this.oobiUrl,
@@ -125,6 +127,8 @@ class OobiResponse {
     this.tunnelActive = false,
     this.tunnelProvider = '',
     this.tunnelError = '',
+    this.endpointUrl = '',
+    this.endpointSource = '',
   });
 
   factory OobiResponse.fromJson(Map<String, dynamic> json) {
@@ -136,6 +140,8 @@ class OobiResponse {
       tunnelActive: json['tunnel_active'] == true,
       tunnelProvider: json['tunnel_provider'] ?? '',
       tunnelError: json['tunnel_error'] ?? '',
+      endpointUrl: json['endpoint_url'] ?? '',
+      endpointSource: json['endpoint_source'] ?? '',
     );
   }
 }
@@ -628,6 +634,15 @@ class CoreService {
     if (response.statusCode != 200) {
       final body = jsonDecode(response.body);
       throw Exception(body['error'] ?? 'Failed to reset');
+    }
+  }
+
+  Future<Map<String, dynamic>> getEndpoint() async {
+    final response = await _client.get(Uri.parse('$baseUrl/api/endpoint'));
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    } else {
+      throw Exception('Failed to get endpoint: ${response.statusCode}');
     }
   }
 

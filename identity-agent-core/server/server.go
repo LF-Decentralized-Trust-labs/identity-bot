@@ -16,6 +16,7 @@ import (
         "time"
 
         "identity-agent-core/drivers"
+        "identity-agent-core/endpoint"
         "identity-agent-core/store"
         "identity-agent-core/tunnel"
 
@@ -25,18 +26,19 @@ import (
 )
 
 type CoreServer struct {
-        DataStore     store.Store
-        KeriDriver    *drivers.KeriDriver
-        TunnelManager *tunnel.Manager
-        StartTime     time.Time
-        Port          int
-        DataDir       string
-        AppCtx        context.Context
-        cancel        context.CancelFunc
-        listener      net.Listener
-        router        chi.Router
-        mu            sync.Mutex
-        running       bool
+        DataStore       store.Store
+        KeriDriver      *drivers.KeriDriver
+        TunnelManager   *tunnel.Manager
+        EndpointService *endpoint.EndpointService
+        StartTime       time.Time
+        Port            int
+        DataDir         string
+        AppCtx          context.Context
+        cancel          context.CancelFunc
+        listener        net.Listener
+        router          chi.Router
+        mu              sync.Mutex
+        running         bool
 }
 
 type Config struct {
@@ -79,13 +81,16 @@ func New(cfg Config) (*CoreServer, error) {
                 return nil, fmt.Errorf("failed to initialize store: %w", err)
         }
 
+        endpointSvc := endpoint.New(cfg.DataDir, cfg.Port)
+
         s := &CoreServer{
-                DataStore:  dataStore,
-                StartTime:  time.Now(),
-                Port:       cfg.Port,
-                DataDir:    cfg.DataDir,
-                AppCtx:     ctx,
-                cancel:     cancel,
+                DataStore:       dataStore,
+                EndpointService: endpointSvc,
+                StartTime:       time.Now(),
+                Port:            cfg.Port,
+                DataDir:         cfg.DataDir,
+                AppCtx:          ctx,
+                cancel:          cancel,
         }
 
         if cfg.EnableKeriDriver {
@@ -112,6 +117,8 @@ func (s *CoreServer) Start() error {
 
         tunnelCfg := s.loadTunnelConfig()
         s.TunnelManager = tunnel.NewManager(tunnelCfg, s.Port)
+        s.EndpointService.SetTunnelManager(s.TunnelManager)
+        s.EndpointService.Refresh()
 
         addr := fmt.Sprintf("0.0.0.0:%d", s.Port)
         var err error
@@ -123,6 +130,7 @@ func (s *CoreServer) Start() error {
         s.running = true
 
         log.Printf("[identity-agent-core] Server listening on %s", addr)
+        log.Printf("[identity-agent-core] Endpoint URL: %s (source: %s)", s.EndpointService.CurrentURL(), s.EndpointService.Source())
         if s.KeriDriver != nil {
                 log.Printf("[identity-agent-core] KERI driver: %s", s.KeriDriver.BaseURL)
         } else {
@@ -132,14 +140,17 @@ func (s *CoreServer) Start() error {
         go func() {
                 if tunnelCfg.Provider == tunnel.ProviderNone {
                         log.Println("[identity-agent-core] No tunnel configured.")
+                        s.EndpointService.Refresh()
                         return
                 }
                 if err := s.TunnelManager.Start(s.AppCtx); err != nil {
                         log.Printf("[identity-agent-core] Tunnel failed (non-fatal): %v", err)
+                        s.EndpointService.Refresh()
                         return
                 }
+                s.EndpointService.Refresh()
                 if s.TunnelManager.URL() != "" {
-                        log.Printf("[identity-agent-core] OOBI public URL: %s", s.TunnelManager.URL())
+                        log.Printf("[identity-agent-core] OOBI public URL: %s", s.EndpointService.CurrentURL())
                         provider := s.TunnelManager.Provider()
                         if provider != nil && provider.Listener() != nil {
                                 go func() {
@@ -249,6 +260,8 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
                 r.Put("/settings/tunnel", s.handlePutTunnelSettings)
                 r.Get("/tunnel/status", s.handleTunnelStatus)
                 r.Post("/tunnel/restart", s.handleTunnelRestart)
+
+                r.Get("/endpoint", s.handleGetEndpoint)
 
                 r.Post("/store/identity", s.handleStoreIdentity)
                 r.Post("/store/event", s.handleStoreEvent)
@@ -363,10 +376,7 @@ func (s *CoreServer) handleHealth(w http.ResponseWriter, r *http.Request) {
                 mode = fmt.Sprintf("primary_active (driver: %s)", driverStatus)
         }
 
-        tunnelURL := ""
-        if s.TunnelManager != nil {
-                tunnelURL = s.TunnelManager.URL()
-        }
+        tunnelURL := s.EndpointService.CurrentURL()
 
         resp := HealthResponse{
                 Status:    "active",
@@ -839,13 +849,9 @@ func (s *CoreServer) handleGenerateMultisigEvent(w http.ResponseWriter, r *http.
         json.NewEncoder(w).Encode(result)
 }
 
-func (s *CoreServer) getPublicURL(r *http.Request) string {
-        if envURL := os.Getenv("PUBLIC_URL"); envURL != "" {
-                return strings.TrimRight(envURL, "/")
-        }
-
-        if s.TunnelManager != nil && s.TunnelManager.URL() != "" {
-                return s.TunnelManager.URL()
+func (es *CoreServer) getPublicURL(r *http.Request) string {
+        if url := es.EndpointService.CurrentURL(); url != "" {
+                return url
         }
 
         scheme := "https"
@@ -861,6 +867,12 @@ func (s *CoreServer) getPublicURL(r *http.Request) string {
         }
 
         return fmt.Sprintf("%s://%s", scheme, host)
+}
+
+func (s *CoreServer) handleGetEndpoint(w http.ResponseWriter, r *http.Request) {
+        state := s.EndpointService.State()
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(state)
 }
 
 func (s *CoreServer) handleOobiGenerate(w http.ResponseWriter, r *http.Request) {
@@ -895,6 +907,8 @@ func (s *CoreServer) handleOobiGenerate(w http.ResponseWriter, r *http.Request) 
                 "tunnel_active":   tunnelActive,
                 "tunnel_provider": tunnelProvider,
                 "tunnel_error":    tunnelError,
+                "endpoint_url":    s.EndpointService.CurrentURL(),
+                "endpoint_source": s.EndpointService.Source(),
         }
 
         w.Header().Set("Content-Type", "application/json")
@@ -1584,11 +1598,14 @@ func (s *CoreServer) handlePutTunnelSettings(w http.ResponseWriter, r *http.Requ
         log.Printf("[identity-agent-core] Tunnel settings updated: provider=%s — restarting tunnel", req.Provider)
 
         if s.TunnelManager == nil {
+                s.EndpointService.Refresh()
                 w.Header().Set("Content-Type", "application/json")
                 json.NewEncoder(w).Encode(map[string]interface{}{
-                        "status":   "saved",
-                        "provider": req.Provider,
-                        "tunnel":   map[string]interface{}{"active": false, "error": "tunnel manager not initialized"},
+                        "status":         "saved",
+                        "provider":       req.Provider,
+                        "tunnel":         map[string]interface{}{"active": false, "error": "tunnel manager not initialized"},
+                        "endpoint_url":   s.EndpointService.CurrentURL(),
+                        "endpoint_source": s.EndpointService.Source(),
                 })
                 return
         }
@@ -1596,23 +1613,29 @@ func (s *CoreServer) handlePutTunnelSettings(w http.ResponseWriter, r *http.Requ
         cfg := s.loadTunnelConfig()
         if err := s.TunnelManager.Restart(s.AppCtx, cfg); err != nil {
                 log.Printf("[identity-agent-core] Tunnel restart after settings change failed: %v", err)
+                s.EndpointService.Refresh()
                 w.Header().Set("Content-Type", "application/json")
                 json.NewEncoder(w).Encode(map[string]interface{}{
-                        "status":   "saved",
-                        "provider": req.Provider,
-                        "tunnel":   map[string]interface{}{"active": false, "error": err.Error()},
+                        "status":         "saved",
+                        "provider":       req.Provider,
+                        "tunnel":         map[string]interface{}{"active": false, "error": err.Error()},
+                        "endpoint_url":   s.EndpointService.CurrentURL(),
+                        "endpoint_source": s.EndpointService.Source(),
                 })
                 return
         }
 
+        s.EndpointService.Refresh()
         status := s.TunnelManager.GetStatus()
         log.Printf("[identity-agent-core] Tunnel restarted after settings change: active=%v url=%s", status.Active, status.URL)
 
         w.Header().Set("Content-Type", "application/json")
         json.NewEncoder(w).Encode(map[string]interface{}{
-                "status":   "saved",
-                "provider": req.Provider,
-                "tunnel":   status,
+                "status":       "saved",
+                "provider":     req.Provider,
+                "tunnel":       status,
+                "endpoint_url": s.EndpointService.CurrentURL(),
+                "endpoint_source": s.EndpointService.Source(),
         })
 }
 
@@ -1628,15 +1651,24 @@ func (s *CoreServer) handleTunnelRestart(w http.ResponseWriter, r *http.Request)
 
         if err := s.TunnelManager.Restart(s.AppCtx, cfg); err != nil {
                 log.Printf("[identity-agent-core] Tunnel restart failed: %v", err)
+                s.EndpointService.Refresh()
                 writeError(w, http.StatusInternalServerError, "Tunnel restart failed", err.Error())
                 return
         }
 
+        s.EndpointService.Refresh()
         status := s.TunnelManager.GetStatus()
-        log.Printf("[identity-agent-core] Tunnel restarted: active=%v url=%s", status.Active, status.URL)
+        log.Printf("[identity-agent-core] Tunnel restarted: active=%v url=%s endpoint=%s", status.Active, status.URL, s.EndpointService.CurrentURL())
 
         w.Header().Set("Content-Type", "application/json")
-        json.NewEncoder(w).Encode(status)
+        json.NewEncoder(w).Encode(map[string]interface{}{
+                "provider":        status.Provider,
+                "active":          status.Active,
+                "url":             status.URL,
+                "error":           status.Error,
+                "endpoint_url":    s.EndpointService.CurrentURL(),
+                "endpoint_source": s.EndpointService.Source(),
+        })
 }
 
 func (s *CoreServer) handleGetProfile(w http.ResponseWriter, r *http.Request) {

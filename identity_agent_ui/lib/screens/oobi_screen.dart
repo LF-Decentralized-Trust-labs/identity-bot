@@ -8,8 +8,9 @@ import '../services/keri_service.dart';
 class OobiScreen extends StatefulWidget {
   final KeriService keriService;
   final String? serverUrl;
+  final ValueNotifier<int>? refreshNotifier;
 
-  const OobiScreen({super.key, required this.keriService, this.serverUrl});
+  const OobiScreen({super.key, required this.keriService, this.serverUrl, this.refreshNotifier});
 
   @override
   State<OobiScreen> createState() => _OobiScreenState();
@@ -26,12 +27,18 @@ class _OobiScreenState extends State<OobiScreen> {
   void initState() {
     super.initState();
     _loadOobi();
+    widget.refreshNotifier?.addListener(_onRefreshNotified);
   }
 
   @override
   void dispose() {
+    widget.refreshNotifier?.removeListener(_onRefreshNotified);
     _coreService.dispose();
     super.dispose();
+  }
+
+  void _onRefreshNotified() {
+    _loadOobi();
   }
 
   Future<void> _loadOobi() async {
@@ -201,10 +208,8 @@ class _OobiScreenState extends State<OobiScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (_oobi != null && _oobi!.tunnelProvider.isNotEmpty && _oobi!.tunnelProvider != 'none' && !_oobi!.tunnelActive)
-            _buildTunnelWarningBanner(),
-          if (_oobi != null && _oobi!.tunnelActive)
-            _buildTunnelActiveBanner(),
+          if (_oobi != null)
+            _buildEndpointSourceBanner(),
           const SizedBox(height: 16),
           _buildOobiUrlCard(),
           const SizedBox(height: 20),
@@ -431,78 +436,86 @@ class _OobiScreenState extends State<OobiScreen> {
     );
   }
 
-  Widget _buildTunnelWarningBanner() {
-    final provider = _oobi!.tunnelProvider.toUpperCase();
-    final errorDetail = _oobi!.tunnelError.isNotEmpty
-        ? _oobi!.tunnelError
-        : 'The $provider tunnel provider is not connected.';
+  Widget _buildEndpointSourceBanner() {
+    final source = _oobi!.endpointSource;
+    final isTunnel = source.startsWith('tunnel:');
+    final isLocal = source.startsWith('local:') || source == 'localhost';
+    final isEnv = source.startsWith('env:');
+    final isOverride = source == 'override';
+
+    Color bannerColor;
+    IconData bannerIcon;
+    String bannerLabel;
+    String? subtitle;
+
+    if (isTunnel) {
+      final provider = source.replaceFirst('tunnel:', '').toUpperCase();
+      bannerColor = AppColors.coreActive;
+      bannerIcon = Icons.cloud_done;
+      bannerLabel = '$provider TUNNEL ACTIVE';
+    } else if (isEnv || isOverride) {
+      bannerColor = AppColors.coreActive;
+      bannerIcon = Icons.dns;
+      bannerLabel = 'CONFIGURED ENDPOINT';
+    } else if (isLocal) {
+      bannerColor = AppColors.warning;
+      bannerIcon = Icons.wifi;
+      bannerLabel = 'LOCAL NETWORK';
+      subtitle = 'This URL is only reachable on your local network.';
+      if (_oobi!.tunnelProvider.isNotEmpty && _oobi!.tunnelProvider != 'none') {
+        final provider = _oobi!.tunnelProvider.toUpperCase();
+        final errorDetail = _oobi!.tunnelError.isNotEmpty
+            ? _oobi!.tunnelError
+            : 'The $provider tunnel is not connected.';
+        subtitle = '$errorDetail\nFalling back to local network address.';
+      }
+    } else {
+      bannerColor = AppColors.warning;
+      bannerIcon = Icons.warning_amber_rounded;
+      bannerLabel = 'LOCALHOST ONLY';
+      subtitle = 'No tunnel or network address available. This URL is not reachable externally.';
+    }
+
     return Container(
       margin: const EdgeInsets.only(top: 8),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: AppColors.warning.withOpacity(0.08),
+        color: bannerColor.withOpacity(0.08),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppColors.warning.withOpacity(0.4), width: 1),
+        border: Border.all(color: bannerColor.withOpacity(0.3), width: 1),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.warning_amber_rounded, color: AppColors.warning, size: 18),
-          const SizedBox(width: 10),
+          Icon(bannerIcon, color: bannerColor, size: 16),
+          const SizedBox(width: 8),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '$provider TUNNEL UNAVAILABLE',
+                  bannerLabel,
                   style: TextStyle(
-                    color: AppColors.warning,
+                    color: bannerColor,
                     fontSize: 11,
                     fontWeight: FontWeight.w700,
                     letterSpacing: 1.0,
                     fontFamily: 'monospace',
                   ),
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  '$errorDetail\nThe OOBI URL below uses your default server address, which may not be reachable externally.',
-                  style: const TextStyle(
-                    color: AppColors.textSecondary,
-                    fontSize: 10,
-                    fontFamily: 'monospace',
-                    height: 1.4,
+                if (subtitle != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(
+                      color: AppColors.textSecondary,
+                      fontSize: 10,
+                      fontFamily: 'monospace',
+                      height: 1.4,
+                    ),
                   ),
-                ),
+                ],
               ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTunnelActiveBanner() {
-    final provider = _oobi!.tunnelProvider.toUpperCase();
-    return Container(
-      margin: const EdgeInsets.only(top: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: AppColors.coreActive.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppColors.coreActive.withOpacity(0.3), width: 1),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.cloud_done, color: AppColors.coreActive, size: 16),
-          const SizedBox(width: 8),
-          Text(
-            '$provider TUNNEL ACTIVE',
-            style: TextStyle(
-              color: AppColors.coreActive,
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 1.0,
-              fontFamily: 'monospace',
             ),
           ),
         ],
