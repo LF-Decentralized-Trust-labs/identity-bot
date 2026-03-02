@@ -15,6 +15,7 @@ import (
         "sync"
         "time"
 
+        "identity-agent-core/certs"
         "identity-agent-core/drivers"
         "identity-agent-core/endpoint"
         "identity-agent-core/store"
@@ -74,6 +75,8 @@ func DefaultConfig() Config {
 
 func New(cfg Config) (*CoreServer, error) {
         ctx, cancel := context.WithCancel(context.Background())
+
+        certs.InitCerts(cfg.DataDir)
 
         dataStore, err := store.NewFileStore(cfg.DataDir)
         if err != nil {
@@ -167,6 +170,8 @@ func (s *CoreServer) Start() error {
                         log.Printf("[identity-agent-core] Server stopped: %v", err)
                 }
         }()
+
+        certs.TryUpdateCerts(s.DataDir)
 
         return nil
 }
