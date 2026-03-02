@@ -34,6 +34,13 @@ func NewGrapeIDProvider(cfg Config) *GrapeIDProvider {
         }
 }
 
+type claimResponse struct {
+        Name       string `json:"name"`
+        Port       int    `json:"port"`
+        TunnelPath string `json:"tunnel_path"`
+        Message    string `json:"message"`
+}
+
 func (p *GrapeIDProvider) Start(ctx context.Context, localPort int) error {
         p.mu.Lock()
         defer p.mu.Unlock()
@@ -52,45 +59,22 @@ func (p *GrapeIDProvider) Start(ctx context.Context, localPort int) error {
                 return fmt.Errorf("grapeid tunnel extension is required")
         }
 
-        claimURL := fmt.Sprintf("%s://%s/claim-name", scheme, domain)
-        claimBody, _ := json.Marshal(map[string]string{"name": extension})
+        aid := p.config.AID
 
-        httpClient := &http.Client{Timeout: 15 * time.Second}
-        resp, err := httpClient.Post(claimURL, "application/json", bytes.NewBuffer(claimBody))
+        resp, err := p.tryReconnect(scheme, domain, extension, aid)
         if err != nil {
-                return fmt.Errorf("failed to reach GrapeID hub at %s: %v", domain, err)
-        }
-        defer resp.Body.Close()
-
-        if resp.StatusCode == 525 {
-                return fmt.Errorf("GrapeID hub at %s returned SSL error (525). The server may have an SSL misconfiguration — contact the hub administrator", domain)
-        }
-
-        if resp.StatusCode != http.StatusOK {
-                var errResp map[string]interface{}
-                json.NewDecoder(resp.Body).Decode(&errResp)
-                errMsg := errResp["error"]
-                if errMsg == nil {
-                        errMsg = fmt.Sprintf("HTTP %d", resp.StatusCode)
+                log.Printf("[tunnel] GrapeID reconnect failed, trying claim: %v", err)
+                resp, err = p.tryClaim(scheme, domain, extension, aid)
+                if err != nil {
+                        return err
                 }
-                return fmt.Errorf("failed to claim name '%s' on %s: %v", extension, domain, errMsg)
         }
 
-        var claimResp struct {
-                Name       string `json:"name"`
-                Port       int    `json:"port"`
-                TunnelPath string `json:"tunnel_path"`
-                Message    string `json:"message"`
-        }
-        if err := json.NewDecoder(resp.Body).Decode(&claimResp); err != nil {
-                return fmt.Errorf("failed to parse claim response: %v", err)
-        }
+        p.allocPort = resp.Port
+        publicURL := fmt.Sprintf("%s://%s/%s", scheme, domain, resp.Name)
+        log.Printf("[tunnel] GrapeID tunnel established. Port: %d. Public URL: %s", p.allocPort, publicURL)
 
-        p.allocPort = claimResp.Port
-        publicURL := fmt.Sprintf("%s://%s/%s", scheme, domain, claimResp.Name)
-        log.Printf("[tunnel] GrapeID name claimed successfully. Port: %d. Public URL: %s", p.allocPort, publicURL)
-
-        tunnelPath := claimResp.TunnelPath
+        tunnelPath := resp.TunnelPath
         if tunnelPath == "" {
                 tunnelPath = "/tunnel"
         }
@@ -143,7 +127,83 @@ func (p *GrapeIDProvider) Start(ctx context.Context, localPort int) error {
         return nil
 }
 
+func (p *GrapeIDProvider) tryReconnect(scheme, domain, name, aid string) (*claimResponse, error) {
+        if aid == "" {
+                return nil, fmt.Errorf("no AID available for reconnect")
+        }
+
+        reconnectURL := fmt.Sprintf("%s://%s/reconnect", scheme, domain)
+        body, _ := json.Marshal(map[string]string{"name": name, "aid": aid})
+
+        httpClient := &http.Client{Timeout: 15 * time.Second}
+        resp, err := httpClient.Post(reconnectURL, "application/json", bytes.NewBuffer(body))
+        if err != nil {
+                return nil, fmt.Errorf("failed to reach GrapeID hub for reconnect: %v", err)
+        }
+        defer resp.Body.Close()
+
+        if resp.StatusCode == http.StatusNotFound {
+                return nil, fmt.Errorf("name '%s' not found on hub (first registration needed)", name)
+        }
+
+        if resp.StatusCode == http.StatusForbidden {
+                return nil, fmt.Errorf("AID mismatch: name '%s' is owned by a different AID on %s", name, domain)
+        }
+
+        if resp.StatusCode != http.StatusOK {
+                return nil, fmt.Errorf("reconnect returned HTTP %d for '%s' on %s", resp.StatusCode, name, domain)
+        }
+
+        var result claimResponse
+        if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+                return nil, fmt.Errorf("failed to parse reconnect response: %v", err)
+        }
+
+        log.Printf("[tunnel] GrapeID reconnected to existing name '%s'", name)
+        return &result, nil
+}
+
+func (p *GrapeIDProvider) tryClaim(scheme, domain, name, aid string) (*claimResponse, error) {
+        claimURL := fmt.Sprintf("%s://%s/claim-name", scheme, domain)
+        payload := map[string]string{"name": name}
+        if aid != "" {
+                payload["aid"] = aid
+        }
+        body, _ := json.Marshal(payload)
+
+        httpClient := &http.Client{Timeout: 15 * time.Second}
+        resp, err := httpClient.Post(claimURL, "application/json", bytes.NewBuffer(body))
+        if err != nil {
+                return nil, fmt.Errorf("failed to reach GrapeID hub at %s: %v", domain, err)
+        }
+        defer resp.Body.Close()
+
+        if resp.StatusCode == 525 {
+                return nil, fmt.Errorf("GrapeID hub at %s returned SSL error (525). The server may have an SSL misconfiguration — contact the hub administrator", domain)
+        }
+
+        if resp.StatusCode != http.StatusOK {
+                var errResp map[string]interface{}
+                json.NewDecoder(resp.Body).Decode(&errResp)
+                errMsg := errResp["error"]
+                if errMsg == nil {
+                        errMsg = fmt.Sprintf("HTTP %d", resp.StatusCode)
+                }
+                return nil, fmt.Errorf("failed to claim name '%s' on %s: %v", name, domain, errMsg)
+        }
+
+        var result claimResponse
+        if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+                return nil, fmt.Errorf("failed to parse claim response: %v", err)
+        }
+
+        log.Printf("[tunnel] GrapeID claimed new name '%s'", name)
+        return &result, nil
+}
+
 func (p *GrapeIDProvider) Stop() error {
+        p.tryReleaseName()
+
         p.mu.Lock()
         defer p.mu.Unlock()
 
@@ -157,6 +217,44 @@ func (p *GrapeIDProvider) Stop() error {
         }
         p.status.Active = false
         return nil
+}
+
+func (p *GrapeIDProvider) tryReleaseName() {
+        domain := p.config.TunnelDomain
+        if domain == "" {
+                domain = "grapeid.org"
+        }
+        scheme := "https"
+        if strings.Contains(domain, "localhost") {
+                scheme = "http"
+        }
+
+        extension := strings.TrimSpace(p.config.TunnelExtension)
+        aid := p.config.AID
+        if extension == "" {
+                return
+        }
+
+        releaseURL := fmt.Sprintf("%s://%s/release-name", scheme, domain)
+        payload := map[string]string{"name": extension}
+        if aid != "" {
+                payload["aid"] = aid
+        }
+        body, _ := json.Marshal(payload)
+
+        httpClient := &http.Client{Timeout: 3 * time.Second}
+        resp, err := httpClient.Post(releaseURL, "application/json", bytes.NewBuffer(body))
+        if err != nil {
+                log.Printf("[tunnel] GrapeID release-name request failed (best-effort): %v", err)
+                return
+        }
+        defer resp.Body.Close()
+
+        if resp.StatusCode == http.StatusOK {
+                log.Printf("[tunnel] GrapeID name '%s' released successfully", extension)
+        } else {
+                log.Printf("[tunnel] GrapeID release-name returned HTTP %d (best-effort, continuing)", resp.StatusCode)
+        }
 }
 
 func (p *GrapeIDProvider) URL() string {

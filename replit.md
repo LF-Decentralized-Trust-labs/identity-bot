@@ -105,7 +105,10 @@ Defined in `codemagic.yaml`. Builds include:
 
 The Grape ID tunnel provider uses a Chisel reverse proxy to expose the agent's OOBI endpoints via a permanent public URL (e.g., `https://grapeid.org/alice`). Works on both desktop and mobile platforms via the Go Core tunnel module.
 
--   **Connection flow:** Agent claims a name via `POST /claim-name` on the hub → receives allocated port and tunnel path → Chisel client connects via `wss://grapeid.org/tunnel` → public traffic at `grapeid.org/<name>/*` routes to the local agent.
--   **Mobile reconnection:** On mobile, the tunnel drops when the app closes or the phone sleeps. When the app reopens, Go Core restarts, re-claims the same name (names persist in the hub's database), and re-establishes the tunnel. The public URL remains reserved but returns 502 while disconnected.
+-   **Connection flow (reconnect-first):** On startup, the agent first tries `POST /reconnect {"name": ..., "aid": ...}` to re-establish a previously claimed name. If that fails (hub doesn't support it yet, or name not found), it falls back to `POST /claim-name {"name": ..., "aid": ...}` for initial registration. Both requests include the agent's AID for ownership tracking.
+-   **AID-based ownership:** Each tunnel name is associated with the claiming agent's AID. The hub uses this to verify reconnection requests — only the original AID holder can reclaim a name. See `docs/grapeid-hub-reconnect-spec.md` for the hub-side implementation specification.
+-   **Graceful release:** On graceful shutdown, the agent sends `POST /release-name {"name": ..., "aid": ...}` (best-effort, 3s timeout) to free the port. On crash, the name stays reserved for reclaim.
+-   **Mobile reconnection:** On mobile, the tunnel drops when the app closes or the phone sleeps. When the app reopens, Go Core restarts and uses the reconnect-first flow to re-establish the tunnel with the same name.
+-   **Future: KERI signatures:** The `aid` field will eventually be accompanied by KERI signature headers for cryptographic proof of ownership (currently trust-on-first-use).
 -   **UI requirement (pending):** Dashboard needs a tunnel status indicator — connected (green), disconnected (amber), error (red) — so the user can confirm their agent is reachable.
 -   **Migration:** Tunnel settings (provider, domain, extension) must transfer during backend migration so the same URL continues working on the new device. See `docs/spec-backend-migration.md`.

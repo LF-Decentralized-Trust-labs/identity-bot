@@ -29,6 +29,7 @@ type Config struct {
         TunnelDomain          string       `json:"tunnel_domain,omitempty"`
         TunnelExtension       string       `json:"tunnel_extension,omitempty"`
         TunnelAuth            string       `json:"tunnel_auth,omitempty"`
+        AID                   string       `json:"aid,omitempty"`
 }
 
 type Provider interface {

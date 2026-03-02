@@ -1526,6 +1526,11 @@ func (s *CoreServer) handleGetAlerts(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *CoreServer) loadTunnelConfig() tunnel.Config {
+        var aid string
+        if identity, err := s.DataStore.GetIdentity(); err == nil && identity != nil {
+                aid = identity.AID
+        }
+
         saved, err := s.DataStore.GetSettings()
         if err == nil && saved != nil && saved.TunnelProvider != "" {
                 return tunnel.Config{
@@ -1534,9 +1539,12 @@ func (s *CoreServer) loadTunnelConfig() tunnel.Config {
                         CloudflareTunnelToken: saved.CloudflareTunnelToken,
                         TunnelDomain:          saved.TunnelDomain,
                         TunnelExtension:       saved.TunnelExtension,
+                        AID:                   aid,
                 }
         }
-        return tunnel.DefaultConfig()
+        cfg := tunnel.DefaultConfig()
+        cfg.AID = aid
+        return cfg
 }
 
 func (s *CoreServer) handleGetTunnelSettings(w http.ResponseWriter, r *http.Request) {
