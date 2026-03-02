@@ -12,8 +12,6 @@ import (
         "sync"
         "time"
 
-        "identity-agent-core/certs"
-
         chclient "github.com/jpillora/chisel/client"
 )
 
@@ -137,7 +135,7 @@ func (p *GrapeIDProvider) tryReconnect(scheme, domain, name, aid string) (*claim
         reconnectURL := fmt.Sprintf("%s://%s/reconnect", scheme, domain)
         body, _ := json.Marshal(map[string]string{"name": name, "aid": aid})
 
-        httpClient := certs.HTTPClient(15 * time.Second)
+        httpClient := &http.Client{Timeout: 15 * time.Second}
         resp, err := httpClient.Post(reconnectURL, "application/json", bytes.NewBuffer(body))
         if err != nil {
                 return nil, fmt.Errorf("failed to reach GrapeID hub for reconnect: %v", err)
@@ -173,7 +171,7 @@ func (p *GrapeIDProvider) tryClaim(scheme, domain, name, aid string) (*claimResp
         }
         body, _ := json.Marshal(payload)
 
-        httpClient := certs.HTTPClient(15 * time.Second)
+        httpClient := &http.Client{Timeout: 15 * time.Second}
         resp, err := httpClient.Post(claimURL, "application/json", bytes.NewBuffer(body))
         if err != nil {
                 return nil, fmt.Errorf("failed to reach GrapeID hub at %s: %v", domain, err)
@@ -244,7 +242,7 @@ func (p *GrapeIDProvider) tryReleaseName() {
         }
         body, _ := json.Marshal(payload)
 
-        httpClient := certs.HTTPClient(3 * time.Second)
+        httpClient := &http.Client{Timeout: 3 * time.Second}
         resp, err := httpClient.Post(releaseURL, "application/json", bytes.NewBuffer(body))
         if err != nil {
                 log.Printf("[tunnel] GrapeID release-name request failed (best-effort): %v", err)
