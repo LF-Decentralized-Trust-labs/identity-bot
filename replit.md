@@ -29,7 +29,7 @@ The system employs a standardized topology model based on three topological stat
 
 -   **Go Backend (`identity-agent-core/`):** Handles core orchestration, public API, file-based data persistence, OOBI management, contact management, and optional tunnel providers. Compiles for mobile via `gomobile` (with KERI driver disabled).
 -   **Python KERI Driver (`drivers/keri-core/`):** The `keripy` (v1.1.17) engine for desktop KERI operations.
--   **Flutter Frontend (`identity_agent_ui/`):** Cross-platform UI featuring a dark cyberpunk theme, multi-step onboarding, BIP-39 mnemonic generation, contact management, OOBI sharing, and a mode-aware dashboard.
+-   **Flutter Frontend (`identity_agent_ui/`):** Cross-platform UI featuring a dark cyberpunk theme, multi-step onboarding, BIP-39 mnemonic generation, contact management, OOBI sharing, profile management (jCard), and a mode-aware dashboard.
 -   **Rust Bridge (`identity_agent_ui/rust/`):** Implements the mobile KERI engine (`keriox/keri-core`) via `flutter_rust_bridge` for Dart ↔ Rust FFI, providing core KERI crypto functions.
 -   **Tunnel Module (`identity-agent-core/tunnel/`):** Manages multi-provider tunnels (Cloudflare, ngrok, Grape ID) for public HTTPS URL acquisition.
 
@@ -85,7 +85,7 @@ The app initializes services based on saved mode and platform:
 
 ### Persistence Layer
 
-Defaults to a file-based JSON store in `./data/` (`identity.json`, `kel.json`, `contacts.json`, `settings.json`, `pending_requests.json`), with a modular `store.Store` interface for swappable backends. On mobile standalone, Go Core stores data in the app's documents directory. Onboarding state (mode, entity type, setup completion) is persisted via SharedPreferences.
+Defaults to a file-based JSON store in `./data/` (`identity.json`, `kel.json`, `contacts.json`, `settings.json`, `pending_requests.json`, `profile.json`), with a modular `store.Store` interface for swappable backends. On mobile standalone, Go Core stores data in the app's documents directory. Onboarding state (mode, entity type, setup completion) is persisted via SharedPreferences. Profile data (jCard fields + photo) is stored in `profile.json` and served via OOBI endpoints and exchange introductions so contacts receive the user's display name and rich identity info.
 
 ## CI/CD (Codemagic)
 

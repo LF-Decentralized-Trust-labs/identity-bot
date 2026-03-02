@@ -1,0 +1,10 @@
+{
+  "fn": "Alice Agent",
+  "family_name": "Agent",
+  "given_name": "Alice",
+  "org": "KERI Labs",
+  "title": "Identity Engineer",
+  "email": "alice@example.com",
+  "tel": "+1234567890",
+  "note": "Testing profile"
+}

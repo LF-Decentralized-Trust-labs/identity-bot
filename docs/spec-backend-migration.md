@@ -145,5 +145,6 @@ This lets the user confirm at a glance whether their agent is reachable from the
 | Tunnel settings | provider, domain, extension, auth tokens | `data/settings.json` | 2026-02-25 |
 | Contacts | contact records, pending requests | `data/contacts.json`, `data/pending_requests.json` | 2026-02-25 |
 | Identity (KERI) | AID, keys, KEL, inception events | KERI engine state / `data/kel/` | 2026-02-25 |
+| Profile (jCard) | display name, given/family name, org, title, email, phone, note, photo (base64) | `data/profile.json` | 2026-03-02 |
 | _Example: Credentials_ | _Issued/held verifiable credentials_ | _`data/credentials/`_ | _TBD_ |
 | _Example: Message history_ | _Encrypted message threads_ | _`data/messages/`_ | _TBD_ |

@@ -187,6 +187,62 @@ class JCardResponse {
   }
 }
 
+class ProfileResponse {
+  final String fullName;
+  final String familyName;
+  final String givenName;
+  final String org;
+  final String title;
+  final String email;
+  final String tel;
+  final String note;
+  final String photo;
+  final String uid;
+
+  ProfileResponse({
+    this.fullName = '',
+    this.familyName = '',
+    this.givenName = '',
+    this.org = '',
+    this.title = '',
+    this.email = '',
+    this.tel = '',
+    this.note = '',
+    this.photo = '',
+    this.uid = '',
+  });
+
+  factory ProfileResponse.fromJson(Map<String, dynamic> json) {
+    return ProfileResponse(
+      fullName: json['fn'] ?? '',
+      familyName: json['family_name'] ?? '',
+      givenName: json['given_name'] ?? '',
+      org: json['org'] ?? '',
+      title: json['title'] ?? '',
+      email: json['email'] ?? '',
+      tel: json['tel'] ?? '',
+      note: json['note'] ?? '',
+      photo: json['photo'] ?? '',
+      uid: json['uid'] ?? '',
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'fn': fullName,
+      'family_name': familyName,
+      'given_name': givenName,
+      'org': org,
+      'title': title,
+      'email': email,
+      'tel': tel,
+      'note': note,
+      'photo': photo,
+      'uid': uid,
+    };
+  }
+}
+
 class ContactResponse {
   final String aid;
   final String alias;
@@ -572,6 +628,29 @@ class CoreService {
     if (response.statusCode != 200) {
       final body = jsonDecode(response.body);
       throw Exception(body['error'] ?? 'Failed to reset');
+    }
+  }
+
+  Future<ProfileResponse> getProfile() async {
+    final response = await _client.get(Uri.parse('$baseUrl/api/profile'));
+    if (response.statusCode == 200) {
+      return ProfileResponse.fromJson(jsonDecode(response.body));
+    } else {
+      throw Exception('Failed to get profile: ${response.statusCode}');
+    }
+  }
+
+  Future<Map<String, dynamic>> saveProfile(ProfileResponse profile) async {
+    final response = await _client.put(
+      Uri.parse('$baseUrl/api/profile'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(profile.toJson()),
+    );
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    } else {
+      final body = jsonDecode(response.body);
+      throw Exception(body['error'] ?? 'Failed to save profile: ${response.statusCode}');
     }
   }
 

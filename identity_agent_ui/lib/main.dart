@@ -5,6 +5,7 @@ import 'theme/app_theme.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/contacts_screen.dart';
 import 'screens/oobi_screen.dart';
+import 'screens/profile_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/setup_wizard_screen.dart';
 import 'screens/mode_selection_screen.dart';
@@ -345,6 +346,7 @@ class _AgentMainScreenState extends State<AgentMainScreen> {
   void initState() {
     super.initState();
     _screens = [
+      ProfileScreen(keriService: widget.keriService, serverUrl: widget.serverUrl),
       DashboardScreen(keriService: widget.keriService, serverUrl: widget.serverUrl),
       ContactsScreen(keriService: widget.keriService, serverUrl: widget.serverUrl),
       OobiScreen(keriService: widget.keriService, serverUrl: widget.serverUrl),
@@ -390,6 +392,11 @@ class _AgentMainScreenState extends State<AgentMainScreen> {
           ),
           type: BottomNavigationBarType.fixed,
           items: const [
+            BottomNavigationBarItem(
+              icon: Icon(Icons.person_outline),
+              activeIcon: Icon(Icons.person),
+              label: 'PROFILE',
+            ),
             BottomNavigationBarItem(
               icon: Icon(Icons.shield_outlined),
               activeIcon: Icon(Icons.shield),

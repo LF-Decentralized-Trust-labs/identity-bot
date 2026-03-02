@@ -242,6 +242,9 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
                 r.Get("/alerts", s.handleGetAlerts)
                 r.Post("/exchange", s.handleExchange)
 
+                r.Get("/profile", s.handleGetProfile)
+                r.Put("/profile", s.handlePutProfile)
+
                 r.Get("/settings/tunnel", s.handleGetTunnelSettings)
                 r.Put("/settings/tunnel", s.handlePutTunnelSettings)
                 r.Get("/tunnel/status", s.handleTunnelStatus)
@@ -921,13 +924,31 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
                 return
         }
 
+        alias := identity.AID[:12] + "..."
+        profile, _ := s.DataStore.GetProfile()
+        var jcard *store.JCard
+        if profile != nil {
+                publicURL := s.getPublicURL(r)
+                oobiURL := fmt.Sprintf("%s/oobi/%s", publicURL, identity.AID)
+                jcard = profile.ToJCard(identity.AID, oobiURL)
+                if profile.FullName != "" {
+                        alias = profile.FullName
+                }
+        }
+
         resp := map[string]interface{}{
                 "aid":         identity.AID,
                 "public_key":  identity.PublicKey,
-                "alias":       identity.AID[:12] + "...",
+                "alias":       alias,
                 "kel":         events,
                 "event_count": identity.EventCount,
                 "created":     identity.Created,
+        }
+        if jcard != nil {
+                resp["jcard"] = jcard
+        }
+        if profile != nil && profile.Photo != "" {
+                resp["photo"] = profile.Photo
         }
 
         w.Header().Set("Content-Type", "application/json")
@@ -1133,6 +1154,10 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
 
                 ourOOBI := fmt.Sprintf("%s/oobi/%s", publicURL, ourIdentity.AID)
                 ourAlias := ourIdentity.AID[:12] + "..."
+                ourProfile, _ := s.DataStore.GetProfile()
+                if ourProfile != nil && ourProfile.FullName != "" {
+                        ourAlias = ourProfile.FullName
+                }
 
                 remoteBase := req.OobiURL
                 if idx := strings.Index(remoteBase, "/oobi/"); idx != -1 {
@@ -1144,12 +1169,16 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
                 log.Printf("[identity-agent-core] EXCHANGE: Our OOBI: %s", ourOOBI)
                 log.Printf("[identity-agent-core] EXCHANGE: Our AID: %s", ourIdentity.AID)
 
-                payload := map[string]string{
+                payload := map[string]interface{}{
                         "type":              "introduction",
                         "sender_aid":        ourIdentity.AID,
                         "sender_oobi":       ourOOBI,
                         "sender_alias":      ourAlias,
                         "sender_public_key": ourIdentity.PublicKey,
+                }
+                if ourProfile != nil {
+                        jc := ourProfile.ToJCard(ourIdentity.AID, ourOOBI)
+                        payload["sender_jcard"] = jc
                 }
                 body, _ := json.Marshal(payload)
 
@@ -1199,11 +1228,12 @@ func (s *CoreServer) handleDeleteContact(w http.ResponseWriter, r *http.Request)
 
 func (s *CoreServer) handleExchange(w http.ResponseWriter, r *http.Request) {
         var req struct {
-                Type            string `json:"type"`
-                SenderAID       string `json:"sender_aid"`
-                SenderOOBI      string `json:"sender_oobi"`
-                SenderAlias     string `json:"sender_alias"`
-                SenderPublicKey string `json:"sender_public_key"`
+                Type            string      `json:"type"`
+                SenderAID       string      `json:"sender_aid"`
+                SenderOOBI      string      `json:"sender_oobi"`
+                SenderAlias     string      `json:"sender_alias"`
+                SenderPublicKey string      `json:"sender_public_key"`
+                SenderJCard     *store.JCard `json:"sender_jcard,omitempty"`
         }
         if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
                 writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
@@ -1294,6 +1324,15 @@ func (s *CoreServer) handleExchange(w http.ResponseWriter, r *http.Request) {
         }
 
         if !oobiReachable {
+                pendingJCard := req.SenderJCard
+                if pendingJCard == nil {
+                        pendingJCard = &store.JCard{
+                                FullName:  alias,
+                                XKeriAID:  req.SenderAID,
+                                XKeriOOBI: req.SenderOOBI,
+                                XKeriRole: "agent",
+                        }
+                }
                 pendingReq := store.PendingRequest{
                         AID:         req.SenderAID,
                         Alias:       alias,
@@ -1302,12 +1341,7 @@ func (s *CoreServer) handleExchange(w http.ResponseWriter, r *http.Request) {
                         ReceivedAt:  time.Now().UTC().Format(time.RFC3339),
                         ExpiresAt:   time.Now().AddDate(0, 0, 90).UTC().Format(time.RFC3339),
                         ErrorReason: oobiErrorMsg,
-                        JCard: &store.JCard{
-                                FullName:  alias,
-                                XKeriAID:  req.SenderAID,
-                                XKeriOOBI: req.SenderOOBI,
-                                XKeriRole: "agent",
-                        },
+                        JCard:       pendingJCard,
                 }
                 if err := s.DataStore.SavePendingRequest(pendingReq); err != nil {
                         writeError(w, http.StatusInternalServerError, "Failed to save pending request", err.Error())
@@ -1325,6 +1359,15 @@ func (s *CoreServer) handleExchange(w http.ResponseWriter, r *http.Request) {
                 return
         }
 
+        contactJCard := req.SenderJCard
+        if contactJCard == nil {
+                contactJCard = &store.JCard{
+                        FullName:  alias,
+                        XKeriAID:  req.SenderAID,
+                        XKeriOOBI: req.SenderOOBI,
+                        XKeriRole: "agent",
+                }
+        }
         contact := store.ContactRecord{
                 AID:          req.SenderAID,
                 Alias:        alias,
@@ -1334,12 +1377,7 @@ func (s *CoreServer) handleExchange(w http.ResponseWriter, r *http.Request) {
                 DiscoveredAt: time.Now().UTC().Format(time.RFC3339),
                 Status:       "pending_inbound",
                 Role:         "agent",
-                JCard: &store.JCard{
-                        FullName:  alias,
-                        XKeriAID:  req.SenderAID,
-                        XKeriOOBI: req.SenderOOBI,
-                        XKeriRole: "agent",
-                },
+                JCard:        contactJCard,
         }
 
         if err := s.DataStore.SaveContact(contact); err != nil {
@@ -1599,6 +1637,38 @@ func (s *CoreServer) handleTunnelRestart(w http.ResponseWriter, r *http.Request)
 
         w.Header().Set("Content-Type", "application/json")
         json.NewEncoder(w).Encode(status)
+}
+
+func (s *CoreServer) handleGetProfile(w http.ResponseWriter, r *http.Request) {
+        profile, err := s.DataStore.GetProfile()
+        if err != nil {
+                writeError(w, http.StatusInternalServerError, "Failed to read profile", err.Error())
+                return
+        }
+        if profile == nil {
+                profile = &store.ProfileData{}
+        }
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(profile)
+}
+
+func (s *CoreServer) handlePutProfile(w http.ResponseWriter, r *http.Request) {
+        var profile store.ProfileData
+        if err := json.NewDecoder(r.Body).Decode(&profile); err != nil {
+                writeError(w, http.StatusBadRequest, "Invalid request", err.Error())
+                return
+        }
+
+        if err := s.DataStore.SaveProfile(profile); err != nil {
+                writeError(w, http.StatusInternalServerError, "Failed to save profile", err.Error())
+                return
+        }
+
+        log.Printf("[identity-agent-core] Profile updated: fn=%q", profile.FullName)
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(map[string]interface{}{"status": "saved", "profile": profile})
 }
 
 func (s *CoreServer) handleDeletePendingRequest(w http.ResponseWriter, r *http.Request) {

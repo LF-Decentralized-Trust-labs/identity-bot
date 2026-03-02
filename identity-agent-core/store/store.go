@@ -74,6 +74,38 @@ type PendingRequest struct {
         JCard       *JCard `json:"jcard,omitempty"`
 }
 
+type ProfileData struct {
+        FullName   string `json:"fn"`
+        FamilyName string `json:"family_name,omitempty"`
+        GivenName  string `json:"given_name,omitempty"`
+        Org        string `json:"org,omitempty"`
+        Title      string `json:"title,omitempty"`
+        Email      string `json:"email,omitempty"`
+        Tel        string `json:"tel,omitempty"`
+        Note       string `json:"note,omitempty"`
+        Photo      string `json:"photo,omitempty"`
+        UID        string `json:"uid,omitempty"`
+}
+
+func (p *ProfileData) ToJCard(aid string, oobiURL string) *JCard {
+        if p == nil {
+                return nil
+        }
+        return &JCard{
+                FullName:   p.FullName,
+                FamilyName: p.FamilyName,
+                GivenName:  p.GivenName,
+                Org:        p.Org,
+                Title:      p.Title,
+                Email:      p.Email,
+                Tel:        p.Tel,
+                Note:       p.Note,
+                UID:        p.UID,
+                XKeriAID:   aid,
+                XKeriOOBI:  oobiURL,
+        }
+}
+
 type Store interface {
         SaveEvent(record EventRecord) error
         GetEvents(aid string) ([]EventRecord, error)
@@ -89,6 +121,8 @@ type Store interface {
         SavePendingRequest(req PendingRequest) error
         GetPendingRequests() ([]PendingRequest, error)
         DeletePendingRequest(aid string) error
+        GetProfile() (*ProfileData, error)
+        SaveProfile(profile ProfileData) error
         ResetAll() error
         Close() error
 }
@@ -407,11 +441,38 @@ func (s *FileStore) loadPendingRequests() ([]PendingRequest, error) {
         return requests, nil
 }
 
+func (s *FileStore) GetProfile() (*ProfileData, error) {
+        s.mu.RLock()
+        defer s.mu.RUnlock()
+
+        path := filepath.Join(s.dir, "profile.json")
+        data, err := os.ReadFile(path)
+        if err != nil {
+                if os.IsNotExist(err) {
+                        return nil, nil
+                }
+                return nil, fmt.Errorf("failed to read profile: %w", err)
+        }
+
+        var profile ProfileData
+        if err := json.Unmarshal(data, &profile); err != nil {
+                return nil, fmt.Errorf("failed to parse profile: %w", err)
+        }
+        return &profile, nil
+}
+
+func (s *FileStore) SaveProfile(profile ProfileData) error {
+        s.mu.Lock()
+        defer s.mu.Unlock()
+
+        return s.writeJSON(filepath.Join(s.dir, "profile.json"), profile)
+}
+
 func (s *FileStore) ResetAll() error {
         s.mu.Lock()
         defer s.mu.Unlock()
 
-        files := []string{"identity.json", "kel.json", "contacts.json", "settings.json", "pending_requests.json"}
+        files := []string{"identity.json", "kel.json", "contacts.json", "settings.json", "pending_requests.json", "profile.json"}
         for _, f := range files {
                 path := filepath.Join(s.dir, f)
                 if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
