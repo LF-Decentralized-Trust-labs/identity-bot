@@ -201,9 +201,7 @@ func (p *GrapeIDProvider) tryClaim(scheme, domain, name, aid string) (*claimResp
         return &result, nil
 }
 
-func (p *GrapeIDProvider) Stop() error {
-        p.tryReleaseName()
-
+func (p *GrapeIDProvider) Disconnect() error {
         p.mu.Lock()
         defer p.mu.Unlock()
 
@@ -216,7 +214,13 @@ func (p *GrapeIDProvider) Stop() error {
                 p.client = nil
         }
         p.status.Active = false
+        log.Printf("[tunnel] GrapeID disconnected (name kept for reconnect)")
         return nil
+}
+
+func (p *GrapeIDProvider) Stop() error {
+        p.tryReleaseName()
+        return p.Disconnect()
 }
 
 func (p *GrapeIDProvider) tryReleaseName() {

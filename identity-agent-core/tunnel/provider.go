@@ -35,6 +35,7 @@ type Config struct {
 type Provider interface {
         Start(ctx context.Context, localPort int) error
         Stop() error
+        Disconnect() error
         URL() string
         Listener() net.Listener
         Status() Status

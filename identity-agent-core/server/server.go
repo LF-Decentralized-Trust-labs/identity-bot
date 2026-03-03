@@ -182,7 +182,7 @@ func (s *CoreServer) Stop() {
         log.Println("[identity-agent-core] Shutting down...")
 
         if s.TunnelManager != nil {
-                s.TunnelManager.Stop()
+                s.TunnelManager.Disconnect()
         }
 
         if s.listener != nil {
