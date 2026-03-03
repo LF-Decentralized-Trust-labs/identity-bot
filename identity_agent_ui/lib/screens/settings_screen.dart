@@ -882,30 +882,49 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(height: 6),
           if (_grapeIdNameLocked) ...[
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-              decoration: BoxDecoration(
-                color: AppColors.primary.withOpacity(0.5),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: AppColors.accent.withOpacity(0.3)),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.link, size: 14, color: AppColors.accent),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      '${_grapeIdDomainController.text.trim().isNotEmpty ? _grapeIdDomainController.text.trim() : "grapeid.org"}/$_grapeIdLockedName',
-                      style: const TextStyle(
-                        color: AppColors.accent,
-                        fontSize: 13,
-                        fontFamily: 'monospace',
-                        fontWeight: FontWeight.w600,
+            GestureDetector(
+              onTap: () {
+                final domain = _grapeIdDomainController.text.trim().isNotEmpty ? _grapeIdDomainController.text.trim() : 'grapeid.org';
+                final fullUrl = 'https://$domain/$_grapeIdLockedName';
+                Clipboard.setData(ClipboardData(text: fullUrl));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      'Copied $fullUrl',
+                      style: const TextStyle(fontFamily: 'monospace'),
+                    ),
+                    duration: const Duration(seconds: 2),
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+              },
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withOpacity(0.5),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: AppColors.accent.withOpacity(0.3)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.link, size: 14, color: AppColors.accent),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '${_grapeIdDomainController.text.trim().isNotEmpty ? _grapeIdDomainController.text.trim() : "grapeid.org"}/$_grapeIdLockedName',
+                        style: const TextStyle(
+                          color: AppColors.accent,
+                          fontSize: 13,
+                          fontFamily: 'monospace',
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
-                  ),
-                ],
+                    const SizedBox(width: 8),
+                    const Icon(Icons.copy, size: 14, color: AppColors.textMuted),
+                  ],
+                ),
               ),
             ),
             const SizedBox(height: 12),
