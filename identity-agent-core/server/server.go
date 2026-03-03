@@ -282,11 +282,27 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
                 log.Printf("[identity-agent-core] Serving Flutter web from: %s", absWebDir)
                 fileServer := http.FileServer(http.Dir(absWebDir))
                 r.Get("/*", func(w http.ResponseWriter, r *http.Request) {
-                        path := filepath.Join(absWebDir, r.URL.Path)
-                        if _, err := os.Stat(path); os.IsNotExist(err) {
+                        urlPath := r.URL.Path
+                        filePath := filepath.Join(absWebDir, urlPath)
+                        _, statErr := os.Stat(filePath)
+
+                        // SPA fallback to index.html for unknown paths
+                        if os.IsNotExist(statErr) {
+                                w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+                                w.Header().Set("Pragma", "no-cache")
                                 http.ServeFile(w, r, filepath.Join(absWebDir, "index.html"))
                                 return
                         }
+
+                        // index.html itself must never be cached — browser must always revalidate
+                        if urlPath == "/" || urlPath == "/index.html" || strings.HasSuffix(urlPath, "/index.html") {
+                                w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+                                w.Header().Set("Pragma", "no-cache")
+                        } else {
+                                // All other Flutter assets are content-hashed by the build — cache aggressively
+                                w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+                        }
+
                         fileServer.ServeHTTP(w, r)
                 })
         } else {
