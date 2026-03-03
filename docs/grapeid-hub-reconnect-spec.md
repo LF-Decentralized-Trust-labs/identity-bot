@@ -179,12 +179,20 @@ The Identity Agent implements this flow on startup:
    → Other error? Fail with error.
 ```
 
-On graceful shutdown:
+On shutdown (SIGTERM, workflow restart, app backgrounded):
+```
+1. Close Chisel client connection (Disconnect).
+2. Do NOT call /release-name — hub keeps name reserved for /reconnect on next startup.
+```
+
+On explicit name release (future UI — "release name" button):
 ```
 1. POST /release-name {"name": "<extension>", "aid": "<AID>"}
-   → Best-effort, 3-second timeout. Log result but don't block shutdown.
-2. Close Chisel client.
+   → Best-effort, 3-second timeout. Log result but don't block.
+2. Close Chisel client (Disconnect).
 ```
+
+See `docs/adr/008-tunnel-lifecycle-disconnect-vs-release.md` for the full rationale behind the Disconnect vs Release distinction.
 
 ## Backward Compatibility
 
