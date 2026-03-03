@@ -563,15 +563,38 @@ class CoreService {
     }
   }
 
-  Future<bool> checkGrapeIdName(String domain, String name) async {
+  Future<({bool? available, bool hubError, String message})> checkGrapeIdName(String domain, String name) async {
     final domainParam = domain.isNotEmpty ? '&domain=${Uri.encodeComponent(domain)}' : '';
     final url = Uri.parse('$baseUrl/api/settings/tunnel/check-name?name=${Uri.encodeComponent(name)}$domainParam');
-    final response = await _client.get(url);
-    if (response.statusCode == 200) {
-      final data = jsonDecode(response.body);
-      return data['available'] == true;
+    try {
+      final response = await _client.get(url);
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        if (data['hub_error'] == true) {
+          return (available: null, hubError: true, message: (data['message'] as String?) ?? 'Provider not responsive');
+        }
+        final isAvailable = data['available'] == true;
+        return (available: isAvailable, hubError: false, message: '');
+      }
+      return (available: null, hubError: true, message: 'Provider not responsive');
+    } catch (_) {
+      return (available: null, hubError: true, message: 'Provider not responsive');
     }
-    return false;
+  }
+
+  Future<({bool reachable, String reason})> checkGrapeIdHealth(String domain) async {
+    final domainParam = domain.isNotEmpty ? '?domain=${Uri.encodeComponent(domain)}' : '';
+    final url = Uri.parse('$baseUrl/api/settings/tunnel/grapeid-health$domainParam');
+    try {
+      final response = await _client.get(url);
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        return (reachable: data['reachable'] == true, reason: (data['reason'] as String?) ?? '');
+      }
+      return (reachable: false, reason: 'Provider not responsive');
+    } catch (_) {
+      return (reachable: false, reason: 'Provider not responsive');
+    }
   }
 
   Future<Map<String, dynamic>> saveTunnelSettings({

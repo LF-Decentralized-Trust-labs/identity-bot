@@ -259,6 +259,7 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
                 r.Get("/settings/tunnel", s.handleGetTunnelSettings)
                 r.Put("/settings/tunnel", s.handlePutTunnelSettings)
                 r.Get("/settings/tunnel/check-name", s.handleCheckTunnelName)
+                r.Get("/settings/tunnel/grapeid-health", s.handleGrapeIdHealth)
                 r.Get("/tunnel/status", s.handleTunnelStatus)
                 r.Post("/tunnel/restart", s.handleTunnelRestart)
 
@@ -1692,7 +1693,13 @@ func (s *CoreServer) handleCheckTunnelName(w http.ResponseWriter, r *http.Reques
         resp, err := client.Get(hubURL)
         if err != nil {
                 log.Printf("[identity-agent-core] check-name proxy failed: %v", err)
-                writeError(w, http.StatusBadGateway, "Failed to reach tunnel hub", err.Error())
+                w.Header().Set("Content-Type", "application/json")
+                w.WriteHeader(http.StatusOK)
+                json.NewEncoder(w).Encode(map[string]interface{}{
+                        "available":  nil,
+                        "hub_error":  true,
+                        "message":    "Provider not responsive",
+                })
                 return
         }
         defer resp.Body.Close()
@@ -1703,9 +1710,65 @@ func (s *CoreServer) handleCheckTunnelName(w http.ResponseWriter, r *http.Reques
                 return
         }
 
+        // Normalize provider-side server errors — do not let 5xx bubble up as
+        // "name taken". Return 200 with hub_error so the client can show the
+        // correct message ("provider not responsive") instead of a false negative.
+        if resp.StatusCode >= 500 {
+                log.Printf("[identity-agent-core] check-name: provider returned HTTP %d", resp.StatusCode)
+                w.Header().Set("Content-Type", "application/json")
+                w.WriteHeader(http.StatusOK)
+                json.NewEncoder(w).Encode(map[string]interface{}{
+                        "available": nil,
+                        "hub_error": true,
+                        "message":   fmt.Sprintf("Provider server returned HTTP %d", resp.StatusCode),
+                })
+                return
+        }
+
         w.Header().Set("Content-Type", "application/json")
         w.WriteHeader(resp.StatusCode)
         w.Write(body)
+}
+
+func (s *CoreServer) handleGrapeIdHealth(w http.ResponseWriter, r *http.Request) {
+        domain := r.URL.Query().Get("domain")
+        if domain == "" {
+                domain = "grapeid.org"
+        }
+
+        scheme := "https"
+        if strings.Contains(domain, "localhost") || strings.Contains(domain, "127.0.0.1") {
+                scheme = "http"
+        }
+
+        probeURL := fmt.Sprintf("%s://%s/health", scheme, domain)
+        client := &http.Client{Timeout: 3 * time.Second}
+        resp, err := client.Get(probeURL)
+
+        w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(http.StatusOK)
+
+        if err != nil {
+                log.Printf("[identity-agent-core] grapeid health probe failed: %v", err)
+                json.NewEncoder(w).Encode(map[string]interface{}{
+                        "reachable": false,
+                        "reason":    "Provider not responsive",
+                })
+                return
+        }
+        defer resp.Body.Close()
+
+        if resp.StatusCode >= 500 {
+                json.NewEncoder(w).Encode(map[string]interface{}{
+                        "reachable": false,
+                        "reason":    fmt.Sprintf("Provider server returned HTTP %d", resp.StatusCode),
+                })
+                return
+        }
+
+        json.NewEncoder(w).Encode(map[string]interface{}{
+                "reachable": true,
+        })
 }
 
 func (s *CoreServer) handleTunnelRestart(w http.ResponseWriter, r *http.Request) {

@@ -57,7 +57,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   
   bool _isCheckingGrapeId = false;
   bool? _isGrapeIdAvailable;
+  bool _isGrapeIdHubError = false;
   String? _grapeIdCheckError;
+  bool? _grapeIdHubAvailable;
 
   @override
   void initState() {
@@ -96,10 +98,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
         }
         _loading = false;
       });
+      _checkGrapeIdHub();
     } catch (e) {
       setState(() {
         _loading = false;
         _error = e.toString();
+      });
+    }
+  }
+
+  Future<void> _checkGrapeIdHub() async {
+    final domain = _grapeIdDomainController.text.trim().isNotEmpty
+        ? _grapeIdDomainController.text.trim()
+        : 'grapeid.org';
+    final result = await _coreService.checkGrapeIdHealth(domain);
+    if (mounted) {
+      setState(() {
+        _grapeIdHubAvailable = result.reachable;
       });
     }
   }
@@ -547,6 +562,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             'Custom permanent URLs via GrapeID Tunneling Hub (e.g. grapeid.org/alice).',
             Icons.vpn_key_outlined,
             enabled: true,
+            badge: _grapeIdHubAvailable == null ? null : (_grapeIdHubAvailable! ? 'AVAILABLE' : 'UNAVAILABLE'),
+            badgeIsError: _grapeIdHubAvailable == false,
           ),
           const SizedBox(height: 8),
           _buildProviderOption(
@@ -556,6 +573,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             Icons.cloud_outlined,
             enabled: _cloudflaredAvailable,
             badge: _cloudflaredAvailable ? 'AVAILABLE' : 'NOT FOUND',
+            badgeIsError: !_cloudflaredAvailable,
           ),
           const SizedBox(height: 8),
           _buildProviderOption(
@@ -564,7 +582,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             'In-memory tunnel. Works on desktop & mobile. Requires auth token.',
             Icons.swap_vert,
             enabled: true,
-            badge: _hasNgrokToken ? 'TOKEN SET' : null,
+            badge: _hasNgrokToken ? 'AVAILABLE' : 'NO TOKEN',
+            badgeIsError: !_hasNgrokToken,
           ),
           const SizedBox(height: 8),
           _buildProviderOption(
@@ -579,7 +598,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Widget _buildProviderOption(String value, String label, String description, IconData icon, {bool enabled = true, String? badge}) {
+  Widget _buildProviderOption(String value, String label, String description, IconData icon, {bool enabled = true, String? badge, bool badgeIsError = false}) {
     final selected = _selectedProvider == value;
 
     return GestureDetector(
@@ -623,13 +642,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
-                            color: enabled ? AppColors.accent.withOpacity(0.15) : AppColors.error.withOpacity(0.15),
+                            color: (!enabled || badgeIsError) ? AppColors.warning.withOpacity(0.15) : AppColors.accent.withOpacity(0.15),
                             borderRadius: BorderRadius.circular(4),
                           ),
                           child: Text(
                             badge,
                             style: TextStyle(
-                              color: enabled ? AppColors.accent : AppColors.error,
+                              color: (!enabled || badgeIsError) ? AppColors.warning : AppColors.accent,
                               fontSize: 8,
                               fontWeight: FontWeight.w600,
                               letterSpacing: 0.5,
@@ -676,6 +695,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (ext.isEmpty) {
       setState(() {
         _isGrapeIdAvailable = null;
+        _isGrapeIdHubError = false;
         _grapeIdCheckError = null;
       });
       return;
@@ -683,20 +703,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     setState(() {
       _isCheckingGrapeId = true;
+      _isGrapeIdHubError = false;
       _grapeIdCheckError = null;
     });
 
     try {
-      final available = await _coreService.checkGrapeIdName(domain, ext);
+      final result = await _coreService.checkGrapeIdName(domain, ext);
       setState(() {
         _isCheckingGrapeId = false;
-        _isGrapeIdAvailable = available;
+        _isGrapeIdHubError = result.hubError;
+        _isGrapeIdAvailable = result.available;
+        _grapeIdCheckError = result.hubError ? result.message : null;
       });
     } catch (e) {
       setState(() {
         _isCheckingGrapeId = false;
         _isGrapeIdAvailable = null;
-        _grapeIdCheckError = 'Check failed: ${e.toString()}';
+        _isGrapeIdHubError = true;
+        _grapeIdCheckError = 'Provider not responsive';
       });
     }
   }
@@ -809,12 +833,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
             Row(
               children: [
                 if (_grapeIdCheckError != null) ...[
-                  const Icon(Icons.error_outline, size: 14, color: AppColors.error),
+                  const Icon(Icons.warning_amber_outlined, size: 14, color: AppColors.warning),
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(
-                      _grapeIdCheckError!,
-                      style: const TextStyle(color: AppColors.error, fontSize: 10, fontFamily: 'monospace'),
+                      'Grape ID provider not responsive — ${_grapeIdCheckError!.toLowerCase()}. You can still save and try connecting.',
+                      style: const TextStyle(color: AppColors.warning, fontSize: 10, fontFamily: 'monospace'),
                     ),
                   ),
                 ] else if (_isGrapeIdAvailable == true) ...[
