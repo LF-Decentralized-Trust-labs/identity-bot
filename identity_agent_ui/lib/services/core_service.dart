@@ -564,10 +564,9 @@ class CoreService {
   }
 
   Future<bool> checkGrapeIdName(String domain, String name) async {
-    final domainUrl = domain.isNotEmpty ? domain : 'grapeid.org';
-    final scheme = domainUrl.contains('localhost') ? 'http' : 'https';
-    final url = Uri.parse('$scheme://$domainUrl/check-name?name=$name');
-    final response = await http.get(url);
+    final domainParam = domain.isNotEmpty ? '&domain=${Uri.encodeComponent(domain)}' : '';
+    final url = Uri.parse('$baseUrl/api/settings/tunnel/check-name?name=${Uri.encodeComponent(name)}$domainParam');
+    final response = await _client.get(url);
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body);
       return data['available'] == true;

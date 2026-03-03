@@ -258,6 +258,7 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 
                 r.Get("/settings/tunnel", s.handleGetTunnelSettings)
                 r.Put("/settings/tunnel", s.handlePutTunnelSettings)
+                r.Get("/settings/tunnel/check-name", s.handleCheckTunnelName)
                 r.Get("/tunnel/status", s.handleTunnelStatus)
                 r.Post("/tunnel/restart", s.handleTunnelRestart)
 
@@ -1651,6 +1652,44 @@ func (s *CoreServer) handleTunnelStatus(w http.ResponseWriter, r *http.Request) 
         status := s.TunnelManager.GetStatus()
         w.Header().Set("Content-Type", "application/json")
         json.NewEncoder(w).Encode(status)
+}
+
+func (s *CoreServer) handleCheckTunnelName(w http.ResponseWriter, r *http.Request) {
+        domain := r.URL.Query().Get("domain")
+        name := r.URL.Query().Get("name")
+
+        if name == "" {
+                writeError(w, http.StatusBadRequest, "Missing required parameter: name", "")
+                return
+        }
+        if domain == "" {
+                domain = "grapeid.org"
+        }
+
+        scheme := "https"
+        if strings.Contains(domain, "localhost") || strings.Contains(domain, "127.0.0.1") {
+                scheme = "http"
+        }
+
+        hubURL := fmt.Sprintf("%s://%s/check-name?name=%s", scheme, domain, name)
+        client := &http.Client{Timeout: 8 * time.Second}
+        resp, err := client.Get(hubURL)
+        if err != nil {
+                log.Printf("[identity-agent-core] check-name proxy failed: %v", err)
+                writeError(w, http.StatusBadGateway, "Failed to reach tunnel hub", err.Error())
+                return
+        }
+        defer resp.Body.Close()
+
+        body, err := io.ReadAll(resp.Body)
+        if err != nil {
+                writeError(w, http.StatusInternalServerError, "Failed to read hub response", err.Error())
+                return
+        }
+
+        w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(resp.StatusCode)
+        w.Write(body)
 }
 
 func (s *CoreServer) handleTunnelRestart(w http.ResponseWriter, r *http.Request) {
