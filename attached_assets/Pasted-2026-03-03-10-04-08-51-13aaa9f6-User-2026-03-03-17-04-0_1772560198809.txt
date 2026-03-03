@@ -1,0 +1,56 @@
+2026-03-03 10:04:08.51
+13aaa9f6
+User
+2026/03/03 17:04:08 server: session#9: tun: proxy#R:10054=>localhost:5000: Listening
+2026-03-03 10:06:42.89
+13aaa9f6
+User
+time=2026-03-03T17:06:42.895Z level=INFO msg="Reconnected name" name=identity-agent-test-031 port=10055 aid=ED4zKjGVbjhKp-otddHszlj0bNERyTKYDS3nTqS7J_av
+2026-03-03 10:06:43.40
+13aaa9f6
+User
+2026/03/03 17:06:43 server: session#10: Client version (0.0.0-src) differs from server version (1.10.1)
+2026-03-03 10:06:43.40
+13aaa9f6
+User
+2026/03/03 17:06:43 server: session#10: tun: proxy#R:10055=>localhost:5000: Listening
+2026-03-03 10:08:36.32
+13aaa9f6
+User
+time=2026-03-03T17:08:36.328Z level=INFO msg="Reconnected name" name=identity-agent-test-031 port=10056 aid=ED4zKjGVbjhKp-otddHszlj0bNERyTKYDS3nTqS7J_av
+2026-03-03 10:08:36.82
+13aaa9f6
+User
+2026/03/03 17:08:36 server: session#11: Client version (0.0.0-src) differs from server version (1.10.1)
+2026-03-03 10:08:36.83
+13aaa9f6
+User
+2026/03/03 17:08:36 server: session#11: tun: proxy#R:10056=>localhost:5000: Listening
+2026-03-03 10:08:55.90
+13aaa9f6
+User
+time=2026-03-03T17:08:55.901Z level=INFO msg="Reconnected name" name=identity-agent-test-031 port=10057 aid=ED4zKjGVbjhKp-otddHszlj0bNERyTKYDS3nTqS7J_av
+2026-03-03 10:08:56.35
+13aaa9f6
+User
+2026/03/03 17:08:56 server: session#12: Client version (0.0.0-src) differs from server version (1.10.1)
+2026-03-03 10:08:56.36
+13aaa9f6
+User
+2026/03/03 17:08:56 server: session#12: tun: proxy#R:10057=>localhost:5000: Listening
+2026-03-03 10:25:41.97
+13aaa9f6
+User
+time=2026-03-03T17:25:41.975Z level=INFO msg="Reconnected name" name=identity-agent-test-031 port=10058 aid=ED4zKjGVbjhKp-otddHszlj0bNERyTKYDS3nTqS7J_av
+2026-03-03 10:25:42.94
+13aaa9f6
+User
+2026/03/03 17:25:42 server: session#13: Client version (0.0.0-src) differs from server version (1.10.1)
+2026-03-03 10:25:42.95
+13aaa9f6
+User
+2026/03/03 17:25:42 server: session#13: tun: proxy#R:10058=>localhost:5000: Listening
+2026-03-03 10:30:52.60
+13aaa9f6
+User
+time=2026-03-03T17:30:52.608Z level=INFO msg="Released name" name=identity-agent-test-031 aid=ED4zKjGVbjhKp-otddHszlj0bNERyTKYDS3nTqS7J_av

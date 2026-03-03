@@ -3,6 +3,8 @@ package server
 import (
         "bytes"
         "context"
+        "crypto/tls"
+        "crypto/x509"
         "encoding/json"
         "fmt"
         "io"
@@ -1690,16 +1692,17 @@ func (s *CoreServer) handleCheckTunnelName(w http.ResponseWriter, r *http.Reques
         }
 
         hubURL := fmt.Sprintf("%s://%s/check-name?name=%s", scheme, domain, name)
-        client := &http.Client{Timeout: 8 * time.Second}
+        client := s.newOutboundHTTPClient(8 * time.Second)
         resp, err := client.Get(hubURL)
         if err != nil {
+                errDetail := err.Error()
                 log.Printf("[identity-agent-core] check-name proxy failed: %v", err)
                 w.Header().Set("Content-Type", "application/json")
                 w.WriteHeader(http.StatusOK)
                 json.NewEncoder(w).Encode(map[string]interface{}{
                         "available":  nil,
                         "hub_error":  true,
-                        "message":    "Provider not responsive",
+                        "message":    fmt.Sprintf("Provider not responsive: %s", errDetail),
                 })
                 return
         }
@@ -1743,17 +1746,18 @@ func (s *CoreServer) handleGrapeIdHealth(w http.ResponseWriter, r *http.Request)
         }
 
         probeURL := fmt.Sprintf("%s://%s/health", scheme, domain)
-        client := &http.Client{Timeout: 3 * time.Second}
+        client := s.newOutboundHTTPClient(3 * time.Second)
         resp, err := client.Get(probeURL)
 
         w.Header().Set("Content-Type", "application/json")
         w.WriteHeader(http.StatusOK)
 
         if err != nil {
+                errDetail := err.Error()
                 log.Printf("[identity-agent-core] grapeid health probe failed: %v", err)
                 json.NewEncoder(w).Encode(map[string]interface{}{
                         "reachable": false,
-                        "reason":    "Provider not responsive",
+                        "reason":    fmt.Sprintf("Provider not responsive: %s", errDetail),
                 })
                 return
         }
@@ -1856,6 +1860,25 @@ func (s *CoreServer) handleReset(w http.ResponseWriter, r *http.Request) {
 
         w.Header().Set("Content-Type", "application/json")
         json.NewEncoder(w).Encode(map[string]interface{}{"reset": true})
+}
+
+func (s *CoreServer) newOutboundHTTPClient(timeout time.Duration) *http.Client {
+        pool, err := x509.SystemCertPool()
+        if err != nil || pool == nil {
+                log.Printf("[identity-agent-core] System cert pool unavailable (%v), using empty pool with InsecureSkipVerify fallback", err)
+                return &http.Client{
+                        Timeout: timeout,
+                        Transport: &http.Transport{
+                                TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+                        },
+                }
+        }
+        return &http.Client{
+                Timeout: timeout,
+                Transport: &http.Transport{
+                        TLSClientConfig: &tls.Config{RootCAs: pool},
+                },
+        }
 }
 
 func (s *CoreServer) handleReleaseTunnelName(w http.ResponseWriter, r *http.Request) {
