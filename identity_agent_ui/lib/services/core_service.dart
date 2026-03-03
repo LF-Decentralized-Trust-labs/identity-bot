@@ -563,22 +563,54 @@ class CoreService {
     }
   }
 
-  Future<({bool? available, bool hubError, String message})> checkGrapeIdName(String domain, String name) async {
+  Future<({bool? available, bool hubError, String message, String debugUrl, int debugStatus, String debugBody})> checkGrapeIdName(String domain, String name) async {
     final domainParam = domain.isNotEmpty ? '&domain=${Uri.encodeComponent(domain)}' : '';
     final url = Uri.parse('$baseUrl/api/settings/tunnel/check-name?name=${Uri.encodeComponent(name)}$domainParam');
+    final debugUrl = url.toString();
+
     try {
       final response = await _client.get(url);
+      final rawBody = response.body.length > 500 ? '${response.body.substring(0, 500)}...' : response.body;
+
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         if (data['hub_error'] == true) {
-          return (available: null, hubError: true, message: (data['message'] as String?) ?? 'Provider not responsive');
+          return (
+            available: null,
+            hubError: true,
+            message: (data['message'] as String?) ?? 'Provider not responsive',
+            debugUrl: debugUrl,
+            debugStatus: response.statusCode,
+            debugBody: rawBody,
+          );
         }
         final isAvailable = data['available'] == true;
-        return (available: isAvailable, hubError: false, message: '');
+        return (
+          available: isAvailable,
+          hubError: false,
+          message: '',
+          debugUrl: debugUrl,
+          debugStatus: response.statusCode,
+          debugBody: rawBody,
+        );
       }
-      return (available: null, hubError: true, message: 'Provider not responsive');
-    } catch (_) {
-      return (available: null, hubError: true, message: 'Provider not responsive');
+      return (
+        available: null,
+        hubError: true,
+        message: 'Go Core returned HTTP ${response.statusCode}',
+        debugUrl: debugUrl,
+        debugStatus: response.statusCode,
+        debugBody: rawBody,
+      );
+    } catch (e) {
+      return (
+        available: null,
+        hubError: true,
+        message: 'Cannot reach local Go Core',
+        debugUrl: debugUrl,
+        debugStatus: 0,
+        debugBody: 'Connection error: $e',
+      );
     }
   }
 

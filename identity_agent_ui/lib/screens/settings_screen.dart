@@ -57,9 +57,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   
   bool _isCheckingGrapeId = false;
   bool? _isGrapeIdAvailable;
-  bool _isGrapeIdHubError = false;
   String? _grapeIdCheckError;
   bool? _grapeIdHubAvailable;
+  bool _showCheckDebug = false;
+  String? _debugUrl;
+  int? _debugStatus;
+  String? _debugBody;
+  DateTime? _debugTime;
 
   @override
   void initState() {
@@ -695,7 +699,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (ext.isEmpty) {
       setState(() {
         _isGrapeIdAvailable = null;
-        _isGrapeIdHubError = false;
         _grapeIdCheckError = null;
       });
       return;
@@ -703,7 +706,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     setState(() {
       _isCheckingGrapeId = true;
-      _isGrapeIdHubError = false;
       _grapeIdCheckError = null;
     });
 
@@ -711,16 +713,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final result = await _coreService.checkGrapeIdName(domain, ext);
       setState(() {
         _isCheckingGrapeId = false;
-        _isGrapeIdHubError = result.hubError;
         _isGrapeIdAvailable = result.available;
         _grapeIdCheckError = result.hubError ? result.message : null;
+        _debugUrl = result.debugUrl;
+        _debugStatus = result.debugStatus;
+        _debugBody = result.debugBody;
+        _debugTime = DateTime.now();
       });
     } catch (e) {
       setState(() {
         _isCheckingGrapeId = false;
         _isGrapeIdAvailable = null;
-        _isGrapeIdHubError = true;
         _grapeIdCheckError = 'Provider not responsive';
+        _debugBody = 'Exception: $e';
+        _debugStatus = 0;
+        _debugTime = DateTime.now();
       });
     }
   }
@@ -859,8 +866,97 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ],
             ),
           ],
+          if (_debugTime != null) ...[
+            const SizedBox(height: 12),
+            GestureDetector(
+              onTap: () => setState(() => _showCheckDebug = !_showCheckDebug),
+              child: Row(
+                children: [
+                  Icon(
+                    _showCheckDebug ? Icons.expand_less : Icons.expand_more,
+                    size: 12,
+                    color: AppColors.textMuted,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    _showCheckDebug ? 'HIDE REQUEST LOG' : 'SHOW REQUEST LOG',
+                    style: const TextStyle(
+                      color: AppColors.textMuted,
+                      fontSize: 9,
+                      letterSpacing: 1.0,
+                      fontFamily: 'monospace',
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (_showCheckDebug) ...[
+              const SizedBox(height: 8),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: AppColors.primary,
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: AppColors.border.withOpacity(0.5)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _debugRow('TIME', _debugTime != null
+                        ? '${_debugTime!.hour.toString().padLeft(2,'0')}:${_debugTime!.minute.toString().padLeft(2,'0')}:${_debugTime!.second.toString().padLeft(2,'0')}'
+                        : '—'),
+                    const SizedBox(height: 4),
+                    _debugRow('URL', _debugUrl ?? '—'),
+                    const SizedBox(height: 4),
+                    _debugRow('STATUS', _debugStatus != null
+                        ? (_debugStatus == 0 ? 'CONNECTION FAILED' : 'HTTP $_debugStatus')
+                        : '—'),
+                    const SizedBox(height: 4),
+                    _debugRow('BODY', _debugBody ?? '—'),
+                  ],
+                ),
+              ),
+            ],
+          ],
         ],
       ),
+    );
+  }
+
+  Widget _debugRow(String label, String value) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 48,
+          child: Text(
+            label,
+            style: const TextStyle(
+              color: AppColors.textMuted,
+              fontSize: 9,
+              fontFamily: 'monospace',
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.5,
+            ),
+          ),
+        ),
+        const Text(
+          ': ',
+          style: TextStyle(color: AppColors.textMuted, fontSize: 9, fontFamily: 'monospace'),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            style: const TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: 9,
+              fontFamily: 'monospace',
+            ),
+          ),
+        ),
+      ],
     );
   }
 
