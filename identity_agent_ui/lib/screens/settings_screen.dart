@@ -1392,7 +1392,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: _restarting
                 ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.accent))
                 : const Text(
-                    'RESTART TUNNEL',
+                    'RECONNECT',
                     style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w600,
