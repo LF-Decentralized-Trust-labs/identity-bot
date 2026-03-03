@@ -629,6 +629,18 @@ class CoreService {
     }
   }
 
+  Future<Map<String, dynamic>> releaseTunnelName() async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/api/settings/tunnel/release-name'),
+    );
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    } else {
+      final body = jsonDecode(response.body);
+      throw Exception(body['error'] ?? 'Release failed: ${response.statusCode}');
+    }
+  }
+
   Future<Map<String, dynamic>> saveTunnelSettings({
     required String provider,
     String? ngrokAuthToken,

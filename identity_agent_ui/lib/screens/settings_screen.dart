@@ -64,6 +64,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   int? _debugStatus;
   String? _debugBody;
   DateTime? _debugTime;
+  bool _grapeIdNameLocked = false;
+  String _grapeIdLockedName = '';
+  bool _isReleasingName = false;
 
   @override
   void initState() {
@@ -95,6 +98,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
         }
         if (settings['tunnel_extension'] != null) {
           _grapeIdExtController.text = settings['tunnel_extension'].toString();
+        }
+        final ext = (settings['tunnel_extension'] ?? '').toString().trim();
+        final provider = (settings['provider'] ?? 'none').toString();
+        if (provider == 'grapeid' && ext.isNotEmpty) {
+          _grapeIdNameLocked = true;
+          _grapeIdLockedName = ext;
+        } else {
+          _grapeIdNameLocked = false;
+          _grapeIdLockedName = '';
         }
         if (endpointData != null) {
           _endpointUrl = endpointData['url']?.toString() ?? '';
@@ -692,6 +704,79 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  Future<void> _releaseTunnelName() async {
+    setState(() => _isReleasingName = true);
+    try {
+      await _coreService.releaseTunnelName();
+      setState(() {
+        _grapeIdNameLocked = false;
+        _grapeIdLockedName = '';
+        _grapeIdExtController.clear();
+        _isGrapeIdAvailable = null;
+        _grapeIdCheckError = null;
+        _debugTime = null;
+      });
+      await _loadSettings();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text(
+              'Name released successfully',
+              style: TextStyle(fontFamily: 'monospace'),
+            ),
+            backgroundColor: AppColors.accent.withOpacity(0.9),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Failed to release name: $e',
+              style: const TextStyle(fontFamily: 'monospace'),
+            ),
+            backgroundColor: AppColors.error.withOpacity(0.9),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isReleasingName = false);
+    }
+  }
+
+  Future<void> _changeTunnelName() async {
+    setState(() => _isReleasingName = true);
+    try {
+      await _coreService.releaseTunnelName();
+      setState(() {
+        _grapeIdNameLocked = false;
+        _grapeIdLockedName = '';
+        _grapeIdExtController.clear();
+        _isGrapeIdAvailable = null;
+        _grapeIdCheckError = null;
+        _debugTime = null;
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Failed to release current name: $e',
+              style: const TextStyle(fontFamily: 'monospace'),
+            ),
+            backgroundColor: AppColors.error.withOpacity(0.9),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isReleasingName = false);
+    }
+  }
+
   Future<void> _checkGrapeIdAvailability() async {
     final domain = _grapeIdDomainController.text.trim();
     final ext = _grapeIdExtController.text.trim();
@@ -767,12 +852,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 6),
           TextField(
             controller: _grapeIdDomainController,
-            style: const TextStyle(color: AppColors.textPrimary, fontSize: 12, fontFamily: 'monospace'),
+            readOnly: _grapeIdNameLocked,
+            style: TextStyle(
+              color: _grapeIdNameLocked ? AppColors.textMuted : AppColors.textPrimary,
+              fontSize: 12,
+              fontFamily: 'monospace',
+            ),
             decoration: InputDecoration(
               hintText: 'e.g. grapeid.org, myagent.com...',
               hintStyle: const TextStyle(color: AppColors.textMuted, fontSize: 12),
               filled: true,
-              fillColor: AppColors.primary,
+              fillColor: _grapeIdNameLocked ? AppColors.primary.withOpacity(0.5) : AppColors.primary,
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppColors.border)),
               enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppColors.border)),
               focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppColors.accent)),
@@ -780,9 +870,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           const SizedBox(height: 16),
-          const Text(
-            'EXTENSION (e.g. alice, cool-dragon)',
-            style: TextStyle(
+          Text(
+            _grapeIdNameLocked ? 'CLAIMED NAME' : 'EXTENSION (e.g. alice, cool-dragon)',
+            style: const TextStyle(
               color: AppColors.textMuted,
               fontSize: 10,
               fontWeight: FontWeight.w600,
@@ -791,135 +881,243 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           const SizedBox(height: 6),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _grapeIdExtController,
-                  style: const TextStyle(color: AppColors.textPrimary, fontSize: 12, fontFamily: 'monospace'),
-                  decoration: InputDecoration(
-                    prefixText: '/',
-                    prefixStyle: const TextStyle(color: AppColors.textMuted, fontSize: 12, fontFamily: 'monospace'),
-                    hintText: 'your-preferred-name',
-                    hintStyle: const TextStyle(color: AppColors.textMuted, fontSize: 12),
-                    filled: true,
-                    fillColor: AppColors.primary,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppColors.border)),
-                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppColors.border)),
-                    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppColors.accent)),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  ),
-                ),
+          if (_grapeIdNameLocked) ...[
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              decoration: BoxDecoration(
+                color: AppColors.primary.withOpacity(0.5),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppColors.accent.withOpacity(0.3)),
               ),
-              const SizedBox(width: 12),
-              OutlinedButton(
-                onPressed: _isCheckingGrapeId ? null : _checkGrapeIdAvailability,
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppColors.accent,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                  side: const BorderSide(color: AppColors.border),
-                ),
-                child: _isCheckingGrapeId
-                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.accent))
-                    : const Text(
-                        'CHECK AVAILABILITY',
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: 1.0,
-                          fontFamily: 'monospace',
-                        ),
-                      ),
-              ),
-            ],
-          ),
-          if (_isGrapeIdAvailable != null || _grapeIdCheckError != null) ...[
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                if (_grapeIdCheckError != null) ...[
-                  const Icon(Icons.warning_amber_outlined, size: 14, color: AppColors.warning),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      'Grape ID provider not responsive — ${_grapeIdCheckError!.toLowerCase()}. You can still save and try connecting.',
-                      style: const TextStyle(color: AppColors.warning, fontSize: 10, fontFamily: 'monospace'),
-                    ),
-                  ),
-                ] else if (_isGrapeIdAvailable == true) ...[
-                  const Icon(Icons.check_circle_outline, size: 14, color: AppColors.coreActive),
-                  const SizedBox(width: 6),
-                  const Text(
-                    'This name is available!',
-                    style: TextStyle(color: AppColors.coreActive, fontSize: 10, fontFamily: 'monospace'),
-                  ),
-                ] else if (_isGrapeIdAvailable == false) ...[
-                  const Icon(Icons.cancel_outlined, size: 14, color: AppColors.error),
-                  const SizedBox(width: 6),
-                  const Text(
-                    'This name is already taken. Please choose another.',
-                    style: TextStyle(color: AppColors.error, fontSize: 10, fontFamily: 'monospace'),
-                  ),
-                ],
-              ],
-            ),
-          ],
-          if (_debugTime != null) ...[
-            const SizedBox(height: 12),
-            GestureDetector(
-              onTap: () => setState(() => _showCheckDebug = !_showCheckDebug),
               child: Row(
                 children: [
-                  Icon(
-                    _showCheckDebug ? Icons.expand_less : Icons.expand_more,
-                    size: 12,
-                    color: AppColors.textMuted,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    _showCheckDebug ? 'HIDE REQUEST LOG' : 'SHOW REQUEST LOG',
-                    style: const TextStyle(
-                      color: AppColors.textMuted,
-                      fontSize: 9,
-                      letterSpacing: 1.0,
-                      fontFamily: 'monospace',
-                      fontWeight: FontWeight.w600,
+                  const Icon(Icons.link, size: 14, color: AppColors.accent),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '${_grapeIdDomainController.text.trim().isNotEmpty ? _grapeIdDomainController.text.trim() : "grapeid.org"}/$_grapeIdLockedName',
+                      style: const TextStyle(
+                        color: AppColors.accent,
+                        fontSize: 13,
+                        fontFamily: 'monospace',
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                 ],
               ),
             ),
-            if (_showCheckDebug) ...[
-              const SizedBox(height: 8),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: AppColors.primary,
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: AppColors.border.withOpacity(0.5)),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _isReleasingName ? null : _changeTunnelName,
+                    icon: _isReleasingName
+                        ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.accent))
+                        : const Icon(Icons.edit, size: 14),
+                    label: const Text(
+                      'CHANGE NAME',
+                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, letterSpacing: 1.0, fontFamily: 'monospace'),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.accent,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      side: const BorderSide(color: AppColors.border),
+                    ),
+                  ),
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                const SizedBox(width: 12),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _isReleasingName ? null : () => _confirmReleaseName(),
+                    icon: _isReleasingName
+                        ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.warning))
+                        : const Icon(Icons.link_off, size: 14),
+                    label: const Text(
+                      'RELEASE NAME',
+                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, letterSpacing: 1.0, fontFamily: 'monospace'),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.warning,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      side: BorderSide(color: AppColors.warning.withOpacity(0.5)),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ] else ...[
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _grapeIdExtController,
+                    style: const TextStyle(color: AppColors.textPrimary, fontSize: 12, fontFamily: 'monospace'),
+                    decoration: InputDecoration(
+                      prefixText: '/',
+                      prefixStyle: const TextStyle(color: AppColors.textMuted, fontSize: 12, fontFamily: 'monospace'),
+                      hintText: 'your-preferred-name',
+                      hintStyle: const TextStyle(color: AppColors.textMuted, fontSize: 12),
+                      filled: true,
+                      fillColor: AppColors.primary,
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppColors.border)),
+                      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppColors.border)),
+                      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppColors.accent)),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                OutlinedButton(
+                  onPressed: _isCheckingGrapeId ? null : _checkGrapeIdAvailability,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.accent,
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    side: const BorderSide(color: AppColors.border),
+                  ),
+                  child: _isCheckingGrapeId
+                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.accent))
+                      : const Text(
+                          'CHECK AVAILABILITY',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 1.0,
+                            fontFamily: 'monospace',
+                          ),
+                        ),
+                ),
+              ],
+            ),
+            if (_isGrapeIdAvailable != null || _grapeIdCheckError != null) ...[
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  if (_grapeIdCheckError != null) ...[
+                    const Icon(Icons.warning_amber_outlined, size: 14, color: AppColors.warning),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'Grape ID provider not responsive — ${_grapeIdCheckError!.toLowerCase()}. You can still save and try connecting.',
+                        style: const TextStyle(color: AppColors.warning, fontSize: 10, fontFamily: 'monospace'),
+                      ),
+                    ),
+                  ] else if (_isGrapeIdAvailable == true) ...[
+                    const Icon(Icons.check_circle_outline, size: 14, color: AppColors.coreActive),
+                    const SizedBox(width: 6),
+                    const Text(
+                      'This name is available!',
+                      style: TextStyle(color: AppColors.coreActive, fontSize: 10, fontFamily: 'monospace'),
+                    ),
+                  ] else if (_isGrapeIdAvailable == false) ...[
+                    const Icon(Icons.cancel_outlined, size: 14, color: AppColors.error),
+                    const SizedBox(width: 6),
+                    const Text(
+                      'This name is already taken. Please choose another.',
+                      style: TextStyle(color: AppColors.error, fontSize: 10, fontFamily: 'monospace'),
+                    ),
+                  ],
+                ],
+              ),
+            ],
+            if (_debugTime != null) ...[
+              const SizedBox(height: 12),
+              GestureDetector(
+                onTap: () => setState(() => _showCheckDebug = !_showCheckDebug),
+                child: Row(
                   children: [
-                    _debugRow('TIME', _debugTime != null
-                        ? '${_debugTime!.hour.toString().padLeft(2,'0')}:${_debugTime!.minute.toString().padLeft(2,'0')}:${_debugTime!.second.toString().padLeft(2,'0')}'
-                        : '—'),
-                    const SizedBox(height: 4),
-                    _debugRow('URL', _debugUrl ?? '—'),
-                    const SizedBox(height: 4),
-                    _debugRow('STATUS', _debugStatus != null
-                        ? (_debugStatus == 0 ? 'CONNECTION FAILED' : 'HTTP $_debugStatus')
-                        : '—'),
-                    const SizedBox(height: 4),
-                    _debugRow('BODY', _debugBody ?? '—'),
+                    Icon(
+                      _showCheckDebug ? Icons.expand_less : Icons.expand_more,
+                      size: 12,
+                      color: AppColors.textMuted,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      _showCheckDebug ? 'HIDE REQUEST LOG' : 'SHOW REQUEST LOG',
+                      style: const TextStyle(
+                        color: AppColors.textMuted,
+                        fontSize: 9,
+                        letterSpacing: 1.0,
+                        fontFamily: 'monospace',
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                   ],
                 ),
               ),
+              if (_showCheckDebug) ...[
+                const SizedBox(height: 8),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: AppColors.primary,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: AppColors.border.withOpacity(0.5)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _debugRow('TIME', _debugTime != null
+                          ? '${_debugTime!.hour.toString().padLeft(2,'0')}:${_debugTime!.minute.toString().padLeft(2,'0')}:${_debugTime!.second.toString().padLeft(2,'0')}'
+                          : '—'),
+                      const SizedBox(height: 4),
+                      _debugRow('URL', _debugUrl ?? '—'),
+                      const SizedBox(height: 4),
+                      _debugRow('STATUS', _debugStatus != null
+                          ? (_debugStatus == 0 ? 'CONNECTION FAILED' : 'HTTP $_debugStatus')
+                          : '—'),
+                      const SizedBox(height: 4),
+                      _debugRow('BODY', _debugBody ?? '—'),
+                    ],
+                  ),
+                ),
+              ],
             ],
           ],
+        ],
+      ),
+    );
+  }
+
+  void _confirmReleaseName() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        title: const Text(
+          'Release Name?',
+          style: TextStyle(color: AppColors.textPrimary, fontFamily: 'monospace', fontSize: 16),
+        ),
+        content: Text(
+          'This will release "$_grapeIdLockedName" on the hub and disconnect the tunnel. The name will become available for others to claim.',
+          style: const TextStyle(color: AppColors.textSecondary, fontFamily: 'monospace', fontSize: 12),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text(
+              'CANCEL',
+              style: TextStyle(color: AppColors.textMuted, fontFamily: 'monospace', fontSize: 11, letterSpacing: 1.0),
+            ),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              _releaseTunnelName();
+            },
+            child: const Text(
+              'RELEASE',
+              style: TextStyle(color: AppColors.warning, fontFamily: 'monospace', fontSize: 11, fontWeight: FontWeight.w600, letterSpacing: 1.0),
+            ),
+          ),
         ],
       ),
     );

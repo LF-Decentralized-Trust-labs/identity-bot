@@ -260,6 +260,7 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
                 r.Put("/settings/tunnel", s.handlePutTunnelSettings)
                 r.Get("/settings/tunnel/check-name", s.handleCheckTunnelName)
                 r.Get("/settings/tunnel/grapeid-health", s.handleGrapeIdHealth)
+                r.Post("/settings/tunnel/release-name", s.handleReleaseTunnelName)
                 r.Get("/tunnel/status", s.handleTunnelStatus)
                 r.Post("/tunnel/restart", s.handleTunnelRestart)
 
@@ -1855,6 +1856,45 @@ func (s *CoreServer) handleReset(w http.ResponseWriter, r *http.Request) {
 
         w.Header().Set("Content-Type", "application/json")
         json.NewEncoder(w).Encode(map[string]interface{}{"reset": true})
+}
+
+func (s *CoreServer) handleReleaseTunnelName(w http.ResponseWriter, r *http.Request) {
+        if s.TunnelManager == nil {
+                writeError(w, http.StatusInternalServerError, "Tunnel manager not initialized", "")
+                return
+        }
+
+        cfg := s.TunnelManager.GetConfig()
+        if cfg.Provider != tunnel.ProviderGrapeID {
+                writeError(w, http.StatusBadRequest, "Release is only supported for Grape ID provider", "")
+                return
+        }
+        if cfg.TunnelExtension == "" {
+                writeError(w, http.StatusBadRequest, "No name is currently claimed", "")
+                return
+        }
+
+        releasedName := cfg.TunnelExtension
+        log.Printf("[identity-agent-core] Releasing tunnel name '%s' on hub", releasedName)
+
+        s.TunnelManager.Stop()
+
+        settings, err := s.DataStore.GetSettings()
+        if err == nil && settings != nil {
+                settings.TunnelExtension = ""
+                s.DataStore.SaveSettings(*settings)
+        }
+
+        s.EndpointService.Refresh()
+        log.Printf("[identity-agent-core] Tunnel name '%s' released and cleared from settings", releasedName)
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(map[string]interface{}{
+                "released":       true,
+                "name":           releasedName,
+                "endpoint_url":   s.EndpointService.CurrentURL(),
+                "endpoint_source": s.EndpointService.Source(),
+        })
 }
 
 func writeError(w http.ResponseWriter, status int, errMsg string, details string) {
