@@ -35,3 +35,5 @@ identity_agent_ui/.pub/
 # Replit
 .cache/
 .config/
+.local/
+attached_assets/
