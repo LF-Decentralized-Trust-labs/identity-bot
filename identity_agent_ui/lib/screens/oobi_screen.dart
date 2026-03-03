@@ -4,19 +4,32 @@ import 'package:qr_flutter/qr_flutter.dart';
 import '../theme/app_theme.dart';
 import '../services/core_service.dart';
 import '../services/keri_service.dart';
+import '../services/mobile_standalone_keri_service.dart';
 
 class OobiScreen extends StatefulWidget {
   final KeriService keriService;
   final String? serverUrl;
+  final ValueNotifier<int>? refreshNotifier;
 
-  const OobiScreen({super.key, required this.keriService, this.serverUrl});
+  const OobiScreen({super.key, required this.keriService, this.serverUrl, this.refreshNotifier});
 
   @override
   State<OobiScreen> createState() => _OobiScreenState();
 }
 
 class _OobiScreenState extends State<OobiScreen> {
-  late final CoreService _coreService = CoreService(baseUrl: widget.serverUrl);
+  late final CoreService _coreService = CoreService(baseUrl: _resolveServerUrl());
+
+  String? _resolveServerUrl() {
+    if (widget.serverUrl != null) return widget.serverUrl;
+    if (widget.keriService is MobileStandaloneKeriService) {
+      final standalone = widget.keriService as MobileStandaloneKeriService;
+      if (standalone.isCoreReady) {
+        return standalone.mobileCore.baseUrl;
+      }
+    }
+    return null;
+  }
   OobiResponse? _oobi;
   bool _loading = true;
   String? _error;
@@ -26,12 +39,18 @@ class _OobiScreenState extends State<OobiScreen> {
   void initState() {
     super.initState();
     _loadOobi();
+    widget.refreshNotifier?.addListener(_onRefreshNotified);
   }
 
   @override
   void dispose() {
+    widget.refreshNotifier?.removeListener(_onRefreshNotified);
     _coreService.dispose();
     super.dispose();
+  }
+
+  void _onRefreshNotified() {
+    _loadOobi();
   }
 
   Future<void> _loadOobi() async {
@@ -201,7 +220,9 @@ class _OobiScreenState extends State<OobiScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SizedBox(height: 24),
+          if (_oobi != null)
+            _buildEndpointSourceBanner(),
+          const SizedBox(height: 16),
           _buildOobiUrlCard(),
           const SizedBox(height: 20),
           _buildAidCard(),
@@ -420,6 +441,93 @@ class _OobiScreenState extends State<OobiScreen> {
                   color: Color(0xFF0a0e1a),
                 ),
               ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEndpointSourceBanner() {
+    final source = _oobi!.endpointSource;
+    final isTunnel = source.startsWith('tunnel:');
+    final isLocal = source.startsWith('local:') || source == 'localhost';
+    final isEnv = source.startsWith('env:');
+    final isOverride = source == 'override';
+
+    Color bannerColor;
+    IconData bannerIcon;
+    String bannerLabel;
+    String? subtitle;
+
+    if (isTunnel) {
+      final provider = source.replaceFirst('tunnel:', '').toUpperCase();
+      bannerColor = AppColors.coreActive;
+      bannerIcon = Icons.cloud_done;
+      bannerLabel = '$provider TUNNEL ACTIVE';
+    } else if (isEnv || isOverride) {
+      bannerColor = AppColors.coreActive;
+      bannerIcon = Icons.dns;
+      bannerLabel = 'CONFIGURED ENDPOINT';
+    } else if (isLocal) {
+      bannerColor = AppColors.warning;
+      bannerIcon = Icons.wifi;
+      bannerLabel = 'LOCAL NETWORK ONLY';
+      subtitle = 'Your OOBI URL is only reachable on your local network. To share it externally, configure a tunnel provider in Settings.';
+      if (_oobi!.tunnelProvider.isNotEmpty && _oobi!.tunnelProvider != 'none') {
+        final provider = _oobi!.tunnelProvider.toUpperCase();
+        final errorDetail = _oobi!.tunnelError.isNotEmpty
+            ? _oobi!.tunnelError
+            : 'The $provider tunnel is not connected.';
+        subtitle = '$errorDetail\nFalling back to local network address — not reachable externally.';
+      }
+    } else {
+      bannerColor = AppColors.coreInactive;
+      bannerIcon = Icons.cloud_off;
+      bannerLabel = 'NO EXTERNAL URL';
+      subtitle = 'No tunnel or network address available. Go to Settings and configure a Grape ID tunnel so others can reach your agent.';
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: bannerColor.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: bannerColor.withOpacity(0.3), width: 1),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(bannerIcon, color: bannerColor, size: 16),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  bannerLabel,
+                  style: TextStyle(
+                    color: bannerColor,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.0,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+                if (subtitle != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(
+                      color: AppColors.textSecondary,
+                      fontSize: 10,
+                      fontFamily: 'monospace',
+                      height: 1.4,
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
         ],

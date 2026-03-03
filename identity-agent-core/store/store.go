@@ -7,6 +7,7 @@ import (
         "os"
         "path/filepath"
         "sync"
+        "time"
 )
 
 type EventRecord struct {
@@ -28,18 +29,81 @@ type IdentityState struct {
 }
 
 type ContactRecord struct {
-        AID        string `json:"aid"`
-        Alias      string `json:"alias"`
-        PublicKey  string `json:"public_key"`
-        OobiURL    string `json:"oobi_url"`
-        Verified   bool   `json:"verified"`
+        AID          string `json:"aid"`
+        Alias        string `json:"alias"`
+        PublicKey    string `json:"public_key"`
+        OobiURL      string `json:"oobi_url"`
+        Verified     bool   `json:"verified"`
         DiscoveredAt string `json:"discovered_at"`
+        Status       string `json:"status"`
+        Role         string `json:"role"`
+        JCard        *JCard `json:"jcard,omitempty"`
+}
+
+type JCard struct {
+        FullName     string `json:"fn"`
+        FamilyName   string `json:"family_name,omitempty"`
+        GivenName    string `json:"given_name,omitempty"`
+        Org          string `json:"org,omitempty"`
+        Title        string `json:"title,omitempty"`
+        Email        string `json:"email,omitempty"`
+        Tel          string `json:"tel,omitempty"`
+        Note         string `json:"note,omitempty"`
+        UID          string `json:"uid,omitempty"`
+        XKeriAID     string `json:"x-keri-aid"`
+        XKeriOOBI    string `json:"x-keri-oobi,omitempty"`
+        XKeriRole    string `json:"x-keri-role"`
 }
 
 type SettingsData struct {
         TunnelProvider        string `json:"tunnel_provider"`
         NgrokAuthToken        string `json:"ngrok_auth_token,omitempty"`
         CloudflareTunnelToken string `json:"cloudflare_tunnel_token,omitempty"`
+        TunnelDomain          string `json:"tunnel_domain,omitempty"`
+        TunnelExtension       string `json:"tunnel_extension,omitempty"`
+}
+
+type PendingRequest struct {
+        AID         string `json:"aid"`
+        Alias       string `json:"alias"`
+        PublicKey   string `json:"public_key"`
+        OobiURL     string `json:"oobi_url"`
+        ReceivedAt  string `json:"received_at"`
+        ExpiresAt   string `json:"expires_at"`
+        ErrorReason string `json:"error_reason,omitempty"`
+        JCard       *JCard `json:"jcard,omitempty"`
+}
+
+type ProfileData struct {
+        FullName   string `json:"fn"`
+        FamilyName string `json:"family_name,omitempty"`
+        GivenName  string `json:"given_name,omitempty"`
+        Org        string `json:"org,omitempty"`
+        Title      string `json:"title,omitempty"`
+        Email      string `json:"email,omitempty"`
+        Tel        string `json:"tel,omitempty"`
+        Note       string `json:"note,omitempty"`
+        Photo      string `json:"photo,omitempty"`
+        UID        string `json:"uid,omitempty"`
+}
+
+func (p *ProfileData) ToJCard(aid string, oobiURL string) *JCard {
+        if p == nil {
+                return nil
+        }
+        return &JCard{
+                FullName:   p.FullName,
+                FamilyName: p.FamilyName,
+                GivenName:  p.GivenName,
+                Org:        p.Org,
+                Title:      p.Title,
+                Email:      p.Email,
+                Tel:        p.Tel,
+                Note:       p.Note,
+                UID:        p.UID,
+                XKeriAID:   aid,
+                XKeriOOBI:  oobiURL,
+        }
 }
 
 type Store interface {
@@ -51,8 +115,15 @@ type Store interface {
         GetContacts() ([]ContactRecord, error)
         GetContact(aid string) (*ContactRecord, error)
         DeleteContact(aid string) error
+        GetContactsByStatus(status string) ([]ContactRecord, error)
         GetSettings() (*SettingsData, error)
         SaveSettings(settings SettingsData) error
+        SavePendingRequest(req PendingRequest) error
+        GetPendingRequests() ([]PendingRequest, error)
+        DeletePendingRequest(aid string) error
+        GetProfile() (*ProfileData, error)
+        SaveProfile(profile ProfileData) error
+        ResetAll() error
         Close() error
 }
 
@@ -195,6 +266,24 @@ func (s *FileStore) DeleteContact(aid string) error {
         return s.writeJSON(filepath.Join(s.dir, "contacts.json"), filtered)
 }
 
+func (s *FileStore) GetContactsByStatus(status string) ([]ContactRecord, error) {
+        s.mu.RLock()
+        defer s.mu.RUnlock()
+
+        contacts, err := s.loadContacts()
+        if err != nil {
+                return nil, err
+        }
+
+        var filtered []ContactRecord
+        for _, c := range contacts {
+                if c.Status == status {
+                        filtered = append(filtered, c)
+                }
+        }
+        return filtered, nil
+}
+
 func (s *FileStore) GetSettings() (*SettingsData, error) {
         s.mu.RLock()
         defer s.mu.RUnlock()
@@ -258,6 +347,139 @@ func (s *FileStore) loadEvents() ([]EventRecord, error) {
                 return nil, fmt.Errorf("failed to parse KEL: %w", err)
         }
         return events, nil
+}
+
+func (s *FileStore) SavePendingRequest(req PendingRequest) error {
+        s.mu.Lock()
+        defer s.mu.Unlock()
+
+        requests, err := s.loadPendingRequests()
+        if err != nil {
+                requests = []PendingRequest{}
+        }
+
+        updated := false
+        for i, r := range requests {
+                if r.AID == req.AID {
+                        requests[i] = req
+                        updated = true
+                        break
+                }
+        }
+        if !updated {
+                requests = append(requests, req)
+        }
+
+        return s.writeJSON(filepath.Join(s.dir, "pending_requests.json"), requests)
+}
+
+func (s *FileStore) GetPendingRequests() ([]PendingRequest, error) {
+        s.mu.Lock()
+        defer s.mu.Unlock()
+
+        requests, err := s.loadPendingRequests()
+        if err != nil {
+                return nil, err
+        }
+
+        now := time.Now()
+        var active []PendingRequest
+        var expired []string
+        for _, r := range requests {
+                expiry, err := time.Parse(time.RFC3339, r.ExpiresAt)
+                if err != nil || now.Before(expiry) {
+                        active = append(active, r)
+                } else {
+                        expired = append(expired, r.AID)
+                }
+        }
+
+        if len(expired) > 0 {
+                s.writeJSON(filepath.Join(s.dir, "pending_requests.json"), active)
+                log.Printf("[store] Auto-deleted %d expired pending requests", len(expired))
+        }
+
+        if active == nil {
+                active = []PendingRequest{}
+        }
+        return active, nil
+}
+
+func (s *FileStore) DeletePendingRequest(aid string) error {
+        s.mu.Lock()
+        defer s.mu.Unlock()
+
+        requests, err := s.loadPendingRequests()
+        if err != nil {
+                return err
+        }
+
+        var filtered []PendingRequest
+        for _, r := range requests {
+                if r.AID != aid {
+                        filtered = append(filtered, r)
+                }
+        }
+
+        return s.writeJSON(filepath.Join(s.dir, "pending_requests.json"), filtered)
+}
+
+func (s *FileStore) loadPendingRequests() ([]PendingRequest, error) {
+        path := filepath.Join(s.dir, "pending_requests.json")
+        data, err := os.ReadFile(path)
+        if err != nil {
+                if os.IsNotExist(err) {
+                        return []PendingRequest{}, nil
+                }
+                return nil, fmt.Errorf("failed to read pending requests: %w", err)
+        }
+
+        var requests []PendingRequest
+        if err := json.Unmarshal(data, &requests); err != nil {
+                return nil, fmt.Errorf("failed to parse pending requests: %w", err)
+        }
+        return requests, nil
+}
+
+func (s *FileStore) GetProfile() (*ProfileData, error) {
+        s.mu.RLock()
+        defer s.mu.RUnlock()
+
+        path := filepath.Join(s.dir, "profile.json")
+        data, err := os.ReadFile(path)
+        if err != nil {
+                if os.IsNotExist(err) {
+                        return nil, nil
+                }
+                return nil, fmt.Errorf("failed to read profile: %w", err)
+        }
+
+        var profile ProfileData
+        if err := json.Unmarshal(data, &profile); err != nil {
+                return nil, fmt.Errorf("failed to parse profile: %w", err)
+        }
+        return &profile, nil
+}
+
+func (s *FileStore) SaveProfile(profile ProfileData) error {
+        s.mu.Lock()
+        defer s.mu.Unlock()
+
+        return s.writeJSON(filepath.Join(s.dir, "profile.json"), profile)
+}
+
+func (s *FileStore) ResetAll() error {
+        s.mu.Lock()
+        defer s.mu.Unlock()
+
+        files := []string{"identity.json", "kel.json", "contacts.json", "settings.json", "pending_requests.json", "profile.json", "endpoint.json"}
+        for _, f := range files {
+                path := filepath.Join(s.dir, f)
+                if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+                        return fmt.Errorf("failed to remove %s: %w", f, err)
+                }
+        }
+        return nil
 }
 
 func (s *FileStore) writeJSON(path string, v interface{}) error {

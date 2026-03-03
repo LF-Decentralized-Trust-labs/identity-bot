@@ -160,11 +160,6 @@ workflows:
           echo "--- Checking dynamic dependencies (arm64) ---"
           readelf -d ../android/app/src/main/jniLibs/arm64-v8a/libidentity_agent_keri.so 2>/dev/null | grep NEEDED || echo "readelf not available"
 
-      - name: Build debug APK (arm64)
-        script: |
-          cd identity_agent_ui
-          flutter build apk --debug --target-platform android-arm64
-
       - name: Build release APK (arm64)
         script: |
           cd identity_agent_ui

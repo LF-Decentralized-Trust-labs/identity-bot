@@ -13,7 +13,12 @@ echo "      Workspace: $WORKSPACE"
 echo ""
 echo "[1/3] Python dependencies..."
 cd "$WORKSPACE"
-pip install -q flask 2>/dev/null || pip3 install -q flask 2>/dev/null || echo "      Warning: flask install skipped"
+if pip show keri >/dev/null 2>&1; then
+    echo "      Python dependencies already installed. Skipping."
+else
+    echo "      Installing Python dependencies (first run)..."
+    pip install -q flask keri 2>/dev/null || pip3 install -q flask keri 2>/dev/null || echo "      Warning: pip install skipped"
+fi
 echo "      Python dependencies ready."
 
 echo ""
@@ -27,7 +32,7 @@ else
     echo "      Go Core binary not found. Building..."
     cd "$WORKSPACE/identity-agent-core"
     mkdir -p "$WORKSPACE/identity-agent-core/bin"
-    CGO_ENABLED=0 go build -o "$BINARY" .
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildvcs=false -ldflags="-s -w" -o "$BINARY" .
     chmod +x "$BINARY"
     echo "      Go Core built successfully."
 fi
@@ -47,14 +52,19 @@ cd "$WORKSPACE"
 
 SODIUM_LIB=$(python3 -c "
 import ctypes, os
-lib = ctypes.CDLL('libsodium.so.26')
-for line in open(f'/proc/{os.getpid()}/maps'):
-    if 'sodium' in line:
-        parts = line.strip().split()
-        if len(parts) >= 6:
-            print(os.path.dirname(parts[-1]))
-            break
-" 2>/dev/null)
+for so_name in ['libsodium.so.26', 'libsodium.so.23', 'libsodium.so']:
+    try:
+        ctypes.CDLL(so_name)
+        for line in open(f'/proc/{os.getpid()}/maps'):
+            if 'sodium' in line:
+                parts = line.strip().split()
+                if len(parts) >= 6:
+                    print(os.path.dirname(parts[-1]))
+                    raise SystemExit(0)
+        break
+    except OSError:
+        continue
+" 2>/dev/null) || true
 if [ -n "$SODIUM_LIB" ]; then
     export LD_LIBRARY_PATH="${SODIUM_LIB}:${LD_LIBRARY_PATH}"
     echo "      libsodium: $SODIUM_LIB"

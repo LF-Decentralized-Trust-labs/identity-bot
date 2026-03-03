@@ -5,6 +5,7 @@ import 'theme/app_theme.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/contacts_screen.dart';
 import 'screens/oobi_screen.dart';
+import 'screens/profile_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/setup_wizard_screen.dart';
 import 'screens/mode_selection_screen.dart';
@@ -107,11 +108,16 @@ class _AgentRouterState extends State<AgentRouter> {
 
         final hasIdentity = await _checkIdentityExists();
 
-        setState(() {
-          _step = hasIdentity
-              ? OnboardingStep.dashboard
-              : OnboardingStep.setupWizard;
-        });
+        if (hasIdentity) {
+          setState(() => _step = OnboardingStep.dashboard);
+        } else {
+          await PreferencesService.clearAll();
+          _selectedMode = null;
+          _selectedEntityType = null;
+          _serverUrl = null;
+          debugPrint('[Agent] Setup was marked complete but no identity found — resetting onboarding');
+          setState(() => _step = OnboardingStep.modeSelection);
+        }
       } else {
         setState(() => _step = OnboardingStep.modeSelection);
       }
@@ -173,11 +179,6 @@ class _AgentRouterState extends State<AgentRouter> {
 
   Future<bool> _checkIdentityExists() async {
     if (_keriService == null) return false;
-
-    if (_keriService!.environment == AgentEnvironment.mobileStandalone &&
-        _selectedMode == AgentMode.createNew) {
-      return false;
-    }
 
     try {
       String baseUrl;
@@ -338,6 +339,7 @@ class AgentMainScreen extends StatefulWidget {
 
 class _AgentMainScreenState extends State<AgentMainScreen> {
   int _currentIndex = 0;
+  final ValueNotifier<int> _oobiRefreshNotifier = ValueNotifier<int>(0);
 
   late final List<Widget> _screens;
 
@@ -345,9 +347,10 @@ class _AgentMainScreenState extends State<AgentMainScreen> {
   void initState() {
     super.initState();
     _screens = [
+      ProfileScreen(keriService: widget.keriService, serverUrl: widget.serverUrl),
       DashboardScreen(keriService: widget.keriService, serverUrl: widget.serverUrl),
       ContactsScreen(keriService: widget.keriService, serverUrl: widget.serverUrl),
-      OobiScreen(keriService: widget.keriService, serverUrl: widget.serverUrl),
+      OobiScreen(keriService: widget.keriService, serverUrl: widget.serverUrl, refreshNotifier: _oobiRefreshNotifier),
       SettingsScreen(
         keriService: widget.keriService,
         mode: widget.mode,
@@ -355,6 +358,19 @@ class _AgentMainScreenState extends State<AgentMainScreen> {
         serverUrl: widget.serverUrl,
       ),
     ];
+  }
+
+  @override
+  void dispose() {
+    _oobiRefreshNotifier.dispose();
+    super.dispose();
+  }
+
+  void _onTabTapped(int index) {
+    setState(() => _currentIndex = index);
+    if (index == 3) {
+      _oobiRefreshNotifier.value++;
+    }
   }
 
   @override
@@ -372,7 +388,7 @@ class _AgentMainScreenState extends State<AgentMainScreen> {
         ),
         child: BottomNavigationBar(
           currentIndex: _currentIndex,
-          onTap: (index) => setState(() => _currentIndex = index),
+          onTap: _onTabTapped,
           backgroundColor: AppColors.surface,
           selectedItemColor: AppColors.accent,
           unselectedItemColor: AppColors.textMuted,
@@ -390,6 +406,11 @@ class _AgentMainScreenState extends State<AgentMainScreen> {
           ),
           type: BottomNavigationBarType.fixed,
           items: const [
+            BottomNavigationBarItem(
+              icon: Icon(Icons.person_outline),
+              activeIcon: Icon(Icons.person),
+              label: 'PROFILE',
+            ),
             BottomNavigationBarItem(
               icon: Icon(Icons.shield_outlined),
               activeIcon: Icon(Icons.shield),

@@ -4,6 +4,8 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import '../theme/app_theme.dart';
 import '../services/core_service.dart';
 import '../services/keri_service.dart';
+import '../services/mobile_standalone_keri_service.dart';
+import '../widgets/consent_modal.dart';
 import 'qr_scanner_screen.dart';
 
 class ContactsScreen extends StatefulWidget {
@@ -17,7 +19,18 @@ class ContactsScreen extends StatefulWidget {
 }
 
 class _ContactsScreenState extends State<ContactsScreen> {
-  late final CoreService _coreService = CoreService(baseUrl: widget.serverUrl);
+  late final CoreService _coreService = CoreService(baseUrl: _resolveServerUrl());
+
+  String? _resolveServerUrl() {
+    if (widget.serverUrl != null) return widget.serverUrl;
+    if (widget.keriService is MobileStandaloneKeriService) {
+      final standalone = widget.keriService as MobileStandaloneKeriService;
+      if (standalone.isCoreReady) {
+        return standalone.mobileCore.baseUrl;
+      }
+    }
+    return null;
+  }
   List<ContactResponse> _contacts = [];
   bool _loading = true;
   String? _error;
@@ -97,8 +110,8 @@ class _ContactsScreenState extends State<ContactsScreen> {
 
   void _showAddContactDialog({String? prefillOobiUrl}) {
     final oobiController = TextEditingController(text: prefillOobiUrl ?? '');
-    final aliasController = TextEditingController();
-    bool isSubmitting = false;
+    bool isResolving = false;
+    String? resolveError;
 
     showDialog(
       context: context,
@@ -117,13 +130,28 @@ class _ContactsScreenState extends State<ContactsScreen> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.link, color: AppColors.textMuted, size: 18),
+                        const SizedBox(width: 8),
+                        const Text(
+                          'RESOLVE OOBI',
+                          style: TextStyle(
+                            color: AppColors.textMuted,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 1.5,
+                            fontFamily: 'monospace',
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
                     const Text(
-                      'ADD CONTACT',
+                      'Enter an identity link to verify before adding',
                       style: TextStyle(
-                        color: AppColors.textMuted,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 1.5,
+                        color: AppColors.textSecondary,
+                        fontSize: 10,
                         fontFamily: 'monospace',
                       ),
                     ),
@@ -170,49 +198,26 @@ class _ContactsScreenState extends State<ContactsScreen> {
                         contentPadding: const EdgeInsets.all(12),
                       ),
                     ),
-                    const SizedBox(height: 16),
-                    const Text(
-                      'ALIAS (OPTIONAL)',
-                      style: TextStyle(
-                        color: AppColors.textMuted,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 1.0,
-                        fontFamily: 'monospace',
+                    if (resolveError != null) ...[
+                      const SizedBox(height: 10),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Icon(Icons.error_outline, color: AppColors.error, size: 14),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              resolveError!,
+                              style: const TextStyle(
+                                color: AppColors.error,
+                                fontSize: 10,
+                                fontFamily: 'monospace',
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                    ),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: aliasController,
-                      style: const TextStyle(
-                        color: AppColors.textPrimary,
-                        fontSize: 12,
-                        fontFamily: 'monospace',
-                      ),
-                      decoration: InputDecoration(
-                        hintText: 'Contact name...',
-                        hintStyle: TextStyle(
-                          color: AppColors.textMuted.withOpacity(0.5),
-                          fontSize: 12,
-                          fontFamily: 'monospace',
-                        ),
-                        filled: true,
-                        fillColor: AppColors.primary,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: const BorderSide(color: AppColors.border),
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: const BorderSide(color: AppColors.border),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: const BorderSide(color: AppColors.accent),
-                        ),
-                        contentPadding: const EdgeInsets.all(12),
-                      ),
-                    ),
+                    ],
                     const SizedBox(height: 24),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.end,
@@ -240,44 +245,34 @@ class _ContactsScreenState extends State<ContactsScreen> {
                         ),
                         const SizedBox(width: 12),
                         InkWell(
-                          onTap: isSubmitting
+                          onTap: isResolving
                               ? null
                               : () async {
                                   final oobiUrl = oobiController.text.trim();
                                   if (oobiUrl.isEmpty) return;
 
-                                  setDialogState(() => isSubmitting = true);
+                                  setDialogState(() {
+                                    isResolving = true;
+                                    resolveError = null;
+                                  });
 
                                   try {
-                                    final alias = aliasController.text.trim();
-                                    await _coreService.addContact(
-                                      oobiUrl: oobiUrl,
-                                      alias: alias.isNotEmpty ? alias : null,
-                                    );
-                                    if (mounted) {
-                                      Navigator.of(context).pop();
-                                      _loadContacts();
-                                    }
+                                    final resolved = await _coreService.resolveOobiContact(oobiUrl: oobiUrl);
+                                    if (!mounted) return;
+                                    Navigator.of(context).pop();
+                                    _showConsentModal(resolved);
                                   } catch (e) {
-                                    setDialogState(() => isSubmitting = false);
-                                    if (mounted) {
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(
-                                          content: Text(
-                                            e.toString(),
-                                            style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
-                                          ),
-                                          backgroundColor: AppColors.error,
-                                        ),
-                                      );
-                                    }
+                                    setDialogState(() {
+                                      isResolving = false;
+                                      resolveError = e.toString().replaceFirst('Exception: ', '');
+                                    });
                                   }
                                 },
                           borderRadius: BorderRadius.circular(8),
                           child: Container(
                             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                             decoration: BoxDecoration(
-                              color: isSubmitting
+                              color: isResolving
                                   ? AppColors.accent.withOpacity(0.3)
                                   : AppColors.accent.withOpacity(0.15),
                               borderRadius: BorderRadius.circular(8),
@@ -286,7 +281,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                                 width: 1,
                               ),
                             ),
-                            child: isSubmitting
+                            child: isResolving
                                 ? const SizedBox(
                                     width: 14,
                                     height: 14,
@@ -296,7 +291,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                                     ),
                                   )
                                 : const Text(
-                                    'ADD',
+                                    'RESOLVE',
                                     style: TextStyle(
                                       color: AppColors.accent,
                                       fontSize: 11,
@@ -317,6 +312,90 @@ class _ContactsScreenState extends State<ContactsScreen> {
         );
       },
     );
+  }
+
+  Future<void> _showConsentModal(ResolvedContactResponse resolved) async {
+    final aidShort = resolved.aid.length > 20
+        ? '${resolved.aid.substring(0, 20)}...'
+        : resolved.aid;
+    final avatarInitial = resolved.alias.isNotEmpty
+        ? resolved.alias[0].toUpperCase()
+        : null;
+
+    final confirmed = await ConsentModal.show(
+      context: context,
+      title: 'ADD CONTACT',
+      subtitle: 'Verify identity before adding to trusted contacts',
+      name: resolved.displayName,
+      avatarLabel: avatarInitial,
+      icon: Icons.person_add_outlined,
+      details: [
+        ConsentDetailItem(
+          label: 'AID',
+          value: resolved.aid,
+          isSelectable: true,
+        ),
+        ConsentDetailItem(
+          label: 'Public Key',
+          value: resolved.publicKey,
+          isSelectable: true,
+        ),
+        ConsentDetailItem(
+          label: 'OOBI Endpoint',
+          value: resolved.oobiUrl,
+          isSelectable: true,
+        ),
+        ConsentDetailItem(
+          label: 'KEL Events',
+          value: '${resolved.eventCount} event${resolved.eventCount != 1 ? 's' : ''} ${resolved.kelVerified ? '(verified)' : '(unverified)'}',
+          isMonospace: true,
+          isSelectable: false,
+        ),
+        if (resolved.created.isNotEmpty)
+          ConsentDetailItem(
+            label: 'Created',
+            value: resolved.created,
+            isMonospace: false,
+          ),
+      ],
+      confirmLabel: 'ADD CONTACT',
+      warningMessage: !resolved.kelVerified
+          ? 'Key Event Log could not be verified. Proceed with caution.'
+          : null,
+    );
+
+    if (confirmed == true && mounted) {
+      try {
+        await _coreService.addContact(
+          oobiUrl: resolved.oobiUrl,
+          alias: resolved.alias.isNotEmpty ? resolved.alias : null,
+        );
+        _loadContacts();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Contact ${resolved.displayName} added',
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+              ),
+              backgroundColor: AppColors.coreActive,
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                e.toString().replaceFirst('Exception: ', ''),
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+              ),
+              backgroundColor: AppColors.error,
+            ),
+          );
+        }
+      }
+    }
   }
 
   @override
@@ -525,21 +604,68 @@ class _ContactsScreenState extends State<ContactsScreen> {
   }
 
   Widget _buildContactsList() {
+    final mutualCount = _contacts.where((c) => c.isMutual).length;
+    final pendingCount = _contacts.where((c) => c.isPendingOutbound || c.isPendingInbound).length;
+
     return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const SizedBox(height: 8),
-          Text(
-            '${_contacts.length} CONTACT${_contacts.length == 1 ? '' : 'S'}',
-            style: const TextStyle(
-              color: AppColors.textMuted,
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 1.5,
-              fontFamily: 'monospace',
-            ),
+          Row(
+            children: [
+              Text(
+                '${_contacts.length} CONTACT${_contacts.length == 1 ? '' : 'S'}',
+                style: const TextStyle(
+                  color: AppColors.textMuted,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 1.5,
+                  fontFamily: 'monospace',
+                ),
+              ),
+              if (mutualCount > 0) ...[
+                const SizedBox(width: 10),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: AppColors.coreActive.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    '$mutualCount MUTUAL',
+                    style: const TextStyle(
+                      color: AppColors.coreActive,
+                      fontSize: 9,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.5,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ),
+              ],
+              if (pendingCount > 0) ...[
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: AppColors.corePending.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    '$pendingCount PENDING',
+                    style: const TextStyle(
+                      color: AppColors.corePending,
+                      fontSize: 9,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.5,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ),
+              ],
+            ],
           ),
           const SizedBox(height: 12),
           ..._contacts.map((contact) => Padding(
@@ -552,29 +678,87 @@ class _ContactsScreenState extends State<ContactsScreen> {
     );
   }
 
+  Color _statusColor(ContactResponse contact) {
+    if (contact.isMutual) return AppColors.coreActive;
+    if (contact.isPendingInbound || contact.isPendingOutbound) return AppColors.corePending;
+    if (contact.isRejected) return AppColors.coreInactive;
+    return AppColors.textMuted;
+  }
+
+  String _statusLabel(ContactResponse contact) {
+    if (contact.isMutual) return 'MUTUAL';
+    if (contact.isPendingOutbound) return 'PENDING';
+    if (contact.isPendingInbound) return 'INCOMING';
+    if (contact.isRejected) return 'REJECTED';
+    return contact.verified ? 'VERIFIED' : 'UNVERIFIED';
+  }
+
+  IconData _statusIcon(ContactResponse contact) {
+    if (contact.isMutual) return Icons.handshake_outlined;
+    if (contact.isPendingOutbound) return Icons.call_made;
+    if (contact.isPendingInbound) return Icons.call_received;
+    if (contact.isRejected) return Icons.block;
+    return Icons.person_outlined;
+  }
+
+  Widget _buildContactAvatar(ContactResponse contact) {
+    final statusColor = _statusColor(contact);
+    final initial = contact.displayName.isNotEmpty
+        ? contact.displayName[0].toUpperCase()
+        : '?';
+
+    return Container(
+      width: 40,
+      height: 40,
+      decoration: BoxDecoration(
+        color: statusColor.withOpacity(0.12),
+        border: Border.all(color: statusColor.withOpacity(0.25), width: 1.5),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Center(
+        child: Text(
+          initial,
+          style: TextStyle(
+            color: statusColor,
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+            fontFamily: 'monospace',
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildContactCard(ContactResponse contact) {
     final aidDisplay = contact.aid.length > 16
         ? contact.aid.substring(0, 16)
         : contact.aid;
+    final displayName = contact.alias.isNotEmpty ? contact.alias : 'Unknown Contact';
+    final statusColor = _statusColor(contact);
+    final borderColor = contact.isMutual 
+        ? AppColors.coreActive.withOpacity(0.3) 
+        : AppColors.border;
 
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.border, width: 1),
+        border: Border.all(color: borderColor, width: 1),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
+              _buildContactAvatar(contact),
+              const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  aidDisplay,
+                  displayName,
                   style: const TextStyle(
-                    color: AppColors.accent,
-                    fontSize: 12,
+                    color: AppColors.textPrimary,
+                    fontSize: 14,
                     fontWeight: FontWeight.w600,
                     fontFamily: 'monospace',
                     letterSpacing: 0.5,
@@ -584,17 +768,13 @@ class _ContactsScreenState extends State<ContactsScreen> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
-                  color: contact.verified
-                      ? AppColors.coreActive.withOpacity(0.12)
-                      : AppColors.corePending.withOpacity(0.12),
+                  color: statusColor.withOpacity(0.12),
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Text(
-                  contact.verified ? 'VERIFIED' : 'UNVERIFIED',
+                  _statusLabel(contact),
                   style: TextStyle(
-                    color: contact.verified
-                        ? AppColors.coreActive
-                        : AppColors.corePending,
+                    color: statusColor,
                     fontSize: 9,
                     fontWeight: FontWeight.w700,
                     letterSpacing: 1.0,
@@ -617,21 +797,38 @@ class _ContactsScreenState extends State<ContactsScreen> {
               ),
             ],
           ),
-          if (contact.alias.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Text(
-              contact.alias,
-              style: const TextStyle(
-                color: AppColors.textPrimary,
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                fontFamily: 'monospace',
-              ),
+          const SizedBox(height: 8),
+          Text(
+            aidDisplay,
+            style: const TextStyle(
+              color: AppColors.accent,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              fontFamily: 'monospace',
+              letterSpacing: 0.5,
             ),
-          ],
+          ),
           const SizedBox(height: 8),
           Row(
             children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: AppColors.accent.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(3),
+                ),
+                child: Text(
+                  contact.role.toUpperCase(),
+                  style: const TextStyle(
+                    color: AppColors.accent,
+                    fontSize: 9,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 1.0,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+              ),
+              const Spacer(),
               const Icon(Icons.access_time, color: AppColors.textMuted, size: 12),
               const SizedBox(width: 6),
               Text(
@@ -646,6 +843,81 @@ class _ContactsScreenState extends State<ContactsScreen> {
               ),
             ],
           ),
+          if (contact.isPendingInbound) ...[
+            const SizedBox(height: 10),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                InkWell(
+                  onTap: () async {
+                    try {
+                      await _coreService.rejectContact(contact.aid);
+                      _loadContacts();
+                    } catch (e) {
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text(e.toString()), backgroundColor: AppColors.error),
+                        );
+                      }
+                    }
+                  },
+                  borderRadius: BorderRadius.circular(6),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: AppColors.coreInactive.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: AppColors.coreInactive.withOpacity(0.3)),
+                    ),
+                    child: const Text(
+                      'REJECT',
+                      style: TextStyle(
+                        color: AppColors.coreInactive,
+                        fontSize: 9,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 1.0,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                InkWell(
+                  onTap: () async {
+                    try {
+                      await _coreService.acceptContact(contact.aid);
+                      _loadContacts();
+                    } catch (e) {
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text(e.toString()), backgroundColor: AppColors.error),
+                        );
+                      }
+                    }
+                  },
+                  borderRadius: BorderRadius.circular(6),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: AppColors.coreActive.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: AppColors.coreActive.withOpacity(0.3)),
+                    ),
+                    child: const Text(
+                      'ACCEPT',
+                      style: TextStyle(
+                        color: AppColors.coreActive,
+                        fontSize: 9,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 1.0,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );

@@ -30,6 +30,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String? _errorMessage;
   final List<LogEntry> _logs = [];
   Timer? _healthTimer;
+  List<ContactResponse> _alerts = [];
+  List<PendingRequestResponse> _pendingRequests = [];
+  Timer? _alertTimer;
 
   String? _resolveServerUrl() {
     if (widget.serverUrl != null) return widget.serverUrl;
@@ -53,6 +56,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void dispose() {
     _healthTimer?.cancel();
+    _alertTimer?.cancel();
     _coreService.dispose();
     super.dispose();
   }
@@ -121,8 +125,51 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
+  Future<void> _fetchAlerts() async {
+    try {
+      final result = await _coreService.getAlerts();
+      if (mounted) {
+        setState(() {
+          _alerts = result.alerts;
+          _pendingRequests = result.pendingRequests;
+        });
+        final totalCount = result.alerts.length + result.pendingRequests.length;
+        if (totalCount > 0) {
+          _addLog('$totalCount pending alert${totalCount == 1 ? '' : 's'}', LogLevel.warning);
+        }
+      }
+    } catch (_) {}
+  }
+
+  void _startAlertPolling() {
+    _alertTimer?.cancel();
+    _fetchAlerts();
+    _alertTimer = Timer.periodic(const Duration(seconds: 15), (_) => _fetchAlerts());
+  }
+
+  Future<void> _acceptContact(String aid) async {
+    try {
+      await _coreService.acceptContact(aid);
+      _addLog('Contact accepted: ${aid.substring(0, 12)}...', LogLevel.success);
+      _fetchAlerts();
+    } catch (e) {
+      _addLog('Accept failed: ${e.toString().split(': ').last}', LogLevel.error);
+    }
+  }
+
+  Future<void> _rejectContact(String aid) async {
+    try {
+      await _coreService.rejectContact(aid);
+      _addLog('Contact rejected: ${aid.substring(0, 12)}...', LogLevel.info);
+      _fetchAlerts();
+    } catch (e) {
+      _addLog('Reject failed: ${e.toString().split(': ').last}', LogLevel.error);
+    }
+  }
+
   void _startHealthPolling() {
     _healthTimer?.cancel();
+    _startAlertPolling();
     _healthTimer = Timer.periodic(Duration(seconds: AgentConfig.healthPollIntervalSeconds), (_) async {
       try {
         final health = await _coreService.getHealth();
@@ -165,6 +212,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         _buildIdentityCard(),
                       if (_identity != null && _identity!.initialized)
                         const SizedBox(height: 20),
+                      if (_alerts.isNotEmpty || _pendingRequests.isNotEmpty)
+                        ...[
+                          _buildAlertsCard(),
+                          const SizedBox(height: 20),
+                        ],
                       if (_isStandaloneMode && _identity != null && _identity!.initialized)
                         ...[
                           _buildMigrateButton(),
@@ -669,6 +721,358 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ),
       ),
     );
+  }
+
+  Widget _buildAlertsCard() {
+    final totalCount = _alerts.length + _pendingRequests.length;
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: AppColors.corePending.withOpacity(0.4),
+          width: 1,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 28,
+                height: 28,
+                decoration: BoxDecoration(
+                  color: AppColors.corePending.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: const Icon(
+                  Icons.notifications_active_outlined,
+                  color: AppColors.corePending,
+                  size: 16,
+                ),
+              ),
+              const SizedBox(width: 10),
+              const Text(
+                'ALERTS',
+                style: TextStyle(
+                  color: AppColors.textMuted,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 1.5,
+                  fontFamily: 'monospace',
+                ),
+              ),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: AppColors.corePending.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  '$totalCount',
+                  style: const TextStyle(
+                    color: AppColors.corePending,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          ..._alerts.map((alert) => Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: _buildAlertItem(alert),
+          )),
+          ..._pendingRequests.map((req) => Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: _buildPendingRequestItem(req),
+          )),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAlertAvatar(String name) {
+    final initial = name.isNotEmpty ? name[0].toUpperCase() : '?';
+    return Container(
+      width: 36,
+      height: 36,
+      decoration: BoxDecoration(
+        color: AppColors.corePending.withOpacity(0.12),
+        border: Border.all(color: AppColors.corePending.withOpacity(0.25), width: 1.5),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Center(
+        child: Text(
+          initial,
+          style: const TextStyle(
+            color: AppColors.corePending,
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            fontFamily: 'monospace',
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAlertItem(ContactResponse alert) {
+    final aidShort = alert.aid.length > 16 ? alert.aid.substring(0, 16) : alert.aid;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.primary,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.border, width: 1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              _buildAlertAvatar(alert.displayName),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      alert.displayName,
+                      style: const TextStyle(
+                        color: AppColors.textPrimary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      aidShort,
+                      style: const TextStyle(
+                        color: AppColors.textMuted,
+                        fontSize: 10,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: AppColors.corePending.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(3),
+                ),
+                child: const Text(
+                  'INCOMING',
+                  style: TextStyle(
+                    color: AppColors.corePending,
+                    fontSize: 8,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.8,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              InkWell(
+                onTap: () => _rejectContact(alert.aid),
+                borderRadius: BorderRadius.circular(6),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                  decoration: BoxDecoration(
+                    color: AppColors.coreInactive.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: AppColors.coreInactive.withOpacity(0.3)),
+                  ),
+                  child: const Text(
+                    'REJECT',
+                    style: TextStyle(
+                      color: AppColors.coreInactive,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 1.0,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              InkWell(
+                onTap: () => _acceptContact(alert.aid),
+                borderRadius: BorderRadius.circular(6),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                  decoration: BoxDecoration(
+                    color: AppColors.coreActive.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: AppColors.coreActive.withOpacity(0.3)),
+                  ),
+                  child: const Text(
+                    'ACCEPT',
+                    style: TextStyle(
+                      color: AppColors.coreActive,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 1.0,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPendingRequestItem(PendingRequestResponse req) {
+    final aidShort = req.aid.length > 16 ? req.aid.substring(0, 16) : req.aid;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.primary,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.error.withOpacity(0.3), width: 1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: AppColors.error.withOpacity(0.12),
+                  border: Border.all(color: AppColors.error.withOpacity(0.25), width: 1.5),
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: const Center(
+                  child: Icon(Icons.link_off, color: AppColors.error, size: 16),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      req.displayName,
+                      style: const TextStyle(
+                        color: AppColors.textPrimary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      aidShort,
+                      style: const TextStyle(
+                        color: AppColors.textMuted,
+                        fontSize: 10,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: AppColors.error.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(3),
+                ),
+                child: const Text(
+                  'FAILED',
+                  style: TextStyle(
+                    color: AppColors.error,
+                    fontSize: 8,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.8,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: AppColors.error.withOpacity(0.06),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.warning_amber_rounded, color: AppColors.corePending, size: 14),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    req.errorReason.isNotEmpty
+                        ? req.errorReason
+                        : 'Could not verify sender identity. They may need to set up tunneling to make their OOBI reachable.',
+                    style: const TextStyle(
+                      color: AppColors.textSecondary,
+                      fontSize: 10,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          Align(
+            alignment: Alignment.centerRight,
+            child: InkWell(
+              onTap: () => _dismissPendingRequest(req.aid),
+              borderRadius: BorderRadius.circular(6),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                decoration: BoxDecoration(
+                  color: AppColors.textMuted.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: AppColors.textMuted.withOpacity(0.3)),
+                ),
+                child: const Text(
+                  'DISMISS',
+                  style: TextStyle(
+                    color: AppColors.textMuted,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.0,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _dismissPendingRequest(String aid) async {
+    try {
+      await _coreService.deletePendingRequest(aid);
+      _fetchAlerts();
+    } catch (e) {
+      debugPrint('[Dashboard] Failed to dismiss pending request: $e');
+    }
   }
 
   Widget _buildInfoGrid() {
