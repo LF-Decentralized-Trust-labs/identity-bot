@@ -4,7 +4,6 @@ import (
         "bytes"
         "context"
         "crypto/tls"
-        "crypto/x509"
         "encoding/json"
         "fmt"
         "io"
@@ -1692,7 +1691,7 @@ func (s *CoreServer) handleCheckTunnelName(w http.ResponseWriter, r *http.Reques
         }
 
         hubURL := fmt.Sprintf("%s://%s/check-name?name=%s", scheme, domain, name)
-        client := s.newOutboundHTTPClient(8 * time.Second)
+        client := s.newProbeHTTPClient(8 * time.Second)
         resp, err := client.Get(hubURL)
         if err != nil {
                 errDetail := err.Error()
@@ -1746,7 +1745,7 @@ func (s *CoreServer) handleGrapeIdHealth(w http.ResponseWriter, r *http.Request)
         }
 
         probeURL := fmt.Sprintf("%s://%s/health", scheme, domain)
-        client := s.newOutboundHTTPClient(3 * time.Second)
+        client := s.newProbeHTTPClient(3 * time.Second)
         resp, err := client.Get(probeURL)
 
         w.Header().Set("Content-Type", "application/json")
@@ -1862,21 +1861,11 @@ func (s *CoreServer) handleReset(w http.ResponseWriter, r *http.Request) {
         json.NewEncoder(w).Encode(map[string]interface{}{"reset": true})
 }
 
-func (s *CoreServer) newOutboundHTTPClient(timeout time.Duration) *http.Client {
-        pool, err := x509.SystemCertPool()
-        if err != nil || pool == nil {
-                log.Printf("[identity-agent-core] System cert pool unavailable (%v), using empty pool with InsecureSkipVerify fallback", err)
-                return &http.Client{
-                        Timeout: timeout,
-                        Transport: &http.Transport{
-                                TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-                        },
-                }
-        }
+func (s *CoreServer) newProbeHTTPClient(timeout time.Duration) *http.Client {
         return &http.Client{
                 Timeout: timeout,
                 Transport: &http.Transport{
-                        TLSClientConfig: &tls.Config{RootCAs: pool},
+                        TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
                 },
         }
 }
