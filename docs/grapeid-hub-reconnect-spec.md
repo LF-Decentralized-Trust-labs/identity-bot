@@ -192,7 +192,7 @@ On explicit name release (future UI — "release name" button):
 2. Close Chisel client (Disconnect).
 ```
 
-See `docs/adr/008-tunnel-lifecycle-disconnect-vs-release.md` for the full rationale behind the Disconnect vs Release distinction.
+See `docs/adr/008-grapeid-tunnel-provider.md` for the full architecture and the rationale behind the Disconnect vs Release distinction.
 
 ## Backward Compatibility
 
