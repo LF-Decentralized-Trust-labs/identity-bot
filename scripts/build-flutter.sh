@@ -25,15 +25,11 @@ echo "      Flutter Web built successfully."
 echo ""
 echo "[3/4] Building Go Core (static binary, no CGO)..."
 GO_BIN="$WORKSPACE/identity-agent-core/bin/identity-agent-core"
-if [ -f "$GO_BIN" ]; then
-    echo "      Go Core binary found (pre-built). Skipping build."
-else
-    cd "$WORKSPACE/identity-agent-core"
-    mkdir -p "$WORKSPACE/identity-agent-core/bin"
-    CGO_ENABLED=0 go build -o "$GO_BIN" .
-    chmod +x "$GO_BIN"
-    echo "      Go Core built successfully."
-fi
+cd "$WORKSPACE/identity-agent-core"
+mkdir -p "$WORKSPACE/identity-agent-core/bin"
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildvcs=false -ldflags="-s -w" -o "$GO_BIN" .
+chmod +x "$GO_BIN"
+echo "      Go Core built successfully."
 ls -la "$GO_BIN"
 
 echo ""

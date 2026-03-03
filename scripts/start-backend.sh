@@ -27,7 +27,7 @@ else
     echo "      Go Core binary not found. Building..."
     cd "$WORKSPACE/identity-agent-core"
     mkdir -p "$WORKSPACE/identity-agent-core/bin"
-    CGO_ENABLED=0 go build -o "$BINARY" .
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildvcs=false -ldflags="-s -w" -o "$BINARY" .
     chmod +x "$BINARY"
     echo "      Go Core built successfully."
 fi

@@ -1,0 +1,112 @@
+2026-03-03T00:25:22Z info: Deployment: 6dd635f8-1de6-42e9-9a92-9bdedf754d93
+2026-03-03T00:25:22Z info: Running Security Scan
+2026-03-03T00:25:28Z info: Security Scan Complete
+2026-03-03T00:25:28Z info: Connecting to builder
+2026-03-03T00:25:28Z info: Builder connected
+2026-03-03T00:25:29Z info: Installing packages
+2026-03-03T00:25:29Z info: Starting Build
+============================================
+ IDENTITY AGENT - Build Pipeline
+============================================
+      Workspace: /home/runner/workspace
+
+[1/4] Installing Python dependencies for KERI driver...
+
+      Python dependencies ready.
+
+[2/4] Building Flutter Web...
+
+Resolving dependencies...
+Downloading packages...
+
+  async 2.11.0 (2.13.0 available)
+  boolean_selector 2.1.1 (2.1.2 available)
+  build_cli_annotations 2.1.0 (2.1.1 available)
+  characters 1.3.0 (1.4.1 available)
+
+33 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+
+The Flutter CLI developer tool uses Google Analytics to report usage and diagnostic
+data along with package dependencies, and crash reporting to send basic crash
+reports. This data is used to help improve the Dart platform, Flutter framework,
+and related tools.
+
+Telemetry is not sent on the very first run. To disable reporting of telemetry,
+run this terminal command:
+
+    flutter --disable-analytics
+
+If you opt out of telemetry, an opt-out event will be sent, and then no further
+information will be sent. This data is collected in accordance with the Google
+Privacy Policy (https://policies.google.com/privacy).
+
+
+Compiling lib/main.dart for the Web...                          
+Font asset "MaterialIcons-Regular.otf" was tree-shaken, reducing it from 1645184 to 15280 bytes (99.1% reduction). Tree-shaking can be disabled by providing the --no-tree-shake-icons flag when building your app.
+
+Compiling lib/main.dart for the Web...                          
+   38.6s
+
+✓ Built build/web
+
+      Flutter Web built successfully.
+
+[3/4] Building Go Core (static binary, no CGO)...
+
+      Go Core binary found (pre-built). Skipping build.
+
+      Go Binary:   /home/runner/workspace/identity-agent-core/bin/identity-agent-core
+============================================
+
+2026-03-03T00:26:17Z info: Pushing pid1 binary layer...
+2026-03-03T00:26:19Z info: Created pid1 binary layer
+2026-03-03T00:26:19Z info: Pushing hosting layer...
+2026-03-03T00:26:19Z info: Pushing Repl layer...
+2026-03-03T00:26:19Z info: Retrieved cached nix layer
+2026-03-03T00:26:19Z info: Nix layers for this Repl are uncached.
+2026-03-03T00:26:19Z info: Pushing nix-0 layer...
+2026-03-03T00:26:19Z info: Created hosting layer
+2026-03-03T00:26:38Z info: Created Repl layer
+2026-03-03T00:26:38Z info: Pushing Repl (cache) layer...
+2026-03-03T00:26:38Z info: Created Repl (cache) layer
+2026-03-03T00:29:39Z info: Created nix-0 layer
+2026-03-03T00:29:39Z info: uploading image for cached layer
+2026-03-03T00:29:40Z info: pushed cache image manifest
+2026-03-03T00:29:41Z info: pushed cache soci index manifest
+2026-03-03T00:29:41Z info: uploading cached layer
+2026-03-03T00:29:41Z info: successfully uploaded cached layer
+2026-03-03T00:29:47Z info: Creating Autoscale service
+[2/3] Go Core binary...
+============================================
+healthcheck failed error=healthcheck / returned status 500
+[3/3] Starting Identity Agent...
+./scripts/start-backend.sh: 70: exec: /home/runner/workspace/identity-agent-core/bin/identity-agent-core: not found
+      Looking for: /home/runner/workspace/identity-agent-core/bin/identity-agent-core
+healthcheck failed error=healthcheck / returned status 500
+============================================
+    libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f434dabd000)
+ IDENTITY AGENT - Go Core + KERI Driver
+    libresolv.so.2 => /lib/x86_64-linux-gnu/libresolv.so.2 (0x00007f434dcd6000)
+    libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f06e778b000)
+      UI:          http://0.0.0.0:5000/
+ IDENTITY AGENT - Go Core + KERI Driver
+healthcheck failed error=healthcheck / returned status 500
+[1/3] Python dependencies...
+
+    libpthread.so.0 => /lib/x86_64-linux-gnu/libpthread.so.0 (0x00007f18b73cf000)
+[2/3] Go Core binary...
+total 1785
+
+healthcheck failed error=healthcheck / returned status 500
+
+./scripts/start-backend.sh: 70: exec: /home/runner/workspace/identity-agent-core/bin/identity-agent-core: not found
+============================================
+[1/3] Python dependencies...
+healthcheck failed error=healthcheck / returned status 500
+[2/3] Go Core binary...
+    linux-vdso.so.1 (0x00007fef66277000)
+      UI:          http://0.0.0.0:5000/
+command finished with error [sh ./scripts/start-backend.sh]: exit status 127
+healthcheck failed error=healthcheck / returned status 500
+2026-03-03T00:33:16Z error: The deployment is crash looping. This can happen if the run command fails or exits immediately after starting. Check the logs for more information.

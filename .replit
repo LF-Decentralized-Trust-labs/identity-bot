@@ -63,6 +63,6 @@ PORT = "5000"
 KERI_HELPER_URL = "https://keri-helper-microservice.replit.app"
 
 [deployment]
-deploymentTarget = "autoscale"
+deploymentTarget = "vm"
 build = ["sh", "./scripts/build-flutter.sh"]
 run = ["sh", "./scripts/start-backend.sh"]
