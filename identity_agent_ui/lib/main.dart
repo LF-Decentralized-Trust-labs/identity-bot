@@ -22,6 +22,7 @@ import 'services/preferences_service.dart';
 import 'services/backend_process_service.dart';
 import 'config/agent_config.dart';
 import 'bridge/keri_bridge.dart';
+import 'screens/mobile/mobile_app.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -84,7 +85,6 @@ class _AgentRouterState extends State<AgentRouter> {
   AgentMode? _selectedMode;
   EntityType? _selectedEntityType;
   String? _serverUrl;
-  String? _error;
 
   @override
   void initState() {
@@ -129,6 +129,9 @@ class _AgentRouterState extends State<AgentRouter> {
 
   Future<void> _initializeServiceForMode(
       AgentMode mode, String? serverUrl) async {
+    _keriService?.dispose();
+    _keriService = null;
+
     if (_isMobilePlatform) {
       await KeriBridge.ensureInitialized();
 
@@ -241,6 +244,16 @@ class _AgentRouterState extends State<AgentRouter> {
     setState(() => _step = OnboardingStep.modeSelection);
   }
 
+  void _handleLogout() async {
+    _keriService?.dispose();
+    _keriService = null;
+    await PreferencesService.clearAll();
+    _selectedMode = null;
+    _selectedEntityType = null;
+    _serverUrl = null;
+    setState(() => _step = OnboardingStep.modeSelection);
+  }
+
   @override
   void dispose() {
     _keriService?.dispose();
@@ -314,6 +327,7 @@ class _AgentRouterState extends State<AgentRouter> {
           mode: _selectedMode,
           entityType: _selectedEntityType,
           serverUrl: effectiveServerUrl,
+          onLogout: _handleLogout,
         );
     }
   }
@@ -324,6 +338,7 @@ class AgentMainScreen extends StatefulWidget {
   final AgentMode? mode;
   final EntityType? entityType;
   final String? serverUrl;
+  final VoidCallback? onLogout;
 
   const AgentMainScreen({
     super.key,
@@ -331,6 +346,7 @@ class AgentMainScreen extends StatefulWidget {
     this.mode,
     this.entityType,
     this.serverUrl,
+    this.onLogout,
   });
 
   @override
@@ -375,6 +391,16 @@ class _AgentMainScreenState extends State<AgentMainScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_isMobilePlatform) {
+      return MobileApp(
+        keriService: widget.keriService,
+        mode: widget.mode,
+        entityType: widget.entityType,
+        serverUrl: widget.serverUrl,
+        onLogout: widget.onLogout,
+      );
+    }
+
     return Scaffold(
       body: IndexedStack(
         index: _currentIndex,

@@ -29,7 +29,7 @@ The system employs a standardized topology model based on three topological stat
 
 -   **Go Backend (`identity-agent-core/`):** Handles core orchestration, public API, file-based data persistence, OOBI management, contact management, and optional tunnel providers. Compiles for mobile via `gomobile` (with KERI driver disabled).
 -   **Python KERI Driver (`drivers/keri-core/`):** The `keripy` (v1.1.17) engine for desktop KERI operations.
--   **Flutter Frontend (`identity_agent_ui/`):** Cross-platform UI featuring a dark cyberpunk theme, multi-step onboarding, BIP-39 mnemonic generation, contact management, OOBI sharing, profile management (jCard), and a mode-aware dashboard.
+-   **Flutter Frontend (`identity_agent_ui/`):** Cross-platform UI with two modes: Desktop Mode (dark cyberpunk theme, 5-tab bottom nav) and Mobile Mode (clean light theme with blue accents, 3-button bottom nav). Features multi-step onboarding, BIP-39 mnemonic generation, contact management, OOBI sharing, profile management (jCard), and a mode-aware dashboard. Platform detection via `Platform.isAndroid || Platform.isIOS` routes to the appropriate UI mode.
 -   **Rust Bridge (`identity_agent_ui/rust/`):** Implements the mobile KERI engine (`keriox/keri-core`) via `flutter_rust_bridge` for Dart ↔ Rust FFI, providing core KERI crypto functions.
 -   **Tunnel Module (`identity-agent-core/tunnel/`):** Manages multi-provider tunnels (Cloudflare, ngrok, Grape ID) for public HTTPS URL acquisition.
 -   **Endpoint Service (`identity-agent-core/endpoint/`):** Single source of truth for the agent's current public base URL. Provider hierarchy: override URL → active tunnel → `PUBLIC_URL` env → local network IP → localhost fallback. Persists to `endpoint.json`; all consumers (OOBI generation, OOBI serving, exchange introductions) call `EndpointService.CurrentURL()`. Exposed via `GET /api/endpoint` returning `{url, source, updated_at}`.
@@ -97,6 +97,37 @@ Defined in `codemagic.yaml`. Builds include:
 -   Flutter build for all platforms (Android, iOS, macOS, Windows, Linux, Web)
 -   Gomobile outputs placed in `identity_agent_ui/android/app/libs/mobilecore.aar` and `identity_agent_ui/ios/Frameworks/Mobilecore.xcframework`
 -   iOS: Mobilecore.framework extracted from xcframework to `ios/Frameworks/Mobilecore/` before pod install; integrated via CocoaPods podspec (vendored_frameworks)
+
+## Mobile UI Architecture
+
+The mobile UI (`lib/screens/mobile/`) is a separate screen set from the desktop UI, activated when `Platform.isAndroid || Platform.isIOS` is true. It uses a clean light theme (`MobileTheme`) with IBM Blue 60 (`#4589FF`) as primary color.
+
+### Mobile File Structure
+- `lib/theme/mobile_theme.dart` — Light ThemeData with MobileColors design tokens
+- `lib/screens/mobile/mobile_app.dart` — Root container, overlay management (drawer, share, scanner, chatbot)
+- `lib/screens/mobile/mobile_dashboard.dart` — Main scrollable view with identity card, 3-tab area (Alerts/Tasks/Activity)
+- `lib/screens/mobile/bottom_nav.dart` — Fixed bottom bar with Share, Scan (elevated center), Chatbot
+- `lib/screens/mobile/drawer_menu.dart` — Left-slide drawer with profile, contacts, placeholder items
+- `lib/screens/mobile/share_menu.dart` — Bottom sheet with 5 share options (all stubbed as "Coming Soon")
+- `lib/screens/mobile/mobile_qr_scanner.dart` — Fullscreen dark scanner with OOBI resolution + consent flow
+- `lib/screens/mobile/chatbot_panel.dart` — Dialog-based chat panel with dummy bot responses
+- `lib/screens/mobile/mobile_profile_screen.dart` — Card-based profile editor with real backend data
+- `lib/screens/mobile/mobile_contacts_screen.dart` — Searchable contact list with detail view
+
+### Mobile Widgets
+- `lib/widgets/identity_card.dart` — Profile photo, name, agent URL, confidence ring
+- `lib/widgets/confidence_ring.dart` — Circular progress ring with color-coded score
+- `lib/widgets/alert_card.dart` — Connection request / pending request cards with Approve/Deny
+- `lib/widgets/task_card.dart` — Background task cards with progress bars (dummy data)
+- `lib/widgets/activity_entry.dart` — Timestamped activity log entries (dummy data)
+
+### Mobile Models
+- `lib/models/background_task.dart` — Task model with dummy data generator
+- `lib/models/activity_log_entry.dart` — Activity model with dummy data generator
+
+### Backend Integration (Mobile)
+Real backend data: Profile (GET/PUT /api/profile), Identity (GET /api/identity), Endpoint (GET /api/endpoint), Alerts (GET /api/alerts), Contacts (GET /api/contacts), OOBI resolution (POST /api/contacts/resolve), Contact add (POST /api/contacts), Accept/Reject (POST /api/contacts/{aid}/accept|reject).
+Dummy data: Tasks tab, Activity tab. Stubbed: All Share menu items, Wallet, Data Vault, Security Settings, My Devices.
 
 ## Specification Documents
 
