@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
@@ -7,12 +6,14 @@ import '../../theme/mobile_theme.dart';
 import '../../services/core_service.dart';
 import '../../services/event_service.dart';
 import '../../config/agent_config.dart';
+import '../../widgets/contact_action_popup.dart';
 import 'mobile_settings_screen.dart';
 
 class ShareMenu extends StatelessWidget {
   final String? serverUrl;
+  final VoidCallback? onAddContactComplete;
 
-  const ShareMenu({super.key, this.serverUrl});
+  const ShareMenu({super.key, this.serverUrl, this.onAddContactComplete});
 
   void _showComingSoon(BuildContext context, String feature) {
     Navigator.of(context).pop();
@@ -37,7 +38,9 @@ class ShareMenu extends StatelessWidget {
       MaterialPageRoute(
         builder: (_) => _AddContactScreen(serverUrl: serverUrl),
       ),
-    );
+    ).then((_) {
+      onAddContactComplete?.call();
+    });
   }
 
   @override
@@ -230,17 +233,49 @@ class _AddContactScreenState extends State<_AddContactScreen> {
 
     final overlay = Overlay.of(context);
     _popupOverlay = OverlayEntry(
-      builder: (ctx) => _ConnectionPopup(
+      builder: (ctx) => ContactActionPopup(
         name: name.isNotEmpty ? name : (aid.length > 12 ? '${aid.substring(0, 12)}...' : aid),
         photo: photo,
-        onTap: () {
+        aid: aid,
+        intentLabel: 'Wants to add you as a contact',
+        confirmLabel: 'Add Contact',
+        dismissLabel: 'Dismiss',
+        onConfirm: () {
+          _acceptContact(aid);
           _dismissPopup();
-          Navigator.of(context).pop();
         },
-        onDismiss: _dismissPopup,
+        onDismiss: () {
+          _rejectContact(aid);
+          _dismissPopup();
+        },
+        onBackdropTap: _dismissPopup,
       ),
     );
     overlay.insert(_popupOverlay!);
+  }
+
+  Future<void> _acceptContact(String aid) async {
+    try {
+      await _coreService.acceptContact(aid);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Contact accepted'),
+            backgroundColor: MobileColors.success,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('[AddContactScreen] Accept failed: $e');
+    }
+  }
+
+  Future<void> _rejectContact(String aid) async {
+    try {
+      await _coreService.rejectContact(aid);
+    } catch (e) {
+      debugPrint('[AddContactScreen] Reject failed: $e');
+    }
   }
 
   void _dismissPopup() {
@@ -665,183 +700,3 @@ class _AddContactScreenState extends State<_AddContactScreen> {
   }
 }
 
-class _ConnectionPopup extends StatefulWidget {
-  final String name;
-  final String photo;
-  final VoidCallback onTap;
-  final VoidCallback onDismiss;
-
-  const _ConnectionPopup({
-    required this.name,
-    this.photo = '',
-    required this.onTap,
-    required this.onDismiss,
-  });
-
-  @override
-  State<_ConnectionPopup> createState() => _ConnectionPopupState();
-}
-
-class _ConnectionPopupState extends State<_ConnectionPopup>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller;
-  late final Animation<double> _scaleAnimation;
-  late final Animation<double> _fadeAnimation;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 300),
-    );
-    _scaleAnimation = Tween<double>(begin: 0.8, end: 1.0)
-        .animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutBack));
-    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0)
-        .animate(CurvedAnimation(parent: _controller, curve: Curves.easeOut));
-    _controller.forward();
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  String _getInitials(String name) {
-    final parts = name.split(' ').where((w) => w.isNotEmpty).take(2);
-    if (parts.isEmpty) return '?';
-    return parts.map((w) => w[0].toUpperCase()).join();
-  }
-
-  Widget _buildPopupAvatar() {
-    if (widget.photo.isNotEmpty) {
-      try {
-        final photoData = widget.photo.contains(',')
-            ? widget.photo.split(',').last
-            : widget.photo;
-        return CircleAvatar(
-          radius: 28,
-          backgroundImage: MemoryImage(base64Decode(photoData)),
-        );
-      } catch (_) {}
-    }
-    return Container(
-      width: 56,
-      height: 56,
-      decoration: BoxDecoration(
-        color: MobileColors.primary.withOpacity(0.12),
-        shape: BoxShape.circle,
-      ),
-      child: Center(
-        child: Text(
-          _getInitials(widget.name),
-          style: const TextStyle(
-            color: MobileColors.primary,
-            fontWeight: FontWeight.w700,
-            fontSize: 20,
-          ),
-        ),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Positioned.fill(
-      child: FadeTransition(
-        opacity: _fadeAnimation,
-        child: GestureDetector(
-          onTap: widget.onDismiss,
-          child: Container(
-            color: Colors.black.withOpacity(0.5),
-            child: Center(
-              child: GestureDetector(
-                onTap: () {},
-                child: ScaleTransition(
-                  scale: _scaleAnimation,
-                  child: Container(
-                    margin: const EdgeInsets.symmetric(horizontal: 32),
-                    padding: const EdgeInsets.all(24),
-                    decoration: BoxDecoration(
-                      color: MobileColors.surface,
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: MobileColors.primary.withOpacity(0.3)),
-                      boxShadow: [
-                        BoxShadow(
-                          color: MobileColors.primary.withOpacity(0.15),
-                          blurRadius: 24,
-                          offset: const Offset(0, 8),
-                        ),
-                      ],
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        _buildPopupAvatar(),
-                        const SizedBox(height: 16),
-                        const Text(
-                          'Connection Request',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w700,
-                            color: MobileColors.textPrimary,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          '${widget.name} wants to add you as a contact',
-                          style: const TextStyle(
-                            fontSize: 14,
-                            color: MobileColors.textSecondary,
-                          ),
-                          textAlign: TextAlign.center,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const SizedBox(height: 24),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: OutlinedButton(
-                                onPressed: widget.onDismiss,
-                                style: OutlinedButton.styleFrom(
-                                  foregroundColor: MobileColors.textSecondary,
-                                  side: const BorderSide(color: MobileColors.border),
-                                  padding: const EdgeInsets.symmetric(vertical: 12),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                ),
-                                child: const Text('Dismiss'),
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: ElevatedButton(
-                                onPressed: widget.onTap,
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: MobileColors.primary,
-                                  foregroundColor: MobileColors.textOnPrimary,
-                                  padding: const EdgeInsets.symmetric(vertical: 12),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                ),
-                                child: const Text('Add'),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}

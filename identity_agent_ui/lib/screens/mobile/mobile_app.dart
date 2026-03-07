@@ -30,6 +30,7 @@ class MobileApp extends StatefulWidget {
 }
 
 class _MobileAppState extends State<MobileApp> {
+  final _dashboardKey = GlobalKey<MobileDashboardState>();
   bool _drawerOpen = false;
 
   void _toggleDrawer() {
@@ -44,16 +45,25 @@ class _MobileAppState extends State<MobileApp> {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
-      builder: (_) => ShareMenu(serverUrl: widget.serverUrl),
-    );
+      builder: (_) => ShareMenu(
+        serverUrl: widget.serverUrl,
+        onAddContactComplete: () {
+          _dashboardKey.currentState?.refreshAlerts();
+        },
+      ),
+    ).then((_) {
+      _dashboardKey.currentState?.refreshAlerts();
+    });
   }
 
   void _openScanner() {
-    Navigator.of(context).push(
+    Navigator.of(context).push<bool>(
       MaterialPageRoute(
         builder: (_) => MobileQrScanner(serverUrl: widget.serverUrl),
       ),
-    );
+    ).then((added) {
+      _dashboardKey.currentState?.refreshAlerts();
+    });
   }
 
   void _openChatbot() {
@@ -79,7 +89,9 @@ class _MobileAppState extends State<MobileApp> {
       MaterialPageRoute(
         builder: (_) => MobileContactsScreen(serverUrl: widget.serverUrl),
       ),
-    );
+    ).then((_) {
+      _dashboardKey.currentState?.refreshAlerts();
+    });
   }
 
   void _navigateToSettings() {
@@ -103,6 +115,7 @@ class _MobileAppState extends State<MobileApp> {
               children: [
                 Expanded(
                   child: MobileDashboard(
+                    key: _dashboardKey,
                     serverUrl: widget.serverUrl,
                     onMenuTap: _toggleDrawer,
                   ),

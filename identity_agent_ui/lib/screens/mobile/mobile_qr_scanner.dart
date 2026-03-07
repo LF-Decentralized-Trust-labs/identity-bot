@@ -1,9 +1,9 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../theme/mobile_theme.dart';
 import '../../services/core_service.dart';
 import '../../config/agent_config.dart';
+import '../../widgets/contact_action_popup.dart';
 
 class MobileQrScanner extends StatefulWidget {
   final String? serverUrl;
@@ -59,7 +59,17 @@ class _MobileQrScannerState extends State<MobileQrScanner> with SingleTickerProv
       final confirmed = await showDialog<bool>(
         context: context,
         barrierDismissible: false,
-        builder: (ctx) => _ConsentDialog(resolved: resolved),
+        builder: (ctx) => ContactActionPopup(
+          name: resolved.displayName,
+          photo: resolved.photo,
+          aid: resolved.aid,
+          kelVerified: resolved.kelVerified,
+          intentLabel: 'Wants to add you as a contact',
+          confirmLabel: 'Add Contact',
+          dismissLabel: 'Dismiss',
+          onConfirm: () => Navigator.of(ctx).pop(true),
+          onDismiss: () => Navigator.of(ctx).pop(false),
+        ),
       );
 
       if (confirmed == true) {
@@ -74,7 +84,7 @@ class _MobileQrScannerState extends State<MobileQrScanner> with SingleTickerProv
               backgroundColor: MobileColors.success,
             ),
           );
-          Navigator.of(context).pop();
+          Navigator.of(context).pop(true);
         }
       } else {
         setState(() => _processing = false);
@@ -248,145 +258,3 @@ class _CornerBracket extends StatelessWidget {
   }
 }
 
-class _ConsentDialog extends StatelessWidget {
-  final ResolvedContactResponse resolved;
-
-  const _ConsentDialog({required this.resolved});
-
-  Widget _buildAvatar() {
-    if (resolved.photo.isNotEmpty) {
-      try {
-        final photoData = resolved.photo.contains(',')
-            ? resolved.photo.split(',').last
-            : resolved.photo;
-        return CircleAvatar(
-          radius: 32,
-          backgroundImage: MemoryImage(base64Decode(photoData)),
-        );
-      } catch (_) {}
-    }
-    final initials = resolved.displayName
-        .split(' ')
-        .where((w) => w.isNotEmpty)
-        .take(2)
-        .map((w) => w[0].toUpperCase())
-        .join();
-    return CircleAvatar(
-      radius: 32,
-      backgroundColor: MobileColors.primary.withOpacity(0.15),
-      child: Text(
-        initials.isNotEmpty ? initials : '?',
-        style: const TextStyle(
-          color: MobileColors.primary,
-          fontWeight: FontWeight.w700,
-          fontSize: 22,
-        ),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final jcard = resolved.jcard;
-    return AlertDialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      title: const Text(
-        'Add Contact?',
-        style: TextStyle(
-          fontWeight: FontWeight.w700,
-          color: MobileColors.textPrimary,
-        ),
-      ),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _buildAvatar(),
-          const SizedBox(height: 12),
-          Text(
-            resolved.displayName,
-            style: const TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w700,
-              color: MobileColors.textPrimary,
-            ),
-            textAlign: TextAlign.center,
-          ),
-          if (jcard != null && jcard.org.isNotEmpty) ...[
-            const SizedBox(height: 4),
-            Text(
-              jcard.org,
-              style: const TextStyle(
-                fontSize: 13,
-                color: MobileColors.textSecondary,
-              ),
-              textAlign: TextAlign.center,
-            ),
-          ],
-          if (jcard != null && jcard.title.isNotEmpty) ...[
-            const SizedBox(height: 2),
-            Text(
-              jcard.title,
-              style: const TextStyle(
-                fontSize: 12,
-                color: MobileColors.textMuted,
-              ),
-              textAlign: TextAlign.center,
-            ),
-          ],
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(
-              color: MobileColors.surfaceSecondary,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Text(
-              resolved.aid.length > 24
-                  ? '${resolved.aid.substring(0, 24)}...'
-                  : resolved.aid,
-              style: const TextStyle(
-                fontSize: 11,
-                color: MobileColors.textMuted,
-                fontFamily: 'monospace',
-              ),
-            ),
-          ),
-          const SizedBox(height: 10),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                resolved.kelVerified ? Icons.verified : Icons.warning_amber,
-                size: 16,
-                color: resolved.kelVerified ? MobileColors.success : MobileColors.warning,
-              ),
-              const SizedBox(width: 6),
-              Text(
-                resolved.kelVerified ? 'KEL Verified' : 'Unverified',
-                style: TextStyle(
-                  fontSize: 13,
-                  color: resolved.kelVerified ? MobileColors.success : MobileColors.warning,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(false),
-          child: const Text('Cancel'),
-        ),
-        ElevatedButton(
-          onPressed: () => Navigator.of(context).pop(true),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: MobileColors.primary,
-            foregroundColor: MobileColors.textOnPrimary,
-          ),
-          child: const Text('Add Contact'),
-        ),
-      ],
-    );
-  }
-}

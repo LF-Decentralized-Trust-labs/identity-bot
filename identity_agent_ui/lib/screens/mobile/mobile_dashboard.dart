@@ -22,10 +22,10 @@ class MobileDashboard extends StatefulWidget {
   });
 
   @override
-  State<MobileDashboard> createState() => _MobileDashboardState();
+  State<MobileDashboard> createState() => MobileDashboardState();
 }
 
-class _MobileDashboardState extends State<MobileDashboard> with SingleTickerProviderStateMixin {
+class MobileDashboardState extends State<MobileDashboard> with SingleTickerProviderStateMixin {
   late final CoreService _coreService;
   late final EventService _eventService;
   late final TabController _tabController;
@@ -100,6 +100,8 @@ class _MobileDashboardState extends State<MobileDashboard> with SingleTickerProv
       debugPrint('[MobileDashboard] Endpoint load error: $e');
     }
   }
+
+  void refreshAlerts() => _loadAlerts();
 
   Future<void> _loadAlerts() async {
     try {
