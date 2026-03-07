@@ -132,7 +132,7 @@ The mobile UI (`lib/screens/mobile/`) is a separate screen set from the desktop 
 
 ### Backend Integration (Mobile)
 Real backend data: Profile (GET/PUT /api/profile), Identity (GET /api/identity), Endpoint (GET /api/endpoint), Alerts (GET /api/alerts), Contacts (GET /api/contacts), OOBI resolution (POST /api/contacts/resolve), Contact add (POST /api/contacts), Accept/Reject (POST /api/contacts/{aid}/accept|reject).
-Dummy data: Tasks tab, Activity tab. Stubbed: All Share menu items, Wallet, Data Vault, Security Settings (general), My Devices.
+Dummy data: Tasks tab, Activity tab. Stubbed: Share menu items (Show ID, Request Payment, Share File, Share Credential), Wallet, Data Vault, Security Settings (general), My Devices. Active: Add Contact (OOBI link + QR code generation with tunnel check).
 
 ## Specification Documents
 

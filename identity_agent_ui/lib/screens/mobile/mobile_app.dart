@@ -47,7 +47,7 @@ class _MobileAppState extends State<MobileApp> {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
-      builder: (_) => const ShareMenu(),
+      builder: (_) => ShareMenu(serverUrl: widget.serverUrl),
     );
   }
 
