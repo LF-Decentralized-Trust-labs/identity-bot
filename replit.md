@@ -113,6 +113,7 @@ The mobile UI (`lib/screens/mobile/`) is a separate screen set from the desktop 
 - `lib/screens/mobile/chatbot_panel.dart` — Dialog-based chat panel with dummy bot responses
 - `lib/screens/mobile/mobile_profile_screen.dart` — Card-based profile editor with real backend data
 - `lib/screens/mobile/mobile_contacts_screen.dart` — Searchable contact list with detail view
+- `lib/screens/mobile/mobile_settings_screen.dart` — Full tunnel/connectivity settings with provider selection, config, save/reconnect, reset
 - `lib/screens/mobile/mobile_mode_selection_screen.dart` — Light-themed mode selection (Create New / Connect Existing)
 - `lib/screens/mobile/mobile_entity_type_screen.dart` — Light-themed entity type picker (Individual / Organization)
 - `lib/screens/mobile/mobile_connect_server_screen.dart` — Light-themed server connection with step progress
@@ -131,7 +132,7 @@ The mobile UI (`lib/screens/mobile/`) is a separate screen set from the desktop 
 
 ### Backend Integration (Mobile)
 Real backend data: Profile (GET/PUT /api/profile), Identity (GET /api/identity), Endpoint (GET /api/endpoint), Alerts (GET /api/alerts), Contacts (GET /api/contacts), OOBI resolution (POST /api/contacts/resolve), Contact add (POST /api/contacts), Accept/Reject (POST /api/contacts/{aid}/accept|reject).
-Dummy data: Tasks tab, Activity tab. Stubbed: All Share menu items, Wallet, Data Vault, Security Settings, My Devices.
+Dummy data: Tasks tab, Activity tab. Stubbed: All Share menu items, Wallet, Data Vault, Security Settings (general), My Devices.
 
 ## Specification Documents
 

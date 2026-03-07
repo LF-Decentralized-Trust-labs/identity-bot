@@ -10,6 +10,7 @@ import 'chatbot_panel.dart';
 import 'mobile_qr_scanner.dart';
 import 'mobile_profile_screen.dart';
 import 'mobile_contacts_screen.dart';
+import 'mobile_settings_screen.dart';
 
 class MobileApp extends StatefulWidget {
   final KeriService keriService;
@@ -84,6 +85,15 @@ class _MobileAppState extends State<MobileApp> {
     );
   }
 
+  void _navigateToSettings() {
+    _closeDrawer();
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => MobileSettingsScreen(serverUrl: widget.serverUrl),
+      ),
+    );
+  }
+
   void _handleLogout() {
     _closeDrawer();
     widget.onLogout?.call();
@@ -126,6 +136,7 @@ class _MobileAppState extends State<MobileApp> {
                 onClose: _closeDrawer,
                 onProfileTap: _navigateToProfile,
                 onContactsTap: _navigateToContacts,
+                onSettingsTap: _navigateToSettings,
                 onLogout: _handleLogout,
               ),
             ],
