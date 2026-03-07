@@ -31,6 +31,7 @@ class _DrawerMenuState extends State<DrawerMenu> {
   String _displayName = 'Identity Agent';
   String _email = '';
   String? _photoBase64;
+  bool _settingsExpanded = false;
 
   @override
   void initState() {
@@ -103,11 +104,7 @@ class _DrawerMenuState extends State<DrawerMenu> {
                         label: 'Contacts',
                         onTap: widget.onContactsTap,
                       ),
-                      _MenuItem(
-                        icon: Icons.settings_outlined,
-                        label: 'Settings',
-                        onTap: widget.onSettingsTap,
-                      ),
+                      _buildSettingsSection(),
                       const Divider(indent: 16, endIndent: 16),
                       _MenuItem(
                         icon: Icons.account_balance_wallet_outlined,
@@ -119,12 +116,6 @@ class _DrawerMenuState extends State<DrawerMenu> {
                         icon: Icons.storage_outlined,
                         label: 'Data Vault',
                         onTap: () => _showComingSoon('Data Vault'),
-                        trailing: _comingSoonBadge(),
-                      ),
-                      _MenuItem(
-                        icon: Icons.security_outlined,
-                        label: 'Security Settings',
-                        onTap: () => _showComingSoon('Security Settings'),
                         trailing: _comingSoonBadge(),
                       ),
                       _MenuItem(
@@ -169,6 +160,45 @@ class _DrawerMenuState extends State<DrawerMenu> {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildSettingsSection() {
+    return Column(
+      children: [
+        ListTile(
+          leading: const Icon(Icons.settings_outlined, color: MobileColors.textSecondary, size: 22),
+          title: const Text(
+            'Settings',
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w500,
+              color: MobileColors.textPrimary,
+            ),
+          ),
+          trailing: AnimatedRotation(
+            turns: _settingsExpanded ? 0.5 : 0.0,
+            duration: const Duration(milliseconds: 200),
+            child: const Icon(Icons.expand_more, color: MobileColors.textMuted, size: 22),
+          ),
+          onTap: () => setState(() => _settingsExpanded = !_settingsExpanded),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 20),
+        ),
+        AnimatedCrossFade(
+          firstChild: const SizedBox(width: double.infinity, height: 0),
+          secondChild: Column(
+            children: [
+              _SubMenuItem(
+                icon: Icons.dns_outlined,
+                label: 'Tunneling',
+                onTap: widget.onSettingsTap,
+              ),
+            ],
+          ),
+          crossFadeState: _settingsExpanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+          duration: const Duration(milliseconds: 200),
+        ),
+      ],
     );
   }
 
@@ -296,6 +326,40 @@ class _MenuItem extends StatelessWidget {
       trailing: trailing,
       onTap: onTap,
       contentPadding: const EdgeInsets.symmetric(horizontal: 20),
+    );
+  }
+}
+
+class _SubMenuItem extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  const _SubMenuItem({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: Padding(
+        padding: const EdgeInsets.only(left: 12),
+        child: Icon(icon, color: MobileColors.textMuted, size: 20),
+      ),
+      title: Text(
+        label,
+        style: const TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w400,
+          color: MobileColors.textSecondary,
+        ),
+      ),
+      onTap: onTap,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 20),
+      dense: true,
+      visualDensity: VisualDensity.compact,
     );
   }
 }

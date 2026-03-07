@@ -1136,8 +1136,11 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
         }
 
         var oobiData struct {
-                AID       string `json:"aid"`
-                PublicKey string `json:"public_key"`
+                AID       string      `json:"aid"`
+                PublicKey string      `json:"public_key"`
+                Alias     string      `json:"alias"`
+                JCard     *store.JCard `json:"jcard,omitempty"`
+                Photo     string      `json:"photo,omitempty"`
         }
         if err := json.NewDecoder(resp.Body).Decode(&oobiData); err != nil {
                 writeError(w, http.StatusBadGateway, "Invalid OOBI response", fmt.Sprintf("Could not parse response: %v", err))
@@ -1150,8 +1153,21 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
         }
 
         alias := req.Alias
+        if alias == "" && oobiData.Alias != "" {
+                alias = oobiData.Alias
+        }
         if alias == "" {
                 alias = oobiData.AID[:12] + "..."
+        }
+
+        contactJCard := oobiData.JCard
+        if contactJCard == nil {
+                contactJCard = &store.JCard{
+                        FullName:  alias,
+                        XKeriAID:  oobiData.AID,
+                        XKeriOOBI: req.OobiURL,
+                        XKeriRole: "agent",
+                }
         }
 
         contact := store.ContactRecord{
@@ -1163,12 +1179,7 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
                 DiscoveredAt: time.Now().UTC().Format(time.RFC3339),
                 Status:       "verified",
                 Role:         "agent",
-                JCard: &store.JCard{
-                        FullName:  alias,
-                        XKeriAID:  oobiData.AID,
-                        XKeriOOBI: req.OobiURL,
-                        XKeriRole: "agent",
-                },
+                JCard:        contactJCard,
         }
 
         if err := s.DataStore.SaveContact(contact); err != nil {
