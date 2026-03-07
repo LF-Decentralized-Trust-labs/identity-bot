@@ -9,6 +9,7 @@ The Identity Agent is a self-sovereign digital identity platform that unifies id
 Preferred communication style: Simple, everyday language.
 Design theme: Dark cyberpunk aesthetic with monospace fonts, dark blue/green color scheme.
 Build/Distribution: No App Store or Play Store submissions. All builds are for local testing only — iOS uses Codemagic's built-in simulator/virtual testing (no TestFlight, no Apple Developer account signing). Android produces unsigned APKs/debug builds. Do not add code signing, provisioning profiles, or store-related configuration.
+Build versioning: All Codemagic workflows pass `--build-number=$BUILD_NUMBER` (Codemagic auto-incrementing) to `flutter build` commands. This ensures Android APKs can be installed over previous versions without uninstalling first (versionCode must increase). Same pattern applied to iOS, Windows, macOS, and Linux for consistent version tracking.
 
 ## System Architecture
 

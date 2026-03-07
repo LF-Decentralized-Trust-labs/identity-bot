@@ -163,7 +163,7 @@ workflows:
       - name: Build release APK (arm64)
         script: |
           cd identity_agent_ui
-          flutter build apk --release --target-platform android-arm64
+          flutter build apk --release --target-platform android-arm64 --build-number=$BUILD_NUMBER
 
     artifacts:
       - identity_agent_ui/build/app/outputs/flutter-apk/*.apk
@@ -389,7 +389,7 @@ workflows:
           echo "--- Debug.xcconfig contents ---"
           cat ios/Flutter/Debug.xcconfig
           echo "--- Building Flutter iOS for simulator (verbose) ---"
-          flutter build ios --debug --simulator --verbose 2>&1 | tail -80
+          flutter build ios --debug --simulator --verbose --build-number=$BUILD_NUMBER 2>&1 | tail -80
 
     artifacts:
       - identity_agent_ui/build/ios/iphonesimulator/*.app
@@ -427,7 +427,7 @@ workflows:
       - name: Build Flutter Windows app
         script: |
           cd identity_agent_ui
-          flutter build windows --release
+          flutter build windows --release --build-number=$env:BUILD_NUMBER
 
       - name: Bundle Go backend and KERI driver with Flutter app
         script: |
@@ -480,7 +480,7 @@ workflows:
       - name: Build Flutter macOS app
         script: |
           cd identity_agent_ui
-          flutter build macos --release
+          flutter build macos --release --build-number=$BUILD_NUMBER
 
       - name: Bundle Go backend and KERI driver into .app
         script: |
@@ -538,7 +538,7 @@ workflows:
       - name: Build Flutter Linux app
         script: |
           cd identity_agent_ui
-          flutter build linux --release
+          flutter build linux --release --build-number=$BUILD_NUMBER
 
       - name: Bundle Go backend and KERI driver with Flutter app
         script: |
