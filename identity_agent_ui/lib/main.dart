@@ -389,9 +389,15 @@ class _AgentMainScreenState extends State<AgentMainScreen> {
     }
   }
 
+  bool _shouldUseMobileUI(BuildContext context) {
+    if (_isMobilePlatform) return true;
+    final width = MediaQuery.of(context).size.width;
+    return width < 768;
+  }
+
   @override
   Widget build(BuildContext context) {
-    if (_isMobilePlatform) {
+    if (_shouldUseMobileUI(context)) {
       return MobileApp(
         keriService: widget.keriService,
         mode: widget.mode,
