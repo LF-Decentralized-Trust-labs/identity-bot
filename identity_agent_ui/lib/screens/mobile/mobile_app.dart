@@ -17,15 +17,12 @@ class MobileApp extends StatefulWidget {
   final AgentMode? mode;
   final EntityType? entityType;
   final String? serverUrl;
-  final VoidCallback? onLogout;
-
   const MobileApp({
     super.key,
     required this.keriService,
     this.mode,
     this.entityType,
     this.serverUrl,
-    this.onLogout,
   });
 
   @override
@@ -94,11 +91,6 @@ class _MobileAppState extends State<MobileApp> {
     );
   }
 
-  void _handleLogout() {
-    _closeDrawer();
-    widget.onLogout?.call();
-  }
-
   @override
   Widget build(BuildContext context) {
     return Theme(
@@ -137,7 +129,6 @@ class _MobileAppState extends State<MobileApp> {
                 onProfileTap: _navigateToProfile,
                 onContactsTap: _navigateToContacts,
                 onSettingsTap: _navigateToSettings,
-                onLogout: _handleLogout,
               ),
             ],
           ],

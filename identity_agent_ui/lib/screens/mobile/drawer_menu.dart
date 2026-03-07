@@ -10,7 +10,6 @@ class DrawerMenu extends StatefulWidget {
   final VoidCallback onProfileTap;
   final VoidCallback onContactsTap;
   final VoidCallback onSettingsTap;
-  final VoidCallback onLogout;
 
   const DrawerMenu({
     super.key,
@@ -19,7 +18,6 @@ class DrawerMenu extends StatefulWidget {
     required this.onProfileTap,
     required this.onContactsTap,
     required this.onSettingsTap,
-    required this.onLogout,
   });
 
   @override
@@ -128,31 +126,14 @@ class _DrawerMenuState extends State<DrawerMenu> {
                   ),
                 ),
                 const Divider(height: 1),
-                Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    children: [
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          onPressed: widget.onLogout,
-                          icon: const Icon(Icons.logout, size: 18),
-                          label: const Text('Log Out'),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: MobileColors.error,
-                            side: const BorderSide(color: MobileColors.error),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      const Text(
-                        'Powered by IdentityBot',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: MobileColors.textMuted,
-                        ),
-                      ),
-                    ],
+                const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Text(
+                    'Powered by IdentityBot',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: MobileColors.textMuted,
+                    ),
                   ),
                 ),
               ],

@@ -124,12 +124,41 @@ class _AgentRouterState extends State<AgentRouter> {
           setState(() => _step = OnboardingStep.modeSelection);
         }
       } else {
-        setState(() => _step = OnboardingStep.modeSelection);
+        final recovered = await _tryRecoverExistingIdentity();
+        if (recovered) {
+          debugPrint('[Agent] Recovered existing identity — skipping onboarding');
+          setState(() => _step = OnboardingStep.dashboard);
+        } else {
+          setState(() => _step = OnboardingStep.modeSelection);
+        }
       }
     } catch (e) {
       debugPrint('[Agent] Error loading saved state: $e');
       setState(() => _step = OnboardingStep.modeSelection);
     }
+  }
+
+  Future<bool> _tryRecoverExistingIdentity() async {
+    try {
+      final baseUrl = AgentConfig.coreBaseUrl;
+      final coreService = CoreService(baseUrl: baseUrl);
+      final identity = await coreService.getIdentity();
+      coreService.dispose();
+
+      if (identity.initialized) {
+        debugPrint('[Agent] Found existing identity on backend — recovering session');
+        _selectedMode = AgentMode.createNew;
+        _selectedEntityType = EntityType.individual;
+        await PreferencesService.setMode(AgentMode.createNew);
+        await PreferencesService.setEntityType(EntityType.individual);
+        await PreferencesService.setSetupComplete(true);
+        await _initializeServiceForMode(AgentMode.createNew, null);
+        return true;
+      }
+    } catch (e) {
+      debugPrint('[Agent] Recovery check failed: $e');
+    }
+    return false;
   }
 
   Future<void> _initializeServiceForMode(
@@ -246,16 +275,6 @@ class _AgentRouterState extends State<AgentRouter> {
   }
 
   void _goBackToModeSelection() {
-    setState(() => _step = OnboardingStep.modeSelection);
-  }
-
-  void _handleLogout() async {
-    _keriService?.dispose();
-    _keriService = null;
-    await PreferencesService.clearAll();
-    _selectedMode = null;
-    _selectedEntityType = null;
-    _serverUrl = null;
     setState(() => _step = OnboardingStep.modeSelection);
   }
 
@@ -396,7 +415,6 @@ class _AgentRouterState extends State<AgentRouter> {
           mode: _selectedMode,
           entityType: _selectedEntityType,
           serverUrl: effectiveServerUrl,
-          onLogout: _handleLogout,
         );
     }
   }
@@ -407,7 +425,6 @@ class AgentMainScreen extends StatefulWidget {
   final AgentMode? mode;
   final EntityType? entityType;
   final String? serverUrl;
-  final VoidCallback? onLogout;
 
   const AgentMainScreen({
     super.key,
@@ -415,7 +432,6 @@ class AgentMainScreen extends StatefulWidget {
     this.mode,
     this.entityType,
     this.serverUrl,
-    this.onLogout,
   });
 
   @override
@@ -466,7 +482,6 @@ class _AgentMainScreenState extends State<AgentMainScreen> {
         mode: widget.mode,
         entityType: widget.entityType,
         serverUrl: widget.serverUrl,
-        onLogout: widget.onLogout,
       );
     }
 
@@ -478,7 +493,6 @@ class _AgentMainScreenState extends State<AgentMainScreen> {
             mode: widget.mode,
             entityType: widget.entityType,
             serverUrl: widget.serverUrl,
-            onLogout: widget.onLogout,
           );
         }
 
