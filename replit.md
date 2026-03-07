@@ -83,6 +83,7 @@ The mobile UI (`lib/screens/mobile/`) is a separate screen set from the desktop 
 -   `ed25519_edwards`: Ed25519 key generation.
 -   `shared_preferences`: Onboarding state persistence.
 -   `mobile_scanner`: QR code scanning.
+-   `image_picker`: Native photo selection on iOS/Android for profile avatar upload.
 -   `qr_flutter`: QR code generation.
 -   `web_socket_channel`: WebSocket client for real-time event streaming.
 
