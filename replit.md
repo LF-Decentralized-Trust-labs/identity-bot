@@ -113,6 +113,10 @@ The mobile UI (`lib/screens/mobile/`) is a separate screen set from the desktop 
 - `lib/screens/mobile/chatbot_panel.dart` — Dialog-based chat panel with dummy bot responses
 - `lib/screens/mobile/mobile_profile_screen.dart` — Card-based profile editor with real backend data
 - `lib/screens/mobile/mobile_contacts_screen.dart` — Searchable contact list with detail view
+- `lib/screens/mobile/mobile_mode_selection_screen.dart` — Light-themed mode selection (Create New / Connect Existing)
+- `lib/screens/mobile/mobile_entity_type_screen.dart` — Light-themed entity type picker (Individual / Organization)
+- `lib/screens/mobile/mobile_connect_server_screen.dart` — Light-themed server connection with step progress
+- `lib/screens/mobile/mobile_setup_wizard_screen.dart` — Light-themed setup wizard (seed generation, verification, inception)
 
 ### Mobile Widgets
 - `lib/widgets/identity_card.dart` — Profile photo, name, agent URL, confidence ring
