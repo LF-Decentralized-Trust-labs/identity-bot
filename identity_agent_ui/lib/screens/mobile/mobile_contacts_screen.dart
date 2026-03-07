@@ -66,15 +66,18 @@ class _MobileContactsScreenState extends State<MobileContactsScreen> {
     });
   }
 
-  void _showContactDetail(ContactResponse contact) {
-    Navigator.of(context).push(
+  void _showContactDetail(ContactResponse contact) async {
+    final deleted = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
         builder: (_) => Theme(
           data: MobileTheme.lightTheme,
-          child: _ContactDetailScreen(contact: contact),
+          child: _ContactDetailScreen(contact: contact, serverUrl: widget.serverUrl),
         ),
       ),
     );
+    if (deleted == true) {
+      _loadContacts();
+    }
   }
 
   @override
@@ -282,20 +285,78 @@ class _ContactCard extends StatelessWidget {
   }
 }
 
-class _ContactDetailScreen extends StatelessWidget {
+class _ContactDetailScreen extends StatefulWidget {
   final ContactResponse contact;
+  final String? serverUrl;
 
-  const _ContactDetailScreen({required this.contact});
+  const _ContactDetailScreen({required this.contact, this.serverUrl});
 
-  void _copyToClipboard(BuildContext context, String text, String label) {
+  @override
+  State<_ContactDetailScreen> createState() => _ContactDetailScreenState();
+}
+
+class _ContactDetailScreenState extends State<_ContactDetailScreen> {
+  bool _deleting = false;
+
+  void _copyToClipboard(String text, String label) {
     Clipboard.setData(ClipboardData(text: text));
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('$label copied')),
     );
   }
 
+  Future<void> _confirmDelete() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Delete Contact'),
+        content: Text(
+          'Are you sure you want to delete ${widget.contact.displayName}? This cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel', style: TextStyle(color: MobileColors.textMuted)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: MobileColors.error,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      setState(() => _deleting = true);
+      try {
+        final coreService = CoreService(baseUrl: widget.serverUrl ?? AgentConfig.coreBaseUrl);
+        await coreService.deleteContact(widget.contact.aid);
+        coreService.dispose();
+        if (mounted) {
+          Navigator.of(context).pop(true);
+        }
+      } catch (e) {
+        if (mounted) {
+          setState(() => _deleting = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to delete: $e'),
+              backgroundColor: MobileColors.error,
+            ),
+          );
+        }
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final contact = widget.contact;
     return Scaffold(
       backgroundColor: MobileColors.background,
       appBar: AppBar(
@@ -303,6 +364,17 @@ class _ContactDetailScreen extends StatelessWidget {
         backgroundColor: MobileColors.surface,
         foregroundColor: MobileColors.textPrimary,
         elevation: 0,
+        actions: [
+          IconButton(
+            onPressed: _deleting ? null : _confirmDelete,
+            icon: _deleting
+                ? const SizedBox(
+                    width: 20, height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: MobileColors.error),
+                  )
+                : const Icon(Icons.delete_outline, color: MobileColors.error),
+          ),
+        ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
@@ -339,6 +411,21 @@ class _ContactDetailScreen extends StatelessWidget {
               const SizedBox(height: 12),
               _buildJCardInfo(),
             ],
+            const SizedBox(height: 24),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _deleting ? null : _confirmDelete,
+                icon: const Icon(Icons.delete_outline, size: 18),
+                label: const Text('Delete Contact'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: MobileColors.error,
+                  side: const BorderSide(color: MobileColors.error),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+            ),
           ],
         ),
       ),
@@ -346,6 +433,7 @@ class _ContactDetailScreen extends StatelessWidget {
   }
 
   Widget _buildStatusChip() {
+    final contact = widget.contact;
     Color color;
     String label;
 
@@ -378,6 +466,7 @@ class _ContactDetailScreen extends StatelessWidget {
   }
 
   Widget _buildInfoCard(BuildContext context) {
+    final contact = widget.contact;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(16),
@@ -393,14 +482,14 @@ class _ContactDetailScreen extends StatelessWidget {
             label: 'AID',
             value: contact.aid,
             monospace: true,
-            onCopy: () => _copyToClipboard(context, contact.aid, 'AID'),
+            onCopy: () => _copyToClipboard(contact.aid, 'AID'),
           ),
           const Divider(height: 16),
           _DetailRow(
             label: 'OOBI URL',
             value: contact.oobiUrl,
             monospace: true,
-            onCopy: () => _copyToClipboard(context, contact.oobiUrl, 'OOBI URL'),
+            onCopy: () => _copyToClipboard(contact.oobiUrl, 'OOBI URL'),
           ),
           const Divider(height: 16),
           _DetailRow(label: 'Status', value: contact.status.isNotEmpty ? contact.status : 'added'),
@@ -416,7 +505,7 @@ class _ContactDetailScreen extends StatelessWidget {
   }
 
   Widget _buildJCardInfo() {
-    final jcard = contact.jcard!;
+    final jcard = widget.contact.jcard!;
     final fields = <MapEntry<String, String>>[];
 
     if (jcard.fullName.isNotEmpty) fields.add(MapEntry('Name', jcard.fullName));

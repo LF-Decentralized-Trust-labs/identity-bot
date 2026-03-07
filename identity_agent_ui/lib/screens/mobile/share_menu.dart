@@ -239,8 +239,6 @@ class _AddContactScreenState extends State<_AddContactScreen> {
       ),
     );
     overlay.insert(_popupOverlay!);
-
-    Future.delayed(const Duration(seconds: 5), _dismissPopup);
   }
 
   void _dismissPopup() {
@@ -683,7 +681,8 @@ class _ConnectionPopup extends StatefulWidget {
 class _ConnectionPopupState extends State<_ConnectionPopup>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
-  late final Animation<Offset> _slideAnimation;
+  late final Animation<double> _scaleAnimation;
+  late final Animation<double> _fadeAnimation;
 
   @override
   void initState() {
@@ -692,10 +691,10 @@ class _ConnectionPopupState extends State<_ConnectionPopup>
       vsync: this,
       duration: const Duration(milliseconds: 300),
     );
-    _slideAnimation = Tween<Offset>(
-      begin: const Offset(0, -1),
-      end: Offset.zero,
-    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOut));
+    _scaleAnimation = Tween<double>(begin: 0.8, end: 1.0)
+        .animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutBack));
+    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0)
+        .animate(CurvedAnimation(parent: _controller, curve: Curves.easeOut));
     _controller.forward();
   }
 
@@ -713,75 +712,112 @@ class _ConnectionPopupState extends State<_ConnectionPopup>
 
   @override
   Widget build(BuildContext context) {
-    final topPadding = MediaQuery.of(context).padding.top;
-
-    return Positioned(
-      top: topPadding + 8,
-      left: 16,
-      right: 16,
-      child: SlideTransition(
-        position: _slideAnimation,
-        child: Material(
-          elevation: 8,
-          borderRadius: BorderRadius.circular(12),
-          shadowColor: MobileColors.cardShadow,
-          child: GestureDetector(
-            onTap: widget.onTap,
-            child: Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: MobileColors.surface,
-                borderRadius: BorderRadius.circular(12),
-                border:
-                    Border.all(color: MobileColors.primary.withOpacity(0.3)),
-              ),
-              child: Row(
-                children: [
-                  CircleAvatar(
-                    radius: 18,
-                    backgroundColor: MobileColors.primary.withOpacity(0.12),
-                    child: Text(
-                      _getInitials(widget.name),
-                      style: const TextStyle(
-                        color: MobileColors.primary,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 12,
-                      ),
+    return Positioned.fill(
+      child: FadeTransition(
+        opacity: _fadeAnimation,
+        child: GestureDetector(
+          onTap: widget.onDismiss,
+          child: Container(
+            color: Colors.black.withOpacity(0.5),
+            child: Center(
+              child: GestureDetector(
+                onTap: () {},
+                child: ScaleTransition(
+                  scale: _scaleAnimation,
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 32),
+                    padding: const EdgeInsets.all(24),
+                    decoration: BoxDecoration(
+                      color: MobileColors.surface,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: MobileColors.primary.withOpacity(0.3)),
+                      boxShadow: [
+                        BoxShadow(
+                          color: MobileColors.primary.withOpacity(0.15),
+                          blurRadius: 24,
+                          offset: const Offset(0, 8),
+                        ),
+                      ],
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
                     child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Text(
-                          'New Connection Request',
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: MobileColors.primary,
+                        Container(
+                          width: 56,
+                          height: 56,
+                          decoration: BoxDecoration(
+                            color: MobileColors.primary.withOpacity(0.12),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Center(
+                            child: Text(
+                              _getInitials(widget.name),
+                              style: const TextStyle(
+                                color: MobileColors.primary,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 20,
+                              ),
+                            ),
                           ),
                         ),
-                        const SizedBox(height: 2),
+                        const SizedBox(height: 16),
+                        const Text(
+                          'Connection Request',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                            color: MobileColors.textPrimary,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
                         Text(
                           '${widget.name} wants to connect',
                           style: const TextStyle(
-                            fontSize: 13,
+                            fontSize: 14,
                             color: MobileColors.textSecondary,
                           ),
-                          maxLines: 1,
+                          textAlign: TextAlign.center,
+                          maxLines: 2,
                           overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 24),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: OutlinedButton(
+                                onPressed: widget.onDismiss,
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: MobileColors.textSecondary,
+                                  side: const BorderSide(color: MobileColors.border),
+                                  padding: const EdgeInsets.symmetric(vertical: 12),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                ),
+                                child: const Text('Dismiss'),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: ElevatedButton(
+                                onPressed: widget.onTap,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: MobileColors.primary,
+                                  foregroundColor: MobileColors.textOnPrimary,
+                                  padding: const EdgeInsets.symmetric(vertical: 12),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                ),
+                                child: const Text('View'),
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
                   ),
-                  GestureDetector(
-                    onTap: widget.onDismiss,
-                    child: const Icon(Icons.close,
-                        size: 18, color: MobileColors.textMuted),
-                  ),
-                ],
+                ),
               ),
             ),
           ),

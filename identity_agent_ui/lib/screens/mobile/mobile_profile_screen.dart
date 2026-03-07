@@ -1,9 +1,15 @@
 import 'dart:convert';
+import 'dart:async';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import '../../theme/mobile_theme.dart';
 import '../../services/core_service.dart';
 import '../../config/agent_config.dart';
+import '../../services/photo_picker_stub.dart'
+    if (dart.library.html) '../../services/photo_picker_web.dart' as photo_picker;
 
 class MobileProfileScreen extends StatefulWidget {
   final String? serverUrl;
@@ -181,28 +187,68 @@ class _MobileProfileScreenState extends State<MobileProfileScreen> {
     );
   }
 
+  Future<void> _pickAndCropPhoto() async {
+    try {
+      final base64 = await photo_picker.pickPhotoBase64();
+      if (base64 == null || base64.isEmpty || !mounted) return;
+
+      final bytes = base64Decode(base64);
+      final croppedBase64 = await showDialog<String>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => _PhotoCropDialog(imageBytes: bytes),
+      );
+
+      if (croppedBase64 != null && croppedBase64.isNotEmpty && mounted) {
+        setState(() => _photoBase64 = croppedBase64);
+      }
+    } catch (e) {
+      debugPrint('[MobileProfile] Photo pick error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to load photo: $e'), backgroundColor: MobileColors.error),
+        );
+      }
+    }
+  }
+
+  void _removePhoto() {
+    setState(() => _photoBase64 = null);
+  }
+
   Widget _buildAvatarSection() {
     return Column(
       children: [
-        Stack(
-          children: [
-            _buildAvatar(48),
-            if (_editing)
-              Positioned(
-                bottom: 0,
-                right: 0,
-                child: Container(
-                  width: 32,
-                  height: 32,
-                  decoration: const BoxDecoration(
-                    color: MobileColors.primary,
-                    shape: BoxShape.circle,
+        GestureDetector(
+          onTap: _editing ? _pickAndCropPhoto : null,
+          child: Stack(
+            children: [
+              _buildAvatar(48),
+              if (_editing)
+                Positioned(
+                  bottom: 0,
+                  right: 0,
+                  child: Container(
+                    width: 32,
+                    height: 32,
+                    decoration: const BoxDecoration(
+                      color: MobileColors.primary,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.camera_alt, color: MobileColors.textOnPrimary, size: 16),
                   ),
-                  child: const Icon(Icons.camera_alt, color: MobileColors.textOnPrimary, size: 16),
                 ),
-              ),
-          ],
+            ],
+          ),
         ),
+        if (_editing && _photoBase64 != null && _photoBase64!.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          TextButton.icon(
+            onPressed: _removePhoto,
+            icon: const Icon(Icons.delete_outline, size: 16, color: MobileColors.error),
+            label: const Text('Remove Photo', style: TextStyle(color: MobileColors.error, fontSize: 13)),
+          ),
+        ],
         const SizedBox(height: 12),
         Text(
           _fnController.text.isNotEmpty ? _fnController.text : 'Identity Agent',
@@ -432,6 +478,218 @@ class _SectionCard extends StatelessWidget {
           const SizedBox(height: 8),
           ...visibleChildren,
         ],
+      ),
+    );
+  }
+}
+
+class _PhotoCropDialog extends StatefulWidget {
+  final Uint8List imageBytes;
+
+  const _PhotoCropDialog({required this.imageBytes});
+
+  @override
+  State<_PhotoCropDialog> createState() => _PhotoCropDialogState();
+}
+
+class _PhotoCropDialogState extends State<_PhotoCropDialog> {
+  final TransformationController _transformController = TransformationController();
+  final GlobalKey _cropKey = GlobalKey();
+  bool _cropping = false;
+  ui.Image? _decodedImage;
+
+  @override
+  void initState() {
+    super.initState();
+    _decodeImage();
+  }
+
+  Future<void> _decodeImage() async {
+    final codec = await ui.instantiateImageCodec(widget.imageBytes);
+    final frame = await codec.getNextFrame();
+    if (mounted) {
+      setState(() => _decodedImage = frame.image);
+
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _centerImage();
+      });
+    }
+  }
+
+  void _centerImage() {
+    if (_decodedImage == null) return;
+    final cropSize = _getCropSize();
+    final imgW = _decodedImage!.width.toDouble();
+    final imgH = _decodedImage!.height.toDouble();
+
+    final scale = cropSize / (imgW < imgH ? imgW : imgH);
+    final scaledW = imgW * scale;
+    final scaledH = imgH * scale;
+    final dx = (cropSize - scaledW) / 2;
+    final dy = (cropSize - scaledH) / 2;
+
+    final matrix = Matrix4.identity()
+      ..scale(scale)
+      ..setTranslationRaw(dx, dy, 0);
+    _transformController.value = matrix;
+  }
+
+  double _getCropSize() {
+    final screenWidth = MediaQuery.of(context).size.width;
+    return (screenWidth - 80).clamp(200.0, 350.0);
+  }
+
+  Future<void> _cropAndSave() async {
+    if (_decodedImage == null) return;
+    setState(() => _cropping = true);
+
+    try {
+      final boundary = _cropKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+      if (boundary == null) {
+        setState(() => _cropping = false);
+        return;
+      }
+
+      final image = await boundary.toImage(pixelRatio: 2.0);
+      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      if (byteData == null) {
+        setState(() => _cropping = false);
+        return;
+      }
+
+      final pngBytes = byteData.buffer.asUint8List();
+      final b64 = base64Encode(pngBytes);
+
+      if (mounted) {
+        Navigator.of(context).pop(b64);
+      }
+    } catch (e) {
+      debugPrint('[PhotoCrop] Crop error: $e');
+      if (mounted) {
+        setState(() => _cropping = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Crop failed: $e'), backgroundColor: MobileColors.error),
+        );
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _transformController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cropSize = _getCropSize();
+
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 40),
+      child: Container(
+        decoration: BoxDecoration(
+          color: MobileColors.surface,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 20, 20, 12),
+              child: Text(
+                'Adjust Photo',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: MobileColors.textPrimary,
+                ),
+              ),
+            ),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 20),
+              child: Text(
+                'Pinch to zoom, drag to reposition',
+                style: TextStyle(fontSize: 13, color: MobileColors.textMuted),
+              ),
+            ),
+            const SizedBox(height: 16),
+            if (_decodedImage == null)
+              SizedBox(
+                height: cropSize,
+                child: const Center(
+                  child: CircularProgressIndicator(color: MobileColors.primary),
+                ),
+              )
+            else
+              Center(
+                child: Container(
+                  width: cropSize,
+                  height: cropSize,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: MobileColors.primary, width: 2),
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: RepaintBoundary(
+                      key: _cropKey,
+                      child: InteractiveViewer(
+                        transformationController: _transformController,
+                        minScale: 0.5,
+                        maxScale: 5.0,
+                        constrained: false,
+                        child: Image.memory(
+                          widget.imageBytes,
+                          fit: BoxFit.contain,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            const SizedBox(height: 20),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: _cropping ? null : () => Navigator.of(context).pop(null),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: MobileColors.textSecondary,
+                        side: const BorderSide(color: MobileColors.border),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      child: const Text('Cancel'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: _cropping ? null : _cropAndSave,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: MobileColors.primary,
+                        foregroundColor: MobileColors.textOnPrimary,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      child: _cropping
+                          ? const SizedBox(
+                              width: 20, height: 20,
+                              child: CircularProgressIndicator(
+                                color: MobileColors.textOnPrimary, strokeWidth: 2,
+                              ),
+                            )
+                          : const Text('Save'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
