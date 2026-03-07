@@ -210,9 +210,15 @@ class _AddContactScreenState extends State<_AddContactScreen> {
   }
 
   void _listenForEvents() {
+    debugPrint('[AddContactScreen] *** Subscribing to EventService events (connected=${_eventService.isConnected})');
     _eventSub = _eventService.events.listen((event) {
-      if (!mounted) return;
+      debugPrint('[AddContactScreen] *** Event received on QR screen: ${event.type} | alias="${event.senderAlias}"');
+      if (!mounted) {
+        debugPrint('[AddContactScreen] *** Widget not mounted, ignoring event');
+        return;
+      }
       if (event.type == 'introduction_received') {
+        debugPrint('[AddContactScreen] *** Showing connection popup for: ${event.senderAlias}');
         _showConnectionPopup(event.senderAlias, event.senderAid);
       }
     });

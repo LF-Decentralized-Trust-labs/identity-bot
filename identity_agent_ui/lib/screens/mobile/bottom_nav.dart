@@ -38,11 +38,15 @@ class MobileBottomNav extends StatelessWidget {
                 label: 'Share',
                 onTap: onShare,
               ),
-              _ScanButton(onTap: onScan),
-              _NavButton(
+              _CenterButton(
                 icon: Icons.chat_bubble_outline,
-                label: 'Chatbot',
+                label: 'Chat',
                 onTap: onChatbot,
+              ),
+              _NavButton(
+                icon: Icons.qr_code_scanner,
+                label: 'Scan',
+                onTap: onScan,
               ),
             ],
           ),
@@ -90,10 +94,16 @@ class _NavButton extends StatelessWidget {
   }
 }
 
-class _ScanButton extends StatelessWidget {
+class _CenterButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
   final VoidCallback onTap;
 
-  const _ScanButton({required this.onTap});
+  const _CenterButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -113,10 +123,19 @@ class _ScanButton extends StatelessWidget {
             ),
           ],
         ),
-        child: const Icon(
-          Icons.qr_code_scanner,
-          color: MobileColors.textOnPrimary,
-          size: 28,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: MobileColors.textOnPrimary, size: 24),
+            Text(
+              label,
+              style: const TextStyle(
+                color: MobileColors.textOnPrimary,
+                fontSize: 9,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
         ),
       ),
     );

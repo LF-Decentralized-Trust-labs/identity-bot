@@ -24,6 +24,9 @@ class AgentEvent {
 
   String get senderAid => payload['sender_aid'] ?? '';
   String get senderAlias => payload['sender_alias'] ?? '';
+
+  @override
+  String toString() => 'AgentEvent(type=$type, alias=$senderAlias, aid=$senderAid)';
 }
 
 class EventService {
@@ -59,18 +62,27 @@ class EventService {
     _instance = null;
   }
 
+  Uri _buildWebSocketUri() {
+    if (_baseUrl.isEmpty && kIsWeb) {
+      final pageUri = Uri.base;
+      final wsScheme = pageUri.scheme == 'https' ? 'wss' : 'ws';
+      return Uri.parse('$wsScheme://${pageUri.host}:${pageUri.port}/api/ws/events');
+    }
+
+    final wsUrl = _baseUrl
+        .replaceFirst('https://', 'wss://')
+        .replaceFirst('http://', 'ws://');
+    return Uri.parse('$wsUrl/api/ws/events');
+  }
+
   void connect() {
     if (_disposed) return;
 
     _connectionGeneration++;
     final thisGeneration = _connectionGeneration;
+    final uri = _buildWebSocketUri();
 
-    final wsUrl = _baseUrl
-        .replaceFirst('https://', 'wss://')
-        .replaceFirst('http://', 'ws://');
-    final uri = Uri.parse('$wsUrl/api/ws/events');
-
-    debugPrint('[EventService] Connecting to $uri (gen=$thisGeneration)');
+    debugPrint('[EventService] *** Connecting to WebSocket: $uri (gen=$thisGeneration)');
 
     try {
       _channel?.sink.close();
@@ -79,34 +91,38 @@ class EventService {
       _channel!.stream.listen(
         (data) {
           if (thisGeneration != _connectionGeneration) return;
-          _connected = true;
+          if (!_connected) {
+            _connected = true;
+            debugPrint('[EventService] *** WebSocket CONNECTED (gen=$thisGeneration)');
+          }
           _reconnectAttempts = 0;
 
           try {
             final json = jsonDecode(data as String);
             final event = AgentEvent.fromJson(json);
-            debugPrint('[EventService] Event received: ${event.type}');
+            debugPrint('[EventService] *** EVENT RECEIVED: ${event.type} | alias="${event.senderAlias}" | aid=${event.senderAid}');
             _controller.add(event);
+            debugPrint('[EventService] *** Event dispatched to ${_controller.hasListener ? "listeners" : "NO listeners"}');
           } catch (e) {
-            debugPrint('[EventService] Failed to parse event: $e');
+            debugPrint('[EventService] *** Failed to parse event: $e | raw=$data');
           }
         },
         onError: (error) {
           if (thisGeneration != _connectionGeneration) return;
-          debugPrint('[EventService] WebSocket error: $error');
+          debugPrint('[EventService] *** WebSocket ERROR: $error (gen=$thisGeneration)');
           _connected = false;
           _scheduleReconnect();
         },
         onDone: () {
           if (thisGeneration != _connectionGeneration) return;
-          debugPrint('[EventService] WebSocket closed');
+          debugPrint('[EventService] *** WebSocket CLOSED (gen=$thisGeneration)');
           _connected = false;
           _scheduleReconnect();
         },
         cancelOnError: false,
       );
     } catch (e) {
-      debugPrint('[EventService] Connection failed: $e');
+      debugPrint('[EventService] *** Connection FAILED: $e');
       _scheduleReconnect();
     }
   }
@@ -122,7 +138,7 @@ class EventService {
     );
     _reconnectAttempts++;
 
-    debugPrint('[EventService] Reconnecting in ${delay.inSeconds}s (attempt $_reconnectAttempts)');
+    debugPrint('[EventService] *** Reconnecting in ${delay.inSeconds}s (attempt $_reconnectAttempts)');
 
     _reconnectTimer = Timer(delay, () {
       if (!_disposed) connect();
@@ -130,6 +146,7 @@ class EventService {
   }
 
   void dispose() {
+    debugPrint('[EventService] *** DISPOSING (gen=$_connectionGeneration)');
     _disposed = true;
     _connectionGeneration++;
     _reconnectTimer?.cancel();

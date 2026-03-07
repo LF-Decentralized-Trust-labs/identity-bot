@@ -1,0 +1,17 @@
+[
+  {
+    "aid": "EGph_k66I9Uvmp8nG1752dktOW0o8c9XhjvTFuqnRjBp",
+    "alias": "EGph_k66I9Uv...",
+    "public_key": "w3jwCECKesT33TOGkAqh17q6NSREKh4OJdJnOo+G534=",
+    "oobi_url": "http://localhost:8642/oobi/EGph_k66I9Uvmp8nG1752dktOW0o8c9XhjvTFuqnRjBp",
+    "received_at": "2026-03-07T06:13:17Z",
+    "expires_at": "2026-06-05T06:13:17Z",
+    "error_reason": "Could not reach OOBI: Get \"http://localhost:8642/oobi/EGph_k66I9Uvmp8nG1752dktOW0o8c9XhjvTFuqnRjBp\": dial tcp [::1]:8642: connect: connection refused",
+    "jcard": {
+      "fn": "EGph_k66I9Uv...",
+      "x-keri-aid": "EGph_k66I9Uvmp8nG1752dktOW0o8c9XhjvTFuqnRjBp",
+      "x-keri-oobi": "http://localhost:8642/oobi/EGph_k66I9Uvmp8nG1752dktOW0o8c9XhjvTFuqnRjBp",
+      "x-keri-role": "agent"
+    }
+  }
+]
