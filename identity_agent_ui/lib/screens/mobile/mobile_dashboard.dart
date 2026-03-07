@@ -304,6 +304,7 @@ class _MobileDashboardState extends State<MobileDashboard> with SingleTickerProv
         displayName: contact.displayName,
         aid: contact.aid,
         type: AlertCardType.connectionRequest,
+        photo: contact.photo,
         onApprove: () => _onAcceptContact(contact.aid),
         onDeny: () => _onRejectContact(contact.aid),
       ));

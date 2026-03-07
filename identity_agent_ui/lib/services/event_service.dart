@@ -24,6 +24,21 @@ class AgentEvent {
 
   String get senderAid => payload['sender_aid'] ?? '';
   String get senderAlias => payload['sender_alias'] ?? '';
+  String get senderPhoto => payload['sender_photo'] ?? '';
+  Map<String, dynamic>? get senderJCard =>
+      payload['sender_jcard'] is Map<String, dynamic>
+          ? payload['sender_jcard'] as Map<String, dynamic>
+          : null;
+  String get senderDisplayName {
+    final jcard = senderJCard;
+    if (jcard != null) {
+      final fn = jcard['fn'] as String? ?? '';
+      if (fn.isNotEmpty) return fn;
+    }
+    if (senderAlias.isNotEmpty) return senderAlias;
+    final aid = senderAid;
+    return aid.length > 12 ? '${aid.substring(0, 12)}...' : aid;
+  }
 
   @override
   String toString() => 'AgentEvent(type=$type, alias=$senderAlias, aid=$senderAid)';

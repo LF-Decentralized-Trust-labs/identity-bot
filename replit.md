@@ -95,3 +95,19 @@ The Go backend includes a WebSocket-based EventHub (`identity-agent-core/server/
 -   **Event types**: `introduction_received` (new inbound contact request), `contact_accepted` (contact upgraded to mutual), `pending_request_received` (OOBI-unreachable sender).
 -   **Architecture**: Same WebSocket URL works for both standalone (localhost) and remote controller (tunnel URL) modes. EventService auto-reconnects with exponential backoff and generation-based connection tracking.
 -   **Popup behavior**: Connection request popups only appear on the OOBI QR sharing screen (`_AddContactScreen` in `share_menu.dart`). The dashboard updates alert badge counts silently via WebSocket events with a 60-second HTTP fallback poll.
+
+### Two-Layer OOBI Exchange Architecture
+
+The OOBI exchange process is designed as two conceptual layers:
+
+-   **Layer 1 (Cryptographic Trust)**: Mandatory KERI handshake — resolves the remote agent's AID, verifies the KEL. Strictly protocol-level, independent of user intent. No profile data (jCard/photo) is exchanged at this layer.
+-   **Layer 2 (Application Intent)**: After Layer 1 succeeds, the user's interaction purpose is executed (e.g., Add Contact, Request Payment, Verify Credential). Profile data (jCard, photo) is fetched and displayed only at this layer. The `intent` parameter in OOBI URLs will route to the appropriate interaction flow (currently only `add_contact` is implemented; others show "Coming Soon").
+
+### Contact Photo Flow
+
+-   `ContactRecord` in Go (`store.go`) has a `Photo` field for base64-encoded profile photos.
+-   The OOBI serve endpoint (`/oobi/{aid}`) includes `photo` and `jcard` in its response.
+-   The resolve endpoint (`/api/contacts/resolve`) forwards `photo` and `jcard` from the OOBI response.
+-   The reverse introduction exchange payload includes `sender_photo` and `sender_jcard`.
+-   WebSocket `introduction_received` events carry `sender_photo` and `sender_jcard` for real-time UI display.
+-   All Flutter contact UI surfaces (QR consent dialog, connection popup, contact cards, contact detail screen, dashboard alert cards) display photos when available, with initials fallback.

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../theme/mobile_theme.dart';
@@ -222,7 +223,25 @@ class _ContactCard extends StatelessWidget {
     );
   }
 
+  Uint8List? _decodePhoto(String photo) {
+    if (photo.isEmpty) return null;
+    try {
+      final data = photo.contains(',') ? photo.split(',').last : photo;
+      return base64Decode(data);
+    } catch (_) {
+      return null;
+    }
+  }
+
   Widget _buildAvatar() {
+    final photoBytes = _decodePhoto(contact.photo);
+    if (photoBytes != null) {
+      return CircleAvatar(
+        radius: 22,
+        backgroundImage: MemoryImage(photoBytes),
+      );
+    }
+
     if (contact.jcard != null) {
       final name = contact.jcard!.fullName;
       if (name.isNotEmpty) {
@@ -380,20 +399,7 @@ class _ContactDetailScreenState extends State<_ContactDetailScreen> {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            CircleAvatar(
-              radius: 40,
-              backgroundColor: MobileColors.primary,
-              child: Text(
-                contact.displayName.isNotEmpty
-                    ? contact.displayName[0].toUpperCase()
-                    : '?',
-                style: const TextStyle(
-                  color: MobileColors.textOnPrimary,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 28,
-                ),
-              ),
-            ),
+            _buildDetailAvatar(contact),
             const SizedBox(height: 12),
             Text(
               contact.displayName,
@@ -427,6 +433,34 @@ class _ContactDetailScreenState extends State<_ContactDetailScreen> {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDetailAvatar(ContactResponse contact) {
+    if (contact.photo.isNotEmpty) {
+      try {
+        final photoData = contact.photo.contains(',')
+            ? contact.photo.split(',').last
+            : contact.photo;
+        return CircleAvatar(
+          radius: 40,
+          backgroundImage: MemoryImage(base64Decode(photoData)),
+        );
+      } catch (_) {}
+    }
+    return CircleAvatar(
+      radius: 40,
+      backgroundColor: MobileColors.primary,
+      child: Text(
+        contact.displayName.isNotEmpty
+            ? contact.displayName[0].toUpperCase()
+            : '?',
+        style: const TextStyle(
+          color: MobileColors.textOnPrimary,
+          fontWeight: FontWeight.w700,
+          fontSize: 28,
         ),
       ),
     );

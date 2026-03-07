@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../theme/mobile_theme.dart';
 
@@ -8,6 +9,7 @@ class AlertCard extends StatelessWidget {
   final String aid;
   final AlertCardType type;
   final String? subtitle;
+  final String photo;
   final VoidCallback? onApprove;
   final VoidCallback? onDeny;
   final VoidCallback? onDismiss;
@@ -19,6 +21,7 @@ class AlertCard extends StatelessWidget {
     required this.aid,
     required this.type,
     this.subtitle,
+    this.photo = '',
     this.onApprove,
     this.onDeny,
     this.onDismiss,
@@ -29,6 +32,34 @@ class AlertCard extends StatelessWidget {
     final parts = displayName.split(' ').where((w) => w.isNotEmpty).take(2);
     if (parts.isEmpty) return '?';
     return parts.map((w) => w[0].toUpperCase()).join();
+  }
+
+  Widget _buildAvatar() {
+    if (photo.isNotEmpty) {
+      try {
+        final photoData = photo.contains(',') ? photo.split(',').last : photo;
+        return CircleAvatar(
+          radius: 20,
+          backgroundImage: MemoryImage(base64Decode(photoData)),
+        );
+      } catch (_) {}
+    }
+    return CircleAvatar(
+      radius: 20,
+      backgroundColor: type == AlertCardType.connectionRequest
+          ? MobileColors.primary.withOpacity(0.12)
+          : MobileColors.warning.withOpacity(0.12),
+      child: Text(
+        _getInitials(),
+        style: TextStyle(
+          color: type == AlertCardType.connectionRequest
+              ? MobileColors.primary
+              : MobileColors.warning,
+          fontWeight: FontWeight.w700,
+          fontSize: 14,
+        ),
+      ),
+    );
   }
 
   @override
@@ -73,22 +104,7 @@ class AlertCard extends StatelessWidget {
             const SizedBox(height: 10),
             Row(
               children: [
-                CircleAvatar(
-                  radius: 20,
-                  backgroundColor: type == AlertCardType.connectionRequest
-                      ? MobileColors.primary.withOpacity(0.12)
-                      : MobileColors.warning.withOpacity(0.12),
-                  child: Text(
-                    _getInitials(),
-                    style: TextStyle(
-                      color: type == AlertCardType.connectionRequest
-                          ? MobileColors.primary
-                          : MobileColors.warning,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 14,
-                    ),
-                  ),
-                ),
+                _buildAvatar(),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -96,7 +112,7 @@ class AlertCard extends StatelessWidget {
                     children: [
                       Text(
                         type == AlertCardType.connectionRequest
-                            ? '$displayName wants to connect'
+                            ? '$displayName wants to add you as a contact'
                             : displayName,
                         style: const TextStyle(
                           fontSize: 15,

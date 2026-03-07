@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../theme/mobile_theme.dart';
@@ -252,24 +253,107 @@ class _ConsentDialog extends StatelessWidget {
 
   const _ConsentDialog({required this.resolved});
 
+  Widget _buildAvatar() {
+    if (resolved.photo.isNotEmpty) {
+      try {
+        final photoData = resolved.photo.contains(',')
+            ? resolved.photo.split(',').last
+            : resolved.photo;
+        return CircleAvatar(
+          radius: 32,
+          backgroundImage: MemoryImage(base64Decode(photoData)),
+        );
+      } catch (_) {}
+    }
+    final initials = resolved.displayName
+        .split(' ')
+        .where((w) => w.isNotEmpty)
+        .take(2)
+        .map((w) => w[0].toUpperCase())
+        .join();
+    return CircleAvatar(
+      radius: 32,
+      backgroundColor: MobileColors.primary.withOpacity(0.15),
+      child: Text(
+        initials.isNotEmpty ? initials : '?',
+        style: const TextStyle(
+          color: MobileColors.primary,
+          fontWeight: FontWeight.w700,
+          fontSize: 22,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final jcard = resolved.jcard;
     return AlertDialog(
-      title: const Text('Add Contact?'),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      title: const Text(
+        'Add Contact?',
+        style: TextStyle(
+          fontWeight: FontWeight.w700,
+          color: MobileColors.textPrimary,
+        ),
+      ),
       content: Column(
         mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _InfoRow(label: 'Name', value: resolved.displayName),
-          const SizedBox(height: 8),
-          _InfoRow(
-            label: 'AID',
-            value: resolved.aid.length > 24
-                ? '${resolved.aid.substring(0, 24)}...'
-                : resolved.aid,
+          _buildAvatar(),
+          const SizedBox(height: 12),
+          Text(
+            resolved.displayName,
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: MobileColors.textPrimary,
+            ),
+            textAlign: TextAlign.center,
           ),
-          const SizedBox(height: 8),
+          if (jcard != null && jcard.org.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              jcard.org,
+              style: const TextStyle(
+                fontSize: 13,
+                color: MobileColors.textSecondary,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+          if (jcard != null && jcard.title.isNotEmpty) ...[
+            const SizedBox(height: 2),
+            Text(
+              jcard.title,
+              style: const TextStyle(
+                fontSize: 12,
+                color: MobileColors.textMuted,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: MobileColors.surfaceSecondary,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              resolved.aid.length > 24
+                  ? '${resolved.aid.substring(0, 24)}...'
+                  : resolved.aid,
+              style: const TextStyle(
+                fontSize: 11,
+                color: MobileColors.textMuted,
+                fontFamily: 'monospace',
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
           Row(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Icon(
                 resolved.kelVerified ? Icons.verified : Icons.warning_amber,
@@ -301,38 +385,6 @@ class _ConsentDialog extends StatelessWidget {
             foregroundColor: MobileColors.textOnPrimary,
           ),
           child: const Text('Add Contact'),
-        ),
-      ],
-    );
-  }
-}
-
-class _InfoRow extends StatelessWidget {
-  final String label;
-  final String value;
-
-  const _InfoRow({required this.label, required this.value});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 11,
-            color: MobileColors.textMuted,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        const SizedBox(height: 2),
-        Text(
-          value,
-          style: const TextStyle(
-            fontSize: 15,
-            color: MobileColors.textPrimary,
-          ),
         ),
       ],
     );

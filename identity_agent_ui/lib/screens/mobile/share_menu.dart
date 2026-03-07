@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
@@ -218,19 +219,20 @@ class _AddContactScreenState extends State<_AddContactScreen> {
         return;
       }
       if (event.type == 'introduction_received') {
-        debugPrint('[AddContactScreen] *** Showing connection popup for: ${event.senderAlias}');
-        _showConnectionPopup(event.senderAlias, event.senderAid);
+        debugPrint('[AddContactScreen] *** Showing connection popup for: ${event.senderDisplayName}');
+        _showConnectionPopup(event.senderDisplayName, event.senderAid, event.senderPhoto);
       }
     });
   }
 
-  void _showConnectionPopup(String name, String aid) {
+  void _showConnectionPopup(String name, String aid, String photo) {
     _dismissPopup();
 
     final overlay = Overlay.of(context);
     _popupOverlay = OverlayEntry(
       builder: (ctx) => _ConnectionPopup(
         name: name.isNotEmpty ? name : (aid.length > 12 ? '${aid.substring(0, 12)}...' : aid),
+        photo: photo,
         onTap: () {
           _dismissPopup();
           Navigator.of(context).pop();
@@ -665,11 +667,13 @@ class _AddContactScreenState extends State<_AddContactScreen> {
 
 class _ConnectionPopup extends StatefulWidget {
   final String name;
+  final String photo;
   final VoidCallback onTap;
   final VoidCallback onDismiss;
 
   const _ConnectionPopup({
     required this.name,
+    this.photo = '',
     required this.onTap,
     required this.onDismiss,
   });
@@ -710,6 +714,38 @@ class _ConnectionPopupState extends State<_ConnectionPopup>
     return parts.map((w) => w[0].toUpperCase()).join();
   }
 
+  Widget _buildPopupAvatar() {
+    if (widget.photo.isNotEmpty) {
+      try {
+        final photoData = widget.photo.contains(',')
+            ? widget.photo.split(',').last
+            : widget.photo;
+        return CircleAvatar(
+          radius: 28,
+          backgroundImage: MemoryImage(base64Decode(photoData)),
+        );
+      } catch (_) {}
+    }
+    return Container(
+      width: 56,
+      height: 56,
+      decoration: BoxDecoration(
+        color: MobileColors.primary.withOpacity(0.12),
+        shape: BoxShape.circle,
+      ),
+      child: Center(
+        child: Text(
+          _getInitials(widget.name),
+          style: const TextStyle(
+            color: MobileColors.primary,
+            fontWeight: FontWeight.w700,
+            fontSize: 20,
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Positioned.fill(
@@ -742,24 +778,7 @@ class _ConnectionPopupState extends State<_ConnectionPopup>
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Container(
-                          width: 56,
-                          height: 56,
-                          decoration: BoxDecoration(
-                            color: MobileColors.primary.withOpacity(0.12),
-                            shape: BoxShape.circle,
-                          ),
-                          child: Center(
-                            child: Text(
-                              _getInitials(widget.name),
-                              style: const TextStyle(
-                                color: MobileColors.primary,
-                                fontWeight: FontWeight.w700,
-                                fontSize: 20,
-                              ),
-                            ),
-                          ),
-                        ),
+                        _buildPopupAvatar(),
                         const SizedBox(height: 16),
                         const Text(
                           'Connection Request',
@@ -771,7 +790,7 @@ class _ConnectionPopupState extends State<_ConnectionPopup>
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          '${widget.name} wants to connect',
+                          '${widget.name} wants to add you as a contact',
                           style: const TextStyle(
                             fontSize: 14,
                             color: MobileColors.textSecondary,
@@ -809,7 +828,7 @@ class _ConnectionPopupState extends State<_ConnectionPopup>
                                     borderRadius: BorderRadius.circular(10),
                                   ),
                                 ),
-                                child: const Text('View'),
+                                child: const Text('Add'),
                               ),
                             ),
                           ],
