@@ -389,15 +389,9 @@ class _AgentMainScreenState extends State<AgentMainScreen> {
     }
   }
 
-  bool _shouldUseMobileUI(BuildContext context) {
-    if (_isMobilePlatform) return true;
-    final width = MediaQuery.of(context).size.width;
-    return width < 768;
-  }
-
   @override
   Widget build(BuildContext context) {
-    if (_shouldUseMobileUI(context)) {
+    if (_isMobilePlatform) {
       return MobileApp(
         keriService: widget.keriService,
         mode: widget.mode,
@@ -407,11 +401,23 @@ class _AgentMainScreenState extends State<AgentMainScreen> {
       );
     }
 
-    return Scaffold(
-      body: IndexedStack(
-        index: _currentIndex,
-        children: _screens,
-      ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 768) {
+          return MobileApp(
+            keriService: widget.keriService,
+            mode: widget.mode,
+            entityType: widget.entityType,
+            serverUrl: widget.serverUrl,
+            onLogout: widget.onLogout,
+          );
+        }
+
+        return Scaffold(
+          body: IndexedStack(
+            index: _currentIndex,
+            children: _screens,
+          ),
       bottomNavigationBar: Container(
         decoration: const BoxDecoration(
           border: Border(
@@ -466,6 +472,8 @@ class _AgentMainScreenState extends State<AgentMainScreen> {
           ],
         ),
       ),
+    );
+      },
     );
   }
 }
