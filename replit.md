@@ -84,3 +84,13 @@ The mobile UI (`lib/screens/mobile/`) is a separate screen set from the desktop 
 -   `shared_preferences`: Onboarding state persistence.
 -   `mobile_scanner`: QR code scanning.
 -   `qr_flutter`: QR code generation.
+-   `web_socket_channel`: WebSocket client for real-time event streaming.
+
+### Real-Time Event System
+
+The Go backend includes a WebSocket-based EventHub (`identity-agent-core/server/events.go`) using `gorilla/websocket`. The Flutter frontend connects via `EventService` singleton (`lib/services/event_service.dart`).
+
+-   **WebSocket endpoint**: `GET /api/ws/events` — upgrades to WebSocket, pushes events to all connected clients.
+-   **Event types**: `introduction_received` (new inbound contact request), `contact_accepted` (contact upgraded to mutual), `pending_request_received` (OOBI-unreachable sender).
+-   **Architecture**: Same WebSocket URL works for both standalone (localhost) and remote controller (tunnel URL) modes. EventService auto-reconnects with exponential backoff and generation-based connection tracking.
+-   **Popup behavior**: Connection request popups only appear on the OOBI QR sharing screen (`_AddContactScreen` in `share_menu.dart`). The dashboard updates alert badge counts silently via WebSocket events with a 60-second HTTP fallback poll.

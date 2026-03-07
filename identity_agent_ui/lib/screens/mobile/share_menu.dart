@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import '../../theme/mobile_theme.dart';
 import '../../services/core_service.dart';
+import '../../services/event_service.dart';
 import '../../config/agent_config.dart';
 import 'mobile_settings_screen.dart';
 
@@ -181,6 +183,11 @@ class _AddContactScreen extends StatefulWidget {
 class _AddContactScreenState extends State<_AddContactScreen> {
   late final CoreService _coreService =
       CoreService(baseUrl: widget.serverUrl ?? AgentConfig.coreBaseUrl);
+  late final EventService _eventService =
+      EventService.instance(widget.serverUrl ?? AgentConfig.coreBaseUrl);
+
+  StreamSubscription<AgentEvent>? _eventSub;
+  OverlayEntry? _popupOverlay;
 
   bool _loading = true;
   String? _error;
@@ -191,12 +198,48 @@ class _AddContactScreenState extends State<_AddContactScreen> {
   void initState() {
     super.initState();
     _loadOobi();
+    _listenForEvents();
   }
 
   @override
   void dispose() {
+    _eventSub?.cancel();
+    _dismissPopup();
     _coreService.dispose();
     super.dispose();
+  }
+
+  void _listenForEvents() {
+    _eventSub = _eventService.events.listen((event) {
+      if (!mounted) return;
+      if (event.type == 'introduction_received') {
+        _showConnectionPopup(event.senderAlias, event.senderAid);
+      }
+    });
+  }
+
+  void _showConnectionPopup(String name, String aid) {
+    _dismissPopup();
+
+    final overlay = Overlay.of(context);
+    _popupOverlay = OverlayEntry(
+      builder: (ctx) => _ConnectionPopup(
+        name: name.isNotEmpty ? name : (aid.length > 12 ? '${aid.substring(0, 12)}...' : aid),
+        onTap: () {
+          _dismissPopup();
+          Navigator.of(context).pop();
+        },
+        onDismiss: _dismissPopup,
+      ),
+    );
+    overlay.insert(_popupOverlay!);
+
+    Future.delayed(const Duration(seconds: 5), _dismissPopup);
+  }
+
+  void _dismissPopup() {
+    _popupOverlay?.remove();
+    _popupOverlay = null;
   }
 
   Future<void> _loadOobi() async {
@@ -611,6 +654,132 @@ class _AddContactScreenState extends State<_AddContactScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _ConnectionPopup extends StatefulWidget {
+  final String name;
+  final VoidCallback onTap;
+  final VoidCallback onDismiss;
+
+  const _ConnectionPopup({
+    required this.name,
+    required this.onTap,
+    required this.onDismiss,
+  });
+
+  @override
+  State<_ConnectionPopup> createState() => _ConnectionPopupState();
+}
+
+class _ConnectionPopupState extends State<_ConnectionPopup>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final Animation<Offset> _slideAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
+    );
+    _slideAnimation = Tween<Offset>(
+      begin: const Offset(0, -1),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOut));
+    _controller.forward();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  String _getInitials(String name) {
+    final parts = name.split(' ').where((w) => w.isNotEmpty).take(2);
+    if (parts.isEmpty) return '?';
+    return parts.map((w) => w[0].toUpperCase()).join();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final topPadding = MediaQuery.of(context).padding.top;
+
+    return Positioned(
+      top: topPadding + 8,
+      left: 16,
+      right: 16,
+      child: SlideTransition(
+        position: _slideAnimation,
+        child: Material(
+          elevation: 8,
+          borderRadius: BorderRadius.circular(12),
+          shadowColor: MobileColors.cardShadow,
+          child: GestureDetector(
+            onTap: widget.onTap,
+            child: Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: MobileColors.surface,
+                borderRadius: BorderRadius.circular(12),
+                border:
+                    Border.all(color: MobileColors.primary.withOpacity(0.3)),
+              ),
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    radius: 18,
+                    backgroundColor: MobileColors.primary.withOpacity(0.12),
+                    child: Text(
+                      _getInitials(widget.name),
+                      style: const TextStyle(
+                        color: MobileColors.primary,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text(
+                          'New Connection Request',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: MobileColors.primary,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '${widget.name} wants to connect',
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: MobileColors.textSecondary,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                  GestureDetector(
+                    onTap: widget.onDismiss,
+                    child: const Icon(Icons.close,
+                        size: 18, color: MobileColors.textMuted),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

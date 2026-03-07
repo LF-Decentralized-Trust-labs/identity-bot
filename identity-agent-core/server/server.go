@@ -31,6 +31,7 @@ type CoreServer struct {
         KeriDriver      *drivers.KeriDriver
         TunnelManager   *tunnel.Manager
         EndpointService *endpoint.EndpointService
+        EventHub        *EventHub
         StartTime       time.Time
         Port            int
         DataDir         string
@@ -84,9 +85,13 @@ func New(cfg Config) (*CoreServer, error) {
 
         endpointSvc := endpoint.New(cfg.DataDir, cfg.Port)
 
+        eventHub := NewEventHub()
+        go eventHub.Run()
+
         s := &CoreServer{
                 DataStore:       dataStore,
                 EndpointService: endpointSvc,
+                EventHub:        eventHub,
                 StartTime:       time.Now(),
                 Port:            cfg.Port,
                 DataDir:         cfg.DataDir,
@@ -272,6 +277,8 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 
                 r.Delete("/pending-requests/{aid}", s.handleDeletePendingRequest)
                 r.Post("/reset", s.handleReset)
+
+                r.Get("/ws/events", s.handleWebSocketEvents)
         })
 
         r.Get("/oobi/{aid}", s.handleOobiServe)
@@ -1295,6 +1302,13 @@ func (s *CoreServer) handleExchange(w http.ResponseWriter, r *http.Request) {
                         existing.Status = "mutual"
                         s.DataStore.SaveContact(*existing)
                         log.Printf("[identity-agent-core] EXCHANGE: Acceptance received — contact %s upgraded to mutual", req.SenderAID)
+                        s.EventHub.Broadcast(AgentEvent{
+                                Type: "contact_accepted",
+                                Payload: map[string]interface{}{
+                                        "sender_aid":   req.SenderAID,
+                                        "sender_alias": existing.Alias,
+                                },
+                        })
                 }
                 w.Header().Set("Content-Type", "application/json")
                 json.NewEncoder(w).Encode(map[string]string{"status": "acknowledged", "aid": req.SenderAID})
@@ -1322,6 +1336,13 @@ func (s *CoreServer) handleExchange(w http.ResponseWriter, r *http.Request) {
                         existing.Status = "mutual"
                         s.DataStore.SaveContact(*existing)
                         log.Printf("[identity-agent-core] EXCHANGE: Introduction received — contact %s auto-upgraded to mutual", req.SenderAID)
+                        s.EventHub.Broadcast(AgentEvent{
+                                Type: "contact_accepted",
+                                Payload: map[string]interface{}{
+                                        "sender_aid":   req.SenderAID,
+                                        "sender_alias": existing.Alias,
+                                },
+                        })
                         w.Header().Set("Content-Type", "application/json")
                         json.NewEncoder(w).Encode(map[string]string{"status": "mutual", "aid": req.SenderAID})
                         return
@@ -1394,6 +1415,15 @@ func (s *CoreServer) handleExchange(w http.ResponseWriter, r *http.Request) {
                 }
                 log.Printf("[identity-agent-core] EXCHANGE: Saved as PENDING REQUEST (OOBI unreachable) — AID=%s, error=%s", req.SenderAID, oobiErrorMsg)
 
+                s.EventHub.Broadcast(AgentEvent{
+                        Type: "pending_request_received",
+                        Payload: map[string]interface{}{
+                                "sender_aid":   req.SenderAID,
+                                "sender_alias": alias,
+                                "error":        oobiErrorMsg,
+                        },
+                })
+
                 w.Header().Set("Content-Type", "application/json")
                 json.NewEncoder(w).Encode(map[string]interface{}{
                         "status":  "received_pending",
@@ -1431,6 +1461,15 @@ func (s *CoreServer) handleExchange(w http.ResponseWriter, r *http.Request) {
         }
 
         log.Printf("[identity-agent-core] EXCHANGE: Introduction received from %s (AID: %s) — saved as pending_inbound, kel_verified=%v", alias, req.SenderAID, kelPresent)
+
+        s.EventHub.Broadcast(AgentEvent{
+                Type: "introduction_received",
+                Payload: map[string]interface{}{
+                        "sender_aid":   req.SenderAID,
+                        "sender_alias": alias,
+                        "sender_oobi":  req.SenderOOBI,
+                },
+        })
 
         w.Header().Set("Content-Type", "application/json")
         json.NewEncoder(w).Encode(map[string]string{"status": "received", "aid": req.SenderAID})
