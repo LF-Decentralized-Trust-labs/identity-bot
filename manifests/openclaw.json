@@ -1,0 +1,42 @@
+{
+  "id": "openclaw",
+  "name": "OpenClaw",
+  "description": "TypeScript/Node.js web application running in a sandboxed container",
+  "version": "1.0.0",
+  "author": "OpenClaw",
+  "execution_type": "docker",
+  "display_method": "webview",
+  "network_mode": "proxy_required",
+  "docker": {
+    "image": "openclaw/openclaw:latest",
+    "ports": {
+      "3000": "display"
+    },
+    "environment": {},
+    "volumes": {}
+  },
+  "resources": {
+    "cpu_cores": 1,
+    "memory_mb": 2048,
+    "disk_mb": 2048,
+    "egress_kbps": 5120,
+    "ingress_kbps": 5120
+  },
+  "network": {
+    "tls_mode": "mitm",
+    "allowed_domains": [
+      "*.npmjs.org",
+      "*.npmjs.com",
+      "registry.npmjs.org"
+    ],
+    "blocked_domains": []
+  },
+  "capabilities": {
+    "allowed": ["network"],
+    "blocked": ["camera", "microphone", "filesystem"]
+  },
+  "log_level": "metadata",
+  "signature": null,
+  "publisher_key": null,
+  "signature_algorithm": null
+}

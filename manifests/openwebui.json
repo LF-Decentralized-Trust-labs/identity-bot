@@ -1,0 +1,45 @@
+{
+  "id": "openwebui",
+  "name": "Open WebUI",
+  "description": "AI chat interface configured to use OpenRouter via agent proxy. API keys are injected by the agent and never enter the container.",
+  "version": "1.0.0",
+  "author": "Open WebUI",
+  "execution_type": "docker",
+  "display_method": "webview",
+  "network_mode": "proxy_required",
+  "docker": {
+    "image": "ghcr.io/open-webui/open-webui:main",
+    "ports": {
+      "8080": "display"
+    },
+    "environment": {
+      "OPENAI_API_BASE_URL": "http://agent.internal/llm/v1",
+      "OPENAI_API_KEY": "injected-by-agent",
+      "WEBUI_AUTH": "false"
+    },
+    "volumes": {}
+  },
+  "resources": {
+    "cpu_cores": 2,
+    "memory_mb": 4096,
+    "disk_mb": 4096,
+    "egress_kbps": 10240,
+    "ingress_kbps": 10240
+  },
+  "network": {
+    "tls_mode": "mitm",
+    "allowed_domains": [
+      "*.openrouter.ai",
+      "openrouter.ai"
+    ],
+    "blocked_domains": []
+  },
+  "capabilities": {
+    "allowed": ["network"],
+    "blocked": ["camera", "microphone", "filesystem"]
+  },
+  "log_level": "metadata",
+  "signature": null,
+  "publisher_key": null,
+  "signature_algorithm": null
+}

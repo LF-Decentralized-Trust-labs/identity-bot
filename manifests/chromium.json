@@ -1,0 +1,43 @@
+{
+  "id": "chromium",
+  "name": "Chromium Browser",
+  "description": "Sandboxed web browser streamed via KasmVNC",
+  "version": "1.0.0",
+  "author": "KasmTech",
+  "execution_type": "docker",
+  "display_method": "webview",
+  "network_mode": "proxy_required",
+  "docker": {
+    "image": "kasmweb/chromium:latest",
+    "ports": {
+      "6901": "display"
+    },
+    "environment": {},
+    "volumes": {}
+  },
+  "resources": {
+    "cpu_cores": 2,
+    "memory_mb": 4096,
+    "disk_mb": 5120,
+    "egress_kbps": 10240,
+    "ingress_kbps": 10240
+  },
+  "network": {
+    "tls_mode": "mitm",
+    "allowed_domains": [
+      "*.google.com",
+      "*.googleapis.com",
+      "*.gstatic.com",
+      "*.nasa.gov"
+    ],
+    "blocked_domains": []
+  },
+  "capabilities": {
+    "allowed": ["network"],
+    "blocked": ["camera", "microphone", "filesystem"]
+  },
+  "log_level": "metadata",
+  "signature": null,
+  "publisher_key": null,
+  "signature_algorithm": null
+}
