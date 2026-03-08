@@ -259,6 +259,7 @@ class ContactResponse {
   final String status;
   final String role;
   final JCardResponse? jcard;
+  final String photo;
 
   ContactResponse({
     required this.aid,
@@ -270,6 +271,7 @@ class ContactResponse {
     this.status = '',
     this.role = 'agent',
     this.jcard,
+    this.photo = '',
   });
 
   bool get isMutual => status == 'mutual';
@@ -294,6 +296,7 @@ class ContactResponse {
       status: json['status'] ?? '',
       role: json['role'] ?? 'agent',
       jcard: json['jcard'] != null ? JCardResponse.fromJson(json['jcard']) : null,
+      photo: json['photo'] ?? '',
     );
   }
 }
@@ -371,6 +374,8 @@ class ResolvedContactResponse {
   final int eventCount;
   final String created;
   final bool kelVerified;
+  final JCardResponse? jcard;
+  final String photo;
 
   ResolvedContactResponse({
     required this.resolved,
@@ -381,9 +386,12 @@ class ResolvedContactResponse {
     this.eventCount = 0,
     this.created = '',
     this.kelVerified = false,
+    this.jcard,
+    this.photo = '',
   });
 
   String get displayName {
+    if (jcard != null && jcard!.fullName.isNotEmpty) return jcard!.fullName;
     if (alias.isNotEmpty) return alias;
     return aid.length > 12 ? '${aid.substring(0, 12)}...' : aid;
   }
@@ -398,6 +406,8 @@ class ResolvedContactResponse {
       eventCount: json['event_count'] ?? 0,
       created: json['created'] ?? '',
       kelVerified: json['kel_verified'] ?? false,
+      jcard: json['jcard'] != null ? JCardResponse.fromJson(json['jcard']) : null,
+      photo: json['photo'] ?? '',
     );
   }
 }

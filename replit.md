@@ -9,6 +9,9 @@ The Identity Agent is a self-sovereign digital identity platform that unifies id
 Preferred communication style: Simple, everyday language.
 Design theme: Dark cyberpunk aesthetic with monospace fonts, dark blue/green color scheme.
 Build/Distribution: No App Store or Play Store submissions. All builds are for local testing only — iOS uses Codemagic's built-in simulator/virtual testing (no TestFlight, no Apple Developer account signing). Android produces unsigned APKs/debug builds. Do not add code signing, provisioning profiles, or store-related configuration.
+Build versioning: All Codemagic workflows pass `--build-number=$BUILD_NUMBER` (Codemagic auto-incrementing) to `flutter build` commands. This ensures Android APKs can be installed over previous versions without uninstalling first (versionCode must increase). Same pattern applied to iOS, Windows, macOS, and Linux for consistent version tracking.
+**Development phase (current)**: Auto-increment build number via `$BUILD_NUMBER`. Version in `pubspec.yaml` stays at `1.0.0+1`. Build counts (1, 2, 3, ... thousands) are fine for internal/development use.
+**Official releases (future)**: When publishing to Play Store/App Store, switch to semantic versioning in `pubspec.yaml` (e.g., `1.0.0+1`, `1.0.1+2`, `1.1.0+3`, `2.0.0+4`). At that point, remove `--build-number=$BUILD_NUMBER` from Codemagic and manually specify versions for each official release build.
 
 ## System Architecture
 
@@ -29,11 +32,11 @@ The system employs a standardized topology model based on three topological stat
 
 -   **Go Backend (`identity-agent-core/`):** Handles core orchestration, public API, file-based data persistence, OOBI management, contact management, and optional tunnel providers. Compiles for mobile via `gomobile` (with KERI driver disabled).
 -   **Python KERI Driver (`drivers/keri-core/`):** The `keripy` (v1.1.17) engine for desktop KERI operations.
--   **Flutter Frontend (`identity_agent_ui/`):** Cross-platform UI featuring a dark cyberpunk theme, multi-step onboarding, BIP-39 mnemonic generation, contact management, OOBI sharing, profile management (jCard), and a mode-aware dashboard.
+-   **Flutter Frontend (`identity_agent_ui/`):** Cross-platform UI with two modes: Desktop Mode (dark cyberpunk theme, 5-tab bottom nav) and Mobile Mode (clean light theme with blue accents, 3-button bottom nav). Features multi-step onboarding, BIP-39 mnemonic generation, contact management, OOBI sharing, profile management (jCard), and a mode-aware dashboard.
 -   **Rust Bridge (`identity_agent_ui/rust/`):** Implements the mobile KERI engine (`keriox/keri-core`) via `flutter_rust_bridge` for Dart ↔ Rust FFI, providing core KERI crypto functions.
 -   **Tunnel Module (`identity-agent-core/tunnel/`):** Manages multi-provider tunnels (Cloudflare, ngrok, Grape ID) for public HTTPS URL acquisition.
--   **Endpoint Service (`identity-agent-core/endpoint/`):** Single source of truth for the agent's current public base URL. Provider hierarchy: override URL → active tunnel → `PUBLIC_URL` env → local network IP → localhost fallback. Persists to `endpoint.json`; all consumers (OOBI generation, OOBI serving, exchange introductions) call `EndpointService.CurrentURL()`. Exposed via `GET /api/endpoint` returning `{url, source, updated_at}`.
--   **AgentConfig (`identity_agent_ui/lib/config/agent_config.dart`):** Platform-aware Go backend URL for Flutter UI ↔ Go Core communication. Desktop = `localhost:5000`, Mobile = `127.0.0.1:8642`, Web = relative (same origin). Uses conditional import (`platform_helper_stub.dart` / `platform_helper_io.dart`) for web-safe `dart:io` Platform detection. All screens resolve server URL via `_resolveServerUrl()` → `widget.serverUrl` → `MobileStandaloneKeriService.baseUrl` → `AgentConfig.coreBaseUrl` fallback chain.
+-   **Endpoint Service (`identity-agent-core/endpoint/`):** Single source of truth for the agent's current public base URL, persisting to `endpoint.json`.
+-   **AgentConfig (`identity_agent_ui/lib/config/agent_config.dart`):** Platform-aware Go backend URL for Flutter UI ↔ Go Core communication.
 
 ### Key Design Decisions
 
@@ -42,8 +45,16 @@ The system employs a standardized topology model based on three topological stat
 -   **Rust for KERI (Mobile):** Provides native mobile KERI capabilities via FFI with `keriox` across all mobile modes.
 -   **Local-First Storage:** Emphasizes user sovereignty and data control, defaulting to file-based JSON storage.
 -   **AID Hierarchy:** Differentiates between delegated child AIDs for "Remote WITHOUT Keys" and retaining primary parent AIDs for "Remote WITH Keys."
--   **Consent-based Contact Flow:** Implements a two-step resolve and consent process for adding contacts, including placeholder avatars and pending request management.
--   **Mutual OOBI Contact Relationships:** Supports mutual relationships with jCard schema (RFC 7095) for rich contact information and reverse introduction flows.
+-   **Consent-based Contact Flow:** Implements a two-step resolve and consent process for adding contacts.
+-   **Mutual OOBI Contact Relationships:** Supports mutual relationships with jCard schema for rich contact information and reverse introduction flows.
+
+### Persistence Layer
+
+Defaults to a file-based JSON store in `./data/` (`identity.json`, `kel.json`, `contacts.json`, `settings.json`, `pending_requests.json`, `profile.json`, `endpoint.json`), with a modular `store.Store` interface for swappable backends. On mobile standalone, Go Core stores data in the app's documents directory. Onboarding state (mode, entity type, setup completion) is persisted via SharedPreferences. Profile data (jCard fields + photo) is stored in `profile.json` and served via OOBI endpoints and exchange introductions.
+
+### Mobile UI Architecture
+
+The mobile UI (`lib/screens/mobile/`) is a separate screen set from the desktop UI, activated when `Platform.isAndroid || Platform.isIOS` is true OR when the screen width is below 768px (responsive web support). It uses a clean light theme (`MobileTheme`) with IBM Blue 60 (`#4589FF`) as primary color. It includes a dashboard, bottom navigation, drawer menu, share menu, QR scanner, chatbot panel, profile editor, contacts screen, settings screen, and various onboarding screens.
 
 ## External Dependencies
 
@@ -75,41 +86,31 @@ The system employs a standardized topology model based on three topological stat
 -   `ed25519_edwards`: Ed25519 key generation.
 -   `shared_preferences`: Onboarding state persistence.
 -   `mobile_scanner`: QR code scanning.
+-   `image_picker`: Native photo selection on iOS/Android for profile avatar upload.
 -   `qr_flutter`: QR code generation.
+-   `web_socket_channel`: WebSocket client for real-time event streaming.
 
-### Onboarding Modes
+### Real-Time Event System
 
-The app initializes services based on saved mode and platform:
--   `desktop` — Full Go Core + Python KERI driver
--   `mobileStandalone` — Go Core (via gomobile) + Rust bridge, both local
--   `mobileRemoteWithKeys` — Rust bridge (parent AID) + remote server URL
--   `mobileRemoteWithoutKeys` — Rust bridge (child AID) + remote server URL
+The Go backend includes a WebSocket-based EventHub (`identity-agent-core/server/events.go`) using `gorilla/websocket`. The Flutter frontend connects via `EventService` singleton (`lib/services/event_service.dart`).
 
-### Persistence Layer
+-   **WebSocket endpoint**: `GET /api/ws/events` — upgrades to WebSocket, pushes events to all connected clients.
+-   **Event types**: `introduction_received` (new inbound contact request), `contact_accepted` (contact upgraded to mutual), `pending_request_received` (OOBI-unreachable sender).
+-   **Architecture**: Same WebSocket URL works for both standalone (localhost) and remote controller (tunnel URL) modes. EventService auto-reconnects with exponential backoff and generation-based connection tracking.
+-   **Popup behavior**: Connection request popups only appear on the OOBI QR sharing screen (`_AddContactScreen` in `share_menu.dart`). The dashboard updates alert badge counts silently via WebSocket events with a 60-second HTTP fallback poll.
 
-Defaults to a file-based JSON store in `./data/` (`identity.json`, `kel.json`, `contacts.json`, `settings.json`, `pending_requests.json`, `profile.json`, `endpoint.json`), with a modular `store.Store` interface for swappable backends. On mobile standalone, Go Core stores data in the app's documents directory. Onboarding state (mode, entity type, setup completion) is persisted via SharedPreferences. Profile data (jCard fields + photo) is stored in `profile.json` and served via OOBI endpoints and exchange introductions so contacts receive the user's display name and rich identity info.
+### Two-Layer OOBI Exchange Architecture
 
-## CI/CD (Codemagic)
+The OOBI exchange process is designed as two conceptual layers:
 
-Defined in `codemagic.yaml`. Builds include:
--   Go Core compilation via gomobile for Android (.aar) and iOS (.xcframework)
--   Rust bridge compilation via cargo-ndk (Android) and cargo-lipo (iOS)
--   Flutter build for all platforms (Android, iOS, macOS, Windows, Linux, Web)
--   Gomobile outputs placed in `identity_agent_ui/android/app/libs/mobilecore.aar` and `identity_agent_ui/ios/Frameworks/Mobilecore.xcframework`
--   iOS: Mobilecore.framework extracted from xcframework to `ios/Frameworks/Mobilecore/` before pod install; integrated via CocoaPods podspec (vendored_frameworks)
+-   **Layer 1 (Cryptographic Trust)**: Mandatory KERI handshake — resolves the remote agent's AID, verifies the KEL. Strictly protocol-level, independent of user intent. No profile data (jCard/photo) is exchanged at this layer.
+-   **Layer 2 (Application Intent)**: After Layer 1 succeeds, the user's interaction purpose is executed (e.g., Add Contact, Request Payment, Verify Credential). Profile data (jCard, photo) is fetched and displayed only at this layer. The `intent` parameter in OOBI URLs will route to the appropriate interaction flow (currently only `add_contact` is implemented; others show "Coming Soon").
 
-## Specification Documents
+### Contact Photo Flow
 
--   `docs/spec-backend-migration.md`: Backend migration specification (mobile-to-desktop). Living document tracking all data and settings that must transfer during migration, including tunnel settings, identity data, contacts, and provider continuity requirements. New features should append their migration requirements to the "Future Additions" table.
-
-## Grape ID Tunnel Integration
-
-The Grape ID tunnel provider uses a Chisel reverse proxy to expose the agent's OOBI endpoints via a permanent public URL (e.g., `https://grapeid.org/alice`). Works on both desktop and mobile platforms via the Go Core tunnel module.
-
--   **Connection flow (reconnect-first):** On startup, the agent first tries `POST /reconnect {"name": ..., "aid": ...}` to re-establish a previously claimed name. If that fails (hub doesn't support it yet, or name not found), it falls back to `POST /claim-name {"name": ..., "aid": ...}` for initial registration. Both requests include the agent's AID for ownership tracking.
--   **AID-based ownership:** Each tunnel name is associated with the claiming agent's AID. The hub uses this to verify reconnection requests — only the original AID holder can reclaim a name. See `docs/grapeid-hub-reconnect-spec.md` for the hub-side implementation specification.
--   **Disconnect vs Release:** The `Provider` interface has two shutdown methods: `Disconnect()` (closes tunnel connection, keeps name reserved on hub for reconnect) and `Stop()` (releases name on hub, then disconnects). All restart paths (SIGTERM, workflow restart, settings changes) use `Disconnect()` so the hub keeps the name reserved and the next startup successfully uses `/reconnect`. `Stop()` with explicit release is available for future use (e.g., explicit "release name" UI button).
--   **Mobile reconnection:** On mobile, the tunnel drops when the app closes or the phone sleeps. When the app reopens, Go Core restarts and uses the reconnect-first flow (via `Disconnect()` semantics) to re-establish the tunnel with the same name.
--   **Future: KERI signatures:** The `aid` field will eventually be accompanied by KERI signature headers for cryptographic proof of ownership (currently trust-on-first-use).
--   **UI requirement (pending):** Dashboard needs a tunnel status indicator — connected (green), disconnected (amber), error (red) — so the user can confirm their agent is reachable.
--   **Migration:** Tunnel settings (provider, domain, extension) must transfer during backend migration so the same URL continues working on the new device. See `docs/spec-backend-migration.md`.
+-   `ContactRecord` in Go (`store.go`) has a `Photo` field for base64-encoded profile photos.
+-   The OOBI serve endpoint (`/oobi/{aid}`) includes `photo` and `jcard` in its response.
+-   The resolve endpoint (`/api/contacts/resolve`) forwards `photo` and `jcard` from the OOBI response.
+-   The reverse introduction exchange payload includes `sender_photo` and `sender_jcard`.
+-   WebSocket `introduction_received` events carry `sender_photo` and `sender_jcard` for real-time UI display.
+-   All Flutter contact UI surfaces (QR consent dialog, connection popup, contact cards, contact detail screen, dashboard alert cards) display photos when available, with initials fallback.

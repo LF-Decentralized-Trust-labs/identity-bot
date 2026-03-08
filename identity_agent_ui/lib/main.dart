@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import 'dart:io' show Platform;
 import 'theme/app_theme.dart';
+import 'theme/mobile_theme.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/contacts_screen.dart';
 import 'screens/oobi_screen.dart';
@@ -22,6 +23,11 @@ import 'services/preferences_service.dart';
 import 'services/backend_process_service.dart';
 import 'config/agent_config.dart';
 import 'bridge/keri_bridge.dart';
+import 'screens/mobile/mobile_app.dart';
+import 'screens/mobile/mobile_mode_selection_screen.dart';
+import 'screens/mobile/mobile_entity_type_screen.dart';
+import 'screens/mobile/mobile_connect_server_screen.dart';
+import 'screens/mobile/mobile_setup_wizard_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -84,7 +90,6 @@ class _AgentRouterState extends State<AgentRouter> {
   AgentMode? _selectedMode;
   EntityType? _selectedEntityType;
   String? _serverUrl;
-  String? _error;
 
   @override
   void initState() {
@@ -119,7 +124,13 @@ class _AgentRouterState extends State<AgentRouter> {
           setState(() => _step = OnboardingStep.modeSelection);
         }
       } else {
-        setState(() => _step = OnboardingStep.modeSelection);
+        final recovered = await _tryRecoverExistingIdentity();
+        if (recovered) {
+          debugPrint('[Agent] Recovered existing identity — skipping onboarding');
+          setState(() => _step = OnboardingStep.dashboard);
+        } else {
+          setState(() => _step = OnboardingStep.modeSelection);
+        }
       }
     } catch (e) {
       debugPrint('[Agent] Error loading saved state: $e');
@@ -127,8 +138,34 @@ class _AgentRouterState extends State<AgentRouter> {
     }
   }
 
+  Future<bool> _tryRecoverExistingIdentity() async {
+    try {
+      final baseUrl = AgentConfig.coreBaseUrl;
+      final coreService = CoreService(baseUrl: baseUrl);
+      final identity = await coreService.getIdentity();
+      coreService.dispose();
+
+      if (identity.initialized) {
+        debugPrint('[Agent] Found existing identity on backend — recovering session');
+        _selectedMode = AgentMode.createNew;
+        _selectedEntityType = EntityType.individual;
+        await PreferencesService.setMode(AgentMode.createNew);
+        await PreferencesService.setEntityType(EntityType.individual);
+        await PreferencesService.setSetupComplete(true);
+        await _initializeServiceForMode(AgentMode.createNew, null);
+        return true;
+      }
+    } catch (e) {
+      debugPrint('[Agent] Recovery check failed: $e');
+    }
+    return false;
+  }
+
   Future<void> _initializeServiceForMode(
       AgentMode mode, String? serverUrl) async {
+    _keriService?.dispose();
+    _keriService = null;
+
     if (_isMobilePlatform) {
       await KeriBridge.ensureInitialized();
 
@@ -249,8 +286,51 @@ class _AgentRouterState extends State<AgentRouter> {
 
   @override
   Widget build(BuildContext context) {
+    if (_isMobilePlatform) {
+      return _buildForMode(true);
+    }
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return _buildForMode(constraints.maxWidth < 768);
+      },
+    );
+  }
+
+  Widget _buildForMode(bool isMobile) {
     switch (_step) {
       case OnboardingStep.loading:
+        if (isMobile) {
+          return Theme(
+            data: MobileTheme.lightTheme,
+            child: Scaffold(
+              backgroundColor: MobileColors.background,
+              body: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SizedBox(
+                      width: 40,
+                      height: 40,
+                      child: CircularProgressIndicator(
+                        color: MobileColors.primary,
+                        strokeWidth: 3,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'Initializing...',
+                      style: TextStyle(
+                        color: MobileColors.textMuted,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }
         return Scaffold(
           backgroundColor: AppColors.primary,
           body: Center(
@@ -281,21 +361,42 @@ class _AgentRouterState extends State<AgentRouter> {
         );
 
       case OnboardingStep.modeSelection:
+        if (isMobile) {
+          return MobileModeSelectionScreen(onModeSelected: _onModeSelected);
+        }
         return ModeSelectionScreen(onModeSelected: _onModeSelected);
 
       case OnboardingStep.entityTypeSelection:
+        if (isMobile) {
+          return MobileEntityTypeScreen(
+            onEntityTypeSelected: _onEntityTypeSelected,
+            onBack: _goBackToModeSelection,
+          );
+        }
         return EntityTypeScreen(
           onEntityTypeSelected: _onEntityTypeSelected,
           onBack: _goBackToModeSelection,
         );
 
       case OnboardingStep.connectServer:
+        if (isMobile) {
+          return MobileConnectServerScreen(
+            onConnected: _onServerConnected,
+            onBack: _goBackToModeSelection,
+          );
+        }
         return ConnectServerScreen(
           onConnected: _onServerConnected,
           onBack: _goBackToModeSelection,
         );
 
       case OnboardingStep.setupWizard:
+        if (isMobile) {
+          return MobileSetupWizardScreen(
+            onComplete: _onSetupComplete,
+            keriService: _keriService!,
+          );
+        }
         return SetupWizardScreen(
           onComplete: _onSetupComplete,
           keriService: _keriService!,
@@ -375,11 +476,31 @@ class _AgentMainScreenState extends State<AgentMainScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: IndexedStack(
-        index: _currentIndex,
-        children: _screens,
-      ),
+    if (_isMobilePlatform) {
+      return MobileApp(
+        keriService: widget.keriService,
+        mode: widget.mode,
+        entityType: widget.entityType,
+        serverUrl: widget.serverUrl,
+      );
+    }
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 768) {
+          return MobileApp(
+            keriService: widget.keriService,
+            mode: widget.mode,
+            entityType: widget.entityType,
+            serverUrl: widget.serverUrl,
+          );
+        }
+
+        return Scaffold(
+          body: IndexedStack(
+            index: _currentIndex,
+            children: _screens,
+          ),
       bottomNavigationBar: Container(
         decoration: const BoxDecoration(
           border: Border(
@@ -434,6 +555,8 @@ class _AgentMainScreenState extends State<AgentMainScreen> {
           ],
         ),
       ),
+    );
+      },
     );
   }
 }

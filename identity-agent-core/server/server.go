@@ -31,6 +31,7 @@ type CoreServer struct {
         KeriDriver      *drivers.KeriDriver
         TunnelManager   *tunnel.Manager
         EndpointService *endpoint.EndpointService
+        EventHub        *EventHub
         StartTime       time.Time
         Port            int
         DataDir         string
@@ -84,9 +85,13 @@ func New(cfg Config) (*CoreServer, error) {
 
         endpointSvc := endpoint.New(cfg.DataDir, cfg.Port)
 
+        eventHub := NewEventHub()
+        go eventHub.Run()
+
         s := &CoreServer{
                 DataStore:       dataStore,
                 EndpointService: endpointSvc,
+                EventHub:        eventHub,
                 StartTime:       time.Now(),
                 Port:            cfg.Port,
                 DataDir:         cfg.DataDir,
@@ -272,6 +277,8 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 
                 r.Delete("/pending-requests/{aid}", s.handleDeletePendingRequest)
                 r.Post("/reset", s.handleReset)
+
+                r.Get("/ws/events", s.handleWebSocketEvents)
         })
 
         r.Get("/oobi/{aid}", s.handleOobiServe)
@@ -1062,12 +1069,14 @@ func (s *CoreServer) handleResolveOobiContact(w http.ResponseWriter, r *http.Req
         }
 
         var oobiData struct {
-                AID        string      `json:"aid"`
-                PublicKey  string      `json:"public_key"`
-                Alias      string      `json:"alias"`
-                KEL        interface{} `json:"kel"`
-                EventCount int         `json:"event_count"`
-                Created    string      `json:"created"`
+                AID        string       `json:"aid"`
+                PublicKey  string       `json:"public_key"`
+                Alias      string       `json:"alias"`
+                KEL        interface{}  `json:"kel"`
+                EventCount int          `json:"event_count"`
+                Created    string       `json:"created"`
+                JCard      *store.JCard `json:"jcard,omitempty"`
+                Photo      string       `json:"photo,omitempty"`
         }
         if err := json.NewDecoder(resp.Body).Decode(&oobiData); err != nil {
                 writeError(w, http.StatusBadGateway, "Invalid OOBI response", fmt.Sprintf("Could not parse response: %v", err))
@@ -1086,8 +1095,7 @@ func (s *CoreServer) handleResolveOobiContact(w http.ResponseWriter, r *http.Req
 
         log.Printf("[identity-agent-core] OOBI-RESOLVE: Success — AID=%s, alias=%s, KEL events=%d", oobiData.AID, oobiData.Alias, kelCount)
 
-        w.Header().Set("Content-Type", "application/json")
-        json.NewEncoder(w).Encode(map[string]interface{}{
+        result := map[string]interface{}{
                 "resolved":     true,
                 "aid":          oobiData.AID,
                 "public_key":   oobiData.PublicKey,
@@ -1097,7 +1105,16 @@ func (s *CoreServer) handleResolveOobiContact(w http.ResponseWriter, r *http.Req
                 "event_count":  oobiData.EventCount,
                 "created":      oobiData.Created,
                 "kel_verified": kelCount > 0,
-        })
+        }
+        if oobiData.JCard != nil {
+                result["jcard"] = oobiData.JCard
+        }
+        if oobiData.Photo != "" {
+                result["photo"] = oobiData.Photo
+        }
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(result)
 }
 
 func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
@@ -1136,8 +1153,11 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
         }
 
         var oobiData struct {
-                AID       string `json:"aid"`
-                PublicKey string `json:"public_key"`
+                AID       string      `json:"aid"`
+                PublicKey string      `json:"public_key"`
+                Alias     string      `json:"alias"`
+                JCard     *store.JCard `json:"jcard,omitempty"`
+                Photo     string      `json:"photo,omitempty"`
         }
         if err := json.NewDecoder(resp.Body).Decode(&oobiData); err != nil {
                 writeError(w, http.StatusBadGateway, "Invalid OOBI response", fmt.Sprintf("Could not parse response: %v", err))
@@ -1150,8 +1170,25 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
         }
 
         alias := req.Alias
+        if alias == "" && oobiData.Alias != "" {
+                alias = oobiData.Alias
+        }
         if alias == "" {
-                alias = oobiData.AID[:12] + "..."
+                if len(oobiData.AID) >= 12 {
+                        alias = oobiData.AID[:12] + "..."
+                } else {
+                        alias = oobiData.AID
+                }
+        }
+
+        contactJCard := oobiData.JCard
+        if contactJCard == nil {
+                contactJCard = &store.JCard{
+                        FullName:  alias,
+                        XKeriAID:  oobiData.AID,
+                        XKeriOOBI: req.OobiURL,
+                        XKeriRole: "agent",
+                }
         }
 
         contact := store.ContactRecord{
@@ -1163,12 +1200,8 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
                 DiscoveredAt: time.Now().UTC().Format(time.RFC3339),
                 Status:       "verified",
                 Role:         "agent",
-                JCard: &store.JCard{
-                        FullName:  alias,
-                        XKeriAID:  oobiData.AID,
-                        XKeriOOBI: req.OobiURL,
-                        XKeriRole: "agent",
-                },
+                JCard:        contactJCard,
+                Photo:        oobiData.Photo,
         }
 
         if err := s.DataStore.SaveContact(contact); err != nil {
@@ -1213,6 +1246,9 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
                 if ourProfile != nil {
                         jc := ourProfile.ToJCard(ourIdentity.AID, ourOOBI)
                         payload["sender_jcard"] = jc
+                        if ourProfile.Photo != "" {
+                                payload["sender_photo"] = ourProfile.Photo
+                        }
                 }
                 body, _ := json.Marshal(payload)
 
@@ -1262,12 +1298,13 @@ func (s *CoreServer) handleDeleteContact(w http.ResponseWriter, r *http.Request)
 
 func (s *CoreServer) handleExchange(w http.ResponseWriter, r *http.Request) {
         var req struct {
-                Type            string      `json:"type"`
-                SenderAID       string      `json:"sender_aid"`
-                SenderOOBI      string      `json:"sender_oobi"`
-                SenderAlias     string      `json:"sender_alias"`
-                SenderPublicKey string      `json:"sender_public_key"`
+                Type            string       `json:"type"`
+                SenderAID       string       `json:"sender_aid"`
+                SenderOOBI      string       `json:"sender_oobi"`
+                SenderAlias     string       `json:"sender_alias"`
+                SenderPublicKey string       `json:"sender_public_key"`
                 SenderJCard     *store.JCard `json:"sender_jcard,omitempty"`
+                SenderPhoto     string       `json:"sender_photo,omitempty"`
         }
         if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
                 writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
@@ -1284,6 +1321,13 @@ func (s *CoreServer) handleExchange(w http.ResponseWriter, r *http.Request) {
                         existing.Status = "mutual"
                         s.DataStore.SaveContact(*existing)
                         log.Printf("[identity-agent-core] EXCHANGE: Acceptance received — contact %s upgraded to mutual", req.SenderAID)
+                        s.EventHub.Broadcast(AgentEvent{
+                                Type: "contact_accepted",
+                                Payload: map[string]interface{}{
+                                        "sender_aid":   req.SenderAID,
+                                        "sender_alias": existing.Alias,
+                                },
+                        })
                 }
                 w.Header().Set("Content-Type", "application/json")
                 json.NewEncoder(w).Encode(map[string]string{"status": "acknowledged", "aid": req.SenderAID})
@@ -1311,6 +1355,13 @@ func (s *CoreServer) handleExchange(w http.ResponseWriter, r *http.Request) {
                         existing.Status = "mutual"
                         s.DataStore.SaveContact(*existing)
                         log.Printf("[identity-agent-core] EXCHANGE: Introduction received — contact %s auto-upgraded to mutual", req.SenderAID)
+                        s.EventHub.Broadcast(AgentEvent{
+                                Type: "contact_accepted",
+                                Payload: map[string]interface{}{
+                                        "sender_aid":   req.SenderAID,
+                                        "sender_alias": existing.Alias,
+                                },
+                        })
                         w.Header().Set("Content-Type", "application/json")
                         json.NewEncoder(w).Encode(map[string]string{"status": "mutual", "aid": req.SenderAID})
                         return
@@ -1383,6 +1434,15 @@ func (s *CoreServer) handleExchange(w http.ResponseWriter, r *http.Request) {
                 }
                 log.Printf("[identity-agent-core] EXCHANGE: Saved as PENDING REQUEST (OOBI unreachable) — AID=%s, error=%s", req.SenderAID, oobiErrorMsg)
 
+                s.EventHub.Broadcast(AgentEvent{
+                        Type: "pending_request_received",
+                        Payload: map[string]interface{}{
+                                "sender_aid":   req.SenderAID,
+                                "sender_alias": alias,
+                                "error":        oobiErrorMsg,
+                        },
+                })
+
                 w.Header().Set("Content-Type", "application/json")
                 json.NewEncoder(w).Encode(map[string]interface{}{
                         "status":  "received_pending",
@@ -1412,6 +1472,7 @@ func (s *CoreServer) handleExchange(w http.ResponseWriter, r *http.Request) {
                 Status:       "pending_inbound",
                 Role:         "agent",
                 JCard:        contactJCard,
+                Photo:        req.SenderPhoto,
         }
 
         if err := s.DataStore.SaveContact(contact); err != nil {
@@ -1420,6 +1481,22 @@ func (s *CoreServer) handleExchange(w http.ResponseWriter, r *http.Request) {
         }
 
         log.Printf("[identity-agent-core] EXCHANGE: Introduction received from %s (AID: %s) — saved as pending_inbound, kel_verified=%v", alias, req.SenderAID, kelPresent)
+
+        introPayload := map[string]interface{}{
+                "sender_aid":   req.SenderAID,
+                "sender_alias": alias,
+                "sender_oobi":  req.SenderOOBI,
+        }
+        if req.SenderJCard != nil {
+                introPayload["sender_jcard"] = req.SenderJCard
+        }
+        if req.SenderPhoto != "" {
+                introPayload["sender_photo"] = req.SenderPhoto
+        }
+        s.EventHub.Broadcast(AgentEvent{
+                Type:    "introduction_received",
+                Payload: introPayload,
+        })
 
         w.Header().Set("Content-Type", "application/json")
         json.NewEncoder(w).Encode(map[string]string{"status": "received", "aid": req.SenderAID})
