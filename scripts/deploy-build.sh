@@ -10,8 +10,20 @@ echo "============================================"
 
 echo ""
 echo "[1/4] Installing Python dependencies..."
-pip install -q flask keri 2>/dev/null || pip3 install -q flask keri 2>/dev/null || echo "      Warning: pip install failed"
-echo "      Python dependencies ready."
+if pip install -q flask keri 2>/dev/null; then
+    echo "      Python dependencies installed via pip."
+elif pip3 install -q flask keri 2>/dev/null; then
+    echo "      Python dependencies installed via pip3."
+else
+    echo "      ERROR: Failed to install Python dependencies (flask, keri)."
+    echo "      The KERI driver requires these packages to function."
+    exit 1
+fi
+python3 -c "import flask; import keri" 2>/dev/null || {
+    echo "      ERROR: Python dependency verification failed."
+    exit 1
+}
+echo "      Python dependencies verified."
 
 echo ""
 echo "[2/4] Building Flutter Web..."

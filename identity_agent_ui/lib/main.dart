@@ -25,18 +25,20 @@ import 'config/agent_config.dart';
 import 'bridge/keri_bridge.dart';
 
 String? _backendStartupError;
+Future<bool>? _backendStartupFuture;
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   if (!kIsWeb && BackendProcessService.isDesktopPlatform) {
     debugPrint('[Agent] Desktop platform detected — starting bundled backend in background...');
-    BackendProcessService.instance.start().then((started) {
+    _backendStartupFuture = BackendProcessService.instance.start().then((started) {
       debugPrint('[Agent] Backend process started: $started');
       if (!started) {
         _backendStartupError = BackendProcessService.instance.startupError;
         debugPrint('[Agent] Backend startup error: $_backendStartupError');
       }
+      return started;
     });
   }
 
@@ -99,10 +101,25 @@ class _AgentRouterState extends State<AgentRouter> {
 
   Future<void> _loadSavedState() async {
     try {
+      if (_backendStartupFuture != null) {
+        debugPrint('[Agent] Waiting for backend startup before loading state...');
+        await _backendStartupFuture;
+      }
+
       final setupComplete = await PreferencesService.isSetupComplete();
       final savedMode = await PreferencesService.getMode();
       final savedEntityType = await PreferencesService.getEntityType();
       final savedServerUrl = await PreferencesService.getServerUrl();
+
+      if (_backendStartupError != null) {
+        if (mounted) {
+          setState(() {
+            _step = OnboardingStep.modeSelection;
+            _showedBackendError = false;
+          });
+        }
+        return;
+      }
 
       if (setupComplete && savedMode != null) {
         _selectedMode = savedMode;

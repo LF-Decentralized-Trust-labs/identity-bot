@@ -64,5 +64,5 @@ KERI_HELPER_URL = "https://keri-helper-microservice.replit.app"
 
 [deployment]
 deploymentTarget = "autoscale"
-build = ["sh", "./scripts/build-flutter.sh"]
-run = ["sh", "./scripts/start-backend.sh"]
+build = ["sh", "./scripts/deploy-build.sh"]
+run = ["sh", "./scripts/deploy-run.sh"]
