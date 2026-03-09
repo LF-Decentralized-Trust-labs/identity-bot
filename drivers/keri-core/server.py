@@ -39,6 +39,25 @@ import shutil
 def _ensure_libsodium():
     if ctypes.util.find_library("sodium"):
         return
+
+    if sys.platform == "win32":
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        search_dirs = [
+            script_dir,
+            os.path.join(script_dir, "..", "python"),
+            os.path.join(script_dir, ".."),
+        ]
+        for d in search_dirs:
+            dll_path = os.path.join(d, "libsodium.dll")
+            if os.path.isfile(dll_path):
+                try:
+                    ctypes.CDLL(dll_path)
+                    os.environ["PATH"] = d + ";" + os.environ.get("PATH", "")
+                    return
+                except OSError:
+                    continue
+        return
+
     found_path = None
     for so_name in ["libsodium.so.26", "libsodium.so.23", "libsodium.so"]:
         try:
