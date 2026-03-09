@@ -40,6 +40,18 @@ fi
 file "$BINARY" 2>/dev/null || true
 ldd "$BINARY" 2>/dev/null || echo "      Binary is statically linked (good for production)"
 
+GO_DEMO="$WORKSPACE/bin/go-demo"
+if [ -f "$GO_DEMO" ]; then
+    echo "      Go Demo binary found (pre-built). Skipping build."
+else
+    echo "      Building go-demo sandbox app..."
+    mkdir -p "$WORKSPACE/bin"
+    cd "$WORKSPACE/sandbox-apps/go-demo"
+    CGO_ENABLED=0 go build -buildvcs=false -ldflags="-s -w" -o "$GO_DEMO" .
+    chmod +x "$GO_DEMO"
+    echo "      Go Demo built: $GO_DEMO"
+fi
+
 echo ""
 echo "[3/3] Starting Identity Agent..."
 echo "      Go Core:     http://0.0.0.0:${PORT:-5000}/api/health"

@@ -12,21 +12,32 @@ import (
         "time"
 )
 
+// InstallProgressInfo tracks in-progress Docker image pulls.
+type InstallProgressInfo struct {
+        AppID    string  `json:"app_id"`
+        Status   string  `json:"status"`
+        Layer    string  `json:"layer,omitempty"`
+        Progress float64 `json:"progress"`
+        Done     bool    `json:"done"`
+        Error    string  `json:"error,omitempty"`
+}
+
 type Manager struct {
-        store         *SandboxStore
-        policy        *PolicyEngine
-        eventBus      *EventBus
-        credentials   *CredentialVault
-        proxy         *ProxyManager
-        tracer        *Tracer
-        manifests     map[string]*AppManifest
-        runtimes      map[string]Runtime
-        agentAPIs     map[string]*AgentAPIServer
-        monitors      map[string]*ResourceMonitor
-        networks      map[string]*NetworkIsolation
-        dataDir       string
-        manifestsDir  string
-        mu            sync.RWMutex
+        store               *SandboxStore
+        policy              *PolicyEngine
+        eventBus            *EventBus
+        credentials         *CredentialVault
+        proxy               *ProxyManager
+        tracer              *Tracer
+        manifests           map[string]*AppManifest
+        runtimes            map[string]Runtime
+        agentAPIs           map[string]*AgentAPIServer
+        monitors            map[string]*ResourceMonitor
+        networks            map[string]*NetworkIsolation
+        dataDir             string
+        manifestsDir        string
+        mu                  sync.RWMutex
+        installProgressMap  sync.Map // map[appID string]*InstallProgressInfo
 }
 
 type ManagerConfig struct {
@@ -189,15 +200,34 @@ func (m *Manager) InstallApp(ctx context.Context, id string, progressCb PullProg
                 return fmt.Errorf("unknown app: %s", id)
         }
 
+        info := &InstallProgressInfo{AppID: id, Status: "starting", Progress: 0}
+        m.installProgressMap.Store(id, info)
         m.store.UpdateAppStatus(id, "installing")
 
         if manifest.IsDocker() && manifest.Docker != nil {
-                if err := PullImage(ctx, manifest.Docker.Image, progressCb); err != nil {
-                        m.store.UpdateAppStatus(id, "error")
+                wrappedCb := func(p PullProgress) {
+                        info.Status = p.Status
+                        info.Layer = p.Layer
+                        info.Progress = p.Progress
+                        if progressCb != nil {
+                                progressCb(p)
+                        }
+                }
+                if err := PullImage(ctx, manifest.Docker.Image, wrappedCb); err != nil {
+                        info.Done = true
+                        info.Error = err.Error()
+                        m.store.UpdateAppStatus(id, "available")
+                        go func() {
+                                time.Sleep(30 * time.Second)
+                                m.installProgressMap.Delete(id)
+                        }()
                         return fmt.Errorf("failed to pull image: %w", err)
                 }
         }
 
+        info.Done = true
+        info.Progress = 100
+        info.Status = "complete"
         m.store.UpdateAppStatus(id, "installed")
         m.policy.SyncManifestRules(manifest)
 
@@ -212,8 +242,22 @@ func (m *Manager) InstallApp(ctx context.Context, id string, progressCb PullProg
                 AppID: id,
         })
 
+        go func() {
+                time.Sleep(30 * time.Second)
+                m.installProgressMap.Delete(id)
+        }()
+
         log.Printf("[sandbox-manager] Installed app: %s", manifest.Name)
         return nil
+}
+
+// GetInstallProgress returns the current install progress for an app, or nil if not installing.
+func (m *Manager) GetInstallProgress(id string) *InstallProgressInfo {
+        val, ok := m.installProgressMap.Load(id)
+        if !ok {
+                return nil
+        }
+        return val.(*InstallProgressInfo)
 }
 
 func (m *Manager) UninstallApp(id string) error {
