@@ -18,6 +18,7 @@ type Manager struct {
         eventBus      *EventBus
         credentials   *CredentialVault
         proxy         *ProxyManager
+        tracer        *Tracer
         manifests     map[string]*AppManifest
         runtimes      map[string]Runtime
         agentAPIs     map[string]*AgentAPIServer
@@ -42,6 +43,7 @@ func NewManager(cfg ManagerConfig) (*Manager, error) {
         eventBus := NewEventBus()
         policy := NewPolicyEngine(store, eventBus)
         credentials := NewCredentialVault(cfg.DataDir)
+        tracer := NewTracer(2000)
 
         proxyMgr, err := NewProxyManager(ProxyManagerConfig{
                 ListenAddr: "127.0.0.1:0",
@@ -51,11 +53,15 @@ func NewManager(cfg ManagerConfig) (*Manager, error) {
                         return policy.CheckDomain(instanceID, appID, domain, method, urlStr)
                 },
                 DNSListenAddr: "127.0.0.1:0",
+                Tracer:        tracer,
         })
         if err != nil {
                 store.Close()
                 return nil, fmt.Errorf("failed to initialize proxy manager: %w", err)
         }
+
+        policy.tracer = tracer
+        credentials.tracer = tracer
 
         m := &Manager{
                 store:        store,
@@ -63,6 +69,7 @@ func NewManager(cfg ManagerConfig) (*Manager, error) {
                 eventBus:     eventBus,
                 credentials:  credentials,
                 proxy:        proxyMgr,
+                tracer:       tracer,
                 manifests:    make(map[string]*AppManifest),
                 runtimes:     make(map[string]Runtime),
                 agentAPIs:    make(map[string]*AgentAPIServer),
@@ -294,7 +301,7 @@ func (m *Manager) LaunchApp(ctx context.Context, id string) (*Instance, error) {
                 m.networks[instanceID] = ni
         }
 
-        agentAPI := NewAgentAPIServer(instanceID, id, netCfg.AgentAPIPort, m.store, m.policy, m.eventBus)
+        agentAPI := NewAgentAPIServer(instanceID, id, netCfg.AgentAPIPort, m.store, m.policy, m.eventBus, m.tracer)
         if err := agentAPI.Start(); err != nil {
                 m.store.UpdateInstanceStatus(instanceID, "error")
                 return nil, fmt.Errorf("failed to start agent API: %w", err)
@@ -591,6 +598,10 @@ func (m *Manager) GetBinaryRuntime(instanceID string) *BinaryRuntime {
 
 func (m *Manager) EventBus() *EventBus {
         return m.eventBus
+}
+
+func (m *Manager) Tracer() *Tracer {
+        return m.tracer
 }
 
 func (m *Manager) Store() *SandboxStore {

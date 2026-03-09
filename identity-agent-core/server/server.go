@@ -296,6 +296,8 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
                 s.sandboxRoutes(r)
         })
 
+        s.traceRoutes(r)
+
         r.Get("/oobi/{aid}", s.handleOobiServe)
 
         absWebDir, err := filepath.Abs(flutterWebDir)
