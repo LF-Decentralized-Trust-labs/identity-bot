@@ -464,6 +464,9 @@ workflows:
           & "$PYTHON_DIR\python.exe" "$PYTHON_DIR\get-pip.py" --no-warn-script-location
           Remove-Item "$PYTHON_DIR\get-pip.py"
 
+          Write-Host "Installing build tools (setuptools + wheel)..."
+          & "$PYTHON_DIR\python.exe" -m pip install --no-warn-script-location setuptools wheel
+
           Write-Host "Installing KERI dependencies..."
           & "$PYTHON_DIR\python.exe" -m pip install --no-warn-script-location flask keri==1.1.17
 
