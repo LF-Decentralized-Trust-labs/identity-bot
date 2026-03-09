@@ -250,21 +250,36 @@ class BackendProcessService {
         (data) => debugPrint('[Backend:err] $data'),
       );
 
+      bool processExited = false;
+      int? exitCode;
       _backendProcess!.exitCode.then((code) {
         debugPrint('[BackendProcess] Exited with code: $code');
+        processExited = true;
+        exitCode = code;
         _isRunning = false;
         _backendProcess = null;
         if (code != 0) {
-          _startupError = 'Backend process exited unexpectedly (code $code). '
-              'Check that Python and KERI dependencies are properly installed.';
+          _startupError = 'Backend process exited with code $code. '
+              'This usually means the KERI driver (Python) failed to start.\n\n'
+              'To fix:\n'
+              '1. Install Python 3.10+ from python.org\n'
+              '2. Open a terminal and run:\n'
+              '   pip install flask keri==1.1.17\n'
+              '3. Restart the application';
         }
       });
 
-      final healthy = await _waitForHealthy();
+      final healthy = await _waitForHealthy(() => processExited);
       if (!healthy) {
-        _startupError ??=
-            'Backend started but did not become healthy within 15 seconds. '
-            'The Python KERI driver may have failed to start.';
+        if (processExited && exitCode != null && exitCode != 0) {
+          // _startupError already set by exitCode.then callback with detailed message
+        } else {
+          _startupError ??=
+              'Backend started but did not respond within 15 seconds. '
+              'The Python KERI driver may have failed to initialize.\n\n'
+              'Ensure Python 3.10+ is installed and the following packages are available:\n'
+              '  pip install flask keri==1.1.17';
+        }
         return false;
       }
       return true;
@@ -276,11 +291,16 @@ class BackendProcessService {
     }
   }
 
-  Future<bool> _waitForHealthy() async {
+  Future<bool> _waitForHealthy(bool Function() hasProcessExited) async {
     final client = HttpClient();
     client.connectionTimeout = const Duration(seconds: 2);
 
     for (int i = 0; i < 30; i++) {
+      if (hasProcessExited()) {
+        debugPrint('[BackendProcess] Process already exited — aborting health check');
+        client.close();
+        return false;
+      }
       try {
         final request = await client.getUrl(
           Uri.parse('http://127.0.0.1:5000/api/health'),
