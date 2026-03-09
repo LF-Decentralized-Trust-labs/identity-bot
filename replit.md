@@ -45,6 +45,33 @@ The system employs a standardized topology model based on three topological stat
 -   **Consent-based Contact Flow:** Implements a two-step resolve and consent process for adding contacts, including placeholder avatars and pending request management.
 -   **Mutual OOBI Contact Relationships:** Supports mutual relationships with jCard schema (RFC 7095) for rich contact information and reverse introduction flows.
 
+## Sandboxed App Marketplace (Desktop-Only)
+
+Desktop-only feature enabling sandboxed application execution via Docker containers and compiled binaries. See `docs/adr/012-sandboxed-app-marketplace.md` for full architecture.
+
+### Architecture
+
+-   **Sandbox Package (`identity-agent-core/sandbox/`):** 16 Go files (~5700 lines) — store (SQLite `sandbox.db`), migrations, manifest loader, runtime abstraction, Docker runtime, binary runtime, pure Go MITM forward proxy, TLS cert generation, DNS forwarder, policy engine, agent API server, network isolation, resource monitor, credentials vault, events bus, and manager orchestrator.
+-   **Backend API (`identity-agent-core/server/sandbox_handlers.go`):** 20 REST endpoints + 2 WebSocket routes (`/ws/sandbox` events, `/ws/terminal/{id}` binary I/O).
+-   **Flutter UI:** Marketplace screen (`marketplace_screen.dart`), sandbox viewer with split-view (`sandbox_viewer.dart`), WebView widget (`sandbox_webview.dart`), terminal widget (`sandbox_terminal.dart`), app models (`sandbox_app.dart`).
+-   **Demo Apps:** 4 manifests in `manifests/` — Chromium (kasmweb), Open WebUI, OpenClaw, Go Demo App (`sandbox-apps/go-demo/`).
+-   **Build tag:** `//go:build !mobile` excludes sandbox from gomobile builds. Flutter UI gated by `Platform.isWindows || Platform.isMacOS || Platform.isLinux`.
+
+### Key Features
+
+-   Pure Go forward proxy with MITM TLS interception (ADR fallback from Caddy)
+-   Policy engine: auto-approve (manifest domains), hold (unknown), auto-block (denied)
+-   Wildcard domain matching: `*.example.com` (single-level), `**.example.com` (any depth)
+-   Credential vault: API keys injected at proxy layer, never enter containers
+-   Resource monitoring with escalation: warn (80%) → ask → kill (timeout)
+-   Crash recovery: startup reconciliation handles 4 state matrix scenarios
+-   Clean shutdown: 10-item checklist per instance
+
+### Data
+
+-   `data/sandbox.db`: SQLite with tables for apps, instances, proxy_logs, policy_rules, resource_requests, policy_decisions, events
+-   Auto-pruning: 7-day retention, 500 MB cap, runs on startup + 24h interval
+
 ## External Dependencies
 
 ### Backend (Go)
@@ -53,6 +80,8 @@ The system employs a standardized topology model based on three topological stat
 -   `github.com/go-chi/cors`: CORS middleware.
 -   `golang.ngrok.com/ngrok`: In-memory tunnel client.
 -   `github.com/jpillora/chisel` v1.9.1: Chisel client for Grape ID reverse proxy tunnels.
+-   `github.com/gorilla/websocket` v1.5.3: WebSocket connections for sandbox events and terminal streaming.
+-   `github.com/mattn/go-sqlite3`: SQLite driver for sandbox.db (CGO, desktop only).
 -   `cloudflared`: System dependency for Cloudflare desktop tunnels.
 
 ### KERI Driver (Python, desktop only)
@@ -76,6 +105,9 @@ The system employs a standardized topology model based on three topological stat
 -   `shared_preferences`: Onboarding state persistence.
 -   `mobile_scanner`: QR code scanning.
 -   `qr_flutter`: QR code generation.
+-   `flutter_inappwebview` ^6.0.0: WebView for sandbox app display (desktop only).
+-   `url_launcher`: Open URLs in system browser (sandbox fallback).
+-   `web_socket_channel` ^3.0.1: WebSocket client for sandbox terminal and events.
 
 ### Onboarding Modes
 

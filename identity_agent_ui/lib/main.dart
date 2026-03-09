@@ -7,6 +7,7 @@ import 'screens/contacts_screen.dart';
 import 'screens/oobi_screen.dart';
 import 'screens/profile_screen.dart';
 import 'screens/settings_screen.dart';
+import 'screens/marketplace_screen.dart';
 import 'screens/setup_wizard_screen.dart';
 import 'screens/mode_selection_screen.dart';
 import 'screens/entity_type_screen.dart';
@@ -342,10 +343,12 @@ class _AgentMainScreenState extends State<AgentMainScreen> {
   final ValueNotifier<int> _oobiRefreshNotifier = ValueNotifier<int>(0);
 
   late final List<Widget> _screens;
+  late final bool _isDesktop;
 
   @override
   void initState() {
     super.initState();
+    _isDesktop = !kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux);
     _screens = [
       ProfileScreen(keriService: widget.keriService, serverUrl: widget.serverUrl),
       DashboardScreen(keriService: widget.keriService, serverUrl: widget.serverUrl),
@@ -357,6 +360,7 @@ class _AgentMainScreenState extends State<AgentMainScreen> {
         entityType: widget.entityType,
         serverUrl: widget.serverUrl,
       ),
+      if (_isDesktop) MarketplaceScreen(serverUrl: widget.serverUrl),
     ];
   }
 
@@ -405,32 +409,38 @@ class _AgentMainScreenState extends State<AgentMainScreen> {
             fontFamily: 'monospace',
           ),
           type: BottomNavigationBarType.fixed,
-          items: const [
-            BottomNavigationBarItem(
+          items: [
+            const BottomNavigationBarItem(
               icon: Icon(Icons.person_outline),
               activeIcon: Icon(Icons.person),
               label: 'PROFILE',
             ),
-            BottomNavigationBarItem(
+            const BottomNavigationBarItem(
               icon: Icon(Icons.shield_outlined),
               activeIcon: Icon(Icons.shield),
               label: 'DASHBOARD',
             ),
-            BottomNavigationBarItem(
+            const BottomNavigationBarItem(
               icon: Icon(Icons.people_outlined),
               activeIcon: Icon(Icons.people),
               label: 'CONTACTS',
             ),
-            BottomNavigationBarItem(
+            const BottomNavigationBarItem(
               icon: Icon(Icons.qr_code),
               activeIcon: Icon(Icons.qr_code),
               label: 'OOBI',
             ),
-            BottomNavigationBarItem(
+            const BottomNavigationBarItem(
               icon: Icon(Icons.settings_outlined),
               activeIcon: Icon(Icons.settings),
               label: 'SETTINGS',
             ),
+            if (_isDesktop)
+              const BottomNavigationBarItem(
+                icon: Icon(Icons.apps_outlined),
+                activeIcon: Icon(Icons.apps),
+                label: 'APPS',
+              ),
           ],
         ),
       ),
