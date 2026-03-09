@@ -438,6 +438,46 @@ workflows:
           Write-Host "--- Bundle contents ---"
           Get-ChildItem -Recurse "$BUNDLE\backend"
 
+      - name: Embed Python runtime (Windows)
+        script: |
+          $BUNDLE = "identity_agent_ui\build\windows\x64\runner\Release"
+          $PYTHON_DIR = "$BUNDLE\backend\python"
+          $PY_VERSION = "3.12.8"
+          $PY_SHORT = "312"
+
+          Write-Host "Downloading Python $PY_VERSION embeddable package..."
+          $PY_URL = "https://www.python.org/ftp/python/$PY_VERSION/python-$PY_VERSION-embed-amd64.zip"
+          Invoke-WebRequest -Uri $PY_URL -OutFile "python-embed.zip"
+
+          Write-Host "Extracting to $PYTHON_DIR..."
+          Expand-Archive -Path "python-embed.zip" -DestinationPath $PYTHON_DIR -Force
+
+          Write-Host "Enabling site-packages in embedded Python..."
+          $pthFile = "$PYTHON_DIR\python$PY_SHORT._pth"
+          $content = Get-Content $pthFile
+          $content = $content -replace '#import site', 'import site'
+          Set-Content $pthFile $content
+          Get-Content $pthFile
+
+          Write-Host "Bootstrapping pip..."
+          Invoke-WebRequest -Uri "https://bootstrap.pypa.io/get-pip.py" -OutFile "$PYTHON_DIR\get-pip.py"
+          & "$PYTHON_DIR\python.exe" "$PYTHON_DIR\get-pip.py" --no-warn-script-location
+          Remove-Item "$PYTHON_DIR\get-pip.py"
+
+          Write-Host "Installing KERI dependencies..."
+          & "$PYTHON_DIR\python.exe" -m pip install --no-warn-script-location flask keri==1.1.17
+
+          Write-Host "Verifying installation..."
+          & "$PYTHON_DIR\python.exe" -c "import flask; import keri; print('flask:', flask.__version__); print('keri:', keri.__version__)"
+
+          Write-Host "Cleaning up pip cache..."
+          Remove-Item -Recurse -Force "$PYTHON_DIR\pip" -ErrorAction SilentlyContinue
+
+          Write-Host "--- Embedded Python contents ---"
+          Get-ChildItem $PYTHON_DIR | Format-Table Name, Length
+          $size = (Get-ChildItem -Recurse $PYTHON_DIR | Measure-Object -Property Length -Sum).Sum / 1MB
+          Write-Host ("Embedded Python size: {0:N1} MB" -f $size)
+
       - name: Create ZIP archive
         script: |
           $BUNDLE = "identity_agent_ui\build\windows\x64\runner\Release"
@@ -492,6 +532,24 @@ workflows:
           chmod +x "$RESOURCES/backend/identity-agent-core"
           echo "--- Bundle contents ---"
           ls -la "$RESOURCES/backend/"
+
+      - name: Bundle Python packages (macOS)
+        script: |
+          APP="identity_agent_ui/build/macos/Build/Products/Release/Identity Agent.app"
+          RESOURCES="$APP/Contents/Resources"
+          PKG_DIR="$RESOURCES/backend/python-packages"
+
+          echo "Installing KERI dependencies into bundle..."
+          pip3 install --target="$PKG_DIR" flask keri==1.1.17
+
+          echo "Verifying installation..."
+          PYTHONPATH="$PKG_DIR" python3 -c "import flask; import keri; print('flask:', flask.__version__); print('keri:', keri.__version__)"
+
+          echo "Cleaning up caches..."
+          find "$PKG_DIR" -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+
+          echo "--- Bundled packages size ---"
+          du -sh "$PKG_DIR"
 
       - name: Create DMG archive
         script: |
@@ -549,6 +607,23 @@ workflows:
           chmod +x "$BUNDLE/backend/identity-agent-core"
           echo "--- Bundle contents ---"
           ls -la "$BUNDLE/backend/"
+
+      - name: Bundle Python packages (Linux)
+        script: |
+          BUNDLE="identity_agent_ui/build/linux/x64/release/bundle"
+          PKG_DIR="$BUNDLE/backend/python-packages"
+
+          echo "Installing KERI dependencies into bundle..."
+          pip3 install --target="$PKG_DIR" flask keri==1.1.17
+
+          echo "Verifying installation..."
+          PYTHONPATH="$PKG_DIR" python3 -c "import flask; import keri; print('flask:', flask.__version__); print('keri:', keri.__version__)"
+
+          echo "Cleaning up caches..."
+          find "$PKG_DIR" -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+
+          echo "--- Bundled packages size ---"
+          du -sh "$PKG_DIR"
 
       - name: Create tarball archive
         script: |

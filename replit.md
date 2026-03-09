@@ -39,6 +39,8 @@ The system uses a standardized topology model based on three topological states 
 
 -   **Go for Backend:** Chosen for orchestration, single binary compilation, and driver lifecycle management, with `gomobile` for mobile integration.
 -   **Python for KERI (Desktop):** Leverages the established `keripy` implementation.
+-   **Embedded Python (Desktop Builds):** All desktop builds (Windows, macOS, Linux) embed a self-contained Python environment with pre-installed `flask` and `keri` packages. Windows uses the Python embeddable package; macOS/Linux use `python3 -m venv`. Users never need to install Python separately. The `BackendProcessService` checks for bundled Python at `backend/python/` (Windows/macOS) or `backend/python-env/` (Linux) before falling back to system Python.
+-   **Backend Startup Error Dialog:** Desktop builds show a modal error dialog with RETRY button if the bundled Go backend fails to start (missing binary, Python not installed, dependency issues).
 -   **Rust for KERI (Mobile):** Provides native mobile KERI capabilities via FFI with `keriox` across all mobile modes.
 -   **Local-First Storage:** Emphasizes user sovereignty and data control, defaulting to file-based JSON storage.
 -   **AID Hierarchy:** Differentiates between delegated child AIDs for "Remote WITHOUT Keys" and retaining primary parent AIDs for "Remote WITH Keys."
