@@ -404,7 +404,13 @@ workflows:
     scripts:
       - name: Install Go toolchain
         script: |
-          choco install golang -y
+          $GO_VERSION = "1.24.0"
+          $GO_MSI = "go$GO_VERSION.windows-amd64.msi"
+          $GO_URL = "https://go.dev/dl/$GO_MSI"
+          Write-Host "Downloading Go $GO_VERSION from $GO_URL"
+          Invoke-WebRequest -Uri $GO_URL -OutFile "$env:TEMP\$GO_MSI" -UseBasicParsing
+          Write-Host "Installing Go..."
+          Start-Process msiexec.exe -Wait -ArgumentList "/i $env:TEMP\$GO_MSI /quiet /norestart"
           $env:Path = "C:\Program Files\Go\bin;$env:Path"
           go version
 
