@@ -30,13 +30,14 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   if (!kIsWeb && BackendProcessService.isDesktopPlatform) {
-    debugPrint('[Agent] Desktop platform detected — starting bundled backend...');
-    final started = await BackendProcessService.instance.start();
-    debugPrint('[Agent] Backend process started: $started');
-    if (!started) {
-      _backendStartupError = BackendProcessService.instance.startupError;
-      debugPrint('[Agent] Backend startup error: $_backendStartupError');
-    }
+    debugPrint('[Agent] Desktop platform detected — starting bundled backend in background...');
+    BackendProcessService.instance.start().then((started) {
+      debugPrint('[Agent] Backend process started: $started');
+      if (!started) {
+        _backendStartupError = BackendProcessService.instance.startupError;
+        debugPrint('[Agent] Backend startup error: $_backendStartupError');
+      }
+    });
   }
 
   runApp(const IdentityAgentApp());
