@@ -295,29 +295,45 @@ class _AgentRouterState extends State<AgentRouter> {
             ),
           ],
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              error,
-              style: const TextStyle(
-                color: Color(0xFFB0B0B0),
-                fontSize: 13,
-                fontFamily: 'monospace',
-              ),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: 400, maxWidth: 500),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  error,
+                  style: const TextStyle(
+                    color: Color(0xFFB0B0B0),
+                    fontSize: 12,
+                    fontFamily: 'monospace',
+                    height: 1.4,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'The Identity Agent backend could not be started. '
+                  'Identity creation and other core operations will not work until this is resolved.',
+                  style: TextStyle(
+                    color: Color(0xFF808080),
+                    fontSize: 11,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'A diagnostic log has been saved alongside the application.',
+                  style: TextStyle(
+                    color: Color(0xFF606060),
+                    fontSize: 10,
+                    fontFamily: 'monospace',
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 16),
-            const Text(
-              'The Identity Agent backend could not be started. '
-              'Identity creation and other core operations will not work until this is resolved.',
-              style: TextStyle(
-                color: Color(0xFF808080),
-                fontSize: 12,
-                fontFamily: 'monospace',
-              ),
-            ),
-          ],
+          ),
         ),
         actions: [
           TextButton(

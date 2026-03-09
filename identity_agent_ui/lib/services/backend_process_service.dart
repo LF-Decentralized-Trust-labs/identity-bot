@@ -7,6 +7,8 @@ class BackendProcessService {
   bool _isRunning = false;
   String? _backendPath;
   String? _startupError;
+  final List<String> _backendOutput = [];
+  static const int _maxOutputLines = 200;
 
   BackendProcessService._();
 
@@ -17,6 +19,7 @@ class BackendProcessService {
 
   bool get isRunning => _isRunning;
   String? get startupError => _startupError;
+  String get diagnosticOutput => _backendOutput.join('\n');
 
   static bool get isDesktopPlatform {
     if (kIsWeb) return false;
@@ -24,6 +27,38 @@ class BackendProcessService {
       return Platform.isWindows || Platform.isMacOS || Platform.isLinux;
     } catch (_) {
       return false;
+    }
+  }
+
+  void _appendOutput(String line) {
+    _backendOutput.add(line);
+    if (_backendOutput.length > _maxOutputLines) {
+      _backendOutput.removeAt(0);
+    }
+  }
+
+  Future<void> _writeDiagnosticLog(String backendDir) async {
+    try {
+      final exeDir = File(Platform.resolvedExecutable).parent.path;
+      final logFile = File('$exeDir${Platform.pathSeparator}backend-startup.log');
+      final content = StringBuffer();
+      content.writeln('=== Identity Agent Backend Diagnostic Log ===');
+      content.writeln('Timestamp: ${DateTime.now().toIso8601String()}');
+      content.writeln('Platform: ${Platform.operatingSystem} ${Platform.operatingSystemVersion}');
+      content.writeln('Backend path: $_backendPath');
+      content.writeln('Working directory: $backendDir');
+      content.writeln('');
+      content.writeln('=== Backend Output ===');
+      for (final line in _backendOutput) {
+        content.writeln(line);
+      }
+      content.writeln('');
+      content.writeln('=== Startup Error ===');
+      content.writeln(_startupError ?? 'none');
+      await logFile.writeAsString(content.toString());
+      debugPrint('[BackendProcess] Diagnostic log written to: ${logFile.path}');
+    } catch (e) {
+      debugPrint('[BackendProcess] Failed to write diagnostic log: $e');
     }
   }
 
@@ -133,6 +168,7 @@ class BackendProcessService {
         if (result.exitCode == 0) {
           final version = (result.stdout as String).trim();
           debugPrint('[BackendProcess] Found system Python: $bin ($version)');
+          _appendOutput('[startup] Found system Python: $bin ($version)');
           return bin;
         }
       } catch (_) {}
@@ -154,18 +190,22 @@ class BackendProcessService {
       );
       if (result.exitCode == 0) {
         debugPrint('[BackendProcess] Python deps (flask, keri) available');
+        _appendOutput('[startup] Python deps (flask, keri) verified OK');
         return true;
       }
       debugPrint('[BackendProcess] Missing Python deps: ${result.stderr}');
+      _appendOutput('[startup] Missing Python deps: ${result.stderr}');
       return false;
     } catch (e) {
       debugPrint('[BackendProcess] Python dep check failed: $e');
+      _appendOutput('[startup] Python dep check failed: $e');
       return false;
     }
   }
 
   Future<bool> _installPythonDeps(String pythonBin, String backendDir) async {
     debugPrint('[BackendProcess] Installing Python dependencies...');
+    _appendOutput('[startup] Installing Python dependencies...');
     try {
       final sep = Platform.pathSeparator;
       final reqCandidates = [
@@ -183,9 +223,11 @@ class BackendProcessService {
           );
           if (result.exitCode == 0) {
             debugPrint('[BackendProcess] Python dependencies installed from requirements.txt');
+            _appendOutput('[startup] Python deps installed from requirements.txt');
             return true;
           }
           debugPrint('[BackendProcess] pip install -r failed: ${result.stderr}');
+          _appendOutput('[startup] pip install -r failed: ${result.stderr}');
         }
       }
 
@@ -198,14 +240,70 @@ class BackendProcessService {
 
       if (result.exitCode == 0) {
         debugPrint('[BackendProcess] Python dependencies installed successfully');
+        _appendOutput('[startup] Python deps installed successfully');
         return true;
       }
 
       debugPrint('[BackendProcess] pip install failed: ${result.stderr}');
+      _appendOutput('[startup] pip install failed: ${result.stderr}');
       return false;
     } catch (e) {
       debugPrint('[BackendProcess] pip install error: $e');
+      _appendOutput('[startup] pip install error: $e');
       return false;
+    }
+  }
+
+  Future<void> _killExistingOnPort(int port) async {
+    debugPrint('[BackendProcess] Checking for existing processes on port $port...');
+    _appendOutput('[startup] Checking for existing processes on port $port...');
+
+    try {
+      if (Platform.isWindows) {
+        final result = await Process.run(
+          'netstat',
+          ['-ano', '-p', 'TCP'],
+        );
+        if (result.exitCode == 0) {
+          final portPattern = RegExp(
+            r'^\s*TCP\s+\S+:(\d+)\s+\S+\s+LISTENING\s+(\d+)',
+            caseSensitive: false,
+          );
+          final lines = (result.stdout as String).split('\n');
+          for (final line in lines) {
+            final match = portPattern.firstMatch(line);
+            if (match != null) {
+              final foundPort = int.tryParse(match.group(1) ?? '');
+              final pid = match.group(2) ?? '';
+              if (foundPort == port && pid.isNotEmpty && pid != '0') {
+                debugPrint('[BackendProcess] Killing PID $pid on port $port');
+                _appendOutput('[startup] Found process $pid on port $port — killing it');
+                final killResult = await Process.run('taskkill', ['/F', '/PID', pid]);
+                if (killResult.exitCode != 0) {
+                  _appendOutput('[startup] taskkill PID $pid failed: ${killResult.stderr}');
+                }
+                await Future.delayed(const Duration(seconds: 1));
+              }
+            }
+          }
+        }
+      } else {
+        final result = await Process.run('lsof', ['-ti', ':$port']);
+        if (result.exitCode == 0) {
+          final pids = (result.stdout as String).trim().split('\n');
+          for (final pid in pids) {
+            if (pid.isNotEmpty && int.tryParse(pid) != null) {
+              debugPrint('[BackendProcess] Killing PID $pid on port $port');
+              _appendOutput('[startup] Found process $pid on port $port — killing it');
+              await Process.run('kill', ['-9', pid]);
+            }
+          }
+          await Future.delayed(const Duration(seconds: 1));
+        }
+      }
+    } catch (e) {
+      debugPrint('[BackendProcess] Port cleanup failed (non-fatal): $e');
+      _appendOutput('[startup] Port cleanup check failed (non-fatal): $e');
     }
   }
 
@@ -221,6 +319,9 @@ class BackendProcessService {
     }
 
     _startupError = null;
+    _backendOutput.clear();
+    _appendOutput('[startup] ${DateTime.now().toIso8601String()}');
+    _appendOutput('[startup] Platform: ${Platform.operatingSystem} ${Platform.operatingSystemVersion}');
 
     _backendPath = _findBackendBinary();
     if (_backendPath == null) {
@@ -229,10 +330,17 @@ class BackendProcessService {
           'The app may not have been packaged correctly. '
           'If running in development mode, start the backend manually.';
       debugPrint('[BackendProcess] Backend binary not found — $_startupError');
+      _appendOutput('[startup] Backend binary not found');
+      final exeDir = File(Platform.resolvedExecutable).parent.path;
+      await _writeDiagnosticLog(exeDir);
       return false;
     }
 
+    _appendOutput('[startup] Backend binary: $_backendPath');
+
     final backendDir = File(_backendPath!).parent.path;
+
+    await _killExistingOnPort(5000);
 
     final pythonBin = await _findPythonBinary(backendDir);
     if (pythonBin == null) {
@@ -240,8 +348,11 @@ class BackendProcessService {
           'Python was not found in the application bundle or on this computer. '
           'The application may not have been packaged correctly.\n\n'
           'As a workaround, install Python 3.10+ from python.org and restart.';
+      await _writeDiagnosticLog(backendDir);
       return false;
     }
+
+    _appendOutput('[startup] Python: $pythonBin');
 
     final isBundled = _isBundledPython(pythonBin, backendDir);
     final bundledPkgDir = _findBundledPythonPackages(backendDir);
@@ -249,6 +360,7 @@ class BackendProcessService {
 
     if (hasBundledDeps) {
       debugPrint('[BackendProcess] Using bundled dependencies — skipping dependency checks');
+      _appendOutput('[startup] Using bundled dependencies');
     } else {
       final depsOk = await _checkPythonDeps(pythonBin);
       if (!depsOk) {
@@ -258,12 +370,14 @@ class BackendProcessService {
           _startupError =
               'Required Python packages (flask, keri) could not be installed. '
               'Please run: $pythonBin -m pip install flask keri==1.1.17';
+          await _writeDiagnosticLog(backendDir);
           return false;
         }
       }
     }
 
     final keriScript = _findKeriDriverScript(backendDir);
+    _appendOutput('[startup] KERI driver script: ${keriScript ?? "not found"}');
 
     try {
       final env = Map<String, String>.from(Platform.environment);
@@ -297,51 +411,75 @@ class BackendProcessService {
 
       _isRunning = true;
       debugPrint('[BackendProcess] Started (PID: ${_backendProcess!.pid})');
+      _appendOutput('[startup] Go backend started (PID: ${_backendProcess!.pid})');
 
       _backendProcess!.stdout.transform(const SystemEncoding().decoder).listen(
-        (data) => debugPrint('[Backend] $data'),
+        (data) {
+          debugPrint('[Backend] $data');
+          for (final line in data.split('\n')) {
+            if (line.trim().isNotEmpty) _appendOutput('[go] $line');
+          }
+        },
       );
       _backendProcess!.stderr.transform(const SystemEncoding().decoder).listen(
-        (data) => debugPrint('[Backend:err] $data'),
+        (data) {
+          debugPrint('[Backend:err] $data');
+          for (final line in data.split('\n')) {
+            if (line.trim().isNotEmpty) _appendOutput('[go:err] $line');
+          }
+        },
       );
 
       bool processExited = false;
       int? exitCode;
       _backendProcess!.exitCode.then((code) {
         debugPrint('[BackendProcess] Exited with code: $code');
+        _appendOutput('[exit] Backend exited with code: $code');
         processExited = true;
         exitCode = code;
         _isRunning = false;
         _backendProcess = null;
         if (code != 0) {
-          _startupError = 'Backend process exited with code $code. '
-              'This usually means the KERI driver (Python) failed to start.\n\n'
-              'To fix:\n'
-              '1. Install Python 3.10+ from python.org\n'
-              '2. Open a terminal and run:\n'
-              '   pip install flask keri==1.1.17\n'
-              '3. Restart the application';
+          final lastLines = _backendOutput
+              .where((l) => l.startsWith('[go]') || l.startsWith('[go:err]'))
+              .toList();
+          final tail = lastLines.length > 10
+              ? lastLines.sublist(lastLines.length - 10)
+              : lastLines;
+          final details = tail.isNotEmpty
+              ? '\n\nBackend output:\n${tail.join('\n')}'
+              : '';
+          _startupError = 'Backend process exited with code $code.$details';
         }
       });
 
       final healthy = await _waitForHealthy(() => processExited);
       if (!healthy) {
         if (processExited && exitCode != null && exitCode != 0) {
-          // _startupError already set by exitCode.then callback with detailed message
+          // _startupError already set by exitCode.then callback with backend output
         } else {
+          final lastLines = _backendOutput
+              .where((l) => l.startsWith('[go]') || l.startsWith('[go:err]'))
+              .toList();
+          final tail = lastLines.length > 10
+              ? lastLines.sublist(lastLines.length - 10)
+              : lastLines;
+          final details = tail.isNotEmpty
+              ? '\n\nBackend output:\n${tail.join('\n')}'
+              : '';
           _startupError ??=
-              'Backend started but did not respond within 15 seconds. '
-              'The Python KERI driver may have failed to initialize.\n\n'
-              'Ensure Python 3.10+ is installed and the following packages are available:\n'
-              '  pip install flask keri==1.1.17';
+              'Backend started but did not respond within 15 seconds.$details';
         }
+        await _writeDiagnosticLog(backendDir);
         return false;
       }
       return true;
     } catch (e) {
       debugPrint('[BackendProcess] Failed to start: $e');
+      _appendOutput('[startup] Exception: $e');
       _startupError = 'Failed to start backend: $e';
       _isRunning = false;
+      await _writeDiagnosticLog(backendDir);
       return false;
     }
   }
@@ -363,6 +501,7 @@ class BackendProcessService {
         final response = await request.close();
         if (response.statusCode == 200) {
           debugPrint('[BackendProcess] Backend is healthy (attempt ${i + 1})');
+          _appendOutput('[startup] Backend healthy (attempt ${i + 1})');
           client.close();
           return true;
         }
@@ -371,6 +510,7 @@ class BackendProcessService {
     }
     client.close();
     debugPrint('[BackendProcess] Health check timed out after 15s');
+    _appendOutput('[startup] Health check timed out after 15s');
     return false;
   }
 
