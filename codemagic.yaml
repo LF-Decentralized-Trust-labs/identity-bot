@@ -441,6 +441,7 @@ workflows:
           mkdir -p "$BUNDLE\backend"
           Copy-Item "identity-agent-core\bin\identity-agent-core.exe" "$BUNDLE\backend\"
           Copy-Item -Recurse "drivers\keri-core" "$BUNDLE\backend\keri-driver"
+          Copy-Item -Recurse "manifests" "$BUNDLE\backend\manifests"
           Write-Host "--- Bundle contents ---"
           Get-ChildItem -Recurse "$BUNDLE\backend"
 
@@ -564,6 +565,7 @@ workflows:
           mkdir -p "$RESOURCES/backend"
           cp identity-agent-core/bin/identity-agent-core "$RESOURCES/backend/"
           cp -r drivers/keri-core "$RESOURCES/backend/keri-driver"
+          cp -r manifests "$RESOURCES/backend/manifests"
           chmod +x "$RESOURCES/backend/identity-agent-core"
           echo "--- Bundle contents ---"
           ls -la "$RESOURCES/backend/"
@@ -639,6 +641,7 @@ workflows:
           mkdir -p "$BUNDLE/backend"
           cp identity-agent-core/bin/identity-agent-core "$BUNDLE/backend/"
           cp -r drivers/keri-core "$BUNDLE/backend/keri-driver"
+          cp -r manifests "$BUNDLE/backend/manifests"
           chmod +x "$BUNDLE/backend/identity-agent-core"
           echo "--- Bundle contents ---"
           ls -la "$BUNDLE/backend/"

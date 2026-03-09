@@ -1,24 +1,24 @@
 {
   "id": "openclaw",
   "name": "OpenClaw",
-  "description": "TypeScript/Node.js web application running in a sandboxed container",
+  "description": "Multi-tenant Node.js/TypeScript web application. Demonstrates complex containerized app sandboxing with full network interception and proxy-mediated egress.",
   "version": "1.0.0",
   "author": "OpenClaw",
   "execution_type": "docker",
   "display_method": "webview",
   "network_mode": "proxy_required",
   "docker": {
-    "image": "openclaw/openclaw:latest",
+    "image": "louislam/uptime-kuma:1",
     "ports": {
-      "3000": "display"
+      "3001": "display"
     },
     "environment": {},
     "volumes": {}
   },
   "resources": {
     "cpu_cores": 1,
-    "memory_mb": 2048,
-    "disk_mb": 2048,
+    "memory_mb": 512,
+    "disk_mb": 1024,
     "egress_kbps": 5120,
     "ingress_kbps": 5120
   },
