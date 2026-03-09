@@ -1,12 +1,25 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 
+class PortConflictInfo {
+  final String pid;
+  final String processName;
+  final int port;
+
+  PortConflictInfo({required this.pid, required this.processName, required this.port});
+
+  bool get isIdentityAgent =>
+      processName.toLowerCase().contains('identity-agent') ||
+      processName.toLowerCase().contains('identity_agent');
+}
+
 class BackendProcessService {
   static BackendProcessService? _instance;
   Process? _backendProcess;
   bool _isRunning = false;
   String? _backendPath;
   String? _startupError;
+  PortConflictInfo? _portConflict;
   final List<String> _backendOutput = [];
   static const int _maxOutputLines = 200;
 
@@ -20,6 +33,7 @@ class BackendProcessService {
   bool get isRunning => _isRunning;
   String? get startupError => _startupError;
   String get diagnosticOutput => _backendOutput.join('\n');
+  PortConflictInfo? get portConflict => _portConflict;
 
   static bool get isDesktopPlatform {
     if (kIsWeb) return false;
@@ -254,56 +268,89 @@ class BackendProcessService {
     }
   }
 
-  Future<void> _killExistingOnPort(int port) async {
+  Future<PortConflictInfo?> checkPortConflict(int port) async {
     debugPrint('[BackendProcess] Checking for existing processes on port $port...');
-    _appendOutput('[startup] Checking for existing processes on port $port...');
 
     try {
       if (Platform.isWindows) {
-        final result = await Process.run(
-          'netstat',
-          ['-ano', '-p', 'TCP'],
+        final result = await Process.run('netstat', ['-ano', '-p', 'TCP']);
+        if (result.exitCode != 0) return null;
+
+        final portPattern = RegExp(
+          r'^\s*TCP\s+\S+:(\d+)\s+\S+\s+LISTENING\s+(\d+)',
+          caseSensitive: false,
         );
-        if (result.exitCode == 0) {
-          final portPattern = RegExp(
-            r'^\s*TCP\s+\S+:(\d+)\s+\S+\s+LISTENING\s+(\d+)',
-            caseSensitive: false,
-          );
-          final lines = (result.stdout as String).split('\n');
-          for (final line in lines) {
-            final match = portPattern.firstMatch(line);
-            if (match != null) {
-              final foundPort = int.tryParse(match.group(1) ?? '');
-              final pid = match.group(2) ?? '';
-              if (foundPort == port && pid.isNotEmpty && pid != '0') {
-                debugPrint('[BackendProcess] Killing PID $pid on port $port');
-                _appendOutput('[startup] Found process $pid on port $port — killing it');
-                final killResult = await Process.run('taskkill', ['/F', '/PID', pid]);
-                if (killResult.exitCode != 0) {
-                  _appendOutput('[startup] taskkill PID $pid failed: ${killResult.stderr}');
+        for (final line in (result.stdout as String).split('\n')) {
+          final match = portPattern.firstMatch(line);
+          if (match != null) {
+            final foundPort = int.tryParse(match.group(1) ?? '');
+            final pid = match.group(2) ?? '';
+            if (foundPort == port && pid.isNotEmpty && pid != '0') {
+              String processName = 'unknown';
+              try {
+                final taskResult = await Process.run(
+                  'tasklist',
+                  ['/FI', 'PID eq $pid', '/FO', 'CSV', '/NH'],
+                );
+                if (taskResult.exitCode == 0) {
+                  final csv = (taskResult.stdout as String).trim();
+                  if (csv.isNotEmpty && csv.startsWith('"')) {
+                    processName = csv.split(',')[0].replaceAll('"', '');
+                  }
                 }
-                await Future.delayed(const Duration(seconds: 1));
-              }
+              } catch (_) {}
+              debugPrint('[BackendProcess] Port $port in use by PID $pid ($processName)');
+              return PortConflictInfo(pid: pid, processName: processName, port: port);
             }
           }
         }
       } else {
         final result = await Process.run('lsof', ['-ti', ':$port']);
         if (result.exitCode == 0) {
-          final pids = (result.stdout as String).trim().split('\n');
-          for (final pid in pids) {
-            if (pid.isNotEmpty && int.tryParse(pid) != null) {
-              debugPrint('[BackendProcess] Killing PID $pid on port $port');
-              _appendOutput('[startup] Found process $pid on port $port — killing it');
-              await Process.run('kill', ['-9', pid]);
-            }
+          final pid = (result.stdout as String).trim().split('\n').first;
+          if (pid.isNotEmpty && int.tryParse(pid) != null) {
+            String processName = 'unknown';
+            try {
+              final psResult = await Process.run('ps', ['-p', pid, '-o', 'comm=']);
+              if (psResult.exitCode == 0) {
+                processName = (psResult.stdout as String).trim();
+              }
+            } catch (_) {}
+            debugPrint('[BackendProcess] Port $port in use by PID $pid ($processName)');
+            return PortConflictInfo(pid: pid, processName: processName, port: port);
           }
-          await Future.delayed(const Duration(seconds: 1));
         }
       }
     } catch (e) {
-      debugPrint('[BackendProcess] Port cleanup failed (non-fatal): $e');
-      _appendOutput('[startup] Port cleanup check failed (non-fatal): $e');
+      debugPrint('[BackendProcess] Port check failed (non-fatal): $e');
+    }
+    return null;
+  }
+
+  Future<bool> killProcessOnPort(PortConflictInfo conflict) async {
+    debugPrint('[BackendProcess] Killing PID ${conflict.pid} on port ${conflict.port}...');
+    _appendOutput('[startup] User confirmed — killing PID ${conflict.pid} (${conflict.processName})');
+
+    try {
+      if (Platform.isWindows) {
+        final result = await Process.run('taskkill', ['/F', '/PID', conflict.pid]);
+        if (result.exitCode != 0) {
+          _appendOutput('[startup] taskkill failed: ${result.stderr}');
+          return false;
+        }
+      } else {
+        final result = await Process.run('kill', ['-9', conflict.pid]);
+        if (result.exitCode != 0) {
+          _appendOutput('[startup] kill failed: ${result.stderr}');
+          return false;
+        }
+      }
+      await Future.delayed(const Duration(seconds: 1));
+      return true;
+    } catch (e) {
+      debugPrint('[BackendProcess] Kill failed: $e');
+      _appendOutput('[startup] Kill failed: $e');
+      return false;
     }
   }
 
@@ -340,7 +387,22 @@ class BackendProcessService {
 
     final backendDir = File(_backendPath!).parent.path;
 
-    await _killExistingOnPort(5000);
+    _portConflict = null;
+    final conflict = await checkPortConflict(5000);
+    if (conflict != null) {
+      if (conflict.isIdentityAgent) {
+        _appendOutput('[startup] Found stale Identity Agent process (PID ${conflict.pid}) — auto-killing');
+        await killProcessOnPort(conflict);
+      } else {
+        _appendOutput('[startup] Port 5000 is in use by ${conflict.processName} (PID ${conflict.pid})');
+        _portConflict = conflict;
+        _startupError =
+            'Port 5000 is already in use by "${conflict.processName}" (PID ${conflict.pid}).\n\n'
+            'Identity Agent needs port 5000 to run its backend.\n'
+            'You can stop that application and retry, or allow Identity Agent to close it.';
+        return false;
+      }
+    }
 
     final pythonBin = await _findPythonBinary(backendDir);
     if (pythonBin == null) {

@@ -270,6 +270,9 @@ class _AgentRouterState extends State<AgentRouter> {
   }
 
   void _showBackendErrorDialog(BuildContext context, String error) {
+    final conflict = BackendProcessService.instance.portConflict;
+    final isPortConflict = conflict != null;
+
     showDialog(
       context: context,
       barrierDismissible: true,
@@ -277,16 +280,23 @@ class _AgentRouterState extends State<AgentRouter> {
         backgroundColor: const Color(0xFF1A1A2E),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(8),
-          side: const BorderSide(color: Color(0xFFFF4444), width: 1),
+          side: BorderSide(
+            color: isPortConflict ? const Color(0xFFFF8800) : const Color(0xFFFF4444),
+            width: 1,
+          ),
         ),
-        title: const Row(
+        title: Row(
           children: [
-            Icon(Icons.warning_amber_rounded, color: Color(0xFFFF4444), size: 24),
-            SizedBox(width: 8),
+            Icon(
+              isPortConflict ? Icons.swap_horiz_rounded : Icons.warning_amber_rounded,
+              color: isPortConflict ? const Color(0xFFFF8800) : const Color(0xFFFF4444),
+              size: 24,
+            ),
+            const SizedBox(width: 8),
             Text(
-              'BACKEND ERROR',
+              isPortConflict ? 'PORT CONFLICT' : 'BACKEND ERROR',
               style: TextStyle(
-                color: Color(0xFFFF4444),
+                color: isPortConflict ? const Color(0xFFFF8800) : const Color(0xFFFF4444),
                 fontSize: 16,
                 fontWeight: FontWeight.w700,
                 fontFamily: 'monospace',
@@ -311,31 +321,62 @@ class _AgentRouterState extends State<AgentRouter> {
                     height: 1.4,
                   ),
                 ),
-                const SizedBox(height: 16),
-                const Text(
-                  'The Identity Agent backend could not be started. '
-                  'Identity creation and other core operations will not work until this is resolved.',
-                  style: TextStyle(
-                    color: Color(0xFF808080),
-                    fontSize: 11,
-                    fontFamily: 'monospace',
+                if (!isPortConflict) ...[
+                  const SizedBox(height: 16),
+                  const Text(
+                    'The Identity Agent backend could not be started. '
+                    'Identity creation and other core operations will not work until this is resolved.',
+                    style: TextStyle(
+                      color: Color(0xFF808080),
+                      fontSize: 11,
+                      fontFamily: 'monospace',
+                    ),
                   ),
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  'A diagnostic log has been saved alongside the application.',
-                  style: TextStyle(
-                    color: Color(0xFF606060),
-                    fontSize: 10,
-                    fontFamily: 'monospace',
-                    fontStyle: FontStyle.italic,
+                  const SizedBox(height: 8),
+                  const Text(
+                    'A diagnostic log has been saved alongside the application.',
+                    style: TextStyle(
+                      color: Color(0xFF606060),
+                      fontSize: 10,
+                      fontFamily: 'monospace',
+                      fontStyle: FontStyle.italic,
+                    ),
                   ),
-                ),
+                ],
               ],
             ),
           ),
         ),
         actions: [
+          if (isPortConflict)
+            TextButton(
+              onPressed: () async {
+                Navigator.of(ctx).pop();
+                final killed = await BackendProcessService.instance.killProcessOnPort(conflict);
+                if (killed) {
+                  final started = await BackendProcessService.instance.start();
+                  if (started) {
+                    _backendStartupError = null;
+                  } else {
+                    _backendStartupError = BackendProcessService.instance.startupError;
+                    _showedBackendError = false;
+                  }
+                } else {
+                  _backendStartupError = 'Failed to close "${conflict.processName}". '
+                      'Please close it manually and try again.';
+                  _showedBackendError = false;
+                }
+                setState(() {});
+              },
+              child: const Text(
+                'CLOSE IT AND RETRY',
+                style: TextStyle(
+                  color: Color(0xFFFF8800),
+                  fontFamily: 'monospace',
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
           TextButton(
             onPressed: () async {
               Navigator.of(ctx).pop();
