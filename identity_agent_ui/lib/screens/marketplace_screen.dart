@@ -275,6 +275,25 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
     );
   }
 
+  String _dockerDownloadUrl() {
+    final docker = _healthInfo?['docker'] as Map<String, dynamic>?;
+    final platform = docker?['platform'] as String? ?? '';
+    final arch = docker?['architecture'] as String? ?? 'amd64';
+
+    if (platform == 'windows') {
+      if (arch == 'arm64') {
+        return 'https://desktop.docker.com/win/main/arm64/Docker%20Desktop%20Installer.exe';
+      }
+      return 'https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe';
+    } else if (platform == 'darwin') {
+      if (arch == 'arm64') {
+        return 'https://desktop.docker.com/mac/main/arm64/Docker.dmg';
+      }
+      return 'https://desktop.docker.com/mac/main/amd64/Docker.dmg';
+    }
+    return 'https://docs.docker.com/engine/install/';
+  }
+
   Widget _buildDockerSetup() {
     final docker = _healthInfo?['docker'] as Map<String, dynamic>?;
     final installed = docker?['installed'] == true;
@@ -294,7 +313,7 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
                 ),
                 const SizedBox(height: 24),
                 Text(
-                  installed ? 'Docker is installed but not running' : 'Docker is needed for sandboxed apps',
+                  installed ? 'Docker is installed but not running' : 'Docker Desktop needed for sandboxed apps',
                   style: const TextStyle(
                     color: AppColors.textPrimary,
                     fontSize: 16,
@@ -306,8 +325,8 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
                 const SizedBox(height: 12),
                 Text(
                   installed
-                      ? 'Sandboxed apps run in isolated Docker containers for security.\nStart Docker Desktop and then tap the button below.'
-                      : 'Sandboxed apps run in isolated Docker containers for security.\nDocker Desktop is free for personal use.',
+                      ? 'Open Docker Desktop on your computer and wait for it to fully start (the whale icon in your taskbar should stop animating), then tap Check Again.'
+                      : 'Sandboxed apps run in isolated Docker containers for security.\nDocker Desktop is free to download and install.',
                   style: const TextStyle(
                     color: AppColors.textSecondary,
                     fontSize: 13,
@@ -317,23 +336,26 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 24),
-                if (installed)
+                if (!installed)
                   _buildDockerActionButton(
-                    icon: Icons.refresh,
-                    label: 'CHECK AGAIN',
-                    onPressed: _loadData,
-                  )
-                else
-                  _buildDockerActionButton(
-                    icon: Icons.open_in_new,
-                    label: 'GET DOCKER DESKTOP',
+                    icon: Icons.download_rounded,
+                    label: 'DOWNLOAD DOCKER DESKTOP',
                     onPressed: () async {
-                      final url = Uri.parse('https://www.docker.com/products/docker-desktop/');
                       try {
-                        await launchUrl(url, mode: LaunchMode.externalApplication);
+                        await launchUrl(
+                          Uri.parse(_dockerDownloadUrl()),
+                          mode: LaunchMode.externalApplication,
+                        );
                       } catch (_) {}
                     },
                   ),
+                const SizedBox(height: 12),
+                _buildDockerActionButton(
+                  icon: Icons.refresh,
+                  label: 'CHECK AGAIN',
+                  onPressed: _loadData,
+                  secondary: !installed,
+                ),
                 const SizedBox(height: 32),
                 Container(
                   padding: const EdgeInsets.all(16),
@@ -383,9 +405,10 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
     required IconData icon,
     required String label,
     required VoidCallback onPressed,
+    bool secondary = false,
   }) {
     return SizedBox(
-      width: 260,
+      width: 280,
       height: 44,
       child: ElevatedButton.icon(
         onPressed: onPressed,
@@ -399,8 +422,9 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
           ),
         ),
         style: ElevatedButton.styleFrom(
-          backgroundColor: AppColors.accent,
-          foregroundColor: AppColors.primary,
+          backgroundColor: secondary ? AppColors.surface : AppColors.accent,
+          foregroundColor: secondary ? AppColors.textSecondary : AppColors.primary,
+          side: secondary ? const BorderSide(color: AppColors.border) : null,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         ),
       ),
