@@ -48,6 +48,9 @@ The system uses a standardized topology model based on three topological states 
 -   **Mutual OOBI Contact Relationships:** Supports mutual relationships with jCard schema for rich contact information and reverse introduction flows.
 -   **IPv4 Loopback for Desktop:** All desktop backend connections use `127.0.0.1` (not `localhost`) to avoid Windows IPv6 resolution issues where `localhost` can map to `::1` while the Go backend binds IPv4 only.
 -   **Backend Startup Error Dialog:** Desktop builds show a modal error dialog with RETRY button if the bundled Go backend fails to start (missing binary, Python not installed, dependency issues).
+-   **Port Conflict Handling:** On startup, checks if port 5000 is occupied. Stale Identity Agent processes are auto-killed; other apps trigger a user confirmation dialog with "CLOSE IT AND RETRY" option.
+-   **libsodium Bundling (Windows):** `libsodium.dll` is downloaded from the official release and bundled into the embedded Python dir, backend dir, and keri-driver dir. The KERI driver's `server.py` has Windows-specific detection logic to find the DLL.
+-   **Docker Setup UX (APPS tab):** When Docker is not available, the marketplace shows a friendly setup guide instead of an error banner, with a "GET DOCKER DESKTOP" or "CHECK AGAIN" button and an explanatory "Why Docker?" section.
 
 ### Sandboxed App Marketplace (Desktop-Only)
 

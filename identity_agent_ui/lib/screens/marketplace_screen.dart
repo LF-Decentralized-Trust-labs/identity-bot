@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
+import 'package:url_launcher/url_launcher.dart';
 import '../theme/app_theme.dart';
 import '../config/agent_config.dart';
 import '../models/sandbox_app.dart';
@@ -148,7 +149,6 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
                     SingleChildScrollView(
                       child: Column(
                         children: [
-                          if (_dockerNotAvailable) _buildDockerWarning(),
                           if (_loading)
                             const Padding(
                               padding: EdgeInsets.all(40),
@@ -225,14 +225,16 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _buildHeader(),
-            if (_dockerNotAvailable) _buildDockerWarning(),
-            Expanded(
-              child: _loading
-                  ? const Center(child: CircularProgressIndicator(color: AppColors.accent))
-                  : _error != null
-                      ? _buildError()
-                      : _buildAppGrid(),
-            ),
+            if (_loading)
+              const Expanded(
+                child: Center(child: CircularProgressIndicator(color: AppColors.accent)),
+              )
+            else if (_error != null)
+              Expanded(child: _buildError())
+            else if (_dockerNotAvailable)
+              _buildDockerSetup()
+            else
+              Expanded(child: _buildAppGrid()),
           ],
         ),
       ),
@@ -273,48 +275,134 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
     );
   }
 
-  Widget _buildDockerWarning() {
+  Widget _buildDockerSetup() {
     final docker = _healthInfo?['docker'] as Map<String, dynamic>?;
     final installed = docker?['installed'] == true;
-    final errorMsg = docker?['error'] ?? 'Docker is not available';
 
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.warning.withOpacity(0.15),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppColors.warning.withOpacity(0.3)),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.warning_amber_rounded, color: AppColors.warning, size: 24),
-          const SizedBox(width: 12),
-          Expanded(
+    return Expanded(
+      child: Center(
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
+                Icon(
+                  installed ? Icons.play_circle_outline : Icons.download_rounded,
+                  size: 64,
+                  color: AppColors.accent.withOpacity(0.5),
+                ),
+                const SizedBox(height: 24),
                 Text(
-                  installed ? 'Docker Not Running' : 'Docker Required',
+                  installed ? 'Docker is installed but not running' : 'Docker is needed for sandboxed apps',
                   style: const TextStyle(
-                    color: AppColors.warning,
+                    color: AppColors.textPrimary,
+                    fontSize: 16,
                     fontWeight: FontWeight.bold,
                     fontFamily: 'monospace',
                   ),
+                  textAlign: TextAlign.center,
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 12),
                 Text(
-                  errorMsg.toString(),
+                  installed
+                      ? 'Sandboxed apps run in isolated Docker containers for security.\nStart Docker Desktop and then tap the button below.'
+                      : 'Sandboxed apps run in isolated Docker containers for security.\nDocker Desktop is free for personal use.',
                   style: const TextStyle(
                     color: AppColors.textSecondary,
-                    fontSize: 12,
+                    fontSize: 13,
                     fontFamily: 'monospace',
+                    height: 1.5,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 24),
+                if (installed)
+                  _buildDockerActionButton(
+                    icon: Icons.refresh,
+                    label: 'CHECK AGAIN',
+                    onPressed: _loadData,
+                  )
+                else
+                  _buildDockerActionButton(
+                    icon: Icons.open_in_new,
+                    label: 'GET DOCKER DESKTOP',
+                    onPressed: () async {
+                      final url = Uri.parse('https://www.docker.com/products/docker-desktop/');
+                      try {
+                        await launchUrl(url, mode: LaunchMode.externalApplication);
+                      } catch (_) {}
+                    },
+                  ),
+                const SizedBox(height: 32),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: AppColors.surface,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  child: const Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Why Docker?',
+                        style: TextStyle(
+                          color: AppColors.accent,
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                      SizedBox(height: 8),
+                      Text(
+                        'The Identity Agent marketplace lets you run third-party apps '
+                        'in sandboxed containers. Docker provides the isolation layer '
+                        'that keeps these apps from accessing your files or network '
+                        'without permission. Your core identity features (KERI, contacts, '
+                        'OOBI sharing) work without Docker.',
+                        style: TextStyle(
+                          color: AppColors.textMuted,
+                          fontSize: 11,
+                          fontFamily: 'monospace',
+                          height: 1.5,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
             ),
           ),
-        ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDockerActionButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback onPressed,
+  }) {
+    return SizedBox(
+      width: 260,
+      height: 44,
+      child: ElevatedButton.icon(
+        onPressed: onPressed,
+        icon: Icon(icon, size: 18),
+        label: Text(
+          label,
+          style: const TextStyle(
+            fontFamily: 'monospace',
+            fontWeight: FontWeight.w600,
+            letterSpacing: 1,
+          ),
+        ),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: AppColors.accent,
+          foregroundColor: AppColors.primary,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ),
       ),
     );
   }
