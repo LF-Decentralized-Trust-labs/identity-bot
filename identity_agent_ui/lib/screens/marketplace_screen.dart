@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 import '../theme/app_theme.dart';
 import '../config/agent_config.dart';
@@ -133,6 +134,90 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (kIsWeb) {
+      return Scaffold(
+        backgroundColor: AppColors.primary,
+        body: SafeArea(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildHeader(),
+              Expanded(
+                child: Stack(
+                  children: [
+                    SingleChildScrollView(
+                      child: Column(
+                        children: [
+                          if (_dockerNotAvailable) _buildDockerWarning(),
+                          if (_loading)
+                            const Padding(
+                              padding: EdgeInsets.all(40),
+                              child: CircularProgressIndicator(color: AppColors.accent),
+                            )
+                          else if (_error != null)
+                            _buildError()
+                          else
+                            _buildAppGrid(),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      color: Colors.black.withOpacity(0.7),
+                      child: Center(
+                        child: Container(
+                          padding: const EdgeInsets.all(32),
+                          decoration: BoxDecoration(
+                            color: AppColors.surface,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: AppColors.accent.withOpacity(0.5)),
+                          ),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.desktop_mac,
+                                size: 48,
+                                color: AppColors.accent.withOpacity(0.6),
+                              ),
+                              const SizedBox(height: 20),
+                              Text(
+                                'SANDBOXED APPS UNAVAILABLE ON WEB',
+                                style: TextStyle(
+                                  color: AppColors.accent.withOpacity(0.8),
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                  fontFamily: 'monospace',
+                                  letterSpacing: 1.2,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                              const SizedBox(height: 16),
+                              Text(
+                                'Sandboxed app execution requires a native desktop environment.\n\n'
+                                'Install the Identity Agent desktop application for Windows, macOS, or Linux to access and launch apps.',
+                                style: TextStyle(
+                                  color: AppColors.textSecondary,
+                                  fontSize: 13,
+                                  fontFamily: 'monospace',
+                                  height: 1.5,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
       backgroundColor: AppColors.primary,
       body: SafeArea(

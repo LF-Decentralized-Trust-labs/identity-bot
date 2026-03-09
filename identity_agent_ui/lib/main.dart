@@ -456,7 +456,7 @@ class _AgentMainScreenState extends State<AgentMainScreen> {
         entityType: widget.entityType,
         serverUrl: widget.serverUrl,
       ),
-      if (_isDesktop) MarketplaceScreen(serverUrl: widget.serverUrl),
+      MarketplaceScreen(serverUrl: widget.serverUrl),
     ];
   }
 
@@ -531,12 +531,11 @@ class _AgentMainScreenState extends State<AgentMainScreen> {
               activeIcon: Icon(Icons.settings),
               label: 'SETTINGS',
             ),
-            if (_isDesktop)
-              const BottomNavigationBarItem(
-                icon: Icon(Icons.apps_outlined),
-                activeIcon: Icon(Icons.apps),
-                label: 'APPS',
-              ),
+            const BottomNavigationBarItem(
+              icon: Icon(Icons.apps_outlined),
+              activeIcon: Icon(Icons.apps),
+              label: 'APPS',
+            ),
           ],
         ),
       ),
