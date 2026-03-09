@@ -24,6 +24,8 @@ import 'services/backend_process_service.dart';
 import 'config/agent_config.dart';
 import 'bridge/keri_bridge.dart';
 
+String? _backendStartupError;
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -32,8 +34,8 @@ void main() async {
     final started = await BackendProcessService.instance.start();
     debugPrint('[Agent] Backend process started: $started');
     if (!started) {
-      final err = BackendProcessService.instance.startupError;
-      debugPrint('[Agent] Backend startup error: $err');
+      _backendStartupError = BackendProcessService.instance.startupError;
+      debugPrint('[Agent] Backend startup error: $_backendStartupError');
     }
   }
 
@@ -86,6 +88,7 @@ class _AgentRouterState extends State<AgentRouter> {
   EntityType? _selectedEntityType;
   String? _serverUrl;
   String? _error;
+  bool _showedBackendError = false;
 
   @override
   void initState() {
@@ -248,6 +251,93 @@ class _AgentRouterState extends State<AgentRouter> {
     super.dispose();
   }
 
+  void _showBackendErrorDialog(BuildContext context, String error) {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+          side: const BorderSide(color: Color(0xFFFF4444), width: 1),
+        ),
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Color(0xFFFF4444), size: 24),
+            SizedBox(width: 8),
+            Text(
+              'BACKEND ERROR',
+              style: TextStyle(
+                color: Color(0xFFFF4444),
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                fontFamily: 'monospace',
+                letterSpacing: 1.2,
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              error,
+              style: const TextStyle(
+                color: Color(0xFFB0B0B0),
+                fontSize: 13,
+                fontFamily: 'monospace',
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'The Identity Agent backend could not be started. '
+              'Identity creation and other core operations will not work until this is resolved.',
+              style: TextStyle(
+                color: Color(0xFF808080),
+                fontSize: 12,
+                fontFamily: 'monospace',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              Navigator.of(ctx).pop();
+              final started = await BackendProcessService.instance.start();
+              if (started) {
+                _backendStartupError = null;
+              } else {
+                _backendStartupError = BackendProcessService.instance.startupError;
+                _showedBackendError = false;
+                setState(() {});
+              }
+            },
+            child: const Text(
+              'RETRY',
+              style: TextStyle(
+                color: Color(0xFF00FF88),
+                fontFamily: 'monospace',
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text(
+              'DISMISS',
+              style: TextStyle(
+                color: Color(0xFF808080),
+                fontFamily: 'monospace',
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     switch (_step) {
@@ -282,6 +372,12 @@ class _AgentRouterState extends State<AgentRouter> {
         );
 
       case OnboardingStep.modeSelection:
+        if (_backendStartupError != null && !_showedBackendError) {
+          _showedBackendError = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _showBackendErrorDialog(context, _backendStartupError!);
+          });
+        }
         return ModeSelectionScreen(onModeSelected: _onModeSelected);
 
       case OnboardingStep.entityTypeSelection:

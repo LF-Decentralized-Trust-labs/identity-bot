@@ -44,6 +44,8 @@ The system uses a standardized topology model based on three topological states 
 -   **AID Hierarchy:** Differentiates between delegated child AIDs for "Remote WITHOUT Keys" and retaining primary parent AIDs for "Remote WITH Keys."
 -   **Consent-based Contact Flow:** Implements a two-step resolve and consent process for adding contacts.
 -   **Mutual OOBI Contact Relationships:** Supports mutual relationships with jCard schema for rich contact information and reverse introduction flows.
+-   **IPv4 Loopback for Desktop:** All desktop backend connections use `127.0.0.1` (not `localhost`) to avoid Windows IPv6 resolution issues where `localhost` can map to `::1` while the Go backend binds IPv4 only.
+-   **Backend Startup Error Dialog:** Desktop builds show a modal error dialog with RETRY button if the bundled Go backend fails to start (missing binary, Python not installed, dependency issues).
 
 ### Sandboxed App Marketplace (Desktop-Only)
 

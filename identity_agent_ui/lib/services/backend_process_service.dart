@@ -185,7 +185,11 @@ class BackendProcessService {
 
     _backendPath = _findBackendBinary();
     if (_backendPath == null) {
-      debugPrint('[BackendProcess] Backend binary not found — running in development mode?');
+      _startupError =
+          'Backend binary (identity-agent-core) was not found in the application bundle. '
+          'The app may not have been packaged correctly. '
+          'If running in development mode, start the backend manually.';
+      debugPrint('[BackendProcess] Backend binary not found — $_startupError');
       return false;
     }
 
@@ -279,7 +283,7 @@ class BackendProcessService {
     for (int i = 0; i < 30; i++) {
       try {
         final request = await client.getUrl(
-          Uri.parse('http://localhost:5000/api/health'),
+          Uri.parse('http://127.0.0.1:5000/api/health'),
         );
         final response = await request.close();
         if (response.statusCode == 200) {
