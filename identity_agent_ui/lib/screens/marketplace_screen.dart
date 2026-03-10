@@ -195,6 +195,99 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
     }
   }
 
+  Future<void> _launchInBrowser(SandboxApp app) async {
+    try {
+      final res = await http.get(Uri.parse('$_baseUrl/api/apps/${app.id}/display'));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        final displayUrl = data['display_url'] as String?;
+        if (displayUrl != null) {
+          _showBrowserSelector(displayUrl);
+        } else {
+          _showError('Display URL not available');
+        }
+      } else {
+        _showError('Failed to get display URL');
+      }
+    } catch (e) {
+      _showError('Failed to launch: $e');
+    }
+  }
+
+  void _showBrowserSelector(String url) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: const Text('Choose Browser', style: TextStyle(color: AppColors.textPrimary)),
+        content: SizedBox(
+          width: 300,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('Open app at: $url', style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+              const SizedBox(height: 16),
+              ListView(
+                shrinkWrap: true,
+                children: [
+                  _browserOption('Default Browser', url),
+                  _browserOption('Chrome', url),
+                  _browserOption('Firefox', url),
+                  _browserOption('Edge', url),
+                  _browserOption('Safari', url),
+                ],
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+        ],
+      ),
+    );
+  }
+
+  Widget _browserOption(String name, String url) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: InkWell(
+        onTap: () async {
+          Navigator.pop(context);
+          await _openInBrowser(url, name);
+        },
+        child: Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            border: Border.all(color: AppColors.border),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Text(name, style: const TextStyle(color: AppColors.textPrimary)),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openInBrowser(String url, String browserName) async {
+    try {
+      final uri = Uri.parse(url);
+      if (browserName == 'Default Browser') {
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        } else {
+          _showError('Cannot open browser');
+        }
+      } else {
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        } else {
+          _showError('Cannot open $browserName');
+        }
+      }
+    } catch (e) {
+      _showError('Failed to open browser: $e');
+    }
+  }
+
   bool _isAppInstalling(SandboxApp app) {
     if (app.isInstalling) return true;
     final progress = _installProgress[app.id];
@@ -477,6 +570,8 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
           ),
         if (app.isInstalled && !isRunning) ...[
           _primaryButton('LAUNCH', () => _launchApp(app)),
+          const SizedBox(width: 4),
+          _primaryButton('BROWSER', () => _launchInBrowser(app)),
           const SizedBox(width: 4),
           _iconButton(Icons.delete_outline, AppColors.error.withOpacity(0.7), () => _uninstallApp(app), 'Uninstall'),
         ],
