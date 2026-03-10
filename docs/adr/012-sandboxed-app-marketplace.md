@@ -2,20 +2,55 @@
 
 **Date:** 2025-07-14
 **Status:** Accepted
+**Amended:** 2026-03-10 — Replaced Docker Desktop with Podman as the container runtime (see §Amendment)
 
 ## Context
 
 The Grape ID Identity Agent currently manages self-sovereign identity (KERI AIDs, contacts, OOBIs, tunneling). The next evolution is to become a **platform** — enabling users to run third-party applications inside sandboxed environments where the agent controls all network egress, enforces policy, and mediates resource access.
 
-This is a desktop-only feature (Phase 1). Mobile platforms lack Docker and the process isolation primitives required for meaningful sandboxing.
+This is a desktop-only feature (Phase 1). Mobile platforms lack container runtimes and the process isolation primitives required for meaningful sandboxing.
 
-The marketplace must support two fundamentally different app types: Docker containers (for web and GUI applications) and compiled binaries (for lightweight agent-native tools). Both must be network-sandboxed, policy-governed, and displayable in the Flutter UI.
+The marketplace must support two fundamentally different app types: OCI containers (for web and GUI applications) and compiled binaries (for lightweight agent-native tools). Both must be network-sandboxed, policy-governed, and displayable in the Flutter UI.
 
 Four demo apps prove the architecture works end-to-end:
-1. **Chromium** — GUI app streaming via KasmVNC (Docker)
-2. **Open WebUI** — Web app proxying with credential injection (Docker)
-3. **OpenClaw** — Complex containerized TypeScript/Node.js app (Docker)
+1. **Chromium** — GUI app streaming via KasmVNC (OCI container)
+2. **Open WebUI** — Web app proxying with credential injection (OCI container)
+3. **OpenClaw** — Complex containerized TypeScript/Node.js app (OCI container)
 4. **Go Demo App** — Agent API communication channel (compiled binary)
+
+## Amendment: Docker Desktop → Podman
+
+### Rationale
+
+Docker Desktop requires a commercial license for organizations with >250 employees or >$10M revenue and introduces installation friction (background daemon, system tray app). Podman provides an equivalent OCI-compliant container runtime that is:
+
+- **Free and open source** — no licensing concerns, Apache 2.0 license
+- **Daemonless** — no background service on Linux; on macOS/Windows, `podman machine` manages a lightweight VM only when needed
+- **Rootless by default** — better security posture than Docker's default root-mode
+- **CLI-compatible** — `podman` accepts the same commands as `docker` (drop-in replacement)
+- **OCI-compliant** — runs the same container images from the same registries
+
+### What Changes
+
+| Component | Before (Docker) | After (Podman) |
+|-----------|-----------------|----------------|
+| Container CLI | `docker` | `podman` |
+| Daemon detection | Docker socket (`/var/run/docker.sock`, `\\.\pipe\docker_engine`) | `podman machine info` / `podman info` |
+| macOS/Windows VM | Docker Desktop (hidden HyperKit/Hyper-V VM) | `podman machine` (QEMU on macOS, WSL2 on Windows) |
+| Networking | Docker bridge network + `docker network create` | Podman CNI/Netavark networks + `podman network create` |
+| Host access from container | `host.docker.internal` | `host.containers.internal` (Podman 4.1+) |
+| Go source file | `docker_runtime.go` | `container_runtime.go` |
+| Flutter setup UI | "Docker Desktop needed" | "Podman needed" with platform-specific install guide |
+| Image labels | `identity-agent: "true"` | `identity-agent: "true"` (unchanged) |
+| Manifest format | Unchanged (OCI images) | Unchanged (OCI images) |
+| SQLite schema | Unchanged | Unchanged |
+
+### Known Gotchas
+
+1. **WSL2 on Windows**: Podman requires WSL2. If not enabled, the Go agent cannot silently install it — requires admin (UAC) prompt and reboot. The agent must detect this and guide the user.
+2. **First-run initialization**: `podman machine init` + `podman machine start` can take several minutes on first run. The UI must show progress and explain what's happening.
+3. **Rootless volume permissions**: Mounting host directories into rootless Podman containers can hit UID/GID mapping issues. The agent must handle `--userns=keep-id` or explicit UID mapping for volume mounts.
+4. **Networking differences**: Podman uses Netavark (default in Podman 4+) or CNI for container networking. DNS resolution between containers and `host.containers.internal` may behave differently than Docker's `host.docker.internal`. The Go runtime must test and handle platform-specific networking.
 
 ## Decision
 
@@ -23,18 +58,18 @@ Four demo apps prove the architecture works end-to-end:
 
 | Type | Examples | How It Runs | Display Method |
 |------|---------|-------------|---------------|
-| **Docker (web UI)** | Open WebUI, OpenClaw | Docker container, agent reverse-proxies HTTP port | WebView in Flutter (via `flutter_inappwebview`) |
-| **Docker (desktop GUI)** | Chromium (kasmweb) | Docker container with built-in VNC/web streaming | WebView in Flutter |
+| **Container (web UI)** | Open WebUI, OpenClaw | OCI container via Podman, agent reverse-proxies HTTP port | WebView in Flutter (via `flutter_inappwebview`) |
+| **Container (desktop GUI)** | Chromium (kasmweb) | OCI container with built-in VNC/web streaming via Podman | WebView in Flutter |
 | **Compiled binary** | Go Demo App | Binary executed by agent as child process, sandboxed via network namespace (Linux) or proxy env vars (macOS/Windows) | Native Flutter terminal widget |
 
 ### 2. Data Flow
 
 ```
 OUTBOUND (Egress):
-  Sandboxed App (Docker container or compiled binary)
+  Sandboxed App (OCI container or compiled binary)
     → Network boundary:
         Layer 1: HTTP_PROXY / HTTPS_PROXY env vars → Caddy proxy
-        Layer 2: iptables / Docker network rules DROP all egress EXCEPT proxy_port + dns_port
+        Layer 2: iptables / Podman network rules DROP all egress EXCEPT proxy_port + dns_port
         (both layers required — env vars alone are bypassable)
     → Identity Agent Caddy Proxy (managed subprocess, same pattern as keri_driver.go)
         → Policy Engine:
@@ -67,8 +102,8 @@ RESOURCE REQUEST (in-sandbox channel):
     → App notified via WebSocket or polling
 
 DISPLAY:
-  Docker GUI app (kasmweb): Container web UI → Caddy reverse proxy → Flutter WebView
-  Docker web app (Open WebUI, OpenClaw): Container HTTP port → Caddy reverse proxy → Flutter WebView
+  Container GUI app (kasmweb): Container web UI → Caddy reverse proxy → Flutter WebView
+  Container web app (Open WebUI, OpenClaw): Container HTTP port → Caddy reverse proxy → Flutter WebView
   Compiled binary (Go Demo): stdout/stdin → Go WebSocket pipe → Flutter terminal widget
   Fallback (all): "Open in browser" button loads URL in system default browser
 ```
@@ -88,37 +123,37 @@ Caddy runs as a **managed child process** (same pattern as `keri_driver.go` — 
 
 #### Traffic Coverage
 
-- **DNS**: All container DNS resolves through agent's DNS forwarder (explicit `--dns {agent_dns_ip}` on container create — Docker's default `127.0.0.11` must be overridden)
+- **DNS**: All container DNS resolves through agent's DNS forwarder (explicit `--dns {agent_dns_ip}` on container create — Podman's default DNS must be overridden)
 - **HTTP**: Forward proxy via Caddy
 - **HTTPS**: MITM (Mode A) or SNI inspection (Mode B) via Caddy
-- **All other traffic**: Two-layer lockdown — Docker network rules + iptables DROP everything except proxy_port and dns_port. **Note: iptables rules only work on Linux hosts.** On macOS/Windows, Docker runs containers inside a hidden Linux VM, so host iptables don't apply. On those platforms, we rely on Docker network isolation (weaker but functional for demos).
+- **All other traffic**: Two-layer lockdown — Podman network rules + iptables DROP everything except proxy_port and dns_port. **Note: iptables rules only work on Linux hosts.** On macOS/Windows, Podman runs containers inside a VM (QEMU/WSL2), so host iptables don't apply. On those platforms, we rely on Podman network isolation (weaker but functional for demos).
 - **SOCKS5**: Deferred to V2
 
 #### Network Bandwidth Limits (per-app)
 
 - `egress_kbps` and `ingress_kbps` caps in manifest
-- Enforced via Docker network controls or `tc` (Linux)
+- Enforced via Podman resource controls or `tc` (Linux)
 - Prevents data exfiltration, crypto mining, DDoS from sandboxed apps
 
 #### Wildcard Domain Matching
 
 `*.example.com` uses **single-level suffix match** (like TLS certificates). `*.google.com` matches `www.google.com` but NOT `a.b.google.com`. To match subdomains at any depth, use `**.google.com`.
 
-### 4. Docker Networking — Platform-Specific Proxy Routing
+### 4. Container Networking — Platform-Specific Proxy Routing
 
-On Linux, Docker runs natively. `HTTP_PROXY=http://localhost:{port}` works because the container shares the host's network stack (when using host networking) or the proxy listens on the bridge gateway.
+On Linux, Podman runs natively (daemonless, rootless). `HTTP_PROXY=http://localhost:{port}` works when the container shares the host's network stack or the proxy listens on the bridge gateway.
 
-On **macOS and Windows**, Docker runs inside a lightweight hidden VM. `localhost` inside a container points to the container itself, not the host. The Go `docker_runtime.go` must inject OS-aware proxy environment variables:
+On **macOS and Windows**, Podman runs containers inside a managed VM (`podman machine`). `localhost` inside a container points to the container itself, not the host. The Go `container_runtime.go` must inject OS-aware proxy environment variables:
 - **Linux**: `HTTP_PROXY=http://localhost:{proxy_port}`
-- **macOS/Windows**: `HTTP_PROXY=http://host.docker.internal:{proxy_port}`
+- **macOS/Windows**: `HTTP_PROXY=http://host.containers.internal:{proxy_port}`
 
 Similarly, the `agent.internal` DNS alias must resolve to the correct host IP:
-- **Linux**: `--add-host agent.internal:172.17.0.1` (Docker bridge gateway) or host IP
-- **macOS/Windows**: `--add-host agent.internal:host-gateway` (Docker resolves this to the host)
+- **Linux**: `--add-host agent.internal:{bridge_gateway_ip}` or host IP
+- **macOS/Windows**: `--add-host agent.internal:host-gateway` (Podman resolves this to the host VM IP)
 
 ### 5. Agent API Endpoint — Internal Service Alias
 
-Every sandbox instance accesses the agent via `http://agent.internal` (Docker internal DNS alias). This decouples the port from the app — we can change ports without breaking apps, and support future services (policy, identity, vault).
+Every sandbox instance accesses the agent via `http://agent.internal` (container internal DNS alias). This decouples the port from the app — we can change ports without breaking apps, and support future services (policy, identity, vault).
 
 Environment variable: `IDENTITY_AGENT_API=http://agent.internal`
 
@@ -144,7 +179,7 @@ External API keys (OpenRouter, OpenAI, etc.) are **never stored inside sandbox c
 **V1 Implementation:**
 - OpenRouter API key entered in Identity Agent settings, stored in `settings.json` (existing persistence layer)
 - Proxy middleware matches requests to `openrouter.ai` and injects the key header
-- Open WebUI configured via Docker environment to use `http://agent.internal/llm/v1` as its API base URL
+- Open WebUI configured via container environment to use `http://agent.internal/llm/v1` as its API base URL
 - Future: dedicated credential management UI for multiple services
 
 ### 7. Policy Engine
@@ -174,7 +209,7 @@ The policy engine evaluates every outbound request and resource request against 
 2. App exceeds limit → **ask user** if they want to allocate more resources
 3. No user response within configurable timeout (default 60s) → **kill** (terminate sandbox, log with full context)
 
-Dynamic throttling (`docker update`, `nice`/`ionice`) deferred to V2 — introduces race conditions under load and cross-platform complexity.
+Dynamic throttling (`podman update`, `nice`/`ionice`) deferred to V2 — introduces race conditions under load and cross-platform complexity.
 
 ### 9. App Manifest Format
 
@@ -185,10 +220,10 @@ Dynamic throttling (`docker update`, `nice`/`ionice`) deferred to V2 — introdu
   "description": "Sandboxed web browser",
   "version": "1.0.0",
   "author": "KasmTech",
-  "execution_type": "docker",
+  "execution_type": "container",
   "display_method": "webview",
   "network_mode": "proxy_required",
-  "docker": {
+  "container": {
     "image": "kasmweb/chromium:latest",
     "ports": { "6901": "display" },
     "environment": {},
@@ -223,10 +258,10 @@ Dynamic throttling (`docker update`, `nice`/`ionice`) deferred to V2 — introdu
 **Manifest fields:**
 - `id` — unique app identifier
 - `name`, `description`, `version`, `author` — metadata
-- `execution_type` — `"docker"` or `"compiled"`
+- `execution_type` — `"container"` or `"compiled"` (formerly `"docker"` or `"compiled"`)
 - `display_method` — `"webview"` or `"terminal"`
 - `network_mode` — `"proxy_required"` (all traffic through proxy), `"proxy_optional"` (proxy available but not enforced), `"isolated"` (no network), `"local_only"` (only agent.internal)
-- `docker` — Docker-specific config (image, ports, environment, volumes)
+- `container` — OCI container config (image, ports, environment, volumes). Formerly `docker` key.
 - `binary` — compiled binary config (path, args, platform-specific paths)
 - `resources` — CPU, memory, disk, bandwidth limits
 - `network` — TLS mode, allowed/blocked domain lists
@@ -242,7 +277,7 @@ Dynamic throttling (`docker update`, `nice`/`ionice`) deferred to V2 — introdu
 | **macOS** | Best-effort | Proxy env vars only (HTTP_PROXY/HTTPS_PROXY). No network namespaces. A sophisticated binary can bypass by opening raw sockets. |
 | **Windows** | Best-effort | Proxy env vars only. Same limitation as macOS. |
 
-This is an explicit, documented limitation. The Go Demo App is purpose-built to use the Agent API properly and won't bypass. Docker containers have strong isolation on all platforms. True compiled binary isolation on non-Linux requires V2 work (sandboxing frameworks like `pledge`/`unveil` on macOS, AppContainers on Windows).
+This is an explicit, documented limitation. The Go Demo App is purpose-built to use the Agent API properly and won't bypass. OCI containers have strong isolation on all platforms. True compiled binary isolation on non-Linux requires V2 work (sandboxing frameworks like `pledge`/`unveil` on macOS, AppContainers on Windows).
 
 **Security implication**: Because compiled binaries can potentially bypass the proxy (especially on macOS/Windows), technical sandboxing alone is insufficient to protect users from malicious compiled apps. The long-term solution is a Decentralized App Audit & Trust Registry (see §FW-1 in Future Work).
 
@@ -270,8 +305,8 @@ CREATE TABLE apps (
     publisher_key TEXT,
     signature_algorithm TEXT,
     install_status TEXT DEFAULT 'available',
-    docker_image TEXT,
-    docker_image_size_bytes INTEGER,
+    container_image TEXT,
+    container_image_size_bytes INTEGER,
     binary_path TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -379,14 +414,27 @@ CREATE INDEX idx_events_timestamp ON events(timestamp);
 - **SQLite indexes**: On `instance_id`, `domain`, `timestamp`, `policy_action` from day one to keep queries fast
 - **UI filtering**: Filter by domain, status, time range. Held-for-review items always shown at top.
 
-### 13. Docker Prerequisite Check
+### 13. Container Runtime Prerequisite Check
 
-Not just checking if the Docker executable exists — must ping the Docker socket:
-- Linux: `unix:///var/run/docker.sock`
-- macOS: `unix:///var/run/docker.sock` (Docker Desktop)
-- Windows: Named pipe `//./pipe/docker_engine`
+Podman detection differs from Docker — there is no persistent daemon to ping. Instead:
 
-If Docker is installed but the daemon is not running, prompt user to launch Docker Desktop. Different message than "Docker not found."
+**Detection flow:**
+1. Find `podman` CLI executable (check `PATH`, platform-specific default locations)
+2. Run `podman info --format json` to verify Podman is functional
+3. On macOS/Windows: Check `podman machine info` to verify the VM is initialized and running
+4. If Podman is installed but the machine is not running, offer to start it (`podman machine start`)
+5. If Podman is not installed, show platform-specific install guidance
+
+**Platform-specific install paths:**
+- **Windows**: `winget install RedHat.Podman-Desktop` or download from podman-desktop.io. Requires WSL2 (may need admin + reboot).
+- **macOS**: `brew install podman` or download Podman Desktop from podman-desktop.io
+- **Linux**: Package manager (`apt install podman`, `dnf install podman`, etc.) — no VM needed, runs natively
+
+**Podman Machine lifecycle (macOS/Windows only):**
+- `podman machine init` — creates the VM (one-time, can take 2-5 minutes)
+- `podman machine start` — starts the VM (needed each session, ~10-30 seconds)
+- `podman machine stop` — stops the VM (on agent shutdown)
+- The Go agent manages this lifecycle automatically, showing progress in the UI
 
 ### 14. Open WebUI LLM Provider Configuration
 
@@ -398,12 +446,12 @@ Users can reconfigure Open WebUI to use other providers (OpenAI, local Ollama, e
 
 - **Go backend**: Sandbox package uses build tag `//go:build !mobile` so gomobile excludes it
 - **Flutter UI**: Marketplace tab gated behind `Platform.isWindows || Platform.isMacOS || Platform.isLinux`
-- **Codemagic**: Desktop workflows install Docker dependencies; mobile workflows skip entirely
+- **Codemagic**: Desktop workflows install Podman dependencies; mobile workflows skip entirely
 
 ### 16. Clean Shutdown Checklist
 
-1. Docker container stopped and removed
-2. Custom Docker network deleted
+1. Container stopped and removed (`podman stop`, `podman rm`)
+2. Custom Podman network deleted (`podman network rm`)
 3. Caddy proxy routes for this app removed
 4. Agent API endpoint for this app stopped
 5. SQLite instance status updated to `stopped`
@@ -415,7 +463,7 @@ Users can reconfigure Open WebUI to use other providers (OpenAI, local Ollama, e
 
 ### 17. Crash Recovery State Matrix (Startup Reconciliation)
 
-| Docker Container | sandbox.db Instance | Action |
+| Container State | sandbox.db Instance | Action |
 |-----------------|---------------------|--------|
 | Running | Missing | Register instance in DB, attempt graceful stop |
 | Stopped | Running | Mark instance stopped in DB, clean up network/ports |
@@ -428,14 +476,16 @@ Users can reconfigure Open WebUI to use other providers (OpenAI, local Ollama, e
 3. If no lockfile but proxy port is in use, find and kill the process holding it
 4. Write new Caddy PID to lockfile on successful launch
 
-All containers managed by the agent are labeled with `identity-agent=true` for discovery.
+All containers managed by the agent are labeled with `identity-agent=true` for discovery via `podman ps --filter label=identity-agent=true`.
 
 ## Consequences
 
 ### Positive
 
 - **Platform evolution**: The Identity Agent becomes a platform, not just an identity manager. Apps run in controlled environments with full network visibility.
-- **Strong Docker isolation**: Containers are network-sandboxed on all platforms via proxy env vars + Docker network rules. Linux adds iptables for defense-in-depth.
+- **Strong container isolation**: Containers are network-sandboxed on all platforms via proxy env vars + Podman network rules. Linux adds iptables for defense-in-depth.
+- **No licensing concerns**: Podman is Apache 2.0 licensed — no commercial restrictions unlike Docker Desktop.
+- **Rootless by default**: Podman's rootless mode provides better security posture than Docker's default root-mode operation.
 - **Credential safety**: API keys never enter sandbox containers. The proxy-injection pattern means even a compromised container cannot exfiltrate secrets.
 - **Operator control**: Every outbound request is logged, filterable, and reviewable. Unknown domains are held for explicit approval.
 - **Extensible manifest format**: Signature fields are reserved for future audit registry integration without schema changes.
@@ -443,17 +493,21 @@ All containers managed by the agent are labeled with `identity-agent=true` for d
 
 ### Negative
 
-- **Docker dependency**: Requires Docker Desktop on macOS/Windows, adding a prerequisite for end users.
+- **Podman Machine lifecycle**: macOS/Windows require `podman machine init/start`, adding first-run latency (2-5 minutes). The Go agent must manage this transparently.
+- **WSL2 requirement on Windows**: Podman on Windows needs WSL2. Users without it face admin prompts and a reboot. Cannot be silently installed.
+- **Rootless volume permission quirks**: UID/GID mapping between host and rootless containers requires careful handling (`--userns=keep-id` or explicit mappings).
+- **Networking differences**: Podman's Netavark networking behaves differently from Docker's bridge networking. DNS, host access, and port forwarding need platform-specific testing.
 - **Compiled binary isolation gap**: macOS/Windows cannot strongly isolate compiled binaries at the network level in V1. Mitigation: audit registry (§FW-1) and prominent UI warnings.
 - **Caddy complexity**: Custom Caddy builds with the forwardproxy plugin add build pipeline complexity. Fallback to `goproxy` or Go stdlib is available.
-- **Resource overhead**: Running Docker containers + Caddy proxy + resource monitors increases the agent's footprint significantly.
+- **Resource overhead**: Running OCI containers + Caddy proxy + resource monitors increases the agent's footprint significantly.
 - **Desktop-only V1**: Mobile users cannot access the marketplace, creating a feature gap between platforms.
 
 ### Risks
 
 - **Caddy forwardproxy compatibility**: The plugin may not support all required MITM scenarios. Evaluated early via technical spike; fallback to `goproxy` documented.
 - **KasmVNC CA cert injection**: The method for injecting the MITM CA cert into kasmweb/chromium containers needs validation against the actual image. NSS volume mount is preferred over command-line flags.
-- **Docker API stability**: Docker SDK for Go is mature but Docker Desktop behavior varies across OS versions.
+- **Podman version fragmentation**: Different Linux distros ship different Podman versions. The agent should require Podman 4.0+ (Netavark default, `host.containers.internal` support).
+- **Podman Machine stability**: `podman machine` on macOS (QEMU) and Windows (WSL2) is less battle-tested than Docker Desktop. May encounter edge cases with VM networking.
 
 ## Future Work
 
@@ -461,7 +515,7 @@ All containers managed by the agent are labeled with `identity-agent=true` for d
 
 This is the primary mitigation for the compiled binary isolation gap on macOS/Windows.
 
-**The Problem**: Unlike Docker containers (which have kernel-level isolation), compiled binaries run as native processes and can bypass proxy-based network controls, especially on macOS and Windows. No amount of runtime sandboxing can fully prevent a malicious compiled binary from exfiltrating data or causing harm on these platforms.
+**The Problem**: Unlike OCI containers (which have kernel-level isolation), compiled binaries run as native processes and can bypass proxy-based network controls, especially on macOS and Windows. No amount of runtime sandboxing can fully prevent a malicious compiled binary from exfiltrating data or causing harm on these platforms.
 
 **The Solution**: A decentralized code audit and verification system that ensures only verified, audited binaries are available to users through the discoverable app registry.
 
@@ -498,19 +552,19 @@ Selective hardware device passthrough from host to sandbox. Requires per-device 
 
 ### §FW-6: Dynamic Resource Throttling
 
-Replace the V1 warn-ask-kill escalation with dynamic throttling using `docker update` for CPU/memory limits and `nice`/`ionice` for compiled binaries. Allows graceful degradation instead of hard kills. Deferred due to race conditions under load and cross-platform complexity.
+Replace the V1 warn-ask-kill escalation with dynamic throttling using `podman update` for CPU/memory limits and `nice`/`ionice` for compiled binaries. Allows graceful degradation instead of hard kills. Deferred due to race conditions under load and cross-platform complexity.
 
 ### §FW-7: App-to-App Communication Channels
 
 Controlled inter-app messaging via the agent as mediator. Apps register communication capabilities in their manifests. The agent enforces which apps can talk to each other and what data types are allowed. Enables composable app workflows (e.g., data pipeline: Collector → Processor → Visualizer).
 
-### §FW-8: Automatic Manifest Generation from Docker Image Inspection
+### §FW-8: Automatic Manifest Generation from Container Image Inspection
 
-Inspect Docker image metadata (exposed ports, environment variables, volumes, labels) to auto-generate a manifest skeleton. Reduces friction for adding new apps. The auto-generated manifest still requires human review for network permissions and resource limits.
+Inspect OCI image metadata (exposed ports, environment variables, volumes, labels) to auto-generate a manifest skeleton. Reduces friction for adding new apps. The auto-generated manifest still requires human review for network permissions and resource limits.
 
 ### §FW-9: App Update/Versioning Management
 
-Manifest versioning with update channels (stable, beta). Automatic update checks against the app registry. Delta updates for Docker images (only pull changed layers). Rollback support with instance snapshot/restore.
+Manifest versioning with update channels (stable, beta). Automatic update checks against the app registry. Delta updates for OCI images (only pull changed layers). Rollback support with instance snapshot/restore.
 
 ### §FW-10: Manifest Signature Verification Implementation
 
@@ -528,9 +582,9 @@ Platform-specific sandboxing for compiled binaries:
 
 These provide OS-level enforcement that compiled binaries cannot bypass, closing the isolation gap documented in §10 of this ADR.
 
-### §FW-13: Background Docker Image Prefetching
+### §FW-13: Background Container Image Prefetching
 
-Pre-download Docker images in the background when the user browses the marketplace, before they click "Install". Provides instant-feeling installs for common images. Respects bandwidth limits and can be paused/cancelled. Shows estimated download time based on image size and connection speed.
+Pre-download OCI images in the background when the user browses the marketplace, before they click "Install". Provides instant-feeling installs for common images. Respects bandwidth limits and can be paused/cancelled. Shows estimated download time based on image size and connection speed.
 
 ### §FW-14: Custom Resource Types Beyond network/filesystem/device/service
 
@@ -541,8 +595,8 @@ V1 supports four resource types in the resource request channel. Future work ext
 - `docs/adr/012-sandboxed-app-marketplace.md` — This document
 - `identity-agent-core/sandbox/store.go` — SQLite access layer for sandbox.db
 - `identity-agent-core/sandbox/manifest.go` — Manifest parsing and validation
-- `identity-agent-core/sandbox/runtime.go` — Runtime interface
-- `identity-agent-core/sandbox/docker_runtime.go` — Docker container lifecycle
+- `identity-agent-core/sandbox/runtime.go` — Runtime interface and container engine detection
+- `identity-agent-core/sandbox/container_runtime.go` — OCI container lifecycle (Podman)
 - `identity-agent-core/sandbox/binary_runtime.go` — Compiled binary lifecycle
 - `identity-agent-core/sandbox/resource_monitor.go` — Resource usage monitoring
 - `identity-agent-core/sandbox/credentials.go` — Credential vault and injection
