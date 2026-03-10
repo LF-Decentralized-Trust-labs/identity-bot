@@ -121,12 +121,13 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
   Future<void> _launchApp(SandboxApp app) async {
     try {
       final res = await http.post(Uri.parse('$_baseUrl/api/apps/${app.id}/launch'));
-      if (res.statusCode == 200) {
-        final instance = SandboxInstance.fromJson(jsonDecode(res.body));
-        _openViewer(app, instance);
-      } else {
+      if (res.statusCode != 200) {
         _showError('Launch failed: ${res.body}');
+        return;
       }
+      // Container is starting — status polling will update badge to RUNNING.
+      // Do NOT open the viewer yet; user clicks OPEN WINDOW when it's ready.
+      await _refreshStatuses();
     } catch (e) {
       _showError('Launch failed: $e');
     }
@@ -180,7 +181,7 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
     ));
   }
 
-  Future<void> _viewRunningApp(SandboxApp app) async {
+  Future<void> _openWindow(SandboxApp app) async {
     try {
       final res = await http.get(Uri.parse('$_baseUrl/api/apps/${app.id}/status'));
       if (res.statusCode == 200) {
@@ -188,14 +189,16 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
         final instanceData = data['instance'];
         if (instanceData != null) {
           _openViewer(app, SandboxInstance.fromJson(instanceData));
+        } else {
+          _showError('App is not ready yet — wait a moment and try again');
         }
       }
     } catch (e) {
-      _showError('Failed to get instance: $e');
+      _showError('Failed to open window: $e');
     }
   }
 
-  Future<void> _launchInBrowser(SandboxApp app) async {
+  Future<void> _openBrowser(SandboxApp app) async {
     try {
       final res = await http.get(Uri.parse('$_baseUrl/api/apps/${app.id}/display'));
       if (res.statusCode == 200) {
@@ -204,13 +207,13 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
         if (displayUrl != null) {
           _showBrowserSelector(displayUrl);
         } else {
-          _showError('Display URL not available');
+          _showError('Display URL not available — app may still be starting');
         }
       } else {
-        _showError('Failed to get display URL');
+        _showError('App is not ready yet — wait a moment and try again');
       }
     } catch (e) {
-      _showError('Failed to launch: $e');
+      _showError('Failed to open browser: $e');
     }
   }
 
@@ -560,23 +563,32 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
+        // State 1: Available — show INSTALL
         if (!app.isInstalled && !_isAppInstalling(app))
           _primaryButton('INSTALL', () => _installApp(app)),
+
+        // State 2: Installing — show spinner only
         if (_isAppInstalling(app))
           const Padding(
             padding: EdgeInsets.symmetric(horizontal: 8),
-            child: SizedBox(width: 14, height: 14,
-              child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.corePending)),
+            child: SizedBox(
+              width: 14, height: 14,
+              child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.corePending),
+            ),
           ),
-        if (app.isInstalled && !isRunning) ...[
+
+        // State 3: Installed but not running — show LAUNCH + uninstall icon
+        if (app.isInstalled && !isRunning && !_isAppInstalling(app)) ...[
           _primaryButton('LAUNCH', () => _launchApp(app)),
-          const SizedBox(width: 4),
-          _primaryButton('BROWSER', () => _launchInBrowser(app)),
           const SizedBox(width: 4),
           _iconButton(Icons.delete_outline, AppColors.error.withOpacity(0.7), () => _uninstallApp(app), 'Uninstall'),
         ],
+
+        // State 4: Running — show OPEN WINDOW, OPEN BROWSER, STOP
         if (isRunning) ...[
-          _primaryButton('VIEW', () => _viewRunningApp(app)),
+          _primaryButton('OPEN WINDOW', () => _openWindow(app)),
+          const SizedBox(width: 4),
+          _primaryButton('OPEN BROWSER', () => _openBrowser(app)),
           const SizedBox(width: 4),
           _primaryButton('STOP', () => _stopApp(app), danger: true),
         ],
