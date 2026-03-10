@@ -10,7 +10,7 @@ The Windows builds from Codemagic no longer include an embedded Python runtime t
 - **pip**: Package installer for Python
 - **Flask**: Web framework for the KERI driver
 - **KERI**: WebOfTrust KERI library v1.1.17
-- **libsodium**: Cryptographic library (optional - usually auto-installed)
+- **libsodium**: Bundled in the app — no action needed
 
 ### Setup Instructions
 
@@ -36,11 +36,11 @@ pip install flask keri==1.1.17
 
 Verify installation:
 ```powershell
-pip list | findstr flask
-pip list | findstr keri
+pip list | findstr /i flask
+pip list | findstr /i keri
 ```
 
-Both should show installed.
+Both should show installed. Note: use `/i` flag for case-insensitive search — Flask appears as "Flask" (capital F) in pip list.
 
 #### 3. Verify Python Location
 

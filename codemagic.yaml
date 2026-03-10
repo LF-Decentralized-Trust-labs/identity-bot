@@ -455,11 +455,30 @@ workflows:
           Write-Host "--- Bundle contents ---"
           Get-ChildItem -Recurse "$BUNDLE\backend"
 
-      - name: Create deployment note
+      - name: Bundle libsodium.dll (Windows)
         script: |
-          Write-Host "NOTE: Python runtime is NOT embedded in this build."
-          Write-Host "Python dependencies must be installed on the target system."
-          Write-Host "See DESKTOP_SETUP.md for instructions."
+          $BUNDLE = "identity_agent_ui\build\windows\x64\runner\Release"
+          $SODIUM_VERSION = "1.0.20"
+          $SODIUM_URL = "https://download.libsodium.org/libsodium/releases/libsodium-${SODIUM_VERSION}-stable-msvc.zip"
+          Write-Host "Downloading libsodium $SODIUM_VERSION..."
+          Invoke-WebRequest -Uri $SODIUM_URL -OutFile "libsodium-msvc.zip" -UseBasicParsing
+          Expand-Archive -Path "libsodium-msvc.zip" -DestinationPath "libsodium-temp" -Force
+          $SODIUM_DLL = Get-ChildItem -Recurse "libsodium-temp" -Filter "libsodium.dll" |
+            Where-Object { $_.DirectoryName -like "*x64*Release*" -or $_.DirectoryName -like "*Win64*Release*" } |
+            Select-Object -First 1
+          if (-not $SODIUM_DLL) {
+            $SODIUM_DLL = Get-ChildItem -Recurse "libsodium-temp" -Filter "libsodium.dll" | Select-Object -First 1
+          }
+          if ($SODIUM_DLL) {
+            Copy-Item $SODIUM_DLL.FullName "$BUNDLE\backend\libsodium.dll"
+            Copy-Item $SODIUM_DLL.FullName "$BUNDLE\backend\keri-driver\libsodium.dll"
+            Write-Host "Bundled libsodium.dll ($([math]::Round($SODIUM_DLL.Length / 1KB)) KB)"
+          } else {
+            Write-Error "libsodium.dll not found in archive — build cannot proceed"
+            exit 1
+          }
+          Remove-Item -Recurse -Force "libsodium-temp" -ErrorAction SilentlyContinue
+          Remove-Item "libsodium-msvc.zip" -ErrorAction SilentlyContinue
 
       - name: Create ZIP archive
         script: |
