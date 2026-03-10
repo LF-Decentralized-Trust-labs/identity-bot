@@ -15,7 +15,9 @@
     "environment": {
       "OPENAI_API_BASE_URL": "http://agent.internal/llm/v1",
       "OPENAI_API_KEY": "injected-by-agent",
-      "WEBUI_AUTH": "false"
+      "WEBUI_AUTH": "false",
+      "OLLAMA_BASE_URL": "",
+      "ENABLE_OLLAMA_API": "false"
     },
     "volumes": {}
   },

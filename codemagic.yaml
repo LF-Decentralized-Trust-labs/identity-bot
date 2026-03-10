@@ -437,6 +437,7 @@ workflows:
 
       - name: Bundle Go backend and KERI driver with Flutter app
         script: |
+          $env:Path = "C:\Program Files\Go\bin;$env:Path"
           $BUNDLE = "identity_agent_ui\build\windows\x64\runner\Release"
           mkdir -p "$BUNDLE\backend"
           mkdir -p "$BUNDLE\backend\bin"
@@ -446,7 +447,10 @@ workflows:
           Write-Host "Building go-demo sandbox app..."
           Set-Location "sandbox-apps\go-demo"
           $env:CGO_ENABLED="0"
+          $env:GOOS="windows"
+          $env:GOARCH="amd64"
           go build -buildvcs=false -ldflags="-s -w" -o "..\..\$BUNDLE\backend\bin\go-demo.exe" .
+          if ($LASTEXITCODE -ne 0) { Write-Error "go-demo build failed!"; exit 1 }
           Set-Location "..\.."
           Write-Host "--- Bundle contents ---"
           Get-ChildItem -Recurse "$BUNDLE\backend"

@@ -230,7 +230,7 @@ func (d *ContainerRuntime) Status(ctx context.Context) (*RuntimeStatus, error) {
         }
 
         state := strings.TrimSpace(string(out))
-        displayURL := fmt.Sprintf("http://localhost:%d", d.netCfg.DisplayPort)
+        displayURL := fmt.Sprintf("http://127.0.0.1:%d", d.netCfg.DisplayPort)
 
         return &RuntimeStatus{
                 State:       state,
@@ -387,14 +387,23 @@ func (d *ContainerRuntime) createContainer(ctx context.Context) error {
         args = append(args, "--name", fmt.Sprintf("sandbox-%s-%s", d.manifest.ID, d.instance.ID[:8]))
         args = append(args, "--network", d.netCfg.NetworkName)
 
-        for k, v := range d.netCfg.EnvVars {
-                args = append(args, "-e", fmt.Sprintf("%s=%s", k, v))
+        reservedKeys := map[string]bool{
+                "HTTP_PROXY": true, "HTTPS_PROXY": true,
+                "http_proxy": true, "https_proxy": true,
+                "IDENTITY_AGENT_API": true,
         }
 
         if d.manifest.Container != nil {
                 for k, v := range d.manifest.Container.Environment {
+                        if reservedKeys[k] {
+                                log.Printf("[container-runtime] Ignoring manifest override of reserved env var: %s", k)
+                                continue
+                        }
                         args = append(args, "-e", fmt.Sprintf("%s=%s", k, v))
                 }
+        }
+        for k, v := range d.netCfg.EnvVars {
+                args = append(args, "-e", fmt.Sprintf("%s=%s", k, v))
         }
 
         if d.manifest.Container != nil {

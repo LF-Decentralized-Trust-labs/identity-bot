@@ -51,6 +51,9 @@ The system uses a standardized topology model based on three topological states 
 -   **Port Conflict Handling:** On startup, checks if port 5000 is occupied. Stale Identity Agent processes are auto-killed; other apps trigger a user confirmation dialog with "CLOSE IT AND RETRY" option.
 -   **libsodium Bundling (Windows):** `libsodium.dll` is downloaded from the official release and bundled into the embedded Python dir, backend dir, and keri-driver dir. The KERI driver's `server.py` has Windows-specific detection logic to find the DLL.
 -   **Podman Setup UX (APPS tab):** When Podman is not available, the marketplace shows a multi-step setup wizard that automatically installs Podman and configures the Podman machine. The wizard uses platform-specific package managers (`winget` on Windows, `brew` on macOS, `apt`/`dnf` on Linux) and handles machine init/start on macOS/Windows. Users only need to approve system prompts (UAC/password). Falls back to manual download links if no supported package manager is detected. Backend endpoints: `POST /api/sandbox/podman/setup` (actions: `install`, `init-machine`, `start-machine`) and `GET /api/sandbox/podman/setup-status` for progress polling.
+-   **Sandbox Security:** Runtime-injected environment variables (`HTTP_PROXY`, `HTTPS_PROXY`, `http_proxy`, `https_proxy`, `IDENTITY_AGENT_API`) are reserved and cannot be overridden by manifest-defined environment variables. This prevents sandbox bypass via manifest manipulation. Applied in both binary and container runtimes.
+-   **IPv4 Loopback Enforcement (Sandbox):** All sandbox proxy URLs, agent API URLs, and display URLs use `127.0.0.1` (not `localhost`) to avoid Windows IPv6 resolution issues.
+-   **Marketplace Apps:** Chromium Browser (KasmVNC), Go Demo (compiled binary), Excalidraw (collaborative whiteboard), Open WebUI (AI chat interface via OpenRouter proxy).
 
 ### Sandboxed App Marketplace (Desktop-Only)
 

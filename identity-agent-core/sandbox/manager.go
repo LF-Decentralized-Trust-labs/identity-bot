@@ -399,7 +399,7 @@ func (m *Manager) LaunchApp(ctx context.Context, id string) (*Instance, error) {
 
         displayURL := ""
         if netCfg.DisplayPort > 0 {
-                displayURL = fmt.Sprintf("http://localhost:%d", netCfg.DisplayPort)
+                displayURL = fmt.Sprintf("http://127.0.0.1:%d", netCfg.DisplayPort)
         }
 
         m.store.InsertEvent(Event{
@@ -612,7 +612,7 @@ func (m *Manager) GetDisplayURL(appID string) (string, error) {
         instances, _ := m.store.GetInstancesByApp(appID)
         for _, inst := range instances {
                 if inst.Status == "running" && inst.DisplayPort != nil {
-                        return fmt.Sprintf("http://localhost:%d", *inst.DisplayPort), nil
+                        return fmt.Sprintf("http://127.0.0.1:%d", *inst.DisplayPort), nil
                 }
         }
 
