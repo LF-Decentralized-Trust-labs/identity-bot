@@ -577,9 +577,9 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
             ),
           ),
 
-        // State 3: Installed but not running — show LAUNCH + uninstall icon
+        // State 3: Installed but not running — show START APP + uninstall icon
         if (app.isInstalled && !isRunning && !_isAppInstalling(app)) ...[
-          _primaryButton('LAUNCH', () => _launchApp(app)),
+          _primaryButton('START APP', () => _launchApp(app)),
           const SizedBox(width: 4),
           _iconButton(Icons.delete_outline, AppColors.error.withOpacity(0.7), () => _uninstallApp(app), 'Uninstall'),
         ],
