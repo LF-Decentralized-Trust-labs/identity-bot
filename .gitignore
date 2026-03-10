@@ -32,6 +32,9 @@ identity_agent_ui/.pub/
 .env
 .env*.local
 
+# Runtime data (SQLite, PID files, endpoint state)
+data/
+
 # Replit
 .cache/
 .config/
