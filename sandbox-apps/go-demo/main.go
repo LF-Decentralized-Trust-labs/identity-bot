@@ -150,29 +150,130 @@ func main() {
         fmt.Println("║  The sandbox communication channel works!              ║")
         fmt.Println("╚══════════════════════════════════════════════════════════╝")
         fmt.Println()
-        fmt.Println("[*] Process will stay alive for interactive commands.")
-        fmt.Println("[*] Type 'status' to check status, 'quit' to exit.")
-
-        var input string
-        for {
-                fmt.Print("> ")
-                fmt.Scanln(&input)
-                switch input {
-                case "status":
-                        checkStatus(agentAPI)
-                case "pending":
-                        checkPending(agentAPI)
-                case "health":
-                        healthCheck(agentAPI)
-                case "quit", "exit":
-                        fmt.Println("[*] Goodbye from Sandbox Agent!")
-                        return
-                case "help":
-                        fmt.Println("Commands: status, pending, health, quit")
-                default:
-                        fmt.Printf("[?] Unknown command: %s (type 'help')\n", input)
-                }
+        displayPort := os.Getenv("DISPLAY_PORT")
+        if displayPort == "" {
+                displayPort = "8080"
         }
+
+        fmt.Printf("[*] Starting status server on http://127.0.0.1:%s\n", displayPort)
+        fmt.Println("[*] Open Window or Open Browser in the Marketplace to view the demo results.")
+
+        http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+                w.Header().Set("Content-Type", "text/html; charset=utf-8")
+                fmt.Fprintf(w, demoStatusPage(agentAPI))
+        })
+        http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+                w.Header().Set("Content-Type", "application/json")
+                fmt.Fprintf(w, `{"status":"ok","app":"go-demo"}`)
+        })
+
+        if err := http.ListenAndServe("0.0.0.0:"+displayPort, nil); err != nil {
+                fmt.Printf("[!] HTTP server error: %v\n", err)
+        }
+}
+
+func demoStatusPage(agentAPI string) string {
+        return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Identity Agent — Sandbox Demo</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0e1a;
+    color: #c0cfe0;
+    font-family: 'Courier New', monospace;
+    padding: 32px;
+    min-height: 100vh;
+  }
+  .header {
+    border: 1px solid #1a3a5c;
+    border-radius: 8px;
+    padding: 24px;
+    margin-bottom: 24px;
+    background: #0d1629;
+  }
+  h1 { color: #00e5cc; font-size: 18px; letter-spacing: 3px; margin-bottom: 8px; }
+  .subtitle { color: #4a7a9b; font-size: 12px; }
+  .badge {
+    display: inline-block;
+    background: #00e5cc22;
+    color: #00e5cc;
+    border: 1px solid #00e5cc44;
+    border-radius: 4px;
+    padding: 3px 10px;
+    font-size: 10px;
+    font-weight: bold;
+    letter-spacing: 1px;
+    margin-left: 12px;
+    vertical-align: middle;
+  }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+  .card {
+    background: #0d1629;
+    border: 1px solid #1a3a5c;
+    border-radius: 8px;
+    padding: 20px;
+  }
+  .card-title { color: #4a7a9b; font-size: 10px; letter-spacing: 2px; margin-bottom: 12px; }
+  .card-value { color: #00e5cc; font-size: 14px; }
+  .feature-list { list-style: none; }
+  .feature-list li {
+    padding: 8px 0;
+    border-bottom: 1px solid #1a3a5c11;
+    font-size: 12px;
+    color: #8ab4cc;
+  }
+  .feature-list li:last-child { border-bottom: none; }
+  .check { color: #00e5cc; margin-right: 8px; }
+  .api-url {
+    background: #060a14;
+    border: 1px solid #1a3a5c;
+    border-radius: 4px;
+    padding: 10px 14px;
+    font-size: 11px;
+    color: #4a7a9b;
+    word-break: break-all;
+    margin-top: 8px;
+  }
+  .footer { color: #2a4a6b; font-size: 10px; margin-top: 24px; text-align: center; }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>SANDBOX DEMO APP <span class="badge">RUNNING</span></h1>
+  <div class="subtitle">Identity Agent · Agent Communication Channel Demo · Go Binary Runtime</div>
+</div>
+<div class="grid">
+  <div class="card">
+    <div class="card-title">AGENT API ENDPOINT</div>
+    <div class="card-value">Connected</div>
+    <div class="api-url">` + agentAPI + `</div>
+  </div>
+  <div class="card">
+    <div class="card-title">DEMO STATUS</div>
+    <div class="card-value">Complete</div>
+    <div class="api-url">All steps executed successfully</div>
+  </div>
+</div>
+<div class="card">
+  <div class="card-title">DEMONSTRATED CAPABILITIES</div>
+  <ul class="feature-list">
+    <li><span class="check">✓</span> Agent API discovery via IDENTITY_AGENT_API environment variable</li>
+    <li><span class="check">✓</span> Outbound network connectivity test through sandbox proxy</li>
+    <li><span class="check">✓</span> Batch resource requests (network, filesystem, device)</li>
+    <li><span class="check">✓</span> Auto-approve flow for manifest-allowed resources</li>
+    <li><span class="check">✓</span> Auto-deny flow for manifest-blocked resources</li>
+    <li><span class="check">✓</span> Pending approval flow for operator-reviewed resources</li>
+    <li><span class="check">✓</span> Polling loop for operator decision resolution</li>
+    <li><span class="check">✓</span> DISPLAY_PORT injection and persistent HTTP status server</li>
+  </ul>
+</div>
+<div class="footer">Identity Agent Sandbox · Go Binary Runtime · Process alive and serving</div>
+</body>
+</html>`
 }
 
 func testExternalNetwork() error {

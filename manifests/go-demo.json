@@ -5,7 +5,7 @@
   "version": "1.0.0",
   "author": "Identity Agent",
   "execution_type": "compiled",
-  "display_method": "terminal",
+  "display_method": "webview",
   "network_mode": "proxy_required",
   "binary": {
     "path": "bin/go-demo",

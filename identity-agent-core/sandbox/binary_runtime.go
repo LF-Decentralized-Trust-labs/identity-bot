@@ -42,10 +42,16 @@ func NewBinaryRuntime(manifest *AppManifest, instance *Instance, store *SandboxS
                 return nil, fmt.Errorf("failed to find agent API port: %w", err)
         }
 
+        displayPort, err := findAvailablePort()
+        if err != nil {
+                return nil, fmt.Errorf("failed to find display port: %w", err)
+        }
+
         proxyURL := fmt.Sprintf("http://127.0.0.1:%d", proxyPort)
 
         netCfg := &NetworkConfig{
                 ProxyPort:    proxyPort,
+                DisplayPort:  displayPort,
                 AgentAPIPort: agentAPIPort,
                 HostIP:       "127.0.0.1",
                 ProxyURL:     proxyURL,
@@ -55,6 +61,7 @@ func NewBinaryRuntime(manifest *AppManifest, instance *Instance, store *SandboxS
                         "http_proxy":         proxyURL,
                         "https_proxy":        proxyURL,
                         "IDENTITY_AGENT_API": fmt.Sprintf("http://127.0.0.1:%d", agentAPIPort),
+                        "DISPLAY_PORT":       fmt.Sprintf("%d", displayPort),
                 },
         }
 
@@ -114,7 +121,7 @@ pathFound:
         reservedKeys := map[string]bool{
                 "HTTP_PROXY": true, "HTTPS_PROXY": true,
                 "http_proxy": true, "https_proxy": true,
-                "IDENTITY_AGENT_API": true,
+                "IDENTITY_AGENT_API": true, "DISPLAY_PORT": true,
         }
 
         env := os.Environ()
@@ -246,10 +253,16 @@ func (b *BinaryRuntime) Status(ctx context.Context) (*RuntimeStatus, error) {
         default:
         }
 
+        displayURL := ""
+        if b.netCfg.DisplayPort > 0 {
+                displayURL = fmt.Sprintf("http://127.0.0.1:%d", b.netCfg.DisplayPort)
+        }
+
         return &RuntimeStatus{
                 State:      "running",
                 ProcessPID: b.cmd.Process.Pid,
                 Uptime:     time.Since(b.startedAt).Round(time.Second).String(),
+                DisplayURL: displayURL,
         }, nil
 }
 
