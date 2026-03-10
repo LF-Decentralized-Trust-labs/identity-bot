@@ -1,16 +1,16 @@
 {
   "id": "openclaw",
-  "name": "Excalidraw",
-  "description": "Collaborative whiteboard and diagramming tool. Demonstrates containerized web app sandboxing with full network interception and proxy-mediated egress.",
+  "name": "OpenClaw",
+  "description": "Personal AI assistant (formerly MoltBot/ClawdBot). Playwright + Chromium automation with intelligent agent capabilities. Demonstrates containerized web app sandboxing with full network interception and proxy-mediated egress.",
   "version": "1.0.0",
   "author": "OpenClaw",
   "execution_type": "container",
   "display_method": "webview",
   "network_mode": "proxy_required",
   "container": {
-    "image": "excalidraw/excalidraw:latest",
+    "image": "alpine/openclaw:latest",
     "ports": {
-      "80": "display"
+      "3000": "display"
     },
     "environment": {},
     "volumes": {}
