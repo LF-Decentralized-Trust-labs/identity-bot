@@ -8,6 +8,7 @@ import (
         "log"
         "os"
         "os/exec"
+        "path/filepath"
         "runtime"
         "sync"
         "time"
@@ -73,18 +74,39 @@ func (b *BinaryRuntime) Start(ctx context.Context) error {
         }
 
         binaryPath := b.manifest.Binary.Path
+        
+        // Check if path exists as-is
         if _, err := os.Stat(binaryPath); os.IsNotExist(err) {
+                // Try with .exe on Windows
                 if runtime.GOOS == "windows" {
                         exePath := binaryPath + ".exe"
                         if _, err2 := os.Stat(exePath); err2 == nil {
                                 binaryPath = exePath
-                        } else {
-                                return fmt.Errorf("binary not found: %s", binaryPath)
+                                goto pathFound
                         }
-                } else {
-                        return fmt.Errorf("binary not found: %s", binaryPath)
                 }
+                
+                // Try resolving relative paths from current working directory
+                wd, _ := os.Getwd()
+                altPath := filepath.Join(wd, binaryPath)
+                if _, err := os.Stat(altPath); err == nil {
+                        binaryPath = altPath
+                        goto pathFound
+                }
+                
+                // Try common base directories
+                for _, baseDir := range []string{".", "/home/runner/workspace"} {
+                        tryPath := filepath.Join(baseDir, binaryPath)
+                        if _, err := os.Stat(tryPath); err == nil {
+                                binaryPath = tryPath
+                                goto pathFound
+                        }
+                }
+                
+                return fmt.Errorf("binary not found: %s (checked: %s, cwd: %s)", binaryPath, filepath.Join(wd, binaryPath), wd)
         }
+        
+pathFound:
 
         args := b.manifest.Binary.Args
         b.cmd = exec.CommandContext(ctx, binaryPath, args...)
