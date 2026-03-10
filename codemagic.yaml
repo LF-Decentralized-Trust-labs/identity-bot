@@ -455,74 +455,11 @@ workflows:
           Write-Host "--- Bundle contents ---"
           Get-ChildItem -Recurse "$BUNDLE\backend"
 
-      - name: Embed Python runtime (Windows)
+      - name: Create deployment note
         script: |
-          $BUNDLE = "identity_agent_ui\build\windows\x64\runner\Release"
-          $PYTHON_DIR = "$BUNDLE\backend\python"
-          $PY_VERSION = "3.12.8"
-          $PY_SHORT = "312"
-
-          Write-Host "Downloading Python $PY_VERSION embeddable package..."
-          $PY_URL = "https://www.python.org/ftp/python/$PY_VERSION/python-$PY_VERSION-embed-amd64.zip"
-          Invoke-WebRequest -Uri $PY_URL -OutFile "python-embed.zip"
-
-          Write-Host "Extracting to $PYTHON_DIR..."
-          Expand-Archive -Path "python-embed.zip" -DestinationPath $PYTHON_DIR -Force
-
-          Write-Host "Enabling site-packages in embedded Python..."
-          $pthFile = "$PYTHON_DIR\python$PY_SHORT._pth"
-          $content = Get-Content $pthFile
-          $content = $content -replace '#import site', 'import site'
-          Set-Content $pthFile $content
-          Get-Content $pthFile
-
-          Write-Host "Bootstrapping pip..."
-          Invoke-WebRequest -Uri "https://bootstrap.pypa.io/get-pip.py" -OutFile "$PYTHON_DIR\get-pip.py"
-          & "$PYTHON_DIR\python.exe" "$PYTHON_DIR\get-pip.py" --no-warn-script-location
-          Remove-Item "$PYTHON_DIR\get-pip.py"
-
-          Write-Host "Installing build tools (setuptools + wheel)..."
-          & "$PYTHON_DIR\python.exe" -m pip install --no-warn-script-location setuptools wheel
-
-          Write-Host "Installing KERI dependencies..."
-          & "$PYTHON_DIR\python.exe" -m pip install --no-warn-script-location flask keri==1.1.17
-
-          Write-Host "Downloading libsodium DLL..."
-          $SODIUM_VERSION = "1.0.20"
-          $SODIUM_URL = "https://download.libsodium.org/libsodium/releases/libsodium-${SODIUM_VERSION}-stable-msvc.zip"
-          Invoke-WebRequest -Uri $SODIUM_URL -OutFile "libsodium-msvc.zip"
-          Expand-Archive -Path "libsodium-msvc.zip" -DestinationPath "libsodium-temp" -Force
-          $SODIUM_DLL = Get-ChildItem -Recurse "libsodium-temp" -Filter "libsodium.dll" | Where-Object { $_.DirectoryName -like "*x64*Release*" -or $_.DirectoryName -like "*Win64*Release*" } | Select-Object -First 1
-          if ($SODIUM_DLL) {
-            Copy-Item $SODIUM_DLL.FullName "$PYTHON_DIR\libsodium.dll"
-            Write-Host "Bundled libsodium.dll from: $($SODIUM_DLL.FullName)"
-          } else {
-            $SODIUM_DLL = Get-ChildItem -Recurse "libsodium-temp" -Filter "libsodium.dll" | Select-Object -First 1
-            if ($SODIUM_DLL) {
-              Copy-Item $SODIUM_DLL.FullName "$PYTHON_DIR\libsodium.dll"
-              Write-Host "Bundled libsodium.dll from: $($SODIUM_DLL.FullName)"
-            } else {
-              Write-Host "WARNING: libsodium.dll not found in downloaded archive"
-              Get-ChildItem -Recurse "libsodium-temp" | Select-Object FullName
-            }
-          }
-          Remove-Item -Recurse -Force "libsodium-temp" -ErrorAction SilentlyContinue
-          Remove-Item "libsodium-msvc.zip" -ErrorAction SilentlyContinue
-
-          $BACKEND_DIR = "$BUNDLE\backend"
-          Copy-Item "$PYTHON_DIR\libsodium.dll" "$BACKEND_DIR\libsodium.dll" -ErrorAction SilentlyContinue
-          Copy-Item "$PYTHON_DIR\libsodium.dll" "$BACKEND_DIR\keri-driver\libsodium.dll" -ErrorAction SilentlyContinue
-
-          Write-Host "Verifying installation..."
-          & "$PYTHON_DIR\python.exe" -c "import flask; import keri; print('flask:', flask.__version__); print('keri:', keri.__version__)"
-
-          Write-Host "Cleaning up pip cache..."
-          Remove-Item -Recurse -Force "$PYTHON_DIR\pip" -ErrorAction SilentlyContinue
-
-          Write-Host "--- Embedded Python contents ---"
-          Get-ChildItem $PYTHON_DIR | Format-Table Name, Length
-          $size = (Get-ChildItem -Recurse $PYTHON_DIR | Measure-Object -Property Length -Sum).Sum / 1MB
-          Write-Host ("Embedded Python size: {0:N1} MB" -f $size)
+          Write-Host "NOTE: Python runtime is NOT embedded in this build."
+          Write-Host "Python dependencies must be installed on the target system."
+          Write-Host "See DESKTOP_SETUP.md for instructions."
 
       - name: Create ZIP archive
         script: |

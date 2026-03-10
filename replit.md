@@ -71,6 +71,10 @@ Defaults to a file-based JSON store for identity, KEL, contacts, settings, pendi
 
 This integration provides a permanent public URL for the agent's OOBI endpoints using a Chisel reverse proxy. It supports a reconnect-first flow on startup to re-establish previously claimed names, with AID-based ownership for security. It handles tunnel reconnection on mobile app restart, ensuring continuous availability.
 
+### Windows Desktop Build Optimization
+
+Windows builds from Codemagic no longer embed Python to reduce build time (13 min → 6 min) and ZIP size (1GB → 300MB). Users must install Python 3.10+ locally with `flask` and `keri==1.1.17` via pip. The app automatically finds Python from the system PATH at runtime. See `DESKTOP_SETUP.md` for detailed instructions.
+
 ## External Dependencies
 
 ### Backend (Go)
