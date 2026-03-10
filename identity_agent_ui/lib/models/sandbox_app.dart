@@ -7,8 +7,8 @@ class SandboxApp {
   final String displayMethod;
   final String networkMode;
   final String installStatus;
-  final String? dockerImage;
-  final int? dockerImageSizeBytes;
+  final String? containerImage;
+  final int? containerImageSizeBytes;
   final String? binaryPath;
   final String? createdAt;
   final String? updatedAt;
@@ -22,8 +22,8 @@ class SandboxApp {
     required this.displayMethod,
     required this.networkMode,
     required this.installStatus,
-    this.dockerImage,
-    this.dockerImageSizeBytes,
+    this.containerImage,
+    this.containerImageSizeBytes,
     this.binaryPath,
     this.createdAt,
     this.updatedAt,
@@ -39,25 +39,25 @@ class SandboxApp {
       displayMethod: json['display_method'] ?? '',
       networkMode: json['network_mode'] ?? '',
       installStatus: json['install_status'] ?? 'available',
-      dockerImage: json['docker_image'],
-      dockerImageSizeBytes: json['docker_image_size_bytes'],
+      containerImage: json['container_image'],
+      containerImageSizeBytes: json['container_image_size_bytes'],
       binaryPath: json['binary_path'],
       createdAt: json['created_at'],
       updatedAt: json['updated_at'],
     );
   }
 
-  bool get isDocker => executionType == 'docker';
+  bool get isContainer => executionType == 'container';
   bool get isCompiled => executionType == 'compiled';
   bool get isInstalled => installStatus == 'installed';
   bool get isInstalling => installStatus == 'installing';
   bool get isAvailable => installStatus == 'available';
 
   String get imageSizeDisplay {
-    if (dockerImageSizeBytes == null || dockerImageSizeBytes == 0) {
+    if (containerImageSizeBytes == null || containerImageSizeBytes == 0) {
       return 'Unknown size';
     }
-    final mb = dockerImageSizeBytes! / (1024 * 1024);
+    final mb = containerImageSizeBytes! / (1024 * 1024);
     if (mb > 1024) {
       return '${(mb / 1024).toStringAsFixed(1)} GB';
     }

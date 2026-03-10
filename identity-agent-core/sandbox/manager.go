@@ -5,14 +5,15 @@ import (
         "encoding/json"
         "fmt"
         "log"
-        "net/http"
         "os"
+        "os/exec"
+        "strings"
         "sync"
         "syscall"
         "time"
 )
 
-// InstallProgressInfo tracks in-progress Docker image pulls.
+// InstallProgressInfo tracks in-progress container image pulls.
 type InstallProgressInfo struct {
         AppID    string  `json:"app_id"`
         Status   string  `json:"status"`
@@ -136,7 +137,7 @@ func (m *Manager) Stop() {
 
         for _, net := range m.networks {
                 ctx := context.Background()
-                net.RemoveDockerNetwork(ctx)
+                net.RemovePodmanNetwork(ctx)
         }
 
         m.proxy.Stop()
@@ -170,8 +171,8 @@ func (m *Manager) LoadManifests() error {
                         ManifestJSON:  manifestJSON,
                         InstallStatus: "available",
                 }
-                if manifest.Docker != nil {
-                        app.DockerImage = &manifest.Docker.Image
+                if manifest.Container != nil {
+                        app.ContainerImage = &manifest.Container.Image
                 }
                 if manifest.Binary != nil {
                         app.BinaryPath = &manifest.Binary.Path
@@ -204,7 +205,7 @@ func (m *Manager) InstallApp(ctx context.Context, id string, progressCb PullProg
         m.installProgressMap.Store(id, info)
         m.store.UpdateAppStatus(id, "installing")
 
-        if manifest.IsDocker() && manifest.Docker != nil {
+        if manifest.IsContainer() && manifest.Container != nil {
                 wrappedCb := func(p PullProgress) {
                         info.Status = p.Status
                         info.Layer = p.Layer
@@ -213,7 +214,7 @@ func (m *Manager) InstallApp(ctx context.Context, id string, progressCb PullProg
                                 progressCb(p)
                         }
                 }
-                if err := PullImage(ctx, manifest.Docker.Image, wrappedCb); err != nil {
+                if err := PullImage(ctx, manifest.Container.Image, wrappedCb); err != nil {
                         info.Done = true
                         info.Error = err.Error()
                         m.store.UpdateAppStatus(id, "available")
@@ -325,8 +326,8 @@ func (m *Manager) LaunchApp(ctx context.Context, id string) (*Instance, error) {
         var rt Runtime
         var err error
 
-        if manifest.IsDocker() {
-                rt, err = NewDockerRuntime(manifest, instance, m.store)
+        if manifest.IsContainer() {
+                rt, err = NewContainerRuntime(manifest, instance, m.store)
         } else {
                 rt, err = NewBinaryRuntime(manifest, instance, m.store)
         }
@@ -337,9 +338,9 @@ func (m *Manager) LaunchApp(ctx context.Context, id string) (*Instance, error) {
 
         netCfg := rt.NetworkConfig()
 
-        if manifest.IsDocker() {
+        if manifest.IsContainer() {
                 ni := NewNetworkIsolation(instanceID, id, netCfg.ProxyPort, 0, netCfg.NetworkName)
-                if err := ni.CreateDockerNetwork(ctx); err != nil {
+                if err := ni.CreatePodmanNetwork(ctx); err != nil {
                         log.Printf("[sandbox-manager] Network creation failed (non-fatal): %v", err)
                 }
                 m.networks[instanceID] = ni
@@ -453,7 +454,7 @@ func (m *Manager) StopApp(ctx context.Context, appID string) error {
                 }
 
                 if ni, ok := m.networks[inst.ID]; ok {
-                        ni.RemoveDockerNetwork(ctx)
+                        ni.RemovePodmanNetwork(ctx)
                         delete(m.networks, inst.ID)
                 }
 
@@ -653,7 +654,7 @@ func (m *Manager) Store() *SandboxStore {
 }
 
 func (m *Manager) HealthCheck() map[string]interface{} {
-        docker := CheckDockerDaemon()
+        containerEngine := CheckContainerEngine()
 
         m.mu.RLock()
         runningCount := 0
@@ -666,7 +667,7 @@ func (m *Manager) HealthCheck() map[string]interface{} {
         m.mu.RUnlock()
 
         return map[string]interface{}{
-                "docker":           docker,
+                "container_engine": containerEngine,
                 "proxy_running":    m.proxy.IsRunning(),
                 "proxy_addr":       m.proxy.ListenAddr(),
                 "running_apps":     runningCount,
@@ -682,7 +683,7 @@ func (m *Manager) ReconcileOnStartup() error {
 
         for _, inst := range instances {
                 if inst.ContainerID != nil && *inst.ContainerID != "" {
-                        running := isDockerContainerRunning(*inst.ContainerID)
+                        running := isContainerRunning(*inst.ContainerID)
                         if !running {
                                 log.Printf("[sandbox-manager] Reconcile: DB=running, Container=stopped → marking stopped (instance %s)", inst.ID)
                                 m.store.UpdateInstanceStatus(inst.ID, "stopped")
@@ -743,7 +744,7 @@ func (m *Manager) ReconcileOnStartup() error {
 func (m *Manager) cleanupInstanceResources(inst Instance) {
         if inst.NetworkName != nil && *inst.NetworkName != "" {
                 ni := NewNetworkIsolation(inst.ID, inst.AppID, 0, 0, *inst.NetworkName)
-                ni.RemoveDockerNetwork(context.Background())
+                ni.RemovePodmanNetwork(context.Background())
         }
         m.proxy.RemoveRoute(inst.ID)
 }
@@ -763,27 +764,12 @@ func killProcess(pid int) {
         }
 }
 
-func isDockerContainerRunning(containerID string) bool {
-        client := newDockerHTTPClient()
-        resp, err := client.Get(fmt.Sprintf("http://localhost/containers/%s/json", containerID))
+func isContainerRunning(containerID string) bool {
+        out, err := exec.CommandContext(context.Background(), "podman", "inspect", "--format={{.State.Running}}", containerID).Output()
         if err != nil {
                 return false
         }
-        defer resp.Body.Close()
-
-        if resp.StatusCode != 200 {
-                return false
-        }
-
-        var info struct {
-                State struct {
-                        Running bool `json:"Running"`
-                } `json:"State"`
-        }
-        if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
-                return false
-        }
-        return info.State.Running
+        return strings.TrimSpace(string(out)) == "true"
 }
 
 func isProcessRunning(pid int) bool {
@@ -799,30 +785,29 @@ func isProcessRunning(pid int) bool {
 }
 
 func cleanupOrphanContainers() {
-        client := newDockerHTTPClient()
-        resp, err := client.Get(`http://localhost/containers/json?all=true&filters={"label":["identity-agent=true"]}`)
+        out, err := exec.CommandContext(context.Background(), "podman", "ps", "-a", "--filter", "label=identity-agent=true", "--format=json").Output()
         if err != nil {
                 return
         }
-        defer resp.Body.Close()
+
+        trimmed := strings.TrimSpace(string(out))
+        if trimmed == "" || trimmed == "[]" || trimmed == "null" {
+                return
+        }
 
         var containers []struct {
                 ID    string `json:"Id"`
                 State string `json:"State"`
         }
-        if err := json.NewDecoder(resp.Body).Decode(&containers); err != nil {
+        if err := json.Unmarshal([]byte(trimmed), &containers); err != nil {
                 return
         }
 
         for _, c := range containers {
                 switch c.State {
                 case "exited", "dead":
-                        req, _ := http.NewRequest("DELETE", fmt.Sprintf("http://localhost/containers/%s?force=true", c.ID), nil)
-                        resp, err := client.Do(req)
-                        if err == nil {
-                                resp.Body.Close()
-                                log.Printf("[sandbox-manager] Removed exited orphan container %s", c.ID[:12])
-                        }
+                        exec.CommandContext(context.Background(), "podman", "rm", "--force", c.ID).Run()
+                        log.Printf("[sandbox-manager] Removed exited orphan container %s", c.ID[:12])
                 case "running", "created", "restarting":
                         stopAndRemoveContainer(context.Background(), c.ID)
                         log.Printf("[sandbox-manager] Stopped and removed orphan container %s (was %s)", c.ID[:12], c.State)

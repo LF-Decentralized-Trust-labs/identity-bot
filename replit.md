@@ -50,11 +50,11 @@ The system uses a standardized topology model based on three topological states 
 -   **Backend Startup Error Dialog:** Desktop builds show a modal error dialog with RETRY button if the bundled Go backend fails to start (missing binary, Python not installed, dependency issues).
 -   **Port Conflict Handling:** On startup, checks if port 5000 is occupied. Stale Identity Agent processes are auto-killed; other apps trigger a user confirmation dialog with "CLOSE IT AND RETRY" option.
 -   **libsodium Bundling (Windows):** `libsodium.dll` is downloaded from the official release and bundled into the embedded Python dir, backend dir, and keri-driver dir. The KERI driver's `server.py` has Windows-specific detection logic to find the DLL.
--   **Docker Setup UX (APPS tab):** When Docker is not available, the marketplace shows a friendly setup guide instead of an error banner, with a "GET DOCKER DESKTOP" or "CHECK AGAIN" button and an explanatory "Why Docker?" section.
+-   **Podman Setup UX (APPS tab):** When Podman is not available, the marketplace shows a friendly setup guide instead of an error banner, with a "GET PODMAN DESKTOP" or "CHECK AGAIN" button and platform-specific install guidance.
 
 ### Sandboxed App Marketplace (Desktop-Only)
 
-This desktop-only feature enables sandboxed application execution via Docker containers and compiled binaries. It includes a comprehensive sandbox package for storage, manifest loading, runtime abstraction, networking, policy enforcement, and resource monitoring. Key features include a pure Go forward proxy with MITM TLS interception, a policy engine for domain access, a credential vault, and resource monitoring with escalation. The marketplace UI uses compact ListView cards (~90px height) with inline status badges, install progress bars (polling `GET /api/apps/{id}/install-progress` every 2s), mini CPU/RAM resource indicators for running apps, and full lifecycle actions (INSTALL → LAUNCH → VIEW/STOP → UNINSTALL). Uninstall resets app status to `available` (not deleted) so users can reinstall in-session. The Go demo binary (`sandbox-apps/go-demo/`) is built and placed at `bin/go-demo` relative to the working directory; `binary_runtime.go` auto-appends `.exe` on Windows.
+This desktop-only feature enables sandboxed application execution via OCI containers (Podman) and compiled binaries. It includes a comprehensive sandbox package for storage, manifest loading, runtime abstraction, networking, policy enforcement, and resource monitoring. Key features include a pure Go forward proxy with MITM TLS interception, a policy engine for domain access, a credential vault, and resource monitoring with escalation. The marketplace UI uses compact ListView cards (~90px height) with inline status badges, install progress bars (polling `GET /api/apps/{id}/install-progress` every 2s), mini CPU/RAM resource indicators for running apps, and full lifecycle actions (INSTALL → LAUNCH → VIEW/STOP → UNINSTALL). Uninstall resets app status to `available` (not deleted) so users can reinstall in-session. The Go demo binary (`sandbox-apps/go-demo/`) is built and placed at `bin/go-demo` relative to the working directory; `binary_runtime.go` auto-appends `.exe` on Windows. Container runtime uses Podman CLI (not Docker API) for all container operations — rootless, daemonless, and free of licensing concerns.
 
 ### Sandbox Trace Debugger (Developer-Only)
 
@@ -79,6 +79,7 @@ This integration provides a permanent public URL for the agent's OOBI endpoints 
 -   `github.com/gorilla/websocket` v1.5.3: WebSocket connections.
 -   `github.com/mattn/go-sqlite3`: SQLite driver for sandbox.db (desktop only).
 -   `cloudflared`: System dependency for Cloudflare desktop tunnels.
+-   Podman: System dependency for sandboxed app container runtime (desktop only).
 
 ### KERI Driver (Python, desktop only)
 

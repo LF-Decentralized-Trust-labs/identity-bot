@@ -428,7 +428,7 @@ func (s *CoreServer) handleSandboxHealth(w http.ResponseWriter, r *http.Request)
         if s.SandboxManager == nil {
                 jsonResponse(w, map[string]interface{}{
                         "sandbox_initialized": false,
-                        "docker":              sandbox.CheckDockerDaemon(),
+                        "container_engine":    sandbox.CheckContainerEngine(),
                 })
                 return
         }

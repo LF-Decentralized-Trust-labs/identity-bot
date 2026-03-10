@@ -4,7 +4,6 @@ import (
         "context"
         "fmt"
         "log"
-        gohttp "net/http"
         "os/exec"
         "runtime"
         "strings"
@@ -26,66 +25,41 @@ func NewNetworkIsolation(instanceID, appID string, proxyPort, dnsPort int, netwo
                 proxyPort:   proxyPort,
                 dnsPort:     dnsPort,
                 networkName: networkName,
-                hostIP:      dockerHostIP(),
+                hostIP:      podmanHostIP(),
         }
 }
 
-func (ni *NetworkIsolation) CreateDockerNetwork(ctx context.Context) error {
-        client := newDockerHTTPClient()
-
-        body := fmt.Sprintf(`{
-                "Name": "%s",
-                "Driver": "bridge",
-                "Labels": {
-                        "identity-agent": "true",
-                        "sandbox-instance": "%s",
-                        "sandbox-app": "%s"
-                }
-        }`, ni.networkName, ni.instanceID, ni.appID)
-
-        req, err := gohttp.NewRequestWithContext(ctx, "POST", "http://localhost/networks/create",
-                strings.NewReader(body))
+func (ni *NetworkIsolation) CreatePodmanNetwork(ctx context.Context) error {
+        cmd := exec.CommandContext(ctx, "podman", "network", "create",
+                "--label", "identity-agent=true",
+                "--label", fmt.Sprintf("sandbox-instance=%s", ni.instanceID),
+                "--label", fmt.Sprintf("sandbox-app=%s", ni.appID),
+                ni.networkName,
+        )
+        out, err := cmd.CombinedOutput()
         if err != nil {
-                return fmt.Errorf("failed to create network request: %w", err)
-        }
-        req.Header.Set("Content-Type", "application/json")
-
-        resp, err := client.Do(req)
-        if err != nil {
-                return fmt.Errorf("failed to create Docker network: %w", err)
-        }
-        defer resp.Body.Close()
-
-        if resp.StatusCode != gohttp.StatusCreated && resp.StatusCode != gohttp.StatusOK {
-                return fmt.Errorf("Docker network creation returned status %d", resp.StatusCode)
+                return fmt.Errorf("failed to create Podman network: %w — %s", err, string(out))
         }
 
-        log.Printf("[network] Created Docker network %s for instance %s", ni.networkName, ni.instanceID)
+        log.Printf("[network] Created Podman network %s for instance %s", ni.networkName, ni.instanceID)
         return nil
 }
 
-func (ni *NetworkIsolation) RemoveDockerNetwork(ctx context.Context) error {
-        client := newDockerHTTPClient()
-
-        req, err := gohttp.NewRequestWithContext(ctx, "DELETE",
-                fmt.Sprintf("http://localhost/networks/%s", ni.networkName), nil)
+func (ni *NetworkIsolation) RemovePodmanNetwork(ctx context.Context) error {
+        cmd := exec.CommandContext(ctx, "podman", "network", "rm", "-f", ni.networkName)
+        out, err := cmd.CombinedOutput()
         if err != nil {
-                return fmt.Errorf("failed to create delete request: %w", err)
+                log.Printf("[network] Failed to remove Podman network %s: %v — %s", ni.networkName, err, string(out))
+                return fmt.Errorf("failed to remove Podman network: %w", err)
         }
 
-        resp, err := client.Do(req)
-        if err != nil {
-                return fmt.Errorf("failed to remove Docker network: %w", err)
-        }
-        defer resp.Body.Close()
-
-        log.Printf("[network] Removed Docker network %s", ni.networkName)
+        log.Printf("[network] Removed Podman network %s", ni.networkName)
         return nil
 }
 
 func (ni *NetworkIsolation) ApplyIptablesRules(containerIP string) error {
         if runtime.GOOS != "linux" {
-                log.Printf("[network] iptables not available on %s, relying on Docker network isolation", runtime.GOOS)
+                log.Printf("[network] iptables not available on %s, relying on container network isolation", runtime.GOOS)
                 return nil
         }
 
@@ -143,23 +117,23 @@ func (ni *NetworkIsolation) ContainerCreateConfig(manifest *AppManifest, proxyUR
                 fmt.Sprintf("IDENTITY_AGENT_API=http://agent.internal:%d", agentAPIPort),
         }
 
-        if manifest.Docker != nil {
-                for k, v := range manifest.Docker.Environment {
+        if manifest.Container != nil {
+                for k, v := range manifest.Container.Environment {
                         env = append(env, fmt.Sprintf("%s=%s", k, v))
                 }
         }
 
         hostConfig := map[string]interface{}{
                 "NetworkMode": ni.networkName,
-                "ExtraHosts":  []string{fmt.Sprintf("agent.internal:%s", agentInternalHost())},
+                "ExtraHosts":  []string{"agent.internal:host-gateway"},
                 "Dns":         []string{ni.hostIP},
         }
 
-        if manifest.Docker != nil {
+        if manifest.Container != nil {
                 portBindings := make(map[string]interface{})
                 exposedPorts := make(map[string]interface{})
 
-                for containerPort := range manifest.Docker.Ports {
+                for containerPort := range manifest.Container.Ports {
                         portKey := containerPort + "/tcp"
                         exposedPorts[portKey] = struct{}{}
 
@@ -189,8 +163,8 @@ func (ni *NetworkIsolation) ContainerCreateConfig(manifest *AppManifest, proxyUR
                 binds = append(binds, fmt.Sprintf("%s:/home/kasm-user/.pki/nssdb:rw", nssDir))
         }
 
-        if manifest.Docker != nil {
-                for hostPath, containerPath := range manifest.Docker.Volumes {
+        if manifest.Container != nil {
+                for hostPath, containerPath := range manifest.Container.Volumes {
                         binds = append(binds, fmt.Sprintf("%s:%s", hostPath, containerPath))
                 }
         }
@@ -199,9 +173,9 @@ func (ni *NetworkIsolation) ContainerCreateConfig(manifest *AppManifest, proxyUR
         }
 
         labels := map[string]string{
-                "identity-agent":    "true",
-                "sandbox-instance":  ni.instanceID,
-                "sandbox-app":       ni.appID,
+                "identity-agent":   "true",
+                "sandbox-instance": ni.instanceID,
+                "sandbox-app":      ni.appID,
         }
 
         config := map[string]interface{}{
@@ -210,8 +184,8 @@ func (ni *NetworkIsolation) ContainerCreateConfig(manifest *AppManifest, proxyUR
                 "HostConfig": hostConfig,
         }
 
-        if manifest.Docker != nil && manifest.Docker.Image != "" {
-                config["Image"] = manifest.Docker.Image
+        if manifest.Container != nil && manifest.Container.Image != "" {
+                config["Image"] = manifest.Container.Image
         }
 
         return config
@@ -261,3 +235,4 @@ func findContainerVeth(containerID string) (string, error) {
         }
         return veth, nil
 }
+

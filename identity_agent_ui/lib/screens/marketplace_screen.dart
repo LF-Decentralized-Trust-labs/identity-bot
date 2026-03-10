@@ -143,7 +143,7 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
         backgroundColor: AppColors.surface,
         title: const Text('Uninstall App', style: TextStyle(color: AppColors.textPrimary, fontFamily: 'monospace')),
         content: Text(
-          'Remove ${app.name}? This deletes the ${app.isDocker ? "Docker image" : "binary"} from this machine.',
+          'Remove ${app.name}? This deletes the ${app.isContainer ? "container image" : "binary"} from this machine.',
           style: const TextStyle(color: AppColors.textSecondary, fontFamily: 'monospace', fontSize: 13),
         ),
         actions: [
@@ -214,8 +214,8 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
               const Expanded(child: Center(child: CircularProgressIndicator(color: AppColors.accent)))
             else if (_error != null)
               Expanded(child: _buildError())
-            else if (_dockerNotAvailable)
-              _buildDockerSetup()
+            else if (_podmanNotAvailable)
+              _buildPodmanSetup()
             else
               Expanded(child: _buildAppList()),
           ],
@@ -224,10 +224,10 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
     );
   }
 
-  bool get _dockerNotAvailable {
+  bool get _podmanNotAvailable {
     if (_healthInfo == null) return false;
-    final docker = _healthInfo!['docker'] as Map<String, dynamic>?;
-    return docker != null && docker['available'] != true;
+    final engine = _healthInfo!['container_engine'] as Map<String, dynamic>?;
+    return engine != null && engine['available'] != true;
   }
 
   Widget _buildHeader() {
@@ -251,8 +251,6 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
       ),
     );
   }
-
-  // ─── App List ────────────────────────────────────────────────────────────────
 
   Widget _buildAppList() {
     if (_apps.isEmpty) {
@@ -288,7 +286,6 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Main row
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
             child: Row(
@@ -323,10 +320,10 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
                       Row(
                         children: [
                           Text(
-                            app.isDocker ? 'Docker' : 'Binary',
+                            app.isContainer ? 'Container' : 'Binary',
                             style: const TextStyle(color: AppColors.textMuted, fontFamily: 'monospace', fontSize: 10),
                           ),
-                          if (app.isDocker && app.imageSizeDisplay != 'Unknown size') ...[
+                          if (app.isContainer && app.imageSizeDisplay != 'Unknown size') ...[
                             const Text('  ·  ', style: TextStyle(color: AppColors.textMuted, fontSize: 10)),
                             Text(app.imageSizeDisplay, style: const TextStyle(color: AppColors.textMuted, fontFamily: 'monospace', fontSize: 10)),
                           ],
@@ -524,8 +521,6 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
     );
   }
 
-  // ─── Error ────────────────────────────────────────────────────────────────────
-
   Widget _buildError() {
     return Center(
       child: Column(
@@ -548,27 +543,20 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
     );
   }
 
-  // ─── Docker Setup ─────────────────────────────────────────────────────────────
-
-  String _dockerDownloadUrl() {
-    final docker = _healthInfo?['docker'] as Map<String, dynamic>?;
-    final platform = docker?['platform'] as String? ?? '';
-    final arch = docker?['architecture'] as String? ?? 'amd64';
+  String _podmanDownloadUrl() {
+    final engine = _healthInfo?['container_engine'] as Map<String, dynamic>?;
+    final platform = engine?['platform'] as String? ?? '';
     if (platform == 'windows') {
-      return arch == 'arm64'
-          ? 'https://desktop.docker.com/win/main/arm64/Docker%20Desktop%20Installer.exe'
-          : 'https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe';
+      return 'https://podman-desktop.io/downloads/windows';
     } else if (platform == 'darwin') {
-      return arch == 'arm64'
-          ? 'https://desktop.docker.com/mac/main/arm64/Docker.dmg'
-          : 'https://desktop.docker.com/mac/main/amd64/Docker.dmg';
+      return 'https://podman-desktop.io/downloads/macos';
     }
-    return 'https://docs.docker.com/engine/install/';
+    return 'https://podman-desktop.io/docs/installation/linux-install';
   }
 
-  Widget _buildDockerSetup() {
-    final docker = _healthInfo?['docker'] as Map<String, dynamic>?;
-    final installed = docker?['installed'] == true;
+  Widget _buildPodmanSetup() {
+    final engine = _healthInfo?['container_engine'] as Map<String, dynamic>?;
+    final installed = engine?['installed'] == true;
     return Expanded(
       child: Center(
         child: SingleChildScrollView(
@@ -584,31 +572,31 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
                 ),
                 const SizedBox(height: 20),
                 Text(
-                  installed ? 'Docker is installed but not running' : 'Docker Desktop needed for sandboxed apps',
+                  installed ? 'Podman is installed but not running' : 'Podman needed for sandboxed apps',
                   style: const TextStyle(color: AppColors.textPrimary, fontSize: 15, fontWeight: FontWeight.bold, fontFamily: 'monospace'),
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 10),
                 Text(
                   installed
-                      ? 'Open Docker Desktop and wait for it to fully start (whale icon stops animating), then tap Check Again.'
-                      : 'Apps run in isolated Docker containers for security.\nDocker Desktop is free to download.',
+                      ? 'Run "podman machine start" in a terminal, then tap Check Again.'
+                      : 'Apps run in isolated containers for security.\nPodman is free and open source.',
                   style: const TextStyle(color: AppColors.textSecondary, fontSize: 12, fontFamily: 'monospace', height: 1.5),
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 20),
                 if (!installed)
-                  _dockerActionButton(Icons.download_rounded, 'DOWNLOAD DOCKER DESKTOP', () async {
-                    try { await launchUrl(Uri.parse(_dockerDownloadUrl()), mode: LaunchMode.externalApplication); } catch (_) {}
+                  _podmanActionButton(Icons.download_rounded, 'GET PODMAN DESKTOP', () async {
+                    try { await launchUrl(Uri.parse(_podmanDownloadUrl()), mode: LaunchMode.externalApplication); } catch (_) {}
                   }),
                 const SizedBox(height: 10),
-                _dockerActionButton(Icons.refresh, 'CHECK AGAIN', _loadData, secondary: !installed),
+                _podmanActionButton(Icons.refresh, 'CHECK AGAIN', _loadData, secondary: !installed),
                 const SizedBox(height: 24),
                 Container(
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(8), border: Border.all(color: AppColors.border)),
                   child: const Text(
-                    'Apps run in sandboxed Docker containers — they can\'t access your files or network without explicit permission. Your identity (KERI, contacts, OOBIs) always works without Docker.',
+                    'Apps run in sandboxed containers — they can\'t access your files or network without explicit permission. Your identity (KERI, contacts, OOBIs) always works without Podman.',
                     style: TextStyle(color: AppColors.textMuted, fontSize: 11, fontFamily: 'monospace', height: 1.5),
                   ),
                 ),
@@ -620,7 +608,7 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
     );
   }
 
-  Widget _dockerActionButton(IconData icon, String label, VoidCallback onPressed, {bool secondary = false}) {
+  Widget _podmanActionButton(IconData icon, String label, VoidCallback onPressed, {bool secondary = false}) {
     return SizedBox(
       width: 280,
       height: 42,
@@ -639,8 +627,6 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
   }
 
 }
-
-// ─── Progress Model ────────────────────────────────────────────────────────────
 
 class _InstallProgress {
   final String status;

@@ -26,8 +26,8 @@ type App struct {
         PublisherKey        *string `json:"publisher_key,omitempty"`
         SignatureAlgorithm  *string `json:"signature_algorithm,omitempty"`
         InstallStatus       string  `json:"install_status"`
-        DockerImage         *string `json:"docker_image,omitempty"`
-        DockerImageSizeBytes *int64 `json:"docker_image_size_bytes,omitempty"`
+        ContainerImage         *string `json:"container_image,omitempty"`
+        ContainerImageSizeBytes *int64 `json:"container_image_size_bytes,omitempty"`
         BinaryPath          *string `json:"binary_path,omitempty"`
         CreatedAt           string  `json:"created_at"`
         UpdatedAt           string  `json:"updated_at"`
@@ -191,7 +191,7 @@ func (s *SandboxStore) SaveApp(app App) error {
         _, err := s.db.Exec(`
                 INSERT INTO apps (id, name, description, version, execution_type, display_method, network_mode,
                         manifest_json, manifest_signature, publisher_key, signature_algorithm, install_status,
-                        docker_image, docker_image_size_bytes, binary_path, created_at, updated_at)
+                        container_image, container_image_size_bytes, binary_path, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 ON CONFLICT(id) DO UPDATE SET
                         name=excluded.name, description=excluded.description, version=excluded.version,
@@ -199,11 +199,11 @@ func (s *SandboxStore) SaveApp(app App) error {
                         network_mode=excluded.network_mode, manifest_json=excluded.manifest_json,
                         manifest_signature=excluded.manifest_signature, publisher_key=excluded.publisher_key,
                         signature_algorithm=excluded.signature_algorithm, install_status=excluded.install_status,
-                        docker_image=excluded.docker_image, docker_image_size_bytes=excluded.docker_image_size_bytes,
+                        container_image=excluded.container_image, container_image_size_bytes=excluded.container_image_size_bytes,
                         binary_path=excluded.binary_path, updated_at=CURRENT_TIMESTAMP`,
                 app.ID, app.Name, app.Description, app.Version, app.ExecutionType, app.DisplayMethod,
                 app.NetworkMode, app.ManifestJSON, app.ManifestSignature, app.PublisherKey,
-                app.SignatureAlgorithm, app.InstallStatus, app.DockerImage, app.DockerImageSizeBytes,
+                app.SignatureAlgorithm, app.InstallStatus, app.ContainerImage, app.ContainerImageSizeBytes,
                 app.BinaryPath)
         return err
 }
@@ -212,11 +212,11 @@ func (s *SandboxStore) GetApp(id string) (*App, error) {
         var app App
         err := s.db.QueryRow(`SELECT id, name, description, version, execution_type, display_method,
                 network_mode, manifest_json, manifest_signature, publisher_key, signature_algorithm,
-                install_status, docker_image, docker_image_size_bytes, binary_path, created_at, updated_at
+                install_status, container_image, container_image_size_bytes, binary_path, created_at, updated_at
                 FROM apps WHERE id = ?`, id).Scan(
                 &app.ID, &app.Name, &app.Description, &app.Version, &app.ExecutionType, &app.DisplayMethod,
                 &app.NetworkMode, &app.ManifestJSON, &app.ManifestSignature, &app.PublisherKey,
-                &app.SignatureAlgorithm, &app.InstallStatus, &app.DockerImage, &app.DockerImageSizeBytes,
+                &app.SignatureAlgorithm, &app.InstallStatus, &app.ContainerImage, &app.ContainerImageSizeBytes,
                 &app.BinaryPath, &app.CreatedAt, &app.UpdatedAt)
         if err == sql.ErrNoRows {
                 return nil, nil
@@ -230,7 +230,7 @@ func (s *SandboxStore) GetApp(id string) (*App, error) {
 func (s *SandboxStore) ListApps() ([]App, error) {
         rows, err := s.db.Query(`SELECT id, name, description, version, execution_type, display_method,
                 network_mode, manifest_json, manifest_signature, publisher_key, signature_algorithm,
-                install_status, docker_image, docker_image_size_bytes, binary_path, created_at, updated_at
+                install_status, container_image, container_image_size_bytes, binary_path, created_at, updated_at
                 FROM apps ORDER BY name`)
         if err != nil {
                 return nil, err
@@ -242,8 +242,8 @@ func (s *SandboxStore) ListApps() ([]App, error) {
                 var app App
                 if err := rows.Scan(&app.ID, &app.Name, &app.Description, &app.Version, &app.ExecutionType,
                         &app.DisplayMethod, &app.NetworkMode, &app.ManifestJSON, &app.ManifestSignature,
-                        &app.PublisherKey, &app.SignatureAlgorithm, &app.InstallStatus, &app.DockerImage,
-                        &app.DockerImageSizeBytes, &app.BinaryPath, &app.CreatedAt, &app.UpdatedAt); err != nil {
+                        &app.PublisherKey, &app.SignatureAlgorithm, &app.InstallStatus, &app.ContainerImage,
+                        &app.ContainerImageSizeBytes, &app.BinaryPath, &app.CreatedAt, &app.UpdatedAt); err != nil {
                         return nil, err
                 }
                 apps = append(apps, app)

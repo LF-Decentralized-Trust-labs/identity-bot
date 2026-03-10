@@ -4,10 +4,10 @@
   "description": "AI chat interface configured to use OpenRouter via agent proxy. API keys are injected by the agent and never enter the container.",
   "version": "1.0.0",
   "author": "Open WebUI",
-  "execution_type": "docker",
+  "execution_type": "container",
   "display_method": "webview",
   "network_mode": "proxy_required",
-  "docker": {
+  "container": {
     "image": "ghcr.io/open-webui/open-webui:main",
     "ports": {
       "8080": "display"

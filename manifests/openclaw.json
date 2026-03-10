@@ -4,10 +4,10 @@
   "description": "Multi-tenant Node.js/TypeScript web application. Demonstrates complex containerized app sandboxing with full network interception and proxy-mediated egress.",
   "version": "1.0.0",
   "author": "OpenClaw",
-  "execution_type": "docker",
+  "execution_type": "container",
   "display_method": "webview",
   "network_mode": "proxy_required",
-  "docker": {
+  "container": {
     "image": "louislam/uptime-kuma:1",
     "ports": {
       "3001": "display"
