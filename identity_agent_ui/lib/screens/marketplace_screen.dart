@@ -25,6 +25,11 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
   Timer? _pollTimer;
   Timer? _progressTimer;
 
+  _PodmanWizardStep _wizardStep = _PodmanWizardStep.prompt;
+  String _wizardMessage = '';
+  String? _wizardError;
+  Timer? _setupPollTimer;
+
   String get _baseUrl => widget.serverUrl ?? AgentConfig.coreBaseUrl;
 
   @override
@@ -39,6 +44,7 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
   void dispose() {
     _pollTimer?.cancel();
     _progressTimer?.cancel();
+    _setupPollTimer?.cancel();
     super.dispose();
   }
 
@@ -546,65 +552,319 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
   String _podmanDownloadUrl() {
     final engine = _healthInfo?['container_engine'] as Map<String, dynamic>?;
     final platform = engine?['platform'] as String? ?? '';
-    if (platform == 'windows') {
-      return 'https://podman-desktop.io/downloads/windows';
-    } else if (platform == 'darwin') {
-      return 'https://podman-desktop.io/downloads/macos';
-    }
+    if (platform == 'windows') return 'https://podman-desktop.io/downloads/windows';
+    if (platform == 'darwin') return 'https://podman-desktop.io/downloads/macos';
     return 'https://podman-desktop.io/docs/installation/linux-install';
   }
 
+  Map<String, dynamic>? get _engineInfo =>
+      _healthInfo?['container_engine'] as Map<String, dynamic>?;
+
+  bool get _engineInstalled => _engineInfo?['installed'] == true;
+  bool get _setupSupported => _engineInfo?['setup_supported'] == true;
+  bool get _needsMachineInit => _engineInfo?['needs_machine_init'] == true;
+  bool get _needsMachineStart => _engineInfo?['needs_machine_start'] == true;
+  String get _enginePlatform => (_engineInfo?['platform'] as String?) ?? '';
+
+  Future<void> _startPodmanWizard() async {
+    setState(() { _wizardError = null; });
+
+    if (!_engineInstalled) {
+      if (!_setupSupported) {
+        setState(() {
+          _wizardStep = _PodmanWizardStep.error;
+          _wizardError = 'Automatic install is not available on this system. Please install Podman manually.';
+        });
+        return;
+      }
+      await _runSetupAction('install', _PodmanWizardStep.installing);
+      if (_wizardError != null) return;
+      await _loadData();
+    }
+
+    if (_needsMachineInit) {
+      await _runSetupAction('init-machine', _PodmanWizardStep.initMachine);
+      if (_wizardError != null) return;
+    }
+
+    if (_needsMachineStart || (_enginePlatform == 'darwin' || _enginePlatform == 'windows')) {
+      await _runSetupAction('start-machine', _PodmanWizardStep.startMachine);
+      if (_wizardError != null) return;
+    }
+
+    await _loadData();
+    if (!_podmanNotAvailable) {
+      setState(() { _wizardStep = _PodmanWizardStep.done; });
+      await Future.delayed(const Duration(seconds: 2));
+      if (mounted) {
+        setState(() { _wizardStep = _PodmanWizardStep.prompt; });
+      }
+    } else if (_engineInstalled) {
+      setState(() {
+        _wizardStep = _PodmanWizardStep.error;
+        _wizardError = 'Podman is installed but not responding. It may need to be restarted or reinstalled.';
+      });
+    }
+  }
+
+  Future<void> _runSetupAction(String action, _PodmanWizardStep step) async {
+    setState(() {
+      _wizardStep = step;
+      _wizardMessage = _stepLabel(step);
+      _wizardError = null;
+    });
+
+    try {
+      final res = await http.post(
+        Uri.parse('$_baseUrl/api/sandbox/podman/setup'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'action': action}),
+      );
+      if (res.statusCode != 200) {
+        final data = jsonDecode(res.body);
+        setState(() {
+          _wizardStep = _PodmanWizardStep.error;
+          _wizardError = data['error'] as String? ?? 'Setup request failed';
+        });
+        return;
+      }
+    } catch (e) {
+      setState(() {
+        _wizardStep = _PodmanWizardStep.error;
+        _wizardError = 'Could not reach backend: $e';
+      });
+      return;
+    }
+
+    final completer = Completer<void>();
+    _setupPollTimer?.cancel();
+    _setupPollTimer = Timer.periodic(const Duration(seconds: 2), (timer) async {
+      try {
+        final res = await http.get(Uri.parse('$_baseUrl/api/sandbox/podman/setup-status'));
+        if (res.statusCode == 200) {
+          final data = jsonDecode(res.body) as Map<String, dynamic>;
+          final status = data['status'] as String? ?? '';
+          final msg = data['message'] as String? ?? '';
+          final err = data['error'] as String?;
+
+          if (mounted) {
+            setState(() { _wizardMessage = msg; });
+          }
+
+          if (status == 'error') {
+            timer.cancel();
+            if (mounted) {
+              setState(() {
+                _wizardStep = _PodmanWizardStep.error;
+                _wizardError = err ?? msg;
+              });
+            }
+            if (!completer.isCompleted) completer.complete();
+          } else if (status == 'complete' || (data['done'] == true)) {
+            timer.cancel();
+            if (!completer.isCompleted) completer.complete();
+          }
+        }
+      } catch (_) {}
+    });
+
+    await completer.future.timeout(const Duration(minutes: 12), onTimeout: () {
+      _setupPollTimer?.cancel();
+      if (mounted) {
+        setState(() {
+          _wizardStep = _PodmanWizardStep.error;
+          _wizardError = 'Setup timed out. Please try again.';
+        });
+      }
+    });
+  }
+
+  String _stepLabel(_PodmanWizardStep step) {
+    switch (step) {
+      case _PodmanWizardStep.installing:
+        return 'Installing Podman...';
+      case _PodmanWizardStep.initMachine:
+        return 'Initializing Podman environment...';
+      case _PodmanWizardStep.startMachine:
+        return 'Starting Podman...';
+      default:
+        return '';
+    }
+  }
+
   Widget _buildPodmanSetup() {
-    final engine = _healthInfo?['container_engine'] as Map<String, dynamic>?;
-    final installed = engine?['installed'] == true;
     return Expanded(
       child: Center(
         child: SingleChildScrollView(
           child: Padding(
             padding: const EdgeInsets.all(32),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  installed ? Icons.play_circle_outline : Icons.download_rounded,
-                  size: 56,
-                  color: AppColors.accent.withOpacity(0.5),
-                ),
-                const SizedBox(height: 20),
-                Text(
-                  installed ? 'Podman is installed but not running' : 'Podman needed for sandboxed apps',
-                  style: const TextStyle(color: AppColors.textPrimary, fontSize: 15, fontWeight: FontWeight.bold, fontFamily: 'monospace'),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  installed
-                      ? 'Run "podman machine start" in a terminal, then tap Check Again.'
-                      : 'Apps run in isolated containers for security.\nPodman is free and open source.',
-                  style: const TextStyle(color: AppColors.textSecondary, fontSize: 12, fontFamily: 'monospace', height: 1.5),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 20),
-                if (!installed)
-                  _podmanActionButton(Icons.download_rounded, 'GET PODMAN DESKTOP', () async {
-                    try { await launchUrl(Uri.parse(_podmanDownloadUrl()), mode: LaunchMode.externalApplication); } catch (_) {}
-                  }),
-                const SizedBox(height: 10),
-                _podmanActionButton(Icons.refresh, 'CHECK AGAIN', _loadData, secondary: !installed),
-                const SizedBox(height: 24),
-                Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(8), border: Border.all(color: AppColors.border)),
-                  child: const Text(
-                    'Apps run in sandboxed containers — they can\'t access your files or network without explicit permission. Your identity (KERI, contacts, OOBIs) always works without Podman.',
-                    style: TextStyle(color: AppColors.textMuted, fontSize: 11, fontFamily: 'monospace', height: 1.5),
-                  ),
-                ),
-              ],
-            ),
+            child: _buildWizardContent(),
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildWizardContent() {
+    switch (_wizardStep) {
+      case _PodmanWizardStep.prompt:
+        return _buildWizardPrompt();
+      case _PodmanWizardStep.installing:
+      case _PodmanWizardStep.initMachine:
+      case _PodmanWizardStep.startMachine:
+        return _buildWizardProgress();
+      case _PodmanWizardStep.done:
+        return _buildWizardDone();
+      case _PodmanWizardStep.error:
+        return _buildWizardError();
+    }
+  }
+
+  Widget _buildWizardPrompt() {
+    final installed = _engineInstalled;
+    final supported = _setupSupported;
+
+    String title;
+    String subtitle;
+    if (installed) {
+      title = 'Podman needs to be started';
+      subtitle = 'Podman is installed but not running yet.\nTap below to start it automatically.';
+    } else {
+      title = 'Marketplace Setup';
+      subtitle = 'Sandboxed apps need Podman — a free, open-source tool — to run securely.\nWould you like to set it up now?';
+    }
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(
+          installed ? Icons.play_circle_outline : Icons.store_rounded,
+          size: 56,
+          color: AppColors.accent.withOpacity(0.6),
+        ),
+        const SizedBox(height: 20),
+        Text(
+          title,
+          style: const TextStyle(color: AppColors.textPrimary, fontSize: 16, fontWeight: FontWeight.bold, fontFamily: 'monospace'),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 10),
+        Text(
+          subtitle,
+          style: const TextStyle(color: AppColors.textSecondary, fontSize: 12, fontFamily: 'monospace', height: 1.5),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 24),
+        if (supported || installed)
+          _podmanActionButton(
+            installed ? Icons.play_arrow_rounded : Icons.download_rounded,
+            installed ? 'START PODMAN' : 'SET UP PODMAN',
+            _startPodmanWizard,
+          ),
+        if (!supported && !installed) ...[
+          _podmanActionButton(Icons.open_in_new, 'DOWNLOAD PODMAN', () async {
+            try { await launchUrl(Uri.parse(_podmanDownloadUrl()), mode: LaunchMode.externalApplication); } catch (_) {}
+          }),
+          const SizedBox(height: 10),
+          _podmanActionButton(Icons.refresh, 'CHECK AGAIN', _loadData, secondary: true),
+        ],
+        if (supported && !installed) ...[
+          const SizedBox(height: 10),
+          Text(
+            _enginePlatform == 'linux'
+                ? 'This will run a package install command.'
+                : 'You may be asked to approve a system prompt — this is normal.',
+            style: const TextStyle(color: AppColors.textMuted, fontSize: 11, fontFamily: 'monospace', height: 1.4),
+            textAlign: TextAlign.center,
+          ),
+        ],
+        const SizedBox(height: 24),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(8), border: Border.all(color: AppColors.border)),
+          child: const Text(
+            'Apps run in sandboxed containers — they can\'t access your files or network without permission. Your identity (KERI, contacts, OOBIs) always works without Podman.',
+            style: TextStyle(color: AppColors.textMuted, fontSize: 11, fontFamily: 'monospace', height: 1.5),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildWizardProgress() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const SizedBox(
+          width: 48,
+          height: 48,
+          child: CircularProgressIndicator(color: AppColors.accent, strokeWidth: 3),
+        ),
+        const SizedBox(height: 24),
+        Text(
+          _wizardMessage,
+          style: const TextStyle(color: AppColors.textPrimary, fontSize: 14, fontWeight: FontWeight.w600, fontFamily: 'monospace'),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 12),
+        Text(
+          _wizardStep == _PodmanWizardStep.installing
+              ? 'This may take a few minutes.\nYou might see a system prompt to approve — please accept it.'
+              : 'Please wait while the environment is being prepared...',
+          style: const TextStyle(color: AppColors.textSecondary, fontSize: 12, fontFamily: 'monospace', height: 1.5),
+          textAlign: TextAlign.center,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildWizardDone() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(Icons.check_circle_rounded, size: 56, color: AppColors.accent.withOpacity(0.8)),
+        const SizedBox(height: 20),
+        const Text(
+          'Podman is ready!',
+          style: TextStyle(color: AppColors.textPrimary, fontSize: 16, fontWeight: FontWeight.bold, fontFamily: 'monospace'),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 10),
+        const Text(
+          'Loading marketplace...',
+          style: TextStyle(color: AppColors.textSecondary, fontSize: 12, fontFamily: 'monospace'),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildWizardError() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(Icons.error_outline_rounded, size: 56, color: AppColors.error.withOpacity(0.7)),
+        const SizedBox(height: 20),
+        const Text(
+          'Setup encountered an issue',
+          style: TextStyle(color: AppColors.textPrimary, fontSize: 15, fontWeight: FontWeight.bold, fontFamily: 'monospace'),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 10),
+        Text(
+          _wizardError ?? 'An unknown error occurred.',
+          style: const TextStyle(color: AppColors.textSecondary, fontSize: 12, fontFamily: 'monospace', height: 1.5),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 20),
+        _podmanActionButton(Icons.refresh, 'TRY AGAIN', () {
+          setState(() { _wizardStep = _PodmanWizardStep.prompt; _wizardError = null; });
+          _loadData();
+        }),
+        const SizedBox(height: 10),
+        _podmanActionButton(Icons.open_in_new, 'INSTALL MANUALLY', () async {
+          try { await launchUrl(Uri.parse(_podmanDownloadUrl()), mode: LaunchMode.externalApplication); } catch (_) {}
+        }, secondary: true),
+      ],
     );
   }
 
@@ -666,4 +926,13 @@ class _InstallProgress {
       default: return status.isNotEmpty ? status : 'Installing…';
     }
   }
+}
+
+enum _PodmanWizardStep {
+  prompt,
+  installing,
+  initMachine,
+  startMachine,
+  done,
+  error,
 }

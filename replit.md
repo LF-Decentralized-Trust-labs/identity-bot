@@ -50,7 +50,7 @@ The system uses a standardized topology model based on three topological states 
 -   **Backend Startup Error Dialog:** Desktop builds show a modal error dialog with RETRY button if the bundled Go backend fails to start (missing binary, Python not installed, dependency issues).
 -   **Port Conflict Handling:** On startup, checks if port 5000 is occupied. Stale Identity Agent processes are auto-killed; other apps trigger a user confirmation dialog with "CLOSE IT AND RETRY" option.
 -   **libsodium Bundling (Windows):** `libsodium.dll` is downloaded from the official release and bundled into the embedded Python dir, backend dir, and keri-driver dir. The KERI driver's `server.py` has Windows-specific detection logic to find the DLL.
--   **Podman Setup UX (APPS tab):** When Podman is not available, the marketplace shows a friendly setup guide instead of an error banner, with a "GET PODMAN DESKTOP" or "CHECK AGAIN" button and platform-specific install guidance.
+-   **Podman Setup UX (APPS tab):** When Podman is not available, the marketplace shows a multi-step setup wizard that automatically installs Podman and configures the Podman machine. The wizard uses platform-specific package managers (`winget` on Windows, `brew` on macOS, `apt`/`dnf` on Linux) and handles machine init/start on macOS/Windows. Users only need to approve system prompts (UAC/password). Falls back to manual download links if no supported package manager is detected. Backend endpoints: `POST /api/sandbox/podman/setup` (actions: `install`, `init-machine`, `start-machine`) and `GET /api/sandbox/podman/setup-status` for progress polling.
 
 ### Sandboxed App Marketplace (Desktop-Only)
 

@@ -4,6 +4,7 @@ import (
         "encoding/json"
         "fmt"
         "log"
+        "net"
         "net/http"
         "strconv"
         "time"
@@ -40,6 +41,8 @@ func (s *CoreServer) sandboxRoutes(r chi.Router) {
         r.Get("/apps/{id}/install-progress", s.handleInstallProgress)
         r.Get("/apps/{id}/display", s.handleAppDisplay)
         r.Get("/sandbox/health", s.handleSandboxHealth)
+        r.Post("/sandbox/podman/setup", s.handlePodmanSetup)
+        r.Get("/sandbox/podman/setup-status", s.handlePodmanSetupStatus)
         r.Get("/ws/sandbox", s.handleSandboxWebSocket)
         r.Get("/ws/terminal/{instanceId}", s.handleTerminalWebSocket)
 }
@@ -534,6 +537,60 @@ func (s *CoreServer) handleTerminalWebSocket(w http.ResponseWriter, r *http.Requ
                         return
                 }
         }
+}
+
+func isLocalRequest(r *http.Request) bool {
+        host, _, _ := net.SplitHostPort(r.RemoteAddr)
+        if host == "" {
+                host = r.RemoteAddr
+        }
+        return host == "127.0.0.1" || host == "::1" || host == "localhost"
+}
+
+func (s *CoreServer) handlePodmanSetup(w http.ResponseWriter, r *http.Request) {
+        if !isLocalRequest(r) {
+                jsonError(w, "Podman setup is only available from the local machine", http.StatusForbidden)
+                return
+        }
+
+        var body struct {
+                Action string `json:"action"`
+        }
+        if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+                jsonError(w, "Invalid request body", http.StatusBadRequest)
+                return
+        }
+
+        if body.Action != "install" && body.Action != "init-machine" && body.Action != "start-machine" {
+                jsonError(w, "Invalid action. Must be one of: install, init-machine, start-machine", http.StatusBadRequest)
+                return
+        }
+
+        if !sandbox.TryStartSetup() {
+                jsonError(w, "A setup operation is already in progress", http.StatusConflict)
+                return
+        }
+
+        go func() {
+                defer sandbox.FinishSetup()
+                if err := sandbox.RunPodmanSetup(body.Action); err != nil {
+                        log.Printf("[podman-setup] Action %s failed: %v", body.Action, err)
+                }
+        }()
+
+        jsonResponse(w, map[string]string{
+                "status":  "started",
+                "action":  body.Action,
+                "message": fmt.Sprintf("Podman setup action '%s' started", body.Action),
+        })
+}
+
+func (s *CoreServer) handlePodmanSetupStatus(w http.ResponseWriter, r *http.Request) {
+        if !isLocalRequest(r) {
+                jsonError(w, "Podman setup status is only available from the local machine", http.StatusForbidden)
+                return
+        }
+        jsonResponse(w, sandbox.GetPodmanSetupStatus())
 }
 
 func jsonResponse(w http.ResponseWriter, data interface{}) {
