@@ -33,6 +33,7 @@ type ContainerConfig struct {
         Ports       map[string]string `json:"ports"`
         Environment map[string]string `json:"environment"`
         Volumes     map[string]string `json:"volumes"`
+        DisplayPath string            `json:"display_path,omitempty"`
 }
 
 type BinaryConfig struct {

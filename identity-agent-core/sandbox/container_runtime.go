@@ -230,7 +230,11 @@ func (d *ContainerRuntime) Status(ctx context.Context) (*RuntimeStatus, error) {
         }
 
         state := strings.TrimSpace(string(out))
-        displayURL := fmt.Sprintf("http://127.0.0.1:%d", d.netCfg.DisplayPort)
+        displayPath := ""
+        if d.manifest.Container != nil && d.manifest.Container.DisplayPath != "" {
+                displayPath = d.manifest.Container.DisplayPath
+        }
+        displayURL := fmt.Sprintf("http://127.0.0.1:%d%s", d.netCfg.DisplayPort, displayPath)
 
         return &RuntimeStatus{
                 State:       state,

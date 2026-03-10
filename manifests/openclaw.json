@@ -10,9 +10,13 @@
   "container": {
     "image": "alpine/openclaw:latest",
     "ports": {
-      "3000": "display"
+      "18789": "display"
     },
-    "environment": {},
+    "display_path": "/__openclaw__/canvas/",
+    "environment": {
+      "HOST": "0.0.0.0",
+      "OPENCLAW_HOST": "0.0.0.0"
+    },
     "volumes": {}
   },
   "resources": {
