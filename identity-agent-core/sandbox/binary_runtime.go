@@ -42,19 +42,19 @@ func NewBinaryRuntime(manifest *AppManifest, instance *Instance, store *SandboxS
                 return nil, fmt.Errorf("failed to find agent API port: %w", err)
         }
 
-        proxyURL := fmt.Sprintf("http://localhost:%d", proxyPort)
+        proxyURL := fmt.Sprintf("http://127.0.0.1:%d", proxyPort)
 
         netCfg := &NetworkConfig{
                 ProxyPort:    proxyPort,
                 AgentAPIPort: agentAPIPort,
-                HostIP:       "localhost",
+                HostIP:       "127.0.0.1",
                 ProxyURL:     proxyURL,
                 EnvVars: map[string]string{
                         "HTTP_PROXY":          proxyURL,
                         "HTTPS_PROXY":        proxyURL,
                         "http_proxy":         proxyURL,
                         "https_proxy":        proxyURL,
-                        "IDENTITY_AGENT_API": fmt.Sprintf("http://localhost:%d", agentAPIPort),
+                        "IDENTITY_AGENT_API": fmt.Sprintf("http://127.0.0.1:%d", agentAPIPort),
                 },
         }
 
@@ -111,14 +111,24 @@ pathFound:
         args := b.manifest.Binary.Args
         b.cmd = exec.CommandContext(ctx, binaryPath, args...)
 
-        env := os.Environ()
-        for k, v := range b.netCfg.EnvVars {
-                env = append(env, fmt.Sprintf("%s=%s", k, v))
+        reservedKeys := map[string]bool{
+                "HTTP_PROXY": true, "HTTPS_PROXY": true,
+                "http_proxy": true, "https_proxy": true,
+                "IDENTITY_AGENT_API": true,
         }
+
+        env := os.Environ()
         if b.manifest.Binary.Environment != nil {
                 for k, v := range b.manifest.Binary.Environment {
+                        if reservedKeys[k] {
+                                log.Printf("[binary-runtime] Ignoring manifest override of reserved env var: %s", k)
+                                continue
+                        }
                         env = append(env, fmt.Sprintf("%s=%s", k, v))
                 }
+        }
+        for k, v := range b.netCfg.EnvVars {
+                env = append(env, fmt.Sprintf("%s=%s", k, v))
         }
         b.cmd.Env = env
 

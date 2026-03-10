@@ -1,6 +1,7 @@
 package server
 
 import (
+        "context"
         "encoding/json"
         "fmt"
         "log"
@@ -91,7 +92,8 @@ func (s *CoreServer) handleInstallApp(w http.ResponseWriter, r *http.Request) {
         id := chi.URLParam(r, "id")
 
         go func() {
-                err := s.SandboxManager.InstallApp(r.Context(), id, func(progress sandbox.PullProgress) {
+                ctx := context.Background()
+                err := s.SandboxManager.InstallApp(ctx, id, func(progress sandbox.PullProgress) {
                         log.Printf("[sandbox-api] Pull progress for %s: %s %.1f%%", id, progress.Status, progress.Progress)
                 })
                 if err != nil {

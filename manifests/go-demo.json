@@ -10,9 +10,7 @@
   "binary": {
     "path": "bin/go-demo",
     "args": [],
-    "environment": {
-      "IDENTITY_AGENT_API": "http://agent.internal"
-    }
+    "environment": {}
   },
   "resources": {
     "cpu_cores": 0.5,
