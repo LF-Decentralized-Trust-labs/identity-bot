@@ -1,8 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import '../theme/app_theme.dart';
@@ -77,7 +75,7 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
   }
 
   Future<void> _refreshInstallProgress() async {
-    final installingApps = _apps.where((a) => a.isInstalling).toList();
+    final installingApps = _apps.where((a) => _isAppInstalling(a)).toList();
     if (installingApps.isEmpty) return;
     for (final app in installingApps) {
       try {
@@ -191,6 +189,12 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
     }
   }
 
+  bool _isAppInstalling(SandboxApp app) {
+    if (app.isInstalling) return true;
+    final progress = _installProgress[app.id];
+    return progress != null && !progress.done;
+  }
+
   void _showError(String msg) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(msg), backgroundColor: AppColors.error),
@@ -199,7 +203,6 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (kIsWeb) return _buildWebOverlay();
     return Scaffold(
       backgroundColor: AppColors.primary,
       body: SafeArea(
@@ -277,7 +280,7 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
         border: Border.all(
           color: isRunning
               ? AppColors.accent.withOpacity(0.4)
-              : app.isInstalling
+              : _isAppInstalling(app)
                   ? AppColors.corePending.withOpacity(0.3)
                   : AppColors.border,
         ),
@@ -348,8 +351,7 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
               ],
             ),
           ),
-          // Install progress bar (shown while installing)
-          if (app.isInstalling)
+          if (_isAppInstalling(app))
             _buildInstallProgressBar(app, progress),
         ],
       ),
@@ -441,7 +443,7 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
     Color color;
     if (isRunning) {
       label = 'RUNNING'; color = AppColors.coreActive;
-    } else if (app.isInstalling) {
+    } else if (_isAppInstalling(app)) {
       label = 'INSTALLING'; color = AppColors.corePending;
     } else if (app.isInstalled) {
       label = 'INSTALLED'; color = AppColors.textSecondary;
@@ -462,9 +464,9 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (!app.isInstalled && !app.isInstalling)
+        if (!app.isInstalled && !_isAppInstalling(app))
           _primaryButton('INSTALL', () => _installApp(app)),
-        if (app.isInstalling)
+        if (_isAppInstalling(app))
           const Padding(
             padding: EdgeInsets.symmetric(horizontal: 8),
             child: SizedBox(width: 14, height: 14,
@@ -636,57 +638,6 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
     );
   }
 
-  // ─── Web Overlay ──────────────────────────────────────────────────────────────
-
-  Widget _buildWebOverlay() {
-    return Scaffold(
-      backgroundColor: AppColors.primary,
-      body: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _buildHeader(),
-            Expanded(
-              child: Stack(
-                children: [
-                  if (!_loading && _error == null) _buildAppList(),
-                  Container(
-                    color: Colors.black.withOpacity(0.75),
-                    child: Center(
-                      child: Container(
-                        padding: const EdgeInsets.all(28),
-                        decoration: BoxDecoration(
-                          color: AppColors.surface,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: AppColors.accent.withOpacity(0.4)),
-                        ),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.desktop_mac, size: 44, color: AppColors.accent.withOpacity(0.6)),
-                            const SizedBox(height: 16),
-                            const Text('DESKTOP ONLY', style: TextStyle(
-                              color: AppColors.accent, fontSize: 15, fontWeight: FontWeight.bold, fontFamily: 'monospace', letterSpacing: 1.5,
-                            )),
-                            const SizedBox(height: 12),
-                            const Text(
-                              'Sandboxed apps require the desktop build.\nDownload for Windows, macOS, or Linux.',
-                              style: TextStyle(color: AppColors.textSecondary, fontSize: 12, fontFamily: 'monospace', height: 1.5),
-                              textAlign: TextAlign.center,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 }
 
 // ─── Progress Model ────────────────────────────────────────────────────────────
