@@ -439,9 +439,15 @@ workflows:
         script: |
           $BUNDLE = "identity_agent_ui\build\windows\x64\runner\Release"
           mkdir -p "$BUNDLE\backend"
+          mkdir -p "$BUNDLE\backend\bin"
           Copy-Item "identity-agent-core\bin\identity-agent-core.exe" "$BUNDLE\backend\"
           Copy-Item -Recurse "drivers\keri-core" "$BUNDLE\backend\keri-driver"
           Copy-Item -Recurse "manifests" "$BUNDLE\backend\manifests"
+          Write-Host "Building go-demo sandbox app..."
+          Set-Location "sandbox-apps\go-demo"
+          $env:CGO_ENABLED="0"
+          go build -buildvcs=false -ldflags="-s -w" -o "..\..\$BUNDLE\backend\bin\go-demo.exe" .
+          Set-Location "..\.."
           Write-Host "--- Bundle contents ---"
           Get-ChildItem -Recurse "$BUNDLE\backend"
 
@@ -567,6 +573,12 @@ workflows:
           cp -r drivers/keri-core "$RESOURCES/backend/keri-driver"
           cp -r manifests "$RESOURCES/backend/manifests"
           chmod +x "$RESOURCES/backend/identity-agent-core"
+          echo "Building go-demo sandbox app..."
+          mkdir -p "$RESOURCES/backend/bin"
+          cd sandbox-apps/go-demo
+          CGO_ENABLED=0 go build -buildvcs=false -ldflags="-s -w" -o "../../$RESOURCES/backend/bin/go-demo" .
+          cd ../..
+          chmod +x "$RESOURCES/backend/bin/go-demo"
           echo "--- Bundle contents ---"
           ls -la "$RESOURCES/backend/"
 
@@ -643,6 +655,12 @@ workflows:
           cp -r drivers/keri-core "$BUNDLE/backend/keri-driver"
           cp -r manifests "$BUNDLE/backend/manifests"
           chmod +x "$BUNDLE/backend/identity-agent-core"
+          echo "Building go-demo sandbox app..."
+          mkdir -p "$BUNDLE/backend/bin"
+          cd sandbox-apps/go-demo
+          CGO_ENABLED=0 go build -buildvcs=false -ldflags="-s -w" -o "../../$BUNDLE/backend/bin/go-demo" .
+          cd ../..
+          chmod +x "$BUNDLE/backend/bin/go-demo"
           echo "--- Bundle contents ---"
           ls -la "$BUNDLE/backend/"
 

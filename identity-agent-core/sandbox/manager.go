@@ -273,7 +273,7 @@ func (m *Manager) UninstallApp(id string) error {
                 }
         }
 
-        m.store.DeleteApp(id)
+        m.store.UpdateAppStatus(id, "available")
         m.policy.UnregisterManifest(id)
 
         m.store.InsertEvent(Event{

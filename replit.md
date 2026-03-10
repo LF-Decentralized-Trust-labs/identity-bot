@@ -54,7 +54,7 @@ The system uses a standardized topology model based on three topological states 
 
 ### Sandboxed App Marketplace (Desktop-Only)
 
-This desktop-only feature enables sandboxed application execution via Docker containers and compiled binaries. It includes a comprehensive sandbox package for storage, manifest loading, runtime abstraction, networking, policy enforcement, and resource monitoring. Key features include a pure Go forward proxy with MITM TLS interception, a policy engine for domain access, a credential vault, and resource monitoring with escalation.
+This desktop-only feature enables sandboxed application execution via Docker containers and compiled binaries. It includes a comprehensive sandbox package for storage, manifest loading, runtime abstraction, networking, policy enforcement, and resource monitoring. Key features include a pure Go forward proxy with MITM TLS interception, a policy engine for domain access, a credential vault, and resource monitoring with escalation. The marketplace UI uses compact ListView cards (~90px height) with inline status badges, install progress bars (polling `GET /api/apps/{id}/install-progress` every 2s), mini CPU/RAM resource indicators for running apps, and full lifecycle actions (INSTALL → LAUNCH → VIEW/STOP → UNINSTALL). Uninstall resets app status to `available` (not deleted) so users can reinstall in-session. The Go demo binary (`sandbox-apps/go-demo/`) is built and placed at `bin/go-demo` relative to the working directory; `binary_runtime.go` auto-appends `.exe` on Windows.
 
 ### Sandbox Trace Debugger (Developer-Only)
 
