@@ -472,9 +472,10 @@ workflows:
           if ($SODIUM_DLL) {
             Copy-Item $SODIUM_DLL.FullName "$BUNDLE\backend\libsodium.dll"
             Copy-Item $SODIUM_DLL.FullName "$BUNDLE\backend\keri-driver\libsodium.dll"
-            Write-Host "Bundled libsodium.dll ($([math]::Round($SODIUM_DLL.Length / 1KB)) KB)"
+            $sizeKB = [math]::Round($SODIUM_DLL.Length / 1024)
+            Write-Host "Bundled libsodium.dll ($sizeKB KB)"
           } else {
-            Write-Error "libsodium.dll not found in archive — build cannot proceed"
+            Write-Error "libsodium.dll not found in archive - build cannot proceed"
             exit 1
           }
           Remove-Item -Recurse -Force "libsodium-temp" -ErrorAction SilentlyContinue
