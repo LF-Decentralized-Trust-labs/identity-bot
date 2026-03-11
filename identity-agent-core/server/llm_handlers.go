@@ -1,16 +1,36 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 )
 
 const openRouterBaseURL = "https://openrouter.ai/api/v1"
+
+type llmModel struct {
+	ID      string `json:"id"`
+	Object  string `json:"object"`
+	Created int64  `json:"created"`
+	OwnedBy string `json:"owned_by"`
+}
+
+var llmModelCatalog = []llmModel{
+	{ID: "openai/gpt-3.5-turbo", Object: "model", Created: 1677610602, OwnedBy: "openai"},
+	{ID: "openai/gpt-4", Object: "model", Created: 1687882411, OwnedBy: "openai"},
+	{ID: "openai/gpt-4o", Object: "model", Created: 1715367049, OwnedBy: "openai"},
+	{ID: "openai/gpt-4o-mini", Object: "model", Created: 1721172717, OwnedBy: "openai"},
+	{ID: "anthropic/claude-3-haiku", Object: "model", Created: 1709251200, OwnedBy: "anthropic"},
+	{ID: "anthropic/claude-3.5-sonnet", Object: "model", Created: 1718841600, OwnedBy: "anthropic"},
+	{ID: "google/gemini-flash-1.5", Object: "model", Created: 1718841600, OwnedBy: "google"},
+	{ID: "meta-llama/llama-3.1-8b-instruct:free", Object: "model", Created: 1721347200, OwnedBy: "meta-llama"},
+}
 
 func (s *CoreServer) llmRoutes(r chi.Router) {
 	r.Get("/api/settings/llm", s.handleGetLLMSettings)
@@ -33,10 +53,15 @@ func (s *CoreServer) handleGetLLMSettings(w http.ResponseWriter, r *http.Request
 	for _, svc := range services {
 		serviceStatus[svc] = s.SandboxManager.GetLLMAPIKey(svc) != ""
 	}
+	models := make([]string, len(llmModelCatalog))
+	for i, m := range llmModelCatalog {
+		models[i] = m.ID
+	}
 	writeJSON(w, map[string]interface{}{
 		"services":       services,
 		"service_status": serviceStatus,
 		"available":      true,
+		"models":         models,
 	})
 }
 
@@ -78,9 +103,23 @@ func (s *CoreServer) handleDeleteLLMKey(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, map[string]interface{}{"deleted": true, "service": service})
 }
 
+func llmCORSHeaders(w http.ResponseWriter) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept")
+}
+
 func (s *CoreServer) handleLLMProxy(w http.ResponseWriter, r *http.Request) {
+	llmCORSHeaders(w)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
 	if s.SandboxManager == nil {
-		http.Error(w, `{"error":{"message":"Sandbox not initialized","code":"unavailable"}}`, http.StatusServiceUnavailable)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Write([]byte(`{"error":{"message":"Sandbox not initialized","code":"unavailable","type":"server_error"}}`))
 		return
 	}
 
@@ -88,20 +127,32 @@ func (s *CoreServer) handleLLMProxy(w http.ResponseWriter, r *http.Request) {
 	if apiKey == "" {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"error":{"message":"OpenRouter API key not configured. Go to Identity Agent Settings and enter your OpenRouter key.","code":"missing_api_key","type":"authentication_error"}}`))
+		w.Write([]byte(`{"error":{"message":"OpenRouter API key not configured. Open the Identity Agent, go to Settings, and enter your OpenRouter key under AI KEYS.","code":"missing_api_key","type":"authentication_error"}}`))
 		return
 	}
 
-	path := strings.TrimPrefix(r.URL.Path, "/llm/v1")
-	if path == "" {
-		path = "/"
+	subPath := strings.TrimPrefix(r.URL.Path, "/llm/v1")
+	if subPath == "" {
+		subPath = "/"
 	}
-	upstreamURL := openRouterBaseURL + path
+
+	if r.Method == http.MethodGet && (subPath == "/models" || subPath == "/models/") {
+		s.handleLLMModels(w, r)
+		return
+	}
+
+	upstreamURL := openRouterBaseURL + subPath
 	if r.URL.RawQuery != "" {
 		upstreamURL += "?" + r.URL.RawQuery
 	}
 
-	upReq, err := http.NewRequestWithContext(r.Context(), r.Method, upstreamURL, r.Body)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Failed to read request body", http.StatusInternalServerError)
+		return
+	}
+
+	upReq, err := http.NewRequestWithContext(r.Context(), r.Method, upstreamURL, bytes.NewReader(body))
 	if err != nil {
 		http.Error(w, "Failed to build upstream request", http.StatusInternalServerError)
 		return
@@ -109,7 +160,7 @@ func (s *CoreServer) handleLLMProxy(w http.ResponseWriter, r *http.Request) {
 
 	for key, vals := range r.Header {
 		lk := strings.ToLower(key)
-		if lk == "host" || lk == "proxy-connection" || lk == "proxy-authorization" {
+		if lk == "host" || lk == "proxy-connection" || lk == "proxy-authorization" || lk == "authorization" {
 			continue
 		}
 		for _, val := range vals {
@@ -120,11 +171,15 @@ func (s *CoreServer) handleLLMProxy(w http.ResponseWriter, r *http.Request) {
 	upReq.Header.Set("HTTP-Referer", "https://identity-agent.local")
 	upReq.Header.Set("X-Title", "Identity Agent")
 
-	client := &http.Client{}
+	log.Printf("[llm-proxy] %s %s -> %s", r.Method, r.URL.Path, upstreamURL)
+
+	client := &http.Client{Timeout: 120 * time.Second}
 	resp, err := client.Do(upReq)
 	if err != nil {
-		log.Printf("[llm-proxy] Upstream error for %s %s: %v", r.Method, upstreamURL, err)
-		http.Error(w, "Upstream request failed", http.StatusBadGateway)
+		log.Printf("[llm-proxy] Upstream error: %v", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		w.Write([]byte(`{"error":{"message":"Upstream request to OpenRouter failed","code":"upstream_error","type":"server_error"}}`))
 		return
 	}
 	defer resp.Body.Close()
@@ -138,7 +193,6 @@ func (s *CoreServer) handleLLMProxy(w http.ResponseWriter, r *http.Request) {
 			w.Header().Add(key, val)
 		}
 	}
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.WriteHeader(resp.StatusCode)
 
 	flusher, canFlush := w.(http.Flusher)
@@ -159,6 +213,17 @@ func (s *CoreServer) handleLLMProxy(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 	}
+}
+
+func (s *CoreServer) handleLLMModels(w http.ResponseWriter, _ *http.Request) {
+	type modelsResponse struct {
+		Object string     `json:"object"`
+		Data   []llmModel `json:"data"`
+	}
+	writeJSON(w, modelsResponse{
+		Object: "list",
+		Data:   llmModelCatalog,
+	})
 }
 
 func writeJSON(w http.ResponseWriter, v interface{}) {
