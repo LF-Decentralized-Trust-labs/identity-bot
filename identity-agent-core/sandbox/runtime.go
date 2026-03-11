@@ -3,9 +3,11 @@ package sandbox
 import (
         "context"
         "encoding/json"
+        "log"
         "net"
         "os/exec"
         "runtime"
+        "strings"
         "time"
 )
 
@@ -248,11 +250,40 @@ func podmanBridgeGatewayIP() string {
 
 func agentInternalHost() string {
         switch runtime.GOOS {
-        case "darwin", "windows":
+        case "windows":
+                // On Windows with WSL2, host-gateway doesn't work reliably.
+                // Dynamically detect the WSL2 bridge gateway IP by querying the Podman machine.
+                return detectWSL2GatewayIP()
+        case "darwin":
+                // macOS Podman with OrbStack/Colima reliably supports host-gateway
                 return "host-gateway"
         default:
                 return podmanBridgeGatewayIP()
         }
+}
+
+func detectWSL2GatewayIP() string {
+        // On Windows + Podman + WSL2, the host IP is the WSL2 bridge gateway.
+        // Query it with: podman machine ssh "ip route | grep default"
+        // Expected output: "default via 172.20.96.1 dev eth0 proto kernel"
+        // We need the second field (the IP).
+        cmd := exec.Command("podman", "machine", "ssh", "ip route | grep default")
+        output, err := cmd.Output()
+        if err != nil {
+                log.Printf("[sandbox] Failed to detect WSL2 gateway IP: %v, falling back to host-gateway", err)
+                return "host-gateway"
+        }
+
+        // Parse: "default via X.X.X.X dev eth0 proto kernel"
+        parts := strings.Fields(strings.TrimSpace(string(output)))
+        if len(parts) >= 3 && parts[0] == "default" && parts[1] == "via" {
+                ip := parts[2]
+                log.Printf("[sandbox] Detected WSL2 gateway IP: %s", ip)
+                return ip
+        }
+
+        log.Printf("[sandbox] Could not parse WSL2 gateway IP from output: %s", string(output))
+        return "host-gateway"
 }
 
 func findAvailablePort() (int, error) {
