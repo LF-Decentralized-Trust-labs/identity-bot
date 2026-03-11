@@ -7,7 +7,6 @@ import (
         "log"
         "net/http"
         "strings"
-        "time"
 
         "github.com/go-chi/chi/v5"
 )
@@ -175,7 +174,10 @@ func (s *CoreServer) handleLLMProxy(w http.ResponseWriter, r *http.Request) {
 
         log.Printf("[llm-proxy] %s %s -> %s", r.Method, r.URL.Path, upstreamURL)
 
-        client := &http.Client{Timeout: 120 * time.Second}
+        // No client-level timeout — streaming LLM responses can take many minutes.
+        // The request context (tied to the client connection) handles cancellation if
+        // the browser disconnects.
+        client := &http.Client{}
         resp, err := client.Do(upReq)
         if err != nil {
                 log.Printf("[llm-proxy] Upstream error: %v", err)
@@ -195,6 +197,11 @@ func (s *CoreServer) handleLLMProxy(w http.ResponseWriter, r *http.Request) {
                         w.Header().Add(key, val)
                 }
         }
+        // Enforce SSE-friendly headers regardless of what OpenRouter sends.
+        // Open WebUI's WebView needs these to keep the stream open.
+        w.Header().Set("Cache-Control", "no-cache")
+        w.Header().Set("Connection", "keep-alive")
+        w.Header().Set("X-Accel-Buffering", "no")
         w.WriteHeader(resp.StatusCode)
 
         flusher, canFlush := w.(http.Flusher)
