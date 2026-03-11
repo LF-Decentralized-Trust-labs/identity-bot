@@ -657,6 +657,33 @@ func (m *Manager) Store() *SandboxStore {
         return m.store
 }
 
+func (m *Manager) GetLLMAPIKey(service string) string {
+        return m.credentials.GetAPIKey(service)
+}
+
+func (m *Manager) SetLLMAPIKey(service, apiKey string) error {
+        var domains []string
+        switch service {
+        case "openrouter":
+                domains = []string{"*.openrouter.ai", "openrouter.ai"}
+        case "openai":
+                domains = []string{"*.openai.com", "api.openai.com"}
+        default:
+                domains = []string{}
+        }
+        return m.credentials.SetCredential(service, domains, map[string]string{
+                "Authorization": "Bearer " + apiKey,
+        })
+}
+
+func (m *Manager) DeleteLLMAPIKey(service string) error {
+        return m.credentials.RemoveCredential(service)
+}
+
+func (m *Manager) ListLLMServices() []string {
+        return m.credentials.ListServices()
+}
+
 func (m *Manager) HealthCheck() map[string]interface{} {
         containerEngine := CheckContainerEngine()
 

@@ -297,6 +297,7 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
         })
 
         s.traceRoutes(r)
+        s.llmRoutes(r)
 
         r.Get("/oobi/{aid}", s.handleOobiServe)
 

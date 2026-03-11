@@ -68,6 +68,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _grapeIdLockedName = '';
   bool _isReleasingName = false;
 
+  final TextEditingController _openRouterKeyController = TextEditingController();
+  bool _openRouterKeySet = false;
+  bool _savingLLMKey = false;
+  bool _showOpenRouterKey = false;
+
   @override
   void initState() {
     super.initState();
@@ -115,12 +120,68 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _loading = false;
       });
       _checkGrapeIdHub();
+      _loadLLMSettings();
     } catch (e) {
       setState(() {
         _loading = false;
         _error = e.toString();
       });
     }
+  }
+
+  Future<void> _loadLLMSettings() async {
+    try {
+      final data = await _coreService.getLLMSettings();
+      final serviceStatus = data['service_status'] as Map<String, dynamic>? ?? {};
+      if (mounted) {
+        setState(() {
+          _openRouterKeySet = serviceStatus['openrouter'] == true;
+        });
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _saveLLMKey() async {
+    final key = _openRouterKeyController.text.trim();
+    if (key.isEmpty) return;
+    setState(() => _savingLLMKey = true);
+    try {
+      await _coreService.saveLLMKey('openrouter', key);
+      _openRouterKeyController.clear();
+      if (mounted) {
+        setState(() {
+          _openRouterKeySet = true;
+          _savingLLMKey = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('OpenRouter key saved', style: TextStyle(fontFamily: 'monospace')),
+          backgroundColor: Color(0xFF00ffc8),
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _savingLLMKey = false);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Failed: $e', style: const TextStyle(fontFamily: 'monospace')),
+          backgroundColor: AppColors.error,
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+    }
+  }
+
+  Future<void> _deleteLLMKey(String service) async {
+    try {
+      await _coreService.deleteLLMKey(service);
+      if (mounted) {
+        setState(() => _openRouterKeySet = false);
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Key removed', style: TextStyle(fontFamily: 'monospace')),
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+    } catch (_) {}
   }
 
   Future<void> _checkGrapeIdHub() async {
@@ -225,6 +286,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _cfTokenController.dispose();
     _grapeIdDomainController.dispose();
     _grapeIdExtController.dispose();
+    _openRouterKeyController.dispose();
     _coreService.dispose();
     super.dispose();
   }
@@ -275,6 +337,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   if (_error != null) _buildErrorCard(),
                   if (_error != null) const SizedBox(height: 16),
                   _buildActionButtons(),
+                  const SizedBox(height: 24),
+                  const Text(
+                    'AI KEYS',
+                    style: TextStyle(
+                      color: AppColors.textMuted,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 1.5,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  _buildLLMKeysSection(),
                   const SizedBox(height: 24),
                   _buildInfoSection(),
                   const SizedBox(height: 24),
@@ -1535,6 +1610,154 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _error = 'Reset failed: $e';
       });
     }
+  }
+
+  Widget _buildLLMKeysSection() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border, width: 1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Text(
+                'OPENROUTER',
+                style: TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 1.5,
+                  fontFamily: 'monospace',
+                ),
+              ),
+              const SizedBox(width: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                decoration: BoxDecoration(
+                  color: _openRouterKeySet
+                      ? AppColors.accent.withOpacity(0.15)
+                      : AppColors.textMuted.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(
+                    color: _openRouterKeySet
+                        ? AppColors.accent.withOpacity(0.4)
+                        : AppColors.border,
+                    width: 1,
+                  ),
+                ),
+                child: Text(
+                  _openRouterKeySet ? 'KEY SET' : 'NO KEY',
+                  style: TextStyle(
+                    color: _openRouterKeySet ? AppColors.accent : AppColors.textMuted,
+                    fontSize: 9,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.2,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+              ),
+              if (_openRouterKeySet) ...[
+                const Spacer(),
+                GestureDetector(
+                  onTap: () => _deleteLLMKey('openrouter'),
+                  child: const Icon(Icons.delete_outline, size: 16, color: AppColors.textMuted),
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'API key is stored in the Identity Agent and injected into sandbox apps. Never sent to containers.',
+            style: TextStyle(
+              color: AppColors.textMuted,
+              fontSize: 10,
+              fontFamily: 'monospace',
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _openRouterKeyController,
+                  obscureText: !_showOpenRouterKey,
+                  style: const TextStyle(
+                    color: AppColors.textPrimary,
+                    fontSize: 12,
+                    fontFamily: 'monospace',
+                  ),
+                  decoration: InputDecoration(
+                    hintText: _openRouterKeySet ? 'Enter new key to replace...' : 'sk-or-v1-...',
+                    hintStyle: TextStyle(
+                      color: AppColors.textMuted.withOpacity(0.5),
+                      fontSize: 11,
+                      fontFamily: 'monospace',
+                    ),
+                    filled: true,
+                    fillColor: AppColors.primary,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(color: AppColors.border),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(color: AppColors.border),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(color: AppColors.accent, width: 1.5),
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        _showOpenRouterKey ? Icons.visibility_off : Icons.visibility,
+                        size: 16,
+                        color: AppColors.textMuted,
+                      ),
+                      onPressed: () => setState(() => _showOpenRouterKey = !_showOpenRouterKey),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              SizedBox(
+                height: 44,
+                child: ElevatedButton(
+                  onPressed: _savingLLMKey ? null : _saveLLMKey,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.accent,
+                    foregroundColor: AppColors.primary,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                  ),
+                  child: _savingLLMKey
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary),
+                        )
+                      : const Text(
+                          'SAVE',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 1.2,
+                            fontFamily: 'monospace',
+                          ),
+                        ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildInfoSection() {
