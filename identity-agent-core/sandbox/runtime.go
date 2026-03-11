@@ -249,40 +249,85 @@ func podmanBridgeGatewayIP() string {
 }
 
 func agentInternalHost() string {
+        log.Printf("[sandbox-init] Determining agent.internal host for OS: %s", runtime.GOOS)
+        
         switch runtime.GOOS {
         case "windows":
+                log.Printf("[sandbox-init] Windows detected, attempting WSL2 gateway IP detection")
                 // On Windows with WSL2, host-gateway doesn't work reliably.
                 // Dynamically detect the WSL2 bridge gateway IP by querying the Podman machine.
-                return detectWSL2GatewayIP()
+                result := detectWSL2GatewayIP()
+                log.Printf("[sandbox-init] Final agent.internal host for Windows: %s", result)
+                return result
         case "darwin":
+                log.Printf("[sandbox-init] macOS detected, using host-gateway")
                 // macOS Podman with OrbStack/Colima reliably supports host-gateway
                 return "host-gateway"
         default:
-                return podmanBridgeGatewayIP()
+                log.Printf("[sandbox-init] Linux detected, using podman bridge gateway")
+                result := podmanBridgeGatewayIP()
+                log.Printf("[sandbox-init] Final agent.internal host for Linux: %s", result)
+                return result
         }
 }
 
 func detectWSL2GatewayIP() string {
         // On Windows + Podman + WSL2, the host IP is the WSL2 bridge gateway.
-        // Query it with: podman machine ssh "ip route | grep default"
+        // We'll run the command through PowerShell to ensure proper shell interpretation.
+        // Command: podman machine ssh "ip route | grep default"
         // Expected output: "default via 172.20.96.1 dev eth0 proto kernel"
-        // We need the second field (the IP).
+        
+        log.Printf("[wsl2-detect] Starting WSL2 gateway IP detection")
+        log.Printf("[wsl2-detect] Executing: podman machine ssh 'ip route | grep default'")
+        
+        // Try the direct approach first
         cmd := exec.Command("podman", "machine", "ssh", "ip route | grep default")
         output, err := cmd.Output()
+        
         if err != nil {
-                log.Printf("[sandbox] Failed to detect WSL2 gateway IP: %v, falling back to host-gateway", err)
+                log.Printf("[wsl2-detect] Direct command failed: %v (stderr: %v)", err, cmd.Stderr)
+                log.Printf("[wsl2-detect] Attempting alternative approach with sh -c")
+                
+                // Try with explicit shell
+                cmd = exec.Command("podman", "machine", "ssh", "sh", "-c", "ip route | grep default")
+                output, err = cmd.Output()
+                
+                if err != nil {
+                        log.Printf("[wsl2-detect] Alternative command also failed: %v", err)
+                        log.Printf("[wsl2-detect] Falling back to host-gateway")
+                        return "host-gateway"
+                }
+        }
+        
+        rawOutput := strings.TrimSpace(string(output))
+        log.Printf("[wsl2-detect] Raw command output: '%s'", rawOutput)
+        
+        if rawOutput == "" {
+                log.Printf("[wsl2-detect] Output is empty, falling back to host-gateway")
                 return "host-gateway"
         }
-
+        
         // Parse: "default via X.X.X.X dev eth0 proto kernel"
-        parts := strings.Fields(strings.TrimSpace(string(output)))
+        parts := strings.Fields(rawOutput)
+        log.Printf("[wsl2-detect] Parsed %d fields from output", len(parts))
+        
+        if len(parts) > 0 {
+                log.Printf("[wsl2-detect] Field breakdown: [0]=%s [1]=%s [2]=%s [len]=%d", 
+                        parts[0], 
+                        func() string { if len(parts) > 1 { return parts[1] }; return "N/A" }(),
+                        func() string { if len(parts) > 2 { return parts[2] }; return "N/A" }(),
+                        len(parts))
+        }
+        
         if len(parts) >= 3 && parts[0] == "default" && parts[1] == "via" {
                 ip := parts[2]
-                log.Printf("[sandbox] Detected WSL2 gateway IP: %s", ip)
+                log.Printf("[wsl2-detect] Successfully detected WSL2 gateway IP: %s", ip)
                 return ip
         }
 
-        log.Printf("[sandbox] Could not parse WSL2 gateway IP from output: %s", string(output))
+        log.Printf("[wsl2-detect] Could not parse expected format (need 'default via X.X.X.X ...')")
+        log.Printf("[wsl2-detect] Full output was: '%s'", rawOutput)
+        log.Printf("[wsl2-detect] Falling back to host-gateway")
         return "host-gateway"
 }
 

@@ -430,6 +430,11 @@ func (d *ContainerRuntime) createContainer(ctx context.Context) error {
                 dnsIP = "8.8.8.8"
         }
 
+        log.Printf("[container-create] Container %s: agentHost resolved to '%s'", d.manifest.ID, agentHost)
+        log.Printf("[container-create] Container %s: hostIP resolved to '%s'", d.manifest.ID, hostIP)
+        log.Printf("[container-create] Container %s: Using --add-host agent.internal:%s", d.manifest.ID, agentHost)
+        log.Printf("[container-create] Container %s: Using --dns %s", d.manifest.ID, dnsIP)
+        
         args = append(args, "--add-host", fmt.Sprintf("agent.internal:%s", agentHost))
         args = append(args, "--dns", dnsIP)
 
