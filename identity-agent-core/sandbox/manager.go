@@ -58,7 +58,7 @@ func NewManager(cfg ManagerConfig) (*Manager, error) {
         tracer := NewTracer(2000)
 
         proxyMgr, err := NewProxyManager(ProxyManagerConfig{
-                ListenAddr: "127.0.0.1:0",
+                ListenAddr: "0.0.0.0:0",
                 DataDir:    cfg.DataDir,
                 Store:      store,
                 PolicyCheck: func(instanceID, appID, domain, method, urlStr string) (string, string) {
@@ -326,10 +326,14 @@ func (m *Manager) LaunchApp(ctx context.Context, id string) (*Instance, error) {
         var rt Runtime
         var err error
 
+        proxyPort := m.proxy.Port()
+        containerProxyURL := fmt.Sprintf("http://%s:%d", podmanHostIP(), proxyPort)
+        binaryProxyURL := fmt.Sprintf("http://127.0.0.1:%d", proxyPort)
+
         if manifest.IsContainer() {
-                rt, err = NewContainerRuntime(manifest, instance, m.store)
+                rt, err = NewContainerRuntime(manifest, instance, m.store, containerProxyURL, proxyPort)
         } else {
-                rt, err = NewBinaryRuntime(manifest, instance, m.store)
+                rt, err = NewBinaryRuntime(manifest, instance, m.store, binaryProxyURL, proxyPort)
         }
         if err != nil {
                 m.store.UpdateInstanceStatus(instanceID, "error")

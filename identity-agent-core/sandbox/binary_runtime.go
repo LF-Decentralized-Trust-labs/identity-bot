@@ -31,12 +31,7 @@ type BinaryRuntime struct {
 
 type OutputCallback func(line string, isStderr bool)
 
-func NewBinaryRuntime(manifest *AppManifest, instance *Instance, store *SandboxStore) (*BinaryRuntime, error) {
-        proxyPort, err := findAvailablePort()
-        if err != nil {
-                return nil, fmt.Errorf("failed to find proxy port: %w", err)
-        }
-
+func NewBinaryRuntime(manifest *AppManifest, instance *Instance, store *SandboxStore, proxyURL string, proxyPort int) (*BinaryRuntime, error) {
         agentAPIPort, err := findAvailablePort()
         if err != nil {
                 return nil, fmt.Errorf("failed to find agent API port: %w", err)
@@ -47,8 +42,6 @@ func NewBinaryRuntime(manifest *AppManifest, instance *Instance, store *SandboxS
                 return nil, fmt.Errorf("failed to find display port: %w", err)
         }
 
-        proxyURL := fmt.Sprintf("http://127.0.0.1:%d", proxyPort)
-
         netCfg := &NetworkConfig{
                 ProxyPort:    proxyPort,
                 DisplayPort:  displayPort,
@@ -57,11 +50,11 @@ func NewBinaryRuntime(manifest *AppManifest, instance *Instance, store *SandboxS
                 ProxyURL:     proxyURL,
                 EnvVars: map[string]string{
                         "HTTP_PROXY":          proxyURL,
-                        "HTTPS_PROXY":        proxyURL,
-                        "http_proxy":         proxyURL,
-                        "https_proxy":        proxyURL,
-                        "IDENTITY_AGENT_API": fmt.Sprintf("http://127.0.0.1:%d", agentAPIPort),
-                        "DISPLAY_PORT":       fmt.Sprintf("%d", displayPort),
+                        "HTTPS_PROXY":         proxyURL,
+                        "http_proxy":          proxyURL,
+                        "https_proxy":         proxyURL,
+                        "IDENTITY_AGENT_API":  fmt.Sprintf("http://127.0.0.1:%d", agentAPIPort),
+                        "DISPLAY_PORT":        fmt.Sprintf("%d", displayPort),
                 },
         }
 

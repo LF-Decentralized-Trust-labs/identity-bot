@@ -273,8 +273,17 @@ document.getElementById('stepControls').classList.toggle('hidden',!stepMode);
 }catch(e){}
 }
 
-checkStatus();
+async function init(){
+await checkStatus();
+if(!traceEnabled){
+await fetch(baseUrl+'/api/trace/enable',{method:'POST'});
+traceEnabled=true;
+updateToggleBtn();
+}
+await loadHistory();
 connectWS();
+}
+init();
 </script>
 </body>
 </html>`
