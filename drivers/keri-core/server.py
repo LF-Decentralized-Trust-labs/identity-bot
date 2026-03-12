@@ -80,6 +80,29 @@ def _ensure_libsodium():
 _ensure_libsodium()
 
 # ---------------------------------------------------------------------------
+# Windows: patch SysLogHandler before keri import
+#
+# keripy's logging setup calls SysLogHandler(address="/dev/log") which uses
+# socket.AF_UNIX.  On Windows (especially Windows Store Python) AF_UNIX is
+# absent, causing an AttributeError that prevents keri from importing.
+# Replace SysLogHandler with a no-op handler so keri imports cleanly.
+# ---------------------------------------------------------------------------
+
+if sys.platform == "win32":
+    import logging
+    import logging.handlers as _lh
+
+    class _WinSysLogHandler(logging.NullHandler):
+        """No-op SysLogHandler for Windows — AF_UNIX is unavailable."""
+        def __init__(self, *args, **kwargs):
+            super().__init__()
+
+        def close(self):
+            super().close()
+
+    _lh.SysLogHandler = _WinSysLogHandler
+
+# ---------------------------------------------------------------------------
 # keripy — hard requirement (no fallback)
 # ---------------------------------------------------------------------------
 

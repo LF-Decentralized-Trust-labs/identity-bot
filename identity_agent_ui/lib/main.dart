@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'dart:io' show Platform;
 import 'theme/app_theme.dart';
 import 'screens/dashboard_screen.dart';
@@ -276,7 +277,18 @@ class _AgentRouterState extends State<AgentRouter> {
     showDialog(
       context: context,
       barrierDismissible: true,
-      builder: (ctx) => AlertDialog(
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          bool _copied = false;
+
+          void _copyLog() async {
+            await Clipboard.setData(ClipboardData(text: error));
+            setDialogState(() => _copied = true);
+            await Future.delayed(const Duration(seconds: 2));
+            setDialogState(() => _copied = false);
+          }
+
+          return AlertDialog(
         backgroundColor: const Color(0xFF1A1A2E),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(8),
@@ -348,6 +360,18 @@ class _AgentRouterState extends State<AgentRouter> {
           ),
         ),
         actions: [
+          if (!isPortConflict)
+            TextButton(
+              onPressed: _copyLog,
+              child: Text(
+                _copied ? 'COPIED!' : 'COPY LOG',
+                style: TextStyle(
+                  color: _copied ? const Color(0xFF00FF88) : const Color(0xFF4488FF),
+                  fontFamily: 'monospace',
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
           if (isPortConflict)
             TextButton(
               onPressed: () async {
@@ -409,6 +433,8 @@ class _AgentRouterState extends State<AgentRouter> {
             ),
           ),
         ],
+          );
+        },
       ),
     );
   }
