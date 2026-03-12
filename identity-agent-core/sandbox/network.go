@@ -1,13 +1,67 @@
 package sandbox
 
 import (
-        "context"
-        "fmt"
-        "log"
-        "os/exec"
-        "runtime"
-        "strings"
+	"context"
+	"fmt"
+	"log"
+	"os/exec"
+	"runtime"
+	"strings"
+	"sync"
+	"time"
 )
+
+// podmanSSHState caches whether `podman machine ssh` is available so we don't
+// re-probe on every container launch.
+var podmanSSHState struct {
+	once      sync.Once
+	available bool
+}
+
+// podmanSSHAvailable returns true if the Podman machine is running and reachable
+// via SSH. The result is cached after the first call.
+func podmanSSHAvailable() bool {
+	podmanSSHState.once.Do(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		err := exec.CommandContext(ctx, "podman", "machine", "ssh", "echo ok").Run()
+		podmanSSHState.available = (err == nil)
+		if podmanSSHState.available {
+			log.Printf("[network] podman machine ssh probe: available")
+		} else {
+			log.Printf("[network] podman machine ssh probe: unavailable (will use soft enforcement)")
+		}
+	})
+	return podmanSSHState.available
+}
+
+// runIptables executes an iptables command. On Linux it runs directly; on
+// Windows and macOS it routes the command into the Podman VM via SSH, since
+// that is where the containers and their network namespaces actually live.
+func runIptables(ctx context.Context, args ...string) error {
+	switch runtime.GOOS {
+	case "linux":
+		return exec.CommandContext(ctx, "iptables", args...).Run()
+	case "windows", "darwin":
+		if !podmanSSHAvailable() {
+			return fmt.Errorf("podman machine ssh not available")
+		}
+		// Build: iptables <arg1> <arg2> ... with basic shell quoting for args
+		// that contain spaces or special characters.
+		quotedArgs := make([]string, len(args))
+		for i, a := range args {
+			if strings.ContainsAny(a, " \t\"'\\") {
+				quotedArgs[i] = "'" + strings.ReplaceAll(a, "'", "'\\''") + "'"
+			} else {
+				quotedArgs[i] = a
+			}
+		}
+		cmd := "iptables " + strings.Join(quotedArgs, " ")
+		return exec.CommandContext(ctx, "podman", "machine", "ssh", cmd).Run()
+	default:
+		return fmt.Errorf("iptables not supported on %s", runtime.GOOS)
+	}
+}
 
 type NetworkIsolation struct {
 	instanceID  string
@@ -59,53 +113,41 @@ func (ni *NetworkIsolation) RemovePodmanNetwork(ctx context.Context) error {
         return nil
 }
 
-func (ni *NetworkIsolation) ApplyIptablesRules(containerIP string) error {
-	if runtime.GOOS != "linux" {
-		log.Printf("[network] iptables not available on %s, relying on container network isolation", runtime.GOOS)
-		return nil
-	}
-
+func (ni *NetworkIsolation) ApplyIptablesRules(ctx context.Context, containerIP string) error {
 	ni.containerIP = containerIP
-
 	chain := fmt.Sprintf("SANDBOX-%s", ni.instanceID[:8])
 
-        commands := [][]string{
-                {"iptables", "-N", chain},
-                {"iptables", "-A", chain, "-p", "tcp", "--dport", fmt.Sprintf("%d", ni.proxyPort), "-j", "ACCEPT"},
-                {"iptables", "-A", chain, "-p", "udp", "--dport", fmt.Sprintf("%d", ni.dnsPort), "-j", "ACCEPT"},
-                {"iptables", "-A", chain, "-p", "tcp", "--dport", fmt.Sprintf("%d", ni.dnsPort), "-j", "ACCEPT"},
-                {"iptables", "-A", chain, "-d", "127.0.0.0/8", "-j", "ACCEPT"},
-                {"iptables", "-A", chain, "-m", "state", "--state", "ESTABLISHED,RELATED", "-j", "ACCEPT"},
-                {"iptables", "-A", chain, "-j", "DROP"},
-                {"iptables", "-I", "FORWARD", "-s", containerIP, "-j", chain},
-        }
-
-        for _, cmd := range commands {
-                if err := exec.Command(cmd[0], cmd[1:]...).Run(); err != nil {
-                        log.Printf("[network] iptables command failed (may require root): %v — %v", cmd, err)
-                        return fmt.Errorf("iptables rule failed: %w", err)
-                }
-        }
-
-        log.Printf("[network] Applied iptables rules for container %s (chain: %s)", containerIP, chain)
-        return nil
-}
-
-func (ni *NetworkIsolation) RemoveIptablesRules() error {
-	if runtime.GOOS != "linux" {
-		return nil
+	rules := [][]string{
+		{"-N", chain},
+		{"-A", chain, "-p", "tcp", "--dport", fmt.Sprintf("%d", ni.proxyPort), "-j", "ACCEPT"},
+		{"-A", chain, "-d", "127.0.0.0/8", "-j", "ACCEPT"},
+		{"-A", chain, "-m", "state", "--state", "ESTABLISHED,RELATED", "-j", "ACCEPT"},
+		{"-A", chain, "-j", "DROP"},
+		{"-I", "FORWARD", "-s", containerIP, "-j", chain},
 	}
 
+	for _, args := range rules {
+		if err := runIptables(ctx, args...); err != nil {
+			log.Printf("[network] iptables rule failed: %v — args: %v", err, args)
+			return fmt.Errorf("iptables rule failed: %w", err)
+		}
+	}
+
+	log.Printf("[network] Applied iptables rules for container %s (chain: %s, via: %s)", containerIP, chain, runtime.GOOS)
+	return nil
+}
+
+func (ni *NetworkIsolation) RemoveIptablesRules(ctx context.Context) error {
 	chain := fmt.Sprintf("SANDBOX-%s", ni.instanceID[:8])
 
 	// Remove the FORWARD jump rule only if we know which container IP to target.
 	// During reconcile-on-startup the IP may not be available; in that case we
 	// still flush and delete the chain so no stale rules linger.
 	if ni.containerIP != "" {
-		exec.Command("iptables", "-D", "FORWARD", "-s", ni.containerIP, "-j", chain).Run()
+		runIptables(ctx, "-D", "FORWARD", "-s", ni.containerIP, "-j", chain)
 	}
-	exec.Command("iptables", "-F", chain).Run()
-	exec.Command("iptables", "-X", chain).Run()
+	runIptables(ctx, "-F", chain)
+	runIptables(ctx, "-X", chain)
 
 	log.Printf("[network] Removed iptables rules for container %s (chain: %s)", ni.containerIP, chain)
 	return nil

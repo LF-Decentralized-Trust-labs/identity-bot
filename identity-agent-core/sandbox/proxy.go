@@ -280,33 +280,44 @@ func (pm *ProxyManager) handleHTTP(w http.ResponseWriter, r *http.Request) {
                         map[string]interface{}{"method": r.Method, "url": r.URL.String(), "domain": domain, "headers": flattenHeaders(r.Header)})
         }
 
-        action, rule := "auto_approved", ""
-        if pm.policyCheck != nil && route != nil {
-                action, rule = pm.policyCheck(route.InstanceID, route.AppID, domain, r.Method, r.URL.String())
-        }
+	if route == nil {
+		pm.logProxyRequest(nil, r, nil, startTime, "auto_blocked", "unidentified_source")
+		if pm.tracer != nil && pm.tracer.IsEnabled() {
+			pm.tracer.Emit("proxy", "blocked", "egress", "", "",
+				fmt.Sprintf("Blocked: unidentified source for %s", domain),
+				map[string]interface{}{"action": "auto_blocked", "rule": "unidentified_source", "domain": domain})
+		}
+		http.Error(w, "Request blocked: unidentified source", http.StatusForbidden)
+		return
+	}
 
-        if pm.tracer != nil && pm.tracer.IsEnabled() {
-                pm.tracer.Emit("proxy", "policy_result", "egress", appID, instanceID,
-                        fmt.Sprintf("Policy: %s (rule: %s)", action, rule),
-                        map[string]interface{}{"action": action, "rule": rule, "domain": domain})
-        }
+	action, rule := "auto_approved", ""
+	if pm.policyCheck != nil {
+		action, rule = pm.policyCheck(route.InstanceID, route.AppID, domain, r.Method, r.URL.String())
+	}
 
-        if action == "held" || action == "auto_blocked" {
-                pm.logProxyRequest(route, r, nil, startTime, action, rule)
-                if pm.tracer != nil && pm.tracer.IsEnabled() {
-                        pm.tracer.Emit("proxy", "blocked", "egress", appID, instanceID,
-                                fmt.Sprintf("Blocked: %s for %s", action, domain),
-                                map[string]interface{}{"action": action, "domain": domain, "duration_ms": time.Since(startTime).Milliseconds()})
-                }
-                if action == "held" {
-                        http.Error(w, "Request held for operator approval", http.StatusForbidden)
-                } else {
-                        http.Error(w, "Request blocked by policy", http.StatusForbidden)
-                }
-                return
-        }
+	if pm.tracer != nil && pm.tracer.IsEnabled() {
+		pm.tracer.Emit("proxy", "policy_result", "egress", appID, instanceID,
+			fmt.Sprintf("Policy: %s (rule: %s)", action, rule),
+			map[string]interface{}{"action": action, "rule": rule, "domain": domain})
+	}
 
-        outReq, err := http.NewRequestWithContext(pm.ctx, r.Method, r.URL.String(), r.Body)
+	if action == "held" || action == "auto_blocked" {
+		pm.logProxyRequest(route, r, nil, startTime, action, rule)
+		if pm.tracer != nil && pm.tracer.IsEnabled() {
+			pm.tracer.Emit("proxy", "blocked", "egress", appID, instanceID,
+				fmt.Sprintf("Blocked: %s for %s", action, domain),
+				map[string]interface{}{"action": action, "domain": domain, "duration_ms": time.Since(startTime).Milliseconds()})
+		}
+		if action == "held" {
+			http.Error(w, "Request held for operator approval", http.StatusForbidden)
+		} else {
+			http.Error(w, "Request blocked by policy", http.StatusForbidden)
+		}
+		return
+	}
+
+	outReq, err := http.NewRequestWithContext(pm.ctx, r.Method, r.URL.String(), r.Body)
         if err != nil {
                 http.Error(w, "Failed to create upstream request", http.StatusInternalServerError)
                 return
@@ -354,9 +365,10 @@ func (pm *ProxyManager) handleHTTP(w http.ResponseWriter, r *http.Request) {
                         map[string]interface{}{"status_code": resp.StatusCode, "domain": domain, "headers": flattenHeaders(resp.Header), "duration_ms": time.Since(startTime).Milliseconds()})
         }
 
-        copyHeaders(w.Header(), resp.Header)
-        w.WriteHeader(resp.StatusCode)
-        io.Copy(w, resp.Body)
+	ScrubResponseHeaders(resp.Header)
+	copyHeaders(w.Header(), resp.Header)
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
 }
 
 func (pm *ProxyManager) handleConnect(w http.ResponseWriter, r *http.Request) {
@@ -382,32 +394,40 @@ func (pm *ProxyManager) handleConnect(w http.ResponseWriter, r *http.Request) {
                         map[string]interface{}{"host": host, "domain": domain})
         }
 
-        action, rule := "auto_approved", ""
-        if pm.policyCheck != nil && route != nil {
-                action, rule = pm.policyCheck(route.InstanceID, route.AppID, domain, "CONNECT", "https://"+host)
-        }
+	if route == nil {
+		pm.logConnectRequest(nil, domain, host, startTime, "auto_blocked", "unidentified_source")
+		if pm.tracer != nil && pm.tracer.IsEnabled() {
+			pm.tracer.Emit("proxy", "connect_blocked", "egress", "", "",
+				fmt.Sprintf("CONNECT blocked: unidentified source for %s", domain),
+				map[string]interface{}{"action": "auto_blocked", "rule": "unidentified_source", "domain": domain})
+		}
+		http.Error(w, "Connection blocked: unidentified source", http.StatusForbidden)
+		return
+	}
 
-        if pm.tracer != nil && pm.tracer.IsEnabled() {
-                pm.tracer.Emit("proxy", "connect_policy", "egress", appID, instanceID,
-                        fmt.Sprintf("CONNECT policy: %s (rule: %s)", action, rule),
-                        map[string]interface{}{"action": action, "rule": rule, "domain": domain})
-        }
+	action, rule := "auto_approved", ""
+	if pm.policyCheck != nil {
+		action, rule = pm.policyCheck(route.InstanceID, route.AppID, domain, "CONNECT", "https://"+host)
+	}
 
-        if action == "held" || action == "auto_blocked" {
-                pm.logConnectRequest(route, domain, host, startTime, action, rule)
-                if pm.tracer != nil && pm.tracer.IsEnabled() {
-                        pm.tracer.Emit("proxy", "connect_blocked", "egress", appID, instanceID,
-                                fmt.Sprintf("CONNECT blocked: %s for %s", action, domain),
-                                map[string]interface{}{"action": action, "domain": domain})
-                }
-                http.Error(w, "Connection blocked", http.StatusForbidden)
-                return
-        }
+	if pm.tracer != nil && pm.tracer.IsEnabled() {
+		pm.tracer.Emit("proxy", "connect_policy", "egress", appID, instanceID,
+			fmt.Sprintf("CONNECT policy: %s (rule: %s)", action, rule),
+			map[string]interface{}{"action": action, "rule": rule, "domain": domain})
+	}
 
-        tlsMode := TLSModeSNIOnly
-        if route != nil {
-                tlsMode = route.TLSMode
-        }
+	if action == "held" || action == "auto_blocked" {
+		pm.logConnectRequest(route, domain, host, startTime, action, rule)
+		if pm.tracer != nil && pm.tracer.IsEnabled() {
+			pm.tracer.Emit("proxy", "connect_blocked", "egress", appID, instanceID,
+				fmt.Sprintf("CONNECT blocked: %s for %s", action, domain),
+				map[string]interface{}{"action": action, "domain": domain})
+		}
+		http.Error(w, "Connection blocked", http.StatusForbidden)
+		return
+	}
+
+	tlsMode := route.TLSMode
 
         if pm.tracer != nil && pm.tracer.IsEnabled() {
                 pm.tracer.Emit("proxy", "connect_mode", "egress", appID, instanceID,
@@ -604,16 +624,17 @@ func (pm *ProxyManager) serveMITMRequests(clientConn net.Conn, host, domain stri
                         continue
                 }
 
-                pm.logProxyRequest(route, req, resp, reqStartTime, mitmAction, mitmRule)
+			pm.logProxyRequest(route, req, resp, reqStartTime, mitmAction, mitmRule)
 
-                if pm.tracer != nil && pm.tracer.IsEnabled() {
-                        pm.tracer.Emit("proxy", "upstream_response", "ingress", appID, instanceID,
-                                fmt.Sprintf("Response %d from %s (%dms)", resp.StatusCode, domain, time.Since(reqStartTime).Milliseconds()),
-                                map[string]interface{}{"status_code": resp.StatusCode, "domain": domain, "headers": flattenHeaders(resp.Header), "duration_ms": time.Since(reqStartTime).Milliseconds()})
-                }
+			if pm.tracer != nil && pm.tracer.IsEnabled() {
+				pm.tracer.Emit("proxy", "upstream_response", "ingress", appID, instanceID,
+					fmt.Sprintf("Response %d from %s (%dms)", resp.StatusCode, domain, time.Since(reqStartTime).Milliseconds()),
+					map[string]interface{}{"status_code": resp.StatusCode, "domain": domain, "headers": flattenHeaders(resp.Header), "duration_ms": time.Since(reqStartTime).Milliseconds()})
+			}
 
-                resp.Write(clientConn)
-                resp.Body.Close()
+			ScrubResponseHeaders(resp.Header)
+			resp.Write(clientConn)
+			resp.Body.Close()
         }
 }
 func (pm *ProxyManager) findRouteForRequest(r *http.Request) *ProxyRoute {

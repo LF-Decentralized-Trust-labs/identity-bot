@@ -143,7 +143,7 @@ func (m *Manager) Stop() {
 
 	for _, net := range m.networks {
 		ctx := context.Background()
-		net.RemoveIptablesRules()
+		net.RemoveIptablesRules(ctx)
 		net.RemovePodmanNetwork(ctx)
 	}
 
@@ -381,15 +381,15 @@ func (m *Manager) LaunchApp(ctx context.Context, id string) (*Instance, error) {
 	}
 	m.runtimes[instanceID] = rt
 
-	// On Linux: enforce proxy-only egress via iptables so the container cannot
-	// bypass the MITM proxy with raw socket connections.  Non-fatal — a failure
-	// means enforcement is soft (env-var only) rather than hard, which matches
-	// the behaviour on Windows and macOS where iptables is unavailable.
+	// Enforce proxy-only egress via iptables so the container cannot bypass the
+	// MITM proxy with raw socket connections.  On Linux the rules run directly;
+	// on Windows/macOS they are applied inside the Podman VM via `podman machine
+	// ssh`.  Non-fatal — a failure means enforcement is soft (env-var only).
 	if manifest.IsContainer() && instance.ContainerID != nil && *instance.ContainerID != "" {
 		if ni, ok := m.networks[instanceID]; ok {
 			containerIP := getContainerIP(ctx, *instance.ContainerID, netCfg.NetworkName)
 			if containerIP != "" {
-				if err := ni.ApplyIptablesRules(containerIP); err != nil {
+				if err := ni.ApplyIptablesRules(ctx, containerIP); err != nil {
 					log.Printf("[sandbox-manager] iptables enforcement setup failed (non-fatal, falling back to soft enforcement): %v", err)
 				} else {
 					log.Printf("[sandbox-manager] iptables hard enforcement applied for instance %s (container IP: %s)", instanceID, containerIP)
@@ -483,11 +483,11 @@ func (m *Manager) StopApp(ctx context.Context, appID string) error {
                         delete(m.agentAPIs, inst.ID)
                 }
 
-			if ni, ok := m.networks[inst.ID]; ok {
-				ni.RemoveIptablesRules()
-				ni.RemovePodmanNetwork(ctx)
-				delete(m.networks, inst.ID)
-			}
+		if ni, ok := m.networks[inst.ID]; ok {
+			ni.RemoveIptablesRules(ctx)
+			ni.RemovePodmanNetwork(ctx)
+			delete(m.networks, inst.ID)
+		}
 
                 m.store.UpdateInstanceStatus(inst.ID, "stopped")
 
@@ -805,7 +805,7 @@ func (m *Manager) cleanupInstanceResources(inst Instance) {
 		// containerIP is not available on the reconcile path (container already gone),
 		// so RemoveIptablesRules will skip the FORWARD -D rule but still flush/delete
 		// the chain, preventing stale iptables entries from accumulating.
-		ni.RemoveIptablesRules()
+		ni.RemoveIptablesRules(context.Background())
 		ni.RemovePodmanNetwork(context.Background())
 	}
 	m.proxy.RemoveRoute(inst.ID)
