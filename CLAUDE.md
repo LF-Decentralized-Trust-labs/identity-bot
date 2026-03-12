@@ -1,0 +1,221 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## What This Is
+
+The **Identity Agent** is a self-hosted, self-sovereign digital identity infrastructure. It is software that individuals (and eventually organizations) install on their own devices. It is not a platform — it is a user-controlled agent where the cryptographic identity is fully owned and managed by the user under the KERI (Key Event Receipt Infrastructure) protocol. There is no central server, no third-party custody of keys, and no dependency on any external service for core identity operations.
+
+The codebase implements the **Identity Agent Protocol** — an open, self-sovereign identity infrastructure that the project intends to standardize through a formal standards body over time.
+
+The Identity Agent runs on five target platforms: **Linux, Windows, macOS** (desktop) and **iOS, Android** (mobile). All five run the same Flutter frontend. The backend differs by OS capabilities.
+
+## Build Commands
+
+### Go Backend
+```sh
+cd identity-agent-core
+go build ./...                                                  # Build and check all packages
+CGO_ENABLED=0 go build -o bin/identity-agent-core .            # Static binary for deployment
+go test ./...                                                   # Run all tests
+```
+
+### Flutter UI
+```sh
+cd identity_agent_ui
+flutter pub get
+flutter build web --release --base-href="/"   # Web (served by Go backend)
+flutter run -d windows                         # Desktop (Windows)
+flutter run -d linux                           # Desktop (Linux)
+flutter run -d macos                           # Desktop (macOS)
+```
+
+### Go Demo Sandbox App
+```sh
+cd sandbox-apps/go-demo
+CGO_ENABLED=0 go build -o ../../bin/go-demo .   # Output must be at bin/go-demo (auto-.exe on Windows)
+```
+
+### Full Pipeline (Linux/CI)
+```sh
+scripts/build-flutter.sh    # Builds Flutter web + Go static binary
+scripts/start-backend.sh    # Installs Python deps, builds if needed, starts server
+scripts/deploy-run.sh       # Minimal run (skips build steps, uses pre-built binary)
+```
+
+### Python KERI Driver (Desktop)
+```sh
+pip install flask keri==1.1.17
+# The driver is spawned automatically by the Go backend — never run it directly
+```
+
+## Running Locally
+
+```sh
+# Start Go backend (also spawns Python KERI driver automatically)
+cd identity-agent-core
+go run .
+# → API: http://127.0.0.1:5000/api
+# → Flutter web UI (if built): http://127.0.0.1:5000/
+
+# Optional: Flutter hot reload during UI development
+cd identity_agent_ui
+flutter run -d chrome   # Connects to backend on port 5000
+```
+
+Key environment variables for the Go backend:
+| Variable | Default | Purpose |
+|---|---|---|
+| `PORT` | `5000` | HTTP listen port |
+| `AGENT_DATA_DIR` | `./data` | JSON data persistence directory |
+| `FLUTTER_WEB_DIR` | `../identity_agent_ui/build/web` | Served Flutter web assets |
+| `KERI_DRIVER_SCRIPT` | `./drivers/keri-core/server.py` | Path to Python KERI driver |
+| `KERI_DRIVER_PORT` | `9999` | Python driver port |
+| `KERI_DRIVER_PYTHON` | `python3` | Python binary |
+| `PUBLIC_URL` | _(auto-detected)_ | Explicit override for OOBI URL generation |
+| `NGROK_AUTHTOKEN` | _(none)_ | ngrok tunnel auth token |
+
+## Architecture
+
+### Core Concept: 3 Topological States × 2 Device Types
+
+Every running Identity Agent instance is in exactly one of **3 topological states**, on one of **2 device types** — giving 6 architectural combinations. This model from ADR-006 is the authoritative terminology (it supersedes the "four modes" language in older ADRs).
+
+**Three Topological States:**
+
+| State | Description |
+|---|---|
+| **Standalone** | Device holds root AID keys AND runs all backend services locally. Fully self-contained. |
+| **Remote Controller WITHOUT Root Keys** | Device holds a delegated child AID locally. Remote parent server holds the root AID and provides backend services. |
+| **Remote Controller WITH Root Keys** | Device holds the primary parent AID and root keys locally. Remote server provides compute-heavy backend services only — never receives private keys. |
+
+**Two Device Types:**
+
+| Device | KERI Engine | Backend Engine |
+|---|---|---|
+| Desktop (Linux/macOS/Windows) | Go backend → Python `keripy` (child process) | Go Core (local binary, port 5000) |
+| Mobile (iOS/Android) | Rust bridge via `flutter_rust_bridge` FFI | Go Core via `gomobile` (embedded, port 8642) |
+
+**6 Architectural Combinations:**
+
+| # | Device | Topology | `KeriService` Implementation | How Entered |
+|---|---|---|---|---|
+| 1 | Desktop | Standalone | `DesktopKeriService` | "Create New Identity" on desktop |
+| 2 | Desktop | Remote WITHOUT Keys | `DesktopKeriService` + remote serverUrl to screens | "Connect to Existing" on desktop |
+| 3 | Desktop | Remote WITH Keys | `DesktopKeriService` + remote serverUrl to screens | Planned: migration from Desktop Standalone |
+| 4 | Mobile | Standalone | `MobileStandaloneKeriService` | "Create New Identity" on mobile |
+| 5 | Mobile | Remote WITHOUT Keys | `MobileRemoteKeriService` | "Connect to Existing" on mobile |
+| 6 | Mobile | Remote WITH Keys | Planned extension of `MobileRemoteKeriService` | Migration from Mobile Standalone |
+
+### Critical Invariant
+
+**Stateful KERI operations always use the LOCAL engine** in all 6 combinations. The remote server is ONLY used for backend services (persistence, OOBI, contacts, tunneling) and stateless KERI operations (format-credential, resolve-oobi, generate-multisig-event). **The remote server never performs stateful KERI operations on behalf of the local device.**
+
+### Port Map
+
+| Service | Port |
+|---|---|
+| Go backend (desktop) | `127.0.0.1:5000` |
+| Go Core (mobile embedded) | `127.0.0.1:8642` |
+| Python KERI driver | `127.0.0.1:9999` |
+
+**Always use `127.0.0.1`, never `localhost`.** On Windows, `localhost` can resolve to `::1` (IPv6) while the Go backend only binds IPv4.
+
+### Go Backend (`identity-agent-core/`)
+
+- `main.go` → `server/server.go` (`CoreServer`) — wires all components together
+- `server/server.go` — Chi router, all `/api/` routes; calls `sandboxRoutes()` and `traceRoutes()`
+- `server/sandbox_handlers.go` — Marketplace REST handlers
+- `drivers/keri_driver.go` — Spawns Python driver as child process, proxies all KERI operations over HTTP to `127.0.0.1:9999`
+- `endpoint/` — Single source of truth for the agent's public URL; resolution hierarchy: `PUBLIC_URL` env > active tunnel > forwarded headers > local
+- `tunnel/` — Multi-provider tunneling (Cloudflare, ngrok, Grape ID via Chisel)
+- `store/store.go` — `Store` interface; default is `FileStore` (file-based JSON in `AGENT_DATA_DIR`)
+- `sandbox/` — Sandboxed App Marketplace: manifest loading, Podman container runtime, compiled binary runtime, MITM proxy, policy engine, SQLite DB
+- `mobilecore/` — `gomobile`-exported API surface for mobile platform channel integration
+
+### Python KERI Driver (`drivers/keri-core/`)
+
+Runs as `127.0.0.1:9999`. The Go Core spawns it via `exec.Command()`, waits up to 15 seconds for `/status` to return `active`, and kills it on shutdown. It is **disabled on mobile** (`EnableKeriDriver: false`).
+
+The driver's endpoint paths are the **single source of truth** for naming — Rust bridge functions and Dart service methods match exactly:
+
+| Driver Endpoint | Type | Purpose |
+|---|---|---|
+| `POST /inception` | Stateful | Create KERI inception event |
+| `POST /rotation` | Stateful | Rotate keys |
+| `POST /sign` | Stateful | Sign data |
+| `GET /kel` | Stateful | Retrieve Key Event Log |
+| `POST /verify` | Stateful | Verify signature |
+| `POST /format-credential` | Stateless | Format ACDC credential |
+| `POST /resolve-oobi` | Stateless | Resolve OOBI URL |
+| `POST /generate-multisig-event` | Stateless | Generate multisig event |
+
+### Flutter UI (`identity_agent_ui/`)
+
+- `lib/main.dart` — App entry point; `AgentRouter` state machine drives the onboarding flow; `_initializeServiceForMode()` instantiates the correct `KeriService`
+- `lib/config/agent_config.dart` — Platform-aware backend URL (`desktopPort=5000`, `mobilePort=8642`); supports `CORE_URL` env override
+- `lib/services/keri_service.dart` — Abstract `KeriService` interface; all screens are mode-agnostic
+- `lib/services/backend_process_service.dart` — Spawns/monitors the Go binary on desktop; handles port conflicts (auto-kills stale Identity Agent processes, prompts for others)
+- `lib/bridge/keri_bridge.dart` — Dart ↔ Rust FFI; gracefully sets `isAvailable=false` if native lib not found (development fallback)
+
+### Onboarding State Machine
+
+```
+LOADING → (saved state?) → DASHBOARD
+                         ↓ (no saved state)
+              MODE SELECTION
+              ↙              ↘
+   "Create New"           "Connect to Existing"
+        ↓                       ↓
+  ENTITY TYPE            CONNECT SERVER (validates /api/health)
+        ↓                       ↓
+  SETUP WIZARD            DASHBOARD
+        ↓
+   DASHBOARD
+```
+
+Onboarding choices are persisted in SharedPreferences via `PreferencesService` (`agent_mode`, `entity_type`, `server_url`, `setup_complete`).
+
+### Sandboxed App Marketplace (Desktop Only)
+
+Apps are defined in `manifests/*.json`. Two runtime types:
+- **OCI containers** — run via Podman CLI (rootless, daemonless; not Docker)
+- **Compiled binaries** — e.g., `bin/go-demo` (`.exe` appended automatically on Windows)
+
+App lifecycle: `available → installing → stopped → running`. Uninstall resets to `available` so users can reinstall in-session. A Podman setup wizard auto-installs Podman using `winget` / `brew` / `apt` / `dnf` when not found.
+
+**Sandbox security:** Runtime-injected env vars (`HTTP_PROXY`, `HTTPS_PROXY`, `IDENTITY_AGENT_API`) are reserved and cannot be overridden by manifest-defined variables.
+
+## Platform-Specific Notes
+
+### Windows Desktop
+- Python is **not** bundled — users install Python 3.10+ manually and run `pip install flask keri==1.1.17`
+- `libsodium.dll` is bundled in the app directory (no user action needed)
+- See `DESKTOP_SETUP.md` for user-facing instructions
+
+### macOS / Linux Desktop
+- Python and dependencies are embedded in the distributed archive
+
+### Mobile (iOS / Android)
+- **No App Store or Play Store submissions** — debug/local builds only
+- **No code signing or provisioning profiles**
+- Android: unsigned APKs via Codemagic (`codemagic.yaml`)
+- iOS: Codemagic simulator/virtual testing only (no TestFlight)
+- Rust cross-compilation and `gomobile` binding only run in Codemagic CI/CD, not locally
+
+## Commit Requirements
+
+All commits must include a DCO (Developer Certificate of Origin) sign-off. Append this line to every commit message:
+
+```
+Signed-off-by: Rob Andersen rob@antispamguy.org
+```
+
+Global git config is set to `user.name = "Rob Andersen"` and `user.email = "rob@antispamguy.org"`.
+
+## Design Conventions
+
+- Dark cyberpunk aesthetic: `AppTheme.darkTheme`, `AppColors.*` from `lib/theme/app_theme.dart`
+- Monospace fonts throughout; dark blue/green color palette
+- All Flutter ↔ backend communication is REST over HTTP to the local Go backend
+- ADR documents in `docs/adr/` are the authoritative source for architectural decisions; ADR-006 is the current topology reference
