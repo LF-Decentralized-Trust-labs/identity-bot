@@ -168,17 +168,15 @@ func (s *CoreServer) handleLLMProxy(w http.ResponseWriter, r *http.Request) {
                         upReq.Header.Add(key, val)
                 }
         }
-        upReq.Header.Set("Authorization", "Bearer "+apiKey)
         upReq.Header.Set("HTTP-Referer", "https://identity-agent.local")
         upReq.Header.Set("X-Title", "Identity Agent")
 
         log.Printf("[llm-proxy] %s %s -> %s", r.Method, r.URL.Path, upstreamURL)
 
+        // MakeTrackedRequest injects the API key via the credential vault and records
+        // the call in the proxy log and trace stream alongside container-originated traffic.
         // No client-level timeout — streaming LLM responses can take many minutes.
-        // The request context (tied to the client connection) handles cancellation if
-        // the browser disconnects.
-        client := &http.Client{}
-        resp, err := client.Do(upReq)
+        resp, err := s.SandboxManager.MakeTrackedRequest(r.Context(), upReq)
         if err != nil {
                 log.Printf("[llm-proxy] Upstream error: %v", err)
                 w.Header().Set("Content-Type", "application/json")

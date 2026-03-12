@@ -510,6 +510,12 @@ func (pm *ProxyManager) handleConnectMITM(w http.ResponseWriter, r *http.Request
 func (pm *ProxyManager) serveMITMRequests(clientConn net.Conn, host, domain string, route *ProxyRoute, startTime time.Time, action, rule string) {
         defer clientConn.Close()
 
+        appID, instanceID := "", ""
+        if route != nil {
+                appID = route.AppID
+                instanceID = route.InstanceID
+        }
+
         reader := bufio.NewReader(clientConn)
         for {
                 req, err := http.ReadRequest(reader)
@@ -528,13 +534,30 @@ func (pm *ProxyManager) serveMITMRequests(clientConn net.Conn, host, domain stri
 
                 fullURL := req.URL.String()
 
+                if pm.tracer != nil && pm.tracer.IsEnabled() {
+                        pm.tracer.Emit("proxy", "entry", "egress", appID, instanceID,
+                                fmt.Sprintf("MITM %s %s", req.Method, fullURL),
+                                map[string]interface{}{"method": req.Method, "url": fullURL, "domain": domain, "headers": flattenHeaders(req.Header)})
+                }
+
                 mitmAction, mitmRule := action, rule
                 if pm.policyCheck != nil && route != nil {
                         mitmAction, mitmRule = pm.policyCheck(route.InstanceID, route.AppID, domain, req.Method, fullURL)
                 }
 
+                if pm.tracer != nil && pm.tracer.IsEnabled() {
+                        pm.tracer.Emit("proxy", "policy_result", "egress", appID, instanceID,
+                                fmt.Sprintf("Policy: %s (rule: %s)", mitmAction, mitmRule),
+                                map[string]interface{}{"action": mitmAction, "rule": mitmRule, "domain": domain})
+                }
+
                 if mitmAction == "held" || mitmAction == "auto_blocked" {
                         pm.logProxyRequest(route, req, nil, reqStartTime, mitmAction, mitmRule)
+                        if pm.tracer != nil && pm.tracer.IsEnabled() {
+                                pm.tracer.Emit("proxy", "blocked", "egress", appID, instanceID,
+                                        fmt.Sprintf("Blocked: %s for %s", mitmAction, domain),
+                                        map[string]interface{}{"action": mitmAction, "domain": domain, "duration_ms": time.Since(reqStartTime).Milliseconds()})
+                        }
                         resp := &http.Response{
                                 StatusCode: http.StatusForbidden,
                                 ProtoMajor: 1,
@@ -556,9 +579,20 @@ func (pm *ProxyManager) serveMITMRequests(clientConn net.Conn, host, domain stri
                 }
                 copyHeaders(outReq.Header, req.Header)
 
+                if pm.tracer != nil && pm.tracer.IsEnabled() {
+                        pm.tracer.Emit("proxy", "upstream_send", "egress", appID, instanceID,
+                                fmt.Sprintf("Sending to %s", host),
+                                map[string]interface{}{"url": fullURL, "method": req.Method, "headers": flattenHeaders(outReq.Header)})
+                }
+
                 resp, err := transport.RoundTrip(outReq)
                 if err != nil {
                         log.Printf("[sandbox-proxy] MITM upstream failed for %s: %v", fullURL, err)
+                        if pm.tracer != nil && pm.tracer.IsEnabled() {
+                                pm.tracer.Emit("proxy", "upstream_error", "ingress", appID, instanceID,
+                                        fmt.Sprintf("Upstream error: %v", err),
+                                        map[string]interface{}{"error": err.Error(), "duration_ms": time.Since(reqStartTime).Milliseconds()})
+                        }
                         errResp := &http.Response{
                                 StatusCode: http.StatusBadGateway,
                                 ProtoMajor: 1,
@@ -572,11 +606,16 @@ func (pm *ProxyManager) serveMITMRequests(clientConn net.Conn, host, domain stri
 
                 pm.logProxyRequest(route, req, resp, reqStartTime, mitmAction, mitmRule)
 
+                if pm.tracer != nil && pm.tracer.IsEnabled() {
+                        pm.tracer.Emit("proxy", "upstream_response", "ingress", appID, instanceID,
+                                fmt.Sprintf("Response %d from %s (%dms)", resp.StatusCode, domain, time.Since(reqStartTime).Milliseconds()),
+                                map[string]interface{}{"status_code": resp.StatusCode, "domain": domain, "headers": flattenHeaders(resp.Header), "duration_ms": time.Since(reqStartTime).Milliseconds()})
+                }
+
                 resp.Write(clientConn)
                 resp.Body.Close()
         }
 }
-
 func (pm *ProxyManager) findRouteForRequest(r *http.Request) *ProxyRoute {
         pm.mu.RLock()
         defer pm.mu.RUnlock()

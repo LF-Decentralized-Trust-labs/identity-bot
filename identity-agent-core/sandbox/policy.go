@@ -42,6 +42,11 @@ func (pe *PolicyEngine) CheckDomain(instanceID, appID, domain, method, urlStr st
                 return "auto_approved", "agent_internal_bypass"
         }
 
+        // agent-llm-proxy is the Identity Agent's own LLM proxy -- auto-approve as a system actor.
+        if instanceID == BackendLLMInstanceID {
+                return "auto_approved", "system-actor"
+        }
+
         pe.mu.RLock()
         manifest, hasManifest := pe.manifests[appID]
         pe.mu.RUnlock()

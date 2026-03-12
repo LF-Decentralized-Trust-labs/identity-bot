@@ -5,6 +5,7 @@ import (
         "encoding/json"
         "fmt"
         "log"
+        "net/http"
         "os"
         "os/exec"
         "strings"
@@ -12,6 +13,11 @@ import (
         "syscall"
         "time"
 )
+
+// BackendLLMInstanceID and BackendLLMAppID identify the Identity Agent's own
+// LLM proxy component in the proxy log and trace stream.
+const BackendLLMInstanceID = "agent-llm-proxy"
+const BackendLLMAppID = "agent-core"
 
 // InstallProgressInfo tracks in-progress container image pulls.
 type InstallProgressInfo struct {
@@ -844,4 +850,70 @@ func cleanupOrphanContainers() {
                         log.Printf("[sandbox-manager] Stopped and removed orphan container %s (was %s)", c.ID[:12], c.State)
                 }
         }
+}
+
+// MakeTrackedRequest executes an outbound HTTP request on behalf of the agent's
+// own LLM proxy, running it through the same policy, credential-injection, and
+// logging infrastructure used for container-originated traffic.
+func (m *Manager) MakeTrackedRequest(ctx context.Context, req *http.Request) (*http.Response, error) {
+	domain := req.URL.Hostname()
+	urlStr := req.URL.String()
+
+	action, rule := m.policy.CheckDomain(BackendLLMInstanceID, BackendLLMAppID, domain, req.Method, urlStr)
+
+	if m.tracer != nil && m.tracer.IsEnabled() {
+		m.tracer.Emit(BackendLLMInstanceID, "policy.entry", "egress", BackendLLMAppID, BackendLLMInstanceID,
+			fmt.Sprintf("Policy check: %s %s -> %s", req.Method, domain, action),
+			map[string]interface{}{"domain": domain, "action": action, "rule": rule, "url": urlStr})
+	}
+
+	if action == "auto_blocked" || action == "held" {
+		m.store.InsertProxyLog(ProxyLog{
+			InstanceID:   BackendLLMInstanceID,
+			Direction:    "egress",
+			Method:       strPtr(req.Method),
+			URL:          strPtr(urlStr),
+			Domain:       strPtr(domain),
+			PolicyAction: strPtr(action),
+			PolicyRule:   strPtr(rule),
+		})
+		return nil, fmt.Errorf("request %s to %s: %s (rule: %s)", req.Method, domain, action, rule)
+	}
+
+	m.credentials.InjectCredentials(req)
+
+	if m.tracer != nil && m.tracer.IsEnabled() {
+		m.tracer.Emit(BackendLLMInstanceID, "proxy.upstream_send", "egress", BackendLLMAppID, BackendLLMInstanceID,
+			fmt.Sprintf("Sending %s %s", req.Method, urlStr),
+			map[string]interface{}{"domain": domain, "url": urlStr})
+	}
+
+	resp, err := (&http.Client{}).Do(req.WithContext(ctx))
+
+	statusCode := 0
+	if resp != nil {
+		statusCode = resp.StatusCode
+	}
+	m.store.InsertProxyLog(ProxyLog{
+		InstanceID:   BackendLLMInstanceID,
+		Direction:    "egress",
+		Method:       strPtr(req.Method),
+		URL:          strPtr(urlStr),
+		Domain:       strPtr(domain),
+		StatusCode:   &statusCode,
+		PolicyAction: strPtr(action),
+		PolicyRule:   strPtr(rule),
+	})
+
+	if m.tracer != nil {
+		errStr := ""
+		if err != nil {
+			errStr = err.Error()
+		}
+		m.tracer.Emit(BackendLLMInstanceID, "proxy.upstream_response", "egress", BackendLLMAppID, BackendLLMInstanceID,
+			fmt.Sprintf("Response from %s: %d", domain, statusCode),
+			map[string]interface{}{"status_code": statusCode, "domain": domain, "error": errStr})
+	}
+
+	return resp, err
 }

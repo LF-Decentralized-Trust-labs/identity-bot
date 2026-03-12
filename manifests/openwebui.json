@@ -31,9 +31,7 @@
   "network": {
     "tls_mode": "mitm",
     "allowed_domains": [
-      "agent.internal",
-      "*.openrouter.ai",
-      "openrouter.ai"
+      "agent.internal"
     ],
     "blocked_domains": []
   },
