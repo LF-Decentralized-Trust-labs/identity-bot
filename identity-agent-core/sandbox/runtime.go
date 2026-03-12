@@ -273,62 +273,112 @@ func agentInternalHost() string {
 
 func detectWSL2GatewayIP() string {
         // On Windows + Podman + WSL2, the host IP is the WSL2 bridge gateway.
-        // We'll run the command through PowerShell to ensure proper shell interpretation.
-        // Command: podman machine ssh "ip route | grep default"
-        // Expected output: "default via 172.20.96.1 dev eth0 proto kernel"
-        
+        // Strategy:
+        //   1. Ask the Podman machine directly: parse default route from inside WSL2.
+        //   2. Fall back to scanning Windows host network interfaces for the WSL vEthernet adapter.
+        //   3. Last resort: 172.17.0.1 (common WSL2 gateway). Never use "host-gateway" on Windows
+        //      because --add-host host-gateway is unreliable under WSL2.
+
         log.Printf("[wsl2-detect] Starting WSL2 gateway IP detection")
-        log.Printf("[wsl2-detect] Executing: podman machine ssh 'ip route | grep default'")
-        
-        // Try the direct approach first
-        cmd := exec.Command("podman", "machine", "ssh", "ip route | grep default")
-        output, err := cmd.Output()
-        
-        if err != nil {
-                log.Printf("[wsl2-detect] Direct command failed: %v (stderr: %v)", err, cmd.Stderr)
-                log.Printf("[wsl2-detect] Attempting alternative approach with sh -c")
-                
-                // Try with explicit shell
-                cmd = exec.Command("podman", "machine", "ssh", "sh", "-c", "ip route | grep default")
-                output, err = cmd.Output()
-                
-                if err != nil {
-                        log.Printf("[wsl2-detect] Alternative command also failed: %v", err)
-                        log.Printf("[wsl2-detect] Falling back to host-gateway")
-                        return "host-gateway"
-                }
-        }
-        
-        rawOutput := strings.TrimSpace(string(output))
-        log.Printf("[wsl2-detect] Raw command output: '%s'", rawOutput)
-        
-        if rawOutput == "" {
-                log.Printf("[wsl2-detect] Output is empty, falling back to host-gateway")
-                return "host-gateway"
-        }
-        
-        // Parse: "default via X.X.X.X dev eth0 proto kernel"
-        parts := strings.Fields(rawOutput)
-        log.Printf("[wsl2-detect] Parsed %d fields from output", len(parts))
-        
-        if len(parts) > 0 {
-                log.Printf("[wsl2-detect] Field breakdown: [0]=%s [1]=%s [2]=%s [len]=%d", 
-                        parts[0], 
-                        func() string { if len(parts) > 1 { return parts[1] }; return "N/A" }(),
-                        func() string { if len(parts) > 2 { return parts[2] }; return "N/A" }(),
-                        len(parts))
-        }
-        
-        if len(parts) >= 3 && parts[0] == "default" && parts[1] == "via" {
-                ip := parts[2]
-                log.Printf("[wsl2-detect] Successfully detected WSL2 gateway IP: %s", ip)
+
+        if ip := detectWSL2GatewayViaPodmanSSH(); ip != "" {
+                log.Printf("[wsl2-detect] Detected gateway via podman machine ssh: %s", ip)
                 return ip
         }
 
-        log.Printf("[wsl2-detect] Could not parse expected format (need 'default via X.X.X.X ...')")
-        log.Printf("[wsl2-detect] Full output was: '%s'", rawOutput)
-        log.Printf("[wsl2-detect] Falling back to host-gateway")
-        return "host-gateway"
+        if ip := detectWSL2GatewayViaHostInterfaces(); ip != "" {
+                log.Printf("[wsl2-detect] Detected gateway via host network interfaces: %s", ip)
+                return ip
+        }
+
+        log.Printf("[wsl2-detect] All detection methods failed, falling back to 172.17.0.1")
+        return "172.17.0.1"
+}
+
+// detectWSL2GatewayViaPodmanSSH runs `podman machine ssh "ip route | grep default"` and
+// parses the gateway IP from the output (3rd whitespace-separated token).
+func detectWSL2GatewayViaPodmanSSH() string {
+        log.Printf("[wsl2-detect] Trying: podman machine ssh 'ip route | grep default'")
+
+        ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+        defer cancel()
+
+        cmd := exec.CommandContext(ctx, "podman", "machine", "ssh", "ip route | grep default")
+        output, err := cmd.Output()
+        if err != nil {
+                log.Printf("[wsl2-detect] podman machine ssh failed: %v", err)
+
+                // Retry with explicit shell invocation
+                cmd = exec.CommandContext(ctx, "podman", "machine", "ssh", "sh", "-c", "ip route | grep default")
+                output, err = cmd.Output()
+                if err != nil {
+                        log.Printf("[wsl2-detect] podman machine ssh (sh -c) failed: %v", err)
+                        return ""
+                }
+        }
+
+        rawOutput := strings.TrimSpace(string(output))
+        log.Printf("[wsl2-detect] podman machine ssh output: %q", rawOutput)
+        if rawOutput == "" {
+                return ""
+        }
+
+        // Parse: "default via X.X.X.X dev eth0 ..."
+        parts := strings.Fields(rawOutput)
+        if len(parts) >= 3 && parts[0] == "default" && parts[1] == "via" {
+                ip := parts[2]
+                if net.ParseIP(ip) != nil {
+                        return ip
+                }
+                log.Printf("[wsl2-detect] Parsed token %q is not a valid IP", ip)
+        }
+
+        log.Printf("[wsl2-detect] Could not parse 'default via <IP>' from: %q", rawOutput)
+        return ""
+}
+
+// detectWSL2GatewayViaHostInterfaces scans Windows host network interfaces for the
+// WSL/Hyper-V virtual adapter and returns its IPv4 address, which is the gateway
+// that containers inside the Podman/WSL2 machine use to reach the host.
+func detectWSL2GatewayViaHostInterfaces() string {
+        log.Printf("[wsl2-detect] Scanning host network interfaces for WSL adapter")
+
+        ifaces, err := net.Interfaces()
+        if err != nil {
+                log.Printf("[wsl2-detect] net.Interfaces() failed: %v", err)
+                return ""
+        }
+
+        wslKeywords := []string{"wsl", "hyper-v", "hyperv"}
+        for _, iface := range ifaces {
+                nameLower := strings.ToLower(iface.Name)
+                isWSL := false
+                for _, kw := range wslKeywords {
+                        if strings.Contains(nameLower, kw) {
+                                isWSL = true
+                                break
+                        }
+                }
+                if !isWSL {
+                        continue
+                }
+
+                addrs, err := iface.Addrs()
+                if err != nil {
+                        continue
+                }
+                for _, addr := range addrs {
+                        if ipnet, ok := addr.(*net.IPNet); ok {
+                                if ip4 := ipnet.IP.To4(); ip4 != nil {
+                                        log.Printf("[wsl2-detect] Found WSL adapter %q with IP %s", iface.Name, ip4.String())
+                                        return ip4.String()
+                                }
+                        }
+                }
+        }
+
+        log.Printf("[wsl2-detect] No WSL adapter found among %d interfaces", len(ifaces))
+        return ""
 }
 
 func findAvailablePort() (int, error) {

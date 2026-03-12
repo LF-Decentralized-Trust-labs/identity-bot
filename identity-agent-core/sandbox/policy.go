@@ -36,6 +36,12 @@ func (pe *PolicyEngine) UnregisterManifest(appID string) {
 }
 
 func (pe *PolicyEngine) CheckDomain(instanceID, appID, domain, method, urlStr string) (action string, rule string) {
+        // agent.internal is the Identity Agent host itself — always allow regardless of manifest rules.
+        // This is the loopback path from sandbox containers back to the agent API and LLM proxy.
+        if domain == "agent.internal" {
+                return "auto_approved", "agent_internal_bypass"
+        }
+
         pe.mu.RLock()
         manifest, hasManifest := pe.manifests[appID]
         pe.mu.RUnlock()

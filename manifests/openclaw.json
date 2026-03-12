@@ -29,6 +29,7 @@
   "network": {
     "tls_mode": "mitm",
     "allowed_domains": [
+      "agent.internal",
       "*.npmjs.org",
       "*.npmjs.com",
       "registry.npmjs.org"

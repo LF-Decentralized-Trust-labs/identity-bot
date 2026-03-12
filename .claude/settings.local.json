@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python --version 2>&1; pip show flask 2>&1 | head -2; pip show keri 2>&1 | head -2)",
+      "Bash(cd 'C:\\\\Users\\\\Boogie Bob\\\\Documents\\\\GitHub\\\\identity-bot\\\\identity-bot\\\\identity-agent-core' && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o bin/identity-agent-core.exe . && echo \"Go backend: OK\" && ls -lh bin/identity-agent-core.exe)",
+      "Bash(find 'C:\\\\Users\\\\Boogie Bob\\\\Documents\\\\GitHub\\\\identity-bot\\\\identity-bot' -name \"*.md\" -o -name \"ADR*\" 2>/dev/null | head -30)",
+      "Bash(cd 'C:\\\\Users\\\\Boogie Bob\\\\Documents\\\\GitHub\\\\identity-bot\\\\identity-bot\\\\identity_agent_ui' && flutter pub get 2>&1 | tail -3 && flutter build windows --release 2>&1)",
+      "Bash(cd \"C:\\\\Users\\\\Boogie Bob\\\\Documents\\\\GitHub\\\\identity-bot\\\\identity-bot\\\\identity-agent-core\" && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o bin/identity-agent-core.exe . 2>&1)",
+      "Bash(cd \"C:\\\\Users\\\\Boogie Bob\\\\Documents\\\\GitHub\\\\identity-bot\\\\identity-bot\\\\identity_agent_ui\" && flutter pub get 2>&1)",
+      "Bash(cd \"C:\\\\Users\\\\Boogie Bob\\\\Documents\\\\GitHub\\\\identity-bot\\\\identity-bot\\\\identity_agent_ui\" && flutter build windows --release 2>&1)",
+      "Bash(cd \"C:\\\\Users\\\\Boogie Bob\\\\Documents\\\\GitHub\\\\identity-bot\\\\identity-bot\" && BUNDLE=\"identity_agent_ui/build/windows/x64/runner/Release\" && mkdir -p \"$BUNDLE/backend/bin\" && cp identity-agent-core/bin/identity-agent-core.exe \"$BUNDLE/backend/\" && cp -r drivers/keri-core \"$BUNDLE/backend/keri-driver\" && cp -r manifests \"$BUNDLE/backend/manifests\" && echo \"Done\")",
+      "Bash(find \"C:\\\\Users\\\\Boogie Bob\\\\Documents\\\\GitHub\\\\identity-bot\\\\identity-bot\" -name \"codemagic.yaml\" -o -name \"DESKTOP_SETUP*\" 2>/dev/null | head -20)",
+      "Bash(cd \"C:\\\\Users\\\\Boogie Bob\\\\Documents\\\\GitHub\\\\identity-bot\\\\identity-bot\\\\identity-agent-core\" && go build ./... 2>&1)"
+    ]
+  }
+}

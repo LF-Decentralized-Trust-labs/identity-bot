@@ -3,6 +3,7 @@
 **Date:** 2025-07-14
 **Status:** Accepted
 **Amended:** 2026-03-10 — Replaced Docker Desktop with Podman as the container runtime (see §Amendment)
+**Amended:** 2026-03-12 — Replaced Caddy with Go-native MITM proxy; documented agent.internal bypass pattern (see §Amendment 2)
 
 ## Context
 
@@ -52,6 +53,26 @@ Docker Desktop requires a commercial license for organizations with >250 employe
 3. **Rootless volume permissions**: Mounting host directories into rootless Podman containers can hit UID/GID mapping issues. The agent must handle `--userns=keep-id` or explicit UID mapping for volume mounts.
 4. **Networking differences**: Podman uses Netavark (default in Podman 4+) or CNI for container networking. DNS resolution between containers and `host.containers.internal` may behave differently than Docker's `host.docker.internal`. The Go runtime must test and handle platform-specific networking.
 
+## Amendment 2: Go-native MITM proxy + agent.internal bypass (2026-03-12)
+
+### What changed
+
+The original ADR proposed Caddy (with the `forwardproxy` plugin) as the MITM inspection proxy. The actual implementation uses a **Go-native MITM forward proxy** embedded directly in the Identity Agent binary (`sandbox/proxy.go`). No Caddy subprocess exists.
+
+Additionally, a critical networking issue was identified and fixed: containers were routing requests to `agent.internal` (the Identity Agent itself) through the MITM inspection proxy. The MITM proxy runs on the host and cannot resolve `agent.internal` (which only exists inside the container), causing those requests to fail silently or be held by the policy engine.
+
+### Fix
+
+1. `NO_PROXY=agent.internal` and `no_proxy=agent.internal` are now injected into every container alongside `HTTP_PROXY`/`HTTPS_PROXY`.
+2. A hardcoded bypass in `policy.go` auto-approves any domain matching `agent.internal` as belt-and-suspenders.
+3. `agent.internal` is now listed in `allowed_domains` in every app manifest (documents intent, defensive redundancy).
+
+### Why this is architecturally correct
+
+Requests from a container to `agent.internal` are **already inside the Identity Agent's control layer** — the LLM proxy, the Agent API server, and the credential vault all live at that address. Routing those requests through the MITM inspection proxy would mean "proxying the proxy," which is both circular and technically impossible (the MITM proxy cannot resolve `agent.internal` from the host side).
+
+The MITM inspection proxy's role is exclusively to police **outbound internet traffic** — traffic leaving to the public internet. Traffic directed at the Identity Agent itself is already controlled.
+
 ## Decision
 
 ### 1. Supported App Types (V1)
@@ -64,57 +85,87 @@ Docker Desktop requires a commercial license for organizations with >250 employe
 
 ### 2. Data Flow
 
-```
-OUTBOUND (Egress):
-  Sandboxed App (OCI container or compiled binary)
-    → Network boundary:
-        Layer 1: HTTP_PROXY / HTTPS_PROXY env vars → Caddy proxy
-        Layer 2: iptables / Podman network rules DROP all egress EXCEPT proxy_port + dns_port
-        (both layers required — env vars alone are bypassable)
-    → Identity Agent Caddy Proxy (managed subprocess, same pattern as keri_driver.go)
-        → Policy Engine:
-            1. Check manifest allowed domains → auto-approve if match
-            2. Unknown domain → hold for operator (queue in SQLite)
-            3. Explicitly denied → auto-block
-        → Egress Filter (inspect headers/body in Mode A, SNI-only in Mode B)
-        → Egress Log (write to sandbox.db, level: none/metadata/full per app)
-    → External Destination (internet, APIs, host services)
+Two separate control layers both live inside the Identity Agent process:
 
-INBOUND (Ingress):
-  External Response
-    → Caddy Proxy
-        → Policy Engine (validate response matches approved request)
-        → Ingress Filter (scan response content)
-        → Ingress Log (write to sandbox.db)
-    → Network boundary
-    → Sandboxed App receives filtered response
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                 IDENTITY AGENT (port 5000)                      │
+│                                                                 │
+│  ┌────────────────────┐    ┌─────────────────────────────────┐  │
+│  │  LLM Proxy         │    │  MITM Inspection Proxy          │  │
+│  │  /llm/v1/*         │    │  (random port per session)      │  │
+│  │                    │    │                                 │  │
+│  │  Receives LLM API  │    │  Intercepts all other outbound  │  │
+│  │  calls directly    │    │  HTTP/HTTPS from container.     │  │
+│  │  from container.   │    │  Runs policy engine, logs       │  │
+│  │  Injects API keys. │    │  traffic, blocks/holds unknown  │  │
+│  │  Streams response. │    │  domains, injects credentials.  │  │
+│  └────────────────────┘    └─────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Container env vars at launch:**
+```
+OPENAI_API_BASE_URL = http://agent.internal:5000/llm/v1   ← direct to LLM Proxy
+HTTP_PROXY          = http://<host_ip>:<random_port>       ← all other traffic
+HTTPS_PROXY         = http://<host_ip>:<random_port>       ← including HTTPS
+NO_PROXY            = agent.internal                       ← bypasses MITM for agent itself
+no_proxy            = agent.internal                       ← (lowercase for Linux/Python)
+```
+
+```
+OUTBOUND — LLM calls (Open WebUI → OpenRouter via Identity Agent):
+  Container
+    → GET/POST http://agent.internal:5000/llm/v1/*
+      (direct — NO_PROXY bypasses MITM inspection proxy)
+    → Identity Agent LLM Proxy (/llm/v1)
+        → Looks up API key from credential vault
+        → Injects Authorization: Bearer header
+        → Forwards to https://openrouter.ai/api/v1/* (direct from host)
+        → Streams response back to container
+
+OUTBOUND — all other internet traffic (CDN, telemetry, etc.):
+  Container
+    → request via HTTP_PROXY env var
+    → Identity Agent MITM Inspection Proxy (Go net/http proxy, random port)
+        → Policy Engine:
+            1. agent.internal → always auto-approved (belt-and-suspenders bypass)
+            2. Check manifest allowed_domains → auto-approve if match
+            3. Unknown domain → hold for operator (queue in SQLite)
+            4. Explicitly blocked → auto-block
+        → If approved: forward to internet, log response
+        → Egress/Ingress Log (write to sandbox.db)
+    → External Destination
+
+  NOTE: The MITM proxy runs on the host. It cannot resolve agent.internal because
+  --add-host only injects that hostname inside the container. NO_PROXY=agent.internal
+  is therefore both architecturally correct (agent traffic shouldn't be double-proxied)
+  and technically necessary (host-side DNS can't resolve agent.internal).
 
 RESOURCE REQUEST (in-sandbox channel):
   Sandboxed App
-    → POST http://agent.internal/request
+    → POST http://agent.internal:{agentAPIPort}/request
         { "resources": ["camera", "filesystem:/documents", "network:newdomain.com"] }
-    → Agent receives, checks policy:
-        Known + policy YES → auto-grant, log
-        Known + policy NO → auto-deny, log
-        Unknown → queue for user approval (persisted in SQLite)
+    → Agent API Server (per-instance port, bound on host)
+        → Policy Engine checks capability rules
+        → Known + policy YES → auto-grant, log
+        → Unknown → queue for user approval (persisted in SQLite, shown in UI)
     → Response: { "granted": [...], "denied": [...], "pending": [...] }
-    → Pending requests shown in Marketplace UI (batch approve/deny)
-    → App notified via WebSocket or polling
 
 DISPLAY:
-  Container GUI app (kasmweb): Container web UI → Caddy reverse proxy → Flutter WebView
-  Container web app (Open WebUI, OpenClaw): Container HTTP port → Caddy reverse proxy → Flutter WebView
-  Compiled binary (Go Demo): stdout/stdin → Go WebSocket pipe → Flutter terminal widget
+  Container web app (Open WebUI, OpenClaw): Container HTTP port → Flutter WebView
+  Container GUI app (Chromium): Container VNC/web port → Flutter WebView
+  Compiled binary (Go Demo): HTTP server on dynamic port → Flutter WebView
   Fallback (all): "Open in browser" button loads URL in system default browser
 ```
 
 ### 3. Proxy Architecture
 
-Caddy runs as a **managed child process** (same pattern as `keri_driver.go` — see [ADR 002](002-keri-driver-pattern.md)). This gives us a lighter agent binary, simpler build process, and better restart/crash recovery than embedding. The Go backend manages Caddy's lifecycle, communicates via Caddy's admin API, and restarts it automatically on failure.
+**Implemented as**: A Go-native MITM forward proxy (`sandbox/proxy.go`) embedded directly in the Identity Agent binary — no separate Caddy subprocess. The original ADR proposed Caddy with the forwardproxy plugin; the Go stdlib approach was chosen instead for simplicity, zero external dependencies, and tighter integration with the policy engine.
 
-**Forward proxy requirement**: Caddy does not natively support forward proxying (CONNECT method, HTTPS MITM). We need a custom Caddy build with the `github.com/caddyserver/forwardproxy` plugin. If this proves too complex, a layered approach is supported: App → Go MITM proxy (using `goproxy` library for CONNECT/MITM) → Caddy for reverse proxy/TLS termination. This must be evaluated as a technical spike before full implementation.
+The proxy handles both HTTP forward proxying (plain `GET http://...` requests) and HTTPS MITM (`CONNECT` tunnel + TLS interception using a per-session CA cert injected into the container).
 
-**Fallback**: If Caddy proves too complex even with the forwardproxy plugin, Go standard library `net/http/httputil.ReverseProxy` + `crypto/tls` or the `goproxy` library is a viable lightweight alternative for V1 interception.
+**Why Caddy was not used**: The `forwardproxy` plugin for Caddy required a custom build, added a managed subprocess with its own lifecycle, and made policy engine integration more complex. The Go net/http + crypto/tls approach achieves the same result with less infrastructure.
 
 #### Two TLS Inspection Modes (selectable per-app in manifest)
 
@@ -148,8 +199,13 @@ On **macOS and Windows**, Podman runs containers inside a managed VM (`podman ma
 - **macOS/Windows**: `HTTP_PROXY=http://host.containers.internal:{proxy_port}`
 
 Similarly, the `agent.internal` DNS alias must resolve to the correct host IP:
-- **Linux**: `--add-host agent.internal:{bridge_gateway_ip}` or host IP
-- **macOS/Windows**: `--add-host agent.internal:host-gateway` (Podman resolves this to the host VM IP)
+- **Linux**: `--add-host agent.internal:{podman_bridge_gateway_ip}` (detected from podman0 interface, fallback 10.88.0.1)
+- **macOS**: `--add-host agent.internal:host-gateway` (Podman resolves this to the host VM IP reliably on macOS)
+- **Windows/WSL2**: `host-gateway` is unreliable. `container_runtime.go` dynamically detects the WSL2 gateway IP at container launch via: (1) `podman machine ssh "ip route | grep default"`, (2) scanning Windows host interfaces for the WSL vEthernet adapter, (3) fallback to 172.17.0.1.
+
+**agent.internal must bypass the MITM inspection proxy** (`NO_PROXY=agent.internal` injected into every container). The MITM proxy runs on the host and cannot resolve `agent.internal` (which only exists inside the container via `--add-host`). Requests to `agent.internal` go directly to the Identity Agent's own endpoints — they are already inside the Identity Agent's control layer and do not need MITM inspection.
+
+All manifests must include `"agent.internal"` in `allowed_domains` as belt-and-suspenders (in case any app ignores `NO_PROXY`, the policy engine also has a hardcoded bypass for `agent.internal` in `policy.go`).
 
 ### 5. Agent API Endpoint — Internal Service Alias
 
@@ -438,9 +494,21 @@ Podman detection differs from Docker — there is no persistent daemon to ping. 
 
 ### 14. Open WebUI LLM Provider Configuration
 
-Open WebUI is configured by default to connect to **OpenRouter** (`https://openrouter.ai/api/v1`) as the external LLM provider. This avoids downloading local AI models (which are multi-GB and would flood the held-for-operator queue). The manifest pre-approves `*.openrouter.ai` domains.
+Open WebUI is configured to call the **Identity Agent's LLM proxy** at `http://agent.internal:5000/llm/v1` (not OpenRouter directly). The Identity Agent then forwards to OpenRouter, injecting the user's API key from its credential vault. This means:
 
-Users can reconfigure Open WebUI to use other providers (OpenAI, local Ollama, etc.) — the proxy will hold any new domains for approval.
+- Open WebUI never sees or stores the real API key
+- All LLM calls are logged by the Identity Agent
+- The user's key can be rotated without touching the container
+
+```
+Open WebUI → agent.internal:5000/llm/v1 → Identity Agent LLM Proxy → openrouter.ai
+```
+
+The `OPENAI_API_BASE_URL` env var points Open WebUI at the Identity Agent's OpenAI-compatible endpoint. Open WebUI thinks it is talking to OpenAI; the Identity Agent proxies to OpenRouter.
+
+The model list (`GET /llm/v1/models`) is served from a static catalog in `llm_handlers.go` — no upstream call needed to populate the dropdown.
+
+Users can reconfigure Open WebUI to use other providers (OpenAI, local Ollama, etc.) — the MITM proxy will hold any new outbound domains for approval.
 
 ### 15. Desktop-Only Exclusion
 

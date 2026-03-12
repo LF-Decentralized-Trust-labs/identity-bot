@@ -46,6 +46,12 @@ func NewContainerRuntime(manifest *AppManifest, instance *Instance, store *Sandb
                         "HTTPS_PROXY":         proxyURL,
                         "http_proxy":          proxyURL,
                         "https_proxy":         proxyURL,
+                        // agent.internal must bypass the MITM proxy — it is the host itself.
+                        // Without NO_PROXY the container routes these requests through the proxy,
+                        // which holds them pending operator approval (unknown domain) and models
+                        // never load in Open WebUI.
+                        "NO_PROXY":            "agent.internal",
+                        "no_proxy":            "agent.internal",
                         "IDENTITY_AGENT_API":  fmt.Sprintf("http://agent.internal:%d", agentAPIPort),
                 },
         }
@@ -388,6 +394,7 @@ func (d *ContainerRuntime) createContainer(ctx context.Context) error {
         reservedKeys := map[string]bool{
                 "HTTP_PROXY": true, "HTTPS_PROXY": true,
                 "http_proxy": true, "https_proxy": true,
+                "NO_PROXY": true, "no_proxy": true,
                 "IDENTITY_AGENT_API": true,
         }
 
@@ -430,11 +437,9 @@ func (d *ContainerRuntime) createContainer(ctx context.Context) error {
                 dnsIP = "8.8.8.8"
         }
 
-        log.Printf("[container-create] Container %s: agentHost resolved to '%s'", d.manifest.ID, agentHost)
-        log.Printf("[container-create] Container %s: hostIP resolved to '%s'", d.manifest.ID, hostIP)
         log.Printf("[container-create] Container %s: Using --add-host agent.internal:%s", d.manifest.ID, agentHost)
         log.Printf("[container-create] Container %s: Using --dns %s", d.manifest.ID, dnsIP)
-        
+
         args = append(args, "--add-host", fmt.Sprintf("agent.internal:%s", agentHost))
         args = append(args, "--dns", dnsIP)
 

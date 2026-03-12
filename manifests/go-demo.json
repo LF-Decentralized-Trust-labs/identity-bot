@@ -21,7 +21,7 @@
   },
   "network": {
     "tls_mode": "sni_only",
-    "allowed_domains": [],
+    "allowed_domains": ["agent.internal"],
     "blocked_domains": []
   },
   "capabilities": {

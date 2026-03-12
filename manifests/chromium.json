@@ -29,6 +29,7 @@
   "network": {
     "tls_mode": "mitm",
     "allowed_domains": [
+      "agent.internal",
       "*.google.com",
       "*.googleapis.com",
       "*.gstatic.com",
