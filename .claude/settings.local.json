@@ -25,7 +25,8 @@
       "Bash('BUNDLE=C:/Users/Boogie Bob/Documents/GitHub/identity-bot/identity-bot/identity_agent_ui/build/windows/x64/runner/Release' echo '=== Root ===')",
       "Read(//c/Users/Boogie Bob/Documents/GitHub/identity-bot/identity-bot/sandbox-apps/go-demo/$BUNDLE/**)",
       "Bash(/dev/null echo:*)",
-      "Read(//c/Users/Boogie Bob/Documents/GitHub/identity-bot/identity-bot/sandbox-apps/go-demo/$BUNDLE/backend/**)"
+      "Read(//c/Users/Boogie Bob/Documents/GitHub/identity-bot/identity-bot/sandbox-apps/go-demo/$BUNDLE/backend/**)",
+      "Bash(cd \"C:\\\\Users\\\\Boogie Bob\\\\Documents\\\\GitHub\\\\identity-bot\\\\identity-bot\\\\identity-agent-core\" && go build ./... 2>&1 && echo \"OK\")"
     ]
   }
 }

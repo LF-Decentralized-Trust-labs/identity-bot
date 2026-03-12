@@ -620,6 +620,39 @@ func min(a, b int) int {
         return b
 }
 
+// getContainerIP returns the container's IP address on the given Podman network.
+// It first queries the network-specific address, then falls back to any attached
+// network. Returns an empty string if the IP cannot be determined.
+func getContainerIP(ctx context.Context, containerID, networkName string) string {
+	// Try the specific sandbox network first.
+	out, err := runPodmanCmd(ctx,
+		"inspect", "--format",
+		fmt.Sprintf(`{{(index .NetworkSettings.Networks "%s").IPAddress}}`, networkName),
+		containerID,
+	)
+	if err == nil {
+		ip := strings.TrimSpace(string(out))
+		if ip != "" && ip != "<no value>" {
+			return ip
+		}
+	}
+
+	// Fallback: take the first IP across all attached networks.
+	out, err = runPodmanCmd(ctx,
+		"inspect", "--format",
+		`{{range .NetworkSettings.Networks}}{{if .IPAddress}}{{.IPAddress}}{{end}}{{end}}`,
+		containerID,
+	)
+	if err == nil {
+		ip := strings.TrimSpace(string(out))
+		if ip != "" {
+			return ip
+		}
+	}
+
+	return ""
+}
+
 func CleanupOrphanedNetworks(ctx context.Context) error {
         out, err := runPodmanCmd(ctx, "network", "ls", "--filter", "label=identity-agent=true", "--format=json")
         if err != nil {

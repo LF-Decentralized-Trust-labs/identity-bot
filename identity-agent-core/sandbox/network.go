@@ -10,12 +10,14 @@ import (
 )
 
 type NetworkIsolation struct {
-        instanceID  string
-        appID       string
-        proxyPort   int
-        dnsPort     int
-        networkName string
-        hostIP      string
+	instanceID  string
+	appID       string
+	proxyPort   int
+	dnsPort     int
+	networkName string
+	hostIP      string
+	// containerIP is set by ApplyIptablesRules and used by RemoveIptablesRules.
+	containerIP string
 }
 
 func NewNetworkIsolation(instanceID, appID string, proxyPort, dnsPort int, networkName string) *NetworkIsolation {
@@ -58,12 +60,14 @@ func (ni *NetworkIsolation) RemovePodmanNetwork(ctx context.Context) error {
 }
 
 func (ni *NetworkIsolation) ApplyIptablesRules(containerIP string) error {
-        if runtime.GOOS != "linux" {
-                log.Printf("[network] iptables not available on %s, relying on container network isolation", runtime.GOOS)
-                return nil
-        }
+	if runtime.GOOS != "linux" {
+		log.Printf("[network] iptables not available on %s, relying on container network isolation", runtime.GOOS)
+		return nil
+	}
 
-        chain := fmt.Sprintf("SANDBOX-%s", ni.instanceID[:8])
+	ni.containerIP = containerIP
+
+	chain := fmt.Sprintf("SANDBOX-%s", ni.instanceID[:8])
 
         commands := [][]string{
                 {"iptables", "-N", chain},
@@ -87,25 +91,24 @@ func (ni *NetworkIsolation) ApplyIptablesRules(containerIP string) error {
         return nil
 }
 
-func (ni *NetworkIsolation) RemoveIptablesRules(containerIP string) error {
-        if runtime.GOOS != "linux" {
-                return nil
-        }
+func (ni *NetworkIsolation) RemoveIptablesRules() error {
+	if runtime.GOOS != "linux" {
+		return nil
+	}
 
-        chain := fmt.Sprintf("SANDBOX-%s", ni.instanceID[:8])
+	chain := fmt.Sprintf("SANDBOX-%s", ni.instanceID[:8])
 
-        commands := [][]string{
-                {"iptables", "-D", "FORWARD", "-s", containerIP, "-j", chain},
-                {"iptables", "-F", chain},
-                {"iptables", "-X", chain},
-        }
+	// Remove the FORWARD jump rule only if we know which container IP to target.
+	// During reconcile-on-startup the IP may not be available; in that case we
+	// still flush and delete the chain so no stale rules linger.
+	if ni.containerIP != "" {
+		exec.Command("iptables", "-D", "FORWARD", "-s", ni.containerIP, "-j", chain).Run()
+	}
+	exec.Command("iptables", "-F", chain).Run()
+	exec.Command("iptables", "-X", chain).Run()
 
-        for _, cmd := range commands {
-                exec.Command(cmd[0], cmd[1:]...).Run()
-        }
-
-        log.Printf("[network] Removed iptables rules for container %s (chain: %s)", containerIP, chain)
-        return nil
+	log.Printf("[network] Removed iptables rules for container %s (chain: %s)", ni.containerIP, chain)
+	return nil
 }
 
 func (ni *NetworkIsolation) ContainerCreateConfig(manifest *AppManifest, proxyURL string, agentAPIPort int, certDir string) map[string]interface{} {

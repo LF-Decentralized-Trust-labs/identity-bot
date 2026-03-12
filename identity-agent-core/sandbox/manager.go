@@ -141,10 +141,11 @@ func (m *Manager) Stop() {
                 log.Printf("[sandbox-manager] Stopped monitor for %s", id)
         }
 
-        for _, net := range m.networks {
-                ctx := context.Background()
-                net.RemovePodmanNetwork(ctx)
-        }
+	for _, net := range m.networks {
+		ctx := context.Background()
+		net.RemoveIptablesRules()
+		net.RemovePodmanNetwork(ctx)
+	}
 
         m.proxy.Stop()
         m.store.Close()
@@ -372,13 +373,32 @@ func (m *Manager) LaunchApp(ctx context.Context, id string) (*Instance, error) {
                 TargetPort: netCfg.ProxyPort,
         })
 
-        if err := rt.Start(ctx); err != nil {
-                agentAPI.Stop()
-                m.proxy.RemoveRoute(instanceID)
-                m.store.UpdateInstanceStatus(instanceID, "error")
-                return nil, fmt.Errorf("failed to start runtime: %w", err)
-        }
-        m.runtimes[instanceID] = rt
+	if err := rt.Start(ctx); err != nil {
+		agentAPI.Stop()
+		m.proxy.RemoveRoute(instanceID)
+		m.store.UpdateInstanceStatus(instanceID, "error")
+		return nil, fmt.Errorf("failed to start runtime: %w", err)
+	}
+	m.runtimes[instanceID] = rt
+
+	// On Linux: enforce proxy-only egress via iptables so the container cannot
+	// bypass the MITM proxy with raw socket connections.  Non-fatal — a failure
+	// means enforcement is soft (env-var only) rather than hard, which matches
+	// the behaviour on Windows and macOS where iptables is unavailable.
+	if manifest.IsContainer() && instance.ContainerID != nil && *instance.ContainerID != "" {
+		if ni, ok := m.networks[instanceID]; ok {
+			containerIP := getContainerIP(ctx, *instance.ContainerID, netCfg.NetworkName)
+			if containerIP != "" {
+				if err := ni.ApplyIptablesRules(containerIP); err != nil {
+					log.Printf("[sandbox-manager] iptables enforcement setup failed (non-fatal, falling back to soft enforcement): %v", err)
+				} else {
+					log.Printf("[sandbox-manager] iptables hard enforcement applied for instance %s (container IP: %s)", instanceID, containerIP)
+				}
+			} else {
+				log.Printf("[sandbox-manager] Could not determine container IP for instance %s; skipping iptables enforcement", instanceID)
+			}
+		}
+	}
 
         mon := NewResourceMonitor(rt, manifest, instance, m.store, func(alert ResourceAlert) {
                 if m.eventBus != nil {
@@ -463,10 +483,11 @@ func (m *Manager) StopApp(ctx context.Context, appID string) error {
                         delete(m.agentAPIs, inst.ID)
                 }
 
-                if ni, ok := m.networks[inst.ID]; ok {
-                        ni.RemovePodmanNetwork(ctx)
-                        delete(m.networks, inst.ID)
-                }
+			if ni, ok := m.networks[inst.ID]; ok {
+				ni.RemoveIptablesRules()
+				ni.RemovePodmanNetwork(ctx)
+				delete(m.networks, inst.ID)
+			}
 
                 m.store.UpdateInstanceStatus(inst.ID, "stopped")
 
@@ -779,11 +800,15 @@ func (m *Manager) ReconcileOnStartup() error {
 }
 
 func (m *Manager) cleanupInstanceResources(inst Instance) {
-        if inst.NetworkName != nil && *inst.NetworkName != "" {
-                ni := NewNetworkIsolation(inst.ID, inst.AppID, 0, 0, *inst.NetworkName)
-                ni.RemovePodmanNetwork(context.Background())
-        }
-        m.proxy.RemoveRoute(inst.ID)
+	if inst.NetworkName != nil && *inst.NetworkName != "" {
+		ni := NewNetworkIsolation(inst.ID, inst.AppID, 0, 0, *inst.NetworkName)
+		// containerIP is not available on the reconcile path (container already gone),
+		// so RemoveIptablesRules will skip the FORWARD -D rule but still flush/delete
+		// the chain, preventing stale iptables entries from accumulating.
+		ni.RemoveIptablesRules()
+		ni.RemovePodmanNetwork(context.Background())
+	}
+	m.proxy.RemoveRoute(inst.ID)
 }
 
 func killProcess(pid int) {
@@ -862,7 +887,7 @@ func (m *Manager) MakeTrackedRequest(ctx context.Context, req *http.Request) (*h
 	action, rule := m.policy.CheckDomain(BackendLLMInstanceID, BackendLLMAppID, domain, req.Method, urlStr)
 
 	if m.tracer != nil && m.tracer.IsEnabled() {
-		m.tracer.Emit(BackendLLMInstanceID, "policy.entry", "egress", BackendLLMAppID, BackendLLMInstanceID,
+		m.tracer.Emit("proxy", "policy.entry", "egress", BackendLLMAppID, BackendLLMInstanceID,
 			fmt.Sprintf("Policy check: %s %s -> %s", req.Method, domain, action),
 			map[string]interface{}{"domain": domain, "action": action, "rule": rule, "url": urlStr})
 	}
@@ -883,7 +908,7 @@ func (m *Manager) MakeTrackedRequest(ctx context.Context, req *http.Request) (*h
 	m.credentials.InjectCredentials(req)
 
 	if m.tracer != nil && m.tracer.IsEnabled() {
-		m.tracer.Emit(BackendLLMInstanceID, "proxy.upstream_send", "egress", BackendLLMAppID, BackendLLMInstanceID,
+		m.tracer.Emit("proxy", "upstream_send", "egress", BackendLLMAppID, BackendLLMInstanceID,
 			fmt.Sprintf("Sending %s %s", req.Method, urlStr),
 			map[string]interface{}{"domain": domain, "url": urlStr})
 	}
@@ -910,7 +935,7 @@ func (m *Manager) MakeTrackedRequest(ctx context.Context, req *http.Request) (*h
 		if err != nil {
 			errStr = err.Error()
 		}
-		m.tracer.Emit(BackendLLMInstanceID, "proxy.upstream_response", "egress", BackendLLMAppID, BackendLLMInstanceID,
+		m.tracer.Emit("proxy", "upstream_response", "egress", BackendLLMAppID, BackendLLMInstanceID,
 			fmt.Sprintf("Response from %s: %d", domain, statusCode),
 			map[string]interface{}{"status_code": statusCode, "domain": domain, "error": errStr})
 	}
