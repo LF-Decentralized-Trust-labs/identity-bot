@@ -164,6 +164,20 @@ func (cv *CredentialVault) RemoveCredential(service string) error {
         return nil
 }
 
+func (cv *CredentialVault) GetAPIKey(service string) string {
+        cv.mu.RLock()
+        defer cv.mu.RUnlock()
+
+        for _, e := range cv.entries {
+                if e.Service == service {
+                        if auth, ok := e.Headers["Authorization"]; ok {
+                                return strings.TrimPrefix(auth, "Bearer ")
+                        }
+                }
+        }
+        return ""
+}
+
 func (cv *CredentialVault) ListServices() []string {
         cv.mu.RLock()
         defer cv.mu.RUnlock()

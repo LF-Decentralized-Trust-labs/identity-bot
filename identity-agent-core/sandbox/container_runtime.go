@@ -21,12 +21,7 @@ type ContainerRuntime struct {
         startedAt   time.Time
 }
 
-func NewContainerRuntime(manifest *AppManifest, instance *Instance, store *SandboxStore) (*ContainerRuntime, error) {
-        proxyPort, err := findAvailablePort()
-        if err != nil {
-                return nil, fmt.Errorf("failed to find proxy port: %w", err)
-        }
-
+func NewContainerRuntime(manifest *AppManifest, instance *Instance, store *SandboxStore, proxyURL string, proxyPort int) (*ContainerRuntime, error) {
         displayPort, err := findAvailablePort()
         if err != nil {
                 return nil, fmt.Errorf("failed to find display port: %w", err)
@@ -38,7 +33,6 @@ func NewContainerRuntime(manifest *AppManifest, instance *Instance, store *Sandb
         }
 
         hostIP := podmanHostIP()
-        proxyURL := fmt.Sprintf("http://%s:%d", hostIP, proxyPort)
 
         netCfg := &NetworkConfig{
                 ProxyPort:    proxyPort,
@@ -49,10 +43,10 @@ func NewContainerRuntime(manifest *AppManifest, instance *Instance, store *Sandb
                 ProxyURL:     proxyURL,
                 EnvVars: map[string]string{
                         "HTTP_PROXY":          proxyURL,
-                        "HTTPS_PROXY":        proxyURL,
-                        "http_proxy":         proxyURL,
-                        "https_proxy":        proxyURL,
-                        "IDENTITY_AGENT_API": fmt.Sprintf("http://agent.internal:%d", agentAPIPort),
+                        "HTTPS_PROXY":         proxyURL,
+                        "http_proxy":          proxyURL,
+                        "https_proxy":         proxyURL,
+                        "IDENTITY_AGENT_API":  fmt.Sprintf("http://agent.internal:%d", agentAPIPort),
                 },
         }
 
@@ -436,6 +430,11 @@ func (d *ContainerRuntime) createContainer(ctx context.Context) error {
                 dnsIP = "8.8.8.8"
         }
 
+        log.Printf("[container-create] Container %s: agentHost resolved to '%s'", d.manifest.ID, agentHost)
+        log.Printf("[container-create] Container %s: hostIP resolved to '%s'", d.manifest.ID, hostIP)
+        log.Printf("[container-create] Container %s: Using --add-host agent.internal:%s", d.manifest.ID, agentHost)
+        log.Printf("[container-create] Container %s: Using --dns %s", d.manifest.ID, dnsIP)
+        
         args = append(args, "--add-host", fmt.Sprintf("agent.internal:%s", agentHost))
         args = append(args, "--dns", dnsIP)
 

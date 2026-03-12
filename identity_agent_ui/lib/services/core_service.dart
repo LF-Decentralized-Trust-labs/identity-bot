@@ -735,6 +735,34 @@ class CoreService {
     }
   }
 
+  Future<Map<String, dynamic>> getLLMSettings() async {
+    final response = await _client.get(Uri.parse('$baseUrl/api/settings/llm'));
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    } else {
+      throw Exception('Failed to get LLM settings: ${response.statusCode}');
+    }
+  }
+
+  Future<void> saveLLMKey(String service, String apiKey) async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/api/settings/llm'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'service': service, 'api_key': apiKey}),
+    );
+    if (response.statusCode != 200) {
+      final body = jsonDecode(response.body);
+      throw Exception(body['error'] ?? 'Failed to save key: ${response.statusCode}');
+    }
+  }
+
+  Future<void> deleteLLMKey(String service) async {
+    final response = await _client.delete(Uri.parse('$baseUrl/api/settings/llm/$service'));
+    if (response.statusCode != 200) {
+      throw Exception('Failed to delete key: ${response.statusCode}');
+    }
+  }
+
   void dispose() {
     _client.close();
   }
