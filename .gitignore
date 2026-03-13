@@ -25,6 +25,10 @@ identity_agent_ui/.pub/
 *.swp
 *.swo
 
+# Claude Code (local permissions and worktrees — machine-specific, not for VCS)
+.claude/settings.local.json
+.claude/worktrees/
+
 # macOS
 .DS_Store
 
