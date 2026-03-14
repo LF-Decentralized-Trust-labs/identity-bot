@@ -12,7 +12,7 @@ echo "      Workspace: $WORKSPACE"
 echo ""
 echo "[1/3] Building Flutter Web..."
 cd "$WORKSPACE/identity_agent_ui"
-flutter pub get || PUB_HOSTED_URL=https://pub.flutter-io.cn flutter pub get
+flutter pub get || flutter pub get || PUB_HOSTED_URL=https://pub.flutter-io.cn flutter pub get
 flutter build web --release --base-href="/"
 echo "      Flutter Web built successfully."
 
