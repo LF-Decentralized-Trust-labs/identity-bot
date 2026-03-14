@@ -13,6 +13,22 @@ subprojects {
     project.evaluationDependsOn(":app")
 }
 
+// Apply proguard keep rules to ALL library modules (including Flutter plugins)
+// so that R8 does not fail on missing android.window.BackEvent references.
+subprojects {
+    afterEvaluate { project ->
+        if (project.plugins.hasPlugin("com.android.library")) {
+            project.android {
+                buildTypes {
+                    release {
+                        consumerProguardFiles "${rootProject.projectDir}/app/proguard-rules.pro"
+                    }
+                }
+            }
+        }
+    }
+}
+
 tasks.register("clean", Delete) {
     delete rootProject.buildDir
 }

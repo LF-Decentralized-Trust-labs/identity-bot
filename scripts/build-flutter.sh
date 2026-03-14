@@ -12,7 +12,16 @@ echo "      Workspace: $WORKSPACE"
 echo ""
 echo "[1/3] Building Flutter Web..."
 cd "$WORKSPACE/identity_agent_ui"
-flutter pub get || flutter pub get || PUB_HOSTED_URL=https://pub.flutter-io.cn flutter pub get
+# Ensure TLS certs are available for pub.dev
+for cert in /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-bundle.crt; do
+  if [ -f "$cert" ]; then
+    export SSL_CERT_FILE="$cert"
+    export GIT_SSL_CAINFO="$cert"
+    echo "      Using cert bundle: $cert"
+    break
+  fi
+done
+flutter pub get
 flutter build web --release --base-href="/"
 echo "      Flutter Web built successfully."
 

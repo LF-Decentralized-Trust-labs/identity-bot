@@ -28,6 +28,15 @@ echo "      Python dependencies verified."
 echo ""
 echo "[2/4] Building Flutter Web..."
 cd "$WORKSPACE/identity_agent_ui"
+# Ensure TLS certs are available for pub.dev
+for cert in /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-bundle.crt; do
+  if [ -f "$cert" ]; then
+    export SSL_CERT_FILE="$cert"
+    export GIT_SSL_CAINFO="$cert"
+    echo "      Using cert bundle: $cert"
+    break
+  fi
+done
 flutter pub get
 flutter build web --release --base-href="/"
 echo "      Flutter Web built successfully."
