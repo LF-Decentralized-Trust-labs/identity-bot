@@ -7,6 +7,9 @@ echo "      [cert] Detecting CA bundle..."
 
 if [ -n "$SSL_CERT_FILE" ] && [ -f "$SSL_CERT_FILE" ]; then
   echo "      [cert] SSL_CERT_FILE already valid: $SSL_CERT_FILE"
+  # Still set DART_VM_OPTIONS — Nix-built Dart may ignore SSL_CERT_FILE
+  export DART_VM_OPTIONS="--root-certs-file=$SSL_CERT_FILE"
+  echo "      [cert] DART_VM_OPTIONS set: $DART_VM_OPTIONS"
   return 0 2>/dev/null || true
 fi
 
@@ -45,7 +48,12 @@ fi
 if [ -n "$CERT" ]; then
   export SSL_CERT_FILE="$CERT"
   export GIT_SSL_CAINFO="$CERT"
+  # Nix-built Dart/Flutter may ignore SSL_CERT_FILE because BoringSSL is
+  # statically linked with hardcoded cert paths that don't exist in Nix.
+  # --root-certs-file is a Dart VM flag that overrides the compiled-in paths.
+  export DART_VM_OPTIONS="--root-certs-file=$CERT"
   echo "      [cert] Using: $CERT"
+  echo "      [cert] DART_VM_OPTIONS set: $DART_VM_OPTIONS"
 else
   echo "      [cert] WARNING: No CA certificate bundle found"
   echo "      [cert] Attempting pub.dev without explicit cert (may fail)"
