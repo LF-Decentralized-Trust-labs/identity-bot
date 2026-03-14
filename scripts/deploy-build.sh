@@ -30,16 +30,7 @@ echo "[2/4] Building Flutter Web..."
 cd "$WORKSPACE/identity_agent_ui"
 # Ensure TLS certs are available for pub.dev (critical in Nix/Replit environments)
 . "$SCRIPT_DIR/ensure-certs.sh"
-# Try flutter pub get first; if TLS fails, use dart directly with --root-certs-file
-if ! flutter pub get 2>&1; then
-  echo "      [retry] flutter pub get failed — trying dart pub get with --root-certs-file"
-  if [ -n "$SSL_CERT_FILE" ]; then
-    dart --root-certs-file="$SSL_CERT_FILE" pub get
-  else
-    echo "      ERROR: No cert bundle available for dart fallback"
-    exit 1
-  fi
-fi
+flutter pub get
 flutter build web --release --base-href="/"
 echo "      Flutter Web built successfully."
 
