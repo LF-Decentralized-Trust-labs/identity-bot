@@ -338,7 +338,7 @@ func (m *Manager) LaunchApp(ctx context.Context, id string) (*Instance, error) {
         binaryProxyURL := fmt.Sprintf("http://127.0.0.1:%d", proxyPort)
 
         if manifest.IsContainer() {
-                rt, err = NewContainerRuntime(manifest, instance, m.store, containerProxyURL, proxyPort)
+                rt, err = NewContainerRuntime(manifest, instance, m.store, containerProxyURL, proxyPort, m.dataDir)
         } else {
                 rt, err = NewBinaryRuntime(manifest, instance, m.store, binaryProxyURL, proxyPort)
         }

@@ -6,7 +6,9 @@ import (
         "encoding/json"
         "fmt"
         "log"
+        "os"
         "os/exec"
+        "path/filepath"
         "strings"
         "time"
 )
@@ -16,12 +18,13 @@ type ContainerRuntime struct {
         instance    *Instance
         store       *SandboxStore
         netCfg      *NetworkConfig
+        dataDir     string
         containerID string
         networkID   string
         startedAt   time.Time
 }
 
-func NewContainerRuntime(manifest *AppManifest, instance *Instance, store *SandboxStore, proxyURL string, proxyPort int) (*ContainerRuntime, error) {
+func NewContainerRuntime(manifest *AppManifest, instance *Instance, store *SandboxStore, proxyURL string, proxyPort int, dataDir string) (*ContainerRuntime, error) {
         displayPort, err := findAvailablePort()
         if err != nil {
                 return nil, fmt.Errorf("failed to find display port: %w", err)
@@ -61,6 +64,7 @@ func NewContainerRuntime(manifest *AppManifest, instance *Instance, store *Sandb
                 instance: instance,
                 store:    store,
                 netCfg:   netCfg,
+                dataDir:  dataDir,
         }, nil
 }
 
@@ -451,7 +455,8 @@ func (d *ContainerRuntime) createContainer(ctx context.Context) error {
 
         if d.manifest.Container != nil {
                 for hostPath, containerPath := range d.manifest.Container.Volumes {
-                        args = append(args, "-v", fmt.Sprintf("%s:%s", hostPath, containerPath))
+                        resolvedHost := d.expandVolumePath(hostPath)
+                        args = append(args, "-v", fmt.Sprintf("%s:%s", resolvedHost, containerPath))
                 }
         }
 
@@ -476,6 +481,25 @@ func (d *ContainerRuntime) startContainer(ctx context.Context) error {
 func (d *ContainerRuntime) stopContainer(ctx context.Context) error {
         _, err := runPodmanCmd(ctx, "stop", "-t", "10", d.containerID)
         return err
+}
+
+// expandVolumePath resolves template tokens in manifest volume host paths.
+// Supported tokens:
+//
+//	{DATA_DIR}  → the agent's data directory (AGENT_DATA_DIR env / ./data default)
+//
+// The resolved directory is created if it does not exist, so Podman never
+// fails on a missing mount source.
+func (d *ContainerRuntime) expandVolumePath(hostPath string) string {
+        expanded := strings.ReplaceAll(hostPath, "{DATA_DIR}", d.dataDir)
+        // Ensure the directory exists so Podman doesn't error on a missing source.
+        // Ignore the error — if it fails, Podman will surface a clearer message.
+        if !strings.Contains(expanded, ".") { // rough heuristic: likely a directory, not a file
+                _ = os.MkdirAll(expanded, 0755)
+        } else {
+                _ = os.MkdirAll(filepath.Dir(expanded), 0755)
+        }
+        return expanded
 }
 
 func (d *ContainerRuntime) removeContainer(ctx context.Context) error {

@@ -339,7 +339,7 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
         children: [
           const Icon(Icons.apps, color: AppColors.accent, size: 24),
           const SizedBox(width: 10),
-          const Text('MARKETPLACE', style: TextStyle(
+          const Text('SANDBOX APPS', style: TextStyle(
             color: AppColors.textPrimary, fontSize: 18,
             fontWeight: FontWeight.bold, fontFamily: 'monospace', letterSpacing: 2,
           )),
@@ -837,7 +837,7 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
       title = 'Podman needs to be started';
       subtitle = 'Podman is installed but not running yet.\nTap below to start it automatically.';
     } else {
-      title = 'Marketplace Setup';
+      title = 'Sandbox Apps Setup';
       subtitle = 'Sandboxed apps need Podman — a free, open-source tool — to run securely.\nWould you like to set it up now?';
     }
 
@@ -938,7 +938,7 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
         ),
         const SizedBox(height: 10),
         const Text(
-          'Loading marketplace...',
+          'Loading apps...',
           style: TextStyle(color: AppColors.textSecondary, fontSize: 12, fontFamily: 'monospace'),
         ),
       ],

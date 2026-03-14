@@ -29,6 +29,7 @@ import (
 
 type CoreServer struct {
         DataStore       store.Store
+        AIMemory        *store.AIMemoryStore
         KeriDriver      *drivers.KeriDriver
         TunnelManager   *tunnel.Manager
         EndpointService *endpoint.EndpointService
@@ -79,19 +80,27 @@ func DefaultConfig() Config {
 func New(cfg Config) (*CoreServer, error) {
         ctx, cancel := context.WithCancel(context.Background())
 
-        dataStore, err := store.NewFileStore(cfg.DataDir)
+        dataStore, err := store.NewSQLiteStore(cfg.DataDir)
         if err != nil {
                 cancel()
                 return nil, fmt.Errorf("failed to initialize store: %w", err)
         }
 
-        endpointSvc := endpoint.New(cfg.DataDir, cfg.Port)
+        aiMemory, err := store.NewAIMemoryStore(cfg.DataDir)
+        if err != nil {
+                cancel()
+                dataStore.Close()
+                return nil, fmt.Errorf("failed to initialize AI memory store: %w", err)
+        }
+
+        endpointSvc := endpoint.New(dataStore, cfg.Port)
 
         eventHub := NewEventHub()
         go eventHub.Run()
 
         s := &CoreServer{
                 DataStore:       dataStore,
+                AIMemory:        aiMemory,
                 EndpointService: endpointSvc,
                 EventHub:        eventHub,
                 StartTime:       time.Now(),
@@ -299,13 +308,18 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
                 r.Post("/reset", s.handleReset)
 
                 s.sandboxRoutes(r)
+                s.aiMemoryRoutes(r)
                 r.Get("/ws/events", s.handleWebSocketEvents)
         })
 
         s.traceRoutes(r)
         s.llmRoutes(r)
 
-        r.Get("/oobi/{aid}", s.handleOobiServe)
+        // Display reverse proxy: intercepts container API calls to serve from ai-memory.db
+        r.HandleFunc("/apps/{app_id}/*", s.handleAppDisplayProxy)
+
+        // /public/oobi/{aid} — public namespace: KERI OOBI endpoint shared with external agents.
+        r.Get("/public/oobi/{aid}", s.handleOobiServe)
 
         absWebDir, err := filepath.Abs(flutterWebDir)
         if err != nil {
@@ -938,7 +952,7 @@ func (s *CoreServer) handleOobiGenerate(w http.ResponseWriter, r *http.Request) 
         }
 
         baseURL := s.getPublicURL(r)
-        oobiURL := fmt.Sprintf("%s/oobi/%s", baseURL, identity.AID)
+        oobiURL := fmt.Sprintf("%s/public/oobi/%s", baseURL, identity.AID)
 
         tunnelActive := false
         tunnelProvider := ""
@@ -1243,17 +1257,14 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
                         return
                 }
 
-                ourOOBI := fmt.Sprintf("%s/oobi/%s", publicURL, ourIdentity.AID)
+                ourOOBI := fmt.Sprintf("%s/public/oobi/%s", publicURL, ourIdentity.AID)
                 ourAlias := ourIdentity.AID[:12] + "..."
                 ourProfile, _ := s.DataStore.GetProfile()
                 if ourProfile != nil && ourProfile.FullName != "" {
                         ourAlias = ourProfile.FullName
                 }
 
-                remoteBase := req.OobiURL
-                if idx := strings.Index(remoteBase, "/oobi/"); idx != -1 {
-                        remoteBase = remoteBase[:idx]
-                }
+                remoteBase := oobiBase(req.OobiURL)
                 exchangeURL := remoteBase + "/api/exchange"
 
                 log.Printf("[identity-agent-core] EXCHANGE: Preparing reverse introduction to %s", exchangeURL)
@@ -1565,10 +1576,7 @@ func (s *CoreServer) handleAcceptContact(w http.ResponseWriter, r *http.Request)
                         return
                 }
 
-                remoteBase := contact.OobiURL
-                if idx := strings.Index(remoteBase, "/oobi/"); idx != -1 {
-                        remoteBase = remoteBase[:idx]
-                }
+                remoteBase := oobiBase(contact.OobiURL)
                 exchangeURL := remoteBase + "/api/exchange"
 
                 log.Printf("[identity-agent-core] EXCHANGE: Sending acceptance confirmation to %s", exchangeURL)
@@ -2008,6 +2016,15 @@ func (s *CoreServer) handleReleaseTunnelName(w http.ResponseWriter, r *http.Requ
                 "endpoint_url":   s.EndpointService.CurrentURL(),
                 "endpoint_source": s.EndpointService.Source(),
         })
+}
+
+// oobiBase extracts the scheme+host+port base URL from an OOBI URL so the
+// caller can append /api/exchange. OOBI URLs follow the /public/oobi/{aid} pattern.
+func oobiBase(oobiURL string) string {
+        if idx := strings.Index(oobiURL, "/public/oobi/"); idx != -1 {
+                return oobiURL[:idx]
+        }
+        return oobiURL
 }
 
 func writeError(w http.ResponseWriter, status int, errMsg string, details string) {

@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "Go Backend",
+      "runtimeExecutable": "go",
+      "runtimeArgs": ["run", "."],
+      "port": 5000
+    },
+    {
+      "name": "Flutter UI (Chrome)",
+      "runtimeExecutable": "flutter",
+      "runtimeArgs": ["run", "-d", "chrome"],
+      "port": 8080
+    }
+  ]
+}

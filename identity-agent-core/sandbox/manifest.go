@@ -26,6 +26,7 @@ type AppManifest struct {
         Signature      *string           `json:"signature"`
         PublisherKey   *string           `json:"publisher_key"`
         SignatureAlgorithm *string       `json:"signature_algorithm"`
+        APISchema          *string       `json:"api_schema,omitempty"`
 }
 
 type ContainerConfig struct {

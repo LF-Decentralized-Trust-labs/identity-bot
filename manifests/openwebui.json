@@ -13,7 +13,7 @@
       "8080": "display"
     },
     "environment": {
-      "OPENAI_API_BASE_URL": "http://agent.internal:5000/llm/v1",
+      "OPENAI_API_BASE_URL": "http://agent.internal:5000/sandbox/llm/v1",
       "OPENAI_API_KEY": "injected-by-agent",
       "WEBUI_AUTH": "false",
       "OLLAMA_BASE_URL": "",
@@ -42,5 +42,6 @@
   "log_level": "metadata",
   "signature": null,
   "publisher_key": null,
-  "signature_algorithm": null
+  "signature_algorithm": null,
+  "api_schema": "schemas/openwebui-api.json"
 }
