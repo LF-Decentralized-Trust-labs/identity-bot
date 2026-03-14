@@ -109,7 +109,7 @@ class MobileTheme {
           fontWeight: FontWeight.w600,
         ),
       ),
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         color: MobileColors.surface,
         elevation: 2,
         shadowColor: MobileColors.cardShadow,
