@@ -38,6 +38,7 @@ type ContactRecord struct {
         Status       string `json:"status"`
         Role         string `json:"role"`
         JCard        *JCard `json:"jcard,omitempty"`
+        Photo        string `json:"photo,omitempty"`
 }
 
 type JCard struct {

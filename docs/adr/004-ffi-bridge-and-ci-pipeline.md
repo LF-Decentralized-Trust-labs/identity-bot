@@ -176,3 +176,7 @@ The `codemagic.yaml` defines build workflows for all platforms:
 - **Local codegen:** Once Rust toolchain in Replit is updated (≥1.80), FRB codegen can run locally during development
 - **Testing:** Add integration tests that exercise the Rust bridge on a real Android device or emulator
 - **Migration flow:** Complete the "Migrate to External Server" flow for Mobile Remote Controller WITH Keys mode
+
+## Updates
+
+- **2026-03-07:** All `flutter build` commands in `codemagic.yaml` now pass `--build-number` with Codemagic's auto-incrementing build counter (`$BUILD_NUMBER` on Bash, `$env:BUILD_NUMBER` on Windows PowerShell) to ensure Android APKs can be installed over previous versions without uninstalling. See [ADR-011](011-build-versioning-strategy.md) for the full versioning strategy.
