@@ -213,6 +213,45 @@ Signed-off-by: Rob Andersen rob@antispamguy.org
 
 Global git config is set to `user.name = "Rob Andersen"` and `user.email = "rob@antispamguy.org"`.
 
+## Flutter Web Compatibility: Conditional Imports
+
+The Flutter UI compiles to **web** (served by the Go backend) and also runs as **native desktop** and **mobile** apps. Several packages use native APIs that don't exist on web. To prevent dart2js compilation failures and runtime crashes, the codebase uses Dart conditional imports.
+
+### The Rule
+
+**Any Dart file that imports a native-only package (`dart:io`, `flutter_rust_bridge`, `flutter_inappwebview`, etc.) must NEVER be directly imported from code that compiles on web.** Instead, use the conditional import pattern:
+
+```dart
+// router file (e.g., sandbox_webview.dart)
+export 'sandbox_webview_stub.dart'
+    if (dart.library.io) 'sandbox_webview_native.dart';
+```
+
+Three files per component:
+1. **Router** (`foo.dart`) — conditional `export`, no logic
+2. **Native** (`foo_native.dart`) — real implementation with native imports
+3. **Stub** (`foo_stub.dart`) — web-safe fallback (no native imports)
+
+Both native and stub must export the **same public API** (same class names, same enums).
+
+### Current Conditional Imports
+
+| Component | Router | Native | Stub | Reason |
+|---|---|---|---|---|
+| KERI Bridge | `keri_bridge.dart` (conditional import in `main.dart`) | `bridge/keri_bridge.dart` | `bridge/keri_bridge_stub.dart` | `flutter_rust_bridge` FFI crashes on web |
+| Sandbox WebView | `widgets/sandbox_webview.dart` | `widgets/sandbox_webview_native.dart` | `widgets/sandbox_webview_stub.dart` | `flutter_inappwebview` native types don't exist on web |
+
+### Adding New Native-Only Packages
+
+When adding a Flutter package that uses native platform APIs:
+
+1. **Check if it has a web plugin.** Look at `flutter pub get` output or the package's `pubspec.yaml` for web platform support. If it auto-registers a web plugin that crashes, you must exclude it.
+2. **Use platform-specific packages** instead of meta-packages when available (e.g., `flutter_inappwebview_macos` + `flutter_inappwebview_windows` instead of `flutter_inappwebview`). This prevents unwanted web plugin registration.
+3. **Apply the conditional import pattern** if the file using the package references native-only types. The web compiler (dart2js) must never see those types.
+4. **Test with `flutter build web`** — this is the build that catches missing conditional imports.
+
+See ADR-013 for the full rationale and history.
+
 ## Design Conventions
 
 - Dark cyberpunk aesthetic: `AppTheme.darkTheme`, `AppColors.*` from `lib/theme/app_theme.dart`
