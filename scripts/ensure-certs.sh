@@ -2,21 +2,25 @@
 # Detect and export the TLS CA certificate bundle for Dart/Flutter pub.dev access.
 # Nix environments store certs in the Nix store, not at standard Linux paths.
 # The Dart VM's BoringSSL needs SSL_CERT_FILE to find them.
+#
+# IMPORTANT: DART_VM_OPTIONS="--root-certs-file=..." only applies to the
+# top-level Dart VM. `flutter pub get` spawns a SEPARATE dart subprocess
+# that does NOT inherit VM flags. So we also symlink the cert bundle to
+# /etc/ssl/certs/ca-certificates.crt (the path Dart's BoringSSL checks
+# on Linux) as the most reliable fix for Nix environments.
 
 echo "      [cert] Detecting CA bundle..."
 
-if [ -n "$SSL_CERT_FILE" ] && [ -f "$SSL_CERT_FILE" ]; then
-  echo "      [cert] SSL_CERT_FILE already valid: $SSL_CERT_FILE"
-  # Still set DART_VM_OPTIONS — Nix-built Dart may ignore SSL_CERT_FILE
-  export DART_VM_OPTIONS="--root-certs-file=$SSL_CERT_FILE"
-  echo "      [cert] DART_VM_OPTIONS set: $DART_VM_OPTIONS"
-  return 0 2>/dev/null || true
-fi
-
 CERT=""
 
+# Check if SSL_CERT_FILE is already valid
+if [ -n "$SSL_CERT_FILE" ] && [ -f "$SSL_CERT_FILE" ]; then
+  CERT="$SSL_CERT_FILE"
+  echo "      [cert] SSL_CERT_FILE already valid: $CERT"
+fi
+
 # 1. Nix-provided cert bundle (preferred in Replit/Nix environments)
-if [ -n "$NIX_SSL_CERT_FILE" ] && [ -f "$NIX_SSL_CERT_FILE" ]; then
+if [ -z "$CERT" ] && [ -n "$NIX_SSL_CERT_FILE" ] && [ -f "$NIX_SSL_CERT_FILE" ]; then
   CERT="$NIX_SSL_CERT_FILE"
   echo "      [cert] Found via NIX_SSL_CERT_FILE"
 fi
@@ -48,12 +52,25 @@ fi
 if [ -n "$CERT" ]; then
   export SSL_CERT_FILE="$CERT"
   export GIT_SSL_CAINFO="$CERT"
-  # Nix-built Dart/Flutter may ignore SSL_CERT_FILE because BoringSSL is
-  # statically linked with hardcoded cert paths that don't exist in Nix.
-  # --root-certs-file is a Dart VM flag that overrides the compiled-in paths.
-  export DART_VM_OPTIONS="--root-certs-file=$CERT"
+
+  # Place the cert where Dart's BoringSSL looks on Linux.
+  # This is the only reliable way to fix TLS in Nix-built Dart because:
+  # - SSL_CERT_FILE is ignored by the statically-linked BoringSSL
+  # - DART_VM_OPTIONS only affects the top-level process, not subprocesses
+  # - flutter pub get spawns dart pub as a separate process
+  STANDARD_CERT="/etc/ssl/certs/ca-certificates.crt"
+  if [ ! -f "$STANDARD_CERT" ]; then
+    mkdir -p /etc/ssl/certs 2>/dev/null
+    if ln -sf "$CERT" "$STANDARD_CERT" 2>/dev/null; then
+      echo "      [cert] Symlinked to $STANDARD_CERT"
+    elif cp "$CERT" "$STANDARD_CERT" 2>/dev/null; then
+      echo "      [cert] Copied to $STANDARD_CERT"
+    else
+      echo "      [cert] WARNING: Cannot write to $STANDARD_CERT (no permissions)"
+    fi
+  fi
+
   echo "      [cert] Using: $CERT"
-  echo "      [cert] DART_VM_OPTIONS set: $DART_VM_OPTIONS"
 else
   echo "      [cert] WARNING: No CA certificate bundle found"
   echo "      [cert] Attempting pub.dev without explicit cert (may fail)"
