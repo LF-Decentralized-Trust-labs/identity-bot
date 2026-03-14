@@ -12,8 +12,8 @@ echo "      Workspace: $WORKSPACE"
 echo ""
 echo "[1/3] Building Flutter Web..."
 cd "$WORKSPACE/identity_agent_ui"
-# Ensure TLS certs are available for pub.dev (critical in Nix/Replit environments)
-. "$SCRIPT_DIR/ensure-certs.sh"
+# If Nix Flutter has broken TLS, fall back to official Flutter SDK from Google
+. "$SCRIPT_DIR/ensure-flutter.sh"
 flutter pub get
 flutter build web --release --base-href="/"
 echo "      Flutter Web built successfully."
