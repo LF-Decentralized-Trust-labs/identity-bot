@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'dart:io' show Platform;
 import 'theme/app_theme.dart';
 import 'theme/mobile_theme.dart';
@@ -8,6 +9,7 @@ import 'screens/contacts_screen.dart';
 import 'screens/oobi_screen.dart';
 import 'screens/profile_screen.dart';
 import 'screens/settings_screen.dart';
+import 'screens/marketplace_screen.dart';
 import 'screens/setup_wizard_screen.dart';
 import 'screens/mode_selection_screen.dart';
 import 'screens/entity_type_screen.dart';
@@ -29,17 +31,22 @@ import 'screens/mobile/mobile_entity_type_screen.dart';
 import 'screens/mobile/mobile_connect_server_screen.dart';
 import 'screens/mobile/mobile_setup_wizard_screen.dart';
 
+String? _backendStartupError;
+Future<bool>? _backendStartupFuture;
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   if (!kIsWeb && BackendProcessService.isDesktopPlatform) {
-    debugPrint('[Agent] Desktop platform detected — starting bundled backend...');
-    final started = await BackendProcessService.instance.start();
-    debugPrint('[Agent] Backend process started: $started');
-    if (!started) {
-      final err = BackendProcessService.instance.startupError;
-      debugPrint('[Agent] Backend startup error: $err');
-    }
+    debugPrint('[Agent] Desktop platform detected — starting bundled backend in background...');
+    _backendStartupFuture = BackendProcessService.instance.start().then((started) {
+      debugPrint('[Agent] Backend process started: $started');
+      if (!started) {
+        _backendStartupError = BackendProcessService.instance.startupError;
+        debugPrint('[Agent] Backend startup error: $_backendStartupError');
+      }
+      return started;
+    });
   }
 
   runApp(const IdentityAgentApp());
@@ -90,6 +97,7 @@ class _AgentRouterState extends State<AgentRouter> {
   AgentMode? _selectedMode;
   EntityType? _selectedEntityType;
   String? _serverUrl;
+  bool _showedBackendError = false;
 
   @override
   void initState() {
@@ -99,10 +107,25 @@ class _AgentRouterState extends State<AgentRouter> {
 
   Future<void> _loadSavedState() async {
     try {
+      if (_backendStartupFuture != null) {
+        debugPrint('[Agent] Waiting for backend startup before loading state...');
+        await _backendStartupFuture;
+      }
+
       final setupComplete = await PreferencesService.isSetupComplete();
       final savedMode = await PreferencesService.getMode();
       final savedEntityType = await PreferencesService.getEntityType();
       final savedServerUrl = await PreferencesService.getServerUrl();
+
+      if (_backendStartupError != null) {
+        if (mounted) {
+          setState(() {
+            _step = OnboardingStep.modeSelection;
+            _showedBackendError = false;
+          });
+        }
+        return;
+      }
 
       if (setupComplete && savedMode != null) {
         _selectedMode = savedMode;
@@ -284,6 +307,175 @@ class _AgentRouterState extends State<AgentRouter> {
     super.dispose();
   }
 
+  void _showBackendErrorDialog(BuildContext context, String error) {
+    final conflict = BackendProcessService.instance.portConflict;
+    final isPortConflict = conflict != null;
+
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          bool _copied = false;
+
+          void _copyLog() async {
+            await Clipboard.setData(ClipboardData(text: error));
+            setDialogState(() => _copied = true);
+            await Future.delayed(const Duration(seconds: 2));
+            setDialogState(() => _copied = false);
+          }
+
+          return AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+          side: BorderSide(
+            color: isPortConflict ? const Color(0xFFFF8800) : const Color(0xFFFF4444),
+            width: 1,
+          ),
+        ),
+        title: Row(
+          children: [
+            Icon(
+              isPortConflict ? Icons.swap_horiz_rounded : Icons.warning_amber_rounded,
+              color: isPortConflict ? const Color(0xFFFF8800) : const Color(0xFFFF4444),
+              size: 24,
+            ),
+            const SizedBox(width: 8),
+            Text(
+              isPortConflict ? 'PORT CONFLICT' : 'BACKEND ERROR',
+              style: TextStyle(
+                color: isPortConflict ? const Color(0xFFFF8800) : const Color(0xFFFF4444),
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                fontFamily: 'monospace',
+                letterSpacing: 1.2,
+              ),
+            ),
+          ],
+        ),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: 400, maxWidth: 500),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  error,
+                  style: const TextStyle(
+                    color: Color(0xFFB0B0B0),
+                    fontSize: 12,
+                    fontFamily: 'monospace',
+                    height: 1.4,
+                  ),
+                ),
+                if (!isPortConflict) ...[
+                  const SizedBox(height: 16),
+                  const Text(
+                    'The Identity Agent backend could not be started. '
+                    'Identity creation and other core operations will not work until this is resolved.',
+                    style: TextStyle(
+                      color: Color(0xFF808080),
+                      fontSize: 11,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'A diagnostic log has been saved alongside the application.',
+                    style: TextStyle(
+                      color: Color(0xFF606060),
+                      fontSize: 10,
+                      fontFamily: 'monospace',
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          if (!isPortConflict)
+            TextButton(
+              onPressed: _copyLog,
+              child: Text(
+                _copied ? 'COPIED!' : 'COPY LOG',
+                style: TextStyle(
+                  color: _copied ? const Color(0xFF00FF88) : const Color(0xFF4488FF),
+                  fontFamily: 'monospace',
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          if (isPortConflict)
+            TextButton(
+              onPressed: () async {
+                Navigator.of(ctx).pop();
+                final killed = await BackendProcessService.instance.killProcessOnPort(conflict);
+                if (killed) {
+                  final started = await BackendProcessService.instance.start();
+                  if (started) {
+                    _backendStartupError = null;
+                  } else {
+                    _backendStartupError = BackendProcessService.instance.startupError;
+                    _showedBackendError = false;
+                  }
+                } else {
+                  _backendStartupError = 'Failed to close "${conflict.processName}". '
+                      'Please close it manually and try again.';
+                  _showedBackendError = false;
+                }
+                setState(() {});
+              },
+              child: const Text(
+                'CLOSE IT AND RETRY',
+                style: TextStyle(
+                  color: Color(0xFFFF8800),
+                  fontFamily: 'monospace',
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          TextButton(
+            onPressed: () async {
+              Navigator.of(ctx).pop();
+              final started = await BackendProcessService.instance.start();
+              if (started) {
+                _backendStartupError = null;
+              } else {
+                _backendStartupError = BackendProcessService.instance.startupError;
+                _showedBackendError = false;
+                setState(() {});
+              }
+            },
+            child: const Text(
+              'RETRY',
+              style: TextStyle(
+                color: Color(0xFF00FF88),
+                fontFamily: 'monospace',
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text(
+              'DISMISS',
+              style: TextStyle(
+                color: Color(0xFF808080),
+                fontFamily: 'monospace',
+              ),
+            ),
+          ),
+        ],
+          );
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isMobilePlatform) {
@@ -361,6 +553,12 @@ class _AgentRouterState extends State<AgentRouter> {
         );
 
       case OnboardingStep.modeSelection:
+        if (_backendStartupError != null && !_showedBackendError) {
+          _showedBackendError = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _showBackendErrorDialog(context, _backendStartupError!);
+          });
+        }
         if (isMobile) {
           return MobileModeSelectionScreen(onModeSelected: _onModeSelected);
         }
@@ -443,10 +641,12 @@ class _AgentMainScreenState extends State<AgentMainScreen> {
   final ValueNotifier<int> _oobiRefreshNotifier = ValueNotifier<int>(0);
 
   late final List<Widget> _screens;
+  late final bool _isDesktop;
 
   @override
   void initState() {
     super.initState();
+    _isDesktop = !kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux);
     _screens = [
       ProfileScreen(keriService: widget.keriService, serverUrl: widget.serverUrl),
       DashboardScreen(keriService: widget.keriService, serverUrl: widget.serverUrl),
@@ -458,6 +658,7 @@ class _AgentMainScreenState extends State<AgentMainScreen> {
         entityType: widget.entityType,
         serverUrl: widget.serverUrl,
       ),
+      MarketplaceScreen(serverUrl: widget.serverUrl),
     ];
   }
 
@@ -526,31 +727,36 @@ class _AgentMainScreenState extends State<AgentMainScreen> {
             fontFamily: 'monospace',
           ),
           type: BottomNavigationBarType.fixed,
-          items: const [
-            BottomNavigationBarItem(
+          items: [
+            const BottomNavigationBarItem(
               icon: Icon(Icons.person_outline),
               activeIcon: Icon(Icons.person),
               label: 'PROFILE',
             ),
-            BottomNavigationBarItem(
+            const BottomNavigationBarItem(
               icon: Icon(Icons.shield_outlined),
               activeIcon: Icon(Icons.shield),
               label: 'DASHBOARD',
             ),
-            BottomNavigationBarItem(
+            const BottomNavigationBarItem(
               icon: Icon(Icons.people_outlined),
               activeIcon: Icon(Icons.people),
               label: 'CONTACTS',
             ),
-            BottomNavigationBarItem(
+            const BottomNavigationBarItem(
               icon: Icon(Icons.qr_code),
               activeIcon: Icon(Icons.qr_code),
               label: 'OOBI',
             ),
-            BottomNavigationBarItem(
+            const BottomNavigationBarItem(
               icon: Icon(Icons.settings_outlined),
               activeIcon: Icon(Icons.settings),
               label: 'SETTINGS',
+            ),
+            const BottomNavigationBarItem(
+              icon: Icon(Icons.apps_outlined),
+              activeIcon: Icon(Icons.apps),
+              label: 'APPS',
             ),
           ],
         ),

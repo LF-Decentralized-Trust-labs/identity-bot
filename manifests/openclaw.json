@@ -1,0 +1,47 @@
+{
+  "id": "openclaw",
+  "name": "OpenClaw",
+  "description": "Personal AI assistant (formerly MoltBot/ClawdBot). Playwright + Chromium automation with intelligent agent capabilities. Demonstrates containerized web app sandboxing with full network interception and proxy-mediated egress.",
+  "version": "1.0.0",
+  "author": "OpenClaw",
+  "execution_type": "container",
+  "display_method": "webview",
+  "network_mode": "proxy_required",
+  "container": {
+    "image": "alpine/openclaw:latest",
+    "ports": {
+      "18789": "display"
+    },
+    "display_path": "/__openclaw__/canvas/",
+    "environment": {
+      "HOST": "0.0.0.0",
+      "OPENCLAW_HOST": "0.0.0.0"
+    },
+    "volumes": {}
+  },
+  "resources": {
+    "cpu_cores": 1,
+    "memory_mb": 512,
+    "disk_mb": 1024,
+    "egress_kbps": 5120,
+    "ingress_kbps": 5120
+  },
+  "network": {
+    "tls_mode": "mitm",
+    "allowed_domains": [
+      "agent.internal",
+      "*.npmjs.org",
+      "*.npmjs.com",
+      "registry.npmjs.org"
+    ],
+    "blocked_domains": []
+  },
+  "capabilities": {
+    "allowed": ["network"],
+    "blocked": ["camera", "microphone", "filesystem"]
+  },
+  "log_level": "metadata",
+  "signature": null,
+  "publisher_key": null,
+  "signature_algorithm": null
+}

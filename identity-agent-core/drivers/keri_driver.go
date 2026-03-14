@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"time"
 )
 
@@ -157,10 +159,34 @@ func (d *KeriDriver) Start() error {
 	}
 
 	cmd := exec.Command(pythonBin, scriptPath)
-	cmd.Env = append(os.Environ(),
+
+	env := append(os.Environ(),
 		fmt.Sprintf("KERI_DRIVER_PORT=%s", port),
 		"KERI_DRIVER_HOST=127.0.0.1",
 	)
+
+	// On Windows, pysodium uses ctypes.util.find_library which searches PATH.
+	// Prepend the keri-driver directory so libsodium.dll is found at startup.
+	if runtime.GOOS == "windows" {
+		driverDir := filepath.Dir(scriptPath)
+		if abs, err := filepath.Abs(driverDir); err == nil {
+			driverDir = abs
+		}
+		pathKey := "PATH"
+		for i, e := range env {
+			if len(e) >= 5 && e[:5] == "PATH=" {
+				env[i] = pathKey + "=" + driverDir + ";" + e[5:]
+				pathKey = ""
+				break
+			}
+		}
+		if pathKey != "" {
+			env = append(env, "PATH="+driverDir)
+		}
+		log.Printf("[keri-driver] Prepended keri-driver dir to PATH for libsodium: %s", driverDir)
+	}
+
+	cmd.Env = env
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 

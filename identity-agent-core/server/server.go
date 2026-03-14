@@ -18,6 +18,7 @@ import (
 
         "identity-agent-core/drivers"
         "identity-agent-core/endpoint"
+        "identity-agent-core/sandbox"
         "identity-agent-core/store"
         "identity-agent-core/tunnel"
 
@@ -31,6 +32,7 @@ type CoreServer struct {
         KeriDriver      *drivers.KeriDriver
         TunnelManager   *tunnel.Manager
         EndpointService *endpoint.EndpointService
+        SandboxManager  *sandbox.Manager
         EventHub        *EventHub
         StartTime       time.Time
         Port            int
@@ -105,6 +107,20 @@ func New(cfg Config) (*CoreServer, error) {
                         cancel()
                         dataStore.Close()
                         return nil, fmt.Errorf("failed to start KERI driver: %w", err)
+                }
+        }
+
+        manifestsDir := filepath.Join(".", "manifests")
+        sbxMgr, err := sandbox.NewManager(sandbox.ManagerConfig{
+                DataDir:      cfg.DataDir,
+                ManifestsDir: manifestsDir,
+        })
+        if err != nil {
+                log.Printf("[identity-agent-core] Sandbox manager init failed (non-fatal): %v", err)
+        } else {
+                s.SandboxManager = sbxMgr
+                if startErr := s.SandboxManager.Start(); startErr != nil {
+                        log.Printf("[identity-agent-core] Sandbox manager start failed (non-fatal): %v", startErr)
                 }
         }
 
@@ -186,6 +202,10 @@ func (s *CoreServer) Stop() {
         }
 
         log.Println("[identity-agent-core] Shutting down...")
+
+        if s.SandboxManager != nil {
+                s.SandboxManager.Stop()
+        }
 
         if s.TunnelManager != nil {
                 s.TunnelManager.Disconnect()
@@ -278,8 +298,12 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
                 r.Delete("/pending-requests/{aid}", s.handleDeletePendingRequest)
                 r.Post("/reset", s.handleReset)
 
+                s.sandboxRoutes(r)
                 r.Get("/ws/events", s.handleWebSocketEvents)
         })
+
+        s.traceRoutes(r)
+        s.llmRoutes(r)
 
         r.Get("/oobi/{aid}", s.handleOobiServe)
 

@@ -39,6 +39,25 @@ import shutil
 def _ensure_libsodium():
     if ctypes.util.find_library("sodium"):
         return
+
+    if sys.platform == "win32":
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        search_dirs = [
+            script_dir,
+            os.path.join(script_dir, "..", "python"),
+            os.path.join(script_dir, ".."),
+        ]
+        for d in search_dirs:
+            dll_path = os.path.join(d, "libsodium.dll")
+            if os.path.isfile(dll_path):
+                try:
+                    ctypes.CDLL(dll_path)
+                    os.environ["PATH"] = d + ";" + os.environ.get("PATH", "")
+                    return
+                except OSError:
+                    continue
+        return
+
     found_path = None
     for so_name in ["libsodium.so.26", "libsodium.so.23", "libsodium.so"]:
         try:
@@ -59,6 +78,45 @@ def _ensure_libsodium():
         )
 
 _ensure_libsodium()
+
+# ---------------------------------------------------------------------------
+# Windows: patch SysLogHandler before keri / hio import
+#
+# keripy → hio → ogling sets up a SysLogHandler(address="/dev/log") which
+# tries socket.socket(socket.AF_UNIX, ...).  On Windows Store Python,
+# socket.AF_UNIX is absent → AttributeError on import.
+#
+# Fix: (1) stub socket.AF_UNIX so attribute lookups pass; (2) patch only the
+# socket-creation methods on SysLogHandler while keeping all the class-level
+# LOG_* constants intact (hio's Ogler accesses e.g. SysLogHandler.LOG_LOCAL0).
+# ---------------------------------------------------------------------------
+
+if sys.platform == "win32":
+    import socket as _socket
+    import logging as _logging
+    import logging.handlers as _lh
+
+    if not hasattr(_socket, "AF_UNIX"):
+        _socket.AF_UNIX = 1  # dummy value; prevents AttributeError on attribute access
+
+    _orig_syslog_init = _lh.SysLogHandler.__init__
+
+    def _win_syslog_init(self, address=("localhost", _lh.SYSLOG_UDP_PORT),
+                         facility=_lh.SysLogHandler.LOG_USER, socktype=None):
+        """No-socket init: sets up all attributes but never creates a socket."""
+        _logging.Handler.__init__(self)
+        self.address = address
+        self.facility = facility
+        self.socktype = socktype
+        self.unixsocket = False
+        self.socket = None
+        self.ident = ""
+        self.append_nul = True
+
+    _lh.SysLogHandler.__init__ = _win_syslog_init
+    _lh.SysLogHandler.createSocket = lambda self: None
+    _lh.SysLogHandler.emit = lambda self, record: None
+    _lh.SysLogHandler.close = lambda self: _logging.Handler.close(self)
 
 # ---------------------------------------------------------------------------
 # keripy — hard requirement (no fallback)

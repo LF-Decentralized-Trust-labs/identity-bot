@@ -1,0 +1,35 @@
+{
+  "id": "go-demo",
+  "name": "Go Demo App",
+  "description": "Purpose-built Go binary demonstrating agent API resource request channel. Requests resources, sends messages, and waits for agent responses.",
+  "version": "1.0.0",
+  "author": "Identity Agent",
+  "execution_type": "compiled",
+  "display_method": "webview",
+  "network_mode": "proxy_required",
+  "binary": {
+    "path": "bin/go-demo",
+    "args": [],
+    "environment": {}
+  },
+  "resources": {
+    "cpu_cores": 0.5,
+    "memory_mb": 256,
+    "disk_mb": 128,
+    "egress_kbps": 1024,
+    "ingress_kbps": 1024
+  },
+  "network": {
+    "tls_mode": "sni_only",
+    "allowed_domains": ["agent.internal"],
+    "blocked_domains": []
+  },
+  "capabilities": {
+    "allowed": ["network"],
+    "blocked": ["camera", "microphone", "filesystem"]
+  },
+  "log_level": "full",
+  "signature": null,
+  "publisher_key": null,
+  "signature_algorithm": null
+}

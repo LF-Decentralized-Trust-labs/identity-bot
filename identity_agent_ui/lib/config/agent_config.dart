@@ -20,7 +20,7 @@ class AgentConfig {
       return 'http://127.0.0.1:$mobilePort';
     }
 
-    return 'http://localhost:$desktopPort';
+    return 'http://127.0.0.1:$desktopPort';
   }
 
   static const int healthPollIntervalSeconds = 15;

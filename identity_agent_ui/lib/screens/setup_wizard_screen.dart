@@ -245,9 +245,9 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
             errorMsg = backendError;
           } else {
             errorMsg =
-                'Cannot connect to the identity backend (localhost:5000). '
+                'Cannot connect to the identity backend (127.0.0.1:5000). '
                 'The backend service may not be running. '
-                'Please ensure Python 3 is installed and try restarting the app.';
+                'Please ensure Python 3.10+ is installed and try restarting the app.';
           }
         } else {
           errorMsg =
