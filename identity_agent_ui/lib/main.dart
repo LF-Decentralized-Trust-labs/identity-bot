@@ -24,7 +24,8 @@ import 'services/mobile_core_service.dart';
 import 'services/preferences_service.dart';
 import 'services/backend_process_service.dart';
 import 'config/agent_config.dart';
-import 'bridge/keri_bridge.dart';
+import 'bridge/keri_bridge_stub.dart'
+    if (dart.library.io) 'bridge/keri_bridge.dart';
 import 'screens/mobile/mobile_app.dart';
 import 'screens/mobile/mobile_mode_selection_screen.dart';
 import 'screens/mobile/mobile_entity_type_screen.dart';

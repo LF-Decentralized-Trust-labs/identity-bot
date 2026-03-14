@@ -1,5 +1,6 @@
 import 'keri_service.dart';
-import '../bridge/keri_bridge.dart';
+import '../bridge/keri_bridge_stub.dart'
+    if (dart.library.io) '../bridge/keri_bridge.dart';
 
 class MobileRemoteKeriService extends KeriService {
   final KeriBridge _bridge;
