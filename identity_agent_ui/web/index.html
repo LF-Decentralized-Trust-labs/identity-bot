@@ -56,8 +56,16 @@
       var el = document.getElementById('flutter-error');
       var msg = document.getElementById('flutter-error-msg');
       if (el && msg) {
+        var detail = 'Unknown rejection';
+        try {
+          var r = e.reason;
+          if (r && r.stack) detail = r.stack;
+          else if (r && r.message) detail = r.message;
+          else if (typeof r === 'string') detail = r;
+          else detail = JSON.stringify(r, null, 2) || String(r) || String(e);
+        } catch(_) { detail = String(e.reason) + ' | ' + String(e); }
         msg.textContent = (msg.textContent ? msg.textContent + '\n\n' : '') +
-          'Unhandled Promise: ' + (e.reason ? (e.reason.message || e.reason) : e);
+          'Unhandled Promise:\n' + detail;
         el.style.display = 'block';
       }
     });
