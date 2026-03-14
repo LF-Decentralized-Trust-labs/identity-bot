@@ -33,6 +33,35 @@
   <link rel="manifest" href="manifest.json">
 </head>
 <body>
+  <!-- Catch Flutter web initialization errors and display them instead of white screen -->
+  <div id="flutter-error" style="display:none;background:#0A1628;color:#FF4444;font-family:monospace;
+    padding:40px;height:100vh;box-sizing:border-box;overflow:auto;">
+    <h2 style="color:#FF6666;margin-top:0;">⚠ Flutter Web Error</h2>
+    <pre id="flutter-error-msg" style="color:#FF8888;white-space:pre-wrap;font-size:13px;"></pre>
+    <p style="color:#8B9DC3;margin-top:20px;font-size:12px;">
+      Open browser DevTools (F12 → Console) for full details.
+    </p>
+  </div>
+  <script>
+    window.addEventListener('error', function(e) {
+      var el = document.getElementById('flutter-error');
+      var msg = document.getElementById('flutter-error-msg');
+      if (el && msg) {
+        msg.textContent = (msg.textContent ? msg.textContent + '\n\n' : '') +
+          (e.message || e) + (e.filename ? '\n  at ' + e.filename + ':' + e.lineno : '');
+        el.style.display = 'block';
+      }
+    });
+    window.addEventListener('unhandledrejection', function(e) {
+      var el = document.getElementById('flutter-error');
+      var msg = document.getElementById('flutter-error-msg');
+      if (el && msg) {
+        msg.textContent = (msg.textContent ? msg.textContent + '\n\n' : '') +
+          'Unhandled Promise: ' + (e.reason ? (e.reason.message || e.reason) : e);
+        el.style.display = 'block';
+      }
+    });
+  </script>
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>
