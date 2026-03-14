@@ -4,7 +4,7 @@ workflows:
     max_build_duration: 120
     instance_type: linux_x2
     environment:
-      flutter: 3.22.0
+      flutter: 3.27.3
       java: 17
     scripts:
       - name: Install Rust toolchain and Android targets
@@ -173,7 +173,7 @@ workflows:
     max_build_duration: 120
     instance_type: mac_mini_m2
     environment:
-      flutter: 3.22.0
+      flutter: 3.27.3
       xcode: latest
       cocoapods: default
       vars:
@@ -400,7 +400,7 @@ workflows:
     max_build_duration: 60
     instance_type: windows_x2
     environment:
-      flutter: 3.22.0
+      flutter: 3.27.3
     scripts:
       - name: Install Go toolchain
         script: |
@@ -496,7 +496,7 @@ workflows:
     max_build_duration: 60
     instance_type: mac_mini_m2
     environment:
-      flutter: 3.22.0
+      flutter: 3.27.3
       xcode: latest
       cocoapods: default
     scripts:
@@ -579,7 +579,7 @@ workflows:
     max_build_duration: 60
     instance_type: linux_x2
     environment:
-      flutter: 3.22.0
+      flutter: 3.27.3
     scripts:
       - name: Install system dependencies
         script: |
