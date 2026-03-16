@@ -917,6 +917,208 @@ def credential_present():
         return jsonify({"error": f"Presentation creation failed: {str(e)}"}), 500
 
 
+@app.route("/credential/verify", methods=["POST"])
+def credential_verify():
+    """Stateless 8-check credential presentation verifier.
+
+    Runs all 8 KERI/ACDC verification checks and returns a detailed result.
+
+    Request JSON:
+        acdc_json_b64        (str)   — base64 of the serialized ACDC credential body
+        issuer_kel           (list)  — list of raw keripy event dicts (KEDs) for issuer
+        pres_said_b64        (str)   — base64 of the bytes the holder signed (pres SAID)
+        pres_cesr_sig        (str)   — CESR '0B...' sig over pres_said_b64 bytes
+        holder_public_key    (str)   — CESR Ed25519 public key of the holder
+        trusted_schema_saids (list)  — optional list of accepted schema SAIDs
+        revocation_list      (list)  — optional list of revoked credential SAIDs
+
+    Returns:
+        verified  (bool)           — true only if all 8 checks pass
+        checks    (dict)           — per-check boolean results
+        errors    (list of str)    — descriptions of failed checks
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Request body required"}), 400
+
+    acdc_json_b64     = data.get("acdc_json_b64", "")
+    issuer_kel        = data.get("issuer_kel", [])
+    pres_said_b64     = data.get("pres_said_b64", "")
+    pres_cesr_sig     = data.get("pres_cesr_sig", "")
+    holder_public_key = data.get("holder_public_key", "")
+    trusted_schemas   = set(data.get("trusted_schema_saids", []))
+    revocation_list   = set(data.get("revocation_list", []))
+
+    checks = {
+        "said_integrity":         False,
+        "issuer_in_kel":          False,
+        "kel_chain_valid":        False,
+        "schema_trusted":         False,
+        "not_revoked":            False,
+        "holder_matches_subject": False,
+        "presentation_sig_valid": False,
+        "credential_anchored":    False,
+    }
+    errors = []
+
+    # -- Decode and parse the ACDC credential ----------------------------------
+    try:
+        acdc_bytes = base64.b64decode(acdc_json_b64)
+        acdc_body  = json.loads(acdc_bytes)
+    except Exception as e:
+        return jsonify({"error": f"Failed to decode acdc_json_b64: {e}"}), 400
+
+    acdc_said_embedded = acdc_body.get("d", "")
+    issuer_aid_in_cred = acdc_body.get("i", "")
+    schema_said        = acdc_body.get("s", "")
+    attr_block         = acdc_body.get("a", {})
+    holder_aid_in_cred = attr_block.get("i", "")
+
+    # -- Check 1: ACDC SAID integrity ------------------------------------------
+    try:
+        blank = dict(acdc_body); blank["d"] = ""
+        recomputed = coring.Diger(
+            ser=json.dumps(blank, separators=(",", ":")).encode(),
+            code=MtrDex.Blake3_256,
+        ).qb64
+        checks["said_integrity"] = (recomputed == acdc_said_embedded)
+        if not checks["said_integrity"]:
+            errors.append(f"Check 1 FAIL: SAID mismatch — embedded={acdc_said_embedded[:16]}… recomputed={recomputed[:16]}…")
+    except Exception as e:
+        errors.append(f"Check 1 ERROR: {e}")
+
+    # -- Check 2: Issuer AID is in a valid KEL ---------------------------------
+    try:
+        if issuer_kel:
+            first_event = issuer_kel[0]
+            # Support both raw KED dicts and EventRecord-like dicts with event_json
+            if "pre" in first_event:
+                kel_pre = first_event["pre"]
+            elif "event_json" in first_event:
+                kel_pre = json.loads(first_event["event_json"]).get("i", "")
+            else:
+                kel_pre = first_event.get("i", "")
+            checks["issuer_in_kel"] = (kel_pre == issuer_aid_in_cred)
+            if not checks["issuer_in_kel"]:
+                errors.append(f"Check 2 FAIL: KEL prefix {kel_pre[:16]}… does not match issuer AID {issuer_aid_in_cred[:16]}…")
+        else:
+            errors.append("Check 2 SKIP: No issuer KEL provided")
+    except Exception as e:
+        errors.append(f"Check 2 ERROR: {e}")
+
+    # -- Check 3: KEL hash chain valid -----------------------------------------
+    try:
+        if len(issuer_kel) >= 2:
+            chain_ok = True
+            for idx in range(1, len(issuer_kel)):
+                ev      = issuer_kel[idx]
+                prev_ev = issuer_kel[idx - 1]
+                # Support raw KED dicts
+                cur_p  = ev.get("p", "")
+                prev_d = prev_ev.get("d", "")
+                if cur_p and prev_d and cur_p != prev_d:
+                    chain_ok = False
+                    errors.append(f"Check 3 FAIL: hash chain broken at sn={idx}: prior={cur_p[:16]}… prev_d={prev_d[:16]}…")
+                    break
+            checks["kel_chain_valid"] = chain_ok
+        elif len(issuer_kel) == 1:
+            checks["kel_chain_valid"] = True  # single-event KEL is trivially valid
+        else:
+            errors.append("Check 3 SKIP: No issuer KEL provided")
+    except Exception as e:
+        errors.append(f"Check 3 ERROR: {e}")
+
+    # -- Check 4: Schema SAID in trusted registry ------------------------------
+    try:
+        if trusted_schemas:
+            checks["schema_trusted"] = schema_said in trusted_schemas
+            if not checks["schema_trusted"]:
+                errors.append(f"Check 4 FAIL: schema {schema_said[:16]}… not in trusted schema registry")
+        else:
+            # No trusted schema list provided — pass (open policy)
+            checks["schema_trusted"] = True
+    except Exception as e:
+        errors.append(f"Check 4 ERROR: {e}")
+
+    # -- Check 5: Credential not revoked ---------------------------------------
+    try:
+        checks["not_revoked"] = acdc_said_embedded not in revocation_list
+        if not checks["not_revoked"]:
+            errors.append(f"Check 5 FAIL: credential {acdc_said_embedded[:16]}… is revoked")
+    except Exception as e:
+        errors.append(f"Check 5 ERROR: {e}")
+
+    # -- Check 6: Holder AID matches credential subject ------------------------
+    try:
+        if holder_aid_in_cred:
+            # Derive the presentation holder AID from the signed pres_said_b64
+            # We check the public key's AID against the credential subject
+            # If we have the holder public key, reconstruct the AID from the KEL
+            # For now: verifier checks holder_public_key derives the same AID as cred.a.i
+            # This check requires the caller to pass holder_aid explicitly
+            holder_aid_from_request = data.get("holder_aid", "")
+            if holder_aid_from_request:
+                checks["holder_matches_subject"] = (holder_aid_from_request == holder_aid_in_cred)
+                if not checks["holder_matches_subject"]:
+                    errors.append(f"Check 6 FAIL: presentation holder {holder_aid_from_request[:16]}… != credential subject {holder_aid_in_cred[:16]}…")
+            else:
+                # No holder AID in request — pass if we have valid sig (check 7)
+                checks["holder_matches_subject"] = True
+        else:
+            checks["holder_matches_subject"] = True  # No subject field in credential
+    except Exception as e:
+        errors.append(f"Check 6 ERROR: {e}")
+
+    # -- Check 7: Presentation signature valid ---------------------------------
+    try:
+        if pres_said_b64 and pres_cesr_sig and holder_public_key:
+            pres_bytes = base64.b64decode(pres_said_b64)
+            raw_key    = _extract_raw_key(holder_public_key)
+            verfer     = coring.Verfer(raw=raw_key, code=MtrDex.Ed25519)
+            if pres_cesr_sig.startswith("0B") and len(pres_cesr_sig) == 88:
+                cigar    = coring.Cigar(qb64=pres_cesr_sig)
+                sig_raw  = cigar.raw
+            else:
+                sig_raw  = base64.b64decode(pres_cesr_sig)
+            checks["presentation_sig_valid"] = verfer.verify(sig=sig_raw, ser=pres_bytes)
+            if not checks["presentation_sig_valid"]:
+                errors.append("Check 7 FAIL: presentation signature does not verify against holder public key")
+        else:
+            errors.append("Check 7 SKIP: pres_said_b64, pres_cesr_sig, or holder_public_key missing")
+    except Exception as e:
+        errors.append(f"Check 7 ERROR: {e}")
+
+    # -- Check 8: Credential SAID anchored in issuer KEL via IXN ---------------
+    try:
+        ixn_said_to_find = data.get("ixn_said", "")
+        anchored = False
+        for ev in issuer_kel:
+            ev_type = ev.get("t", "")
+            if ev_type != "ixn":
+                continue
+            # Check if this IXN contains the credential SAID in its seal data
+            seal_list = ev.get("a", [])
+            if any(s.get("d") == acdc_said_embedded for s in seal_list):
+                # Optionally: verify this is the specific IXN we recorded (by SAID)
+                if not ixn_said_to_find or ev.get("d", "") == ixn_said_to_find:
+                    anchored = True
+                    break
+        checks["credential_anchored"] = anchored
+        if not anchored:
+            errors.append(f"Check 8 FAIL: credential SAID {acdc_said_embedded[:16]}… not found in any IXN seal in the issuer KEL")
+    except Exception as e:
+        errors.append(f"Check 8 ERROR: {e}")
+
+    verified = all(checks.values())
+
+    return jsonify({
+        "verified": verified,
+        "checks":   checks,
+        "errors":   errors,
+        "acdc_said": acdc_said_embedded,
+    }), 200
+
+
 @app.route("/generate-multisig-event", methods=["POST"])
 def generate_multisig_event():
     data = request.get_json()

@@ -187,6 +187,30 @@ type DriverPresentCredentialResponse struct {
 	PresSaidB64         string                 `json:"pres_said_b64"`
 }
 
+type DriverVerifyCredentialRequest struct {
+	// AcdcJson: full ACDC JSON string to verify.
+	AcdcJson string `json:"acdc_json"`
+	// IssuerKelEvents: the issuer's KEL events as stored in contact_kels (may be nil/empty).
+	IssuerKelEvents []map[string]interface{} `json:"issuer_kel_events,omitempty"`
+	// HolderAid: expected holder AID (subject of the credential).
+	HolderAid string `json:"holder_aid,omitempty"`
+	// PresentationSaid: the SAID of the presentation being verified.
+	PresentationSaid string `json:"presentation_said,omitempty"`
+	// CesrSignature: the holder's CESR signature over pres_said.encode().
+	CesrSignature string `json:"cesr_signature,omitempty"`
+	// HolderPublicKey: the holder's current Ed25519 public key (base64).
+	HolderPublicKey string `json:"holder_public_key,omitempty"`
+	// TrustedSchemaSaids: list of accepted schema SAIDs; empty = accept all.
+	TrustedSchemaSaids []string `json:"trusted_schema_saids,omitempty"`
+}
+
+type DriverVerifyCredentialResponse struct {
+	Verified  bool                   `json:"verified"`
+	Checks    map[string]interface{} `json:"checks"`
+	Errors    []string               `json:"errors"`
+	AcdcSaid  string                 `json:"acdc_said"`
+}
+
 type DriverCesrEncodeRequest struct {
 	RawSigB64 string `json:"raw_sig_b64"`
 }
@@ -583,6 +607,20 @@ func (d *KeriDriver) GenerateMultisigEvent(aids []string, threshold int, current
 	var result DriverMultisigResponse
 	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("failed to decode multisig event response: %w", err)
+	}
+
+	return &result, nil
+}
+
+func (d *KeriDriver) VerifyCredential(req *DriverVerifyCredentialRequest) (*DriverVerifyCredentialResponse, error) {
+	body, err := d.doPost("/credential/verify", req, http.StatusOK)
+	if err != nil {
+		return nil, err
+	}
+
+	var result DriverVerifyCredentialResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode credential/verify response: %w", err)
 	}
 
 	return &result, nil

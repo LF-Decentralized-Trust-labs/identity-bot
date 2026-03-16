@@ -104,6 +104,21 @@ class CredentialIssuanceResult {
   });
 }
 
+class VerificationResult {
+  final bool verified;
+  // checks: map of check name → bool (e.g. "said_integrity": true).
+  final Map<String, dynamic> checks;
+  final List<String> errors;
+  final String acdcSaid;
+
+  VerificationResult({
+    required this.verified,
+    required this.checks,
+    required this.errors,
+    required this.acdcSaid,
+  });
+}
+
 abstract class KeriService {
   AgentEnvironment get environment;
 
@@ -148,6 +163,18 @@ abstract class KeriService {
     required String holderAid,
     String issuerAid = '',
     String schemaSaid = '',
+  });
+
+  /// Verify a credential against the 8-check engine:
+  /// SAID integrity, issuer KEL, KEL hash chain, schema trust,
+  /// revocation, holder subject match, presentation sig, IXN anchor.
+  Future<VerificationResult> verifyCredential({
+    required String acdcJson,
+    String holderAid = '',
+    String presentationSaid = '',
+    String cesrSignature = '',
+    String holderPublicKey = '',
+    List<String> trustedSchemaSaids = const [],
   });
 
   void dispose();

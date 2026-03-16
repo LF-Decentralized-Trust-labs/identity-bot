@@ -97,5 +97,17 @@ class MobileRemoteKeriService extends KeriService {
   }
 
   @override
+  Future<VerificationResult> verifyCredential({
+    required String acdcJson,
+    String holderAid = '',
+    String presentationSaid = '',
+    String cesrSignature = '',
+    String holderPublicKey = '',
+    List<String> trustedSchemaSaids = const [],
+  }) async {
+    throw UnimplementedError('verifyCredential not yet supported on mobile remote');
+  }
+
+  @override
   void dispose() {}
 }

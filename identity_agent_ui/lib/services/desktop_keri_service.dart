@@ -365,6 +365,42 @@ class DesktopKeriService extends KeriService {
   }
 
   @override
+  Future<VerificationResult> verifyCredential({
+    required String acdcJson,
+    String holderAid = '',
+    String presentationSaid = '',
+    String cesrSignature = '',
+    String holderPublicKey = '',
+    List<String> trustedSchemaSaids = const [],
+  }) async {
+    final response = await _client.post(
+      Uri.parse('$_baseUrl/api/credential/verify'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'acdc_json': acdcJson,
+        'holder_aid': holderAid,
+        'presentation_said': presentationSaid,
+        'cesr_signature': cesrSignature,
+        'holder_public_key': holderPublicKey,
+        'trusted_schema_saids': trustedSchemaSaids,
+      }),
+    );
+
+    if (response.statusCode == 200) {
+      final json = jsonDecode(response.body);
+      return VerificationResult(
+        verified: json['verified'] == true,
+        checks: (json['checks'] as Map<String, dynamic>?) ?? {},
+        errors: List<String>.from(json['errors'] ?? []),
+        acdcSaid: json['acdc_said'] ?? '',
+      );
+    } else {
+      final body = jsonDecode(response.body);
+      throw Exception(body['error'] ?? 'Credential verification failed: ${response.statusCode}');
+    }
+  }
+
+  @override
   void dispose() {
     _client.close();
   }

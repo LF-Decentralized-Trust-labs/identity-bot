@@ -283,6 +283,7 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
                 r.Get("/credentials", s.handleGetCredentials)
                 r.Post("/credential/present", s.handlePresentCredential)
                 r.Get("/presentations", s.handleGetPresentations)
+                r.Post("/credential/verify", s.handleVerifyCredential)
 
                 r.Get("/oobi", s.handleOobiGenerate)
 
@@ -1112,6 +1113,62 @@ func (s *CoreServer) handleGetPresentations(w http.ResponseWriter, r *http.Reque
                 "presentations": pres,
                 "count":         len(pres),
         })
+}
+
+func (s *CoreServer) handleVerifyCredential(w http.ResponseWriter, r *http.Request) {
+	if s.KeriDriver == nil {
+		writeError(w, http.StatusServiceUnavailable, "KERI driver not available",
+			"Credential verification requires the Python KERI driver (desktop only)")
+		return
+	}
+
+	var req struct {
+		AcdcJson           string   `json:"acdc_json"`
+		HolderAid          string   `json:"holder_aid"`
+		PresentationSaid   string   `json:"presentation_said"`
+		CesrSignature      string   `json:"cesr_signature"`
+		HolderPublicKey    string   `json:"holder_public_key"`
+		TrustedSchemaSaids []string `json:"trusted_schema_saids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+
+	if req.AcdcJson == "" {
+		writeError(w, http.StatusBadRequest, "Missing acdc_json", "")
+		return
+	}
+
+	// Extract issuer AID from the ACDC JSON to look up its stored KEL.
+	var acdcBody map[string]interface{}
+	var issuerKelEvents []map[string]interface{}
+	if err := json.Unmarshal([]byte(req.AcdcJson), &acdcBody); err == nil {
+		if issuerAid, ok := acdcBody["i"].(string); ok && issuerAid != "" {
+			if kelRecord, err := s.DataStore.GetContactKEL(issuerAid); err == nil && kelRecord != nil {
+				issuerKelEvents = kelRecord.KEL
+			}
+		}
+	}
+
+	driverReq := &drivers.DriverVerifyCredentialRequest{
+		AcdcJson:           req.AcdcJson,
+		IssuerKelEvents:    issuerKelEvents,
+		HolderAid:          req.HolderAid,
+		PresentationSaid:   req.PresentationSaid,
+		CesrSignature:      req.CesrSignature,
+		HolderPublicKey:    req.HolderPublicKey,
+		TrustedSchemaSaids: req.TrustedSchemaSaids,
+	}
+
+	result, err := s.KeriDriver.VerifyCredential(driverReq)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Credential verification failed", err.Error())
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
 }
 
 func (s *CoreServer) handleResolveOobi(w http.ResponseWriter, r *http.Request) {
