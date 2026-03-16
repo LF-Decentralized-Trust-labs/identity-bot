@@ -400,6 +400,62 @@ func (s *SQLiteStore) SaveProfile(profile ProfileData) error {
 	return nil
 }
 
+// ── Contact KELs ──────────────────────────────────────────────────────────────
+
+func (s *SQLiteStore) SaveContactKEL(record ContactKELRecord) error {
+	kelJSON, err := json.Marshal(record.KEL)
+	if err != nil {
+		return fmt.Errorf("failed to marshal contact KEL: %w", err)
+	}
+	errorsJSON, err := json.Marshal(record.ValidationErrors)
+	if err != nil {
+		return fmt.Errorf("failed to marshal validation errors: %w", err)
+	}
+
+	_, err = s.db.Exec(`
+		INSERT INTO contact_kels (aid, kel_json, kel_verified, current_public_key, events_validated, validation_errors, validated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(aid) DO UPDATE SET
+			kel_json           = excluded.kel_json,
+			kel_verified       = excluded.kel_verified,
+			current_public_key = excluded.current_public_key,
+			events_validated   = excluded.events_validated,
+			validation_errors  = excluded.validation_errors,
+			validated_at       = excluded.validated_at`,
+		record.AID, string(kelJSON), record.KelVerified,
+		record.CurrentPublicKey, record.EventsValidated,
+		string(errorsJSON), record.ValidatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to save contact KEL: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) GetContactKEL(aid string) (*ContactKELRecord, error) {
+	var r ContactKELRecord
+	var kelJSON, errorsJSON string
+	err := s.db.QueryRow(
+		`SELECT aid, kel_json, kel_verified, current_public_key, events_validated, validation_errors, validated_at
+		 FROM contact_kels WHERE aid = ?`, aid,
+	).Scan(&r.AID, &kelJSON, &r.KelVerified, &r.CurrentPublicKey, &r.EventsValidated, &errorsJSON, &r.ValidatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get contact KEL: %w", err)
+	}
+	if err := json.Unmarshal([]byte(kelJSON), &r.KEL); err != nil {
+		return nil, fmt.Errorf("failed to parse contact KEL JSON: %w", err)
+	}
+	if errorsJSON != "" && errorsJSON != "null" {
+		if err := json.Unmarshal([]byte(errorsJSON), &r.ValidationErrors); err != nil {
+			return nil, fmt.Errorf("failed to parse validation errors JSON: %w", err)
+		}
+	}
+	return &r, nil
+}
+
 // ── Endpoint ──────────────────────────────────────────────────────────────────
 
 // GetEndpoint returns the last persisted public OOBI endpoint URL and its source.
@@ -430,7 +486,7 @@ func (s *SQLiteStore) SaveEndpoint(url, source string) error {
 // ── Reset ─────────────────────────────────────────────────────────────────────
 
 func (s *SQLiteStore) ResetAll() error {
-	tables := []string{"kel", "identity", "contacts", "pending_requests", "profile", "settings", "endpoint"}
+	tables := []string{"kel", "identity", "contacts", "pending_requests", "profile", "settings", "endpoint", "contact_kels"}
 	for _, t := range tables {
 		if _, err := s.db.Exec(`DELETE FROM ` + t); err != nil {
 			return fmt.Errorf("failed to clear table %s: %w", t, err)

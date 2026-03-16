@@ -285,6 +285,7 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
                 r.Post("/contacts/resolve", s.handleResolveOobiContact)
                 r.Post("/contacts", s.handleAddContact)
                 r.Get("/contacts/{aid}", s.handleGetContact)
+                r.Get("/contacts/{aid}/kel", s.handleGetContactKEL)
                 r.Delete("/contacts/{aid}", s.handleDeleteContact)
                 r.Post("/contacts/{aid}/accept", s.handleAcceptContact)
                 r.Post("/contacts/{aid}/reject", s.handleRejectContact)
@@ -1166,6 +1167,27 @@ func (s *CoreServer) handleGetContact(w http.ResponseWriter, r *http.Request) {
         json.NewEncoder(w).Encode(contact)
 }
 
+func (s *CoreServer) handleGetContactKEL(w http.ResponseWriter, r *http.Request) {
+        aid := chi.URLParam(r, "aid")
+        if aid == "" {
+                writeError(w, http.StatusBadRequest, "Missing AID", "aid path parameter is required")
+                return
+        }
+
+        kelRecord, err := s.DataStore.GetContactKEL(aid)
+        if err != nil {
+                writeError(w, http.StatusInternalServerError, "Failed to read contact KEL", err.Error())
+                return
+        }
+        if kelRecord == nil {
+                writeError(w, http.StatusNotFound, "No KEL found", fmt.Sprintf("No validated KEL stored for AID: %s", aid))
+                return
+        }
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(kelRecord)
+}
+
 func (s *CoreServer) handleResolveOobiContact(w http.ResponseWriter, r *http.Request) {
         var req struct {
                 OobiURL string `json:"oobi_url"`
@@ -1204,14 +1226,14 @@ func (s *CoreServer) handleResolveOobiContact(w http.ResponseWriter, r *http.Req
         }
 
         var oobiData struct {
-                AID        string       `json:"aid"`
-                PublicKey  string       `json:"public_key"`
-                Alias      string       `json:"alias"`
-                KEL        interface{}  `json:"kel"`
-                EventCount int          `json:"event_count"`
-                Created    string       `json:"created"`
-                JCard      *store.JCard `json:"jcard,omitempty"`
-                Photo      string       `json:"photo,omitempty"`
+                AID        string                   `json:"aid"`
+                PublicKey  string                   `json:"public_key"`
+                Alias      string                   `json:"alias"`
+                KEL        []map[string]interface{} `json:"kel"`
+                EventCount int                      `json:"event_count"`
+                Created    string                   `json:"created"`
+                JCard      *store.JCard             `json:"jcard,omitempty"`
+                Photo      string                   `json:"photo,omitempty"`
         }
         if err := json.NewDecoder(resp.Body).Decode(&oobiData); err != nil {
                 writeError(w, http.StatusBadGateway, "Invalid OOBI response", fmt.Sprintf("Could not parse response: %v", err))
@@ -1223,23 +1245,53 @@ func (s *CoreServer) handleResolveOobiContact(w http.ResponseWriter, r *http.Req
                 return
         }
 
-        kelCount := 0
-        if events, ok := oobiData.KEL.([]interface{}); ok {
-                kelCount = len(events)
-        }
-
+        kelCount := len(oobiData.KEL)
         log.Printf("[identity-agent-core] OOBI-RESOLVE: Success — AID=%s, alias=%s, KEL events=%d", oobiData.AID, oobiData.Alias, kelCount)
 
+        // Validate the KEL via the Python driver (desktop only — driver is nil on mobile).
+        kelVerified := false
+        currentPublicKey := oobiData.PublicKey
+        var validationErrors []string
+        if s.KeriDriver != nil && kelCount > 0 {
+                valResult, err := s.KeriDriver.ValidateKEL(oobiData.AID, oobiData.KEL)
+                if err != nil {
+                        log.Printf("[identity-agent-core] OOBI-RESOLVE: KEL validation error for %s: %v", oobiData.AID, err)
+                        validationErrors = []string{err.Error()}
+                } else {
+                        kelVerified = valResult.KelVerified
+                        if valResult.CurrentPublicKey != "" {
+                                currentPublicKey = valResult.CurrentPublicKey
+                        }
+                        validationErrors = valResult.ValidationErrors
+                        log.Printf("[identity-agent-core] OOBI-RESOLVE: KEL validated=%v events=%d for %s",
+                                kelVerified, valResult.EventsValidated, oobiData.AID)
+                }
+
+                kelRecord := store.ContactKELRecord{
+                        AID:              oobiData.AID,
+                        KEL:              oobiData.KEL,
+                        KelVerified:      kelVerified,
+                        CurrentPublicKey: currentPublicKey,
+                        EventsValidated:  kelCount,
+                        ValidationErrors: validationErrors,
+                        ValidatedAt:      time.Now().UTC().Format(time.RFC3339),
+                }
+                if err := s.DataStore.SaveContactKEL(kelRecord); err != nil {
+                        log.Printf("[identity-agent-core] OOBI-RESOLVE: Failed to store contact KEL for %s: %v", oobiData.AID, err)
+                }
+        }
+
         result := map[string]interface{}{
-                "resolved":     true,
-                "aid":          oobiData.AID,
-                "public_key":   oobiData.PublicKey,
-                "alias":        oobiData.Alias,
-                "oobi_url":     req.OobiURL,
-                "kel":          oobiData.KEL,
-                "event_count":  oobiData.EventCount,
-                "created":      oobiData.Created,
-                "kel_verified": kelCount > 0,
+                "resolved":          true,
+                "aid":               oobiData.AID,
+                "public_key":        currentPublicKey,
+                "alias":             oobiData.Alias,
+                "oobi_url":          req.OobiURL,
+                "kel":               oobiData.KEL,
+                "event_count":       kelCount,
+                "created":           oobiData.Created,
+                "kel_verified":      kelVerified,
+                "validation_errors": validationErrors,
         }
         if oobiData.JCard != nil {
                 result["jcard"] = oobiData.JCard
@@ -1288,11 +1340,12 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
         }
 
         var oobiData struct {
-                AID       string      `json:"aid"`
-                PublicKey string      `json:"public_key"`
-                Alias     string      `json:"alias"`
-                JCard     *store.JCard `json:"jcard,omitempty"`
-                Photo     string      `json:"photo,omitempty"`
+                AID       string                   `json:"aid"`
+                PublicKey string                   `json:"public_key"`
+                Alias     string                   `json:"alias"`
+                KEL       []map[string]interface{} `json:"kel"`
+                JCard     *store.JCard             `json:"jcard,omitempty"`
+                Photo     string                   `json:"photo,omitempty"`
         }
         if err := json.NewDecoder(resp.Body).Decode(&oobiData); err != nil {
                 writeError(w, http.StatusBadGateway, "Invalid OOBI response", fmt.Sprintf("Could not parse response: %v", err))
@@ -1302,6 +1355,33 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
         if oobiData.AID == "" {
                 writeError(w, http.StatusBadGateway, "Invalid OOBI response", "Response did not contain an AID")
                 return
+        }
+
+        // Validate KEL (desktop only).
+        kelVerified := false
+        currentPublicKey := oobiData.PublicKey
+        if s.KeriDriver != nil && len(oobiData.KEL) > 0 {
+                valResult, err := s.KeriDriver.ValidateKEL(oobiData.AID, oobiData.KEL)
+                if err != nil {
+                        log.Printf("[identity-agent-core] CONTACT: KEL validation error for %s: %v", oobiData.AID, err)
+                } else {
+                        kelVerified = valResult.KelVerified
+                        if valResult.CurrentPublicKey != "" {
+                                currentPublicKey = valResult.CurrentPublicKey
+                        }
+                        kelRecord := store.ContactKELRecord{
+                                AID:              oobiData.AID,
+                                KEL:              oobiData.KEL,
+                                KelVerified:      kelVerified,
+                                CurrentPublicKey: currentPublicKey,
+                                EventsValidated:  len(oobiData.KEL),
+                                ValidationErrors: valResult.ValidationErrors,
+                                ValidatedAt:      time.Now().UTC().Format(time.RFC3339),
+                        }
+                        if err := s.DataStore.SaveContactKEL(kelRecord); err != nil {
+                                log.Printf("[identity-agent-core] CONTACT: Failed to store KEL for %s: %v", oobiData.AID, err)
+                        }
+                }
         }
 
         alias := req.Alias
@@ -1326,14 +1406,19 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
                 }
         }
 
+        contactStatus := "verified"
+        if s.KeriDriver != nil && len(oobiData.KEL) > 0 && !kelVerified {
+                contactStatus = "unverified"
+        }
+
         contact := store.ContactRecord{
                 AID:          oobiData.AID,
                 Alias:        alias,
-                PublicKey:    oobiData.PublicKey,
+                PublicKey:    currentPublicKey,
                 OobiURL:      req.OobiURL,
-                Verified:     true,
+                Verified:     kelVerified || s.KeriDriver == nil,
                 DiscoveredAt: time.Now().UTC().Format(time.RFC3339),
-                Status:       "verified",
+                Status:       contactStatus,
                 Role:         "agent",
                 JCard:        contactJCard,
                 Photo:        oobiData.Photo,
@@ -1344,7 +1429,7 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
                 return
         }
 
-        log.Printf("[identity-agent-core] CONTACT: Added %s (AID: %s) status=verified", alias, oobiData.AID)
+        log.Printf("[identity-agent-core] CONTACT: Added %s (AID: %s) status=%s kel_verified=%v", alias, oobiData.AID, contactStatus, kelVerified)
 
         publicURL := s.getPublicURL(r)
         go func() {

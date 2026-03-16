@@ -94,6 +94,23 @@ CREATE TABLE IF NOT EXISTS endpoint (
 );
 `,
 	},
+	{
+		Version:     2,
+		Description: "Add contact_kels table and cesr_signature column to kel",
+		SQL: `
+ALTER TABLE kel ADD COLUMN cesr_signature TEXT NOT NULL DEFAULT '';
+
+CREATE TABLE IF NOT EXISTS contact_kels (
+    aid                TEXT PRIMARY KEY,
+    kel_json           TEXT NOT NULL DEFAULT '[]',
+    kel_verified       INTEGER NOT NULL DEFAULT 0,
+    current_public_key TEXT NOT NULL DEFAULT '',
+    events_validated   INTEGER NOT NULL DEFAULT 0,
+    validation_errors  TEXT NOT NULL DEFAULT '[]',
+    validated_at       TEXT NOT NULL DEFAULT ''
+);
+`,
+	},
 }
 
 // ApplyIdentityMigrations creates the migrations table and applies any pending migrations.

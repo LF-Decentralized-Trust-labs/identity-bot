@@ -113,11 +113,29 @@ type DriverResolveOobiRequest struct {
 }
 
 type DriverResolveOobiResponse struct {
-	Endpoints []string `json:"endpoints"`
-	OobiURL   string   `json:"oobi_url"`
-	CID       string   `json:"cid"`
-	EID       string   `json:"eid"`
-	Role      string   `json:"role"`
+	Endpoints        []string                 `json:"endpoints"`
+	OobiURL          string                   `json:"oobi_url"`
+	CID              string                   `json:"cid"`
+	EID              string                   `json:"eid"`
+	Role             string                   `json:"role"`
+	// Phase 3: KEL validation fields returned when resolve-oobi fetches and validates the KEL.
+	KEL              []map[string]interface{} `json:"kel,omitempty"`
+	KelVerified      bool                     `json:"kel_verified"`
+	CurrentPublicKey string                   `json:"current_public_key,omitempty"`
+	EventsValidated  int                      `json:"events_validated"`
+	ValidationErrors []string                 `json:"validation_errors,omitempty"`
+}
+
+type DriverValidateKELRequest struct {
+	AID    string                   `json:"aid"`
+	Events []map[string]interface{} `json:"events"`
+}
+
+type DriverValidateKELResponse struct {
+	KelVerified      bool     `json:"kel_verified"`
+	CurrentPublicKey string   `json:"current_public_key"`
+	EventsValidated  int      `json:"events_validated"`
+	ValidationErrors []string `json:"validation_errors,omitempty"`
 }
 
 type DriverMultisigRequest struct {
@@ -452,6 +470,22 @@ func (d *KeriDriver) ResolveOobi(url string) (*DriverResolveOobiResponse, error)
 	var result DriverResolveOobiResponse
 	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("failed to decode resolve-oobi response: %w", err)
+	}
+
+	return &result, nil
+}
+
+func (d *KeriDriver) ValidateKEL(aid string, events []map[string]interface{}) (*DriverValidateKELResponse, error) {
+	reqBody := DriverValidateKELRequest{AID: aid, Events: events}
+
+	body, err := d.doPost("/validate-kel", reqBody, http.StatusOK)
+	if err != nil {
+		return nil, err
+	}
+
+	var result DriverValidateKELResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode validate-kel response: %w", err)
 	}
 
 	return &result, nil

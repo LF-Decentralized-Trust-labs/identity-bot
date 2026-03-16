@@ -39,6 +39,12 @@ import json
 import tempfile
 import shutil
 
+try:
+    import requests as _requests
+    _REQUESTS_AVAILABLE = True
+except ImportError:
+    _REQUESTS_AVAILABLE = False
+
 # ---------------------------------------------------------------------------
 # libsodium detection (Nix environments don't always expose it to find_library)
 # ---------------------------------------------------------------------------
@@ -500,8 +506,161 @@ def format_credential():
         return jsonify({"error": f"Format credential failed: {str(e)}"}), 500
 
 
+def _validate_kel_events(kel_events: list) -> dict:
+    """Validate a KEL (list of event record dicts) for hash chain integrity and signatures.
+
+    Each event record is expected to have:
+        event_json      (str)  — JSON string of the keripy serder.ked dict
+        cesr_signature  (str)  — CESR '0B...' Cigar signature (may be absent)
+        public_key      (str)  — CESR Ed25519 public key active after this event
+        event_type      (str)  — 'icp', 'ixn', 'rot'
+        sequence_number (int)
+
+    Returns dict with:
+        kel_verified       (bool)
+        events_validated   (int)
+        current_public_key (str)  — CESR public key after the last event
+        validation_errors  (list of str)
+    """
+    errors = []
+    current_key_qb64 = None
+    events_validated = 0
+
+    if not kel_events:
+        return {
+            "kel_verified": False,
+            "events_validated": 0,
+            "current_public_key": "",
+            "validation_errors": ["KEL is empty"],
+        }
+
+    for i, record in enumerate(kel_events):
+        try:
+            event_dict = json.loads(record.get("event_json", "{}"))
+        except (json.JSONDecodeError, TypeError) as e:
+            errors.append(f"sn={i}: could not parse event_json: {e}")
+            continue
+
+        event_type = record.get("event_type") or event_dict.get("t", "")
+        sn_str = event_dict.get("s", str(i))
+        try:
+            sn = int(sn_str, 16) if len(sn_str) > 1 and sn_str.startswith("0") else int(sn_str)
+        except (ValueError, TypeError):
+            sn = i
+
+        # Check sequence number is contiguous
+        if sn != i:
+            errors.append(f"sn={i}: expected sequence {i}, got {sn}")
+
+        # Hash chain: 'p' (prior) must match the 'd' (SAID) of the previous event
+        if i == 0:
+            if event_type not in ("icp", "dip"):
+                errors.append(f"sn=0: first event must be inception (icp), got '{event_type}'")
+        else:
+            try:
+                prev_dict = json.loads(kel_events[i - 1].get("event_json", "{}"))
+                expected_prior = prev_dict.get("d", "")
+                actual_prior = event_dict.get("p", "")
+                if expected_prior != actual_prior:
+                    errors.append(
+                        f"sn={i}: hash chain broken — prior '{actual_prior[:16]}...' "
+                        f"does not match previous event SAID '{expected_prior[:16]}...'"
+                    )
+            except Exception as e:
+                errors.append(f"sn={i}: hash chain check failed: {e}")
+
+        # Determine signing key for this event type
+        if event_type == "icp":
+            # Inception: signed with the inception key (first key in 'k' list)
+            keys_list = event_dict.get("k", [])
+            signing_key_qb64 = keys_list[0] if keys_list else record.get("public_key", "")
+            current_key_qb64 = signing_key_qb64
+        elif event_type == "ixn":
+            # Interaction: signed with the currently active key (no key change)
+            signing_key_qb64 = current_key_qb64
+        elif event_type in ("rot", "drt"):
+            # Rotation: signed with the newly revealed pre-rotated key (first key in 'k' list)
+            keys_list = event_dict.get("k", [])
+            signing_key_qb64 = keys_list[0] if keys_list else record.get("public_key", "")
+            current_key_qb64 = signing_key_qb64
+        else:
+            signing_key_qb64 = current_key_qb64
+
+        # Signature verification (if cesr_signature present)
+        cesr_sig = record.get("cesr_signature", "")
+        if cesr_sig and signing_key_qb64:
+            try:
+                # Re-serialize the event dict through keripy to get canonical raw bytes
+                serder = coring.Serder(ked=event_dict)
+                cigar = coring.Cigar(qb64=cesr_sig)
+                raw_key = _extract_raw_key(signing_key_qb64)
+                verfer = coring.Verfer(raw=raw_key, code=MtrDex.Ed25519)
+                if not verfer.verify(sig=cigar.raw, ser=serder.raw):
+                    errors.append(f"sn={i} ({event_type}): signature verification FAILED")
+                else:
+                    events_validated += 1
+            except Exception as e:
+                errors.append(f"sn={i} ({event_type}): signature check error: {e}")
+        else:
+            # No signature present — structural-only check passed
+            events_validated += 1
+
+    return {
+        "kel_verified": len(errors) == 0,
+        "events_validated": events_validated,
+        "current_public_key": current_key_qb64 or "",
+        "validation_errors": errors,
+    }
+
+
+@app.route("/validate-kel", methods=["POST"])
+def validate_kel():
+    """Stateless: validate a KEL (Key Event Log) from an OOBI response.
+
+    Accepts JSON: {
+        "aid":    "<AID string>",
+        "events": [<event record dicts from the OOBI response>]
+    }
+
+    Each event record should have: event_json, cesr_signature, public_key,
+    event_type, sequence_number.
+
+    Returns: {
+        "kel_verified": bool,
+        "events_validated": int,
+        "current_public_key": str,
+        "validation_errors": [str]
+    }
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Request body required"}), 400
+
+    events = data.get("events", [])
+    if not events:
+        return jsonify({
+            "kel_verified": False,
+            "events_validated": 0,
+            "current_public_key": "",
+            "validation_errors": ["No events provided"],
+        }), 200
+
+    try:
+        result = _validate_kel_events(events)
+        return jsonify(result), 200
+    except Exception as e:
+        return jsonify({"error": f"KEL validation failed: {str(e)}"}), 500
+
+
 @app.route("/resolve-oobi", methods=["POST"])
 def resolve_oobi():
+    """Resolve an OOBI URL: fetch it over HTTP and validate the returned KEL.
+
+    Accepts JSON: { "url": "<oobi_url>" }
+
+    Returns full validation result including the AID's current public key,
+    KEL validity, and any validation errors.
+    """
     data = request.get_json()
     if not data:
         return jsonify({"error": "Request body required"}), 400
@@ -510,12 +669,10 @@ def resolve_oobi():
     if not url:
         return jsonify({"error": "url is required"}), 400
 
+    # Parse OOBI URL components (cid = controller AID, role, eid = endpoint AID)
+    cid, eid, role = "", "", ""
     try:
         parts = url.rstrip("/").split("/")
-
-        cid = ""
-        eid = ""
-        role = ""
         if "/oobi/" in url:
             oobi_idx = parts.index("oobi")
             if oobi_idx + 1 < len(parts):
@@ -524,20 +681,71 @@ def resolve_oobi():
                 role = parts[oobi_idx + 2]
             if oobi_idx + 3 < len(parts):
                 eid = parts[oobi_idx + 3]
+    except Exception:
+        pass
 
-        scheme = "http" if url.startswith("http://") else "https"
-        host_port = url.split("//")[1].split("/")[0] if "//" in url else ""
-        endpoints = [f"{scheme}://{host_port}"] if host_port else []
+    scheme = "http" if url.startswith("http://") else "https"
+    host_port = url.split("//")[1].split("/")[0] if "//" in url else ""
+    endpoints = [f"{scheme}://{host_port}"] if host_port else []
 
+    # Without requests, fall back to URL-parse-only mode
+    if not _REQUESTS_AVAILABLE:
         return jsonify({
             "endpoints": endpoints,
             "oobi_url": url,
             "cid": cid,
             "eid": eid,
             "role": role,
+            "kel_verified": False,
+            "validation_errors": ["requests library not installed; install with: pip install requests"],
         }), 200
+
+    # Fetch the OOBI endpoint
+    try:
+        resp = _requests.get(url, timeout=15)
+        resp.raise_for_status()
+        oobi_data = resp.json()
     except Exception as e:
-        return jsonify({"error": f"OOBI resolution failed: {str(e)}"}), 500
+        return jsonify({
+            "endpoints": endpoints,
+            "oobi_url": url,
+            "cid": cid,
+            "eid": eid,
+            "role": role,
+            "kel_verified": False,
+            "validation_errors": [f"Failed to fetch OOBI URL: {e}"],
+        }), 200
+
+    # Extract and validate the KEL from the response
+    aid = oobi_data.get("aid", cid)
+    public_key = oobi_data.get("public_key", "")
+    kel_events = oobi_data.get("kel", [])
+
+    # Normalise: kel may be a list of EventRecord-like dicts
+    validation = _validate_kel_events(kel_events) if kel_events else {
+        "kel_verified": False,
+        "events_validated": 0,
+        "current_public_key": public_key,
+        "validation_errors": ["OOBI response contained no KEL events"],
+    }
+
+    return jsonify({
+        "endpoints": endpoints,
+        "oobi_url": url,
+        "cid": cid,
+        "eid": eid,
+        "role": role,
+        "aid": aid,
+        "public_key": validation.get("current_public_key") or public_key,
+        "alias": oobi_data.get("alias", ""),
+        "jcard": oobi_data.get("jcard"),
+        "photo": oobi_data.get("photo", ""),
+        "kel": kel_events,
+        "event_count": len(kel_events),
+        "kel_verified": validation["kel_verified"],
+        "events_validated": validation["events_validated"],
+        "validation_errors": validation["validation_errors"],
+    }), 200
 
 
 @app.route("/generate-multisig-event", methods=["POST"])
@@ -611,6 +819,6 @@ if __name__ == "__main__":
     print(f"[keri-driver] Starting KERI Core Driver on {host}:{port}")
     print(f"[keri-driver] KERI library: keripy (reference)")
     print(f"[keri-driver] Stateful endpoints:  /status, /inception, /rotation, /interact, /sign, /kel, /verify")
-    print(f"[keri-driver] Stateless endpoints: /cesr-encode, /format-credential, /resolve-oobi, /generate-multisig-event")
+    print(f"[keri-driver] Stateless endpoints: /cesr-encode, /validate-kel, /resolve-oobi, /format-credential, /generate-multisig-event")
 
     app.run(host=host, port=port, debug=False)

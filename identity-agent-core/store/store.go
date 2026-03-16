@@ -110,6 +110,20 @@ func (p *ProfileData) ToJCard(aid string, oobiURL string) *JCard {
         }
 }
 
+// ContactKELRecord stores a contact's validated Key Event Log.
+// This is the cryptographic proof of a contact's identity history.
+type ContactKELRecord struct {
+        AID              string                   `json:"aid"`
+        // KEL events as received from the contact's OOBI endpoint.
+        KEL              []map[string]interface{} `json:"kel"`
+        KelVerified      bool                     `json:"kel_verified"`
+        // CurrentPublicKey: the CESR Ed25519 key active after the last validated event.
+        CurrentPublicKey string                   `json:"current_public_key"`
+        EventsValidated  int                      `json:"events_validated"`
+        ValidationErrors []string                 `json:"validation_errors,omitempty"`
+        ValidatedAt      string                   `json:"validated_at"`
+}
+
 type Store interface {
         SaveEvent(record EventRecord) error
         GetEvents(aid string) ([]EventRecord, error)
@@ -120,6 +134,8 @@ type Store interface {
         GetContact(aid string) (*ContactRecord, error)
         DeleteContact(aid string) error
         GetContactsByStatus(status string) ([]ContactRecord, error)
+        SaveContactKEL(record ContactKELRecord) error
+        GetContactKEL(aid string) (*ContactKELRecord, error)
         GetSettings() (*SettingsData, error)
         SaveSettings(settings SettingsData) error
         SavePendingRequest(req PendingRequest) error
@@ -472,11 +488,54 @@ func (s *FileStore) SaveProfile(profile ProfileData) error {
         return s.writeJSON(filepath.Join(s.dir, "profile.json"), profile)
 }
 
+func (s *FileStore) SaveContactKEL(record ContactKELRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	kels, err := s.loadContactKELs()
+	if err != nil {
+		kels = map[string]ContactKELRecord{}
+	}
+	kels[record.AID] = record
+	return s.writeJSON(filepath.Join(s.dir, "contact_kels.json"), kels)
+}
+
+func (s *FileStore) GetContactKEL(aid string) (*ContactKELRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	kels, err := s.loadContactKELs()
+	if err != nil {
+		return nil, err
+	}
+	r, ok := kels[aid]
+	if !ok {
+		return nil, nil
+	}
+	return &r, nil
+}
+
+func (s *FileStore) loadContactKELs() (map[string]ContactKELRecord, error) {
+	path := filepath.Join(s.dir, "contact_kels.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]ContactKELRecord{}, nil
+		}
+		return nil, fmt.Errorf("failed to read contact KELs: %w", err)
+	}
+	var kels map[string]ContactKELRecord
+	if err := json.Unmarshal(data, &kels); err != nil {
+		return nil, fmt.Errorf("failed to parse contact KELs: %w", err)
+	}
+	return kels, nil
+}
+
 func (s *FileStore) ResetAll() error {
         s.mu.Lock()
         defer s.mu.Unlock()
 
-        files := []string{"identity.json", "kel.json", "contacts.json", "settings.json", "pending_requests.json", "profile.json", "endpoint.json"}
+        files := []string{"identity.json", "kel.json", "contacts.json", "settings.json", "pending_requests.json", "profile.json", "endpoint.json", "contact_kels.json"}
         for _, f := range files {
                 path := filepath.Join(s.dir, f)
                 if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
