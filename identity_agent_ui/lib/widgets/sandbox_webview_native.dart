@@ -1,7 +1,17 @@
 import 'dart:io' show Platform, Process, ProcessResult;
 import 'package:flutter/foundation.dart' show kIsWeb, debugPrint;
 import 'package:flutter/material.dart';
-import 'package:flutter_inappwebview_platform_interface/flutter_inappwebview_platform_interface.dart';
+import 'package:flutter_inappwebview_platform_interface/flutter_inappwebview_platform_interface.dart'
+    show
+        InAppWebViewPlatform,
+        InAppWebViewSettings,
+        NavigationActionPolicy,
+        PlatformInAppWebViewController,
+        PlatformInAppWebViewWidgetCreationParams,
+        ServerTrustAuthResponse,
+        ServerTrustAuthResponseAction,
+        URLRequest,
+        WebUri;
 import 'package:url_launcher/url_launcher.dart';
 import '../theme/app_theme.dart';
 
@@ -59,7 +69,7 @@ class SandboxWebView extends StatefulWidget {
 }
 
 class _SandboxWebViewState extends State<SandboxWebView> {
-  InAppWebViewController? _controller;
+  PlatformInAppWebViewController? _controller;
   SandboxWebViewStatus _status = SandboxWebViewStatus.loading;
   String? _errorMessage;
   double _progress = 0.0;
@@ -236,55 +246,63 @@ class _SandboxWebViewState extends State<SandboxWebView> {
       return _buildFallbackView();
     }
 
+    // Use the platform_interface factory directly (avoids flutter_inappwebview
+    // meta-package which registers a web plugin that crashes Flutter web).
+    final webviewWidget = InAppWebViewPlatform.instance!
+        .createPlatformInAppWebViewWidget(
+          PlatformInAppWebViewWidgetCreationParams(
+            initialUrlRequest: URLRequest(url: WebUri(widget.url)),
+            initialSettings: _secureSettings,
+            onWebViewCreated: (controller) {
+              _controller = controller;
+            },
+            onLoadStart: (controller, url) {
+              setState(() {
+                _status = SandboxWebViewStatus.loading;
+                if (url != null) _currentUrl = url.toString();
+              });
+            },
+            onLoadStop: (controller, url) {
+              setState(() {
+                _status = SandboxWebViewStatus.ready;
+                _progress = 1.0;
+                if (url != null) _currentUrl = url.toString();
+              });
+            },
+            onReceivedError: (controller, request, error) {
+              debugPrint('[SandboxWebView] Load error: ${error.description}');
+              setState(() {
+                _status = SandboxWebViewStatus.error;
+                _errorMessage = error.description;
+              });
+            },
+            onProgressChanged: (controller, progress) {
+              setState(() => _progress = progress / 100.0);
+            },
+            shouldOverrideUrlLoading: (controller, navigationAction) async {
+              final url = navigationAction.request.url?.toString() ?? '';
+              if (!_isAllowedNavigation(url)) {
+                debugPrint('[SandboxWebView] Blocked navigation to: $url');
+                widget.onNavigationBlocked?.call(url);
+                return NavigationActionPolicy.CANCEL;
+              }
+              return NavigationActionPolicy.ALLOW;
+            },
+            onConsoleMessage: (controller, consoleMessage) {
+              debugPrint('[SandboxWebView][Console] ${consoleMessage.message}');
+            },
+            onReceivedServerTrustAuthRequest: (controller, challenge) async {
+              return ServerTrustAuthResponse(
+                action: ServerTrustAuthResponseAction.PROCEED,
+              );
+            },
+          ),
+        )
+        .build(context);
+
     return Stack(
       children: [
-        InAppWebView(
-          initialUrlRequest: URLRequest(url: WebUri(widget.url)),
-          initialSettings: _secureSettings,
-          onWebViewCreated: (controller) {
-            _controller = controller;
-          },
-          onLoadStart: (controller, url) {
-            setState(() {
-              _status = SandboxWebViewStatus.loading;
-              if (url != null) _currentUrl = url.toString();
-            });
-          },
-          onLoadStop: (controller, url) {
-            setState(() {
-              _status = SandboxWebViewStatus.ready;
-              _progress = 1.0;
-              if (url != null) _currentUrl = url.toString();
-            });
-          },
-          onReceivedError: (controller, request, error) {
-            debugPrint('[SandboxWebView] Load error: ${error.description}');
-            setState(() {
-              _status = SandboxWebViewStatus.error;
-              _errorMessage = error.description;
-            });
-          },
-          onProgressChanged: (controller, progress) {
-            setState(() => _progress = progress / 100.0);
-          },
-          shouldOverrideUrlLoading: (controller, navigationAction) async {
-            final url = navigationAction.request.url?.toString() ?? '';
-            if (!_isAllowedNavigation(url)) {
-              debugPrint('[SandboxWebView] Blocked navigation to: $url');
-              widget.onNavigationBlocked?.call(url);
-              return NavigationActionPolicy.CANCEL;
-            }
-            return NavigationActionPolicy.ALLOW;
-          },
-          onConsoleMessage: (controller, consoleMessage) {
-            debugPrint('[SandboxWebView][Console] ${consoleMessage.message}');
-          },
-          onReceivedServerTrustAuthRequest: (controller, challenge) async {
-            return ServerTrustAuthResponse(
-              action: ServerTrustAuthResponseAction.PROCEED,
-            );
-          },
-        ),
+        webviewWidget,
         if (_status == SandboxWebViewStatus.error) _buildErrorOverlay(),
       ],
     );

@@ -194,7 +194,7 @@ pub fn verify_signature(data: Vec<u8>, signature: String, public_key: String) ->
 pub struct InteractResult {
     pub aid: String,
     pub said: String,
-    pub sequence_number: u64,
+    pub sequence_number: i64,
     pub kel_entry: String,
     pub raw_bytes_b64: String,
 }
@@ -211,7 +211,7 @@ pub fn interact_aid(name: String, seal_data_json: String) -> Result<InteractResu
         .get_mut(&name)
         .ok_or_else(|| format!("No AID found with name: {}", name))?;
 
-    let sn = instance.kel.len() as u64;
+    let sn = instance.kel.len() as i64;
     let aid = instance.prefix.to_string();
 
     // Parse seal data (pass-through; caller provides validated JSON array).
@@ -223,7 +223,7 @@ pub fn interact_aid(name: String, seal_data_json: String) -> Result<InteractResu
         "t": "ixn",
         "d": "",
         "i": aid,
-        "s": format!("{:x}", sn),
+        "s": format!("{:x}", sn as u64),
         "p": instance.kel.last().cloned().unwrap_or_default(),
         "a": seal_data,
     });

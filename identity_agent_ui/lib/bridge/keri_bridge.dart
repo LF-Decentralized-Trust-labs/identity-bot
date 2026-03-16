@@ -172,7 +172,10 @@ class KeriBridge {
     return BridgeInteractResult(
       aid: result.aid,
       said: result.said,
-      sequenceNumber: result.sequenceNumber,
+      // i64 in Rust; FRB v2 maps i64 → int on native. Cast defensively.
+      sequenceNumber: result.sequenceNumber is int
+          ? result.sequenceNumber as int
+          : (result.sequenceNumber as dynamic).toInt() as int,
       kelEntry: result.kelEntry,
       rawBytesB64: result.rawBytesB64,
     );
