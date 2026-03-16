@@ -49,7 +49,23 @@ type DriverRotationResponse struct {
 	NewPublicKey     string                 `json:"new_public_key"`
 	NewNextKeyDigest string                 `json:"new_next_key_digest"`
 	RotationEvent    map[string]interface{} `json:"rotation_event"`
+	// RawBytesB64: sign with the PRE-ROTATED key (mnemonic index 1), then /cesr-encode.
+	RawBytesB64    string `json:"raw_bytes_b64"`
 	SequenceNumber   int                    `json:"sequence_number"`
+}
+
+type DriverInteractRequest struct {
+	Name string        `json:"name"`
+	Data []interface{} `json:"data"`
+}
+
+type DriverInteractResponse struct {
+	AID            string                 `json:"aid"`
+	IxnEvent       map[string]interface{} `json:"ixn_event"`
+	// RawBytesB64: sign with the CURRENT signing key, then call /cesr-encode.
+	RawBytesB64    string `json:"raw_bytes_b64"`
+	Said           string `json:"said"`
+	SequenceNumber int    `json:"sequence_number"`
 }
 
 type DriverSignRequest struct {
@@ -368,6 +384,22 @@ func (d *KeriDriver) VerifySignature(dataB64, signature, publicKey string) (*Dri
 	var result DriverVerifyResponse
 	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("failed to decode verify response: %w", err)
+	}
+
+	return &result, nil
+}
+
+func (d *KeriDriver) Interact(name string, data []interface{}) (*DriverInteractResponse, error) {
+	reqBody := DriverInteractRequest{Name: name, Data: data}
+
+	body, err := d.doPost("/interact", reqBody, http.StatusCreated)
+	if err != nil {
+		return nil, err
+	}
+
+	var result DriverInteractResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode interact response: %w", err)
 	}
 
 	return &result, nil

@@ -175,6 +175,7 @@ def create_inception_event(public_key: str, next_public_key: str) -> dict:
 
     return {
         "aid": serder.pre,
+        "said": serder.said,
         "inception_event": serder.ked,
         # raw_bytes_b64: the exact bytes the controller must sign with its Ed25519 key.
         # Dart: base64.decode(raw_bytes_b64) → sign → /cesr-encode → attach CESR sig.
@@ -224,6 +225,8 @@ def inception():
             "next_key_digest": result["next_key_digest"],
             "kel": [result["inception_event"]],
             "sequence_number": 0,
+            # last_said tracks the SAID of the most recent event (used as 'dig' in next event)
+            "last_said": result.get("said", ""),
         }
 
         return jsonify(result), 201
@@ -258,11 +261,12 @@ def rotation():
         new_diger = coring.Diger(raw=new_next_bytes, code=MtrDex.Blake3_256)
 
         sn = identity["sequence_number"] + 1
+        prev_said = identity.get("last_said", "")
 
         serder = eventing.rotate(
             pre=identity["aid"],
             keys=[new_verfer.qb64],
-            dig=coring.Diger(ser=json.dumps(identity["kel"][-1]).encode(), code=MtrDex.Blake3_256).qb64,
+            dig=prev_said,
             ndigs=[new_diger.qb64],
             sn=sn,
         )
@@ -270,6 +274,7 @@ def rotation():
         identity["public_key"] = new_verfer.qb64
         identity["next_key_digest"] = new_diger.qb64
         identity["sequence_number"] = sn
+        identity["last_said"] = serder.said
         identity["kel"].append(serder.ked)
 
         return jsonify({
@@ -277,10 +282,67 @@ def rotation():
             "new_public_key": new_verfer.qb64,
             "new_next_key_digest": new_diger.qb64,
             "rotation_event": serder.ked,
+            # raw_bytes_b64: sign these with the PRE-ROTATED key (index 1 from mnemonic)
+            "raw_bytes_b64": base64.b64encode(serder.raw).decode(),
             "sequence_number": sn,
         }), 200
     except Exception as e:
         return jsonify({"error": f"Rotation failed: {str(e)}"}), 500
+
+
+@app.route("/interact", methods=["POST"])
+def interact():
+    """Create a KERI interaction (IXN) event anchoring external data in the KEL.
+
+    Request JSON:
+        name          (str)  — identity name (AID or label)
+        data          (list) — list of seal dicts to anchor, e.g. [{"d": "<SAID>"}]
+
+    Returns:
+        ixn_event     (dict) — the serialized IXN event body
+        raw_bytes_b64 (str)  — base64 of event bytes; sign with current key then /cesr-encode
+        said          (str)  — SAID of the IXN event
+        sequence_number (int)
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Request body required"}), 400
+
+    name = data.get("name", "")
+    seal_data = data.get("data", [])
+
+    if not name:
+        return jsonify({"error": "name is required"}), 400
+
+    identity = _identities.get(name)
+    if not identity:
+        return jsonify({"error": f"No identity found with name: {name}"}), 404
+
+    try:
+        sn = identity["sequence_number"] + 1
+        prev_said = identity.get("last_said", "")
+
+        serder = eventing.interact(
+            pre=identity["aid"],
+            dig=prev_said,
+            sn=sn,
+            data=seal_data,
+        )
+
+        identity["sequence_number"] = sn
+        identity["last_said"] = serder.said
+        identity["kel"].append(serder.ked)
+
+        return jsonify({
+            "aid": identity["aid"],
+            "ixn_event": serder.ked,
+            # raw_bytes_b64: sign these with the CURRENT signing key then call /cesr-encode
+            "raw_bytes_b64": base64.b64encode(serder.raw).decode(),
+            "said": serder.said,
+            "sequence_number": sn,
+        }), 201
+    except Exception as e:
+        return jsonify({"error": f"Interact failed: {str(e)}"}), 500
 
 
 @app.route("/cesr-encode", methods=["POST"])
@@ -548,7 +610,7 @@ if __name__ == "__main__":
 
     print(f"[keri-driver] Starting KERI Core Driver on {host}:{port}")
     print(f"[keri-driver] KERI library: keripy (reference)")
-    print(f"[keri-driver] Stateful endpoints:  /status, /inception, /rotation, /sign, /kel, /verify")
+    print(f"[keri-driver] Stateful endpoints:  /status, /inception, /rotation, /interact, /sign, /kel, /verify")
     print(f"[keri-driver] Stateless endpoints: /cesr-encode, /format-credential, /resolve-oobi, /generate-multisig-event")
 
     app.run(host=host, port=port, debug=False)

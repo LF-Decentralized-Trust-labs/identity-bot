@@ -89,23 +89,104 @@ class DesktopKeriService extends KeriService {
 
   @override
   Future<RotationResult> rotateAid({required String name}) async {
+    final mnemonic = await SecureKeyStore.loadMnemonic();
+    if (mnemonic == null) {
+      throw Exception('No identity keys found in secure storage.');
+    }
+
+    // Derive the pre-rotated key (index 1) and the next-next key (index 2).
+    // Rotation is signed with the PRE-ROTATED key (index 1), not the original key.
+    final seed = Bip39.mnemonicToSeed(mnemonic);
+    final seedBytes = Uint8List.fromList(seed.sublist(0, 32));
+
+    // Index 1: the key that was committed as pre-rotation at inception
+    final rot1Hash = sha256.convert([...seedBytes, 0x01]);
+    final rot1Seed = Uint8List.fromList(rot1Hash.bytes);
+    final rot1Keys = KeyManager.generateFromSeed(rot1Seed);
+
+    // Index 2: the new pre-rotation to commit
+    final rot2Hash = sha256.convert([...seedBytes, 0x02]);
+    final rot2Keys = KeyManager.generateFromSeed(Uint8List.fromList(rot2Hash.bytes));
+
+    // Step 1: Ask the Python driver to create the rotation event.
     final response = await _client.post(
       Uri.parse('$_baseUrl/api/rotation'),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'name': name}),
+      body: jsonEncode({
+        'name': name,
+        'new_public_key': rot1Keys.publicKeyEncoded,
+        'new_next_public_key': rot2Keys.publicKeyEncoded,
+      }),
     );
 
-    if (response.statusCode == 200) {
-      final json = jsonDecode(response.body);
-      return RotationResult(
-        aid: json['aid'] ?? '',
-        newPublicKey: json['new_public_key'] ?? '',
-        kel: json['kel'] ?? '',
-      );
-    } else {
+    if (response.statusCode != 200) {
       final body = jsonDecode(response.body);
       throw Exception(body['error'] ?? 'Rotation failed: ${response.statusCode}');
     }
+
+    final json = jsonDecode(response.body);
+    final rawBytesB64 = json['raw_bytes_b64'] as String? ?? '';
+
+    // Step 2: Sign with the pre-rotated key (index 1) and CESR-encode.
+    String cesrSig = '';
+    if (rawBytesB64.isNotEmpty) {
+      final rot1PrivKey = ed.newKeyFromSeed(rot1Seed);
+      final rawEventBytes = base64Decode(rawBytesB64);
+      final rawSig = ed.sign(rot1PrivKey, Uint8List.fromList(rawEventBytes));
+      cesrSig = await _cesrEncode(base64Encode(rawSig));
+    }
+
+    return RotationResult(
+      aid: json['aid'] ?? '',
+      newPublicKey: json['new_public_key'] ?? '',
+      kel: json['kel'] ?? '',
+      cesrSignature: cesrSig,
+    );
+  }
+
+  @override
+  Future<InteractResult> interactAid({
+    required String name,
+    List<Map<String, String>> sealData = const [],
+  }) async {
+    final mnemonic = await SecureKeyStore.loadMnemonic();
+    if (mnemonic == null) {
+      throw Exception('No identity keys found in secure storage.');
+    }
+
+    // Step 1: Create the IXN event via the Python driver.
+    final response = await _client.post(
+      Uri.parse('$_baseUrl/api/interact'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'name': name, 'data': sealData}),
+    );
+
+    if (response.statusCode != 201 && response.statusCode != 200) {
+      final body = jsonDecode(response.body);
+      throw Exception(body['error'] ?? 'IXN failed: ${response.statusCode}');
+    }
+
+    final json = jsonDecode(response.body);
+    final rawBytesB64 = json['raw_bytes_b64'] as String? ?? '';
+
+    // Step 2: Sign IXN event body with current key (index 0) and CESR-encode.
+    String cesrSig = '';
+    if (rawBytesB64.isNotEmpty) {
+      final seed = Bip39.mnemonicToSeed(mnemonic);
+      final seedHash = sha256.convert(seed.sublist(0, 32));
+      final privateSeed = Uint8List.fromList(seedHash.bytes);
+      final privateKey = ed.newKeyFromSeed(privateSeed);
+      final rawEventBytes = base64Decode(rawBytesB64);
+      final rawSig = ed.sign(privateKey, Uint8List.fromList(rawEventBytes));
+      cesrSig = await _cesrEncode(base64Encode(rawSig));
+    }
+
+    return InteractResult(
+      aid: json['aid'] ?? '',
+      said: json['said'] ?? '',
+      sequenceNumber: json['sequence_number'] as int? ?? 0,
+      cesrSignature: cesrSig,
+    );
   }
 
   @override

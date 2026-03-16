@@ -268,6 +268,7 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 
                 r.Post("/inception", s.handleInception)
                 r.Post("/rotation", s.handleRotation)
+                r.Post("/interact", s.handleInteract)
                 r.Post("/sign", s.handleSign)
                 r.Get("/kel", s.handleKel)
                 r.Post("/verify", s.handleVerify)
@@ -407,6 +408,9 @@ type DriverInfo struct {
 type InceptionRequest struct {
         PublicKey     string `json:"public_key"`
         NextPublicKey string `json:"next_public_key"`
+        // CesrSignature: optional — the controller's CESR '0B...' signature over the
+        // inception event body, produced by Dart local signing + /api/cesr/encode.
+        CesrSignature string `json:"cesr_signature,omitempty"`
 }
 
 type InceptionResponse struct {
@@ -580,6 +584,7 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
                 PublicKey:      result.PublicKey,
                 NextKeyDigest:  result.NextKeyDigest,
                 Timestamp:      now,
+                CesrSignature:  req.CesrSignature,
         }
         if err := s.DataStore.SaveEvent(eventRecord); err != nil {
                 writeError(w, http.StatusInternalServerError, "Failed to persist inception event", err.Error())
@@ -680,6 +685,7 @@ func (s *CoreServer) handleRotation(w http.ResponseWriter, r *http.Request) {
                 Name             string `json:"name"`
                 NewPublicKey     string `json:"new_public_key"`
                 NewNextPublicKey string `json:"new_next_public_key"`
+                CesrSignature    string `json:"cesr_signature,omitempty"`
         }
         if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
                 writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
@@ -707,6 +713,7 @@ func (s *CoreServer) handleRotation(w http.ResponseWriter, r *http.Request) {
                 PublicKey:      result.NewPublicKey,
                 NextKeyDigest:  result.NewNextKeyDigest,
                 Timestamp:      now,
+                CesrSignature:  req.CesrSignature,
         }
         if err := s.DataStore.SaveEvent(eventRecord); err != nil {
                 log.Printf("[identity-agent-core] Warning: failed to persist rotation event: %v", err)
@@ -723,6 +730,61 @@ func (s *CoreServer) handleRotation(w http.ResponseWriter, r *http.Request) {
         log.Printf("[identity-agent-core] ROTATION: Key rotated for AID: %s (sn: %d)", result.AID, result.SequenceNumber)
 
         w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(result)
+}
+
+func (s *CoreServer) handleInteract(w http.ResponseWriter, r *http.Request) {
+        if s.KeriDriver == nil {
+                writeError(w, http.StatusServiceUnavailable, "KERI driver not available",
+                        "On mobile, use the Rust bridge for IXN events")
+                return
+        }
+
+        var req struct {
+                Name          string        `json:"name"`
+                Data          []interface{} `json:"data"`
+                CesrSignature string        `json:"cesr_signature,omitempty"`
+        }
+        if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+                writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+                return
+        }
+        if req.Name == "" {
+                writeError(w, http.StatusBadRequest, "Missing required field", "name is required")
+                return
+        }
+
+        result, err := s.KeriDriver.Interact(req.Name, req.Data)
+        if err != nil {
+                writeError(w, http.StatusInternalServerError, "IXN event failed", err.Error())
+                return
+        }
+
+        now := time.Now().UTC().Format(time.RFC3339)
+        eventJSON, _ := json.Marshal(result.IxnEvent)
+        eventRecord := store.EventRecord{
+                AID:            result.AID,
+                SequenceNumber: result.SequenceNumber,
+                EventType:      "ixn",
+                EventJSON:      string(eventJSON),
+                Timestamp:      now,
+                CesrSignature:  req.CesrSignature,
+        }
+        if err := s.DataStore.SaveEvent(eventRecord); err != nil {
+                log.Printf("[identity-agent-core] Warning: failed to persist IXN event: %v", err)
+        }
+
+        identity, _ := s.DataStore.GetIdentity()
+        if identity != nil {
+                identity.EventCount = result.SequenceNumber + 1
+                s.DataStore.SaveIdentity(*identity)
+        }
+
+        log.Printf("[identity-agent-core] IXN: Interaction event for AID: %s (sn: %d, said: %s)",
+                result.AID, result.SequenceNumber, result.Said)
+
+        w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(http.StatusCreated)
         json.NewEncoder(w).Encode(result)
 }
 

@@ -30,11 +30,13 @@ class RotationResult {
   final String aid;
   final String newPublicKey;
   final String kel;
+  final String cesrSignature;
 
   RotationResult({
     required this.aid,
     required this.newPublicKey,
     required this.kel,
+    this.cesrSignature = '',
   });
 }
 
@@ -53,6 +55,21 @@ class SignatureResult {
   });
 }
 
+class InteractResult {
+  final String aid;
+  final String said;
+  final int sequenceNumber;
+  // cesrSignature: CESR '0B...' signature over the IXN event body.
+  final String cesrSignature;
+
+  InteractResult({
+    required this.aid,
+    required this.said,
+    required this.sequenceNumber,
+    this.cesrSignature = '',
+  });
+}
+
 abstract class KeriService {
   AgentEnvironment get environment;
 
@@ -61,8 +78,13 @@ abstract class KeriService {
     required String code,
   });
 
-  Future<RotationResult> rotateAid({
+  Future<RotationResult> rotateAid({required String name});
+
+  /// Create a KERI interaction (IXN) event anchoring [sealData] in the KEL.
+  /// [sealData] is a list of seal maps, e.g. [{"d": "<credentialSAID>"}].
+  Future<InteractResult> interactAid({
     required String name,
+    List<Map<String, String>> sealData,
   });
 
   Future<SignatureResult> signPayload({

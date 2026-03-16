@@ -18,6 +18,9 @@ type EventRecord struct {
         PublicKey      string `json:"public_key"`
         NextKeyDigest  string `json:"next_key_digest"`
         Timestamp      string `json:"timestamp"`
+        // CesrSignature: CESR '0B...' (88-char) signature over the event body.
+        // Produced by Dart local signing + /api/cesr/encode. Empty for legacy records.
+        CesrSignature  string `json:"cesr_signature,omitempty"`
 }
 
 type IdentityState struct {
