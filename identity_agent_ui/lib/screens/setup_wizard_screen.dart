@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import '../theme/app_theme.dart';
 import '../crypto/bip39.dart';
 import '../services/keri_service.dart';
+import '../services/secure_key_store.dart';
 import '../services/backend_process_service.dart';
 
 enum WizardStep {
@@ -209,6 +210,8 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
         name: 'default',
         code: _mnemonic.join(' '),
       );
+
+      await SecureKeyStore.saveMnemonic(_mnemonic);
 
       setState(() {
         _aid = result.aid;

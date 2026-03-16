@@ -1,8 +1,13 @@
 import 'dart:convert';
+import 'dart:typed_data';
+import 'package:crypto/crypto.dart';
+import 'package:ed25519_edwards/ed25519_edwards.dart' as ed;
 import 'package:http/http.dart' as http;
 import '../config/agent_config.dart';
+import '../crypto/bip39.dart';
 import '../crypto/keys.dart';
 import 'keri_service.dart';
+import 'secure_key_store.dart';
 
 class DesktopKeriService extends KeriService {
   final String _baseUrl;
@@ -72,25 +77,27 @@ class DesktopKeriService extends KeriService {
     required String name,
     required List<int> data,
   }) async {
-    final response = await _client.post(
-      Uri.parse('$_baseUrl/api/sign'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'name': name,
-        'data': base64Encode(data),
-      }),
-    );
-
-    if (response.statusCode == 200) {
-      final json = jsonDecode(response.body);
-      return SignatureResult(
-        signature: json['signature'] ?? '',
-        publicKey: json['public_key'] ?? '',
-      );
-    } else {
-      final body = jsonDecode(response.body);
-      throw Exception(body['error'] ?? 'Signing failed: ${response.statusCode}');
+    // Signing is performed locally in Dart using the stored mnemonic.
+    // The private key never leaves the device and is never sent to the backend.
+    final mnemonic = await SecureKeyStore.loadMnemonic();
+    if (mnemonic == null) {
+      throw Exception(
+          'No identity keys found in secure storage. '
+          'Please recreate your identity to restore signing capability.');
     }
+
+    final seed = Bip39.mnemonicToSeed(mnemonic);
+    final seedHash = sha256.convert(seed.sublist(0, 32));
+    final privateSeed = Uint8List.fromList(seedHash.bytes);
+    final privateKey = ed.newKeyFromSeed(privateSeed);
+
+    final signature = ed.sign(privateKey, Uint8List.fromList(data));
+    final signingKeyPair = KeyManager.generateFromSeed(privateSeed);
+
+    return SignatureResult(
+      signature: base64Encode(signature),
+      publicKey: signingKeyPair.publicKeyEncoded,
+    );
   }
 
   @override
