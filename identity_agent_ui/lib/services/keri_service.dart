@@ -104,6 +104,34 @@ class CredentialIssuanceResult {
   });
 }
 
+class WitnessReceiptResult {
+  final bool accepted;
+  final bool thresholdMet;
+  final int receiptCount;
+  final List<String> errors;
+
+  WitnessReceiptResult({
+    required this.accepted,
+    required this.thresholdMet,
+    required this.receiptCount,
+    this.errors = const [],
+  });
+}
+
+class KerlEntry {
+  final String eventSaid;
+  final List<Map<String, dynamic>> receipts;
+  final int receiptCount;
+  final bool thresholdMet;
+
+  KerlEntry({
+    required this.eventSaid,
+    required this.receipts,
+    required this.receiptCount,
+    required this.thresholdMet,
+  });
+}
+
 class VerificationResult {
   final bool verified;
   // checks: map of check name → bool (e.g. "said_integrity": true).
@@ -163,6 +191,24 @@ abstract class KeriService {
     required String holderAid,
     String issuerAid = '',
     String schemaSaid = '',
+  });
+
+  /// Submit a witness receipt for a KERI event. The receipt is a CESR-encoded
+  /// Ed25519 signature from a witness over the event SAID (UTF-8 bytes).
+  Future<WitnessReceiptResult> submitWitnessReceipt({
+    required String eventSaid,
+    required String witnessAid,
+    required String witnessPublicKey,
+    required String cesrSignature,
+    List<String> trustedWitnesses = const [],
+    int threshold = 0,
+  });
+
+  /// Retrieve the KERL entry for an event: the event SAID plus all
+  /// accumulated witness receipts and threshold status.
+  Future<KerlEntry> getKERL({
+    required String eventSaid,
+    int threshold = 0,
   });
 
   /// Verify a credential against the 8-check engine:

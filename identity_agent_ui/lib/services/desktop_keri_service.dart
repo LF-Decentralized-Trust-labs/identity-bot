@@ -365,6 +365,66 @@ class DesktopKeriService extends KeriService {
   }
 
   @override
+  Future<WitnessReceiptResult> submitWitnessReceipt({
+    required String eventSaid,
+    required String witnessAid,
+    required String witnessPublicKey,
+    required String cesrSignature,
+    List<String> trustedWitnesses = const [],
+    int threshold = 0,
+  }) async {
+    final response = await _client.post(
+      Uri.parse('$_baseUrl/api/receipt/submit'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'event_said': eventSaid,
+        'witness_aid': witnessAid,
+        'witness_public_key': witnessPublicKey,
+        'cesr_signature': cesrSignature,
+        'trusted_witnesses': trustedWitnesses,
+        'threshold': threshold,
+      }),
+    );
+
+    if (response.statusCode == 200) {
+      final json = jsonDecode(response.body);
+      return WitnessReceiptResult(
+        accepted: json['accepted'] == true,
+        thresholdMet: json['threshold_met'] == true,
+        receiptCount: json['receipt_count'] as int? ?? 0,
+        errors: List<String>.from(json['errors'] ?? []),
+      );
+    } else {
+      final body = jsonDecode(response.body);
+      throw Exception(body['error'] ?? 'Receipt submission failed: ${response.statusCode}');
+    }
+  }
+
+  @override
+  Future<KerlEntry> getKERL({
+    required String eventSaid,
+    int threshold = 0,
+  }) async {
+    final response = await _client.get(
+      Uri.parse('$_baseUrl/api/kerl?event_said=$eventSaid&threshold=$threshold'),
+    );
+
+    if (response.statusCode == 200) {
+      final json = jsonDecode(response.body);
+      return KerlEntry(
+        eventSaid: json['event_said'] ?? '',
+        receipts: List<Map<String, dynamic>>.from(
+          (json['receipts'] as List? ?? []).map((r) => Map<String, dynamic>.from(r)),
+        ),
+        receiptCount: json['receipt_count'] as int? ?? 0,
+        thresholdMet: json['threshold_met'] == true,
+      );
+    } else {
+      throw Exception('Failed to get KERL: ${response.statusCode}');
+    }
+  }
+
+  @override
   Future<VerificationResult> verifyCredential({
     required String acdcJson,
     String holderAid = '',

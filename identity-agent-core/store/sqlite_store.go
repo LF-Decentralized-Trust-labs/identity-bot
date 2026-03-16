@@ -599,10 +599,48 @@ func (s *SQLiteStore) SaveEndpoint(url, source string) error {
 	return err
 }
 
+// ── Witness Receipts (KERL Phase 7) ───────────────────────────────────────────
+
+func (s *SQLiteStore) SaveWitnessReceipt(record WitnessReceiptRecord) error {
+	if record.ReceivedAt == "" {
+		record.ReceivedAt = time.Now().UTC().Format(time.RFC3339)
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO witness_receipts (event_said, witness_aid, cesr_signature, received_at)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(event_said, witness_aid) DO NOTHING`,
+		record.EventSAID, record.WitnessAID, record.CesrSignature, record.ReceivedAt,
+	)
+	return err
+}
+
+func (s *SQLiteStore) GetWitnessReceipts(eventSAID string) ([]WitnessReceiptRecord, error) {
+	rows, err := s.db.Query(
+		`SELECT event_said, witness_aid, cesr_signature, received_at
+		 FROM witness_receipts WHERE event_said = ? ORDER BY id ASC`, eventSAID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query witness receipts: %w", err)
+	}
+	defer rows.Close()
+
+	var receipts []WitnessReceiptRecord
+	for rows.Next() {
+		var r WitnessReceiptRecord
+		if err := rows.Scan(&r.EventSAID, &r.WitnessAID, &r.CesrSignature, &r.ReceivedAt); err != nil {
+			return nil, err
+		}
+		receipts = append(receipts, r)
+	}
+	if receipts == nil {
+		receipts = []WitnessReceiptRecord{}
+	}
+	return receipts, nil
+}
+
 // ── Reset ─────────────────────────────────────────────────────────────────────
 
 func (s *SQLiteStore) ResetAll() error {
-	tables := []string{"kel", "identity", "contacts", "pending_requests", "profile", "settings", "endpoint", "contact_kels", "credentials", "presentations"}
+	tables := []string{"kel", "identity", "contacts", "pending_requests", "profile", "settings", "endpoint", "contact_kels", "credentials", "presentations", "witness_receipts"}
 	for _, t := range tables {
 		if _, err := s.db.Exec(`DELETE FROM ` + t); err != nil {
 			return fmt.Errorf("failed to clear table %s: %w", t, err)

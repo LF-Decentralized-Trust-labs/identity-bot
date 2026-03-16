@@ -150,6 +150,22 @@ CREATE INDEX IF NOT EXISTS idx_presentations_credential ON presentations(credent
 CREATE INDEX IF NOT EXISTS idx_presentations_holder ON presentations(holder_aid);
 `,
 	},
+	{
+		Version:     5,
+		Description: "Add witness_receipts table for KERL phase 7",
+		SQL: `
+CREATE TABLE IF NOT EXISTS witness_receipts (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_said      TEXT NOT NULL,
+    witness_aid     TEXT NOT NULL,
+    cesr_signature  TEXT NOT NULL,
+    received_at     TEXT NOT NULL DEFAULT '',
+    UNIQUE(event_said, witness_aid)
+);
+
+CREATE INDEX IF NOT EXISTS idx_witness_receipts_event ON witness_receipts(event_said);
+`,
+	},
 }
 
 // ApplyIdentityMigrations creates the migrations table and applies any pending migrations.

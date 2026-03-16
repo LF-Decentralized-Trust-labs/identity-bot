@@ -151,6 +151,26 @@ class MobileStandaloneKeriService extends KeriService {
   }
 
   @override
+  Future<WitnessReceiptResult> submitWitnessReceipt({
+    required String eventSaid,
+    required String witnessAid,
+    required String witnessPublicKey,
+    required String cesrSignature,
+    List<String> trustedWitnesses = const [],
+    int threshold = 0,
+  }) async {
+    throw UnimplementedError('submitWitnessReceipt not yet supported on mobile standalone');
+  }
+
+  @override
+  Future<KerlEntry> getKERL({
+    required String eventSaid,
+    int threshold = 0,
+  }) async {
+    throw UnimplementedError('getKERL not yet supported on mobile standalone');
+  }
+
+  @override
   Future<VerificationResult> verifyCredential({
     required String acdcJson,
     String holderAid = '',

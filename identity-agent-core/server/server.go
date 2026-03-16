@@ -285,6 +285,9 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
                 r.Get("/presentations", s.handleGetPresentations)
                 r.Post("/credential/verify", s.handleVerifyCredential)
 
+                r.Post("/receipt/submit", s.handleSubmitReceipt)
+                r.Get("/kerl", s.handleGetKERL)
+
                 r.Get("/oobi", s.handleOobiGenerate)
 
                 r.Get("/contacts", s.handleGetContacts)
@@ -1169,6 +1172,101 @@ func (s *CoreServer) handleVerifyCredential(w http.ResponseWriter, r *http.Reque
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
+}
+
+func (s *CoreServer) handleSubmitReceipt(w http.ResponseWriter, r *http.Request) {
+	if s.KeriDriver == nil {
+		writeError(w, http.StatusServiceUnavailable, "KERI driver not available",
+			"Witness receipt submission requires the Python KERI driver (desktop only)")
+		return
+	}
+
+	var req struct {
+		EventSAID        string   `json:"event_said"`
+		WitnessAID       string   `json:"witness_aid"`
+		WitnessPublicKey string   `json:"witness_public_key"`
+		CesrSignature    string   `json:"cesr_signature"`
+		TrustedWitnesses []string `json:"trusted_witnesses"`
+		Threshold        int      `json:"threshold"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+	if req.EventSAID == "" || req.WitnessAID == "" || req.CesrSignature == "" {
+		writeError(w, http.StatusBadRequest, "Missing required fields", "event_said, witness_aid, cesr_signature are required")
+		return
+	}
+
+	driverReq := &drivers.DriverSubmitReceiptRequest{
+		EventSAID:        req.EventSAID,
+		WitnessAID:       req.WitnessAID,
+		WitnessPublicKey: req.WitnessPublicKey,
+		CesrSignature:    req.CesrSignature,
+		TrustedWitnesses: req.TrustedWitnesses,
+		Threshold:        req.Threshold,
+	}
+
+	result, err := s.KeriDriver.SubmitReceipt(driverReq)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Receipt submission failed", err.Error())
+		return
+	}
+
+	// Persist accepted receipts to durable store.
+	if result.Accepted {
+		_ = s.DataStore.SaveWitnessReceipt(store.WitnessReceiptRecord{
+			EventSAID:     req.EventSAID,
+			WitnessAID:    req.WitnessAID,
+			CesrSignature: req.CesrSignature,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+func (s *CoreServer) handleGetKERL(w http.ResponseWriter, r *http.Request) {
+	eventSAID := r.URL.Query().Get("event_said")
+	if eventSAID == "" {
+		writeError(w, http.StatusBadRequest, "Missing event_said query parameter", "")
+		return
+	}
+	threshold := 0
+	if t := r.URL.Query().Get("threshold"); t != "" {
+		fmt.Sscanf(t, "%d", &threshold)
+	}
+
+	// Load receipts from durable store (always available, even without the Python driver).
+	receipts, err := s.DataStore.GetWitnessReceipts(eventSAID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to read witness receipts", err.Error())
+		return
+	}
+
+	thresholdMet := threshold == 0 || len(receipts) >= threshold
+
+	type receiptEntry struct {
+		WitnessAID    string `json:"witness_aid"`
+		CesrSignature string `json:"cesr_signature"`
+		ReceivedAt    string `json:"received_at"`
+	}
+	entries := make([]receiptEntry, 0, len(receipts))
+	for _, r := range receipts {
+		entries = append(entries, receiptEntry{
+			WitnessAID:    r.WitnessAID,
+			CesrSignature: r.CesrSignature,
+			ReceivedAt:    r.ReceivedAt,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"event_said":    eventSAID,
+		"receipts":      entries,
+		"receipt_count": len(receipts),
+		"threshold_met": thresholdMet,
+	})
 }
 
 func (s *CoreServer) handleResolveOobi(w http.ResponseWriter, r *http.Request) {

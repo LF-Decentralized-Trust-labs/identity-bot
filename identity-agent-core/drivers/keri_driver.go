@@ -187,6 +187,35 @@ type DriverPresentCredentialResponse struct {
 	PresSaidB64         string                 `json:"pres_said_b64"`
 }
 
+type DriverSubmitReceiptRequest struct {
+	EventSAID        string   `json:"event_said"`
+	WitnessAID       string   `json:"witness_aid"`
+	WitnessPublicKey string   `json:"witness_public_key"`
+	CesrSignature    string   `json:"cesr_signature"`
+	TrustedWitnesses []string `json:"trusted_witnesses,omitempty"`
+	Threshold        int      `json:"threshold,omitempty"`
+}
+
+type DriverSubmitReceiptResponse struct {
+	Accepted     bool     `json:"accepted"`
+	ThresholdMet bool     `json:"threshold_met"`
+	ReceiptCount int      `json:"receipt_count"`
+	Errors       []string `json:"errors"`
+}
+
+type DriverKerlReceiptEntry struct {
+	WitnessAID    string `json:"witness_aid"`
+	CesrSignature string `json:"cesr_sig"`
+}
+
+type DriverGetKerlResponse struct {
+	EventSAID    string                   `json:"event_said"`
+	Receipts     []DriverKerlReceiptEntry `json:"receipts"`
+	ReceiptCount int                      `json:"receipt_count"`
+	ThresholdMet bool                     `json:"threshold_met"`
+	Errors       []string                 `json:"errors"`
+}
+
 type DriverVerifyCredentialRequest struct {
 	// AcdcJson: full ACDC JSON string to verify.
 	AcdcJson string `json:"acdc_json"`
@@ -607,6 +636,45 @@ func (d *KeriDriver) GenerateMultisigEvent(aids []string, threshold int, current
 	var result DriverMultisigResponse
 	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("failed to decode multisig event response: %w", err)
+	}
+
+	return &result, nil
+}
+
+func (d *KeriDriver) SubmitReceipt(req *DriverSubmitReceiptRequest) (*DriverSubmitReceiptResponse, error) {
+	body, err := d.doPost("/receipt/submit", req, http.StatusOK)
+	if err != nil {
+		return nil, err
+	}
+
+	var result DriverSubmitReceiptResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode receipt/submit response: %w", err)
+	}
+
+	return &result, nil
+}
+
+func (d *KeriDriver) GetKERL(eventSAID string, threshold int) (*DriverGetKerlResponse, error) {
+	url := fmt.Sprintf("%s/receipt/kerl?event_said=%s&threshold=%d", d.BaseURL, eventSAID, threshold)
+	resp, err := d.client.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("KERL request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read KERL response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, d.parseError(body, resp.StatusCode, "KERL request")
+	}
+
+	var result DriverGetKerlResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode KERL response: %w", err)
 	}
 
 	return &result, nil

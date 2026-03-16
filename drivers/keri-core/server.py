@@ -1180,6 +1180,148 @@ def generate_multisig_event():
         return jsonify({"error": f"Multisig event generation failed: {str(e)}"}), 500
 
 # ---------------------------------------------------------------------------
+# Phase 7: KERL + Witness Receipts
+# ---------------------------------------------------------------------------
+#
+# Witness receipts: a witness signs the event SAID (UTF-8 bytes of the 44-char
+# SAID string) with its Ed25519 key, producing a CESR Cigar '0B...' (88 chars).
+# A KERL entry = event JSON + list of valid receipts + threshold_met flag.
+#
+# In-process receipt store: keyed by event_said → list of receipt dicts.
+# This is stateless across restarts (receipts are ephemeral unless the Go
+# server persists them via SaveWitnessReceipt). The Go server is the durable
+# store; the Python driver validates and structures the data.
+
+_receipt_store: dict = {}   # event_said -> [{"witness_aid": str, "cesr_sig": str}]
+
+
+def _verify_receipt_sig(cesr_sig: str, event_said: str, witness_public_key: str) -> bool:
+    """Verify a CESR-encoded witness receipt signature against an event SAID.
+
+    Args:
+        cesr_sig: '0B...' (88-char) CESR-encoded Ed25519 signature.
+        event_said: The 44-char SAID the witness signed (UTF-8 bytes).
+        witness_public_key: CESR Ed25519 public key of the witness.
+    Returns:
+        True if the signature is valid, False otherwise.
+    """
+    try:
+        cigar = coring.Cigar(qb64=cesr_sig)
+        verfer = coring.Verfer(qb64=witness_public_key)
+        return verfer.verify(sig=cigar.raw, ser=event_said.encode())
+    except Exception:
+        return False
+
+
+@app.route("/receipt/submit", methods=["POST"])
+def receipt_submit():
+    """Accept and validate a witness receipt for a KERI event.
+
+    Request body:
+        event_said      (str)  — the 44-char SAID of the event being receipted
+        witness_aid     (str)  — the AID of the witnessing entity
+        witness_public_key (str) — CESR Ed25519 public key of the witness
+        cesr_signature  (str)  — '0B...' witness signature over event_said.encode()
+        trusted_witnesses (list[str]) — AIDs considered trusted by the controller
+        threshold       (int)  — minimum receipts required (0 = no threshold check)
+
+    Response body:
+        accepted        (bool) — True if sig verified and witness is trusted
+        threshold_met   (bool) — True if accumulated receipts meet threshold
+        receipt_count   (int)  — number of trusted receipts now stored for this event
+        errors          (list) — validation error messages (empty on success)
+    """
+    data = request.get_json(force=True, silent=True) or {}
+    event_said       = data.get("event_said", "")
+    witness_aid      = data.get("witness_aid", "")
+    witness_pub_key  = data.get("witness_public_key", "")
+    cesr_sig         = data.get("cesr_signature", "")
+    trusted_witnesses = set(data.get("trusted_witnesses", []))
+    threshold        = int(data.get("threshold", 0))
+
+    errors = []
+
+    if not event_said:
+        errors.append("event_said is required")
+    if not witness_aid:
+        errors.append("witness_aid is required")
+    if not witness_pub_key:
+        errors.append("witness_public_key is required")
+    if not cesr_sig:
+        errors.append("cesr_signature is required")
+    if errors:
+        return jsonify({"error": "; ".join(errors)}), 400
+
+    # Verify the receipt signature.
+    sig_valid = _verify_receipt_sig(cesr_sig, event_said, witness_pub_key)
+    if not sig_valid:
+        return jsonify({
+            "accepted": False,
+            "threshold_met": False,
+            "receipt_count": len(_receipt_store.get(event_said, [])),
+            "errors": ["receipt signature invalid"],
+        }), 200
+
+    # Check trust.
+    if trusted_witnesses and witness_aid not in trusted_witnesses:
+        return jsonify({
+            "accepted": False,
+            "threshold_met": False,
+            "receipt_count": len(_receipt_store.get(event_said, [])),
+            "errors": ["witness AID not in trusted_witnesses list"],
+        }), 200
+
+    # Accumulate (de-duplicate by witness_aid).
+    existing = _receipt_store.setdefault(event_said, [])
+    if not any(r["witness_aid"] == witness_aid for r in existing):
+        existing.append({"witness_aid": witness_aid, "cesr_sig": cesr_sig})
+
+    receipt_count = len(existing)
+    threshold_met = (threshold == 0) or (receipt_count >= threshold)
+
+    return jsonify({
+        "accepted": True,
+        "threshold_met": threshold_met,
+        "receipt_count": receipt_count,
+        "errors": [],
+    }), 200
+
+
+@app.route("/receipt/kerl", methods=["GET"])
+def receipt_kerl():
+    """Return the KERL entry for an event: the event body plus all accumulated receipts.
+
+    Query params:
+        event_said   — the SAID of the event
+        threshold    — (optional, int) required receipt count; defaults to 0 (no check)
+
+    Response body:
+        event_said      (str)
+        receipts        (list) — [{witness_aid, cesr_sig}] in insertion order
+        receipt_count   (int)
+        threshold_met   (bool)
+        errors          (list)
+    """
+    event_said = request.args.get("event_said", "")
+    threshold  = int(request.args.get("threshold", "0"))
+
+    if not event_said:
+        return jsonify({"error": "event_said query parameter is required"}), 400
+
+    receipts = list(_receipt_store.get(event_said, []))
+    receipt_count = len(receipts)
+    threshold_met = (threshold == 0) or (receipt_count >= threshold)
+
+    return jsonify({
+        "event_said":    event_said,
+        "receipts":      receipts,
+        "receipt_count": receipt_count,
+        "threshold_met": threshold_met,
+        "errors":        [],
+    }), 200
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -1191,6 +1333,7 @@ if __name__ == "__main__":
     print(f"[keri-driver] KERI library: keripy (reference)")
     print(f"[keri-driver] Stateful endpoints:  /status, /inception, /rotation, /interact, /sign, /kel, /verify")
     print(f"[keri-driver] Stateless endpoints: /cesr-encode, /validate-kel, /resolve-oobi, /format-credential, /generate-multisig-event")
-    print(f"[keri-driver] Credential endpoints: /credential/issue, /credential/present")
+    print(f"[keri-driver] Credential endpoints: /credential/issue, /credential/present, /credential/verify")
+    print(f"[keri-driver] KERL endpoints:       /receipt/submit, /receipt/kerl")
 
     app.run(host=host, port=port, debug=False)
