@@ -2,10 +2,17 @@ import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../services/preferences_service.dart';
 
-class ModeSelectionScreen extends StatelessWidget {
+class ModeSelectionScreen extends StatefulWidget {
   final void Function(AgentMode mode) onModeSelected;
 
   const ModeSelectionScreen({super.key, required this.onModeSelected});
+
+  @override
+  State<ModeSelectionScreen> createState() => _ModeSelectionScreenState();
+}
+
+class _ModeSelectionScreenState extends State<ModeSelectionScreen> {
+  bool _advancedExpanded = false;
 
   @override
   Widget build(BuildContext context) {
@@ -48,24 +55,31 @@ class ModeSelectionScreen extends StatelessWidget {
                       fontFamily: 'monospace',
                     ),
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 16),
                   const Text(
-                    'SETUP',
+                    'Protect and control your entire digital life.',
+                    textAlign: TextAlign.center,
                     style: TextStyle(
-                      color: AppColors.accent,
-                      fontSize: 14,
+                      color: AppColors.textPrimary,
+                      fontSize: 16,
                       fontWeight: FontWeight.w600,
-                      letterSpacing: 2.0,
+                      height: 1.4,
                       fontFamily: 'monospace',
                     ),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 20),
+                  _buildBulletRow(Icons.person_outline, 'Your identity.'),
+                  const SizedBox(height: 10),
+                  _buildBulletRow(Icons.vpn_key_outlined, 'Your keys.'),
+                  const SizedBox(height: 10),
+                  _buildBulletRow(Icons.folder_outlined, 'Your data.'),
+                  const SizedBox(height: 16),
                   const Text(
-                    'How would you like to get started?',
+                    'This app will manage your digital life for as long as you choose to use it.',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: AppColors.textSecondary,
-                      fontSize: 14,
+                      fontSize: 12,
                       height: 1.5,
                       fontFamily: 'monospace',
                     ),
@@ -79,7 +93,7 @@ class ModeSelectionScreen extends StatelessWidget {
                         'You will generate a secure seed phrase and create your '
                         'root identity from scratch.',
                     badge: 'RECOMMENDED',
-                    onTap: () => onModeSelected(AgentMode.createNew),
+                    onTap: () => widget.onModeSelected(AgentMode.createNew),
                   ),
                   const SizedBox(height: 16),
                   _buildModeCard(
@@ -89,13 +103,182 @@ class ModeSelectionScreen extends StatelessWidget {
                         'Connect this device to an identity that is already '
                         'running on another server or device. You will need '
                         'the server URL.',
-                    onTap: () => onModeSelected(AgentMode.connectExisting),
+                    onTap: () =>
+                        widget.onModeSelected(AgentMode.connectExisting),
                   ),
+                  const SizedBox(height: 24),
+                  _buildAdvancedSection(context),
                   const SizedBox(height: 32),
                 ],
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBulletRow(IconData icon, String text) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, color: AppColors.accent, size: 20),
+        const SizedBox(width: 10),
+        Text(
+          text,
+          style: const TextStyle(
+            color: AppColors.textPrimary,
+            fontSize: 14,
+            fontFamily: 'monospace',
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAdvancedSection(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        GestureDetector(
+          onTap: () => setState(() => _advancedExpanded = !_advancedExpanded),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                _advancedExpanded
+                    ? Icons.expand_less
+                    : Icons.expand_more,
+                color: AppColors.textMuted,
+                size: 20,
+              ),
+              const SizedBox(width: 6),
+              const Text(
+                'ADVANCED',
+                style: TextStyle(
+                  color: AppColors.textMuted,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 1.5,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (_advancedExpanded) ...[
+          const SizedBox(height: 16),
+          _buildAdvancedCard(context),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildAdvancedCard(BuildContext context) {
+    return GestureDetector(
+      onTap: () {
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: AppColors.surface,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+              side: const BorderSide(color: AppColors.border),
+            ),
+            title: const Text(
+              'COMING SOON',
+              style: TextStyle(
+                color: AppColors.textPrimary,
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1.5,
+                fontFamily: 'monospace',
+              ),
+            ),
+            content: const Text(
+              'Backend server setup is coming soon. Your identity is fully operational without it.',
+              style: TextStyle(
+                color: AppColors.textSecondary,
+                fontSize: 13,
+                height: 1.5,
+                fontFamily: 'monospace',
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text(
+                  'OK',
+                  style: TextStyle(
+                    color: AppColors.accent,
+                    fontFamily: 'monospace',
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.border, width: 1),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: AppColors.textMuted.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(
+                    Icons.dns_outlined,
+                    color: AppColors.textMuted,
+                    size: 24,
+                  ),
+                ),
+                const SizedBox(width: 14),
+                const Expanded(
+                  child: Text(
+                    'CREATE BACKEND SERVER',
+                    style: TextStyle(
+                      color: AppColors.textMuted,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 1.0,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ),
+                const Icon(
+                  Icons.chevron_right,
+                  color: AppColors.textMuted,
+                  size: 24,
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            const Text(
+              'Turn this computer into the brain behind your identity. '
+              'Set up this machine as a backend server for your phone.',
+              style: TextStyle(
+                color: AppColors.textMuted,
+                fontSize: 12,
+                height: 1.6,
+                fontFamily: 'monospace',
+              ),
+            ),
+          ],
         ),
       ),
     );

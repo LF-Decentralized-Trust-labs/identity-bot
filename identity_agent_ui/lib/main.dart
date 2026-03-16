@@ -12,7 +12,6 @@ import 'screens/settings_screen.dart';
 import 'screens/marketplace_screen.dart';
 import 'screens/setup_wizard_screen.dart';
 import 'screens/mode_selection_screen.dart';
-import 'screens/entity_type_screen.dart';
 import 'screens/connect_server_screen.dart';
 import 'services/core_service.dart';
 import 'services/keri_service.dart';
@@ -28,7 +27,6 @@ import 'bridge/keri_bridge_stub.dart'
     if (dart.library.io) 'bridge/keri_bridge.dart';
 import 'screens/mobile/mobile_app.dart';
 import 'screens/mobile/mobile_mode_selection_screen.dart';
-import 'screens/mobile/mobile_entity_type_screen.dart';
 import 'screens/mobile/mobile_connect_server_screen.dart';
 import 'screens/mobile/mobile_setup_wizard_screen.dart';
 
@@ -70,7 +68,6 @@ class IdentityAgentApp extends StatelessWidget {
 enum OnboardingStep {
   loading,
   modeSelection,
-  entityTypeSelection,
   connectServer,
   setupWizard,
   dashboard,
@@ -269,18 +266,13 @@ class _AgentRouterState extends State<AgentRouter> {
     await PreferencesService.setMode(mode);
 
     if (mode == AgentMode.createNew) {
-      setState(() => _step = OnboardingStep.entityTypeSelection);
+      _selectedEntityType = EntityType.individual;
+      await PreferencesService.setEntityType(EntityType.individual);
+      await _initializeServiceForMode(AgentMode.createNew, null);
+      setState(() => _step = OnboardingStep.setupWizard);
     } else {
       setState(() => _step = OnboardingStep.connectServer);
     }
-  }
-
-  void _onEntityTypeSelected(EntityType type) async {
-    _selectedEntityType = type;
-    await PreferencesService.setEntityType(type);
-
-    await _initializeServiceForMode(AgentMode.createNew, null);
-    setState(() => _step = OnboardingStep.setupWizard);
   }
 
   void _onServerConnected(String serverUrl) async {
@@ -564,18 +556,6 @@ class _AgentRouterState extends State<AgentRouter> {
           return MobileModeSelectionScreen(onModeSelected: _onModeSelected);
         }
         return ModeSelectionScreen(onModeSelected: _onModeSelected);
-
-      case OnboardingStep.entityTypeSelection:
-        if (isMobile) {
-          return MobileEntityTypeScreen(
-            onEntityTypeSelected: _onEntityTypeSelected,
-            onBack: _goBackToModeSelection,
-          );
-        }
-        return EntityTypeScreen(
-          onEntityTypeSelected: _onEntityTypeSelected,
-          onBack: _goBackToModeSelection,
-        );
 
       case OnboardingStep.connectServer:
         if (isMobile) {

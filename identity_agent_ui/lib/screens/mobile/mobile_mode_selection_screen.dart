@@ -49,22 +49,30 @@ class MobileModeSelectionScreen extends StatelessWidget {
                         letterSpacing: -0.5,
                       ),
                     ),
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 16),
                     const Text(
-                      'Setup',
+                      'Protect and control your entire digital life.',
+                      textAlign: TextAlign.center,
                       style: TextStyle(
-                        color: MobileColors.primary,
-                        fontSize: 15,
+                        color: MobileColors.textPrimary,
+                        fontSize: 17,
                         fontWeight: FontWeight.w600,
+                        height: 1.4,
                       ),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 20),
+                    _buildBulletRow(Icons.person_outline, 'Your identity.'),
+                    const SizedBox(height: 10),
+                    _buildBulletRow(Icons.vpn_key_outlined, 'Your keys.'),
+                    const SizedBox(height: 10),
+                    _buildBulletRow(Icons.folder_outlined, 'Your data.'),
+                    const SizedBox(height: 16),
                     const Text(
-                      'How would you like to get started?',
+                      'This app will manage your digital life for as long as you choose to use it.',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         color: MobileColors.textSecondary,
-                        fontSize: 15,
+                        fontSize: 14,
                         height: 1.5,
                       ),
                     ),
@@ -97,6 +105,24 @@ class MobileModeSelectionScreen extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildBulletRow(IconData icon, String text) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, color: MobileColors.primary, size: 20),
+        const SizedBox(width: 10),
+        Text(
+          text,
+          style: const TextStyle(
+            color: MobileColors.textPrimary,
+            fontSize: 15,
+          ),
+        ),
+      ],
     );
   }
 

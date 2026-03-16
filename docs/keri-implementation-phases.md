@@ -31,13 +31,13 @@ Each phase has a corresponding interoperability test in `tests/` that proves the
 
 ---
 
-## Phase 2 — IXN Events + Key Rotation Signing
+## Phase 2 — IXN Events + Key Rotation Signing ✓ COMPLETE
 
 **What it proves:** Interaction events and key rotation events can be created, signed with the Dart local key, CESR-encoded, and verified by keripy.
 
 **Interop test:** `tests/keri_phase2_interop_test.py`
 
-### What to build
+### What was built
 | Component | Change |
 |---|---|
 | Python driver | `POST /interact` — `eventing.interact()`, returns `raw_bytes_b64` |
@@ -57,13 +57,13 @@ Rotation is signed with the **pre-rotated** key (index 1 from the mnemonic). Dar
 
 ---
 
-## Phase 3 — Real OOBI Resolution + KEL Validation
+## Phase 3 — Real OOBI Resolution + KEL Validation ✓ COMPLETE
 
 **What it proves:** An OOBI URL can be resolved (HTTP GET), the returned KEL can be parsed and cryptographically validated with keripy, and the result stored for contact verification.
 
 **Interop test:** `tests/keri_phase3_interop_test.py`
 
-### What to build
+### What was built
 | Component | Change |
 |---|---|
 | Python driver | `POST /resolve-oobi` — HTTP GET the URL using `requests`, parse returned KEL with keripy |
@@ -73,13 +73,13 @@ Rotation is signed with the **pre-rotated** key (index 1 from the mnemonic). Dar
 
 ---
 
-## Phase 4 — ACDC Credential Issuance
+## Phase 4 — ACDC Credential Issuance ✓ COMPLETE
 
 **What it proves:** An ACDC credential can be formatted, its SAID computed, a KEL-anchored IXN seal created, and the seal signed — all producing output keripy accepts as a valid issued credential.
 
 **Interop test:** `tests/keri_phase4_interop_test.py`
 
-### What to build
+### What was built
 | Component | Change |
 |---|---|
 | Python driver | `POST /credential/issue` — format ACDC, compute SAID, create IXN seal, return `raw_bytes_b64` for signing |
@@ -89,13 +89,13 @@ Rotation is signed with the **pre-rotated** key (index 1 from the mnemonic). Dar
 
 ---
 
-## Phase 5 — Credential Presentation
+## Phase 5 — Credential Presentation ✓ COMPLETE
 
 **What it proves:** A credential holder can package a verifiable presentation with proof of possession, signed with their current key, that a verifier can validate.
 
 **Interop test:** `tests/keri_phase5_interop_test.py`
 
-### What to build
+### What was built
 | Component | Change |
 |---|---|
 | Python driver | `POST /credential/present` — package presentation, compute presentation SAID |
@@ -104,7 +104,7 @@ Rotation is signed with the **pre-rotated** key (index 1 from the mnemonic). Dar
 
 ---
 
-## Phase 6 — Credential Verification (8 checks)
+## Phase 6 — Credential Verification (8 checks) ✓ COMPLETE
 
 **What it proves:** All 8 verification checks from the SEDI grandpa scenario pass against a known-good credential + presentation.
 
@@ -120,7 +120,7 @@ Rotation is signed with the **pre-rotated** key (index 1 from the mnemonic). Dar
 7. Presentation signature valid against holder's current public key
 8. Holder KEL anchors the presentation — IXN event with seal exists in holder's KEL
 
-### What to build
+### What was built
 | Component | Change |
 |---|---|
 | Python driver | `POST /credential/verify` — implements all 8 checks |
@@ -129,19 +129,24 @@ Rotation is signed with the **pre-rotated** key (index 1 from the mnemonic). Dar
 
 ---
 
-## Phase 7 — KERL + Witness Receipts Storage
+## Phase 7 — KERL + Witness Receipts Storage ✓ COMPLETE
 
 **What it proves:** Witness receipts can be stored and retrieved, and a threshold of witness receipts constitutes a valid KERL entry.
 
 **Interop test:** `tests/keri_phase7_interop_test.py`
 
-### What to build
+### What was built
 | Component | Change |
 |---|---|
-| SQLite | `witness_receipts` table — stores receipts (AID, sn, event SAID, witness AID, CESR receipt sig) |
-| Python driver | `POST /witness/receipt` — validate and store an incoming witness receipt |
-| Go server | `POST /api/witness/receipt` |
-| Go server | `GET /api/witness/receipts/{aid}` |
+| SQLite | `witness_receipts` table (migration 5) — `UNIQUE(event_said, witness_aid)` deduplication |
+| Python driver | `POST /receipt/submit` — validates CESR sig, checks trusted_witnesses set, returns threshold_met |
+| Python driver | `GET /receipt/kerl` — returns receipts + threshold status for an event_said |
+| Go driver | `SubmitReceipt()` and `GetKERL()` methods |
+| Go server | `POST /api/receipt/submit` + `handleSubmitReceipt` |
+| Go server | `GET /api/kerl` + `handleGetKERL` (served from DataStore, no Python needed for reads) |
+| Store | `WitnessReceiptRecord`, `KerlEntry` structs; `SaveWitnessReceipt`, `GetWitnessReceipts` on FileStore + SQLiteStore |
+| Dart | `WitnessReceiptResult`, `KerlEntry` classes; `submitWitnessReceipt()`, `getKERL()` abstract methods |
+| Dart | `DesktopKeriService.submitWitnessReceipt()` and `DesktopKeriService.getKERL()` |
 
 ---
 
