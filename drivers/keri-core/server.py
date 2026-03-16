@@ -10,16 +10,23 @@ Go spawns this as a child process and kills it on exit.
 
 Endpoints (Stateful — require identity state):
     GET  /status       — Driver health and library info
-    POST /inception    — Create a KERI inception event from Ed25519 key pair
+    POST /inception    — Create a KERI inception event; returns raw_bytes_b64 for Dart to sign
     POST /rotation     — Rotate keys for an existing AID
     POST /sign         — Returns 501: signing is done on the controller device (ADR-014)
     GET  /kel          — Retrieve the Key Event Log for an AID
-    POST /verify       — Verify a signature against a public key
+    POST /verify       — Verify a signature (accepts raw base64 or CESR '0B...' format)
 
 Endpoints (Stateless — public data only, no private keys):
+    POST /cesr-encode           — Wrap raw 64-byte Ed25519 sig in CESR Cigar ('0B...' 88 chars)
     POST /format-credential     — Format an ACDC credential for signing
     POST /resolve-oobi          — Resolve an OOBI URL to endpoints
     POST /generate-multisig-event — Generate a multisig KERI event
+
+CESR signing chain (proven by tests/keri_interop_test.py):
+    Dart signs raw bytes with ed25519_edwards
+    → raw 64-byte signature sent to /cesr-encode
+    → coring.Cigar(raw=sig, code=MtrDex.Ed25519_Sig).qb64 = '0B...' (88 chars)
+    → keripy verifier accepts this output identically to its native signer.sign()
 """
 
 import os
@@ -169,6 +176,9 @@ def create_inception_event(public_key: str, next_public_key: str) -> dict:
     return {
         "aid": serder.pre,
         "inception_event": serder.ked,
+        # raw_bytes_b64: the exact bytes the controller must sign with its Ed25519 key.
+        # Dart: base64.decode(raw_bytes_b64) → sign → /cesr-encode → attach CESR sig.
+        "raw_bytes_b64": base64.b64encode(serder.raw).decode(),
         "public_key": verfer.qb64,
         "next_key_digest": diger.qb64,
     }
@@ -273,6 +283,41 @@ def rotation():
         return jsonify({"error": f"Rotation failed: {str(e)}"}), 500
 
 
+@app.route("/cesr-encode", methods=["POST"])
+def cesr_encode():
+    """Stateless: wrap a raw Ed25519 signature in CESR Cigar encoding ('0B...' 88 chars).
+
+    Accepts JSON: { "raw_sig_b64": "<standard base64 of 64 raw sig bytes>" }
+    Returns JSON: { "cesr_sig": "0B...", "length": 88 }
+
+    This is the bridge between Dart's ed25519_edwards raw output and the CESR
+    format required by the KERI protocol. Proven equivalent to keripy's native
+    signer.sign() output by tests/keri_interop_test.py.
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Request body required"}), 400
+
+    raw_sig_b64 = data.get("raw_sig_b64", "")
+    if not raw_sig_b64:
+        return jsonify({"error": "raw_sig_b64 is required"}), 400
+
+    try:
+        raw_sig = base64.b64decode(raw_sig_b64)
+        if len(raw_sig) != 64:
+            return jsonify({"error": f"Ed25519 signature must be 64 bytes, got {len(raw_sig)}"}), 400
+
+        cigar = coring.Cigar(raw=raw_sig, code=MtrDex.Ed25519_Sig)
+        cesr_sig = cigar.qb64
+
+        return jsonify({
+            "cesr_sig": cesr_sig,
+            "length": len(cesr_sig),
+        }), 200
+    except Exception as e:
+        return jsonify({"error": f"CESR encoding failed: {str(e)}"}), 500
+
+
 @app.route("/sign", methods=["POST"])
 def sign():
     # Signing is intentionally not implemented in the Python driver.
@@ -323,10 +368,19 @@ def verify():
 
     try:
         payload_bytes = base64.b64decode(payload_b64)
-        signature_bytes = base64.b64decode(signature_b64)
         raw_key = _extract_raw_key(public_key)
-
         verfer = coring.Verfer(raw=raw_key, code=MtrDex.Ed25519)
+
+        # Accept either CESR '0B...' format or plain base64 raw bytes.
+        # CESR Cigar: strip the 2-char '0B' code prefix, then base64url-decode the rest.
+        if signature_b64.startswith("0B") and len(signature_b64) == 88:
+            cigar = coring.Cigar(qb64=signature_b64)
+            signature_bytes = cigar.raw
+        else:
+            signature_bytes = base64.b64decode(signature_b64)
+
+        if len(signature_bytes) != 64:
+            return jsonify({"error": f"Signature must be 64 bytes, got {len(signature_bytes)}"}), 400
 
         import pysodium
         try:
@@ -495,6 +549,6 @@ if __name__ == "__main__":
     print(f"[keri-driver] Starting KERI Core Driver on {host}:{port}")
     print(f"[keri-driver] KERI library: keripy (reference)")
     print(f"[keri-driver] Stateful endpoints:  /status, /inception, /rotation, /sign, /kel, /verify")
-    print(f"[keri-driver] Stateless endpoints: /format-credential, /resolve-oobi, /generate-multisig-event")
+    print(f"[keri-driver] Stateless endpoints: /cesr-encode, /format-credential, /resolve-oobi, /generate-multisig-event")
 
     app.run(host=host, port=port, debug=False)

@@ -10,12 +10,19 @@ class InceptionResult {
   final String publicKey;
   final String kel;
   final String created;
+  // cesrSignature: CESR '0B...' (88-char) signature over the inception event body.
+  // Empty string if CESR encoding is not yet available (mobile stub path).
+  final String cesrSignature;
+  // rawBytesB64: the inception event bytes that were signed (base64).
+  final String rawBytesB64;
 
   InceptionResult({
     required this.aid,
     required this.publicKey,
     required this.kel,
     required this.created,
+    this.cesrSignature = '',
+    this.rawBytesB64 = '',
   });
 }
 
@@ -32,12 +39,17 @@ class RotationResult {
 }
 
 class SignatureResult {
+  // signature: raw Ed25519 signature, base64-encoded.
   final String signature;
   final String publicKey;
+  // cesrSignature: CESR '0B...' (88-char) encoding of the same signature.
+  // Empty string if CESR encoding was not requested.
+  final String cesrSignature;
 
   SignatureResult({
     required this.signature,
     required this.publicKey,
+    this.cesrSignature = '',
   });
 }
 

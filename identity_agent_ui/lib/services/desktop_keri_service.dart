@@ -28,6 +28,7 @@ class DesktopKeriService extends KeriService {
     final mnemonic = code.split(' ');
     final keys = KeyManager.generateKeysFromMnemonic(mnemonic);
 
+    // Step 1: Create the inception event on the Python driver via Go backend.
     final response = await _client.post(
       Uri.parse('$_baseUrl/api/inception'),
       headers: {'Content-Type': 'application/json'},
@@ -37,18 +38,53 @@ class DesktopKeriService extends KeriService {
       }),
     );
 
-    if (response.statusCode == 201 || response.statusCode == 200) {
-      final json = jsonDecode(response.body);
-      return InceptionResult(
-        aid: json['aid'] ?? '',
-        publicKey: json['public_key'] ?? '',
-        kel: json['kel'] ?? '',
-        created: json['created'] ?? DateTime.now().toIso8601String(),
-      );
-    } else {
+    if (response.statusCode != 201 && response.statusCode != 200) {
       final body = jsonDecode(response.body);
       throw Exception(body['error'] ?? 'Inception failed: ${response.statusCode}');
     }
+
+    final json = jsonDecode(response.body);
+    final rawBytesB64 = json['raw_bytes_b64'] as String? ?? '';
+
+    // Step 2: Sign the inception event bytes locally with the Ed25519 key.
+    // Private key never leaves this device (ADR-014).
+    String cesrSignature = '';
+    if (rawBytesB64.isNotEmpty) {
+      final seed = Bip39.mnemonicToSeed(mnemonic);
+      final seedHash = sha256.convert(seed.sublist(0, 32));
+      final privateSeed = Uint8List.fromList(seedHash.bytes);
+      final privateKey = ed.newKeyFromSeed(privateSeed);
+
+      final rawEventBytes = base64Decode(rawBytesB64);
+      final rawSig = ed.sign(privateKey, Uint8List.fromList(rawEventBytes));
+
+      // Step 3: CESR-encode the raw signature via the stateless /cesr/encode endpoint.
+      cesrSignature = await _cesrEncode(base64Encode(rawSig));
+    }
+
+    return InceptionResult(
+      aid: json['aid'] ?? '',
+      publicKey: json['public_key'] ?? '',
+      kel: json['kel'] ?? '',
+      created: json['created'] ?? DateTime.now().toIso8601String(),
+      cesrSignature: cesrSignature,
+      rawBytesB64: rawBytesB64,
+    );
+  }
+
+  /// Calls POST /api/cesr/encode to wrap a raw base64 signature in CESR '0B...' format.
+  Future<String> _cesrEncode(String rawSigB64) async {
+    final response = await _client.post(
+      Uri.parse('$_baseUrl/api/cesr/encode'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'raw_sig_b64': rawSigB64}),
+    );
+    if (response.statusCode == 200) {
+      final json = jsonDecode(response.body);
+      return json['cesr_sig'] as String? ?? '';
+    }
+    // Non-fatal: return empty string; caller can proceed without CESR sig for now.
+    return '';
   }
 
   @override
@@ -91,12 +127,17 @@ class DesktopKeriService extends KeriService {
     final privateSeed = Uint8List.fromList(seedHash.bytes);
     final privateKey = ed.newKeyFromSeed(privateSeed);
 
-    final signature = ed.sign(privateKey, Uint8List.fromList(data));
+    final rawSig = ed.sign(privateKey, Uint8List.fromList(data));
     final signingKeyPair = KeyManager.generateFromSeed(privateSeed);
+    final rawSigB64 = base64Encode(rawSig);
+
+    // CESR-encode the signature via the stateless Python driver endpoint.
+    final cesrSig = await _cesrEncode(rawSigB64);
 
     return SignatureResult(
-      signature: base64Encode(signature),
+      signature: rawSigB64,
       publicKey: signingKeyPair.publicKeyEncoded,
+      cesrSignature: cesrSig,
     );
   }
 

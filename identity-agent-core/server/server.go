@@ -272,6 +272,8 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
                 r.Get("/kel", s.handleKel)
                 r.Post("/verify", s.handleVerify)
 
+                r.Post("/cesr/encode", s.handleCesrEncode)
+
                 r.Post("/format-credential", s.handleFormatCredential)
                 r.Post("/resolve-oobi", s.handleResolveOobi)
                 r.Post("/generate-multisig-event", s.handleGenerateMultisigEvent)
@@ -410,6 +412,9 @@ type InceptionRequest struct {
 type InceptionResponse struct {
         AID            string                 `json:"aid"`
         InceptionEvent map[string]interface{} `json:"inception_event"`
+        // RawBytesB64: base64 of the serialized event body. Sign these bytes with
+        // the Ed25519 key, then call POST /api/cesr/encode to get the CESR signature.
+        RawBytesB64    string                 `json:"raw_bytes_b64"`
         PublicKey      string                 `json:"public_key"`
         Created        string                 `json:"created"`
 }
@@ -598,6 +603,7 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
         resp := InceptionResponse{
                 AID:            result.AID,
                 InceptionEvent: result.InceptionEvent,
+                RawBytesB64:    result.RawBytesB64,
                 PublicKey:      result.PublicKey,
                 Created:        now,
         }
@@ -808,6 +814,35 @@ func (s *CoreServer) handleVerify(w http.ResponseWriter, r *http.Request) {
         result, err := s.KeriDriver.VerifySignature(req.Data, req.Signature, req.PublicKey)
         if err != nil {
                 writeError(w, http.StatusInternalServerError, "Verification failed", err.Error())
+                return
+        }
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(result)
+}
+
+func (s *CoreServer) handleCesrEncode(w http.ResponseWriter, r *http.Request) {
+        if s.KeriDriver == nil {
+                writeError(w, http.StatusServiceUnavailable, "KERI driver not available",
+                        "On mobile, CESR encoding is handled by the Rust bridge")
+                return
+        }
+
+        var req struct {
+                RawSigB64 string `json:"raw_sig_b64"`
+        }
+        if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+                writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+                return
+        }
+        if req.RawSigB64 == "" {
+                writeError(w, http.StatusBadRequest, "Missing required field", "raw_sig_b64 is required")
+                return
+        }
+
+        result, err := s.KeriDriver.CesrEncode(req.RawSigB64)
+        if err != nil {
+                writeError(w, http.StatusInternalServerError, "CESR encoding failed", err.Error())
                 return
         }
 

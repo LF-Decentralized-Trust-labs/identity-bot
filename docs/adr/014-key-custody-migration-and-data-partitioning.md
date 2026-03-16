@@ -22,7 +22,7 @@ This ADR also documents the `SecureKeyStore` implementation and the local Dart s
 
 ### 1. Key Custody: Private Keys Never Leave the Controller Device
 
-The signing key and BIP39 mnemonic are the property of the controller device in all topological states. The following invariant is non-negotiable and extends ADR-006's trust invariant:
+The signing key and BIP39 mnemonic (Seed phrase) are the property of the controller device in all topological states. The following invariant is non-negotiable and extends ADR-006's trust invariant:
 
 > **Private keys are generated on the controller device, stored on the controller device, and signing operations are performed on the controller device. No other device ever receives, stores, or uses the private key.**
 
@@ -120,7 +120,7 @@ This migration is initiated from the controller device (the device holding the r
 
 2. **Controller initiates migration (mobile/controller device):** From the dashboard, user opens Settings → "Migrate to Backend Server." User scans the backend's pairing QR code or enters the pairing URL.
 
-3. **Mutual authentication:** Controller and backend exchange their respective AIDs and verify each other's service signatures. This establishes a trusted channel for the data transfer.
+3. **Mutual authentication:** Controller and backend exchange their respective AIDs and verify each other's service signatures. This establishes a trusted channel for the data transfer (DIDcomm).
 
 4. **Data replication to backend:** The controller pushes the following to the backend server:
    - Full KEL for the root AID

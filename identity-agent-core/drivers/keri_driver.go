@@ -31,8 +31,11 @@ type DriverInceptionRequest struct {
 type DriverInceptionResponse struct {
 	AID            string                 `json:"aid"`
 	InceptionEvent map[string]interface{} `json:"inception_event"`
-	PublicKey      string                 `json:"public_key"`
-	NextKeyDigest  string                 `json:"next_key_digest"`
+	// RawBytesB64: base64 of the serialized inception event body.
+	// The controller signs these bytes with its Ed25519 key, then calls /cesr-encode.
+	RawBytesB64   string `json:"raw_bytes_b64"`
+	PublicKey      string `json:"public_key"`
+	NextKeyDigest  string `json:"next_key_digest"`
 }
 
 type DriverRotationRequest struct {
@@ -114,6 +117,15 @@ type DriverMultisigResponse struct {
 	Pre         string `json:"pre"`
 	EventType   string `json:"event_type"`
 	Size        int    `json:"size"`
+}
+
+type DriverCesrEncodeRequest struct {
+	RawSigB64 string `json:"raw_sig_b64"`
+}
+
+type DriverCesrEncodeResponse struct {
+	CesrSig string `json:"cesr_sig"`
+	Length  int    `json:"length"`
 }
 
 type DriverErrorResponse struct {
@@ -356,6 +368,22 @@ func (d *KeriDriver) VerifySignature(dataB64, signature, publicKey string) (*Dri
 	var result DriverVerifyResponse
 	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("failed to decode verify response: %w", err)
+	}
+
+	return &result, nil
+}
+
+func (d *KeriDriver) CesrEncode(rawSigB64 string) (*DriverCesrEncodeResponse, error) {
+	reqBody := DriverCesrEncodeRequest{RawSigB64: rawSigB64}
+
+	body, err := d.doPost("/cesr-encode", reqBody, http.StatusOK)
+	if err != nil {
+		return nil, err
+	}
+
+	var result DriverCesrEncodeResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode cesr-encode response: %w", err)
 	}
 
 	return &result, nil
