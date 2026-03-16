@@ -12,7 +12,7 @@ Endpoints (Stateful — require identity state):
     GET  /status       — Driver health and library info
     POST /inception    — Create a KERI inception event from Ed25519 key pair
     POST /rotation     — Rotate keys for an existing AID
-    POST /sign         — Sign arbitrary data with an AID's current key
+    POST /sign         — Returns 501: signing is done on the controller device (ADR-014)
     GET  /kel          — Retrieve the Key Event Log for an AID
     POST /verify       — Verify a signature against a public key
 
@@ -275,38 +275,19 @@ def rotation():
 
 @app.route("/sign", methods=["POST"])
 def sign():
-    data = request.get_json()
-    if not data:
-        return jsonify({"error": "Request body required"}), 400
-
-    name = data.get("name", "")
-    payload_b64 = data.get("data", "")
-
-    if not name:
-        return jsonify({"error": "name is required"}), 400
-    if not payload_b64:
-        return jsonify({"error": "data (base64-encoded) is required"}), 400
-
-    identity = _identities.get(name)
-    if not identity:
-        return jsonify({"error": f"No identity found with name: {name}"}), 404
-
-    try:
-        payload_bytes = base64.b64decode(payload_b64)
-
-        import pysodium
-        raw_key = _extract_raw_key(identity["public_key"])
-        seed = os.urandom(32)
-        pk, sk = pysodium.crypto_sign_seed_keypair(seed)
-
-        signature = pysodium.crypto_sign_detached(payload_bytes, sk)
-
-        return jsonify({
-            "signature": base64.b64encode(signature).decode(),
-            "public_key": identity["public_key"],
-        }), 200
-    except Exception as e:
-        return jsonify({"error": f"Signing failed: {str(e)}"}), 500
+    # Signing is intentionally not implemented in the Python driver.
+    #
+    # Private keys never leave the controller device. All signing is performed
+    # locally in Dart (desktop) or via the Rust KERI bridge (mobile).
+    # Passing private key material to this process would violate the key
+    # custody invariant established in ADR-014.
+    #
+    # If this endpoint is called, it means a code path is incorrectly routing
+    # signing through the backend. Fix the caller, not this endpoint.
+    return jsonify({
+        "error": "Signing is not handled by the KERI driver. Sign locally on the controller device.",
+        "see": "ADR-014: Key Custody invariant — private keys never leave the controller device.",
+    }), 501
 
 
 @app.route("/kel", methods=["GET"])
