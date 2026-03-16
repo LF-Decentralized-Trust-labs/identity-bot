@@ -127,6 +127,24 @@ class RemoteServerKeriService extends KeriService {
   }
 
   @override
+  Future<InteractResult> interactAid({
+    required String name,
+    List<Map<String, String>> sealData = const [],
+  }) async {
+    throw UnimplementedError('interactAid not yet supported on remote server service');
+  }
+
+  @override
+  Future<CredentialIssuanceResult> issueCredential({
+    required Map<String, dynamic> claims,
+    required String schemaSaid,
+    String holderAid = '',
+    String name = '',
+  }) async {
+    throw UnimplementedError('issueCredential not yet supported on remote server service');
+  }
+
+  @override
   void dispose() {
     _client.close();
   }

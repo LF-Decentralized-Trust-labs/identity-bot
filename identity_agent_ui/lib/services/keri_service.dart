@@ -70,6 +70,26 @@ class InteractResult {
   });
 }
 
+class CredentialIssuanceResult {
+  final String acdcSaid;
+  final String acdcJsonB64;
+  // ixnRawBytesB64: the IXN event bytes the controller signs to anchor the credential.
+  final String ixnRawBytesB64;
+  final String ixnSaid;
+  final int sequenceNumber;
+  // cesrSignature: CESR '0B...' signature over the IXN event body. Empty until Dart signs.
+  final String cesrSignature;
+
+  CredentialIssuanceResult({
+    required this.acdcSaid,
+    required this.acdcJsonB64,
+    required this.ixnRawBytesB64,
+    required this.ixnSaid,
+    required this.sequenceNumber,
+    this.cesrSignature = '',
+  });
+}
+
 abstract class KeriService {
   AgentEnvironment get environment;
 
@@ -100,6 +120,13 @@ abstract class KeriService {
     required List<int> data,
     required String signature,
     required String publicKey,
+  });
+
+  Future<CredentialIssuanceResult> issueCredential({
+    required Map<String, dynamic> claims,
+    required String schemaSaid,
+    String holderAid = '',
+    String name = '',
   });
 
   void dispose();

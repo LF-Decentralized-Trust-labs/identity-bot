@@ -123,6 +123,24 @@ class MobileStandaloneKeriService extends KeriService {
   }
 
   @override
+  Future<InteractResult> interactAid({
+    required String name,
+    List<Map<String, String>> sealData = const [],
+  }) async {
+    throw UnimplementedError('interactAid not yet supported on mobile standalone');
+  }
+
+  @override
+  Future<CredentialIssuanceResult> issueCredential({
+    required Map<String, dynamic> claims,
+    required String schemaSaid,
+    String holderAid = '',
+    String name = '',
+  }) async {
+    throw UnimplementedError('issueCredential not yet supported on mobile standalone');
+  }
+
+  @override
   void dispose() {
     if (_coreStarted) {
       _mobileCore.stopCore();

@@ -468,6 +468,42 @@ def verify():
 # HTTP routes — Stateless KERI operations (no private keys, public data only)
 # ---------------------------------------------------------------------------
 
+def _format_acdc(issuer_aid: str, schema_said: str, claims: dict) -> dict:
+    """Format an ACDC credential body with self-addressing SAIDs.
+
+    Computes the attribute block SAID first (embedded as 'a.d'), then the
+    top-level credential SAID (embedded as 'd'). Both use Blake3_256.
+
+    Returns dict with: acdc_body, acdc_said, acdc_json_b64
+    """
+    attr_block = dict(claims)
+    attr_block.setdefault("d", "")
+
+    # Step 1: compute attribute block SAID
+    attr_json = json.dumps(attr_block, separators=(",", ":")).encode()
+    attr_diger = coring.Diger(ser=attr_json, code=MtrDex.Blake3_256)
+    attr_block["d"] = attr_diger.qb64
+
+    # Step 2: build ACDC body and compute top-level SAID
+    acdc_body = {
+        "v": "ACDC10JSON000000_",
+        "d": "",
+        "i": issuer_aid,
+        "s": schema_said,
+        "a": attr_block,
+    }
+    acdc_json_v1 = json.dumps(acdc_body, separators=(",", ":")).encode()
+    acdc_diger = coring.Diger(ser=acdc_json_v1, code=MtrDex.Blake3_256)
+    acdc_body["d"] = acdc_diger.qb64
+
+    acdc_json_final = json.dumps(acdc_body, separators=(",", ":")).encode()
+    return {
+        "acdc_body": acdc_body,
+        "acdc_said": acdc_diger.qb64,
+        "acdc_json_b64": base64.b64encode(acdc_json_final).decode(),
+    }
+
+
 @app.route("/format-credential", methods=["POST"])
 def format_credential():
     data = request.get_json()
@@ -482,28 +518,87 @@ def format_credential():
         return jsonify({"error": "claims, schema_said, and issuer_aid are required"}), 400
 
     try:
-        acdc_data = {
-            "v": "ACDC10JSON000000_",
-            "d": "",
-            "i": issuer_aid,
-            "s": schema_said,
-            "a": claims,
-        }
-
-        acdc_json = json.dumps(acdc_data, separators=(",", ":")).encode()
-
-        said_diger = coring.Diger(ser=acdc_json, code=MtrDex.Blake3_256)
-        acdc_data["d"] = said_diger.qb64
-
-        final_json = json.dumps(acdc_data, separators=(",", ":")).encode()
-
+        result = _format_acdc(issuer_aid, schema_said, claims)
+        final_json = base64.b64decode(result["acdc_json_b64"])
         return jsonify({
-            "raw_bytes_b64": base64.b64encode(final_json).decode(),
-            "said": said_diger.qb64,
+            "raw_bytes_b64": result["acdc_json_b64"],
+            "said": result["acdc_said"],
             "size": len(final_json),
         }), 200
     except Exception as e:
         return jsonify({"error": f"Format credential failed: {str(e)}"}), 500
+
+
+@app.route("/credential/issue", methods=["POST"])
+def credential_issue():
+    """Issue an ACDC credential anchored in the issuer's KEL via an IXN event.
+
+    Request JSON:
+        name        (str)  — issuer identity name
+        claims      (dict) — credential attribute claims (holder_aid, etc.)
+        schema_said (str)  — SAID of the credential schema
+        holder_aid  (str)  — AID of the credential subject/holder
+
+    Returns:
+        acdc_said       (str)  — self-addressing SAID of the ACDC credential
+        acdc_json_b64   (str)  — base64 of the serialized ACDC credential
+        acdc_body       (dict) — parsed ACDC credential
+        ixn_raw_bytes_b64 (str) — base64 IXN event bytes; sign with current key then /cesr-encode
+        ixn_said        (str)  — SAID of the anchoring IXN event
+        sequence_number (int)
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Request body required"}), 400
+
+    name = data.get("name", "")
+    claims = data.get("claims", {})
+    schema_said = data.get("schema_said", "")
+    holder_aid = data.get("holder_aid", "")
+
+    if not name:
+        return jsonify({"error": "name is required"}), 400
+    if not claims or not schema_said:
+        return jsonify({"error": "claims and schema_said are required"}), 400
+
+    identity = _identities.get(name)
+    if not identity:
+        return jsonify({"error": f"No identity found with name: {name}"}), 404
+
+    try:
+        # Step 1: format ACDC with full SAID computation
+        credential = _format_acdc(identity["aid"], schema_said, claims)
+        acdc_said = credential["acdc_said"]
+
+        # Step 2: create IXN anchoring the credential SAID in the issuer's KEL
+        sn = identity["sequence_number"] + 1
+        prev_said = identity.get("last_said", "")
+        seal = {"d": acdc_said}
+
+        ixn_serder = eventing.interact(
+            pre=identity["aid"],
+            dig=prev_said,
+            sn=sn,
+            data=[seal],
+        )
+
+        identity["sequence_number"] = sn
+        identity["last_said"] = ixn_serder.said
+        identity["kel"].append(ixn_serder.ked)
+
+        return jsonify({
+            "aid": identity["aid"],
+            "acdc_said": acdc_said,
+            "acdc_json_b64": credential["acdc_json_b64"],
+            "acdc_body": credential["acdc_body"],
+            # ixn_raw_bytes_b64: sign these with the CURRENT signing key then /cesr-encode
+            "ixn_raw_bytes_b64": base64.b64encode(ixn_serder.raw).decode(),
+            "ixn_said": ixn_serder.said,
+            "ixn_event": ixn_serder.ked,
+            "sequence_number": sn,
+        }), 201
+    except Exception as e:
+        return jsonify({"error": f"Credential issuance failed: {str(e)}"}), 500
 
 
 def _validate_kel_events(kel_events: list) -> dict:
@@ -820,5 +915,6 @@ if __name__ == "__main__":
     print(f"[keri-driver] KERI library: keripy (reference)")
     print(f"[keri-driver] Stateful endpoints:  /status, /inception, /rotation, /interact, /sign, /kel, /verify")
     print(f"[keri-driver] Stateless endpoints: /cesr-encode, /validate-kel, /resolve-oobi, /format-credential, /generate-multisig-event")
+    print(f"[keri-driver] Credential endpoints: /credential/issue")
 
     app.run(host=host, port=port, debug=False)

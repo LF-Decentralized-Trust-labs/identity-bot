@@ -111,6 +111,26 @@ CREATE TABLE IF NOT EXISTS contact_kels (
 );
 `,
 	},
+	{
+		Version:     3,
+		Description: "Add credentials table for ACDC credential issuance",
+		SQL: `
+CREATE TABLE IF NOT EXISTS credentials (
+    said           TEXT PRIMARY KEY,
+    issuer_aid     TEXT NOT NULL DEFAULT '',
+    holder_aid     TEXT NOT NULL DEFAULT '',
+    schema_said    TEXT NOT NULL DEFAULT '',
+    acdc_json      TEXT NOT NULL DEFAULT '',
+    ixn_said       TEXT NOT NULL DEFAULT '',
+    cesr_signature TEXT NOT NULL DEFAULT '',
+    issued_at      TEXT NOT NULL DEFAULT '',
+    status         TEXT NOT NULL DEFAULT 'issued'
+);
+
+CREATE INDEX IF NOT EXISTS idx_credentials_issuer ON credentials(issuer_aid);
+CREATE INDEX IF NOT EXISTS idx_credentials_holder ON credentials(holder_aid);
+`,
+	},
 }
 
 // ApplyIdentityMigrations creates the migrations table and applies any pending migrations.

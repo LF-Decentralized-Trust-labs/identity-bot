@@ -153,6 +153,25 @@ type DriverMultisigResponse struct {
 	Size        int    `json:"size"`
 }
 
+type DriverIssueCredentialRequest struct {
+	Name       string                 `json:"name"`
+	Claims     map[string]interface{} `json:"claims"`
+	SchemaSaid string                 `json:"schema_said"`
+	HolderAid  string                 `json:"holder_aid"`
+}
+
+type DriverIssueCredentialResponse struct {
+	AID            string                 `json:"aid"`
+	AcdcSaid       string                 `json:"acdc_said"`
+	AcdcJsonB64    string                 `json:"acdc_json_b64"`
+	AcdcBody       map[string]interface{} `json:"acdc_body"`
+	// IxnRawBytesB64: sign with the CURRENT signing key then call /cesr-encode.
+	IxnRawBytesB64 string                 `json:"ixn_raw_bytes_b64"`
+	IxnSaid        string                 `json:"ixn_said"`
+	IxnEvent       map[string]interface{} `json:"ixn_event"`
+	SequenceNumber int                    `json:"sequence_number"`
+}
+
 type DriverCesrEncodeRequest struct {
 	RawSigB64 string `json:"raw_sig_b64"`
 }
@@ -470,6 +489,27 @@ func (d *KeriDriver) ResolveOobi(url string) (*DriverResolveOobiResponse, error)
 	var result DriverResolveOobiResponse
 	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("failed to decode resolve-oobi response: %w", err)
+	}
+
+	return &result, nil
+}
+
+func (d *KeriDriver) IssueCredential(name string, claims map[string]interface{}, schemaSaid, holderAid string) (*DriverIssueCredentialResponse, error) {
+	reqBody := DriverIssueCredentialRequest{
+		Name:       name,
+		Claims:     claims,
+		SchemaSaid: schemaSaid,
+		HolderAid:  holderAid,
+	}
+
+	body, err := d.doPost("/credential/issue", reqBody, http.StatusCreated)
+	if err != nil {
+		return nil, err
+	}
+
+	var result DriverIssueCredentialResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode credential/issue response: %w", err)
 	}
 
 	return &result, nil

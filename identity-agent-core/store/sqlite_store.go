@@ -400,6 +400,64 @@ func (s *SQLiteStore) SaveProfile(profile ProfileData) error {
 	return nil
 }
 
+// ── Credentials ───────────────────────────────────────────────────────────────
+
+func (s *SQLiteStore) SaveCredential(record CredentialRecord) error {
+	_, err := s.db.Exec(`
+		INSERT INTO credentials (said, issuer_aid, holder_aid, schema_said, acdc_json, ixn_said, cesr_signature, issued_at, status)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(said) DO UPDATE SET
+			cesr_signature = excluded.cesr_signature,
+			status         = excluded.status`,
+		record.SAID, record.IssuerAID, record.HolderAID, record.SchemaSAID,
+		record.AcdcJson, record.IxnSAID, record.CesrSignature, record.IssuedAt, record.Status,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to save credential: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) GetCredential(said string) (*CredentialRecord, error) {
+	var r CredentialRecord
+	err := s.db.QueryRow(
+		`SELECT said, issuer_aid, holder_aid, schema_said, acdc_json, ixn_said, cesr_signature, issued_at, status
+		 FROM credentials WHERE said = ?`, said,
+	).Scan(&r.SAID, &r.IssuerAID, &r.HolderAID, &r.SchemaSAID,
+		&r.AcdcJson, &r.IxnSAID, &r.CesrSignature, &r.IssuedAt, &r.Status)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get credential: %w", err)
+	}
+	return &r, nil
+}
+
+func (s *SQLiteStore) GetCredentials() ([]CredentialRecord, error) {
+	rows, err := s.db.Query(
+		`SELECT said, issuer_aid, holder_aid, schema_said, acdc_json, ixn_said, cesr_signature, issued_at, status
+		 FROM credentials ORDER BY issued_at DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query credentials: %w", err)
+	}
+	defer rows.Close()
+
+	var creds []CredentialRecord
+	for rows.Next() {
+		var r CredentialRecord
+		if err := rows.Scan(&r.SAID, &r.IssuerAID, &r.HolderAID, &r.SchemaSAID,
+			&r.AcdcJson, &r.IxnSAID, &r.CesrSignature, &r.IssuedAt, &r.Status); err != nil {
+			return nil, fmt.Errorf("failed to scan credential: %w", err)
+		}
+		creds = append(creds, r)
+	}
+	if creds == nil {
+		creds = []CredentialRecord{}
+	}
+	return creds, nil
+}
+
 // ── Contact KELs ──────────────────────────────────────────────────────────────
 
 func (s *SQLiteStore) SaveContactKEL(record ContactKELRecord) error {
@@ -486,7 +544,7 @@ func (s *SQLiteStore) SaveEndpoint(url, source string) error {
 // ── Reset ─────────────────────────────────────────────────────────────────────
 
 func (s *SQLiteStore) ResetAll() error {
-	tables := []string{"kel", "identity", "contacts", "pending_requests", "profile", "settings", "endpoint", "contact_kels"}
+	tables := []string{"kel", "identity", "contacts", "pending_requests", "profile", "settings", "endpoint", "contact_kels", "credentials"}
 	for _, t := range tables {
 		if _, err := s.db.Exec(`DELETE FROM ` + t); err != nil {
 			return fmt.Errorf("failed to clear table %s: %w", t, err)

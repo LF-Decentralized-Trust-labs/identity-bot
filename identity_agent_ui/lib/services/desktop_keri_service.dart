@@ -261,6 +261,58 @@ class DesktopKeriService extends KeriService {
   }
 
   @override
+  Future<CredentialIssuanceResult> issueCredential({
+    required Map<String, dynamic> claims,
+    required String schemaSaid,
+    String holderAid = '',
+    String name = '',
+  }) async {
+    // Step 1: Ask the Go backend to format the ACDC and create the IXN anchor.
+    final response = await _client.post(
+      Uri.parse('$_baseUrl/api/credential/issue'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'claims': claims,
+        'schema_said': schemaSaid,
+        'holder_aid': holderAid,
+      }),
+    );
+
+    if (response.statusCode != 201 && response.statusCode != 200) {
+      final body = jsonDecode(response.body);
+      throw Exception(body['error'] ?? 'Credential issuance failed: ${response.statusCode}');
+    }
+
+    final json = jsonDecode(response.body);
+    final ixnRawBytesB64 = json['ixn_raw_bytes_b64'] as String? ?? '';
+
+    // Step 2: Sign the IXN event bytes locally with the current key (index 0).
+    // Private key never leaves this device (ADR-014).
+    String cesrSig = '';
+    if (ixnRawBytesB64.isNotEmpty) {
+      final mnemonic = await SecureKeyStore.loadMnemonic();
+      if (mnemonic != null) {
+        final seed = Bip39.mnemonicToSeed(mnemonic);
+        final seedHash = sha256.convert(seed.sublist(0, 32));
+        final privateSeed = Uint8List.fromList(seedHash.bytes);
+        final privateKey = ed.newKeyFromSeed(privateSeed);
+        final rawEventBytes = base64Decode(ixnRawBytesB64);
+        final rawSig = ed.sign(privateKey, Uint8List.fromList(rawEventBytes));
+        cesrSig = await _cesrEncode(base64Encode(rawSig));
+      }
+    }
+
+    return CredentialIssuanceResult(
+      acdcSaid: json['acdc_said'] ?? '',
+      acdcJsonB64: json['acdc_json_b64'] ?? '',
+      ixnRawBytesB64: ixnRawBytesB64,
+      ixnSaid: json['ixn_said'] ?? '',
+      sequenceNumber: json['sequence_number'] as int? ?? 0,
+      cesrSignature: cesrSig,
+    );
+  }
+
+  @override
   void dispose() {
     _client.close();
   }

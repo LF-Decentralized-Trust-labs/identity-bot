@@ -110,6 +110,19 @@ func (p *ProfileData) ToJCard(aid string, oobiURL string) *JCard {
         }
 }
 
+// CredentialRecord stores an issued ACDC credential anchored in the issuer's KEL.
+type CredentialRecord struct {
+	SAID          string `json:"said"`
+	IssuerAID     string `json:"issuer_aid"`
+	HolderAID     string `json:"holder_aid"`
+	SchemaSAID    string `json:"schema_said"`
+	AcdcJson      string `json:"acdc_json"`
+	IxnSAID       string `json:"ixn_said"`
+	CesrSignature string `json:"cesr_signature,omitempty"`
+	IssuedAt      string `json:"issued_at"`
+	Status        string `json:"status"`
+}
+
 // ContactKELRecord stores a contact's validated Key Event Log.
 // This is the cryptographic proof of a contact's identity history.
 type ContactKELRecord struct {
@@ -136,6 +149,9 @@ type Store interface {
         GetContactsByStatus(status string) ([]ContactRecord, error)
         SaveContactKEL(record ContactKELRecord) error
         GetContactKEL(aid string) (*ContactKELRecord, error)
+        SaveCredential(record CredentialRecord) error
+        GetCredential(said string) (*CredentialRecord, error)
+        GetCredentials() ([]CredentialRecord, error)
         GetSettings() (*SettingsData, error)
         SaveSettings(settings SettingsData) error
         SavePendingRequest(req PendingRequest) error
@@ -488,6 +504,64 @@ func (s *FileStore) SaveProfile(profile ProfileData) error {
         return s.writeJSON(filepath.Join(s.dir, "profile.json"), profile)
 }
 
+func (s *FileStore) SaveCredential(record CredentialRecord) error {
+        s.mu.Lock()
+        defer s.mu.Unlock()
+
+        creds, err := s.loadCredentials()
+        if err != nil {
+                creds = map[string]CredentialRecord{}
+        }
+        creds[record.SAID] = record
+        return s.writeJSON(filepath.Join(s.dir, "credentials.json"), creds)
+}
+
+func (s *FileStore) GetCredential(said string) (*CredentialRecord, error) {
+        s.mu.RLock()
+        defer s.mu.RUnlock()
+
+        creds, err := s.loadCredentials()
+        if err != nil {
+                return nil, err
+        }
+        r, ok := creds[said]
+        if !ok {
+                return nil, nil
+        }
+        return &r, nil
+}
+
+func (s *FileStore) GetCredentials() ([]CredentialRecord, error) {
+        s.mu.RLock()
+        defer s.mu.RUnlock()
+
+        creds, err := s.loadCredentials()
+        if err != nil {
+                return nil, err
+        }
+        list := make([]CredentialRecord, 0, len(creds))
+        for _, c := range creds {
+                list = append(list, c)
+        }
+        return list, nil
+}
+
+func (s *FileStore) loadCredentials() (map[string]CredentialRecord, error) {
+        path := filepath.Join(s.dir, "credentials.json")
+        data, err := os.ReadFile(path)
+        if err != nil {
+                if os.IsNotExist(err) {
+                        return map[string]CredentialRecord{}, nil
+                }
+                return nil, fmt.Errorf("failed to read credentials: %w", err)
+        }
+        var creds map[string]CredentialRecord
+        if err := json.Unmarshal(data, &creds); err != nil {
+                return nil, fmt.Errorf("failed to parse credentials: %w", err)
+        }
+        return creds, nil
+}
+
 func (s *FileStore) SaveContactKEL(record ContactKELRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -535,7 +609,7 @@ func (s *FileStore) ResetAll() error {
         s.mu.Lock()
         defer s.mu.Unlock()
 
-        files := []string{"identity.json", "kel.json", "contacts.json", "settings.json", "pending_requests.json", "profile.json", "endpoint.json", "contact_kels.json"}
+        files := []string{"identity.json", "kel.json", "contacts.json", "settings.json", "pending_requests.json", "profile.json", "endpoint.json", "contact_kels.json", "credentials.json"}
         for _, f := range files {
                 path := filepath.Join(s.dir, f)
                 if err := os.Remove(path); err != nil && !os.IsNotExist(err) {

@@ -279,6 +279,9 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
                 r.Post("/resolve-oobi", s.handleResolveOobi)
                 r.Post("/generate-multisig-event", s.handleGenerateMultisigEvent)
 
+                r.Post("/credential/issue", s.handleIssueCredential)
+                r.Get("/credentials", s.handleGetCredentials)
+
                 r.Get("/oobi", s.handleOobiGenerate)
 
                 r.Get("/contacts", s.handleGetContacts)
@@ -943,6 +946,100 @@ func (s *CoreServer) handleFormatCredential(w http.ResponseWriter, r *http.Reque
 
         w.Header().Set("Content-Type", "application/json")
         json.NewEncoder(w).Encode(result)
+}
+
+func (s *CoreServer) handleIssueCredential(w http.ResponseWriter, r *http.Request) {
+        if s.KeriDriver == nil {
+                writeError(w, http.StatusServiceUnavailable, "KERI driver not available",
+                        "Credential issuance requires the Python KERI driver (desktop only)")
+                return
+        }
+
+        var req struct {
+                Claims        map[string]interface{} `json:"claims"`
+                SchemaSaid    string                 `json:"schema_said"`
+                HolderAid     string                 `json:"holder_aid"`
+                CesrSignature string                 `json:"cesr_signature,omitempty"`
+        }
+        if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+                writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+                return
+        }
+        if len(req.Claims) == 0 || req.SchemaSaid == "" {
+                writeError(w, http.StatusBadRequest, "Missing required fields", "claims and schema_said are required")
+                return
+        }
+
+        identity, err := s.DataStore.GetIdentity()
+        if err != nil || identity == nil {
+                writeError(w, http.StatusBadRequest, "No identity found", "Create an identity before issuing credentials")
+                return
+        }
+
+        result, err := s.KeriDriver.IssueCredential(identity.AID, req.Claims, req.SchemaSaid, req.HolderAid)
+        if err != nil {
+                writeError(w, http.StatusInternalServerError, "Credential issuance failed", err.Error())
+                return
+        }
+
+        // Persist the credential record
+        record := store.CredentialRecord{
+                SAID:          result.AcdcSaid,
+                IssuerAID:     identity.AID,
+                HolderAID:     req.HolderAid,
+                SchemaSAID:    req.SchemaSaid,
+                AcdcJson:      result.AcdcJsonB64,
+                IxnSAID:       result.IxnSaid,
+                CesrSignature: req.CesrSignature,
+                IssuedAt:      time.Now().UTC().Format(time.RFC3339),
+                Status:        "issued",
+        }
+        if err := s.DataStore.SaveCredential(record); err != nil {
+                log.Printf("[identity-agent-core] CREDENTIAL: Failed to persist credential %s: %v", result.AcdcSaid, err)
+        }
+
+        // Persist the IXN event in the KEL
+        ixnEventJSON, _ := json.Marshal(result.IxnEvent)
+        kelRecord := store.EventRecord{
+                AID:            identity.AID,
+                SequenceNumber: result.SequenceNumber,
+                EventType:      "ixn",
+                EventJSON:      string(ixnEventJSON),
+                PublicKey:      identity.PublicKey,
+                NextKeyDigest:  identity.NextKeyDigest,
+                Timestamp:      time.Now().UTC().Format(time.RFC3339),
+                CesrSignature:  req.CesrSignature,
+        }
+        if err := s.DataStore.SaveEvent(kelRecord); err != nil {
+                log.Printf("[identity-agent-core] CREDENTIAL: Failed to persist IXN event for credential %s: %v", result.AcdcSaid, err)
+        }
+
+        log.Printf("[identity-agent-core] CREDENTIAL: Issued %s for holder %s (IXN sn=%d)", result.AcdcSaid, req.HolderAid, result.SequenceNumber)
+
+        w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(http.StatusCreated)
+        json.NewEncoder(w).Encode(map[string]interface{}{
+                "acdc_said":        result.AcdcSaid,
+                "acdc_json_b64":    result.AcdcJsonB64,
+                "ixn_raw_bytes_b64": result.IxnRawBytesB64,
+                "ixn_said":         result.IxnSaid,
+                "sequence_number":  result.SequenceNumber,
+                "status":           "issued",
+        })
+}
+
+func (s *CoreServer) handleGetCredentials(w http.ResponseWriter, r *http.Request) {
+        creds, err := s.DataStore.GetCredentials()
+        if err != nil {
+                writeError(w, http.StatusInternalServerError, "Failed to read credentials", err.Error())
+                return
+        }
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(map[string]interface{}{
+                "credentials": creds,
+                "count":       len(creds),
+        })
 }
 
 func (s *CoreServer) handleResolveOobi(w http.ResponseWriter, r *http.Request) {
