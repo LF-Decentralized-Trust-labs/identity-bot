@@ -3,6 +3,22 @@ import 'package:flutter/foundation.dart' show kIsWeb, debugPrint;
 import '../src/rust/frb_generated.dart';
 import '../src/rust/api/keri_bridge.dart' as rust_api;
 
+class BridgeInteractResult {
+  final String aid;
+  final String said;
+  final int sequenceNumber;
+  final String kelEntry;
+  final String rawBytesB64;
+
+  BridgeInteractResult({
+    required this.aid,
+    required this.said,
+    required this.sequenceNumber,
+    required this.kelEntry,
+    required this.rawBytesB64,
+  });
+}
+
 class BridgeInceptionResult {
   final String aid;
   final String publicKey;
@@ -144,5 +160,27 @@ class KeriBridge {
       signature: signature,
       publicKey: publicKey,
     );
+  }
+
+  Future<BridgeInteractResult> interactAid({
+    required String name,
+    String sealDataJson = '[]',
+  }) async {
+    await ensureInitialized();
+    _ensureBridgeReady('interactAid');
+    final result = rust_api.interactAid(name: name, sealDataJson: sealDataJson);
+    return BridgeInteractResult(
+      aid: result.aid,
+      said: result.said,
+      sequenceNumber: result.sequenceNumber,
+      kelEntry: result.kelEntry,
+      rawBytesB64: result.rawBytesB64,
+    );
+  }
+
+  Future<String> cesrEncode({required String rawSigB64}) async {
+    await ensureInitialized();
+    _ensureBridgeReady('cesrEncode');
+    return rust_api.cesrEncode(rawSigB64: rawSigB64);
   }
 }

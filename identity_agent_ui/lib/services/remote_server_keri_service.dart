@@ -36,7 +36,7 @@ class RemoteServerKeriService extends KeriService {
         created: json['created'] ?? DateTime.now().toIso8601String(),
       );
     } else {
-      final body = jsonDecode(response.body);
+      final body = _tryDecodeJson(response.body);
       throw Exception(body['error'] ?? 'Remote inception failed: ${response.statusCode}');
     }
   }
@@ -57,7 +57,7 @@ class RemoteServerKeriService extends KeriService {
         kel: json['kel'] ?? '',
       );
     } else {
-      final body = jsonDecode(response.body);
+      final body = _tryDecodeJson(response.body);
       throw Exception(body['error'] ?? 'Remote rotation failed: ${response.statusCode}');
     }
   }
@@ -83,7 +83,7 @@ class RemoteServerKeriService extends KeriService {
         publicKey: json['public_key'] ?? '',
       );
     } else {
-      final body = jsonDecode(response.body);
+      final body = _tryDecodeJson(response.body);
       throw Exception(body['error'] ?? 'Remote signing failed: ${response.statusCode}');
     }
   }
@@ -131,7 +131,27 @@ class RemoteServerKeriService extends KeriService {
     required String name,
     List<Map<String, String>> sealData = const [],
   }) async {
-    throw UnimplementedError('interactAid not yet supported on remote server service');
+    final response = await _client.post(
+      Uri.parse('$_serverUrl/api/interact'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'name': name,
+        'data': sealData,
+      }),
+    );
+
+    if (response.statusCode == 200 || response.statusCode == 201) {
+      final json = jsonDecode(response.body) as Map<String, dynamic>;
+      return InteractResult(
+        aid: json['aid'] as String? ?? '',
+        said: json['said'] as String? ?? '',
+        sequenceNumber: (json['sequence_number'] as int?) ?? 0,
+        cesrSignature: json['cesr_signature'] as String? ?? '',
+      );
+    } else {
+      final body = _tryDecodeJson(response.body);
+      throw Exception(body['error'] ?? 'Remote interactAid failed: ${response.statusCode}');
+    }
   }
 
   @override
@@ -141,7 +161,30 @@ class RemoteServerKeriService extends KeriService {
     String holderAid = '',
     String name = '',
   }) async {
-    throw UnimplementedError('issueCredential not yet supported on remote server service');
+    final response = await _client.post(
+      Uri.parse('$_serverUrl/api/credential/issue'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'claims': claims,
+        'schema_said': schemaSaid,
+        'holder_aid': holderAid,
+      }),
+    );
+
+    if (response.statusCode == 200 || response.statusCode == 201) {
+      final json = jsonDecode(response.body) as Map<String, dynamic>;
+      return CredentialIssuanceResult(
+        acdcSaid: json['acdc_said'] as String? ?? '',
+        acdcJsonB64: json['acdc_json_b64'] as String? ?? '',
+        ixnRawBytesB64: json['ixn_raw_bytes_b64'] as String? ?? '',
+        ixnSaid: json['ixn_said'] as String? ?? '',
+        sequenceNumber: (json['sequence_number'] as int?) ?? 0,
+        cesrSignature: json['cesr_signature'] as String? ?? '',
+      );
+    } else {
+      final body = _tryDecodeJson(response.body);
+      throw Exception(body['error'] ?? 'Remote issueCredential failed: ${response.statusCode}');
+    }
   }
 
   @override
@@ -151,27 +194,28 @@ class RemoteServerKeriService extends KeriService {
     String issuerAid = '',
     String schemaSaid = '',
   }) async {
-    throw UnimplementedError('presentCredential not yet supported on remote server service');
-  }
+    final response = await _client.post(
+      Uri.parse('$_serverUrl/api/credential/present'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'acdc_said': acdcSaid,
+        'holder_aid': holderAid,
+        'issuer_aid': issuerAid,
+        'schema_said': schemaSaid,
+      }),
+    );
 
-  @override
-  Future<WitnessReceiptResult> submitWitnessReceipt({
-    required String eventSaid,
-    required String witnessAid,
-    required String witnessPublicKey,
-    required String cesrSignature,
-    List<String> trustedWitnesses = const [],
-    int threshold = 0,
-  }) async {
-    throw UnimplementedError('submitWitnessReceipt not yet supported on remote server service');
-  }
-
-  @override
-  Future<KerlEntry> getKERL({
-    required String eventSaid,
-    int threshold = 0,
-  }) async {
-    throw UnimplementedError('getKERL not yet supported on remote server service');
+    if (response.statusCode == 200 || response.statusCode == 201) {
+      final json = jsonDecode(response.body) as Map<String, dynamic>;
+      return PresentationResult(
+        presentationSaid: json['presentation_said'] as String? ?? '',
+        presentationJsonB64: json['presentation_json_b64'] as String? ?? '',
+        cesrSignature: json['cesr_signature'] as String? ?? '',
+      );
+    } else {
+      final body = _tryDecodeJson(response.body);
+      throw Exception(body['error'] ?? 'Remote presentCredential failed: ${response.statusCode}');
+    }
   }
 
   @override
@@ -183,7 +227,101 @@ class RemoteServerKeriService extends KeriService {
     String holderPublicKey = '',
     List<String> trustedSchemaSaids = const [],
   }) async {
-    throw UnimplementedError('verifyCredential not yet supported on remote server service');
+    final response = await _client.post(
+      Uri.parse('$_serverUrl/api/credential/verify'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'acdc_json': acdcJson,
+        'holder_aid': holderAid,
+        'presentation_said': presentationSaid,
+        'cesr_signature': cesrSignature,
+        'holder_public_key': holderPublicKey,
+        'trusted_schema_saids': trustedSchemaSaids,
+      }),
+    );
+
+    if (response.statusCode == 200) {
+      final json = jsonDecode(response.body) as Map<String, dynamic>;
+      return VerificationResult(
+        verified: json['verified'] == true,
+        checks: (json['checks'] as Map<String, dynamic>?) ?? {},
+        errors: List<String>.from(json['errors'] ?? []),
+        acdcSaid: json['acdc_said'] as String? ?? '',
+      );
+    } else {
+      final body = _tryDecodeJson(response.body);
+      throw Exception(body['error'] ?? 'Remote verifyCredential failed: ${response.statusCode}');
+    }
+  }
+
+  @override
+  Future<WitnessReceiptResult> submitWitnessReceipt({
+    required String eventSaid,
+    required String witnessAid,
+    required String witnessPublicKey,
+    required String cesrSignature,
+    List<String> trustedWitnesses = const [],
+    int threshold = 0,
+  }) async {
+    final response = await _client.post(
+      Uri.parse('$_serverUrl/api/receipt/submit'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'event_said': eventSaid,
+        'witness_aid': witnessAid,
+        'witness_public_key': witnessPublicKey,
+        'cesr_signature': cesrSignature,
+        'trusted_witnesses': trustedWitnesses,
+        'threshold': threshold,
+      }),
+    );
+
+    if (response.statusCode == 200) {
+      final json = jsonDecode(response.body) as Map<String, dynamic>;
+      return WitnessReceiptResult(
+        accepted: json['accepted'] == true,
+        thresholdMet: json['threshold_met'] == true,
+        receiptCount: (json['receipt_count'] as int?) ?? 0,
+        errors: List<String>.from(json['errors'] ?? []),
+      );
+    } else {
+      final body = _tryDecodeJson(response.body);
+      throw Exception(body['error'] ?? 'Remote submitWitnessReceipt failed: ${response.statusCode}');
+    }
+  }
+
+  @override
+  Future<KerlEntry> getKERL({
+    required String eventSaid,
+    int threshold = 0,
+  }) async {
+    final response = await _client.get(
+      Uri.parse('$_serverUrl/api/kerl?event_said=$eventSaid&threshold=$threshold'),
+    );
+
+    if (response.statusCode == 200) {
+      final json = jsonDecode(response.body) as Map<String, dynamic>;
+      final rawReceipts = (json['receipts'] as List<dynamic>?) ?? [];
+      final receipts = rawReceipts
+          .map((r) => Map<String, dynamic>.from(r as Map))
+          .toList();
+      return KerlEntry(
+        eventSaid: eventSaid,
+        receipts: receipts,
+        receiptCount: (json['receipt_count'] as int?) ?? receipts.length,
+        thresholdMet: json['threshold_met'] == true,
+      );
+    } else {
+      throw Exception('Remote getKERL failed: ${response.statusCode}');
+    }
+  }
+
+  Map<String, dynamic> _tryDecodeJson(String body) {
+    try {
+      return jsonDecode(body) as Map<String, dynamic>;
+    } catch (_) {
+      return {};
+    }
   }
 
   @override

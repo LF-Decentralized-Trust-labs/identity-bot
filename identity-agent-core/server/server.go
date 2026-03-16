@@ -317,6 +317,9 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 
                 r.Post("/store/identity", s.handleStoreIdentity)
                 r.Post("/store/event", s.handleStoreEvent)
+                r.Post("/store/receipt", s.handleStoreReceipt)
+                r.Get("/store/receipts", s.handleGetStoreReceipts)
+                r.Post("/store/credential", s.handleStoreCredential)
 
                 r.Delete("/pending-requests/{aid}", s.handleDeletePendingRequest)
                 r.Post("/reset", s.handleReset)

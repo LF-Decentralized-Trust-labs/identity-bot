@@ -7,6 +7,22 @@
 /// The real implementation is in keri_bridge.dart and is loaded on
 /// native platforms via conditional import in main.dart.
 
+class BridgeInteractResult {
+  final String aid;
+  final String said;
+  final int sequenceNumber;
+  final String kelEntry;
+  final String rawBytesB64;
+
+  BridgeInteractResult({
+    required this.aid,
+    required this.said,
+    required this.sequenceNumber,
+    required this.kelEntry,
+    required this.rawBytesB64,
+  });
+}
+
 class BridgeInceptionResult {
   final String aid;
   final String publicKey;
@@ -78,6 +94,17 @@ class KeriBridge {
     required String signature,
     required String publicKey,
   }) async {
+    throw UnsupportedError('KeriBridge is not available on web');
+  }
+
+  Future<BridgeInteractResult> interactAid({
+    required String name,
+    String sealDataJson = '[]',
+  }) async {
+    throw UnsupportedError('KeriBridge is not available on web');
+  }
+
+  Future<String> cesrEncode({required String rawSigB64}) async {
     throw UnsupportedError('KeriBridge is not available on web');
   }
 }
