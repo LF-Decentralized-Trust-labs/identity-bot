@@ -50,7 +50,7 @@ flutter_inappwebview_platform_interface: ^1.3.0
 
 This prevents the web plugin from being registered in `web_plugin_registrant.dart` at all. The `_platform_interface` package provides the abstract types (classes, enums) needed for compilation without any native code.
 
-Android and iOS InAppWebView packages are excluded because the sandbox webview feature is desktop-only.
+Android and iOS InAppWebView packages (`flutter_inappwebview_android`, `flutter_inappwebview_ios`) are included in pubspec even though the sandbox webview is desktop-only. This is necessary because `dart.library.io` is `true` on mobile as well as desktop, so `sandbox_webview_native.dart` is compiled on Android/iOS. Without the platform packages, `InAppWebView` is undefined at compile time on mobile. The `_isDesktopPlatform` runtime guard in `sandbox_webview_native.dart` shows "UNSUPPORTED PLATFORM" on mobile — no sandbox UI ever renders there.
 
 ### 3. Stub Contracts
 
