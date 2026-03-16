@@ -13,3 +13,11 @@ dependencies = [
     "pysodium>=0.7.18",
     "simplejson>=3.20.2",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+# Verbose by default so each test_* function is listed individually
+addopts = "-v"
