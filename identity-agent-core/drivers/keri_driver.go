@@ -217,16 +217,16 @@ type DriverGetKerlResponse struct {
 }
 
 type DriverVerifyCredentialRequest struct {
-	// AcdcJson: full ACDC JSON string to verify.
-	AcdcJson string `json:"acdc_json"`
-	// IssuerKelEvents: the issuer's KEL events as stored in contact_kels (may be nil/empty).
-	IssuerKelEvents []map[string]interface{} `json:"issuer_kel_events,omitempty"`
+	// AcdcJson: base64-encoded ACDC JSON string to verify (matches driver field acdc_json_b64).
+	AcdcJson string `json:"acdc_json_b64"`
+	// IssuerKelEvents: the issuer's KEL as raw KED dicts (driver field: issuer_kel).
+	IssuerKelEvents []map[string]interface{} `json:"issuer_kel,omitempty"`
 	// HolderAid: expected holder AID (subject of the credential).
 	HolderAid string `json:"holder_aid,omitempty"`
-	// PresentationSaid: the SAID of the presentation being verified.
-	PresentationSaid string `json:"presentation_said,omitempty"`
-	// CesrSignature: the holder's CESR signature over pres_said.encode().
-	CesrSignature string `json:"cesr_signature,omitempty"`
+	// PresentationSaid: base64 of pres_said.encode() — bytes the holder signed (driver field: pres_said_b64).
+	PresentationSaid string `json:"pres_said_b64,omitempty"`
+	// CesrSignature: the holder's CESR '0B...' signature over pres_said bytes (driver field: pres_cesr_sig).
+	CesrSignature string `json:"pres_cesr_sig,omitempty"`
 	// HolderPublicKey: the holder's current Ed25519 public key (base64).
 	HolderPublicKey string `json:"holder_public_key,omitempty"`
 	// TrustedSchemaSaids: list of accepted schema SAIDs; empty = accept all.
@@ -278,7 +278,31 @@ func (d *KeriDriver) Start() error {
 
 	scriptPath := os.Getenv("KERI_DRIVER_SCRIPT")
 	if scriptPath == "" {
-		scriptPath = "./drivers/keri-core/server.py"
+		// Default: look relative to this executable's directory, then fall back
+		// to the repo-root layout (drivers/ lives one level above identity-agent-core/).
+		exe, err := os.Executable()
+		if err == nil {
+			candidate := filepath.Join(filepath.Dir(exe), "drivers", "keri-core", "server.py")
+			if _, statErr := os.Stat(candidate); statErr == nil {
+				scriptPath = candidate
+			}
+		}
+		if scriptPath == "" {
+			// When running via `go run .` from identity-agent-core/, the CWD is
+			// identity-agent-core/ and the drivers/ dir is one level up.
+			for _, rel := range []string{
+				"./drivers/keri-core/server.py",
+				"../drivers/keri-core/server.py",
+			} {
+				if _, statErr := os.Stat(rel); statErr == nil {
+					scriptPath = rel
+					break
+				}
+			}
+		}
+		if scriptPath == "" {
+			scriptPath = "./drivers/keri-core/server.py" // last resort, keeps old behaviour
+		}
 	}
 
 	pythonBin := os.Getenv("KERI_DRIVER_PYTHON")

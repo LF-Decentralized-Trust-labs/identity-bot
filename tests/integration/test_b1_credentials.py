@@ -5,9 +5,12 @@ Tests ACDC credential issuance, presentation, and verification through
 the full Go + Python KERI driver stack.
 """
 
+import base64
+import json as _json
+
 import pytest
 import requests
-from helpers import TIMEOUT
+from helpers import TIMEOUT, sign_and_encode
 
 pytestmark = pytest.mark.integration
 
@@ -39,7 +42,8 @@ def issued_credential(agent_a, identity_a):
 
 
 def test_credential_issuance_returns_aid(issued_credential, identity_a):
-    assert issued_credential.get("aid") == identity_a.aid
+    acdc = _json.loads(base64.b64decode(issued_credential["acdc_json_b64"]))
+    assert acdc.get("i") == identity_a.aid
 
 
 def test_credential_issuance_returns_acdc_said(issued_credential):
@@ -56,7 +60,8 @@ def test_credential_issuance_returns_ixn_event(issued_credential):
 
 
 def test_credential_issuance_ixn_contains_acdc_said(issued_credential):
-    ixn = issued_credential.get("ixn_event", {})
+    raw = issued_credential.get("ixn_raw_bytes_b64", "")
+    ixn = _json.loads(base64.b64decode(raw)) if raw else issued_credential.get("ixn_event", {})
     acdc_said = issued_credential.get("acdc_said", "")
     seals = ixn.get("a", [])
     found = any(s.get("d") == acdc_said for s in seals if isinstance(s, dict))
@@ -68,9 +73,8 @@ def test_credential_issuance_ixn_contains_acdc_said(issued_credential):
 def test_credentials_list_includes_issued(agent_a, issued_credential):
     r = requests.get(f"{agent_a}/api/credentials", timeout=TIMEOUT)
     assert r.status_code == 200
-    creds = r.json()
-    assert isinstance(creds, list)
-    saids = [c.get("acdc_said") or c.get("said") or c.get("d") for c in creds]
+    creds = r.json().get("credentials", [])
+    saids = [c.get("said") or c.get("acdc_said") or c.get("d") for c in creds]
     assert issued_credential["acdc_said"] in saids, (
         f"Issued credential SAID not in list. Got: {saids}"
     )
@@ -102,9 +106,8 @@ def test_presentation_returns_said(presentation):
 
 def test_presentation_references_credential(presentation, issued_credential):
     """Presentation body must reference the credential SAID."""
-    body = presentation.get("presentation_body", {})
-    # The credential SAID should appear somewhere in the presentation body
-    body_str = str(body)
+    pres_b64 = presentation.get("presentation_json_b64", "")
+    body_str = base64.b64decode(pres_b64).decode() if pres_b64 else str(presentation)
     assert issued_credential["acdc_said"] in body_str, (
         "Credential SAID not found in presentation body"
     )
@@ -116,13 +119,17 @@ def test_presentation_references_credential(presentation, issued_credential):
 
 def test_credential_verification_passes(agent_a, issued_credential, identity_a, presentation):
     """POST /api/credential/verify must pass all 8 checks for a valid credential."""
+    pres_said_b64 = presentation.get("pres_said_b64", "")
+    pres_bytes = base64.b64decode(pres_said_b64) if pres_said_b64 else b""
+    cesr_sig = sign_and_encode(pres_bytes, identity_a.sk0) if pres_bytes else ""
     r = requests.post(
         f"{agent_a}/api/credential/verify",
         json={
-            "acdc_json":          issued_credential.get("acdc_body", {}),
+            "acdc_json":          issued_credential["acdc_json_b64"],
             "holder_aid":         identity_a.aid,
-            "presentation_said":  presentation.get("pres_said_b64", ""),
-            "holder_public_key":  identity_a.cesr_pk0,
+            "presentation_said":  pres_said_b64,
+            "cesr_signature":     cesr_sig,
+            "holder_public_key":  identity_a.server_pk0,
             "trusted_schema_saids": [SCHEMA_SAID],
         },
         timeout=TIMEOUT,
@@ -139,7 +146,7 @@ def test_credential_verification_all_checks_present(agent_a, issued_credential, 
     r = requests.post(
         f"{agent_a}/api/credential/verify",
         json={
-            "acdc_json":          issued_credential.get("acdc_body", {}),
+            "acdc_json":          issued_credential["acdc_json_b64"],
             "holder_aid":         identity_a.aid,
             "trusted_schema_saids": [SCHEMA_SAID],
         },
@@ -159,15 +166,17 @@ def test_credential_verification_all_checks_present(agent_a, issued_credential, 
 def test_tampered_credential_fails_verification(agent_a, issued_credential, identity_a):
     """A tampered credential body must fail SAID integrity check."""
     import copy
-    tampered = copy.deepcopy(issued_credential.get("acdc_body", {}))
+    acdc = _json.loads(base64.b64decode(issued_credential["acdc_json_b64"]))
+    tampered = copy.deepcopy(acdc)
     # Tamper the degree claim
     if "a" in tampered and isinstance(tampered["a"], dict):
         tampered["a"]["degree"] = "Fake PhD"
 
+    tampered_b64 = base64.b64encode(_json.dumps(tampered).encode()).decode()
     r = requests.post(
         f"{agent_a}/api/credential/verify",
         json={
-            "acdc_json":          tampered,
+            "acdc_json":          tampered_b64,
             "holder_aid":         identity_a.aid,
             "trusted_schema_saids": [SCHEMA_SAID],
         },

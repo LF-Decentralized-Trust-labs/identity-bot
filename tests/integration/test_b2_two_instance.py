@@ -21,9 +21,12 @@ Run with:
   AGENT_B_URL=http://127.0.0.1:5001 python -m pytest tests/integration/ -m two_instance -v
 """
 
+import base64
+import json as _json
+
 import pytest
 import requests
-from helpers import TIMEOUT
+from helpers import TIMEOUT, sign_and_encode
 
 pytestmark = [pytest.mark.integration, pytest.mark.two_instance]
 
@@ -136,11 +139,17 @@ def test_b_resolved_a_events_validated(b_resolves_a):
     )
 
 
-def test_b_has_a_as_contact(agent_b, identity_a, b_resolves_a):
-    """After resolving A's OOBI, B should have A in its contacts list."""
+def test_b_has_a_as_contact(agent_b, oobi_a, identity_a, b_resolves_a):
+    """After POST /api/contacts with A's OOBI, B should have A in its contacts list."""
+    # POST /api/resolve-oobi validates KEL only; POST /api/contacts creates the contact record.
+    requests.post(
+        f"{agent_b}/api/contacts",
+        json={"oobi_url": oobi_a},
+        timeout=TIMEOUT,
+    )
     r = requests.get(f"{agent_b}/api/contacts", timeout=TIMEOUT)
     assert r.status_code == 200
-    contacts = r.json()
+    contacts = r.json().get("contacts", [])
     aids = [c.get("aid") for c in contacts]
     assert identity_a.aid in aids, (
         f"A's AID not in B's contacts after OOBI resolution. Contacts: {aids}"
@@ -172,9 +181,14 @@ def test_a_resolved_b_kel_is_verified(a_resolves_b):
     assert a_resolves_b.get("kel_verified") is True
 
 
-def test_a_has_b_as_contact(agent_a, identity_b, a_resolves_b):
+def test_a_has_b_as_contact(agent_a, oobi_b, identity_b, a_resolves_b):
+    requests.post(
+        f"{agent_a}/api/contacts",
+        json={"oobi_url": oobi_b},
+        timeout=TIMEOUT,
+    )
     r = requests.get(f"{agent_a}/api/contacts", timeout=TIMEOUT)
-    contacts = r.json()
+    contacts = r.json().get("contacts", [])
     aids = [c.get("aid") for c in contacts]
     assert identity_b.aid in aids
 
@@ -211,19 +225,23 @@ def test_cross_instance_credential_said(cross_instance_credential):
     assert len(said) == 44
 
 
-def test_cross_instance_credential_holder_is_b(cross_instance_credential, identity_b):
-    body = cross_instance_credential.get("acdc_body", {})
-    a_block = body.get("a", {})
-    holder = a_block.get("i", "") if isinstance(a_block, dict) else ""
-    assert holder == identity_b.aid, (
-        f"Credential holder AID mismatch.\n"
-        f"Expected: {identity_b.aid}\nGot: {holder}"
+def test_cross_instance_credential_holder_is_b(agent_a, cross_instance_credential, identity_b):
+    """The credential store must record instance B as the holder."""
+    r = requests.get(f"{agent_a}/api/credentials", timeout=TIMEOUT)
+    assert r.status_code == 200
+    creds = r.json().get("credentials", [])
+    acdc_said = cross_instance_credential["acdc_said"]
+    cred = next((c for c in creds if c.get("said") == acdc_said), None)
+    assert cred is not None, f"Credential {acdc_said} not found in store"
+    assert cred.get("holder_aid") == identity_b.aid, (
+        f"Stored holder AID mismatch.\n"
+        f"Expected: {identity_b.aid}\nGot: {cred.get('holder_aid')}"
     )
 
 
-def test_cross_instance_credential_anchored_in_a_kel(agent_a, cross_instance_credential):
+def test_cross_instance_credential_anchored_in_a_kel(agent_a, identity_a, cross_instance_credential):
     """The credential's IXN seal must be in instance A's KEL."""
-    kel_body = requests.get(f"{agent_a}/api/kel", timeout=TIMEOUT).json()
+    kel_body = requests.get(f"{agent_a}/api/kel?name={identity_a.aid}", timeout=TIMEOUT).json()
     acdc_said = cross_instance_credential["acdc_said"]
     events    = kel_body.get("kel", [])
     found = False
@@ -265,15 +283,24 @@ def test_b_presentation_said(b_presentation):
 
 
 def test_cross_instance_verification_passes(agent_b, cross_instance_credential,
-                                             identity_b, b_presentation):
+                                             identity_b, b_presentation, oobi_a):
     """B verifies A's credential — the core interop proof."""
+    # Refresh B's stored contact KEL for A (which now includes the IXN seal from credential
+    # issuance). Must use POST /api/contacts (not /api/resolve-oobi) because only
+    # handleAddContact persists the updated KEL to contact_kels.json.
+    requests.post(f"{agent_b}/api/contacts", json={"oobi_url": oobi_a}, timeout=TIMEOUT)
+
+    pres_said_b64 = b_presentation.get("pres_said_b64", "")
+    pres_bytes = base64.b64decode(pres_said_b64) if pres_said_b64 else b""
+    cesr_sig = sign_and_encode(pres_bytes, identity_b.sk0) if pres_bytes else ""
     r = requests.post(
         f"{agent_b}/api/credential/verify",
         json={
-            "acdc_json":          cross_instance_credential.get("acdc_body", {}),
+            "acdc_json":          cross_instance_credential["acdc_json_b64"],
             "holder_aid":         identity_b.aid,
-            "presentation_said":  b_presentation.get("pres_said_b64", ""),
-            "holder_public_key":  identity_b.cesr_pk0,
+            "presentation_said":  pres_said_b64,
+            "cesr_signature":     cesr_sig,
+            "holder_public_key":  identity_b.server_pk0,
             "trusted_schema_saids": [SCHEMA_SAID],
         },
         timeout=TIMEOUT,

@@ -142,6 +142,8 @@ class AgentIdentity:
         self.aid          = body["aid"]
         self.raw_bytes_b64 = body["raw_bytes_b64"]
         self.inception_event = body["inception_event"]
+        # Use the public key as stored by the server (driver may normalise encoding)
+        self.server_pk0   = body.get("public_key", self.cesr_pk0)
 
         # Sign and record the CESR signature
         raw_bytes = base64.b64decode(self.raw_bytes_b64)

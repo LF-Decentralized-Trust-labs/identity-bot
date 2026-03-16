@@ -162,7 +162,12 @@ def _b64url_decode(s: str) -> bytes:
 
 def _extract_raw_key(cesr_key: str) -> bytes:
     if cesr_key[0] in ("B", "D") and len(cesr_key) > 1:
-        return _b64url_decode(cesr_key[1:])
+        # CESR 1-char code with 1 lead zero byte:
+        # qb64 = code + base64url('\x00' + raw_32)[1:]
+        # To recover raw_32: restore the dropped first base64 char ('A' for a zero lead byte),
+        # decode to 33 bytes, then strip the lead byte.
+        raw_with_lead = _b64url_decode("A" + cesr_key[1:])  # 33 bytes: '\x00' + raw_32
+        return raw_with_lead[1:]                             # 32 bytes: raw_32
     return _b64url_decode(cesr_key)
 
 

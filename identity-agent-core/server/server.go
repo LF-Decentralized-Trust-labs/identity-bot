@@ -4,6 +4,7 @@ import (
         "bytes"
         "context"
         "crypto/tls"
+        "encoding/base64"
         "encoding/json"
         "fmt"
         "io"
@@ -1143,13 +1144,22 @@ func (s *CoreServer) handleVerifyCredential(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Extract issuer AID from the ACDC JSON to look up its stored KEL.
+	// Extract issuer AID from the ACDC JSON (which is base64-encoded) to look up its stored KEL.
 	var acdcBody map[string]interface{}
 	var issuerKelEvents []map[string]interface{}
-	if err := json.Unmarshal([]byte(req.AcdcJson), &acdcBody); err == nil {
-		if issuerAid, ok := acdcBody["i"].(string); ok && issuerAid != "" {
-			if kelRecord, err := s.DataStore.GetContactKEL(issuerAid); err == nil && kelRecord != nil {
-				issuerKelEvents = kelRecord.KEL
+	if acdcBytes, err := base64.StdEncoding.DecodeString(req.AcdcJson); err == nil {
+		if err2 := json.Unmarshal(acdcBytes, &acdcBody); err2 == nil {
+			if issuerAid, ok := acdcBody["i"].(string); ok && issuerAid != "" {
+				// Try contact KEL first (cross-instance: issuer is a remote contact).
+				if kelRecord, err3 := s.DataStore.GetContactKEL(issuerAid); err3 == nil && kelRecord != nil {
+					issuerKelEvents = unwrapEventJSON(kelRecord.KEL)
+				}
+				// Fall back to own KEL (self-issued: issuer is this instance).
+				if issuerKelEvents == nil {
+					if ownEvents, err3 := s.DataStore.GetEvents(issuerAid); err3 == nil && len(ownEvents) > 0 {
+						issuerKelEvents = eventRecordsToKEDs(ownEvents)
+					}
+				}
 			}
 		}
 	}
@@ -2531,6 +2541,37 @@ func oobiBase(oobiURL string) string {
                 return oobiURL[:idx]
         }
         return oobiURL
+}
+
+// unwrapEventJSON converts EventRecord-style dicts (with an "event_json" field containing a
+// JSON-encoded KED) to raw KED dicts. Events that are already raw KEDs are passed through unchanged.
+// This is needed because the OOBI endpoint serves EventRecord structs, so contact_kels stores
+// event_json-wrapped records, while the Python credential_verify driver expects raw KED dicts.
+func unwrapEventJSON(events []map[string]interface{}) []map[string]interface{} {
+	out := make([]map[string]interface{}, 0, len(events))
+	for _, ev := range events {
+		if ejson, ok := ev["event_json"].(string); ok {
+			var ked map[string]interface{}
+			if err := json.Unmarshal([]byte(ejson), &ked); err == nil {
+				out = append(out, ked)
+				continue
+			}
+		}
+		out = append(out, ev)
+	}
+	return out
+}
+
+// eventRecordsToKEDs converts store.EventRecord structs to raw KED dicts by parsing EventJSON.
+func eventRecordsToKEDs(records []store.EventRecord) []map[string]interface{} {
+	out := make([]map[string]interface{}, 0, len(records))
+	for _, rec := range records {
+		var ked map[string]interface{}
+		if err := json.Unmarshal([]byte(rec.EventJSON), &ked); err == nil {
+			out = append(out, ked)
+		}
+	}
+	return out
 }
 
 func writeError(w http.ResponseWriter, status int, errMsg string, details string) {
