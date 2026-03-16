@@ -131,6 +131,25 @@ CREATE INDEX IF NOT EXISTS idx_credentials_issuer ON credentials(issuer_aid);
 CREATE INDEX IF NOT EXISTS idx_credentials_holder ON credentials(holder_aid);
 `,
 	},
+	{
+		Version:     4,
+		Description: "Add presentations table for verifiable credential presentations",
+		SQL: `
+CREATE TABLE IF NOT EXISTS presentations (
+    said                   TEXT PRIMARY KEY,
+    credential_said        TEXT NOT NULL DEFAULT '',
+    holder_aid             TEXT NOT NULL DEFAULT '',
+    issuer_aid             TEXT NOT NULL DEFAULT '',
+    presentation_json_b64  TEXT NOT NULL DEFAULT '',
+    cesr_signature         TEXT NOT NULL DEFAULT '',
+    created_at             TEXT NOT NULL DEFAULT '',
+    status                 TEXT NOT NULL DEFAULT 'created'
+);
+
+CREATE INDEX IF NOT EXISTS idx_presentations_credential ON presentations(credential_said);
+CREATE INDEX IF NOT EXISTS idx_presentations_holder ON presentations(holder_aid);
+`,
+	},
 }
 
 // ApplyIdentityMigrations creates the migrations table and applies any pending migrations.

@@ -141,6 +141,16 @@ class MobileStandaloneKeriService extends KeriService {
   }
 
   @override
+  Future<PresentationResult> presentCredential({
+    required String acdcSaid,
+    required String holderAid,
+    String issuerAid = '',
+    String schemaSaid = '',
+  }) async {
+    throw UnimplementedError('presentCredential not yet supported on mobile standalone');
+  }
+
+  @override
   void dispose() {
     if (_coreStarted) {
       _mobileCore.stopCore();

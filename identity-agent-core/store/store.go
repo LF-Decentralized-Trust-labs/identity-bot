@@ -123,6 +123,18 @@ type CredentialRecord struct {
 	Status        string `json:"status"`
 }
 
+// PresentationRecord stores a verifiable presentation created by the holder.
+type PresentationRecord struct {
+	SAID                string `json:"said"`
+	CredentialSAID      string `json:"credential_said"`
+	HolderAID           string `json:"holder_aid"`
+	IssuerAID           string `json:"issuer_aid"`
+	PresentationJsonB64 string `json:"presentation_json_b64"`
+	CesrSignature       string `json:"cesr_signature,omitempty"`
+	CreatedAt           string `json:"created_at"`
+	Status              string `json:"status"`
+}
+
 // ContactKELRecord stores a contact's validated Key Event Log.
 // This is the cryptographic proof of a contact's identity history.
 type ContactKELRecord struct {
@@ -152,6 +164,9 @@ type Store interface {
         SaveCredential(record CredentialRecord) error
         GetCredential(said string) (*CredentialRecord, error)
         GetCredentials() ([]CredentialRecord, error)
+        SavePresentation(record PresentationRecord) error
+        GetPresentation(said string) (*PresentationRecord, error)
+        GetPresentations() ([]PresentationRecord, error)
         GetSettings() (*SettingsData, error)
         SaveSettings(settings SettingsData) error
         SavePendingRequest(req PendingRequest) error
@@ -504,6 +519,64 @@ func (s *FileStore) SaveProfile(profile ProfileData) error {
         return s.writeJSON(filepath.Join(s.dir, "profile.json"), profile)
 }
 
+func (s *FileStore) SavePresentation(record PresentationRecord) error {
+        s.mu.Lock()
+        defer s.mu.Unlock()
+
+        pres, err := s.loadPresentations()
+        if err != nil {
+                pres = map[string]PresentationRecord{}
+        }
+        pres[record.SAID] = record
+        return s.writeJSON(filepath.Join(s.dir, "presentations.json"), pres)
+}
+
+func (s *FileStore) GetPresentation(said string) (*PresentationRecord, error) {
+        s.mu.RLock()
+        defer s.mu.RUnlock()
+
+        pres, err := s.loadPresentations()
+        if err != nil {
+                return nil, err
+        }
+        r, ok := pres[said]
+        if !ok {
+                return nil, nil
+        }
+        return &r, nil
+}
+
+func (s *FileStore) GetPresentations() ([]PresentationRecord, error) {
+        s.mu.RLock()
+        defer s.mu.RUnlock()
+
+        pres, err := s.loadPresentations()
+        if err != nil {
+                return nil, err
+        }
+        list := make([]PresentationRecord, 0, len(pres))
+        for _, p := range pres {
+                list = append(list, p)
+        }
+        return list, nil
+}
+
+func (s *FileStore) loadPresentations() (map[string]PresentationRecord, error) {
+        path := filepath.Join(s.dir, "presentations.json")
+        data, err := os.ReadFile(path)
+        if err != nil {
+                if os.IsNotExist(err) {
+                        return map[string]PresentationRecord{}, nil
+                }
+                return nil, fmt.Errorf("failed to read presentations: %w", err)
+        }
+        var pres map[string]PresentationRecord
+        if err := json.Unmarshal(data, &pres); err != nil {
+                return nil, fmt.Errorf("failed to parse presentations: %w", err)
+        }
+        return pres, nil
+}
+
 func (s *FileStore) SaveCredential(record CredentialRecord) error {
         s.mu.Lock()
         defer s.mu.Unlock()
@@ -609,7 +682,7 @@ func (s *FileStore) ResetAll() error {
         s.mu.Lock()
         defer s.mu.Unlock()
 
-        files := []string{"identity.json", "kel.json", "contacts.json", "settings.json", "pending_requests.json", "profile.json", "endpoint.json", "contact_kels.json", "credentials.json"}
+        files := []string{"identity.json", "kel.json", "contacts.json", "settings.json", "pending_requests.json", "profile.json", "endpoint.json", "contact_kels.json", "credentials.json", "presentations.json"}
         for _, f := range files {
                 path := filepath.Join(s.dir, f)
                 if err := os.Remove(path); err != nil && !os.IsNotExist(err) {

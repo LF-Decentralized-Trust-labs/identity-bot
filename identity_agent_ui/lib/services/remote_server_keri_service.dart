@@ -145,6 +145,16 @@ class RemoteServerKeriService extends KeriService {
   }
 
   @override
+  Future<PresentationResult> presentCredential({
+    required String acdcSaid,
+    required String holderAid,
+    String issuerAid = '',
+    String schemaSaid = '',
+  }) async {
+    throw UnimplementedError('presentCredential not yet supported on remote server service');
+  }
+
+  @override
   void dispose() {
     _client.close();
   }

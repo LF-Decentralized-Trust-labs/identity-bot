@@ -87,5 +87,15 @@ class MobileRemoteKeriService extends KeriService {
   }
 
   @override
+  Future<PresentationResult> presentCredential({
+    required String acdcSaid,
+    required String holderAid,
+    String issuerAid = '',
+    String schemaSaid = '',
+  }) async {
+    throw UnimplementedError('presentCredential not yet supported on mobile remote');
+  }
+
+  @override
   void dispose() {}
 }

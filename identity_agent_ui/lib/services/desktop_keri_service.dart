@@ -313,6 +313,58 @@ class DesktopKeriService extends KeriService {
   }
 
   @override
+  Future<PresentationResult> presentCredential({
+    required String acdcSaid,
+    required String holderAid,
+    String issuerAid = '',
+    String schemaSaid = '',
+  }) async {
+    // Step 1: Ask the Go backend to build the presentation and compute its SAID.
+    final response = await _client.post(
+      Uri.parse('$_baseUrl/api/credential/present'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'acdc_said': acdcSaid,
+        'holder_aid': holderAid,
+        'issuer_aid': issuerAid,
+        'schema_said': schemaSaid,
+      }),
+    );
+
+    if (response.statusCode != 201 && response.statusCode != 200) {
+      final body = jsonDecode(response.body);
+      throw Exception(body['error'] ?? 'Presentation failed: ${response.statusCode}');
+    }
+
+    final json = jsonDecode(response.body);
+    final presSaidB64 = json['pres_said_b64'] as String? ?? '';
+
+    // Step 2: Sign the presentation SAID bytes locally with the holder's current
+    // key (index 0). This proves possession of the key bound to the holder AID.
+    // The holder signs pres_said.encode() — the UTF-8 bytes of the 44-char SAID.
+    // Private key never leaves this device (ADR-014).
+    String cesrSig = '';
+    if (presSaidB64.isNotEmpty) {
+      final mnemonic = await SecureKeyStore.loadMnemonic();
+      if (mnemonic != null) {
+        final seed = Bip39.mnemonicToSeed(mnemonic);
+        final seedHash = sha256.convert(seed.sublist(0, 32));
+        final privateSeed = Uint8List.fromList(seedHash.bytes);
+        final privateKey = ed.newKeyFromSeed(privateSeed);
+        final saidBytes = base64Decode(presSaidB64);
+        final rawSig = ed.sign(privateKey, Uint8List.fromList(saidBytes));
+        cesrSig = await _cesrEncode(base64Encode(rawSig));
+      }
+    }
+
+    return PresentationResult(
+      presentationSaid: json['presentation_said'] ?? '',
+      presentationJsonB64: json['presentation_json_b64'] ?? '',
+      cesrSignature: cesrSig,
+    );
+  }
+
+  @override
   void dispose() {
     _client.close();
   }

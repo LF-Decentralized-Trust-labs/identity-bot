@@ -843,6 +843,80 @@ def resolve_oobi():
     }), 200
 
 
+@app.route("/credential/present", methods=["POST"])
+def credential_present():
+    """Create a verifiable presentation for a held credential.
+
+    The presentation body is SAID-computed (attribute block first, then top-level).
+    The holder proves possession by signing the presentation SAID bytes with their
+    current key — the verifier checks this against the holder AID's KEL.
+
+    Request JSON:
+        acdc_said   (str)  — SAID of the credential being presented
+        holder_aid  (str)  — AID of the presenter (credential subject)
+        issuer_aid  (str)  — AID of the credential issuer (optional, for 'ri' field)
+        schema_said (str)  — SAID of the presentation schema (optional)
+
+    Returns:
+        presentation_said    (str) — self-addressing SAID of the presentation
+        presentation_json_b64 (str) — base64 of the serialized presentation
+        pres_said_b64        (str) — base64 of pres_said.encode(); sign these
+                                     bytes with the holder's current key then /cesr-encode
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Request body required"}), 400
+
+    acdc_said   = data.get("acdc_said", "")
+    holder_aid  = data.get("holder_aid", "")
+    issuer_aid  = data.get("issuer_aid", "")
+    schema_said = data.get("schema_said", "EpresentationSchema")
+
+    if not acdc_said or not holder_aid:
+        return jsonify({"error": "acdc_said and holder_aid are required"}), 400
+
+    try:
+        # Build presentation attribute block and compute its SAID
+        attr_block = {
+            "d": "",
+            "credential_said": acdc_said,
+            "holder_aid": holder_aid,
+        }
+        attr_json = json.dumps(attr_block, separators=(",", ":")).encode()
+        attr_diger = coring.Diger(ser=attr_json, code=MtrDex.Blake3_256)
+        attr_block["d"] = attr_diger.qb64
+
+        # Build top-level presentation body and compute its SAID
+        presentation = {
+            "v": "ACDC10JSON000000_",
+            "d": "",
+            "i": holder_aid,
+            "ri": issuer_aid,
+            "s": schema_said,
+            "a": attr_block,
+        }
+        pres_json_v1 = json.dumps(presentation, separators=(",", ":")).encode()
+        pres_diger   = coring.Diger(ser=pres_json_v1, code=MtrDex.Blake3_256)
+        pres_said    = pres_diger.qb64
+        presentation["d"] = pres_said
+
+        pres_json_final = json.dumps(presentation, separators=(",", ":")).encode()
+
+        # The holder signs the presentation SAID (UTF-8 bytes) as proof of possession.
+        # This binds the holder's identity to this specific presentation instance.
+        pres_said_b64 = base64.b64encode(pres_said.encode()).decode()
+
+        return jsonify({
+            "presentation_said":     pres_said,
+            "presentation_json_b64": base64.b64encode(pres_json_final).decode(),
+            "presentation_body":     presentation,
+            # pres_said_b64: base64 of pres_said.encode(); sign these bytes then /cesr-encode
+            "pres_said_b64":         pres_said_b64,
+        }), 201
+    except Exception as e:
+        return jsonify({"error": f"Presentation creation failed: {str(e)}"}), 500
+
+
 @app.route("/generate-multisig-event", methods=["POST"])
 def generate_multisig_event():
     data = request.get_json()
@@ -915,6 +989,6 @@ if __name__ == "__main__":
     print(f"[keri-driver] KERI library: keripy (reference)")
     print(f"[keri-driver] Stateful endpoints:  /status, /inception, /rotation, /interact, /sign, /kel, /verify")
     print(f"[keri-driver] Stateless endpoints: /cesr-encode, /validate-kel, /resolve-oobi, /format-credential, /generate-multisig-event")
-    print(f"[keri-driver] Credential endpoints: /credential/issue")
+    print(f"[keri-driver] Credential endpoints: /credential/issue, /credential/present")
 
     app.run(host=host, port=port, debug=False)

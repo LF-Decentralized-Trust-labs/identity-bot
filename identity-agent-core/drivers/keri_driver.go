@@ -172,6 +172,21 @@ type DriverIssueCredentialResponse struct {
 	SequenceNumber int                    `json:"sequence_number"`
 }
 
+type DriverPresentCredentialRequest struct {
+	AcdcSaid   string `json:"acdc_said"`
+	HolderAid  string `json:"holder_aid"`
+	IssuerAid  string `json:"issuer_aid,omitempty"`
+	SchemaSaid string `json:"schema_said,omitempty"`
+}
+
+type DriverPresentCredentialResponse struct {
+	PresentationSaid    string                 `json:"presentation_said"`
+	PresentationJsonB64 string                 `json:"presentation_json_b64"`
+	PresentationBody    map[string]interface{} `json:"presentation_body"`
+	// PresSaidB64: base64 of pres_said.encode(); sign these bytes with holder's key.
+	PresSaidB64         string                 `json:"pres_said_b64"`
+}
+
 type DriverCesrEncodeRequest struct {
 	RawSigB64 string `json:"raw_sig_b64"`
 }
@@ -489,6 +504,27 @@ func (d *KeriDriver) ResolveOobi(url string) (*DriverResolveOobiResponse, error)
 	var result DriverResolveOobiResponse
 	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("failed to decode resolve-oobi response: %w", err)
+	}
+
+	return &result, nil
+}
+
+func (d *KeriDriver) PresentCredential(acdcSaid, holderAid, issuerAid, schemaSaid string) (*DriverPresentCredentialResponse, error) {
+	reqBody := DriverPresentCredentialRequest{
+		AcdcSaid:   acdcSaid,
+		HolderAid:  holderAid,
+		IssuerAid:  issuerAid,
+		SchemaSaid: schemaSaid,
+	}
+
+	body, err := d.doPost("/credential/present", reqBody, http.StatusCreated)
+	if err != nil {
+		return nil, err
+	}
+
+	var result DriverPresentCredentialResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode credential/present response: %w", err)
 	}
 
 	return &result, nil

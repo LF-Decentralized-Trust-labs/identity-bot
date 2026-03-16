@@ -400,6 +400,64 @@ func (s *SQLiteStore) SaveProfile(profile ProfileData) error {
 	return nil
 }
 
+// ── Presentations ─────────────────────────────────────────────────────────────
+
+func (s *SQLiteStore) SavePresentation(record PresentationRecord) error {
+	_, err := s.db.Exec(`
+		INSERT INTO presentations (said, credential_said, holder_aid, issuer_aid, presentation_json_b64, cesr_signature, created_at, status)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(said) DO UPDATE SET
+			cesr_signature = excluded.cesr_signature,
+			status         = excluded.status`,
+		record.SAID, record.CredentialSAID, record.HolderAID, record.IssuerAID,
+		record.PresentationJsonB64, record.CesrSignature, record.CreatedAt, record.Status,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to save presentation: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) GetPresentation(said string) (*PresentationRecord, error) {
+	var r PresentationRecord
+	err := s.db.QueryRow(
+		`SELECT said, credential_said, holder_aid, issuer_aid, presentation_json_b64, cesr_signature, created_at, status
+		 FROM presentations WHERE said = ?`, said,
+	).Scan(&r.SAID, &r.CredentialSAID, &r.HolderAID, &r.IssuerAID,
+		&r.PresentationJsonB64, &r.CesrSignature, &r.CreatedAt, &r.Status)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get presentation: %w", err)
+	}
+	return &r, nil
+}
+
+func (s *SQLiteStore) GetPresentations() ([]PresentationRecord, error) {
+	rows, err := s.db.Query(
+		`SELECT said, credential_said, holder_aid, issuer_aid, presentation_json_b64, cesr_signature, created_at, status
+		 FROM presentations ORDER BY created_at DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query presentations: %w", err)
+	}
+	defer rows.Close()
+
+	var pres []PresentationRecord
+	for rows.Next() {
+		var r PresentationRecord
+		if err := rows.Scan(&r.SAID, &r.CredentialSAID, &r.HolderAID, &r.IssuerAID,
+			&r.PresentationJsonB64, &r.CesrSignature, &r.CreatedAt, &r.Status); err != nil {
+			return nil, fmt.Errorf("failed to scan presentation: %w", err)
+		}
+		pres = append(pres, r)
+	}
+	if pres == nil {
+		pres = []PresentationRecord{}
+	}
+	return pres, nil
+}
+
 // ── Credentials ───────────────────────────────────────────────────────────────
 
 func (s *SQLiteStore) SaveCredential(record CredentialRecord) error {
@@ -544,7 +602,7 @@ func (s *SQLiteStore) SaveEndpoint(url, source string) error {
 // ── Reset ─────────────────────────────────────────────────────────────────────
 
 func (s *SQLiteStore) ResetAll() error {
-	tables := []string{"kel", "identity", "contacts", "pending_requests", "profile", "settings", "endpoint", "contact_kels", "credentials"}
+	tables := []string{"kel", "identity", "contacts", "pending_requests", "profile", "settings", "endpoint", "contact_kels", "credentials", "presentations"}
 	for _, t := range tables {
 		if _, err := s.db.Exec(`DELETE FROM ` + t); err != nil {
 			return fmt.Errorf("failed to clear table %s: %w", t, err)

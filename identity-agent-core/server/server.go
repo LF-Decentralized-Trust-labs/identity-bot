@@ -281,6 +281,8 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 
                 r.Post("/credential/issue", s.handleIssueCredential)
                 r.Get("/credentials", s.handleGetCredentials)
+                r.Post("/credential/present", s.handlePresentCredential)
+                r.Get("/presentations", s.handleGetPresentations)
 
                 r.Get("/oobi", s.handleOobiGenerate)
 
@@ -1039,6 +1041,76 @@ func (s *CoreServer) handleGetCredentials(w http.ResponseWriter, r *http.Request
         json.NewEncoder(w).Encode(map[string]interface{}{
                 "credentials": creds,
                 "count":       len(creds),
+        })
+}
+
+func (s *CoreServer) handlePresentCredential(w http.ResponseWriter, r *http.Request) {
+        if s.KeriDriver == nil {
+                writeError(w, http.StatusServiceUnavailable, "KERI driver not available",
+                        "Credential presentation requires the Python KERI driver (desktop only)")
+                return
+        }
+
+        var req struct {
+                AcdcSaid      string `json:"acdc_said"`
+                HolderAid     string `json:"holder_aid"`
+                IssuerAid     string `json:"issuer_aid,omitempty"`
+                SchemaSaid    string `json:"schema_said,omitempty"`
+                CesrSignature string `json:"cesr_signature,omitempty"`
+        }
+        if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+                writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+                return
+        }
+        if req.AcdcSaid == "" || req.HolderAid == "" {
+                writeError(w, http.StatusBadRequest, "Missing required fields", "acdc_said and holder_aid are required")
+                return
+        }
+
+        result, err := s.KeriDriver.PresentCredential(req.AcdcSaid, req.HolderAid, req.IssuerAid, req.SchemaSaid)
+        if err != nil {
+                writeError(w, http.StatusInternalServerError, "Credential presentation failed", err.Error())
+                return
+        }
+
+        record := store.PresentationRecord{
+                SAID:                result.PresentationSaid,
+                CredentialSAID:      req.AcdcSaid,
+                HolderAID:           req.HolderAid,
+                IssuerAID:           req.IssuerAid,
+                PresentationJsonB64: result.PresentationJsonB64,
+                CesrSignature:       req.CesrSignature,
+                CreatedAt:           time.Now().UTC().Format(time.RFC3339),
+                Status:              "created",
+        }
+        if err := s.DataStore.SavePresentation(record); err != nil {
+                log.Printf("[identity-agent-core] PRESENTATION: Failed to persist %s: %v", result.PresentationSaid, err)
+        }
+
+        log.Printf("[identity-agent-core] PRESENTATION: Created %s for credential %s", result.PresentationSaid, req.AcdcSaid)
+
+        w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(http.StatusCreated)
+        json.NewEncoder(w).Encode(map[string]interface{}{
+                "presentation_said":     result.PresentationSaid,
+                "presentation_json_b64": result.PresentationJsonB64,
+                // pres_said_b64: base64 of pres_said.encode(); Dart signs these bytes with holder key
+                "pres_said_b64": result.PresSaidB64,
+                "status":        "created",
+        })
+}
+
+func (s *CoreServer) handleGetPresentations(w http.ResponseWriter, r *http.Request) {
+        pres, err := s.DataStore.GetPresentations()
+        if err != nil {
+                writeError(w, http.StatusInternalServerError, "Failed to read presentations", err.Error())
+                return
+        }
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(map[string]interface{}{
+                "presentations": pres,
+                "count":         len(pres),
         })
 }
 

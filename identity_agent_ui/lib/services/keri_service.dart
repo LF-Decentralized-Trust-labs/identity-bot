@@ -70,6 +70,20 @@ class InteractResult {
   });
 }
 
+class PresentationResult {
+  final String presentationSaid;
+  final String presentationJsonB64;
+  // cesrSignature: CESR '0B...' signature over the presentation SAID bytes.
+  // Proves the holder possesses the key bound to the holder AID in the credential.
+  final String cesrSignature;
+
+  PresentationResult({
+    required this.presentationSaid,
+    required this.presentationJsonB64,
+    this.cesrSignature = '',
+  });
+}
+
 class CredentialIssuanceResult {
   final String acdcSaid;
   final String acdcJsonB64;
@@ -127,6 +141,13 @@ abstract class KeriService {
     required String schemaSaid,
     String holderAid = '',
     String name = '',
+  });
+
+  Future<PresentationResult> presentCredential({
+    required String acdcSaid,
+    required String holderAid,
+    String issuerAid = '',
+    String schemaSaid = '',
   });
 
   void dispose();
