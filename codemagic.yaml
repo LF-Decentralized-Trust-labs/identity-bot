@@ -587,6 +587,7 @@ workflows:
           sudo apt-get install -y \
             clang cmake ninja-build pkg-config \
             libgtk-3-dev liblzma-dev libstdc++-12-dev \
+            libsecret-1-dev \
             golang-go python3 python3-pip python3-venv
           go version
 
