@@ -6,32 +6,56 @@ import '../bridge/keri_bridge_stub.dart'
     if (dart.library.io) '../bridge/keri_bridge.dart';
 import '../config/agent_config.dart';
 
-class MobileStandaloneKeriService extends KeriService {
+/// Mobile KERI service for devices that hold their own private keys.
+///
+/// Covers two topological states (ADR-006):
+///   - **Standalone**: device holds root AID keys and runs Go Core locally.
+///     The 3 stateless KERI ops (format-credential, resolve-oobi,
+///     generate-multisig-event) are delegated to the public KERI microservice.
+///   - **Remote Controller WITH Keys**: device holds root AID keys but pairs
+///     with a desktop Identity Agent server for backend services. The 3
+///     stateless ops are delegated to that paired server instead of the public
+///     microservice.
+///
+/// All stateful KERI operations (inception, rotation, signing, interaction)
+/// always run locally via the Rust bridge — the paired server never receives
+/// private keys.
+///
+/// Usage:
+///   OnDeviceKeriService()                       // standalone → public microservice
+///   OnDeviceKeriService(pairedServerUrl: url)   // remote-with-keys → paired server
+class OnDeviceKeriService extends KeriService {
   final KeriBridge _bridge;
   final MobileCoreService _mobileCore;
+
+  /// URL used for the 3 stateless ops. Paired server takes priority; falls
+  /// back to the public KERI microservice when not paired.
   final String _keriServiceUrl;
+
+  final String? _pairedServerUrl;
   final http.Client _client;
   bool _coreStarted = false;
 
-  MobileStandaloneKeriService({
+  OnDeviceKeriService({
+    String? pairedServerUrl,
     KeriBridge? bridge,
     MobileCoreService? mobileCore,
-    String? keriServiceUrl,
-  })  : _bridge = bridge ?? KeriBridge(),
+  })  : _pairedServerUrl = pairedServerUrl,
+        _bridge = bridge ?? KeriBridge(),
         _mobileCore = mobileCore ?? MobileCoreService(),
-        _keriServiceUrl = keriServiceUrl ?? AgentConfig.publicKeriServiceUrl,
+        _keriServiceUrl = pairedServerUrl ?? AgentConfig.publicKeriServiceUrl,
         _client = http.Client();
 
   @override
-  AgentEnvironment get environment => AgentEnvironment.mobileStandalone;
+  AgentEnvironment get environment => _pairedServerUrl != null
+      ? AgentEnvironment.mobileRemoteWithKeys
+      : AgentEnvironment.mobileStandalone;
 
   MobileCoreService get mobileCore => _mobileCore;
-
   bool get isCoreReady => _coreStarted;
 
   Future<void> startGoCore({String? dataDir, int? port}) async {
     if (_coreStarted) return;
-
     await _mobileCore.startCore(dataDir: dataDir, port: port);
     final ready = await _mobileCore.waitForReady();
     if (!ready) {
@@ -52,45 +76,32 @@ class MobileStandaloneKeriService extends KeriService {
   // CESR / key conversion helpers
   // ---------------------------------------------------------------------------
 
-  /// Decode a CESR '0B...' (88-char) signature to raw base64 (standard, 88 chars → 64 bytes).
-  ///
-  /// CESR encoding: prepend 2 lead bytes [0x00,0x00] → 66 bytes → base64url (no pad) → 88 chars
-  ///                then replace chars [0,2] with '0B'.
-  /// Since lead bytes are always \x00\x00, their base64url prefix is 'AA'.
+  /// Decode a CESR '0B...' (88-char) Ed25519 signature to raw base64 (64 bytes).
   String _cesrSigToRawBase64(String cesrSig) {
     if (!cesrSig.startsWith('0B') || cesrSig.length != 88) {
       throw ArgumentError('Expected CESR Ed25519 sig (0B..., 88 chars), got: $cesrSig');
     }
-    // Reconstruct original base64url: replace '0B' → 'AA'.
-    final b64url = 'AA${cesrSig.substring(2)}'; // 88 chars → 66 bytes when decoded
-    final decoded = base64Url.decode(b64url); // Dart pads internally if needed
-    final raw64 = decoded.sublist(2); // drop 2 lead bytes → 64 bytes
+    final b64url = 'AA${cesrSig.substring(2)}';
+    final decoded = base64Url.decode(b64url);
+    final raw64 = decoded.sublist(2);
     return base64.encode(raw64);
   }
 
   /// Decode a CESR Ed25519 public key ('B...' or 'D...', 44 chars) to raw base64 (32 bytes).
-  ///
-  /// CESR encoding: prepend 1 lead byte [0x00] → 33 bytes → base64url (no pad) → 44 chars
-  ///                then replace char[0] with 'B' (NT) or 'D' (transferable).
-  /// Since the lead byte is \x00, its base64url prefix char is 'A'.
   String _cesrKeyToRawBase64(String cesrKey) {
-    if (cesrKey.length != 44) {
-      // Might already be raw base64 (32 bytes → 44 chars with padding, or 43 no-pad).
-      return cesrKey;
-    }
+    if (cesrKey.length != 44) return cesrKey;
     final ch = cesrKey[0];
     if (ch == 'B' || ch == 'D') {
-      final b64url = 'A${cesrKey.substring(1)}'; // 44 chars → 33 bytes
+      final b64url = 'A${cesrKey.substring(1)}';
       final decoded = base64Url.decode(b64url);
-      final raw32 = decoded.sublist(1); // drop 1 lead byte → 32 bytes
+      final raw32 = decoded.sublist(1);
       return base64.encode(raw32);
     }
-    // Assume already raw base64.
     return cesrKey;
   }
 
   // ---------------------------------------------------------------------------
-  // Standard KERI bridge ops (unchanged from original)
+  // Stateful KERI ops — always local via Rust bridge
   // ---------------------------------------------------------------------------
 
   @override
@@ -102,10 +113,7 @@ class MobileStandaloneKeriService extends KeriService {
 
     if (_coreStarted) {
       try {
-        await _mobileCore.storeIdentity(
-          aid: result.aid,
-          publicKey: result.publicKey,
-        );
+        await _mobileCore.storeIdentity(aid: result.aid, publicKey: result.publicKey);
         await _mobileCore.storeEvent(
           aid: result.aid,
           eventType: 'icp',
@@ -153,10 +161,7 @@ class MobileStandaloneKeriService extends KeriService {
     required List<int> data,
   }) async {
     final result = await _bridge.signPayload(name: name, data: data);
-    return SignatureResult(
-      signature: result.signature,
-      publicKey: result.publicKey,
-    );
+    return SignatureResult(signature: result.signature, publicKey: result.publicKey);
   }
 
   @override
@@ -170,46 +175,45 @@ class MobileStandaloneKeriService extends KeriService {
     required String signature,
     required String publicKey,
   }) async {
-    return await _bridge.verifySignature(
-      data: data,
-      signature: signature,
-      publicKey: publicKey,
-    );
+    return await _bridge.verifySignature(data: data, signature: signature, publicKey: publicKey);
   }
-
-  // ---------------------------------------------------------------------------
-  // Previously unimplemented methods
-  // ---------------------------------------------------------------------------
 
   @override
   Future<InteractResult> interactAid({
     required String name,
     List<Map<String, String>> sealData = const [],
   }) async {
-    final sealDataJson = jsonEncode(sealData);
-    final ixn = await _bridge.interactAid(name: name, sealDataJson: sealDataJson);
+    final ixn = await _bridge.interactAid(name: name, sealDataJson: jsonEncode(sealData));
 
-    // Sign the raw IXN event bytes.
     final rawBytes = base64.decode(ixn.rawBytesB64);
     final sigResult = await _bridge.signPayload(name: name, data: rawBytes);
     final cesrSig = await _bridge.cesrEncode(rawSigB64: sigResult.signature);
 
+    final ixnPayload = jsonEncode({
+      'aid': ixn.aid,
+      'event_type': 'ixn',
+      'sequence_number': ixn.sequenceNumber,
+      'event_json': ixn.kelEntry,
+      'cesr_signature': cesrSig,
+    });
+
     if (_coreStarted) {
+      // Standalone: persist to local Go Core.
       try {
-        final response = await _client.post(
+        await _client.post(
           Uri.parse('$_coreUrl/api/store/event'),
           headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({
-            'aid': ixn.aid,
-            'event_type': 'ixn',
-            'sequence_number': ixn.sequenceNumber,
-            'event_json': ixn.kelEntry,
-            'cesr_signature': cesrSig,
-          }),
+          body: ixnPayload,
         );
-        if (response.statusCode != 201) {
-          // Non-fatal: log but continue.
-        }
+      } catch (_) {}
+    } else if (_pairedServerUrl != null) {
+      // Remote-with-keys: sync IXN event to paired server for persistence.
+      try {
+        await _client.post(
+          Uri.parse('$_pairedServerUrl/api/store/event'),
+          headers: {'Content-Type': 'application/json'},
+          body: ixnPayload,
+        );
       } catch (_) {}
     }
 
@@ -221,6 +225,10 @@ class MobileStandaloneKeriService extends KeriService {
     );
   }
 
+  // ---------------------------------------------------------------------------
+  // Stateless KERI ops — delegated to paired server or public microservice
+  // ---------------------------------------------------------------------------
+
   @override
   Future<CredentialIssuanceResult> issueCredential({
     required Map<String, dynamic> claims,
@@ -228,11 +236,9 @@ class MobileStandaloneKeriService extends KeriService {
     String holderAid = '',
     String name = '',
   }) async {
-    // 1. Get the issuer AID from the bridge (we need it for format-credential).
     final identity = _coreStarted ? await _getStoredIdentity() : null;
     final issuerAid = identity?.aid ?? '';
 
-    // 2. Format the ACDC credential via the public KERI service (stateless).
     final fmtResponse = await _client.post(
       Uri.parse('$_keriServiceUrl/format-credential'),
       headers: {'Content-Type': 'application/json'},
@@ -250,7 +256,6 @@ class MobileStandaloneKeriService extends KeriService {
     final acdcSaid = fmtJson['said'] as String? ?? '';
     final acdcJsonB64 = fmtJson['raw_bytes_b64'] as String? ?? '';
 
-    // 3. Anchor the credential SAID in the KEL via an IXN event.
     final ixnResult = await interactAid(
       name: name,
       sealData: [
@@ -258,7 +263,6 @@ class MobileStandaloneKeriService extends KeriService {
       ],
     );
 
-    // 4. Persist the credential in Go Core.
     if (_coreStarted) {
       try {
         await _client.post(
@@ -295,7 +299,6 @@ class MobileStandaloneKeriService extends KeriService {
     String issuerAid = '',
     String schemaSaid = '',
   }) async {
-    // Build the presentation envelope via the public KERI service (stateless).
     final response = await _client.post(
       Uri.parse('$_keriServiceUrl/credential/present'),
       headers: {'Content-Type': 'application/json'},
@@ -311,18 +314,15 @@ class MobileStandaloneKeriService extends KeriService {
       throw Exception(body['error'] ?? 'presentCredential failed: ${response.statusCode}');
     }
     final json = jsonDecode(response.body) as Map<String, dynamic>;
-    final presentationSaid = json['presentation_said'] as String? ?? '';
-    final presentationJsonB64 = json['presentation_json_b64'] as String? ?? '';
     final presSaidB64 = json['pres_said_b64'] as String? ?? '';
 
-    // Sign the presentation SAID bytes with the holder's local key.
     final presSaidBytes = base64.decode(presSaidB64);
     final sigResult = await _bridge.signPayload(name: holderAid, data: presSaidBytes);
     final cesrSig = await _bridge.cesrEncode(rawSigB64: sigResult.signature);
 
     return PresentationResult(
-      presentationSaid: presentationSaid,
-      presentationJsonB64: presentationJsonB64,
+      presentationSaid: json['presentation_said'] as String? ?? '',
+      presentationJsonB64: json['presentation_json_b64'] as String? ?? '',
       cesrSignature: cesrSig,
     );
   }
@@ -370,7 +370,6 @@ class MobileStandaloneKeriService extends KeriService {
     List<String> trustedWitnesses = const [],
     int threshold = 0,
   }) async {
-    // 1. Verify the receipt signature locally via the Rust bridge.
     final eventSaidBytes = utf8.encode(eventSaid);
     final rawSigB64 = _cesrSigToRawBase64(cesrSignature);
     final rawPkB64 = _cesrKeyToRawBase64(witnessPublicKey);
@@ -400,7 +399,6 @@ class MobileStandaloneKeriService extends KeriService {
       );
     }
 
-    // 2. Check trust (if trustedWitnesses list is provided).
     if (trustedWitnesses.isNotEmpty && !trustedWitnesses.contains(witnessAid)) {
       return WitnessReceiptResult(
         accepted: false,
@@ -410,7 +408,6 @@ class MobileStandaloneKeriService extends KeriService {
       );
     }
 
-    // 3. Persist the receipt in Go Core.
     if (_coreStarted) {
       try {
         await _client.post(
@@ -425,7 +422,6 @@ class MobileStandaloneKeriService extends KeriService {
       } catch (_) {}
     }
 
-    // 4. Query current receipt count.
     int receiptCount = 1;
     if (_coreStarted) {
       try {
@@ -439,11 +435,9 @@ class MobileStandaloneKeriService extends KeriService {
       } catch (_) {}
     }
 
-    final thresholdMet = threshold == 0 || receiptCount >= threshold;
-
     return WitnessReceiptResult(
       accepted: true,
-      thresholdMet: thresholdMet,
+      thresholdMet: threshold == 0 || receiptCount >= threshold,
       receiptCount: receiptCount,
     );
   }
@@ -465,13 +459,10 @@ class MobileStandaloneKeriService extends KeriService {
     final response = await _client.get(
       Uri.parse('$_coreUrl/api/kerl?event_said=$eventSaid&threshold=$threshold'),
     );
-
     if (response.statusCode == 200) {
       final json = jsonDecode(response.body) as Map<String, dynamic>;
       final rawReceipts = (json['receipts'] as List<dynamic>?) ?? [];
-      final receipts = rawReceipts
-          .map((r) => Map<String, dynamic>.from(r as Map))
-          .toList();
+      final receipts = rawReceipts.map((r) => Map<String, dynamic>.from(r as Map)).toList();
       return KerlEntry(
         eventSaid: eventSaid,
         receipts: receipts,
@@ -492,9 +483,7 @@ class MobileStandaloneKeriService extends KeriService {
       if (response.statusCode == 200) {
         final json = jsonDecode(response.body) as Map<String, dynamic>;
         final aid = json['aid'] as String?;
-        if (aid != null && aid.isNotEmpty) {
-          return _StoredIdentity(aid: aid);
-        }
+        if (aid != null && aid.isNotEmpty) return _StoredIdentity(aid: aid);
       }
     } catch (_) {}
     return null;
@@ -510,9 +499,7 @@ class MobileStandaloneKeriService extends KeriService {
 
   @override
   void dispose() {
-    if (_coreStarted) {
-      _mobileCore.stopCore();
-    }
+    if (_coreStarted) _mobileCore.stopCore();
     _mobileCore.dispose();
     _client.close();
   }

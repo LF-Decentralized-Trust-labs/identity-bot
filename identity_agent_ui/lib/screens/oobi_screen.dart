@@ -4,7 +4,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import '../theme/app_theme.dart';
 import '../services/core_service.dart';
 import '../services/keri_service.dart';
-import '../services/mobile_standalone_keri_service.dart';
+import '../services/on_device_keri_service.dart';
 
 class OobiScreen extends StatefulWidget {
   final KeriService keriService;
@@ -22,8 +22,8 @@ class _OobiScreenState extends State<OobiScreen> {
 
   String? _resolveServerUrl() {
     if (widget.serverUrl != null) return widget.serverUrl;
-    if (widget.keriService is MobileStandaloneKeriService) {
-      final standalone = widget.keriService as MobileStandaloneKeriService;
+    if (widget.keriService is OnDeviceKeriService) {
+      final standalone = widget.keriService as OnDeviceKeriService;
       if (standalone.isCoreReady) {
         return standalone.mobileCore.baseUrl;
       }

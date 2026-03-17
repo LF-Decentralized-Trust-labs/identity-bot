@@ -25,7 +25,7 @@ class AgentConfig {
 
   static const int healthPollIntervalSeconds = 15;
 
-  /// URL of the public KERI microservice used by MobileStandaloneKeriService
+  /// URL of the public KERI microservice used by OnDeviceKeriService
   /// for stateless ACDC operations (/format-credential, /credential/present,
   /// /credential/verify) that keri_core v0.11 does not support natively.
   /// Can be overridden at compile-time via KERI_SERVICE_URL env variable.

@@ -16,9 +16,8 @@ import 'screens/connect_server_screen.dart';
 import 'services/core_service.dart';
 import 'services/keri_service.dart';
 import 'services/desktop_keri_service.dart';
-import 'services/remote_server_keri_service.dart';
-import 'services/mobile_remote_keri_service.dart';
-import 'services/mobile_standalone_keri_service.dart';
+import 'services/on_device_keri_service.dart';
+import 'services/remote_keri_service.dart';
 import 'services/mobile_core_service.dart';
 import 'services/preferences_service.dart';
 import 'services/backend_process_service.dart';
@@ -192,35 +191,35 @@ class _AgentRouterState extends State<AgentRouter> {
 
       if (mode == AgentMode.connectExisting && serverUrl != null) {
         if (KeriBridge.isAvailable) {
-          debugPrint('[Agent] Mobile Remote Controller WITHOUT Keys — '
-              'Rust bridge for local child AID, '
-              'remote parent server ($serverUrl) for backend/stateless ops');
-          _keriService = MobileRemoteKeriService(parentServerUrl: serverUrl);
+          debugPrint('[Agent] Mobile Remote Controller WITH Keys — '
+              'Rust bridge for local key ops, '
+              'paired server ($serverUrl) for backend/stateless ops');
+          _keriService = OnDeviceKeriService(pairedServerUrl: serverUrl);
         } else {
-          debugPrint('[Agent] Mobile Remote Controller — Rust bridge '
-              'unavailable (${KeriBridge.loadError}), falling back to '
-              'RemoteServerKeriService (all ops forwarded to remote server)');
-          _keriService = RemoteServerKeriService(serverUrl: serverUrl);
+          debugPrint('[Agent] Mobile Remote Controller WITHOUT Keys — '
+              'Rust bridge unavailable (${KeriBridge.loadError}), '
+              'all ops forwarded to paired server');
+          _keriService = RemoteKeriService(serverUrl: serverUrl);
         }
       } else {
         debugPrint('[Agent] Mobile Standalone — Rust bridge available: '
             '${KeriBridge.isAvailable}'
             '${KeriBridge.isAvailable ? '' : ' (error: ${KeriBridge.loadError})'}');
 
-        final standaloneService = MobileStandaloneKeriService();
+        final onDeviceService = OnDeviceKeriService();
 
         try {
           debugPrint('[Agent] Starting embedded Go Core...');
-          await standaloneService.startGoCore();
-          final coreUrl = standaloneService.mobileCore.baseUrl;
+          await onDeviceService.startGoCore();
+          final coreUrl = onDeviceService.mobileCore.baseUrl;
           debugPrint('[Agent] Go Core started on port '
-              '${standaloneService.mobileCore.port} → $coreUrl');
+              '${onDeviceService.mobileCore.port} → $coreUrl');
           _serverUrl = coreUrl;
         } catch (e) {
           debugPrint('[Agent] Go Core start failed (non-fatal): $e');
         }
 
-        _keriService = standaloneService;
+        _keriService = onDeviceService;
       }
     } else {
       if (mode == AgentMode.connectExisting && serverUrl != null) {
@@ -240,8 +239,8 @@ class _AgentRouterState extends State<AgentRouter> {
 
     try {
       String baseUrl;
-      if (_keriService is MobileStandaloneKeriService) {
-        final standalone = _keriService as MobileStandaloneKeriService;
+      if (_keriService is OnDeviceKeriService) {
+        final standalone = _keriService as OnDeviceKeriService;
         if (standalone.isCoreReady) {
           baseUrl = standalone.mobileCore.baseUrl;
         } else {
@@ -583,8 +582,8 @@ class _AgentRouterState extends State<AgentRouter> {
 
       case OnboardingStep.dashboard:
         String? effectiveServerUrl = _serverUrl;
-        if (effectiveServerUrl == null && _keriService is MobileStandaloneKeriService) {
-          final standalone = _keriService as MobileStandaloneKeriService;
+        if (effectiveServerUrl == null && _keriService is OnDeviceKeriService) {
+          final standalone = _keriService as OnDeviceKeriService;
           if (standalone.isCoreReady) {
             effectiveServerUrl = standalone.mobileCore.baseUrl;
           }
