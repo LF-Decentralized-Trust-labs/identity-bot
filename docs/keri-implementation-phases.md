@@ -150,6 +150,41 @@ Rotation is signed with the **pre-rotated** key (index 1 from the mnemonic). Dar
 
 ---
 
+## Phase 8 — Mobile KERI Feature Parity ✓ COMPLETE
+
+**What it proves:** All 6 previously `UnimplementedError`-throwing `KeriService` methods work on mobile across all service implementations, and the live Android APK passes end-to-end API tests against a real Go Core instance at `https://grapeid.org/agents`.
+
+**Validated live (2026-03-15):** `GET /api/health`, `GET /api/identity`, `GET /public/oobi/{AID}`, `POST /api/store/receipt`, `GET /api/store/receipts`, `GET /api/kerl` — all returned correct responses from the deployed Android build.
+
+#### What was built
+
+| Component | Change |
+|---|---|
+| Rust bridge | Added `interact_aid()` — IXN event creation, returns raw bytes for signing |
+| Rust bridge | Added `cesr_encode()` — CESR `0B...` encoding for Ed25519 signatures |
+| Dart bridge | Added `BridgeInteractResult`, `interactAid()`, `cesrEncode()` wrappers |
+| Dart bridge stub | Added matching stubs for web compile target |
+| `AgentConfig` | Added `publicKeriServiceUrl` constant (`https://keri.grapeid.org`), overridable via `KERI_SERVICE_URL` env |
+| Go Core | Added `POST /api/store/receipt` — store witness receipt (no Python driver required) |
+| Go Core | Added `GET /api/store/receipts` — retrieve receipts + threshold check |
+| Go Core | Added `POST /api/store/credential` — store ACDC credential |
+| `MobileOnDeviceKeriService` | Implements all 6 methods: `interactAid`, `issueCredential`, `presentCredential`, `verifyCredential`, `submitWitnessReceipt`, `getKERL` |
+| `MobileRemoteKeriService` | Implements all 6 methods via HTTP forwarding to paired server |
+| `DesktopOnDeviceKeriService` | `interactAid` was already implemented; all 6 confirmed complete |
+| Service naming | Consolidated 3 mobile classes → 2: `MobileOnDeviceKeriService` + `MobileRemoteKeriService`; adopted `{Platform}{KeriLocation}KeriService` naming convention (see ADR-015) |
+
+#### keri_core v0.11 constraint
+
+`keri_core` v0.11 (Rust) does NOT support ACDC/SAID. The 3 stateless ops (`format-credential`, `resolve-oobi`, `generate-multisig-event`) are delegated to the paired server when available, or to `https://keri.grapeid.org` (public KERI microservice) otherwise. See ADR-015 for full rationale.
+
+#### Android build fix
+
+The Android build was failing due to two compiler errors:
+1. `InAppWebView` / `InAppWebViewController` not found — `flutter_inappwebview` meta-package only exports these in the meta-package, not in platform-specific sub-packages. Fixed by using `InAppWebViewPlatform.instance!.createPlatformInAppWebViewWidget(PlatformInAppWebViewWidgetCreationParams(...)).build(context)` from `flutter_inappwebview_platform_interface` instead.
+2. `BigInt` not assignable to `int` — FRB v2 maps Rust `u64 → BigInt` in Dart. Fixed by declaring `sequence_number` as `i64` in Rust (`i64 → int` in Dart). See ADR-015.
+
+---
+
 ## Deferred (post-SEDI demo)
 
 - DIDComm v2 messaging protocol
@@ -171,5 +206,6 @@ Rotation is signed with the **pre-rotated** key (index 1 from the mnemonic). Dar
 | Phase 4 — Credential issuance | ✓ Required |
 | Phase 5 — Credential presentation | ✓ Required |
 | Phase 6 — Credential verification | ✓ Required |
-| Phase 7 — Witness receipts | Partial (receipts storage, not full threshold) |
+| Phase 7 — Witness receipts | ✓ Done (receipts storage + threshold check) |
+| Phase 8 — Mobile KERI parity | ✓ Done |
 | Onboarding UI (paths A + B) | ✓ Required — see `docs/onboarding-wizard-design.md` |

@@ -25,12 +25,17 @@ We use **flutter_rust_bridge (FRB) v2.11.1** to generate Dart↔Rust FFI binding
 - Memory safety for strings, `Vec<u8>`, and `Result<T, E>` types
 - Platform-specific library loading (`.so` on Android, `.dylib` on iOS)
 
-The Rust crate (`identity_agent_keri`) is annotated with `#[frb(sync)]` on all five public functions matching the Python driver's canonical endpoints (per ADR-002):
+The Rust crate (`identity_agent_keri`) is annotated with `#[frb(sync)]` on seven public functions. The first five match the Python driver's canonical stateful endpoints (per ADR-002); two additional functions handle operations not supported by the Python driver on mobile:
+
 - `incept_aid(name, code) → InceptionResult`
 - `rotate_aid(name) → RotationResult`
 - `sign_payload(name, data) → SignResult`
 - `get_current_kel(name) → String`
 - `verify_signature(data, signature, public_key) → bool`
+- `interact_aid(name, seal_data_json) → InteractResult` — creates a KERI IXN event, returns raw bytes for signing
+- `cesr_encode(raw_sig_b64) → String` — CESR-encodes a raw 64-byte Ed25519 signature into `0B...` format (88 chars); pure encoding transform, no KERI protocol computation
+
+**Type mapping note:** `InteractResult.sequence_number` is declared `i64` in Rust (not `u64`). FRB v2 maps `u64` → `BigInt` in Dart, which is not assignable to `int`. Using `i64` maps to Dart `int` directly, avoiding a runtime cast failure.
 
 ### 2. Placeholder-then-Regenerate Pattern
 
@@ -165,8 +170,10 @@ The `codemagic.yaml` defines build workflows for all platforms:
 - `identity_agent_ui/lib/services/mobile_core_service.dart` — Dart wrapper around platform channels
 
 ### Service Layer
-- `identity_agent_ui/lib/services/mobile_standalone_keri_service.dart` — Coordinates Rust bridge + Go Core for Standalone mode
-- `identity_agent_ui/lib/services/keri_service.dart` — Abstract interface implemented by all modes
+- `identity_agent_ui/lib/services/mobile_on_device_keri_service.dart` — `MobileOnDeviceKeriService`: Rust bridge + Go Core for Standalone; Rust bridge + paired server for Remote WITH Keys. Single class covers both topologies via optional `pairedServerUrl` parameter.
+- `identity_agent_ui/lib/services/mobile_remote_keri_service.dart` — `MobileRemoteKeriService`: forwards all ops to paired server; no Rust bridge.
+- `identity_agent_ui/lib/services/desktop_on_device_keri_service.dart` — `DesktopOnDeviceKeriService`: all desktop topologies via Go + Python keripy.
+- `identity_agent_ui/lib/services/keri_service.dart` — Abstract `KeriService` interface implemented by all three classes.
 
 ### CI/CD
 - `codemagic.yaml` — Build pipelines for Android, iOS, macOS, Windows, Linux

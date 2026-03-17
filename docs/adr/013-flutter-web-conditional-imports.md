@@ -68,8 +68,8 @@ This ensures any file importing the component compiles on all platforms without 
 |---|---|---|---|
 | KERI Bridge | `bridge/keri_bridge.dart` | `bridge/keri_bridge_stub.dart` | `flutter_rust_bridge` |
 | Sandbox WebView | `widgets/sandbox_webview_native.dart` | `widgets/sandbox_webview_stub.dart` | `flutter_inappwebview_*` |
-| Mobile KERI Services | `services/mobile_standalone_keri_service.dart` | (uses bridge stub transitively) | `flutter_rust_bridge` |
-| | `services/mobile_remote_keri_service.dart` | (uses bridge stub transitively) | `flutter_rust_bridge` |
+| Mobile KERI Services | `services/mobile_on_device_keri_service.dart` | (uses bridge stub transitively) | `flutter_rust_bridge` |
+| | `services/mobile_remote_keri_service.dart` | (none — pure HTTP, no native packages) | — |
 
 ## Consequences
 

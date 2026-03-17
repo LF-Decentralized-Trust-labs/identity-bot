@@ -100,12 +100,12 @@ Every running Identity Agent instance is in exactly one of **3 topological state
 
 | # | Device | Topology | `KeriService` Implementation | How Entered |
 |---|---|---|---|---|
-| 1 | Desktop | Standalone | `DesktopKeriService` | "Create New Identity" on desktop |
-| 2 | Desktop | Remote WITHOUT Keys | `DesktopKeriService` + remote serverUrl to screens | "Connect to Existing" on desktop |
-| 3 | Desktop | Remote WITH Keys | `DesktopKeriService` + remote serverUrl to screens | Planned: migration from Desktop Standalone |
-| 4 | Mobile | Standalone | `MobileStandaloneKeriService` | "Create New Identity" on mobile |
-| 5 | Mobile | Remote WITHOUT Keys | `MobileRemoteKeriService` | "Connect to Existing" on mobile |
-| 6 | Mobile | Remote WITH Keys | Planned extension of `MobileRemoteKeriService` | Migration from Mobile Standalone |
+| 1 | Desktop | Standalone | `DesktopOnDeviceKeriService` | "Create New Identity" on desktop |
+| 2 | Desktop | Remote WITHOUT Keys | `DesktopOnDeviceKeriService` + remote serverUrl to screens | "Connect to Existing" on desktop |
+| 3 | Desktop | Remote WITH Keys | `DesktopOnDeviceKeriService` + remote serverUrl to screens | Planned: migration from Desktop Standalone |
+| 4 | Mobile | Standalone | `MobileOnDeviceKeriService()` | "Create New Identity" on mobile |
+| 5 | Mobile | Remote WITHOUT Keys | `MobileRemoteKeriService(serverUrl:)` | "Connect to Existing" (Rust bridge unavailable) |
+| 6 | Mobile | Remote WITH Keys | `MobileOnDeviceKeriService(pairedServerUrl:)` | "Connect to Existing" (Rust bridge available) |
 
 ### Critical Invariant
 
@@ -240,6 +240,7 @@ Both native and stub must export the **same public API** (same class names, same
 |---|---|---|---|---|
 | KERI Bridge | `keri_bridge.dart` (conditional import in `main.dart`) | `bridge/keri_bridge.dart` | `bridge/keri_bridge_stub.dart` | `flutter_rust_bridge` FFI crashes on web |
 | Sandbox WebView | `widgets/sandbox_webview.dart` | `widgets/sandbox_webview_native.dart` | `widgets/sandbox_webview_stub.dart` | `flutter_inappwebview` native types don't exist on web |
+| Mobile On-Device KERI | (imports bridge stub/native transitively) | `services/mobile_on_device_keri_service.dart` | — | Uses `flutter_rust_bridge` via bridge conditional import |
 
 ### Adding New Native-Only Packages
 
