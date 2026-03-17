@@ -15,9 +15,9 @@ import 'screens/mode_selection_screen.dart';
 import 'screens/connect_server_screen.dart';
 import 'services/core_service.dart';
 import 'services/keri_service.dart';
-import 'services/desktop_keri_service.dart';
-import 'services/on_device_keri_service.dart';
-import 'services/remote_keri_service.dart';
+import 'services/desktop_on_device_keri_service.dart';
+import 'services/mobile_on_device_keri_service.dart';
+import 'services/mobile_remote_keri_service.dart';
 import 'services/mobile_core_service.dart';
 import 'services/preferences_service.dart';
 import 'services/backend_process_service.dart';
@@ -194,19 +194,19 @@ class _AgentRouterState extends State<AgentRouter> {
           debugPrint('[Agent] Mobile Remote Controller WITH Keys — '
               'Rust bridge for local key ops, '
               'paired server ($serverUrl) for backend/stateless ops');
-          _keriService = OnDeviceKeriService(pairedServerUrl: serverUrl);
+          _keriService = MobileOnDeviceKeriService(pairedServerUrl: serverUrl);
         } else {
           debugPrint('[Agent] Mobile Remote Controller WITHOUT Keys — '
               'Rust bridge unavailable (${KeriBridge.loadError}), '
               'all ops forwarded to paired server');
-          _keriService = RemoteKeriService(serverUrl: serverUrl);
+          _keriService = MobileRemoteKeriService(serverUrl: serverUrl);
         }
       } else {
         debugPrint('[Agent] Mobile Standalone — Rust bridge available: '
             '${KeriBridge.isAvailable}'
             '${KeriBridge.isAvailable ? '' : ' (error: ${KeriBridge.loadError})'}');
 
-        final onDeviceService = OnDeviceKeriService();
+        final onDeviceService = MobileOnDeviceKeriService();
 
         try {
           debugPrint('[Agent] Starting embedded Go Core...');
@@ -223,12 +223,12 @@ class _AgentRouterState extends State<AgentRouter> {
       }
     } else {
       if (mode == AgentMode.connectExisting && serverUrl != null) {
-        _keriService = DesktopKeriService();
+        _keriService = DesktopOnDeviceKeriService();
         debugPrint('[Agent] Desktop Remote Controller WITHOUT Keys — '
             'local Go+Python for child AID, '
             'remote parent server ($serverUrl) for backend/stateless ops');
       } else {
-        _keriService = DesktopKeriService();
+        _keriService = DesktopOnDeviceKeriService();
         debugPrint('[Agent] Desktop mode → ${AgentConfig.coreBaseUrl}');
       }
     }
@@ -239,8 +239,8 @@ class _AgentRouterState extends State<AgentRouter> {
 
     try {
       String baseUrl;
-      if (_keriService is OnDeviceKeriService) {
-        final standalone = _keriService as OnDeviceKeriService;
+      if (_keriService is MobileOnDeviceKeriService) {
+        final standalone = _keriService as MobileOnDeviceKeriService;
         if (standalone.isCoreReady) {
           baseUrl = standalone.mobileCore.baseUrl;
         } else {
@@ -582,8 +582,8 @@ class _AgentRouterState extends State<AgentRouter> {
 
       case OnboardingStep.dashboard:
         String? effectiveServerUrl = _serverUrl;
-        if (effectiveServerUrl == null && _keriService is OnDeviceKeriService) {
-          final standalone = _keriService as OnDeviceKeriService;
+        if (effectiveServerUrl == null && _keriService is MobileOnDeviceKeriService) {
+          final standalone = _keriService as MobileOnDeviceKeriService;
           if (standalone.isCoreReady) {
             effectiveServerUrl = standalone.mobileCore.baseUrl;
           }

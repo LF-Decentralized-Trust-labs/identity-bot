@@ -4,7 +4,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import '../theme/app_theme.dart';
 import '../services/core_service.dart';
 import '../services/keri_service.dart';
-import '../services/on_device_keri_service.dart';
+import '../services/mobile_on_device_keri_service.dart';
 import '../widgets/consent_modal.dart';
 import 'qr_scanner_screen.dart';
 
@@ -23,8 +23,8 @@ class _ContactsScreenState extends State<ContactsScreen> {
 
   String? _resolveServerUrl() {
     if (widget.serverUrl != null) return widget.serverUrl;
-    if (widget.keriService is OnDeviceKeriService) {
-      final standalone = widget.keriService as OnDeviceKeriService;
+    if (widget.keriService is MobileOnDeviceKeriService) {
+      final standalone = widget.keriService as MobileOnDeviceKeriService;
       if (standalone.isCoreReady) {
         return standalone.mobileCore.baseUrl;
       }

@@ -6,7 +6,7 @@ import '../theme/app_theme.dart';
 import '../config/agent_config.dart';
 import '../services/core_service.dart';
 import '../services/keri_service.dart';
-import '../services/on_device_keri_service.dart';
+import '../services/mobile_on_device_keri_service.dart';
 import '../widgets/status_indicator.dart';
 import '../widgets/info_card.dart';
 import '../widgets/log_entry.dart';
@@ -36,8 +36,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   String? _resolveServerUrl() {
     if (widget.serverUrl != null) return widget.serverUrl;
-    if (widget.keriService is OnDeviceKeriService) {
-      final standalone = widget.keriService as OnDeviceKeriService;
+    if (widget.keriService is MobileOnDeviceKeriService) {
+      final standalone = widget.keriService as MobileOnDeviceKeriService;
       if (standalone.isCoreReady) {
         return standalone.mobileCore.baseUrl;
       }
@@ -62,7 +62,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   bool get _isStandaloneMode {
-    return widget.keriService is OnDeviceKeriService;
+    return widget.keriService is MobileOnDeviceKeriService;
   }
 
   String _timeNow() {
