@@ -2,6 +2,23 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Planning Documents (check these at the start of every session)
+
+All planning docs live in `C:\Users\Boogie Bob\Documents\GrapeID\`:
+
+| File | Purpose |
+|---|---|
+| `roadmap.md` | Strategy only — business model, revenue streams, architecture vision. No task checklists. |
+| `tasks.md` | **90-day backlog** — all tasks with detailed subtasks, dependency order, and unresolved issues |
+| `daily.md` | **Today's session list** — microtasks for the current session; replace at each session start |
+| `tasks-completed.md` | Archive — items moved here when fully done |
+| `flows.md` | UX flows & use case scenarios — screen-by-screen walkthroughs; link to tasks.md when ready to implement |
+
+**Workflow:**
+- At session start ("Start session!"): read `daily.md` and `tasks.md` to orient
+- During session: update `daily.md` as tasks complete (check them off)
+- At session end ("Stop session!"): move completed daily items to `tasks-completed.md`, update `tasks.md` top-level checkboxes, write next-session resume marker in `daily.md`
+
 ## What This Is
 
 The **Identity Agent** is a self-hosted, self-sovereign digital identity infrastructure. It is software that individuals (and eventually organizations) install on their own devices. It is not a platform — it is a user-controlled agent where the cryptographic identity is fully owned and managed by the user under the KERI (Key Event Receipt Infrastructure) protocol. There is no central server, no third-party custody of keys, and no dependency on any external service for core identity operations.
