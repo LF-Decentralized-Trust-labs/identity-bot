@@ -4,20 +4,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Planning Documents (check these at the start of every session)
 
-All planning docs live in `C:\Users\Boogie Bob\Documents\GrapeID\`:
+All planning docs live in `C:\Users\Boogie Bob\Documents\GrapeID\`. Three subfolders:
 
-| File | Purpose |
-|---|---|
-| `roadmap.md` | Strategy only — business model, revenue streams, architecture vision. No task checklists. |
-| `tasks.md` | **90-day backlog** — all tasks with detailed subtasks, dependency order, and unresolved issues |
-| `daily.md` | **Today's session list** — microtasks for the current session; replace at each session start |
-| `tasks-completed.md` | Archive — items moved here when fully done |
-| `flows.md` | UX flows & use case scenarios — screen-by-screen walkthroughs; link to tasks.md when ready to implement |
+| Folder | File | Purpose |
+|---|---|---|
+| `1. Strategy/` | `roadmap.md` | Strategy only — business model, revenue streams, architecture vision. No task checklists. |
+| `1. Strategy/` | `tasks.md` | **90-day backlog** — all tasks with detailed subtasks, dependency order, and unresolved issues |
+| `1. Strategy/` | `daily.md` | **Today's session list** — microtasks for the current session; replace at each session start |
+| `1. Strategy/` | `tasks-completed.md` | Archive — items moved here when fully done |
+| `2. Plans/` | `*.md` | Architecture + technical specs and flows — how features work end-to-end |
+| `3. Design/` | `flows.md` | UX flows & use case scenarios — screen-by-screen walkthroughs |
+| `3. Design/` | `*.md` | UI/UX specifications — visual design, copy, component specs |
 
 **Workflow:**
-- At session start ("Start session!"): read `daily.md` and `tasks.md` to orient
-- During session: update `daily.md` as tasks complete (check them off)
-- At session end ("Stop session!"): move completed daily items to `tasks-completed.md`, update `tasks.md` top-level checkboxes, write next-session resume marker in `daily.md`
+- At session start ("Start session!"): read `1. Strategy/daily.md` and `1. Strategy/tasks.md` to orient
+- During session: update `1. Strategy/daily.md` as tasks complete (check them off)
+- At session end ("Stop session!"): move completed daily items to `1. Strategy/tasks-completed.md`, update `1. Strategy/tasks.md` top-level checkboxes, write next-session resume marker in `1. Strategy/daily.md`
 
 ## What This Is
 
