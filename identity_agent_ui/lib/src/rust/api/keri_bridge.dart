@@ -62,3 +62,27 @@ bool verifySignature(
         required String publicKey}) =>
     RustLib.instance.api.crateApiKeriBridgeVerifySignature(
         data: data, signature: signature, publicKey: publicKey);
+
+class InteractResult {
+  final String aid;
+  final String said;
+  final int sequenceNumber;
+  final String kelEntry;
+  final String rawBytesB64;
+
+  const InteractResult({
+    required this.aid,
+    required this.said,
+    required this.sequenceNumber,
+    required this.kelEntry,
+    required this.rawBytesB64,
+  });
+}
+
+InteractResult interactAid(
+        {required String name, required String sealDataJson}) =>
+    RustLib.instance.api
+        .crateApiKeriBridgeInteractAid(name: name, sealDataJson: sealDataJson);
+
+String cesrEncode({required String rawSigB64}) =>
+    RustLib.instance.api.crateApiKeriBridgeCesrEncode(rawSigB64: rawSigB64);
