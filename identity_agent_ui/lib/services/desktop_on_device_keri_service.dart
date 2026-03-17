@@ -9,11 +9,11 @@ import '../crypto/keys.dart';
 import 'keri_service.dart';
 import 'secure_key_store.dart';
 
-class DesktopKeriService extends KeriService {
+class DesktopOnDeviceKeriService extends KeriService {
   final String _baseUrl;
   final http.Client _client;
 
-  DesktopKeriService({String? baseUrl})
+  DesktopOnDeviceKeriService({String? baseUrl})
       : _baseUrl = baseUrl ?? AgentConfig.coreBaseUrl,
         _client = http.Client();
 

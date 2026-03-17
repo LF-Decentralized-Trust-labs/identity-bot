@@ -8,11 +8,11 @@ import 'keri_service.dart';
 /// server. The Rust bridge is never used. This is the fallback for the
 /// Remote Controller WITHOUT Keys topology (ADR-006) — either when the device
 /// is intentionally key-free, or when the Rust bridge fails to load.
-class RemoteKeriService extends KeriService {
+class MobileRemoteKeriService extends KeriService {
   final String _serverUrl;
   final http.Client _client;
 
-  RemoteKeriService({required String serverUrl})
+  MobileRemoteKeriService({required String serverUrl})
       : _serverUrl = serverUrl,
         _client = http.Client();
 

@@ -22,9 +22,9 @@ import '../config/agent_config.dart';
 /// private keys.
 ///
 /// Usage:
-///   OnDeviceKeriService()                       // standalone → public microservice
-///   OnDeviceKeriService(pairedServerUrl: url)   // remote-with-keys → paired server
-class OnDeviceKeriService extends KeriService {
+///   MobileOnDeviceKeriService()                       // standalone → public microservice
+///   MobileOnDeviceKeriService(pairedServerUrl: url)   // remote-with-keys → paired server
+class MobileOnDeviceKeriService extends KeriService {
   final KeriBridge _bridge;
   final MobileCoreService _mobileCore;
 
@@ -36,7 +36,7 @@ class OnDeviceKeriService extends KeriService {
   final http.Client _client;
   bool _coreStarted = false;
 
-  OnDeviceKeriService({
+  MobileOnDeviceKeriService({
     String? pairedServerUrl,
     KeriBridge? bridge,
     MobileCoreService? mobileCore,

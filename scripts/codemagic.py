@@ -123,7 +123,7 @@ def cmd_logs(args):
         status  = action.get("status", "?")
         log_url = action.get("logUrl")
         all_lines.append("\n" + "=" * 70)
-        all_lines.append("[%s] %s" % (status.upper(), name))
+        all_lines.append("[%s] %s" % ((status or "?").upper(), name or "?"))
         all_lines.append("=" * 70)
         if log_url:
             all_lines.append(_fetch_step_log(log_url))
