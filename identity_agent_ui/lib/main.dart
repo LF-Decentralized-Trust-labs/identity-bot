@@ -4,12 +4,7 @@ import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'dart:io' show Platform;
 import 'theme/app_theme.dart';
 import 'theme/mobile_theme.dart';
-import 'screens/dashboard_screen.dart';
-import 'screens/contacts_screen.dart';
-import 'screens/oobi_screen.dart';
-import 'screens/profile_screen.dart';
-import 'screens/settings_screen.dart';
-import 'screens/marketplace_screen.dart';
+import 'screens/desktop/desktop_app.dart';
 import 'screens/setup_wizard_screen.dart';
 import 'screens/mode_selection_screen.dart';
 import 'screens/connect_server_screen.dart';
@@ -18,7 +13,6 @@ import 'services/keri_service.dart';
 import 'services/desktop_on_device_keri_service.dart';
 import 'services/mobile_on_device_keri_service.dart';
 import 'services/mobile_remote_keri_service.dart';
-import 'services/mobile_core_service.dart';
 import 'services/preferences_service.dart';
 import 'services/backend_process_service.dart';
 import 'config/agent_config.dart';
@@ -34,6 +28,9 @@ Future<bool>? _backendStartupFuture;
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Load persisted theme before the first frame.
+  await ThemeNotifier.initialize();
 
   if (!kIsWeb && BackendProcessService.isDesktopPlatform) {
     debugPrint('[Agent] Desktop platform detected — starting bundled backend in background...');
@@ -55,11 +52,18 @@ class IdentityAgentApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Identity Agent',
-      debugShowCheckedModeBanner: false,
-      theme: AppTheme.darkTheme,
-      home: const AgentRouter(),
+    return ValueListenableBuilder<ThemeMode>(
+      valueListenable: ThemeNotifier.instance,
+      builder: (_, themeMode, __) {
+        return MaterialApp(
+          title: 'Identity Agent',
+          debugShowCheckedModeBanner: false,
+          theme:      AppTheme.light,
+          darkTheme:  AppTheme.dark,
+          themeMode:  themeMode,
+          home: const AgentRouter(),
+        );
+      },
     );
   }
 }
@@ -516,7 +520,7 @@ class _AgentRouterState extends State<AgentRouter> {
           );
         }
         return Scaffold(
-          backgroundColor: AppColors.primary,
+          backgroundColor: AppColors.background,
           body: Center(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -525,17 +529,17 @@ class _AgentRouterState extends State<AgentRouter> {
                   width: 40,
                   height: 40,
                   child: CircularProgressIndicator(
-                    color: AppColors.accent,
+                    color: AppColors.primary,
                     strokeWidth: 3,
                   ),
                 ),
                 const SizedBox(height: 16),
                 const Text(
-                  'INITIALIZING...',
+                  'Initializing...',
                   style: TextStyle(
                     color: AppColors.textMuted,
-                    fontSize: 12,
-                    letterSpacing: 1.5,
+                    fontSize: 14,
+                    letterSpacing: 0,
                     fontFamily: 'monospace',
                   ),
                 ),
@@ -617,46 +621,19 @@ class AgentMainScreen extends StatefulWidget {
 }
 
 class _AgentMainScreenState extends State<AgentMainScreen> {
-  int _currentIndex = 0;
-  final ValueNotifier<int> _oobiRefreshNotifier = ValueNotifier<int>(0);
-
-  late final List<Widget> _screens;
-  late final bool _isDesktop;
-
-  @override
-  void initState() {
-    super.initState();
-    _isDesktop = !kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux);
-    _screens = [
-      ProfileScreen(keriService: widget.keriService, serverUrl: widget.serverUrl),
-      DashboardScreen(keriService: widget.keriService, serverUrl: widget.serverUrl),
-      ContactsScreen(keriService: widget.keriService, serverUrl: widget.serverUrl),
-      OobiScreen(keriService: widget.keriService, serverUrl: widget.serverUrl, refreshNotifier: _oobiRefreshNotifier),
-      SettingsScreen(
-        keriService: widget.keriService,
-        mode: widget.mode,
-        entityType: widget.entityType,
-        serverUrl: widget.serverUrl,
-      ),
-      MarketplaceScreen(serverUrl: widget.serverUrl),
-    ];
-  }
-
-  @override
-  void dispose() {
-    _oobiRefreshNotifier.dispose();
-    super.dispose();
-  }
-
-  void _onTabTapped(int index) {
-    setState(() => _currentIndex = index);
-    if (index == 3) {
-      _oobiRefreshNotifier.value++;
+  void _handleReset() {
+    // Bubble up to AgentRouter to restart onboarding
+    if (mounted) {
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const AgentRouter()),
+        (_) => false,
+      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    // Mobile platform (native iOS/Android) → always MobileApp
     if (_isMobilePlatform) {
       return MobileApp(
         keriService: widget.keriService,
@@ -666,6 +643,7 @@ class _AgentMainScreenState extends State<AgentMainScreen> {
       );
     }
 
+    // Responsive: narrow window → MobileApp, wide → DesktopApp
     return LayoutBuilder(
       builder: (context, constraints) {
         if (constraints.maxWidth < 768) {
@@ -676,72 +654,13 @@ class _AgentMainScreenState extends State<AgentMainScreen> {
             serverUrl: widget.serverUrl,
           );
         }
-
-        return Scaffold(
-          body: IndexedStack(
-            index: _currentIndex,
-            children: _screens,
-          ),
-      bottomNavigationBar: Container(
-        decoration: const BoxDecoration(
-          border: Border(
-            top: BorderSide(color: AppColors.border, width: 1),
-          ),
-        ),
-        child: BottomNavigationBar(
-          currentIndex: _currentIndex,
-          onTap: _onTabTapped,
-          backgroundColor: AppColors.surface,
-          selectedItemColor: AppColors.accent,
-          unselectedItemColor: AppColors.textMuted,
-          selectedLabelStyle: const TextStyle(
-            fontSize: 10,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 1.0,
-            fontFamily: 'monospace',
-          ),
-          unselectedLabelStyle: const TextStyle(
-            fontSize: 10,
-            fontWeight: FontWeight.w500,
-            letterSpacing: 1.0,
-            fontFamily: 'monospace',
-          ),
-          type: BottomNavigationBarType.fixed,
-          items: [
-            const BottomNavigationBarItem(
-              icon: Icon(Icons.person_outline),
-              activeIcon: Icon(Icons.person),
-              label: 'PROFILE',
-            ),
-            const BottomNavigationBarItem(
-              icon: Icon(Icons.shield_outlined),
-              activeIcon: Icon(Icons.shield),
-              label: 'DASHBOARD',
-            ),
-            const BottomNavigationBarItem(
-              icon: Icon(Icons.people_outlined),
-              activeIcon: Icon(Icons.people),
-              label: 'CONTACTS',
-            ),
-            const BottomNavigationBarItem(
-              icon: Icon(Icons.qr_code),
-              activeIcon: Icon(Icons.qr_code),
-              label: 'OOBI',
-            ),
-            const BottomNavigationBarItem(
-              icon: Icon(Icons.settings_outlined),
-              activeIcon: Icon(Icons.settings),
-              label: 'SETTINGS',
-            ),
-            const BottomNavigationBarItem(
-              icon: Icon(Icons.apps_outlined),
-              activeIcon: Icon(Icons.apps),
-              label: 'APPS',
-            ),
-          ],
-        ),
-      ),
-    );
+        return DesktopApp(
+          keriService: widget.keriService,
+          mode: widget.mode,
+          entityType: widget.entityType,
+          serverUrl: widget.serverUrl,
+          onResetIdentity: _handleReset,
+        );
       },
     );
   }
