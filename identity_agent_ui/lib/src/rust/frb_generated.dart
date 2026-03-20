@@ -65,6 +65,11 @@ abstract class RustLibApi extends BaseApi {
       {required List<int> data,
       required String signature,
       required String publicKey});
+
+  keri_api.InteractResult crateApiKeriBridgeInteractAid(
+      {required String name, required String sealDataJson});
+
+  String crateApiKeriBridgeCesrEncode({required String rawSigB64});
 }
 
 class RustLibApiImpl extends BaseApiImpl<RustLibWire> implements RustLibApi {
@@ -107,6 +112,19 @@ class RustLibApiImpl extends BaseApiImpl<RustLibWire> implements RustLibApi {
       {required List<int> data,
       required String signature,
       required String publicKey}) {
+    throw UnimplementedError(
+        'Placeholder — run flutter_rust_bridge_codegen generate');
+  }
+
+  @override
+  keri_api.InteractResult crateApiKeriBridgeInteractAid(
+      {required String name, required String sealDataJson}) {
+    throw UnimplementedError(
+        'Placeholder — run flutter_rust_bridge_codegen generate');
+  }
+
+  @override
+  String crateApiKeriBridgeCesrEncode({required String rawSigB64}) {
     throw UnimplementedError(
         'Placeholder — run flutter_rust_bridge_codegen generate');
   }

@@ -38,6 +38,11 @@ identity_agent_ui/.pub/
 
 # Runtime data (SQLite, PID files, endpoint state)
 data/
+data-*/
+
+# Python
+__pycache__/
+tests/keri_test_vector.json
 
 # Replit
 .cache/

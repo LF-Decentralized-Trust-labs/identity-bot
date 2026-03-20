@@ -3,6 +3,8 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../theme/app_theme.dart';
 
+enum _ConnectPhase { intro, enterUrl, processing, connected }
+
 class ConnectServerScreen extends StatefulWidget {
   final void Function(String serverUrl) onConnected;
   final VoidCallback onBack;
@@ -23,6 +25,10 @@ class _ConnectServerScreenState extends State<ConnectServerScreen> {
   String? _error;
   String? _statusMessage;
   int _step = 0;
+
+  _ConnectPhase _phase = _ConnectPhase.intro;
+  String? _connectedUrl;
+  int _processingStep = 0;
 
   @override
   void dispose() {
@@ -162,8 +168,9 @@ class _ConnectServerScreenState extends State<ConnectServerScreen> {
         _connecting = false;
       });
 
-      await Future.delayed(const Duration(milliseconds: 800));
-      widget.onConnected(normalizedUrl);
+      _connectedUrl = normalizedUrl;
+      setState(() => _phase = _ConnectPhase.processing);
+      await _runLinkingAnimation();
     } catch (e) {
       setState(() {
         _connecting = false;
@@ -175,10 +182,143 @@ class _ConnectServerScreenState extends State<ConnectServerScreen> {
     }
   }
 
+  Future<void> _runLinkingAnimation() async {
+    for (int i = 1; i <= 3; i++) {
+      await Future.delayed(const Duration(milliseconds: 600));
+      if (mounted) setState(() => _processingStep = i);
+    }
+    await Future.delayed(const Duration(milliseconds: 400));
+    if (mounted) setState(() => _phase = _ConnectPhase.connected);
+  }
+
   @override
   Widget build(BuildContext context) {
+    switch (_phase) {
+      case _ConnectPhase.intro:
+        return _buildIntroScreen();
+      case _ConnectPhase.enterUrl:
+        return _buildEnterUrlScreen();
+      case _ConnectPhase.processing:
+        return _buildProcessingScreen();
+      case _ConnectPhase.connected:
+        return _buildConnectedScreen();
+    }
+  }
+
+  Widget _buildIntroScreen() {
     return Scaffold(
-      backgroundColor: AppColors.primary,
+      backgroundColor: AppColors.background,
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 480),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(
+                    width: 64,
+                    height: 64,
+                    decoration: BoxDecoration(
+                      color: AppColors.accent.withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: AppColors.accent.withOpacity(0.3),
+                        width: 1.5,
+                      ),
+                    ),
+                    child: const Icon(
+                      Icons.link,
+                      color: AppColors.accent,
+                      size: 32,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  const Text(
+                    'CONNECT TO EXISTING IDENTITY',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: AppColors.textPrimary,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 2.0,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  const Text(
+                    'Connect this device to your Identity Agent running on another device or server.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: AppColors.textSecondary,
+                      fontSize: 14,
+                      height: 1.6,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Your keys stay on your main device. This one works as a remote control.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: AppColors.textSecondary,
+                      fontSize: 14,
+                      height: 1.6,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                  const SizedBox(height: 40),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () =>
+                          setState(() => _phase = _ConnectPhase.enterUrl),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.accent,
+                        foregroundColor: AppColors.primary,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: const Text(
+                        'ENTER SERVER ADDRESS',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1.5,
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextButton(
+                    onPressed: widget.onBack,
+                    child: const Text(
+                      'GO BACK',
+                      style: TextStyle(
+                        color: AppColors.textMuted,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        letterSpacing: 1.0,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEnterUrlScreen() {
+    return Scaffold(
+      backgroundColor: AppColors.background,
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
@@ -235,7 +375,8 @@ class _ConnectServerScreenState extends State<ConnectServerScreen> {
                     decoration: BoxDecoration(
                       color: AppColors.surface,
                       borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: AppColors.border, width: 1),
+                      border:
+                          Border.all(color: AppColors.border, width: 1),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -345,37 +486,6 @@ class _ConnectServerScreenState extends State<ConnectServerScreen> {
                       ),
                     ),
                   ],
-                  if (!_connecting && _step == 4) ...[
-                    const SizedBox(height: 16),
-                    Container(
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: AppColors.accent.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
-                          color: AppColors.accent.withOpacity(0.3),
-                          width: 1,
-                        ),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.check_circle_outline,
-                              color: AppColors.accent, size: 18),
-                          const SizedBox(width: 10),
-                          const Expanded(
-                            child: Text(
-                              'OOBI resolved. Identity verified.',
-                              style: TextStyle(
-                                color: AppColors.accent,
-                                fontSize: 12,
-                                fontFamily: 'monospace',
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
                   const SizedBox(height: 24),
                   SizedBox(
                     width: double.infinity,
@@ -413,7 +523,8 @@ class _ConnectServerScreenState extends State<ConnectServerScreen> {
                   ),
                   const SizedBox(height: 12),
                   TextButton(
-                    onPressed: widget.onBack,
+                    onPressed: () =>
+                        setState(() => _phase = _ConnectPhase.intro),
                     child: const Text(
                       'GO BACK',
                       style: TextStyle(
@@ -422,6 +533,209 @@ class _ConnectServerScreenState extends State<ConnectServerScreen> {
                         fontWeight: FontWeight.w500,
                         letterSpacing: 1.0,
                         fontFamily: 'monospace',
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildProcessingScreen() {
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 480),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const SizedBox(
+                    width: 48,
+                    height: 48,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 3,
+                      color: AppColors.accent,
+                    ),
+                  ),
+                  const SizedBox(height: 32),
+                  const Text(
+                    'LINKING YOUR IDENTITIES',
+                    style: TextStyle(
+                      color: AppColors.textPrimary,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 2.0,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Please wait...',
+                    style: TextStyle(
+                      color: AppColors.textSecondary,
+                      fontSize: 13,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                  const SizedBox(height: 32),
+                  Container(
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: AppColors.surface,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: AppColors.border, width: 1),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _buildLinkingStepRow(
+                            1, 'Establishing secure connection...'),
+                        const SizedBox(height: 12),
+                        _buildLinkingStepRow(2, 'Configuring your device...'),
+                        const SizedBox(height: 12),
+                        _buildLinkingStepRow(3, 'Finalizing setup...'),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLinkingStepRow(int stepNum, String label) {
+    final isCurrentStep =
+        _processingStep == stepNum - 1 && _phase == _ConnectPhase.processing;
+    final isComplete = _processingStep >= stepNum;
+
+    return Row(
+      children: [
+        SizedBox(
+          width: 20,
+          height: 20,
+          child: isCurrentStep
+              ? const CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: AppColors.accent,
+                )
+              : Icon(
+                  isComplete ? Icons.check_circle : Icons.circle_outlined,
+                  color: isComplete
+                      ? AppColors.accent
+                      : AppColors.textMuted.withOpacity(0.3),
+                  size: 18,
+                ),
+        ),
+        const SizedBox(width: 10),
+        Text(
+          label,
+          style: TextStyle(
+            color: isComplete || isCurrentStep
+                ? AppColors.textPrimary
+                : AppColors.textMuted,
+            fontSize: 12,
+            fontFamily: 'monospace',
+            fontWeight: isComplete || isCurrentStep
+                ? FontWeight.w600
+                : FontWeight.w400,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildConnectedScreen() {
+    final url = _connectedUrl ?? '';
+    final displayUrl = url.length > 40 ? '${url.substring(0, 40)}...' : url;
+
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 480),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(
+                    Icons.check_circle_outline,
+                    color: AppColors.coreActive,
+                    size: 72,
+                  ),
+                  const SizedBox(height: 28),
+                  const Text(
+                    'YOU\'RE CONNECTED.',
+                    style: TextStyle(
+                      color: AppColors.coreActive,
+                      fontSize: 22,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 2.0,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Your device is now linked to your Identity Agent.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: AppColors.textSecondary,
+                      fontSize: 14,
+                      height: 1.5,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: AppColors.surface,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: AppColors.border, width: 1),
+                    ),
+                    child: Text(
+                      displayUrl,
+                      style: const TextStyle(
+                        color: AppColors.textMuted,
+                        fontSize: 11,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 40),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () => widget.onConnected(_connectedUrl!),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.coreActive,
+                        foregroundColor: AppColors.primary,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: const Text(
+                        'OPEN DASHBOARD',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1.5,
+                          fontFamily: 'monospace',
+                        ),
                       ),
                     ),
                   ),

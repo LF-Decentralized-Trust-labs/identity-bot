@@ -31,8 +31,11 @@ type DriverInceptionRequest struct {
 type DriverInceptionResponse struct {
 	AID            string                 `json:"aid"`
 	InceptionEvent map[string]interface{} `json:"inception_event"`
-	PublicKey      string                 `json:"public_key"`
-	NextKeyDigest  string                 `json:"next_key_digest"`
+	// RawBytesB64: base64 of the serialized inception event body.
+	// The controller signs these bytes with its Ed25519 key, then calls /cesr-encode.
+	RawBytesB64   string `json:"raw_bytes_b64"`
+	PublicKey      string `json:"public_key"`
+	NextKeyDigest  string `json:"next_key_digest"`
 }
 
 type DriverRotationRequest struct {
@@ -46,7 +49,23 @@ type DriverRotationResponse struct {
 	NewPublicKey     string                 `json:"new_public_key"`
 	NewNextKeyDigest string                 `json:"new_next_key_digest"`
 	RotationEvent    map[string]interface{} `json:"rotation_event"`
+	// RawBytesB64: sign with the PRE-ROTATED key (mnemonic index 1), then /cesr-encode.
+	RawBytesB64    string `json:"raw_bytes_b64"`
 	SequenceNumber   int                    `json:"sequence_number"`
+}
+
+type DriverInteractRequest struct {
+	Name string        `json:"name"`
+	Data []interface{} `json:"data"`
+}
+
+type DriverInteractResponse struct {
+	AID            string                 `json:"aid"`
+	IxnEvent       map[string]interface{} `json:"ixn_event"`
+	// RawBytesB64: sign with the CURRENT signing key, then call /cesr-encode.
+	RawBytesB64    string `json:"raw_bytes_b64"`
+	Said           string `json:"said"`
+	SequenceNumber int    `json:"sequence_number"`
 }
 
 type DriverSignRequest struct {
@@ -94,11 +113,29 @@ type DriverResolveOobiRequest struct {
 }
 
 type DriverResolveOobiResponse struct {
-	Endpoints []string `json:"endpoints"`
-	OobiURL   string   `json:"oobi_url"`
-	CID       string   `json:"cid"`
-	EID       string   `json:"eid"`
-	Role      string   `json:"role"`
+	Endpoints        []string                 `json:"endpoints"`
+	OobiURL          string                   `json:"oobi_url"`
+	CID              string                   `json:"cid"`
+	EID              string                   `json:"eid"`
+	Role             string                   `json:"role"`
+	// Phase 3: KEL validation fields returned when resolve-oobi fetches and validates the KEL.
+	KEL              []map[string]interface{} `json:"kel,omitempty"`
+	KelVerified      bool                     `json:"kel_verified"`
+	CurrentPublicKey string                   `json:"current_public_key,omitempty"`
+	EventsValidated  int                      `json:"events_validated"`
+	ValidationErrors []string                 `json:"validation_errors,omitempty"`
+}
+
+type DriverValidateKELRequest struct {
+	AID    string                   `json:"aid"`
+	Events []map[string]interface{} `json:"events"`
+}
+
+type DriverValidateKELResponse struct {
+	KelVerified      bool     `json:"kel_verified"`
+	CurrentPublicKey string   `json:"current_public_key"`
+	EventsValidated  int      `json:"events_validated"`
+	ValidationErrors []string `json:"validation_errors,omitempty"`
 }
 
 type DriverMultisigRequest struct {
@@ -114,6 +151,102 @@ type DriverMultisigResponse struct {
 	Pre         string `json:"pre"`
 	EventType   string `json:"event_type"`
 	Size        int    `json:"size"`
+}
+
+type DriverIssueCredentialRequest struct {
+	Name       string                 `json:"name"`
+	Claims     map[string]interface{} `json:"claims"`
+	SchemaSaid string                 `json:"schema_said"`
+	HolderAid  string                 `json:"holder_aid"`
+}
+
+type DriverIssueCredentialResponse struct {
+	AID            string                 `json:"aid"`
+	AcdcSaid       string                 `json:"acdc_said"`
+	AcdcJsonB64    string                 `json:"acdc_json_b64"`
+	AcdcBody       map[string]interface{} `json:"acdc_body"`
+	// IxnRawBytesB64: sign with the CURRENT signing key then call /cesr-encode.
+	IxnRawBytesB64 string                 `json:"ixn_raw_bytes_b64"`
+	IxnSaid        string                 `json:"ixn_said"`
+	IxnEvent       map[string]interface{} `json:"ixn_event"`
+	SequenceNumber int                    `json:"sequence_number"`
+}
+
+type DriverPresentCredentialRequest struct {
+	AcdcSaid   string `json:"acdc_said"`
+	HolderAid  string `json:"holder_aid"`
+	IssuerAid  string `json:"issuer_aid,omitempty"`
+	SchemaSaid string `json:"schema_said,omitempty"`
+}
+
+type DriverPresentCredentialResponse struct {
+	PresentationSaid    string                 `json:"presentation_said"`
+	PresentationJsonB64 string                 `json:"presentation_json_b64"`
+	PresentationBody    map[string]interface{} `json:"presentation_body"`
+	// PresSaidB64: base64 of pres_said.encode(); sign these bytes with holder's key.
+	PresSaidB64         string                 `json:"pres_said_b64"`
+}
+
+type DriverSubmitReceiptRequest struct {
+	EventSAID        string   `json:"event_said"`
+	WitnessAID       string   `json:"witness_aid"`
+	WitnessPublicKey string   `json:"witness_public_key"`
+	CesrSignature    string   `json:"cesr_signature"`
+	TrustedWitnesses []string `json:"trusted_witnesses,omitempty"`
+	Threshold        int      `json:"threshold,omitempty"`
+}
+
+type DriverSubmitReceiptResponse struct {
+	Accepted     bool     `json:"accepted"`
+	ThresholdMet bool     `json:"threshold_met"`
+	ReceiptCount int      `json:"receipt_count"`
+	Errors       []string `json:"errors"`
+}
+
+type DriverKerlReceiptEntry struct {
+	WitnessAID    string `json:"witness_aid"`
+	CesrSignature string `json:"cesr_sig"`
+}
+
+type DriverGetKerlResponse struct {
+	EventSAID    string                   `json:"event_said"`
+	Receipts     []DriverKerlReceiptEntry `json:"receipts"`
+	ReceiptCount int                      `json:"receipt_count"`
+	ThresholdMet bool                     `json:"threshold_met"`
+	Errors       []string                 `json:"errors"`
+}
+
+type DriverVerifyCredentialRequest struct {
+	// AcdcJson: base64-encoded ACDC JSON string to verify (matches driver field acdc_json_b64).
+	AcdcJson string `json:"acdc_json_b64"`
+	// IssuerKelEvents: the issuer's KEL as raw KED dicts (driver field: issuer_kel).
+	IssuerKelEvents []map[string]interface{} `json:"issuer_kel,omitempty"`
+	// HolderAid: expected holder AID (subject of the credential).
+	HolderAid string `json:"holder_aid,omitempty"`
+	// PresentationSaid: base64 of pres_said.encode() — bytes the holder signed (driver field: pres_said_b64).
+	PresentationSaid string `json:"pres_said_b64,omitempty"`
+	// CesrSignature: the holder's CESR '0B...' signature over pres_said bytes (driver field: pres_cesr_sig).
+	CesrSignature string `json:"pres_cesr_sig,omitempty"`
+	// HolderPublicKey: the holder's current Ed25519 public key (base64).
+	HolderPublicKey string `json:"holder_public_key,omitempty"`
+	// TrustedSchemaSaids: list of accepted schema SAIDs; empty = accept all.
+	TrustedSchemaSaids []string `json:"trusted_schema_saids,omitempty"`
+}
+
+type DriverVerifyCredentialResponse struct {
+	Verified  bool                   `json:"verified"`
+	Checks    map[string]interface{} `json:"checks"`
+	Errors    []string               `json:"errors"`
+	AcdcSaid  string                 `json:"acdc_said"`
+}
+
+type DriverCesrEncodeRequest struct {
+	RawSigB64 string `json:"raw_sig_b64"`
+}
+
+type DriverCesrEncodeResponse struct {
+	CesrSig string `json:"cesr_sig"`
+	Length  int    `json:"length"`
 }
 
 type DriverErrorResponse struct {
@@ -145,7 +278,31 @@ func (d *KeriDriver) Start() error {
 
 	scriptPath := os.Getenv("KERI_DRIVER_SCRIPT")
 	if scriptPath == "" {
-		scriptPath = "./drivers/keri-core/server.py"
+		// Default: look relative to this executable's directory, then fall back
+		// to the repo-root layout (drivers/ lives one level above identity-agent-core/).
+		exe, err := os.Executable()
+		if err == nil {
+			candidate := filepath.Join(filepath.Dir(exe), "drivers", "keri-core", "server.py")
+			if _, statErr := os.Stat(candidate); statErr == nil {
+				scriptPath = candidate
+			}
+		}
+		if scriptPath == "" {
+			// When running via `go run .` from identity-agent-core/, the CWD is
+			// identity-agent-core/ and the drivers/ dir is one level up.
+			for _, rel := range []string{
+				"./drivers/keri-core/server.py",
+				"../drivers/keri-core/server.py",
+			} {
+				if _, statErr := os.Stat(rel); statErr == nil {
+					scriptPath = rel
+					break
+				}
+			}
+		}
+		if scriptPath == "" {
+			scriptPath = "./drivers/keri-core/server.py" // last resort, keeps old behaviour
+		}
 	}
 
 	pythonBin := os.Getenv("KERI_DRIVER_PYTHON")
@@ -361,6 +518,38 @@ func (d *KeriDriver) VerifySignature(dataB64, signature, publicKey string) (*Dri
 	return &result, nil
 }
 
+func (d *KeriDriver) Interact(name string, data []interface{}) (*DriverInteractResponse, error) {
+	reqBody := DriverInteractRequest{Name: name, Data: data}
+
+	body, err := d.doPost("/interact", reqBody, http.StatusCreated)
+	if err != nil {
+		return nil, err
+	}
+
+	var result DriverInteractResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode interact response: %w", err)
+	}
+
+	return &result, nil
+}
+
+func (d *KeriDriver) CesrEncode(rawSigB64 string) (*DriverCesrEncodeResponse, error) {
+	reqBody := DriverCesrEncodeRequest{RawSigB64: rawSigB64}
+
+	body, err := d.doPost("/cesr-encode", reqBody, http.StatusOK)
+	if err != nil {
+		return nil, err
+	}
+
+	var result DriverCesrEncodeResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode cesr-encode response: %w", err)
+	}
+
+	return &result, nil
+}
+
 func (d *KeriDriver) FormatCredential(claims map[string]interface{}, schemaSaid, issuerAid string) (*DriverFormatCredentialResponse, error) {
 	reqBody := DriverFormatCredentialRequest{
 		Claims:     claims,
@@ -397,6 +586,64 @@ func (d *KeriDriver) ResolveOobi(url string) (*DriverResolveOobiResponse, error)
 	return &result, nil
 }
 
+func (d *KeriDriver) PresentCredential(acdcSaid, holderAid, issuerAid, schemaSaid string) (*DriverPresentCredentialResponse, error) {
+	reqBody := DriverPresentCredentialRequest{
+		AcdcSaid:   acdcSaid,
+		HolderAid:  holderAid,
+		IssuerAid:  issuerAid,
+		SchemaSaid: schemaSaid,
+	}
+
+	body, err := d.doPost("/credential/present", reqBody, http.StatusCreated)
+	if err != nil {
+		return nil, err
+	}
+
+	var result DriverPresentCredentialResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode credential/present response: %w", err)
+	}
+
+	return &result, nil
+}
+
+func (d *KeriDriver) IssueCredential(name string, claims map[string]interface{}, schemaSaid, holderAid string) (*DriverIssueCredentialResponse, error) {
+	reqBody := DriverIssueCredentialRequest{
+		Name:       name,
+		Claims:     claims,
+		SchemaSaid: schemaSaid,
+		HolderAid:  holderAid,
+	}
+
+	body, err := d.doPost("/credential/issue", reqBody, http.StatusCreated)
+	if err != nil {
+		return nil, err
+	}
+
+	var result DriverIssueCredentialResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode credential/issue response: %w", err)
+	}
+
+	return &result, nil
+}
+
+func (d *KeriDriver) ValidateKEL(aid string, events []map[string]interface{}) (*DriverValidateKELResponse, error) {
+	reqBody := DriverValidateKELRequest{AID: aid, Events: events}
+
+	body, err := d.doPost("/validate-kel", reqBody, http.StatusOK)
+	if err != nil {
+		return nil, err
+	}
+
+	var result DriverValidateKELResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode validate-kel response: %w", err)
+	}
+
+	return &result, nil
+}
+
 func (d *KeriDriver) GenerateMultisigEvent(aids []string, threshold int, currentKeys []string, eventType string) (*DriverMultisigResponse, error) {
 	reqBody := DriverMultisigRequest{
 		AIDs:        aids,
@@ -413,6 +660,59 @@ func (d *KeriDriver) GenerateMultisigEvent(aids []string, threshold int, current
 	var result DriverMultisigResponse
 	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("failed to decode multisig event response: %w", err)
+	}
+
+	return &result, nil
+}
+
+func (d *KeriDriver) SubmitReceipt(req *DriverSubmitReceiptRequest) (*DriverSubmitReceiptResponse, error) {
+	body, err := d.doPost("/receipt/submit", req, http.StatusOK)
+	if err != nil {
+		return nil, err
+	}
+
+	var result DriverSubmitReceiptResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode receipt/submit response: %w", err)
+	}
+
+	return &result, nil
+}
+
+func (d *KeriDriver) GetKERL(eventSAID string, threshold int) (*DriverGetKerlResponse, error) {
+	url := fmt.Sprintf("%s/receipt/kerl?event_said=%s&threshold=%d", d.BaseURL, eventSAID, threshold)
+	resp, err := d.client.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("KERL request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read KERL response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, d.parseError(body, resp.StatusCode, "KERL request")
+	}
+
+	var result DriverGetKerlResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode KERL response: %w", err)
+	}
+
+	return &result, nil
+}
+
+func (d *KeriDriver) VerifyCredential(req *DriverVerifyCredentialRequest) (*DriverVerifyCredentialResponse, error) {
+	body, err := d.doPost("/credential/verify", req, http.StatusOK)
+	if err != nil {
+		return nil, err
+	}
+
+	var result DriverVerifyCredentialResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode credential/verify response: %w", err)
 	}
 
 	return &result, nil

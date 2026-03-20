@@ -5,7 +5,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import '../theme/app_theme.dart';
 import '../services/core_service.dart';
 import '../services/keri_service.dart';
-import '../services/mobile_standalone_keri_service.dart';
+import '../services/mobile_on_device_keri_service.dart';
 import '../services/photo_picker_stub.dart'
     if (dart.library.html) '../services/photo_picker_web.dart' as photo_picker;
 
@@ -28,8 +28,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   String? _resolveServerUrl() {
     if (widget.serverUrl != null) return widget.serverUrl;
-    if (widget.keriService is MobileStandaloneKeriService) {
-      final standalone = widget.keriService as MobileStandaloneKeriService;
+    if (widget.keriService is MobileOnDeviceKeriService) {
+      final standalone = widget.keriService as MobileOnDeviceKeriService;
       if (standalone.isCoreReady) {
         return standalone.mobileCore.baseUrl;
       }
@@ -200,12 +200,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
           TextButton(
             onPressed: _removePhoto,
             child: const Text(
-              'REMOVE PHOTO',
+              'Remove Photo',
               style: TextStyle(
                 color: AppColors.error,
-                fontSize: 11,
-                fontFamily: 'monospace',
-                letterSpacing: 1.0,
+                fontSize: 13,
               ),
             ),
           ),
@@ -220,13 +218,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            label.toUpperCase(),
+            label,
             style: const TextStyle(
-              color: AppColors.textMuted,
-              fontSize: 10,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 1.5,
-              fontFamily: 'monospace',
+              color: AppColors.textSecondary,
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
             ),
           ),
           const SizedBox(height: 6),
@@ -237,7 +233,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
             style: const TextStyle(
               color: AppColors.textPrimary,
               fontSize: 14,
-              fontFamily: 'monospace',
             ),
             decoration: InputDecoration(
               filled: true,
@@ -265,35 +260,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.primary,
       body: SafeArea(
         child: _loading
             ? const Center(child: CircularProgressIndicator(color: AppColors.accent))
             : SingleChildScrollView(
-                padding: const EdgeInsets.all(20),
+                padding: const EdgeInsets.fromLTRB(32, 32, 32, 32),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    const Text(
-                      'PROFILE',
-                      style: TextStyle(
-                        color: AppColors.accent,
-                        fontSize: 20,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 2.0,
-                        fontFamily: 'monospace',
-                      ),
-                      textAlign: TextAlign.center,
+                    Text(
+                      'My Profile',
+                      style: Theme.of(context).textTheme.headlineMedium,
                     ),
                     const SizedBox(height: 4),
                     const Text(
-                      'Your digital identity card (jCard)',
-                      style: TextStyle(
-                        color: AppColors.textSecondary,
-                        fontSize: 12,
-                        fontFamily: 'monospace',
-                      ),
-                      textAlign: TextAlign.center,
+                      'Your digital identity card.',
+                      style: TextStyle(color: AppColors.textSecondary, fontSize: 14),
                     ),
                     const SizedBox(height: 24),
                     Center(child: _buildPhotoSection()),
@@ -350,24 +332,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       height: 48,
                       child: ElevatedButton(
                         onPressed: _saving ? null : _saveProfile,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.accent,
-                          foregroundColor: AppColors.primary,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                          textStyle: const TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 1.5,
-                            fontFamily: 'monospace',
-                          ),
-                        ),
                         child: _saving
                             ? const SizedBox(
                                 height: 20,
                                 width: 20,
-                                child: CircularProgressIndicator(color: AppColors.primary, strokeWidth: 2),
+                                child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
                               )
-                            : const Text('SAVE PROFILE'),
+                            : const Text('Save Profile'),
                       ),
                     ),
                     const SizedBox(height: 24),

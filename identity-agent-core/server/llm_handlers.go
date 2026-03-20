@@ -2,14 +2,51 @@ package server
 
 import (
         "bytes"
+        "crypto/sha256"
         "encoding/json"
+        "fmt"
         "io"
         "log"
         "net/http"
         "strings"
+        "time"
+
+        "identity-agent-core/store"
 
         "github.com/go-chi/chi/v5"
 )
+
+// ── Chat completion types (OpenAI-compatible) ─────────────────────────────────
+
+type chatCompletionRequest struct {
+        Model    string        `json:"model"`
+        Messages []chatMessage `json:"messages"`
+        Stream   bool          `json:"stream"`
+}
+
+type chatMessage struct {
+        Role    string `json:"role"`
+        Content string `json:"content"`
+}
+
+// SSE chunk from a streaming chat completion response.
+type chatCompletionChunk struct {
+        ID      string `json:"id"`
+        Choices []struct {
+                Delta struct {
+                        Role    string `json:"role,omitempty"`
+                        Content string `json:"content,omitempty"`
+                } `json:"delta"`
+        } `json:"choices"`
+}
+
+// Non-streaming chat completion response.
+type chatCompletionResponse struct {
+        ID      string `json:"id"`
+        Choices []struct {
+                Message chatMessage `json:"message"`
+        } `json:"choices"`
+}
 
 const openRouterBaseURL = "https://openrouter.ai/api/v1"
 
@@ -35,8 +72,10 @@ func (s *CoreServer) llmRoutes(r chi.Router) {
         r.Get("/api/settings/llm", s.handleGetLLMSettings)
         r.Post("/api/settings/llm", s.handleSaveLLMKey)
         r.Delete("/api/settings/llm/{service}", s.handleDeleteLLMKey)
-        r.HandleFunc("/llm/v1", s.handleLLMProxy)
-        r.HandleFunc("/llm/v1/*", s.handleLLMProxy)
+        // /sandbox/llm/v1/* — container egress namespace: LLM proxy for sandboxed apps.
+        // Containers call http://agent.internal:5000/sandbox/llm/v1 as their OpenAI-compatible base URL.
+        r.HandleFunc("/sandbox/llm/v1", s.handleLLMProxy)
+        r.HandleFunc("/sandbox/llm/v1/*", s.handleLLMProxy)
 }
 
 func (s *CoreServer) handleGetLLMSettings(w http.ResponseWriter, r *http.Request) {
@@ -115,7 +154,7 @@ func (s *CoreServer) handleLLMProxy(w http.ResponseWriter, r *http.Request) {
                 return
         }
 
-        subPath := strings.TrimPrefix(r.URL.Path, "/llm/v1")
+        subPath := strings.TrimPrefix(r.URL.Path, "/sandbox/llm/v1")
         if subPath == "" {
                 subPath = "/"
         }
@@ -151,6 +190,13 @@ func (s *CoreServer) handleLLMProxy(w http.ResponseWriter, r *http.Request) {
         if err != nil {
                 http.Error(w, "Failed to read request body", http.StatusInternalServerError)
                 return
+        }
+
+        // Parse the request for conversation capture (chat/completions only).
+        isChatCompletion := subPath == "/chat/completions" || subPath == "/chat/completions/"
+        var chatReq chatCompletionRequest
+        if isChatCompletion {
+                _ = json.Unmarshal(body, &chatReq) // best-effort; capture failures are non-fatal
         }
 
         upReq, err := http.NewRequestWithContext(r.Context(), r.Method, upstreamURL, bytes.NewReader(body))
@@ -202,12 +248,17 @@ func (s *CoreServer) handleLLMProxy(w http.ResponseWriter, r *http.Request) {
         w.Header().Set("X-Accel-Buffering", "no")
         w.WriteHeader(resp.StatusCode)
 
+        // Stream the response to the client while capturing content for ai-memory.db.
+        var captureBuffer bytes.Buffer
         flusher, canFlush := w.(http.Flusher)
         buf := make([]byte, 4096)
         for {
                 n, readErr := resp.Body.Read(buf)
                 if n > 0 {
                         w.Write(buf[:n])
+                        if isChatCompletion && resp.StatusCode == http.StatusOK {
+                                captureBuffer.Write(buf[:n])
+                        }
                         if canFlush {
                                 flusher.Flush()
                         }
@@ -219,6 +270,12 @@ func (s *CoreServer) handleLLMProxy(w http.ResponseWriter, r *http.Request) {
                         log.Printf("[llm-proxy] Stream read error: %v", readErr)
                         break
                 }
+        }
+
+        // Capture the conversation asynchronously — never delay the client response.
+        if isChatCompletion && resp.StatusCode == http.StatusOK && s.AIMemory != nil && len(chatReq.Messages) > 0 {
+                captured := captureBuffer.Bytes()
+                go s.captureConversation(chatReq, captured)
         }
 }
 
@@ -236,4 +293,158 @@ func (s *CoreServer) handleLLMModels(w http.ResponseWriter, _ *http.Request) {
 func writeJSON(w http.ResponseWriter, v interface{}) {
         w.Header().Set("Content-Type", "application/json")
         json.NewEncoder(w).Encode(v)
+}
+
+// ── Conversation capture ──────────────────────────────────────────────────────
+
+// captureConversation extracts the new user message and the assistant response
+// from a chat completion exchange and saves them to ai-memory.db.
+//
+// This runs in a goroutine — errors are logged, never surfaced to the client.
+func (s *CoreServer) captureConversation(req chatCompletionRequest, rawResponse []byte) {
+        // 1. Derive a stable conversation ID from the first system + first user messages.
+        convID := deriveConversationID(req.Messages)
+        if convID == "" {
+                return
+        }
+
+        // 2. Extract the assistant's response from the raw bytes.
+        assistantContent := extractAssistantResponse(rawResponse)
+        if assistantContent == "" {
+                log.Printf("[llm-capture] No assistant content found in response for conv=%s", convID)
+                return
+        }
+
+        // 3. The last user message in the request is the new prompt.
+        var lastUserMsg string
+        var lastUserIdx int
+        for i := len(req.Messages) - 1; i >= 0; i-- {
+                if req.Messages[i].Role == "user" {
+                        lastUserMsg = req.Messages[i].Content
+                        lastUserIdx = i
+                        break
+                }
+        }
+        if lastUserMsg == "" {
+                return
+        }
+
+        now := time.Now().Unix()
+
+        // 4. Upsert the conversation.
+        title := truncateTitle(lastUserMsg, 80)
+        conv := store.Conversation{
+                ID:        convID,
+                SourceApp: "llm-proxy",
+                Title:     title,
+                Model:     req.Model,
+        }
+        if err := s.AIMemory.SaveConversation(conv); err != nil {
+                log.Printf("[llm-capture] Failed to save conversation %s: %v", convID, err)
+                return
+        }
+
+        // 5. Save the new user message.
+        userMsgID := hashMessageID(convID, "user", lastUserMsg, lastUserIdx)
+        if err := s.AIMemory.SaveMessage(store.Message{
+                ID:             userMsgID,
+                ConversationID: convID,
+                Role:           "user",
+                Content:        lastUserMsg,
+                Model:          req.Model,
+                Timestamp:      now,
+        }); err != nil {
+                log.Printf("[llm-capture] Failed to save user message: %v", err)
+        }
+
+        // 6. Save the assistant response.
+        assistantIdx := lastUserIdx + 1
+        assistantMsgID := hashMessageID(convID, "assistant", assistantContent, assistantIdx)
+        if err := s.AIMemory.SaveMessage(store.Message{
+                ID:             assistantMsgID,
+                ConversationID: convID,
+                Role:           "assistant",
+                Content:        assistantContent,
+                Model:          req.Model,
+                Timestamp:      now,
+        }); err != nil {
+                log.Printf("[llm-capture] Failed to save assistant message: %v", err)
+        }
+
+        log.Printf("[llm-capture] Saved conv=%s model=%s user_len=%d assistant_len=%d",
+                convID, req.Model, len(lastUserMsg), len(assistantContent))
+}
+
+// deriveConversationID creates a stable conversation ID by hashing the first
+// system message (if any) and the first user message. This stays constant
+// across all turns of the same conversation because the OpenAI API sends the
+// full message history with every request.
+func deriveConversationID(messages []chatMessage) string {
+        var systemContent, firstUserContent string
+        for _, m := range messages {
+                if m.Role == "system" && systemContent == "" {
+                        systemContent = m.Content
+                }
+                if m.Role == "user" && firstUserContent == "" {
+                        firstUserContent = m.Content
+                        break
+                }
+        }
+        if firstUserContent == "" {
+                return ""
+        }
+        h := sha256.Sum256([]byte(systemContent + "|" + firstUserContent))
+        return fmt.Sprintf("%x", h[:8]) // 16-char hex ID
+}
+
+// hashMessageID creates a deterministic message ID for deduplication.
+func hashMessageID(convID, role, content string, index int) string {
+        h := sha256.Sum256([]byte(fmt.Sprintf("%s|%s|%s|%d", convID, role, content, index)))
+        return fmt.Sprintf("%x", h[:8])
+}
+
+// extractAssistantResponse handles both streaming (SSE) and non-streaming responses.
+func extractAssistantResponse(raw []byte) string {
+        rawStr := string(raw)
+
+        // Streaming response: lines prefixed with "data: "
+        if strings.Contains(rawStr, "data: ") {
+                var contentParts []string
+                for _, line := range strings.Split(rawStr, "\n") {
+                        line = strings.TrimSpace(line)
+                        if !strings.HasPrefix(line, "data: ") {
+                                continue
+                        }
+                        data := strings.TrimPrefix(line, "data: ")
+                        if data == "[DONE]" {
+                                break
+                        }
+                        var chunk chatCompletionChunk
+                        if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+                                continue
+                        }
+                        if len(chunk.Choices) > 0 && chunk.Choices[0].Delta.Content != "" {
+                                contentParts = append(contentParts, chunk.Choices[0].Delta.Content)
+                        }
+                }
+                return strings.Join(contentParts, "")
+        }
+
+        // Non-streaming response: single JSON object
+        var resp chatCompletionResponse
+        if err := json.Unmarshal(raw, &resp); err != nil {
+                return ""
+        }
+        if len(resp.Choices) > 0 {
+                return resp.Choices[0].Message.Content
+        }
+        return ""
+}
+
+// truncateTitle shortens a string to maxLen characters for use as a conversation title.
+func truncateTitle(s string, maxLen int) string {
+        if len(s) <= maxLen {
+                return s
+        }
+        return s[:maxLen-3] + "..."
 }

@@ -6,7 +6,7 @@ import '../theme/app_theme.dart';
 import '../config/agent_config.dart';
 import '../services/core_service.dart';
 import '../services/keri_service.dart';
-import '../services/mobile_standalone_keri_service.dart';
+import '../services/mobile_on_device_keri_service.dart';
 import '../widgets/status_indicator.dart';
 import '../widgets/info_card.dart';
 import '../widgets/log_entry.dart';
@@ -36,8 +36,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   String? _resolveServerUrl() {
     if (widget.serverUrl != null) return widget.serverUrl;
-    if (widget.keriService is MobileStandaloneKeriService) {
-      final standalone = widget.keriService as MobileStandaloneKeriService;
+    if (widget.keriService is MobileOnDeviceKeriService) {
+      final standalone = widget.keriService as MobileOnDeviceKeriService;
       if (standalone.isCoreReady) {
         return standalone.mobileCore.baseUrl;
       }
@@ -62,7 +62,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   bool get _isStandaloneMode {
-    return widget.keriService is MobileStandaloneKeriService;
+    return widget.keriService is MobileOnDeviceKeriService;
   }
 
   String _timeNow() {
@@ -192,101 +192,73 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.primary,
       body: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _buildHeader(),
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const SizedBox(height: 24),
-                    _buildCoreStatusCard(),
-                    const SizedBox(height: 20),
-                    if (_connectionState == CoreConnectionState.connected) ...[
-                      if (_identity != null && _identity!.initialized)
-                        _buildIdentityCard(),
-                      if (_identity != null && _identity!.initialized)
-                        const SizedBox(height: 20),
-                      if (_alerts.isNotEmpty || _pendingRequests.isNotEmpty)
-                        ...[
-                          _buildAlertsCard(),
-                          const SizedBox(height: 20),
-                        ],
-                      if (_isStandaloneMode && _identity != null && _identity!.initialized)
-                        ...[
-                          _buildMigrateButton(),
-                          const SizedBox(height: 20),
-                        ],
-                      _buildInfoGrid(),
-                      const SizedBox(height: 20),
-                    ],
-                    _buildActivityLog(),
-                    const SizedBox(height: 24),
-                  ],
-                ),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(32, 0, 32, 32),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildHeader(),
+              const SizedBox(height: 28),
+              // OmniFactor stub row
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(flex: 2, child: _buildCoreStatusCard()),
+                  const SizedBox(width: 16),
+                  Expanded(child: _buildOfaStubCard()),
+                ],
               ),
-            ),
-          ],
+              const SizedBox(height: 20),
+              if (_connectionState == CoreConnectionState.connected) ...[
+                if (_identity != null && _identity!.initialized) ...[
+                  _buildIdentityCard(),
+                  const SizedBox(height: 20),
+                ],
+                if (_alerts.isNotEmpty || _pendingRequests.isNotEmpty) ...[
+                  _buildAlertsCard(),
+                  const SizedBox(height: 20),
+                ],
+                if (_isStandaloneMode && _identity != null && _identity!.initialized) ...[
+                  _buildMigrateButton(),
+                  const SizedBox(height: 20),
+                ],
+                _buildInfoGrid(),
+                const SizedBox(height: 20),
+              ],
+              _buildActivityLog(),
+            ],
+          ),
         ),
       ),
     );
   }
 
   Widget _buildHeader() {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(32, 32, 32, 0),
       child: Row(
         children: [
-          Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              color: AppColors.accent.withOpacity(0.15),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(
-                color: AppColors.accent.withOpacity(0.3),
-                width: 1,
-              ),
-            ),
-            child: const Icon(
-              Icons.shield_outlined,
-              color: AppColors.accent,
-              size: 20,
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Dashboard',
+                    style: Theme.of(context).textTheme.headlineMedium),
+                const SizedBox(height: 4),
+                const Text('Your identity at a glance.',
+                    style: TextStyle(color: AppColors.textSecondary, fontSize: 14)),
+              ],
             ),
           ),
-          const SizedBox(width: 12),
-          const Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'IDENTITY AGENT',
-                style: TextStyle(
-                  color: AppColors.textPrimary,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 2.0,
-                  fontFamily: 'monospace',
-                ),
-              ),
-              Text(
-                'CONTROLLER DASHBOARD',
-                style: TextStyle(
-                  color: AppColors.textMuted,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w500,
-                  letterSpacing: 1.5,
-                  fontFamily: 'monospace',
-                ),
-              ),
-            ],
-          ),
-          const Spacer(),
           StatusIndicator(state: _connectionState),
+          const SizedBox(width: 8),
+          IconButton(
+            onPressed: _performHandshake,
+            icon: const Icon(Icons.refresh),
+            color: AppColors.textSecondary,
+            tooltip: 'Refresh',
+          ),
         ],
       ),
     );
@@ -297,62 +269,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: _connectionState == CoreConnectionState.connected
-              ? AppColors.accent.withOpacity(0.3)
-              : AppColors.border,
-          width: 1,
-        ),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              const Text(
-                'GO CORE STATUS',
-                style: TextStyle(
-                  color: AppColors.textMuted,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 1.5,
-                  fontFamily: 'monospace',
-                ),
-              ),
-              const Spacer(),
-              if (_connectionState != CoreConnectionState.connecting)
-                InkWell(
-                  onTap: _performHandshake,
-                  borderRadius: BorderRadius.circular(6),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                    decoration: BoxDecoration(
-                      color: AppColors.surfaceLight,
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.refresh, color: AppColors.textSecondary, size: 14),
-                        SizedBox(width: 4),
-                        Text(
-                          'RETRY',
-                          style: TextStyle(
-                            color: AppColors.textSecondary,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w600,
-                            letterSpacing: 1.0,
-                            fontFamily: 'monospace',
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-            ],
-          ),
-          const SizedBox(height: 16),
+          const Text('Backend Status',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
+          const Divider(height: 20),
           _buildStatusContent(),
         ],
       ),
@@ -378,7 +303,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
               style: TextStyle(
                 color: AppColors.corePending,
                 fontSize: 13,
-                fontFamily: 'monospace',
               ),
             ),
           ],
@@ -396,12 +320,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text(
-                        'Handshake Successful',
+                        'Connected',
                         style: TextStyle(
                           color: AppColors.coreActive,
                           fontSize: 15,
                           fontWeight: FontWeight.w600,
-                          fontFamily: 'monospace',
                         ),
                       ),
                       const SizedBox(height: 2),
@@ -409,8 +332,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         'Connected to ${_healthData?.agent ?? "unknown"} v${_healthData?.version ?? "?"}',
                         style: const TextStyle(
                           color: AppColors.textSecondary,
-                          fontSize: 12,
-                          fontFamily: 'monospace',
+                          fontSize: 13,
                         ),
                       ),
                     ],
@@ -423,14 +345,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
               width: double.infinity,
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: AppColors.primary,
+                color: AppColors.surfaceLight,
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: AppColors.border, width: 1),
               ),
               child: Text(
                 'GET /health -> {"status": "${_healthData?.status}", "agent": "${_healthData?.agent}"}',
                 style: const TextStyle(
-                  color: AppColors.accent,
+                  color: AppColors.textSecondary,
                   fontSize: 11,
                   fontFamily: 'monospace',
                 ),
@@ -454,7 +376,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       color: AppColors.coreInactive,
                       fontSize: 15,
                       fontWeight: FontWeight.w600,
-                      fontFamily: 'monospace',
                     ),
                   ),
                 ),
@@ -474,7 +395,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   style: const TextStyle(
                     color: AppColors.coreInactive,
                     fontSize: 11,
-                    fontFamily: 'monospace',
                   ),
                 ),
               ),
@@ -492,12 +412,56 @@ class _DashboardScreenState extends State<DashboardScreen> {
               style: TextStyle(
                 color: AppColors.textMuted,
                 fontSize: 14,
-                fontFamily: 'monospace',
               ),
             ),
           ],
         );
     }
+  }
+
+  Widget _buildOfaStubCard() {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        border: Border.all(color: AppColors.border),
+        borderRadius: BorderRadius.circular(12),
+        color: AppColors.surface,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('OmniFactor Score',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
+          const Divider(height: 20),
+          const SizedBox(height: 8),
+          Center(
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                SizedBox(
+                  width: 80,
+                  height: 80,
+                  child: CircularProgressIndicator(
+                    value: 0.0,
+                    strokeWidth: 8,
+                    backgroundColor: AppColors.border,
+                    color: AppColors.primary.withValues(alpha: 0.3),
+                  ),
+                ),
+                const Text('—', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700, color: AppColors.textMuted)),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          const Center(
+            child: Text(
+              'Coming soon',
+              style: TextStyle(fontSize: 12, color: AppColors.textMuted),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildIdentityCard() {
@@ -506,11 +470,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: AppColors.coreActive.withOpacity(0.3),
-          width: 1,
-        ),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -532,13 +493,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
               const SizedBox(width: 10),
               const Text(
-                'AUTONOMOUS IDENTIFIER',
+                'Autonomous Identifier',
                 style: TextStyle(
-                  color: AppColors.textMuted,
-                  fontSize: 11,
+                  color: AppColors.textSecondary,
+                  fontSize: 13,
                   fontWeight: FontWeight.w600,
-                  letterSpacing: 1.5,
-                  fontFamily: 'monospace',
                 ),
               ),
               const Spacer(),
@@ -554,8 +513,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     color: AppColors.coreActive,
                     fontSize: 9,
                     fontWeight: FontWeight.w700,
-                    letterSpacing: 1.0,
-                    fontFamily: 'monospace',
                   ),
                 ),
               ),
@@ -566,15 +523,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
             width: double.infinity,
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: AppColors.primary,
+              color: AppColors.surfaceLight,
               borderRadius: BorderRadius.circular(8),
               border: Border.all(color: AppColors.border, width: 1),
             ),
             child: SelectableText(
               aid,
               style: const TextStyle(
-                color: AppColors.accent,
-                fontSize: 11,
+                color: AppColors.primary,
+                fontSize: 12,
                 fontFamily: 'monospace',
                 height: 1.5,
               ),
@@ -591,7 +548,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   style: const TextStyle(
                     color: AppColors.textMuted,
                     fontSize: 10,
-                    fontFamily: 'monospace',
                   ),
                 ),
                 const Spacer(),
@@ -600,7 +556,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   style: const TextStyle(
                     color: AppColors.textMuted,
                     fontSize: 10,
-                    fontFamily: 'monospace',
                   ),
                 ),
               ],
@@ -623,13 +578,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
               side: const BorderSide(color: AppColors.border),
             ),
             title: const Text(
-              'MIGRATE TO EXTERNAL SERVER',
+              'Migrate to External Server',
               style: TextStyle(
                 color: AppColors.textPrimary,
                 fontSize: 14,
                 fontWeight: FontWeight.w700,
-                letterSpacing: 1.5,
-                fontFamily: 'monospace',
               ),
             ),
             content: const Text(
@@ -642,7 +595,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
               style: TextStyle(
                 color: AppColors.textSecondary,
                 fontSize: 13,
-                fontFamily: 'monospace',
                 height: 1.5,
               ),
             ),
@@ -653,7 +605,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   'OK',
                   style: TextStyle(
                     color: AppColors.accent,
-                    fontFamily: 'monospace',
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -695,13 +646,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'MIGRATE TO EXTERNAL SERVER',
+                    'Migrate to External Server',
                     style: TextStyle(
                       color: AppColors.textPrimary,
                       fontSize: 11,
                       fontWeight: FontWeight.w600,
-                      letterSpacing: 1.0,
-                      fontFamily: 'monospace',
                     ),
                   ),
                   SizedBox(height: 2),
@@ -710,7 +659,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     style: TextStyle(
                       color: AppColors.textMuted,
                       fontSize: 10,
-                      fontFamily: 'monospace',
                     ),
                   ),
                 ],
@@ -730,10 +678,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       decoration: BoxDecoration(
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: AppColors.corePending.withOpacity(0.4),
-          width: 1,
-        ),
+        border: Border.all(color: AppColors.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -755,13 +700,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
               const SizedBox(width: 10),
               const Text(
-                'ALERTS',
+                'Alerts',
                 style: TextStyle(
-                  color: AppColors.textMuted,
-                  fontSize: 11,
+                  color: AppColors.textSecondary,
+                  fontSize: 13,
                   fontWeight: FontWeight.w600,
-                  letterSpacing: 1.5,
-                  fontFamily: 'monospace',
                 ),
               ),
               const Spacer(),
@@ -777,7 +720,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     color: AppColors.corePending,
                     fontSize: 11,
                     fontWeight: FontWeight.w700,
-                    fontFamily: 'monospace',
                   ),
                 ),
               ),
@@ -814,7 +756,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
             color: AppColors.corePending,
             fontSize: 14,
             fontWeight: FontWeight.w600,
-            fontFamily: 'monospace',
           ),
         ),
       ),
@@ -826,7 +767,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: AppColors.primary,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(color: AppColors.border, width: 1),
       ),
@@ -847,7 +788,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         color: AppColors.textPrimary,
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
-                        fontFamily: 'monospace',
                       ),
                     ),
                     const SizedBox(height: 2),
@@ -856,7 +796,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       style: const TextStyle(
                         color: AppColors.textMuted,
                         fontSize: 10,
-                        fontFamily: 'monospace',
                       ),
                     ),
                   ],
@@ -875,7 +814,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     fontSize: 8,
                     fontWeight: FontWeight.w700,
                     letterSpacing: 0.8,
-                    fontFamily: 'monospace',
                   ),
                 ),
               ),
@@ -885,50 +823,29 @@ class _DashboardScreenState extends State<DashboardScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
-              InkWell(
-                onTap: () => _rejectContact(alert.aid),
-                borderRadius: BorderRadius.circular(6),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-                  decoration: BoxDecoration(
-                    color: AppColors.coreInactive.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: AppColors.coreInactive.withOpacity(0.3)),
-                  ),
-                  child: const Text(
-                    'REJECT',
-                    style: TextStyle(
-                      color: AppColors.coreInactive,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 1.0,
-                      fontFamily: 'monospace',
-                    ),
-                  ),
+              OutlinedButton(
+                onPressed: () => _rejectContact(alert.aid),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.error,
+                  side: BorderSide(color: AppColors.error.withValues(alpha: 0.4)),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
+                child: const Text('Reject', style: TextStyle(fontSize: 13)),
               ),
               const SizedBox(width: 10),
-              InkWell(
-                onTap: () => _acceptContact(alert.aid),
-                borderRadius: BorderRadius.circular(6),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-                  decoration: BoxDecoration(
-                    color: AppColors.coreActive.withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: AppColors.coreActive.withOpacity(0.3)),
-                  ),
-                  child: const Text(
-                    'ACCEPT',
-                    style: TextStyle(
-                      color: AppColors.coreActive,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 1.0,
-                      fontFamily: 'monospace',
-                    ),
-                  ),
+              ElevatedButton(
+                onPressed: () => _acceptContact(alert.aid),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.success,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  elevation: 0,
                 ),
+                child: const Text('Accept', style: TextStyle(fontSize: 13)),
               ),
             ],
           ),
@@ -942,7 +859,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: AppColors.primary,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(color: AppColors.error.withOpacity(0.3), width: 1),
       ),
@@ -974,7 +891,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         color: AppColors.textPrimary,
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
-                        fontFamily: 'monospace',
                       ),
                     ),
                     const SizedBox(height: 2),
@@ -983,7 +899,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       style: const TextStyle(
                         color: AppColors.textMuted,
                         fontSize: 10,
-                        fontFamily: 'monospace',
                       ),
                     ),
                   ],
@@ -1002,7 +917,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     fontSize: 8,
                     fontWeight: FontWeight.w700,
                     letterSpacing: 0.8,
-                    fontFamily: 'monospace',
                   ),
                 ),
               ),
@@ -1028,7 +942,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     style: const TextStyle(
                       color: AppColors.textSecondary,
                       fontSize: 10,
-                      fontFamily: 'monospace',
                     ),
                   ),
                 ),
@@ -1038,27 +951,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
           const SizedBox(height: 10),
           Align(
             alignment: Alignment.centerRight,
-            child: InkWell(
-              onTap: () => _dismissPendingRequest(req.aid),
-              borderRadius: BorderRadius.circular(6),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-                decoration: BoxDecoration(
-                  color: AppColors.textMuted.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: AppColors.textMuted.withOpacity(0.3)),
-                ),
-                child: const Text(
-                  'DISMISS',
-                  style: TextStyle(
-                    color: AppColors.textMuted,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 1.0,
-                    fontFamily: 'monospace',
-                  ),
-                ),
+            child: OutlinedButton(
+              onPressed: () => _dismissPendingRequest(req.aid),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.textMuted,
+                side: const BorderSide(color: AppColors.border),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
+              child: const Text('Dismiss', style: TextStyle(fontSize: 13)),
             ),
           ),
         ],
@@ -1080,13 +982,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text(
-          'SYSTEM INFO',
+          'System Info',
           style: TextStyle(
-            color: AppColors.textMuted,
-            fontSize: 11,
+            color: AppColors.textSecondary,
+            fontSize: 13,
             fontWeight: FontWeight.w600,
-            letterSpacing: 1.5,
-            fontFamily: 'monospace',
           ),
         ),
         const SizedBox(height: 10),
@@ -1150,13 +1050,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
         Row(
           children: [
             const Text(
-              'ACTIVITY LOG',
+              'Activity Log',
               style: TextStyle(
-                color: AppColors.textMuted,
-                fontSize: 11,
+                color: AppColors.textSecondary,
+                fontSize: 13,
                 fontWeight: FontWeight.w600,
-                letterSpacing: 1.5,
-                fontFamily: 'monospace',
               ),
             ),
             const Spacer(),
@@ -1165,7 +1063,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
               style: const TextStyle(
                 color: AppColors.textMuted,
                 fontSize: 10,
-                fontFamily: 'monospace',
               ),
             ),
           ],
@@ -1185,7 +1082,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   style: TextStyle(
                     color: AppColors.textMuted,
                     fontSize: 12,
-                    fontFamily: 'monospace',
                   ),
                 )
               : Column(

@@ -45,10 +45,22 @@ dependencies:
   meta: ^1.11.0
   qr_flutter: ^4.1.0
   mobile_scanner: ^6.0.11
-  flutter_inappwebview: ^6.0.0
+  # Use platform-specific InAppWebView packages (NOT the meta-package) to
+  # prevent the web plugin from registering and crashing Flutter web.
+  # Sandbox webview is desktop-only; Android/iOS packages are included so
+  # sandbox_webview_native.dart compiles on mobile (dart.library.io is true
+  # on mobile too). The _isDesktopPlatform runtime guard shows "unsupported"
+  # on mobile — no sandbox UI is ever shown there.
+  # See: https://github.com/pichillilorenzo/flutter_inappwebview/issues/2076
+  flutter_inappwebview_android: ^1.1.3
+  flutter_inappwebview_ios: ^1.1.0
+  flutter_inappwebview_macos: ^1.1.2
+  flutter_inappwebview_windows: ^0.6.0
+  flutter_inappwebview_platform_interface: ^1.3.0
   url_launcher: ^6.2.5
   web_socket_channel: ^3.0.3
   image_picker: ^1.1.2
+  flutter_secure_storage: ^9.2.2
 
 
 dev_dependencies:

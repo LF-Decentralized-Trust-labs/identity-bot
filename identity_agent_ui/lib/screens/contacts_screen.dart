@@ -4,7 +4,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import '../theme/app_theme.dart';
 import '../services/core_service.dart';
 import '../services/keri_service.dart';
-import '../services/mobile_standalone_keri_service.dart';
+import '../services/mobile_on_device_keri_service.dart';
 import '../widgets/consent_modal.dart';
 import 'qr_scanner_screen.dart';
 
@@ -23,8 +23,8 @@ class _ContactsScreenState extends State<ContactsScreen> {
 
   String? _resolveServerUrl() {
     if (widget.serverUrl != null) return widget.serverUrl;
-    if (widget.keriService is MobileStandaloneKeriService) {
-      final standalone = widget.keriService as MobileStandaloneKeriService;
+    if (widget.keriService is MobileOnDeviceKeriService) {
+      final standalone = widget.keriService as MobileOnDeviceKeriService;
       if (standalone.isCoreReady) {
         return standalone.mobileCore.baseUrl;
       }
@@ -32,6 +32,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
     return null;
   }
   List<ContactResponse> _contacts = [];
+  ContactResponse? _selectedContact;
   bool _loading = true;
   String? _error;
 
@@ -58,6 +59,11 @@ class _ContactsScreenState extends State<ContactsScreen> {
       setState(() {
         _contacts = result.contacts;
         _loading = false;
+        // Refresh selected contact if it still exists
+        if (_selectedContact != null) {
+          final stillExists = _contacts.where((c) => c.aid == _selectedContact!.aid);
+          _selectedContact = stillExists.isNotEmpty ? stillExists.first : null;
+        }
       });
     } catch (e) {
       setState(() {
@@ -182,7 +188,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                           fontFamily: 'monospace',
                         ),
                         filled: true,
-                        fillColor: AppColors.primary,
+                        fillColor: AppColors.surfaceLight,
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8),
                           borderSide: const BorderSide(color: AppColors.border),
@@ -401,7 +407,6 @@ class _ContactsScreenState extends State<ContactsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.primary,
       body: SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -409,21 +414,16 @@ class _ContactsScreenState extends State<ContactsScreen> {
             _buildHeader(),
             Expanded(
               child: _loading
-                  ? Center(
-                      child: SizedBox(
-                        width: 30,
-                        height: 30,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: AppColors.accent,
-                        ),
-                      ),
+                  ? const Center(
+                      child: CircularProgressIndicator(color: AppColors.accent),
                     )
                   : _error != null
                       ? _buildErrorState()
                       : _contacts.isEmpty
                           ? _buildEmptyState()
-                          : _buildContactsList(),
+                          : _isMobilePlatform
+                              ? _buildContactsList()
+                              : _buildDesktopLayout(),
             ),
           ],
         ),
@@ -431,102 +431,328 @@ class _ContactsScreenState extends State<ContactsScreen> {
     );
   }
 
-  Widget _buildHeader() {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
-      child: Row(
-        children: [
-          Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              color: AppColors.accent.withOpacity(0.15),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(
-                color: AppColors.accent.withOpacity(0.3),
-                width: 1,
+  Widget _buildDesktopLayout() {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 320,
+          decoration: const BoxDecoration(
+            border: Border(right: BorderSide(color: AppColors.border)),
+          ),
+          child: _buildContactsPanelList(),
+        ),
+        Expanded(
+          child: _selectedContact != null
+              ? _buildDetailPanel(_selectedContact!)
+              : _buildSelectContactHint(),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildContactsPanelList() {
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      itemCount: _contacts.length,
+      itemBuilder: (context, i) {
+        final contact = _contacts[i];
+        final isSelected = _selectedContact?.aid == contact.aid;
+        return _buildContactRow(contact, isSelected);
+      },
+    );
+  }
+
+  Widget _buildContactRow(ContactResponse contact, bool isSelected) {
+    final statusColor = _statusColor(contact);
+    final displayName = contact.alias.isNotEmpty ? contact.alias : 'Unknown Contact';
+    return InkWell(
+      onTap: () => setState(() => _selectedContact = contact),
+      child: Container(
+        color: isSelected ? AppColors.accent.withOpacity(0.08) : null,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(
+          children: [
+            _buildContactAvatar(contact),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    displayName,
+                    style: const TextStyle(
+                      color: AppColors.textPrimary,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    contact.aid.length > 14 ? '${contact.aid.substring(0, 14)}…' : contact.aid,
+                    style: const TextStyle(
+                      color: AppColors.textMuted,
+                      fontSize: 11,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ],
               ),
             ),
-            child: const Icon(
-              Icons.people_outlined,
-              color: AppColors.accent,
-              size: 20,
-            ),
-          ),
-          const SizedBox(width: 12),
-          const Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'CONTACTS',
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: statusColor.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                _statusLabel(contact),
                 style: TextStyle(
-                  color: AppColors.textPrimary,
-                  fontSize: 16,
+                  color: statusColor,
+                  fontSize: 9,
                   fontWeight: FontWeight.w700,
-                  letterSpacing: 2.0,
-                  fontFamily: 'monospace',
                 ),
               ),
-              Text(
-                'TRUSTED IDENTIFIERS',
-                style: TextStyle(
-                  color: AppColors.textMuted,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w500,
-                  letterSpacing: 1.5,
-                  fontFamily: 'monospace',
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDetailPanel(ContactResponse contact) {
+    final statusColor = _statusColor(contact);
+    final displayName = contact.alias.isNotEmpty ? contact.alias : 'Unknown Contact';
+    final initial = displayName.isNotEmpty ? displayName[0].toUpperCase() : '?';
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(32),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 64,
+                height: 64,
+                decoration: BoxDecoration(
+                  color: statusColor.withOpacity(0.12),
+                  border: Border.all(color: statusColor.withOpacity(0.3), width: 2),
+                  borderRadius: BorderRadius.circular(32),
+                ),
+                child: Center(
+                  child: Text(
+                    initial,
+                    style: TextStyle(
+                      color: statusColor,
+                      fontSize: 24,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      displayName,
+                      style: const TextStyle(
+                        color: AppColors.textPrimary,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: statusColor.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        _statusLabel(contact),
+                        style: TextStyle(
+                          color: statusColor,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
           ),
-          const Spacer(),
-          InkWell(
-            onTap: _loadContacts,
-            borderRadius: BorderRadius.circular(6),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-              decoration: BoxDecoration(
-                color: AppColors.surfaceLight,
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: const Icon(Icons.refresh, color: AppColors.textSecondary, size: 18),
-            ),
+          const SizedBox(height: 24),
+          const Divider(color: AppColors.border),
+          const SizedBox(height: 16),
+          _buildDetailField('Autonomous Identifier', contact.aid, monospace: true, selectable: true),
+          const SizedBox(height: 12),
+          _buildDetailField('Role', contact.role),
+          const SizedBox(height: 12),
+          _buildDetailField(
+            'Discovered',
+            contact.discoveredAt.isNotEmpty ? contact.discoveredAt : 'Unknown',
           ),
-          if (_isMobilePlatform) ...[
-            const SizedBox(width: 8),
-            InkWell(
-              onTap: _openQrScanner,
-              borderRadius: BorderRadius.circular(6),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                decoration: BoxDecoration(
-                  color: AppColors.accent.withOpacity(0.15),
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(
-                    color: AppColors.accent.withOpacity(0.3),
-                    width: 1,
+          const SizedBox(height: 12),
+          _buildDetailField('Verified', contact.verified ? 'Yes' : 'No'),
+          const SizedBox(height: 24),
+          if (contact.isPendingInbound) ...[
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () async {
+                      try {
+                        await _coreService.rejectContact(contact.aid);
+                        setState(() => _selectedContact = null);
+                        _loadContacts();
+                      } catch (e) {
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text(e.toString()), backgroundColor: AppColors.error),
+                          );
+                        }
+                      }
+                    },
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.error,
+                      side: const BorderSide(color: AppColors.error),
+                    ),
+                    child: const Text('Reject'),
                   ),
                 ),
-                child: const Icon(Icons.qr_code_scanner, color: AppColors.accent, size: 18),
-              ),
-            ),
-          ],
-          const SizedBox(width: 8),
-          InkWell(
-            onTap: () => _showAddContactDialog(),
-            borderRadius: BorderRadius.circular(6),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-              decoration: BoxDecoration(
-                color: AppColors.accent.withOpacity(0.15),
-                borderRadius: BorderRadius.circular(6),
-                border: Border.all(
-                  color: AppColors.accent.withOpacity(0.3),
-                  width: 1,
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: () async {
+                      try {
+                        await _coreService.acceptContact(contact.aid);
+                        _loadContacts();
+                      } catch (e) {
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text(e.toString()), backgroundColor: AppColors.error),
+                          );
+                        }
+                      }
+                    },
+                    child: const Text('Accept'),
+                  ),
                 ),
-              ),
-              child: const Icon(Icons.add, color: AppColors.accent, size: 18),
+              ],
             ),
+            const SizedBox(height: 12),
+          ],
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () {
+                _deleteContact(contact.aid);
+                setState(() => _selectedContact = null);
+              },
+              icon: const Icon(Icons.delete_outline, size: 16),
+              label: const Text('Remove Contact'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.error,
+                side: const BorderSide(color: AppColors.error),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDetailField(String label, String value, {bool monospace = false, bool selectable = false}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            color: AppColors.textSecondary,
+            fontSize: 12,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        const SizedBox(height: 4),
+        if (selectable)
+          SelectableText(
+            value,
+            style: TextStyle(
+              color: AppColors.textPrimary,
+              fontSize: 13,
+              fontFamily: monospace ? 'monospace' : null,
+            ),
+          )
+        else
+          Text(
+            value,
+            style: TextStyle(
+              color: AppColors.textPrimary,
+              fontSize: 13,
+              fontFamily: monospace ? 'monospace' : null,
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildSelectContactHint() {
+    return const Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.person_outline, color: AppColors.textMuted, size: 48),
+          SizedBox(height: 12),
+          Text(
+            'Select a contact to view details.',
+            style: TextStyle(color: AppColors.textMuted, fontSize: 14),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHeader() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(32, 32, 32, 0),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Contacts', style: Theme.of(context).textTheme.headlineMedium),
+                const SizedBox(height: 4),
+                const Text(
+                  'Verified identifiers in your network.',
+                  style: TextStyle(color: AppColors.textSecondary, fontSize: 14),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            onPressed: _loadContacts,
+            icon: const Icon(Icons.refresh),
+            color: AppColors.textSecondary,
+            tooltip: 'Refresh',
+          ),
+          if (_isMobilePlatform)
+            IconButton(
+              onPressed: _openQrScanner,
+              icon: const Icon(Icons.qr_code_scanner),
+              color: AppColors.accent,
+              tooltip: 'Scan QR',
+            ),
+          IconButton(
+            onPressed: () => _showAddContactDialog(),
+            icon: const Icon(Icons.add),
+            color: AppColors.accent,
+            tooltip: 'Add contact',
           ),
         ],
       ),
@@ -545,22 +771,19 @@ class _ContactsScreenState extends State<ContactsScreen> {
           ),
           const SizedBox(height: 16),
           const Text(
-            'NO CONTACTS YET',
+            'No contacts yet',
             style: TextStyle(
               color: AppColors.textMuted,
-              fontSize: 13,
+              fontSize: 14,
               fontWeight: FontWeight.w600,
-              letterSpacing: 1.5,
-              fontFamily: 'monospace',
             ),
           ),
           const SizedBox(height: 8),
           const Text(
-            'Add a contact by resolving their OOBI URL',
+            'Add a contact by resolving their OOBI URL.',
             style: TextStyle(
               color: AppColors.textMuted,
-              fontSize: 11,
-              fontFamily: 'monospace',
+              fontSize: 13,
             ),
           ),
         ],
@@ -578,13 +801,11 @@ class _ContactsScreenState extends State<ContactsScreen> {
             const Icon(Icons.error_outline, color: AppColors.coreInactive, size: 40),
             const SizedBox(height: 16),
             const Text(
-              'FAILED TO LOAD CONTACTS',
+              'Failed to load contacts',
               style: TextStyle(
                 color: AppColors.coreInactive,
-                fontSize: 13,
+                fontSize: 14,
                 fontWeight: FontWeight.w600,
-                letterSpacing: 1.5,
-                fontFamily: 'monospace',
               ),
             ),
             const SizedBox(height: 8),

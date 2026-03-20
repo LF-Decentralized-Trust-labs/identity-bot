@@ -13,6 +13,25 @@ subprojects {
     project.evaluationDependsOn(":app")
 }
 
+// Inject proguard keep rules into every Android library module (including Flutter
+// plugins like flutter_inappwebview) so R8 does not fail on missing
+// android.window.BackEvent references introduced by Flutter 3.27+.
+// Using plugins.withId avoids the afterEvaluate lifecycle conflict caused by
+// evaluationDependsOn(":app") above.
+subprojects {
+    plugins.withId("com.android.library") {
+        android {
+            buildTypes {
+                release {
+                    // Apply to the module's own R8 pass (not just the consumer)
+                    proguardFiles "${rootProject.projectDir}/app/proguard-rules.pro"
+                    consumerProguardFiles "${rootProject.projectDir}/app/proguard-rules.pro"
+                }
+            }
+        }
+    }
+}
+
 tasks.register("clean", Delete) {
     delete rootProject.buildDir
 }

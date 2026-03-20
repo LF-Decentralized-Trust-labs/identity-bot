@@ -420,13 +420,19 @@ func (s *CoreServer) handleAppDisplay(w http.ResponseWriter, r *http.Request) {
         }
 
         id := chi.URLParam(r, "id")
-        displayURL, err := s.SandboxManager.GetDisplayURL(id)
+        // Verify the app is actually running before returning a proxy URL.
+        _, err := s.SandboxManager.GetDisplayURL(id)
         if err != nil {
                 jsonError(w, err.Error(), http.StatusNotFound)
                 return
         }
 
-        jsonResponse(w, map[string]string{"display_url": displayURL})
+        // Return the Identity Agent's reverse proxy URL instead of the container's
+        // direct port. This allows the Identity Agent to intercept specific API
+        // paths (e.g., chat data) and serve from its own data stores while
+        // forwarding everything else to the container.
+        proxyURL := s.appDisplayProxyURL(id)
+        jsonResponse(w, map[string]string{"display_url": proxyURL})
 }
 
 func (s *CoreServer) handleSandboxHealth(w http.ResponseWriter, r *http.Request) {

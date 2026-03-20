@@ -1,0 +1,78 @@
+{
+  "app_id": "openwebui",
+  "version": "1.1.0",
+  "description": "API schema for Open WebUI. Lists all API paths the app calls, their data domains, and whether the Identity Agent intercepts them.",
+  "endpoints": [
+    {
+      "path": "/api/v1/chats",
+      "method": "GET",
+      "direction": "inbound",
+      "namespace": "inbound (served via display reverse proxy at /apps/openwebui/)",
+      "description": "List all conversations in the inbox. Intercepted by the display proxy before reaching the container — served directly from ai-memory.db.",
+      "data_domain": "ai-memory",
+      "intercept": true,
+      "identity_agent_handler": "/api/ai/conversations",
+      "response_format": "openwebui_chat_list"
+    },
+    {
+      "path": "/api/v1/chats/{id}",
+      "method": "GET",
+      "direction": "inbound",
+      "namespace": "inbound (served via display reverse proxy at /apps/openwebui/)",
+      "description": "Get a single conversation with full message history. Intercepted by the display proxy — served from ai-memory.db.",
+      "data_domain": "ai-memory",
+      "intercept": true,
+      "identity_agent_handler": "/api/ai/conversations/{id}",
+      "response_format": "openwebui_chat_detail"
+    },
+    {
+      "path": "/sandbox/llm/v1/chat/completions",
+      "method": "POST",
+      "direction": "outbound",
+      "namespace": "sandbox",
+      "description": "Send chat completion request to LLM via OpenRouter. Intercepted by the Identity Agent LLM proxy — conversation captured to ai-memory.db and forwarded to OpenRouter.",
+      "data_domain": "ai-memory",
+      "intercept": true,
+      "identity_agent_handler": "/sandbox/llm/v1/chat/completions",
+      "capture": true
+    },
+    {
+      "path": "/sandbox/llm/v1/models",
+      "method": "GET",
+      "direction": "outbound",
+      "namespace": "sandbox",
+      "description": "List available LLM models. Served from a static catalog in the Identity Agent — no upstream call made.",
+      "data_domain": null,
+      "intercept": true,
+      "identity_agent_handler": "/sandbox/llm/v1/models"
+    },
+    {
+      "path": "/api/v1/configs",
+      "method": "GET",
+      "direction": "inbound",
+      "namespace": "inbound (forwarded to container via display reverse proxy)",
+      "description": "Get UI configuration and feature flags. Forwarded to the container's own backend.",
+      "data_domain": null,
+      "intercept": false
+    },
+    {
+      "path": "/api/v1/auths/signin",
+      "method": "POST",
+      "direction": "inbound",
+      "namespace": "inbound (forwarded to container via display reverse proxy)",
+      "description": "User authentication. Disabled via WEBUI_AUTH=false — container returns an auto-session. Not intercepted.",
+      "data_domain": null,
+      "intercept": false
+    },
+    {
+      "path": "/api/v1/models",
+      "method": "GET",
+      "direction": "inbound",
+      "namespace": "inbound (forwarded to container via display reverse proxy)",
+      "description": "List models available in the UI dropdown. Served by the container — populated from the Open WebUI model registry.",
+      "data_domain": null,
+      "intercept": false
+    }
+  ],
+  "notes": "URL namespace convention: /sandbox/* = container egress (calls FROM the container TO the Identity Agent); inbound paths are container-internal paths intercepted or forwarded by the display reverse proxy at /apps/{app_id}/. 'intercept: true' endpoints are served by the Identity Agent. 'intercept: false' endpoints are forwarded to the container. 'capture: true' means request/response data is written to the specified data domain."
+}

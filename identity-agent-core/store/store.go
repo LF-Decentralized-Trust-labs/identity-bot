@@ -18,6 +18,9 @@ type EventRecord struct {
         PublicKey      string `json:"public_key"`
         NextKeyDigest  string `json:"next_key_digest"`
         Timestamp      string `json:"timestamp"`
+        // CesrSignature: CESR '0B...' (88-char) signature over the event body.
+        // Produced by Dart local signing + /api/cesr/encode. Empty for legacy records.
+        CesrSignature  string `json:"cesr_signature,omitempty"`
 }
 
 type IdentityState struct {
@@ -107,6 +110,62 @@ func (p *ProfileData) ToJCard(aid string, oobiURL string) *JCard {
         }
 }
 
+// CredentialRecord stores an issued ACDC credential anchored in the issuer's KEL.
+type CredentialRecord struct {
+	SAID          string `json:"said"`
+	IssuerAID     string `json:"issuer_aid"`
+	HolderAID     string `json:"holder_aid"`
+	SchemaSAID    string `json:"schema_said"`
+	AcdcJson      string `json:"acdc_json"`
+	IxnSAID       string `json:"ixn_said"`
+	CesrSignature string `json:"cesr_signature,omitempty"`
+	IssuedAt      string `json:"issued_at"`
+	Status        string `json:"status"`
+}
+
+// PresentationRecord stores a verifiable presentation created by the holder.
+type PresentationRecord struct {
+	SAID                string `json:"said"`
+	CredentialSAID      string `json:"credential_said"`
+	HolderAID           string `json:"holder_aid"`
+	IssuerAID           string `json:"issuer_aid"`
+	PresentationJsonB64 string `json:"presentation_json_b64"`
+	CesrSignature       string `json:"cesr_signature,omitempty"`
+	CreatedAt           string `json:"created_at"`
+	Status              string `json:"status"`
+}
+
+// ContactKELRecord stores a contact's validated Key Event Log.
+// This is the cryptographic proof of a contact's identity history.
+type ContactKELRecord struct {
+        AID              string                   `json:"aid"`
+        // KEL events as received from the contact's OOBI endpoint.
+        KEL              []map[string]interface{} `json:"kel"`
+        KelVerified      bool                     `json:"kel_verified"`
+        // CurrentPublicKey: the CESR Ed25519 key active after the last validated event.
+        CurrentPublicKey string                   `json:"current_public_key"`
+        EventsValidated  int                      `json:"events_validated"`
+        ValidationErrors []string                 `json:"validation_errors,omitempty"`
+        ValidatedAt      string                   `json:"validated_at"`
+}
+
+// WitnessReceiptRecord stores one witness receipt for a specific event SAID.
+// Receipts are deduplicated by (EventSAID, WitnessAID).
+type WitnessReceiptRecord struct {
+	EventSAID     string `json:"event_said"`
+	WitnessAID    string `json:"witness_aid"`
+	CesrSignature string `json:"cesr_signature"`
+	ReceivedAt    string `json:"received_at"`
+}
+
+// KerlEntry is a Key Event Receipt Log entry: one event plus all its receipts.
+type KerlEntry struct {
+	EventSAID     string                `json:"event_said"`
+	Receipts      []WitnessReceiptRecord `json:"receipts"`
+	ReceiptCount  int                   `json:"receipt_count"`
+	ThresholdMet  bool                  `json:"threshold_met"`
+}
+
 type Store interface {
         SaveEvent(record EventRecord) error
         GetEvents(aid string) ([]EventRecord, error)
@@ -117,6 +176,16 @@ type Store interface {
         GetContact(aid string) (*ContactRecord, error)
         DeleteContact(aid string) error
         GetContactsByStatus(status string) ([]ContactRecord, error)
+        SaveContactKEL(record ContactKELRecord) error
+        GetContactKEL(aid string) (*ContactKELRecord, error)
+        SaveCredential(record CredentialRecord) error
+        GetCredential(said string) (*CredentialRecord, error)
+        GetCredentials() ([]CredentialRecord, error)
+        SavePresentation(record PresentationRecord) error
+        GetPresentation(said string) (*PresentationRecord, error)
+        GetPresentations() ([]PresentationRecord, error)
+        SaveWitnessReceipt(record WitnessReceiptRecord) error
+        GetWitnessReceipts(eventSAID string) ([]WitnessReceiptRecord, error)
         GetSettings() (*SettingsData, error)
         SaveSettings(settings SettingsData) error
         SavePendingRequest(req PendingRequest) error
@@ -469,11 +538,216 @@ func (s *FileStore) SaveProfile(profile ProfileData) error {
         return s.writeJSON(filepath.Join(s.dir, "profile.json"), profile)
 }
 
+func (s *FileStore) SavePresentation(record PresentationRecord) error {
+        s.mu.Lock()
+        defer s.mu.Unlock()
+
+        pres, err := s.loadPresentations()
+        if err != nil {
+                pres = map[string]PresentationRecord{}
+        }
+        pres[record.SAID] = record
+        return s.writeJSON(filepath.Join(s.dir, "presentations.json"), pres)
+}
+
+func (s *FileStore) GetPresentation(said string) (*PresentationRecord, error) {
+        s.mu.RLock()
+        defer s.mu.RUnlock()
+
+        pres, err := s.loadPresentations()
+        if err != nil {
+                return nil, err
+        }
+        r, ok := pres[said]
+        if !ok {
+                return nil, nil
+        }
+        return &r, nil
+}
+
+func (s *FileStore) GetPresentations() ([]PresentationRecord, error) {
+        s.mu.RLock()
+        defer s.mu.RUnlock()
+
+        pres, err := s.loadPresentations()
+        if err != nil {
+                return nil, err
+        }
+        list := make([]PresentationRecord, 0, len(pres))
+        for _, p := range pres {
+                list = append(list, p)
+        }
+        return list, nil
+}
+
+func (s *FileStore) loadPresentations() (map[string]PresentationRecord, error) {
+        path := filepath.Join(s.dir, "presentations.json")
+        data, err := os.ReadFile(path)
+        if err != nil {
+                if os.IsNotExist(err) {
+                        return map[string]PresentationRecord{}, nil
+                }
+                return nil, fmt.Errorf("failed to read presentations: %w", err)
+        }
+        var pres map[string]PresentationRecord
+        if err := json.Unmarshal(data, &pres); err != nil {
+                return nil, fmt.Errorf("failed to parse presentations: %w", err)
+        }
+        return pres, nil
+}
+
+func (s *FileStore) SaveCredential(record CredentialRecord) error {
+        s.mu.Lock()
+        defer s.mu.Unlock()
+
+        creds, err := s.loadCredentials()
+        if err != nil {
+                creds = map[string]CredentialRecord{}
+        }
+        creds[record.SAID] = record
+        return s.writeJSON(filepath.Join(s.dir, "credentials.json"), creds)
+}
+
+func (s *FileStore) GetCredential(said string) (*CredentialRecord, error) {
+        s.mu.RLock()
+        defer s.mu.RUnlock()
+
+        creds, err := s.loadCredentials()
+        if err != nil {
+                return nil, err
+        }
+        r, ok := creds[said]
+        if !ok {
+                return nil, nil
+        }
+        return &r, nil
+}
+
+func (s *FileStore) GetCredentials() ([]CredentialRecord, error) {
+        s.mu.RLock()
+        defer s.mu.RUnlock()
+
+        creds, err := s.loadCredentials()
+        if err != nil {
+                return nil, err
+        }
+        list := make([]CredentialRecord, 0, len(creds))
+        for _, c := range creds {
+                list = append(list, c)
+        }
+        return list, nil
+}
+
+func (s *FileStore) loadCredentials() (map[string]CredentialRecord, error) {
+        path := filepath.Join(s.dir, "credentials.json")
+        data, err := os.ReadFile(path)
+        if err != nil {
+                if os.IsNotExist(err) {
+                        return map[string]CredentialRecord{}, nil
+                }
+                return nil, fmt.Errorf("failed to read credentials: %w", err)
+        }
+        var creds map[string]CredentialRecord
+        if err := json.Unmarshal(data, &creds); err != nil {
+                return nil, fmt.Errorf("failed to parse credentials: %w", err)
+        }
+        return creds, nil
+}
+
+func (s *FileStore) SaveContactKEL(record ContactKELRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	kels, err := s.loadContactKELs()
+	if err != nil {
+		kels = map[string]ContactKELRecord{}
+	}
+	kels[record.AID] = record
+	return s.writeJSON(filepath.Join(s.dir, "contact_kels.json"), kels)
+}
+
+func (s *FileStore) GetContactKEL(aid string) (*ContactKELRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	kels, err := s.loadContactKELs()
+	if err != nil {
+		return nil, err
+	}
+	r, ok := kels[aid]
+	if !ok {
+		return nil, nil
+	}
+	return &r, nil
+}
+
+func (s *FileStore) loadContactKELs() (map[string]ContactKELRecord, error) {
+	path := filepath.Join(s.dir, "contact_kels.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]ContactKELRecord{}, nil
+		}
+		return nil, fmt.Errorf("failed to read contact KELs: %w", err)
+	}
+	var kels map[string]ContactKELRecord
+	if err := json.Unmarshal(data, &kels); err != nil {
+		return nil, fmt.Errorf("failed to parse contact KELs: %w", err)
+	}
+	return kels, nil
+}
+
+func (s *FileStore) SaveWitnessReceipt(record WitnessReceiptRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	receipts, err := s.loadWitnessReceipts()
+	if err != nil {
+		receipts = map[string][]WitnessReceiptRecord{}
+	}
+	key := record.EventSAID
+	existing := receipts[key]
+	for _, r := range existing {
+		if r.WitnessAID == record.WitnessAID {
+			return nil // already stored, deduplicate
+		}
+	}
+	receipts[key] = append(existing, record)
+	return s.writeJSON(filepath.Join(s.dir, "witness_receipts.json"), receipts)
+}
+
+func (s *FileStore) GetWitnessReceipts(eventSAID string) ([]WitnessReceiptRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	receipts, err := s.loadWitnessReceipts()
+	if err != nil {
+		return nil, err
+	}
+	return receipts[eventSAID], nil
+}
+
+func (s *FileStore) loadWitnessReceipts() (map[string][]WitnessReceiptRecord, error) {
+	path := filepath.Join(s.dir, "witness_receipts.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string][]WitnessReceiptRecord{}, nil
+		}
+		return nil, fmt.Errorf("failed to read witness receipts: %w", err)
+	}
+	var receipts map[string][]WitnessReceiptRecord
+	if err := json.Unmarshal(data, &receipts); err != nil {
+		return nil, fmt.Errorf("failed to parse witness receipts: %w", err)
+	}
+	return receipts, nil
+}
+
 func (s *FileStore) ResetAll() error {
         s.mu.Lock()
         defer s.mu.Unlock()
 
-        files := []string{"identity.json", "kel.json", "contacts.json", "settings.json", "pending_requests.json", "profile.json", "endpoint.json"}
+        files := []string{"identity.json", "kel.json", "contacts.json", "settings.json", "pending_requests.json", "profile.json", "endpoint.json", "contact_kels.json", "credentials.json", "presentations.json", "witness_receipts.json"}
         for _, f := range files {
                 path := filepath.Join(s.dir, f)
                 if err := os.Remove(path); err != nil && !os.IsNotExist(err) {

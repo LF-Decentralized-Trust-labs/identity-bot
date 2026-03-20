@@ -4,30 +4,22 @@ import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'dart:io' show Platform;
 import 'theme/app_theme.dart';
 import 'theme/mobile_theme.dart';
-import 'screens/dashboard_screen.dart';
-import 'screens/contacts_screen.dart';
-import 'screens/oobi_screen.dart';
-import 'screens/profile_screen.dart';
-import 'screens/settings_screen.dart';
-import 'screens/marketplace_screen.dart';
+import 'screens/desktop/desktop_app.dart';
 import 'screens/setup_wizard_screen.dart';
 import 'screens/mode_selection_screen.dart';
-import 'screens/entity_type_screen.dart';
 import 'screens/connect_server_screen.dart';
 import 'services/core_service.dart';
 import 'services/keri_service.dart';
-import 'services/desktop_keri_service.dart';
-import 'services/remote_server_keri_service.dart';
+import 'services/desktop_on_device_keri_service.dart';
+import 'services/mobile_on_device_keri_service.dart';
 import 'services/mobile_remote_keri_service.dart';
-import 'services/mobile_standalone_keri_service.dart';
-import 'services/mobile_core_service.dart';
 import 'services/preferences_service.dart';
 import 'services/backend_process_service.dart';
 import 'config/agent_config.dart';
-import 'bridge/keri_bridge.dart';
+import 'bridge/keri_bridge_stub.dart'
+    if (dart.library.io) 'bridge/keri_bridge.dart';
 import 'screens/mobile/mobile_app.dart';
 import 'screens/mobile/mobile_mode_selection_screen.dart';
-import 'screens/mobile/mobile_entity_type_screen.dart';
 import 'screens/mobile/mobile_connect_server_screen.dart';
 import 'screens/mobile/mobile_setup_wizard_screen.dart';
 
@@ -36,6 +28,9 @@ Future<bool>? _backendStartupFuture;
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Load persisted theme before the first frame.
+  await ThemeNotifier.initialize();
 
   if (!kIsWeb && BackendProcessService.isDesktopPlatform) {
     debugPrint('[Agent] Desktop platform detected — starting bundled backend in background...');
@@ -57,11 +52,18 @@ class IdentityAgentApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Identity Agent',
-      debugShowCheckedModeBanner: false,
-      theme: AppTheme.darkTheme,
-      home: const AgentRouter(),
+    return ValueListenableBuilder<ThemeMode>(
+      valueListenable: ThemeNotifier.instance,
+      builder: (_, themeMode, __) {
+        return MaterialApp(
+          title: 'Identity Agent',
+          debugShowCheckedModeBanner: false,
+          theme:      AppTheme.light,
+          darkTheme:  AppTheme.dark,
+          themeMode:  themeMode,
+          home: const AgentRouter(),
+        );
+      },
     );
   }
 }
@@ -69,7 +71,6 @@ class IdentityAgentApp extends StatelessWidget {
 enum OnboardingStep {
   loading,
   modeSelection,
-  entityTypeSelection,
   connectServer,
   setupWizard,
   dashboard,
@@ -194,44 +195,44 @@ class _AgentRouterState extends State<AgentRouter> {
 
       if (mode == AgentMode.connectExisting && serverUrl != null) {
         if (KeriBridge.isAvailable) {
-          debugPrint('[Agent] Mobile Remote Controller WITHOUT Keys — '
-              'Rust bridge for local child AID, '
-              'remote parent server ($serverUrl) for backend/stateless ops');
-          _keriService = MobileRemoteKeriService(parentServerUrl: serverUrl);
+          debugPrint('[Agent] Mobile Remote Controller WITH Keys — '
+              'Rust bridge for local key ops, '
+              'paired server ($serverUrl) for backend/stateless ops');
+          _keriService = MobileOnDeviceKeriService(pairedServerUrl: serverUrl);
         } else {
-          debugPrint('[Agent] Mobile Remote Controller — Rust bridge '
-              'unavailable (${KeriBridge.loadError}), falling back to '
-              'RemoteServerKeriService (all ops forwarded to remote server)');
-          _keriService = RemoteServerKeriService(serverUrl: serverUrl);
+          debugPrint('[Agent] Mobile Remote Controller WITHOUT Keys — '
+              'Rust bridge unavailable (${KeriBridge.loadError}), '
+              'all ops forwarded to paired server');
+          _keriService = MobileRemoteKeriService(serverUrl: serverUrl);
         }
       } else {
         debugPrint('[Agent] Mobile Standalone — Rust bridge available: '
             '${KeriBridge.isAvailable}'
             '${KeriBridge.isAvailable ? '' : ' (error: ${KeriBridge.loadError})'}');
 
-        final standaloneService = MobileStandaloneKeriService();
+        final onDeviceService = MobileOnDeviceKeriService();
 
         try {
           debugPrint('[Agent] Starting embedded Go Core...');
-          await standaloneService.startGoCore();
-          final coreUrl = standaloneService.mobileCore.baseUrl;
+          await onDeviceService.startGoCore();
+          final coreUrl = onDeviceService.mobileCore.baseUrl;
           debugPrint('[Agent] Go Core started on port '
-              '${standaloneService.mobileCore.port} → $coreUrl');
+              '${onDeviceService.mobileCore.port} → $coreUrl');
           _serverUrl = coreUrl;
         } catch (e) {
           debugPrint('[Agent] Go Core start failed (non-fatal): $e');
         }
 
-        _keriService = standaloneService;
+        _keriService = onDeviceService;
       }
     } else {
       if (mode == AgentMode.connectExisting && serverUrl != null) {
-        _keriService = DesktopKeriService();
+        _keriService = DesktopOnDeviceKeriService();
         debugPrint('[Agent] Desktop Remote Controller WITHOUT Keys — '
             'local Go+Python for child AID, '
             'remote parent server ($serverUrl) for backend/stateless ops');
       } else {
-        _keriService = DesktopKeriService();
+        _keriService = DesktopOnDeviceKeriService();
         debugPrint('[Agent] Desktop mode → ${AgentConfig.coreBaseUrl}');
       }
     }
@@ -242,8 +243,8 @@ class _AgentRouterState extends State<AgentRouter> {
 
     try {
       String baseUrl;
-      if (_keriService is MobileStandaloneKeriService) {
-        final standalone = _keriService as MobileStandaloneKeriService;
+      if (_keriService is MobileOnDeviceKeriService) {
+        final standalone = _keriService as MobileOnDeviceKeriService;
         if (standalone.isCoreReady) {
           baseUrl = standalone.mobileCore.baseUrl;
         } else {
@@ -268,18 +269,13 @@ class _AgentRouterState extends State<AgentRouter> {
     await PreferencesService.setMode(mode);
 
     if (mode == AgentMode.createNew) {
-      setState(() => _step = OnboardingStep.entityTypeSelection);
+      _selectedEntityType = EntityType.individual;
+      await PreferencesService.setEntityType(EntityType.individual);
+      await _initializeServiceForMode(AgentMode.createNew, null);
+      setState(() => _step = OnboardingStep.setupWizard);
     } else {
       setState(() => _step = OnboardingStep.connectServer);
     }
-  }
-
-  void _onEntityTypeSelected(EntityType type) async {
-    _selectedEntityType = type;
-    await PreferencesService.setEntityType(type);
-
-    await _initializeServiceForMode(AgentMode.createNew, null);
-    setState(() => _step = OnboardingStep.setupWizard);
   }
 
   void _onServerConnected(String serverUrl) async {
@@ -524,7 +520,7 @@ class _AgentRouterState extends State<AgentRouter> {
           );
         }
         return Scaffold(
-          backgroundColor: AppColors.primary,
+          backgroundColor: AppColors.background,
           body: Center(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -533,17 +529,17 @@ class _AgentRouterState extends State<AgentRouter> {
                   width: 40,
                   height: 40,
                   child: CircularProgressIndicator(
-                    color: AppColors.accent,
+                    color: AppColors.primary,
                     strokeWidth: 3,
                   ),
                 ),
                 const SizedBox(height: 16),
                 const Text(
-                  'INITIALIZING...',
+                  'Initializing...',
                   style: TextStyle(
                     color: AppColors.textMuted,
-                    fontSize: 12,
-                    letterSpacing: 1.5,
+                    fontSize: 14,
+                    letterSpacing: 0,
                     fontFamily: 'monospace',
                   ),
                 ),
@@ -563,18 +559,6 @@ class _AgentRouterState extends State<AgentRouter> {
           return MobileModeSelectionScreen(onModeSelected: _onModeSelected);
         }
         return ModeSelectionScreen(onModeSelected: _onModeSelected);
-
-      case OnboardingStep.entityTypeSelection:
-        if (isMobile) {
-          return MobileEntityTypeScreen(
-            onEntityTypeSelected: _onEntityTypeSelected,
-            onBack: _goBackToModeSelection,
-          );
-        }
-        return EntityTypeScreen(
-          onEntityTypeSelected: _onEntityTypeSelected,
-          onBack: _goBackToModeSelection,
-        );
 
       case OnboardingStep.connectServer:
         if (isMobile) {
@@ -602,8 +586,8 @@ class _AgentRouterState extends State<AgentRouter> {
 
       case OnboardingStep.dashboard:
         String? effectiveServerUrl = _serverUrl;
-        if (effectiveServerUrl == null && _keriService is MobileStandaloneKeriService) {
-          final standalone = _keriService as MobileStandaloneKeriService;
+        if (effectiveServerUrl == null && _keriService is MobileOnDeviceKeriService) {
+          final standalone = _keriService as MobileOnDeviceKeriService;
           if (standalone.isCoreReady) {
             effectiveServerUrl = standalone.mobileCore.baseUrl;
           }
@@ -637,46 +621,19 @@ class AgentMainScreen extends StatefulWidget {
 }
 
 class _AgentMainScreenState extends State<AgentMainScreen> {
-  int _currentIndex = 0;
-  final ValueNotifier<int> _oobiRefreshNotifier = ValueNotifier<int>(0);
-
-  late final List<Widget> _screens;
-  late final bool _isDesktop;
-
-  @override
-  void initState() {
-    super.initState();
-    _isDesktop = !kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux);
-    _screens = [
-      ProfileScreen(keriService: widget.keriService, serverUrl: widget.serverUrl),
-      DashboardScreen(keriService: widget.keriService, serverUrl: widget.serverUrl),
-      ContactsScreen(keriService: widget.keriService, serverUrl: widget.serverUrl),
-      OobiScreen(keriService: widget.keriService, serverUrl: widget.serverUrl, refreshNotifier: _oobiRefreshNotifier),
-      SettingsScreen(
-        keriService: widget.keriService,
-        mode: widget.mode,
-        entityType: widget.entityType,
-        serverUrl: widget.serverUrl,
-      ),
-      MarketplaceScreen(serverUrl: widget.serverUrl),
-    ];
-  }
-
-  @override
-  void dispose() {
-    _oobiRefreshNotifier.dispose();
-    super.dispose();
-  }
-
-  void _onTabTapped(int index) {
-    setState(() => _currentIndex = index);
-    if (index == 3) {
-      _oobiRefreshNotifier.value++;
+  void _handleReset() {
+    // Bubble up to AgentRouter to restart onboarding
+    if (mounted) {
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const AgentRouter()),
+        (_) => false,
+      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    // Mobile platform (native iOS/Android) → always MobileApp
     if (_isMobilePlatform) {
       return MobileApp(
         keriService: widget.keriService,
@@ -686,6 +643,7 @@ class _AgentMainScreenState extends State<AgentMainScreen> {
       );
     }
 
+    // Responsive: narrow window → MobileApp, wide → DesktopApp
     return LayoutBuilder(
       builder: (context, constraints) {
         if (constraints.maxWidth < 768) {
@@ -696,72 +654,13 @@ class _AgentMainScreenState extends State<AgentMainScreen> {
             serverUrl: widget.serverUrl,
           );
         }
-
-        return Scaffold(
-          body: IndexedStack(
-            index: _currentIndex,
-            children: _screens,
-          ),
-      bottomNavigationBar: Container(
-        decoration: const BoxDecoration(
-          border: Border(
-            top: BorderSide(color: AppColors.border, width: 1),
-          ),
-        ),
-        child: BottomNavigationBar(
-          currentIndex: _currentIndex,
-          onTap: _onTabTapped,
-          backgroundColor: AppColors.surface,
-          selectedItemColor: AppColors.accent,
-          unselectedItemColor: AppColors.textMuted,
-          selectedLabelStyle: const TextStyle(
-            fontSize: 10,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 1.0,
-            fontFamily: 'monospace',
-          ),
-          unselectedLabelStyle: const TextStyle(
-            fontSize: 10,
-            fontWeight: FontWeight.w500,
-            letterSpacing: 1.0,
-            fontFamily: 'monospace',
-          ),
-          type: BottomNavigationBarType.fixed,
-          items: [
-            const BottomNavigationBarItem(
-              icon: Icon(Icons.person_outline),
-              activeIcon: Icon(Icons.person),
-              label: 'PROFILE',
-            ),
-            const BottomNavigationBarItem(
-              icon: Icon(Icons.shield_outlined),
-              activeIcon: Icon(Icons.shield),
-              label: 'DASHBOARD',
-            ),
-            const BottomNavigationBarItem(
-              icon: Icon(Icons.people_outlined),
-              activeIcon: Icon(Icons.people),
-              label: 'CONTACTS',
-            ),
-            const BottomNavigationBarItem(
-              icon: Icon(Icons.qr_code),
-              activeIcon: Icon(Icons.qr_code),
-              label: 'OOBI',
-            ),
-            const BottomNavigationBarItem(
-              icon: Icon(Icons.settings_outlined),
-              activeIcon: Icon(Icons.settings),
-              label: 'SETTINGS',
-            ),
-            const BottomNavigationBarItem(
-              icon: Icon(Icons.apps_outlined),
-              activeIcon: Icon(Icons.apps),
-              label: 'APPS',
-            ),
-          ],
-        ),
-      ),
-    );
+        return DesktopApp(
+          keriService: widget.keriService,
+          mode: widget.mode,
+          entityType: widget.entityType,
+          serverUrl: widget.serverUrl,
+          onResetIdentity: _handleReset,
+        );
       },
     );
   }

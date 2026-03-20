@@ -189,3 +189,108 @@ pub fn verify_signature(data: Vec<u8>, signature: String, public_key: String) ->
 
     Ok(valid)
 }
+
+#[derive(Serialize, Deserialize)]
+pub struct InteractResult {
+    pub aid: String,
+    pub said: String,
+    pub sequence_number: i64,
+    pub kel_entry: String,
+    pub raw_bytes_b64: String,
+}
+
+/// Create a KERI interaction (IXN) event anchoring [seal_data_json] in the KEL.
+/// [seal_data_json] is a JSON array of seal maps, e.g. '[{"d":"<SAID>","i":"<AID>","s":"<schema>"}]'.
+/// Returns the IXN event bytes (base64) for Dart to sign with the current key.
+#[frb(sync)]
+pub fn interact_aid(name: String, seal_data_json: String) -> Result<InteractResult, String> {
+    let mut instances = get_or_init_instances();
+    let map = instances.as_mut().unwrap();
+
+    let instance = map
+        .get_mut(&name)
+        .ok_or_else(|| format!("No AID found with name: {}", name))?;
+
+    let sn = instance.kel.len() as i64;
+    let aid = instance.prefix.to_string();
+
+    // Parse seal data (pass-through; caller provides validated JSON array).
+    let seal_data: serde_json::Value = serde_json::from_str(&seal_data_json)
+        .unwrap_or(serde_json::Value::Array(vec![]));
+
+    let ixn_event = serde_json::json!({
+        "v": "KERI10JSON000000_",
+        "t": "ixn",
+        "d": "",
+        "i": aid,
+        "s": format!("{:x}", sn as u64),
+        "p": instance.kel.last().cloned().unwrap_or_default(),
+        "a": seal_data,
+    });
+
+    let ixn_bytes = serde_json::to_vec(&ixn_event)
+        .map_err(|e| format!("IXN serialization failed: {}", e))?;
+
+    // Compute SAID as Blake3-256 of the serialized event bytes.
+    let said_digest = HashFunction::from(HashFunctionCode::Blake3_256)
+        .derive(&ixn_bytes);
+    let said = said_digest.to_string();
+
+    let mut ixn_final = ixn_event.clone();
+    ixn_final["d"] = serde_json::Value::String(said.clone());
+
+    let ixn_final_bytes = serde_json::to_vec(&ixn_final)
+        .map_err(|e| format!("IXN final serialization failed: {}", e))?;
+
+    let kel_entry = String::from_utf8(ixn_final_bytes.clone())
+        .map_err(|e| format!("IXN UTF-8 conversion failed: {}", e))?;
+
+    instance.kel.push(kel_entry.clone());
+
+    Ok(InteractResult {
+        aid,
+        said,
+        sequence_number: sn,
+        kel_entry,
+        raw_bytes_b64: base64::encode(&ixn_final_bytes),
+    })
+}
+
+/// CESR-encode a raw 64-byte Ed25519 signature (base64-encoded input) into the
+/// '0B...' 88-character CESR Cigar format used by KERI witness receipts and event signatures.
+///
+/// Algorithm (identical to Python's coring.Cigar(raw=sig, code=MtrDex.Ed25519_Sig).qb64):
+///   1. base64-decode raw_sig_b64 → 64 raw bytes
+///   2. prepend two zero lead bytes → 66 bytes
+///   3. base64url-encode (no padding) → 88 chars
+///   4. replace leading 2 chars with '0B'
+#[frb(sync)]
+pub fn cesr_encode(raw_sig_b64: String) -> Result<String, String> {
+    let raw_bytes = base64::decode(&raw_sig_b64)
+        .map_err(|e| format!("Invalid base64 signature: {}", e))?;
+
+    if raw_bytes.len() != 64 {
+        return Err(format!(
+            "Ed25519 signature must be 64 bytes, got {}",
+            raw_bytes.len()
+        ));
+    }
+
+    // Prepend 2 lead bytes so the total is 66 bytes (divisible by 3 → no padding).
+    let mut padded = Vec::with_capacity(66);
+    padded.push(0u8);
+    padded.push(0u8);
+    padded.extend_from_slice(&raw_bytes);
+
+    // base64url (URL-safe, no padding) encode of the 66 bytes → 88 chars.
+    let encoded = base64::encode_config(&padded, base64::URL_SAFE_NO_PAD);
+
+    if encoded.len() < 2 {
+        return Err("CESR encoding produced unexpectedly short output".to_string());
+    }
+
+    // Replace first 2 chars with the CESR code '0B'.
+    let cesr = format!("0B{}", &encoded[2..]);
+
+    Ok(cesr)
+}

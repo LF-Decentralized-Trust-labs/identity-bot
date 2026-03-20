@@ -12,6 +12,8 @@ echo "      Workspace: $WORKSPACE"
 echo ""
 echo "[1/3] Building Flutter Web..."
 cd "$WORKSPACE/identity_agent_ui"
+# If Nix Flutter has broken TLS, fall back to official Flutter SDK from Google
+. "$SCRIPT_DIR/ensure-flutter.sh"
 flutter pub get
 flutter build web --release --base-href="/"
 echo "      Flutter Web built successfully."

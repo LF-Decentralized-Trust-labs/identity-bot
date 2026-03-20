@@ -148,7 +148,7 @@ class ConsentModal {
                     if (details.isNotEmpty) ...[
                       Container(
                         decoration: BoxDecoration(
-                          color: AppColors.primary,
+                          color: AppColors.surfaceLight,
                           border: Border.all(color: AppColors.border, width: 1),
                           borderRadius: BorderRadius.circular(8),
                         ),

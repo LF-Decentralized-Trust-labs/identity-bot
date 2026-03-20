@@ -4,6 +4,7 @@ import (
         "bytes"
         "context"
         "crypto/tls"
+        "encoding/base64"
         "encoding/json"
         "fmt"
         "io"
@@ -29,6 +30,7 @@ import (
 
 type CoreServer struct {
         DataStore       store.Store
+        AIMemory        *store.AIMemoryStore
         KeriDriver      *drivers.KeriDriver
         TunnelManager   *tunnel.Manager
         EndpointService *endpoint.EndpointService
@@ -79,19 +81,27 @@ func DefaultConfig() Config {
 func New(cfg Config) (*CoreServer, error) {
         ctx, cancel := context.WithCancel(context.Background())
 
-        dataStore, err := store.NewFileStore(cfg.DataDir)
+        dataStore, err := store.NewSQLiteStore(cfg.DataDir)
         if err != nil {
                 cancel()
                 return nil, fmt.Errorf("failed to initialize store: %w", err)
         }
 
-        endpointSvc := endpoint.New(cfg.DataDir, cfg.Port)
+        aiMemory, err := store.NewAIMemoryStore(cfg.DataDir)
+        if err != nil {
+                cancel()
+                dataStore.Close()
+                return nil, fmt.Errorf("failed to initialize AI memory store: %w", err)
+        }
+
+        endpointSvc := endpoint.New(dataStore, cfg.Port)
 
         eventHub := NewEventHub()
         go eventHub.Run()
 
         s := &CoreServer{
                 DataStore:       dataStore,
+                AIMemory:        aiMemory,
                 EndpointService: endpointSvc,
                 EventHub:        eventHub,
                 StartTime:       time.Now(),
@@ -259,13 +269,25 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 
                 r.Post("/inception", s.handleInception)
                 r.Post("/rotation", s.handleRotation)
+                r.Post("/interact", s.handleInteract)
                 r.Post("/sign", s.handleSign)
                 r.Get("/kel", s.handleKel)
                 r.Post("/verify", s.handleVerify)
 
+                r.Post("/cesr/encode", s.handleCesrEncode)
+
                 r.Post("/format-credential", s.handleFormatCredential)
                 r.Post("/resolve-oobi", s.handleResolveOobi)
                 r.Post("/generate-multisig-event", s.handleGenerateMultisigEvent)
+
+                r.Post("/credential/issue", s.handleIssueCredential)
+                r.Get("/credentials", s.handleGetCredentials)
+                r.Post("/credential/present", s.handlePresentCredential)
+                r.Get("/presentations", s.handleGetPresentations)
+                r.Post("/credential/verify", s.handleVerifyCredential)
+
+                r.Post("/receipt/submit", s.handleSubmitReceipt)
+                r.Get("/kerl", s.handleGetKERL)
 
                 r.Get("/oobi", s.handleOobiGenerate)
 
@@ -273,6 +295,7 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
                 r.Post("/contacts/resolve", s.handleResolveOobiContact)
                 r.Post("/contacts", s.handleAddContact)
                 r.Get("/contacts/{aid}", s.handleGetContact)
+                r.Get("/contacts/{aid}/kel", s.handleGetContactKEL)
                 r.Delete("/contacts/{aid}", s.handleDeleteContact)
                 r.Post("/contacts/{aid}/accept", s.handleAcceptContact)
                 r.Post("/contacts/{aid}/reject", s.handleRejectContact)
@@ -294,18 +317,26 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 
                 r.Post("/store/identity", s.handleStoreIdentity)
                 r.Post("/store/event", s.handleStoreEvent)
+                r.Post("/store/receipt", s.handleStoreReceipt)
+                r.Get("/store/receipts", s.handleGetStoreReceipts)
+                r.Post("/store/credential", s.handleStoreCredential)
 
                 r.Delete("/pending-requests/{aid}", s.handleDeletePendingRequest)
                 r.Post("/reset", s.handleReset)
 
                 s.sandboxRoutes(r)
+                s.aiMemoryRoutes(r)
                 r.Get("/ws/events", s.handleWebSocketEvents)
         })
 
         s.traceRoutes(r)
         s.llmRoutes(r)
 
-        r.Get("/oobi/{aid}", s.handleOobiServe)
+        // Display reverse proxy: intercepts container API calls to serve from ai-memory.db
+        r.HandleFunc("/apps/{app_id}/*", s.handleAppDisplayProxy)
+
+        // /public/oobi/{aid} — public namespace: KERI OOBI endpoint shared with external agents.
+        r.Get("/public/oobi/{aid}", s.handleOobiServe)
 
         absWebDir, err := filepath.Abs(flutterWebDir)
         if err != nil {
@@ -391,11 +422,17 @@ type DriverInfo struct {
 type InceptionRequest struct {
         PublicKey     string `json:"public_key"`
         NextPublicKey string `json:"next_public_key"`
+        // CesrSignature: optional — the controller's CESR '0B...' signature over the
+        // inception event body, produced by Dart local signing + /api/cesr/encode.
+        CesrSignature string `json:"cesr_signature,omitempty"`
 }
 
 type InceptionResponse struct {
         AID            string                 `json:"aid"`
         InceptionEvent map[string]interface{} `json:"inception_event"`
+        // RawBytesB64: base64 of the serialized event body. Sign these bytes with
+        // the Ed25519 key, then call POST /api/cesr/encode to get the CESR signature.
+        RawBytesB64    string                 `json:"raw_bytes_b64"`
         PublicKey      string                 `json:"public_key"`
         Created        string                 `json:"created"`
 }
@@ -561,6 +598,7 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
                 PublicKey:      result.PublicKey,
                 NextKeyDigest:  result.NextKeyDigest,
                 Timestamp:      now,
+                CesrSignature:  req.CesrSignature,
         }
         if err := s.DataStore.SaveEvent(eventRecord); err != nil {
                 writeError(w, http.StatusInternalServerError, "Failed to persist inception event", err.Error())
@@ -584,6 +622,7 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
         resp := InceptionResponse{
                 AID:            result.AID,
                 InceptionEvent: result.InceptionEvent,
+                RawBytesB64:    result.RawBytesB64,
                 PublicKey:      result.PublicKey,
                 Created:        now,
         }
@@ -660,6 +699,7 @@ func (s *CoreServer) handleRotation(w http.ResponseWriter, r *http.Request) {
                 Name             string `json:"name"`
                 NewPublicKey     string `json:"new_public_key"`
                 NewNextPublicKey string `json:"new_next_public_key"`
+                CesrSignature    string `json:"cesr_signature,omitempty"`
         }
         if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
                 writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
@@ -687,6 +727,7 @@ func (s *CoreServer) handleRotation(w http.ResponseWriter, r *http.Request) {
                 PublicKey:      result.NewPublicKey,
                 NextKeyDigest:  result.NewNextKeyDigest,
                 Timestamp:      now,
+                CesrSignature:  req.CesrSignature,
         }
         if err := s.DataStore.SaveEvent(eventRecord); err != nil {
                 log.Printf("[identity-agent-core] Warning: failed to persist rotation event: %v", err)
@@ -703,6 +744,61 @@ func (s *CoreServer) handleRotation(w http.ResponseWriter, r *http.Request) {
         log.Printf("[identity-agent-core] ROTATION: Key rotated for AID: %s (sn: %d)", result.AID, result.SequenceNumber)
 
         w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(result)
+}
+
+func (s *CoreServer) handleInteract(w http.ResponseWriter, r *http.Request) {
+        if s.KeriDriver == nil {
+                writeError(w, http.StatusServiceUnavailable, "KERI driver not available",
+                        "On mobile, use the Rust bridge for IXN events")
+                return
+        }
+
+        var req struct {
+                Name          string        `json:"name"`
+                Data          []interface{} `json:"data"`
+                CesrSignature string        `json:"cesr_signature,omitempty"`
+        }
+        if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+                writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+                return
+        }
+        if req.Name == "" {
+                writeError(w, http.StatusBadRequest, "Missing required field", "name is required")
+                return
+        }
+
+        result, err := s.KeriDriver.Interact(req.Name, req.Data)
+        if err != nil {
+                writeError(w, http.StatusInternalServerError, "IXN event failed", err.Error())
+                return
+        }
+
+        now := time.Now().UTC().Format(time.RFC3339)
+        eventJSON, _ := json.Marshal(result.IxnEvent)
+        eventRecord := store.EventRecord{
+                AID:            result.AID,
+                SequenceNumber: result.SequenceNumber,
+                EventType:      "ixn",
+                EventJSON:      string(eventJSON),
+                Timestamp:      now,
+                CesrSignature:  req.CesrSignature,
+        }
+        if err := s.DataStore.SaveEvent(eventRecord); err != nil {
+                log.Printf("[identity-agent-core] Warning: failed to persist IXN event: %v", err)
+        }
+
+        identity, _ := s.DataStore.GetIdentity()
+        if identity != nil {
+                identity.EventCount = result.SequenceNumber + 1
+                s.DataStore.SaveIdentity(*identity)
+        }
+
+        log.Printf("[identity-agent-core] IXN: Interaction event for AID: %s (sn: %d, said: %s)",
+                result.AID, result.SequenceNumber, result.Said)
+
+        w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(http.StatusCreated)
         json.NewEncoder(w).Encode(result)
 }
 
@@ -801,6 +897,35 @@ func (s *CoreServer) handleVerify(w http.ResponseWriter, r *http.Request) {
         json.NewEncoder(w).Encode(result)
 }
 
+func (s *CoreServer) handleCesrEncode(w http.ResponseWriter, r *http.Request) {
+        if s.KeriDriver == nil {
+                writeError(w, http.StatusServiceUnavailable, "KERI driver not available",
+                        "On mobile, CESR encoding is handled by the Rust bridge")
+                return
+        }
+
+        var req struct {
+                RawSigB64 string `json:"raw_sig_b64"`
+        }
+        if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+                writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+                return
+        }
+        if req.RawSigB64 == "" {
+                writeError(w, http.StatusBadRequest, "Missing required field", "raw_sig_b64 is required")
+                return
+        }
+
+        result, err := s.KeriDriver.CesrEncode(req.RawSigB64)
+        if err != nil {
+                writeError(w, http.StatusInternalServerError, "CESR encoding failed", err.Error())
+                return
+        }
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(result)
+}
+
 func (s *CoreServer) handleFormatCredential(w http.ResponseWriter, r *http.Request) {
         if s.KeriDriver == nil {
                 writeError(w, http.StatusServiceUnavailable, "KERI driver not available",
@@ -831,6 +956,330 @@ func (s *CoreServer) handleFormatCredential(w http.ResponseWriter, r *http.Reque
 
         w.Header().Set("Content-Type", "application/json")
         json.NewEncoder(w).Encode(result)
+}
+
+func (s *CoreServer) handleIssueCredential(w http.ResponseWriter, r *http.Request) {
+        if s.KeriDriver == nil {
+                writeError(w, http.StatusServiceUnavailable, "KERI driver not available",
+                        "Credential issuance requires the Python KERI driver (desktop only)")
+                return
+        }
+
+        var req struct {
+                Claims        map[string]interface{} `json:"claims"`
+                SchemaSaid    string                 `json:"schema_said"`
+                HolderAid     string                 `json:"holder_aid"`
+                CesrSignature string                 `json:"cesr_signature,omitempty"`
+        }
+        if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+                writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+                return
+        }
+        if len(req.Claims) == 0 || req.SchemaSaid == "" {
+                writeError(w, http.StatusBadRequest, "Missing required fields", "claims and schema_said are required")
+                return
+        }
+
+        identity, err := s.DataStore.GetIdentity()
+        if err != nil || identity == nil {
+                writeError(w, http.StatusBadRequest, "No identity found", "Create an identity before issuing credentials")
+                return
+        }
+
+        result, err := s.KeriDriver.IssueCredential(identity.AID, req.Claims, req.SchemaSaid, req.HolderAid)
+        if err != nil {
+                writeError(w, http.StatusInternalServerError, "Credential issuance failed", err.Error())
+                return
+        }
+
+        // Persist the credential record
+        record := store.CredentialRecord{
+                SAID:          result.AcdcSaid,
+                IssuerAID:     identity.AID,
+                HolderAID:     req.HolderAid,
+                SchemaSAID:    req.SchemaSaid,
+                AcdcJson:      result.AcdcJsonB64,
+                IxnSAID:       result.IxnSaid,
+                CesrSignature: req.CesrSignature,
+                IssuedAt:      time.Now().UTC().Format(time.RFC3339),
+                Status:        "issued",
+        }
+        if err := s.DataStore.SaveCredential(record); err != nil {
+                log.Printf("[identity-agent-core] CREDENTIAL: Failed to persist credential %s: %v", result.AcdcSaid, err)
+        }
+
+        // Persist the IXN event in the KEL
+        ixnEventJSON, _ := json.Marshal(result.IxnEvent)
+        kelRecord := store.EventRecord{
+                AID:            identity.AID,
+                SequenceNumber: result.SequenceNumber,
+                EventType:      "ixn",
+                EventJSON:      string(ixnEventJSON),
+                PublicKey:      identity.PublicKey,
+                NextKeyDigest:  identity.NextKeyDigest,
+                Timestamp:      time.Now().UTC().Format(time.RFC3339),
+                CesrSignature:  req.CesrSignature,
+        }
+        if err := s.DataStore.SaveEvent(kelRecord); err != nil {
+                log.Printf("[identity-agent-core] CREDENTIAL: Failed to persist IXN event for credential %s: %v", result.AcdcSaid, err)
+        }
+
+        log.Printf("[identity-agent-core] CREDENTIAL: Issued %s for holder %s (IXN sn=%d)", result.AcdcSaid, req.HolderAid, result.SequenceNumber)
+
+        w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(http.StatusCreated)
+        json.NewEncoder(w).Encode(map[string]interface{}{
+                "acdc_said":        result.AcdcSaid,
+                "acdc_json_b64":    result.AcdcJsonB64,
+                "ixn_raw_bytes_b64": result.IxnRawBytesB64,
+                "ixn_said":         result.IxnSaid,
+                "sequence_number":  result.SequenceNumber,
+                "status":           "issued",
+        })
+}
+
+func (s *CoreServer) handleGetCredentials(w http.ResponseWriter, r *http.Request) {
+        creds, err := s.DataStore.GetCredentials()
+        if err != nil {
+                writeError(w, http.StatusInternalServerError, "Failed to read credentials", err.Error())
+                return
+        }
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(map[string]interface{}{
+                "credentials": creds,
+                "count":       len(creds),
+        })
+}
+
+func (s *CoreServer) handlePresentCredential(w http.ResponseWriter, r *http.Request) {
+        if s.KeriDriver == nil {
+                writeError(w, http.StatusServiceUnavailable, "KERI driver not available",
+                        "Credential presentation requires the Python KERI driver (desktop only)")
+                return
+        }
+
+        var req struct {
+                AcdcSaid      string `json:"acdc_said"`
+                HolderAid     string `json:"holder_aid"`
+                IssuerAid     string `json:"issuer_aid,omitempty"`
+                SchemaSaid    string `json:"schema_said,omitempty"`
+                CesrSignature string `json:"cesr_signature,omitempty"`
+        }
+        if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+                writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+                return
+        }
+        if req.AcdcSaid == "" || req.HolderAid == "" {
+                writeError(w, http.StatusBadRequest, "Missing required fields", "acdc_said and holder_aid are required")
+                return
+        }
+
+        result, err := s.KeriDriver.PresentCredential(req.AcdcSaid, req.HolderAid, req.IssuerAid, req.SchemaSaid)
+        if err != nil {
+                writeError(w, http.StatusInternalServerError, "Credential presentation failed", err.Error())
+                return
+        }
+
+        record := store.PresentationRecord{
+                SAID:                result.PresentationSaid,
+                CredentialSAID:      req.AcdcSaid,
+                HolderAID:           req.HolderAid,
+                IssuerAID:           req.IssuerAid,
+                PresentationJsonB64: result.PresentationJsonB64,
+                CesrSignature:       req.CesrSignature,
+                CreatedAt:           time.Now().UTC().Format(time.RFC3339),
+                Status:              "created",
+        }
+        if err := s.DataStore.SavePresentation(record); err != nil {
+                log.Printf("[identity-agent-core] PRESENTATION: Failed to persist %s: %v", result.PresentationSaid, err)
+        }
+
+        log.Printf("[identity-agent-core] PRESENTATION: Created %s for credential %s", result.PresentationSaid, req.AcdcSaid)
+
+        w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(http.StatusCreated)
+        json.NewEncoder(w).Encode(map[string]interface{}{
+                "presentation_said":     result.PresentationSaid,
+                "presentation_json_b64": result.PresentationJsonB64,
+                // pres_said_b64: base64 of pres_said.encode(); Dart signs these bytes with holder key
+                "pres_said_b64": result.PresSaidB64,
+                "status":        "created",
+        })
+}
+
+func (s *CoreServer) handleGetPresentations(w http.ResponseWriter, r *http.Request) {
+        pres, err := s.DataStore.GetPresentations()
+        if err != nil {
+                writeError(w, http.StatusInternalServerError, "Failed to read presentations", err.Error())
+                return
+        }
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(map[string]interface{}{
+                "presentations": pres,
+                "count":         len(pres),
+        })
+}
+
+func (s *CoreServer) handleVerifyCredential(w http.ResponseWriter, r *http.Request) {
+	if s.KeriDriver == nil {
+		writeError(w, http.StatusServiceUnavailable, "KERI driver not available",
+			"Credential verification requires the Python KERI driver (desktop only)")
+		return
+	}
+
+	var req struct {
+		AcdcJson           string   `json:"acdc_json"`
+		HolderAid          string   `json:"holder_aid"`
+		PresentationSaid   string   `json:"presentation_said"`
+		CesrSignature      string   `json:"cesr_signature"`
+		HolderPublicKey    string   `json:"holder_public_key"`
+		TrustedSchemaSaids []string `json:"trusted_schema_saids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+
+	if req.AcdcJson == "" {
+		writeError(w, http.StatusBadRequest, "Missing acdc_json", "")
+		return
+	}
+
+	// Extract issuer AID from the ACDC JSON (which is base64-encoded) to look up its stored KEL.
+	var acdcBody map[string]interface{}
+	var issuerKelEvents []map[string]interface{}
+	if acdcBytes, err := base64.StdEncoding.DecodeString(req.AcdcJson); err == nil {
+		if err2 := json.Unmarshal(acdcBytes, &acdcBody); err2 == nil {
+			if issuerAid, ok := acdcBody["i"].(string); ok && issuerAid != "" {
+				// Try contact KEL first (cross-instance: issuer is a remote contact).
+				if kelRecord, err3 := s.DataStore.GetContactKEL(issuerAid); err3 == nil && kelRecord != nil {
+					issuerKelEvents = unwrapEventJSON(kelRecord.KEL)
+				}
+				// Fall back to own KEL (self-issued: issuer is this instance).
+				if issuerKelEvents == nil {
+					if ownEvents, err3 := s.DataStore.GetEvents(issuerAid); err3 == nil && len(ownEvents) > 0 {
+						issuerKelEvents = eventRecordsToKEDs(ownEvents)
+					}
+				}
+			}
+		}
+	}
+
+	driverReq := &drivers.DriverVerifyCredentialRequest{
+		AcdcJson:           req.AcdcJson,
+		IssuerKelEvents:    issuerKelEvents,
+		HolderAid:          req.HolderAid,
+		PresentationSaid:   req.PresentationSaid,
+		CesrSignature:      req.CesrSignature,
+		HolderPublicKey:    req.HolderPublicKey,
+		TrustedSchemaSaids: req.TrustedSchemaSaids,
+	}
+
+	result, err := s.KeriDriver.VerifyCredential(driverReq)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Credential verification failed", err.Error())
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+func (s *CoreServer) handleSubmitReceipt(w http.ResponseWriter, r *http.Request) {
+	if s.KeriDriver == nil {
+		writeError(w, http.StatusServiceUnavailable, "KERI driver not available",
+			"Witness receipt submission requires the Python KERI driver (desktop only)")
+		return
+	}
+
+	var req struct {
+		EventSAID        string   `json:"event_said"`
+		WitnessAID       string   `json:"witness_aid"`
+		WitnessPublicKey string   `json:"witness_public_key"`
+		CesrSignature    string   `json:"cesr_signature"`
+		TrustedWitnesses []string `json:"trusted_witnesses"`
+		Threshold        int      `json:"threshold"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+	if req.EventSAID == "" || req.WitnessAID == "" || req.CesrSignature == "" {
+		writeError(w, http.StatusBadRequest, "Missing required fields", "event_said, witness_aid, cesr_signature are required")
+		return
+	}
+
+	driverReq := &drivers.DriverSubmitReceiptRequest{
+		EventSAID:        req.EventSAID,
+		WitnessAID:       req.WitnessAID,
+		WitnessPublicKey: req.WitnessPublicKey,
+		CesrSignature:    req.CesrSignature,
+		TrustedWitnesses: req.TrustedWitnesses,
+		Threshold:        req.Threshold,
+	}
+
+	result, err := s.KeriDriver.SubmitReceipt(driverReq)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Receipt submission failed", err.Error())
+		return
+	}
+
+	// Persist accepted receipts to durable store.
+	if result.Accepted {
+		_ = s.DataStore.SaveWitnessReceipt(store.WitnessReceiptRecord{
+			EventSAID:     req.EventSAID,
+			WitnessAID:    req.WitnessAID,
+			CesrSignature: req.CesrSignature,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+func (s *CoreServer) handleGetKERL(w http.ResponseWriter, r *http.Request) {
+	eventSAID := r.URL.Query().Get("event_said")
+	if eventSAID == "" {
+		writeError(w, http.StatusBadRequest, "Missing event_said query parameter", "")
+		return
+	}
+	threshold := 0
+	if t := r.URL.Query().Get("threshold"); t != "" {
+		fmt.Sscanf(t, "%d", &threshold)
+	}
+
+	// Load receipts from durable store (always available, even without the Python driver).
+	receipts, err := s.DataStore.GetWitnessReceipts(eventSAID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to read witness receipts", err.Error())
+		return
+	}
+
+	thresholdMet := threshold == 0 || len(receipts) >= threshold
+
+	type receiptEntry struct {
+		WitnessAID    string `json:"witness_aid"`
+		CesrSignature string `json:"cesr_signature"`
+		ReceivedAt    string `json:"received_at"`
+	}
+	entries := make([]receiptEntry, 0, len(receipts))
+	for _, r := range receipts {
+		entries = append(entries, receiptEntry{
+			WitnessAID:    r.WitnessAID,
+			CesrSignature: r.CesrSignature,
+			ReceivedAt:    r.ReceivedAt,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"event_said":    eventSAID,
+		"receipts":      entries,
+		"receipt_count": len(receipts),
+		"threshold_met": thresholdMet,
+	})
 }
 
 func (s *CoreServer) handleResolveOobi(w http.ResponseWriter, r *http.Request) {
@@ -938,7 +1387,7 @@ func (s *CoreServer) handleOobiGenerate(w http.ResponseWriter, r *http.Request) 
         }
 
         baseURL := s.getPublicURL(r)
-        oobiURL := fmt.Sprintf("%s/oobi/%s", baseURL, identity.AID)
+        oobiURL := fmt.Sprintf("%s/public/oobi/%s", baseURL, identity.AID)
 
         tunnelActive := false
         tunnelProvider := ""
@@ -1055,6 +1504,27 @@ func (s *CoreServer) handleGetContact(w http.ResponseWriter, r *http.Request) {
         json.NewEncoder(w).Encode(contact)
 }
 
+func (s *CoreServer) handleGetContactKEL(w http.ResponseWriter, r *http.Request) {
+        aid := chi.URLParam(r, "aid")
+        if aid == "" {
+                writeError(w, http.StatusBadRequest, "Missing AID", "aid path parameter is required")
+                return
+        }
+
+        kelRecord, err := s.DataStore.GetContactKEL(aid)
+        if err != nil {
+                writeError(w, http.StatusInternalServerError, "Failed to read contact KEL", err.Error())
+                return
+        }
+        if kelRecord == nil {
+                writeError(w, http.StatusNotFound, "No KEL found", fmt.Sprintf("No validated KEL stored for AID: %s", aid))
+                return
+        }
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(kelRecord)
+}
+
 func (s *CoreServer) handleResolveOobiContact(w http.ResponseWriter, r *http.Request) {
         var req struct {
                 OobiURL string `json:"oobi_url"`
@@ -1093,14 +1563,14 @@ func (s *CoreServer) handleResolveOobiContact(w http.ResponseWriter, r *http.Req
         }
 
         var oobiData struct {
-                AID        string       `json:"aid"`
-                PublicKey  string       `json:"public_key"`
-                Alias      string       `json:"alias"`
-                KEL        interface{}  `json:"kel"`
-                EventCount int          `json:"event_count"`
-                Created    string       `json:"created"`
-                JCard      *store.JCard `json:"jcard,omitempty"`
-                Photo      string       `json:"photo,omitempty"`
+                AID        string                   `json:"aid"`
+                PublicKey  string                   `json:"public_key"`
+                Alias      string                   `json:"alias"`
+                KEL        []map[string]interface{} `json:"kel"`
+                EventCount int                      `json:"event_count"`
+                Created    string                   `json:"created"`
+                JCard      *store.JCard             `json:"jcard,omitempty"`
+                Photo      string                   `json:"photo,omitempty"`
         }
         if err := json.NewDecoder(resp.Body).Decode(&oobiData); err != nil {
                 writeError(w, http.StatusBadGateway, "Invalid OOBI response", fmt.Sprintf("Could not parse response: %v", err))
@@ -1112,23 +1582,53 @@ func (s *CoreServer) handleResolveOobiContact(w http.ResponseWriter, r *http.Req
                 return
         }
 
-        kelCount := 0
-        if events, ok := oobiData.KEL.([]interface{}); ok {
-                kelCount = len(events)
-        }
-
+        kelCount := len(oobiData.KEL)
         log.Printf("[identity-agent-core] OOBI-RESOLVE: Success — AID=%s, alias=%s, KEL events=%d", oobiData.AID, oobiData.Alias, kelCount)
 
+        // Validate the KEL via the Python driver (desktop only — driver is nil on mobile).
+        kelVerified := false
+        currentPublicKey := oobiData.PublicKey
+        var validationErrors []string
+        if s.KeriDriver != nil && kelCount > 0 {
+                valResult, err := s.KeriDriver.ValidateKEL(oobiData.AID, oobiData.KEL)
+                if err != nil {
+                        log.Printf("[identity-agent-core] OOBI-RESOLVE: KEL validation error for %s: %v", oobiData.AID, err)
+                        validationErrors = []string{err.Error()}
+                } else {
+                        kelVerified = valResult.KelVerified
+                        if valResult.CurrentPublicKey != "" {
+                                currentPublicKey = valResult.CurrentPublicKey
+                        }
+                        validationErrors = valResult.ValidationErrors
+                        log.Printf("[identity-agent-core] OOBI-RESOLVE: KEL validated=%v events=%d for %s",
+                                kelVerified, valResult.EventsValidated, oobiData.AID)
+                }
+
+                kelRecord := store.ContactKELRecord{
+                        AID:              oobiData.AID,
+                        KEL:              oobiData.KEL,
+                        KelVerified:      kelVerified,
+                        CurrentPublicKey: currentPublicKey,
+                        EventsValidated:  kelCount,
+                        ValidationErrors: validationErrors,
+                        ValidatedAt:      time.Now().UTC().Format(time.RFC3339),
+                }
+                if err := s.DataStore.SaveContactKEL(kelRecord); err != nil {
+                        log.Printf("[identity-agent-core] OOBI-RESOLVE: Failed to store contact KEL for %s: %v", oobiData.AID, err)
+                }
+        }
+
         result := map[string]interface{}{
-                "resolved":     true,
-                "aid":          oobiData.AID,
-                "public_key":   oobiData.PublicKey,
-                "alias":        oobiData.Alias,
-                "oobi_url":     req.OobiURL,
-                "kel":          oobiData.KEL,
-                "event_count":  oobiData.EventCount,
-                "created":      oobiData.Created,
-                "kel_verified": kelCount > 0,
+                "resolved":          true,
+                "aid":               oobiData.AID,
+                "public_key":        currentPublicKey,
+                "alias":             oobiData.Alias,
+                "oobi_url":          req.OobiURL,
+                "kel":               oobiData.KEL,
+                "event_count":       kelCount,
+                "created":           oobiData.Created,
+                "kel_verified":      kelVerified,
+                "validation_errors": validationErrors,
         }
         if oobiData.JCard != nil {
                 result["jcard"] = oobiData.JCard
@@ -1177,11 +1677,12 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
         }
 
         var oobiData struct {
-                AID       string      `json:"aid"`
-                PublicKey string      `json:"public_key"`
-                Alias     string      `json:"alias"`
-                JCard     *store.JCard `json:"jcard,omitempty"`
-                Photo     string      `json:"photo,omitempty"`
+                AID       string                   `json:"aid"`
+                PublicKey string                   `json:"public_key"`
+                Alias     string                   `json:"alias"`
+                KEL       []map[string]interface{} `json:"kel"`
+                JCard     *store.JCard             `json:"jcard,omitempty"`
+                Photo     string                   `json:"photo,omitempty"`
         }
         if err := json.NewDecoder(resp.Body).Decode(&oobiData); err != nil {
                 writeError(w, http.StatusBadGateway, "Invalid OOBI response", fmt.Sprintf("Could not parse response: %v", err))
@@ -1191,6 +1692,33 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
         if oobiData.AID == "" {
                 writeError(w, http.StatusBadGateway, "Invalid OOBI response", "Response did not contain an AID")
                 return
+        }
+
+        // Validate KEL (desktop only).
+        kelVerified := false
+        currentPublicKey := oobiData.PublicKey
+        if s.KeriDriver != nil && len(oobiData.KEL) > 0 {
+                valResult, err := s.KeriDriver.ValidateKEL(oobiData.AID, oobiData.KEL)
+                if err != nil {
+                        log.Printf("[identity-agent-core] CONTACT: KEL validation error for %s: %v", oobiData.AID, err)
+                } else {
+                        kelVerified = valResult.KelVerified
+                        if valResult.CurrentPublicKey != "" {
+                                currentPublicKey = valResult.CurrentPublicKey
+                        }
+                        kelRecord := store.ContactKELRecord{
+                                AID:              oobiData.AID,
+                                KEL:              oobiData.KEL,
+                                KelVerified:      kelVerified,
+                                CurrentPublicKey: currentPublicKey,
+                                EventsValidated:  len(oobiData.KEL),
+                                ValidationErrors: valResult.ValidationErrors,
+                                ValidatedAt:      time.Now().UTC().Format(time.RFC3339),
+                        }
+                        if err := s.DataStore.SaveContactKEL(kelRecord); err != nil {
+                                log.Printf("[identity-agent-core] CONTACT: Failed to store KEL for %s: %v", oobiData.AID, err)
+                        }
+                }
         }
 
         alias := req.Alias
@@ -1215,14 +1743,19 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
                 }
         }
 
+        contactStatus := "verified"
+        if s.KeriDriver != nil && len(oobiData.KEL) > 0 && !kelVerified {
+                contactStatus = "unverified"
+        }
+
         contact := store.ContactRecord{
                 AID:          oobiData.AID,
                 Alias:        alias,
-                PublicKey:    oobiData.PublicKey,
+                PublicKey:    currentPublicKey,
                 OobiURL:      req.OobiURL,
-                Verified:     true,
+                Verified:     kelVerified || s.KeriDriver == nil,
                 DiscoveredAt: time.Now().UTC().Format(time.RFC3339),
-                Status:       "verified",
+                Status:       contactStatus,
                 Role:         "agent",
                 JCard:        contactJCard,
                 Photo:        oobiData.Photo,
@@ -1233,7 +1766,7 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
                 return
         }
 
-        log.Printf("[identity-agent-core] CONTACT: Added %s (AID: %s) status=verified", alias, oobiData.AID)
+        log.Printf("[identity-agent-core] CONTACT: Added %s (AID: %s) status=%s kel_verified=%v", alias, oobiData.AID, contactStatus, kelVerified)
 
         publicURL := s.getPublicURL(r)
         go func() {
@@ -1243,17 +1776,14 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
                         return
                 }
 
-                ourOOBI := fmt.Sprintf("%s/oobi/%s", publicURL, ourIdentity.AID)
+                ourOOBI := fmt.Sprintf("%s/public/oobi/%s", publicURL, ourIdentity.AID)
                 ourAlias := ourIdentity.AID[:12] + "..."
                 ourProfile, _ := s.DataStore.GetProfile()
                 if ourProfile != nil && ourProfile.FullName != "" {
                         ourAlias = ourProfile.FullName
                 }
 
-                remoteBase := req.OobiURL
-                if idx := strings.Index(remoteBase, "/oobi/"); idx != -1 {
-                        remoteBase = remoteBase[:idx]
-                }
+                remoteBase := oobiBase(req.OobiURL)
                 exchangeURL := remoteBase + "/api/exchange"
 
                 log.Printf("[identity-agent-core] EXCHANGE: Preparing reverse introduction to %s", exchangeURL)
@@ -1565,10 +2095,7 @@ func (s *CoreServer) handleAcceptContact(w http.ResponseWriter, r *http.Request)
                         return
                 }
 
-                remoteBase := contact.OobiURL
-                if idx := strings.Index(remoteBase, "/oobi/"); idx != -1 {
-                        remoteBase = remoteBase[:idx]
-                }
+                remoteBase := oobiBase(contact.OobiURL)
                 exchangeURL := remoteBase + "/api/exchange"
 
                 log.Printf("[identity-agent-core] EXCHANGE: Sending acceptance confirmation to %s", exchangeURL)
@@ -2008,6 +2535,46 @@ func (s *CoreServer) handleReleaseTunnelName(w http.ResponseWriter, r *http.Requ
                 "endpoint_url":   s.EndpointService.CurrentURL(),
                 "endpoint_source": s.EndpointService.Source(),
         })
+}
+
+// oobiBase extracts the scheme+host+port base URL from an OOBI URL so the
+// caller can append /api/exchange. OOBI URLs follow the /public/oobi/{aid} pattern.
+func oobiBase(oobiURL string) string {
+        if idx := strings.Index(oobiURL, "/public/oobi/"); idx != -1 {
+                return oobiURL[:idx]
+        }
+        return oobiURL
+}
+
+// unwrapEventJSON converts EventRecord-style dicts (with an "event_json" field containing a
+// JSON-encoded KED) to raw KED dicts. Events that are already raw KEDs are passed through unchanged.
+// This is needed because the OOBI endpoint serves EventRecord structs, so contact_kels stores
+// event_json-wrapped records, while the Python credential_verify driver expects raw KED dicts.
+func unwrapEventJSON(events []map[string]interface{}) []map[string]interface{} {
+	out := make([]map[string]interface{}, 0, len(events))
+	for _, ev := range events {
+		if ejson, ok := ev["event_json"].(string); ok {
+			var ked map[string]interface{}
+			if err := json.Unmarshal([]byte(ejson), &ked); err == nil {
+				out = append(out, ked)
+				continue
+			}
+		}
+		out = append(out, ev)
+	}
+	return out
+}
+
+// eventRecordsToKEDs converts store.EventRecord structs to raw KED dicts by parsing EventJSON.
+func eventRecordsToKEDs(records []store.EventRecord) []map[string]interface{} {
+	out := make([]map[string]interface{}, 0, len(records))
+	for _, rec := range records {
+		var ked map[string]interface{}
+		if err := json.Unmarshal([]byte(rec.EventJSON), &ked); err == nil {
+			out = append(out, ked)
+		}
+	}
+	return out
 }
 
 func writeError(w http.ResponseWriter, status int, errMsg string, details string) {

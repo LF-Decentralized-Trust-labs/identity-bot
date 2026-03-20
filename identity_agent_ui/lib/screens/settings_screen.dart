@@ -3,7 +3,7 @@ import 'package:flutter/services.dart';
 import '../theme/app_theme.dart';
 import '../services/core_service.dart';
 import '../services/keri_service.dart';
-import '../services/mobile_standalone_keri_service.dart';
+import '../services/mobile_on_device_keri_service.dart';
 import '../services/preferences_service.dart';
 import '../main.dart';
 
@@ -30,8 +30,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   String? _resolveServerUrl() {
     if (widget.serverUrl != null) return widget.serverUrl;
-    if (widget.keriService is MobileStandaloneKeriService) {
-      final standalone = widget.keriService as MobileStandaloneKeriService;
+    if (widget.keriService is MobileOnDeviceKeriService) {
+      final standalone = widget.keriService as MobileOnDeviceKeriService;
       if (standalone.isCoreReady) {
         return standalone.mobileCore.baseUrl;
       }
@@ -297,32 +297,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
       child: _loading
           ? const Center(child: CircularProgressIndicator(color: AppColors.accent))
           : SingleChildScrollView(
-              padding: const EdgeInsets.all(20),
+              padding: const EdgeInsets.fromLTRB(32, 32, 32, 32),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const SizedBox(height: 8),
+                  Builder(builder: (context) => Text('Settings', style: Theme.of(context).textTheme.headlineMedium)),
+                  const SizedBox(height: 4),
                   const Text(
-                    'SETTINGS',
-                    style: TextStyle(
-                      color: AppColors.textPrimary,
-                      fontSize: 22,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 2,
-                      fontFamily: 'monospace',
-                    ),
+                    'Configure connectivity and preferences.',
+                    style: TextStyle(color: AppColors.textSecondary, fontSize: 14),
                   ),
                   const SizedBox(height: 24),
                   _buildAgentInfoCard(),
                   const SizedBox(height: 24),
                   const Text(
-                    'TUNNEL & CONNECTIVITY',
+                    'Tunnel & Connectivity',
                     style: TextStyle(
-                      color: AppColors.textMuted,
-                      fontSize: 11,
+                      color: AppColors.textSecondary,
+                      fontSize: 13,
                       fontWeight: FontWeight.w600,
-                      letterSpacing: 1.5,
-                      fontFamily: 'monospace',
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -339,13 +332,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   _buildActionButtons(),
                   const SizedBox(height: 24),
                   const Text(
-                    'AI KEYS',
+                    'AI Keys',
                     style: TextStyle(
-                      color: AppColors.textMuted,
-                      fontSize: 11,
+                      color: AppColors.textSecondary,
+                      fontSize: 13,
                       fontWeight: FontWeight.w600,
-                      letterSpacing: 1.5,
-                      fontFamily: 'monospace',
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -512,8 +503,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(
-                  color: AppColors.primary,
+                  color: AppColors.surfaceLight,
                   borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: AppColors.border),
                 ),
                 child: Row(
                   children: [
@@ -586,8 +578,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(
-                  color: AppColors.primary,
+                  color: AppColors.surfaceLight,
                   borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: AppColors.border),
                 ),
                 child: Row(
                   children: [
@@ -977,9 +970,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                 decoration: BoxDecoration(
-                  color: AppColors.primary.withOpacity(0.5),
+                  color: AppColors.primary.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: AppColors.accent.withOpacity(0.3)),
+                  border: Border.all(color: AppColors.primary.withValues(alpha: 0.2)),
                 ),
                 child: Row(
                   children: [
@@ -1151,9 +1144,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   width: double.infinity,
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: AppColors.primary,
+                    color: AppColors.surfaceLight,
                     borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: AppColors.border.withOpacity(0.5)),
+                    border: Border.all(color: AppColors.border),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,

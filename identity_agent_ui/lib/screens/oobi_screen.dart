@@ -4,7 +4,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import '../theme/app_theme.dart';
 import '../services/core_service.dart';
 import '../services/keri_service.dart';
-import '../services/mobile_standalone_keri_service.dart';
+import '../services/mobile_on_device_keri_service.dart';
 
 class OobiScreen extends StatefulWidget {
   final KeriService keriService;
@@ -22,8 +22,8 @@ class _OobiScreenState extends State<OobiScreen> {
 
   String? _resolveServerUrl() {
     if (widget.serverUrl != null) return widget.serverUrl;
-    if (widget.keriService is MobileStandaloneKeriService) {
-      final standalone = widget.keriService as MobileStandaloneKeriService;
+    if (widget.keriService is MobileOnDeviceKeriService) {
+      final standalone = widget.keriService as MobileOnDeviceKeriService;
       if (standalone.isCoreReady) {
         return standalone.mobileCore.baseUrl;
       }
@@ -85,7 +85,6 @@ class _OobiScreenState extends State<OobiScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.primary,
       body: SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -114,65 +113,28 @@ class _OobiScreenState extends State<OobiScreen> {
   }
 
   Widget _buildHeader() {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(32, 32, 32, 0),
       child: Row(
         children: [
-          Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              color: AppColors.accent.withOpacity(0.15),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(
-                color: AppColors.accent.withOpacity(0.3),
-                width: 1,
-              ),
-            ),
-            child: const Icon(
-              Icons.qr_code,
-              color: AppColors.accent,
-              size: 20,
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('OOBI', style: Theme.of(context).textTheme.headlineMedium),
+                const SizedBox(height: 4),
+                const Text(
+                  'Out-of-band introduction URL.',
+                  style: TextStyle(color: AppColors.textSecondary, fontSize: 14),
+                ),
+              ],
             ),
           ),
-          const SizedBox(width: 12),
-          const Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'OOBI',
-                style: TextStyle(
-                  color: AppColors.textPrimary,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 2.0,
-                  fontFamily: 'monospace',
-                ),
-              ),
-              Text(
-                'OUT-OF-BAND INTRODUCTION',
-                style: TextStyle(
-                  color: AppColors.textMuted,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w500,
-                  letterSpacing: 1.5,
-                  fontFamily: 'monospace',
-                ),
-              ),
-            ],
-          ),
-          const Spacer(),
-          InkWell(
-            onTap: _loadOobi,
-            borderRadius: BorderRadius.circular(6),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-              decoration: BoxDecoration(
-                color: AppColors.surfaceLight,
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: const Icon(Icons.refresh, color: AppColors.textSecondary, size: 18),
-            ),
+          IconButton(
+            onPressed: _loadOobi,
+            icon: const Icon(Icons.refresh),
+            color: AppColors.textSecondary,
+            tooltip: 'Refresh',
           ),
         ],
       ),
@@ -189,22 +151,19 @@ class _OobiScreenState extends State<OobiScreen> {
             const Icon(Icons.error_outline, color: AppColors.coreInactive, size: 40),
             const SizedBox(height: 16),
             const Text(
-              'NO IDENTITY FOUND',
+              'No identity found',
               style: TextStyle(
                 color: AppColors.coreInactive,
-                fontSize: 13,
+                fontSize: 14,
                 fontWeight: FontWeight.w600,
-                letterSpacing: 1.5,
-                fontFamily: 'monospace',
               ),
             ),
             const SizedBox(height: 8),
             const Text(
-              'Create an identity first to generate an OOBI URL',
+              'Create an identity first to generate an OOBI URL.',
               style: TextStyle(
                 color: AppColors.textMuted,
-                fontSize: 11,
-                fontFamily: 'monospace',
+                fontSize: 13,
               ),
               textAlign: TextAlign.center,
             ),
@@ -216,7 +175,7 @@ class _OobiScreenState extends State<OobiScreen> {
 
   Widget _buildContent() {
     return SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
+      padding: const EdgeInsets.fromLTRB(32, 16, 32, 32),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -253,11 +212,9 @@ class _OobiScreenState extends State<OobiScreen> {
               const Text(
                 'OOBI URL',
                 style: TextStyle(
-                  color: AppColors.textMuted,
-                  fontSize: 11,
+                  color: AppColors.textSecondary,
+                  fontSize: 13,
                   fontWeight: FontWeight.w600,
-                  letterSpacing: 1.5,
-                  fontFamily: 'monospace',
                 ),
               ),
               const Spacer(),
@@ -305,7 +262,7 @@ class _OobiScreenState extends State<OobiScreen> {
             width: double.infinity,
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: AppColors.primary,
+              color: AppColors.surfaceLight,
               borderRadius: BorderRadius.circular(8),
               border: Border.all(color: AppColors.border, width: 1),
             ),
@@ -352,13 +309,11 @@ class _OobiScreenState extends State<OobiScreen> {
               ),
               const SizedBox(width: 10),
               const Text(
-                'AUTONOMOUS IDENTIFIER',
+                'Autonomous Identifier',
                 style: TextStyle(
-                  color: AppColors.textMuted,
-                  fontSize: 11,
+                  color: AppColors.textSecondary,
+                  fontSize: 13,
                   fontWeight: FontWeight.w600,
-                  letterSpacing: 1.5,
-                  fontFamily: 'monospace',
                 ),
               ),
             ],
@@ -368,7 +323,7 @@ class _OobiScreenState extends State<OobiScreen> {
             width: double.infinity,
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: AppColors.primary,
+              color: AppColors.surfaceLight,
               borderRadius: BorderRadius.circular(8),
               border: Border.all(color: AppColors.border, width: 1),
             ),
@@ -400,22 +355,19 @@ class _OobiScreenState extends State<OobiScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'QR CODE',
+            'QR Code',
             style: TextStyle(
-              color: AppColors.textMuted,
-              fontSize: 11,
+              color: AppColors.textSecondary,
+              fontSize: 13,
               fontWeight: FontWeight.w600,
-              letterSpacing: 1.5,
-              fontFamily: 'monospace',
             ),
           ),
           const SizedBox(height: 6),
           const Text(
-            'Scan this code from another device to add this identity as a contact',
+            'Scan this code from another device to add this identity as a contact.',
             style: TextStyle(
               color: AppColors.textMuted,
-              fontSize: 10,
-              fontFamily: 'monospace',
+              fontSize: 12,
               height: 1.4,
             ),
           ),

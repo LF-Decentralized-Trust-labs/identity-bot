@@ -1,18 +1,23 @@
 package endpoint
 
 import (
-        "encoding/json"
         "fmt"
         "log"
         "net"
         "os"
-        "path/filepath"
         "strings"
         "sync"
         "time"
 
         "identity-agent-core/tunnel"
 )
+
+// EndpointPersister is a minimal interface for persisting endpoint state.
+// Implemented by store.SQLiteStore — defined here to avoid a circular import.
+type EndpointPersister interface {
+        GetEndpoint() (url, source string, err error)
+        SaveEndpoint(url, source string) error
+}
 
 type EndpointState struct {
         URL       string `json:"url"`
@@ -27,14 +32,14 @@ type EndpointService struct {
         tunnelManager *tunnel.Manager
         overrideURL   string
         localPort     int
-        dataDir       string
+        store         EndpointPersister
         onChange      []func(newURL, source string)
         mu            sync.RWMutex
 }
 
-func New(dataDir string, localPort int) *EndpointService {
+func New(store EndpointPersister, localPort int) *EndpointService {
         es := &EndpointService{
-                dataDir:   dataDir,
+                store:     store,
                 localPort: localPort,
         }
         es.load()
@@ -142,41 +147,35 @@ func (es *EndpointService) resolve() (string, string) {
         return fmt.Sprintf("http://localhost:%d", port), "localhost"
 }
 
-func (es *EndpointService) filePath() string {
-        return filepath.Join(es.dataDir, "endpoint.json")
-}
-
 func (es *EndpointService) save() {
-        state := es.State()
-        data, err := json.MarshalIndent(state, "", "  ")
-        if err != nil {
-                log.Printf("[endpoint] Failed to marshal state: %v", err)
+        if es.store == nil {
                 return
         }
-        if err := os.MkdirAll(es.dataDir, 0755); err != nil {
-                log.Printf("[endpoint] Failed to create data dir: %v", err)
-                return
-        }
-        if err := os.WriteFile(es.filePath(), data, 0644); err != nil {
-                log.Printf("[endpoint] Failed to save state: %v", err)
+        es.mu.RLock()
+        url, source := es.currentURL, es.source
+        es.mu.RUnlock()
+
+        if err := es.store.SaveEndpoint(url, source); err != nil {
+                log.Printf("[endpoint] Failed to save endpoint to store: %v", err)
         }
 }
 
 func (es *EndpointService) load() {
-        data, err := os.ReadFile(es.filePath())
+        if es.store == nil {
+                return
+        }
+        url, source, err := es.store.GetEndpoint()
         if err != nil {
+                log.Printf("[endpoint] Failed to load endpoint from store: %v", err)
                 return
         }
-        var state EndpointState
-        if err := json.Unmarshal(data, &state); err != nil {
+        if url == "" {
                 return
         }
-        es.currentURL = state.URL
-        es.source = state.Source
-        if t, err := time.Parse(time.RFC3339, state.UpdatedAt); err == nil {
-                es.updatedAt = t
-        }
-        log.Printf("[endpoint] Loaded previous state: %s (source: %s)", state.URL, state.Source)
+        es.currentURL = url
+        es.source = source
+        es.updatedAt = time.Now()
+        log.Printf("[endpoint] Loaded previous state: %s (source: %s)", url, source)
 }
 
 func detectLocalIP() string {

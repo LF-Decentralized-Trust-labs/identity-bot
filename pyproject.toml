@@ -13,3 +13,18 @@ dependencies = [
     "pysodium>=0.7.18",
     "simplejson>=3.20.2",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+# Verbose by default so each test_* function is listed individually
+addopts = "-v"
+# Integration tests are excluded from plain `pytest` — run explicitly with:
+#   python -m pytest tests/integration/ -v
+#   AGENT_B_URL=http://127.0.0.1:5001 python -m pytest tests/integration/ -m two_instance -v
+markers = [
+    "integration: live integration tests against a running Identity Agent",
+    "two_instance: requires two running Identity Agent instances (AGENT_B_URL)",
+]

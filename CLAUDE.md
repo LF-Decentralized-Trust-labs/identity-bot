@@ -2,6 +2,28 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Planning Documents (check these at the start of every session)
+
+All planning docs live in `C:\Users\Boogie Bob\Documents\GitHub\strategy\` (also at `https://github.com/bobert600/strategy`).
+
+| Folder | File | Purpose |
+|---|---|---|
+| `1. Strategy/` | `daily.md` | **Session state** — where to resume, current blockers; read this first at session start |
+| `1. Strategy/` | `tasks.md` | **90-day backlog** — all tasks with detailed subtasks; read the relevant section after daily.md |
+| `1. Strategy/` | `roadmap.md` | Strategy only — business model, revenue streams, architecture vision |
+| `1. Strategy/` | `unknowns.md` | Open questions and unresolved problems that need a decision before building |
+| `1. Strategy/` | `tasks-completed.md` | Archive — high-level tasks moved here when fully done |
+| `2. Plans/` | `*.md` | Architecture + technical specs — how features work end-to-end; **every plan doc must have a corresponding high-level task entry and detailed breakdown in tasks.md** |
+| `3. Design/` | `flows.md` | UX flows & use case scenarios |
+| `3. Design/` | `*.md` | UI/UX specifications — visual design, copy, component specs |
+
+**Workflow:**
+- At session start ("Start session!"): read `1. Strategy/daily.md` — it tells you exactly where to resume and which section of tasks.md to read. Report to the user what's on deck. If daily.md has no active tasks, read the top of `1. Strategy/tasks.md` and suggest the next unchecked high-level task, recommending the user add it to today's session.
+- During session: daily.md is NOT updated constantly — it is a session state file, not a live checklist. Work directly from tasks.md checkboxes.
+- At session end ("Stop session!"): update tasks.md checkboxes for everything completed, move any fully-finished high-level tasks to `tasks-completed.md`, then write a fresh resume marker in daily.md (what to pick up, which file/function/section to look at first).
+
+**Plan doc → Task rule (mandatory):** Every new document created in `2. Plans/` MUST have a corresponding entry in the high-level task list in `tasks.md` AND a detailed breakdown section under `## Detailed Breakdown`. Never create a plan document without first adding both. The plan doc is the "why and how"; the task entries are the actionable checkboxes. One cannot exist without the other. See `tasks.md` → "Convention for new high-level tasks" for the full convention.
+
 ## What This Is
 
 The **Identity Agent** is a self-hosted, self-sovereign digital identity infrastructure. It is software that individuals (and eventually organizations) install on their own devices. It is not a platform — it is a user-controlled agent where the cryptographic identity is fully owned and managed by the user under the KERI (Key Event Receipt Infrastructure) protocol. There is no central server, no third-party custody of keys, and no dependency on any external service for core identity operations.
@@ -100,12 +122,12 @@ Every running Identity Agent instance is in exactly one of **3 topological state
 
 | # | Device | Topology | `KeriService` Implementation | How Entered |
 |---|---|---|---|---|
-| 1 | Desktop | Standalone | `DesktopKeriService` | "Create New Identity" on desktop |
-| 2 | Desktop | Remote WITHOUT Keys | `DesktopKeriService` + remote serverUrl to screens | "Connect to Existing" on desktop |
-| 3 | Desktop | Remote WITH Keys | `DesktopKeriService` + remote serverUrl to screens | Planned: migration from Desktop Standalone |
-| 4 | Mobile | Standalone | `MobileStandaloneKeriService` | "Create New Identity" on mobile |
-| 5 | Mobile | Remote WITHOUT Keys | `MobileRemoteKeriService` | "Connect to Existing" on mobile |
-| 6 | Mobile | Remote WITH Keys | Planned extension of `MobileRemoteKeriService` | Migration from Mobile Standalone |
+| 1 | Desktop | Standalone | `DesktopOnDeviceKeriService` | "Create New Identity" on desktop |
+| 2 | Desktop | Remote WITHOUT Keys | `DesktopOnDeviceKeriService` + remote serverUrl to screens | "Connect to Existing" on desktop |
+| 3 | Desktop | Remote WITH Keys | `DesktopOnDeviceKeriService` + remote serverUrl to screens | Planned: migration from Desktop Standalone |
+| 4 | Mobile | Standalone | `MobileOnDeviceKeriService()` | "Create New Identity" on mobile |
+| 5 | Mobile | Remote WITHOUT Keys | `MobileRemoteKeriService(serverUrl:)` | "Connect to Existing" (Rust bridge unavailable) |
+| 6 | Mobile | Remote WITH Keys | `MobileOnDeviceKeriService(pairedServerUrl:)` | "Connect to Existing" (Rust bridge available) |
 
 ### Critical Invariant
 
@@ -212,6 +234,46 @@ Signed-off-by: Rob Andersen rob@antispamguy.org
 ```
 
 Global git config is set to `user.name = "Rob Andersen"` and `user.email = "rob@antispamguy.org"`.
+
+## Flutter Web Compatibility: Conditional Imports
+
+The Flutter UI compiles to **web** (served by the Go backend) and also runs as **native desktop** and **mobile** apps. Several packages use native APIs that don't exist on web. To prevent dart2js compilation failures and runtime crashes, the codebase uses Dart conditional imports.
+
+### The Rule
+
+**Any Dart file that imports a native-only package (`dart:io`, `flutter_rust_bridge`, `flutter_inappwebview`, etc.) must NEVER be directly imported from code that compiles on web.** Instead, use the conditional import pattern:
+
+```dart
+// router file (e.g., sandbox_webview.dart)
+export 'sandbox_webview_stub.dart'
+    if (dart.library.io) 'sandbox_webview_native.dart';
+```
+
+Three files per component:
+1. **Router** (`foo.dart`) — conditional `export`, no logic
+2. **Native** (`foo_native.dart`) — real implementation with native imports
+3. **Stub** (`foo_stub.dart`) — web-safe fallback (no native imports)
+
+Both native and stub must export the **same public API** (same class names, same enums).
+
+### Current Conditional Imports
+
+| Component | Router | Native | Stub | Reason |
+|---|---|---|---|---|
+| KERI Bridge | `keri_bridge.dart` (conditional import in `main.dart`) | `bridge/keri_bridge.dart` | `bridge/keri_bridge_stub.dart` | `flutter_rust_bridge` FFI crashes on web |
+| Sandbox WebView | `widgets/sandbox_webview.dart` | `widgets/sandbox_webview_native.dart` | `widgets/sandbox_webview_stub.dart` | `flutter_inappwebview` native types don't exist on web |
+| Mobile On-Device KERI | (imports bridge stub/native transitively) | `services/mobile_on_device_keri_service.dart` | — | Uses `flutter_rust_bridge` via bridge conditional import |
+
+### Adding New Native-Only Packages
+
+When adding a Flutter package that uses native platform APIs:
+
+1. **Check if it has a web plugin.** Look at `flutter pub get` output or the package's `pubspec.yaml` for web platform support. If it auto-registers a web plugin that crashes, you must exclude it.
+2. **Use platform-specific packages** instead of meta-packages when available (e.g., `flutter_inappwebview_macos` + `flutter_inappwebview_windows` instead of `flutter_inappwebview`). This prevents unwanted web plugin registration.
+3. **Apply the conditional import pattern** if the file using the package references native-only types. The web compiler (dart2js) must never see those types.
+4. **Test with `flutter build web`** — this is the build that catches missing conditional imports.
+
+See ADR-013 for the full rationale and history.
 
 ## Design Conventions
 
