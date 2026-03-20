@@ -10,6 +10,12 @@ enum EntityType {
   organization,
 }
 
+enum HostingChoice {
+  keysHereBrainHere,   // standalone — both keys and agent on this device
+  keysHereBrainRemote, // keys here, agent brain on a remote server
+  keysHereBrainLater,  // mobile-only: standalone now, connect remote brain later
+}
+
 class PreferencesService {
   static const String _modeKey = 'agent_mode';
   static const String _entityTypeKey = 'entity_type';

@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
@@ -8,25 +9,26 @@ import '../services/core_service.dart';
 import '../services/secure_key_store.dart';
 import '../services/backend_process_service.dart';
 import '../config/agent_config.dart';
+import '../services/photo_picker_stub.dart'
+    if (dart.library.html) '../services/photo_picker_web.dart' as photo_picker;
 
 enum WizardStep {
-  seedDisplay,
-  verifySeed,
   profile,
+  seedDisplay,
   creatingIdentity,
   identityCreated,
-  addContacts,
-  setupComplete,
 }
 
 class SetupWizardScreen extends StatefulWidget {
   final VoidCallback onComplete;
   final KeriService keriService;
+  final String? remoteBrainUrl;
 
   const SetupWizardScreen({
     super.key,
     required this.onComplete,
     required this.keriService,
+    this.remoteBrainUrl,
   });
 
   @override
@@ -34,35 +36,32 @@ class SetupWizardScreen extends StatefulWidget {
 }
 
 class _SetupWizardScreenState extends State<SetupWizardScreen> {
-  WizardStep _currentStep = WizardStep.seedDisplay;
+  WizardStep _currentStep = WizardStep.profile;
   List<String> _mnemonic = [];
   String? _aid;
   String? _errorMessage;
 
-  // A3 — verify
+  // Profile step
+  final _displayNameController = TextEditingController();
+  String? _photoBase64;
+  String? _profileFormError;
+
+  // Seed verify (inline on seed display screen)
   int _verifyWordIndex1 = 3;
   int _verifyWordIndex2 = 8;
   final _verifyController1 = TextEditingController();
   final _verifyController2 = TextEditingController();
   bool _verifyError = false;
-  bool _backupVerified = false;
 
-  // A4 — profile
-  final _firstNameController = TextEditingController();
-  final _lastNameController = TextEditingController();
-  final _middleNameController = TextEditingController();
-  final _displayNameController = TextEditingController();
-  String? _profileFormError;
-
-  // A5 — processing steps (0 = not started, 1–4 = each step done)
+  // Processing
   int _processingStep = 0;
 
-  // A6/A8
+  // Identity created
   String _displayName = '';
-  int _contactsAdded = 0;
-
-  // A7 — OOBI for invite
   String? _oobiUrl;
+
+  String get _coreBaseUrl =>
+      widget.remoteBrainUrl ?? AgentConfig.coreBaseUrl;
 
   @override
   void initState() {
@@ -72,12 +71,9 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
 
   @override
   void dispose() {
+    _displayNameController.dispose();
     _verifyController1.dispose();
     _verifyController2.dispose();
-    _firstNameController.dispose();
-    _lastNameController.dispose();
-    _middleNameController.dispose();
-    _displayNameController.dispose();
     super.dispose();
   }
 
@@ -91,30 +87,47 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
     });
   }
 
-  void _proceedToVerify() {
+  // ── Profile submit ──────────────────────────────────────────────────────────
+
+  void _submitProfile() {
+    final name = _displayNameController.text.trim();
+    if (name.isEmpty) {
+      setState(() => _profileFormError = 'Display name is required.');
+      return;
+    }
     setState(() {
+      _displayName = name;
+      _profileFormError = null;
       _verifyController1.clear();
       _verifyController2.clear();
       _verifyError = false;
-      _currentStep = WizardStep.verifySeed;
+      _currentStep = WizardStep.seedDisplay;
     });
   }
 
-  void _verifyAndProceedToProfile() {
+  // ── Seed verify & skip ─────────────────────────────────────────────────────
+
+  void _proceedFromSeed() {
     final word1 = _verifyController1.text.trim().toLowerCase();
     final word2 = _verifyController2.text.trim().toLowerCase();
+
+    // If user left fields blank, treat same as skipping — show warning
+    if (word1.isEmpty && word2.isEmpty) {
+      _skipWithWarning();
+      return;
+    }
+
     if (word1 != _mnemonic[_verifyWordIndex1] ||
         word2 != _mnemonic[_verifyWordIndex2]) {
       setState(() => _verifyError = true);
       return;
     }
-    setState(() {
-      _backupVerified = true;
-      _currentStep = WizardStep.profile;
-    });
+
+    setState(() => _verifyError = false);
+    _startInception();
   }
 
-  Future<void> _skipVerificationWithWarning() async {
+  Future<void> _skipWithWarning() async {
     final confirmed = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
@@ -126,7 +139,8 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
         ),
         title: const Row(
           children: [
-            Icon(Icons.warning_amber_rounded, color: AppColors.corePending, size: 28),
+            Icon(Icons.warning_amber_rounded,
+                color: AppColors.corePending, size: 28),
             SizedBox(width: 12),
             Expanded(
               child: Text(
@@ -197,7 +211,8 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.corePending,
               foregroundColor: AppColors.primary,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8)),
             ),
             child: const Text(
               'I ACCEPT THE RISK',
@@ -213,48 +228,22 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
       ),
     );
     if (confirmed == true) {
-      setState(() {
-        _backupVerified = false;
-        _currentStep = WizardStep.profile;
-      });
+      _startInception();
     }
   }
 
-  void _submitProfile() {
-    final firstName = _firstNameController.text.trim();
-    final lastName = _lastNameController.text.trim();
-    if (firstName.isEmpty) {
-      setState(() => _profileFormError = 'First name is required.');
-      return;
-    }
-    if (lastName.isEmpty) {
-      setState(() => _profileFormError = 'Last name is required.');
-      return;
-    }
-    setState(() => _profileFormError = null);
-    _performInception(firstName: firstName, lastName: lastName);
-  }
+  // ── Inception ───────────────────────────────────────────────────────────────
 
-  Future<void> _performInception({
-    required String firstName,
-    required String lastName,
-  }) async {
-    final middleName = _middleNameController.text.trim();
-    final displayName = _displayNameController.text.trim().isNotEmpty
-        ? _displayNameController.text.trim()
-        : '$firstName $lastName'.trim();
-
-    // Build full name including middle if provided
-    final fullName = middleName.isNotEmpty
-        ? '$firstName $middleName $lastName'.trim()
-        : '$firstName $lastName'.trim();
-
+  void _startInception() {
     setState(() {
       _processingStep = 1;
       _currentStep = WizardStep.creatingIdentity;
       _errorMessage = null;
     });
+    _performInception();
+  }
 
+  Future<void> _performInception() async {
     await Future.delayed(const Duration(milliseconds: 400));
     setState(() => _processingStep = 2);
 
@@ -265,16 +254,15 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
       );
 
       setState(() => _processingStep = 3);
-
       await SecureKeyStore.saveMnemonic(_mnemonic);
 
-      // Save profile to backend (best-effort — non-fatal if it fails)
       try {
-        final coreService = CoreService(baseUrl: AgentConfig.coreBaseUrl);
+        final coreService = CoreService(baseUrl: _coreBaseUrl);
         await coreService.saveProfile(ProfileResponse(
-          fullName: fullName,
-          givenName: firstName,
-          familyName: lastName,
+          fullName: _displayName,
+          givenName: _displayName,
+          familyName: '',
+          photo: _photoBase64 ?? '',
         ));
         coreService.dispose();
       } catch (_) {}
@@ -284,25 +272,23 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
 
       setState(() {
         _aid = result.aid;
-        _displayName = displayName;
         _currentStep = WizardStep.identityCreated;
       });
 
-      // Pre-fetch OOBI for A7 invite flow
       _fetchOobi();
     } catch (e) {
       String errorMsg = e.toString();
       if (errorMsg.contains('KERI_BRIDGE_NOT_AVAILABLE')) {
         final loadReason = RegExp(r'\((.+?)\)\. This is required')
-            .firstMatch(errorMsg)?.group(1) ?? 'unknown';
-        errorMsg =
-            'The native KERI engine could not be loaded on this device. '
+                .firstMatch(errorMsg)
+                ?.group(1) ??
+            'unknown';
+        errorMsg = 'The native KERI engine could not be loaded on this device. '
             'Please rebuild the app using the Codemagic CI/CD pipeline.\n\n'
             'Diagnostic: $loadReason';
       } else if (errorMsg.contains('UnimplementedError') ||
           errorMsg.contains('Placeholder')) {
-        errorMsg =
-            'The native KERI engine is not available in this build. '
+        errorMsg = 'The native KERI engine is not available in this build. '
             'Please rebuild using the Codemagic CI/CD pipeline.';
       } else if (errorMsg.contains('SocketException') ||
           errorMsg.contains('Connection refused') ||
@@ -312,10 +298,9 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
           final backendError = BackendProcessService.instance.startupError;
           errorMsg = backendError ??
               'Cannot connect to the identity backend (127.0.0.1:5000). '
-              'Please ensure Python 3.10+ is installed and try restarting the app.';
+                  'Please ensure Python 3.10+ is installed and try restarting the app.';
         } else {
-          errorMsg =
-              'Cannot reach the Identity Agent server. '
+          errorMsg = 'Cannot reach the Identity Agent server. '
               'Please make sure your server is running and try again.';
         }
       }
@@ -329,12 +314,14 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
 
   Future<void> _fetchOobi() async {
     try {
-      final coreService = CoreService(baseUrl: AgentConfig.coreBaseUrl);
+      final coreService = CoreService(baseUrl: _coreBaseUrl);
       final oobi = await coreService.getOobi();
       coreService.dispose();
       if (mounted) setState(() => _oobiUrl = oobi.oobiUrl);
     } catch (_) {}
   }
+
+  // ── Build ───────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -356,435 +343,26 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
 
   Widget _buildCurrentStep() {
     switch (_currentStep) {
-      case WizardStep.seedDisplay:
-        return _buildSeedDisplay();
-      case WizardStep.verifySeed:
-        return _buildSeedVerify();
       case WizardStep.profile:
         return _buildProfile();
+      case WizardStep.seedDisplay:
+        return _buildSeedDisplay();
       case WizardStep.creatingIdentity:
         return _buildCreating();
       case WizardStep.identityCreated:
         return _buildIdentityCreated();
-      case WizardStep.addContacts:
-        return _buildAddContacts();
-      case WizardStep.setupComplete:
-        return _buildSetupComplete();
     }
   }
 
-  // ── A2: Seed Phrase ──────────────────────────────────────────────────────────
-
-  Widget _buildSeedDisplay() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const SizedBox(height: 8),
-        Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: AppColors.corePending.withOpacity(0.08),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              color: AppColors.corePending.withOpacity(0.3),
-              width: 1,
-            ),
-          ),
-          child: const Row(
-            children: [
-              Icon(Icons.warning_amber_rounded,
-                  color: AppColors.corePending, size: 20),
-              SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  'Your master key — store it safely.',
-                  style: TextStyle(
-                    color: AppColors.corePending,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    fontFamily: 'monospace',
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 12),
-        const Text(
-          'These 12 words are the only way to recover your identity if you lose this device. Never share them. Never store them on this device.',
-          style: TextStyle(
-            color: AppColors.textSecondary,
-            fontSize: 13,
-            height: 1.6,
-            fontFamily: 'monospace',
-          ),
-        ),
-        const SizedBox(height: 20),
-        Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: AppColors.corePending.withOpacity(0.3),
-              width: 1,
-            ),
-          ),
-          child: Column(
-            children: [
-              for (int row = 0; row < 4; row++)
-                Padding(
-                  padding: EdgeInsets.only(bottom: row < 3 ? 12 : 0),
-                  child: Row(
-                    children: [
-                      for (int col = 0; col < 3; col++)
-                        Expanded(
-                          child: Padding(
-                            padding: EdgeInsets.only(left: col > 0 ? 8 : 0),
-                            child: _buildWordCell(row * 3 + col),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 16),
-        _buildBackupOption(
-          icon: '✍️',
-          title: 'Write it on paper',
-          subtitle: 'Keep it somewhere physically safe. Fireproof safe, safety deposit box, etc.',
-        ),
-        const SizedBox(height: 8),
-        _buildBackupOption(
-          icon: '🔄',
-          title: 'Generate a new phrase',
-          subtitle: 'Start over with a different seed phrase.',
-          isAction: true,
-          onTap: () {
-            _generateSeedPhrase();
-            setState(() {});
-          },
-        ),
-        const SizedBox(height: 24),
-        SizedBox(
-          width: double.infinity,
-          child: ElevatedButton(
-            onPressed: _proceedToVerify,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.accent,
-              foregroundColor: AppColors.primary,
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            child: const Text(
-              "I'VE WRITTEN IT DOWN — CONTINUE",
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 1.2,
-                fontFamily: 'monospace',
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildWordCell(int index) {
-    if (index >= _mnemonic.length) return const SizedBox.shrink();
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceLight,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppColors.border, width: 1),
-      ),
-      child: Row(
-        children: [
-          Text(
-            '${index + 1}.',
-            style: const TextStyle(
-              color: AppColors.textMuted,
-              fontSize: 11,
-              fontFamily: 'monospace',
-            ),
-          ),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-              _mnemonic[index],
-              style: const TextStyle(
-                color: AppColors.textPrimary,
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                fontFamily: 'monospace',
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildBackupOption({
-    required String icon,
-    required String title,
-    required String subtitle,
-    bool isAction = false,
-    VoidCallback? onTap,
-  }) {
-    final child = Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppColors.border, width: 1),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(icon, style: const TextStyle(fontSize: 18)),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: TextStyle(
-                    color: isAction ? AppColors.accent : AppColors.textPrimary,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    fontFamily: 'monospace',
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  subtitle,
-                  style: const TextStyle(
-                    color: AppColors.textSecondary,
-                    fontSize: 11,
-                    height: 1.4,
-                    fontFamily: 'monospace',
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-    if (onTap != null) {
-      return GestureDetector(onTap: onTap, child: child);
-    }
-    return child;
-  }
-
-  // ── A3: Verify Backup ────────────────────────────────────────────────────────
-
-  Widget _buildSeedVerify() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'VERIFY BACKUP',
-          style: TextStyle(
-            color: AppColors.textMuted,
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 1.5,
-            fontFamily: 'monospace',
-          ),
-        ),
-        const SizedBox(height: 8),
-        const Text(
-          'Confirm you have backed up your seed phrase by entering the requested words.',
-          style: TextStyle(
-            color: AppColors.textSecondary,
-            fontSize: 13,
-            height: 1.5,
-            fontFamily: 'monospace',
-          ),
-        ),
-        const SizedBox(height: 24),
-        Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: AppColors.border, width: 1),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Word #${_verifyWordIndex1 + 1}',
-                style: const TextStyle(
-                  color: AppColors.textMuted,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 1.0,
-                  fontFamily: 'monospace',
-                ),
-              ),
-              const SizedBox(height: 8),
-              _buildVerifyField(_verifyController1, _verifyWordIndex1 + 1),
-              const SizedBox(height: 20),
-              Text(
-                'Word #${_verifyWordIndex2 + 1}',
-                style: const TextStyle(
-                  color: AppColors.textMuted,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 1.0,
-                  fontFamily: 'monospace',
-                ),
-              ),
-              const SizedBox(height: 8),
-              _buildVerifyField(_verifyController2, _verifyWordIndex2 + 1),
-            ],
-          ),
-        ),
-        if (_verifyError) ...[
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: AppColors.coreInactive.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: AppColors.coreInactive.withOpacity(0.3)),
-            ),
-            child: const Row(
-              children: [
-                Icon(Icons.close, color: AppColors.coreInactive, size: 18),
-                SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Words do not match. Check your backup and try again.',
-                    style: TextStyle(
-                      color: AppColors.coreInactive,
-                      fontSize: 12,
-                      fontFamily: 'monospace',
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-        const SizedBox(height: 24),
-        SizedBox(
-          width: double.infinity,
-          child: ElevatedButton(
-            onPressed: _verifyAndProceedToProfile,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.accent,
-              foregroundColor: AppColors.primary,
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            child: const Text(
-              'VERIFY & CONTINUE',
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 1.5,
-                fontFamily: 'monospace',
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 12),
-        SizedBox(
-          width: double.infinity,
-          child: OutlinedButton(
-            onPressed: _skipVerificationWithWarning,
-            style: OutlinedButton.styleFrom(
-              foregroundColor: AppColors.corePending,
-              side: const BorderSide(color: AppColors.corePending, width: 1),
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            ),
-            child: const Text(
-              'SKIP VERIFICATION',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                letterSpacing: 1.5,
-                fontFamily: 'monospace',
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 12),
-        SizedBox(
-          width: double.infinity,
-          child: TextButton(
-            onPressed: () => setState(() => _currentStep = WizardStep.seedDisplay),
-            child: const Text(
-              'GO BACK',
-              style: TextStyle(
-                color: AppColors.textMuted,
-                fontSize: 12,
-                letterSpacing: 1.0,
-                fontFamily: 'monospace',
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildVerifyField(TextEditingController controller, int wordNum) {
-    return TextField(
-      controller: controller,
-      style: const TextStyle(
-        color: AppColors.textPrimary,
-        fontSize: 16,
-        fontFamily: 'monospace',
-      ),
-      decoration: InputDecoration(
-        hintText: 'Enter word #$wordNum',
-        hintStyle: TextStyle(
-          color: AppColors.textMuted.withOpacity(0.5),
-          fontFamily: 'monospace',
-        ),
-        filled: true,
-        fillColor: AppColors.primary,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: AppColors.border),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: AppColors.border),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: AppColors.accent),
-        ),
-      ),
-      autocorrect: false,
-      enableSuggestions: false,
-    );
-  }
-
-  // ── A4: Profile ──────────────────────────────────────────────────────────────
+  // ── Screen: Profile ─────────────────────────────────────────────────────────
 
   Widget _buildProfile() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        const SizedBox(height: 32),
         const Text(
-          'TELL US YOUR NAME.',
+          'SET UP YOUR PROFILE.',
           style: TextStyle(
             color: AppColors.textPrimary,
             fontSize: 20,
@@ -802,6 +380,72 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
             fontFamily: 'monospace',
           ),
         ),
+        const SizedBox(height: 28),
+        // Photo picker
+        Center(
+          child: GestureDetector(
+            onTap: () async {
+              try {
+                final base64 = await photo_picker.pickPhotoBase64();
+                if (base64 != null && base64.isNotEmpty) {
+                  setState(() => _photoBase64 = base64);
+                }
+              } catch (_) {}
+            },
+            child: Stack(
+              alignment: Alignment.bottomRight,
+              children: [
+                Container(
+                  width: 96,
+                  height: 96,
+                  decoration: BoxDecoration(
+                    color: AppColors.surface,
+                    borderRadius: BorderRadius.circular(48),
+                    border: Border.all(color: AppColors.border, width: 2),
+                  ),
+                  child: _photoBase64 != null
+                      ? ClipRRect(
+                          borderRadius: BorderRadius.circular(48),
+                          child: Image.memory(
+                            base64Decode(_photoBase64!),
+                            fit: BoxFit.cover,
+                          ),
+                        )
+                      : const Icon(
+                          Icons.person_outline,
+                          color: AppColors.textMuted,
+                          size: 48,
+                        ),
+                ),
+                Container(
+                  width: 28,
+                  height: 28,
+                  decoration: BoxDecoration(
+                    color: AppColors.accent,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: AppColors.primary, width: 2),
+                  ),
+                  child: const Icon(
+                    Icons.camera_alt,
+                    color: AppColors.primary,
+                    size: 14,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        const Center(
+          child: Text(
+            'Tap to add a photo (optional)',
+            style: TextStyle(
+              color: AppColors.textMuted,
+              fontSize: 11,
+              fontFamily: 'monospace',
+            ),
+          ),
+        ),
         const SizedBox(height: 24),
         Container(
           padding: const EdgeInsets.all(20),
@@ -813,32 +457,62 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _buildProfileField(
-                controller: _firstNameController,
-                label: 'FIRST NAME',
-                hint: 'First name',
-                required: true,
+              const Row(
+                children: [
+                  Text(
+                    'DISPLAY NAME',
+                    style: TextStyle(
+                      color: AppColors.textMuted,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 1.2,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                  SizedBox(width: 4),
+                  Text(
+                    '*',
+                    style: TextStyle(
+                      color: AppColors.coreInactive,
+                      fontSize: 13,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 16),
-              _buildProfileField(
-                controller: _lastNameController,
-                label: 'LAST NAME',
-                hint: 'Last name',
-                required: true,
-              ),
-              const SizedBox(height: 16),
-              _buildProfileField(
-                controller: _middleNameController,
-                label: 'MIDDLE NAME',
-                hint: 'Optional',
-                required: false,
-              ),
-              const SizedBox(height: 16),
-              _buildProfileField(
+              const SizedBox(height: 8),
+              TextField(
                 controller: _displayNameController,
-                label: 'DISPLAY NAME',
-                hint: 'What contacts will see (defaults to First Last)',
-                required: false,
+                style: const TextStyle(
+                  color: AppColors.textPrimary,
+                  fontSize: 15,
+                  fontFamily: 'monospace',
+                ),
+                decoration: InputDecoration(
+                  hintText: 'What your contacts will see',
+                  hintStyle: TextStyle(
+                    color: AppColors.textMuted.withOpacity(0.5),
+                    fontFamily: 'monospace',
+                    fontSize: 13,
+                  ),
+                  filled: true,
+                  fillColor: AppColors.primary,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(color: AppColors.border),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(color: AppColors.border),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(color: AppColors.accent),
+                  ),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                ),
+                autocorrect: false,
               ),
             ],
           ),
@@ -854,7 +528,8 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
             ),
             child: Row(
               children: [
-                const Icon(Icons.error_outline, color: AppColors.coreInactive, size: 18),
+                const Icon(Icons.error_outline,
+                    color: AppColors.coreInactive, size: 18),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -902,7 +577,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
               ),
             ),
             child: const Text(
-              'SAVE & CREATE IDENTITY',
+              'CONTINUE',
               style: TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.w700,
@@ -912,11 +587,246 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
             ),
           ),
         ),
+        const SizedBox(height: 32),
+      ],
+    );
+  }
+
+  // ── Screen: Seed Phrase (with inline verify) ────────────────────────────────
+
+  Widget _buildSeedDisplay() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 8),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: AppColors.corePending.withOpacity(0.08),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: AppColors.corePending.withOpacity(0.3),
+              width: 1,
+            ),
+          ),
+          child: const Row(
+            children: [
+              Icon(Icons.warning_amber_rounded,
+                  color: AppColors.corePending, size: 20),
+              SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Your master key — store it safely.',
+                  style: TextStyle(
+                    color: AppColors.corePending,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
         const SizedBox(height: 12),
+        const Text(
+          'These 12 words are the only way to recover your identity if you lose this device. Never share them. Never store them on this device.',
+          style: TextStyle(
+            color: AppColors.textSecondary,
+            fontSize: 13,
+            height: 1.6,
+            fontFamily: 'monospace',
+          ),
+        ),
+        const SizedBox(height: 20),
+        // Word grid
+        Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: AppColors.corePending.withOpacity(0.3),
+              width: 1,
+            ),
+          ),
+          child: Column(
+            children: [
+              for (int row = 0; row < 4; row++)
+                Padding(
+                  padding: EdgeInsets.only(bottom: row < 3 ? 12 : 0),
+                  child: Row(
+                    children: [
+                      for (int col = 0; col < 3; col++)
+                        Expanded(
+                          child: Padding(
+                            padding: EdgeInsets.only(left: col > 0 ? 8 : 0),
+                            child: _buildWordCell(row * 3 + col),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        _buildBackupTip(
+          icon: '✍️',
+          title: 'Write it on paper',
+          subtitle:
+              'Keep it somewhere physically safe. Fireproof safe, safety deposit box, etc.',
+        ),
+        const SizedBox(height: 8),
+        GestureDetector(
+          onTap: () {
+            _generateSeedPhrase();
+            setState(() {
+              _verifyController1.clear();
+              _verifyController2.clear();
+              _verifyError = false;
+            });
+          },
+          child: _buildBackupTip(
+            icon: '🔄',
+            title: 'Generate a new phrase',
+            subtitle: 'Start over with a different seed phrase.',
+            isAction: true,
+          ),
+        ),
+        const SizedBox(height: 24),
+        // Inline verify section
+        Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: AppColors.border, width: 1),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'CONFIRM YOU SAVED IT',
+                style: TextStyle(
+                  color: AppColors.textMuted,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 1.5,
+                  fontFamily: 'monospace',
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Enter word #${_verifyWordIndex1 + 1} and word #${_verifyWordIndex2 + 1} from your seed phrase.',
+                style: const TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 12,
+                  height: 1.5,
+                  fontFamily: 'monospace',
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Word #${_verifyWordIndex1 + 1}',
+                style: const TextStyle(
+                  color: AppColors.textMuted,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 1.0,
+                  fontFamily: 'monospace',
+                ),
+              ),
+              const SizedBox(height: 6),
+              _buildVerifyField(_verifyController1, _verifyWordIndex1 + 1),
+              const SizedBox(height: 14),
+              Text(
+                'Word #${_verifyWordIndex2 + 1}',
+                style: const TextStyle(
+                  color: AppColors.textMuted,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 1.0,
+                  fontFamily: 'monospace',
+                ),
+              ),
+              const SizedBox(height: 6),
+              _buildVerifyField(_verifyController2, _verifyWordIndex2 + 1),
+              if (_verifyError) ...[
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: AppColors.coreInactive.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                        color: AppColors.coreInactive.withOpacity(0.3)),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(Icons.close, color: AppColors.coreInactive, size: 16),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Words do not match. Check your backup and try again.',
+                          style: TextStyle(
+                            color: AppColors.coreInactive,
+                            fontSize: 11,
+                            fontFamily: 'monospace',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
+        SizedBox(
+          width: double.infinity,
+          child: ElevatedButton(
+            onPressed: _proceedFromSeed,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.accent,
+              foregroundColor: AppColors.primary,
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            child: const Text(
+              "I'VE BACKED IT UP — CONTINUE",
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1.2,
+                fontFamily: 'monospace',
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
         SizedBox(
           width: double.infinity,
           child: TextButton(
-            onPressed: () => setState(() => _currentStep = WizardStep.verifySeed),
+            onPressed: _skipWithWarning,
+            child: const Text(
+              'Skip backup verification (not recommended)',
+              style: TextStyle(
+                color: AppColors.corePending,
+                fontSize: 11,
+                fontFamily: 'monospace',
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        SizedBox(
+          width: double.infinity,
+          child: TextButton(
+            onPressed: () => setState(() => _currentStep = WizardStep.profile),
             child: const Text(
               'GO BACK',
               style: TextStyle(
@@ -928,82 +838,131 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
             ),
           ),
         ),
+        const SizedBox(height: 32),
       ],
     );
   }
 
-  Widget _buildProfileField({
-    required TextEditingController controller,
-    required String label,
-    required String hint,
-    required bool required,
-  }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Text(
-              label,
+  Widget _buildWordCell(int index) {
+    if (index >= _mnemonic.length) return const SizedBox.shrink();
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceLight,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppColors.border, width: 1),
+      ),
+      child: Row(
+        children: [
+          Text(
+            '${index + 1}.',
+            style: const TextStyle(
+              color: AppColors.textMuted,
+              fontSize: 11,
+              fontFamily: 'monospace',
+            ),
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              _mnemonic[index],
               style: const TextStyle(
-                color: AppColors.textMuted,
-                fontSize: 11,
+                color: AppColors.textPrimary,
+                fontSize: 13,
                 fontWeight: FontWeight.w600,
-                letterSpacing: 1.2,
                 fontFamily: 'monospace',
               ),
             ),
-            if (required) ...[
-              const SizedBox(width: 4),
-              const Text(
-                '*',
-                style: TextStyle(
-                  color: AppColors.coreInactive,
-                  fontSize: 13,
-                  fontFamily: 'monospace',
-                ),
-              ),
-            ],
-          ],
-        ),
-        const SizedBox(height: 8),
-        TextField(
-          controller: controller,
-          style: const TextStyle(
-            color: AppColors.textPrimary,
-            fontSize: 15,
-            fontFamily: 'monospace',
           ),
-          decoration: InputDecoration(
-            hintText: hint,
-            hintStyle: TextStyle(
-              color: AppColors.textMuted.withOpacity(0.5),
-              fontFamily: 'monospace',
-              fontSize: 13,
-            ),
-            filled: true,
-            fillColor: AppColors.primary,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: AppColors.border),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: AppColors.border),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: AppColors.accent),
-            ),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          ),
-          autocorrect: false,
-        ),
-      ],
+        ],
+      ),
     );
   }
 
-  // ── A5: Creating Identity (Processing) ──────────────────────────────────────
+  Widget _buildBackupTip({
+    required String icon,
+    required String title,
+    required String subtitle,
+    bool isAction = false,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.border, width: 1),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(icon, style: const TextStyle(fontSize: 18)),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    color: isAction ? AppColors.accent : AppColors.textPrimary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: const TextStyle(
+                    color: AppColors.textSecondary,
+                    fontSize: 11,
+                    height: 1.4,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildVerifyField(TextEditingController controller, int wordNum) {
+    return TextField(
+      controller: controller,
+      style: const TextStyle(
+        color: AppColors.textPrimary,
+        fontSize: 15,
+        fontFamily: 'monospace',
+      ),
+      decoration: InputDecoration(
+        hintText: 'Enter word #$wordNum',
+        hintStyle: TextStyle(
+          color: AppColors.textMuted.withOpacity(0.5),
+          fontFamily: 'monospace',
+        ),
+        filled: true,
+        fillColor: AppColors.primary,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: const BorderSide(color: AppColors.border),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: const BorderSide(color: AppColors.border),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: const BorderSide(color: AppColors.accent),
+        ),
+      ),
+      autocorrect: false,
+      enableSuggestions: false,
+    );
+  }
+
+  // ── Screen: Creating Identity ───────────────────────────────────────────────
 
   Widget _buildCreating() {
     return Column(
@@ -1051,7 +1010,8 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
             children: [
               _buildProcessingRow(1, 'Generating your keys...'),
               const SizedBox(height: 14),
-              _buildProcessingRow(2, 'Creating your identity on the network...'),
+              _buildProcessingRow(
+                  2, 'Creating your identity on the network...'),
               const SizedBox(height: 14),
               _buildProcessingRow(3, 'Saving keys to secure storage...'),
               const SizedBox(height: 14),
@@ -1090,9 +1050,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
           child: Text(
             label,
             style: TextStyle(
-              color: done || active
-                  ? AppColors.textPrimary
-                  : AppColors.textMuted,
+              color: done || active ? AppColors.textPrimary : AppColors.textMuted,
               fontSize: 13,
               fontFamily: 'monospace',
               fontWeight: done || active ? FontWeight.w600 : FontWeight.w400,
@@ -1103,31 +1061,36 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
     );
   }
 
-  // ── A6: Identity Created ─────────────────────────────────────────────────────
+  // ── Screen: Identity Created (+ contacts) ───────────────────────────────────
 
   Widget _buildIdentityCreated() {
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
         const SizedBox(height: 16),
+        // Avatar
         Container(
-          width: 80,
-          height: 80,
+          width: 88,
+          height: 88,
           decoration: BoxDecoration(
             color: AppColors.coreActive.withOpacity(0.12),
-            borderRadius: BorderRadius.circular(40),
+            borderRadius: BorderRadius.circular(44),
             border: Border.all(
               color: AppColors.coreActive.withOpacity(0.3),
               width: 2,
             ),
           ),
-          child: const Icon(
-            Icons.person,
-            color: AppColors.coreActive,
-            size: 44,
-          ),
+          child: _photoBase64 != null
+              ? ClipRRect(
+                  borderRadius: BorderRadius.circular(44),
+                  child: Image.memory(
+                    base64Decode(_photoBase64!),
+                    fit: BoxFit.cover,
+                  ),
+                )
+              : const Icon(Icons.person, color: AppColors.coreActive, size: 44),
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: 16),
         Text(
           _displayName.isNotEmpty ? _displayName : 'Your Identity',
           style: const TextStyle(
@@ -1137,19 +1100,20 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
             fontFamily: 'monospace',
           ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 6),
         const Text(
-          'Your identity is active.',
+          'Your identity is live and protected.',
           style: TextStyle(
             color: AppColors.coreActive,
-            fontSize: 14,
+            fontSize: 13,
             fontFamily: 'monospace',
           ),
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 20),
+        // AID display
         Container(
           width: double.infinity,
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
             color: AppColors.surface,
             borderRadius: BorderRadius.circular(12),
@@ -1168,7 +1132,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
                   fontFamily: 'monospace',
                 ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
               SelectableText(
                 _aid ?? '',
                 style: const TextStyle(
@@ -1178,7 +1142,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
                   height: 1.5,
                 ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
               const Text(
                 'This is your permanent identifier. Share it as your digital address.',
                 style: TextStyle(
@@ -1191,51 +1155,8 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
             ],
           ),
         ),
-        const SizedBox(height: 28),
-        SizedBox(
-          width: double.infinity,
-          child: ElevatedButton(
-            onPressed: () => setState(() => _currentStep = WizardStep.addContacts),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.accent,
-              foregroundColor: AppColors.primary,
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            child: const Text(
-              'CONTINUE SETUP',
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 1.5,
-                fontFamily: 'monospace',
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  // ── A7: Add Contacts ─────────────────────────────────────────────────────────
-
-  Widget _buildAddContacts() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'ADD YOUR FIRST CONTACTS.',
-          style: TextStyle(
-            color: AppColors.textPrimary,
-            fontSize: 20,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 1.2,
-            fontFamily: 'monospace',
-          ),
-        ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 20),
+        // Contacts invite section
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
@@ -1243,11 +1164,11 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: AppColors.border, width: 1),
           ),
-          child: const Column(
+          child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'Add contacts to protect your identity.',
+              const Text(
+                'Invite trusted contacts',
                 style: TextStyle(
                   color: AppColors.textPrimary,
                   fontSize: 14,
@@ -1255,9 +1176,9 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
                   fontFamily: 'monospace',
                 ),
               ),
-              SizedBox(height: 12),
-              Text(
-                'Your Identity Agent works best when trusted people you know are also using it. Your agents help each other behind the scenes — making each identity more trusted and easier to recover if something goes wrong.',
+              const SizedBox(height: 8),
+              const Text(
+                'Contacts help verify your identity is genuine and can help you recover access if you ever get locked out. We recommend at least 3 — 7 is ideal.',
                 style: TextStyle(
                   color: AppColors.textSecondary,
                   fontSize: 12,
@@ -1265,53 +1186,40 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
                   fontFamily: 'monospace',
                 ),
               ),
-              SizedBox(height: 12),
-              _BulletPoint(text: 'They help verify your identity is genuine.'),
-              SizedBox(height: 6),
-              _BulletPoint(text: 'If you ever get locked out, trusted contacts can help you recover.'),
-              SizedBox(height: 12),
-              Text(
-                'We recommend inviting at least 3 contacts now. 7 is ideal.',
-                style: TextStyle(
-                  color: AppColors.accent,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  fontFamily: 'monospace',
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 12),
-        Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: AppColors.coreActive.withOpacity(0.06),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              color: AppColors.coreActive.withOpacity(0.2),
-              width: 1,
-            ),
-          ),
-          child: const Row(
-            children: [
-              Icon(Icons.shield_outlined, color: AppColors.coreActive, size: 18),
-              SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  'Grape ID is already protecting your identity. Adding personal contacts makes it even stronger.',
-                  style: TextStyle(
-                    color: AppColors.coreActive,
-                    fontSize: 11,
-                    fontFamily: 'monospace',
-                    height: 1.4,
+              const SizedBox(height: 6),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                decoration: BoxDecoration(
+                  color: AppColors.coreActive.withOpacity(0.06),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: AppColors.coreActive.withOpacity(0.2),
                   ),
                 ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.shield_outlined,
+                        color: AppColors.coreActive, size: 16),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Grape ID is already protecting your identity. Personal contacts make it even stronger.',
+                        style: TextStyle(
+                          color: AppColors.coreActive,
+                          fontSize: 11,
+                          fontFamily: 'monospace',
+                          height: 1.4,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 20),
         SizedBox(
           width: double.infinity,
           child: ElevatedButton(
@@ -1325,32 +1233,32 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
               ),
             ),
             child: const Text(
-              'INVITE CONTACTS',
+              'INVITE YOUR FIRST CONTACTS',
               style: TextStyle(
-                fontSize: 14,
+                fontSize: 13,
                 fontWeight: FontWeight.w700,
-                letterSpacing: 1.5,
+                letterSpacing: 1.2,
                 fontFamily: 'monospace',
               ),
             ),
           ),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 10),
         SizedBox(
           width: double.infinity,
           child: TextButton(
-            onPressed: () => setState(() => _currentStep = WizardStep.setupComplete),
+            onPressed: widget.onComplete,
             child: const Text(
-              'SKIP FOR NOW',
+              'Skip — go to dashboard',
               style: TextStyle(
                 color: AppColors.textMuted,
                 fontSize: 12,
-                letterSpacing: 1.0,
                 fontFamily: 'monospace',
               ),
             ),
           ),
         ),
+        const SizedBox(height: 32),
       ],
     );
   }
@@ -1380,7 +1288,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Share your Identity Address (OOBI) with people you trust:',
+              'Share your Identity Address with people you trust:',
               style: TextStyle(
                 color: AppColors.textSecondary,
                 fontSize: 12,
@@ -1412,7 +1320,6 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
               onPressed: () async {
                 await Clipboard.setData(ClipboardData(text: _oobiUrl!));
                 if (ctx.mounted) Navigator.of(ctx).pop();
-                setState(() => _contactsAdded++);
               },
               child: const Text(
                 'COPY & CLOSE',
@@ -1426,7 +1333,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
           TextButton(
             onPressed: () {
               Navigator.of(ctx).pop();
-              setState(() => _currentStep = WizardStep.setupComplete);
+              widget.onComplete();
             },
             child: const Text(
               'DONE',
@@ -1438,132 +1345,6 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
           ),
         ],
       ),
-    );
-  }
-
-  // ── A8: Setup Complete ───────────────────────────────────────────────────────
-
-  Widget _buildSetupComplete() {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        const SizedBox(height: 16),
-        const Text(
-          "YOU'RE ALL SET.",
-          style: TextStyle(
-            color: AppColors.coreActive,
-            fontSize: 24,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 2.0,
-            fontFamily: 'monospace',
-          ),
-        ),
-        const SizedBox(height: 24),
-        Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: AppColors.border, width: 1),
-          ),
-          child: Column(
-            children: [
-              _buildSummaryRow(true, 'Identity created'),
-              const SizedBox(height: 12),
-              _buildSummaryRow(true, 'Keys secured on this device'),
-              const SizedBox(height: 12),
-              _buildSummaryRow(
-                _backupVerified,
-                _backupVerified
-                    ? 'Seed phrase backed up'
-                    : 'Backup not verified — consider doing this soon',
-              ),
-              const SizedBox(height: 12),
-              _buildSummaryRow(true, 'Identity protection active (Grape ID)'),
-              const SizedBox(height: 12),
-              _buildSummaryRow(
-                _contactsAdded > 0,
-                _contactsAdded > 0
-                    ? 'Contacts: $_contactsAdded added'
-                    : 'No contacts yet — add some when you\'re ready',
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 32),
-        SizedBox(
-          width: double.infinity,
-          child: ElevatedButton(
-            onPressed: widget.onComplete,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.accent,
-              foregroundColor: AppColors.primary,
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            child: const Text(
-              'OPEN DASHBOARD',
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 1.5,
-                fontFamily: 'monospace',
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildSummaryRow(bool ok, String label) {
-    return Row(
-      children: [
-        Icon(
-          ok ? Icons.check_circle : Icons.warning_amber_rounded,
-          color: ok ? AppColors.coreActive : AppColors.corePending,
-          size: 20,
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Text(
-            label,
-            style: TextStyle(
-              color: ok ? AppColors.textPrimary : AppColors.corePending,
-              fontSize: 13,
-              fontFamily: 'monospace',
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _BulletPoint extends StatelessWidget {
-  final String text;
-  const _BulletPoint({required this.text});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text('• ', style: TextStyle(color: AppColors.textMuted, fontFamily: 'monospace')),
-        Expanded(
-          child: Text(
-            text,
-            style: const TextStyle(
-              color: AppColors.textSecondary,
-              fontSize: 12,
-              height: 1.5,
-              fontFamily: 'monospace',
-            ),
-          ),
-        ),
-      ],
     );
   }
 }

@@ -22,6 +22,8 @@ import 'screens/mobile/mobile_app.dart';
 import 'screens/mobile/mobile_mode_selection_screen.dart';
 import 'screens/mobile/mobile_connect_server_screen.dart';
 import 'screens/mobile/mobile_setup_wizard_screen.dart';
+import 'screens/hosting_choice_screen.dart';
+import 'screens/mobile/mobile_hosting_choice_screen.dart';
 
 String? _backendStartupError;
 Future<bool>? _backendStartupFuture;
@@ -71,6 +73,7 @@ class IdentityAgentApp extends StatelessWidget {
 enum OnboardingStep {
   loading,
   modeSelection,
+  hostingChoice,
   connectServer,
   setupWizard,
   dashboard,
@@ -98,6 +101,7 @@ class _AgentRouterState extends State<AgentRouter> {
   AgentMode? _selectedMode;
   EntityType? _selectedEntityType;
   String? _serverUrl;
+  String? _remoteBrainUrl;
   bool _showedBackendError = false;
 
   @override
@@ -271,11 +275,16 @@ class _AgentRouterState extends State<AgentRouter> {
     if (mode == AgentMode.createNew) {
       _selectedEntityType = EntityType.individual;
       await PreferencesService.setEntityType(EntityType.individual);
-      await _initializeServiceForMode(AgentMode.createNew, null);
-      setState(() => _step = OnboardingStep.setupWizard);
+      setState(() => _step = OnboardingStep.hostingChoice);
     } else {
       setState(() => _step = OnboardingStep.connectServer);
     }
+  }
+
+  void _onHostingChosen(HostingChoice choice, {String? remoteBrainUrl}) async {
+    _remoteBrainUrl = remoteBrainUrl;
+    await _initializeServiceForMode(AgentMode.createNew, null);
+    setState(() => _step = OnboardingStep.setupWizard);
   }
 
   void _onServerConnected(String serverUrl) async {
@@ -560,6 +569,12 @@ class _AgentRouterState extends State<AgentRouter> {
         }
         return ModeSelectionScreen(onModeSelected: _onModeSelected);
 
+      case OnboardingStep.hostingChoice:
+        if (isMobile) {
+          return MobileHostingChoiceScreen(onHostingChosen: _onHostingChosen);
+        }
+        return HostingChoiceScreen(onHostingChosen: _onHostingChosen);
+
       case OnboardingStep.connectServer:
         if (isMobile) {
           return MobileConnectServerScreen(
@@ -577,11 +592,13 @@ class _AgentRouterState extends State<AgentRouter> {
           return MobileSetupWizardScreen(
             onComplete: _onSetupComplete,
             keriService: _keriService!,
+            remoteBrainUrl: _remoteBrainUrl,
           );
         }
         return SetupWizardScreen(
           onComplete: _onSetupComplete,
           keriService: _keriService!,
+          remoteBrainUrl: _remoteBrainUrl,
         );
 
       case OnboardingStep.dashboard:
