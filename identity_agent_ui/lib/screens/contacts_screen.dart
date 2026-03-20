@@ -182,7 +182,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                           fontFamily: 'monospace',
                         ),
                         filled: true,
-                        fillColor: AppColors.primary,
+                        fillColor: AppColors.surfaceLight,
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8),
                           borderSide: const BorderSide(color: AppColors.border),
@@ -401,7 +401,6 @@ class _ContactsScreenState extends State<ContactsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.primary,
       body: SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,

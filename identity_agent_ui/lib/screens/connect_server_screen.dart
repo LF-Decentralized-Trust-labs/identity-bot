@@ -207,7 +207,7 @@ class _ConnectServerScreenState extends State<ConnectServerScreen> {
 
   Widget _buildIntroScreen() {
     return Scaffold(
-      backgroundColor: AppColors.primary,
+      backgroundColor: AppColors.background,
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
@@ -318,7 +318,7 @@ class _ConnectServerScreenState extends State<ConnectServerScreen> {
 
   Widget _buildEnterUrlScreen() {
     return Scaffold(
-      backgroundColor: AppColors.primary,
+      backgroundColor: AppColors.background,
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
@@ -547,7 +547,7 @@ class _ConnectServerScreenState extends State<ConnectServerScreen> {
 
   Widget _buildProcessingScreen() {
     return Scaffold(
-      backgroundColor: AppColors.primary,
+      backgroundColor: AppColors.background,
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
@@ -660,7 +660,7 @@ class _ConnectServerScreenState extends State<ConnectServerScreen> {
     final displayUrl = url.length > 40 ? '${url.substring(0, 40)}...' : url;
 
     return Scaffold(
-      backgroundColor: AppColors.primary,
+      backgroundColor: AppColors.background,
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(

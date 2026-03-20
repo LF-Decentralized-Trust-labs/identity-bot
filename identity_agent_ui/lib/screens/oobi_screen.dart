@@ -85,7 +85,6 @@ class _OobiScreenState extends State<OobiScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.primary,
       body: SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -305,7 +304,7 @@ class _OobiScreenState extends State<OobiScreen> {
             width: double.infinity,
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: AppColors.primary,
+              color: AppColors.surfaceLight,
               borderRadius: BorderRadius.circular(8),
               border: Border.all(color: AppColors.border, width: 1),
             ),
@@ -368,7 +367,7 @@ class _OobiScreenState extends State<OobiScreen> {
             width: double.infinity,
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: AppColors.primary,
+              color: AppColors.surfaceLight,
               borderRadius: BorderRadius.circular(8),
               border: Border.all(color: AppColors.border, width: 1),
             ),
