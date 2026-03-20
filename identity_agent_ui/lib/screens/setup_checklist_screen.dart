@@ -4,6 +4,7 @@ import '../services/setup_task_service.dart';
 import '../services/preferences_service.dart';
 import '../services/keri_service.dart';
 import '../services/core_service.dart';
+import '../services/enclave_service.dart';
 import '../services/secure_key_store.dart';
 import 'hosting_choice_screen.dart';
 import 'desktop/coming_soon_screen.dart';
@@ -31,6 +32,7 @@ class SetupChecklistScreen extends StatefulWidget {
 class _SetupChecklistScreenState extends State<SetupChecklistScreen> {
   Map<SetupTask, bool> _state = {};
   bool _loading = true;
+  EnclaveStatusResponse? _enclaveStatus;
 
   bool get _needsRemoteBrain =>
       widget.hostingChoice == HostingChoice.keysHereBrainLater;
@@ -379,6 +381,8 @@ class _SetupChecklistScreenState extends State<SetupChecklistScreen> {
         await _doConnectRemoteBrain();
       case SetupTask.backupSeedPhrase:
         await _doBackupSeedPhrase();
+      case SetupTask.secureKeyStorage:
+        await _doSecureKeyStorage();
       case SetupTask.inviteContacts:
         await _doInviteContacts();
       case SetupTask.completeProfile:
@@ -890,6 +894,206 @@ class _SetupChecklistScreenState extends State<SetupChecklistScreen> {
     }
   }
 
+  Future<void> _doSecureKeyStorage() async {
+    // Load enclave status if not already available
+    if (_enclaveStatus == null) {
+      try {
+        final svc = EnclaveService(
+          coreService: CoreService(baseUrl: widget.serverUrl ?? 'http://127.0.0.1:5000'),
+        );
+        final status = await svc.detect();
+        if (mounted) setState(() => _enclaveStatus = status);
+      } catch (_) {}
+    }
+
+    final status = _enclaveStatus;
+    if (status == null) return;
+
+    if (status.hardwareBacked) {
+      // Already hardware-backed — mark complete and confirm to user
+      await SetupTaskService.markComplete(SetupTask.secureKeyStorage);
+      await _load();
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: AppColors.surface,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: BorderSide(color: AppColors.coreActive.withOpacity(0.4)),
+          ),
+          title: Row(
+            children: [
+              const Icon(Icons.shield, color: AppColors.coreActive, size: 20),
+              const SizedBox(width: 8),
+              const Text(
+                'KEYS SECURED',
+                style: TextStyle(
+                  color: AppColors.textPrimary,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.0,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ],
+          ),
+          content: Text(
+            'Your signing keys are protected by ${status.backingLabel}.',
+            style: const TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: 13,
+              fontFamily: 'monospace',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Done', style: TextStyle(color: AppColors.accent)),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    // Not hardware-backed — show options
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: AppColors.border),
+        ),
+        title: Row(
+          children: [
+            const Icon(Icons.shield_outlined, color: Color(0xFFFFB74D), size: 20),
+            const SizedBox(width: 8),
+            const Expanded(
+              child: Text(
+                'KEY STORAGE OPTIONS',
+                style: TextStyle(
+                  color: AppColors.textPrimary,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.0,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Current: ${status.backingLabel}',
+              style: const TextStyle(
+                color: AppColors.textPrimary,
+                fontSize: 13,
+                fontFamily: 'monospace',
+              ),
+            ),
+            if (status.tpmPresent == true && status.tpmEnabled == false) ...[
+              const SizedBox(height: 8),
+              const Text(
+                'A TPM was detected but is not enabled. Enable it in BIOS/UEFI for hardware protection.',
+                style: TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 12,
+                  fontFamily: 'monospace',
+                  height: 1.5,
+                ),
+              ),
+            ],
+            const SizedBox(height: 16),
+            _optionRow(Icons.devices_other, 'Migrate to different device',
+                'Use a device with a hardware secure enclave. This task will remain open as a reminder.'),
+            const SizedBox(height: 10),
+            _optionRow(Icons.cloud_outlined, 'Cloud HSM — Coming Soon',
+                'Delegate to a hardware-backed cloud HSM (future release).', disabled: true),
+            const SizedBox(height: 10),
+            _optionRow(Icons.usb, 'YubiKey — Coming Soon',
+                'Hardware token for multi-factor signing (future release).', disabled: true),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Keep open', style: TextStyle(color: AppColors.textMuted)),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              // Mark complete — user acknowledged; task stays relevant but cleared
+              await SetupTaskService.markComplete(SetupTask.secureKeyStorage);
+              await _load();
+            },
+            child: const Text('Continue with software', style: TextStyle(color: AppColors.accent)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _optionRow(IconData icon, String title, String subtitle, {bool disabled = false}) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 18, color: disabled ? AppColors.textMuted : AppColors.accent),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: TextStyle(
+                        color: disabled ? AppColors.textMuted : AppColors.textPrimary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  ),
+                  if (disabled)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: AppColors.border,
+                        borderRadius: BorderRadius.circular(3),
+                      ),
+                      child: const Text('SOON',
+                          style: TextStyle(
+                            color: AppColors.textMuted,
+                            fontSize: 8,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 1.0,
+                          )),
+                    ),
+                ],
+              ),
+              Text(
+                subtitle,
+                style: const TextStyle(
+                  color: AppColors.textMuted,
+                  fontSize: 11,
+                  fontFamily: 'monospace',
+                  height: 1.4,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
   Future<void> _doInviteContacts() async {
     String? oobiUrl;
     try {
@@ -1004,6 +1208,8 @@ class _SetupChecklistScreenState extends State<SetupChecklistScreen> {
         return Icons.key_outlined;
       case SetupTask.setupAuthentication:
         return Icons.lock_outlined;
+      case SetupTask.secureKeyStorage:
+        return Icons.shield_outlined;
       case SetupTask.inviteContacts:
         return Icons.people_outline;
       case SetupTask.connectEmail:

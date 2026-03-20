@@ -8,6 +8,8 @@ import '../services/keri_service.dart';
 import '../services/core_service.dart';
 import '../services/secure_key_store.dart';
 import '../services/backend_process_service.dart';
+import '../services/enclave_service.dart';
+import '../services/setup_task_service.dart';
 import '../config/agent_config.dart';
 import '../services/photo_picker_stub.dart'
     if (dart.library.html) '../services/photo_picker_web.dart' as photo_picker;
@@ -55,6 +57,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
 
   // Processing
   int _processingStep = 0;
+  EnclaveStatusResponse? _enclaveStatus;
 
   // Identity created
   String _displayName = '';
@@ -269,6 +272,27 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
 
       setState(() => _processingStep = 4);
       await Future.delayed(const Duration(milliseconds: 700));
+
+      // Step 5 — check hardware security enclave
+      setState(() => _processingStep = 5);
+      try {
+        final enclaveService = EnclaveService(
+          coreService: CoreService(baseUrl: _coreBaseUrl),
+        );
+        _enclaveStatus = await enclaveService.detect();
+      } catch (_) {
+        _enclaveStatus = EnclaveStatusResponse(
+          hardwareBacked: false,
+          backingType: 'software',
+          backingLabel: 'Software (detection failed)',
+        );
+      }
+
+      // Auto-complete secure key storage task if hardware-backed
+      if (_enclaveStatus?.hardwareBacked == true) {
+        await SetupTaskService.markComplete(SetupTask.secureKeyStorage);
+      }
+      await Future.delayed(const Duration(milliseconds: 600));
 
       setState(() {
         _aid = result.aid;
@@ -1016,6 +1040,8 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
               _buildProcessingRow(3, 'Saving keys to secure storage...'),
               const SizedBox(height: 14),
               _buildProcessingRow(4, 'Enrolling in identity protection...'),
+              const SizedBox(height: 14),
+              _buildProcessingRow(5, 'Checking hardware security...'),
             ],
           ),
         ),
@@ -1058,6 +1084,227 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  // ── Enclave badge ────────────────────────────────────────────────────────────
+
+  Widget _buildEnclaveBadge() {
+    final status = _enclaveStatus!;
+    final isHardware = status.hardwareBacked;
+    final badgeColor = isHardware ? AppColors.coreActive : const Color(0xFFFFB74D);
+    final badgeIcon = isHardware ? Icons.shield : Icons.shield_outlined;
+
+    return GestureDetector(
+      onTap: isHardware ? null : _showEnclaveOptions,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: badgeColor.withOpacity(0.10),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: badgeColor.withOpacity(0.35), width: 1),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(badgeIcon, color: badgeColor, size: 18),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                status.backingLabel,
+                style: TextStyle(
+                  color: badgeColor,
+                  fontSize: 12,
+                  fontFamily: 'monospace',
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            if (!isHardware) ...[
+              const SizedBox(width: 6),
+              Icon(Icons.chevron_right, color: badgeColor, size: 16),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showEnclaveOptions() {
+    final status = _enclaveStatus!;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) => Container(
+        decoration: const BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.border,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            const Text(
+              'KEY STORAGE OPTIONS',
+              style: TextStyle(
+                color: AppColors.textMuted,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1.5,
+                fontFamily: 'monospace',
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Current backing: ${status.backingLabel}',
+              style: const TextStyle(
+                color: AppColors.textPrimary,
+                fontSize: 14,
+                fontFamily: 'monospace',
+              ),
+            ),
+            if (status.tpmPresent == true && status.tpmEnabled == false) ...[
+              const SizedBox(height: 8),
+              const Text(
+                'A TPM chip was detected but is not enabled in your OS. Enable it in your BIOS/UEFI settings for stronger protection.',
+                style: TextStyle(
+                  color: AppColors.textMuted,
+                  fontSize: 12,
+                  fontFamily: 'monospace',
+                  height: 1.5,
+                ),
+              ),
+            ],
+            const SizedBox(height: 20),
+            _buildOptionTile(
+              icon: Icons.devices_other,
+              title: 'Migrate to a different device',
+              subtitle: 'Use a device with a hardware secure enclave (iPhone, modern Android, or Apple Silicon Mac). A reminder will stay on your checklist.',
+              onTap: () {
+                Navigator.pop(ctx);
+                // Task stays open in checklist — no action needed here
+              },
+            ),
+            const SizedBox(height: 10),
+            _buildOptionTile(
+              icon: Icons.cloud_outlined,
+              title: 'Cloud HSM — Coming Soon',
+              subtitle: 'Delegate key operations to a hardware-backed cloud HSM (Grape ID, AWS KMS, Azure). Available in a future release.',
+              onTap: null,
+              disabled: true,
+            ),
+            const SizedBox(height: 10),
+            _buildOptionTile(
+              icon: Icons.usb,
+              title: 'YubiKey — Coming Soon',
+              subtitle: 'Use a YubiKey hardware token for multi-factor signing. Available in a future release.',
+              onTap: null,
+              disabled: true,
+            ),
+            const SizedBox(height: 10),
+            _buildOptionTile(
+              icon: Icons.check_circle_outline,
+              title: 'Continue with software storage',
+              subtitle: 'Your keys are encrypted with your OS credential store. Secure for most users.',
+              onTap: () {
+                Navigator.pop(ctx);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOptionTile({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback? onTap,
+    bool disabled = false,
+  }) {
+    final color = disabled ? AppColors.textMuted : AppColors.textPrimary;
+    final subColor = AppColors.textMuted;
+    return InkWell(
+      onTap: disabled ? null : onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: AppColors.background,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: AppColors.border, width: 1),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, color: disabled ? AppColors.textMuted : AppColors.accent, size: 20),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          title,
+                          style: TextStyle(
+                            color: color,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            fontFamily: 'monospace',
+                          ),
+                        ),
+                      ),
+                      if (disabled)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: AppColors.border,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: const Text(
+                            'SOON',
+                            style: TextStyle(
+                              color: AppColors.textMuted,
+                              fontSize: 9,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 1.0,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      color: subColor,
+                      fontSize: 11,
+                      fontFamily: 'monospace',
+                      height: 1.4,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -1109,7 +1356,9 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
             fontFamily: 'monospace',
           ),
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: 16),
+        if (_enclaveStatus != null) _buildEnclaveBadge(),
+        const SizedBox(height: 16),
         // AID display
         Container(
           width: double.infinity,

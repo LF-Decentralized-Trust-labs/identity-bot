@@ -773,7 +773,41 @@ class CoreService {
     }
   }
 
+  Future<EnclaveStatusResponse> getEnclaveStatus() async {
+    final response = await _client.get(Uri.parse('$baseUrl/api/security/enclave'));
+    if (response.statusCode != 200) {
+      throw Exception('Failed to get enclave status: ${response.statusCode}');
+    }
+    return EnclaveStatusResponse.fromJson(jsonDecode(response.body));
+  }
+
   void dispose() {
     _client.close();
+  }
+}
+
+class EnclaveStatusResponse {
+  final bool hardwareBacked;
+  final String backingType;
+  final String backingLabel;
+  final bool? tpmPresent;
+  final bool? tpmEnabled;
+
+  EnclaveStatusResponse({
+    required this.hardwareBacked,
+    required this.backingType,
+    required this.backingLabel,
+    this.tpmPresent,
+    this.tpmEnabled,
+  });
+
+  factory EnclaveStatusResponse.fromJson(Map<String, dynamic> json) {
+    return EnclaveStatusResponse(
+      hardwareBacked: json['hardwareBacked'] as bool? ?? false,
+      backingType: json['backingType'] as String? ?? 'software',
+      backingLabel: json['backingLabel'] as String? ?? 'Software',
+      tpmPresent: json['tpmPresent'] as bool?,
+      tpmEnabled: json['tpmEnabled'] as bool?,
+    );
   }
 }

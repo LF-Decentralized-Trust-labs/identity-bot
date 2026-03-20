@@ -4,6 +4,7 @@ import '../../services/setup_task_service.dart';
 import '../../services/preferences_service.dart';
 import '../../services/keri_service.dart';
 import '../../services/core_service.dart';
+import '../../services/enclave_service.dart';
 import '../../services/secure_key_store.dart';
 import '../../config/agent_config.dart';
 import '../hosting_choice_screen.dart';
@@ -34,6 +35,7 @@ class _MobileSetupChecklistScreenState
     extends State<MobileSetupChecklistScreen> {
   Map<SetupTask, bool> _state = {};
   bool _loading = true;
+  EnclaveStatusResponse? _enclaveStatus;
 
   bool get _needsRemoteBrain =>
       widget.hostingChoice == HostingChoice.keysHereBrainLater;
@@ -338,6 +340,8 @@ class _MobileSetupChecklistScreenState
         await _doConnectRemoteBrain();
       case SetupTask.backupSeedPhrase:
         await _doBackupSeedPhrase();
+      case SetupTask.secureKeyStorage:
+        await _doSecureKeyStorage();
       case SetupTask.inviteContacts:
         await _doInviteContacts();
       case SetupTask.completeProfile:
@@ -776,6 +780,119 @@ class _MobileSetupChecklistScreenState
     }
   }
 
+  Future<void> _doSecureKeyStorage() async {
+    if (_enclaveStatus == null) {
+      try {
+        final svc = EnclaveService(
+          coreService: CoreService(baseUrl: _effectiveServerUrl),
+        );
+        final status = await svc.detect();
+        if (mounted) setState(() => _enclaveStatus = status);
+      } catch (_) {}
+    }
+
+    final status = _enclaveStatus;
+    if (status == null) return;
+
+    if (status.hardwareBacked) {
+      await SetupTaskService.markComplete(SetupTask.secureKeyStorage);
+      await _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Keys secured: ${status.backingLabel}'),
+          backgroundColor: MobileColors.success,
+        ),
+      );
+      return;
+    }
+
+    // Not hardware-backed — show options sheet
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) => Container(
+        decoration: const BoxDecoration(
+          color: MobileColors.surface,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: MobileColors.border,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              'Current: ${status.backingLabel}',
+              style: const TextStyle(
+                color: MobileColors.textPrimary,
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            if (status.tpmPresent == true && status.tpmEnabled == false) ...[
+              const SizedBox(height: 8),
+              Text(
+                'A TPM was detected but not enabled. Enable it in BIOS/UEFI for hardware protection.',
+                style: TextStyle(color: MobileColors.textSecondary, fontSize: 13, height: 1.5),
+              ),
+            ],
+            const SizedBox(height: 20),
+            ListTile(
+              leading: const Icon(Icons.devices_other, color: MobileColors.primary),
+              title: const Text('Migrate to a different device', style: TextStyle(color: MobileColors.textPrimary, fontWeight: FontWeight.w600)),
+              subtitle: Text('Keep this task open as a reminder.', style: TextStyle(color: MobileColors.textSecondary)),
+              onTap: () => Navigator.pop(ctx),
+            ),
+            ListTile(
+              leading: Icon(Icons.cloud_outlined, color: MobileColors.textSecondary),
+              title: const Text('Cloud HSM — Coming Soon', style: TextStyle(color: MobileColors.textSecondary)),
+              trailing: _soonBadge(),
+              onTap: null,
+            ),
+            ListTile(
+              leading: const Icon(Icons.check_circle_outline, color: MobileColors.primary),
+              title: const Text('Continue with software storage', style: TextStyle(color: MobileColors.textPrimary, fontWeight: FontWeight.w600)),
+              onTap: () async {
+                Navigator.pop(ctx);
+                await SetupTaskService.markComplete(SetupTask.secureKeyStorage);
+                await _load();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _soonBadge() => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          color: MobileColors.border,
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Text(
+          'SOON',
+          style: TextStyle(
+            color: MobileColors.textSecondary,
+            fontSize: 9,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 1.0,
+          ),
+        ),
+      );
+
   Future<void> _doInviteContacts() async {
     String? oobiUrl;
     try {
@@ -877,6 +994,8 @@ class _MobileSetupChecklistScreenState
         return Icons.key_outlined;
       case SetupTask.setupAuthentication:
         return Icons.lock_outlined;
+      case SetupTask.secureKeyStorage:
+        return Icons.shield_outlined;
       case SetupTask.inviteContacts:
         return Icons.people_outline;
       case SetupTask.connectEmail:

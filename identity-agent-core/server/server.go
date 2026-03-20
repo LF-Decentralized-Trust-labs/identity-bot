@@ -266,6 +266,7 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
                 r.Get("/health", s.handleHealth)
                 r.Get("/info", s.handleInfo)
                 r.Get("/identity", s.handleIdentity)
+                r.Get("/security/enclave", s.handleSecurityEnclave)
 
                 r.Post("/inception", s.handleInception)
                 r.Post("/rotation", s.handleRotation)

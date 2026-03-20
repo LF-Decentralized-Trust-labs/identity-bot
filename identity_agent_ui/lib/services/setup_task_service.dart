@@ -5,6 +5,7 @@ enum SetupTask {
   connectRemoteBrain,
   backupSeedPhrase,
   setupAuthentication,
+  secureKeyStorage,
   inviteContacts,
   connectEmail,
   addPhoneNumber,
@@ -52,6 +53,14 @@ const _allTaskMeta = <SetupTask, SetupTaskMeta>{
     description:
         'Add a PIN or biometrics so only you can open this app.',
     isStub: true,
+    isCritical: true,
+  ),
+  SetupTask.secureKeyStorage: SetupTaskMeta(
+    task: SetupTask.secureKeyStorage,
+    title: 'Secure your signing keys',
+    description:
+        'Protect your identity keys with the strongest security available on this device.',
+    isStub: false,
     isCritical: true,
   ),
   SetupTask.inviteContacts: SetupTaskMeta(
@@ -104,11 +113,15 @@ class SetupTaskService {
 
   /// Returns the ordered task list, filtering out connectRemoteBrain
   /// if it was already connected (remoteBrainUrl is set) or not applicable.
-  static List<SetupTask> orderedTasks({required bool needsRemoteBrain}) {
+  static List<SetupTask> orderedTasks({
+    required bool needsRemoteBrain,
+    bool includeSecureKeyStorage = true,
+  }) {
     final all = [
       if (needsRemoteBrain) SetupTask.connectRemoteBrain,
       SetupTask.backupSeedPhrase,
       SetupTask.setupAuthentication,
+      if (includeSecureKeyStorage) SetupTask.secureKeyStorage,
       SetupTask.inviteContacts,
       SetupTask.connectEmail,
       SetupTask.addPhoneNumber,
