@@ -4,22 +4,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Planning Documents (check these at the start of every session)
 
-All planning docs live in `C:\Users\Boogie Bob\Documents\GrapeID\`. Three subfolders:
+All planning docs live in `C:\Users\Boogie Bob\Documents\GitHub\strategy\` (also at `https://github.com/bobert600/strategy`).
 
 | Folder | File | Purpose |
 |---|---|---|
-| `1. Strategy/` | `roadmap.md` | Strategy only — business model, revenue streams, architecture vision. No task checklists. |
-| `1. Strategy/` | `tasks.md` | **90-day backlog** — all tasks with detailed subtasks, dependency order, and unresolved issues |
-| `1. Strategy/` | `daily.md` | **Today's session list** — microtasks for the current session; replace at each session start |
-| `1. Strategy/` | `tasks-completed.md` | Archive — items moved here when fully done |
-| `2. Plans/` | `*.md` | Architecture + technical specs and flows — how features work end-to-end |
-| `3. Design/` | `flows.md` | UX flows & use case scenarios — screen-by-screen walkthroughs |
+| `1. Strategy/` | `daily.md` | **Session state** — where to resume, current blockers; read this first at session start |
+| `1. Strategy/` | `tasks.md` | **90-day backlog** — all tasks with detailed subtasks; read the relevant section after daily.md |
+| `1. Strategy/` | `roadmap.md` | Strategy only — business model, revenue streams, architecture vision |
+| `1. Strategy/` | `unknowns.md` | Open questions and unresolved problems that need a decision before building |
+| `1. Strategy/` | `tasks-completed.md` | Archive — high-level tasks moved here when fully done |
+| `2. Plans/` | `*.md` | Architecture + technical specs — how features work end-to-end; **every plan doc must have a corresponding high-level task entry and detailed breakdown in tasks.md** |
+| `3. Design/` | `flows.md` | UX flows & use case scenarios |
 | `3. Design/` | `*.md` | UI/UX specifications — visual design, copy, component specs |
 
 **Workflow:**
-- At session start ("Start session!"): read `1. Strategy/daily.md` and `1. Strategy/tasks.md` to orient
-- During session: update `1. Strategy/daily.md` as tasks complete (check them off)
-- At session end ("Stop session!"): move completed daily items to `1. Strategy/tasks-completed.md`, update `1. Strategy/tasks.md` top-level checkboxes, write next-session resume marker in `1. Strategy/daily.md`
+- At session start ("Start session!"): read `1. Strategy/daily.md` — it tells you exactly where to resume and which section of tasks.md to read. Report to the user what's on deck. If daily.md has no active tasks, read the top of `1. Strategy/tasks.md` and suggest the next unchecked high-level task, recommending the user add it to today's session.
+- During session: daily.md is NOT updated constantly — it is a session state file, not a live checklist. Work directly from tasks.md checkboxes.
+- At session end ("Stop session!"): update tasks.md checkboxes for everything completed, move any fully-finished high-level tasks to `tasks-completed.md`, then write a fresh resume marker in daily.md (what to pick up, which file/function/section to look at first).
+
+**Plan doc → Task rule (mandatory):** Every new document created in `2. Plans/` MUST have a corresponding entry in the high-level task list in `tasks.md` AND a detailed breakdown section under `## Detailed Breakdown`. Never create a plan document without first adding both. The plan doc is the "why and how"; the task entries are the actionable checkboxes. One cannot exist without the other. See `tasks.md` → "Convention for new high-level tasks" for the full convention.
 
 ## What This Is
 
