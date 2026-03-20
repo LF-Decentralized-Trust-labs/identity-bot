@@ -333,18 +333,25 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
 
   Widget _buildHeader() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 20, 12, 12),
+      padding: const EdgeInsets.fromLTRB(32, 32, 32, 0),
       child: Row(
         children: [
-          const Icon(Icons.apps, color: AppColors.accent, size: 24),
-          const SizedBox(width: 10),
-          const Text('SANDBOX APPS', style: TextStyle(
-            color: AppColors.textPrimary, fontSize: 18,
-            fontWeight: FontWeight.bold, fontFamily: 'monospace', letterSpacing: 2,
-          )),
-          const Spacer(),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Apps', style: Theme.of(context).textTheme.headlineMedium),
+                const SizedBox(height: 4),
+                const Text(
+                  'Sandboxed identity applications.',
+                  style: TextStyle(color: AppColors.textSecondary, fontSize: 14),
+                ),
+              ],
+            ),
+          ),
           IconButton(
-            icon: const Icon(Icons.refresh, color: AppColors.textSecondary, size: 20),
+            icon: const Icon(Icons.refresh),
+            color: AppColors.textSecondary,
             onPressed: _loadData,
             tooltip: 'Refresh',
           ),
@@ -360,7 +367,7 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
       );
     }
     return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+      padding: const EdgeInsets.fromLTRB(32, 16, 32, 24),
       itemCount: _apps.length,
       separatorBuilder: (_, __) => const SizedBox(height: 8),
       itemBuilder: (context, index) => _buildAppCard(_apps[index]),

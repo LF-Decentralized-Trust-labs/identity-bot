@@ -38,6 +38,7 @@ class DesktopApp extends StatefulWidget {
 
 class _DesktopAppState extends State<DesktopApp> {
   DesktopRoute _route = DesktopRoute.dashboard;
+  bool _aiPanelOpen = false;
 
   void _navigate(DesktopRoute route) {
     setState(() => _route = route);
@@ -146,6 +147,91 @@ class _DesktopAppState extends State<DesktopApp> {
     }
   }
 
+  Widget _buildAiPanel() {
+    return Container(
+      width: 320,
+      height: 400,
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.08),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+            decoration: const BoxDecoration(
+              border: Border(bottom: BorderSide(color: AppColors.border)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.auto_awesome, color: AppColors.accent, size: 16),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text(
+                    'AI Assistant',
+                    style: TextStyle(
+                      color: AppColors.textPrimary,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close, size: 16),
+                  color: AppColors.textSecondary,
+                  onPressed: () => setState(() => _aiPanelOpen = false),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                ),
+              ],
+            ),
+          ),
+          const Expanded(
+            child: Center(
+              child: Padding(
+                padding: EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.auto_awesome, color: AppColors.textMuted, size: 40),
+                    SizedBox(height: 16),
+                    Text(
+                      'AI Assistant',
+                      style: TextStyle(
+                        color: AppColors.textPrimary,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    SizedBox(height: 8),
+                    Text(
+                      'Intelligent identity management assistant. Coming soon.',
+                      style: TextStyle(
+                        color: AppColors.textMuted,
+                        fontSize: 12,
+                        height: 1.5,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
@@ -162,7 +248,27 @@ class _DesktopAppState extends State<DesktopApp> {
           // ── Vertical divider ─────────────────────────────────────────────
           VerticalDivider(width: 1, thickness: 1, color: AppColors.border),
           // ── Content area ─────────────────────────────────────────────────
-          Expanded(child: _buildContent()),
+          Expanded(
+            child: Stack(
+              children: [
+                _buildContent(),
+                Positioned(
+                  bottom: 24,
+                  right: 24,
+                  child: _aiPanelOpen
+                      ? _buildAiPanel()
+                      : FloatingActionButton(
+                          onPressed: () => setState(() => _aiPanelOpen = true),
+                          backgroundColor: AppColors.accent,
+                          foregroundColor: Colors.white,
+                          tooltip: 'AI Assistant (coming soon)',
+                          mini: true,
+                          child: const Icon(Icons.auto_awesome, size: 18),
+                        ),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
