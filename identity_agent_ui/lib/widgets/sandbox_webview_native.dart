@@ -310,7 +310,7 @@ class _SandboxWebViewState extends State<SandboxWebView> {
 
   Widget _buildErrorOverlay() {
     return Container(
-      color: AppColors.primary.withOpacity(0.9),
+      color: AppColors.surface.withOpacity(0.95),
       child: Center(
         child: Padding(
           padding: const EdgeInsets.all(32),
@@ -371,7 +371,7 @@ class _SandboxWebViewState extends State<SandboxWebView> {
     final isMissingWebKit = _status == SandboxWebViewStatus.missingWebKitGtk;
 
     return Container(
-      color: AppColors.primary,
+      color: AppColors.background,
       child: Center(
         child: Padding(
           padding: const EdgeInsets.all(32),

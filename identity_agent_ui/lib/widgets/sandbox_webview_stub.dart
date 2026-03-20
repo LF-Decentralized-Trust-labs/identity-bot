@@ -87,7 +87,7 @@ class SandboxWebView extends StatelessWidget {
         ),
         Expanded(
           child: Container(
-            color: AppColors.primary,
+            color: AppColors.background,
             child: Center(
               child: Padding(
                 padding: const EdgeInsets.all(32),

@@ -500,7 +500,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
       decoration: BoxDecoration(
-        color: AppColors.primary,
+        color: AppColors.surfaceLight,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: AppColors.border, width: 1),
       ),
@@ -1391,7 +1391,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: AppColors.primary,
+                color: AppColors.surfaceLight,
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: AppColors.border),
               ),
