@@ -21,6 +21,8 @@ class PreferencesService {
   static const String _entityTypeKey = 'entity_type';
   static const String _serverUrlKey = 'server_url';
   static const String _setupCompleteKey = 'setup_complete';
+  static const String _hostingChoiceKey = 'hosting_choice';
+  static const String _remoteBrainUrlKey = 'remote_brain_url';
 
   static Future<SharedPreferences> get _prefs => SharedPreferences.getInstance();
 
@@ -74,12 +76,39 @@ class PreferencesService {
     await prefs.setBool(_setupCompleteKey, complete);
   }
 
+  static Future<HostingChoice?> getHostingChoice() async {
+    final prefs = await _prefs;
+    final value = prefs.getString(_hostingChoiceKey);
+    if (value == null) return null;
+    return HostingChoice.values.firstWhere(
+      (h) => h.name == value,
+      orElse: () => HostingChoice.keysHereBrainHere,
+    );
+  }
+
+  static Future<void> setHostingChoice(HostingChoice choice) async {
+    final prefs = await _prefs;
+    await prefs.setString(_hostingChoiceKey, choice.name);
+  }
+
+  static Future<String?> getRemoteBrainUrl() async {
+    final prefs = await _prefs;
+    return prefs.getString(_remoteBrainUrlKey);
+  }
+
+  static Future<void> setRemoteBrainUrl(String url) async {
+    final prefs = await _prefs;
+    await prefs.setString(_remoteBrainUrlKey, url);
+  }
+
   static Future<void> clearAll() async {
     final prefs = await _prefs;
     await prefs.remove(_modeKey);
     await prefs.remove(_entityTypeKey);
     await prefs.remove(_serverUrlKey);
     await prefs.remove(_setupCompleteKey);
+    await prefs.remove(_hostingChoiceKey);
+    await prefs.remove(_remoteBrainUrlKey);
   }
 
   static String modeDisplayName(AgentMode mode) {

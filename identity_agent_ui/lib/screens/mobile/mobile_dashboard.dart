@@ -3,22 +3,26 @@ import 'package:flutter/material.dart';
 import '../../theme/mobile_theme.dart';
 import '../../services/core_service.dart';
 import '../../services/event_service.dart';
+import '../../services/keri_service.dart';
 import '../../config/agent_config.dart';
 import '../../widgets/identity_card.dart';
 import '../../widgets/alert_card.dart';
 import '../../widgets/task_card.dart';
 import '../../widgets/activity_entry.dart';
+import '../../widgets/setup_task_banner.dart';
 import '../../models/background_task.dart';
 import '../../models/activity_log_entry.dart';
 
 class MobileDashboard extends StatefulWidget {
   final String? serverUrl;
   final VoidCallback onMenuTap;
+  final KeriService? keriService;
 
   const MobileDashboard({
     super.key,
     this.serverUrl,
     required this.onMenuTap,
+    this.keriService,
   });
 
   @override
@@ -188,6 +192,12 @@ class MobileDashboardState extends State<MobileDashboard> with SingleTickerProvi
                       agentUrl: _agentUrl,
                       photoBase64: _photoBase64,
                     ),
+                    if (widget.keriService != null)
+                      SetupTaskBanner(
+                        isMobile: true,
+                        keriService: widget.keriService!,
+                        serverUrl: widget.serverUrl,
+                      ),
                     const SizedBox(height: 16),
                     _buildTabs(),
                   ],

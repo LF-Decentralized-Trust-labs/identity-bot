@@ -15,6 +15,7 @@ import 'key_rotation_screen.dart';
 import 'developer_tools_screen.dart';
 import 'theme_settings_screen.dart';
 import 'account_settings_screen.dart';
+import '../../widgets/setup_task_banner.dart';
 
 class DesktopApp extends StatefulWidget {
   final KeriService keriService;
@@ -51,7 +52,16 @@ class _DesktopAppState extends State<DesktopApp> {
     switch (_route) {
       // ── Identity ───────────────────────────────────────────────────────────
       case DesktopRoute.dashboard:
-        return DashboardScreen(keriService: keri, serverUrl: url);
+        return Column(
+          children: [
+            SetupTaskBanner(
+              isMobile: false,
+              keriService: keri,
+              serverUrl: url,
+            ),
+            Expanded(child: DashboardScreen(keriService: keri, serverUrl: url)),
+          ],
+        );
 
       case DesktopRoute.identityProfile:
         return ProfileScreen(keriService: keri, serverUrl: url);

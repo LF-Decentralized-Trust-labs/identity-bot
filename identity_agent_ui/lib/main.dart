@@ -24,6 +24,8 @@ import 'screens/mobile/mobile_connect_server_screen.dart';
 import 'screens/mobile/mobile_setup_wizard_screen.dart';
 import 'screens/hosting_choice_screen.dart';
 import 'screens/mobile/mobile_hosting_choice_screen.dart';
+import 'screens/setup_checklist_screen.dart';
+import 'screens/mobile/mobile_setup_checklist_screen.dart';
 
 String? _backendStartupError;
 Future<bool>? _backendStartupFuture;
@@ -76,6 +78,7 @@ enum OnboardingStep {
   hostingChoice,
   connectServer,
   setupWizard,
+  setupChecklist,
   dashboard,
 }
 
@@ -102,6 +105,7 @@ class _AgentRouterState extends State<AgentRouter> {
   EntityType? _selectedEntityType;
   String? _serverUrl;
   String? _remoteBrainUrl;
+  HostingChoice? _hostingChoice;
   bool _showedBackendError = false;
 
   @override
@@ -282,7 +286,12 @@ class _AgentRouterState extends State<AgentRouter> {
   }
 
   void _onHostingChosen(HostingChoice choice, {String? remoteBrainUrl}) async {
+    _hostingChoice = choice;
     _remoteBrainUrl = remoteBrainUrl;
+    await PreferencesService.setHostingChoice(choice);
+    if (remoteBrainUrl != null) {
+      await PreferencesService.setRemoteBrainUrl(remoteBrainUrl);
+    }
     await _initializeServiceForMode(AgentMode.createNew, null);
     setState(() => _step = OnboardingStep.setupWizard);
   }
@@ -299,6 +308,10 @@ class _AgentRouterState extends State<AgentRouter> {
 
   void _onSetupComplete() async {
     await PreferencesService.setSetupComplete(true);
+    setState(() => _step = OnboardingStep.setupChecklist);
+  }
+
+  void _onChecklistDone() {
     setState(() => _step = OnboardingStep.dashboard);
   }
 
@@ -598,6 +611,24 @@ class _AgentRouterState extends State<AgentRouter> {
         return SetupWizardScreen(
           onComplete: _onSetupComplete,
           keriService: _keriService!,
+          remoteBrainUrl: _remoteBrainUrl,
+        );
+
+      case OnboardingStep.setupChecklist:
+        if (isMobile) {
+          return MobileSetupChecklistScreen(
+            onDone: _onChecklistDone,
+            keriService: _keriService!,
+            serverUrl: _serverUrl,
+            hostingChoice: _hostingChoice,
+            remoteBrainUrl: _remoteBrainUrl,
+          );
+        }
+        return SetupChecklistScreen(
+          onDone: _onChecklistDone,
+          keriService: _keriService!,
+          serverUrl: _serverUrl,
+          hostingChoice: _hostingChoice,
           remoteBrainUrl: _remoteBrainUrl,
         );
 
