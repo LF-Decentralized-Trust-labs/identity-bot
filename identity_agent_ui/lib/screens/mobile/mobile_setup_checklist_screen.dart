@@ -349,6 +349,8 @@ class _MobileSetupChecklistScreenState
         await _doInviteContacts();
       case SetupTask.completeProfile:
         _doCompleteProfile();
+      case SetupTask.getVerified:
+        await _doGetVerified();
       default:
         break;
     }
@@ -995,6 +997,61 @@ class _MobileSetupChecklistScreenState
   void _doCompleteProfile() {
     Navigator.of(context).pop();
     SetupTaskService.markComplete(SetupTask.completeProfile);
+  }
+
+  Future<void> _doGetVerified() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: MobileColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.fromLTRB(24, 24, 24, 36),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Get Verified',
+              style: TextStyle(
+                color: MobileColors.textPrimary,
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'Add someone you know personally as a contact and mark '
+              '"I know and trust this contact" when you add or accept them.\n\n'
+              'They\'ll be assigned as a witness to your identity, and this '
+              'task will complete automatically.',
+              style: TextStyle(
+                color: MobileColors.textSecondary,
+                fontSize: 14,
+                height: 1.5,
+              ),
+            ),
+            const SizedBox(height: 24),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: MobileColors.primary,
+                  foregroundColor: MobileColors.textOnPrimary,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                ),
+                child: const Text('Got It'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    await _load();
   }
 
   IconData _taskIcon(SetupTask task) {

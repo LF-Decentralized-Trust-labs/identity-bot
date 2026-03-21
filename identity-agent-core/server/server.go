@@ -1647,6 +1647,7 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
         var req struct {
                 OobiURL string `json:"oobi_url"`
                 Alias   string `json:"alias"`
+                Trusted bool   `json:"trusted"`
         }
         if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
                 writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
@@ -1750,6 +1751,15 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
                 contactStatus = "unverified"
         }
 
+        role := "agent"
+        trustedAt := ""
+        if req.Trusted {
+                trustedAt = time.Now().UTC().Format(time.RFC3339)
+                if s.countWitnesses() < 3 {
+                        role = "witness"
+                }
+        }
+
         contact := store.ContactRecord{
                 AID:          oobiData.AID,
                 Alias:        alias,
@@ -1758,7 +1768,9 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
                 Verified:     kelVerified || s.KeriDriver == nil,
                 DiscoveredAt: time.Now().UTC().Format(time.RFC3339),
                 Status:       contactStatus,
-                Role:         "agent",
+                Role:         role,
+                Trusted:      req.Trusted,
+                TrustedAt:    trustedAt,
                 JCard:        contactJCard,
                 Photo:        oobiData.Photo,
         }
@@ -2080,9 +2092,21 @@ func (s *CoreServer) handleAcceptContact(w http.ResponseWriter, r *http.Request)
                 return
         }
 
+        var acceptReq struct {
+                Trusted bool `json:"trusted"`
+        }
+        json.NewDecoder(r.Body).Decode(&acceptReq) // body is optional
+
         log.Printf("[identity-agent-core] CONTACT-ACCEPT: Upgrading contact %s (%s) from pending_inbound to mutual", contact.Alias, aid)
 
         contact.Status = "mutual"
+        if acceptReq.Trusted && !contact.Trusted {
+                contact.Trusted = true
+                contact.TrustedAt = time.Now().UTC().Format(time.RFC3339)
+                if contact.Role == "agent" && s.countWitnesses() < 3 {
+                        contact.Role = "witness"
+                }
+        }
         if err := s.DataStore.SaveContact(*contact); err != nil {
                 writeError(w, http.StatusInternalServerError, "Failed to update contact", err.Error())
                 return
@@ -2130,8 +2154,9 @@ func (s *CoreServer) handleUpdateContact(w http.ResponseWriter, r *http.Request)
         }
 
         var req struct {
-                Role  string `json:"role"`
-                Alias string `json:"alias"`
+                Role    string `json:"role"`
+                Alias   string `json:"alias"`
+                Trusted *bool  `json:"trusted"`
         }
         if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
                 writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
@@ -2159,6 +2184,20 @@ func (s *CoreServer) handleUpdateContact(w http.ResponseWriter, r *http.Request)
         if req.Alias != "" {
                 contact.Alias = req.Alias
         }
+        if req.Trusted != nil {
+                if *req.Trusted && !contact.Trusted {
+                        // Newly trusted — record timestamp and auto-assign witness if capacity allows
+                        contact.Trusted = true
+                        contact.TrustedAt = time.Now().UTC().Format(time.RFC3339)
+                        if contact.Role == "agent" && s.countWitnesses() < 3 {
+                                contact.Role = "witness"
+                        }
+                } else if !*req.Trusted {
+                        contact.Trusted = false
+                        contact.TrustedAt = ""
+                        // Role stays as-is — user manages role changes separately
+                }
+        }
 
         if err := s.DataStore.SaveContact(*contact); err != nil {
                 writeError(w, http.StatusInternalServerError, "Failed to update contact", err.Error())
@@ -2169,6 +2208,20 @@ func (s *CoreServer) handleUpdateContact(w http.ResponseWriter, r *http.Request)
 
         w.Header().Set("Content-Type", "application/json")
         json.NewEncoder(w).Encode(contact)
+}
+
+func (s *CoreServer) countWitnesses() int {
+	contacts, err := s.DataStore.GetContacts()
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, c := range contacts {
+		if c.Role == "witness" {
+			n++
+		}
+	}
+	return n
 }
 
 func (s *CoreServer) handleRejectContact(w http.ResponseWriter, r *http.Request) {

@@ -40,6 +40,8 @@ type ContactRecord struct {
         DiscoveredAt string `json:"discovered_at"`
         Status       string `json:"status"`
         Role         string `json:"role"`
+        Trusted      bool   `json:"trusted"`
+        TrustedAt    string `json:"trusted_at,omitempty"`
         JCard        *JCard `json:"jcard,omitempty"`
         Photo        string `json:"photo,omitempty"`
 }

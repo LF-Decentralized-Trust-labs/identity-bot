@@ -258,6 +258,8 @@ class ContactResponse {
   final String discoveredAt;
   final String status;
   final String role;
+  final bool trusted;
+  final String trustedAt;
   final JCardResponse? jcard;
   final String photo;
 
@@ -270,6 +272,8 @@ class ContactResponse {
     required this.discoveredAt,
     this.status = '',
     this.role = 'agent',
+    this.trusted = false,
+    this.trustedAt = '',
     this.jcard,
     this.photo = '',
   });
@@ -295,6 +299,8 @@ class ContactResponse {
       discoveredAt: json['discovered_at'] ?? '',
       status: json['status'] ?? '',
       role: json['role'] ?? 'agent',
+      trusted: json['trusted'] ?? false,
+      trustedAt: json['trusted_at'] ?? '',
       jcard: json['jcard'] != null ? JCardResponse.fromJson(json['jcard']) : null,
       photo: json['photo'] ?? '',
     );
@@ -516,11 +522,11 @@ class CoreService {
     }
   }
 
-  Future<ContactResponse> addContact({required String oobiUrl, String? alias}) async {
+  Future<ContactResponse> addContact({required String oobiUrl, String? alias, bool trusted = false}) async {
     final response = await _client.post(
       Uri.parse('$baseUrl/api/contacts'),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'oobi_url': oobiUrl, if (alias != null) 'alias': alias}),
+      body: jsonEncode({'oobi_url': oobiUrl, if (alias != null) 'alias': alias, 'trusted': trusted}),
     );
     if (response.statusCode == 201) {
       return ContactResponse.fromJson(jsonDecode(response.body));
@@ -537,8 +543,12 @@ class CoreService {
     }
   }
 
-  Future<ContactResponse> acceptContact(String aid) async {
-    final response = await _client.post(Uri.parse('$baseUrl/api/contacts/$aid/accept'));
+  Future<ContactResponse> acceptContact(String aid, {bool trusted = false}) async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/api/contacts/$aid/accept'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'trusted': trusted}),
+    );
     if (response.statusCode == 200) {
       return ContactResponse.fromJson(jsonDecode(response.body));
     } else {
@@ -555,10 +565,11 @@ class CoreService {
     }
   }
 
-  Future<ContactResponse> updateContact(String aid, {String? role, String? alias}) async {
-    final body = <String, String>{};
+  Future<ContactResponse> updateContact(String aid, {String? role, String? alias, bool? trusted}) async {
+    final body = <String, dynamic>{};
     if (role != null) body['role'] = role;
     if (alias != null) body['alias'] = alias;
+    if (trusted != null) body['trusted'] = trusted;
     final response = await _client.put(
       Uri.parse('$baseUrl/api/contacts/$aid'),
       headers: {'Content-Type': 'application/json'},

@@ -390,6 +390,8 @@ class _SetupChecklistScreenState extends State<SetupChecklistScreen> {
         await _doInviteContacts();
       case SetupTask.completeProfile:
         _doCompleteProfile();
+      case SetupTask.getVerified:
+        await _doGetVerified();
       default:
         break;
     }
@@ -1209,6 +1211,49 @@ class _SetupChecklistScreenState extends State<SetupChecklistScreen> {
     // Mark complete when they come back (best-effort)
     Navigator.of(context).pop();
     SetupTaskService.markComplete(SetupTask.completeProfile);
+  }
+
+  Future<void> _doGetVerified() async {
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: AppColors.accent.withOpacity(0.3)),
+        ),
+        title: const Text(
+          'GET VERIFIED',
+          style: TextStyle(
+            color: AppColors.textPrimary,
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 1.0,
+            fontFamily: 'monospace',
+          ),
+        ),
+        content: const Text(
+          'Add someone you know personally as a contact and mark '
+          '"I know and trust this contact" when you add or accept them.\n\n'
+          'They\'ll be assigned as a witness to your identity, and this '
+          'task will complete automatically.',
+          style: TextStyle(
+            color: AppColors.textSecondary,
+            fontSize: 12,
+            fontFamily: 'monospace',
+            height: 1.5,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('GOT IT',
+                style: TextStyle(color: AppColors.accent, fontFamily: 'monospace')),
+          ),
+        ],
+      ),
+    );
+    await _load();
   }
 
   IconData _taskIcon(SetupTask task) {

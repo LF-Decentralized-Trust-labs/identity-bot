@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import '../../theme/mobile_theme.dart';
 import '../../services/core_service.dart';
 import '../../services/identity_level_service.dart';
+import '../../services/setup_task_service.dart';
 import '../../config/agent_config.dart';
 
 class MobileContactsScreen extends StatefulWidget {
@@ -355,6 +356,7 @@ class _ContactDetailScreenState extends State<_ContactDetailScreen> {
 
   Future<void> _showAcceptSheet() async {
     String selectedRole = 'agent';
+    bool trusted = false;
     final coreService = CoreService(baseUrl: widget.serverUrl ?? AgentConfig.coreBaseUrl);
 
     await showModalBottomSheet<void>(
@@ -379,12 +381,65 @@ class _ContactDetailScreenState extends State<_ContactDetailScreen> {
                   fontWeight: FontWeight.w700,
                 ),
               ),
-              const SizedBox(height: 6),
-              const Text(
-                'Choose the role this contact will have in your identity.',
-                style: TextStyle(color: MobileColors.textSecondary, fontSize: 13),
+              const SizedBox(height: 16),
+              // Trust toggle
+              GestureDetector(
+                onTap: () => setS(() {
+                  trusted = !trusted;
+                  if (trusted && selectedRole == 'agent') selectedRole = 'witness';
+                }),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: trusted
+                        ? Colors.green.withOpacity(0.08)
+                        : MobileColors.surfaceSecondary,
+                    border: Border.all(
+                      color: trusted
+                          ? Colors.green.withOpacity(0.5)
+                          : MobileColors.border,
+                    ),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    children: [
+                      Checkbox(
+                        value: trusted,
+                        onChanged: (v) => setS(() {
+                          trusted = v!;
+                          if (trusted && selectedRole == 'agent') {
+                            selectedRole = 'witness';
+                          }
+                        }),
+                        activeColor: Colors.green,
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        child: Text(
+                          'I know and trust this contact',
+                          style: TextStyle(
+                            color: MobileColors.textPrimary,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 16),
+              const Text(
+                'Role',
+                style: TextStyle(
+                  color: MobileColors.textSecondary,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 4),
               for (final entry in {
                 'agent': 'Agent — general contact',
                 'witness': 'Witness — will witness your keys',
@@ -438,12 +493,17 @@ class _ContactDetailScreenState extends State<_ContactDetailScreen> {
                       onPressed: () async {
                         Navigator.of(ctx).pop();
                         try {
-                          await coreService.acceptContact(_contact.aid);
+                          await coreService.acceptContact(_contact.aid,
+                              trusted: trusted);
                           if (selectedRole != 'agent') {
                             await coreService.updateContact(_contact.aid,
                                 role: selectedRole);
                           }
                           coreService.dispose();
+                          if (trusted) {
+                            await SetupTaskService.markComplete(
+                                SetupTask.getVerified);
+                          }
                           // Refresh contact list witness count
                           final all = await CoreService(
                                   baseUrl: widget.serverUrl ??
@@ -691,8 +751,73 @@ class _ContactDetailScreenState extends State<_ContactDetailScreen> {
               ),
               const SizedBox(height: 8),
             ],
-            // Change role for accepted contacts
+            // Trust toggle for non-pending contacts
             if (!_contact.isPendingInbound) ...[
+              GestureDetector(
+                onTap: () async {
+                  final coreService = CoreService(
+                      baseUrl: widget.serverUrl ?? AgentConfig.coreBaseUrl);
+                  try {
+                    final updated = await coreService.updateContact(
+                        _contact.aid, trusted: !_contact.trusted);
+                    if (!_contact.trusted) {
+                      await SetupTaskService.markComplete(SetupTask.getVerified);
+                    }
+                    coreService.dispose();
+                    if (mounted) setState(() => _contact = updated);
+                  } catch (e) {
+                    coreService.dispose();
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                          content: Text('$e'),
+                          backgroundColor: MobileColors.error));
+                    }
+                  }
+                },
+                child: Container(
+                  width: double.infinity,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: _contact.trusted
+                        ? Colors.green.withOpacity(0.08)
+                        : MobileColors.surfaceSecondary,
+                    border: Border.all(
+                      color: _contact.trusted
+                          ? Colors.green.withOpacity(0.5)
+                          : MobileColors.border,
+                    ),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        _contact.trusted
+                            ? Icons.favorite
+                            : Icons.favorite_border,
+                        color: _contact.trusted
+                            ? Colors.green
+                            : MobileColors.textSecondary,
+                        size: 18,
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        _contact.trusted
+                            ? 'I know and trust this contact'
+                            : 'Mark as trusted',
+                        style: TextStyle(
+                          color: _contact.trusted
+                              ? Colors.green
+                              : MobileColors.textSecondary,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton.icon(

@@ -7,6 +7,7 @@ import '../services/keri_service.dart';
 import '../services/mobile_on_device_keri_service.dart';
 import '../widgets/consent_modal.dart';
 import '../services/identity_level_service.dart';
+import '../services/setup_task_service.dart';
 import 'qr_scanner_screen.dart';
 
 class ContactsScreen extends StatefulWidget {
@@ -156,12 +157,145 @@ class _ContactsScreenState extends State<ContactsScreen> {
   }
 
   Future<void> _acceptWithRole(ContactResponse contact) async {
-    final role = await _pickRole(context);
-    if (role == null || !mounted) return;
+    String selectedRole = 'agent';
+    bool trusted = false;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setS) => AlertDialog(
+          backgroundColor: AppColors.surface,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(color: AppColors.border),
+          ),
+          title: Text(
+            'ACCEPT ${contact.displayName.toUpperCase()}',
+            style: const TextStyle(
+              color: AppColors.textPrimary,
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.0,
+              fontFamily: 'monospace',
+            ),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Trust toggle
+              InkWell(
+                onTap: () => setS(() {
+                  trusted = !trusted;
+                  if (trusted && selectedRole == 'agent') {
+                    selectedRole = 'witness';
+                  }
+                }),
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: trusted
+                        ? AppColors.coreActive.withOpacity(0.08)
+                        : AppColors.surfaceLight,
+                    border: Border.all(
+                      color: trusted
+                          ? AppColors.coreActive.withOpacity(0.4)
+                          : AppColors.border,
+                    ),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    children: [
+                      Checkbox(
+                        value: trusted,
+                        onChanged: (v) => setS(() {
+                          trusted = v!;
+                          if (trusted && selectedRole == 'agent') {
+                            selectedRole = 'witness';
+                          }
+                        }),
+                        activeColor: AppColors.coreActive,
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      const SizedBox(width: 6),
+                      const Expanded(
+                        child: Text(
+                          'I know and trust this contact',
+                          style: TextStyle(
+                            color: AppColors.textPrimary,
+                            fontSize: 12,
+                            fontFamily: 'monospace',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'ROLE',
+                style: TextStyle(
+                  color: AppColors.textMuted,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 1.0,
+                  fontFamily: 'monospace',
+                ),
+              ),
+              for (final role in ['agent', 'witness', 'verifier'])
+                RadioListTile<String>(
+                  value: role,
+                  groupValue: selectedRole,
+                  onChanged: (v) => setS(() => selectedRole = v!),
+                  title: Text(
+                    role == 'agent'
+                        ? 'Agent (general contact)'
+                        : role == 'witness'
+                            ? 'Witness (will witness your keys)'
+                            : 'Verifier (will verify your identity)',
+                    style: const TextStyle(
+                      color: AppColors.textPrimary,
+                      fontSize: 12,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                  activeColor: AppColors.accent,
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(null),
+              child: const Text('CANCEL',
+                  style: TextStyle(color: AppColors.textMuted, fontFamily: 'monospace')),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.accent,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              child: const Text('ACCEPT', style: TextStyle(fontFamily: 'monospace')),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
     try {
-      await _coreService.acceptContact(contact.aid);
-      if (role != 'agent') {
-        await _coreService.updateContact(contact.aid, role: role);
+      await _coreService.acceptContact(contact.aid, trusted: trusted);
+      if (selectedRole != 'agent') {
+        await _coreService.updateContact(contact.aid, role: selectedRole);
+      }
+      if (trusted) {
+        await SetupTaskService.markComplete(SetupTask.getVerified);
       }
       _loadContacts();
     } catch (e) {
@@ -443,10 +577,10 @@ class _ContactsScreenState extends State<ContactsScreen> {
         ? resolved.alias[0].toUpperCase()
         : null;
 
-    final confirmed = await ConsentModal.show(
+    final result = await ConsentModal.show(
       context: context,
       title: 'ADD CONTACT',
-      subtitle: 'Verify identity before adding to trusted contacts',
+      subtitle: 'Review their identity before adding',
       name: resolved.displayName,
       avatarLabel: avatarInitial,
       icon: Icons.person_add_outlined,
@@ -483,14 +617,19 @@ class _ContactsScreenState extends State<ContactsScreen> {
       warningMessage: !resolved.kelVerified
           ? 'Key Event Log could not be verified. Proceed with caution.'
           : null,
+      showTrustToggle: true,
     );
 
-    if (confirmed == true && mounted) {
+    if (result?.confirmed == true && mounted) {
       try {
         await _coreService.addContact(
           oobiUrl: resolved.oobiUrl,
           alias: resolved.alias.isNotEmpty ? resolved.alias : null,
+          trusted: result!.trusted,
         );
+        if (result.trusted) {
+          await SetupTaskService.markComplete(SetupTask.getVerified);
+        }
         _loadContacts();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -713,7 +852,71 @@ class _ContactsScreenState extends State<ContactsScreen> {
           ),
           const SizedBox(height: 12),
           _buildDetailField('Verified', contact.verified ? 'Yes' : 'No'),
-          const SizedBox(height: 24),
+          const SizedBox(height: 16),
+          // Trusted relationship toggle
+          InkWell(
+            onTap: () async {
+              final newTrusted = !contact.trusted;
+              try {
+                final updated = await _coreService.updateContact(
+                    contact.aid, trusted: newTrusted);
+                if (newTrusted) {
+                  await SetupTaskService.markComplete(SetupTask.getVerified);
+                }
+                _loadContacts();
+                setState(() => _selectedContact = updated);
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(e.toString()),
+                    backgroundColor: AppColors.error,
+                  ));
+                }
+              }
+            },
+            borderRadius: BorderRadius.circular(8),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: contact.trusted
+                    ? AppColors.coreActive.withOpacity(0.08)
+                    : AppColors.surfaceLight,
+                border: Border.all(
+                  color: contact.trusted
+                      ? AppColors.coreActive.withOpacity(0.4)
+                      : AppColors.border,
+                ),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    contact.trusted
+                        ? Icons.favorite
+                        : Icons.favorite_border,
+                    size: 16,
+                    color: contact.trusted
+                        ? AppColors.coreActive
+                        : AppColors.textMuted,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    contact.trusted
+                        ? 'I know and trust this contact'
+                        : 'Mark as trusted',
+                    style: TextStyle(
+                      color: contact.trusted
+                          ? AppColors.coreActive
+                          : AppColors.textSecondary,
+                      fontSize: 12,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
           if (contact.isPendingInbound) ...[
             Row(
               children: [

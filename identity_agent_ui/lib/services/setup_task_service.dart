@@ -99,8 +99,8 @@ const _allTaskMeta = <SetupTask, SetupTaskMeta>{
     task: SetupTask.getVerified,
     title: 'Get verified',
     description:
-        'Have contacts confirm your identity to build trust and boost your identity score.',
-    isStub: true,
+        'Add someone you know personally as a trusted contact. This establishes your first real-world identity relationship.',
+    isStub: false,
     isCritical: false,
   ),
 };
