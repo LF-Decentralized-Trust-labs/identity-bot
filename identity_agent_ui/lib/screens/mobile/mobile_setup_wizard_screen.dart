@@ -398,7 +398,7 @@ class _MobileSetupWizardScreenState extends State<MobileSetupWizardScreen> {
           child: GestureDetector(
             onTap: () async {
               try {
-                final base64 = await photo_picker.pickPhotoBase64();
+                final base64 = await photo_picker.pickAndCropPhotoBase64(context);
                 if (base64 != null && base64.isNotEmpty) {
                   setState(() => _photoBase64 = base64);
                 }
