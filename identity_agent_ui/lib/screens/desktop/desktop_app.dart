@@ -2,17 +2,16 @@ import 'package:flutter/material.dart';
 import '../../theme/app_theme.dart';
 import '../../services/keri_service.dart';
 import '../../services/preferences_service.dart';
-import '../../screens/dashboard_screen.dart';
+import 'desktop_dashboard_screen.dart';
 import '../../screens/contacts_screen.dart';
 import '../../screens/profile_screen.dart';
-import '../../screens/oobi_screen.dart';
 import '../../screens/settings_screen.dart';
 import '../../screens/marketplace_screen.dart';
 import 'desktop_sidebar.dart';
 import 'coming_soon_screen.dart';
-import 'key_event_log_screen.dart';
-import 'key_rotation_screen.dart';
 import 'developer_tools_screen.dart';
+import 'keri_protocol_screen.dart';
+import 'endpoints_screen.dart';
 import 'theme_settings_screen.dart';
 import 'account_settings_screen.dart';
 import 'auth_management_screen.dart';
@@ -60,21 +59,12 @@ class _DesktopAppState extends State<DesktopApp> {
               keriService: keri,
               serverUrl: url,
             ),
-            Expanded(child: DashboardScreen(keriService: keri, serverUrl: url)),
+            Expanded(child: DesktopDashboardScreen(keriService: keri, serverUrl: url)),
           ],
         );
 
       case DesktopRoute.identityProfile:
         return ProfileScreen(keriService: keri, serverUrl: url);
-
-      case DesktopRoute.identityKel:
-        return KeyEventLogScreen(serverUrl: url);
-
-      case DesktopRoute.identityRotation:
-        return KeyRotationScreen(keriService: keri, serverUrl: url);
-
-      case DesktopRoute.identityOobi:
-        return OobiScreen(keriService: keri, serverUrl: url);
 
       // ── Contacts / Apps ────────────────────────────────────────────────────
       case DesktopRoute.contacts:
@@ -87,10 +77,8 @@ class _DesktopAppState extends State<DesktopApp> {
       case DesktopRoute.settingsAuthentication:
         return const AuthManagementScreen();
 
-      case DesktopRoute.settingsNetwork:
-      case DesktopRoute.settingsAiKeys:
-        // Existing SettingsScreen handles both tunneling and AI keys.
-        // Route both here until the split is done in a future sprint.
+      case DesktopRoute.settingsTunneling:
+      case DesktopRoute.settingsApiKeys:
         return SettingsScreen(
           keriService: keri,
           mode: widget.mode,
@@ -98,8 +86,17 @@ class _DesktopAppState extends State<DesktopApp> {
           serverUrl: url,
         );
 
+      case DesktopRoute.settingsKeri:
+        return KeriProtocolScreen(keriService: keri, serverUrl: url);
+
+      case DesktopRoute.settingsEndpoints:
+        return EndpointsScreen(serverUrl: url);
+
       case DesktopRoute.settingsDeveloperTools:
-        return DeveloperToolsScreen(serverUrl: url);
+        return DeveloperToolsScreen(
+          serverUrl: url,
+          onResetIdentity: widget.onResetIdentity,
+        );
 
       case DesktopRoute.settingsTheme:
         return const ThemeSettingsScreen();
@@ -131,9 +128,6 @@ class _DesktopAppState extends State<DesktopApp> {
         return const ComingSoonScreen(title: 'Healthcare Hub', icon: Icons.local_hospital_outlined);
       case DesktopRoute.hubsFinancial:
         return const ComingSoonScreen(title: 'Financial Hub', icon: Icons.bar_chart);
-      case DesktopRoute.settingsKeri:
-        return const ComingSoonScreen(title: 'KERI Settings', icon: Icons.key,
-            description: 'Witness, mailbox, and watcher configuration coming soon.');
       case DesktopRoute.settingsKeyManagement:
         return const ComingSoonScreen(title: 'Key Management', icon: Icons.lock_outlined);
       case DesktopRoute.settingsServiceProviders:

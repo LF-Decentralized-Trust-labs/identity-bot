@@ -753,6 +753,16 @@ class CoreService {
     }
   }
 
+  Future<List<Map<String, dynamic>>> getActions() async {
+    final response = await _client.get(Uri.parse('$baseUrl/api/actions'));
+    if (response.statusCode == 200) {
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      return List<Map<String, dynamic>>.from(body['actions'] ?? []);
+    } else {
+      throw Exception('Failed to get actions: ${response.statusCode}');
+    }
+  }
+
   Future<ProfileResponse> getProfile() async {
     final response = await _client.get(Uri.parse('$baseUrl/api/profile'));
     if (response.statusCode == 200) {

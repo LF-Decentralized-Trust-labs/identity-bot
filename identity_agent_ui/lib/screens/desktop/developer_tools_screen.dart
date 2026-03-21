@@ -2,11 +2,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../theme/app_theme.dart';
 import '../../services/core_service.dart';
+import '../../services/preferences_service.dart';
 import '../../config/agent_config.dart';
 
 class DeveloperToolsScreen extends StatefulWidget {
   final String? serverUrl;
-  const DeveloperToolsScreen({super.key, this.serverUrl});
+  final VoidCallback? onResetIdentity;
+  const DeveloperToolsScreen({super.key, this.serverUrl, this.onResetIdentity});
 
   @override
   State<DeveloperToolsScreen> createState() => _DeveloperToolsScreenState();
@@ -96,6 +98,8 @@ class _DeveloperToolsScreenState extends State<DeveloperToolsScreen> {
               const SizedBox(height: 20),
               if (_info != null) _buildInfoCard(context),
             ],
+            const SizedBox(height: 20),
+            _buildResetCard(context),
           ],
         ),
       ),
@@ -196,6 +200,72 @@ class _DeveloperToolsScreenState extends State<DeveloperToolsScreen> {
           _kv('Description', info.description),
           const SizedBox(height: 12),
           _kv('Capabilities', info.capabilities.join(', ')),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _confirmReset() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Reset Identity'),
+        content: const Text(
+          'This will erase all local identity data including your keys, contacts, and settings. '
+          'This action cannot be undone.\n\nAre you sure?',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.error, foregroundColor: Colors.white),
+            child: const Text('Reset Identity'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await PreferencesService.clearAll();
+      widget.onResetIdentity?.call();
+    }
+  }
+
+  Widget _buildResetCard(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        border: Border.all(color: AppColors.error.withOpacity(0.4)),
+        borderRadius: BorderRadius.circular(12),
+        color: AppColors.error.withOpacity(0.04),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.warning_amber_rounded, color: AppColors.error, size: 20),
+              const SizedBox(width: 8),
+              const Text('Danger Zone',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600,
+                      color: AppColors.textPrimary)),
+            ],
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            'Resetting your identity clears all local keys, contacts, credentials, and settings. '
+            'This cannot be undone. Make sure you have a backup before proceeding.',
+            style: TextStyle(fontSize: 14, color: AppColors.textSecondary, height: 1.5),
+          ),
+          const SizedBox(height: 20),
+          OutlinedButton.icon(
+            onPressed: _confirmReset,
+            icon: const Icon(Icons.delete_forever, size: 18),
+            label: const Text('Reset Identity'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.error,
+              side: const BorderSide(color: AppColors.error),
+            ),
+          ),
         ],
       ),
     );

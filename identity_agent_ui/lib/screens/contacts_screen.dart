@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:qr_flutter/qr_flutter.dart';
 import '../theme/app_theme.dart';
 import '../services/core_service.dart';
 import '../services/keri_service.dart';
@@ -340,6 +342,22 @@ class _ContactsScreenState extends State<ContactsScreen> {
       return Platform.isIOS || Platform.isAndroid;
     } catch (_) {
       return false;
+    }
+  }
+
+  Future<void> _showShareDialog() async {
+    try {
+      final oobi = await _coreService.getOobi();
+      if (!mounted) return;
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => _ContactsShareScreen(oobi: oobi)),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not load OOBI: ${e.toString().split(': ').last}'),
+            backgroundColor: AppColors.error),
+      );
     }
   }
 
@@ -1058,6 +1076,12 @@ class _ContactsScreenState extends State<ContactsScreen> {
             color: AppColors.textSecondary,
             tooltip: 'Refresh',
           ),
+          IconButton(
+            onPressed: _showShareDialog,
+            icon: const Icon(Icons.share_outlined),
+            color: AppColors.primary,
+            tooltip: 'Share my identity',
+          ),
           if (_isMobilePlatform)
             IconButton(
               onPressed: _openQrScanner,
@@ -1438,6 +1462,131 @@ class _ContactsScreenState extends State<ContactsScreen> {
             ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+// ── Share Identity screen ─────────────────────────────────────────────────────
+
+class _ContactsShareScreen extends StatefulWidget {
+  final OobiResponse oobi;
+  const _ContactsShareScreen({required this.oobi});
+
+  @override
+  State<_ContactsShareScreen> createState() => _ContactsShareScreenState();
+}
+
+class _ContactsShareScreenState extends State<_ContactsShareScreen> {
+  bool _copied = false;
+
+  void _copy() {
+    Clipboard.setData(ClipboardData(text: widget.oobi.oobiUrl));
+    setState(() => _copied = true);
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) setState(() => _copied = false);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      appBar: AppBar(
+        title: const Text('Share My Identity'),
+        backgroundColor: AppColors.surface,
+        foregroundColor: AppColors.textPrimary,
+        elevation: 0,
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Share your OOBI URL so others can verify and add you as a contact.',
+              style: TextStyle(color: AppColors.textSecondary, fontSize: 14, height: 1.5),
+            ),
+            const SizedBox(height: 20),
+            const Text('OOBI URL',
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
+                    color: AppColors.textMuted, letterSpacing: 0.5)),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppColors.accent.withOpacity(0.3)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SelectableText(
+                    widget.oobi.oobiUrl,
+                    style: const TextStyle(color: AppColors.accent, fontSize: 12,
+                        fontFamily: 'monospace', height: 1.5),
+                  ),
+                  const SizedBox(height: 10),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: InkWell(
+                      onTap: _copy,
+                      borderRadius: BorderRadius.circular(6),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: _copied ? AppColors.success.withOpacity(0.12) : AppColors.surfaceLight,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: _copied ? AppColors.success.withOpacity(0.3) : AppColors.border),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(_copied ? Icons.check : Icons.copy,
+                                color: _copied ? AppColors.success : AppColors.textSecondary, size: 14),
+                            const SizedBox(width: 6),
+                            Text(_copied ? 'Copied' : 'Copy',
+                                style: TextStyle(
+                                  color: _copied ? AppColors.success : AppColors.textSecondary,
+                                  fontSize: 12, fontWeight: FontWeight.w600,
+                                )),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 24),
+            const Text('QR Code',
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
+                    color: AppColors.textMuted, letterSpacing: 0.5)),
+            const SizedBox(height: 8),
+            const Text('Scan from another device to add this identity.',
+                style: TextStyle(color: AppColors.textMuted, fontSize: 13)),
+            const SizedBox(height: 16),
+            Center(
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: QrImageView(
+                  data: widget.oobi.oobiUrl,
+                  version: QrVersions.auto,
+                  size: 220,
+                  backgroundColor: Colors.white,
+                  eyeStyle: const QrEyeStyle(eyeShape: QrEyeShape.square, color: Color(0xFF0a0e1a)),
+                  dataModuleStyle: const QrDataModuleStyle(
+                      dataModuleShape: QrDataModuleShape.square, color: Color(0xFF0a0e1a)),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

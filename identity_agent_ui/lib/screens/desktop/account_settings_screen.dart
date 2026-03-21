@@ -8,6 +8,7 @@ class AccountSettingsScreen extends StatefulWidget {
   final AgentMode? mode;
   final EntityType? entityType;
   final String? serverUrl;
+  // onResetIdentity kept for backwards-compat; Reset Identity has moved to Developer Tools.
   final VoidCallback? onResetIdentity;
 
   const AccountSettingsScreen({
@@ -50,32 +51,6 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
     }
   }
 
-  Future<void> _confirmReset() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Reset Identity'),
-        content: const Text(
-          'This will erase all local identity data including your keys, contacts, and settings. '
-          'This action cannot be undone.\n\nAre you sure?',
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
-          ElevatedButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.error, foregroundColor: Colors.white),
-            child: const Text('Reset Identity'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed == true) {
-      await PreferencesService.clearAll();
-      widget.onResetIdentity?.call();
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
@@ -94,7 +69,27 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
                   const SizedBox(height: 32),
                   _buildInfoCard(context),
                   const SizedBox(height: 24),
-                  _buildDangerCard(context),
+                  // Reset Identity has moved to Settings → Developer Tools.
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: AppColors.surfaceLight,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.info_outline, color: AppColors.textMuted, size: 16),
+                        const SizedBox(width: 10),
+                        const Expanded(
+                          child: Text(
+                            'To reset your identity, go to Settings → Developer Tools.',
+                            style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -146,42 +141,4 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
     );
   }
 
-  Widget _buildDangerCard(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        border: Border.all(color: AppColors.error.withOpacity(0.4)),
-        borderRadius: BorderRadius.circular(12),
-        color: AppColors.error.withOpacity(0.04),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.warning_amber_rounded, color: AppColors.error, size: 20),
-              const SizedBox(width: 8),
-              Text('Danger Zone', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Text(
-            'Resetting your identity clears all local keys, contacts, credentials, and settings. '
-            'This cannot be undone. Make sure you have a backup before proceeding.',
-            style: TextStyle(fontSize: 14, color: AppColors.textSecondary, height: 1.5),
-          ),
-          const SizedBox(height: 20),
-          OutlinedButton.icon(
-            onPressed: _confirmReset,
-            icon: const Icon(Icons.delete_forever, size: 18),
-            label: const Text('Reset Identity'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: AppColors.error,
-              side: BorderSide(color: AppColors.error),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 }

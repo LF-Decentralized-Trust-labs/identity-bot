@@ -10,9 +10,6 @@ enum DesktopRoute {
 
   // Identity
   identityProfile,
-  identityKel,
-  identityRotation,
-  identityOobi,
 
   // Top-level
   contacts,
@@ -30,11 +27,12 @@ enum DesktopRoute {
   hubsFinancial,
 
   // Settings
-  settingsNetwork,
+  settingsTunneling,
   settingsAuthentication,
   settingsKeri,
   settingsKeyManagement,
-  settingsAiKeys,
+  settingsApiKeys,
+  settingsEndpoints,
   settingsServiceProviders,
   settingsConnectedApps,
   settingsGovernance,
@@ -170,10 +168,7 @@ class _DesktopSidebarState extends State<DesktopSidebar> {
                   onToggle: () => setState(() => _identityOpen = !_identityOpen),
                 ),
                 if (_identityOpen) ...[
-                  _SubItem(icon: Icons.person_outline,     label: 'My Profile',     route: DesktopRoute.identityProfile,  current: widget.currentRoute, onTap: _select),
-                  _SubItem(icon: Icons.history,            label: 'Key Event Log',  route: DesktopRoute.identityKel,      current: widget.currentRoute, onTap: _select),
-                  _SubItem(icon: Icons.rotate_right,       label: 'Key Rotation',   route: DesktopRoute.identityRotation, current: widget.currentRoute, onTap: _select),
-                  _SubItem(icon: Icons.share,              label: 'Share / OOBI',   route: DesktopRoute.identityOobi,     current: widget.currentRoute, onTap: _select),
+                  _SubItem(icon: Icons.person_outline, label: 'My Profile', route: DesktopRoute.identityProfile, current: widget.currentRoute, onTap: _select),
                 ],
                 _sectionDivider(),
 
@@ -211,11 +206,12 @@ class _DesktopSidebarState extends State<DesktopSidebar> {
                   onToggle: () => setState(() => _settingsOpen = !_settingsOpen),
                 ),
                 if (_settingsOpen) ...[
-                  _SubItem(icon: Icons.lan_outlined,              label: 'Network & Endpoints',      route: DesktopRoute.settingsNetwork,         current: widget.currentRoute, onTap: _select),
+                  _SubItem(icon: Icons.vpn_lock_outlined,         label: 'Tunneling',                route: DesktopRoute.settingsTunneling,        current: widget.currentRoute, onTap: _select),
                   _SubItem(icon: Icons.lock_outlined,             label: 'Authentication',            route: DesktopRoute.settingsAuthentication,  current: widget.currentRoute, onTap: _select),
-                  _SubItem(icon: Icons.key,                       label: 'KERI',                     route: DesktopRoute.settingsKeri,            current: widget.currentRoute, onTap: _select, comingSoon: true),
+                  _SubItem(icon: Icons.key,                       label: 'KERI Protocol',            route: DesktopRoute.settingsKeri,            current: widget.currentRoute, onTap: _select),
                   _SubItem(icon: Icons.lock_outlined,             label: 'Key Management',           route: DesktopRoute.settingsKeyManagement,   current: widget.currentRoute, onTap: _select, comingSoon: true),
-                  _SubItem(icon: Icons.smart_toy_outlined,        label: 'AI Keys',                  route: DesktopRoute.settingsAiKeys,          current: widget.currentRoute, onTap: _select),
+                  _SubItem(icon: Icons.api_outlined,              label: 'API Keys',                 route: DesktopRoute.settingsApiKeys,         current: widget.currentRoute, onTap: _select),
+                  _SubItem(icon: Icons.hub_outlined,              label: 'Endpoints',                route: DesktopRoute.settingsEndpoints,       current: widget.currentRoute, onTap: _select),
                   _SubItem(icon: Icons.cloud_outlined,            label: 'Service Providers',        route: DesktopRoute.settingsServiceProviders, current: widget.currentRoute, onTap: _select, comingSoon: true),
                   _SubItem(icon: Icons.link,                      label: 'Connected Apps',           route: DesktopRoute.settingsConnectedApps,   current: widget.currentRoute, onTap: _select, comingSoon: true),
                   _SubItem(icon: Icons.gavel,                     label: 'Governance Gateway',       route: DesktopRoute.settingsGovernance,      current: widget.currentRoute, onTap: _select, comingSoon: true),

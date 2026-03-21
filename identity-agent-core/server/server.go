@@ -316,6 +316,7 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
                 r.Post("/tunnel/restart", s.handleTunnelRestart)
 
                 r.Get("/endpoint", s.handleGetEndpoint)
+                r.Get("/actions", s.handleGetActions)
 
                 r.Post("/store/identity", s.handleStoreIdentity)
                 r.Post("/store/event", s.handleStoreEvent)
@@ -1375,6 +1376,61 @@ func (s *CoreServer) handleGetEndpoint(w http.ResponseWriter, r *http.Request) {
         state := s.EndpointService.State()
         w.Header().Set("Content-Type", "application/json")
         json.NewEncoder(w).Encode(state)
+}
+
+// handleGetActions returns the list of available agent actions/endpoints.
+// The Flutter Endpoints screen fetches this to display a live, searchable list.
+func (s *CoreServer) handleGetActions(w http.ResponseWriter, r *http.Request) {
+        type ActionEndpoint struct {
+                Name        string   `json:"name"`
+                Endpoint    string   `json:"endpoint"`
+                Method      string   `json:"method"`
+                Description string   `json:"description"`
+                Tags        []string `json:"tags"`
+        }
+        actions := []ActionEndpoint{
+                {Name: "Add Contact", Endpoint: "/api/contacts/resolve", Method: "POST",
+                        Description: "Resolve an OOBI URL and add the identity as a trusted contact.",
+                        Tags: []string{"contacts", "identity"}},
+                {Name: "Get Contacts", Endpoint: "/api/contacts", Method: "GET",
+                        Description: "List all verified contacts in your network.",
+                        Tags: []string{"contacts"}},
+                {Name: "Accept Contact", Endpoint: "/api/contacts/{aid}/accept", Method: "POST",
+                        Description: "Accept an incoming contact request.",
+                        Tags: []string{"contacts"}},
+                {Name: "Get OOBI", Endpoint: "/api/oobi", Method: "GET",
+                        Description: "Generate your OOBI URL for sharing with contacts.",
+                        Tags: []string{"identity", "sharing"}},
+                {Name: "Get Identity", Endpoint: "/api/identity", Method: "GET",
+                        Description: "Get the current identity AID and status.",
+                        Tags: []string{"identity"}},
+                {Name: "Key Rotation", Endpoint: "/api/rotation", Method: "POST",
+                        Description: "Rotate signing keys. Your AID remains unchanged.",
+                        Tags: []string{"identity", "security"}},
+                {Name: "Get Key Event Log", Endpoint: "/api/kel", Method: "GET",
+                        Description: "Retrieve the Key Event Log for an AID.",
+                        Tags: []string{"identity", "keri"}},
+                {Name: "Sign Data", Endpoint: "/api/sign", Method: "POST",
+                        Description: "Cryptographically sign arbitrary data with your current keys.",
+                        Tags: []string{"crypto", "signing"}},
+                {Name: "Verify Signature", Endpoint: "/api/verify", Method: "POST",
+                        Description: "Verify a signature against a known AID.",
+                        Tags: []string{"crypto", "verification"}},
+                {Name: "Send Exchange", Endpoint: "/api/exchange", Method: "POST",
+                        Description: "Send an exchange message (payment request, credential offer, etc.) to a contact.",
+                        Tags: []string{"exchange", "payments"}},
+                {Name: "Issue Credential", Endpoint: "/api/credential/issue", Method: "POST",
+                        Description: "Issue a verifiable credential (ACDC) to a contact.",
+                        Tags: []string{"credentials"}},
+                {Name: "Get Credentials", Endpoint: "/api/credentials", Method: "GET",
+                        Description: "List all credentials held by this agent.",
+                        Tags: []string{"credentials"}},
+                {Name: "Get Health", Endpoint: "/api/health", Method: "GET",
+                        Description: "Check agent health and status.",
+                        Tags: []string{"system"}},
+        }
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(map[string]interface{}{"actions": actions})
 }
 
 func (s *CoreServer) handleOobiGenerate(w http.ResponseWriter, r *http.Request) {
