@@ -298,6 +298,7 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
                 r.Get("/contacts/{aid}", s.handleGetContact)
                 r.Get("/contacts/{aid}/kel", s.handleGetContactKEL)
                 r.Delete("/contacts/{aid}", s.handleDeleteContact)
+                r.Put("/contacts/{aid}", s.handleUpdateContact)
                 r.Post("/contacts/{aid}/accept", s.handleAcceptContact)
                 r.Post("/contacts/{aid}/reject", s.handleRejectContact)
                 r.Get("/alerts", s.handleGetAlerts)
@@ -2119,6 +2120,55 @@ func (s *CoreServer) handleAcceptContact(w http.ResponseWriter, r *http.Request)
 
         w.Header().Set("Content-Type", "application/json")
         json.NewEncoder(w).Encode(map[string]string{"status": "accepted", "aid": aid})
+}
+
+func (s *CoreServer) handleUpdateContact(w http.ResponseWriter, r *http.Request) {
+        aid := chi.URLParam(r, "aid")
+        if aid == "" {
+                writeError(w, http.StatusBadRequest, "Missing AID", "AID parameter is required")
+                return
+        }
+
+        var req struct {
+                Role  string `json:"role"`
+                Alias string `json:"alias"`
+        }
+        if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+                writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+                return
+        }
+
+        contact, err := s.DataStore.GetContact(aid)
+        if err != nil {
+                writeError(w, http.StatusInternalServerError, "Failed to read contact", err.Error())
+                return
+        }
+        if contact == nil {
+                writeError(w, http.StatusNotFound, "Contact not found", fmt.Sprintf("No contact found for AID: %s", aid))
+                return
+        }
+
+        if req.Role != "" {
+                validRoles := map[string]bool{"agent": true, "witness": true, "verifier": true}
+                if !validRoles[req.Role] {
+                        writeError(w, http.StatusBadRequest, "Invalid role", fmt.Sprintf("Role must be one of: agent, witness, verifier"))
+                        return
+                }
+                contact.Role = req.Role
+        }
+        if req.Alias != "" {
+                contact.Alias = req.Alias
+        }
+
+        if err := s.DataStore.SaveContact(*contact); err != nil {
+                writeError(w, http.StatusInternalServerError, "Failed to update contact", err.Error())
+                return
+        }
+
+        log.Printf("[identity-agent-core] CONTACT: Updated %s (AID: %s) role=%s", contact.Alias, aid, contact.Role)
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(contact)
 }
 
 func (s *CoreServer) handleRejectContact(w http.ResponseWriter, r *http.Request) {

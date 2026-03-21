@@ -6,6 +6,7 @@ import '../services/core_service.dart';
 import '../services/keri_service.dart';
 import '../services/mobile_on_device_keri_service.dart';
 import '../widgets/consent_modal.dart';
+import '../services/identity_level_service.dart';
 import 'qr_scanner_screen.dart';
 
 class ContactsScreen extends StatefulWidget {
@@ -65,11 +66,125 @@ class _ContactsScreenState extends State<ContactsScreen> {
           _selectedContact = stillExists.isNotEmpty ? stillExists.first : null;
         }
       });
+      _syncWitnessCount(result.contacts);
     } catch (e) {
       setState(() {
         _error = e.toString();
         _loading = false;
       });
+    }
+  }
+
+  /// Counts mutual contacts with role "witness" and updates the Identity Level tier.
+  void _syncWitnessCount(List<ContactResponse> contacts) {
+    final count = contacts.where((c) => c.isMutual && c.role == 'witness').length;
+    IdentityLevelService.setWitnessCount(count);
+  }
+
+  /// Shows a role-picker dialog and returns the chosen role, or null if cancelled.
+  Future<String?> _pickRole(BuildContext context, {String initial = 'agent'}) async {
+    String selected = initial;
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setS) => AlertDialog(
+          backgroundColor: AppColors.surface,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(color: AppColors.border),
+          ),
+          title: const Text(
+            'ASSIGN ROLE',
+            style: TextStyle(
+              color: AppColors.textPrimary,
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.0,
+              fontFamily: 'monospace',
+            ),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Choose how this contact will relate to your identity.',
+                style: TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 12,
+                  fontFamily: 'monospace',
+                ),
+              ),
+              const SizedBox(height: 16),
+              for (final role in ['agent', 'witness', 'verifier'])
+                RadioListTile<String>(
+                  value: role,
+                  groupValue: selected,
+                  onChanged: (v) => setS(() => selected = v!),
+                  title: Text(
+                    role == 'agent' ? 'Agent (general contact)' :
+                    role == 'witness' ? 'Witness (will witness your keys)' :
+                    'Verifier (will verify your identity)',
+                    style: const TextStyle(
+                      color: AppColors.textPrimary,
+                      fontSize: 12,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                  activeColor: AppColors.accent,
+                  dense: true,
+                ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(null),
+              child: const Text('CANCEL', style: TextStyle(color: AppColors.textMuted, fontFamily: 'monospace')),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(ctx).pop(selected),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.accent,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              child: const Text('CONFIRM', style: TextStyle(fontFamily: 'monospace')),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _acceptWithRole(ContactResponse contact) async {
+    final role = await _pickRole(context);
+    if (role == null || !mounted) return;
+    try {
+      await _coreService.acceptContact(contact.aid);
+      if (role != 'agent') {
+        await _coreService.updateContact(contact.aid, role: role);
+      }
+      _loadContacts();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.toString()), backgroundColor: AppColors.error),
+        );
+      }
+    }
+  }
+
+  Future<void> _changeRole(ContactResponse contact) async {
+    final role = await _pickRole(context, initial: contact.role);
+    if (role == null || !mounted) return;
+    try {
+      await _coreService.updateContact(contact.aid, role: role);
+      _loadContacts();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.toString()), backgroundColor: AppColors.error),
+        );
+      }
     }
   }
 
@@ -627,24 +742,33 @@ class _ContactsScreenState extends State<ContactsScreen> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: ElevatedButton(
-                    onPressed: () async {
-                      try {
-                        await _coreService.acceptContact(contact.aid);
-                        _loadContacts();
-                      } catch (e) {
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text(e.toString()), backgroundColor: AppColors.error),
-                          );
-                        }
-                      }
-                    },
-                    child: const Text('Accept'),
+                    onPressed: () => _acceptWithRole(contact),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.accent,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                    child: const Text('Accept as...'),
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 12),
+          ],
+          if (!contact.isPendingInbound) ...[
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () => _changeRole(contact),
+                icon: const Icon(Icons.swap_horiz, size: 15),
+                label: const Text('Change Role'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.accent,
+                  side: const BorderSide(color: AppColors.accent),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
           ],
           SizedBox(
             width: double.infinity,
@@ -1104,18 +1228,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                 ),
                 const SizedBox(width: 8),
                 InkWell(
-                  onTap: () async {
-                    try {
-                      await _coreService.acceptContact(contact.aid);
-                      _loadContacts();
-                    } catch (e) {
-                      if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text(e.toString()), backgroundColor: AppColors.error),
-                        );
-                      }
-                    }
-                  },
+                  onTap: () => _acceptWithRole(contact),
                   borderRadius: BorderRadius.circular(6),
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -1125,7 +1238,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                       border: Border.all(color: AppColors.coreActive.withOpacity(0.3)),
                     ),
                     child: const Text(
-                      'ACCEPT',
+                      'ACCEPT AS...',
                       style: TextStyle(
                         color: AppColors.coreActive,
                         fontSize: 9,

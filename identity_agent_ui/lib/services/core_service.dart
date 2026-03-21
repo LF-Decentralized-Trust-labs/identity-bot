@@ -555,6 +555,23 @@ class CoreService {
     }
   }
 
+  Future<ContactResponse> updateContact(String aid, {String? role, String? alias}) async {
+    final body = <String, String>{};
+    if (role != null) body['role'] = role;
+    if (alias != null) body['alias'] = alias;
+    final response = await _client.put(
+      Uri.parse('$baseUrl/api/contacts/$aid'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(body),
+    );
+    if (response.statusCode == 200) {
+      return ContactResponse.fromJson(jsonDecode(response.body));
+    } else {
+      final err = jsonDecode(response.body);
+      throw Exception(err['error'] ?? 'Update contact failed: ${response.statusCode}');
+    }
+  }
+
   Future<AlertsResponse> getAlerts() async {
     final response = await _client.get(Uri.parse('$baseUrl/api/alerts'));
     if (response.statusCode == 200) {

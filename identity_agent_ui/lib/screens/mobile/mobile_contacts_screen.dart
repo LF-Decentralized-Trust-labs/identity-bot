@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../theme/mobile_theme.dart';
 import '../../services/core_service.dart';
+import '../../services/identity_level_service.dart';
 import '../../config/agent_config.dart';
 
 class MobileContactsScreen extends StatefulWidget {
@@ -46,11 +47,17 @@ class _MobileContactsScreenState extends State<MobileContactsScreen> {
           _filtered = result.contacts;
           _loading = false;
         });
+        _syncWitnessCount(result.contacts);
       }
     } catch (e) {
       debugPrint('[MobileContacts] Load error: $e');
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  void _syncWitnessCount(List<ContactResponse> contacts) {
+    final count = contacts.where((c) => c.isMutual && c.role == 'witness').length;
+    IdentityLevelService.setWitnessCount(count);
   }
 
   void _filterContacts() {
@@ -214,7 +221,16 @@ class _ContactCard extends StatelessWidget {
                 ],
               ),
             ),
-            _buildStatusBadge(),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                _buildStatusBadge(),
+                if (contact.role != 'agent') ...[
+                  const SizedBox(height: 4),
+                  _buildRoleBadge(),
+                ],
+              ],
+            ),
             const SizedBox(width: 8),
             const Icon(Icons.chevron_right, color: MobileColors.textMuted, size: 20),
           ],
@@ -280,7 +296,7 @@ class _ContactCard extends StatelessWidget {
       label = 'Verified';
     } else if (contact.isPendingInbound) {
       color = MobileColors.warning;
-      label = 'Pending';
+      label = 'Incoming';
     } else {
       color = MobileColors.textMuted;
       label = 'Added';
@@ -294,11 +310,24 @@ class _ContactCard extends StatelessWidget {
       ),
       child: Text(
         label,
-        style: TextStyle(
-          fontSize: 10,
-          fontWeight: FontWeight.w600,
-          color: color,
-        ),
+        style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: color),
+      ),
+    );
+  }
+
+  Widget _buildRoleBadge() {
+    final isWitness = contact.role == 'witness';
+    final color = isWitness ? MobileColors.primary : MobileColors.textSecondary;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: color.withOpacity(0.25)),
+      ),
+      child: Text(
+        contact.role.toUpperCase(),
+        style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: color),
       ),
     );
   }
@@ -316,6 +345,232 @@ class _ContactDetailScreen extends StatefulWidget {
 
 class _ContactDetailScreenState extends State<_ContactDetailScreen> {
   bool _deleting = false;
+  late ContactResponse _contact;
+
+  @override
+  void initState() {
+    super.initState();
+    _contact = widget.contact;
+  }
+
+  Future<void> _showAcceptSheet() async {
+    String selectedRole = 'agent';
+    final coreService = CoreService(baseUrl: widget.serverUrl ?? AgentConfig.coreBaseUrl);
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: MobileColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setS) => Padding(
+          padding: const EdgeInsets.fromLTRB(24, 24, 24, 36),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Accept ${_contact.displayName}',
+                style: const TextStyle(
+                  color: MobileColors.textPrimary,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'Choose the role this contact will have in your identity.',
+                style: TextStyle(color: MobileColors.textSecondary, fontSize: 13),
+              ),
+              const SizedBox(height: 20),
+              for (final entry in {
+                'agent': 'Agent — general contact',
+                'witness': 'Witness — will witness your keys',
+                'verifier': 'Verifier — will verify your identity',
+              }.entries)
+                RadioListTile<String>(
+                  value: entry.key,
+                  groupValue: selectedRole,
+                  onChanged: (v) => setS(() => selectedRole = v!),
+                  title: Text(entry.value,
+                      style: const TextStyle(
+                          color: MobileColors.textPrimary, fontSize: 14)),
+                  activeColor: MobileColors.primary,
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () async {
+                        Navigator.of(ctx).pop();
+                        try {
+                          await coreService.rejectContact(_contact.aid);
+                          coreService.dispose();
+                          if (mounted) Navigator.of(context).pop(true);
+                        } catch (e) {
+                          coreService.dispose();
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('$e'),
+                                  backgroundColor: MobileColors.error),
+                            );
+                          }
+                        }
+                      },
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: MobileColors.error),
+                        foregroundColor: MobileColors.error,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10)),
+                      ),
+                      child: const Text('Decline'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () async {
+                        Navigator.of(ctx).pop();
+                        try {
+                          await coreService.acceptContact(_contact.aid);
+                          if (selectedRole != 'agent') {
+                            await coreService.updateContact(_contact.aid,
+                                role: selectedRole);
+                          }
+                          coreService.dispose();
+                          // Refresh contact list witness count
+                          final all = await CoreService(
+                                  baseUrl: widget.serverUrl ??
+                                      AgentConfig.coreBaseUrl)
+                              .getContacts();
+                          IdentityLevelService.setWitnessCount(all.contacts
+                              .where((c) =>
+                                  c.isMutual && c.role == 'witness')
+                              .length);
+                          if (mounted) Navigator.of(context).pop(true);
+                        } catch (e) {
+                          coreService.dispose();
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('$e'),
+                                  backgroundColor: MobileColors.error),
+                            );
+                          }
+                        }
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: MobileColors.primary,
+                        foregroundColor: MobileColors.textOnPrimary,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10)),
+                      ),
+                      child: const Text('Accept'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showChangeRoleSheet() async {
+    String selectedRole = _contact.role;
+    final coreService = CoreService(baseUrl: widget.serverUrl ?? AgentConfig.coreBaseUrl);
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: MobileColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setS) => Padding(
+          padding: const EdgeInsets.fromLTRB(24, 24, 24, 36),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Change Role',
+                style: TextStyle(
+                  color: MobileColors.textPrimary,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 16),
+              for (final entry in {
+                'agent': 'Agent — general contact',
+                'witness': 'Witness — will witness your keys',
+                'verifier': 'Verifier — will verify your identity',
+              }.entries)
+                RadioListTile<String>(
+                  value: entry.key,
+                  groupValue: selectedRole,
+                  onChanged: (v) => setS(() => selectedRole = v!),
+                  title: Text(entry.value,
+                      style: const TextStyle(
+                          color: MobileColors.textPrimary, fontSize: 14)),
+                  activeColor: MobileColors.primary,
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                ),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () async {
+                    Navigator.of(ctx).pop();
+                    try {
+                      final updated = await coreService.updateContact(
+                          _contact.aid, role: selectedRole);
+                      coreService.dispose();
+                      // Refresh witness count
+                      final all = await CoreService(
+                              baseUrl:
+                                  widget.serverUrl ?? AgentConfig.coreBaseUrl)
+                          .getContacts();
+                      IdentityLevelService.setWitnessCount(all.contacts
+                          .where((c) => c.isMutual && c.role == 'witness')
+                          .length);
+                      if (mounted) setState(() => _contact = updated);
+                    } catch (e) {
+                      coreService.dispose();
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('$e'),
+                              backgroundColor: MobileColors.error),
+                        );
+                      }
+                    }
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: MobileColors.primary,
+                    foregroundColor: MobileColors.textOnPrimary,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                  ),
+                  child: const Text('Save Role',
+                      style: TextStyle(fontWeight: FontWeight.w600)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
   void _copyToClipboard(String text, String label) {
     Clipboard.setData(ClipboardData(text: text));
@@ -331,7 +586,7 @@ class _ContactDetailScreenState extends State<_ContactDetailScreen> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text('Delete Contact'),
         content: Text(
-          'Are you sure you want to delete ${widget.contact.displayName}? This cannot be undone.',
+          'Are you sure you want to delete ${_contact.displayName}? This cannot be undone.',
         ),
         actions: [
           TextButton(
@@ -354,7 +609,7 @@ class _ContactDetailScreenState extends State<_ContactDetailScreen> {
       setState(() => _deleting = true);
       try {
         final coreService = CoreService(baseUrl: widget.serverUrl ?? AgentConfig.coreBaseUrl);
-        await coreService.deleteContact(widget.contact.aid);
+        await coreService.deleteContact(_contact.aid);
         coreService.dispose();
         if (mounted) {
           Navigator.of(context).pop(true);
@@ -375,11 +630,10 @@ class _ContactDetailScreenState extends State<_ContactDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final contact = widget.contact;
     return Scaffold(
       backgroundColor: MobileColors.background,
       appBar: AppBar(
-        title: Text(contact.displayName),
+        title: Text(_contact.displayName),
         backgroundColor: MobileColors.surface,
         foregroundColor: MobileColors.textPrimary,
         elevation: 0,
@@ -399,10 +653,10 @@ class _ContactDetailScreenState extends State<_ContactDetailScreen> {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            _buildDetailAvatar(contact),
+            _buildDetailAvatar(_contact),
             const SizedBox(height: 12),
             Text(
-              contact.displayName,
+              _contact.displayName,
               style: const TextStyle(
                 fontSize: 22,
                 fontWeight: FontWeight.w700,
@@ -413,11 +667,49 @@ class _ContactDetailScreenState extends State<_ContactDetailScreen> {
             _buildStatusChip(),
             const SizedBox(height: 20),
             _buildInfoCard(context),
-            if (contact.jcard != null) ...[
+            if (_contact.jcard != null) ...[
               const SizedBox(height: 12),
               _buildJCardInfo(),
             ],
-            const SizedBox(height: 24),
+            const SizedBox(height: 16),
+            // Accept/Decline for incoming pending contacts
+            if (_contact.isPendingInbound) ...[
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: _showAcceptSheet,
+                  icon: const Icon(Icons.check, size: 18),
+                  label: const Text('Accept as...'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: MobileColors.primary,
+                    foregroundColor: MobileColors.textOnPrimary,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
+            // Change role for accepted contacts
+            if (!_contact.isPendingInbound) ...[
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _showChangeRoleSheet,
+                  icon: const Icon(Icons.swap_horiz, size: 18),
+                  label: Text('Role: ${_contact.role.toUpperCase()}'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: MobileColors.primary,
+                    side: const BorderSide(color: MobileColors.primary),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
             SizedBox(
               width: double.infinity,
               child: OutlinedButton.icon(
@@ -467,14 +759,16 @@ class _ContactDetailScreenState extends State<_ContactDetailScreen> {
   }
 
   Widget _buildStatusChip() {
-    final contact = widget.contact;
     Color color;
     String label;
 
-    if (contact.isMutual) {
+    if (_contact.isPendingInbound) {
+      color = MobileColors.warning;
+      label = 'Incoming Request';
+    } else if (_contact.isMutual) {
       color = MobileColors.success;
       label = 'Mutual Connection';
-    } else if (contact.verified) {
+    } else if (_contact.verified) {
       color = MobileColors.info;
       label = 'Verified';
     } else {
@@ -500,7 +794,6 @@ class _ContactDetailScreenState extends State<_ContactDetailScreen> {
   }
 
   Widget _buildInfoCard(BuildContext context) {
-    final contact = widget.contact;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(16),
@@ -514,24 +807,26 @@ class _ContactDetailScreenState extends State<_ContactDetailScreen> {
         children: [
           _DetailRow(
             label: 'AID',
-            value: contact.aid,
+            value: _contact.aid,
             monospace: true,
-            onCopy: () => _copyToClipboard(contact.aid, 'AID'),
+            onCopy: () => _copyToClipboard(_contact.aid, 'AID'),
           ),
           const Divider(height: 16),
           _DetailRow(
             label: 'OOBI URL',
-            value: contact.oobiUrl,
+            value: _contact.oobiUrl,
             monospace: true,
-            onCopy: () => _copyToClipboard(contact.oobiUrl, 'OOBI URL'),
+            onCopy: () => _copyToClipboard(_contact.oobiUrl, 'OOBI URL'),
           ),
           const Divider(height: 16),
-          _DetailRow(label: 'Status', value: contact.status.isNotEmpty ? contact.status : 'added'),
+          _DetailRow(label: 'Role', value: _contact.role),
           const Divider(height: 16),
-          _DetailRow(label: 'Verified', value: contact.verified ? 'Yes' : 'No'),
-          if (contact.discoveredAt.isNotEmpty) ...[
+          _DetailRow(label: 'Status', value: _contact.status.isNotEmpty ? _contact.status : 'added'),
+          const Divider(height: 16),
+          _DetailRow(label: 'Verified', value: _contact.verified ? 'Yes' : 'No'),
+          if (_contact.discoveredAt.isNotEmpty) ...[
             const Divider(height: 16),
-            _DetailRow(label: 'Discovered', value: contact.discoveredAt),
+            _DetailRow(label: 'Discovered', value: _contact.discoveredAt),
           ],
         ],
       ),
@@ -539,7 +834,7 @@ class _ContactDetailScreenState extends State<_ContactDetailScreen> {
   }
 
   Widget _buildJCardInfo() {
-    final jcard = widget.contact.jcard!;
+    final jcard = _contact.jcard!;
     final fields = <MapEntry<String, String>>[];
 
     if (jcard.fullName.isNotEmpty) fields.add(MapEntry('Name', jcard.fullName));
