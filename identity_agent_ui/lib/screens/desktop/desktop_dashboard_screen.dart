@@ -8,6 +8,7 @@ import '../../config/agent_config.dart';
 import '../../services/core_service.dart';
 import '../../services/keri_service.dart';
 import '../../services/mobile_on_device_keri_service.dart';
+import '../../services/setup_task_service.dart';
 import '../../widgets/identity_level_badge.dart';
 import '../../widgets/key_storage_badge.dart';
 import '../../widgets/log_entry.dart';
@@ -49,6 +50,9 @@ class _DesktopDashboardScreenState extends State<DesktopDashboardScreen> {
 
   // Activity
   final List<LogEntry> _logs = [];
+
+  // Setup
+  int _pendingSetupTasks = 0;
 
   // Status
   HealthResponse? _health;
@@ -131,6 +135,11 @@ class _DesktopDashboardScreenState extends State<DesktopDashboardScreen> {
           _addLog('Identity: ${_identity!.aid!.substring(0, 12)}…', LogLevel.info);
         }
       }
+      // Count pending setup tasks
+      final tasks = SetupTaskService.orderedTasks(needsRemoteBrain: widget.serverUrl != null);
+      final state = await SetupTaskService.loadState(tasks);
+      final pending = state.values.where((done) => !done).length;
+      if (mounted) setState(() => _pendingSetupTasks = pending);
     } catch (_) {}
   }
 
@@ -299,6 +308,10 @@ class _DesktopDashboardScreenState extends State<DesktopDashboardScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _buildHeader(),
+            if (_pendingSetupTasks > 0) ...[
+              const SizedBox(height: 12),
+              _buildSetupBanner(),
+            ],
             const SizedBox(height: 20),
             // 3-column dashboard layout
             IntrinsicHeight(
@@ -325,6 +338,9 @@ class _DesktopDashboardScreenState extends State<DesktopDashboardScreen> {
                 ],
               ),
             ),
+            const SizedBox(height: 16),
+            // ── My Devices row ─────────────────────────────────────────────
+            _buildMyDevicesSection(),
           ],
         ),
       ),
@@ -371,6 +387,49 @@ class _DesktopDashboardScreenState extends State<DesktopDashboardScreen> {
           iconSize: 18,
         ),
       ],
+    );
+  }
+
+  Widget _buildSetupBanner() {
+    final isIdentityMissing = _identity?.initialized != true;
+    final color = isIdentityMissing ? AppColors.error : AppColors.warning;
+    final icon = isIdentityMissing ? Icons.error_outline : Icons.warning_amber_rounded;
+    return InkWell(
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const AuthSetupScreen()),
+      ),
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: color.withOpacity(0.35)),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: color, size: 18),
+            const SizedBox(width: 10),
+            Expanded(
+              child: RichText(
+                text: TextSpan(
+                  style: TextStyle(color: color, fontSize: 13),
+                  children: [
+                    TextSpan(
+                      text: '$_pendingSetupTasks pending setup item${_pendingSetupTasks == 1 ? '' : 's'}',
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    const TextSpan(text: '  ·  Complete your setup to unlock all features.'),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text('Complete Setup →',
+                style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w600)),
+          ],
+        ),
+      ),
     );
   }
 
@@ -715,37 +774,121 @@ class _DesktopDashboardScreenState extends State<DesktopDashboardScreen> {
             color: AppColors.accent,
             onTap: _showAddContactDialog,
           ),
-          const SizedBox(height: 16),
-          // Backend status pill
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: AppColors.surfaceLight,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: AppColors.border),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMyDevicesSection() {
+    final isRemote = widget.serverUrl != null;
+    return _sectionCard(
+      title: 'My Devices',
+      icon: Icons.devices_outlined,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // This device / local backend
+          Expanded(
+            child: _deviceTile(
+              label: isRemote ? 'Remote Server' : 'This Device',
+              icon: isRemote ? Icons.dns_outlined : Icons.computer,
+              isOnline: _connectionState == CoreConnectionState.connected,
+              agent: _health?.agent ?? '—',
+              version: _health?.version ?? '—',
+              mode: _health?.mode ?? '—',
+              uptime: _health?.uptime ?? '—',
+              url: widget.serverUrl ?? AgentConfig.coreBaseUrl,
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Backend',
-                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
-                        color: AppColors.textMuted)),
-                const SizedBox(height: 6),
-                if (_health != null) ...[
-                  Text(_health!.agent,
-                      style: const TextStyle(fontSize: 12, color: AppColors.textPrimary)),
-                  const SizedBox(height: 2),
-                  Text('v${_health!.version} · ${_health!.mode}',
-                      style: const TextStyle(fontSize: 11, color: AppColors.textMuted,
-                          fontFamily: 'monospace')),
-                  const SizedBox(height: 2),
-                  Text('Uptime: ${_health!.uptime}',
-                      style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
-                ] else
-                  const Text('Loading…',
-                      style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
-              ],
+          ),
+          if (isRemote) ...[
+            const SizedBox(width: 12),
+            // Local controller
+            Expanded(
+              child: _deviceTile(
+                label: 'This Device (Controller)',
+                icon: Icons.computer,
+                isOnline: true,
+                agent: 'Identity Agent UI',
+                version: '—',
+                mode: 'controller',
+                uptime: '—',
+                url: 'local',
+              ),
             ),
+          ],
+          // Spacer so single device card doesn't stretch full width
+          if (!isRemote) const Expanded(child: SizedBox()),
+        ],
+      ),
+    );
+  }
+
+  Widget _deviceTile({
+    required String label,
+    required IconData icon,
+    required bool isOnline,
+    required String agent,
+    required String version,
+    required String mode,
+    required String uptime,
+    required String url,
+  }) {
+    final statusColor = isOnline ? AppColors.success : AppColors.error;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceLight,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 14, color: AppColors.textSecondary),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(label,
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
+                        color: AppColors.textPrimary),
+                    overflow: TextOverflow.ellipsis),
+              ),
+              Container(
+                width: 7, height: 7,
+                decoration: BoxDecoration(color: statusColor, shape: BoxShape.circle),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          _deviceKv('Agent', agent),
+          _deviceKv('Version', 'v$version'),
+          _deviceKv('Mode', mode),
+          if (uptime != '—') _deviceKv('Uptime', uptime),
+          if (url != 'local') ...[
+            const SizedBox(height: 4),
+            Text(url,
+                style: const TextStyle(fontSize: 9, color: AppColors.textMuted,
+                    fontFamily: 'monospace'),
+                overflow: TextOverflow.ellipsis),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _deviceKv(String key, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 2),
+      child: Row(
+        children: [
+          Text('$key  ',
+              style: const TextStyle(fontSize: 10, color: AppColors.textMuted)),
+          Expanded(
+            child: Text(value,
+                style: const TextStyle(fontSize: 10, color: AppColors.textSecondary,
+                    fontFamily: 'monospace'),
+                overflow: TextOverflow.ellipsis),
           ),
         ],
       ),
