@@ -26,6 +26,8 @@ import 'screens/hosting_choice_screen.dart';
 import 'screens/mobile/mobile_hosting_choice_screen.dart';
 import 'screens/setup_checklist_screen.dart';
 import 'screens/mobile/mobile_setup_checklist_screen.dart';
+import 'screens/lock_screen.dart';
+import 'services/pin_password_service.dart';
 
 String? _backendStartupError;
 Future<bool>? _backendStartupFuture;
@@ -668,9 +670,45 @@ class AgentMainScreen extends StatefulWidget {
   State<AgentMainScreen> createState() => _AgentMainScreenState();
 }
 
-class _AgentMainScreenState extends State<AgentMainScreen> {
+class _AgentMainScreenState extends State<AgentMainScreen>
+    with WidgetsBindingObserver {
+  bool _locked = false;
+  DateTime? _backgroundedAt;
+  static const _lockAfter = Duration(minutes: 5);
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      _backgroundedAt ??= DateTime.now();
+    } else if (state == AppLifecycleState.resumed) {
+      _maybelock();
+    }
+  }
+
+  Future<void> _maybelock() async {
+    final bg = _backgroundedAt;
+    if (bg == null) return;
+    if (DateTime.now().difference(bg) < _lockAfter) return;
+    _backgroundedAt = null;
+    // Only lock if the user has actually set up authentication
+    final hasAuth = await PinPasswordService.hasAnyCredential();
+    if (hasAuth && mounted) setState(() => _locked = true);
+  }
+
   void _handleReset() {
-    // Bubble up to AgentRouter to restart onboarding
     if (mounted) {
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const AgentRouter()),
@@ -679,9 +717,7 @@ class _AgentMainScreenState extends State<AgentMainScreen> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    // Mobile platform (native iOS/Android) → always MobileApp
+  Widget _buildMain() {
     if (_isMobilePlatform) {
       return MobileApp(
         keriService: widget.keriService,
@@ -690,8 +726,6 @@ class _AgentMainScreenState extends State<AgentMainScreen> {
         serverUrl: widget.serverUrl,
       );
     }
-
-    // Responsive: narrow window → MobileApp, wide → DesktopApp
     return LayoutBuilder(
       builder: (context, constraints) {
         if (constraints.maxWidth < 768) {
@@ -711,5 +745,13 @@ class _AgentMainScreenState extends State<AgentMainScreen> {
         );
       },
     );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_locked) {
+      return LockScreen(onUnlocked: () => setState(() => _locked = false));
+    }
+    return _buildMain();
   }
 }

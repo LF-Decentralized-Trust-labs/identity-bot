@@ -5,6 +5,7 @@ import '../../services/core_service.dart';
 import '../../services/preferences_service.dart';
 import '../../config/agent_config.dart';
 import '../../main.dart';
+import 'mobile_auth_management_screen.dart';
 
 class MobileSettingsScreen extends StatefulWidget {
   final String? serverUrl;
@@ -460,6 +461,8 @@ class _MobileSettingsScreenState extends State<MobileSettingsScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      _buildAuthSection(),
+                      const SizedBox(height: 16),
                       _buildTunnelStatusCard(),
                       const SizedBox(height: 16),
                       _buildProviderSelector(),
@@ -1358,6 +1361,55 @@ class _MobileSettingsScreenState extends State<MobileSettingsScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildAuthSection() {
+    return GestureDetector(
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute(
+            builder: (_) => const MobileAuthManagementScreen()),
+      ),
+      child: _buildCard(
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: MobileColors.primary.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.lock_outlined,
+                  color: MobileColors.primary, size: 20),
+            ),
+            const SizedBox(width: 14),
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Authentication & Security',
+                    style: TextStyle(
+                      color: MobileColors.textPrimary,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  SizedBox(height: 2),
+                  Text(
+                    'PIN, password, biometrics, and Identity Level',
+                    style: TextStyle(
+                        color: MobileColors.textMuted, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right,
+                color: MobileColors.textMuted, size: 20),
+          ],
+        ),
+      ),
     );
   }
 

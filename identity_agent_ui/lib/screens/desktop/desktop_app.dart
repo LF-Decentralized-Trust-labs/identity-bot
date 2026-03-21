@@ -15,6 +15,7 @@ import 'key_rotation_screen.dart';
 import 'developer_tools_screen.dart';
 import 'theme_settings_screen.dart';
 import 'account_settings_screen.dart';
+import 'auth_management_screen.dart';
 import '../../widgets/setup_task_banner.dart';
 
 class DesktopApp extends StatefulWidget {
@@ -83,6 +84,9 @@ class _DesktopAppState extends State<DesktopApp> {
         return MarketplaceScreen(serverUrl: url);
 
       // ── Settings ───────────────────────────────────────────────────────────
+      case DesktopRoute.settingsAuthentication:
+        return const AuthManagementScreen();
+
       case DesktopRoute.settingsNetwork:
       case DesktopRoute.settingsAiKeys:
         // Existing SettingsScreen handles both tunneling and AI keys.

@@ -31,6 +31,7 @@ enum DesktopRoute {
 
   // Settings
   settingsNetwork,
+  settingsAuthentication,
   settingsKeri,
   settingsKeyManagement,
   settingsAiKeys,
@@ -211,6 +212,7 @@ class _DesktopSidebarState extends State<DesktopSidebar> {
                 ),
                 if (_settingsOpen) ...[
                   _SubItem(icon: Icons.lan_outlined,              label: 'Network & Endpoints',      route: DesktopRoute.settingsNetwork,         current: widget.currentRoute, onTap: _select),
+                  _SubItem(icon: Icons.lock_outlined,             label: 'Authentication',            route: DesktopRoute.settingsAuthentication,  current: widget.currentRoute, onTap: _select),
                   _SubItem(icon: Icons.key,                       label: 'KERI',                     route: DesktopRoute.settingsKeri,            current: widget.currentRoute, onTap: _select, comingSoon: true),
                   _SubItem(icon: Icons.lock_outlined,             label: 'Key Management',           route: DesktopRoute.settingsKeyManagement,   current: widget.currentRoute, onTap: _select, comingSoon: true),
                   _SubItem(icon: Icons.smart_toy_outlined,        label: 'AI Keys',                  route: DesktopRoute.settingsAiKeys,          current: widget.currentRoute, onTap: _select),
