@@ -12,6 +12,7 @@ import '../../widgets/activity_entry.dart';
 import '../../widgets/setup_task_banner.dart';
 import '../../models/background_task.dart';
 import '../../models/activity_log_entry.dart';
+import 'mobile_auth_setup_screen.dart';
 
 class MobileDashboard extends StatefulWidget {
   final String? serverUrl;
@@ -191,6 +192,11 @@ class MobileDashboardState extends State<MobileDashboard> with SingleTickerProvi
                       displayName: _displayName,
                       agentUrl: _agentUrl,
                       photoBase64: _photoBase64,
+                      onBadgeTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const MobileAuthSetupScreen(),
+                        ),
+                      ),
                     ),
                     if (widget.keriService != null)
                       SetupTaskBanner(

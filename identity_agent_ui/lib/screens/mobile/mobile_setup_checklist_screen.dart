@@ -8,6 +8,7 @@ import '../../services/enclave_service.dart';
 import '../../services/secure_key_store.dart';
 import '../../config/agent_config.dart';
 import '../hosting_choice_screen.dart';
+import 'mobile_auth_setup_screen.dart';
 import 'mobile_coming_soon_screen.dart';
 
 class MobileSetupChecklistScreen extends StatefulWidget {
@@ -340,6 +341,8 @@ class _MobileSetupChecklistScreenState
         await _doConnectRemoteBrain();
       case SetupTask.backupSeedPhrase:
         await _doBackupSeedPhrase();
+      case SetupTask.setupAuthentication:
+        await _doSetupAuthentication();
       case SetupTask.secureKeyStorage:
         await _doSecureKeyStorage();
       case SetupTask.inviteContacts:
@@ -349,6 +352,14 @@ class _MobileSetupChecklistScreenState
       default:
         break;
     }
+  }
+
+  Future<void> _doSetupAuthentication() async {
+    await Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => const MobileAuthSetupScreen(),
+    ));
+    // Reload state — MobileAuthSetupScreen calls markComplete when Tier 2 is reached
+    await _load();
   }
 
   Future<void> _doConnectRemoteBrain() async {

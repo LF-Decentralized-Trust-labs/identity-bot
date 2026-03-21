@@ -47,5 +47,7 @@
         <true/>
         <key>NSPhotoLibraryUsageDescription</key>
         <string>Identity Agent needs access to your photo library to set your profile photo.</string>
+        <key>NSFaceIDUsageDescription</key>
+        <string>Identity Agent uses Face ID to verify your identity when unlocking the app.</string>
 </dict>
 </plist>

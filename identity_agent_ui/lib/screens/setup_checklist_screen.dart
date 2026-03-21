@@ -7,6 +7,7 @@ import '../services/core_service.dart';
 import '../services/enclave_service.dart';
 import '../services/secure_key_store.dart';
 import 'hosting_choice_screen.dart';
+import 'auth_setup_screen.dart';
 import 'desktop/coming_soon_screen.dart';
 
 class SetupChecklistScreen extends StatefulWidget {
@@ -381,6 +382,8 @@ class _SetupChecklistScreenState extends State<SetupChecklistScreen> {
         await _doConnectRemoteBrain();
       case SetupTask.backupSeedPhrase:
         await _doBackupSeedPhrase();
+      case SetupTask.setupAuthentication:
+        await _doSetupAuthentication();
       case SetupTask.secureKeyStorage:
         await _doSecureKeyStorage();
       case SetupTask.inviteContacts:
@@ -390,6 +393,14 @@ class _SetupChecklistScreenState extends State<SetupChecklistScreen> {
       default:
         break;
     }
+  }
+
+  Future<void> _doSetupAuthentication() async {
+    await Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => const AuthSetupScreen(),
+    ));
+    // Reload state — AuthSetupScreen calls markComplete when Tier 2 is reached
+    await _load();
   }
 
   Future<void> _doConnectRemoteBrain() async {
