@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../theme/mobile_theme.dart';
 import '../../services/core_service.dart';
+import '../../services/nfc_service.dart';
 import '../../config/agent_config.dart';
 import '../../widgets/contact_action_popup.dart';
 
@@ -18,6 +19,7 @@ class _MobileQrScannerState extends State<MobileQrScanner> with SingleTickerProv
   late final CoreService _coreService;
   late final AnimationController _scanLineController;
   bool _processing = false;
+  bool _nfcActive = false;
 
   @override
   void initState() {
@@ -27,10 +29,33 @@ class _MobileQrScannerState extends State<MobileQrScanner> with SingleTickerProv
       vsync: this,
       duration: const Duration(seconds: 2),
     )..repeat();
+    _startNfcListen();
+  }
+
+  Future<void> _startNfcListen() async {
+    final available = await NfcService.isAvailable();
+    if (!available || !mounted) return;
+    setState(() => _nfcActive = true);
+    await NfcService.startOobiReadSession(
+      onSuccess: (oobiUrl) {
+        if (!mounted || _processing) return;
+        // Only handle add_contact action (or no explicit action — default intent)
+        final uri = Uri.tryParse(oobiUrl);
+        final action = uri?.queryParameters['action'] ?? 'add_contact';
+        if (action == 'add_contact' && oobiUrl.contains('/oobi/')) {
+          setState(() => _processing = true);
+          _resolveAndAddContact(oobiUrl);
+        }
+      },
+      onError: (_) {
+        // Ignore NFC errors silently — camera scan is the primary path
+      },
+    );
   }
 
   @override
   void dispose() {
+    NfcService.stopSession();
     _scanLineController.dispose();
     _coreService.dispose();
     super.dispose();
@@ -113,6 +138,7 @@ class _MobileQrScannerState extends State<MobileQrScanner> with SingleTickerProv
             MobileScanner(onDetect: _onDetect),
             _buildScanOverlay(),
             _buildTopBar(),
+            if (_nfcActive) _buildNfcBadge(),
             if (_processing) _buildProcessingOverlay(),
           ],
         ),
@@ -188,6 +214,34 @@ class _MobileQrScannerState extends State<MobileQrScanner> with SingleTickerProv
               },
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildNfcBadge() {
+    return Positioned(
+      bottom: 100,
+      left: 0,
+      right: 0,
+      child: Center(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            color: Colors.black54,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: const Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.nfc, color: Colors.white70, size: 16),
+              SizedBox(width: 6),
+              Text(
+                'NFC tap also accepted',
+                style: TextStyle(color: Colors.white70, fontSize: 12),
+              ),
+            ],
+          ),
         ),
       ),
     );

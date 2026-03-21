@@ -490,8 +490,11 @@ class CoreService {
     }
   }
 
-  Future<OobiResponse> getOobi() async {
-    final response = await _client.get(Uri.parse('$baseUrl/api/oobi'));
+  Future<OobiResponse> getOobi({String? action}) async {
+    final uri = Uri.parse('$baseUrl/api/oobi').replace(
+      queryParameters: action != null ? {'action': action} : null,
+    );
+    final response = await _client.get(uri);
     if (response.statusCode == 200) {
       return OobiResponse.fromJson(jsonDecode(response.body));
     } else {

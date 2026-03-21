@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import '../../theme/mobile_theme.dart';
 import '../../services/core_service.dart';
 import '../../services/identity_level_service.dart';
+import '../../services/nfc_service.dart';
 import '../../services/setup_task_service.dart';
 import '../../config/agent_config.dart';
 
@@ -61,6 +62,56 @@ class _MobileContactsScreenState extends State<MobileContactsScreen> {
     IdentityLevelService.setWitnessCount(count);
   }
 
+  Future<void> _writeNfcTag() async {
+    final isAvailable = await NfcService.isAvailable();
+    if (!isAvailable) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('NFC is not available on this device.')),
+        );
+      }
+      return;
+    }
+
+    OobiResponse? oobi;
+    try {
+      oobi = await _coreService.getOobi(action: 'add_contact');
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not load identity link: $e'),
+              backgroundColor: MobileColors.error),
+        );
+      }
+      return;
+    }
+
+    if (!oobi.tunnelActive || oobi.oobiUrl.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('You need an active tunnel to write an NFC tap tag. Go to Settings to configure one.'),
+          ),
+        );
+      }
+      return;
+    }
+
+    // Show the write-tap sheet.
+    if (!mounted) return;
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: MobileColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => _NfcWriteSheet(
+        oobiUrl: oobi!.oobiUrl,
+        onDone: () => Navigator.of(ctx).pop(),
+      ),
+    );
+  }
+
   void _filterContacts() {
     final query = _searchController.text.toLowerCase();
     setState(() {
@@ -100,6 +151,13 @@ class _MobileContactsScreenState extends State<MobileContactsScreen> {
           backgroundColor: MobileColors.surface,
           foregroundColor: MobileColors.textPrimary,
           elevation: 0,
+          actions: [
+            IconButton(
+              onPressed: _writeNfcTag,
+              icon: const Icon(Icons.nfc),
+              tooltip: 'Write Identity Tap Tag',
+            ),
+          ],
         ),
         body: Column(
           children: [
@@ -226,7 +284,7 @@ class _ContactCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 _buildStatusBadge(),
-                if (contact.role != 'agent') ...[
+                if (contact.role != 'general') ...[
                   const SizedBox(height: 4),
                   _buildRoleBadge(),
                 ],
@@ -317,8 +375,19 @@ class _ContactCard extends StatelessWidget {
   }
 
   Widget _buildRoleBadge() {
-    final isWitness = contact.role == 'witness';
-    final color = isWitness ? MobileColors.primary : MobileColors.textSecondary;
+    Color color;
+    String label;
+    switch (contact.role) {
+      case 'witness':
+        color = MobileColors.primary;
+        label = 'WITNESS';
+      case 'professional':
+        color = MobileColors.textSecondary;
+        label = 'PROFESSIONAL';
+      default:
+        color = MobileColors.textSecondary;
+        label = contact.role.toUpperCase();
+    }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
@@ -327,7 +396,7 @@ class _ContactCard extends StatelessWidget {
         border: Border.all(color: color.withOpacity(0.25)),
       ),
       child: Text(
-        contact.role.toUpperCase(),
+        label,
         style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: color),
       ),
     );
@@ -355,8 +424,9 @@ class _ContactDetailScreenState extends State<_ContactDetailScreen> {
   }
 
   Future<void> _showAcceptSheet() async {
-    String selectedRole = 'agent';
-    bool trusted = false;
+    // Relationship type: 'general' | 'trusted' | 'professional'
+    // Witness designation is handled automatically by the backend when trusted.
+    String relationshipType = 'general';
     final coreService = CoreService(baseUrl: widget.serverUrl ?? AgentConfig.coreBaseUrl);
 
     await showModalBottomSheet<void>(
@@ -381,80 +451,85 @@ class _ContactDetailScreenState extends State<_ContactDetailScreen> {
                   fontWeight: FontWeight.w700,
                 ),
               ),
+              const SizedBox(height: 8),
+              const Text(
+                'How do you know this person?',
+                style: TextStyle(color: MobileColors.textSecondary, fontSize: 13),
+              ),
               const SizedBox(height: 16),
-              // Trust toggle
-              GestureDetector(
-                onTap: () => setS(() {
-                  trusted = !trusted;
-                  if (trusted && selectedRole == 'agent') selectedRole = 'witness';
-                }),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: trusted
-                        ? Colors.green.withOpacity(0.08)
-                        : MobileColors.surfaceSecondary,
-                    border: Border.all(
-                      color: trusted
-                          ? Colors.green.withOpacity(0.5)
-                          : MobileColors.border,
-                    ),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Row(
-                    children: [
-                      Checkbox(
-                        value: trusted,
-                        onChanged: (v) => setS(() {
-                          trusted = v!;
-                          if (trusted && selectedRole == 'agent') {
-                            selectedRole = 'witness';
-                          }
-                        }),
-                        activeColor: Colors.green,
-                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        visualDensity: VisualDensity.compact,
+              for (final entry in const [
+                ('general', 'General', 'Someone you know — acquaintance or casual contact'),
+                ('trusted', 'Trusted', 'Someone you personally trust — can be invited as a witness'),
+                ('professional', 'Professional', 'A colleague or professional connection'),
+              ])
+                GestureDetector(
+                  onTap: () => setS(() => relationshipType = entry.$1),
+                  child: Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: relationshipType == entry.$1
+                          ? MobileColors.primary.withOpacity(0.08)
+                          : MobileColors.surfaceSecondary,
+                      border: Border.all(
+                        color: relationshipType == entry.$1
+                            ? MobileColors.primary.withOpacity(0.6)
+                            : MobileColors.border,
+                        width: relationshipType == entry.$1 ? 1.5 : 1,
                       ),
-                      const SizedBox(width: 8),
-                      const Expanded(
-                        child: Text(
-                          'I know and trust this contact',
-                          style: TextStyle(
-                            color: MobileColors.textPrimary,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Row(
+                      children: [
+                        Radio<String>(
+                          value: entry.$1,
+                          groupValue: relationshipType,
+                          onChanged: (v) => setS(() => relationshipType = v!),
+                          activeColor: MobileColors.primary,
+                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(entry.$2,
+                                  style: const TextStyle(
+                                      color: MobileColors.textPrimary,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600)),
+                              Text(entry.$3,
+                                  style: const TextStyle(
+                                      color: MobileColors.textSecondary,
+                                      fontSize: 12)),
+                            ],
                           ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              if (relationshipType == 'trusted')
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.green.withOpacity(0.06),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.green.withOpacity(0.2)),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(Icons.info_outline, size: 16, color: Colors.green),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'If you need more witnesses, this contact may be automatically invited to witness your keys.',
+                          style: TextStyle(color: Colors.green, fontSize: 12),
                         ),
                       ),
                     ],
                   ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'Role',
-                style: TextStyle(
-                  color: MobileColors.textSecondary,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 4),
-              for (final entry in {
-                'agent': 'Agent — general contact',
-                'witness': 'Witness — will witness your keys',
-                'verifier': 'Verifier — will verify your identity',
-              }.entries)
-                RadioListTile<String>(
-                  value: entry.key,
-                  groupValue: selectedRole,
-                  onChanged: (v) => setS(() => selectedRole = v!),
-                  title: Text(entry.value,
-                      style: const TextStyle(
-                          color: MobileColors.textPrimary, fontSize: 14)),
-                  activeColor: MobileColors.primary,
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
                 ),
               const SizedBox(height: 20),
               Row(
@@ -492,26 +567,30 @@ class _ContactDetailScreenState extends State<_ContactDetailScreen> {
                     child: ElevatedButton(
                       onPressed: () async {
                         Navigator.of(ctx).pop();
+                        final isTrusted = relationshipType == 'trusted';
+                        // Map relationship type to backend role + trusted flag.
+                        // Witness designation is set automatically by backend when trusted.
+                        final backendRole = relationshipType == 'professional'
+                            ? 'professional'
+                            : 'general';
                         try {
                           await coreService.acceptContact(_contact.aid,
-                              trusted: trusted);
-                          if (selectedRole != 'agent') {
+                              trusted: isTrusted);
+                          if (backendRole != 'general') {
                             await coreService.updateContact(_contact.aid,
-                                role: selectedRole);
+                                role: backendRole);
                           }
                           coreService.dispose();
-                          if (trusted) {
+                          if (isTrusted) {
                             await SetupTaskService.markComplete(
                                 SetupTask.getVerified);
                           }
-                          // Refresh contact list witness count
                           final all = await CoreService(
                                   baseUrl: widget.serverUrl ??
                                       AgentConfig.coreBaseUrl)
                               .getContacts();
                           IdentityLevelService.setWitnessCount(all.contacts
-                              .where((c) =>
-                                  c.isMutual && c.role == 'witness')
+                              .where((c) => c.isMutual && c.role == 'witness')
                               .length);
                           if (mounted) Navigator.of(context).pop(true);
                         } catch (e) {
@@ -544,7 +623,9 @@ class _ContactDetailScreenState extends State<_ContactDetailScreen> {
   }
 
   Future<void> _showChangeRoleSheet() async {
-    String selectedRole = _contact.role;
+    // Derive current relationship type from role + trusted fields.
+    String relationshipType = _contact.trusted ? 'trusted' : 'general';
+    if (_contact.role == 'professional') relationshipType = 'professional';
     final coreService = CoreService(baseUrl: widget.serverUrl ?? AgentConfig.coreBaseUrl);
 
     await showModalBottomSheet<void>(
@@ -561,26 +642,34 @@ class _ContactDetailScreenState extends State<_ContactDetailScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                'Change Role',
+                'Change Relationship',
                 style: TextStyle(
                   color: MobileColors.textPrimary,
                   fontSize: 18,
                   fontWeight: FontWeight.w700,
                 ),
               ),
+              const SizedBox(height: 8),
+              const Text(
+                'Changing to Trusted may trigger a witness invitation.',
+                style: TextStyle(color: MobileColors.textSecondary, fontSize: 12),
+              ),
               const SizedBox(height: 16),
-              for (final entry in {
-                'agent': 'Agent — general contact',
-                'witness': 'Witness — will witness your keys',
-                'verifier': 'Verifier — will verify your identity',
-              }.entries)
+              for (final entry in const [
+                ('general', 'General', 'Acquaintance or casual contact'),
+                ('trusted', 'Trusted', 'Personal trust — can become a witness'),
+                ('professional', 'Professional', 'Colleague or professional connection'),
+              ])
                 RadioListTile<String>(
-                  value: entry.key,
-                  groupValue: selectedRole,
-                  onChanged: (v) => setS(() => selectedRole = v!),
-                  title: Text(entry.value,
+                  value: entry.$1,
+                  groupValue: relationshipType,
+                  onChanged: (v) => setS(() => relationshipType = v!),
+                  title: Text(entry.$2,
                       style: const TextStyle(
                           color: MobileColors.textPrimary, fontSize: 14)),
+                  subtitle: Text(entry.$3,
+                      style: const TextStyle(
+                          color: MobileColors.textSecondary, fontSize: 12)),
                   activeColor: MobileColors.primary,
                   dense: true,
                   contentPadding: EdgeInsets.zero,
@@ -591,14 +680,23 @@ class _ContactDetailScreenState extends State<_ContactDetailScreen> {
                 child: ElevatedButton(
                   onPressed: () async {
                     Navigator.of(ctx).pop();
+                    final isTrusted = relationshipType == 'trusted';
+                    final backendRole = relationshipType == 'professional'
+                        ? 'professional'
+                        : 'general';
                     try {
-                      final updated = await coreService.updateContact(
-                          _contact.aid, role: selectedRole);
+                      ContactResponse updated = await coreService.updateContact(
+                          _contact.aid, role: backendRole);
+                      if (isTrusted != _contact.trusted) {
+                        updated = await coreService.updateContact(
+                            _contact.aid, trusted: isTrusted);
+                      }
                       coreService.dispose();
-                      // Refresh witness count
+                      if (isTrusted && !_contact.trusted) {
+                        await SetupTaskService.markComplete(SetupTask.getVerified);
+                      }
                       final all = await CoreService(
-                              baseUrl:
-                                  widget.serverUrl ?? AgentConfig.coreBaseUrl)
+                              baseUrl: widget.serverUrl ?? AgentConfig.coreBaseUrl)
                           .getContacts();
                       IdentityLevelService.setWitnessCount(all.contacts
                           .where((c) => c.isMutual && c.role == 'witness')
@@ -621,7 +719,7 @@ class _ContactDetailScreenState extends State<_ContactDetailScreen> {
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(10)),
                   ),
-                  child: const Text('Save Role',
+                  child: const Text('Save',
                       style: TextStyle(fontWeight: FontWeight.w600)),
                 ),
               ),
@@ -823,7 +921,7 @@ class _ContactDetailScreenState extends State<_ContactDetailScreen> {
                 child: OutlinedButton.icon(
                   onPressed: _showChangeRoleSheet,
                   icon: const Icon(Icons.swap_horiz, size: 18),
-                  label: Text('Role: ${_contact.role.toUpperCase()}'),
+                  label: Text('Relationship: ${_contact.trusted ? 'Trusted' : _contact.role == 'professional' ? 'Professional' : 'General'}'),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: MobileColors.primary,
                     side: const BorderSide(color: MobileColors.primary),
@@ -1056,6 +1154,139 @@ class _DetailRow extends StatelessWidget {
             constraints: const BoxConstraints(),
           ),
       ],
+    );
+  }
+}
+
+// ── NFC Write Sheet ─────────────────────────────────────────────────────────
+
+class _NfcWriteSheet extends StatefulWidget {
+  final String oobiUrl;
+  final VoidCallback onDone;
+
+  const _NfcWriteSheet({required this.oobiUrl, required this.onDone});
+
+  @override
+  State<_NfcWriteSheet> createState() => _NfcWriteSheetState();
+}
+
+class _NfcWriteSheetState extends State<_NfcWriteSheet>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse;
+  bool _writing = false;
+  bool _success = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulse = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat(reverse: true);
+    _startWrite();
+  }
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    NfcService.stopSession();
+    super.dispose();
+  }
+
+  Future<void> _startWrite() async {
+    setState(() {
+      _writing = true;
+      _error = null;
+      _success = false;
+    });
+    await NfcService.writeOobi(
+      widget.oobiUrl,
+      onSuccess: () {
+        if (mounted) setState(() { _writing = false; _success = true; });
+        _pulse.stop();
+        Future.delayed(const Duration(seconds: 1), widget.onDone);
+      },
+      onError: (err) {
+        if (mounted) setState(() { _writing = false; _error = err; });
+        _pulse.stop();
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(24, 24, 24,
+          24 + MediaQuery.of(context).padding.bottom),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text(
+            'Write Identity Tap Tag',
+            style: TextStyle(
+              color: MobileColors.textPrimary,
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Hold your phone to a blank NFC tag or sticker.\nAnyone who taps it will be prompted to add you as a contact.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: MobileColors.textSecondary, fontSize: 13, height: 1.5),
+          ),
+          const SizedBox(height: 32),
+          if (_success)
+            const Column(
+              children: [
+                Icon(Icons.check_circle, size: 64, color: MobileColors.success),
+                SizedBox(height: 12),
+                Text('Tag written!',
+                    style: TextStyle(
+                        color: MobileColors.success,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700)),
+              ],
+            )
+          else if (_error != null)
+            Column(
+              children: [
+                const Icon(Icons.error_outline, size: 64, color: MobileColors.error),
+                const SizedBox(height: 12),
+                Text(_error!,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: MobileColors.error, fontSize: 13)),
+                const SizedBox(height: 16),
+                OutlinedButton.icon(
+                  onPressed: _startWrite,
+                  icon: const Icon(Icons.refresh, size: 18),
+                  label: const Text('Retry'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: MobileColors.primary,
+                  ),
+                ),
+              ],
+            )
+          else
+            AnimatedBuilder(
+              animation: _pulse,
+              builder: (_, __) => Opacity(
+                opacity: 0.5 + 0.5 * _pulse.value,
+                child: const Icon(Icons.nfc, size: 80, color: MobileColors.primary),
+              ),
+            ),
+          const SizedBox(height: 24),
+          if (!_success && _error == null)
+            OutlinedButton(
+              onPressed: widget.onDone,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: MobileColors.textMuted,
+              ),
+              child: const Text('Cancel'),
+            ),
+        ],
+      ),
     );
   }
 }

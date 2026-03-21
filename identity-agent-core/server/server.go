@@ -1390,6 +1390,10 @@ func (s *CoreServer) handleOobiGenerate(w http.ResponseWriter, r *http.Request) 
 
         baseURL := s.getPublicURL(r)
         oobiURL := fmt.Sprintf("%s/public/oobi/%s", baseURL, identity.AID)
+        // Embed action type in OOBI URL if requested (e.g. ?action=add_contact)
+        if action := r.URL.Query().Get("action"); action != "" {
+                oobiURL = fmt.Sprintf("%s?action=%s", oobiURL, action)
+        }
 
         tunnelActive := false
         tunnelProvider := ""
@@ -1450,6 +1454,54 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
                 if profile.FullName != "" {
                         alias = profile.FullName
                 }
+        }
+
+        // Browser landing page: when a browser (not the Identity Agent app) opens an OOBI link,
+        // return a human-readable HTML page with download instructions and the OOBI URL.
+        acceptHeader := r.Header.Get("Accept")
+        if strings.Contains(acceptHeader, "text/html") {
+                action := r.URL.Query().Get("action")
+                actionLabel := "connect with you on Identity Agent"
+                if action == "add_contact" {
+                        actionLabel = "add you as a contact on Identity Agent"
+                }
+                publicURL := s.getPublicURL(r)
+                rawOobiURL := fmt.Sprintf("%s/public/oobi/%s", publicURL, identity.AID)
+                if action != "" {
+                        rawOobiURL = fmt.Sprintf("%s?action=%s", rawOobiURL, action)
+                }
+                htmlPage := fmt.Sprintf(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Connect with %s — Identity Agent</title>
+  <style>
+    body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#0a0e1a;color:#e2e8f0;max-width:480px;margin:60px auto;padding:24px}
+    h1{font-size:22px;font-weight:700;margin-bottom:8px}
+    p{color:#94a3b8;line-height:1.6}
+    .card{background:#1e2433;border:1px solid #2d3748;border-radius:12px;padding:20px;margin:24px 0}
+    .oobi{font-family:monospace;font-size:11px;color:#67e8f9;word-break:break-all}
+    .step{display:flex;gap:12px;margin:12px 0}
+    .num{background:#3b82f6;color:white;border-radius:50%%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0}
+  </style>
+</head>
+<body>
+  <h1>%s wants to %s</h1>
+  <p>You need the Identity Agent app to accept this request.</p>
+  <div class="card">
+    <div class="step"><div class="num">1</div><div>Download and install Identity Agent</div></div>
+    <div class="step"><div class="num">2</div><div>Open the app and create or import your identity</div></div>
+    <div class="step"><div class="num">3</div><div>Scan or paste the link below to complete the request</div></div>
+  </div>
+  <p style="font-size:13px;margin-bottom:4px;">Your connection link (save this):</p>
+  <div class="card"><span class="oobi">%s</span></div>
+  <p style="font-size:12px;color:#64748b;">This link only works while the sender's Identity Agent is running.</p>
+</body>
+</html>`, alias, alias, actionLabel, rawOobiURL)
+                w.Header().Set("Content-Type", "text/html; charset=utf-8")
+                fmt.Fprint(w, htmlPage)
+                return
         }
 
         resp := map[string]interface{}{
@@ -1742,7 +1794,7 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
                         FullName:  alias,
                         XKeriAID:  oobiData.AID,
                         XKeriOOBI: req.OobiURL,
-                        XKeriRole: "agent",
+                        XKeriRole: "general",
                 }
         }
 
@@ -1751,7 +1803,7 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
                 contactStatus = "unverified"
         }
 
-        role := "agent"
+        role := "general"
         trustedAt := ""
         if req.Trusted {
                 trustedAt = time.Now().UTC().Format(time.RFC3339)
@@ -1983,7 +2035,7 @@ func (s *CoreServer) handleExchange(w http.ResponseWriter, r *http.Request) {
                                 FullName:  alias,
                                 XKeriAID:  req.SenderAID,
                                 XKeriOOBI: req.SenderOOBI,
-                                XKeriRole: "agent",
+                                XKeriRole: "general",
                         }
                 }
                 pendingReq := store.PendingRequest{
@@ -2027,7 +2079,7 @@ func (s *CoreServer) handleExchange(w http.ResponseWriter, r *http.Request) {
                         FullName:  alias,
                         XKeriAID:  req.SenderAID,
                         XKeriOOBI: req.SenderOOBI,
-                        XKeriRole: "agent",
+                        XKeriRole: "general",
                 }
         }
         contact := store.ContactRecord{
@@ -2038,7 +2090,7 @@ func (s *CoreServer) handleExchange(w http.ResponseWriter, r *http.Request) {
                 Verified:     kelPresent,
                 DiscoveredAt: time.Now().UTC().Format(time.RFC3339),
                 Status:       "pending_inbound",
-                Role:         "agent",
+                Role:         "general",
                 JCard:        contactJCard,
                 Photo:        req.SenderPhoto,
         }

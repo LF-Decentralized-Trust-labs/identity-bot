@@ -290,7 +290,7 @@ class _AddContactScreenState extends State<_AddContactScreen> {
     });
 
     try {
-      final result = await _coreService.getOobi();
+      final result = await _coreService.getOobi(action: 'add_contact');
 
       if (!result.tunnelActive || result.endpointUrl.isEmpty) {
         if (mounted) {

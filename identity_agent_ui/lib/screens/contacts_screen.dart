@@ -83,7 +83,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
   }
 
   /// Shows a role-picker dialog and returns the chosen role, or null if cancelled.
-  Future<String?> _pickRole(BuildContext context, {String initial = 'agent'}) async {
+  Future<String?> _pickRole(BuildContext context, {String initial = 'general'}) async {
     String selected = initial;
     return showDialog<String>(
       context: context,
@@ -116,15 +116,16 @@ class _ContactsScreenState extends State<ContactsScreen> {
                 ),
               ),
               const SizedBox(height: 16),
-              for (final role in ['agent', 'witness', 'verifier'])
+              for (final role in ['general', 'trusted', 'professional', 'witness'])
                 RadioListTile<String>(
                   value: role,
                   groupValue: selected,
                   onChanged: (v) => setS(() => selected = v!),
                   title: Text(
-                    role == 'agent' ? 'Agent (general contact)' :
-                    role == 'witness' ? 'Witness (will witness your keys)' :
-                    'Verifier (will verify your identity)',
+                    role == 'general' ? 'General — acquaintance or casual contact' :
+                    role == 'trusted' ? 'Trusted — personal trust relationship' :
+                    role == 'professional' ? 'Professional — colleague or professional connection' :
+                    'Witness — witnesses your key events',
                     style: const TextStyle(
                       color: AppColors.textPrimary,
                       fontSize: 12,
@@ -157,7 +158,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
   }
 
   Future<void> _acceptWithRole(ContactResponse contact) async {
-    String selectedRole = 'agent';
+    String selectedRole = 'general';
     bool trusted = false;
 
     final confirmed = await showDialog<bool>(
@@ -185,12 +186,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
             children: [
               // Trust toggle
               InkWell(
-                onTap: () => setS(() {
-                  trusted = !trusted;
-                  if (trusted && selectedRole == 'agent') {
-                    selectedRole = 'witness';
-                  }
-                }),
+                onTap: () => setS(() { trusted = !trusted; }),
                 borderRadius: BorderRadius.circular(8),
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -209,12 +205,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                     children: [
                       Checkbox(
                         value: trusted,
-                        onChanged: (v) => setS(() {
-                          trusted = v!;
-                          if (trusted && selectedRole == 'agent') {
-                            selectedRole = 'witness';
-                          }
-                        }),
+                        onChanged: (v) => setS(() { trusted = v!; }),
                         activeColor: AppColors.coreActive,
                         materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         visualDensity: VisualDensity.compact,
@@ -245,17 +236,19 @@ class _ContactsScreenState extends State<ContactsScreen> {
                   fontFamily: 'monospace',
                 ),
               ),
-              for (final role in ['agent', 'witness', 'verifier'])
+              for (final role in ['general', 'trusted', 'professional', 'witness'])
                 RadioListTile<String>(
                   value: role,
                   groupValue: selectedRole,
                   onChanged: (v) => setS(() => selectedRole = v!),
                   title: Text(
-                    role == 'agent'
-                        ? 'Agent (general contact)'
-                        : role == 'witness'
-                            ? 'Witness (will witness your keys)'
-                            : 'Verifier (will verify your identity)',
+                    role == 'general'
+                        ? 'General — acquaintance or casual contact'
+                        : role == 'trusted'
+                            ? 'Trusted — personal trust relationship'
+                            : role == 'professional'
+                                ? 'Professional — colleague or professional connection'
+                                : 'Witness — witnesses your key events',
                     style: const TextStyle(
                       color: AppColors.textPrimary,
                       fontSize: 12,
@@ -291,7 +284,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
     if (confirmed != true || !mounted) return;
     try {
       await _coreService.acceptContact(contact.aid, trusted: trusted);
-      if (selectedRole != 'agent') {
+      if (selectedRole != 'general') {
         await _coreService.updateContact(contact.aid, role: selectedRole);
       }
       if (trusted) {
