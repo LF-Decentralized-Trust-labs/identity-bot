@@ -592,19 +592,51 @@ class _SetupChecklistScreenState extends State<SetupChecklistScreen> {
               ctx: ctx,
               icon: Icons.nfc,
               title: "Write to NFC tag",
-              description: "Save to a physical NFC tag for hardware backup.",
-              isStub: true,
+              description: "Available on the Identity Agent mobile app.",
+              isStub: false,
               onTap: () {
                 Navigator.of(ctx).pop();
-                Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => const ComingSoonScreen(
-                    title: 'NFC Seed Backup',
-                    description:
-                        'Write your seed phrase to an NFC tag for hardware backup. '
-                        'This feature is actively being built.',
-                    icon: Icons.nfc,
+                showDialog<void>(
+                  context: context,
+                  builder: (dctx) => AlertDialog(
+                    backgroundColor: AppColors.surface,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      side: BorderSide(color: AppColors.border),
+                    ),
+                    title: const Text(
+                      'NFC BACKUP — MOBILE ONLY',
+                      style: TextStyle(
+                        color: AppColors.textPrimary,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 1.0,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                    content: const Text(
+                      'NFC tag writing requires hardware that desktop computers '
+                      'don\'t have. Open the Identity Agent mobile app on your '
+                      'phone, go to Settings → Back Up Seed Phrase, and tap '
+                      '"Write to NFC tag" there.',
+                      style: TextStyle(
+                        color: AppColors.textSecondary,
+                        fontSize: 12,
+                        fontFamily: 'monospace',
+                        height: 1.5,
+                      ),
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.of(dctx).pop(),
+                        child: const Text('GOT IT',
+                            style: TextStyle(
+                                color: AppColors.accent,
+                                fontFamily: 'monospace')),
+                      ),
+                    ],
                   ),
-                ));
+                );
               },
             ),
           ],

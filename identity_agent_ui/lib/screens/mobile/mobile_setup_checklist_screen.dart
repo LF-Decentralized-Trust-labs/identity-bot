@@ -10,6 +10,7 @@ import '../../config/agent_config.dart';
 import '../hosting_choice_screen.dart';
 import 'mobile_auth_setup_screen.dart';
 import 'mobile_coming_soon_screen.dart';
+import 'mobile_nfc_seed_screen.dart';
 
 class MobileSetupChecklistScreen extends StatefulWidget {
   final VoidCallback onDone;
@@ -513,18 +514,12 @@ class _MobileSetupChecklistScreenState
               ctx: ctx,
               icon: Icons.nfc,
               title: 'Write to NFC tag',
-              description: 'Save to a physical NFC tag.',
-              isStub: true,
+              description: 'Save to a physical NFC tag for hardware backup.',
               onTap: () {
                 Navigator.of(ctx).pop();
                 Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => const MobileComingSoonScreen(
-                    title: 'NFC Seed Backup',
-                    description:
-                        'Write your seed phrase to an NFC tag for hardware backup. '
-                        'This feature is actively being built.',
-                    icon: Icons.nfc,
-                  ),
+                  builder: (_) =>
+                      const MobileNfcSeedScreen(mode: NfcSeedMode.write),
                 ));
               },
             ),
