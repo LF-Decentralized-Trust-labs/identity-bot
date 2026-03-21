@@ -350,7 +350,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.primary,
+      backgroundColor: AppColors.background,
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
@@ -410,7 +410,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
           child: GestureDetector(
             onTap: () async {
               try {
-                final base64 = await photo_picker.pickPhotoBase64();
+                final base64 = await photo_picker.pickAndCropPhotoBase64(context);
                 if (base64 != null && base64.isNotEmpty) {
                   setState(() => _photoBase64 = base64);
                 }
@@ -445,13 +445,13 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
                   width: 28,
                   height: 28,
                   decoration: BoxDecoration(
-                    color: AppColors.accent,
+                    color: AppColors.surface,
                     borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: AppColors.primary, width: 2),
+                    border: Border.all(color: AppColors.border, width: 1.5),
                   ),
                   child: const Icon(
                     Icons.camera_alt,
-                    color: AppColors.primary,
+                    color: AppColors.textSecondary,
                     size: 14,
                   ),
                 ),
@@ -520,7 +520,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
                     fontSize: 13,
                   ),
                   filled: true,
-                  fillColor: AppColors.primary,
+                  fillColor: AppColors.surfaceLight,
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(10),
                     borderSide: const BorderSide(color: AppColors.border),
@@ -967,7 +967,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
           fontFamily: 'monospace',
         ),
         filled: true,
-        fillColor: AppColors.primary,
+        fillColor: AppColors.surfaceLight,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
           borderSide: const BorderSide(color: AppColors.border),
