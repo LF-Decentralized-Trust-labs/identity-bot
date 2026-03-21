@@ -56,8 +56,6 @@ class _MobileSetupWizardScreenState extends State<MobileSetupWizardScreen> {
   final _verifyController1 = TextEditingController();
   final _verifyController2 = TextEditingController();
   bool _verifyError = false;
-  bool _backupVerified = false;
-
   // Processing
   int _processingStep = 0;
   EnclaveStatusResponse? _enclaveStatus;
@@ -126,7 +124,6 @@ class _MobileSetupWizardScreenState extends State<MobileSetupWizardScreen> {
       return;
     }
     setState(() {
-      _backupVerified = true;
       _verifyError = false;
     });
     _startInception();
@@ -219,7 +216,6 @@ class _MobileSetupWizardScreenState extends State<MobileSetupWizardScreen> {
       ),
     );
     if (confirmed == true) {
-      setState(() => _backupVerified = false);
       _startInception();
     }
   }

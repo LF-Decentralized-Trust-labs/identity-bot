@@ -1,5 +1,4 @@
 import 'package:shared_preferences/shared_preferences.dart';
-import 'preferences_service.dart';
 
 enum SetupTask {
   connectRemoteBrain,

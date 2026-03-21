@@ -37,7 +37,7 @@ class EnclaveService {
     // Desktop — ask the Go backend
     if (_coreService != null) {
       try {
-        return await _coreService!.getEnclaveStatus();
+        return await _coreService.getEnclaveStatus();
       } catch (_) {
         // Fallback if backend unreachable
       }

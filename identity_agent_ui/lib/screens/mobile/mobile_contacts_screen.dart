@@ -1173,7 +1173,6 @@ class _NfcWriteSheet extends StatefulWidget {
 class _NfcWriteSheetState extends State<_NfcWriteSheet>
     with SingleTickerProviderStateMixin {
   late final AnimationController _pulse;
-  bool _writing = false;
   bool _success = false;
   String? _error;
 
@@ -1196,19 +1195,18 @@ class _NfcWriteSheetState extends State<_NfcWriteSheet>
 
   Future<void> _startWrite() async {
     setState(() {
-      _writing = true;
       _error = null;
       _success = false;
     });
     await NfcService.writeOobi(
       widget.oobiUrl,
       onSuccess: () {
-        if (mounted) setState(() { _writing = false; _success = true; });
+        if (mounted) setState(() { _success = true; });
         _pulse.stop();
         Future.delayed(const Duration(seconds: 1), widget.onDone);
       },
       onError: (err) {
-        if (mounted) setState(() { _writing = false; _error = err; });
+        if (mounted) setState(() { _error = err; });
         _pulse.stop();
       },
     );

@@ -563,9 +563,6 @@ class _ContactsScreenState extends State<ContactsScreen> {
   }
 
   Future<void> _showConsentModal(ResolvedContactResponse resolved) async {
-    final aidShort = resolved.aid.length > 20
-        ? '${resolved.aid.substring(0, 20)}...'
-        : resolved.aid;
     final avatarInitial = resolved.alias.isNotEmpty
         ? resolved.alias[0].toUpperCase()
         : null;
@@ -1232,14 +1229,6 @@ class _ContactsScreenState extends State<ContactsScreen> {
     if (contact.isPendingInbound) return 'INCOMING';
     if (contact.isRejected) return 'REJECTED';
     return contact.verified ? 'VERIFIED' : 'UNVERIFIED';
-  }
-
-  IconData _statusIcon(ContactResponse contact) {
-    if (contact.isMutual) return Icons.handshake_outlined;
-    if (contact.isPendingOutbound) return Icons.call_made;
-    if (contact.isPendingInbound) return Icons.call_received;
-    if (contact.isRejected) return Icons.block;
-    return Icons.person_outlined;
   }
 
   Widget _buildContactAvatar(ContactResponse contact) {

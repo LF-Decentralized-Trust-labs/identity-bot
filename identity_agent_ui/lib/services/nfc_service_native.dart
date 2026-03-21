@@ -157,7 +157,7 @@ class NfcService {
   /// Starts an NFC read session that listens for identity-agent OOBI tags.
   /// Calls [onSuccess] with the raw OOBI URL (including any ?action= param).
   /// Calls [onError] if the tag is not a valid OOBI tag or on failure.
-  /// Does NOT stop the session on success — caller must call [stopSession].
+  /// The session is stopped automatically on success.
   static Future<void> startOobiReadSession({
     required void Function(String oobiUrl) onSuccess,
     void Function(String error)? onError,

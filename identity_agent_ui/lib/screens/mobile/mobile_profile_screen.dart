@@ -448,7 +448,7 @@ class _SectionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final visibleChildren = children.where((w) => w is! SizedBox || (w as SizedBox).height != 0).toList();
+    final visibleChildren = children.where((w) => w is! SizedBox || w.height != 0).toList();
     
     return Container(
       width: double.infinity,

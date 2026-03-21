@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:async';
-import 'dart:io' show Platform;
 import '../theme/app_theme.dart';
 import '../config/agent_config.dart';
 import '../services/core_service.dart';
