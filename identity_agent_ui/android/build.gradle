@@ -32,13 +32,15 @@ subprojects {
     }
 }
 
-// Suppress Kotlin version-deprecation errors in plugin subprojects (e.g. nfc_manager
-// uses String.toLowerCase(Locale) which Kotlin 2.x elevates from warning to error).
+// Pin plugin subprojects to Kotlin 1.9 language/API semantics so that deprecated
+// APIs (e.g. nfc_manager 3.5.0's String.toLowerCase(Locale)) remain warnings
+// rather than errors under Kotlin 2.x compiler.
 subprojects {
     afterEvaluate {
         tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
             kotlinOptions {
-                freeCompilerArgs += ["-Xsuppress-version-warnings"]
+                languageVersion = "1.9"
+                apiVersion = "1.9"
             }
         }
     }
