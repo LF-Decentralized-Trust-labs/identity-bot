@@ -79,6 +79,7 @@ class _SetupChecklistScreenState extends State<SetupChecklistScreen> {
                       if (_needsRemoteBrain) SetupTask.connectRemoteBrain,
                       SetupTask.backupSeedPhrase,
                       SetupTask.setupAuthentication,
+                      SetupTask.secureKeyStorage,
                       SetupTask.inviteContacts,
                     ]),
                     const SizedBox(height: 20),

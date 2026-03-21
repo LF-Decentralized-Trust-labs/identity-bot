@@ -85,6 +85,7 @@ class _MobileSetupChecklistScreenState
                             if (_needsRemoteBrain) SetupTask.connectRemoteBrain,
                             SetupTask.backupSeedPhrase,
                             SetupTask.setupAuthentication,
+                            SetupTask.secureKeyStorage,
                             SetupTask.inviteContacts,
                           ]),
                           _buildSection('Connections', [

@@ -32,6 +32,18 @@ subprojects {
     }
 }
 
+// Suppress Kotlin version-deprecation errors in plugin subprojects (e.g. nfc_manager
+// uses String.toLowerCase(Locale) which Kotlin 2.x elevates from warning to error).
+subprojects {
+    afterEvaluate {
+        tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+            kotlinOptions {
+                freeCompilerArgs += ["-Xsuppress-version-warnings"]
+            }
+        }
+    }
+}
+
 tasks.register("clean", Delete) {
     delete rootProject.buildDir
 }

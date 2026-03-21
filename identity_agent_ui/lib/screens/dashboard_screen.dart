@@ -11,6 +11,7 @@ import '../widgets/status_indicator.dart';
 import '../widgets/info_card.dart';
 import '../widgets/log_entry.dart';
 import '../widgets/identity_level_badge.dart';
+import '../widgets/key_storage_badge.dart';
 import 'auth_setup_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -565,8 +566,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ],
           const SizedBox(height: 14),
           Row(
-            mainAxisAlignment: MainAxisAlignment.end,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
+              KeyStorageBadge(coreService: _coreService),
               LiveIdentityLevelBadge(
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const AuthSetupScreen()),

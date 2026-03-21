@@ -10,6 +10,7 @@ import '../../widgets/alert_card.dart';
 import '../../widgets/task_card.dart';
 import '../../widgets/activity_entry.dart';
 import '../../widgets/setup_task_banner.dart';
+import '../../widgets/key_storage_badge.dart';
 import '../../models/background_task.dart';
 import '../../models/activity_log_entry.dart';
 import 'mobile_auth_setup_screen.dart';
@@ -197,6 +198,10 @@ class MobileDashboardState extends State<MobileDashboard> with SingleTickerProvi
                           builder: (_) => const MobileAuthSetupScreen(),
                         ),
                       ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(left: 32, bottom: 4),
+                      child: const KeyStorageBadge(),
                     ),
                     if (widget.keriService != null)
                       SetupTaskBanner(
