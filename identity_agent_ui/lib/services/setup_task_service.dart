@@ -6,10 +6,6 @@ enum SetupTask {
   setupAuthentication,
   secureKeyStorage,
   inviteContacts,
-  connectEmail,
-  addPhoneNumber,
-  completeProfile,
-  getVerified,
 }
 
 class SetupTaskMeta {
@@ -32,9 +28,9 @@ class SetupTaskMeta {
 const _allTaskMeta = <SetupTask, SetupTaskMeta>{
   SetupTask.connectRemoteBrain: SetupTaskMeta(
     task: SetupTask.connectRemoteBrain,
-    title: 'Connect your remote brain',
+    title: 'Connect your remote server',
     description:
-        'Your identity needs a remote server to unlock email, phone, and advanced features.',
+        'Your identity needs a remote server to store events and stay reachable. Connect one to continue.',
     isStub: false,
     isCritical: true,
   ),
@@ -42,7 +38,7 @@ const _allTaskMeta = <SetupTask, SetupTaskMeta>{
     task: SetupTask.backupSeedPhrase,
     title: 'Back up your seed phrase',
     description:
-        'Write down your 12 words or save them to an NFC tag. Without this backup, you cannot recover your identity.',
+        'Write down your 12 words or save them to an NFC tag. This is the only way to recover your identity if you lose this device.',
     isStub: false,
     isCritical: true,
   ),
@@ -50,7 +46,7 @@ const _allTaskMeta = <SetupTask, SetupTaskMeta>{
     task: SetupTask.setupAuthentication,
     title: 'Set up app authentication',
     description:
-        'Add a PIN or biometrics so only you can open this app.',
+        'Require a PIN or biometrics to open this app. Prevents anyone with physical access to your device from using your identity.',
     isStub: true,
     isCritical: true,
   ),
@@ -58,49 +54,17 @@ const _allTaskMeta = <SetupTask, SetupTaskMeta>{
     task: SetupTask.secureKeyStorage,
     title: 'Secure your signing keys',
     description:
-        'Protect your identity keys with the strongest security available on this device.',
+        'Your signing key controls your entire digital identity. If stored in software only, any app or attacker with OS-level access could steal it and impersonate you. Move it to a hardware enclave if available.',
     isStub: false,
     isCritical: true,
   ),
   SetupTask.inviteContacts: SetupTaskMeta(
     task: SetupTask.inviteContacts,
-    title: 'Invite contacts',
+    title: 'Add at least 3 trusted contacts',
     description:
-        'Trusted contacts help verify your identity and can help you recover access if you get locked out. Aim for at least 3.',
+        'Trusted contacts serve as witnesses to your identity. You need a minimum of 3 to enable key rotation and identity recovery. The more you add, the more resilient your identity becomes.',
     isStub: false,
     isCritical: true,
-  ),
-  SetupTask.connectEmail: SetupTaskMeta(
-    task: SetupTask.connectEmail,
-    title: 'Connect email',
-    description:
-        'Link your email address to enable identity-verified communications.',
-    isStub: true,
-    isCritical: false,
-  ),
-  SetupTask.addPhoneNumber: SetupTaskMeta(
-    task: SetupTask.addPhoneNumber,
-    title: 'Add phone number',
-    description:
-        'Add your phone number for SMS-based verification and recovery.',
-    isStub: true,
-    isCritical: false,
-  ),
-  SetupTask.completeProfile: SetupTaskMeta(
-    task: SetupTask.completeProfile,
-    title: 'Complete your profile',
-    description:
-        'Add your bio, organization, and title so contacts know who you are.',
-    isStub: false,
-    isCritical: false,
-  ),
-  SetupTask.getVerified: SetupTaskMeta(
-    task: SetupTask.getVerified,
-    title: 'Get verified',
-    description:
-        'Add someone you know personally as a trusted contact. This establishes your first real-world identity relationship.',
-    isStub: false,
-    isCritical: false,
   ),
 };
 
@@ -116,18 +80,13 @@ class SetupTaskService {
     required bool needsRemoteBrain,
     bool includeSecureKeyStorage = true,
   }) {
-    final all = [
+    return [
       if (needsRemoteBrain) SetupTask.connectRemoteBrain,
       SetupTask.backupSeedPhrase,
       SetupTask.setupAuthentication,
       if (includeSecureKeyStorage) SetupTask.secureKeyStorage,
       SetupTask.inviteContacts,
-      SetupTask.connectEmail,
-      SetupTask.addPhoneNumber,
-      SetupTask.completeProfile,
-      SetupTask.getVerified,
     ];
-    return all;
   }
 
   static Future<SharedPreferences> get _prefs =>

@@ -285,7 +285,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
       final finalType = trusted ? 'trusted' : selectedRole;
       await _coreService.acceptContact(contact.aid, contactType: finalType);
       if (finalType == 'trusted') {
-        await SetupTaskService.markComplete(SetupTask.getVerified);
+        // trusted contact acknowledged
       }
       _loadContacts();
     } catch (e) {
@@ -645,7 +645,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
           trusted: result!.trusted,
         );
         if (result.trusted == true) {
-          await SetupTaskService.markComplete(SetupTask.getVerified);
+          // trusted contact added
         }
         _loadContacts();
         if (mounted) {
@@ -893,7 +893,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                   if (value == null) return;
                   try {
                     await _coreService.updateContact(contact.aid, contactType: value);
-                    if (value == 'trusted') await SetupTaskService.markComplete(SetupTask.getVerified);
+                    // trusted contact updated
                     await _loadContacts();
                   } catch (e) {
                     if (mounted) {

@@ -14,27 +14,28 @@ enum DesktopRoute {
   // Top-level
   contacts,
   credentials,
-  apps,
+  passwords,
   wallet,
-  assets,
   dataVault,
   myDevices,
+  apps,
 
   // Hubs
   hubsCommunications,
   hubsAi,
-  hubsHealthcare,
-  hubsFinancial,
+  hubsHealth,
+  hubsFinance,
+  hubsSocialMedia,
+  hubsLegal,
+  hubsSecurity,
 
   // Settings
   settingsTunneling,
   settingsAuthentication,
   settingsKeri,
-  settingsKeyManagement,
-  settingsApiKeys,
   settingsEndpoints,
   settingsServiceProviders,
-  settingsConnectedApps,
+  settingsApiKeys,
   settingsGovernance,
   settingsPrivacy,
   settingsNotifications,
@@ -43,7 +44,7 @@ enum DesktopRoute {
   settingsTheme,
   settingsAccount,
 
-  // Top-level
+  // History
   activityLog,
 
   // Organization
@@ -72,12 +73,12 @@ class DesktopSidebar extends StatefulWidget {
 
 class _DesktopSidebarState extends State<DesktopSidebar> {
   // Section expand state
-  bool _hubsOpen      = false;
-  bool _settingsOpen  = false;
-  bool _orgOpen       = false;
+  bool _hubsOpen     = false;
+  bool _settingsOpen = false;
+  bool _orgOpen      = false;
 
   // Profile
-  String _displayName  = '';
+  String _displayName = '';
   String? _photoBase64;
 
   late final CoreService _coreService;
@@ -87,7 +88,6 @@ class _DesktopSidebarState extends State<DesktopSidebar> {
     super.initState();
     _coreService = CoreService(baseUrl: widget.serverUrl ?? AgentConfig.coreBaseUrl);
     _loadProfile();
-    // Auto-expand the section containing the current route
     _expandForRoute(widget.currentRoute);
   }
 
@@ -106,23 +106,22 @@ class _DesktopSidebarState extends State<DesktopSidebar> {
   }
 
   void _expandForRoute(DesktopRoute r) {
-    if (_isHubRoute(r))      setState(() => _hubsOpen      = true);
-    if (_isSettingsRoute(r)) setState(() => _settingsOpen  = true);
-    if (_isOrgRoute(r))      setState(() => _orgOpen       = true);
+    if (_isHubRoute(r))      setState(() => _hubsOpen     = true);
+    if (_isSettingsRoute(r)) setState(() => _settingsOpen = true);
+    if (_isOrgRoute(r))      setState(() => _orgOpen      = true);
   }
 
-  bool _isIdentityRoute(DesktopRoute r)  => r.name.startsWith('identity');
-  bool _isHubRoute(DesktopRoute r)       => r.name.startsWith('hubs');
-  bool _isSettingsRoute(DesktopRoute r)  => r.name.startsWith('settings');
-  bool _isOrgRoute(DesktopRoute r)       => r.name.startsWith('org');
+  bool _isHubRoute(DesktopRoute r)      => r.name.startsWith('hubs');
+  bool _isSettingsRoute(DesktopRoute r) => r.name.startsWith('settings');
+  bool _isOrgRoute(DesktopRoute r)      => r.name.startsWith('org');
 
   Future<void> _loadProfile() async {
     try {
       final profile = await _coreService.getProfile();
       if (mounted) {
         setState(() {
-          _displayName  = profile.fullName.isNotEmpty ? profile.fullName : 'Identity Agent';
-          _photoBase64  = profile.photo.isNotEmpty ? profile.photo : null;
+          _displayName = profile.fullName.isNotEmpty ? profile.fullName : 'Identity Agent';
+          _photoBase64 = profile.photo.isNotEmpty ? profile.photo : null;
         });
       }
     } catch (_) {
@@ -158,18 +157,18 @@ class _DesktopSidebarState extends State<DesktopSidebar> {
                 ),
                 _sectionDivider(),
 
-                // ── Identity ───────────────────────────────────────────────
+                // ── My Profile ─────────────────────────────────────────────
                 _NavItem(icon: Icons.person_outline, label: 'My Profile', route: DesktopRoute.identityProfile, current: widget.currentRoute, onTap: _select),
                 _sectionDivider(),
 
-                // ── Top-level items ────────────────────────────────────────
-                _NavItem(icon: Icons.people_outline,                   label: 'Contacts',   route: DesktopRoute.contacts,   current: widget.currentRoute, onTap: _select),
-                _NavItem(icon: Icons.verified_user_outlined,           label: 'Credentials',route: DesktopRoute.credentials, current: widget.currentRoute, onTap: _select, comingSoon: true),
-                _NavItem(icon: Icons.apps,                             label: 'Apps',       route: DesktopRoute.apps,        current: widget.currentRoute, onTap: _select),
-                _NavItem(icon: Icons.account_balance_wallet_outlined,  label: 'Wallet',     route: DesktopRoute.wallet,      current: widget.currentRoute, onTap: _select, comingSoon: true),
-                _NavItem(icon: Icons.diamond_outlined,                 label: 'Assets',     route: DesktopRoute.assets,      current: widget.currentRoute, onTap: _select, comingSoon: true),
-                _NavItem(icon: Icons.storage_outlined,                 label: 'Data Vault', route: DesktopRoute.dataVault,   current: widget.currentRoute, onTap: _select, comingSoon: true),
-                _NavItem(icon: Icons.devices,                          label: 'My Devices', route: DesktopRoute.myDevices,   current: widget.currentRoute, onTap: _select),
+                // ── Core items ─────────────────────────────────────────────
+                _NavItem(icon: Icons.people_outline,                  label: 'Contacts',    route: DesktopRoute.contacts,    current: widget.currentRoute, onTap: _select),
+                _NavItem(icon: Icons.verified_user_outlined,          label: 'Credentials', route: DesktopRoute.credentials, current: widget.currentRoute, onTap: _select, comingSoon: true),
+                _NavItem(icon: Icons.password_outlined,               label: 'Passwords',   route: DesktopRoute.passwords,   current: widget.currentRoute, onTap: _select, comingSoon: true),
+                _NavItem(icon: Icons.account_balance_wallet_outlined, label: 'Wallet',      route: DesktopRoute.wallet,      current: widget.currentRoute, onTap: _select, comingSoon: true),
+                _NavItem(icon: Icons.storage_outlined,                label: 'My Data',     route: DesktopRoute.dataVault,   current: widget.currentRoute, onTap: _select, comingSoon: true),
+                _NavItem(icon: Icons.devices,                         label: 'My Devices',  route: DesktopRoute.myDevices,   current: widget.currentRoute, onTap: _select),
+                _NavItem(icon: Icons.apps,                            label: 'Apps',        route: DesktopRoute.apps,        current: widget.currentRoute, onTap: _select),
                 _sectionDivider(),
 
                 // ── Hubs ───────────────────────────────────────────────────
@@ -182,9 +181,12 @@ class _DesktopSidebarState extends State<DesktopSidebar> {
                 ),
                 if (_hubsOpen) ...[
                   _SubItem(icon: Icons.chat_bubble_outline, label: 'Communications', route: DesktopRoute.hubsCommunications, current: widget.currentRoute, onTap: _select, comingSoon: true),
-                  _SubItem(icon: Icons.auto_awesome,        label: 'AI Hub',         route: DesktopRoute.hubsAi,            current: widget.currentRoute, onTap: _select, comingSoon: true),
-                  _SubItem(icon: Icons.local_hospital_outlined, label: 'Healthcare', route: DesktopRoute.hubsHealthcare,    current: widget.currentRoute, onTap: _select, comingSoon: true),
-                  _SubItem(icon: Icons.bar_chart,           label: 'Financial',      route: DesktopRoute.hubsFinancial,     current: widget.currentRoute, onTap: _select, comingSoon: true),
+                  _SubItem(icon: Icons.auto_awesome,        label: 'AI',             route: DesktopRoute.hubsAi,            current: widget.currentRoute, onTap: _select, comingSoon: true),
+                  _SubItem(icon: Icons.favorite_border,     label: 'Health',         route: DesktopRoute.hubsHealth,        current: widget.currentRoute, onTap: _select, comingSoon: true),
+                  _SubItem(icon: Icons.bar_chart,           label: 'Finance',        route: DesktopRoute.hubsFinance,       current: widget.currentRoute, onTap: _select, comingSoon: true),
+                  _SubItem(icon: Icons.tag,                 label: 'Social Media',   route: DesktopRoute.hubsSocialMedia,   current: widget.currentRoute, onTap: _select, comingSoon: true),
+                  _SubItem(icon: Icons.gavel,               label: 'Legal',          route: DesktopRoute.hubsLegal,         current: widget.currentRoute, onTap: _select, comingSoon: true),
+                  _SubItem(icon: Icons.security,            label: 'Security',       route: DesktopRoute.hubsSecurity,      current: widget.currentRoute, onTap: _select, comingSoon: true),
                 ],
                 _sectionDivider(),
 
@@ -196,21 +198,19 @@ class _DesktopSidebarState extends State<DesktopSidebar> {
                   onToggle: () => setState(() => _settingsOpen = !_settingsOpen),
                 ),
                 if (_settingsOpen) ...[
-                  _SubItem(icon: Icons.vpn_lock_outlined,         label: 'Tunneling',                route: DesktopRoute.settingsTunneling,        current: widget.currentRoute, onTap: _select),
-                  _SubItem(icon: Icons.lock_outlined,             label: 'Authentication',            route: DesktopRoute.settingsAuthentication,  current: widget.currentRoute, onTap: _select),
-                  _SubItem(icon: Icons.key,                       label: 'KERI Protocol',            route: DesktopRoute.settingsKeri,            current: widget.currentRoute, onTap: _select),
-                  _SubItem(icon: Icons.lock_outlined,             label: 'Key Management',           route: DesktopRoute.settingsKeyManagement,   current: widget.currentRoute, onTap: _select, comingSoon: true),
-                  _SubItem(icon: Icons.api_outlined,              label: 'API Keys',                 route: DesktopRoute.settingsApiKeys,         current: widget.currentRoute, onTap: _select),
-                  _SubItem(icon: Icons.hub_outlined,              label: 'Endpoints',                route: DesktopRoute.settingsEndpoints,       current: widget.currentRoute, onTap: _select),
-                  _SubItem(icon: Icons.cloud_outlined,            label: 'Service Providers',        route: DesktopRoute.settingsServiceProviders, current: widget.currentRoute, onTap: _select, comingSoon: true),
-                  _SubItem(icon: Icons.link,                      label: 'Connected Apps',           route: DesktopRoute.settingsConnectedApps,   current: widget.currentRoute, onTap: _select, comingSoon: true),
-                  _SubItem(icon: Icons.gavel,                     label: 'Governance Gateway',       route: DesktopRoute.settingsGovernance,      current: widget.currentRoute, onTap: _select, comingSoon: true),
-                  _SubItem(icon: Icons.privacy_tip_outlined,      label: 'Privacy & Data',           route: DesktopRoute.settingsPrivacy,         current: widget.currentRoute, onTap: _select, comingSoon: true),
-                  _SubItem(icon: Icons.notifications_outlined,    label: 'Notifications',            route: DesktopRoute.settingsNotifications,   current: widget.currentRoute, onTap: _select, comingSoon: true),
-                  _SubItem(icon: Icons.backup_outlined,           label: 'Backup & Recovery',        route: DesktopRoute.settingsBackup,          current: widget.currentRoute, onTap: _select, comingSoon: true),
-                  _SubItem(icon: Icons.terminal,                  label: 'Developer Tools',          route: DesktopRoute.settingsDeveloperTools,  current: widget.currentRoute, onTap: _select),
-                  _SubItem(icon: Icons.palette_outlined,          label: 'Theme',                    route: DesktopRoute.settingsTheme,           current: widget.currentRoute, onTap: _select),
-                  _SubItem(icon: Icons.manage_accounts_outlined,  label: 'Account',                  route: DesktopRoute.settingsAccount,         current: widget.currentRoute, onTap: _select),
+                  _SubItem(icon: Icons.manage_accounts_outlined, label: 'Agent',             route: DesktopRoute.settingsAccount,         current: widget.currentRoute, onTap: _select),
+                  _SubItem(icon: Icons.shield_outlined,          label: 'Security',          route: DesktopRoute.settingsAuthentication,  current: widget.currentRoute, onTap: _select),
+                  _SubItem(icon: Icons.privacy_tip_outlined,     label: 'Privacy & Data',    route: DesktopRoute.settingsPrivacy,         current: widget.currentRoute, onTap: _select, comingSoon: true),
+                  _SubItem(icon: Icons.palette_outlined,         label: 'Appearance',        route: DesktopRoute.settingsTheme,           current: widget.currentRoute, onTap: _select),
+                  _SubItem(icon: Icons.notifications_outlined,   label: 'Notifications',     route: DesktopRoute.settingsNotifications,   current: widget.currentRoute, onTap: _select, comingSoon: true),
+                  _SubItem(icon: Icons.api_outlined,             label: 'API Keys',          route: DesktopRoute.settingsApiKeys,         current: widget.currentRoute, onTap: _select),
+                  _SubItem(icon: Icons.vpn_lock_outlined,        label: 'Tunneling',         route: DesktopRoute.settingsTunneling,       current: widget.currentRoute, onTap: _select),
+                  _SubItem(icon: Icons.hub_outlined,             label: 'Endpoints',         route: DesktopRoute.settingsEndpoints,       current: widget.currentRoute, onTap: _select),
+                  _SubItem(icon: Icons.cloud_outlined,           label: 'Service Providers', route: DesktopRoute.settingsServiceProviders, current: widget.currentRoute, onTap: _select, comingSoon: true),
+                  _SubItem(icon: Icons.gavel,                    label: 'Governance',        route: DesktopRoute.settingsGovernance,      current: widget.currentRoute, onTap: _select, comingSoon: true),
+                  _SubItem(icon: Icons.key,                      label: 'KERI Protocol',     route: DesktopRoute.settingsKeri,            current: widget.currentRoute, onTap: _select),
+                  _SubItem(icon: Icons.backup_outlined,          label: 'Backup & Recovery', route: DesktopRoute.settingsBackup,          current: widget.currentRoute, onTap: _select, comingSoon: true),
+                  _SubItem(icon: Icons.terminal,                 label: 'Developer Tools',   route: DesktopRoute.settingsDeveloperTools,  current: widget.currentRoute, onTap: _select),
                 ],
                 _sectionDivider(),
 
@@ -227,10 +227,10 @@ class _DesktopSidebarState extends State<DesktopSidebar> {
                   comingSoon: true,
                 ),
                 if (_orgOpen) ...[
-                  _SubItem(icon: Icons.space_dashboard_outlined, label: 'Overview',          route: DesktopRoute.orgOverview,   current: widget.currentRoute, onTap: _select, comingSoon: true),
-                  _SubItem(icon: Icons.group_outlined,           label: 'Employees & Roles', route: DesktopRoute.orgEmployees,  current: widget.currentRoute, onTap: _select, comingSoon: true),
-                  _SubItem(icon: Icons.verified_user_outlined,   label: 'Credentials',       route: DesktopRoute.orgCredentials,current: widget.currentRoute, onTap: _select, comingSoon: true),
-                  _SubItem(icon: Icons.settings_outlined,        label: 'Settings',          route: DesktopRoute.orgSettings,   current: widget.currentRoute, onTap: _select, comingSoon: true),
+                  _SubItem(icon: Icons.space_dashboard_outlined, label: 'Overview',    route: DesktopRoute.orgOverview,    current: widget.currentRoute, onTap: _select, comingSoon: true),
+                  _SubItem(icon: Icons.group_outlined,           label: 'Team & Roles',route: DesktopRoute.orgEmployees,   current: widget.currentRoute, onTap: _select, comingSoon: true),
+                  _SubItem(icon: Icons.verified_user_outlined,   label: 'Credentials', route: DesktopRoute.orgCredentials, current: widget.currentRoute, onTap: _select, comingSoon: true),
+                  _SubItem(icon: Icons.settings_outlined,        label: 'Settings',    route: DesktopRoute.orgSettings,    current: widget.currentRoute, onTap: _select, comingSoon: true),
                 ],
 
                 const SizedBox(height: 16),
@@ -473,7 +473,7 @@ class _SidebarTile extends StatelessWidget {
               child: Text(
                 label,
                 style: TextStyle(
-                  fontSize: indent > 0 ? 13 : 13,
+                  fontSize: 13,
                   fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
                   color: textColor,
                 ),

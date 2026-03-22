@@ -17,6 +17,7 @@ import 'account_settings_screen.dart';
 import 'auth_management_screen.dart';
 import 'history_screen.dart';
 import 'my_devices_screen.dart';
+import 'api_keys_screen.dart';
 
 class DesktopApp extends StatefulWidget {
   final KeriService keriService;
@@ -71,13 +72,15 @@ class _DesktopAppState extends State<DesktopApp> {
         return const AuthManagementScreen();
 
       case DesktopRoute.settingsTunneling:
-      case DesktopRoute.settingsApiKeys:
         return SettingsScreen(
           keriService: keri,
           mode: widget.mode,
           entityType: widget.entityType,
           serverUrl: url,
         );
+
+      case DesktopRoute.settingsApiKeys:
+        return ApiKeysScreen(serverUrl: url);
 
       case DesktopRoute.settingsKeri:
         return KeriProtocolScreen(
@@ -112,30 +115,32 @@ class _DesktopAppState extends State<DesktopApp> {
       // ── Coming Soon stubs ──────────────────────────────────────────────────
       case DesktopRoute.credentials:
         return const ComingSoonScreen(title: 'Credentials', icon: Icons.verified_user_outlined);
+      case DesktopRoute.passwords:
+        return const ComingSoonScreen(title: 'Passwords', icon: Icons.password_outlined);
       case DesktopRoute.wallet:
         return const ComingSoonScreen(title: 'Wallet', icon: Icons.account_balance_wallet_outlined);
-      case DesktopRoute.assets:
-        return const ComingSoonScreen(title: 'Assets', icon: Icons.diamond_outlined);
       case DesktopRoute.dataVault:
-        return const ComingSoonScreen(title: 'Data Vault', icon: Icons.storage_outlined);
+        return const ComingSoonScreen(title: 'My Data', icon: Icons.storage_outlined);
       case DesktopRoute.myDevices:
         return MyDevicesScreen(keriService: keri, serverUrl: url);
       case DesktopRoute.hubsCommunications:
-        return const ComingSoonScreen(title: 'Communications Gateway', icon: Icons.chat_bubble_outline);
+        return const ComingSoonScreen(title: 'Communications', icon: Icons.chat_bubble_outline);
       case DesktopRoute.hubsAi:
-        return const ComingSoonScreen(title: 'AI Hub', icon: Icons.auto_awesome);
-      case DesktopRoute.hubsHealthcare:
-        return const ComingSoonScreen(title: 'Healthcare Hub', icon: Icons.local_hospital_outlined);
-      case DesktopRoute.hubsFinancial:
-        return const ComingSoonScreen(title: 'Financial Hub', icon: Icons.bar_chart);
-      case DesktopRoute.settingsKeyManagement:
-        return const ComingSoonScreen(title: 'Key Management', icon: Icons.lock_outlined);
+        return const ComingSoonScreen(title: 'AI', icon: Icons.auto_awesome);
+      case DesktopRoute.hubsHealth:
+        return const ComingSoonScreen(title: 'Health', icon: Icons.favorite_border);
+      case DesktopRoute.hubsFinance:
+        return const ComingSoonScreen(title: 'Finance', icon: Icons.bar_chart);
+      case DesktopRoute.hubsSocialMedia:
+        return const ComingSoonScreen(title: 'Social Media', icon: Icons.tag);
+      case DesktopRoute.hubsLegal:
+        return const ComingSoonScreen(title: 'Legal', icon: Icons.gavel);
+      case DesktopRoute.hubsSecurity:
+        return const ComingSoonScreen(title: 'Security', icon: Icons.security);
       case DesktopRoute.settingsServiceProviders:
         return const ComingSoonScreen(title: 'Service Providers', icon: Icons.cloud_outlined);
-      case DesktopRoute.settingsConnectedApps:
-        return const ComingSoonScreen(title: 'Connected Apps & Integrations', icon: Icons.link);
       case DesktopRoute.settingsGovernance:
-        return const ComingSoonScreen(title: 'Governance Gateway', icon: Icons.gavel);
+        return const ComingSoonScreen(title: 'Governance', icon: Icons.gavel);
       case DesktopRoute.settingsPrivacy:
         return const ComingSoonScreen(title: 'Privacy & Data', icon: Icons.privacy_tip_outlined);
       case DesktopRoute.settingsNotifications:
