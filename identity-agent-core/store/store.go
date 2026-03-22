@@ -31,6 +31,15 @@ type IdentityState struct {
         EventCount    int    `json:"event_count"`
 }
 
+// ContactRecord stores a resolved contact in the Identity Agent.
+//
+// Protocol layers kept separate:
+//   - ContactType (Identity Agent protocol): user-facing relationship category.
+//     Values: "general" | "trusted" | "professional"
+//   - IsWitness (KERI protocol): set automatically when this contact's Identity
+//     Agent is serving as a witness for our key events. Full witness exchange
+//     protocol is a future task — see ADR-016.
+//   - Status (connection state): pending_inbound | pending_outbound | accepted | rejected
 type ContactRecord struct {
         AID          string `json:"aid"`
         Alias        string `json:"alias"`
@@ -39,11 +48,24 @@ type ContactRecord struct {
         Verified     bool   `json:"verified"`
         DiscoveredAt string `json:"discovered_at"`
         Status       string `json:"status"`
-        Role         string `json:"role"`
-        Trusted      bool   `json:"trusted"`
-        TrustedAt    string `json:"trusted_at,omitempty"`
+        ContactType  string `json:"contact_type"` // general | trusted | professional
+        IsWitness    bool   `json:"is_witness"`   // KERI witness role — auto-managed
         JCard        *JCard `json:"jcard,omitempty"`
         Photo        string `json:"photo,omitempty"`
+}
+
+// TaskRecord represents an automated background task tracked by the Identity Agent.
+// Tasks are always automated — they show system operation status, not user actions.
+// Status: "pending" | "in_progress" | "completed" | "failed"
+type TaskRecord struct {
+        ID         string `json:"id"`
+        Type       string `json:"type"`        // e.g. "witness_request_sent", "kel_sync"
+        Status     string `json:"status"`
+        ContactAID string `json:"contact_aid"` // related contact AID, if applicable
+        Progress   int    `json:"progress"`    // 0–100
+        Detail     string `json:"detail"`      // human-readable status message
+        CreatedAt  string `json:"created_at"`
+        UpdatedAt  string `json:"updated_at"`
 }
 
 type JCard struct {
@@ -151,6 +173,20 @@ type ContactKELRecord struct {
         ValidatedAt      string                   `json:"validated_at"`
 }
 
+// ShareAction defines a user-facing engagement action shown in the Share menu.
+// The list is managed by the Data Manager sandbox app and persisted in identity.db.
+// Actions with IsEnabled=false appear in the UI as "Coming Soon".
+type ShareAction struct {
+	ID        string `json:"id"`
+	ActionKey string `json:"action_key"` // used as ?action= param in OOBI URLs
+	Name      string `json:"name"`
+	Subtitle  string `json:"subtitle"`
+	Icon      string `json:"icon"`       // Material Icons name string
+	IsEnabled bool   `json:"is_enabled"`
+	SortOrder int    `json:"sort_order"`
+	UpdatedAt string `json:"updated_at"`
+}
+
 // WitnessReceiptRecord stores one witness receipt for a specific event SAID.
 // Receipts are deduplicated by (EventSAID, WitnessAID).
 type WitnessReceiptRecord struct {
@@ -195,6 +231,14 @@ type Store interface {
         DeletePendingRequest(aid string) error
         GetProfile() (*ProfileData, error)
         SaveProfile(profile ProfileData) error
+        SaveTask(task TaskRecord) error
+        GetTasks() ([]TaskRecord, error)
+        GetTask(id string) (*TaskRecord, error)
+        DeleteTask(id string) error
+        GetShareActions() ([]ShareAction, error)
+        GetShareAction(id string) (*ShareAction, error)
+        UpsertShareAction(action ShareAction) error
+        DeleteShareAction(id string) error
         ResetAll() error
         Close() error
 }

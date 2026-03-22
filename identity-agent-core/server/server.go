@@ -304,6 +304,12 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
                 r.Get("/alerts", s.handleGetAlerts)
                 r.Post("/exchange", s.handleExchange)
 
+                r.Get("/tasks", s.handleGetTasks)
+
+                // Inter-agent witness protocol (server-to-server, fully automated)
+                r.Post("/witness/request", s.handleWitnessRequest)
+                r.Post("/witness/accept", s.handleWitnessAccept)
+
                 r.Get("/profile", s.handleGetProfile)
                 r.Put("/profile", s.handlePutProfile)
 
@@ -317,6 +323,10 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 
                 r.Get("/endpoint", s.handleGetEndpoint)
                 r.Get("/actions", s.handleGetActions)
+                r.Get("/share-actions", s.handleGetShareActions)
+                r.Post("/share-actions", s.handleCreateShareAction)
+                r.Put("/share-actions/{id}", s.handleUpdateShareAction)
+                r.Delete("/share-actions/{id}", s.handleDeleteShareAction)
 
                 r.Post("/store/identity", s.handleStoreIdentity)
                 r.Post("/store/event", s.handleStoreEvent)
@@ -1433,6 +1443,61 @@ func (s *CoreServer) handleGetActions(w http.ResponseWriter, r *http.Request) {
         json.NewEncoder(w).Encode(map[string]interface{}{"actions": actions})
 }
 
+// ── Share Actions ─────────────────────────────────────────────────────────────
+
+func (s *CoreServer) handleGetShareActions(w http.ResponseWriter, r *http.Request) {
+	actions, err := s.DataStore.GetShareActions()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to read share actions", err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"actions": actions, "count": len(actions)})
+}
+
+func (s *CoreServer) handleCreateShareAction(w http.ResponseWriter, r *http.Request) {
+	var action store.ShareAction
+	if err := json.NewDecoder(r.Body).Decode(&action); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+	if action.ID == "" {
+		action.ID = fmt.Sprintf("sa-%s", strings.ReplaceAll(action.ActionKey, "_", "-"))
+	}
+	if err := s.DataStore.UpsertShareAction(action); err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to save share action", err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(action)
+}
+
+func (s *CoreServer) handleUpdateShareAction(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var action store.ShareAction
+	if err := json.NewDecoder(r.Body).Decode(&action); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+	action.ID = id
+	if err := s.DataStore.UpsertShareAction(action); err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to update share action", err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(action)
+}
+
+func (s *CoreServer) handleDeleteShareAction(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if err := s.DataStore.DeleteShareAction(id); err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to delete share action", err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *CoreServer) handleOobiGenerate(w http.ResponseWriter, r *http.Request) {
         identity, err := s.DataStore.GetIdentity()
         if err != nil {
@@ -1859,13 +1924,9 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
                 contactStatus = "unverified"
         }
 
-        role := "general"
-        trustedAt := ""
+        contactType := "general"
         if req.Trusted {
-                trustedAt = time.Now().UTC().Format(time.RFC3339)
-                if s.countWitnesses() < 3 {
-                        role = "witness"
-                }
+                contactType = "trusted"
         }
 
         contact := store.ContactRecord{
@@ -1876,9 +1937,8 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
                 Verified:     kelVerified || s.KeriDriver == nil,
                 DiscoveredAt: time.Now().UTC().Format(time.RFC3339),
                 Status:       contactStatus,
-                Role:         role,
-                Trusted:      req.Trusted,
-                TrustedAt:    trustedAt,
+                ContactType:  contactType,
+                IsWitness:    false, // set via witness protocol (ADR-016)
                 JCard:        contactJCard,
                 Photo:        oobiData.Photo,
         }
@@ -1994,9 +2054,9 @@ func (s *CoreServer) handleExchange(w http.ResponseWriter, r *http.Request) {
                 }
                 existing, _ := s.DataStore.GetContact(req.SenderAID)
                 if existing != nil && (existing.Status == "pending_outbound" || existing.Status == "pending_inbound") {
-                        existing.Status = "mutual"
+                        existing.Status = "accepted"
                         s.DataStore.SaveContact(*existing)
-                        log.Printf("[identity-agent-core] EXCHANGE: Acceptance received — contact %s upgraded to mutual", req.SenderAID)
+                        log.Printf("[identity-agent-core] EXCHANGE: Acceptance received — contact %s upgraded to accepted", req.SenderAID)
                         s.EventHub.Broadcast(AgentEvent{
                                 Type: "contact_accepted",
                                 Payload: map[string]interface{}{
@@ -2022,15 +2082,15 @@ func (s *CoreServer) handleExchange(w http.ResponseWriter, r *http.Request) {
 
         existing, _ := s.DataStore.GetContact(req.SenderAID)
         if existing != nil {
-                if existing.Status == "mutual" {
+                if existing.Status == "accepted" {
                         w.Header().Set("Content-Type", "application/json")
-                        json.NewEncoder(w).Encode(map[string]string{"status": "already_mutual", "aid": req.SenderAID})
+                        json.NewEncoder(w).Encode(map[string]string{"status": "already_accepted", "aid": req.SenderAID})
                         return
                 }
                 if existing.Status == "pending_outbound" || existing.Status == "verified" {
-                        existing.Status = "mutual"
+                        existing.Status = "accepted"
                         s.DataStore.SaveContact(*existing)
-                        log.Printf("[identity-agent-core] EXCHANGE: Introduction received — contact %s auto-upgraded to mutual", req.SenderAID)
+                        log.Printf("[identity-agent-core] EXCHANGE: Introduction received — contact %s auto-upgraded to accepted", req.SenderAID)
                         s.EventHub.Broadcast(AgentEvent{
                                 Type: "contact_accepted",
                                 Payload: map[string]interface{}{
@@ -2039,7 +2099,7 @@ func (s *CoreServer) handleExchange(w http.ResponseWriter, r *http.Request) {
                                 },
                         })
                         w.Header().Set("Content-Type", "application/json")
-                        json.NewEncoder(w).Encode(map[string]string{"status": "mutual", "aid": req.SenderAID})
+                        json.NewEncoder(w).Encode(map[string]string{"status": "accepted", "aid": req.SenderAID})
                         return
                 }
         }
@@ -2146,7 +2206,7 @@ func (s *CoreServer) handleExchange(w http.ResponseWriter, r *http.Request) {
                 Verified:     kelPresent,
                 DiscoveredAt: time.Now().UTC().Format(time.RFC3339),
                 Status:       "pending_inbound",
-                Role:         "general",
+                ContactType:  "general",
                 JCard:        contactJCard,
                 Photo:        req.SenderPhoto,
         }
@@ -2201,26 +2261,24 @@ func (s *CoreServer) handleAcceptContact(w http.ResponseWriter, r *http.Request)
         }
 
         var acceptReq struct {
-                Trusted bool `json:"trusted"`
+                ContactType string `json:"contact_type"` // general | trusted | professional
         }
         json.NewDecoder(r.Body).Decode(&acceptReq) // body is optional
 
-        log.Printf("[identity-agent-core] CONTACT-ACCEPT: Upgrading contact %s (%s) from pending_inbound to mutual", contact.Alias, aid)
-
-        contact.Status = "mutual"
-        if acceptReq.Trusted && !contact.Trusted {
-                contact.Trusted = true
-                contact.TrustedAt = time.Now().UTC().Format(time.RFC3339)
-                if contact.Role == "agent" && s.countWitnesses() < 3 {
-                        contact.Role = "witness"
-                }
+        if acceptReq.ContactType == "" {
+                acceptReq.ContactType = "general"
         }
+
+        log.Printf("[identity-agent-core] CONTACT-ACCEPT: Upgrading contact %s (%s) to accepted, type=%s", contact.Alias, aid, acceptReq.ContactType)
+
+        contact.Status = "accepted"
+        contact.ContactType = acceptReq.ContactType
         if err := s.DataStore.SaveContact(*contact); err != nil {
                 writeError(w, http.StatusInternalServerError, "Failed to update contact", err.Error())
                 return
         }
 
-        log.Printf("[identity-agent-core] CONTACT: Accepted %s (AID: %s) — status=mutual", contact.Alias, aid)
+        log.Printf("[identity-agent-core] CONTACT: Accepted %s (AID: %s) — status=accepted, type=%s", contact.Alias, aid, contact.ContactType)
 
         go func() {
                 ourIdentity, err := s.DataStore.GetIdentity()
@@ -2262,9 +2320,8 @@ func (s *CoreServer) handleUpdateContact(w http.ResponseWriter, r *http.Request)
         }
 
         var req struct {
-                Role    string `json:"role"`
-                Alias   string `json:"alias"`
-                Trusted *bool  `json:"trusted"`
+                ContactType string `json:"contact_type"` // general | trusted | professional
+                Alias       string `json:"alias"`
         }
         if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
                 writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
@@ -2281,30 +2338,18 @@ func (s *CoreServer) handleUpdateContact(w http.ResponseWriter, r *http.Request)
                 return
         }
 
-        if req.Role != "" {
-                validRoles := map[string]bool{"agent": true, "witness": true, "verifier": true}
-                if !validRoles[req.Role] {
-                        writeError(w, http.StatusBadRequest, "Invalid role", fmt.Sprintf("Role must be one of: agent, witness, verifier"))
+        if req.ContactType != "" {
+                validTypes := map[string]bool{
+                        "general": true, "trusted": true, "professional": true,
+                }
+                if !validTypes[req.ContactType] {
+                        writeError(w, http.StatusBadRequest, "Invalid contact_type", "contact_type must be one of: general, trusted, professional")
                         return
                 }
-                contact.Role = req.Role
+                contact.ContactType = req.ContactType
         }
         if req.Alias != "" {
                 contact.Alias = req.Alias
-        }
-        if req.Trusted != nil {
-                if *req.Trusted && !contact.Trusted {
-                        // Newly trusted — record timestamp and auto-assign witness if capacity allows
-                        contact.Trusted = true
-                        contact.TrustedAt = time.Now().UTC().Format(time.RFC3339)
-                        if contact.Role == "agent" && s.countWitnesses() < 3 {
-                                contact.Role = "witness"
-                        }
-                } else if !*req.Trusted {
-                        contact.Trusted = false
-                        contact.TrustedAt = ""
-                        // Role stays as-is — user manages role changes separately
-                }
         }
 
         if err := s.DataStore.SaveContact(*contact); err != nil {
@@ -2312,7 +2357,7 @@ func (s *CoreServer) handleUpdateContact(w http.ResponseWriter, r *http.Request)
                 return
         }
 
-        log.Printf("[identity-agent-core] CONTACT: Updated %s (AID: %s) role=%s", contact.Alias, aid, contact.Role)
+        log.Printf("[identity-agent-core] CONTACT: Updated %s (AID: %s) contact_type=%s", contact.Alias, aid, contact.ContactType)
 
         w.Header().Set("Content-Type", "application/json")
         json.NewEncoder(w).Encode(contact)
@@ -2325,7 +2370,7 @@ func (s *CoreServer) countWitnesses() int {
 	}
 	n := 0
 	for _, c := range contacts {
-		if c.Role == "witness" {
+		if c.IsWitness {
 			n++
 		}
 	}
@@ -2793,4 +2838,96 @@ func writeError(w http.ResponseWriter, status int, errMsg string, details string
         w.Header().Set("Content-Type", "application/json")
         w.WriteHeader(status)
         json.NewEncoder(w).Encode(ErrorResponse{Error: errMsg, Details: details})
+}
+
+// handleGetTasks returns all background tasks tracked in the database.
+// Tasks are always automated — created and resolved by the identity agent,
+// never manually initiated by the user. They provide a status window into
+// ongoing operations (witness requests, KEL sync, credential verification, etc.).
+func (s *CoreServer) handleGetTasks(w http.ResponseWriter, r *http.Request) {
+        tasks, err := s.DataStore.GetTasks()
+        if err != nil {
+                writeError(w, http.StatusInternalServerError, "Failed to read tasks", err.Error())
+                return
+        }
+        if tasks == nil {
+                tasks = []store.TaskRecord{}
+        }
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(map[string]interface{}{
+                "tasks": tasks,
+                "count": len(tasks),
+        })
+}
+
+// handleWitnessRequest is an inbound inter-agent endpoint.
+// A remote Identity Agent calls this when it wants our agent to act as a
+// witness for its key events. The request is processed automatically —
+// no human action is required or presented. The agent evaluates capacity
+// and policy, then calls handleWitnessAccept on the requester's OOBI URL.
+//
+// ADR-016: Witness Protocol — server-to-server, fully automated.
+//
+// TODO (Sprint 4): implement witness capacity check, policy evaluation,
+//   outbound accept/decline call to requester, task lifecycle tracking.
+func (s *CoreServer) handleWitnessRequest(w http.ResponseWriter, r *http.Request) {
+        var req struct {
+                RequesterAID  string `json:"requester_aid"`
+                RequesterOOBI string `json:"requester_oobi"`
+                EventJSON     string `json:"event_json"`
+        }
+        if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+                writeError(w, http.StatusBadRequest, "Invalid witness request body", err.Error())
+                return
+        }
+        if req.RequesterAID == "" || req.RequesterOOBI == "" {
+                writeError(w, http.StatusBadRequest, "Missing required fields", "requester_aid and requester_oobi are required")
+                return
+        }
+
+        log.Printf("[identity-agent-core] WITNESS: Received witness request from AID %s (OOBI: %s) [stub — not yet processed]",
+                req.RequesterAID, req.RequesterOOBI)
+
+        // Stub: acknowledge receipt. Full implementation in Sprint 4 (ADR-016).
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(map[string]string{
+                "status":  "received",
+                "message": "Witness request received. Processing automatically.",
+        })
+}
+
+// handleWitnessAccept is an inbound inter-agent endpoint.
+// A remote Identity Agent calls this to deliver its accept/decline response
+// to a witness request we previously sent. The response is processed
+// automatically; if accepted, the contact's is_witness flag is set to true.
+//
+// ADR-016: Witness Protocol — server-to-server, fully automated.
+//
+// TODO (Sprint 4): resolve task by ID, update contact.IsWitness on accept,
+//   update task status to completed/failed, emit WebSocket event.
+func (s *CoreServer) handleWitnessAccept(w http.ResponseWriter, r *http.Request) {
+        var req struct {
+                TaskID       string `json:"task_id"`
+                RequesterAID string `json:"requester_aid"`
+                Decision     string `json:"decision"` // "accepted" | "declined"
+                Reason       string `json:"reason"`
+        }
+        if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+                writeError(w, http.StatusBadRequest, "Invalid witness accept body", err.Error())
+                return
+        }
+        if req.RequesterAID == "" || req.Decision == "" {
+                writeError(w, http.StatusBadRequest, "Missing required fields", "requester_aid and decision are required")
+                return
+        }
+
+        log.Printf("[identity-agent-core] WITNESS: Received witness decision=%s from AID %s (task_id=%s) [stub — not yet applied]",
+                req.Decision, req.RequesterAID, req.TaskID)
+
+        // Stub: acknowledge receipt. Full implementation in Sprint 4 (ADR-016).
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(map[string]string{
+                "status":  "received",
+                "message": "Witness decision received.",
+        })
 }

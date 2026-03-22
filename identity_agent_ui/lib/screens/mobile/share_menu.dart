@@ -9,11 +9,119 @@ import '../../config/agent_config.dart';
 import '../../widgets/contact_action_popup.dart';
 import 'mobile_settings_screen.dart';
 
-class ShareMenu extends StatelessWidget {
+// Default action list — mirrors the seeded DB rows; used as a fallback if the
+// API is unreachable so the Share menu is never empty.
+const _defaultActions = [
+  ShareAction(
+    id: 'sa-add-contact',
+    actionKey: 'add_contact',
+    name: 'Add Contact',
+    subtitle: 'Generate a shareable link so others can add you as a contact',
+    icon: 'person_add_outlined',
+    isEnabled: true,
+    sortOrder: 1,
+  ),
+  ShareAction(
+    id: 'sa-show-id',
+    actionKey: 'show_id',
+    name: 'Show ID',
+    subtitle: 'Display your identity QR code',
+    icon: 'badge_outlined',
+    isEnabled: false,
+    sortOrder: 2,
+  ),
+  ShareAction(
+    id: 'sa-request-payment',
+    actionKey: 'request_payment',
+    name: 'Request Payment',
+    subtitle: 'Send a payment request to a contact',
+    icon: 'payment_outlined',
+    isEnabled: false,
+    sortOrder: 3,
+  ),
+  ShareAction(
+    id: 'sa-share-file',
+    actionKey: 'share_file',
+    name: 'Share a File',
+    subtitle: 'Send an encrypted file to a contact',
+    icon: 'attach_file',
+    isEnabled: false,
+    sortOrder: 4,
+  ),
+  ShareAction(
+    id: 'sa-share-credential',
+    actionKey: 'share_credential',
+    name: 'Share Credential',
+    subtitle: 'Present a verifiable credential',
+    icon: 'verified_outlined',
+    isEnabled: false,
+    sortOrder: 5,
+  ),
+];
+
+IconData _iconForKey(String key) {
+  switch (key) {
+    case 'add_contact': return Icons.person_add_outlined;
+    case 'show_id': return Icons.badge_outlined;
+    case 'request_payment': return Icons.payment_outlined;
+    case 'share_file': return Icons.attach_file;
+    case 'share_credential': return Icons.verified_outlined;
+    default: return Icons.share_outlined;
+  }
+}
+
+class ShareMenu extends StatefulWidget {
   final String? serverUrl;
   final VoidCallback? onAddContactComplete;
 
   const ShareMenu({super.key, this.serverUrl, this.onAddContactComplete});
+
+  @override
+  State<ShareMenu> createState() => _ShareMenuState();
+}
+
+class _ShareMenuState extends State<ShareMenu> {
+  late final CoreService _coreService =
+      CoreService(baseUrl: widget.serverUrl ?? AgentConfig.coreBaseUrl);
+
+  List<ShareAction> _actions = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadActions();
+  }
+
+  @override
+  void dispose() {
+    _coreService.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadActions() async {
+    try {
+      final actions = await _coreService.getShareActions();
+      if (mounted) setState(() { _actions = actions; _loading = false; });
+    } catch (_) {
+      if (mounted) setState(() { _actions = _defaultActions; _loading = false; });
+    }
+  }
+
+  void _handleTap(BuildContext context, ShareAction action) {
+    if (!action.isEnabled) return;
+    switch (action.actionKey) {
+      case 'add_contact':
+        Navigator.of(context).pop();
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => _AddContactScreen(serverUrl: widget.serverUrl),
+          ),
+        ).then((_) => widget.onAddContactComplete?.call());
+      default:
+        _showComingSoon(context, action.name);
+    }
+  }
 
   void _showComingSoon(BuildContext context, String feature) {
     Navigator.of(context).pop();
@@ -30,17 +138,6 @@ class ShareMenu extends StatelessWidget {
         ],
       ),
     );
-  }
-
-  void _handleAddContact(BuildContext context) {
-    Navigator.of(context).pop();
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => _AddContactScreen(serverUrl: serverUrl),
-      ),
-    ).then((_) {
-      onAddContactComplete?.call();
-    });
   }
 
   @override
@@ -72,37 +169,19 @@ class ShareMenu extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 8),
-          _ShareItem(
-            icon: Icons.badge_outlined,
-            label: 'Show ID',
-            subtitle: 'Display your identity QR code',
-            onTap: () => _showComingSoon(context, 'Show ID'),
-          ),
-          _ShareItem(
-            icon: Icons.person_add_outlined,
-            label: 'Add Contact',
-            subtitle: 'Generate shareable link',
-            onTap: () => _handleAddContact(context),
-            isActive: true,
-          ),
-          _ShareItem(
-            icon: Icons.payment_outlined,
-            label: 'Request Payment',
-            subtitle: 'Send a payment request',
-            onTap: () => _showComingSoon(context, 'Request Payment'),
-          ),
-          _ShareItem(
-            icon: Icons.attach_file,
-            label: 'Share a File',
-            subtitle: 'Send an encrypted file',
-            onTap: () => _showComingSoon(context, 'Share a File'),
-          ),
-          _ShareItem(
-            icon: Icons.verified_outlined,
-            label: 'Share Credential',
-            subtitle: 'Present a verifiable credential',
-            onTap: () => _showComingSoon(context, 'Share Credential'),
-          ),
+          if (_loading)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
+              child: CircularProgressIndicator(color: MobileColors.primary),
+            )
+          else
+            ..._actions.map((action) => _ShareItem(
+              icon: _iconForKey(action.actionKey),
+              label: action.name,
+              subtitle: action.subtitle,
+              isActive: action.isEnabled,
+              onTap: () => _handleTap(context, action),
+            )),
           SizedBox(height: MediaQuery.of(context).padding.bottom + 12),
         ],
       ),
@@ -699,4 +778,3 @@ class _AddContactScreenState extends State<_AddContactScreen> {
     );
   }
 }
-

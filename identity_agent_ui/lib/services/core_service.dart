@@ -257,9 +257,15 @@ class ContactResponse {
   final bool verified;
   final String discoveredAt;
   final String status;
-  final String role;
-  final bool trusted;
-  final String trustedAt;
+
+  // contactType: Identity Agent contact category (user-facing).
+  // Values: "general" | "trusted" | "professional"
+  final String contactType;
+
+  // isWitness: KERI protocol flag — auto-managed by the backend.
+  // True when this contact's Identity Agent is witnessing our key events.
+  final bool isWitness;
+
   final JCardResponse? jcard;
   final String photo;
 
@@ -271,14 +277,13 @@ class ContactResponse {
     required this.verified,
     required this.discoveredAt,
     this.status = '',
-    this.role = 'agent',
-    this.trusted = false,
-    this.trustedAt = '',
+    this.contactType = 'general',
+    this.isWitness = false,
     this.jcard,
     this.photo = '',
   });
 
-  bool get isMutual => status == 'mutual';
+  bool get isAccepted => status == 'accepted';
   bool get isPendingInbound => status == 'pending_inbound';
   bool get isPendingOutbound => status == 'pending_outbound';
   bool get isRejected => status == 'rejected';
@@ -298,9 +303,8 @@ class ContactResponse {
       verified: json['verified'] ?? false,
       discoveredAt: json['discovered_at'] ?? '',
       status: json['status'] ?? '',
-      role: json['role'] ?? 'agent',
-      trusted: json['trusted'] ?? false,
-      trustedAt: json['trusted_at'] ?? '',
+      contactType: json['contact_type'] ?? 'general',
+      isWitness: json['is_witness'] ?? false,
       jcard: json['jcard'] != null ? JCardResponse.fromJson(json['jcard']) : null,
       photo: json['photo'] ?? '',
     );
@@ -367,6 +371,55 @@ class PendingRequestResponse {
       errorReason: json['error_reason'] ?? '',
       receivedAt: json['received_at'] ?? '',
       expiresAt: json['expires_at'] ?? '',
+    );
+  }
+}
+
+class TaskRecord {
+  final String id;
+  final String type;
+  final String status; // pending | in_progress | completed | failed
+  final String contactAid;
+  final int progress; // 0–100
+  final String detail;
+  final String createdAt;
+  final String updatedAt;
+
+  TaskRecord({
+    required this.id,
+    required this.type,
+    this.status = 'pending',
+    this.contactAid = '',
+    this.progress = 0,
+    this.detail = '',
+    this.createdAt = '',
+    this.updatedAt = '',
+  });
+
+  factory TaskRecord.fromJson(Map<String, dynamic> json) {
+    return TaskRecord(
+      id: json['id'] ?? '',
+      type: json['type'] ?? '',
+      status: json['status'] ?? 'pending',
+      contactAid: json['contact_aid'] ?? '',
+      progress: json['progress'] ?? 0,
+      detail: json['detail'] ?? '',
+      createdAt: json['created_at'] ?? '',
+      updatedAt: json['updated_at'] ?? '',
+    );
+  }
+}
+
+class TasksResponse {
+  final List<TaskRecord> tasks;
+  final int count;
+
+  TasksResponse({required this.tasks, required this.count});
+
+  factory TasksResponse.fromJson(Map<String, dynamic> json) {
+    return TasksResponse(
+      tasks: (json['tasks'] as List<dynamic>?)?.map((t) => TaskRecord.fromJson(t)).toList() ?? [],
+      count: json['count'] ?? 0,
     );
   }
 }
@@ -546,11 +599,11 @@ class CoreService {
     }
   }
 
-  Future<ContactResponse> acceptContact(String aid, {bool trusted = false}) async {
+  Future<ContactResponse> acceptContact(String aid, {String contactType = 'general'}) async {
     final response = await _client.post(
       Uri.parse('$baseUrl/api/contacts/$aid/accept'),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'trusted': trusted}),
+      body: jsonEncode({'contact_type': contactType}),
     );
     if (response.statusCode == 200) {
       return ContactResponse.fromJson(jsonDecode(response.body));
@@ -568,11 +621,10 @@ class CoreService {
     }
   }
 
-  Future<ContactResponse> updateContact(String aid, {String? role, String? alias, bool? trusted}) async {
+  Future<ContactResponse> updateContact(String aid, {String? contactType, String? alias}) async {
     final body = <String, dynamic>{};
-    if (role != null) body['role'] = role;
+    if (contactType != null) body['contact_type'] = contactType;
     if (alias != null) body['alias'] = alias;
-    if (trusted != null) body['trusted'] = trusted;
     final response = await _client.put(
       Uri.parse('$baseUrl/api/contacts/$aid'),
       headers: {'Content-Type': 'application/json'},
@@ -583,6 +635,15 @@ class CoreService {
     } else {
       final err = jsonDecode(response.body);
       throw Exception(err['error'] ?? 'Update contact failed: ${response.statusCode}');
+    }
+  }
+
+  Future<TasksResponse> getTasks() async {
+    final response = await _client.get(Uri.parse('$baseUrl/api/tasks'));
+    if (response.statusCode == 200) {
+      return TasksResponse.fromJson(jsonDecode(response.body));
+    } else {
+      throw Exception('Tasks request failed: ${response.statusCode}');
     }
   }
 
@@ -763,6 +824,47 @@ class CoreService {
     }
   }
 
+  Future<List<ShareAction>> getShareActions() async {
+    final response = await _client.get(Uri.parse('$baseUrl/api/share-actions'));
+    if (response.statusCode == 200) {
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      final list = body['actions'] as List<dynamic>? ?? [];
+      return list.map((e) => ShareAction.fromJson(e as Map<String, dynamic>)).toList();
+    }
+    throw Exception('Failed to get share actions: ${response.statusCode}');
+  }
+
+  Future<ShareAction> upsertShareAction(ShareAction action) async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/api/share-actions'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(action.toJson()),
+    );
+    if (response.statusCode == 201 || response.statusCode == 200) {
+      return ShareAction.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+    }
+    throw Exception('Failed to save share action: ${response.statusCode}');
+  }
+
+  Future<ShareAction> updateShareAction(String id, ShareAction action) async {
+    final response = await _client.put(
+      Uri.parse('$baseUrl/api/share-actions/$id'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(action.toJson()),
+    );
+    if (response.statusCode == 200) {
+      return ShareAction.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+    }
+    throw Exception('Failed to update share action: ${response.statusCode}');
+  }
+
+  Future<void> deleteShareAction(String id) async {
+    final response = await _client.delete(Uri.parse('$baseUrl/api/share-actions/$id'));
+    if (response.statusCode != 204) {
+      throw Exception('Failed to delete share action: ${response.statusCode}');
+    }
+  }
+
   Future<ProfileResponse> getProfile() async {
     final response = await _client.get(Uri.parse('$baseUrl/api/profile'));
     if (response.statusCode == 200) {
@@ -851,4 +953,48 @@ class EnclaveStatusResponse {
       tpmEnabled: json['tpmEnabled'] as bool?,
     );
   }
+}
+
+// ShareAction represents a user-facing engagement action in the Share menu.
+// Managed by the Data Manager sandbox app; persisted in identity.db.
+class ShareAction {
+  final String id;
+  final String actionKey;
+  final String name;
+  final String subtitle;
+  final String icon;
+  final bool isEnabled;
+  final int sortOrder;
+
+  const ShareAction({
+    required this.id,
+    required this.actionKey,
+    required this.name,
+    required this.subtitle,
+    required this.icon,
+    required this.isEnabled,
+    required this.sortOrder,
+  });
+
+  factory ShareAction.fromJson(Map<String, dynamic> json) {
+    return ShareAction(
+      id: json['id'] as String? ?? '',
+      actionKey: json['action_key'] as String? ?? '',
+      name: json['name'] as String? ?? '',
+      subtitle: json['subtitle'] as String? ?? '',
+      icon: json['icon'] as String? ?? '',
+      isEnabled: json['is_enabled'] == true,
+      sortOrder: (json['sort_order'] as num?)?.toInt() ?? 0,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'action_key': actionKey,
+    'name': name,
+    'subtitle': subtitle,
+    'icon': icon,
+    'is_enabled': isEnabled,
+    'sort_order': sortOrder,
+  };
 }
