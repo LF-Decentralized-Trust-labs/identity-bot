@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:qr_flutter/qr_flutter.dart';
 import '../theme/app_theme.dart';
 import '../services/core_service.dart';
 import '../services/keri_service.dart';
 import '../services/mobile_on_device_keri_service.dart';
 import '../widgets/consent_modal.dart';
+import '../services/identity_level_service.dart';
+import '../services/setup_task_service.dart';
 import 'qr_scanner_screen.dart';
 
 class ContactsScreen extends StatefulWidget {
@@ -65,11 +69,246 @@ class _ContactsScreenState extends State<ContactsScreen> {
           _selectedContact = stillExists.isNotEmpty ? stillExists.first : null;
         }
       });
+      _syncWitnessCount(result.contacts);
     } catch (e) {
       setState(() {
         _error = e.toString();
         _loading = false;
       });
+    }
+  }
+
+  /// Counts mutual contacts with role "witness" and updates the Identity Level tier.
+  void _syncWitnessCount(List<ContactResponse> contacts) {
+    final count = contacts.where((c) => c.isAccepted && c.isWitness).length;
+    IdentityLevelService.setWitnessCount(count);
+  }
+
+  /// Shows a contact-type picker dialog and returns the chosen type, or null if cancelled.
+  Future<String?> _pickRole(BuildContext context, {String initial = 'general'}) async {
+    String selected = initial;
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setS) => AlertDialog(
+          backgroundColor: AppColors.surface,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(color: AppColors.border),
+          ),
+          title: const Text(
+            'CONTACT TYPE',
+            style: TextStyle(
+              color: AppColors.textPrimary,
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.0,
+              fontFamily: 'monospace',
+            ),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Choose your relationship with this contact.',
+                style: TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 12,
+                  fontFamily: 'monospace',
+                ),
+              ),
+              const SizedBox(height: 16),
+              for (final type in ['general', 'trusted', 'professional'])
+                RadioListTile<String>(
+                  value: type,
+                  groupValue: selected,
+                  onChanged: (v) => setS(() => selected = v!),
+                  title: Text(
+                    type == 'general'      ? 'General — acquaintance or casual contact' :
+                    type == 'trusted'      ? 'Trusted — someone you personally know and trust' :
+                                            'Professional — colleague or professional connection',
+                    style: const TextStyle(
+                      color: AppColors.textPrimary,
+                      fontSize: 12,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                  activeColor: AppColors.accent,
+                  dense: true,
+                ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(null),
+              child: const Text('CANCEL', style: TextStyle(color: AppColors.textMuted, fontFamily: 'monospace')),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(ctx).pop(selected),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.accent,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              child: const Text('CONFIRM', style: TextStyle(fontFamily: 'monospace')),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _acceptWithRole(ContactResponse contact) async {
+    String selectedRole = 'general';
+    bool trusted = false;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setS) => AlertDialog(
+          backgroundColor: AppColors.surface,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(color: AppColors.border),
+          ),
+          title: Text(
+            'ACCEPT ${contact.displayName.toUpperCase()}',
+            style: const TextStyle(
+              color: AppColors.textPrimary,
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.0,
+              fontFamily: 'monospace',
+            ),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Trust toggle
+              InkWell(
+                onTap: () => setS(() { trusted = !trusted; }),
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: trusted
+                        ? AppColors.coreActive.withOpacity(0.08)
+                        : AppColors.surfaceLight,
+                    border: Border.all(
+                      color: trusted
+                          ? AppColors.coreActive.withOpacity(0.4)
+                          : AppColors.border,
+                    ),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    children: [
+                      Checkbox(
+                        value: trusted,
+                        onChanged: (v) => setS(() { trusted = v!; }),
+                        activeColor: AppColors.coreActive,
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      const SizedBox(width: 6),
+                      const Expanded(
+                        child: Text(
+                          'I know and trust this contact',
+                          style: TextStyle(
+                            color: AppColors.textPrimary,
+                            fontSize: 12,
+                            fontFamily: 'monospace',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'CONTACT TYPE',
+                style: TextStyle(
+                  color: AppColors.textMuted,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 1.0,
+                  fontFamily: 'monospace',
+                ),
+              ),
+              for (final type in ['general', 'trusted', 'professional'])
+                RadioListTile<String>(
+                  value: type,
+                  groupValue: selectedRole,
+                  onChanged: (v) => setS(() => selectedRole = v!),
+                  title: Text(
+                    type == 'general'
+                        ? 'General — acquaintance or casual contact'
+                        : type == 'trusted'
+                            ? 'Trusted — someone you personally know and trust'
+                            : 'Professional — colleague or professional connection',
+                    style: const TextStyle(
+                      color: AppColors.textPrimary,
+                      fontSize: 12,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                  activeColor: AppColors.accent,
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(null),
+              child: const Text('CANCEL',
+                  style: TextStyle(color: AppColors.textMuted, fontFamily: 'monospace')),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.accent,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              child: const Text('ACCEPT', style: TextStyle(fontFamily: 'monospace')),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+    try {
+      final finalType = trusted ? 'trusted' : selectedRole;
+      await _coreService.acceptContact(contact.aid, contactType: finalType);
+      if (finalType == 'trusted') {
+        await SetupTaskService.markComplete(SetupTask.getVerified);
+      }
+      _loadContacts();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.toString()), backgroundColor: AppColors.error),
+        );
+      }
+    }
+  }
+
+  Future<void> _changeRole(ContactResponse contact) async {
+    final role = await _pickRole(context, initial: contact.contactType);
+    if (role == null || !mounted) return;
+    try {
+      await _coreService.updateContact(contact.aid, contactType: role);
+      _loadContacts();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.toString()), backgroundColor: AppColors.error),
+        );
+      }
     }
   }
 
@@ -98,6 +337,36 @@ class _ContactsScreenState extends State<ContactsScreen> {
       return Platform.isIOS || Platform.isAndroid;
     } catch (_) {
       return false;
+    }
+  }
+
+  Future<void> _showShareDialog() async {
+    try {
+      final oobi = await _coreService.getOobi();
+      if (!mounted) return;
+      if (_isMobilePlatform) {
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => _ContactsShareScreen(oobi: oobi)),
+        );
+      } else {
+        showDialog(
+          context: context,
+          builder: (_) => _DesktopAddContactDialog(
+            oobi: oobi,
+            coreService: _coreService,
+            onResolved: (resolved) {
+              Navigator.of(context).pop();
+              _showConsentModal(resolved);
+            },
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not load OOBI: ${e.toString().split(': ').last}'),
+            backgroundColor: AppColors.error),
+      );
     }
   }
 
@@ -321,17 +590,14 @@ class _ContactsScreenState extends State<ContactsScreen> {
   }
 
   Future<void> _showConsentModal(ResolvedContactResponse resolved) async {
-    final aidShort = resolved.aid.length > 20
-        ? '${resolved.aid.substring(0, 20)}...'
-        : resolved.aid;
     final avatarInitial = resolved.alias.isNotEmpty
         ? resolved.alias[0].toUpperCase()
         : null;
 
-    final confirmed = await ConsentModal.show(
+    final result = await ConsentModal.show(
       context: context,
       title: 'ADD CONTACT',
-      subtitle: 'Verify identity before adding to trusted contacts',
+      subtitle: 'Review their identity before adding',
       name: resolved.displayName,
       avatarLabel: avatarInitial,
       icon: Icons.person_add_outlined,
@@ -368,14 +634,19 @@ class _ContactsScreenState extends State<ContactsScreen> {
       warningMessage: !resolved.kelVerified
           ? 'Key Event Log could not be verified. Proceed with caution.'
           : null,
+      showTrustToggle: true,
     );
 
-    if (confirmed == true && mounted) {
+    if (result?.confirmed == true && mounted) {
       try {
         await _coreService.addContact(
           oobiUrl: resolved.oobiUrl,
           alias: resolved.alias.isNotEmpty ? resolved.alias : null,
+          trusted: result!.trusted,
         );
+        if (result.trusted == true) {
+          await SetupTaskService.markComplete(SetupTask.getVerified);
+        }
         _loadContacts();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -589,76 +860,134 @@ class _ContactsScreenState extends State<ContactsScreen> {
           const Divider(color: AppColors.border),
           const SizedBox(height: 16),
           _buildDetailField('Autonomous Identifier', contact.aid, monospace: true, selectable: true),
+          const SizedBox(height: 16),
+          const Divider(color: AppColors.border),
           const SizedBox(height: 12),
-          _buildDetailField('Role', contact.role),
+
+          // ── Contact Type dropdown ──────────────────────────────────────────
+          const Text(
+            'Contact Type',
+            style: TextStyle(color: AppColors.textSecondary, fontSize: 12, fontWeight: FontWeight.w500),
+          ),
+          const SizedBox(height: 6),
+          DropdownButtonHideUnderline(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              decoration: BoxDecoration(
+                color: AppColors.surfaceLight,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: DropdownButton<String>(
+                value: contact.contactType,
+                dropdownColor: AppColors.surface,
+                isDense: true,
+                style: const TextStyle(color: AppColors.textPrimary, fontSize: 13),
+                icon: const Icon(Icons.keyboard_arrow_down, color: AppColors.textMuted, size: 18),
+                items: const [
+                  DropdownMenuItem(value: 'general',      child: Text('General Contact')),
+                  DropdownMenuItem(value: 'trusted',      child: Text('Trusted Contact')),
+                  DropdownMenuItem(value: 'professional', child: Text('Professional Contact')),
+                ],
+                onChanged: contact.isPendingInbound ? null : (value) async {
+                  if (value == null) return;
+                  try {
+                    await _coreService.updateContact(contact.aid, contactType: value);
+                    if (value == 'trusted') await SetupTaskService.markComplete(SetupTask.getVerified);
+                    await _loadContacts();
+                  } catch (e) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text(e.toString()), backgroundColor: AppColors.error),
+                      );
+                    }
+                  }
+                },
+              ),
+            ),
+          ),
+
+          // ── Witness badge (auto-managed by backend via KERI witness protocol) ──
+          if (contact.isWitness) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: AppColors.accent.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: AppColors.accent.withOpacity(0.3)),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.verified_outlined, size: 13, color: AppColors.accent),
+                  SizedBox(width: 5),
+                  Text('Witness', style: TextStyle(color: AppColors.accent, fontSize: 11, fontWeight: FontWeight.w600)),
+                ],
+              ),
+            ),
+          ],
+
+          const SizedBox(height: 16),
+          const Divider(color: AppColors.border),
           const SizedBox(height: 12),
+
+          // ── Other info ───────────────────────────────────────────────────
           _buildDetailField(
             'Discovered',
             contact.discoveredAt.isNotEmpty ? contact.discoveredAt : 'Unknown',
           ),
-          const SizedBox(height: 12),
-          _buildDetailField('Verified', contact.verified ? 'Yes' : 'No'),
-          const SizedBox(height: 24),
+          const SizedBox(height: 20),
+
+          // ── Actions ───────────────────────────────────────────────────────
           if (contact.isPendingInbound) ...[
             Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () async {
-                      try {
-                        await _coreService.rejectContact(contact.aid);
-                        setState(() => _selectedContact = null);
-                        _loadContacts();
-                      } catch (e) {
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text(e.toString()), backgroundColor: AppColors.error),
-                          );
-                        }
+                OutlinedButton(
+                  onPressed: () async {
+                    try {
+                      await _coreService.rejectContact(contact.aid);
+                      setState(() => _selectedContact = null);
+                      _loadContacts();
+                    } catch (e) {
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text(e.toString()), backgroundColor: AppColors.error),
+                        );
                       }
-                    },
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppColors.error,
-                      side: const BorderSide(color: AppColors.error),
-                    ),
-                    child: const Text('Reject'),
+                    }
+                  },
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.error,
+                    side: const BorderSide(color: AppColors.error),
                   ),
+                  child: const Text('Reject'),
                 ),
                 const SizedBox(width: 12),
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: () async {
-                      try {
-                        await _coreService.acceptContact(contact.aid);
-                        _loadContacts();
-                      } catch (e) {
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text(e.toString()), backgroundColor: AppColors.error),
-                          );
-                        }
-                      }
-                    },
-                    child: const Text('Accept'),
+                ElevatedButton(
+                  onPressed: () => _acceptWithRole(contact),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.accent,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   ),
+                  child: const Text('Accept'),
                 ),
               ],
             ),
             const SizedBox(height: 12),
           ],
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: () {
-                _deleteContact(contact.aid);
-                setState(() => _selectedContact = null);
-              },
-              icon: const Icon(Icons.delete_outline, size: 16),
-              label: const Text('Remove Contact'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.error,
-                side: const BorderSide(color: AppColors.error),
-              ),
+          OutlinedButton.icon(
+            onPressed: () {
+              _deleteContact(contact.aid);
+              setState(() => _selectedContact = null);
+            },
+            icon: const Icon(Icons.delete_outline, size: 16),
+            label: const Text('Remove Contact'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.error,
+              side: const BorderSide(color: AppColors.error),
             ),
           ),
         ],
@@ -749,7 +1078,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
               tooltip: 'Scan QR',
             ),
           IconButton(
-            onPressed: () => _showAddContactDialog(),
+            onPressed: _showShareDialog,
             icon: const Icon(Icons.add),
             color: AppColors.accent,
             tooltip: 'Add contact',
@@ -825,7 +1154,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
   }
 
   Widget _buildContactsList() {
-    final mutualCount = _contacts.where((c) => c.isMutual).length;
+    final mutualCount = _contacts.where((c) => c.isAccepted).length;
     final pendingCount = _contacts.where((c) => c.isPendingOutbound || c.isPendingInbound).length;
 
     return SingleChildScrollView(
@@ -900,26 +1229,17 @@ class _ContactsScreenState extends State<ContactsScreen> {
   }
 
   Color _statusColor(ContactResponse contact) {
-    if (contact.isMutual) return AppColors.coreActive;
     if (contact.isPendingInbound || contact.isPendingOutbound) return AppColors.corePending;
     if (contact.isRejected) return AppColors.coreInactive;
+    if (contact.verified || contact.isAccepted) return AppColors.coreActive;
     return AppColors.textMuted;
   }
 
   String _statusLabel(ContactResponse contact) {
-    if (contact.isMutual) return 'MUTUAL';
     if (contact.isPendingOutbound) return 'PENDING';
     if (contact.isPendingInbound) return 'INCOMING';
     if (contact.isRejected) return 'REJECTED';
-    return contact.verified ? 'VERIFIED' : 'UNVERIFIED';
-  }
-
-  IconData _statusIcon(ContactResponse contact) {
-    if (contact.isMutual) return Icons.handshake_outlined;
-    if (contact.isPendingOutbound) return Icons.call_made;
-    if (contact.isPendingInbound) return Icons.call_received;
-    if (contact.isRejected) return Icons.block;
-    return Icons.person_outlined;
+    return contact.verified || contact.isAccepted ? 'VERIFIED' : 'UNVERIFIED';
   }
 
   Widget _buildContactAvatar(ContactResponse contact) {
@@ -956,7 +1276,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
         : contact.aid;
     final displayName = contact.alias.isNotEmpty ? contact.alias : 'Unknown Contact';
     final statusColor = _statusColor(contact);
-    final borderColor = contact.isMutual 
+    final borderColor = contact.isAccepted
         ? AppColors.coreActive.withOpacity(0.3) 
         : AppColors.border;
 
@@ -1039,7 +1359,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                   borderRadius: BorderRadius.circular(3),
                 ),
                 child: Text(
-                  contact.role.toUpperCase(),
+                  contact.contactType.toUpperCase(),
                   style: const TextStyle(
                     color: AppColors.accent,
                     fontSize: 9,
@@ -1104,18 +1424,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                 ),
                 const SizedBox(width: 8),
                 InkWell(
-                  onTap: () async {
-                    try {
-                      await _coreService.acceptContact(contact.aid);
-                      _loadContacts();
-                    } catch (e) {
-                      if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text(e.toString()), backgroundColor: AppColors.error),
-                        );
-                      }
-                    }
-                  },
+                  onTap: () => _acceptWithRole(contact),
                   borderRadius: BorderRadius.circular(6),
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -1125,7 +1434,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                       border: Border.all(color: AppColors.coreActive.withOpacity(0.3)),
                     ),
                     child: const Text(
-                      'ACCEPT',
+                      'ACCEPT AS...',
                       style: TextStyle(
                         color: AppColors.coreActive,
                         fontSize: 9,
@@ -1140,6 +1449,298 @@ class _ContactsScreenState extends State<ContactsScreen> {
             ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+// ── Share Identity screen ─────────────────────────────────────────────────────
+
+class _ContactsShareScreen extends StatefulWidget {
+  final OobiResponse oobi;
+  const _ContactsShareScreen({required this.oobi});
+
+  @override
+  State<_ContactsShareScreen> createState() => _ContactsShareScreenState();
+}
+
+class _ContactsShareScreenState extends State<_ContactsShareScreen> {
+  bool _copied = false;
+
+  void _copy() {
+    Clipboard.setData(ClipboardData(text: widget.oobi.oobiUrl));
+    setState(() => _copied = true);
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) setState(() => _copied = false);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      appBar: AppBar(
+        title: const Text('Share My Identity'),
+        backgroundColor: AppColors.surface,
+        foregroundColor: AppColors.textPrimary,
+        elevation: 0,
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Share your OOBI URL so others can verify and add you as a contact.',
+              style: TextStyle(color: AppColors.textSecondary, fontSize: 14, height: 1.5),
+            ),
+            const SizedBox(height: 20),
+            const Text('OOBI URL',
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
+                    color: AppColors.textMuted, letterSpacing: 0.5)),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppColors.accent.withOpacity(0.3)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SelectableText(
+                    widget.oobi.oobiUrl,
+                    style: const TextStyle(color: AppColors.accent, fontSize: 12,
+                        fontFamily: 'monospace', height: 1.5),
+                  ),
+                  const SizedBox(height: 10),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: InkWell(
+                      onTap: _copy,
+                      borderRadius: BorderRadius.circular(6),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: _copied ? AppColors.success.withOpacity(0.12) : AppColors.surfaceLight,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: _copied ? AppColors.success.withOpacity(0.3) : AppColors.border),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(_copied ? Icons.check : Icons.copy,
+                                color: _copied ? AppColors.success : AppColors.textSecondary, size: 14),
+                            const SizedBox(width: 6),
+                            Text(_copied ? 'Copied' : 'Copy',
+                                style: TextStyle(
+                                  color: _copied ? AppColors.success : AppColors.textSecondary,
+                                  fontSize: 12, fontWeight: FontWeight.w600,
+                                )),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 24),
+            const Text('QR Code',
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
+                    color: AppColors.textMuted, letterSpacing: 0.5)),
+            const SizedBox(height: 8),
+            const Text('Scan from another device to add this identity.',
+                style: TextStyle(color: AppColors.textMuted, fontSize: 13)),
+            const SizedBox(height: 16),
+            Center(
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: QrImageView(
+                  data: widget.oobi.oobiUrl,
+                  version: QrVersions.auto,
+                  size: 220,
+                  backgroundColor: Colors.white,
+                  eyeStyle: const QrEyeStyle(eyeShape: QrEyeShape.square, color: Color(0xFF0a0e1a)),
+                  dataModuleStyle: const QrDataModuleStyle(
+                      dataModuleShape: QrDataModuleShape.square, color: Color(0xFF0a0e1a)),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Desktop add-contact dialog (QR share + resolve OOBI) ──────────────────────
+
+class _DesktopAddContactDialog extends StatefulWidget {
+  final OobiResponse oobi;
+  final CoreService coreService;
+  final void Function(ResolvedContactResponse resolved) onResolved;
+
+  const _DesktopAddContactDialog({
+    required this.oobi,
+    required this.coreService,
+    required this.onResolved,
+  });
+
+  @override
+  State<_DesktopAddContactDialog> createState() => _DesktopAddContactDialogState();
+}
+
+class _DesktopAddContactDialogState extends State<_DesktopAddContactDialog> {
+  bool _copied = false;
+
+  void _copy() {
+    Clipboard.setData(ClipboardData(text: widget.oobi.oobiUrl));
+    setState(() => _copied = true);
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) setState(() => _copied = false);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: AppColors.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: const BorderSide(color: AppColors.border),
+      ),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 40),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 460),
+        child: Padding(
+          padding: const EdgeInsets.all(28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // ── Header ────────────────────────────────────────────────────
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Add Contact',
+                          style: TextStyle(
+                            color: AppColors.textPrimary,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        SizedBox(height: 4),
+                        Text(
+                          'Share this QR code with the person you want to add you as a contact. You\'ll be notified once they accept and invited to add them back.',
+                          style: TextStyle(color: AppColors.textSecondary, fontSize: 12, height: 1.5),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    icon: const Icon(Icons.close, size: 18),
+                    color: AppColors.textMuted,
+                    onPressed: () => Navigator.of(context).pop(),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+
+              // ── QR + URL side by side ─────────────────────────────────────
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: QrImageView(
+                      data: widget.oobi.oobiUrl,
+                      version: QrVersions.auto,
+                      size: 148,
+                      backgroundColor: Colors.white,
+                      eyeStyle: const QrEyeStyle(eyeShape: QrEyeShape.square, color: Color(0xFF0a0e1a)),
+                      dataModuleStyle: const QrDataModuleStyle(dataModuleShape: QrDataModuleShape.square, color: Color(0xFF0a0e1a)),
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Identity Link',
+                          style: TextStyle(
+                            color: AppColors.textSecondary,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: AppColors.surfaceLight,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: AppColors.accent.withOpacity(0.25)),
+                          ),
+                          child: SelectableText(
+                            widget.oobi.oobiUrl,
+                            style: const TextStyle(
+                              color: AppColors.accent,
+                              fontSize: 10,
+                              fontFamily: 'monospace',
+                              height: 1.5,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: _copy,
+                            icon: Icon(
+                              _copied ? Icons.check : Icons.copy,
+                              size: 14,
+                              color: _copied ? AppColors.success : AppColors.accent,
+                            ),
+                            label: Text(
+                              _copied ? 'Copied!' : 'Copy Link',
+                              style: TextStyle(
+                                color: _copied ? AppColors.success : AppColors.accent,
+                                fontSize: 12,
+                              ),
+                            ),
+                            style: OutlinedButton.styleFrom(
+                              side: BorderSide(color: _copied ? AppColors.success : AppColors.accent),
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

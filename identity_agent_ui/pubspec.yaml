@@ -61,6 +61,8 @@ dependencies:
   web_socket_channel: ^3.0.3
   image_picker: ^1.1.2
   flutter_secure_storage: ^9.2.2
+  local_auth: ^2.3.0
+  nfc_manager: ^3.3.0
 
 
 dev_dependencies:

@@ -32,6 +32,30 @@ subprojects {
     }
 }
 
+// Pin Kotlin plugin subprojects to 1.9 language/API semantics so that deprecated
+// APIs (e.g. nfc_manager 3.5.0's String.toLowerCase(Locale)) remain warnings
+// rather than errors under Kotlin 2.x compiler.
+// Uses plugins.withId to avoid the afterEvaluate lifecycle conflict caused by
+// evaluationDependsOn(":app") above.
+subprojects {
+    plugins.withId("org.jetbrains.kotlin.android") {
+        tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+            kotlinOptions {
+                languageVersion = "1.9"
+                apiVersion = "1.9"
+            }
+        }
+    }
+    plugins.withId("kotlin-android") {
+        tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+            kotlinOptions {
+                languageVersion = "1.9"
+                apiVersion = "1.9"
+            }
+        }
+    }
+}
+
 tasks.register("clean", Delete) {
     delete rootProject.buildDir
 }

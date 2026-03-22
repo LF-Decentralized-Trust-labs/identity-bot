@@ -3,22 +3,26 @@ import 'package:flutter/material.dart';
 import '../../theme/mobile_theme.dart';
 import '../../services/core_service.dart';
 import '../../services/event_service.dart';
+import '../../services/keri_service.dart';
 import '../../config/agent_config.dart';
 import '../../widgets/identity_card.dart';
 import '../../widgets/alert_card.dart';
-import '../../widgets/task_card.dart';
 import '../../widgets/activity_entry.dart';
-import '../../models/background_task.dart';
+import '../../widgets/setup_task_banner.dart';
+import '../../widgets/key_storage_badge.dart';
 import '../../models/activity_log_entry.dart';
+import 'mobile_auth_setup_screen.dart';
 
 class MobileDashboard extends StatefulWidget {
   final String? serverUrl;
   final VoidCallback onMenuTap;
+  final KeriService? keriService;
 
   const MobileDashboard({
     super.key,
     this.serverUrl,
     required this.onMenuTap,
+    this.keriService,
   });
 
   @override
@@ -39,6 +43,7 @@ class MobileDashboardState extends State<MobileDashboard> with SingleTickerProvi
   List<PendingRequestResponse> _pendingRequests = [];
   int _alertCount = 0;
   bool _loading = true;
+  List<TaskRecord> _backgroundTasks = [];
 
   @override
   void initState() {
@@ -70,8 +75,15 @@ class MobileDashboardState extends State<MobileDashboard> with SingleTickerProvi
   }
 
   Future<void> _loadData() async {
-    await Future.wait([_loadProfile(), _loadEndpoint(), _loadAlerts()]);
+    await Future.wait([_loadProfile(), _loadEndpoint(), _loadAlerts(), _loadTasks()]);
     if (mounted) setState(() => _loading = false);
+  }
+
+  Future<void> _loadTasks() async {
+    try {
+      final result = await _coreService.getTasks();
+      if (mounted) setState(() => _backgroundTasks = result.tasks);
+    } catch (_) {}
   }
 
   Future<void> _loadProfile() async {
@@ -187,7 +199,22 @@ class MobileDashboardState extends State<MobileDashboard> with SingleTickerProvi
                       displayName: _displayName,
                       agentUrl: _agentUrl,
                       photoBase64: _photoBase64,
+                      onBadgeTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const MobileAuthSetupScreen(),
+                        ),
+                      ),
                     ),
+                    Padding(
+                      padding: const EdgeInsets.only(left: 32, bottom: 4),
+                      child: const KeyStorageBadge(),
+                    ),
+                    if (widget.keriService != null)
+                      SetupTaskBanner(
+                        isMobile: true,
+                        keriService: widget.keriService!,
+                        serverUrl: widget.serverUrl,
+                      ),
                     const SizedBox(height: 16),
                     _buildTabs(),
                   ],
@@ -345,12 +372,126 @@ class MobileDashboardState extends State<MobileDashboard> with SingleTickerProvi
   }
 
   Widget _buildTasksTab() {
-    final tasks = BackgroundTask.dummyTasks();
+    if (_backgroundTasks.isEmpty) {
+      return const Center(
+        child: Text(
+          'No active tasks',
+          style: TextStyle(color: MobileColors.textMuted, fontSize: 14),
+        ),
+      );
+    }
     return ListView.builder(
       padding: const EdgeInsets.symmetric(vertical: 8),
-      itemCount: tasks.length,
-      itemBuilder: (context, index) => TaskCard(task: tasks[index]),
+      itemCount: _backgroundTasks.length,
+      itemBuilder: (context, index) => _buildMobileTaskRow(_backgroundTasks[index]),
     );
+  }
+
+  Widget _buildMobileTaskRow(TaskRecord task) {
+    Color statusColor;
+    IconData statusIcon;
+    String statusLabel;
+    switch (task.status) {
+      case 'in_progress':
+        statusColor = MobileColors.primary;
+        statusIcon = Icons.sync;
+        statusLabel = 'In Progress';
+      case 'completed':
+        statusColor = MobileColors.success;
+        statusIcon = Icons.check_circle;
+        statusLabel = 'Completed';
+      case 'failed':
+        statusColor = MobileColors.error;
+        statusIcon = Icons.error;
+        statusLabel = 'Failed';
+      default:
+        statusColor = MobileColors.textMuted;
+        statusIcon = Icons.schedule;
+        statusLabel = 'Pending';
+    }
+
+    final title = _taskTypeLabel(task.type);
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: MobileColors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: MobileColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: MobileColors.textPrimary,
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: statusColor.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(statusIcon, size: 12, color: statusColor),
+                    const SizedBox(width: 4),
+                    Text(statusLabel,
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: statusColor)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          if (task.detail.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(task.detail,
+                style: const TextStyle(fontSize: 12, color: MobileColors.textSecondary)),
+          ],
+          if (task.status == 'in_progress' && task.progress > 0) ...[
+            const SizedBox(height: 10),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: task.progress / 100.0,
+                backgroundColor: MobileColors.border,
+                valueColor: AlwaysStoppedAnimation<Color>(statusColor),
+                minHeight: 6,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Align(
+              alignment: Alignment.centerRight,
+              child: Text('${task.progress}%',
+                  style: const TextStyle(fontSize: 11, color: MobileColors.textMuted)),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  String _taskTypeLabel(String type) {
+    switch (type) {
+      case 'witness_request_sent': return 'Witness Request Sent';
+      case 'witness_request_received': return 'Witness Request Received';
+      case 'kel_sync': return 'KEL Synchronization';
+      case 'credential_verification': return 'Credential Verification';
+      case 'backup_identity': return 'Identity Backup';
+      default: return type.replaceAll('_', ' ').split(' ')
+          .map((w) => w.isEmpty ? '' : '${w[0].toUpperCase()}${w.substring(1)}')
+          .join(' ');
+    }
   }
 
   Widget _buildActivityTab() {

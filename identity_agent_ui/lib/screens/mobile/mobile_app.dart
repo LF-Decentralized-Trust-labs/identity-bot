@@ -118,6 +118,7 @@ class _MobileAppState extends State<MobileApp> {
                     key: _dashboardKey,
                     serverUrl: widget.serverUrl,
                     onMenuTap: _toggleDrawer,
+                    keriService: widget.keriService,
                   ),
                 ),
                 MobileBottomNav(

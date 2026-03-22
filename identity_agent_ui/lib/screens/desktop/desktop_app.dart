@@ -2,19 +2,21 @@ import 'package:flutter/material.dart';
 import '../../theme/app_theme.dart';
 import '../../services/keri_service.dart';
 import '../../services/preferences_service.dart';
-import '../../screens/dashboard_screen.dart';
+import 'desktop_dashboard_screen.dart';
 import '../../screens/contacts_screen.dart';
 import '../../screens/profile_screen.dart';
-import '../../screens/oobi_screen.dart';
 import '../../screens/settings_screen.dart';
 import '../../screens/marketplace_screen.dart';
 import 'desktop_sidebar.dart';
 import 'coming_soon_screen.dart';
-import 'key_event_log_screen.dart';
-import 'key_rotation_screen.dart';
 import 'developer_tools_screen.dart';
+import 'keri_protocol_screen.dart';
+import 'endpoints_screen.dart';
 import 'theme_settings_screen.dart';
 import 'account_settings_screen.dart';
+import 'auth_management_screen.dart';
+import 'history_screen.dart';
+import 'my_devices_screen.dart';
 
 class DesktopApp extends StatefulWidget {
   final KeriService keriService;
@@ -38,6 +40,7 @@ class DesktopApp extends StatefulWidget {
 
 class _DesktopAppState extends State<DesktopApp> {
   DesktopRoute _route = DesktopRoute.dashboard;
+  int _historyInitialTab = 0;
   bool _aiPanelOpen = false;
 
   void _navigate(DesktopRoute route) {
@@ -51,19 +54,10 @@ class _DesktopAppState extends State<DesktopApp> {
     switch (_route) {
       // ── Identity ───────────────────────────────────────────────────────────
       case DesktopRoute.dashboard:
-        return DashboardScreen(keriService: keri, serverUrl: url);
+        return DesktopDashboardScreen(keriService: keri, serverUrl: url);
 
       case DesktopRoute.identityProfile:
         return ProfileScreen(keriService: keri, serverUrl: url);
-
-      case DesktopRoute.identityKel:
-        return KeyEventLogScreen(serverUrl: url);
-
-      case DesktopRoute.identityRotation:
-        return KeyRotationScreen(keriService: keri, serverUrl: url);
-
-      case DesktopRoute.identityOobi:
-        return OobiScreen(keriService: keri, serverUrl: url);
 
       // ── Contacts / Apps ────────────────────────────────────────────────────
       case DesktopRoute.contacts:
@@ -73,10 +67,11 @@ class _DesktopAppState extends State<DesktopApp> {
         return MarketplaceScreen(serverUrl: url);
 
       // ── Settings ───────────────────────────────────────────────────────────
-      case DesktopRoute.settingsNetwork:
-      case DesktopRoute.settingsAiKeys:
-        // Existing SettingsScreen handles both tunneling and AI keys.
-        // Route both here until the split is done in a future sprint.
+      case DesktopRoute.settingsAuthentication:
+        return const AuthManagementScreen();
+
+      case DesktopRoute.settingsTunneling:
+      case DesktopRoute.settingsApiKeys:
         return SettingsScreen(
           keriService: keri,
           mode: widget.mode,
@@ -84,8 +79,24 @@ class _DesktopAppState extends State<DesktopApp> {
           serverUrl: url,
         );
 
+      case DesktopRoute.settingsKeri:
+        return KeriProtocolScreen(
+          keriService: keri,
+          serverUrl: url,
+          onViewKeyEvents: () => setState(() {
+            _historyInitialTab = 1;
+            _route = DesktopRoute.activityLog;
+          }),
+        );
+
+      case DesktopRoute.settingsEndpoints:
+        return EndpointsScreen(serverUrl: url);
+
       case DesktopRoute.settingsDeveloperTools:
-        return DeveloperToolsScreen(serverUrl: url);
+        return DeveloperToolsScreen(
+          serverUrl: url,
+          onResetIdentity: widget.onResetIdentity,
+        );
 
       case DesktopRoute.settingsTheme:
         return const ThemeSettingsScreen();
@@ -108,7 +119,7 @@ class _DesktopAppState extends State<DesktopApp> {
       case DesktopRoute.dataVault:
         return const ComingSoonScreen(title: 'Data Vault', icon: Icons.storage_outlined);
       case DesktopRoute.myDevices:
-        return const ComingSoonScreen(title: 'My Devices', icon: Icons.devices);
+        return MyDevicesScreen(keriService: keri, serverUrl: url);
       case DesktopRoute.hubsCommunications:
         return const ComingSoonScreen(title: 'Communications Gateway', icon: Icons.chat_bubble_outline);
       case DesktopRoute.hubsAi:
@@ -117,9 +128,6 @@ class _DesktopAppState extends State<DesktopApp> {
         return const ComingSoonScreen(title: 'Healthcare Hub', icon: Icons.local_hospital_outlined);
       case DesktopRoute.hubsFinancial:
         return const ComingSoonScreen(title: 'Financial Hub', icon: Icons.bar_chart);
-      case DesktopRoute.settingsKeri:
-        return const ComingSoonScreen(title: 'KERI Settings', icon: Icons.key,
-            description: 'Witness, mailbox, and watcher configuration coming soon.');
       case DesktopRoute.settingsKeyManagement:
         return const ComingSoonScreen(title: 'Key Management', icon: Icons.lock_outlined);
       case DesktopRoute.settingsServiceProviders:
@@ -135,7 +143,7 @@ class _DesktopAppState extends State<DesktopApp> {
       case DesktopRoute.settingsBackup:
         return const ComingSoonScreen(title: 'Backup & Recovery', icon: Icons.backup_outlined);
       case DesktopRoute.activityLog:
-        return const ComingSoonScreen(title: 'Activity Log', icon: Icons.receipt_long_outlined);
+        return HistoryScreen(serverUrl: url, initialTab: _historyInitialTab);
       case DesktopRoute.orgOverview:
         return const ComingSoonScreen(title: 'Organization Overview', icon: Icons.business);
       case DesktopRoute.orgEmployees:

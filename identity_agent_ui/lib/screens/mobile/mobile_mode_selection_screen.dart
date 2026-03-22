@@ -51,7 +51,7 @@ class MobileModeSelectionScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 16),
                     const Text(
-                      'Protect and control your entire digital life.',
+                      'Manage your entire digital life.',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         color: MobileColors.textPrimary,

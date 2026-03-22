@@ -10,9 +10,6 @@ enum DesktopRoute {
 
   // Identity
   identityProfile,
-  identityKel,
-  identityRotation,
-  identityOobi,
 
   // Top-level
   contacts,
@@ -30,10 +27,12 @@ enum DesktopRoute {
   hubsFinancial,
 
   // Settings
-  settingsNetwork,
+  settingsTunneling,
+  settingsAuthentication,
   settingsKeri,
   settingsKeyManagement,
-  settingsAiKeys,
+  settingsApiKeys,
+  settingsEndpoints,
   settingsServiceProviders,
   settingsConnectedApps,
   settingsGovernance,
@@ -73,7 +72,6 @@ class DesktopSidebar extends StatefulWidget {
 
 class _DesktopSidebarState extends State<DesktopSidebar> {
   // Section expand state
-  bool _identityOpen  = true;
   bool _hubsOpen      = false;
   bool _settingsOpen  = false;
   bool _orgOpen       = false;
@@ -108,7 +106,6 @@ class _DesktopSidebarState extends State<DesktopSidebar> {
   }
 
   void _expandForRoute(DesktopRoute r) {
-    if (_isIdentityRoute(r)) setState(() => _identityOpen  = true);
     if (_isHubRoute(r))      setState(() => _hubsOpen      = true);
     if (_isSettingsRoute(r)) setState(() => _settingsOpen  = true);
     if (_isOrgRoute(r))      setState(() => _orgOpen       = true);
@@ -162,18 +159,7 @@ class _DesktopSidebarState extends State<DesktopSidebar> {
                 _sectionDivider(),
 
                 // ── Identity ───────────────────────────────────────────────
-                _SectionHeader(
-                  icon: Icons.fingerprint,
-                  label: 'Identity',
-                  expanded: _identityOpen,
-                  onToggle: () => setState(() => _identityOpen = !_identityOpen),
-                ),
-                if (_identityOpen) ...[
-                  _SubItem(icon: Icons.person_outline,     label: 'My Profile',     route: DesktopRoute.identityProfile,  current: widget.currentRoute, onTap: _select),
-                  _SubItem(icon: Icons.history,            label: 'Key Event Log',  route: DesktopRoute.identityKel,      current: widget.currentRoute, onTap: _select),
-                  _SubItem(icon: Icons.rotate_right,       label: 'Key Rotation',   route: DesktopRoute.identityRotation, current: widget.currentRoute, onTap: _select),
-                  _SubItem(icon: Icons.share,              label: 'Share / OOBI',   route: DesktopRoute.identityOobi,     current: widget.currentRoute, onTap: _select),
-                ],
+                _NavItem(icon: Icons.person_outline, label: 'My Profile', route: DesktopRoute.identityProfile, current: widget.currentRoute, onTap: _select),
                 _sectionDivider(),
 
                 // ── Top-level items ────────────────────────────────────────
@@ -183,7 +169,7 @@ class _DesktopSidebarState extends State<DesktopSidebar> {
                 _NavItem(icon: Icons.account_balance_wallet_outlined,  label: 'Wallet',     route: DesktopRoute.wallet,      current: widget.currentRoute, onTap: _select, comingSoon: true),
                 _NavItem(icon: Icons.diamond_outlined,                 label: 'Assets',     route: DesktopRoute.assets,      current: widget.currentRoute, onTap: _select, comingSoon: true),
                 _NavItem(icon: Icons.storage_outlined,                 label: 'Data Vault', route: DesktopRoute.dataVault,   current: widget.currentRoute, onTap: _select, comingSoon: true),
-                _NavItem(icon: Icons.devices,                          label: 'My Devices', route: DesktopRoute.myDevices,   current: widget.currentRoute, onTap: _select, comingSoon: true),
+                _NavItem(icon: Icons.devices,                          label: 'My Devices', route: DesktopRoute.myDevices,   current: widget.currentRoute, onTap: _select),
                 _sectionDivider(),
 
                 // ── Hubs ───────────────────────────────────────────────────
@@ -210,10 +196,12 @@ class _DesktopSidebarState extends State<DesktopSidebar> {
                   onToggle: () => setState(() => _settingsOpen = !_settingsOpen),
                 ),
                 if (_settingsOpen) ...[
-                  _SubItem(icon: Icons.lan_outlined,              label: 'Network & Endpoints',      route: DesktopRoute.settingsNetwork,         current: widget.currentRoute, onTap: _select),
-                  _SubItem(icon: Icons.key,                       label: 'KERI',                     route: DesktopRoute.settingsKeri,            current: widget.currentRoute, onTap: _select, comingSoon: true),
+                  _SubItem(icon: Icons.vpn_lock_outlined,         label: 'Tunneling',                route: DesktopRoute.settingsTunneling,        current: widget.currentRoute, onTap: _select),
+                  _SubItem(icon: Icons.lock_outlined,             label: 'Authentication',            route: DesktopRoute.settingsAuthentication,  current: widget.currentRoute, onTap: _select),
+                  _SubItem(icon: Icons.key,                       label: 'KERI Protocol',            route: DesktopRoute.settingsKeri,            current: widget.currentRoute, onTap: _select),
                   _SubItem(icon: Icons.lock_outlined,             label: 'Key Management',           route: DesktopRoute.settingsKeyManagement,   current: widget.currentRoute, onTap: _select, comingSoon: true),
-                  _SubItem(icon: Icons.smart_toy_outlined,        label: 'AI Keys',                  route: DesktopRoute.settingsAiKeys,          current: widget.currentRoute, onTap: _select),
+                  _SubItem(icon: Icons.api_outlined,              label: 'API Keys',                 route: DesktopRoute.settingsApiKeys,         current: widget.currentRoute, onTap: _select),
+                  _SubItem(icon: Icons.hub_outlined,              label: 'Endpoints',                route: DesktopRoute.settingsEndpoints,       current: widget.currentRoute, onTap: _select),
                   _SubItem(icon: Icons.cloud_outlined,            label: 'Service Providers',        route: DesktopRoute.settingsServiceProviders, current: widget.currentRoute, onTap: _select, comingSoon: true),
                   _SubItem(icon: Icons.link,                      label: 'Connected Apps',           route: DesktopRoute.settingsConnectedApps,   current: widget.currentRoute, onTap: _select, comingSoon: true),
                   _SubItem(icon: Icons.gavel,                     label: 'Governance Gateway',       route: DesktopRoute.settingsGovernance,      current: widget.currentRoute, onTap: _select, comingSoon: true),
@@ -226,8 +214,8 @@ class _DesktopSidebarState extends State<DesktopSidebar> {
                 ],
                 _sectionDivider(),
 
-                // ── Activity Log ───────────────────────────────────────────
-                _NavItem(icon: Icons.receipt_long_outlined, label: 'Activity Log', route: DesktopRoute.activityLog, current: widget.currentRoute, onTap: _select, comingSoon: true),
+                // ── History ────────────────────────────────────────────────
+                _NavItem(icon: Icons.history, label: 'History', route: DesktopRoute.activityLog, current: widget.currentRoute, onTap: _select),
                 _sectionDivider(),
 
                 // ── Organization ───────────────────────────────────────────

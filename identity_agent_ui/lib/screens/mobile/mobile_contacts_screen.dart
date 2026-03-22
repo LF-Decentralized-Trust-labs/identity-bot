@@ -4,6 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../theme/mobile_theme.dart';
 import '../../services/core_service.dart';
+import '../../services/identity_level_service.dart';
+import '../../services/nfc_service.dart';
+import '../../services/setup_task_service.dart';
 import '../../config/agent_config.dart';
 
 class MobileContactsScreen extends StatefulWidget {
@@ -46,11 +49,67 @@ class _MobileContactsScreenState extends State<MobileContactsScreen> {
           _filtered = result.contacts;
           _loading = false;
         });
+        _syncWitnessCount(result.contacts);
       }
     } catch (e) {
       debugPrint('[MobileContacts] Load error: $e');
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  void _syncWitnessCount(List<ContactResponse> contacts) {
+    final count = contacts.where((c) => c.isAccepted && c.isWitness).length;
+    IdentityLevelService.setWitnessCount(count);
+  }
+
+  Future<void> _writeNfcTag() async {
+    final isAvailable = await NfcService.isAvailable();
+    if (!isAvailable) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('NFC is not available on this device.')),
+        );
+      }
+      return;
+    }
+
+    OobiResponse? oobi;
+    try {
+      oobi = await _coreService.getOobi(action: 'add_contact');
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not load identity link: $e'),
+              backgroundColor: MobileColors.error),
+        );
+      }
+      return;
+    }
+
+    if (!oobi.tunnelActive || oobi.oobiUrl.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('You need an active tunnel to write an NFC tap tag. Go to Settings to configure one.'),
+          ),
+        );
+      }
+      return;
+    }
+
+    // Show the write-tap sheet.
+    if (!mounted) return;
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: MobileColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => _NfcWriteSheet(
+        oobiUrl: oobi!.oobiUrl,
+        onDone: () => Navigator.of(ctx).pop(),
+      ),
+    );
   }
 
   void _filterContacts() {
@@ -92,6 +151,13 @@ class _MobileContactsScreenState extends State<MobileContactsScreen> {
           backgroundColor: MobileColors.surface,
           foregroundColor: MobileColors.textPrimary,
           elevation: 0,
+          actions: [
+            IconButton(
+              onPressed: _writeNfcTag,
+              icon: const Icon(Icons.nfc),
+              tooltip: 'Write Identity Tap Tag',
+            ),
+          ],
         ),
         body: Column(
           children: [
@@ -214,7 +280,16 @@ class _ContactCard extends StatelessWidget {
                 ],
               ),
             ),
-            _buildStatusBadge(),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                _buildStatusBadge(),
+                if (contact.contactType != 'general' || contact.isWitness) ...[
+                  const SizedBox(height: 4),
+                  _buildRoleBadge(),
+                ],
+              ],
+            ),
             const SizedBox(width: 8),
             const Icon(Icons.chevron_right, color: MobileColors.textMuted, size: 20),
           ],
@@ -272,15 +347,15 @@ class _ContactCard extends StatelessWidget {
     Color color;
     String label;
 
-    if (contact.isMutual) {
+    if (contact.isAccepted) {
       color = MobileColors.success;
-      label = 'Mutual';
+      label = 'Connected';
     } else if (contact.verified) {
       color = MobileColors.info;
       label = 'Verified';
     } else if (contact.isPendingInbound) {
       color = MobileColors.warning;
-      label = 'Pending';
+      label = 'Incoming';
     } else {
       color = MobileColors.textMuted;
       label = 'Added';
@@ -294,11 +369,31 @@ class _ContactCard extends StatelessWidget {
       ),
       child: Text(
         label,
-        style: TextStyle(
-          fontSize: 10,
-          fontWeight: FontWeight.w600,
-          color: color,
-        ),
+        style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: color),
+      ),
+    );
+  }
+
+  Widget _buildRoleBadge() {
+    Color color;
+    String label;
+    if (contact.isWitness) {
+      color = MobileColors.primary;
+      label = 'WITNESS';
+    } else {
+      color = MobileColors.textSecondary;
+      label = contact.contactType.toUpperCase();
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: color.withOpacity(0.25)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: color),
       ),
     );
   }
@@ -316,6 +411,300 @@ class _ContactDetailScreen extends StatefulWidget {
 
 class _ContactDetailScreenState extends State<_ContactDetailScreen> {
   bool _deleting = false;
+  late ContactResponse _contact;
+
+  @override
+  void initState() {
+    super.initState();
+    _contact = widget.contact;
+  }
+
+  Future<void> _showAcceptSheet() async {
+    // Relationship type: 'general' | 'trusted' | 'professional'
+    // Witness designation is handled automatically by the backend when trusted.
+    String relationshipType = 'general';
+    final coreService = CoreService(baseUrl: widget.serverUrl ?? AgentConfig.coreBaseUrl);
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: MobileColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setS) => Padding(
+          padding: const EdgeInsets.fromLTRB(24, 24, 24, 36),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Accept ${_contact.displayName}',
+                style: const TextStyle(
+                  color: MobileColors.textPrimary,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'How do you know this person?',
+                style: TextStyle(color: MobileColors.textSecondary, fontSize: 13),
+              ),
+              const SizedBox(height: 16),
+              for (final entry in const [
+                ('general', 'General', 'Someone you know — acquaintance or casual contact'),
+                ('trusted', 'Trusted', 'Someone you personally trust — can be invited as a witness'),
+                ('professional', 'Professional', 'A colleague or professional connection'),
+              ])
+                GestureDetector(
+                  onTap: () => setS(() => relationshipType = entry.$1),
+                  child: Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: relationshipType == entry.$1
+                          ? MobileColors.primary.withOpacity(0.08)
+                          : MobileColors.surfaceSecondary,
+                      border: Border.all(
+                        color: relationshipType == entry.$1
+                            ? MobileColors.primary.withOpacity(0.6)
+                            : MobileColors.border,
+                        width: relationshipType == entry.$1 ? 1.5 : 1,
+                      ),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Row(
+                      children: [
+                        Radio<String>(
+                          value: entry.$1,
+                          groupValue: relationshipType,
+                          onChanged: (v) => setS(() => relationshipType = v!),
+                          activeColor: MobileColors.primary,
+                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(entry.$2,
+                                  style: const TextStyle(
+                                      color: MobileColors.textPrimary,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600)),
+                              Text(entry.$3,
+                                  style: const TextStyle(
+                                      color: MobileColors.textSecondary,
+                                      fontSize: 12)),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              if (relationshipType == 'trusted')
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.green.withOpacity(0.06),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.green.withOpacity(0.2)),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(Icons.info_outline, size: 16, color: Colors.green),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'If you need more witnesses, this contact may be automatically invited to witness your keys.',
+                          style: TextStyle(color: Colors.green, fontSize: 12),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () async {
+                        Navigator.of(ctx).pop();
+                        try {
+                          await coreService.rejectContact(_contact.aid);
+                          coreService.dispose();
+                          if (mounted) Navigator.of(context).pop(true);
+                        } catch (e) {
+                          coreService.dispose();
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('$e'),
+                                  backgroundColor: MobileColors.error),
+                            );
+                          }
+                        }
+                      },
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: MobileColors.error),
+                        foregroundColor: MobileColors.error,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10)),
+                      ),
+                      child: const Text('Decline'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () async {
+                        Navigator.of(ctx).pop();
+                        try {
+                          await coreService.acceptContact(_contact.aid,
+                              contactType: relationshipType);
+                          coreService.dispose();
+                          if (relationshipType == 'trusted') {
+                            await SetupTaskService.markComplete(
+                                SetupTask.getVerified);
+                          }
+                          final all = await CoreService(
+                                  baseUrl: widget.serverUrl ??
+                                      AgentConfig.coreBaseUrl)
+                              .getContacts();
+                          IdentityLevelService.setWitnessCount(all.contacts
+                              .where((c) => c.isAccepted && c.isWitness)
+                              .length);
+                          if (mounted) Navigator.of(context).pop(true);
+                        } catch (e) {
+                          coreService.dispose();
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('$e'),
+                                  backgroundColor: MobileColors.error),
+                            );
+                          }
+                        }
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: MobileColors.primary,
+                        foregroundColor: MobileColors.textOnPrimary,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10)),
+                      ),
+                      child: const Text('Accept'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showChangeRoleSheet() async {
+    String relationshipType = _contact.contactType;
+    final coreService = CoreService(baseUrl: widget.serverUrl ?? AgentConfig.coreBaseUrl);
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: MobileColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setS) => Padding(
+          padding: const EdgeInsets.fromLTRB(24, 24, 24, 36),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Change Relationship',
+                style: TextStyle(
+                  color: MobileColors.textPrimary,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Changing to Trusted may trigger a witness invitation.',
+                style: TextStyle(color: MobileColors.textSecondary, fontSize: 12),
+              ),
+              const SizedBox(height: 16),
+              for (final entry in const [
+                ('general', 'General', 'Acquaintance or casual contact'),
+                ('trusted', 'Trusted', 'Personal trust — can become a witness'),
+                ('professional', 'Professional', 'Colleague or professional connection'),
+              ])
+                RadioListTile<String>(
+                  value: entry.$1,
+                  groupValue: relationshipType,
+                  onChanged: (v) => setS(() => relationshipType = v!),
+                  title: Text(entry.$2,
+                      style: const TextStyle(
+                          color: MobileColors.textPrimary, fontSize: 14)),
+                  subtitle: Text(entry.$3,
+                      style: const TextStyle(
+                          color: MobileColors.textSecondary, fontSize: 12)),
+                  activeColor: MobileColors.primary,
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                ),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () async {
+                    Navigator.of(ctx).pop();
+                    try {
+                      final updated = await coreService.updateContact(
+                          _contact.aid, contactType: relationshipType);
+                      coreService.dispose();
+                      if (relationshipType == 'trusted' && _contact.contactType != 'trusted') {
+                        await SetupTaskService.markComplete(SetupTask.getVerified);
+                      }
+                      final all = await CoreService(
+                              baseUrl: widget.serverUrl ?? AgentConfig.coreBaseUrl)
+                          .getContacts();
+                      IdentityLevelService.setWitnessCount(all.contacts
+                          .where((c) => c.isAccepted && c.isWitness)
+                          .length);
+                      if (mounted) setState(() => _contact = updated);
+                    } catch (e) {
+                      coreService.dispose();
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('$e'),
+                              backgroundColor: MobileColors.error),
+                        );
+                      }
+                    }
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: MobileColors.primary,
+                    foregroundColor: MobileColors.textOnPrimary,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                  ),
+                  child: const Text('Save',
+                      style: TextStyle(fontWeight: FontWeight.w600)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
   void _copyToClipboard(String text, String label) {
     Clipboard.setData(ClipboardData(text: text));
@@ -331,7 +720,7 @@ class _ContactDetailScreenState extends State<_ContactDetailScreen> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text('Delete Contact'),
         content: Text(
-          'Are you sure you want to delete ${widget.contact.displayName}? This cannot be undone.',
+          'Are you sure you want to delete ${_contact.displayName}? This cannot be undone.',
         ),
         actions: [
           TextButton(
@@ -354,7 +743,7 @@ class _ContactDetailScreenState extends State<_ContactDetailScreen> {
       setState(() => _deleting = true);
       try {
         final coreService = CoreService(baseUrl: widget.serverUrl ?? AgentConfig.coreBaseUrl);
-        await coreService.deleteContact(widget.contact.aid);
+        await coreService.deleteContact(_contact.aid);
         coreService.dispose();
         if (mounted) {
           Navigator.of(context).pop(true);
@@ -375,11 +764,10 @@ class _ContactDetailScreenState extends State<_ContactDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final contact = widget.contact;
     return Scaffold(
       backgroundColor: MobileColors.background,
       appBar: AppBar(
-        title: Text(contact.displayName),
+        title: Text(_contact.displayName),
         backgroundColor: MobileColors.surface,
         foregroundColor: MobileColors.textPrimary,
         elevation: 0,
@@ -399,10 +787,10 @@ class _ContactDetailScreenState extends State<_ContactDetailScreen> {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            _buildDetailAvatar(contact),
+            _buildDetailAvatar(_contact),
             const SizedBox(height: 12),
             Text(
-              contact.displayName,
+              _contact.displayName,
               style: const TextStyle(
                 fontSize: 22,
                 fontWeight: FontWeight.w700,
@@ -413,11 +801,49 @@ class _ContactDetailScreenState extends State<_ContactDetailScreen> {
             _buildStatusChip(),
             const SizedBox(height: 20),
             _buildInfoCard(context),
-            if (contact.jcard != null) ...[
+            if (_contact.jcard != null) ...[
               const SizedBox(height: 12),
               _buildJCardInfo(),
             ],
-            const SizedBox(height: 24),
+            const SizedBox(height: 16),
+            // Accept/Decline for incoming pending contacts
+            if (_contact.isPendingInbound) ...[
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: _showAcceptSheet,
+                  icon: const Icon(Icons.check, size: 18),
+                  label: const Text('Accept as...'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: MobileColors.primary,
+                    foregroundColor: MobileColors.textOnPrimary,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
+            // Contact type for non-pending contacts
+            if (!_contact.isPendingInbound) ...[
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _showChangeRoleSheet,
+                  icon: const Icon(Icons.swap_horiz, size: 18),
+                  label: Text('Contact Type: ${_contact.contactType[0].toUpperCase()}${_contact.contactType.substring(1)}'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: MobileColors.primary,
+                    side: const BorderSide(color: MobileColors.primary),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
             SizedBox(
               width: double.infinity,
               child: OutlinedButton.icon(
@@ -467,14 +893,16 @@ class _ContactDetailScreenState extends State<_ContactDetailScreen> {
   }
 
   Widget _buildStatusChip() {
-    final contact = widget.contact;
     Color color;
     String label;
 
-    if (contact.isMutual) {
+    if (_contact.isPendingInbound) {
+      color = MobileColors.warning;
+      label = 'Incoming Request';
+    } else if (_contact.isAccepted) {
       color = MobileColors.success;
-      label = 'Mutual Connection';
-    } else if (contact.verified) {
+      label = 'Connected';
+    } else if (_contact.verified) {
       color = MobileColors.info;
       label = 'Verified';
     } else {
@@ -500,7 +928,6 @@ class _ContactDetailScreenState extends State<_ContactDetailScreen> {
   }
 
   Widget _buildInfoCard(BuildContext context) {
-    final contact = widget.contact;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(16),
@@ -514,24 +941,26 @@ class _ContactDetailScreenState extends State<_ContactDetailScreen> {
         children: [
           _DetailRow(
             label: 'AID',
-            value: contact.aid,
+            value: _contact.aid,
             monospace: true,
-            onCopy: () => _copyToClipboard(contact.aid, 'AID'),
+            onCopy: () => _copyToClipboard(_contact.aid, 'AID'),
           ),
           const Divider(height: 16),
           _DetailRow(
             label: 'OOBI URL',
-            value: contact.oobiUrl,
+            value: _contact.oobiUrl,
             monospace: true,
-            onCopy: () => _copyToClipboard(contact.oobiUrl, 'OOBI URL'),
+            onCopy: () => _copyToClipboard(_contact.oobiUrl, 'OOBI URL'),
           ),
           const Divider(height: 16),
-          _DetailRow(label: 'Status', value: contact.status.isNotEmpty ? contact.status : 'added'),
+          _DetailRow(label: 'Contact Type', value: _contact.contactType),
           const Divider(height: 16),
-          _DetailRow(label: 'Verified', value: contact.verified ? 'Yes' : 'No'),
-          if (contact.discoveredAt.isNotEmpty) ...[
+          _DetailRow(label: 'Status', value: _contact.status.isNotEmpty ? _contact.status : 'added'),
+          const Divider(height: 16),
+          _DetailRow(label: 'Verified', value: _contact.verified ? 'Yes' : 'No'),
+          if (_contact.discoveredAt.isNotEmpty) ...[
             const Divider(height: 16),
-            _DetailRow(label: 'Discovered', value: contact.discoveredAt),
+            _DetailRow(label: 'Discovered', value: _contact.discoveredAt),
           ],
         ],
       ),
@@ -539,7 +968,7 @@ class _ContactDetailScreenState extends State<_ContactDetailScreen> {
   }
 
   Widget _buildJCardInfo() {
-    final jcard = widget.contact.jcard!;
+    final jcard = _contact.jcard!;
     final fields = <MapEntry<String, String>>[];
 
     if (jcard.fullName.isNotEmpty) fields.add(MapEntry('Name', jcard.fullName));
@@ -636,6 +1065,137 @@ class _DetailRow extends StatelessWidget {
             constraints: const BoxConstraints(),
           ),
       ],
+    );
+  }
+}
+
+// ── NFC Write Sheet ─────────────────────────────────────────────────────────
+
+class _NfcWriteSheet extends StatefulWidget {
+  final String oobiUrl;
+  final VoidCallback onDone;
+
+  const _NfcWriteSheet({required this.oobiUrl, required this.onDone});
+
+  @override
+  State<_NfcWriteSheet> createState() => _NfcWriteSheetState();
+}
+
+class _NfcWriteSheetState extends State<_NfcWriteSheet>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse;
+  bool _success = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulse = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat(reverse: true);
+    _startWrite();
+  }
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    NfcService.stopSession();
+    super.dispose();
+  }
+
+  Future<void> _startWrite() async {
+    setState(() {
+      _error = null;
+      _success = false;
+    });
+    await NfcService.writeOobi(
+      widget.oobiUrl,
+      onSuccess: () {
+        if (mounted) setState(() { _success = true; });
+        _pulse.stop();
+        Future.delayed(const Duration(seconds: 1), widget.onDone);
+      },
+      onError: (err) {
+        if (mounted) setState(() { _error = err; });
+        _pulse.stop();
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(24, 24, 24,
+          24 + MediaQuery.of(context).padding.bottom),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text(
+            'Write Identity Tap Tag',
+            style: TextStyle(
+              color: MobileColors.textPrimary,
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Hold your phone to a blank NFC tag or sticker.\nAnyone who taps it will be prompted to add you as a contact.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: MobileColors.textSecondary, fontSize: 13, height: 1.5),
+          ),
+          const SizedBox(height: 32),
+          if (_success)
+            const Column(
+              children: [
+                Icon(Icons.check_circle, size: 64, color: MobileColors.success),
+                SizedBox(height: 12),
+                Text('Tag written!',
+                    style: TextStyle(
+                        color: MobileColors.success,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700)),
+              ],
+            )
+          else if (_error != null)
+            Column(
+              children: [
+                const Icon(Icons.error_outline, size: 64, color: MobileColors.error),
+                const SizedBox(height: 12),
+                Text(_error!,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: MobileColors.error, fontSize: 13)),
+                const SizedBox(height: 16),
+                OutlinedButton.icon(
+                  onPressed: _startWrite,
+                  icon: const Icon(Icons.refresh, size: 18),
+                  label: const Text('Retry'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: MobileColors.primary,
+                  ),
+                ),
+              ],
+            )
+          else
+            AnimatedBuilder(
+              animation: _pulse,
+              builder: (_, __) => Opacity(
+                opacity: 0.5 + 0.5 * _pulse.value,
+                child: const Icon(Icons.nfc, size: 80, color: MobileColors.primary),
+              ),
+            ),
+          const SizedBox(height: 24),
+          if (!_success && _error == null)
+            OutlinedButton(
+              onPressed: widget.onDone,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: MobileColors.textMuted,
+              ),
+              child: const Text('Cancel'),
+            ),
+        ],
+      ),
     );
   }
 }

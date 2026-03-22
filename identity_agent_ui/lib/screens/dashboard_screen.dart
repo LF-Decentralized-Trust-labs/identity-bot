@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:async';
-import 'dart:io' show Platform;
 import '../theme/app_theme.dart';
 import '../config/agent_config.dart';
 import '../services/core_service.dart';
@@ -10,6 +8,9 @@ import '../services/mobile_on_device_keri_service.dart';
 import '../widgets/status_indicator.dart';
 import '../widgets/info_card.dart';
 import '../widgets/log_entry.dart';
+import '../widgets/identity_level_badge.dart';
+import '../widgets/key_storage_badge.dart';
+import 'auth_setup_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   final KeriService keriService;
@@ -561,6 +562,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ],
             ),
           ],
+          const SizedBox(height: 14),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              KeyStorageBadge(coreService: _coreService),
+              LiveIdentityLevelBadge(
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const AuthSetupScreen()),
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );

@@ -1,20 +1,20 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../theme/mobile_theme.dart';
-import 'confidence_ring.dart';
+import 'identity_level_badge.dart';
 
 class IdentityCard extends StatelessWidget {
   final String displayName;
   final String agentUrl;
   final String? photoBase64;
-  final int confidenceScore;
+  final VoidCallback? onBadgeTap;
 
   const IdentityCard({
     super.key,
     required this.displayName,
     required this.agentUrl,
     this.photoBase64,
-    this.confidenceScore = 85,
+    this.onBadgeTap,
   });
 
   @override
@@ -65,7 +65,7 @@ class IdentityCard extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 12),
-          ConfidenceRing(score: confidenceScore),
+          LiveIdentityLevelBadge(onTap: onBadgeTap),
         ],
       ),
     );

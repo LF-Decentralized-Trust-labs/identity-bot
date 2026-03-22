@@ -166,6 +166,64 @@ CREATE TABLE IF NOT EXISTS witness_receipts (
 CREATE INDEX IF NOT EXISTS idx_witness_receipts_event ON witness_receipts(event_said);
 `,
 	},
+	{
+		Version:     6,
+		Description: "Contacts: replace role/trusted with contact_type/is_witness; add tasks table",
+		SQL: `
+DROP TABLE IF EXISTS contacts;
+CREATE TABLE contacts (
+    aid           TEXT PRIMARY KEY,
+    alias         TEXT NOT NULL DEFAULT '',
+    public_key    TEXT NOT NULL DEFAULT '',
+    oobi_url      TEXT NOT NULL DEFAULT '',
+    verified      INTEGER NOT NULL DEFAULT 0,
+    discovered_at TEXT NOT NULL DEFAULT '',
+    status        TEXT NOT NULL DEFAULT '',
+    contact_type  TEXT NOT NULL DEFAULT 'general',
+    is_witness    INTEGER NOT NULL DEFAULT 0,
+    jcard_json    TEXT NOT NULL DEFAULT '',
+    photo         TEXT NOT NULL DEFAULT '',
+    updated_at    TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_contacts_status ON contacts(status);
+CREATE INDEX IF NOT EXISTS idx_contacts_type ON contacts(contact_type);
+
+CREATE TABLE IF NOT EXISTS tasks (
+    id          TEXT PRIMARY KEY,
+    type        TEXT NOT NULL DEFAULT '',
+    status      TEXT NOT NULL DEFAULT 'pending',
+    contact_aid TEXT NOT NULL DEFAULT '',
+    progress    INTEGER NOT NULL DEFAULT 0,
+    detail      TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL DEFAULT '',
+    updated_at  TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+`,
+	},
+	{
+		Version:     7,
+		Description: "Add share_actions table with default engagement actions",
+		SQL: `
+CREATE TABLE IF NOT EXISTS share_actions (
+    id          TEXT PRIMARY KEY,
+    action_key  TEXT NOT NULL UNIQUE,
+    name        TEXT NOT NULL DEFAULT '',
+    subtitle    TEXT NOT NULL DEFAULT '',
+    icon        TEXT NOT NULL DEFAULT '',
+    is_enabled  INTEGER NOT NULL DEFAULT 1,
+    sort_order  INTEGER NOT NULL DEFAULT 0,
+    updated_at  TEXT NOT NULL DEFAULT ''
+);
+
+INSERT OR IGNORE INTO share_actions (id, action_key, name, subtitle, icon, is_enabled, sort_order, updated_at) VALUES
+    ('sa-add-contact',      'add_contact',      'Add Contact',      'Generate a shareable link so others can add you as a contact', 'person_add_outlined', 1, 1, datetime('now')),
+    ('sa-show-id',          'show_id',          'Show ID',          'Display your identity QR code',                               'badge_outlined',      0, 2, datetime('now')),
+    ('sa-request-payment',  'request_payment',  'Request Payment',  'Send a payment request to a contact',                        'payment_outlined',    0, 3, datetime('now')),
+    ('sa-share-file',       'share_file',       'Share a File',     'Send an encrypted file to a contact',                        'attach_file',         0, 4, datetime('now')),
+    ('sa-share-credential', 'share_credential', 'Share Credential', 'Present a verifiable credential',                            'verified_outlined',   0, 5, datetime('now'));
+`,
+	},
 }
 
 // ApplyIdentityMigrations creates the migrations table and applies any pending migrations.

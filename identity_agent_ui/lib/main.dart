@@ -22,6 +22,12 @@ import 'screens/mobile/mobile_app.dart';
 import 'screens/mobile/mobile_mode_selection_screen.dart';
 import 'screens/mobile/mobile_connect_server_screen.dart';
 import 'screens/mobile/mobile_setup_wizard_screen.dart';
+import 'screens/hosting_choice_screen.dart';
+import 'screens/mobile/mobile_hosting_choice_screen.dart';
+import 'screens/setup_checklist_screen.dart';
+import 'screens/mobile/mobile_setup_checklist_screen.dart';
+import 'screens/lock_screen.dart';
+import 'services/pin_password_service.dart';
 
 String? _backendStartupError;
 Future<bool>? _backendStartupFuture;
@@ -71,8 +77,10 @@ class IdentityAgentApp extends StatelessWidget {
 enum OnboardingStep {
   loading,
   modeSelection,
+  hostingChoice,
   connectServer,
   setupWizard,
+  setupChecklist,
   dashboard,
 }
 
@@ -98,6 +106,8 @@ class _AgentRouterState extends State<AgentRouter> {
   AgentMode? _selectedMode;
   EntityType? _selectedEntityType;
   String? _serverUrl;
+  String? _remoteBrainUrl;
+  HostingChoice? _hostingChoice;
   bool _showedBackendError = false;
 
   @override
@@ -271,11 +281,21 @@ class _AgentRouterState extends State<AgentRouter> {
     if (mode == AgentMode.createNew) {
       _selectedEntityType = EntityType.individual;
       await PreferencesService.setEntityType(EntityType.individual);
-      await _initializeServiceForMode(AgentMode.createNew, null);
-      setState(() => _step = OnboardingStep.setupWizard);
+      setState(() => _step = OnboardingStep.hostingChoice);
     } else {
       setState(() => _step = OnboardingStep.connectServer);
     }
+  }
+
+  void _onHostingChosen(HostingChoice choice, {String? remoteBrainUrl}) async {
+    _hostingChoice = choice;
+    _remoteBrainUrl = remoteBrainUrl;
+    await PreferencesService.setHostingChoice(choice);
+    if (remoteBrainUrl != null) {
+      await PreferencesService.setRemoteBrainUrl(remoteBrainUrl);
+    }
+    await _initializeServiceForMode(AgentMode.createNew, null);
+    setState(() => _step = OnboardingStep.setupWizard);
   }
 
   void _onServerConnected(String serverUrl) async {
@@ -290,6 +310,10 @@ class _AgentRouterState extends State<AgentRouter> {
 
   void _onSetupComplete() async {
     await PreferencesService.setSetupComplete(true);
+    setState(() => _step = OnboardingStep.setupChecklist);
+  }
+
+  void _onChecklistDone() {
     setState(() => _step = OnboardingStep.dashboard);
   }
 
@@ -560,6 +584,12 @@ class _AgentRouterState extends State<AgentRouter> {
         }
         return ModeSelectionScreen(onModeSelected: _onModeSelected);
 
+      case OnboardingStep.hostingChoice:
+        if (isMobile) {
+          return MobileHostingChoiceScreen(onHostingChosen: _onHostingChosen);
+        }
+        return HostingChoiceScreen(onHostingChosen: _onHostingChosen);
+
       case OnboardingStep.connectServer:
         if (isMobile) {
           return MobileConnectServerScreen(
@@ -577,11 +607,31 @@ class _AgentRouterState extends State<AgentRouter> {
           return MobileSetupWizardScreen(
             onComplete: _onSetupComplete,
             keriService: _keriService!,
+            remoteBrainUrl: _remoteBrainUrl,
           );
         }
         return SetupWizardScreen(
           onComplete: _onSetupComplete,
           keriService: _keriService!,
+          remoteBrainUrl: _remoteBrainUrl,
+        );
+
+      case OnboardingStep.setupChecklist:
+        if (isMobile) {
+          return MobileSetupChecklistScreen(
+            onDone: _onChecklistDone,
+            keriService: _keriService!,
+            serverUrl: _serverUrl,
+            hostingChoice: _hostingChoice,
+            remoteBrainUrl: _remoteBrainUrl,
+          );
+        }
+        return SetupChecklistScreen(
+          onDone: _onChecklistDone,
+          keriService: _keriService!,
+          serverUrl: _serverUrl,
+          hostingChoice: _hostingChoice,
+          remoteBrainUrl: _remoteBrainUrl,
         );
 
       case OnboardingStep.dashboard:
@@ -620,9 +670,45 @@ class AgentMainScreen extends StatefulWidget {
   State<AgentMainScreen> createState() => _AgentMainScreenState();
 }
 
-class _AgentMainScreenState extends State<AgentMainScreen> {
+class _AgentMainScreenState extends State<AgentMainScreen>
+    with WidgetsBindingObserver {
+  bool _locked = false;
+  DateTime? _backgroundedAt;
+  static const _lockAfter = Duration(minutes: 5);
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      _backgroundedAt ??= DateTime.now();
+    } else if (state == AppLifecycleState.resumed) {
+      _maybelock();
+    }
+  }
+
+  Future<void> _maybelock() async {
+    final bg = _backgroundedAt;
+    if (bg == null) return;
+    if (DateTime.now().difference(bg) < _lockAfter) return;
+    _backgroundedAt = null;
+    // Only lock if the user has actually set up authentication
+    final hasAuth = await PinPasswordService.hasAnyCredential();
+    if (hasAuth && mounted) setState(() => _locked = true);
+  }
+
   void _handleReset() {
-    // Bubble up to AgentRouter to restart onboarding
     if (mounted) {
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const AgentRouter()),
@@ -631,9 +717,7 @@ class _AgentMainScreenState extends State<AgentMainScreen> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    // Mobile platform (native iOS/Android) → always MobileApp
+  Widget _buildMain() {
     if (_isMobilePlatform) {
       return MobileApp(
         keriService: widget.keriService,
@@ -642,8 +726,6 @@ class _AgentMainScreenState extends State<AgentMainScreen> {
         serverUrl: widget.serverUrl,
       );
     }
-
-    // Responsive: narrow window → MobileApp, wide → DesktopApp
     return LayoutBuilder(
       builder: (context, constraints) {
         if (constraints.maxWidth < 768) {
@@ -663,5 +745,13 @@ class _AgentMainScreenState extends State<AgentMainScreen> {
         );
       },
     );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_locked) {
+      return LockScreen(onUnlocked: () => setState(() => _locked = false));
+    }
+    return _buildMain();
   }
 }

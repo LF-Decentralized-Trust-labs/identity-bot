@@ -146,23 +146,28 @@ func (s *SQLiteStore) SaveContact(contact ContactRecord) error {
 		}
 		jcardJSON = string(b)
 	}
+	if contact.ContactType == "" {
+		contact.ContactType = "general"
+	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := s.db.Exec(`
-		INSERT INTO contacts (aid, alias, public_key, oobi_url, verified, discovered_at, status, role, jcard_json, photo, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO contacts (aid, alias, public_key, oobi_url, verified, discovered_at, status, contact_type, is_witness, jcard_json, photo, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(aid) DO UPDATE SET
-			alias = excluded.alias,
-			public_key = excluded.public_key,
-			oobi_url = excluded.oobi_url,
-			verified = excluded.verified,
-			status = excluded.status,
-			role = excluded.role,
-			jcard_json = excluded.jcard_json,
-			photo = excluded.photo,
-			updated_at = excluded.updated_at`,
+			alias        = excluded.alias,
+			public_key   = excluded.public_key,
+			oobi_url     = excluded.oobi_url,
+			verified     = excluded.verified,
+			status       = excluded.status,
+			contact_type = excluded.contact_type,
+			is_witness   = excluded.is_witness,
+			jcard_json   = excluded.jcard_json,
+			photo        = excluded.photo,
+			updated_at   = excluded.updated_at`,
 		contact.AID, contact.Alias, contact.PublicKey, contact.OobiURL,
-		contact.Verified, contact.DiscoveredAt, contact.Status, contact.Role,
+		contact.Verified, contact.DiscoveredAt, contact.Status,
+		contact.ContactType, contact.IsWitness,
 		jcardJSON, contact.Photo, now,
 	)
 	if err != nil {
@@ -173,7 +178,7 @@ func (s *SQLiteStore) SaveContact(contact ContactRecord) error {
 
 func (s *SQLiteStore) GetContacts() ([]ContactRecord, error) {
 	rows, err := s.db.Query(
-		`SELECT aid, alias, public_key, oobi_url, verified, discovered_at, status, role, jcard_json, photo
+		`SELECT aid, alias, public_key, oobi_url, verified, discovered_at, status, contact_type, is_witness, jcard_json, photo
 		 FROM contacts ORDER BY alias ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query contacts: %w", err)
@@ -184,7 +189,7 @@ func (s *SQLiteStore) GetContacts() ([]ContactRecord, error) {
 
 func (s *SQLiteStore) GetContact(aid string) (*ContactRecord, error) {
 	rows, err := s.db.Query(
-		`SELECT aid, alias, public_key, oobi_url, verified, discovered_at, status, role, jcard_json, photo
+		`SELECT aid, alias, public_key, oobi_url, verified, discovered_at, status, contact_type, is_witness, jcard_json, photo
 		 FROM contacts WHERE aid = ?`, aid)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query contact: %w", err)
@@ -211,7 +216,7 @@ func (s *SQLiteStore) DeleteContact(aid string) error {
 
 func (s *SQLiteStore) GetContactsByStatus(status string) ([]ContactRecord, error) {
 	rows, err := s.db.Query(
-		`SELECT aid, alias, public_key, oobi_url, verified, discovered_at, status, role, jcard_json, photo
+		`SELECT aid, alias, public_key, oobi_url, verified, discovered_at, status, contact_type, is_witness, jcard_json, photo
 		 FROM contacts WHERE status = ? ORDER BY alias ASC`, status)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query contacts by status: %w", err)
@@ -226,7 +231,8 @@ func (s *SQLiteStore) scanContacts(rows *sql.Rows) ([]ContactRecord, error) {
 		var c ContactRecord
 		var jcardJSON string
 		if err := rows.Scan(&c.AID, &c.Alias, &c.PublicKey, &c.OobiURL,
-			&c.Verified, &c.DiscoveredAt, &c.Status, &c.Role, &jcardJSON, &c.Photo); err != nil {
+			&c.Verified, &c.DiscoveredAt, &c.Status, &c.ContactType, &c.IsWitness,
+			&jcardJSON, &c.Photo); err != nil {
 			return nil, fmt.Errorf("failed to scan contact: %w", err)
 		}
 		if jcardJSON != "" {
@@ -241,6 +247,170 @@ func (s *SQLiteStore) scanContacts(rows *sql.Rows) ([]ContactRecord, error) {
 		contacts = []ContactRecord{}
 	}
 	return contacts, nil
+}
+
+// ── Tasks ─────────────────────────────────────────────────────────────────────
+
+func (s *SQLiteStore) SaveTask(task TaskRecord) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	if task.CreatedAt == "" {
+		task.CreatedAt = now
+	}
+	task.UpdatedAt = now
+	_, err := s.db.Exec(`
+		INSERT INTO tasks (id, type, status, contact_aid, progress, detail, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			status      = excluded.status,
+			contact_aid = excluded.contact_aid,
+			progress    = excluded.progress,
+			detail      = excluded.detail,
+			updated_at  = excluded.updated_at`,
+		task.ID, task.Type, task.Status, task.ContactAID,
+		task.Progress, task.Detail, task.CreatedAt, task.UpdatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to save task: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) GetTasks() ([]TaskRecord, error) {
+	rows, err := s.db.Query(
+		`SELECT id, type, status, contact_aid, progress, detail, created_at, updated_at
+		 FROM tasks ORDER BY created_at DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query tasks: %w", err)
+	}
+	defer rows.Close()
+	return s.scanTasks(rows)
+}
+
+func (s *SQLiteStore) GetTask(id string) (*TaskRecord, error) {
+	rows, err := s.db.Query(
+		`SELECT id, type, status, contact_aid, progress, detail, created_at, updated_at
+		 FROM tasks WHERE id = ?`, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query task: %w", err)
+	}
+	defer rows.Close()
+	tasks, err := s.scanTasks(rows)
+	if err != nil {
+		return nil, err
+	}
+	if len(tasks) == 0 {
+		return nil, nil
+	}
+	return &tasks[0], nil
+}
+
+func (s *SQLiteStore) DeleteTask(id string) error {
+	_, err := s.db.Exec(`DELETE FROM tasks WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete task: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) scanTasks(rows *sql.Rows) ([]TaskRecord, error) {
+	var tasks []TaskRecord
+	for rows.Next() {
+		var t TaskRecord
+		if err := rows.Scan(&t.ID, &t.Type, &t.Status, &t.ContactAID,
+			&t.Progress, &t.Detail, &t.CreatedAt, &t.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan task: %w", err)
+		}
+		tasks = append(tasks, t)
+	}
+	if tasks == nil {
+		tasks = []TaskRecord{}
+	}
+	return tasks, nil
+}
+
+// ── Share Actions ─────────────────────────────────────────────────────────────
+
+func (s *SQLiteStore) GetShareActions() ([]ShareAction, error) {
+	rows, err := s.db.Query(
+		`SELECT id, action_key, name, subtitle, icon, is_enabled, sort_order, updated_at
+		 FROM share_actions ORDER BY sort_order ASC, name ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query share_actions: %w", err)
+	}
+	defer rows.Close()
+	return s.scanShareActions(rows)
+}
+
+func (s *SQLiteStore) GetShareAction(id string) (*ShareAction, error) {
+	rows, err := s.db.Query(
+		`SELECT id, action_key, name, subtitle, icon, is_enabled, sort_order, updated_at
+		 FROM share_actions WHERE id = ?`, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query share_action: %w", err)
+	}
+	defer rows.Close()
+	actions, err := s.scanShareActions(rows)
+	if err != nil {
+		return nil, err
+	}
+	if len(actions) == 0 {
+		return nil, nil
+	}
+	return &actions[0], nil
+}
+
+func (s *SQLiteStore) UpsertShareAction(action ShareAction) error {
+	if action.UpdatedAt == "" {
+		action.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	}
+	isEnabled := 0
+	if action.IsEnabled {
+		isEnabled = 1
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO share_actions (id, action_key, name, subtitle, icon, is_enabled, sort_order, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			action_key = excluded.action_key,
+			name       = excluded.name,
+			subtitle   = excluded.subtitle,
+			icon       = excluded.icon,
+			is_enabled = excluded.is_enabled,
+			sort_order = excluded.sort_order,
+			updated_at = excluded.updated_at`,
+		action.ID, action.ActionKey, action.Name, action.Subtitle,
+		action.Icon, isEnabled, action.SortOrder, action.UpdatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to upsert share_action: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) DeleteShareAction(id string) error {
+	_, err := s.db.Exec(`DELETE FROM share_actions WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete share_action: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) scanShareActions(rows *sql.Rows) ([]ShareAction, error) {
+	var actions []ShareAction
+	for rows.Next() {
+		var a ShareAction
+		var isEnabled int
+		if err := rows.Scan(&a.ID, &a.ActionKey, &a.Name, &a.Subtitle,
+			&a.Icon, &isEnabled, &a.SortOrder, &a.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan share_action: %w", err)
+		}
+		a.IsEnabled = isEnabled == 1
+		actions = append(actions, a)
+	}
+	if actions == nil {
+		actions = []ShareAction{}
+	}
+	return actions, nil
 }
 
 // ── Settings ─────────────────────────────────────────────────────────────────
@@ -640,7 +810,7 @@ func (s *SQLiteStore) GetWitnessReceipts(eventSAID string) ([]WitnessReceiptReco
 // ── Reset ─────────────────────────────────────────────────────────────────────
 
 func (s *SQLiteStore) ResetAll() error {
-	tables := []string{"kel", "identity", "contacts", "pending_requests", "profile", "settings", "endpoint", "contact_kels", "credentials", "presentations", "witness_receipts"}
+	tables := []string{"kel", "identity", "contacts", "pending_requests", "profile", "settings", "endpoint", "contact_kels", "credentials", "presentations", "witness_receipts", "tasks"}
 	for _, t := range tables {
 		if _, err := s.db.Exec(`DELETE FROM ` + t); err != nil {
 			return fmt.Errorf("failed to clear table %s: %w", t, err)

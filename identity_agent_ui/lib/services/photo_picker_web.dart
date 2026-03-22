@@ -1,5 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:html' as html;
+import 'dart:typed_data';
+import 'package:flutter/material.dart';
+import '../widgets/avatar_crop_dialog.dart';
 
 Future<String?> pickPhotoBase64() async {
   final completer = Completer<String?>();
@@ -32,4 +36,15 @@ Future<String?> pickPhotoBase64() async {
   });
 
   return completer.future;
+}
+
+/// Web version: picks a file via browser dialog, shows the crop dialog, and
+/// returns a base64-encoded PNG. Returns null if cancelled at any step.
+Future<String?> pickAndCropPhotoBase64(BuildContext context) async {
+  final base64Raw = await pickPhotoBase64();
+  if (base64Raw == null) return null;
+  if (!context.mounted) return null;
+
+  final bytes = Uint8List.fromList(base64Decode(base64Raw));
+  return AvatarCropDialog.toBase64(context, bytes);
 }
