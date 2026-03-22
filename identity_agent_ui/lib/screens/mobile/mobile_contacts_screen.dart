@@ -568,8 +568,7 @@ class _ContactDetailScreenState extends State<_ContactDetailScreen> {
                               contactType: relationshipType);
                           coreService.dispose();
                           if (relationshipType == 'trusted') {
-                            await SetupTaskService.markComplete(
-                                SetupTask.getVerified);
+                            // trusted contact accepted
                           }
                           final all = await CoreService(
                                   baseUrl: widget.serverUrl ??
@@ -669,7 +668,7 @@ class _ContactDetailScreenState extends State<_ContactDetailScreen> {
                           _contact.aid, contactType: relationshipType);
                       coreService.dispose();
                       if (relationshipType == 'trusted' && _contact.contactType != 'trusted') {
-                        await SetupTaskService.markComplete(SetupTask.getVerified);
+                        // trusted contact updated
                       }
                       final all = await CoreService(
                               baseUrl: widget.serverUrl ?? AgentConfig.coreBaseUrl)

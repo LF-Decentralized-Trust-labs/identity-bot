@@ -74,80 +74,52 @@ class _SetupTaskBannerState extends State<SetupTaskBanner> {
     }
 
     final remaining = _total - _done;
-    final pct = _total == 0 ? 0.0 : _done / _total;
 
     return widget.isMobile
-        ? _buildMobileBanner(remaining, pct)
-        : _buildDesktopBanner(remaining, pct);
+        ? _buildMobileBanner(remaining)
+        : _buildDesktopBanner(remaining);
   }
 
-  Widget _buildDesktopBanner(int remaining, double pct) {
-    final color = _done == 0 ? const Color(0xFFCC3333) : const Color(0xFFCC8800);
+  Widget _buildDesktopBanner(int remaining) {
     return _HoverBanner(
-      color: color,
-      pct: pct,
-      done: _done,
+      color: const Color(0xFFCC8800),
       remaining: remaining,
       onTap: _openChecklist,
       onDismiss: _dismiss,
     );
   }
 
-  Widget _buildMobileBanner(int remaining, double pct) {
+  Widget _buildMobileBanner(int remaining) {
+    const color = Color(0xFFCC8800);
     return GestureDetector(
       onTap: _openChecklist,
       child: Container(
         margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         decoration: BoxDecoration(
-          color: const Color(0xFF4589FF).withOpacity(0.06),
+          color: color.withOpacity(0.08),
           borderRadius: BorderRadius.circular(12),
-          border:
-              Border.all(color: const Color(0xFF4589FF).withOpacity(0.2)),
+          border: Border.all(color: color.withOpacity(0.3)),
         ),
         child: Row(
           children: [
-            SizedBox(
-              width: 32,
-              height: 32,
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  CircularProgressIndicator(
-                    value: pct,
-                    strokeWidth: 3,
-                    backgroundColor: const Color(0xFFE0E0E0),
-                    color: pct == 1.0
-                        ? const Color(0xFF24A148)
-                        : const Color(0xFF4589FF),
-                  ),
-                  Text(
-                    '$_done',
-                    style: const TextStyle(
-                      color: Color(0xFF161616),
-                      fontSize: 9,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
-              ),
-            ),
+            Icon(Icons.shield_outlined, size: 20, color: color),
             const SizedBox(width: 10),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'Finish setting up your identity',
-                    style: TextStyle(
+                  Text(
+                    '$remaining more ${remaining == 1 ? 'step' : 'steps'} to complete setup',
+                    style: const TextStyle(
                       color: Color(0xFF161616),
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
-                  Text(
-                    '$remaining task${remaining == 1 ? '' : 's'} remaining',
-                    style: const TextStyle(
+                  const Text(
+                    'Required for basic security.',
+                    style: TextStyle(
                       color: Color(0xFF8D8D8D),
                       fontSize: 11,
                     ),
@@ -155,8 +127,7 @@ class _SetupTaskBannerState extends State<SetupTaskBanner> {
                 ],
               ),
             ),
-            const Icon(Icons.chevron_right,
-                color: Color(0xFF4589FF), size: 18),
+            Icon(Icons.chevron_right, color: color, size: 18),
           ],
         ),
       ),
@@ -164,23 +135,53 @@ class _SetupTaskBannerState extends State<SetupTaskBanner> {
   }
 
   Future<void> _openChecklist() async {
-    await Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => widget.isMobile
-          ? MobileSetupChecklistScreen(
-              onDone: () => Navigator.of(context).pop(),
-              keriService: widget.keriService,
-              serverUrl: widget.serverUrl,
-              hostingChoice: _hostingChoice,
-              remoteBrainUrl: _remoteBrainUrl,
-            )
-          : SetupChecklistScreen(
+    if (widget.isMobile) {
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (_) => DraggableScrollableSheet(
+          initialChildSize: 0.9,
+          maxChildSize: 0.95,
+          expand: false,
+          builder: (_, ctrl) => ClipRRect(
+            borderRadius:
+                const BorderRadius.vertical(top: Radius.circular(20)),
+            child: MobileSetupChecklistScreen(
               onDone: () => Navigator.of(context).pop(),
               keriService: widget.keriService,
               serverUrl: widget.serverUrl,
               hostingChoice: _hostingChoice,
               remoteBrainUrl: _remoteBrainUrl,
             ),
-    ));
+          ),
+        ),
+      );
+    } else {
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: true,
+        builder: (ctx) => Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding:
+              const EdgeInsets.symmetric(horizontal: 64, vertical: 48),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: ConstrainedBox(
+              constraints:
+                  const BoxConstraints(maxWidth: 560, maxHeight: 680),
+              child: SetupChecklistScreen(
+                onDone: () => Navigator.of(ctx).pop(),
+                keriService: widget.keriService,
+                serverUrl: widget.serverUrl,
+                hostingChoice: _hostingChoice,
+                remoteBrainUrl: _remoteBrainUrl,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
     _load();
   }
 }
@@ -189,16 +190,12 @@ class _SetupTaskBannerState extends State<SetupTaskBanner> {
 
 class _HoverBanner extends StatefulWidget {
   final Color color;
-  final double pct;
-  final int done;
   final int remaining;
   final VoidCallback onTap;
   final VoidCallback onDismiss;
 
   const _HoverBanner({
     required this.color,
-    required this.pct,
-    required this.done,
     required this.remaining,
     required this.onTap,
     required this.onDismiss,
@@ -231,46 +228,23 @@ class _HoverBannerState extends State<_HoverBanner> {
           ),
           child: Row(
             children: [
-              SizedBox(
-                width: 28,
-                height: 28,
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    CircularProgressIndicator(
-                      value: widget.pct,
-                      strokeWidth: 3,
-                      backgroundColor: c.withOpacity(0.15),
-                      color: c,
-                    ),
-                    Text(
-                      '${widget.done}',
-                      style: TextStyle(
-                        color: c,
-                        fontSize: 9,
-                        fontWeight: FontWeight.w700,
-                        fontFamily: 'monospace',
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 12),
+              Icon(Icons.shield_outlined, size: 16, color: c),
+              const SizedBox(width: 10),
               Expanded(
                 child: RichText(
                   text: TextSpan(
                     style: TextStyle(fontSize: 13, color: c, height: 1.3),
                     children: [
                       TextSpan(
-                        text: '${widget.remaining} task${widget.remaining == 1 ? '' : 's'} remaining',
+                        text: '${widget.remaining} more ${widget.remaining == 1 ? 'step' : 'steps'} to complete setup',
                         style: const TextStyle(fontWeight: FontWeight.w700),
                       ),
-                      const TextSpan(
-                          text: '  ·  Click to complete setup and unlock all features.'),
+                      const TextSpan(text: '  ·  Required for basic security.'),
                     ],
                   ),
                 ),
               ),
+              const SizedBox(width: 8),
               IconButton(
                 icon: const Icon(Icons.close, size: 14),
                 color: c.withOpacity(0.6),

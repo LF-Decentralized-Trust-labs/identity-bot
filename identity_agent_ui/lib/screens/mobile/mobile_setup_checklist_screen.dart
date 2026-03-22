@@ -80,21 +80,13 @@ class _MobileSetupChecklistScreenState
                     : ListView(
                         padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
                         children: [
-                          _buildSection('Security', [
-                            if (_needsRemoteBrain) SetupTask.connectRemoteBrain,
-                            SetupTask.backupSeedPhrase,
-                            SetupTask.setupAuthentication,
-                            SetupTask.secureKeyStorage,
-                            SetupTask.inviteContacts,
-                          ]),
-                          _buildSection('Connections', [
-                            SetupTask.connectEmail,
-                            SetupTask.addPhoneNumber,
-                          ]),
-                          _buildSection('Profile & Trust', [
-                            SetupTask.completeProfile,
-                            SetupTask.getVerified,
-                          ]),
+                          // Only show incomplete tasks — completed ones disappear
+                          ...(_tasks
+                              .where((t) => !(_state[t] ?? false))
+                              .map((t) => Padding(
+                                    padding: const EdgeInsets.only(bottom: 8),
+                                    child: _buildTaskCard(t),
+                                  ))),
                           const SizedBox(height: 8),
                           TextButton(
                             onPressed: widget.onDone,
@@ -117,47 +109,23 @@ class _MobileSetupChecklistScreenState
   }
 
   Widget _buildHeader() {
-    final pct = _loading || _totalCount == 0
-        ? 0.0
-        : _doneCount / _totalCount;
+    final remaining = _totalCount - _doneCount;
+    final subtitle = _loading
+        ? 'Loading...'
+        : '$remaining step${remaining == 1 ? '' : 's'} remaining';
 
     return Container(
       color: MobileColors.surface,
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+      padding: const EdgeInsets.fromLTRB(20, 20, 8, 16),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            width: 52,
-            height: 52,
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                CircularProgressIndicator(
-                  value: pct,
-                  backgroundColor: MobileColors.border,
-                  color: pct == 1.0
-                      ? MobileColors.success
-                      : MobileColors.primary,
-                  strokeWidth: 4,
-                ),
-                Text(
-                  '$_doneCount/$_totalCount',
-                  style: const TextStyle(
-                    color: MobileColors.textPrimary,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 16),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'Secure your identity',
+                  'Complete Your Setup',
                   style: TextStyle(
                     color: MobileColors.textPrimary,
                     fontSize: 18,
@@ -165,47 +133,34 @@ class _MobileSetupChecklistScreenState
                     height: 1.2,
                   ),
                 ),
-                const SizedBox(height: 2),
+                const SizedBox(height: 4),
                 Text(
-                  _loading
-                      ? 'Loading...'
-                      : '$_doneCount of $_totalCount tasks complete',
+                  subtitle,
                   style: const TextStyle(
                     color: MobileColors.textMuted,
                     fontSize: 13,
                   ),
                 ),
+                const SizedBox(height: 2),
+                const Text(
+                  'Required for basic security.',
+                  style: TextStyle(
+                    color: MobileColors.textSecondary,
+                    fontSize: 12,
+                  ),
+                ),
               ],
             ),
           ),
+          IconButton(
+            icon: const Icon(Icons.close, size: 20),
+            color: MobileColors.textMuted,
+            onPressed: widget.onDone,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+          ),
         ],
       ),
-    );
-  }
-
-  Widget _buildSection(String title, List<SetupTask> tasks) {
-    final filtered = tasks.where((t) => _tasks.contains(t)).toList();
-    if (filtered.isEmpty) return const SizedBox.shrink();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(top: 20, bottom: 10),
-          child: Text(
-            title.toUpperCase(),
-            style: const TextStyle(
-              color: MobileColors.textMuted,
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 1.0,
-            ),
-          ),
-        ),
-        ...filtered.map((t) => Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: _buildTaskCard(t),
-            )),
-      ],
     );
   }
 
@@ -348,12 +303,6 @@ class _MobileSetupChecklistScreenState
         await _doSecureKeyStorage();
       case SetupTask.inviteContacts:
         await _doInviteContacts();
-      case SetupTask.completeProfile:
-        _doCompleteProfile();
-      case SetupTask.getVerified:
-        await _doGetVerified();
-      default:
-        break;
     }
   }
 
@@ -989,65 +938,6 @@ class _MobileSetupChecklistScreenState
     );
   }
 
-  void _doCompleteProfile() {
-    Navigator.of(context).pop();
-    SetupTaskService.markComplete(SetupTask.completeProfile);
-  }
-
-  Future<void> _doGetVerified() async {
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: MobileColors.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => Padding(
-        padding: const EdgeInsets.fromLTRB(24, 24, 24, 36),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Get Verified',
-              style: TextStyle(
-                color: MobileColors.textPrimary,
-                fontSize: 20,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 12),
-            const Text(
-              'Add someone you know personally as a contact and mark '
-              '"I know and trust this contact" when you add or accept them.\n\n'
-              'They\'ll be assigned as a witness to your identity, and this '
-              'task will complete automatically.',
-              style: TextStyle(
-                color: MobileColors.textSecondary,
-                fontSize: 14,
-                height: 1.5,
-              ),
-            ),
-            const SizedBox(height: 24),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: () => Navigator.of(ctx).pop(),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: MobileColors.primary,
-                  foregroundColor: MobileColors.textOnPrimary,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10)),
-                ),
-                child: const Text('Got It'),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-    await _load();
-  }
 
   IconData _taskIcon(SetupTask task) {
     switch (task) {
@@ -1061,14 +951,6 @@ class _MobileSetupChecklistScreenState
         return Icons.shield_outlined;
       case SetupTask.inviteContacts:
         return Icons.people_outline;
-      case SetupTask.connectEmail:
-        return Icons.email_outlined;
-      case SetupTask.addPhoneNumber:
-        return Icons.phone_outlined;
-      case SetupTask.completeProfile:
-        return Icons.person_outline;
-      case SetupTask.getVerified:
-        return Icons.verified_outlined;
     }
   }
 }

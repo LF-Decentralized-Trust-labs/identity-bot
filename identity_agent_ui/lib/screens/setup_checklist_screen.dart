@@ -74,23 +74,13 @@ class _SetupChecklistScreenState extends State<SetupChecklistScreen> {
                       child: CircularProgressIndicator(color: AppColors.accent),
                     )
                   else ...[
-                    _buildSection('Security', [
-                      if (_needsRemoteBrain) SetupTask.connectRemoteBrain,
-                      SetupTask.backupSeedPhrase,
-                      SetupTask.setupAuthentication,
-                      SetupTask.secureKeyStorage,
-                      SetupTask.inviteContacts,
-                    ]),
-                    const SizedBox(height: 20),
-                    _buildSection('Connections', [
-                      SetupTask.connectEmail,
-                      SetupTask.addPhoneNumber,
-                    ]),
-                    const SizedBox(height: 20),
-                    _buildSection('Profile & Trust', [
-                      SetupTask.completeProfile,
-                      SetupTask.getVerified,
-                    ]),
+                    // Only show incomplete tasks — completed ones disappear
+                    ...(_tasks
+                        .where((t) => !(_state[t] ?? false))
+                        .map((t) => Padding(
+                              padding: const EdgeInsets.only(bottom: 8),
+                              child: _buildTaskCard(t),
+                            ))),
                   ],
                   const SizedBox(height: 32),
                   SizedBox(
@@ -119,115 +109,67 @@ class _SetupChecklistScreenState extends State<SetupChecklistScreen> {
   }
 
   Widget _buildHeader() {
-    return Column(
+    final remaining = _totalCount - _doneCount;
+    final remainingLabel = _loading
+        ? ''
+        : remaining == 1
+            ? '1 step remaining'
+            : '$remaining steps remaining';
+
+    return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Progress
-        Row(
-          children: [
-            _buildProgressRing(),
-            const SizedBox(width: 20),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'SECURE YOUR IDENTITY\nAND MAKE IT USEFUL.',
-                    style: TextStyle(
-                      color: AppColors.textPrimary,
-                      fontSize: 20,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 1.0,
-                      height: 1.3,
-                      fontFamily: 'monospace',
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    _loading
-                        ? ''
-                        : '$_doneCount of $_totalCount tasks complete.',
-                    style: const TextStyle(
-                      color: AppColors.textSecondary,
-                      fontSize: 13,
-                      fontFamily: 'monospace',
-                    ),
-                  ),
-                ],
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'COMPLETE YOUR SETUP',
+                style: TextStyle(
+                  color: AppColors.textPrimary,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.0,
+                  fontFamily: 'monospace',
+                ),
               ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        const Text(
-          'These steps are optional — your identity is already live. '
-          'But completing them makes your identity more secure, more useful, and easier to recover.',
-          style: TextStyle(
-            color: AppColors.textSecondary,
-            fontSize: 12,
-            height: 1.6,
-            fontFamily: 'monospace',
+              const SizedBox(height: 6),
+              if (!_loading)
+                Text(
+                  remainingLabel,
+                  style: const TextStyle(
+                    color: AppColors.textSecondary,
+                    fontSize: 13,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+              const SizedBox(height: 12),
+              const Text(
+                'These steps are required for basic security. '
+                'Complete them to protect your identity and enable key recovery.',
+                style: TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 12,
+                  height: 1.6,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ],
           ),
+        ),
+        IconButton(
+          icon: const Icon(Icons.close, size: 18),
+          color: AppColors.textMuted,
+          onPressed: widget.onDone,
+          tooltip: 'Close',
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
         ),
       ],
     );
   }
 
-  Widget _buildProgressRing() {
-    final pct = _loading || _totalCount == 0
-        ? 0.0
-        : _doneCount / _totalCount;
-    return SizedBox(
-      width: 64,
-      height: 64,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          CircularProgressIndicator(
-            value: pct,
-            backgroundColor: AppColors.border,
-            color: pct == 1.0 ? AppColors.coreActive : AppColors.accent,
-            strokeWidth: 5,
-          ),
-          Text(
-            '$_doneCount/$_totalCount',
-            style: const TextStyle(
-              color: AppColors.textPrimary,
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-              fontFamily: 'monospace',
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSection(String title, List<SetupTask> tasks) {
-    // Filter to tasks that are in our ordered list
-    final filtered = tasks.where((t) => _tasks.contains(t)).toList();
-    if (filtered.isEmpty) return const SizedBox.shrink();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          title.toUpperCase(),
-          style: const TextStyle(
-            color: AppColors.textMuted,
-            fontSize: 10,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 2.0,
-            fontFamily: 'monospace',
-          ),
-        ),
-        const SizedBox(height: 10),
-        ...filtered.map((t) => Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: _buildTaskCard(t),
-            )),
-      ],
-    );
-  }
+  // _buildSection removed — tasks are now shown as a flat list of remaining items only.
 
   Widget _buildTaskCard(SetupTask task) {
     final meta = SetupTaskMeta(
@@ -388,12 +330,6 @@ class _SetupChecklistScreenState extends State<SetupChecklistScreen> {
         await _doSecureKeyStorage();
       case SetupTask.inviteContacts:
         await _doInviteContacts();
-      case SetupTask.completeProfile:
-        _doCompleteProfile();
-      case SetupTask.getVerified:
-        await _doGetVerified();
-      default:
-        break;
     }
   }
 
@@ -1238,56 +1174,6 @@ class _SetupChecklistScreenState extends State<SetupChecklistScreen> {
     );
   }
 
-  void _doCompleteProfile() {
-    // Navigate to profile screen — user can fill in bio/org/title
-    // Mark complete when they come back (best-effort)
-    Navigator.of(context).pop();
-    SetupTaskService.markComplete(SetupTask.completeProfile);
-  }
-
-  Future<void> _doGetVerified() async {
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.surface,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-          side: BorderSide(color: AppColors.accent.withOpacity(0.3)),
-        ),
-        title: const Text(
-          'GET VERIFIED',
-          style: TextStyle(
-            color: AppColors.textPrimary,
-            fontSize: 14,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 1.0,
-            fontFamily: 'monospace',
-          ),
-        ),
-        content: const Text(
-          'Add someone you know personally as a contact and mark '
-          '"I know and trust this contact" when you add or accept them.\n\n'
-          'They\'ll be assigned as a witness to your identity, and this '
-          'task will complete automatically.',
-          style: TextStyle(
-            color: AppColors.textSecondary,
-            fontSize: 12,
-            fontFamily: 'monospace',
-            height: 1.5,
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('GOT IT',
-                style: TextStyle(color: AppColors.accent, fontFamily: 'monospace')),
-          ),
-        ],
-      ),
-    );
-    await _load();
-  }
-
   IconData _taskIcon(SetupTask task) {
     switch (task) {
       case SetupTask.connectRemoteBrain:
@@ -1300,14 +1186,6 @@ class _SetupChecklistScreenState extends State<SetupChecklistScreen> {
         return Icons.shield_outlined;
       case SetupTask.inviteContacts:
         return Icons.people_outline;
-      case SetupTask.connectEmail:
-        return Icons.email_outlined;
-      case SetupTask.addPhoneNumber:
-        return Icons.phone_outlined;
-      case SetupTask.completeProfile:
-        return Icons.person_outline;
-      case SetupTask.getVerified:
-        return Icons.verified_outlined;
     }
   }
 }
