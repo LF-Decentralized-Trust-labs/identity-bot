@@ -204,6 +204,31 @@ type KerlEntry struct {
 	ThresholdMet  bool                  `json:"threshold_met"`
 }
 
+// ── Guardianship ────────────────────────────────────────────────────────────
+
+type GuardianshipRecord struct {
+        ID                  string             `json:"id"`
+        Type                string             `json:"type"`                // minor_child|elderly|disability|temporary
+        GuardianAID         string             `json:"guardian_aid"`
+        DependentAID        string             `json:"dependent_aid"`
+        DependentName       string             `json:"dependent_name"`
+        DelegatedAIDPrefix  string             `json:"delegated_aid_prefix"`
+        Status              string             `json:"status"`              // active|expired|revoked|emancipated
+        HostingType         string             `json:"hosting_type"`        // cloud|device
+        HostingURL          string             `json:"hosting_url"`
+        CreatedAt           string             `json:"created_at"`
+        UpdatedAt           string             `json:"updated_at"`
+        EmancipationTrigger *EmancipationTrigger `json:"emancipation_trigger,omitempty"`
+        CoGuardians         []string           `json:"co_guardians"`
+        MultisigThreshold   int                `json:"multisig_threshold"`
+        Metadata            map[string]string  `json:"metadata"`
+}
+
+type EmancipationTrigger struct {
+        Type  string `json:"type"`  // age|date|manual
+        Value string `json:"value"` // date string or empty for manual
+}
+
 type Store interface {
         SaveEvent(record EventRecord) error
         GetEvents(aid string) ([]EventRecord, error)
@@ -239,6 +264,10 @@ type Store interface {
         GetShareAction(id string) (*ShareAction, error)
         UpsertShareAction(action ShareAction) error
         DeleteShareAction(id string) error
+        SaveGuardianship(record GuardianshipRecord) error
+        GetGuardianships() ([]GuardianshipRecord, error)
+        GetGuardianship(id string) (*GuardianshipRecord, error)
+        DeleteGuardianship(id string) error
         ResetAll() error
         Close() error
 }
@@ -787,6 +816,24 @@ func (s *FileStore) loadWitnessReceipts() (map[string][]WitnessReceiptRecord, er
 		return nil, fmt.Errorf("failed to parse witness receipts: %w", err)
 	}
 	return receipts, nil
+}
+
+// ── Guardianship (FileStore stubs — SQLiteStore is the active implementation) ─
+
+func (s *FileStore) SaveGuardianship(record GuardianshipRecord) error {
+        return fmt.Errorf("guardianship not supported by FileStore — use SQLiteStore")
+}
+
+func (s *FileStore) GetGuardianships() ([]GuardianshipRecord, error) {
+        return []GuardianshipRecord{}, nil
+}
+
+func (s *FileStore) GetGuardianship(id string) (*GuardianshipRecord, error) {
+        return nil, nil
+}
+
+func (s *FileStore) DeleteGuardianship(id string) error {
+        return fmt.Errorf("guardianship not supported by FileStore — use SQLiteStore")
 }
 
 func (s *FileStore) ResetAll() error {

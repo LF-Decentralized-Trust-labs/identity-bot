@@ -18,6 +18,8 @@ import 'auth_management_screen.dart';
 import 'history_screen.dart';
 import 'my_devices_screen.dart';
 import 'api_keys_screen.dart';
+import 'guardianship_screen.dart';
+import 'guardianship_dependents_screen.dart';
 
 class DesktopApp extends StatefulWidget {
   final KeriService keriService;
@@ -111,6 +113,18 @@ class _DesktopAppState extends State<DesktopApp> {
           serverUrl: url,
           onResetIdentity: widget.onResetIdentity,
         );
+
+      // ── Guardianship ──────────────────────────────────────────────────────
+      case DesktopRoute.guardianship:
+        return GuardianshipScreen(serverUrl: url, onNavigate: _navigate);
+      case DesktopRoute.guardianshipDependents:
+        return GuardianshipDependentsScreen(serverUrl: url);
+      case DesktopRoute.guardianshipGuardians:
+        return const ComingSoonScreen(title: 'My Guardians', icon: Icons.shield_outlined);
+      case DesktopRoute.guardianshipSuccession:
+        return const ComingSoonScreen(title: 'Succession Plan', icon: Icons.description_outlined);
+      case DesktopRoute.guardianshipEstate:
+        return const ComingSoonScreen(title: 'Estate Management', icon: Icons.account_balance_outlined);
 
       // ── Coming Soon stubs ──────────────────────────────────────────────────
       case DesktopRoute.credentials:

@@ -924,8 +924,197 @@ class CoreService {
     return EnclaveStatusResponse.fromJson(jsonDecode(response.body));
   }
 
+  // ── Guardianship ──────────────────────────────────────────────────────────
+
+  Future<GuardianshipsListResponse> getGuardianships() async {
+    final response = await _client.get(Uri.parse('$baseUrl/api/guardianship'));
+    if (response.statusCode == 200) {
+      return GuardianshipsListResponse.fromJson(jsonDecode(response.body));
+    }
+    throw Exception('Failed to list guardianships: ${response.statusCode}');
+  }
+
+  Future<GuardianshipResponse> createGuardianship({
+    required String type,
+    required String dependentName,
+    required String hostingType,
+    String? dependentAid,
+    String? hostingUrl,
+    Map<String, dynamic>? emancipationTrigger,
+    List<String>? coGuardians,
+    int? multisigThreshold,
+    Map<String, String>? metadata,
+  }) async {
+    final body = <String, dynamic>{
+      'type': type,
+      'dependent_name': dependentName,
+      'hosting_type': hostingType,
+    };
+    if (dependentAid != null) body['dependent_aid'] = dependentAid;
+    if (hostingUrl != null) body['hosting_url'] = hostingUrl;
+    if (emancipationTrigger != null) body['emancipation_trigger'] = emancipationTrigger;
+    if (coGuardians != null) body['co_guardians'] = coGuardians;
+    if (multisigThreshold != null) body['multisig_threshold'] = multisigThreshold;
+    if (metadata != null) body['metadata'] = metadata;
+
+    final response = await _client.post(
+      Uri.parse('$baseUrl/api/guardianship'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(body),
+    );
+    if (response.statusCode == 201) {
+      return GuardianshipResponse.fromJson(jsonDecode(response.body));
+    }
+    throw Exception(jsonDecode(response.body)['error'] ?? 'Failed to create guardianship');
+  }
+
+  Future<GuardianshipResponse> getGuardianship(String id) async {
+    final response = await _client.get(Uri.parse('$baseUrl/api/guardianship/$id'));
+    if (response.statusCode == 200) {
+      return GuardianshipResponse.fromJson(jsonDecode(response.body));
+    }
+    throw Exception('Failed to get guardianship: ${response.statusCode}');
+  }
+
+  Future<GuardianshipResponse> updateGuardianship(String id, Map<String, dynamic> updates) async {
+    final response = await _client.put(
+      Uri.parse('$baseUrl/api/guardianship/$id'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(updates),
+    );
+    if (response.statusCode == 200) {
+      return GuardianshipResponse.fromJson(jsonDecode(response.body));
+    }
+    throw Exception(jsonDecode(response.body)['error'] ?? 'Failed to update guardianship');
+  }
+
+  Future<GuardianshipResponse> revokeGuardianship(String id) async {
+    final response = await _client.delete(Uri.parse('$baseUrl/api/guardianship/$id'));
+    if (response.statusCode == 200) {
+      return GuardianshipResponse.fromJson(jsonDecode(response.body));
+    }
+    throw Exception('Failed to revoke guardianship: ${response.statusCode}');
+  }
+
+  Future<GuardianshipResponse> emancipateGuardianship(String id) async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/api/guardianship/$id/emancipate'),
+      headers: {'Content-Type': 'application/json'},
+    );
+    if (response.statusCode == 200) {
+      return GuardianshipResponse.fromJson(jsonDecode(response.body));
+    }
+    throw Exception(jsonDecode(response.body)['error'] ?? 'Failed to emancipate guardianship');
+  }
+
   void dispose() {
     _client.close();
+  }
+}
+
+// ── Guardianship models ─────────────────────────────────────────────────────
+
+class GuardianshipResponse {
+  final String id;
+  final String type;
+  final String guardianAid;
+  final String dependentAid;
+  final String dependentName;
+  final String delegatedAidPrefix;
+  final String status;
+  final String hostingType;
+  final String hostingUrl;
+  final String createdAt;
+  final String updatedAt;
+  final EmancipationTriggerResponse? emancipationTrigger;
+  final List<String> coGuardians;
+  final int multisigThreshold;
+  final Map<String, String> metadata;
+
+  GuardianshipResponse({
+    required this.id,
+    required this.type,
+    required this.guardianAid,
+    required this.dependentAid,
+    required this.dependentName,
+    required this.delegatedAidPrefix,
+    required this.status,
+    required this.hostingType,
+    required this.hostingUrl,
+    required this.createdAt,
+    required this.updatedAt,
+    this.emancipationTrigger,
+    required this.coGuardians,
+    required this.multisigThreshold,
+    required this.metadata,
+  });
+
+  factory GuardianshipResponse.fromJson(Map<String, dynamic> json) {
+    return GuardianshipResponse(
+      id: json['id'] as String? ?? '',
+      type: json['type'] as String? ?? '',
+      guardianAid: json['guardian_aid'] as String? ?? '',
+      dependentAid: json['dependent_aid'] as String? ?? '',
+      dependentName: json['dependent_name'] as String? ?? '',
+      delegatedAidPrefix: json['delegated_aid_prefix'] as String? ?? '',
+      status: json['status'] as String? ?? '',
+      hostingType: json['hosting_type'] as String? ?? '',
+      hostingUrl: json['hosting_url'] as String? ?? '',
+      createdAt: json['created_at'] as String? ?? '',
+      updatedAt: json['updated_at'] as String? ?? '',
+      emancipationTrigger: json['emancipation_trigger'] != null
+          ? EmancipationTriggerResponse.fromJson(json['emancipation_trigger'])
+          : null,
+      coGuardians: (json['co_guardians'] as List<dynamic>?)
+          ?.map((e) => e.toString()).toList() ?? [],
+      multisigThreshold: (json['multisig_threshold'] as num?)?.toInt() ?? 0,
+      metadata: (json['metadata'] as Map<String, dynamic>?)
+          ?.map((k, v) => MapEntry(k, v.toString())) ?? {},
+    );
+  }
+
+  String get typeLabel {
+    switch (type) {
+      case 'minor_child': return 'Minor Child';
+      case 'elderly': return 'Elderly Family Member';
+      case 'disability': return 'Person with a Disability';
+      case 'temporary': return 'Temporary Guardianship';
+      default: return type;
+    }
+  }
+
+  bool get isActive => status == 'active';
+}
+
+class EmancipationTriggerResponse {
+  final String type;
+  final String value;
+
+  EmancipationTriggerResponse({required this.type, required this.value});
+
+  factory EmancipationTriggerResponse.fromJson(Map<String, dynamic> json) {
+    return EmancipationTriggerResponse(
+      type: json['type'] as String? ?? '',
+      value: json['value'] as String? ?? '',
+    );
+  }
+
+  Map<String, dynamic> toJson() => {'type': type, 'value': value};
+}
+
+class GuardianshipsListResponse {
+  final List<GuardianshipResponse> guardianships;
+  final int count;
+
+  GuardianshipsListResponse({required this.guardianships, required this.count});
+
+  factory GuardianshipsListResponse.fromJson(Map<String, dynamic> json) {
+    return GuardianshipsListResponse(
+      guardianships: (json['guardianships'] as List<dynamic>?)
+          ?.map((e) => GuardianshipResponse.fromJson(e as Map<String, dynamic>))
+          .toList() ?? [],
+      count: (json['count'] as num?)?.toInt() ?? 0,
+    );
   }
 }
 

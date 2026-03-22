@@ -20,6 +20,13 @@ enum DesktopRoute {
   myDevices,
   apps,
 
+  // Guardianship
+  guardianship,
+  guardianshipDependents,
+  guardianshipGuardians,
+  guardianshipSuccession,
+  guardianshipEstate,
+
   // Hubs
   hubsCommunications,
   hubsAi,
@@ -73,6 +80,7 @@ class DesktopSidebar extends StatefulWidget {
 
 class _DesktopSidebarState extends State<DesktopSidebar> {
   // Section expand state
+  bool _guardianshipOpen = false;
   bool _hubsOpen     = false;
   bool _settingsOpen = false;
   bool _orgOpen      = false;
@@ -106,14 +114,16 @@ class _DesktopSidebarState extends State<DesktopSidebar> {
   }
 
   void _expandForRoute(DesktopRoute r) {
-    if (_isHubRoute(r))      setState(() => _hubsOpen     = true);
-    if (_isSettingsRoute(r)) setState(() => _settingsOpen = true);
-    if (_isOrgRoute(r))      setState(() => _orgOpen      = true);
+    if (_isGuardianshipRoute(r)) setState(() => _guardianshipOpen = true);
+    if (_isHubRoute(r))          setState(() => _hubsOpen         = true);
+    if (_isSettingsRoute(r))     setState(() => _settingsOpen     = true);
+    if (_isOrgRoute(r))          setState(() => _orgOpen          = true);
   }
 
-  bool _isHubRoute(DesktopRoute r)      => r.name.startsWith('hubs');
-  bool _isSettingsRoute(DesktopRoute r) => r.name.startsWith('settings');
-  bool _isOrgRoute(DesktopRoute r)      => r.name.startsWith('org');
+  bool _isGuardianshipRoute(DesktopRoute r) => r.name.startsWith('guardianship');
+  bool _isHubRoute(DesktopRoute r)          => r.name.startsWith('hubs');
+  bool _isSettingsRoute(DesktopRoute r)     => r.name.startsWith('settings');
+  bool _isOrgRoute(DesktopRoute r)          => r.name.startsWith('org');
 
   Future<void> _loadProfile() async {
     try {
@@ -169,6 +179,21 @@ class _DesktopSidebarState extends State<DesktopSidebar> {
                 _NavItem(icon: Icons.storage_outlined,                label: 'My Data',     route: DesktopRoute.dataVault,   current: widget.currentRoute, onTap: _select, comingSoon: true),
                 _NavItem(icon: Icons.devices,                         label: 'My Devices',  route: DesktopRoute.myDevices,   current: widget.currentRoute, onTap: _select),
                 _NavItem(icon: Icons.apps,                            label: 'Apps',        route: DesktopRoute.apps,        current: widget.currentRoute, onTap: _select),
+                _sectionDivider(),
+
+                // ── Guardianship ─────────────────────────────────────────
+                _SectionHeader(
+                  icon: Icons.family_restroom_outlined,
+                  label: 'Guardianship',
+                  expanded: _guardianshipOpen,
+                  onToggle: () => setState(() => _guardianshipOpen = !_guardianshipOpen),
+                ),
+                if (_guardianshipOpen) ...[
+                  _SubItem(icon: Icons.people_outline,            label: 'My Dependents',     route: DesktopRoute.guardianshipDependents, current: widget.currentRoute, onTap: _select),
+                  _SubItem(icon: Icons.shield_outlined,           label: 'My Guardians',      route: DesktopRoute.guardianshipGuardians,  current: widget.currentRoute, onTap: _select, comingSoon: true),
+                  _SubItem(icon: Icons.description_outlined,      label: 'Succession Plan',   route: DesktopRoute.guardianshipSuccession, current: widget.currentRoute, onTap: _select, comingSoon: true),
+                  _SubItem(icon: Icons.account_balance_outlined,  label: 'Estate Management', route: DesktopRoute.guardianshipEstate,     current: widget.currentRoute, onTap: _select, comingSoon: true),
+                ],
                 _sectionDivider(),
 
                 // ── Hubs ───────────────────────────────────────────────────

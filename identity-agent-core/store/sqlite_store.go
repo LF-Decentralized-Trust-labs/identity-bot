@@ -807,10 +807,155 @@ func (s *SQLiteStore) GetWitnessReceipts(eventSAID string) ([]WitnessReceiptReco
 	return receipts, nil
 }
 
+// ── Guardianship ────────────────────────────────────────────────────────────
+
+func (s *SQLiteStore) SaveGuardianship(record GuardianshipRecord) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	if record.CreatedAt == "" {
+		record.CreatedAt = now
+	}
+	record.UpdatedAt = now
+
+	emancipationJSON := "{}"
+	if record.EmancipationTrigger != nil {
+		b, err := json.Marshal(record.EmancipationTrigger)
+		if err != nil {
+			return fmt.Errorf("failed to marshal emancipation trigger: %w", err)
+		}
+		emancipationJSON = string(b)
+	}
+
+	coGuardiansJSON := "[]"
+	if record.CoGuardians != nil {
+		b, err := json.Marshal(record.CoGuardians)
+		if err != nil {
+			return fmt.Errorf("failed to marshal co-guardians: %w", err)
+		}
+		coGuardiansJSON = string(b)
+	}
+
+	metadataJSON := "{}"
+	if record.Metadata != nil {
+		b, err := json.Marshal(record.Metadata)
+		if err != nil {
+			return fmt.Errorf("failed to marshal metadata: %w", err)
+		}
+		metadataJSON = string(b)
+	}
+
+	_, err := s.db.Exec(`
+		INSERT INTO guardianships (id, type, guardian_aid, dependent_aid, dependent_name, delegated_aid_prefix,
+			status, hosting_type, hosting_url, created_at, updated_at, emancipation_json, co_guardians_json,
+			multisig_threshold, metadata_json)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			type                 = excluded.type,
+			guardian_aid         = excluded.guardian_aid,
+			dependent_aid        = excluded.dependent_aid,
+			dependent_name       = excluded.dependent_name,
+			delegated_aid_prefix = excluded.delegated_aid_prefix,
+			status               = excluded.status,
+			hosting_type         = excluded.hosting_type,
+			hosting_url          = excluded.hosting_url,
+			updated_at           = excluded.updated_at,
+			emancipation_json    = excluded.emancipation_json,
+			co_guardians_json    = excluded.co_guardians_json,
+			multisig_threshold   = excluded.multisig_threshold,
+			metadata_json        = excluded.metadata_json`,
+		record.ID, record.Type, record.GuardianAID, record.DependentAID,
+		record.DependentName, record.DelegatedAIDPrefix, record.Status,
+		record.HostingType, record.HostingURL, record.CreatedAt, record.UpdatedAt,
+		emancipationJSON, coGuardiansJSON, record.MultisigThreshold, metadataJSON,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to save guardianship: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) GetGuardianships() ([]GuardianshipRecord, error) {
+	rows, err := s.db.Query(
+		`SELECT id, type, guardian_aid, dependent_aid, dependent_name, delegated_aid_prefix,
+			status, hosting_type, hosting_url, created_at, updated_at, emancipation_json,
+			co_guardians_json, multisig_threshold, metadata_json
+		 FROM guardianships ORDER BY created_at DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query guardianships: %w", err)
+	}
+	defer rows.Close()
+	return s.scanGuardianships(rows)
+}
+
+func (s *SQLiteStore) GetGuardianship(id string) (*GuardianshipRecord, error) {
+	rows, err := s.db.Query(
+		`SELECT id, type, guardian_aid, dependent_aid, dependent_name, delegated_aid_prefix,
+			status, hosting_type, hosting_url, created_at, updated_at, emancipation_json,
+			co_guardians_json, multisig_threshold, metadata_json
+		 FROM guardianships WHERE id = ?`, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query guardianship: %w", err)
+	}
+	defer rows.Close()
+
+	records, err := s.scanGuardianships(rows)
+	if err != nil {
+		return nil, err
+	}
+	if len(records) == 0 {
+		return nil, nil
+	}
+	return &records[0], nil
+}
+
+func (s *SQLiteStore) DeleteGuardianship(id string) error {
+	_, err := s.db.Exec(`DELETE FROM guardianships WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete guardianship: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) scanGuardianships(rows *sql.Rows) ([]GuardianshipRecord, error) {
+	var records []GuardianshipRecord
+	for rows.Next() {
+		var r GuardianshipRecord
+		var emancipationJSON, coGuardiansJSON, metadataJSON string
+		if err := rows.Scan(&r.ID, &r.Type, &r.GuardianAID, &r.DependentAID,
+			&r.DependentName, &r.DelegatedAIDPrefix, &r.Status, &r.HostingType,
+			&r.HostingURL, &r.CreatedAt, &r.UpdatedAt, &emancipationJSON,
+			&coGuardiansJSON, &r.MultisigThreshold, &metadataJSON); err != nil {
+			return nil, fmt.Errorf("failed to scan guardianship: %w", err)
+		}
+		if emancipationJSON != "" && emancipationJSON != "{}" {
+			var trigger EmancipationTrigger
+			if err := json.Unmarshal([]byte(emancipationJSON), &trigger); err == nil {
+				r.EmancipationTrigger = &trigger
+			}
+		}
+		if coGuardiansJSON != "" && coGuardiansJSON != "[]" {
+			_ = json.Unmarshal([]byte(coGuardiansJSON), &r.CoGuardians)
+		}
+		if r.CoGuardians == nil {
+			r.CoGuardians = []string{}
+		}
+		if metadataJSON != "" && metadataJSON != "{}" {
+			_ = json.Unmarshal([]byte(metadataJSON), &r.Metadata)
+		}
+		if r.Metadata == nil {
+			r.Metadata = map[string]string{}
+		}
+		records = append(records, r)
+	}
+	if records == nil {
+		records = []GuardianshipRecord{}
+	}
+	return records, nil
+}
+
 // ── Reset ─────────────────────────────────────────────────────────────────────
 
 func (s *SQLiteStore) ResetAll() error {
-	tables := []string{"kel", "identity", "contacts", "pending_requests", "profile", "settings", "endpoint", "contact_kels", "credentials", "presentations", "witness_receipts", "tasks"}
+	tables := []string{"kel", "identity", "contacts", "pending_requests", "profile", "settings", "endpoint", "contact_kels", "credentials", "presentations", "witness_receipts", "tasks", "guardianships"}
 	for _, t := range tables {
 		if _, err := s.db.Exec(`DELETE FROM ` + t); err != nil {
 			return fmt.Errorf("failed to clear table %s: %w", t, err)

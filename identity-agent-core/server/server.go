@@ -338,6 +338,7 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
                 r.Post("/reset", s.handleReset)
 
                 s.sandboxRoutes(r)
+                s.guardianshipRoutes(r)
                 s.aiMemoryRoutes(r)
                 r.Get("/ws/events", s.handleWebSocketEvents)
         })
