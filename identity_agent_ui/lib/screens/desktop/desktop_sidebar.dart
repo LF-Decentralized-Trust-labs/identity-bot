@@ -72,7 +72,6 @@ class DesktopSidebar extends StatefulWidget {
 
 class _DesktopSidebarState extends State<DesktopSidebar> {
   // Section expand state
-  bool _identityOpen  = true;
   bool _hubsOpen      = false;
   bool _settingsOpen  = false;
   bool _orgOpen       = false;
@@ -107,7 +106,6 @@ class _DesktopSidebarState extends State<DesktopSidebar> {
   }
 
   void _expandForRoute(DesktopRoute r) {
-    if (_isIdentityRoute(r)) setState(() => _identityOpen  = true);
     if (_isHubRoute(r))      setState(() => _hubsOpen      = true);
     if (_isSettingsRoute(r)) setState(() => _settingsOpen  = true);
     if (_isOrgRoute(r))      setState(() => _orgOpen       = true);
@@ -161,15 +159,7 @@ class _DesktopSidebarState extends State<DesktopSidebar> {
                 _sectionDivider(),
 
                 // ── Identity ───────────────────────────────────────────────
-                _SectionHeader(
-                  icon: Icons.fingerprint,
-                  label: 'Identity',
-                  expanded: _identityOpen,
-                  onToggle: () => setState(() => _identityOpen = !_identityOpen),
-                ),
-                if (_identityOpen) ...[
-                  _SubItem(icon: Icons.person_outline, label: 'My Profile', route: DesktopRoute.identityProfile, current: widget.currentRoute, onTap: _select),
-                ],
+                _NavItem(icon: Icons.person_outline, label: 'My Profile', route: DesktopRoute.identityProfile, current: widget.currentRoute, onTap: _select),
                 _sectionDivider(),
 
                 // ── Top-level items ────────────────────────────────────────
@@ -179,7 +169,7 @@ class _DesktopSidebarState extends State<DesktopSidebar> {
                 _NavItem(icon: Icons.account_balance_wallet_outlined,  label: 'Wallet',     route: DesktopRoute.wallet,      current: widget.currentRoute, onTap: _select, comingSoon: true),
                 _NavItem(icon: Icons.diamond_outlined,                 label: 'Assets',     route: DesktopRoute.assets,      current: widget.currentRoute, onTap: _select, comingSoon: true),
                 _NavItem(icon: Icons.storage_outlined,                 label: 'Data Vault', route: DesktopRoute.dataVault,   current: widget.currentRoute, onTap: _select, comingSoon: true),
-                _NavItem(icon: Icons.devices,                          label: 'My Devices', route: DesktopRoute.myDevices,   current: widget.currentRoute, onTap: _select, comingSoon: true),
+                _NavItem(icon: Icons.devices,                          label: 'My Devices', route: DesktopRoute.myDevices,   current: widget.currentRoute, onTap: _select),
                 _sectionDivider(),
 
                 // ── Hubs ───────────────────────────────────────────────────
@@ -224,8 +214,8 @@ class _DesktopSidebarState extends State<DesktopSidebar> {
                 ],
                 _sectionDivider(),
 
-                // ── Activity Log ───────────────────────────────────────────
-                _NavItem(icon: Icons.receipt_long_outlined, label: 'Activity Log', route: DesktopRoute.activityLog, current: widget.currentRoute, onTap: _select, comingSoon: true),
+                // ── History ────────────────────────────────────────────────
+                _NavItem(icon: Icons.history, label: 'History', route: DesktopRoute.activityLog, current: widget.currentRoute, onTap: _select),
                 _sectionDivider(),
 
                 // ── Organization ───────────────────────────────────────────

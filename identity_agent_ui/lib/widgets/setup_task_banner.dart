@@ -82,83 +82,14 @@ class _SetupTaskBannerState extends State<SetupTaskBanner> {
   }
 
   Widget _buildDesktopBanner(int remaining, double pct) {
-    return GestureDetector(
+    final color = _done == 0 ? const Color(0xFFCC3333) : const Color(0xFFCC8800);
+    return _HoverBanner(
+      color: color,
+      pct: pct,
+      done: _done,
+      remaining: remaining,
       onTap: _openChecklist,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-        decoration: const BoxDecoration(
-          color: Color(0xFF1A1A2E),
-          border: Border(
-            bottom: BorderSide(color: Color(0xFF2D2D4E), width: 1),
-          ),
-        ),
-        child: Row(
-          children: [
-            SizedBox(
-              width: 28,
-              height: 28,
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  CircularProgressIndicator(
-                    value: pct,
-                    strokeWidth: 3,
-                    backgroundColor: const Color(0xFF2D2D4E),
-                    color: const Color(0xFF00CC66),
-                  ),
-                  Text(
-                    '$_done',
-                    style: const TextStyle(
-                      color: Color(0xFFE0E0E0),
-                      fontSize: 9,
-                      fontWeight: FontWeight.w700,
-                      fontFamily: 'monospace',
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: RichText(
-                text: TextSpan(
-                  style: const TextStyle(
-                    fontFamily: 'monospace',
-                    fontSize: 12,
-                    height: 1.3,
-                  ),
-                  children: [
-                    const TextSpan(
-                      text: 'Setup incomplete — ',
-                      style: TextStyle(color: Color(0xFFB0B0B0)),
-                    ),
-                    TextSpan(
-                      text:
-                          '$remaining task${remaining == 1 ? '' : 's'} remaining.',
-                      style: const TextStyle(
-                        color: Color(0xFFE0E0E0),
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const TextSpan(
-                      text: '  Tap to continue.',
-                      style: TextStyle(color: Color(0xFF4488FF)),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            IconButton(
-              icon: const Icon(Icons.close, size: 16),
-              color: const Color(0xFF606060),
-              onPressed: _dismiss,
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-              tooltip: 'Dismiss',
-            ),
-          ],
-        ),
-      ),
+      onDismiss: _dismiss,
     );
   }
 
@@ -251,5 +182,107 @@ class _SetupTaskBannerState extends State<SetupTaskBanner> {
             ),
     ));
     _load();
+  }
+}
+
+// ── Hover-animated desktop banner ─────────────────────────────────────────────
+
+class _HoverBanner extends StatefulWidget {
+  final Color color;
+  final double pct;
+  final int done;
+  final int remaining;
+  final VoidCallback onTap;
+  final VoidCallback onDismiss;
+
+  const _HoverBanner({
+    required this.color,
+    required this.pct,
+    required this.done,
+    required this.remaining,
+    required this.onTap,
+    required this.onDismiss,
+  });
+
+  @override
+  State<_HoverBanner> createState() => _HoverBannerState();
+}
+
+class _HoverBannerState extends State<_HoverBanner> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = widget.color;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          margin: const EdgeInsets.only(top: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+          decoration: BoxDecoration(
+            color: c.withOpacity(_hovered ? 0.16 : 0.08),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: c.withOpacity(_hovered ? 0.55 : 0.35)),
+          ),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 28,
+                height: 28,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    CircularProgressIndicator(
+                      value: widget.pct,
+                      strokeWidth: 3,
+                      backgroundColor: c.withOpacity(0.15),
+                      color: c,
+                    ),
+                    Text(
+                      '${widget.done}',
+                      style: TextStyle(
+                        color: c,
+                        fontSize: 9,
+                        fontWeight: FontWeight.w700,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: RichText(
+                  text: TextSpan(
+                    style: TextStyle(fontSize: 13, color: c, height: 1.3),
+                    children: [
+                      TextSpan(
+                        text: '${widget.remaining} task${widget.remaining == 1 ? '' : 's'} remaining',
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      const TextSpan(
+                          text: '  ·  Click to complete setup and unlock all features.'),
+                    ],
+                  ),
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close, size: 14),
+                color: c.withOpacity(0.6),
+                onPressed: widget.onDismiss,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                tooltip: 'Dismiss',
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }

@@ -58,7 +58,7 @@ class _MobileContactsScreenState extends State<MobileContactsScreen> {
   }
 
   void _syncWitnessCount(List<ContactResponse> contacts) {
-    final count = contacts.where((c) => c.isMutual && c.role == 'witness').length;
+    final count = contacts.where((c) => c.isAccepted && c.isWitness).length;
     IdentityLevelService.setWitnessCount(count);
   }
 
@@ -284,7 +284,7 @@ class _ContactCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 _buildStatusBadge(),
-                if (contact.role != 'general') ...[
+                if (contact.contactType != 'general' || contact.isWitness) ...[
                   const SizedBox(height: 4),
                   _buildRoleBadge(),
                 ],
@@ -347,9 +347,9 @@ class _ContactCard extends StatelessWidget {
     Color color;
     String label;
 
-    if (contact.isMutual) {
+    if (contact.isAccepted) {
       color = MobileColors.success;
-      label = 'Mutual';
+      label = 'Connected';
     } else if (contact.verified) {
       color = MobileColors.info;
       label = 'Verified';
@@ -377,16 +377,12 @@ class _ContactCard extends StatelessWidget {
   Widget _buildRoleBadge() {
     Color color;
     String label;
-    switch (contact.role) {
-      case 'witness':
-        color = MobileColors.primary;
-        label = 'WITNESS';
-      case 'professional':
-        color = MobileColors.textSecondary;
-        label = 'PROFESSIONAL';
-      default:
-        color = MobileColors.textSecondary;
-        label = contact.role.toUpperCase();
+    if (contact.isWitness) {
+      color = MobileColors.primary;
+      label = 'WITNESS';
+    } else {
+      color = MobileColors.textSecondary;
+      label = contact.contactType.toUpperCase();
     }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -567,21 +563,11 @@ class _ContactDetailScreenState extends State<_ContactDetailScreen> {
                     child: ElevatedButton(
                       onPressed: () async {
                         Navigator.of(ctx).pop();
-                        final isTrusted = relationshipType == 'trusted';
-                        // Map relationship type to backend role + trusted flag.
-                        // Witness designation is set automatically by backend when trusted.
-                        final backendRole = relationshipType == 'professional'
-                            ? 'professional'
-                            : 'general';
                         try {
                           await coreService.acceptContact(_contact.aid,
-                              trusted: isTrusted);
-                          if (backendRole != 'general') {
-                            await coreService.updateContact(_contact.aid,
-                                role: backendRole);
-                          }
+                              contactType: relationshipType);
                           coreService.dispose();
-                          if (isTrusted) {
+                          if (relationshipType == 'trusted') {
                             await SetupTaskService.markComplete(
                                 SetupTask.getVerified);
                           }
@@ -590,7 +576,7 @@ class _ContactDetailScreenState extends State<_ContactDetailScreen> {
                                       AgentConfig.coreBaseUrl)
                               .getContacts();
                           IdentityLevelService.setWitnessCount(all.contacts
-                              .where((c) => c.isMutual && c.role == 'witness')
+                              .where((c) => c.isAccepted && c.isWitness)
                               .length);
                           if (mounted) Navigator.of(context).pop(true);
                         } catch (e) {
@@ -623,9 +609,7 @@ class _ContactDetailScreenState extends State<_ContactDetailScreen> {
   }
 
   Future<void> _showChangeRoleSheet() async {
-    // Derive current relationship type from role + trusted fields.
-    String relationshipType = _contact.trusted ? 'trusted' : 'general';
-    if (_contact.role == 'professional') relationshipType = 'professional';
+    String relationshipType = _contact.contactType;
     final coreService = CoreService(baseUrl: widget.serverUrl ?? AgentConfig.coreBaseUrl);
 
     await showModalBottomSheet<void>(
@@ -680,26 +664,18 @@ class _ContactDetailScreenState extends State<_ContactDetailScreen> {
                 child: ElevatedButton(
                   onPressed: () async {
                     Navigator.of(ctx).pop();
-                    final isTrusted = relationshipType == 'trusted';
-                    final backendRole = relationshipType == 'professional'
-                        ? 'professional'
-                        : 'general';
                     try {
-                      ContactResponse updated = await coreService.updateContact(
-                          _contact.aid, role: backendRole);
-                      if (isTrusted != _contact.trusted) {
-                        updated = await coreService.updateContact(
-                            _contact.aid, trusted: isTrusted);
-                      }
+                      final updated = await coreService.updateContact(
+                          _contact.aid, contactType: relationshipType);
                       coreService.dispose();
-                      if (isTrusted && !_contact.trusted) {
+                      if (relationshipType == 'trusted' && _contact.contactType != 'trusted') {
                         await SetupTaskService.markComplete(SetupTask.getVerified);
                       }
                       final all = await CoreService(
                               baseUrl: widget.serverUrl ?? AgentConfig.coreBaseUrl)
                           .getContacts();
                       IdentityLevelService.setWitnessCount(all.contacts
-                          .where((c) => c.isMutual && c.role == 'witness')
+                          .where((c) => c.isAccepted && c.isWitness)
                           .length);
                       if (mounted) setState(() => _contact = updated);
                     } catch (e) {
@@ -849,79 +825,14 @@ class _ContactDetailScreenState extends State<_ContactDetailScreen> {
               ),
               const SizedBox(height: 8),
             ],
-            // Trust toggle for non-pending contacts
+            // Contact type for non-pending contacts
             if (!_contact.isPendingInbound) ...[
-              GestureDetector(
-                onTap: () async {
-                  final coreService = CoreService(
-                      baseUrl: widget.serverUrl ?? AgentConfig.coreBaseUrl);
-                  try {
-                    final updated = await coreService.updateContact(
-                        _contact.aid, trusted: !_contact.trusted);
-                    if (!_contact.trusted) {
-                      await SetupTaskService.markComplete(SetupTask.getVerified);
-                    }
-                    coreService.dispose();
-                    if (mounted) setState(() => _contact = updated);
-                  } catch (e) {
-                    coreService.dispose();
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                          content: Text('$e'),
-                          backgroundColor: MobileColors.error));
-                    }
-                  }
-                },
-                child: Container(
-                  width: double.infinity,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  decoration: BoxDecoration(
-                    color: _contact.trusted
-                        ? Colors.green.withOpacity(0.08)
-                        : MobileColors.surfaceSecondary,
-                    border: Border.all(
-                      color: _contact.trusted
-                          ? Colors.green.withOpacity(0.5)
-                          : MobileColors.border,
-                    ),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        _contact.trusted
-                            ? Icons.favorite
-                            : Icons.favorite_border,
-                        color: _contact.trusted
-                            ? Colors.green
-                            : MobileColors.textSecondary,
-                        size: 18,
-                      ),
-                      const SizedBox(width: 10),
-                      Text(
-                        _contact.trusted
-                            ? 'I know and trust this contact'
-                            : 'Mark as trusted',
-                        style: TextStyle(
-                          color: _contact.trusted
-                              ? Colors.green
-                              : MobileColors.textSecondary,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton.icon(
                   onPressed: _showChangeRoleSheet,
                   icon: const Icon(Icons.swap_horiz, size: 18),
-                  label: Text('Relationship: ${_contact.trusted ? 'Trusted' : _contact.role == 'professional' ? 'Professional' : 'General'}'),
+                  label: Text('Contact Type: ${_contact.contactType[0].toUpperCase()}${_contact.contactType.substring(1)}'),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: MobileColors.primary,
                     side: const BorderSide(color: MobileColors.primary),
@@ -988,9 +899,9 @@ class _ContactDetailScreenState extends State<_ContactDetailScreen> {
     if (_contact.isPendingInbound) {
       color = MobileColors.warning;
       label = 'Incoming Request';
-    } else if (_contact.isMutual) {
+    } else if (_contact.isAccepted) {
       color = MobileColors.success;
-      label = 'Mutual Connection';
+      label = 'Connected';
     } else if (_contact.verified) {
       color = MobileColors.info;
       label = 'Verified';
@@ -1042,7 +953,7 @@ class _ContactDetailScreenState extends State<_ContactDetailScreen> {
             onCopy: () => _copyToClipboard(_contact.oobiUrl, 'OOBI URL'),
           ),
           const Divider(height: 16),
-          _DetailRow(label: 'Role', value: _contact.role),
+          _DetailRow(label: 'Contact Type', value: _contact.contactType),
           const Divider(height: 16),
           _DetailRow(label: 'Status', value: _contact.status.isNotEmpty ? _contact.status : 'added'),
           const Divider(height: 16),

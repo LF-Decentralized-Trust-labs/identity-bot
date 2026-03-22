@@ -424,8 +424,8 @@ class _AuthManagementScreenState extends State<AuthManagementScreen> {
   }
 
   Widget _buildAddMethodButton() {
-    return SizedBox(
-      width: double.infinity,
+    return Align(
+      alignment: Alignment.centerLeft,
       child: OutlinedButton.icon(
         onPressed: () async {
           await Navigator.of(context).push(
@@ -436,14 +436,13 @@ class _AuthManagementScreenState extends State<AuthManagementScreen> {
         style: OutlinedButton.styleFrom(
           foregroundColor: AppColors.accent,
           side: const BorderSide(color: AppColors.accent),
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         ),
-        icon: const Icon(Icons.add, size: 16),
+        icon: const Icon(Icons.add, size: 14),
         label: const Text(
           'Add / Improve Authentication',
-          style: TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.w600),
+          style: TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.w600, fontSize: 12),
         ),
       ),
     );

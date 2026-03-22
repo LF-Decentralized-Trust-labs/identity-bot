@@ -116,7 +116,9 @@ class _AvatarCropDialogState extends State<AvatarCropDialog> {
 
     return Dialog(
       insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 40),
-      child: Column(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 420),
+        child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           const Padding(
@@ -217,6 +219,7 @@ class _AvatarCropDialogState extends State<AvatarCropDialog> {
             ),
           ),
         ],
+        ),
       ),
     );
   }

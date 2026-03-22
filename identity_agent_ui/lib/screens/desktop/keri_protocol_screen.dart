@@ -13,8 +13,9 @@ import '../../config/agent_config.dart';
 class KeriProtocolScreen extends StatefulWidget {
   final KeriService keriService;
   final String? serverUrl;
+  final VoidCallback? onViewKeyEvents;
 
-  const KeriProtocolScreen({super.key, required this.keriService, this.serverUrl});
+  const KeriProtocolScreen({super.key, required this.keriService, this.serverUrl, this.onViewKeyEvents});
 
   @override
   State<KeriProtocolScreen> createState() => _KeriProtocolScreenState();
@@ -306,10 +307,21 @@ class _KeriProtocolScreenState extends State<KeriProtocolScreen> {
   Widget _buildKelCard() => _card(
     icon: Icons.history,
     title: 'Key Event Log',
-    trailing: TextButton(
-      onPressed: () => setState(() => _kelExpanded = !_kelExpanded),
-      child: Text(_kelExpanded ? 'Collapse' : 'Expand',
-          style: const TextStyle(color: AppColors.primary, fontSize: 12)),
+    trailing: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (widget.onViewKeyEvents != null)
+          TextButton(
+            onPressed: widget.onViewKeyEvents,
+            child: const Text('View in History →',
+                style: TextStyle(color: AppColors.accent, fontSize: 12)),
+          ),
+        TextButton(
+          onPressed: () => setState(() => _kelExpanded = !_kelExpanded),
+          child: Text(_kelExpanded ? 'Collapse' : 'Expand',
+              style: const TextStyle(color: AppColors.primary, fontSize: 12)),
+        ),
+      ],
     ),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,

@@ -29,27 +29,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (widget.serverUrl != null) return widget.serverUrl;
     if (widget.keriService is MobileOnDeviceKeriService) {
       final standalone = widget.keriService as MobileOnDeviceKeriService;
-      if (standalone.isCoreReady) {
-        return standalone.mobileCore.baseUrl;
-      }
+      if (standalone.isCoreReady) return standalone.mobileCore.baseUrl;
     }
     return null;
   }
 
-  final _fnController = TextEditingController();
-  final _givenNameController = TextEditingController();
+  final _fnController         = TextEditingController();
+  final _givenNameController  = TextEditingController();
   final _familyNameController = TextEditingController();
-  final _orgController = TextEditingController();
-  final _titleController = TextEditingController();
-  final _emailController = TextEditingController();
-  final _telController = TextEditingController();
-  final _noteController = TextEditingController();
+  final _orgController        = TextEditingController();   // kept for data round-trip
+  final _titleController      = TextEditingController();  // kept for data round-trip
+  final _emailController      = TextEditingController();
+  final _telController        = TextEditingController();
+  final _noteController       = TextEditingController();
 
-  bool _loading = true;
-  bool _saving = false;
+  bool _loading        = true;
+  bool _saving         = false;
+  bool _savedIndicator = false;
   String? _error;
-  String? _successMessage;
-  String _photoBase64 = '';
+  String _photoBase64  = '';
 
   @override
   void initState() {
@@ -74,59 +72,48 @@ class _ProfileScreenState extends State<ProfileScreen> {
     try {
       final profile = await _coreService.getProfile();
       setState(() {
-        _fnController.text = profile.fullName;
-        _givenNameController.text = profile.givenName;
+        _fnController.text         = profile.fullName;
+        _givenNameController.text  = profile.givenName;
         _familyNameController.text = profile.familyName;
-        _orgController.text = profile.org;
-        _titleController.text = profile.title;
-        _emailController.text = profile.email;
-        _telController.text = profile.tel;
-        _noteController.text = profile.note;
-        _photoBase64 = profile.photo;
-        _loading = false;
+        _orgController.text        = profile.org;
+        _titleController.text      = profile.title;
+        _emailController.text      = profile.email;
+        _telController.text        = profile.tel;
+        _noteController.text       = profile.note;
+        _photoBase64               = profile.photo;
+        _loading                   = false;
       });
     } catch (e) {
       setState(() {
-        _error = 'Failed to load profile: $e';
+        _error   = 'Failed to load profile: $e';
         _loading = false;
       });
     }
   }
 
   Future<void> _saveProfile() async {
-    setState(() {
-      _saving = true;
-      _error = null;
-      _successMessage = null;
-    });
-
+    if (_saving) return;
+    setState(() { _saving = true; _error = null; });
     try {
-      final profile = ProfileResponse(
-        fullName: _fnController.text.trim(),
-        givenName: _givenNameController.text.trim(),
+      await _coreService.saveProfile(ProfileResponse(
+        fullName:   _fnController.text.trim(),
+        givenName:  _givenNameController.text.trim(),
         familyName: _familyNameController.text.trim(),
-        org: _orgController.text.trim(),
-        title: _titleController.text.trim(),
-        email: _emailController.text.trim(),
-        tel: _telController.text.trim(),
-        note: _noteController.text.trim(),
-        photo: _photoBase64,
-      );
-      await _coreService.saveProfile(profile);
-      setState(() {
-        _saving = false;
-        _successMessage = 'Profile saved';
-      });
-      Future.delayed(const Duration(seconds: 3), () {
-        if (mounted) {
-          setState(() => _successMessage = null);
-        }
-      });
+        org:        _orgController.text.trim(),
+        title:      _titleController.text.trim(),
+        email:      _emailController.text.trim(),
+        tel:        _telController.text.trim(),
+        note:       _noteController.text.trim(),
+        photo:      _photoBase64,
+      ));
+      if (mounted) {
+        setState(() { _saving = false; _savedIndicator = true; });
+        Future.delayed(const Duration(seconds: 2), () {
+          if (mounted) setState(() => _savedIndicator = false);
+        });
+      }
     } catch (e) {
-      setState(() {
-        _saving = false;
-        _error = 'Failed to save profile: $e';
-      });
+      if (mounted) setState(() { _saving = false; _error = 'Failed to save: $e'; });
     }
   }
 
@@ -134,84 +121,105 @@ class _ProfileScreenState extends State<ProfileScreen> {
     try {
       final base64 = await photo_picker.pickAndCropPhotoBase64(context);
       if (base64 != null && base64.isNotEmpty) {
-        setState(() {
-          _photoBase64 = base64;
-        });
+        setState(() => _photoBase64 = base64);
+        _saveProfile();
       }
     } catch (e) {
-      setState(() {
-        _error = 'Failed to pick photo: $e';
-      });
+      setState(() => _error = 'Failed to pick photo: $e');
     }
   }
 
   void _removePhoto() {
-    setState(() {
-      _photoBase64 = '';
-    });
+    setState(() => _photoBase64 = '');
+    _saveProfile();
   }
 
+  // ── Photo ────────────────────────────────────────────────────────────────────
+
   Widget _buildPhotoSection() {
-    Widget photoWidget;
+    Widget avatar;
     if (_photoBase64.isNotEmpty) {
       try {
-        final bytes = base64Decode(_photoBase64);
-        photoWidget = CircleAvatar(
-          radius: 50,
-          backgroundImage: MemoryImage(Uint8List.fromList(bytes)),
+        avatar = CircleAvatar(
+          radius: 52,
+          backgroundImage: MemoryImage(Uint8List.fromList(base64Decode(_photoBase64))),
           backgroundColor: AppColors.surfaceLight,
         );
       } catch (_) {
-        photoWidget = const CircleAvatar(
-          radius: 50,
-          backgroundColor: AppColors.surfaceLight,
-          child: Icon(Icons.person, size: 50, color: AppColors.textMuted),
-        );
+        avatar = _defaultAvatar();
       }
     } else {
-      photoWidget = const CircleAvatar(
-        radius: 50,
-        backgroundColor: AppColors.surfaceLight,
-        child: Icon(Icons.person, size: 50, color: AppColors.textMuted),
-      );
+      avatar = _defaultAvatar();
     }
 
-    return Column(
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        GestureDetector(
-          onTap: _pickPhoto,
-          child: Stack(
-            alignment: Alignment.bottomRight,
-            children: [
-              photoWidget,
-              Container(
-                padding: const EdgeInsets.all(4),
-                decoration: const BoxDecoration(
-                  color: AppColors.accent,
-                  shape: BoxShape.circle,
+        MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: GestureDetector(
+            onTap: _pickPhoto,
+            child: Stack(
+              alignment: Alignment.bottomRight,
+              children: [
+                avatar,
+                Container(
+                  padding: const EdgeInsets.all(5),
+                  decoration: const BoxDecoration(
+                    color: AppColors.accent,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.camera_alt, size: 15, color: AppColors.primary),
                 ),
-                child: const Icon(Icons.camera_alt, size: 16, color: AppColors.primary),
-              ),
-            ],
-          ),
-        ),
-        if (_photoBase64.isNotEmpty)
-          TextButton(
-            onPressed: _removePhoto,
-            child: const Text(
-              'Remove Photo',
-              style: TextStyle(
-                color: AppColors.error,
-                fontSize: 13,
-              ),
+              ],
             ),
           ),
+        ),
+        const SizedBox(width: 20),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Profile Photo',
+              style: TextStyle(color: AppColors.textPrimary, fontSize: 14, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Click photo to change',
+              style: TextStyle(color: AppColors.textMuted, fontSize: 12),
+            ),
+            if (_photoBase64.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              GestureDetector(
+                onTap: _removePhoto,
+                child: const Text(
+                  'Remove',
+                  style: TextStyle(color: AppColors.error, fontSize: 12),
+                ),
+              ),
+            ],
+          ],
+        ),
       ],
     );
   }
 
-  Widget _buildField(String label, TextEditingController controller, {int maxLines = 1, TextInputType? keyboardType}) {
-    return Padding(
+  CircleAvatar _defaultAvatar() => const CircleAvatar(
+        radius: 52,
+        backgroundColor: AppColors.surfaceLight,
+        child: Icon(Icons.person, size: 48, color: AppColors.textMuted),
+      );
+
+  // ── Field ────────────────────────────────────────────────────────────────────
+
+  Widget _buildField(
+    String label,
+    TextEditingController controller, {
+    int maxLines = 1,
+    TextInputType? keyboardType,
+    double? width,
+  }) {
+    Widget field = Padding(
       padding: const EdgeInsets.only(bottom: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -229,10 +237,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             controller: controller,
             maxLines: maxLines,
             keyboardType: keyboardType,
-            style: const TextStyle(
-              color: AppColors.textPrimary,
-              fontSize: 14,
-            ),
+            style: const TextStyle(color: AppColors.textPrimary, fontSize: 14),
             decoration: InputDecoration(
               filled: true,
               fillColor: AppColors.surfaceLight,
@@ -254,7 +259,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ],
       ),
     );
+
+    if (width != null) {
+      return SizedBox(width: width, child: field);
+    }
+    return field;
   }
+
+  // ── Build ────────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -263,85 +275,114 @@ class _ProfileScreenState extends State<ProfileScreen> {
         child: _loading
             ? const Center(child: CircularProgressIndicator(color: AppColors.accent))
             : SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(32, 32, 32, 32),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Text(
-                      'My Profile',
-                      style: Theme.of(context).textTheme.headlineMedium,
-                    ),
-                    const SizedBox(height: 4),
-                    const Text(
-                      'Your digital identity card.',
-                      style: TextStyle(color: AppColors.textSecondary, fontSize: 14),
-                    ),
-                    const SizedBox(height: 24),
-                    Center(child: _buildPhotoSection()),
-                    const SizedBox(height: 24),
-                    if (_error != null)
-                      Container(
-                        margin: const EdgeInsets.only(bottom: 16),
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: AppColors.error.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: AppColors.error.withOpacity(0.3)),
-                        ),
-                        child: Text(
-                          _error!,
-                          style: const TextStyle(color: AppColors.error, fontSize: 12, fontFamily: 'monospace'),
-                        ),
-                      ),
-                    if (_successMessage != null)
-                      Container(
-                        margin: const EdgeInsets.only(bottom: 16),
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: AppColors.accent.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: AppColors.accent.withOpacity(0.3)),
-                        ),
-                        child: Row(
+                padding: const EdgeInsets.fromLTRB(32, 32, 32, 48),
+                child: Align(
+                  alignment: Alignment.topLeft,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 560),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // ── Header ──────────────────────────────────────────
+                        const Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Icon(Icons.check_circle, color: AppColors.accent, size: 16),
-                            const SizedBox(width: 8),
                             Text(
-                              _successMessage!,
-                              style: const TextStyle(color: AppColors.accent, fontSize: 12, fontFamily: 'monospace'),
+                              'My Profile',
+                              style: TextStyle(
+                                color: AppColors.textPrimary,
+                                fontSize: 22,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            SizedBox(height: 2),
+                            Text(
+                              'Your digital identity card.',
+                              style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
                             ),
                           ],
                         ),
-                      ),
-                    _buildField('Display Name', _fnController),
-                    Row(
-                      children: [
-                        Expanded(child: _buildField('Given Name', _givenNameController)),
-                        const SizedBox(width: 12),
-                        Expanded(child: _buildField('Family Name', _familyNameController)),
+
+                        const SizedBox(height: 28),
+
+                        // ── Photo ────────────────────────────────────────────
+                        _buildPhotoSection(),
+                        const SizedBox(height: 28),
+
+                        // ── Error ────────────────────────────────────────────
+                        if (_error != null) ...[
+                          Container(
+                            margin: const EdgeInsets.only(bottom: 16),
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: AppColors.error.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: AppColors.error.withOpacity(0.3)),
+                            ),
+                            child: Text(
+                              _error!,
+                              style: const TextStyle(color: AppColors.error, fontSize: 12, fontFamily: 'monospace'),
+                            ),
+                          ),
+                        ],
+
+                        // ── Fields ───────────────────────────────────────────
+                        _buildField('Display Name', _fnController),
+                        Row(
+                          children: [
+                            Expanded(child: _buildField('Given Name', _givenNameController)),
+                            const SizedBox(width: 12),
+                            Expanded(child: _buildField('Family Name', _familyNameController)),
+                          ],
+                        ),
+                        _buildField('Email', _emailController, keyboardType: TextInputType.emailAddress),
+                        _buildField('Phone', _telController, keyboardType: TextInputType.phone),
+                        _buildField('Note / Bio', _noteController, maxLines: 3),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            SizedBox(
+                              width: 160,
+                              height: 42,
+                              child: ElevatedButton(
+                                onPressed: _saving ? null : _saveProfile,
+                                child: _saving
+                                    ? const SizedBox(
+                                        width: 18,
+                                        height: 18,
+                                        child: CircularProgressIndicator(
+                                          color: Colors.white,
+                                          strokeWidth: 2,
+                                        ),
+                                      )
+                                    : const Text('Save Profile'),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            AnimatedOpacity(
+                              opacity: _savedIndicator ? 1.0 : 0.0,
+                              duration: const Duration(milliseconds: 300),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.check_circle, color: Color(0xFF24A148), size: 15),
+                                  SizedBox(width: 4),
+                                  Text(
+                                    'Saved',
+                                    style: TextStyle(
+                                      color: Color(0xFF24A148),
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
                       ],
                     ),
-                    _buildField('Organization', _orgController),
-                    _buildField('Title / Role', _titleController),
-                    _buildField('Email', _emailController, keyboardType: TextInputType.emailAddress),
-                    _buildField('Phone', _telController, keyboardType: TextInputType.phone),
-                    _buildField('Note', _noteController, maxLines: 3),
-                    const SizedBox(height: 8),
-                    SizedBox(
-                      height: 48,
-                      child: ElevatedButton(
-                        onPressed: _saving ? null : _saveProfile,
-                        child: _saving
-                            ? const SizedBox(
-                                height: 20,
-                                width: 20,
-                                child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                              )
-                            : const Text('Save Profile'),
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                  ],
+                  ),
                 ),
               ),
       ),
