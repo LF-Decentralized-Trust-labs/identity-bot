@@ -1180,6 +1180,46 @@ class CoreService {
     }
   }
 
+  // ── Service Providers ────────────────────────────────────────────────────
+
+  Future<ServiceProvidersListResponse> getServiceProviders({String? category, String? status}) async {
+    var url = '$baseUrl/api/service-providers';
+    final params = <String>[];
+    if (category != null) params.add('category=$category');
+    if (status != null) params.add('status=$status');
+    if (params.isNotEmpty) url += '?${params.join('&')}';
+
+    final response = await _client.get(Uri.parse(url));
+    if (response.statusCode == 200) {
+      return ServiceProvidersListResponse.fromJson(jsonDecode(response.body));
+    }
+    throw Exception('Failed to list service providers: ${response.statusCode}');
+  }
+
+  Future<ServiceProviderResponse> connectServiceProvider(String id) async {
+    final response = await _client.post(Uri.parse('$baseUrl/api/service-providers/$id/connect'));
+    if (response.statusCode == 200) {
+      return ServiceProviderResponse.fromJson(jsonDecode(response.body));
+    }
+    throw Exception('Failed to connect: ${response.statusCode}');
+  }
+
+  Future<ServiceProviderResponse> disconnectServiceProvider(String id) async {
+    final response = await _client.post(Uri.parse('$baseUrl/api/service-providers/$id/disconnect'));
+    if (response.statusCode == 200) {
+      return ServiceProviderResponse.fromJson(jsonDecode(response.body));
+    }
+    throw Exception('Failed to disconnect: ${response.statusCode}');
+  }
+
+  Future<ServiceProviderResponse> checkServiceProviderHealth(String id) async {
+    final response = await _client.post(Uri.parse('$baseUrl/api/service-providers/$id/health'));
+    if (response.statusCode == 200) {
+      return ServiceProviderResponse.fromJson(jsonDecode(response.body));
+    }
+    throw Exception('Failed to check health: ${response.statusCode}');
+  }
+
   void dispose() {
     _client.close();
   }
@@ -1511,5 +1551,110 @@ class CredentialRecord {
       }
     } catch (_) {}
     return said.length > 20 ? '${said.substring(0, 20)}...' : said;
+  }
+}
+
+// ── Service Provider models ─────────────────────────────────────────────────
+
+class ServiceProviderResponse {
+  final String id;
+  final String providerName;
+  final String providerAid;
+  final String category;
+  final String displayName;
+  final String endpointUrl;
+  final String status;
+  final String health;
+  final String healthCheckedAt;
+  final String companyHq;
+  final String serverRegion;
+  final int identityLevel;
+  final int grapeScore;
+  final List<String> capabilities;
+  final String termsUrl;
+  final String termsAcceptedAt;
+  final String termsVersion;
+  final String connectedAt;
+  final Map<String, String> configuration;
+  final bool isDefault;
+  final String source;
+
+  ServiceProviderResponse({
+    required this.id,
+    required this.providerName,
+    required this.providerAid,
+    required this.category,
+    required this.displayName,
+    required this.endpointUrl,
+    required this.status,
+    required this.health,
+    required this.healthCheckedAt,
+    required this.companyHq,
+    required this.serverRegion,
+    required this.identityLevel,
+    required this.grapeScore,
+    required this.capabilities,
+    required this.termsUrl,
+    required this.termsAcceptedAt,
+    required this.termsVersion,
+    required this.connectedAt,
+    required this.configuration,
+    required this.isDefault,
+    required this.source,
+  });
+
+  factory ServiceProviderResponse.fromJson(Map<String, dynamic> json) {
+    return ServiceProviderResponse(
+      id: json['id'] as String? ?? '',
+      providerName: json['provider_name'] as String? ?? '',
+      providerAid: json['provider_aid'] as String? ?? '',
+      category: json['category'] as String? ?? '',
+      displayName: json['display_name'] as String? ?? '',
+      endpointUrl: json['endpoint_url'] as String? ?? '',
+      status: json['status'] as String? ?? '',
+      health: json['health'] as String? ?? 'unknown',
+      healthCheckedAt: json['health_checked_at'] as String? ?? '',
+      companyHq: json['company_hq'] as String? ?? '',
+      serverRegion: json['server_region'] as String? ?? '',
+      identityLevel: (json['identity_level'] as num?)?.toInt() ?? 0,
+      grapeScore: (json['grape_score'] as num?)?.toInt() ?? 0,
+      capabilities: (json['capabilities'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? [],
+      termsUrl: json['terms_url'] as String? ?? '',
+      termsAcceptedAt: json['terms_accepted_at'] as String? ?? '',
+      termsVersion: json['terms_version'] as String? ?? '',
+      connectedAt: json['connected_at'] as String? ?? '',
+      configuration: (json['configuration'] as Map<String, dynamic>?)?.map((k, v) => MapEntry(k, v.toString())) ?? {},
+      isDefault: json['is_default'] == true,
+      source: json['source'] as String? ?? '',
+    );
+  }
+
+  String get categoryLabel {
+    switch (category) {
+      case 'infrastructure': return 'Infrastructure';
+      case 'witness': return 'Witness';
+      case 'cloud_hsm': return 'Cloud HSM';
+      case 'tunneling': return 'Tunneling';
+      default: return category;
+    }
+  }
+
+  bool get isConnected => status == 'connected';
+  bool get isHealthy => health == 'healthy';
+}
+
+class ServiceProvidersListResponse {
+  final List<ServiceProviderResponse> providers;
+  final int count;
+
+  ServiceProvidersListResponse({required this.providers, required this.count});
+
+  factory ServiceProvidersListResponse.fromJson(Map<String, dynamic> json) {
+    return ServiceProvidersListResponse(
+      providers: (json['providers'] as List<dynamic>?)
+          ?.map((e) => ServiceProviderResponse.fromJson(e as Map<String, dynamic>))
+          .toList() ?? [],
+      count: (json['count'] as num?)?.toInt() ?? 0,
+    );
   }
 }

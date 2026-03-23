@@ -354,6 +354,7 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 
                 s.sandboxRoutes(r)
                 s.guardianshipRoutes(r)
+                s.serviceProviderRoutes(r)
                 s.aiMemoryRoutes(r)
                 r.Get("/ws/events", s.handleWebSocketEvents)
         })

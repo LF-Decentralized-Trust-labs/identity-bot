@@ -275,6 +275,45 @@ CREATE TABLE IF NOT EXISTS credential_schemas (
 ALTER TABLE guardianships ADD COLUMN credential_said TEXT NOT NULL DEFAULT '';
 `,
 	},
+	{
+		Version:     11,
+		Description: "Add service_providers table",
+		SQL: `
+CREATE TABLE IF NOT EXISTS service_providers (
+    id                 TEXT PRIMARY KEY,
+    provider_name      TEXT NOT NULL DEFAULT '',
+    provider_aid       TEXT NOT NULL DEFAULT '',
+    category           TEXT NOT NULL DEFAULT '',
+    display_name       TEXT NOT NULL DEFAULT '',
+    endpoint_url       TEXT NOT NULL DEFAULT '',
+    status             TEXT NOT NULL DEFAULT 'available',
+    health             TEXT NOT NULL DEFAULT 'unknown',
+    health_checked_at  TEXT NOT NULL DEFAULT '',
+    company_hq         TEXT NOT NULL DEFAULT '',
+    server_region      TEXT NOT NULL DEFAULT '',
+    identity_level     INTEGER NOT NULL DEFAULT 0,
+    grape_score        INTEGER NOT NULL DEFAULT 0,
+    capabilities_json  TEXT NOT NULL DEFAULT '[]',
+    terms_url          TEXT NOT NULL DEFAULT '',
+    terms_accepted_at  TEXT NOT NULL DEFAULT '',
+    terms_version      TEXT NOT NULL DEFAULT '',
+    connected_at       TEXT NOT NULL DEFAULT '',
+    configuration_json TEXT NOT NULL DEFAULT '{}',
+    is_default         INTEGER NOT NULL DEFAULT 0,
+    source             TEXT NOT NULL DEFAULT 'manual',
+    created_at         TEXT NOT NULL DEFAULT '',
+    updated_at         TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_service_providers_category ON service_providers(category);
+CREATE INDEX IF NOT EXISTS idx_service_providers_status ON service_providers(status);
+
+INSERT OR IGNORE INTO service_providers (id, provider_name, provider_aid, category, display_name, endpoint_url, status, health, company_hq, server_region, identity_level, grape_score, capabilities_json, terms_url, is_default, source, created_at, updated_at) VALUES
+    ('sp-grapeid-infra',   'Grape ID', '', 'infrastructure', 'Grape ID Infrastructure', 'https://grapeid.org/api/infrastructure', 'available', 'unknown', 'United States', 'US-West', 0, 0, '["host_instance","tee_enclave","auto_provision"]',       'https://grapeid.org/terms', 1, 'builtin', datetime('now'), datetime('now')),
+    ('sp-grapeid-witness', 'Grape ID', '', 'witness',        'Grape ID Witness',        'https://keri.grapeid.org',               'available', 'unknown', 'United States', 'US-West', 0, 0, '["witness_events","store_kel_replica","serve_kel"]',     'https://grapeid.org/terms', 1, 'builtin', datetime('now'), datetime('now')),
+    ('sp-grapeid-hsm',     'Grape ID', '', 'cloud_hsm',      'Grape ID Cloud HSM',      'https://grapeid.org/api/hsm',            'available', 'unknown', 'United States', 'US-West', 0, 0, '["key_storage","sign_operations","seal_unseal"]',        'https://grapeid.org/terms', 1, 'builtin', datetime('now'), datetime('now')),
+    ('sp-grapeid-tunnel',  'Grape ID', '', 'tunneling',       'Grape ID Tunnel',         'https://grapeid.org/api/tunnel',          'available', 'unknown', 'United States', 'US-West', 0, 0, '["tunnel_chisel","custom_domain"]',                      'https://grapeid.org/terms', 1, 'builtin', datetime('now'), datetime('now'));
+`,
+	},
 }
 
 // ApplyIdentityMigrations creates the migrations table and applies any pending migrations.

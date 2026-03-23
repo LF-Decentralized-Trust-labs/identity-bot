@@ -21,6 +21,7 @@ import 'api_keys_screen.dart';
 import 'guardianship_screen.dart';
 import 'guardianship_dependents_screen.dart';
 import 'credentials_screen.dart';
+import 'service_providers_screen.dart';
 
 class DesktopApp extends StatefulWidget {
   final KeriService keriService;
@@ -153,7 +154,7 @@ class _DesktopAppState extends State<DesktopApp> {
       case DesktopRoute.hubsSecurity:
         return const ComingSoonScreen(title: 'Security', icon: Icons.security);
       case DesktopRoute.settingsServiceProviders:
-        return const ComingSoonScreen(title: 'Service Providers', icon: Icons.cloud_outlined);
+        return ServiceProvidersScreen(serverUrl: url);
       case DesktopRoute.settingsGovernance:
         return const ComingSoonScreen(title: 'Governance', icon: Icons.gavel);
       case DesktopRoute.settingsPrivacy:
