@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../theme/mobile_theme.dart';
 
-enum AlertCardType { connectionRequest, pendingRequest }
+enum AlertCardType { connectionRequest, pendingRequest, credentialIncoming }
 
 class AlertCard extends StatelessWidget {
   final String displayName;
@@ -44,17 +44,18 @@ class AlertCard extends StatelessWidget {
         );
       } catch (_) {}
     }
+    final Color avatarColor = switch (type) {
+      AlertCardType.connectionRequest  => MobileColors.primary,
+      AlertCardType.credentialIncoming => MobileColors.success,
+      _                                => MobileColors.warning,
+    };
     return CircleAvatar(
       radius: 20,
-      backgroundColor: type == AlertCardType.connectionRequest
-          ? MobileColors.primary.withOpacity(0.12)
-          : MobileColors.warning.withOpacity(0.12),
+      backgroundColor: avatarColor.withOpacity(0.12),
       child: Text(
         _getInitials(),
         style: TextStyle(
-          color: type == AlertCardType.connectionRequest
-              ? MobileColors.primary
-              : MobileColors.warning,
+          color: avatarColor,
           fontWeight: FontWeight.w700,
           fontSize: 14,
         ),
@@ -80,19 +81,25 @@ class AlertCard extends StatelessWidget {
             Row(
               children: [
                 Icon(
-                  type == AlertCardType.connectionRequest
-                      ? Icons.person_add
-                      : Icons.hourglass_top,
-                  color: type == AlertCardType.connectionRequest
-                      ? MobileColors.primary
-                      : MobileColors.warning,
+                  switch (type) {
+                    AlertCardType.connectionRequest  => Icons.person_add,
+                    AlertCardType.credentialIncoming => Icons.verified_outlined,
+                    _                                => Icons.hourglass_top,
+                  },
+                  color: switch (type) {
+                    AlertCardType.connectionRequest  => MobileColors.primary,
+                    AlertCardType.credentialIncoming => MobileColors.success,
+                    _                                => MobileColors.warning,
+                  },
                   size: 16,
                 ),
                 const SizedBox(width: 6),
                 Text(
-                  type == AlertCardType.connectionRequest
-                      ? 'Connection Request'
-                      : 'Pending Request',
+                  switch (type) {
+                    AlertCardType.connectionRequest  => 'Connection Request',
+                    AlertCardType.credentialIncoming => 'Incoming Credential',
+                    _                                => 'Pending Request',
+                  },
                   style: const TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
@@ -113,7 +120,9 @@ class AlertCard extends StatelessWidget {
                       Text(
                         type == AlertCardType.connectionRequest
                             ? '$displayName wants to add you as a contact'
-                            : displayName,
+                            : type == AlertCardType.credentialIncoming
+                                ? '$displayName has issued you a credential'
+                                : displayName,
                         style: const TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.w600,
@@ -174,6 +183,36 @@ class AlertCard extends StatelessWidget {
                         ),
                       ),
                       child: const Text('Approve', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                    ),
+                  ),
+                ],
+              ),
+            if (type == AlertCardType.credentialIncoming)
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: onDeny,
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: MobileColors.error,
+                        side: const BorderSide(color: MobileColors.error),
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      child: const Text('Reject', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: onApprove,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: MobileColors.success,
+                        foregroundColor: MobileColors.textOnPrimary,
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      child: const Text('Accept', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
                     ),
                   ),
                 ],

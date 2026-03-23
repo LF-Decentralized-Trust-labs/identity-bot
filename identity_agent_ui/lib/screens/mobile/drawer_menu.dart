@@ -9,6 +9,7 @@ class DrawerMenu extends StatefulWidget {
   final VoidCallback onClose;
   final VoidCallback onProfileTap;
   final VoidCallback onContactsTap;
+  final VoidCallback onCredentialsTap;
   final VoidCallback onSettingsTap;
 
   const DrawerMenu({
@@ -17,6 +18,7 @@ class DrawerMenu extends StatefulWidget {
     required this.onClose,
     required this.onProfileTap,
     required this.onContactsTap,
+    required this.onCredentialsTap,
     required this.onSettingsTap,
   });
 
@@ -101,6 +103,11 @@ class _DrawerMenuState extends State<DrawerMenu> {
                         icon: Icons.people_outline,
                         label: 'Contacts',
                         onTap: widget.onContactsTap,
+                      ),
+                      _MenuItem(
+                        icon: Icons.verified_user_outlined,
+                        label: 'Credentials',
+                        onTap: widget.onCredentialsTap,
                       ),
                       _buildSettingsSection(),
                       const Divider(indent: 16, endIndent: 16),

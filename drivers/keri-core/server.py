@@ -1326,6 +1326,56 @@ def receipt_kerl():
     }), 200
 
 
+@app.route("/reload-identity", methods=["POST"])
+def reload_identity():
+    """Restore a previously created identity into the driver's in-memory state.
+
+    Called by the Go backend on startup when an identity already exists in the DB.
+    Does NOT require private keys — only restores the public state needed for
+    subsequent IXN events and credential issuance: sequence number, public keys, KEL.
+
+    Without this, IssueCredential and Interact fail after any driver restart because
+    _identities is empty on cold start.
+
+    Request JSON:
+        aid             (str)  — the AID prefix (used as the identity name key)
+        public_key      (str)  — current CESR Ed25519 public key
+        next_key_digest (str)  — current CESR Blake3_256 next key digest
+        sequence_number (int)  — sequence number of the most recent event
+        last_said       (str)  — SAID of the most recent event (the 'd' field)
+        kel             (list) — list of KED event dicts (the parsed event_json entries)
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Request body required"}), 400
+
+    aid             = data.get("aid", "")
+    public_key      = data.get("public_key", "")
+    next_key_digest = data.get("next_key_digest", "")
+    sequence_number = data.get("sequence_number", 0)
+    last_said       = data.get("last_said", "")
+    kel             = data.get("kel", [])
+
+    if not aid or not public_key or not next_key_digest:
+        return jsonify({"error": "aid, public_key, and next_key_digest are required"}), 400
+
+    _identities[aid] = {
+        "aid":            aid,
+        "public_key":     public_key,
+        "next_key_digest": next_key_digest,
+        "kel":            kel,
+        "sequence_number": sequence_number,
+        "last_said":      last_said,
+    }
+
+    return jsonify({
+        "aid":            aid,
+        "sequence_number": sequence_number,
+        "kel_events":     len(kel),
+        "status":         "reloaded",
+    }), 200
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -1336,7 +1386,7 @@ if __name__ == "__main__":
 
     print(f"[keri-driver] Starting KERI Core Driver on {host}:{port}")
     print(f"[keri-driver] KERI library: keripy (reference)")
-    print(f"[keri-driver] Stateful endpoints:  /status, /inception, /rotation, /interact, /sign, /kel, /verify")
+    print(f"[keri-driver] Stateful endpoints:  /status, /inception, /rotation, /interact, /reload-identity, /sign, /kel, /verify")
     print(f"[keri-driver] Stateless endpoints: /cesr-encode, /validate-kel, /resolve-oobi, /format-credential, /generate-multisig-event")
     print(f"[keri-driver] Credential endpoints: /credential/issue, /credential/present, /credential/verify")
     print(f"[keri-driver] KERL endpoints:       /receipt/submit, /receipt/kerl")

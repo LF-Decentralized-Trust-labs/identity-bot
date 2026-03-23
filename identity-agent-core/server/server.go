@@ -20,6 +20,7 @@ import (
         "identity-agent-core/drivers"
         "identity-agent-core/endpoint"
         "identity-agent-core/sandbox"
+        "identity-agent-core/schemas"
         "identity-agent-core/store"
         "identity-agent-core/tunnel"
 
@@ -118,6 +119,9 @@ func New(cfg Config) (*CoreServer, error) {
                         dataStore.Close()
                         return nil, fmt.Errorf("failed to start KERI driver: %w", err)
                 }
+                // If an identity already exists in the DB, seed the driver's in-memory
+                // state so IssueCredential and Interact work without a fresh inception.
+                s.reloadIdentityIntoDriver()
         }
 
         manifestsDir := filepath.Join(".", "manifests")
@@ -283,9 +287,19 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 
                 r.Post("/credential/issue", s.handleIssueCredential)
                 r.Get("/credentials", s.handleGetCredentials)
+                r.Get("/credentials/{said}", s.handleGetCredential)
+                r.Post("/credentials/receive", s.handleReceiveCredential)
+                r.Post("/credentials/deliver", s.handleDeliverCredential)
+                r.Post("/credentials/{said}/accept", s.handleAcceptCredential)
+                r.Post("/credentials/{said}/reject", s.handleRejectCredential)
+                r.Delete("/credentials/{said}", s.handleDeleteCredential)
                 r.Post("/credential/present", s.handlePresentCredential)
                 r.Get("/presentations", s.handleGetPresentations)
                 r.Post("/credential/verify", s.handleVerifyCredential)
+                r.Get("/credential-schemas", s.handleGetCredentialSchemas)
+                r.Post("/credential-schemas/fetch", s.handleFetchCredentialSchema)
+                r.Get("/schemas", s.handleListBuiltinSchemas)
+                r.Get("/schemas/{said}", s.handleGetBuiltinSchema)
 
                 r.Post("/receipt/submit", s.handleSubmitReceipt)
                 r.Get("/kerl", s.handleGetKERL)
@@ -338,6 +352,7 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
                 r.Post("/reset", s.handleReset)
 
                 s.sandboxRoutes(r)
+                s.guardianshipRoutes(r)
                 s.aiMemoryRoutes(r)
                 r.Get("/ws/events", s.handleWebSocketEvents)
         })
@@ -350,6 +365,9 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 
         // /public/oobi/{aid} — public namespace: KERI OOBI endpoint shared with external agents.
         r.Get("/public/oobi/{aid}", s.handleOobiServe)
+
+        // /public/credential/{said} — public credential delivery endpoint for sharing issued credentials.
+        r.Get("/public/credential/{said}", s.handlePublicCredentialServe)
 
         absWebDir, err := filepath.Abs(flutterWebDir)
         if err != nil {
@@ -1005,20 +1023,40 @@ func (s *CoreServer) handleIssueCredential(w http.ResponseWriter, r *http.Reques
                 return
         }
 
+        // Populate credential type from builtin schema catalog
+        credType := ""
+        if schema := schemas.Get(req.SchemaSaid); schema != nil {
+                credType = schema.Name
+        }
+
+        // Populate issuer name from profile
+        issuerName := ""
+        if profile, _ := s.DataStore.GetProfile(); profile != nil {
+                issuerName = profile.FullName
+        }
+
         // Persist the credential record
         record := store.CredentialRecord{
-                SAID:          result.AcdcSaid,
-                IssuerAID:     identity.AID,
-                HolderAID:     req.HolderAid,
-                SchemaSAID:    req.SchemaSaid,
-                AcdcJson:      result.AcdcJsonB64,
-                IxnSAID:       result.IxnSaid,
-                CesrSignature: req.CesrSignature,
-                IssuedAt:      time.Now().UTC().Format(time.RFC3339),
-                Status:        "issued",
+                SAID:           result.AcdcSaid,
+                IssuerAID:      identity.AID,
+                HolderAID:      req.HolderAid,
+                SchemaSAID:     req.SchemaSaid,
+                AcdcJson:       result.AcdcJsonB64,
+                IxnSAID:        result.IxnSaid,
+                CesrSignature:  req.CesrSignature,
+                IssuedAt:       time.Now().UTC().Format(time.RFC3339),
+                Status:         "issued",
+                Format:         "acdc",
+                CredentialType: credType,
+                IssuerName:     issuerName,
         }
         if err := s.DataStore.SaveCredential(record); err != nil {
                 log.Printf("[identity-agent-core] CREDENTIAL: Failed to persist credential %s: %v", result.AcdcSaid, err)
+        }
+
+        // Attempt automatic push delivery to the holder if they are a known contact
+        if contact, err := s.DataStore.GetContact(req.HolderAid); err == nil && contact != nil && contact.OobiURL != "" {
+                go s.deliverCredentialToContact(contact, record)
         }
 
         // Persist the IXN event in the KEL
@@ -1052,7 +1090,10 @@ func (s *CoreServer) handleIssueCredential(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *CoreServer) handleGetCredentials(w http.ResponseWriter, r *http.Request) {
-        creds, err := s.DataStore.GetCredentials()
+        role := r.URL.Query().Get("role")     // "holder" | "issuer" | ""
+        status := r.URL.Query().Get("status") // "valid" | "expired" | ""
+
+        creds, err := s.DataStore.GetCredentialsFiltered(role, status)
         if err != nil {
                 writeError(w, http.StatusInternalServerError, "Failed to read credentials", err.Error())
                 return
@@ -1063,6 +1104,346 @@ func (s *CoreServer) handleGetCredentials(w http.ResponseWriter, r *http.Request
                 "credentials": creds,
                 "count":       len(creds),
         })
+}
+
+func (s *CoreServer) handleGetCredential(w http.ResponseWriter, r *http.Request) {
+        said := chi.URLParam(r, "said")
+        cred, err := s.DataStore.GetCredential(said)
+        if err != nil {
+                writeError(w, http.StatusInternalServerError, "Failed to read credential", err.Error())
+                return
+        }
+        if cred == nil {
+                writeError(w, http.StatusNotFound, "Credential not found", said)
+                return
+        }
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(cred)
+}
+
+func (s *CoreServer) handleReceiveCredential(w http.ResponseWriter, r *http.Request) {
+        var req struct {
+                AcdcJson  string `json:"acdc_json"`
+                RawJson   string `json:"raw_json"`
+                Format    string `json:"format"`
+        }
+        if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+                writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+                return
+        }
+        if req.Format == "" {
+                req.Format = "acdc"
+        }
+
+        // Determine SAID: for ACDC parse from JSON, for others use raw_json hash placeholder
+        said := ""
+        sourceJson := req.AcdcJson
+        if req.Format != "acdc" && req.RawJson != "" {
+                sourceJson = req.AcdcJson // ACDC wrapper (caller must provide)
+        }
+
+        // Extract SAID from ACDC JSON "d" field
+        var acdcMap map[string]interface{}
+        if err := json.Unmarshal([]byte(sourceJson), &acdcMap); err == nil {
+                if d, ok := acdcMap["d"].(string); ok && d != "" {
+                        said = d
+                }
+        }
+        if said == "" {
+                writeError(w, http.StatusBadRequest, "Cannot extract SAID from credential", "Ensure the ACDC JSON contains a 'd' field")
+                return
+        }
+
+        identity, err := s.DataStore.GetIdentity()
+        if err != nil || identity == nil {
+                writeError(w, http.StatusBadRequest, "No identity found", "Create an identity before receiving credentials")
+                return
+        }
+
+        issuerAID := ""
+        if v, ok := acdcMap["i"].(string); ok {
+                issuerAID = v
+        }
+
+        record := store.CredentialRecord{
+                SAID:      said,
+                HolderAID: identity.AID,
+                IssuerAID: issuerAID,
+                AcdcJson:  req.AcdcJson,
+                RawJson:   req.RawJson,
+                Format:    req.Format,
+                IssuedAt:  time.Now().UTC().Format(time.RFC3339),
+                Status:    "received",
+        }
+        if err := s.DataStore.SaveCredential(record); err != nil {
+                writeError(w, http.StatusInternalServerError, "Failed to save credential", err.Error())
+                return
+        }
+
+        log.Printf("[identity-agent-core] CREDENTIAL: Received %s (format=%s) for holder %s", said, req.Format, identity.AID)
+        w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(http.StatusCreated)
+        json.NewEncoder(w).Encode(map[string]interface{}{"said": said, "status": "received"})
+}
+
+func (s *CoreServer) handleDeleteCredential(w http.ResponseWriter, r *http.Request) {
+        said := chi.URLParam(r, "said")
+        cred, err := s.DataStore.GetCredential(said)
+        if err != nil {
+                writeError(w, http.StatusInternalServerError, "Failed to read credential", err.Error())
+                return
+        }
+        if cred == nil {
+                writeError(w, http.StatusNotFound, "Credential not found", said)
+                return
+        }
+        if err := s.DataStore.DeleteCredential(said); err != nil {
+                writeError(w, http.StatusInternalServerError, "Failed to delete credential", err.Error())
+                return
+        }
+        log.Printf("[identity-agent-core] CREDENTIAL: Deleted %s", said)
+        w.WriteHeader(http.StatusNoContent)
+}
+
+// handleDeliverCredential receives a credential pushed by another Identity Agent.
+// The credential is saved with status "pending_inbound" and a WebSocket event is broadcast.
+func (s *CoreServer) handleDeliverCredential(w http.ResponseWriter, r *http.Request) {
+        var req struct {
+                Said           string `json:"said"`
+                AcdcJson       string `json:"acdc_json"`
+                Format         string `json:"format"`
+                CredentialType string `json:"credential_type"`
+                IssuerAID      string `json:"issuer_aid"`
+                IssuerName     string `json:"issuer_name"`
+                SchemaSAID     string `json:"schema_said"`
+        }
+        if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+                writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+                return
+        }
+        if req.Said == "" || req.AcdcJson == "" {
+                writeError(w, http.StatusBadRequest, "Missing required fields", "said and acdc_json are required")
+                return
+        }
+
+        holderAID := ""
+        if identity, err := s.DataStore.GetIdentity(); err == nil && identity != nil {
+                holderAID = identity.AID
+        }
+        if req.Format == "" {
+                req.Format = "acdc"
+        }
+
+        record := store.CredentialRecord{
+                SAID:           req.Said,
+                IssuerAID:      req.IssuerAID,
+                HolderAID:      holderAID,
+                SchemaSAID:     req.SchemaSAID,
+                AcdcJson:       req.AcdcJson,
+                IssuedAt:       time.Now().UTC().Format(time.RFC3339),
+                Status:         "pending_inbound",
+                Format:         req.Format,
+                CredentialType: req.CredentialType,
+                IssuerName:     req.IssuerName,
+        }
+        if err := s.DataStore.SaveCredential(record); err != nil {
+                writeError(w, http.StatusInternalServerError, "Failed to save credential", err.Error())
+                return
+        }
+
+        s.EventHub.Broadcast(AgentEvent{
+                Type: "credential_received",
+                Payload: map[string]interface{}{
+                        "said":            req.Said,
+                        "credential_type": req.CredentialType,
+                        "issuer_aid":      req.IssuerAID,
+                        "issuer_name":     req.IssuerName,
+                },
+        })
+
+        log.Printf("[identity-agent-core] CREDENTIAL: Received pending credential %s from %s", req.Said, req.IssuerAID)
+
+        w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(http.StatusCreated)
+        json.NewEncoder(w).Encode(map[string]interface{}{
+                "said":   req.Said,
+                "status": "pending_inbound",
+        })
+}
+
+// handleAcceptCredential moves a pending_inbound credential to accepted (status=received).
+func (s *CoreServer) handleAcceptCredential(w http.ResponseWriter, r *http.Request) {
+        said := chi.URLParam(r, "said")
+        if err := s.DataStore.UpdateCredentialStatus(said, "received"); err != nil {
+                writeError(w, http.StatusInternalServerError, "Failed to accept credential", err.Error())
+                return
+        }
+        s.EventHub.Broadcast(AgentEvent{
+                Type:    "credential_accepted",
+                Payload: map[string]interface{}{"said": said},
+        })
+        log.Printf("[identity-agent-core] CREDENTIAL: Accepted %s", said)
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(map[string]interface{}{"said": said, "status": "received"})
+}
+
+// handleRejectCredential deletes a pending_inbound credential.
+func (s *CoreServer) handleRejectCredential(w http.ResponseWriter, r *http.Request) {
+        said := chi.URLParam(r, "said")
+        if err := s.DataStore.DeleteCredential(said); err != nil {
+                writeError(w, http.StatusInternalServerError, "Failed to reject credential", err.Error())
+                return
+        }
+        log.Printf("[identity-agent-core] CREDENTIAL: Rejected and deleted %s", said)
+        w.WriteHeader(http.StatusNoContent)
+}
+
+// deliverCredentialToContact pushes an issued credential directly to a known contact's agent.
+// Called as a goroutine — failures are logged but do not affect the issue response.
+func (s *CoreServer) deliverCredentialToContact(contact *store.ContactRecord, cred store.CredentialRecord) {
+        baseURL := oobiBase(contact.OobiURL)
+        if baseURL == "" {
+                return
+        }
+        deliverURL := fmt.Sprintf("%s/api/credentials/deliver", baseURL)
+        payload := map[string]interface{}{
+                "said":            cred.SAID,
+                "acdc_json":       cred.AcdcJson,
+                "format":          cred.Format,
+                "credential_type": cred.CredentialType,
+                "issuer_aid":      cred.IssuerAID,
+                "issuer_name":     cred.IssuerName,
+                "schema_said":     cred.SchemaSAID,
+        }
+        body, _ := json.Marshal(payload)
+
+        ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+        defer cancel()
+
+        req, err := http.NewRequestWithContext(ctx, "POST", deliverURL, bytes.NewReader(body))
+        if err != nil {
+                log.Printf("[identity-agent-core] CREDENTIAL DELIVER: build request failed for %s: %v", deliverURL, err)
+                return
+        }
+        req.Header.Set("Content-Type", "application/json")
+
+        resp, err := http.DefaultClient.Do(req)
+        if err != nil {
+                log.Printf("[identity-agent-core] CREDENTIAL DELIVER: push failed to %s: %v", deliverURL, err)
+                return
+        }
+        defer resp.Body.Close()
+        log.Printf("[identity-agent-core] CREDENTIAL DELIVER: pushed %s to %s (HTTP %d)", cred.SAID, deliverURL, resp.StatusCode)
+}
+
+// handleListBuiltinSchemas returns all schemas bundled into the Identity Agent binary.
+// These are served to any KERI verifier that needs to resolve a schema SAID.
+func (s *CoreServer) handleListBuiltinSchemas(w http.ResponseWriter, r *http.Request) {
+        list := schemas.List()
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(map[string]interface{}{
+                "schemas": list,
+                "count":   len(list),
+        })
+}
+
+func (s *CoreServer) handleGetBuiltinSchema(w http.ResponseWriter, r *http.Request) {
+        said := chi.URLParam(r, "said")
+        schema := schemas.Get(said)
+        if schema == nil {
+                writeError(w, http.StatusNotFound, "Schema not found", said)
+                return
+        }
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(schema)
+}
+
+func (s *CoreServer) handleGetCredentialSchemas(w http.ResponseWriter, r *http.Request) {
+        schemas, err := s.DataStore.GetCredentialSchemas()
+        if err != nil {
+                writeError(w, http.StatusInternalServerError, "Failed to read credential schemas", err.Error())
+                return
+        }
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(map[string]interface{}{
+                "schemas": schemas,
+                "count":   len(schemas),
+        })
+}
+
+func (s *CoreServer) handleFetchCredentialSchema(w http.ResponseWriter, r *http.Request) {
+        var req struct {
+                SAID string `json:"said"`
+                URL  string `json:"url"`
+        }
+        if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+                writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+                return
+        }
+        if req.SAID == "" && req.URL == "" {
+                writeError(w, http.StatusBadRequest, "Either said or url is required", "")
+                return
+        }
+
+        // Check cache first
+        if req.SAID != "" {
+                if cached, _ := s.DataStore.GetCredentialSchema(req.SAID); cached != nil {
+                        w.Header().Set("Content-Type", "application/json")
+                        json.NewEncoder(w).Encode(cached)
+                        return
+                }
+        }
+
+        // Fetch from URL or GLEIF ACDC schema registry
+        fetchURL := req.URL
+        if fetchURL == "" {
+                fetchURL = "https://schema.gleif.org/acdc/" + req.SAID
+        }
+
+        client := &http.Client{Timeout: 10 * time.Second}
+        resp, err := client.Get(fetchURL)
+        if err != nil {
+                writeError(w, http.StatusBadGateway, "Failed to fetch schema", err.Error())
+                return
+        }
+        defer resp.Body.Close()
+
+        if resp.StatusCode != http.StatusOK {
+                writeError(w, http.StatusBadGateway, "Schema fetch returned non-200", fmt.Sprintf("status %d from %s", resp.StatusCode, fetchURL))
+                return
+        }
+
+        schemaBytes, err := io.ReadAll(resp.Body)
+        if err != nil {
+                writeError(w, http.StatusInternalServerError, "Failed to read schema response", err.Error())
+                return
+        }
+
+        // Extract SAID from response if not provided
+        said := req.SAID
+        if said == "" {
+                var schemaMap map[string]interface{}
+                if json.Unmarshal(schemaBytes, &schemaMap) == nil {
+                        if d, ok := schemaMap["$id"].(string); ok {
+                                said = d
+                        }
+                }
+        }
+        if said == "" {
+                said = req.URL
+        }
+
+        record := store.CredentialSchemaRecord{
+                SAID:       said,
+                SchemaJson: string(schemaBytes),
+                FetchedAt:  time.Now().UTC().Format(time.RFC3339),
+        }
+        if err := s.DataStore.SaveCredentialSchema(record); err != nil {
+                log.Printf("[identity-agent-core] SCHEMA: Failed to cache schema %s: %v", said, err)
+        }
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(record)
 }
 
 func (s *CoreServer) handlePresentCredential(w http.ResponseWriter, r *http.Request) {
@@ -1642,6 +2023,84 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
 
         w.Header().Set("Content-Type", "application/json")
         json.NewEncoder(w).Encode(resp)
+}
+
+func (s *CoreServer) handlePublicCredentialServe(w http.ResponseWriter, r *http.Request) {
+	said := chi.URLParam(r, "said")
+	if said == "" {
+		writeError(w, http.StatusBadRequest, "Missing SAID", "SAID parameter is required")
+		return
+	}
+
+	cred, err := s.DataStore.GetCredential(said)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to read credential", err.Error())
+		return
+	}
+	if cred == nil {
+		writeError(w, http.StatusNotFound, "Credential not found", fmt.Sprintf("No credential found for SAID: %s", said))
+		return
+	}
+
+	acceptHeader := r.Header.Get("Accept")
+	if strings.Contains(acceptHeader, "text/html") {
+		typeName := cred.CredentialType
+		if typeName == "" {
+			typeName = "Credential"
+		}
+		issuerDisplay := cred.IssuerName
+		if issuerDisplay == "" {
+			issuerDisplay = cred.IssuerAID
+			if len(issuerDisplay) > 20 {
+				issuerDisplay = issuerDisplay[:12] + "..."
+			}
+		}
+		publicURL := s.getPublicURL(r)
+		credURL := fmt.Sprintf("%s/public/credential/%s", publicURL, said)
+		htmlPage := fmt.Sprintf(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>%s — Identity Agent</title>
+  <style>
+    body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#0a0e1a;color:#e2e8f0;max-width:480px;margin:60px auto;padding:24px}
+    h1{font-size:22px;font-weight:700;margin-bottom:8px}
+    p{color:#94a3b8;line-height:1.6}
+    .card{background:#1e2433;border:1px solid #2d3748;border-radius:12px;padding:20px;margin:24px 0}
+    .url{font-family:monospace;font-size:11px;color:#67e8f9;word-break:break-all}
+    .step{display:flex;gap:12px;margin:12px 0}
+    .num{background:#3b82f6;color:white;border-radius:50%%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0}
+  </style>
+</head>
+<body>
+  <h1>%s has sent you a credential</h1>
+  <p>You've been issued a <strong>%s</strong> credential. Open Identity Agent to accept it.</p>
+  <div class="card">
+    <div class="step"><div class="num">1</div><div>Download and install Identity Agent</div></div>
+    <div class="step"><div class="num">2</div><div>Open the app and create or import your identity</div></div>
+    <div class="step"><div class="num">3</div><div>Go to Credentials → Receive, then paste this link:</div></div>
+    <div style="margin-top:12px"><div class="url">%s</div></div>
+  </div>
+  <p style="font-size:12px;color:#64748b;">This link only works while the issuer's Identity Agent is running.</p>
+</body>
+</html>`, typeName, issuerDisplay, typeName, credURL)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprint(w, htmlPage)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"said":            cred.SAID,
+		"acdc_json":       cred.AcdcJson,
+		"format":          cred.Format,
+		"credential_type": cred.CredentialType,
+		"issuer_name":     cred.IssuerName,
+		"issuer_aid":      cred.IssuerAID,
+		"schema_said":     cred.SchemaSAID,
+		"issued_at":       cred.IssuedAt,
+	})
 }
 
 func (s *CoreServer) handleGetContacts(w http.ResponseWriter, r *http.Request) {
@@ -2421,12 +2880,19 @@ func (s *CoreServer) handleGetAlerts(w http.ResponseWriter, r *http.Request) {
                 pendingReqs = []store.PendingRequest{}
         }
 
+        pendingCreds, err := s.DataStore.GetCredentialsFiltered("", "pending_inbound")
+        if err != nil {
+                pendingCreds = []store.CredentialRecord{}
+        }
+
         w.Header().Set("Content-Type", "application/json")
         json.NewEncoder(w).Encode(map[string]interface{}{
-                "alerts":           contacts,
-                "count":            len(contacts),
-                "pending_requests": pendingReqs,
-                "pending_count":    len(pendingReqs),
+                "alerts":              contacts,
+                "count":               len(contacts),
+                "pending_requests":    pendingReqs,
+                "pending_count":       len(pendingReqs),
+                "pending_credentials": pendingCreds,
+                "pending_cred_count":  len(pendingCreds),
         })
 }
 
@@ -2732,6 +3198,63 @@ func (s *CoreServer) handleDeletePendingRequest(w http.ResponseWriter, r *http.R
 
         w.Header().Set("Content-Type", "application/json")
         json.NewEncoder(w).Encode(map[string]interface{}{"deleted": true, "aid": aid})
+}
+
+// reloadIdentityIntoDriver seeds the Python KERI driver's in-memory _identities dict
+// from the persisted DB state. Called once on startup after the driver is ready.
+// This makes IssueCredential and Interact work across server restarts without
+// requiring a fresh inception event each session.
+func (s *CoreServer) reloadIdentityIntoDriver() {
+        if s.KeriDriver == nil {
+                return
+        }
+        identity, err := s.DataStore.GetIdentity()
+        if err != nil || identity == nil {
+                log.Printf("[identity-agent-core] KERI driver reload: no existing identity in DB")
+                return
+        }
+
+        events, err := s.DataStore.GetEvents(identity.AID)
+        if err != nil {
+                log.Printf("[identity-agent-core] KERI driver reload: failed to load KEL events: %v", err)
+                return
+        }
+
+        // Parse each stored event_json into a KED dict and track the last SAID
+        kel := make([]map[string]interface{}, 0, len(events))
+        lastSAID := ""
+        lastSN := 0
+        for _, ev := range events {
+                var ked map[string]interface{}
+                if err := json.Unmarshal([]byte(ev.EventJSON), &ked); err != nil {
+                        log.Printf("[identity-agent-core] KERI driver reload: failed to parse event sn=%d: %v", ev.SequenceNumber, err)
+                        continue
+                }
+                kel = append(kel, ked)
+                if d, ok := ked["d"].(string); ok && d != "" {
+                        lastSAID = d
+                }
+                if ev.SequenceNumber > lastSN {
+                        lastSN = ev.SequenceNumber
+                }
+        }
+
+        req := &drivers.DriverReloadIdentityRequest{
+                AID:            identity.AID,
+                PublicKey:      identity.PublicKey,
+                NextKeyDigest:  identity.NextKeyDigest,
+                SequenceNumber: lastSN,
+                LastSAID:       lastSAID,
+                KEL:            kel,
+        }
+
+        result, err := s.KeriDriver.ReloadIdentity(req)
+        if err != nil {
+                log.Printf("[identity-agent-core] KERI driver reload failed (non-fatal — issuing will require fresh inception): %v", err)
+                return
+        }
+        log.Printf("[identity-agent-core] KERI driver: reloaded identity %s (sn=%d, %d KEL events)",
+                result.AID, result.SequenceNumber, result.KelEvents)
 }
 
 func (s *CoreServer) handleReset(w http.ResponseWriter, r *http.Request) {

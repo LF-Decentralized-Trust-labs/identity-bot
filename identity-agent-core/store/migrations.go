@@ -224,6 +224,57 @@ INSERT OR IGNORE INTO share_actions (id, action_key, name, subtitle, icon, is_en
     ('sa-share-credential', 'share_credential', 'Share Credential', 'Present a verifiable credential',                            'verified_outlined',   0, 5, datetime('now'));
 `,
 	},
+	{
+		Version:     8,
+		Description: "Add guardianships table",
+		SQL: `
+CREATE TABLE IF NOT EXISTS guardianships (
+    id                    TEXT PRIMARY KEY,
+    type                  TEXT NOT NULL DEFAULT '',
+    guardian_aid          TEXT NOT NULL DEFAULT '',
+    dependent_aid         TEXT NOT NULL DEFAULT '',
+    dependent_name        TEXT NOT NULL DEFAULT '',
+    delegated_aid_prefix  TEXT NOT NULL DEFAULT '',
+    status                TEXT NOT NULL DEFAULT 'active',
+    hosting_type          TEXT NOT NULL DEFAULT '',
+    hosting_url           TEXT NOT NULL DEFAULT '',
+    created_at            TEXT NOT NULL DEFAULT '',
+    updated_at            TEXT NOT NULL DEFAULT '',
+    emancipation_json     TEXT NOT NULL DEFAULT '{}',
+    co_guardians_json     TEXT NOT NULL DEFAULT '[]',
+    multisig_threshold    INTEGER NOT NULL DEFAULT 0,
+    metadata_json         TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_guardianships_guardian ON guardianships(guardian_aid);
+CREATE INDEX IF NOT EXISTS idx_guardianships_dependent ON guardianships(dependent_aid);
+CREATE INDEX IF NOT EXISTS idx_guardianships_status ON guardianships(status);
+`,
+	},
+	{
+		Version:     9,
+		Description: "Credentials: add multi-format columns; add credential_schemas table",
+		SQL: `
+ALTER TABLE credentials ADD COLUMN format          TEXT NOT NULL DEFAULT 'acdc';
+ALTER TABLE credentials ADD COLUMN credential_type TEXT NOT NULL DEFAULT '';
+ALTER TABLE credentials ADD COLUMN issuer_name     TEXT NOT NULL DEFAULT '';
+ALTER TABLE credentials ADD COLUMN issuer_logo_url TEXT NOT NULL DEFAULT '';
+ALTER TABLE credentials ADD COLUMN expiry_date     TEXT NOT NULL DEFAULT '';
+ALTER TABLE credentials ADD COLUMN raw_json        TEXT NOT NULL DEFAULT '';
+
+CREATE TABLE IF NOT EXISTS credential_schemas (
+    said        TEXT PRIMARY KEY,
+    schema_json TEXT NOT NULL DEFAULT '',
+    fetched_at  TEXT NOT NULL DEFAULT ''
+);
+`,
+	},
+	{
+		Version:     10,
+		Description: "Guardianship: add credential_said column for chain-of-trust linkage",
+		SQL: `
+ALTER TABLE guardianships ADD COLUMN credential_said TEXT NOT NULL DEFAULT '';
+`,
+	},
 }
 
 // ApplyIdentityMigrations creates the migrations table and applies any pending migrations.
