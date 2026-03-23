@@ -1088,10 +1088,179 @@ func (s *SQLiteStore) scanGuardianships(rows *sql.Rows) ([]GuardianshipRecord, e
 	return records, nil
 }
 
+// ── Service Providers ────────────────────────────────────────────────────────
+
+func (s *SQLiteStore) SaveServiceProvider(record ServiceProviderRecord) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	if record.CreatedAt == "" {
+		record.CreatedAt = now
+	}
+	record.UpdatedAt = now
+
+	capabilitiesJSON := "[]"
+	if record.Capabilities != nil {
+		b, _ := json.Marshal(record.Capabilities)
+		capabilitiesJSON = string(b)
+	}
+
+	configJSON := "{}"
+	if record.Configuration != nil {
+		b, _ := json.Marshal(record.Configuration)
+		configJSON = string(b)
+	}
+
+	isDefault := 0
+	if record.IsDefault {
+		isDefault = 1
+	}
+
+	_, err := s.db.Exec(`
+		INSERT INTO service_providers (id, provider_name, provider_aid, category, display_name, endpoint_url,
+			status, health, health_checked_at, company_hq, server_region, identity_level, grape_score,
+			capabilities_json, terms_url, terms_accepted_at, terms_version, connected_at,
+			configuration_json, is_default, source, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			provider_name     = excluded.provider_name,
+			provider_aid      = excluded.provider_aid,
+			category          = excluded.category,
+			display_name      = excluded.display_name,
+			endpoint_url      = excluded.endpoint_url,
+			status            = excluded.status,
+			health            = excluded.health,
+			health_checked_at = excluded.health_checked_at,
+			company_hq        = excluded.company_hq,
+			server_region     = excluded.server_region,
+			identity_level    = excluded.identity_level,
+			grape_score       = excluded.grape_score,
+			capabilities_json = excluded.capabilities_json,
+			terms_url         = excluded.terms_url,
+			terms_accepted_at = excluded.terms_accepted_at,
+			terms_version     = excluded.terms_version,
+			connected_at      = excluded.connected_at,
+			configuration_json= excluded.configuration_json,
+			is_default        = excluded.is_default,
+			source            = excluded.source,
+			updated_at        = excluded.updated_at`,
+		record.ID, record.ProviderName, record.ProviderAID, record.Category,
+		record.DisplayName, record.EndpointURL, record.Status, record.Health,
+		record.HealthCheckedAt, record.CompanyHQ, record.ServerRegion,
+		record.IdentityLevel, record.GrapeScore, capabilitiesJSON, record.TermsURL,
+		record.TermsAcceptedAt, record.TermsVersion, record.ConnectedAt,
+		configJSON, isDefault, record.Source, record.CreatedAt, record.UpdatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to save service provider: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) GetServiceProviders() ([]ServiceProviderRecord, error) {
+	rows, err := s.db.Query(`SELECT id, provider_name, provider_aid, category, display_name, endpoint_url,
+		status, health, health_checked_at, company_hq, server_region, identity_level, grape_score,
+		capabilities_json, terms_url, terms_accepted_at, terms_version, connected_at,
+		configuration_json, is_default, source, created_at, updated_at
+		FROM service_providers ORDER BY category ASC, display_name ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query service providers: %w", err)
+	}
+	defer rows.Close()
+	return s.scanServiceProviders(rows)
+}
+
+func (s *SQLiteStore) GetServiceProvider(id string) (*ServiceProviderRecord, error) {
+	rows, err := s.db.Query(`SELECT id, provider_name, provider_aid, category, display_name, endpoint_url,
+		status, health, health_checked_at, company_hq, server_region, identity_level, grape_score,
+		capabilities_json, terms_url, terms_accepted_at, terms_version, connected_at,
+		configuration_json, is_default, source, created_at, updated_at
+		FROM service_providers WHERE id = ?`, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query service provider: %w", err)
+	}
+	defer rows.Close()
+	records, err := s.scanServiceProviders(rows)
+	if err != nil {
+		return nil, err
+	}
+	if len(records) == 0 {
+		return nil, nil
+	}
+	return &records[0], nil
+}
+
+func (s *SQLiteStore) GetServiceProvidersByCategory(category string) ([]ServiceProviderRecord, error) {
+	rows, err := s.db.Query(`SELECT id, provider_name, provider_aid, category, display_name, endpoint_url,
+		status, health, health_checked_at, company_hq, server_region, identity_level, grape_score,
+		capabilities_json, terms_url, terms_accepted_at, terms_version, connected_at,
+		configuration_json, is_default, source, created_at, updated_at
+		FROM service_providers WHERE category = ? ORDER BY display_name ASC`, category)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query service providers by category: %w", err)
+	}
+	defer rows.Close()
+	return s.scanServiceProviders(rows)
+}
+
+func (s *SQLiteStore) GetServiceProvidersByStatus(status string) ([]ServiceProviderRecord, error) {
+	rows, err := s.db.Query(`SELECT id, provider_name, provider_aid, category, display_name, endpoint_url,
+		status, health, health_checked_at, company_hq, server_region, identity_level, grape_score,
+		capabilities_json, terms_url, terms_accepted_at, terms_version, connected_at,
+		configuration_json, is_default, source, created_at, updated_at
+		FROM service_providers WHERE status = ? ORDER BY category ASC, display_name ASC`, status)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query service providers by status: %w", err)
+	}
+	defer rows.Close()
+	return s.scanServiceProviders(rows)
+}
+
+func (s *SQLiteStore) DeleteServiceProvider(id string) error {
+	_, err := s.db.Exec(`DELETE FROM service_providers WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete service provider: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) scanServiceProviders(rows *sql.Rows) ([]ServiceProviderRecord, error) {
+	var records []ServiceProviderRecord
+	for rows.Next() {
+		var r ServiceProviderRecord
+		var capabilitiesJSON, configJSON string
+		var isDefault int
+		if err := rows.Scan(&r.ID, &r.ProviderName, &r.ProviderAID, &r.Category,
+			&r.DisplayName, &r.EndpointURL, &r.Status, &r.Health, &r.HealthCheckedAt,
+			&r.CompanyHQ, &r.ServerRegion, &r.IdentityLevel, &r.GrapeScore,
+			&capabilitiesJSON, &r.TermsURL, &r.TermsAcceptedAt, &r.TermsVersion,
+			&r.ConnectedAt, &configJSON, &isDefault, &r.Source,
+			&r.CreatedAt, &r.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan service provider: %w", err)
+		}
+		r.IsDefault = isDefault == 1
+		if capabilitiesJSON != "" && capabilitiesJSON != "[]" {
+			_ = json.Unmarshal([]byte(capabilitiesJSON), &r.Capabilities)
+		}
+		if r.Capabilities == nil {
+			r.Capabilities = []string{}
+		}
+		if configJSON != "" && configJSON != "{}" {
+			_ = json.Unmarshal([]byte(configJSON), &r.Configuration)
+		}
+		if r.Configuration == nil {
+			r.Configuration = map[string]string{}
+		}
+		records = append(records, r)
+	}
+	if records == nil {
+		records = []ServiceProviderRecord{}
+	}
+	return records, nil
+}
+
 // ── Reset ─────────────────────────────────────────────────────────────────────
 
 func (s *SQLiteStore) ResetAll() error {
-	tables := []string{"kel", "identity", "contacts", "pending_requests", "profile", "settings", "endpoint", "contact_kels", "credentials", "credential_schemas", "presentations", "witness_receipts", "tasks", "guardianships"}
+	tables := []string{"kel", "identity", "contacts", "pending_requests", "profile", "settings", "endpoint", "contact_kels", "credentials", "credential_schemas", "presentations", "witness_receipts", "tasks", "guardianships", "service_providers"}
 	for _, t := range tables {
 		if _, err := s.db.Exec(`DELETE FROM ` + t); err != nil {
 			return fmt.Errorf("failed to clear table %s: %w", t, err)

@@ -253,6 +253,34 @@ type EmancipationTrigger struct {
         Value string `json:"value"` // date string or empty for manual
 }
 
+// ── Service Providers ───────────────────────────────────────────────────────
+
+type ServiceProviderRecord struct {
+        ID              string            `json:"id"`
+        ProviderName    string            `json:"provider_name"`
+        ProviderAID     string            `json:"provider_aid"`
+        Category        string            `json:"category"`         // infrastructure|witness|cloud_hsm|tunneling
+        DisplayName     string            `json:"display_name"`
+        EndpointURL     string            `json:"endpoint_url"`
+        Status          string            `json:"status"`           // available|connected|disconnected|error
+        Health          string            `json:"health"`           // healthy|degraded|unreachable|unknown
+        HealthCheckedAt string            `json:"health_checked_at"`
+        CompanyHQ       string            `json:"company_hq"`
+        ServerRegion    string            `json:"server_region"`
+        IdentityLevel   int               `json:"identity_level"`
+        GrapeScore      int               `json:"grape_score"`
+        Capabilities    []string          `json:"capabilities"`
+        TermsURL        string            `json:"terms_url"`
+        TermsAcceptedAt string            `json:"terms_accepted_at"`
+        TermsVersion    string            `json:"terms_version"`
+        ConnectedAt     string            `json:"connected_at"`
+        Configuration   map[string]string `json:"configuration"`
+        IsDefault       bool              `json:"is_default"`
+        Source          string            `json:"source"`           // builtin|directory|manual
+        CreatedAt       string            `json:"created_at"`
+        UpdatedAt       string            `json:"updated_at"`
+}
+
 type Store interface {
         SaveEvent(record EventRecord) error
         GetEvents(aid string) ([]EventRecord, error)
@@ -299,6 +327,12 @@ type Store interface {
         GetGuardianship(id string) (*GuardianshipRecord, error)
         GetGuardianshipByDependentAID(dependentAID string) (*GuardianshipRecord, error)
         DeleteGuardianship(id string) error
+        SaveServiceProvider(record ServiceProviderRecord) error
+        GetServiceProviders() ([]ServiceProviderRecord, error)
+        GetServiceProvider(id string) (*ServiceProviderRecord, error)
+        GetServiceProvidersByCategory(category string) ([]ServiceProviderRecord, error)
+        GetServiceProvidersByStatus(status string) ([]ServiceProviderRecord, error)
+        DeleteServiceProvider(id string) error
         ResetAll() error
         Close() error
 }
@@ -960,6 +994,32 @@ func (s *FileStore) GetGuardianshipByDependentAID(dependentAID string) (*Guardia
 
 func (s *FileStore) DeleteGuardianship(id string) error {
         return fmt.Errorf("guardianship not supported by FileStore — use SQLiteStore")
+}
+
+// ── Service Provider (FileStore stubs — SQLiteStore is the active implementation) ─
+
+func (s *FileStore) SaveServiceProvider(record ServiceProviderRecord) error {
+        return fmt.Errorf("service providers not supported by FileStore — use SQLiteStore")
+}
+
+func (s *FileStore) GetServiceProviders() ([]ServiceProviderRecord, error) {
+        return []ServiceProviderRecord{}, nil
+}
+
+func (s *FileStore) GetServiceProvider(id string) (*ServiceProviderRecord, error) {
+        return nil, nil
+}
+
+func (s *FileStore) GetServiceProvidersByCategory(category string) ([]ServiceProviderRecord, error) {
+        return []ServiceProviderRecord{}, nil
+}
+
+func (s *FileStore) GetServiceProvidersByStatus(status string) ([]ServiceProviderRecord, error) {
+        return []ServiceProviderRecord{}, nil
+}
+
+func (s *FileStore) DeleteServiceProvider(id string) error {
+        return fmt.Errorf("service providers not supported by FileStore — use SQLiteStore")
 }
 
 func (s *FileStore) ResetAll() error {
