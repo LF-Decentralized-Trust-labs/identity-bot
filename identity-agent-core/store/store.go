@@ -113,6 +113,13 @@ type ProfileData struct {
         Note       string `json:"note,omitempty"`
         Photo      string `json:"photo,omitempty"`
         UID        string `json:"uid,omitempty"`
+
+        // Organization-specific fields (entity_type = "organization").
+        // Identity Agent Protocol-level per ADR-020. Jurisdiction is free-text for now (formal spec TBD).
+        EntityType   string `json:"entity_type,omitempty"`   // "individual" | "organization"
+        OrgName      string `json:"org_name,omitempty"`
+        OrgType      string `json:"org_type,omitempty"`      // e.g. "school", "business", "healthcare"
+        Jurisdiction string `json:"jurisdiction,omitempty"`  // free-text for now
 }
 
 func (p *ProfileData) ToJCard(aid string, oobiURL string) *JCard {
@@ -238,6 +245,7 @@ type GuardianshipRecord struct {
         CoGuardians         []string           `json:"co_guardians"`
         MultisigThreshold   int                `json:"multisig_threshold"`
         Metadata            map[string]string  `json:"metadata"`
+        CredentialSAID      string             `json:"credential_said"` // SAID of the guardianship ACDC proving this relationship
 }
 
 type EmancipationTrigger struct {
@@ -289,6 +297,7 @@ type Store interface {
         SaveGuardianship(record GuardianshipRecord) error
         GetGuardianships() ([]GuardianshipRecord, error)
         GetGuardianship(id string) (*GuardianshipRecord, error)
+        GetGuardianshipByDependentAID(dependentAID string) (*GuardianshipRecord, error)
         DeleteGuardianship(id string) error
         ResetAll() error
         Close() error
@@ -942,6 +951,10 @@ func (s *FileStore) GetGuardianships() ([]GuardianshipRecord, error) {
 }
 
 func (s *FileStore) GetGuardianship(id string) (*GuardianshipRecord, error) {
+        return nil, nil
+}
+
+func (s *FileStore) GetGuardianshipByDependentAID(dependentAID string) (*GuardianshipRecord, error) {
         return nil, nil
 }
 

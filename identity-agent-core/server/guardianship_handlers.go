@@ -115,6 +115,29 @@ func (s *CoreServer) handleCreateGuardianship(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// Auto-issue a Guardianship Credential ACDC so the SAID can serve as a chain-of-trust anchor.
+	// This runs synchronously — failure is non-fatal (guardianship record still created).
+	if s.KeriDriver != nil {
+		claims := map[string]interface{}{
+			"dependent_name": record.DependentName,
+			"guardian_type":  record.Type,
+		}
+		if record.DependentAID != "" {
+			claims["dependent_aid"] = record.DependentAID
+		}
+		const guardianshipSchemaSAID = "EGuardianship__placeholder__v1"
+		if result, err := s.KeriDriver.IssueCredential(identity.AID, claims, guardianshipSchemaSAID, identity.AID, nil); err == nil {
+			record.CredentialSAID = result.AcdcSaid
+			if saveErr := s.DataStore.SaveGuardianship(record); saveErr != nil {
+				log.Printf("[guardianship] Warning: failed to store guardianship credential SAID %s: %v", result.AcdcSaid, saveErr)
+			} else {
+				log.Printf("[guardianship] Issued guardianship credential %s for %s", result.AcdcSaid, record.DependentName)
+			}
+		} else {
+			log.Printf("[guardianship] Warning: failed to auto-issue guardianship credential: %v", err)
+		}
+	}
+
 	log.Printf("[guardianship] Created guardianship %s: type=%s dependent=%s hosting=%s",
 		record.ID, record.Type, record.DependentName, record.HostingType)
 

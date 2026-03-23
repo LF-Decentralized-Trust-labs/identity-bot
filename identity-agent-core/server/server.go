@@ -296,6 +296,7 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
                 r.Post("/credential/present", s.handlePresentCredential)
                 r.Get("/presentations", s.handleGetPresentations)
                 r.Post("/credential/verify", s.handleVerifyCredential)
+                r.Post("/credentials/verify", s.handleVerifyCredentialChain)
                 r.Get("/credential-schemas", s.handleGetCredentialSchemas)
                 r.Post("/credential-schemas/fetch", s.handleFetchCredentialSchema)
                 r.Get("/schemas", s.handleListBuiltinSchemas)
@@ -1001,6 +1002,9 @@ func (s *CoreServer) handleIssueCredential(w http.ResponseWriter, r *http.Reques
                 SchemaSaid    string                 `json:"schema_said"`
                 HolderAid     string                 `json:"holder_aid"`
                 CesrSignature string                 `json:"cesr_signature,omitempty"`
+                // Edges: optional ACDC edge block for credential chaining.
+                // Structure: {"<label>": {"n": "<parent-SAID>", "s": "<schema-SAID>"}}
+                Edges         map[string]interface{} `json:"edges,omitempty"`
         }
         if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
                 writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
@@ -1017,7 +1021,22 @@ func (s *CoreServer) handleIssueCredential(w http.ResponseWriter, r *http.Reques
                 return
         }
 
-        result, err := s.KeriDriver.IssueCredential(identity.AID, req.Claims, req.SchemaSaid, req.HolderAid)
+        // Chain-of-trust: if the holder is a known dependent with an active guardianship
+        // credential, auto-build a proper ACDC edges block referencing that credential.
+        // The caller may also supply edges explicitly; explicit edges take precedence.
+        if req.Edges == nil && req.HolderAid != "" {
+                if gr, err2 := s.DataStore.GetGuardianshipByDependentAID(req.HolderAid); err2 == nil && gr != nil && gr.CredentialSAID != "" {
+                        req.Edges = map[string]interface{}{
+                                "guardianship": map[string]interface{}{
+                                        "n": gr.CredentialSAID,
+                                        "s": "EGuardianship__placeholder__v1",
+                                },
+                        }
+                        log.Printf("[identity-agent-core] CREDENTIAL: Auto-built guardianship edges block (SAID %s) for dependent %s", gr.CredentialSAID, req.HolderAid)
+                }
+        }
+
+        result, err := s.KeriDriver.IssueCredential(identity.AID, req.Claims, req.SchemaSaid, req.HolderAid, req.Edges)
         if err != nil {
                 writeError(w, http.StatusInternalServerError, "Credential issuance failed", err.Error())
                 return
@@ -1579,6 +1598,172 @@ func (s *CoreServer) handleVerifyCredential(w http.ResponseWriter, r *http.Reque
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
+}
+
+// handleVerifyCredentialChain accepts a SAID or ACDC JSON, verifies the credential,
+// then walks the 'e' (edges) block to recursively verify each parent credential in the chain.
+// Returns {valid, chain: [{...}], warnings, errors} where each chain step includes
+// the credential SAID, schema, checks map, and overall step validity.
+func (s *CoreServer) handleVerifyCredentialChain(w http.ResponseWriter, r *http.Request) {
+	if s.KeriDriver == nil {
+		writeError(w, http.StatusServiceUnavailable, "KERI driver not available",
+			"Credential verification requires the Python KERI driver (desktop only)")
+		return
+	}
+
+	var req struct {
+		// AcdcSaid: look up a credential by SAID from the local store.
+		AcdcSaid    string `json:"acdc_said"`
+		// AcdcJsonB64: raw base64-encoded ACDC JSON for external credentials not in local store.
+		AcdcJsonB64 string `json:"acdc_json_b64"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+	if req.AcdcSaid == "" && req.AcdcJsonB64 == "" {
+		writeError(w, http.StatusBadRequest, "acdc_said or acdc_json_b64 required", "")
+		return
+	}
+
+	// Resolve ACDC JSON: from local store (by SAID) or from request body directly.
+	acdcJsonB64 := req.AcdcJsonB64
+	if acdcJsonB64 == "" {
+		cred, err := s.DataStore.GetCredential(req.AcdcSaid)
+		if err != nil || cred == nil {
+			writeError(w, http.StatusNotFound, "Credential not found", req.AcdcSaid)
+			return
+		}
+		acdcJsonB64 = cred.AcdcJson
+	}
+
+	type ChainStep struct {
+		Said       string                 `json:"said"`
+		SchemaSaid string                 `json:"schema_said"`
+		IssuerAid  string                 `json:"issuer_aid"`
+		Checks     map[string]interface{} `json:"checks"`
+		Errors     []string               `json:"errors"`
+		Valid       bool                   `json:"valid"`
+		EdgeLabel  string                 `json:"edge_label,omitempty"` // label used in parent's edges block
+	}
+
+	var chain []ChainStep
+	var allErrors []string
+	warnings := []string{}
+
+	// verifyOne: call the driver to verify a single ACDC, add a ChainStep, return the parsed ACDC body.
+	verifyOne := func(jsonB64, edgeLabel string) (map[string]interface{}, bool) {
+		// Decode to extract issuer AID for KEL lookup.
+		var acdcBody map[string]interface{}
+		if decoded, err := base64.StdEncoding.DecodeString(jsonB64); err == nil {
+			_ = json.Unmarshal(decoded, &acdcBody)
+		}
+
+		var issuerKelEvents []map[string]interface{}
+		issuerAid := ""
+		if acdcBody != nil {
+			if aid, ok := acdcBody["i"].(string); ok {
+				issuerAid = aid
+				if kelRecord, err := s.DataStore.GetContactKEL(aid); err == nil && kelRecord != nil {
+					issuerKelEvents = unwrapEventJSON(kelRecord.KEL)
+				}
+				if issuerKelEvents == nil {
+					if ownEvents, err := s.DataStore.GetEvents(aid); err == nil && len(ownEvents) > 0 {
+						issuerKelEvents = eventRecordsToKEDs(ownEvents)
+					}
+				}
+				if issuerKelEvents == nil {
+					warnings = append(warnings, "No KEL found for issuer "+aid+"; issuer checks skipped")
+				}
+			}
+		}
+
+		driverReq := &drivers.DriverVerifyCredentialRequest{
+			AcdcJson:        jsonB64,
+			IssuerKelEvents: issuerKelEvents,
+		}
+		result, err := s.KeriDriver.VerifyCredential(driverReq)
+
+		step := ChainStep{
+			EdgeLabel:  edgeLabel,
+			IssuerAid:  issuerAid,
+			Errors:     []string{},
+		}
+		if acdcBody != nil {
+			step.Said, _ = acdcBody["d"].(string)
+			step.SchemaSaid, _ = acdcBody["s"].(string)
+		}
+		if err != nil {
+			step.Valid = false
+			step.Errors = append(step.Errors, err.Error())
+			allErrors = append(allErrors, err.Error())
+		} else {
+			step.Valid = result.Verified
+			step.Checks = result.Checks
+			step.Errors = result.Errors
+			if !result.Verified {
+				allErrors = append(allErrors, result.Errors...)
+			}
+		}
+		chain = append(chain, step)
+		return acdcBody, step.Valid
+	}
+
+	// Verify the top-level credential.
+	topBody, _ := verifyOne(acdcJsonB64, "")
+
+	// Walk the 'e' edges block to verify parent credentials.
+	if topBody != nil {
+		if edgesRaw, ok := topBody["e"]; ok {
+			if edgesMap, ok := edgesRaw.(map[string]interface{}); ok {
+				for label, edgeRaw := range edgesMap {
+					if label == "d" {
+						continue // skip the edges block SAID itself
+					}
+					edgeEntry, ok := edgeRaw.(map[string]interface{})
+					if !ok {
+						continue
+					}
+					parentSAID, _ := edgeEntry["n"].(string)
+					if parentSAID == "" {
+						continue
+					}
+					// Look up parent credential from local store.
+					parentCred, err := s.DataStore.GetCredential(parentSAID)
+					if err != nil || parentCred == nil || parentCred.AcdcJson == "" {
+						warnings = append(warnings, "Parent credential "+parentSAID+" (edge '"+label+"') not found in local store; cannot verify chain")
+						// Add a placeholder step.
+						chain = append(chain, ChainStep{
+							Said:      parentSAID,
+							EdgeLabel: label,
+							Valid:     false,
+							Errors:    []string{"Parent credential not in local store"},
+						})
+						allErrors = append(allErrors, "Chain broken: parent credential "+parentSAID+" not found")
+						continue
+					}
+					verifyOne(parentCred.AcdcJson, label)
+				}
+			}
+		}
+	}
+
+	// Overall validity: all steps must be valid.
+	valid := len(allErrors) == 0
+	for _, step := range chain {
+		if !step.Valid {
+			valid = false
+			break
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"valid":    valid,
+		"chain":    chain,
+		"warnings": warnings,
+		"errors":   allErrors,
+	})
 }
 
 func (s *CoreServer) handleSubmitReceipt(w http.ResponseWriter, r *http.Request) {

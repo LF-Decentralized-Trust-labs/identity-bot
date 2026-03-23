@@ -6,6 +6,7 @@ import '../theme/app_theme.dart';
 import '../crypto/bip39.dart';
 import '../services/keri_service.dart';
 import '../services/core_service.dart';
+import '../services/preferences_service.dart' show EntityType;
 import '../services/secure_key_store.dart';
 import '../services/backend_process_service.dart';
 import '../services/enclave_service.dart';
@@ -25,12 +26,14 @@ class SetupWizardScreen extends StatefulWidget {
   final VoidCallback onComplete;
   final KeriService keriService;
   final String? remoteBrainUrl;
+  final EntityType? entityType;
 
   const SetupWizardScreen({
     super.key,
     required this.onComplete,
     required this.keriService,
     this.remoteBrainUrl,
+    this.entityType,
   });
 
   @override
@@ -47,6 +50,11 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
   final _displayNameController = TextEditingController();
   String? _photoBase64;
   String? _profileFormError;
+
+  // Org-specific profile fields (only used when entityType == organization)
+  final _orgNameController = TextEditingController();
+  final _orgTypeController = TextEditingController();
+  final _jurisdictionController = TextEditingController();
 
   // Seed verify (inline on seed display screen)
   int _verifyWordIndex1 = 3;
@@ -75,6 +83,9 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
   @override
   void dispose() {
     _displayNameController.dispose();
+    _orgNameController.dispose();
+    _orgTypeController.dispose();
+    _jurisdictionController.dispose();
     _verifyController1.dispose();
     _verifyController2.dispose();
     super.dispose();
@@ -92,10 +103,16 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
 
   // ── Profile submit ──────────────────────────────────────────────────────────
 
+  bool get _isOrg => widget.entityType == EntityType.organization;
+
   void _submitProfile() {
     final name = _displayNameController.text.trim();
     if (name.isEmpty) {
-      setState(() => _profileFormError = 'Display name is required.');
+      setState(() => _profileFormError = _isOrg ? 'Organization name is required.' : 'Display name is required.');
+      return;
+    }
+    if (_isOrg && _orgTypeController.text.trim().isEmpty) {
+      setState(() => _profileFormError = 'Organization type is required.');
       return;
     }
     setState(() {
@@ -263,9 +280,13 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
         final coreService = CoreService(baseUrl: _coreBaseUrl);
         await coreService.saveProfile(ProfileResponse(
           fullName: _displayName,
-          givenName: _displayName,
+          givenName: _isOrg ? '' : _displayName,
           familyName: '',
           photo: _photoBase64 ?? '',
+          entityType: _isOrg ? 'organization' : 'individual',
+          orgName: _isOrg ? _orgNameController.text.trim() : '',
+          orgType: _isOrg ? _orgTypeController.text.trim() : '',
+          jurisdiction: _isOrg ? _jurisdictionController.text.trim() : '',
         ));
         coreService.dispose();
       } catch (_) {}
@@ -381,12 +402,13 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
   // ── Screen: Profile ─────────────────────────────────────────────────────────
 
   Widget _buildProfile() {
+    final isOrg = _isOrg;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const SizedBox(height: 32),
-        const Text(
-          'SET UP YOUR PROFILE.',
+        Text(
+          isOrg ? 'SET UP YOUR ORGANIZATION.' : 'SET UP YOUR PROFILE.',
           style: TextStyle(
             color: AppColors.textPrimary,
             fontSize: 20,
@@ -396,8 +418,8 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
           ),
         ),
         const SizedBox(height: 8),
-        const Text(
-          'This is how contacts will know you.',
+        Text(
+          isOrg ? 'Enter your organization details.' : 'This is how contacts will know you.',
           style: TextStyle(
             color: AppColors.textSecondary,
             fontSize: 13,
@@ -481,11 +503,11 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Row(
+              Row(
                 children: [
                   Text(
-                    'DISPLAY NAME',
-                    style: TextStyle(
+                    isOrg ? 'ORGANIZATION NAME' : 'DISPLAY NAME',
+                    style: const TextStyle(
                       color: AppColors.textMuted,
                       fontSize: 11,
                       fontWeight: FontWeight.w600,
@@ -493,8 +515,8 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
                       fontFamily: 'monospace',
                     ),
                   ),
-                  SizedBox(width: 4),
-                  Text(
+                  const SizedBox(width: 4),
+                  const Text(
                     '*',
                     style: TextStyle(
                       color: AppColors.coreInactive,
@@ -513,7 +535,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
                   fontFamily: 'monospace',
                 ),
                 decoration: InputDecoration(
-                  hintText: 'What your contacts will see',
+                  hintText: isOrg ? 'e.g. Riverside Elementary School' : 'What your contacts will see',
                   hintStyle: TextStyle(
                     color: AppColors.textMuted.withOpacity(0.5),
                     fontFamily: 'monospace',
@@ -538,6 +560,15 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
                 ),
                 autocorrect: false,
               ),
+              // Org-specific fields shown when entity_type = organization
+              if (isOrg) ...[
+                const SizedBox(height: 16),
+                _buildOrgField('ORG TYPE *', _orgTypeController,
+                    hint: 'e.g. school, business, healthcare, government'),
+                const SizedBox(height: 12),
+                _buildOrgField('JURISDICTION', _jurisdictionController,
+                    hint: 'e.g. Texas, USA  (free text — optional)'),
+              ],
             ],
           ),
         ),
@@ -612,6 +643,38 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
           ),
         ),
         const SizedBox(height: 32),
+      ],
+    );
+  }
+
+  Widget _buildOrgField(String label, TextEditingController ctrl, {String hint = ''}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label,
+            style: const TextStyle(
+              color: AppColors.textMuted,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 1.2,
+              fontFamily: 'monospace',
+            )),
+        const SizedBox(height: 8),
+        TextField(
+          controller: ctrl,
+          style: const TextStyle(color: AppColors.textPrimary, fontSize: 14, fontFamily: 'monospace'),
+          decoration: InputDecoration(
+            hintText: hint,
+            hintStyle: TextStyle(color: AppColors.textMuted.withOpacity(0.5), fontFamily: 'monospace', fontSize: 12),
+            filled: true,
+            fillColor: AppColors.surfaceLight,
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.border)),
+            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.border)),
+            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.accent)),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          ),
+          autocorrect: false,
+        ),
       ],
     );
   }
