@@ -1,5 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import '../config/agent_config.dart';
 import 'pin_password_service.dart';
 import 'local_auth_service.dart';
 
@@ -81,7 +84,7 @@ class IdentityLevelService {
   static Future<ActiveFactors> loadFactors() async {
     final prefs = await SharedPreferences.getInstance();
     final witnessCount = prefs.getInt(_witnessCountKey) ?? 0;
-    final hasCredential = prefs.getBool(_hasCredentialKey) ?? false;
+    final hasCredential = await _checkHasCredentialFromDB();
     final hasPin = await PinPasswordService.hasPin();
     final hasPassword = await PinPasswordService.hasPassword();
     final biometricState = await LocalAuthService.fingerprintAvailability();
@@ -97,6 +100,26 @@ class IdentityLevelService {
       witnessCount: witnessCount,
       hasCredential: hasCredential,
     );
+  }
+
+  /// Checks the credentials database via the backend API for any held
+  /// externally-issued credential, replacing the old SharedPreferences flag.
+  static Future<bool> _checkHasCredentialFromDB() async {
+    try {
+      final baseUrl = AgentConfig.coreBaseUrl;
+      final uri = Uri.parse('$baseUrl/api/credentials?role=holder&status=valid');
+      final response = await http.get(uri).timeout(const Duration(seconds: 3));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        final list = data['credentials'] as List<dynamic>? ?? [];
+        return list.isNotEmpty;
+      }
+    } catch (_) {
+      // Backend unavailable — fall back to SharedPreferences cache
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getBool(_hasCredentialKey) ?? false;
+    }
+    return false;
   }
 
   // ── Tier computation ──────────────────────────────────────────────────────

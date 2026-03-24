@@ -118,6 +118,60 @@ const guardianshipCredentialJSON = `{
   "required": ["d", "dependent_name", "guardian_type"]
 }`
 
+const identityAttestationJSON = `{
+  "$id": "EIdentityAttestation__placeholder__v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Identity Attestation",
+  "description": "Attests that the holder's real-world identity has been verified to a stated assurance level. Bridges KERI cryptographic identity with human identity verification. Compatible with SEDI (State Endorsed Digital Identity) frameworks.",
+  "type": "object",
+  "properties": {
+    "d":                { "type": "string", "description": "SAID of attribute block" },
+    "i":                { "type": "string", "description": "Holder AID" },
+    "subject_name":     { "type": "string", "description": "Full legal name of the verified individual" },
+    "assurance_level":  { "type": "string", "enum": ["ial1", "ial2", "ial3", "ial4"], "description": "NIST Identity Assurance Level achieved" },
+    "auth_assurance":   { "type": "string", "enum": ["aal1", "aal2", "aal3", "aal4"], "description": "NIST Authentication Assurance Level achieved" },
+    "confidence_score": { "type": "integer", "minimum": 0, "maximum": 100, "description": "OmniFactor confidence score (0-100) at time of attestation" },
+    "verification_methods": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Methods used to verify identity (e.g. government_id, biometric_liveness, in_person, witness_attestation)"
+    },
+    "jurisdiction":     { "type": "string", "description": "Legal jurisdiction of identity verification (e.g. US-UT for Utah)" },
+    "issued_date":      { "type": "string", "format": "date", "description": "ISO 8601 date credential was issued" },
+    "expiry_date":      { "type": "string", "format": "date", "description": "ISO 8601 date credential expires" },
+    "issuer_type":      { "type": "string", "enum": ["self", "witness", "organization", "government"], "description": "Type of entity that issued this attestation" },
+    "notes":            { "type": "string", "description": "Optional additional context" }
+  },
+  "required": ["d", "subject_name", "assurance_level"]
+}`
+
+const employeeAuthorizationJSON = `{
+  "$id": "EEmployeeAuth__placeholder__v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Employee Authorization",
+  "description": "Authorizes an individual to act on behalf of an organization. Issued by an organization's identity agent to an employee's personal identity agent. The employee presents this credential to prove organizational affiliation.",
+  "type": "object",
+  "properties": {
+    "d":              { "type": "string", "description": "SAID of attribute block" },
+    "i":              { "type": "string", "description": "Employee AID (holder)" },
+    "org_name":       { "type": "string", "description": "Legal name of the organization" },
+    "org_aid":        { "type": "string", "description": "Organization's AID" },
+    "employee_name":  { "type": "string", "description": "Full legal name of the employee" },
+    "role":           { "type": "string", "description": "Employee's role or title within the organization" },
+    "department":     { "type": "string", "description": "Department within the organization" },
+    "permissions": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Specific permissions granted (e.g. verify_credentials, sign_contracts, manage_employees)"
+    },
+    "effective_date": { "type": "string", "format": "date", "description": "Date authorization became effective" },
+    "expiry_date":    { "type": "string", "format": "date", "description": "Date authorization expires" },
+    "jurisdiction":   { "type": "string", "description": "Legal jurisdiction of the organization" },
+    "notes":          { "type": "string", "description": "Optional additional context" }
+  },
+  "required": ["d", "org_name", "org_aid", "employee_name", "role"]
+}`
+
 // ── Catalog ───────────────────────────────────────────────────────────────────
 
 // Catalog is the authoritative map of SAID → BuiltinSchema for all bundled schemas.
@@ -161,6 +215,42 @@ var Catalog = map[string]*BuiltinSchema{
 			{Key: "relationship",  Label: "Relationship",        Type: "string", Required: false, Placeholder: "colleague, friend, attorney…"},
 			{Key: "verified_date", Label: "Date Verified",       Type: "date",   Required: false, Placeholder: ""},
 			{Key: "notes",         Label: "Notes",               Type: "string", Required: false, Placeholder: "Optional context"},
+		},
+	},
+	"EIdentityAttestation__placeholder__v1": {
+		SAID:        "EIdentityAttestation__placeholder__v1",
+		Name:        "Identity Attestation",
+		Description: "Attests that the holder's real-world identity has been verified to a stated assurance level. Bridges KERI cryptographic identity with human identity verification. Compatible with SEDI frameworks.",
+		JSON:        identityAttestationJSON,
+		Fields: []SchemaField{
+			{Key: "subject_name",          Label: "Full Legal Name",         Type: "string",  Required: true,  Placeholder: "Full legal name"},
+			{Key: "assurance_level",       Label: "Identity Assurance Level",Type: "string",  Required: true,  Placeholder: "ial1 | ial2 | ial3 | ial4"},
+			{Key: "auth_assurance",        Label: "Auth Assurance Level",    Type: "string",  Required: false, Placeholder: "aal1 | aal2 | aal3 | aal4"},
+			{Key: "confidence_score",      Label: "Confidence Score (0-100)",Type: "string",  Required: false, Placeholder: "87"},
+			{Key: "verification_methods",  Label: "Verification Methods",    Type: "string",  Required: false, Placeholder: "government_id, biometric_liveness"},
+			{Key: "jurisdiction",          Label: "Jurisdiction",            Type: "string",  Required: false, Placeholder: "US-UT"},
+			{Key: "issued_date",           Label: "Issued Date",             Type: "date",    Required: false, Placeholder: ""},
+			{Key: "expiry_date",           Label: "Expiry Date",             Type: "date",    Required: false, Placeholder: ""},
+			{Key: "issuer_type",           Label: "Issuer Type",             Type: "string",  Required: false, Placeholder: "self | witness | organization | government"},
+			{Key: "notes",                 Label: "Notes",                   Type: "string",  Required: false, Placeholder: "Optional context"},
+		},
+	},
+	"EEmployeeAuth__placeholder__v1": {
+		SAID:        "EEmployeeAuth__placeholder__v1",
+		Name:        "Employee Authorization",
+		Description: "Authorizes an individual to act on behalf of an organization. Issued by org identity agent to employee's personal identity agent.",
+		JSON:        employeeAuthorizationJSON,
+		Fields: []SchemaField{
+			{Key: "org_name",        Label: "Organization Name",   Type: "string",  Required: true,  Placeholder: "Legal entity name"},
+			{Key: "org_aid",         Label: "Organization AID",    Type: "aid",     Required: true,  Placeholder: "E…"},
+			{Key: "employee_name",   Label: "Employee Name",       Type: "string",  Required: true,  Placeholder: "Full legal name"},
+			{Key: "role",            Label: "Role / Title",        Type: "string",  Required: true,  Placeholder: "Software Engineer"},
+			{Key: "department",      Label: "Department",          Type: "string",  Required: false, Placeholder: "Engineering"},
+			{Key: "permissions",     Label: "Permissions",         Type: "string",  Required: false, Placeholder: "verify_credentials, sign_contracts"},
+			{Key: "effective_date",  Label: "Effective Date",      Type: "date",    Required: false, Placeholder: ""},
+			{Key: "expiry_date",     Label: "Expiry Date",         Type: "date",    Required: false, Placeholder: ""},
+			{Key: "jurisdiction",    Label: "Jurisdiction",        Type: "string",  Required: false, Placeholder: "US-UT"},
+			{Key: "notes",           Label: "Notes",               Type: "string",  Required: false, Placeholder: "Optional context"},
 		},
 	},
 	"ESchoolPickupAuth__placeholder__v1": {
