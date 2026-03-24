@@ -12,6 +12,8 @@ import '../../services/keri_service.dart';
 import '../../services/mobile_on_device_keri_service.dart';
 import '../../widgets/identity_level_badge.dart';
 import '../../widgets/key_storage_badge.dart';
+import '../../widgets/alert_detail_modal.dart';
+import '../../widgets/confirmation_toast.dart';
 import '../../widgets/log_entry.dart';
 import '../../widgets/setup_task_banner.dart';
 import '../auth_setup_screen.dart';
@@ -244,6 +246,9 @@ class _DesktopDashboardScreenState extends State<DesktopDashboardScreen> {
       await _coreService.acceptContact(aid);
       _addLog('Contact accepted', LogLevel.success);
       _fetchAlerts();
+      if (mounted) {
+        ConfirmationToast.show(context, message: 'Contact Added', icon: Icons.person_add);
+      }
     } catch (e) {
       _addLog('Accept failed: ${e.toString().split(': ').last}', LogLevel.error);
     }
@@ -254,6 +259,13 @@ class _DesktopDashboardScreenState extends State<DesktopDashboardScreen> {
       await _coreService.rejectContact(aid);
       _addLog('Contact rejected', LogLevel.info);
       _fetchAlerts();
+      if (mounted) {
+        ConfirmationToast.show(context,
+          message: 'Contact Rejected',
+          icon: Icons.person_off,
+          color: AppColors.error,
+        );
+      }
     } catch (e) {
       _addLog('Reject failed: ${e.toString().split(': ').last}', LogLevel.error);
     }
@@ -263,6 +275,13 @@ class _DesktopDashboardScreenState extends State<DesktopDashboardScreen> {
     try {
       await _coreService.deletePendingRequest(aid);
       _fetchAlerts();
+      if (mounted) {
+        ConfirmationToast.show(context,
+          message: 'Dismissed',
+          icon: Icons.close,
+          color: AppColors.textMuted,
+        );
+      }
     } catch (_) {}
   }
 
@@ -271,6 +290,9 @@ class _DesktopDashboardScreenState extends State<DesktopDashboardScreen> {
       await _coreService.acceptCredential(said);
       _addLog('Credential accepted', LogLevel.success);
       _fetchAlerts();
+      if (mounted) {
+        ConfirmationToast.show(context, message: 'Credential Accepted', icon: Icons.verified);
+      }
     } catch (e) {
       _addLog('Accept failed: ${e.toString().split(': ').last}', LogLevel.error);
     }
@@ -281,8 +303,40 @@ class _DesktopDashboardScreenState extends State<DesktopDashboardScreen> {
       await _coreService.rejectCredential(said);
       _addLog('Credential rejected', LogLevel.info);
       _fetchAlerts();
+      if (mounted) {
+        ConfirmationToast.show(context,
+          message: 'Credential Rejected',
+          icon: Icons.cancel_outlined,
+          color: AppColors.error,
+        );
+      }
     } catch (e) {
       _addLog('Reject failed: ${e.toString().split(': ').last}', LogLevel.error);
+    }
+  }
+
+  Future<void> _showContactDetail(ContactResponse contact) async {
+    final action = await AlertDetailModal.showContactDetail(context, contact: contact);
+    if (action == 'accept') {
+      _acceptContact(contact.aid);
+    } else if (action == 'reject') {
+      _rejectContact(contact.aid);
+    }
+  }
+
+  Future<void> _showCredentialDetail(CredentialRecord cred) async {
+    final action = await AlertDetailModal.showCredentialDetail(context, credential: cred);
+    if (action == 'accept') {
+      _acceptCredential(cred.said);
+    } else if (action == 'reject') {
+      _rejectCredential(cred.said);
+    }
+  }
+
+  Future<void> _showPendingDetail(PendingRequestResponse req) async {
+    final action = await AlertDetailModal.showPendingDetail(context, request: req);
+    if (action == 'dismiss') {
+      _dismissPendingRequest(req.aid);
     }
   }
 
@@ -697,7 +751,9 @@ class _DesktopDashboardScreenState extends State<DesktopDashboardScreen> {
   }
 
   Widget _alertItem(ContactResponse alert) {
-    return Container(
+    return GestureDetector(
+      onTap: () => _showContactDetail(alert),
+      child: Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
@@ -768,48 +824,52 @@ class _DesktopDashboardScreenState extends State<DesktopDashboardScreen> {
           ),
         ],
       ),
+    ),
     );
   }
 
   Widget _pendingItem(PendingRequestResponse req) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceLight,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppColors.error.withOpacity(0.3)),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.link_off, color: AppColors.error, size: 16),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(req.displayName,
-                style: const TextStyle(fontSize: 12, color: AppColors.textPrimary)),
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-            decoration: BoxDecoration(
-              color: AppColors.error.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(3),
+    return GestureDetector(
+      onTap: () => _showPendingDetail(req),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: AppColors.surfaceLight,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: AppColors.error.withOpacity(0.3)),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.link_off, color: AppColors.error, size: 16),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(req.displayName,
+                  style: const TextStyle(fontSize: 12, color: AppColors.textPrimary)),
             ),
-            child: const Text('FAILED',
-                style: TextStyle(color: AppColors.error, fontSize: 8,
-                    fontWeight: FontWeight.w700, letterSpacing: 0.8)),
-          ),
-          const SizedBox(width: 6),
-          TextButton(
-            onPressed: () => _dismissPendingRequest(req.aid),
-            style: TextButton.styleFrom(
-              foregroundColor: AppColors.textMuted,
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              minimumSize: Size.zero,
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+              decoration: BoxDecoration(
+                color: AppColors.error.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(3),
+              ),
+              child: const Text('FAILED',
+                  style: TextStyle(color: AppColors.error, fontSize: 8,
+                      fontWeight: FontWeight.w700, letterSpacing: 0.8)),
             ),
-            child: const Text('Dismiss', style: TextStyle(fontSize: 11)),
-          ),
-        ],
+            const SizedBox(width: 6),
+            TextButton(
+              onPressed: () => _dismissPendingRequest(req.aid),
+              style: TextButton.styleFrom(
+                foregroundColor: AppColors.textMuted,
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: const Text('Dismiss', style: TextStyle(fontSize: 11)),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -818,69 +878,72 @@ class _DesktopDashboardScreenState extends State<DesktopDashboardScreen> {
     final issuerDisplay = cred.issuerName.isNotEmpty ? cred.issuerName
         : (cred.issuerAid.length > 16 ? '${cred.issuerAid.substring(0, 12)}…' : cred.issuerAid);
     final typeDisplay = cred.credentialType.isNotEmpty ? cred.credentialType : 'Credential';
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceLight,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppColors.success.withOpacity(0.3)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.verified_outlined, size: 14, color: AppColors.success),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text('$typeDisplay from $issuerDisplay',
-                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
-                        color: AppColors.textPrimary),
-                    maxLines: 1, overflow: TextOverflow.ellipsis),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                decoration: BoxDecoration(
-                  color: AppColors.success.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(3),
+    return GestureDetector(
+      onTap: () => _showCredentialDetail(cred),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: AppColors.surfaceLight,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: AppColors.success.withOpacity(0.3)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.verified_outlined, size: 14, color: AppColors.success),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text('$typeDisplay from $issuerDisplay',
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary),
+                      maxLines: 1, overflow: TextOverflow.ellipsis),
                 ),
-                child: const Text('CREDENTIAL',
-                    style: TextStyle(color: AppColors.success, fontSize: 8,
-                        fontWeight: FontWeight.w700, letterSpacing: 0.8)),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              TextButton(
-                onPressed: () => _rejectCredential(cred.said),
-                style: TextButton.styleFrom(
-                  foregroundColor: AppColors.error,
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: AppColors.success.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                  child: const Text('CREDENTIAL',
+                      style: TextStyle(color: AppColors.success, fontSize: 8,
+                          fontWeight: FontWeight.w700, letterSpacing: 0.8)),
                 ),
-                child: const Text('Reject', style: TextStyle(fontSize: 12)),
-              ),
-              const SizedBox(width: 6),
-              ElevatedButton(
-                onPressed: () => _acceptCredential(cred.said),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.success,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  elevation: 0,
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton(
+                  onPressed: () => _rejectCredential(cred.said),
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppColors.error,
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: const Text('Reject', style: TextStyle(fontSize: 12)),
                 ),
-                child: const Text('Accept', style: TextStyle(fontSize: 12)),
-              ),
-            ],
-          ),
-        ],
+                const SizedBox(width: 6),
+                ElevatedButton(
+                  onPressed: () => _acceptCredential(cred.said),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.success,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    elevation: 0,
+                  ),
+                  child: const Text('Accept', style: TextStyle(fontSize: 12)),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
