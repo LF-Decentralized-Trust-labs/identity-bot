@@ -113,6 +113,13 @@ type ProfileData struct {
         Note       string `json:"note,omitempty"`
         Photo      string `json:"photo,omitempty"`
         UID        string `json:"uid,omitempty"`
+
+        // Organization-specific fields (entity_type = "organization").
+        // Identity Agent Protocol-level per ADR-020. Jurisdiction is free-text for now (formal spec TBD).
+        EntityType   string `json:"entity_type,omitempty"`   // "individual" | "organization"
+        OrgName      string `json:"org_name,omitempty"`
+        OrgType      string `json:"org_type,omitempty"`      // e.g. "school", "business", "healthcare"
+        Jurisdiction string `json:"jurisdiction,omitempty"`  // free-text for now
 }
 
 func (p *ProfileData) ToJCard(aid string, oobiURL string) *JCard {
@@ -134,7 +141,10 @@ func (p *ProfileData) ToJCard(aid string, oobiURL string) *JCard {
         }
 }
 
-// CredentialRecord stores an issued ACDC credential anchored in the issuer's KEL.
+// CredentialRecord stores a credential held or issued by this agent.
+// format: "acdc" | "w3c_vc" | "sd_jwt" | "mdl"
+// For non-ACDC formats, raw_json holds the original bytes and acdc_json holds the thin ACDC wrapper
+// anchored to the holder's KEL via an IXN event.
 type CredentialRecord struct {
 	SAID          string `json:"said"`
 	IssuerAID     string `json:"issuer_aid"`
@@ -145,6 +155,19 @@ type CredentialRecord struct {
 	CesrSignature string `json:"cesr_signature,omitempty"`
 	IssuedAt      string `json:"issued_at"`
 	Status        string `json:"status"`
+	Format        string `json:"format"`
+	CredentialType string `json:"credential_type"`
+	IssuerName    string `json:"issuer_name"`
+	IssuerLogoURL string `json:"issuer_logo_url"`
+	ExpiryDate    string `json:"expiry_date"`
+	RawJson       string `json:"raw_json,omitempty"`
+}
+
+// CredentialSchemaRecord caches a fetched ACDC schema by its SAID.
+type CredentialSchemaRecord struct {
+	SAID       string `json:"said"`
+	SchemaJson string `json:"schema_json"`
+	FetchedAt  string `json:"fetched_at"`
 }
 
 // PresentationRecord stores a verifiable presentation created by the holder.
@@ -204,6 +227,60 @@ type KerlEntry struct {
 	ThresholdMet  bool                  `json:"threshold_met"`
 }
 
+// ── Guardianship ────────────────────────────────────────────────────────────
+
+type GuardianshipRecord struct {
+        ID                  string             `json:"id"`
+        Type                string             `json:"type"`                // minor_child|elderly|disability|temporary
+        GuardianAID         string             `json:"guardian_aid"`
+        DependentAID        string             `json:"dependent_aid"`
+        DependentName       string             `json:"dependent_name"`
+        DelegatedAIDPrefix  string             `json:"delegated_aid_prefix"`
+        Status              string             `json:"status"`              // active|expired|revoked|emancipated
+        HostingType         string             `json:"hosting_type"`        // cloud|device
+        HostingURL          string             `json:"hosting_url"`
+        CreatedAt           string             `json:"created_at"`
+        UpdatedAt           string             `json:"updated_at"`
+        EmancipationTrigger *EmancipationTrigger `json:"emancipation_trigger,omitempty"`
+        CoGuardians         []string           `json:"co_guardians"`
+        MultisigThreshold   int                `json:"multisig_threshold"`
+        Metadata            map[string]string  `json:"metadata"`
+        CredentialSAID      string             `json:"credential_said"` // SAID of the guardianship ACDC proving this relationship
+}
+
+type EmancipationTrigger struct {
+        Type  string `json:"type"`  // age|date|manual
+        Value string `json:"value"` // date string or empty for manual
+}
+
+// ── Service Providers ───────────────────────────────────────────────────────
+
+type ServiceProviderRecord struct {
+        ID              string            `json:"id"`
+        ProviderName    string            `json:"provider_name"`
+        ProviderAID     string            `json:"provider_aid"`
+        Category        string            `json:"category"`         // infrastructure|witness|cloud_hsm|tunneling
+        DisplayName     string            `json:"display_name"`
+        EndpointURL     string            `json:"endpoint_url"`
+        Status          string            `json:"status"`           // available|connected|disconnected|error
+        Health          string            `json:"health"`           // healthy|degraded|unreachable|unknown
+        HealthCheckedAt string            `json:"health_checked_at"`
+        CompanyHQ       string            `json:"company_hq"`
+        ServerRegion    string            `json:"server_region"`
+        IdentityLevel   int               `json:"identity_level"`
+        GrapeScore      int               `json:"grape_score"`
+        Capabilities    []string          `json:"capabilities"`
+        TermsURL        string            `json:"terms_url"`
+        TermsAcceptedAt string            `json:"terms_accepted_at"`
+        TermsVersion    string            `json:"terms_version"`
+        ConnectedAt     string            `json:"connected_at"`
+        Configuration   map[string]string `json:"configuration"`
+        IsDefault       bool              `json:"is_default"`
+        Source          string            `json:"source"`           // builtin|directory|manual
+        CreatedAt       string            `json:"created_at"`
+        UpdatedAt       string            `json:"updated_at"`
+}
+
 type Store interface {
         SaveEvent(record EventRecord) error
         GetEvents(aid string) ([]EventRecord, error)
@@ -219,6 +296,12 @@ type Store interface {
         SaveCredential(record CredentialRecord) error
         GetCredential(said string) (*CredentialRecord, error)
         GetCredentials() ([]CredentialRecord, error)
+        GetCredentialsFiltered(role, status string) ([]CredentialRecord, error)
+        UpdateCredentialStatus(said, status string) error
+        DeleteCredential(said string) error
+        SaveCredentialSchema(record CredentialSchemaRecord) error
+        GetCredentialSchemas() ([]CredentialSchemaRecord, error)
+        GetCredentialSchema(said string) (*CredentialSchemaRecord, error)
         SavePresentation(record PresentationRecord) error
         GetPresentation(said string) (*PresentationRecord, error)
         GetPresentations() ([]PresentationRecord, error)
@@ -239,6 +322,17 @@ type Store interface {
         GetShareAction(id string) (*ShareAction, error)
         UpsertShareAction(action ShareAction) error
         DeleteShareAction(id string) error
+        SaveGuardianship(record GuardianshipRecord) error
+        GetGuardianships() ([]GuardianshipRecord, error)
+        GetGuardianship(id string) (*GuardianshipRecord, error)
+        GetGuardianshipByDependentAID(dependentAID string) (*GuardianshipRecord, error)
+        DeleteGuardianship(id string) error
+        SaveServiceProvider(record ServiceProviderRecord) error
+        GetServiceProviders() ([]ServiceProviderRecord, error)
+        GetServiceProvider(id string) (*ServiceProviderRecord, error)
+        GetServiceProvidersByCategory(category string) ([]ServiceProviderRecord, error)
+        GetServiceProvidersByStatus(status string) ([]ServiceProviderRecord, error)
+        DeleteServiceProvider(id string) error
         ResetAll() error
         Close() error
 }
@@ -700,6 +794,97 @@ func (s *FileStore) loadCredentials() (map[string]CredentialRecord, error) {
         return creds, nil
 }
 
+func (s *FileStore) GetCredentialsFiltered(role, status string) ([]CredentialRecord, error) {
+        // FileStore is only used in tests/mobile fallback; full filtering not needed.
+        return s.GetCredentials()
+}
+
+func (s *FileStore) UpdateCredentialStatus(said, status string) error {
+        s.mu.Lock()
+        defer s.mu.Unlock()
+
+        creds, err := s.loadCredentials()
+        if err != nil {
+                return err
+        }
+        if c, ok := creds[said]; ok {
+                c.Status = status
+                creds[said] = c
+                return s.writeJSON(filepath.Join(s.dir, "credentials.json"), creds)
+        }
+        return nil
+}
+
+func (s *FileStore) DeleteCredential(said string) error {
+        s.mu.Lock()
+        defer s.mu.Unlock()
+
+        creds, err := s.loadCredentials()
+        if err != nil {
+                return err
+        }
+        delete(creds, said)
+        return s.writeJSON(filepath.Join(s.dir, "credentials.json"), creds)
+}
+
+func (s *FileStore) SaveCredentialSchema(record CredentialSchemaRecord) error {
+        s.mu.Lock()
+        defer s.mu.Unlock()
+
+        schemas, err := s.loadCredentialSchemas()
+        if err != nil {
+                schemas = map[string]CredentialSchemaRecord{}
+        }
+        schemas[record.SAID] = record
+        return s.writeJSON(filepath.Join(s.dir, "credential_schemas.json"), schemas)
+}
+
+func (s *FileStore) GetCredentialSchemas() ([]CredentialSchemaRecord, error) {
+        s.mu.RLock()
+        defer s.mu.RUnlock()
+
+        schemas, err := s.loadCredentialSchemas()
+        if err != nil {
+                return nil, err
+        }
+        list := make([]CredentialSchemaRecord, 0, len(schemas))
+        for _, sc := range schemas {
+                list = append(list, sc)
+        }
+        return list, nil
+}
+
+func (s *FileStore) GetCredentialSchema(said string) (*CredentialSchemaRecord, error) {
+        s.mu.RLock()
+        defer s.mu.RUnlock()
+
+        schemas, err := s.loadCredentialSchemas()
+        if err != nil {
+                return nil, err
+        }
+        r, ok := schemas[said]
+        if !ok {
+                return nil, nil
+        }
+        return &r, nil
+}
+
+func (s *FileStore) loadCredentialSchemas() (map[string]CredentialSchemaRecord, error) {
+        path := filepath.Join(s.dir, "credential_schemas.json")
+        data, err := os.ReadFile(path)
+        if err != nil {
+                if os.IsNotExist(err) {
+                        return map[string]CredentialSchemaRecord{}, nil
+                }
+                return nil, fmt.Errorf("failed to read credential schemas: %w", err)
+        }
+        var schemas map[string]CredentialSchemaRecord
+        if err := json.Unmarshal(data, &schemas); err != nil {
+                return nil, fmt.Errorf("failed to parse credential schemas: %w", err)
+        }
+        return schemas, nil
+}
+
 func (s *FileStore) SaveContactKEL(record ContactKELRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -789,11 +974,59 @@ func (s *FileStore) loadWitnessReceipts() (map[string][]WitnessReceiptRecord, er
 	return receipts, nil
 }
 
+// ── Guardianship (FileStore stubs — SQLiteStore is the active implementation) ─
+
+func (s *FileStore) SaveGuardianship(record GuardianshipRecord) error {
+        return fmt.Errorf("guardianship not supported by FileStore — use SQLiteStore")
+}
+
+func (s *FileStore) GetGuardianships() ([]GuardianshipRecord, error) {
+        return []GuardianshipRecord{}, nil
+}
+
+func (s *FileStore) GetGuardianship(id string) (*GuardianshipRecord, error) {
+        return nil, nil
+}
+
+func (s *FileStore) GetGuardianshipByDependentAID(dependentAID string) (*GuardianshipRecord, error) {
+        return nil, nil
+}
+
+func (s *FileStore) DeleteGuardianship(id string) error {
+        return fmt.Errorf("guardianship not supported by FileStore — use SQLiteStore")
+}
+
+// ── Service Provider (FileStore stubs — SQLiteStore is the active implementation) ─
+
+func (s *FileStore) SaveServiceProvider(record ServiceProviderRecord) error {
+        return fmt.Errorf("service providers not supported by FileStore — use SQLiteStore")
+}
+
+func (s *FileStore) GetServiceProviders() ([]ServiceProviderRecord, error) {
+        return []ServiceProviderRecord{}, nil
+}
+
+func (s *FileStore) GetServiceProvider(id string) (*ServiceProviderRecord, error) {
+        return nil, nil
+}
+
+func (s *FileStore) GetServiceProvidersByCategory(category string) ([]ServiceProviderRecord, error) {
+        return []ServiceProviderRecord{}, nil
+}
+
+func (s *FileStore) GetServiceProvidersByStatus(status string) ([]ServiceProviderRecord, error) {
+        return []ServiceProviderRecord{}, nil
+}
+
+func (s *FileStore) DeleteServiceProvider(id string) error {
+        return fmt.Errorf("service providers not supported by FileStore — use SQLiteStore")
+}
+
 func (s *FileStore) ResetAll() error {
         s.mu.Lock()
         defer s.mu.Unlock()
 
-        files := []string{"identity.json", "kel.json", "contacts.json", "settings.json", "pending_requests.json", "profile.json", "endpoint.json", "contact_kels.json", "credentials.json", "presentations.json", "witness_receipts.json"}
+        files := []string{"identity.json", "kel.json", "contacts.json", "settings.json", "pending_requests.json", "profile.json", "endpoint.json", "contact_kels.json", "credentials.json", "credential_schemas.json", "presentations.json", "witness_receipts.json"}
         for _, f := range files {
                 path := filepath.Join(s.dir, f)
                 if err := os.Remove(path); err != nil && !os.IsNotExist(err) {

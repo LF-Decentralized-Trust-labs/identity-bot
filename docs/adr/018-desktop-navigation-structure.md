@@ -1,4 +1,4 @@
-# ADR-018: Desktop Navigation Structure
+# ADR-018: Navigation Structure (Desktop & Mobile)
 
 **Status:** Accepted
 **Date:** 2026-03-21
@@ -176,14 +176,101 @@ The Organization section is shown in addition to all individual items, and only 
 
 ---
 
+---
+
+### Mobile Navigation Structure
+
+#### Guiding Principle
+
+**Mobile = consume, verify, present, monitor. Desktop = create, configure, manage, administer.**
+
+Mobile is the device people carry everywhere. It's used for quick identity actions in the real world — presenting a credential at a doctor's office, checking a password at a coffee shop, verifying that your agent is healthy. It is NOT for deep configuration, administration, or complex management workflows.
+
+Every feature on mobile should pass the **"standing in line" test**: can a user accomplish their goal in under 30 seconds, one-handed, without needing to think carefully about consequences?
+
+#### Mobile Navigation Components
+
+**Bottom Navigation Bar (persistent, 3 actions):**
+```
+Share  |  Chat  |  Scan
+```
+- **Share** — opens share action menu (Add Contact, Show ID, etc.)
+- **Chat** — opens AI assistant panel
+- **Scan** — opens QR scanner full-screen
+
+**Drawer Menu (hamburger, secondary navigation):**
+```
+My Profile
+Contacts
+Credentials
+    Verifiable Credentials
+    Passwords
+Guardianship (view-only)
+─────────────────────────────────────
+My Devices
+History
+─────────────────────────────────────
+Settings
+    Security
+    Tunneling
+─────────────────────────────────────
+Wallet                            [Soon]
+My Data                           [Soon]
+```
+
+#### What's on Mobile and Why
+
+| Feature | Mobile Behavior | Rationale |
+|---|---|---|
+| **My Profile** | Full editor (name, photo, contact info) | People update their profile photo, email, and phone from their phone. Standard mobile behavior. |
+| **Contacts** | List, search, accept/reject, NFC tag write | Adding contacts via QR scan and NFC is a fundamentally mobile interaction. |
+| **Verifiable Credentials** | View list, tap to present QR | Presenting credentials in person — at a clinic, airport, bar — is THE mobile use case for identity. |
+| **Passwords** | View, search, copy to clipboard | People frequently need passwords on their phone — logging into apps, websites, services while away from their desk. This is a core daily utility. |
+| **Guardianship** (view-only) | View dependents, view their credentials | A parent at a clinic needs to pull up their child's vaccination record. Must be accessible from the device they have with them. No create/edit/revoke — those are deliberate desktop actions. |
+| **My Devices** | View device status, agent health | "Is my desktop agent still running?" — a quick status check from anywhere. View-only. |
+| **History** | Scrollable event feed | "Did someone just use my identity?" — security monitoring on the go. Critical for trust. |
+| **Settings > Security** | Biometric toggle, enclave status | You should be able to manage the security of the device you're holding. |
+| **Settings > Tunneling** | Provider config (existing) | Already implemented. Needed for mobile agent reachability. |
+| **Share / Scan / Chat** | Bottom nav (existing) | Core quick-actions that define the mobile experience. |
+
+#### What's NOT on Mobile and Why
+
+| Feature | Rationale |
+|---|---|
+| **Apps / Marketplace** | Sandboxed containers (Podman) are desktop compute. No mobile runtime. |
+| **Hubs** (all 7) | Deep integrations with finance, health, legal systems — complex configuration best done at a desk with full attention. |
+| **Organization** | Managing employees, org credentials, org settings — administrative work. |
+| **API Keys** | Developer-oriented credential type. Managed on desktop, used programmatically. |
+| **Wallet** | Complex asset management (investments, property, crypto) requires careful attention. Future mobile wallet may be a simplified "quick pay" view. |
+| **My Data** | Read-only data browser with many sub-sections. Information-dense, better on a larger screen. |
+| **Succession Plan / Estate Management** | Sensitive, infrequent, consequential — must not be accidentally triggered from a pocket. |
+| **Settings** (most sub-items) | Appearance, Notifications, Endpoints, Service Providers, Governance, KERI Protocol, Backup & Recovery, Developer Tools — all configuration tasks for a sit-down session. |
+| **Guardianship create/edit/revoke** | Creating or revoking a guardianship is a deliberate, consequential action. View-only on mobile; manage on desktop. |
+
+#### Mobile View-Only vs. Full Access
+
+Some features appear on both platforms but with different capability levels:
+
+| Feature | Desktop | Mobile |
+|---|---|---|
+| **Guardianship** | Full CRUD (create, edit, revoke, emancipate) | View-only (list dependents, view details, view dependent credentials) |
+| **My Devices** | Full management | View status only |
+| **History** | Full log with tabs (Activity, Key Events, System) | Activity feed only (no Key Events or System tabs) |
+| **Credentials** | Full management (issue, revoke, present) | View and present only |
+| **Passwords** | Full management (add, edit, delete, generate) | View, search, copy only |
+
+---
+
 ## Consequences
 
-- The sidebar is now the canonical reference for app structure. Any new top-level feature requires a corresponding entry in this ADR before being added.
-- The `DesktopRoute` enum is the single source of truth for navigation state. Screen additions require enum additions.
+- The sidebar is now the canonical reference for desktop app structure. Any new top-level feature requires a corresponding entry in this ADR before being added.
+- The mobile drawer menu is the canonical reference for mobile app structure. Mobile additions must pass the "standing in line" test.
+- The `DesktopRoute` enum is the single source of truth for desktop navigation state. Screen additions require enum additions.
 - The Hubs section will grow as new domain integrations are built. New hubs must fit the dual-purpose model: user-facing controls + interoperability standards for that domain.
 - The Organization section is scaffolded but hidden from individual agents. When org-mode is implemented, visibility is controlled by entity type set during onboarding.
 - Settings → Security (key rotation + auth method) is deliberately separate from the Security Hub (link verification, phishing). These must not be conflated in implementation or UX copy.
 - "My Data" replaces "Data Vault" in all user-facing strings. "Data Vault" may appear in internal code, database names, and backend API paths — it is a UI label change only.
+- Mobile features default to view-only unless the feature is inherently a mobile action (scanning, presenting, sharing). Create/edit/delete operations belong on desktop unless the "standing in line" test is met.
 
 ---
 
@@ -191,5 +278,7 @@ The Organization section is shown in addition to all individual items, and only 
 
 - `navigation-menu.md` in the strategy repo — full item descriptions, open questions, and detailed hub breakdowns
 - ADR-006 — standardized topology (3 states × 2 device types)
-- `identity_agent_ui/lib/screens/desktop/desktop_sidebar.dart` — implementation
-- `identity_agent_ui/lib/screens/desktop/desktop_app.dart` — route → screen mapping
+- `identity_agent_ui/lib/screens/desktop/desktop_sidebar.dart` — desktop implementation
+- `identity_agent_ui/lib/screens/desktop/desktop_app.dart` — desktop route → screen mapping
+- `identity_agent_ui/lib/screens/mobile/drawer_menu.dart` — mobile drawer implementation
+- `identity_agent_ui/lib/screens/mobile/mobile_app.dart` — mobile navigation state

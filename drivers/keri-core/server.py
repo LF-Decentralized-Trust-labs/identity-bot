@@ -473,11 +473,17 @@ def verify():
 # HTTP routes — Stateless KERI operations (no private keys, public data only)
 # ---------------------------------------------------------------------------
 
-def _format_acdc(issuer_aid: str, schema_said: str, claims: dict) -> dict:
+def _format_acdc(issuer_aid: str, schema_said: str, claims: dict, edges: dict = None) -> dict:
     """Format an ACDC credential body with self-addressing SAIDs.
 
-    Computes the attribute block SAID first (embedded as 'a.d'), then the
-    top-level credential SAID (embedded as 'd'). Both use Blake3_256.
+    Computes the attribute block SAID first (embedded as 'a.d'), then optionally
+    the edges block SAID (embedded as 'e.d'), then the top-level credential SAID
+    (embedded as 'd'). All SAIDs use Blake3_256.
+
+    edges (optional): dict of named edge entries following ACDC spec, e.g.:
+        {"guardianship": {"n": "<parent-credential-SAID>", "s": "<schema-SAID>"}}
+    When provided, the edges block is included as the 'e' field in the ACDC body,
+    with a self-addressing 'd' SAID computed from the block content.
 
     Returns dict with: acdc_body, acdc_said, acdc_json_b64
     """
@@ -489,7 +495,7 @@ def _format_acdc(issuer_aid: str, schema_said: str, claims: dict) -> dict:
     attr_diger = coring.Diger(ser=attr_json, code=MtrDex.Blake3_256)
     attr_block["d"] = attr_diger.qb64
 
-    # Step 2: build ACDC body and compute top-level SAID
+    # Step 2: build ACDC body — include edges block if provided
     acdc_body = {
         "v": "ACDC10JSON000000_",
         "d": "",
@@ -497,6 +503,18 @@ def _format_acdc(issuer_aid: str, schema_said: str, claims: dict) -> dict:
         "s": schema_said,
         "a": attr_block,
     }
+
+    if edges:
+        # Build edges block with self-addressing SAID per ACDC spec:
+        # {"d": "", <label>: {"n": "<SAID>", "s": "<schemaSAID>"}, ...}
+        edges_block = {"d": ""}
+        edges_block.update(edges)
+        edges_json = json.dumps(edges_block, separators=(",", ":")).encode()
+        edges_diger = coring.Diger(ser=edges_json, code=MtrDex.Blake3_256)
+        edges_block["d"] = edges_diger.qb64
+        acdc_body["e"] = edges_block
+
+    # Step 3: compute top-level SAID
     acdc_json_v1 = json.dumps(acdc_body, separators=(",", ":")).encode()
     acdc_diger = coring.Diger(ser=acdc_json_v1, code=MtrDex.Blake3_256)
     acdc_body["d"] = acdc_diger.qb64
@@ -543,6 +561,8 @@ def credential_issue():
         claims      (dict) — credential attribute claims (holder_aid, etc.)
         schema_said (str)  — SAID of the credential schema
         holder_aid  (str)  — AID of the credential subject/holder
+        edges       (dict, optional) — ACDC edge block entries for credential chaining:
+                    {"<label>": {"n": "<parent-credential-SAID>", "s": "<schema-SAID>"}}
 
     Returns:
         acdc_said       (str)  — self-addressing SAID of the ACDC credential
@@ -560,6 +580,7 @@ def credential_issue():
     claims = data.get("claims", {})
     schema_said = data.get("schema_said", "")
     holder_aid = data.get("holder_aid", "")
+    edges = data.get("edges") or None  # optional; None means no edges block
 
     if not name:
         return jsonify({"error": "name is required"}), 400
@@ -571,8 +592,8 @@ def credential_issue():
         return jsonify({"error": f"No identity found with name: {name}"}), 404
 
     try:
-        # Step 1: format ACDC with full SAID computation
-        credential = _format_acdc(identity["aid"], schema_said, claims)
+        # Step 1: format ACDC with full SAID computation (edges block included if provided)
+        credential = _format_acdc(identity["aid"], schema_said, claims, edges=edges)
         acdc_said = credential["acdc_said"]
 
         # Step 2: create IXN anchoring the credential SAID in the issuer's KEL
@@ -1326,6 +1347,56 @@ def receipt_kerl():
     }), 200
 
 
+@app.route("/reload-identity", methods=["POST"])
+def reload_identity():
+    """Restore a previously created identity into the driver's in-memory state.
+
+    Called by the Go backend on startup when an identity already exists in the DB.
+    Does NOT require private keys — only restores the public state needed for
+    subsequent IXN events and credential issuance: sequence number, public keys, KEL.
+
+    Without this, IssueCredential and Interact fail after any driver restart because
+    _identities is empty on cold start.
+
+    Request JSON:
+        aid             (str)  — the AID prefix (used as the identity name key)
+        public_key      (str)  — current CESR Ed25519 public key
+        next_key_digest (str)  — current CESR Blake3_256 next key digest
+        sequence_number (int)  — sequence number of the most recent event
+        last_said       (str)  — SAID of the most recent event (the 'd' field)
+        kel             (list) — list of KED event dicts (the parsed event_json entries)
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Request body required"}), 400
+
+    aid             = data.get("aid", "")
+    public_key      = data.get("public_key", "")
+    next_key_digest = data.get("next_key_digest", "")
+    sequence_number = data.get("sequence_number", 0)
+    last_said       = data.get("last_said", "")
+    kel             = data.get("kel", [])
+
+    if not aid or not public_key or not next_key_digest:
+        return jsonify({"error": "aid, public_key, and next_key_digest are required"}), 400
+
+    _identities[aid] = {
+        "aid":            aid,
+        "public_key":     public_key,
+        "next_key_digest": next_key_digest,
+        "kel":            kel,
+        "sequence_number": sequence_number,
+        "last_said":      last_said,
+    }
+
+    return jsonify({
+        "aid":            aid,
+        "sequence_number": sequence_number,
+        "kel_events":     len(kel),
+        "status":         "reloaded",
+    }), 200
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -1336,7 +1407,7 @@ if __name__ == "__main__":
 
     print(f"[keri-driver] Starting KERI Core Driver on {host}:{port}")
     print(f"[keri-driver] KERI library: keripy (reference)")
-    print(f"[keri-driver] Stateful endpoints:  /status, /inception, /rotation, /interact, /sign, /kel, /verify")
+    print(f"[keri-driver] Stateful endpoints:  /status, /inception, /rotation, /interact, /reload-identity, /sign, /kel, /verify")
     print(f"[keri-driver] Stateless endpoints: /cesr-encode, /validate-kel, /resolve-oobi, /format-credential, /generate-multisig-event")
     print(f"[keri-driver] Credential endpoints: /credential/issue, /credential/present, /credential/verify")
     print(f"[keri-driver] KERL endpoints:       /receipt/submit, /receipt/kerl")

@@ -630,15 +630,37 @@ func (s *SQLiteStore) GetPresentations() ([]PresentationRecord, error) {
 
 // ── Credentials ───────────────────────────────────────────────────────────────
 
+const credentialCols = `said, issuer_aid, holder_aid, schema_said, acdc_json, ixn_said, cesr_signature, issued_at, status, format, credential_type, issuer_name, issuer_logo_url, expiry_date, raw_json`
+
+func scanCredentialRow(row interface{ Scan(dest ...any) error }) (CredentialRecord, error) {
+	var r CredentialRecord
+	err := row.Scan(
+		&r.SAID, &r.IssuerAID, &r.HolderAID, &r.SchemaSAID,
+		&r.AcdcJson, &r.IxnSAID, &r.CesrSignature, &r.IssuedAt, &r.Status,
+		&r.Format, &r.CredentialType, &r.IssuerName, &r.IssuerLogoURL, &r.ExpiryDate, &r.RawJson,
+	)
+	return r, err
+}
+
 func (s *SQLiteStore) SaveCredential(record CredentialRecord) error {
+	if record.Format == "" {
+		record.Format = "acdc"
+	}
 	_, err := s.db.Exec(`
-		INSERT INTO credentials (said, issuer_aid, holder_aid, schema_said, acdc_json, ixn_said, cesr_signature, issued_at, status)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO credentials (`+credentialCols+`)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(said) DO UPDATE SET
-			cesr_signature = excluded.cesr_signature,
-			status         = excluded.status`,
+			cesr_signature  = excluded.cesr_signature,
+			status          = excluded.status,
+			format          = excluded.format,
+			credential_type = excluded.credential_type,
+			issuer_name     = excluded.issuer_name,
+			issuer_logo_url = excluded.issuer_logo_url,
+			expiry_date     = excluded.expiry_date,
+			raw_json        = excluded.raw_json`,
 		record.SAID, record.IssuerAID, record.HolderAID, record.SchemaSAID,
 		record.AcdcJson, record.IxnSAID, record.CesrSignature, record.IssuedAt, record.Status,
+		record.Format, record.CredentialType, record.IssuerName, record.IssuerLogoURL, record.ExpiryDate, record.RawJson,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to save credential: %w", err)
@@ -647,12 +669,9 @@ func (s *SQLiteStore) SaveCredential(record CredentialRecord) error {
 }
 
 func (s *SQLiteStore) GetCredential(said string) (*CredentialRecord, error) {
-	var r CredentialRecord
-	err := s.db.QueryRow(
-		`SELECT said, issuer_aid, holder_aid, schema_said, acdc_json, ixn_said, cesr_signature, issued_at, status
-		 FROM credentials WHERE said = ?`, said,
-	).Scan(&r.SAID, &r.IssuerAID, &r.HolderAID, &r.SchemaSAID,
-		&r.AcdcJson, &r.IxnSAID, &r.CesrSignature, &r.IssuedAt, &r.Status)
+	r, err := scanCredentialRow(s.db.QueryRow(
+		`SELECT `+credentialCols+` FROM credentials WHERE said = ?`, said,
+	))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -663,9 +682,40 @@ func (s *SQLiteStore) GetCredential(said string) (*CredentialRecord, error) {
 }
 
 func (s *SQLiteStore) GetCredentials() ([]CredentialRecord, error) {
-	rows, err := s.db.Query(
-		`SELECT said, issuer_aid, holder_aid, schema_said, acdc_json, ixn_said, cesr_signature, issued_at, status
-		 FROM credentials ORDER BY issued_at DESC`)
+	return s.GetCredentialsFiltered("", "")
+}
+
+func (s *SQLiteStore) GetCredentialsFiltered(role, status string) ([]CredentialRecord, error) {
+	identity, _ := s.GetIdentity()
+	myAID := ""
+	if identity != nil {
+		myAID = identity.AID
+	}
+
+	query := `SELECT ` + credentialCols + ` FROM credentials WHERE 1=1`
+	args := []any{}
+
+	if role == "holder" && myAID != "" {
+		query += ` AND holder_aid = ?`
+		args = append(args, myAID)
+	} else if role == "issuer" && myAID != "" {
+		query += ` AND issuer_aid = ?`
+		args = append(args, myAID)
+	}
+
+	if status == "expired" {
+		query += ` AND expiry_date != '' AND expiry_date < datetime('now')`
+	} else if status == "valid" {
+		query += ` AND (expiry_date = '' OR expiry_date >= datetime('now'))`
+	}
+
+	if status != "expired" {
+		// default excludes fully expired unless explicitly asked
+	}
+
+	query += ` ORDER BY issued_at DESC`
+
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query credentials: %w", err)
 	}
@@ -673,9 +723,8 @@ func (s *SQLiteStore) GetCredentials() ([]CredentialRecord, error) {
 
 	var creds []CredentialRecord
 	for rows.Next() {
-		var r CredentialRecord
-		if err := rows.Scan(&r.SAID, &r.IssuerAID, &r.HolderAID, &r.SchemaSAID,
-			&r.AcdcJson, &r.IxnSAID, &r.CesrSignature, &r.IssuedAt, &r.Status); err != nil {
+		r, err := scanCredentialRow(rows)
+		if err != nil {
 			return nil, fmt.Errorf("failed to scan credential: %w", err)
 		}
 		creds = append(creds, r)
@@ -684,6 +733,72 @@ func (s *SQLiteStore) GetCredentials() ([]CredentialRecord, error) {
 		creds = []CredentialRecord{}
 	}
 	return creds, nil
+}
+
+func (s *SQLiteStore) UpdateCredentialStatus(said, status string) error {
+	_, err := s.db.Exec(`UPDATE credentials SET status = ? WHERE said = ?`, status, said)
+	if err != nil {
+		return fmt.Errorf("failed to update credential status: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) DeleteCredential(said string) error {
+	_, err := s.db.Exec(`DELETE FROM credentials WHERE said = ?`, said)
+	if err != nil {
+		return fmt.Errorf("failed to delete credential: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) SaveCredentialSchema(record CredentialSchemaRecord) error {
+	_, err := s.db.Exec(`
+		INSERT INTO credential_schemas (said, schema_json, fetched_at)
+		VALUES (?, ?, ?)
+		ON CONFLICT(said) DO UPDATE SET
+			schema_json = excluded.schema_json,
+			fetched_at  = excluded.fetched_at`,
+		record.SAID, record.SchemaJson, record.FetchedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to save credential schema: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) GetCredentialSchemas() ([]CredentialSchemaRecord, error) {
+	rows, err := s.db.Query(`SELECT said, schema_json, fetched_at FROM credential_schemas ORDER BY fetched_at DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query credential schemas: %w", err)
+	}
+	defer rows.Close()
+
+	var schemas []CredentialSchemaRecord
+	for rows.Next() {
+		var r CredentialSchemaRecord
+		if err := rows.Scan(&r.SAID, &r.SchemaJson, &r.FetchedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan credential schema: %w", err)
+		}
+		schemas = append(schemas, r)
+	}
+	if schemas == nil {
+		schemas = []CredentialSchemaRecord{}
+	}
+	return schemas, nil
+}
+
+func (s *SQLiteStore) GetCredentialSchema(said string) (*CredentialSchemaRecord, error) {
+	var r CredentialSchemaRecord
+	err := s.db.QueryRow(
+		`SELECT said, schema_json, fetched_at FROM credential_schemas WHERE said = ?`, said,
+	).Scan(&r.SAID, &r.SchemaJson, &r.FetchedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get credential schema: %w", err)
+	}
+	return &r, nil
 }
 
 // ── Contact KELs ──────────────────────────────────────────────────────────────
@@ -807,10 +922,345 @@ func (s *SQLiteStore) GetWitnessReceipts(eventSAID string) ([]WitnessReceiptReco
 	return receipts, nil
 }
 
+// ── Guardianship ────────────────────────────────────────────────────────────
+
+func (s *SQLiteStore) SaveGuardianship(record GuardianshipRecord) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	if record.CreatedAt == "" {
+		record.CreatedAt = now
+	}
+	record.UpdatedAt = now
+
+	emancipationJSON := "{}"
+	if record.EmancipationTrigger != nil {
+		b, err := json.Marshal(record.EmancipationTrigger)
+		if err != nil {
+			return fmt.Errorf("failed to marshal emancipation trigger: %w", err)
+		}
+		emancipationJSON = string(b)
+	}
+
+	coGuardiansJSON := "[]"
+	if record.CoGuardians != nil {
+		b, err := json.Marshal(record.CoGuardians)
+		if err != nil {
+			return fmt.Errorf("failed to marshal co-guardians: %w", err)
+		}
+		coGuardiansJSON = string(b)
+	}
+
+	metadataJSON := "{}"
+	if record.Metadata != nil {
+		b, err := json.Marshal(record.Metadata)
+		if err != nil {
+			return fmt.Errorf("failed to marshal metadata: %w", err)
+		}
+		metadataJSON = string(b)
+	}
+
+	_, err := s.db.Exec(`
+		INSERT INTO guardianships (id, type, guardian_aid, dependent_aid, dependent_name, delegated_aid_prefix,
+			status, hosting_type, hosting_url, created_at, updated_at, emancipation_json, co_guardians_json,
+			multisig_threshold, metadata_json, credential_said)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			type                 = excluded.type,
+			guardian_aid         = excluded.guardian_aid,
+			dependent_aid        = excluded.dependent_aid,
+			dependent_name       = excluded.dependent_name,
+			delegated_aid_prefix = excluded.delegated_aid_prefix,
+			status               = excluded.status,
+			hosting_type         = excluded.hosting_type,
+			hosting_url          = excluded.hosting_url,
+			updated_at           = excluded.updated_at,
+			emancipation_json    = excluded.emancipation_json,
+			co_guardians_json    = excluded.co_guardians_json,
+			multisig_threshold   = excluded.multisig_threshold,
+			metadata_json        = excluded.metadata_json,
+			credential_said      = excluded.credential_said`,
+		record.ID, record.Type, record.GuardianAID, record.DependentAID,
+		record.DependentName, record.DelegatedAIDPrefix, record.Status,
+		record.HostingType, record.HostingURL, record.CreatedAt, record.UpdatedAt,
+		emancipationJSON, coGuardiansJSON, record.MultisigThreshold, metadataJSON, record.CredentialSAID,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to save guardianship: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) GetGuardianships() ([]GuardianshipRecord, error) {
+	rows, err := s.db.Query(
+		`SELECT id, type, guardian_aid, dependent_aid, dependent_name, delegated_aid_prefix,
+			status, hosting_type, hosting_url, created_at, updated_at, emancipation_json,
+			co_guardians_json, multisig_threshold, metadata_json, COALESCE(credential_said,'')
+		 FROM guardianships ORDER BY created_at DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query guardianships: %w", err)
+	}
+	defer rows.Close()
+	return s.scanGuardianships(rows)
+}
+
+func (s *SQLiteStore) GetGuardianship(id string) (*GuardianshipRecord, error) {
+	rows, err := s.db.Query(
+		`SELECT id, type, guardian_aid, dependent_aid, dependent_name, delegated_aid_prefix,
+			status, hosting_type, hosting_url, created_at, updated_at, emancipation_json,
+			co_guardians_json, multisig_threshold, metadata_json, COALESCE(credential_said,'')
+		 FROM guardianships WHERE id = ?`, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query guardianship: %w", err)
+	}
+	defer rows.Close()
+
+	records, err := s.scanGuardianships(rows)
+	if err != nil {
+		return nil, err
+	}
+	if len(records) == 0 {
+		return nil, nil
+	}
+	return &records[0], nil
+}
+
+func (s *SQLiteStore) GetGuardianshipByDependentAID(dependentAID string) (*GuardianshipRecord, error) {
+	rows, err := s.db.Query(
+		`SELECT id, type, guardian_aid, dependent_aid, dependent_name, delegated_aid_prefix,
+			status, hosting_type, hosting_url, created_at, updated_at, emancipation_json,
+			co_guardians_json, multisig_threshold, metadata_json, COALESCE(credential_said,'')
+		 FROM guardianships WHERE dependent_aid = ? AND status = 'active' LIMIT 1`, dependentAID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query guardianship by dependent: %w", err)
+	}
+	defer rows.Close()
+	records, err := s.scanGuardianships(rows)
+	if err != nil {
+		return nil, err
+	}
+	if len(records) == 0 {
+		return nil, nil
+	}
+	return &records[0], nil
+}
+
+func (s *SQLiteStore) DeleteGuardianship(id string) error {
+	_, err := s.db.Exec(`DELETE FROM guardianships WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete guardianship: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) scanGuardianships(rows *sql.Rows) ([]GuardianshipRecord, error) {
+	var records []GuardianshipRecord
+	for rows.Next() {
+		var r GuardianshipRecord
+		var emancipationJSON, coGuardiansJSON, metadataJSON string
+		if err := rows.Scan(&r.ID, &r.Type, &r.GuardianAID, &r.DependentAID,
+			&r.DependentName, &r.DelegatedAIDPrefix, &r.Status, &r.HostingType,
+			&r.HostingURL, &r.CreatedAt, &r.UpdatedAt, &emancipationJSON,
+			&coGuardiansJSON, &r.MultisigThreshold, &metadataJSON, &r.CredentialSAID); err != nil {
+			return nil, fmt.Errorf("failed to scan guardianship: %w", err)
+		}
+		if emancipationJSON != "" && emancipationJSON != "{}" {
+			var trigger EmancipationTrigger
+			if err := json.Unmarshal([]byte(emancipationJSON), &trigger); err == nil {
+				r.EmancipationTrigger = &trigger
+			}
+		}
+		if coGuardiansJSON != "" && coGuardiansJSON != "[]" {
+			_ = json.Unmarshal([]byte(coGuardiansJSON), &r.CoGuardians)
+		}
+		if r.CoGuardians == nil {
+			r.CoGuardians = []string{}
+		}
+		if metadataJSON != "" && metadataJSON != "{}" {
+			_ = json.Unmarshal([]byte(metadataJSON), &r.Metadata)
+		}
+		if r.Metadata == nil {
+			r.Metadata = map[string]string{}
+		}
+		records = append(records, r)
+	}
+	if records == nil {
+		records = []GuardianshipRecord{}
+	}
+	return records, nil
+}
+
+// ── Service Providers ────────────────────────────────────────────────────────
+
+func (s *SQLiteStore) SaveServiceProvider(record ServiceProviderRecord) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	if record.CreatedAt == "" {
+		record.CreatedAt = now
+	}
+	record.UpdatedAt = now
+
+	capabilitiesJSON := "[]"
+	if record.Capabilities != nil {
+		b, _ := json.Marshal(record.Capabilities)
+		capabilitiesJSON = string(b)
+	}
+
+	configJSON := "{}"
+	if record.Configuration != nil {
+		b, _ := json.Marshal(record.Configuration)
+		configJSON = string(b)
+	}
+
+	isDefault := 0
+	if record.IsDefault {
+		isDefault = 1
+	}
+
+	_, err := s.db.Exec(`
+		INSERT INTO service_providers (id, provider_name, provider_aid, category, display_name, endpoint_url,
+			status, health, health_checked_at, company_hq, server_region, identity_level, grape_score,
+			capabilities_json, terms_url, terms_accepted_at, terms_version, connected_at,
+			configuration_json, is_default, source, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			provider_name     = excluded.provider_name,
+			provider_aid      = excluded.provider_aid,
+			category          = excluded.category,
+			display_name      = excluded.display_name,
+			endpoint_url      = excluded.endpoint_url,
+			status            = excluded.status,
+			health            = excluded.health,
+			health_checked_at = excluded.health_checked_at,
+			company_hq        = excluded.company_hq,
+			server_region     = excluded.server_region,
+			identity_level    = excluded.identity_level,
+			grape_score       = excluded.grape_score,
+			capabilities_json = excluded.capabilities_json,
+			terms_url         = excluded.terms_url,
+			terms_accepted_at = excluded.terms_accepted_at,
+			terms_version     = excluded.terms_version,
+			connected_at      = excluded.connected_at,
+			configuration_json= excluded.configuration_json,
+			is_default        = excluded.is_default,
+			source            = excluded.source,
+			updated_at        = excluded.updated_at`,
+		record.ID, record.ProviderName, record.ProviderAID, record.Category,
+		record.DisplayName, record.EndpointURL, record.Status, record.Health,
+		record.HealthCheckedAt, record.CompanyHQ, record.ServerRegion,
+		record.IdentityLevel, record.GrapeScore, capabilitiesJSON, record.TermsURL,
+		record.TermsAcceptedAt, record.TermsVersion, record.ConnectedAt,
+		configJSON, isDefault, record.Source, record.CreatedAt, record.UpdatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to save service provider: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) GetServiceProviders() ([]ServiceProviderRecord, error) {
+	rows, err := s.db.Query(`SELECT id, provider_name, provider_aid, category, display_name, endpoint_url,
+		status, health, health_checked_at, company_hq, server_region, identity_level, grape_score,
+		capabilities_json, terms_url, terms_accepted_at, terms_version, connected_at,
+		configuration_json, is_default, source, created_at, updated_at
+		FROM service_providers ORDER BY category ASC, display_name ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query service providers: %w", err)
+	}
+	defer rows.Close()
+	return s.scanServiceProviders(rows)
+}
+
+func (s *SQLiteStore) GetServiceProvider(id string) (*ServiceProviderRecord, error) {
+	rows, err := s.db.Query(`SELECT id, provider_name, provider_aid, category, display_name, endpoint_url,
+		status, health, health_checked_at, company_hq, server_region, identity_level, grape_score,
+		capabilities_json, terms_url, terms_accepted_at, terms_version, connected_at,
+		configuration_json, is_default, source, created_at, updated_at
+		FROM service_providers WHERE id = ?`, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query service provider: %w", err)
+	}
+	defer rows.Close()
+	records, err := s.scanServiceProviders(rows)
+	if err != nil {
+		return nil, err
+	}
+	if len(records) == 0 {
+		return nil, nil
+	}
+	return &records[0], nil
+}
+
+func (s *SQLiteStore) GetServiceProvidersByCategory(category string) ([]ServiceProviderRecord, error) {
+	rows, err := s.db.Query(`SELECT id, provider_name, provider_aid, category, display_name, endpoint_url,
+		status, health, health_checked_at, company_hq, server_region, identity_level, grape_score,
+		capabilities_json, terms_url, terms_accepted_at, terms_version, connected_at,
+		configuration_json, is_default, source, created_at, updated_at
+		FROM service_providers WHERE category = ? ORDER BY display_name ASC`, category)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query service providers by category: %w", err)
+	}
+	defer rows.Close()
+	return s.scanServiceProviders(rows)
+}
+
+func (s *SQLiteStore) GetServiceProvidersByStatus(status string) ([]ServiceProviderRecord, error) {
+	rows, err := s.db.Query(`SELECT id, provider_name, provider_aid, category, display_name, endpoint_url,
+		status, health, health_checked_at, company_hq, server_region, identity_level, grape_score,
+		capabilities_json, terms_url, terms_accepted_at, terms_version, connected_at,
+		configuration_json, is_default, source, created_at, updated_at
+		FROM service_providers WHERE status = ? ORDER BY category ASC, display_name ASC`, status)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query service providers by status: %w", err)
+	}
+	defer rows.Close()
+	return s.scanServiceProviders(rows)
+}
+
+func (s *SQLiteStore) DeleteServiceProvider(id string) error {
+	_, err := s.db.Exec(`DELETE FROM service_providers WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete service provider: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) scanServiceProviders(rows *sql.Rows) ([]ServiceProviderRecord, error) {
+	var records []ServiceProviderRecord
+	for rows.Next() {
+		var r ServiceProviderRecord
+		var capabilitiesJSON, configJSON string
+		var isDefault int
+		if err := rows.Scan(&r.ID, &r.ProviderName, &r.ProviderAID, &r.Category,
+			&r.DisplayName, &r.EndpointURL, &r.Status, &r.Health, &r.HealthCheckedAt,
+			&r.CompanyHQ, &r.ServerRegion, &r.IdentityLevel, &r.GrapeScore,
+			&capabilitiesJSON, &r.TermsURL, &r.TermsAcceptedAt, &r.TermsVersion,
+			&r.ConnectedAt, &configJSON, &isDefault, &r.Source,
+			&r.CreatedAt, &r.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan service provider: %w", err)
+		}
+		r.IsDefault = isDefault == 1
+		if capabilitiesJSON != "" && capabilitiesJSON != "[]" {
+			_ = json.Unmarshal([]byte(capabilitiesJSON), &r.Capabilities)
+		}
+		if r.Capabilities == nil {
+			r.Capabilities = []string{}
+		}
+		if configJSON != "" && configJSON != "{}" {
+			_ = json.Unmarshal([]byte(configJSON), &r.Configuration)
+		}
+		if r.Configuration == nil {
+			r.Configuration = map[string]string{}
+		}
+		records = append(records, r)
+	}
+	if records == nil {
+		records = []ServiceProviderRecord{}
+	}
+	return records, nil
+}
+
 // ── Reset ─────────────────────────────────────────────────────────────────────
 
 func (s *SQLiteStore) ResetAll() error {
-	tables := []string{"kel", "identity", "contacts", "pending_requests", "profile", "settings", "endpoint", "contact_kels", "credentials", "presentations", "witness_receipts", "tasks"}
+	tables := []string{"kel", "identity", "contacts", "pending_requests", "profile", "settings", "endpoint", "contact_kels", "credentials", "credential_schemas", "presentations", "witness_receipts", "tasks", "guardianships", "service_providers"}
 	for _, t := range tables {
 		if _, err := s.db.Exec(`DELETE FROM ` + t); err != nil {
 			return fmt.Errorf("failed to clear table %s: %w", t, err)

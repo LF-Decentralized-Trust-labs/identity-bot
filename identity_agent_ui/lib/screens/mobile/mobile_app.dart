@@ -10,6 +10,7 @@ import 'chatbot_panel.dart';
 import 'mobile_qr_scanner.dart';
 import 'mobile_profile_screen.dart';
 import 'mobile_contacts_screen.dart';
+import 'mobile_credentials_screen.dart';
 import 'mobile_settings_screen.dart';
 
 class MobileApp extends StatefulWidget {
@@ -94,6 +95,17 @@ class _MobileAppState extends State<MobileApp> {
     });
   }
 
+  void _navigateToCredentials() {
+    _closeDrawer();
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => MobileCredentialsScreen(serverUrl: widget.serverUrl),
+      ),
+    ).then((_) {
+      _dashboardKey.currentState?.refreshAlerts();
+    });
+  }
+
   void _navigateToSettings() {
     _closeDrawer();
     Navigator.of(context).push(
@@ -142,6 +154,7 @@ class _MobileAppState extends State<MobileApp> {
                 onClose: _closeDrawer,
                 onProfileTap: _navigateToProfile,
                 onContactsTap: _navigateToContacts,
+                onCredentialsTap: _navigateToCredentials,
                 onSettingsTap: _navigateToSettings,
               ),
             ],

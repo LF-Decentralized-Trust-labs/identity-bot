@@ -36,6 +36,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
     return null;
   }
   List<ContactResponse> _contacts = [];
+  List<GuardianshipResponse> _guardianships = [];
   ContactResponse? _selectedContact;
   bool _loading = true;
   String? _error;
@@ -44,6 +45,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
   void initState() {
     super.initState();
     _loadContacts();
+    _loadGuardianships();
   }
 
   @override
@@ -76,6 +78,30 @@ class _ContactsScreenState extends State<ContactsScreen> {
         _loading = false;
       });
     }
+  }
+
+  Future<void> _loadGuardianships() async {
+    try {
+      final resp = await _coreService.getGuardianships();
+      if (mounted) setState(() => _guardianships = resp.guardianships);
+    } catch (_) {
+      // Guardianship labels are optional — don't block contacts
+    }
+  }
+
+  String? _guardianshipLabel(ContactResponse contact) {
+    for (final g in _guardianships) {
+      if (g.dependentAid == contact.aid) {
+        return 'You are guardian of ${g.dependentName}';
+      }
+      if (g.guardianAid == contact.aid) {
+        return '${contact.alias.isNotEmpty ? contact.alias : "This contact"} is your guardian';
+      }
+      if (g.coGuardians.contains(contact.aid)) {
+        return 'Co-guardian with you for ${g.dependentName}';
+      }
+    }
+    return null;
   }
 
   /// Counts mutual contacts with role "witness" and updates the Identity Level tier.
@@ -1384,6 +1410,26 @@ class _ContactsScreenState extends State<ContactsScreen> {
               ),
             ],
           ),
+          // Guardianship role label
+          if (_guardianshipLabel(contact) != null) ...[
+            const SizedBox(height: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: AppColors.warning.withOpacity(0.10),
+                borderRadius: BorderRadius.circular(4),
+                border: Border.all(color: AppColors.warning.withOpacity(0.25)),
+              ),
+              child: Text(
+                _guardianshipLabel(contact)!,
+                style: TextStyle(
+                  color: AppColors.warning,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
           if (contact.isPendingInbound) ...[
             const SizedBox(height: 10),
             Row(

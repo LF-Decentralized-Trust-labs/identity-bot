@@ -204,6 +204,11 @@ class ProfileResponse {
   final String note;
   final String photo;
   final String uid;
+  // Organization-specific fields (ADR-020)
+  final String entityType;   // "individual" | "organization"
+  final String orgName;
+  final String orgType;      // e.g. "school", "business", "healthcare"
+  final String jurisdiction; // free-text for now
 
   ProfileResponse({
     this.fullName = '',
@@ -216,6 +221,10 @@ class ProfileResponse {
     this.note = '',
     this.photo = '',
     this.uid = '',
+    this.entityType = '',
+    this.orgName = '',
+    this.orgType = '',
+    this.jurisdiction = '',
   });
 
   factory ProfileResponse.fromJson(Map<String, dynamic> json) {
@@ -230,6 +239,10 @@ class ProfileResponse {
       note: json['note'] ?? '',
       photo: json['photo'] ?? '',
       uid: json['uid'] ?? '',
+      entityType: json['entity_type'] ?? '',
+      orgName: json['org_name'] ?? '',
+      orgType: json['org_type'] ?? '',
+      jurisdiction: json['jurisdiction'] ?? '',
     );
   }
 
@@ -245,6 +258,10 @@ class ProfileResponse {
       'note': note,
       'photo': photo,
       'uid': uid,
+      if (entityType.isNotEmpty) 'entity_type': entityType,
+      if (orgName.isNotEmpty) 'org_name': orgName,
+      if (orgType.isNotEmpty) 'org_type': orgType,
+      if (jurisdiction.isNotEmpty) 'jurisdiction': jurisdiction,
     };
   }
 }
@@ -328,14 +345,23 @@ class ContactsListResponse {
 class AlertsResponse {
   final List<ContactResponse> alerts;
   final List<PendingRequestResponse> pendingRequests;
+  final List<CredentialRecord> pendingCredentials;
   final int count;
 
-  AlertsResponse({required this.alerts, this.pendingRequests = const [], required this.count});
+  AlertsResponse({
+    required this.alerts,
+    this.pendingRequests = const [],
+    this.pendingCredentials = const [],
+    required this.count,
+  });
+
+  int get totalCount => alerts.length + pendingRequests.length + pendingCredentials.length;
 
   factory AlertsResponse.fromJson(Map<String, dynamic> json) {
     return AlertsResponse(
       alerts: (json['alerts'] as List<dynamic>?)?.map((c) => ContactResponse.fromJson(c)).toList() ?? [],
       pendingRequests: (json['pending_requests'] as List<dynamic>?)?.map((p) => PendingRequestResponse.fromJson(p)).toList() ?? [],
+      pendingCredentials: (json['pending_credentials'] as List<dynamic>?)?.map((c) => CredentialRecord.fromJson(c as Map<String, dynamic>)).toList() ?? [],
       count: json['count'] ?? 0,
     );
   }
@@ -924,8 +950,387 @@ class CoreService {
     return EnclaveStatusResponse.fromJson(jsonDecode(response.body));
   }
 
+  // ── Guardianship ──────────────────────────────────────────────────────────
+
+  Future<GuardianshipsListResponse> getGuardianships() async {
+    final response = await _client.get(Uri.parse('$baseUrl/api/guardianship'));
+    if (response.statusCode == 200) {
+      return GuardianshipsListResponse.fromJson(jsonDecode(response.body));
+    }
+    throw Exception('Failed to list guardianships: ${response.statusCode}');
+  }
+
+  Future<GuardianshipResponse> createGuardianship({
+    required String type,
+    required String dependentName,
+    required String hostingType,
+    String? dependentAid,
+    String? hostingUrl,
+    Map<String, dynamic>? emancipationTrigger,
+    List<String>? coGuardians,
+    int? multisigThreshold,
+    Map<String, String>? metadata,
+  }) async {
+    final body = <String, dynamic>{
+      'type': type,
+      'dependent_name': dependentName,
+      'hosting_type': hostingType,
+    };
+    if (dependentAid != null) body['dependent_aid'] = dependentAid;
+    if (hostingUrl != null) body['hosting_url'] = hostingUrl;
+    if (emancipationTrigger != null) body['emancipation_trigger'] = emancipationTrigger;
+    if (coGuardians != null) body['co_guardians'] = coGuardians;
+    if (multisigThreshold != null) body['multisig_threshold'] = multisigThreshold;
+    if (metadata != null) body['metadata'] = metadata;
+
+    final response = await _client.post(
+      Uri.parse('$baseUrl/api/guardianship'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(body),
+    );
+    if (response.statusCode == 201) {
+      return GuardianshipResponse.fromJson(jsonDecode(response.body));
+    }
+    throw Exception(jsonDecode(response.body)['error'] ?? 'Failed to create guardianship');
+  }
+
+  Future<GuardianshipResponse> getGuardianship(String id) async {
+    final response = await _client.get(Uri.parse('$baseUrl/api/guardianship/$id'));
+    if (response.statusCode == 200) {
+      return GuardianshipResponse.fromJson(jsonDecode(response.body));
+    }
+    throw Exception('Failed to get guardianship: ${response.statusCode}');
+  }
+
+  Future<GuardianshipResponse> updateGuardianship(String id, Map<String, dynamic> updates) async {
+    final response = await _client.put(
+      Uri.parse('$baseUrl/api/guardianship/$id'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(updates),
+    );
+    if (response.statusCode == 200) {
+      return GuardianshipResponse.fromJson(jsonDecode(response.body));
+    }
+    throw Exception(jsonDecode(response.body)['error'] ?? 'Failed to update guardianship');
+  }
+
+  Future<GuardianshipResponse> revokeGuardianship(String id) async {
+    final response = await _client.delete(Uri.parse('$baseUrl/api/guardianship/$id'));
+    if (response.statusCode == 200) {
+      return GuardianshipResponse.fromJson(jsonDecode(response.body));
+    }
+    throw Exception('Failed to revoke guardianship: ${response.statusCode}');
+  }
+
+  Future<GuardianshipResponse> emancipateGuardianship(String id) async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/api/guardianship/$id/emancipate'),
+      headers: {'Content-Type': 'application/json'},
+    );
+    if (response.statusCode == 200) {
+      return GuardianshipResponse.fromJson(jsonDecode(response.body));
+    }
+    throw Exception(jsonDecode(response.body)['error'] ?? 'Failed to emancipate guardianship');
+  }
+
+  // ── Credentials ─────────────────────────────────────────────────────────────
+
+  // ── Built-in schema catalog ─────────────────────────────────────────────────
+
+  Future<List<BuiltinSchema>> getBuiltinSchemas() async {
+    final response = await _client.get(Uri.parse('$baseUrl/api/schemas'));
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final list = data['schemas'] as List<dynamic>? ?? [];
+      return list.map((e) => BuiltinSchema.fromJson(e as Map<String, dynamic>)).toList();
+    } else {
+      throw Exception('Failed to get schemas: ${response.statusCode}');
+    }
+  }
+
+  Future<Map<String, dynamic>> issueCredential({
+    required String schemaSaid,
+    required String holderAid,
+    required Map<String, String> claims,
+    // edges: optional ACDC edge block for credential chaining.
+    // Structure: {"<label>": {"n": "<parent-SAID>", "s": "<schema-SAID>"}}
+    Map<String, dynamic>? edges,
+  }) async {
+    final body = <String, dynamic>{
+      'schema_said': schemaSaid,
+      'holder_aid': holderAid,
+      'claims': claims,
+    };
+    if (edges != null) body['edges'] = edges;
+    final response = await _client.post(
+      Uri.parse('$baseUrl/api/credential/issue'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(body),
+    );
+    if (response.statusCode == 201) {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    } else {
+      final err = jsonDecode(response.body) as Map<String, dynamic>;
+      throw Exception(err['error'] ?? 'Credential issuance failed: ${response.statusCode}');
+    }
+  }
+
+  /// Verify a credential and walk its ACDC edges chain.
+  /// Pass [acdcSaid] to look up from local store, or [acdcJsonB64] for an external credential.
+  /// Returns {valid, chain: [{said, schema_said, issuer_aid, checks, errors, valid, edge_label}], warnings, errors}.
+  Future<Map<String, dynamic>> verifyCredentialChain({
+    String? acdcSaid,
+    String? acdcJsonB64,
+  }) async {
+    final reqBody = <String, dynamic>{};
+    if (acdcSaid != null) reqBody['acdc_said'] = acdcSaid;
+    if (acdcJsonB64 != null) reqBody['acdc_json_b64'] = acdcJsonB64;
+    final response = await _client.post(
+      Uri.parse('$baseUrl/api/credentials/verify'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(reqBody),
+    );
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    } else {
+      final err = jsonDecode(response.body) as Map<String, dynamic>;
+      throw Exception(err['error'] ?? 'Verification failed: ${response.statusCode}');
+    }
+  }
+
+  Future<List<CredentialRecord>> getCredentials({String? role, String? status}) async {
+    var uri = Uri.parse('$baseUrl/api/credentials');
+    final params = <String, String>{};
+    if (role != null && role.isNotEmpty) params['role'] = role;
+    if (status != null && status.isNotEmpty) params['status'] = status;
+    if (params.isNotEmpty) uri = uri.replace(queryParameters: params);
+
+    final response = await _client.get(uri);
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final list = data['credentials'] as List<dynamic>? ?? [];
+      return list.map((e) => CredentialRecord.fromJson(e as Map<String, dynamic>)).toList();
+    } else {
+      throw Exception('Failed to get credentials: ${response.statusCode}');
+    }
+  }
+
+  Future<CredentialRecord> getCredential(String said) async {
+    final response = await _client.get(Uri.parse('$baseUrl/api/credentials/$said'));
+    if (response.statusCode == 200) {
+      return CredentialRecord.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+    } else {
+      throw Exception('Credential not found: $said');
+    }
+  }
+
+  Future<Map<String, dynamic>> receiveCredential({
+    required String acdcJson,
+    String rawJson = '',
+    String format = 'acdc',
+  }) async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/api/credentials/receive'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'acdc_json': acdcJson, 'raw_json': rawJson, 'format': format}),
+    );
+    if (response.statusCode == 201) {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    } else {
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      throw Exception(body['error'] ?? 'Failed to receive credential: ${response.statusCode}');
+    }
+  }
+
+  Future<void> deleteCredential(String said) async {
+    final response = await _client.delete(Uri.parse('$baseUrl/api/credentials/$said'));
+    if (response.statusCode != 204) {
+      throw Exception('Failed to delete credential: ${response.statusCode}');
+    }
+  }
+
+  Future<void> acceptCredential(String said) async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/api/credentials/$said/accept'),
+      headers: {'Content-Type': 'application/json'},
+    );
+    if (response.statusCode != 200) {
+      throw Exception('Failed to accept credential: ${response.statusCode}');
+    }
+  }
+
+  Future<void> rejectCredential(String said) async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/api/credentials/$said/reject'),
+      headers: {'Content-Type': 'application/json'},
+    );
+    if (response.statusCode != 204) {
+      throw Exception('Failed to reject credential: ${response.statusCode}');
+    }
+  }
+
+  /// Fetches a credential from a public delivery URL (e.g. {agent_url}/public/credential/{said}).
+  /// Used in the receive-via-link flow.
+  Future<Map<String, dynamic>> fetchPublicCredential(String url) async {
+    final response = await _client.get(Uri.parse(url));
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    } else {
+      throw Exception('Failed to fetch credential from link: ${response.statusCode}');
+    }
+  }
+
+  // ── Service Providers ────────────────────────────────────────────────────
+
+  Future<ServiceProvidersListResponse> getServiceProviders({String? category, String? status}) async {
+    var url = '$baseUrl/api/service-providers';
+    final params = <String>[];
+    if (category != null) params.add('category=$category');
+    if (status != null) params.add('status=$status');
+    if (params.isNotEmpty) url += '?${params.join('&')}';
+
+    final response = await _client.get(Uri.parse(url));
+    if (response.statusCode == 200) {
+      return ServiceProvidersListResponse.fromJson(jsonDecode(response.body));
+    }
+    throw Exception('Failed to list service providers: ${response.statusCode}');
+  }
+
+  Future<ServiceProviderResponse> connectServiceProvider(String id) async {
+    final response = await _client.post(Uri.parse('$baseUrl/api/service-providers/$id/connect'));
+    if (response.statusCode == 200) {
+      return ServiceProviderResponse.fromJson(jsonDecode(response.body));
+    }
+    throw Exception('Failed to connect: ${response.statusCode}');
+  }
+
+  Future<ServiceProviderResponse> disconnectServiceProvider(String id) async {
+    final response = await _client.post(Uri.parse('$baseUrl/api/service-providers/$id/disconnect'));
+    if (response.statusCode == 200) {
+      return ServiceProviderResponse.fromJson(jsonDecode(response.body));
+    }
+    throw Exception('Failed to disconnect: ${response.statusCode}');
+  }
+
+  Future<ServiceProviderResponse> checkServiceProviderHealth(String id) async {
+    final response = await _client.post(Uri.parse('$baseUrl/api/service-providers/$id/health'));
+    if (response.statusCode == 200) {
+      return ServiceProviderResponse.fromJson(jsonDecode(response.body));
+    }
+    throw Exception('Failed to check health: ${response.statusCode}');
+  }
+
   void dispose() {
     _client.close();
+  }
+}
+
+// ── Guardianship models ─────────────────────────────────────────────────────
+
+class GuardianshipResponse {
+  final String id;
+  final String type;
+  final String guardianAid;
+  final String dependentAid;
+  final String dependentName;
+  final String delegatedAidPrefix;
+  final String status;
+  final String hostingType;
+  final String hostingUrl;
+  final String createdAt;
+  final String updatedAt;
+  final EmancipationTriggerResponse? emancipationTrigger;
+  final List<String> coGuardians;
+  final int multisigThreshold;
+  final Map<String, String> metadata;
+  final String credentialSaid;
+
+  GuardianshipResponse({
+    required this.id,
+    required this.type,
+    required this.guardianAid,
+    required this.dependentAid,
+    required this.dependentName,
+    required this.delegatedAidPrefix,
+    required this.status,
+    required this.hostingType,
+    required this.hostingUrl,
+    required this.createdAt,
+    required this.updatedAt,
+    this.emancipationTrigger,
+    required this.coGuardians,
+    required this.multisigThreshold,
+    required this.metadata,
+    this.credentialSaid = '',
+  });
+
+  factory GuardianshipResponse.fromJson(Map<String, dynamic> json) {
+    return GuardianshipResponse(
+      id: json['id'] as String? ?? '',
+      type: json['type'] as String? ?? '',
+      guardianAid: json['guardian_aid'] as String? ?? '',
+      dependentAid: json['dependent_aid'] as String? ?? '',
+      dependentName: json['dependent_name'] as String? ?? '',
+      delegatedAidPrefix: json['delegated_aid_prefix'] as String? ?? '',
+      status: json['status'] as String? ?? '',
+      hostingType: json['hosting_type'] as String? ?? '',
+      hostingUrl: json['hosting_url'] as String? ?? '',
+      createdAt: json['created_at'] as String? ?? '',
+      updatedAt: json['updated_at'] as String? ?? '',
+      emancipationTrigger: json['emancipation_trigger'] != null
+          ? EmancipationTriggerResponse.fromJson(json['emancipation_trigger'])
+          : null,
+      coGuardians: (json['co_guardians'] as List<dynamic>?)
+          ?.map((e) => e.toString()).toList() ?? [],
+      multisigThreshold: (json['multisig_threshold'] as num?)?.toInt() ?? 0,
+      metadata: (json['metadata'] as Map<String, dynamic>?)
+          ?.map((k, v) => MapEntry(k, v.toString())) ?? {},
+      credentialSaid: json['credential_said'] as String? ?? '',
+    );
+  }
+
+  String get typeLabel {
+    switch (type) {
+      case 'minor_child': return 'Minor Child';
+      case 'elderly': return 'Elderly Family Member';
+      case 'disability': return 'Person with a Disability';
+      case 'temporary': return 'Temporary Guardianship';
+      default: return type;
+    }
+  }
+
+  bool get isActive => status == 'active';
+}
+
+class EmancipationTriggerResponse {
+  final String type;
+  final String value;
+
+  EmancipationTriggerResponse({required this.type, required this.value});
+
+  factory EmancipationTriggerResponse.fromJson(Map<String, dynamic> json) {
+    return EmancipationTriggerResponse(
+      type: json['type'] as String? ?? '',
+      value: json['value'] as String? ?? '',
+    );
+  }
+
+  Map<String, dynamic> toJson() => {'type': type, 'value': value};
+}
+
+class GuardianshipsListResponse {
+  final List<GuardianshipResponse> guardianships;
+  final int count;
+
+  GuardianshipsListResponse({required this.guardianships, required this.count});
+
+  factory GuardianshipsListResponse.fromJson(Map<String, dynamic> json) {
+    return GuardianshipsListResponse(
+      guardianships: (json['guardianships'] as List<dynamic>?)
+          ?.map((e) => GuardianshipResponse.fromJson(e as Map<String, dynamic>))
+          .toList() ?? [],
+      count: (json['count'] as num?)?.toInt() ?? 0,
+    );
   }
 }
 
@@ -997,4 +1402,259 @@ class ShareAction {
     'is_enabled': isEnabled,
     'sort_order': sortOrder,
   };
+}
+
+// ── Built-in schema catalog models ────────────────────────────────────────────
+
+class SchemaField {
+  final String key;
+  final String label;
+  final String type; // "string" | "boolean" | "date" | "aid"
+  final bool required;
+  final String placeholder;
+
+  const SchemaField({
+    required this.key,
+    required this.label,
+    required this.type,
+    required this.required,
+    required this.placeholder,
+  });
+
+  factory SchemaField.fromJson(Map<String, dynamic> json) => SchemaField(
+    key:         json['Key']         as String? ?? '',
+    label:       json['Label']       as String? ?? '',
+    type:        json['Type']        as String? ?? 'string',
+    required:    json['Required']    as bool?   ?? false,
+    placeholder: json['Placeholder'] as String? ?? '',
+  );
+}
+
+class BuiltinSchema {
+  final String said;
+  final String name;
+  final String description;
+  final List<SchemaField> fields;
+
+  const BuiltinSchema({
+    required this.said,
+    required this.name,
+    required this.description,
+    required this.fields,
+  });
+
+  factory BuiltinSchema.fromJson(Map<String, dynamic> json) => BuiltinSchema(
+    said:        json['SAID']        as String? ?? '',
+    name:        json['Name']        as String? ?? '',
+    description: json['Description'] as String? ?? '',
+    fields: (json['Fields'] as List<dynamic>? ?? [])
+        .map((f) => SchemaField.fromJson(f as Map<String, dynamic>))
+        .toList(),
+  );
+}
+
+// ── Credential data model ──────────────────────────────────────────────────────
+
+class CredentialRecord {
+  final String said;
+  final String issuerAid;
+  final String holderAid;
+  final String schemaSaid;
+  final String acdcJson;
+  final String ixnSaid;
+  final String cesrSignature;
+  final String issuedAt;
+  final String status;
+  final String format;
+  final String credentialType;
+  final String issuerName;
+  final String issuerLogoUrl;
+  final String expiryDate;
+  final String rawJson;
+
+  const CredentialRecord({
+    required this.said,
+    required this.issuerAid,
+    required this.holderAid,
+    required this.schemaSaid,
+    required this.acdcJson,
+    required this.ixnSaid,
+    required this.cesrSignature,
+    required this.issuedAt,
+    required this.status,
+    required this.format,
+    required this.credentialType,
+    required this.issuerName,
+    required this.issuerLogoUrl,
+    required this.expiryDate,
+    required this.rawJson,
+  });
+
+  factory CredentialRecord.fromJson(Map<String, dynamic> json) {
+    return CredentialRecord(
+      said:           json['said']            as String? ?? '',
+      issuerAid:      json['issuer_aid']       as String? ?? '',
+      holderAid:      json['holder_aid']       as String? ?? '',
+      schemaSaid:     json['schema_said']      as String? ?? '',
+      acdcJson:       json['acdc_json']        as String? ?? '',
+      ixnSaid:        json['ixn_said']         as String? ?? '',
+      cesrSignature:  json['cesr_signature']   as String? ?? '',
+      issuedAt:       json['issued_at']        as String? ?? '',
+      status:         json['status']           as String? ?? '',
+      format:         json['format']           as String? ?? 'acdc',
+      credentialType: json['credential_type']  as String? ?? '',
+      issuerName:     json['issuer_name']      as String? ?? '',
+      issuerLogoUrl:  json['issuer_logo_url']  as String? ?? '',
+      expiryDate:     json['expiry_date']      as String? ?? '',
+      rawJson:        json['raw_json']         as String? ?? '',
+    );
+  }
+
+  bool get isExpired {
+    if (expiryDate.isEmpty) return false;
+    try {
+      return DateTime.parse(expiryDate).isBefore(DateTime.now());
+    } catch (_) {
+      return false;
+    }
+  }
+
+  bool get expiringWithin30Days {
+    if (expiryDate.isEmpty) return false;
+    try {
+      final exp = DateTime.parse(expiryDate);
+      final now = DateTime.now();
+      return !exp.isBefore(now) && exp.isBefore(now.add(const Duration(days: 30)));
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // Attempt to extract a primary claim from the ACDC JSON.
+  // Returns a human-readable string representing the most prominent claim.
+  String get primaryClaim {
+    if (acdcJson.isEmpty) return said.length > 20 ? '${said.substring(0, 20)}...' : said;
+    try {
+      final Map<String, dynamic> acdc = jsonDecode(acdcJson) as Map<String, dynamic>;
+      final attrs = acdc['a'] as Map<String, dynamic>?;
+      if (attrs != null) {
+        for (final key in ['email', 'name', 'fullName', 'full_name', 'identifier',
+                           'licenseNumber', 'license_number', 'id', 'subject']) {
+          if (attrs[key] is String && (attrs[key] as String).isNotEmpty) {
+            return attrs[key] as String;
+          }
+        }
+        // Fall back to first non-empty string value
+        for (final val in attrs.values) {
+          if (val is String && val.isNotEmpty) return val;
+        }
+      }
+    } catch (_) {}
+    return said.length > 20 ? '${said.substring(0, 20)}...' : said;
+  }
+}
+
+// ── Service Provider models ─────────────────────────────────────────────────
+
+class ServiceProviderResponse {
+  final String id;
+  final String providerName;
+  final String providerAid;
+  final String category;
+  final String displayName;
+  final String endpointUrl;
+  final String status;
+  final String health;
+  final String healthCheckedAt;
+  final String companyHq;
+  final String serverRegion;
+  final int identityLevel;
+  final int grapeScore;
+  final List<String> capabilities;
+  final String termsUrl;
+  final String termsAcceptedAt;
+  final String termsVersion;
+  final String connectedAt;
+  final Map<String, String> configuration;
+  final bool isDefault;
+  final String source;
+
+  ServiceProviderResponse({
+    required this.id,
+    required this.providerName,
+    required this.providerAid,
+    required this.category,
+    required this.displayName,
+    required this.endpointUrl,
+    required this.status,
+    required this.health,
+    required this.healthCheckedAt,
+    required this.companyHq,
+    required this.serverRegion,
+    required this.identityLevel,
+    required this.grapeScore,
+    required this.capabilities,
+    required this.termsUrl,
+    required this.termsAcceptedAt,
+    required this.termsVersion,
+    required this.connectedAt,
+    required this.configuration,
+    required this.isDefault,
+    required this.source,
+  });
+
+  factory ServiceProviderResponse.fromJson(Map<String, dynamic> json) {
+    return ServiceProviderResponse(
+      id: json['id'] as String? ?? '',
+      providerName: json['provider_name'] as String? ?? '',
+      providerAid: json['provider_aid'] as String? ?? '',
+      category: json['category'] as String? ?? '',
+      displayName: json['display_name'] as String? ?? '',
+      endpointUrl: json['endpoint_url'] as String? ?? '',
+      status: json['status'] as String? ?? '',
+      health: json['health'] as String? ?? 'unknown',
+      healthCheckedAt: json['health_checked_at'] as String? ?? '',
+      companyHq: json['company_hq'] as String? ?? '',
+      serverRegion: json['server_region'] as String? ?? '',
+      identityLevel: (json['identity_level'] as num?)?.toInt() ?? 0,
+      grapeScore: (json['grape_score'] as num?)?.toInt() ?? 0,
+      capabilities: (json['capabilities'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? [],
+      termsUrl: json['terms_url'] as String? ?? '',
+      termsAcceptedAt: json['terms_accepted_at'] as String? ?? '',
+      termsVersion: json['terms_version'] as String? ?? '',
+      connectedAt: json['connected_at'] as String? ?? '',
+      configuration: (json['configuration'] as Map<String, dynamic>?)?.map((k, v) => MapEntry(k, v.toString())) ?? {},
+      isDefault: json['is_default'] == true,
+      source: json['source'] as String? ?? '',
+    );
+  }
+
+  String get categoryLabel {
+    switch (category) {
+      case 'infrastructure': return 'Infrastructure';
+      case 'witness': return 'Witness';
+      case 'cloud_hsm': return 'Cloud HSM';
+      case 'tunneling': return 'Tunneling';
+      default: return category;
+    }
+  }
+
+  bool get isConnected => status == 'connected';
+  bool get isHealthy => health == 'healthy';
+}
+
+class ServiceProvidersListResponse {
+  final List<ServiceProviderResponse> providers;
+  final int count;
+
+  ServiceProvidersListResponse({required this.providers, required this.count});
+
+  factory ServiceProvidersListResponse.fromJson(Map<String, dynamic> json) {
+    return ServiceProvidersListResponse(
+      providers: (json['providers'] as List<dynamic>?)
+          ?.map((e) => ServiceProviderResponse.fromJson(e as Map<String, dynamic>))
+          .toList() ?? [],
+      count: (json['count'] as num?)?.toInt() ?? 0,
+    );
+  }
 }

@@ -7,6 +7,7 @@ import '../../theme/app_theme.dart';
 import '../../config/agent_config.dart';
 import '../../services/camera_service.dart';
 import '../../services/core_service.dart';
+import '../../services/event_service.dart';
 import '../../services/keri_service.dart';
 import '../../services/mobile_on_device_keri_service.dart';
 import '../../widgets/identity_level_badge.dart';
@@ -79,6 +80,7 @@ class _DesktopDashboardScreenState extends State<DesktopDashboardScreen> {
   // Notifications
   List<ContactResponse> _alerts = [];
   List<PendingRequestResponse> _pendingRequests = [];
+  List<CredentialRecord> _pendingCredentials = [];
 
   // Automated background tasks (from backend)
   List<TaskRecord> _backgroundTasks = [];
@@ -96,6 +98,7 @@ class _DesktopDashboardScreenState extends State<DesktopDashboardScreen> {
 
   Timer? _healthTimer;
   Timer? _alertTimer;
+  StreamSubscription<AgentEvent>? _eventSub;
 
   @override
   void initState() {
@@ -103,6 +106,22 @@ class _DesktopDashboardScreenState extends State<DesktopDashboardScreen> {
     _addLog('Dashboard initialized', LogLevel.info);
     _load();
     _detectCamera();
+    _subscribeToEvents();
+  }
+
+  void _subscribeToEvents() {
+    final serverUrl = widget.serverUrl ?? AgentConfig.coreBaseUrl;
+    final eventService = EventService.instance(serverUrl);
+    _eventSub = eventService.events.listen((event) {
+      if (!mounted) return;
+      if (event.type == 'introduction_received' ||
+          event.type == 'contact_accepted' ||
+          event.type == 'pending_request_received' ||
+          event.type == 'credential_received' ||
+          event.type == 'credential_accepted') {
+        _fetchAlerts();
+      }
+    });
   }
 
   Future<void> _detectCamera() async {
@@ -114,6 +133,7 @@ class _DesktopDashboardScreenState extends State<DesktopDashboardScreen> {
   void dispose() {
     _healthTimer?.cancel();
     _alertTimer?.cancel();
+    _eventSub?.cancel();
     _coreService.dispose();
     super.dispose();
   }
@@ -195,6 +215,7 @@ class _DesktopDashboardScreenState extends State<DesktopDashboardScreen> {
         setState(() {
           _alerts = result.alerts;
           _pendingRequests = result.pendingRequests;
+          _pendingCredentials = result.pendingCredentials;
         });
       }
     } catch (_) {}
@@ -245,6 +266,26 @@ class _DesktopDashboardScreenState extends State<DesktopDashboardScreen> {
     } catch (_) {}
   }
 
+  Future<void> _acceptCredential(String said) async {
+    try {
+      await _coreService.acceptCredential(said);
+      _addLog('Credential accepted', LogLevel.success);
+      _fetchAlerts();
+    } catch (e) {
+      _addLog('Accept failed: ${e.toString().split(': ').last}', LogLevel.error);
+    }
+  }
+
+  Future<void> _rejectCredential(String said) async {
+    try {
+      await _coreService.rejectCredential(said);
+      _addLog('Credential rejected', LogLevel.info);
+      _fetchAlerts();
+    } catch (e) {
+      _addLog('Reject failed: ${e.toString().split(': ').last}', LogLevel.error);
+    }
+  }
+
   void _showShareQrDialog() {
     showDialog(
       context: context,
@@ -257,7 +298,7 @@ class _DesktopDashboardScreenState extends State<DesktopDashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final totalAlerts = _alerts.length + _pendingRequests.length;
+    final totalAlerts = _alerts.length + _pendingRequests.length + _pendingCredentials.length;
 
     return Scaffold(
       body: SingleChildScrollView(
@@ -503,16 +544,17 @@ class _DesktopDashboardScreenState extends State<DesktopDashboardScreen> {
                       fontSize: 11, fontWeight: FontWeight.w700)),
             )
           : null,
-      child: _alerts.isNotEmpty || _pendingRequests.isNotEmpty
+      child: _alerts.isNotEmpty || _pendingRequests.isNotEmpty || _pendingCredentials.isNotEmpty
           ? Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 ..._alerts.take(3).map((a) => _alertItem(a)),
                 ..._pendingRequests.take(2).map((r) => _pendingItem(r)),
-                if (_alerts.length + _pendingRequests.length > 5)
+                ..._pendingCredentials.take(3).map((c) => _credentialAlertItem(c)),
+                if (totalAlerts > 8)
                   Padding(
                     padding: const EdgeInsets.only(top: 4),
-                    child: Text('+ ${_alerts.length + _pendingRequests.length - 5} more…',
+                    child: Text('+ ${totalAlerts - 8} more…',
                         style: const TextStyle(color: AppColors.textMuted, fontSize: 11)),
                   ),
               ],
@@ -766,6 +808,77 @@ class _DesktopDashboardScreenState extends State<DesktopDashboardScreen> {
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
             child: const Text('Dismiss', style: TextStyle(fontSize: 11)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _credentialAlertItem(CredentialRecord cred) {
+    final issuerDisplay = cred.issuerName.isNotEmpty ? cred.issuerName
+        : (cred.issuerAid.length > 16 ? '${cred.issuerAid.substring(0, 12)}…' : cred.issuerAid);
+    final typeDisplay = cred.credentialType.isNotEmpty ? cred.credentialType : 'Credential';
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceLight,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppColors.success.withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.verified_outlined, size: 14, color: AppColors.success),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text('$typeDisplay from $issuerDisplay',
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
+                        color: AppColors.textPrimary),
+                    maxLines: 1, overflow: TextOverflow.ellipsis),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                decoration: BoxDecoration(
+                  color: AppColors.success.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(3),
+                ),
+                child: const Text('CREDENTIAL',
+                    style: TextStyle(color: AppColors.success, fontSize: 8,
+                        fontWeight: FontWeight.w700, letterSpacing: 0.8)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton(
+                onPressed: () => _rejectCredential(cred.said),
+                style: TextButton.styleFrom(
+                  foregroundColor: AppColors.error,
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child: const Text('Reject', style: TextStyle(fontSize: 12)),
+              ),
+              const SizedBox(width: 6),
+              ElevatedButton(
+                onPressed: () => _acceptCredential(cred.said),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.success,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  elevation: 0,
+                ),
+                child: const Text('Accept', style: TextStyle(fontSize: 12)),
+              ),
+            ],
           ),
         ],
       ),

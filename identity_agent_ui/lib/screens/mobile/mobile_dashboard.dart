@@ -41,6 +41,7 @@ class MobileDashboardState extends State<MobileDashboard> with SingleTickerProvi
   String? _photoBase64;
   List<ContactResponse> _alertContacts = [];
   List<PendingRequestResponse> _pendingRequests = [];
+  List<CredentialRecord> _pendingCredentials = [];
   int _alertCount = 0;
   bool _loading = true;
   List<TaskRecord> _backgroundTasks = [];
@@ -68,7 +69,9 @@ class MobileDashboardState extends State<MobileDashboard> with SingleTickerProvi
   void _listenForEvents() {
     _eventSub = _eventService.events.listen((event) {
       if (!mounted) return;
-      if (event.type == 'introduction_received' || event.type == 'contact_accepted' || event.type == 'pending_request_received') {
+      if (event.type == 'introduction_received' || event.type == 'contact_accepted' ||
+          event.type == 'pending_request_received' || event.type == 'credential_received' ||
+          event.type == 'credential_accepted') {
         _loadAlerts();
       }
     });
@@ -122,7 +125,8 @@ class MobileDashboardState extends State<MobileDashboard> with SingleTickerProvi
         setState(() {
           _alertContacts = alerts.alerts;
           _pendingRequests = alerts.pendingRequests;
-          _alertCount = alerts.alerts.length + alerts.pendingRequests.length;
+          _pendingCredentials = alerts.pendingCredentials;
+          _alertCount = alerts.totalCount;
         });
       }
     } catch (e) {
@@ -174,6 +178,42 @@ class MobileDashboardState extends State<MobileDashboard> with SingleTickerProvi
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Failed to dismiss: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _onAcceptCredential(String said) async {
+    try {
+      await _coreService.acceptCredential(said);
+      await _loadAlerts();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Credential accepted')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to accept credential: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _onRejectCredential(String said) async {
+    try {
+      await _coreService.rejectCredential(said);
+      await _loadAlerts();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Credential rejected')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to reject credential: $e')),
         );
       }
     }
@@ -346,6 +386,20 @@ class MobileDashboardState extends State<MobileDashboard> with SingleTickerProvi
         type: AlertCardType.pendingRequest,
         subtitle: pending.errorReason,
         onDismiss: () => _onDismissPending(pending.aid),
+      ));
+    }
+
+    for (final cred in _pendingCredentials) {
+      final issuerDisplay = cred.issuerName.isNotEmpty ? cred.issuerName
+          : (cred.issuerAid.length > 16 ? '${cred.issuerAid.substring(0, 12)}…' : cred.issuerAid);
+      final typeDisplay = cred.credentialType.isNotEmpty ? cred.credentialType : 'Credential';
+      items.add(AlertCard(
+        displayName: issuerDisplay,
+        aid: cred.issuerAid,
+        type: AlertCardType.credentialIncoming,
+        subtitle: typeDisplay,
+        onApprove: () => _onAcceptCredential(cred.said),
+        onDeny: () => _onRejectCredential(cred.said),
       ));
     }
 

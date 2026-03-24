@@ -614,6 +614,7 @@ class _AgentRouterState extends State<AgentRouter> {
           onComplete: _onSetupComplete,
           keriService: _keriService!,
           remoteBrainUrl: _remoteBrainUrl,
+          entityType: _selectedEntityType,
         );
 
       case OnboardingStep.setupChecklist:

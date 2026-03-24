@@ -68,6 +68,25 @@ type DriverInteractResponse struct {
 	SequenceNumber int    `json:"sequence_number"`
 }
 
+// DriverReloadIdentityRequest seeds the driver's in-memory _identities dict from
+// persisted DB state. Called on server startup when an identity already exists.
+// No private key material is included — only public state needed for IXN/issuance.
+type DriverReloadIdentityRequest struct {
+	AID            string                   `json:"aid"`
+	PublicKey      string                   `json:"public_key"`
+	NextKeyDigest  string                   `json:"next_key_digest"`
+	SequenceNumber int                      `json:"sequence_number"`
+	LastSAID       string                   `json:"last_said"`
+	KEL            []map[string]interface{} `json:"kel"`
+}
+
+type DriverReloadIdentityResponse struct {
+	AID            string `json:"aid"`
+	SequenceNumber int    `json:"sequence_number"`
+	KelEvents      int    `json:"kel_events"`
+	Status         string `json:"status"`
+}
+
 type DriverSignRequest struct {
 	Name string `json:"name"`
 	Data string `json:"data"`
@@ -158,6 +177,10 @@ type DriverIssueCredentialRequest struct {
 	Claims     map[string]interface{} `json:"claims"`
 	SchemaSaid string                 `json:"schema_said"`
 	HolderAid  string                 `json:"holder_aid"`
+	// Edges: optional ACDC edge block entries for credential chaining.
+	// Structure: {"<label>": {"n": "<parent-SAID>", "s": "<schema-SAID>"}}
+	// The driver computes the edges block SAID and includes the 'e' field in the ACDC body.
+	Edges      map[string]interface{} `json:"edges,omitempty"`
 }
 
 type DriverIssueCredentialResponse struct {
@@ -534,6 +557,20 @@ func (d *KeriDriver) Interact(name string, data []interface{}) (*DriverInteractR
 	return &result, nil
 }
 
+// ReloadIdentity seeds the driver's in-memory identity state from persisted DB data.
+// Must be called after the driver is ready whenever an identity already exists in the store.
+func (d *KeriDriver) ReloadIdentity(req *DriverReloadIdentityRequest) (*DriverReloadIdentityResponse, error) {
+	body, err := d.doPost("/reload-identity", req, http.StatusOK)
+	if err != nil {
+		return nil, fmt.Errorf("reload-identity failed: %w", err)
+	}
+	var result DriverReloadIdentityResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode reload-identity response: %w", err)
+	}
+	return &result, nil
+}
+
 func (d *KeriDriver) CesrEncode(rawSigB64 string) (*DriverCesrEncodeResponse, error) {
 	reqBody := DriverCesrEncodeRequest{RawSigB64: rawSigB64}
 
@@ -607,12 +644,13 @@ func (d *KeriDriver) PresentCredential(acdcSaid, holderAid, issuerAid, schemaSai
 	return &result, nil
 }
 
-func (d *KeriDriver) IssueCredential(name string, claims map[string]interface{}, schemaSaid, holderAid string) (*DriverIssueCredentialResponse, error) {
+func (d *KeriDriver) IssueCredential(name string, claims map[string]interface{}, schemaSaid, holderAid string, edges map[string]interface{}) (*DriverIssueCredentialResponse, error) {
 	reqBody := DriverIssueCredentialRequest{
 		Name:       name,
 		Claims:     claims,
 		SchemaSaid: schemaSaid,
 		HolderAid:  holderAid,
+		Edges:      edges,
 	}
 
 	body, err := d.doPost("/credential/issue", reqBody, http.StatusCreated)

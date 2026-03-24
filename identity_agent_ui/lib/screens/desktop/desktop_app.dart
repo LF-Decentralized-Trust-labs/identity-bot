@@ -18,6 +18,10 @@ import 'auth_management_screen.dart';
 import 'history_screen.dart';
 import 'my_devices_screen.dart';
 import 'api_keys_screen.dart';
+import 'guardianship_screen.dart';
+import 'guardianship_dependents_screen.dart';
+import 'credentials_screen.dart';
+import 'service_providers_screen.dart';
 
 class DesktopApp extends StatefulWidget {
   final KeriService keriService;
@@ -112,9 +116,21 @@ class _DesktopAppState extends State<DesktopApp> {
           onResetIdentity: widget.onResetIdentity,
         );
 
-      // ── Coming Soon stubs ──────────────────────────────────────────────────
+      // ── Guardianship ──────────────────────────────────────────────────────
+      case DesktopRoute.guardianship:
+        return GuardianshipScreen(serverUrl: url, onNavigate: _navigate);
+      case DesktopRoute.guardianshipDependents:
+        return GuardianshipDependentsScreen(serverUrl: url);
+      case DesktopRoute.guardianshipGuardians:
+        return const ComingSoonScreen(title: 'My Guardians', icon: Icons.shield_outlined);
+      case DesktopRoute.guardianshipSuccession:
+        return const ComingSoonScreen(title: 'Succession Plan', icon: Icons.description_outlined);
+      case DesktopRoute.guardianshipEstate:
+        return const ComingSoonScreen(title: 'Estate Management', icon: Icons.account_balance_outlined);
+
+      // ── Credentials ────────────────────────────────────────────────────────
       case DesktopRoute.credentials:
-        return const ComingSoonScreen(title: 'Credentials', icon: Icons.verified_user_outlined);
+        return CredentialsScreen(serverUrl: url);
       case DesktopRoute.passwords:
         return const ComingSoonScreen(title: 'Passwords', icon: Icons.password_outlined);
       case DesktopRoute.wallet:
@@ -138,7 +154,7 @@ class _DesktopAppState extends State<DesktopApp> {
       case DesktopRoute.hubsSecurity:
         return const ComingSoonScreen(title: 'Security', icon: Icons.security);
       case DesktopRoute.settingsServiceProviders:
-        return const ComingSoonScreen(title: 'Service Providers', icon: Icons.cloud_outlined);
+        return ServiceProvidersScreen(serverUrl: url);
       case DesktopRoute.settingsGovernance:
         return const ComingSoonScreen(title: 'Governance', icon: Icons.gavel);
       case DesktopRoute.settingsPrivacy:
