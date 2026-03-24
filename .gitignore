@@ -49,3 +49,6 @@ tests/keri_test_vector.json
 .config/
 .local/
 attached_assets/
+
+# MCP config (personal dev tooling)
+.mcp.json
