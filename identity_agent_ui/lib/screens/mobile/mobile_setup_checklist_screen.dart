@@ -143,7 +143,7 @@ class _MobileSetupChecklistScreenState
                 ),
                 const SizedBox(height: 2),
                 const Text(
-                  'Required for basic security.',
+                  'Required to continue using your Identity Agent.',
                   style: TextStyle(
                     color: MobileColors.textSecondary,
                     fontSize: 12,

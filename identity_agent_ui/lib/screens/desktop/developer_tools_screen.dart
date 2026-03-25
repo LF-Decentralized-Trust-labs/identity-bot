@@ -5,6 +5,7 @@ import '../../services/core_service.dart';
 import '../../services/preferences_service.dart';
 import '../../services/secure_key_store.dart';
 import '../../services/setup_task_service.dart';
+import '../../services/identity_level_service.dart';
 import '../../config/agent_config.dart';
 
 class DeveloperToolsScreen extends StatefulWidget {
@@ -245,7 +246,10 @@ class _DeveloperToolsScreenState extends State<DeveloperToolsScreen> {
         await SetupTaskService.markIncomplete(task);
       }
 
-      // 4. Clear SharedPreferences (onboarding, settings, etc.)
+      // 4. Clear identity level state (PIN, password, witness count, etc.)
+      await IdentityLevelService.clearAll();
+
+      // 5. Clear SharedPreferences (onboarding, settings, etc.)
       await PreferencesService.clearAll();
 
       widget.onResetIdentity?.call();

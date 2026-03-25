@@ -310,7 +310,9 @@ class _AgentRouterState extends State<AgentRouter> {
 
   void _onSetupComplete() async {
     await PreferencesService.setSetupComplete(true);
-    setState(() => _step = OnboardingStep.setupChecklist);
+    // Go straight to dashboard; the SetupTaskBanner will auto-open the
+    // checklist modal on first load (no white-background intermediate page).
+    setState(() => _step = OnboardingStep.dashboard);
   }
 
   void _onChecklistDone() {

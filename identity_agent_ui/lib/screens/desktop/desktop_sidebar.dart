@@ -235,7 +235,6 @@ class _DesktopSidebarState extends State<DesktopSidebar> {
                   label: 'Hubs',
                   expanded: _openSection == 'hubs',
                   onToggle: () => _toggleSection('hubs'),
-                  comingSoon: true,
                 ),
                 if (_openSection == 'hubs') ...[
                   _SubItem(icon: Icons.chat_bubble_outline, label: 'Communications', route: DesktopRoute.hubsCommunications, current: widget.currentRoute, onTap: _select, comingSoon: true),
@@ -246,6 +245,10 @@ class _DesktopSidebarState extends State<DesktopSidebar> {
                   _SubItem(icon: Icons.gavel,               label: 'Legal',          route: DesktopRoute.hubsLegal,         current: widget.currentRoute, onTap: _select, comingSoon: true),
                   _SubItem(icon: Icons.security,            label: 'Security',       route: DesktopRoute.hubsSecurity,      current: widget.currentRoute, onTap: _select, comingSoon: true),
                 ],
+                _sectionDivider(),
+
+                // ── History ────────────────────────────────────────────────
+                _NavItem(icon: Icons.history, label: 'History', route: DesktopRoute.activityLog, current: widget.currentRoute, onTap: _select),
                 _sectionDivider(),
 
                 // ── Settings ───────────────────────────────────────────────
@@ -270,10 +273,6 @@ class _DesktopSidebarState extends State<DesktopSidebar> {
                   _SubItem(icon: Icons.backup_outlined,          label: 'Backup & Recovery', route: DesktopRoute.settingsBackup,          current: widget.currentRoute, onTap: _select, comingSoon: true),
                   _SubItem(icon: Icons.terminal,                 label: 'Developer Tools',   route: DesktopRoute.settingsDeveloperTools,  current: widget.currentRoute, onTap: _select),
                 ],
-                _sectionDivider(),
-
-                // ── History ────────────────────────────────────────────────
-                _NavItem(icon: Icons.history, label: 'History', route: DesktopRoute.activityLog, current: widget.currentRoute, onTap: _select),
 
                 const SizedBox(height: 16),
               ],

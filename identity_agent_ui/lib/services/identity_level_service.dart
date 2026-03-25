@@ -28,7 +28,7 @@ extension IdentityTierX on IdentityTier {
   String get label {
     switch (this) {
       case IdentityTier.notVerified:    return 'Not Verified';
-      case IdentityTier.selfAsserted:   return 'Self-Asserted';
+      case IdentityTier.selfAsserted:   return 'Basic';
       case IdentityTier.authenticated:  return 'Authenticated';
       case IdentityTier.verified:       return 'Verified';
       case IdentityTier.highlyVerified: return 'Highly Verified';

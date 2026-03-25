@@ -576,7 +576,7 @@ class _SetupChecklistScreenState extends State<SetupChecklistScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Protect your identity from unauthorized access. Enable at least one method${enabledCount < 2 ? " (we recommend two)" : ""}.',
+          'Protect your identity from unauthorized access. Enabling all methods is recommended.${enabledCount < 2 ? " (we recommend two)" : ""}.',
           style: TextStyle(color: cs.onSurface.withOpacity(0.6), fontSize: 13, height: 1.5),
         ),
         if (enabledCount >= 1) ...[

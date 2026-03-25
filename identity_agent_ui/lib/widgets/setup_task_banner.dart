@@ -28,6 +28,7 @@ class _SetupTaskBannerState extends State<SetupTaskBanner> {
   int _total = 0;
   bool _dismissed = false;
   bool _loaded = false;
+  bool _autoOpened = false;
   HostingChoice? _hostingChoice;
   String? _remoteBrainUrl;
 
@@ -47,7 +48,7 @@ class _SetupTaskBannerState extends State<SetupTaskBanner> {
     final hosting = await PreferencesService.getHostingChoice();
     final remoteBrain = await PreferencesService.getRemoteBrainUrl();
     final needsRemoteBrain = hosting == HostingChoice.keysHereBrainLater;
-    final tasks = SetupTaskService.orderedTasks(needsRemoteBrain: needsRemoteBrain);
+    final tasks = SetupTaskService.orderedTasks(needsRemoteBrain: needsRemoteBrain, includeSecureKeyStorage: false);
     final state = await SetupTaskService.loadState(tasks);
     final done = state.values.where((v) => v).length;
 
@@ -59,6 +60,13 @@ class _SetupTaskBannerState extends State<SetupTaskBanner> {
         _total = tasks.length;
         _loaded = true;
       });
+      // Auto-open checklist on first dashboard visit after onboarding
+      if (!_autoOpened && done < tasks.length) {
+        _autoOpened = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _openChecklist();
+        });
+      }
     }
   }
 
@@ -118,7 +126,7 @@ class _SetupTaskBannerState extends State<SetupTaskBanner> {
                     ),
                   ),
                   const Text(
-                    'Required for basic security.',
+                    'Required to continue using your Identity Agent.',
                     style: TextStyle(
                       color: Color(0xFF8D8D8D),
                       fontSize: 11,
@@ -239,7 +247,7 @@ class _HoverBannerState extends State<_HoverBanner> {
                         text: '${widget.remaining} more ${widget.remaining == 1 ? 'step' : 'steps'} to complete setup',
                         style: const TextStyle(fontWeight: FontWeight.w700),
                       ),
-                      const TextSpan(text: '  ·  Required for basic security.'),
+                      const TextSpan(text: '  ·  Required to continue using your Identity Agent.'),
                     ],
                   ),
                 ),
