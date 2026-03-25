@@ -67,7 +67,7 @@ class _HostingChoiceScreenState extends State<HostingChoiceScreen> {
                 children: [
                   const SizedBox(height: 32),
                   const Text(
-                    'WHERE DO YOU WANT YOUR KEYS AND BRAIN?',
+                    'YOUR KEYS WILL LIVE ON THIS DEVICE.',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: AppColors.textPrimary,
@@ -79,12 +79,11 @@ class _HostingChoiceScreenState extends State<HostingChoiceScreen> {
                   ),
                   const SizedBox(height: 12),
                   const Text(
-                    'Your keys (Identity) are your secret seed — whoever holds them is you.\n'
-                    'Your brain (Agent) is the software that runs your identity.',
+                    'Now, where do you want the heavy processing done?',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: AppColors.textSecondary,
-                      fontSize: 12,
+                      fontSize: 13,
                       height: 1.6,
                       fontFamily: 'monospace',
                     ),
@@ -93,17 +92,18 @@ class _HostingChoiceScreenState extends State<HostingChoiceScreen> {
                   _buildOptionCard(
                     choice: HostingChoice.keysHereBrainHere,
                     icon: Icons.computer,
-                    title: 'Keys here · Brain here',
+                    title: 'Right here',
                     subtitle:
-                        'Both on this computer. Fully self-contained. Full features.',
+                        'Everything runs on this computer. Fully self-contained.',
+                    badge: 'RECOMMENDED',
                   ),
                   const SizedBox(height: 12),
                   _buildOptionCard(
                     choice: HostingChoice.keysHereBrainRemote,
                     icon: Icons.cloud_outlined,
-                    title: 'Keys here · Brain on a remote server',
+                    title: 'On a remote server',
                     subtitle:
-                        'Your keys stay on this computer. A cloud server or VPS runs the agent.',
+                        'This device manages your keys. A server handles the heavy processing.',
                   ),
                   if (_selected == HostingChoice.keysHereBrainRemote) ...[
                     const SizedBox(height: 16),
@@ -152,6 +152,7 @@ class _HostingChoiceScreenState extends State<HostingChoiceScreen> {
     required IconData icon,
     required String title,
     required String subtitle,
+    String? badge,
   }) {
     final selected = _selected == choice;
     return GestureDetector(
@@ -194,17 +195,42 @@ class _HostingChoiceScreenState extends State<HostingChoiceScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    title,
-                    style: TextStyle(
-                      color: selected
-                          ? AppColors.textPrimary
-                          : AppColors.textSecondary,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 0.5,
-                      fontFamily: 'monospace',
-                    ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          title,
+                          style: TextStyle(
+                            color: selected
+                                ? AppColors.textPrimary
+                                : AppColors.textSecondary,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.5,
+                            fontFamily: 'monospace',
+                          ),
+                        ),
+                      ),
+                      if (badge != null)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: AppColors.accent.withOpacity(0.15),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            badge,
+                            style: const TextStyle(
+                              color: AppColors.accent,
+                              fontSize: 9,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 1.0,
+                              fontFamily: 'monospace',
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                   const SizedBox(height: 4),
                   Text(
