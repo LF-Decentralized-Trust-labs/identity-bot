@@ -385,7 +385,7 @@ class _MobileSetupWizardScreenState extends State<MobileSetupWizardScreen> {
         ),
         const SizedBox(height: 6),
         const Text(
-          'This is how contacts will know you.',
+          'This is how others will see your profile.',
           style: TextStyle(
             color: MobileColors.textSecondary,
             fontSize: 15,

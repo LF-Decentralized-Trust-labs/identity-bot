@@ -271,7 +271,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
         ),
         const SizedBox(height: 8),
         Text(
-          isOrg ? 'Enter your organization details.' : 'This is how contacts will know you.',
+          isOrg ? 'Enter your organization details.' : 'This is how others will see your profile.',
           style: TextStyle(
             color: AppColors.textSecondary,
             fontSize: 13,
@@ -708,7 +708,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
               ),
               const SizedBox(height: 10),
               const Text(
-                'Install the Identity Agent on a device with hardware security:',
+                'Use a different device. Install the Identity Agent on a device with hardware security (most modern devices):',
                 style: TextStyle(
                   color: AppColors.textPrimary,
                   fontSize: 12,
@@ -717,9 +717,9 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
                 ),
               ),
               const SizedBox(height: 8),
-              _buildDeviceRow('iPhone (Secure Enclave)'),
-              _buildDeviceRow('Modern Android (StrongBox / TEE)'),
-              _buildDeviceRow('Apple Silicon Mac (Secure Enclave)'),
+              _buildDeviceRow('iPhone (with a Secure Enclave)'),
+              _buildDeviceRow('Modern Android (with StrongBox / TEE)'),
+              _buildDeviceRow('Apple Silicon Mac (with a Secure Enclave)'),
               _buildDeviceRow('PC with TPM 2.0 enabled in BIOS'),
             ],
           ),
@@ -816,7 +816,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
               ),
             ),
             child: const Text(
-              'CONTINUE — OTHERS MAY NOT TRUST ME',
+              'CONTINUE — OTHERS WON\'T TRUST ME',
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w700,
