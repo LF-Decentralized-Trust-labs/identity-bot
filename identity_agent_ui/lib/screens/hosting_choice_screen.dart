@@ -28,7 +28,7 @@ class _HostingChoiceScreenState extends State<HostingChoiceScreen> {
   Future<void> _connectRemoteBrain() async {
     final url = _urlController.text.trim();
     if (url.isEmpty) {
-      setState(() => _connectError = 'Enter a server URL.');
+      setState(() => _connectError = 'Invalid URL.');
       return;
     }
     setState(() {
@@ -46,8 +46,7 @@ class _HostingChoiceScreenState extends State<HostingChoiceScreen> {
     } catch (_) {
       setState(() {
         _connecting = false;
-        _connectError =
-            'Could not reach that server. Check the URL and try again.';
+        _connectError = 'Invalid URL. Could not reach a server at that address.';
       });
     }
   }
@@ -67,7 +66,7 @@ class _HostingChoiceScreenState extends State<HostingChoiceScreen> {
                 children: [
                   const SizedBox(height: 32),
                   const Text(
-                    'YOUR KEYS WILL LIVE ON THIS DEVICE.',
+                    'WHERE DO YOU WANT THE HEAVY PROCESSING DONE?',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: AppColors.textPrimary,
@@ -79,7 +78,7 @@ class _HostingChoiceScreenState extends State<HostingChoiceScreen> {
                   ),
                   const SizedBox(height: 12),
                   const Text(
-                    'Now, where do you want the heavy processing done?',
+                    'Your keys will live on this device. Now choose where the processing happens.',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: AppColors.textSecondary,
@@ -119,7 +118,7 @@ class _HostingChoiceScreenState extends State<HostingChoiceScreen> {
                         ),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: AppColors.accent,
-                          foregroundColor: AppColors.primary,
+                          foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(vertical: 16),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
@@ -330,7 +329,7 @@ class _HostingChoiceScreenState extends State<HostingChoiceScreen> {
               onPressed: _connecting ? null : _connectRemoteBrain,
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.accent,
-                foregroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10),
@@ -341,7 +340,7 @@ class _HostingChoiceScreenState extends State<HostingChoiceScreen> {
                       width: 18,
                       height: 18,
                       child: CircularProgressIndicator(
-                        color: AppColors.primary,
+                        color: Colors.white,
                         strokeWidth: 2,
                       ),
                     )
@@ -354,24 +353,6 @@ class _HostingChoiceScreenState extends State<HostingChoiceScreen> {
                         fontFamily: 'monospace',
                       ),
                     ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          SizedBox(
-            width: double.infinity,
-            child: TextButton(
-              onPressed: () => widget.onHostingChosen(
-                HostingChoice.keysHereBrainLater,
-              ),
-              child: const Text(
-                'Connect later — start standalone for now',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: AppColors.textMuted,
-                  fontSize: 11,
-                  fontFamily: 'monospace',
-                ),
-              ),
             ),
           ),
         ],
