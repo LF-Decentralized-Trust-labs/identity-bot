@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import '../theme/app_theme.dart';
 import '../crypto/bip39.dart';
 import '../services/keri_service.dart';
@@ -16,10 +15,9 @@ import '../services/photo_picker_stub.dart'
     if (dart.library.html) '../services/photo_picker_web.dart' as photo_picker;
 
 enum WizardStep {
-  profile,
-  seedDisplay, // kept for compile safety; skipped in flow
   creatingIdentity,
   enclaveWarning,
+  profile,
   identityCreated,
 }
 
@@ -42,7 +40,7 @@ class SetupWizardScreen extends StatefulWidget {
 }
 
 class _SetupWizardScreenState extends State<SetupWizardScreen> {
-  WizardStep _currentStep = WizardStep.profile;
+  WizardStep _currentStep = WizardStep.creatingIdentity;
   List<String> _mnemonic = [];
   String? _aid;
   String? _errorMessage;
@@ -57,20 +55,12 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
   final _orgTypeController = TextEditingController();
   final _jurisdictionController = TextEditingController();
 
-  // Seed verify (inline on seed display screen)
-  int _verifyWordIndex1 = 3;
-  int _verifyWordIndex2 = 8;
-  final _verifyController1 = TextEditingController();
-  final _verifyController2 = TextEditingController();
-  bool _verifyError = false;
-
   // Processing
   int _processingStep = 0;
   EnclaveStatusResponse? _enclaveStatus;
 
   // Identity created
   String _displayName = '';
-  String? _oobiUrl;
 
   String get _coreBaseUrl =>
       widget.remoteBrainUrl ?? AgentConfig.coreBaseUrl;
@@ -78,8 +68,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
   @override
   void initState() {
     super.initState();
-    _displayNameController.text = 'Rob Anderson';
-    _generateSeedPhrase();
+    _generateAndStartInception();
   }
 
   @override
@@ -88,26 +77,20 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
     _orgNameController.dispose();
     _orgTypeController.dispose();
     _jurisdictionController.dispose();
-    _verifyController1.dispose();
-    _verifyController2.dispose();
     super.dispose();
   }
 
-  void _generateSeedPhrase() {
+  void _generateAndStartInception() {
     final mnemonic = Bip39.generateMnemonic();
-    final wordCount = mnemonic.length;
-    setState(() {
-      _mnemonic = mnemonic;
-      _verifyWordIndex1 = 3;
-      _verifyWordIndex2 = wordCount > 8 ? 8 : wordCount - 1;
-    });
+    _mnemonic = mnemonic;
+    _startInception();
   }
 
   // ── Profile submit ──────────────────────────────────────────────────────────
 
   bool get _isOrg => widget.entityType == EntityType.organization;
 
-  void _submitProfile() {
+  Future<void> _submitProfile() async {
     final name = _displayNameController.text.trim();
     if (name.isEmpty) {
       setState(() => _profileFormError = _isOrg ? 'Organization name is required.' : 'Display name is required.');
@@ -121,135 +104,25 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
       _displayName = name;
       _profileFormError = null;
     });
-    // Skip seed phrase step — backup is now in the setup checklist
-    _startInception();
-  }
+    // Save profile to server
+    try {
+      final coreService = CoreService(baseUrl: _coreBaseUrl);
+      await coreService.saveProfile(ProfileResponse(
+        fullName: _displayName,
+        givenName: _isOrg ? '' : _displayName,
+        familyName: '',
+        photo: _photoBase64 ?? '',
+        entityType: _isOrg ? 'organization' : 'individual',
+        orgName: _isOrg ? _orgNameController.text.trim() : '',
+        orgType: _isOrg ? _orgTypeController.text.trim() : '',
+        jurisdiction: _isOrg ? _jurisdictionController.text.trim() : '',
+      ));
+      coreService.dispose();
+    } catch (_) {}
 
-  // ── Seed verify & skip ─────────────────────────────────────────────────────
-
-  void _proceedFromSeed() {
-    final word1 = _verifyController1.text.trim().toLowerCase();
-    final word2 = _verifyController2.text.trim().toLowerCase();
-
-    // If user left fields blank, treat same as skipping — show warning
-    if (word1.isEmpty && word2.isEmpty) {
-      _skipWithWarning();
-      return;
-    }
-
-    if (word1 != _mnemonic[_verifyWordIndex1] ||
-        word2 != _mnemonic[_verifyWordIndex2]) {
-      setState(() => _verifyError = true);
-      return;
-    }
-
-    setState(() => _verifyError = false);
-    _startInception();
-  }
-
-  Future<void> _skipWithWarning() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.surface,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-          side: const BorderSide(color: AppColors.corePending, width: 1),
-        ),
-        title: const Row(
-          children: [
-            Icon(Icons.warning_amber_rounded,
-                color: AppColors.corePending, size: 28),
-            SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                'SKIP BACKUP VERIFICATION',
-                style: TextStyle(
-                  color: AppColors.corePending,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1.0,
-                  fontFamily: 'monospace',
-                ),
-              ),
-            ),
-          ],
-        ),
-        content: const Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'If you skip verification and lose your seed phrase, your identity CANNOT be recovered.',
-              style: TextStyle(
-                color: AppColors.textPrimary,
-                fontSize: 13,
-                height: 1.6,
-                fontFamily: 'monospace',
-              ),
-            ),
-            SizedBox(height: 12),
-            Text(
-              '- All credentials tied to this identity will be permanently lost\n'
-              '- All signed data will become unverifiable\n'
-              '- No one, including you, can restore access',
-              style: TextStyle(
-                color: AppColors.coreInactive,
-                fontSize: 12,
-                height: 1.6,
-                fontFamily: 'monospace',
-              ),
-            ),
-            SizedBox(height: 16),
-            Text(
-              'By proceeding, you accept full liability for any loss resulting from an unverified backup.',
-              style: TextStyle(
-                color: AppColors.textSecondary,
-                fontSize: 12,
-                height: 1.5,
-                fontFamily: 'monospace',
-                fontStyle: FontStyle.italic,
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text(
-              'GO BACK',
-              style: TextStyle(
-                color: AppColors.textMuted,
-                fontSize: 12,
-                fontFamily: 'monospace',
-              ),
-            ),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.corePending,
-              foregroundColor: AppColors.primary,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8)),
-            ),
-            child: const Text(
-              'I ACCEPT THE RISK',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 1.0,
-                fontFamily: 'monospace',
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-    if (confirmed == true) {
-      _startInception();
-    }
+    setState(() {
+      _currentStep = WizardStep.identityCreated;
+    });
   }
 
   // ── Inception ───────────────────────────────────────────────────────────────
@@ -276,21 +149,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
       setState(() => _processingStep = 3);
       await SecureKeyStore.saveMnemonic(_mnemonic);
 
-      try {
-        final coreService = CoreService(baseUrl: _coreBaseUrl);
-        await coreService.saveProfile(ProfileResponse(
-          fullName: _displayName,
-          givenName: _isOrg ? '' : _displayName,
-          familyName: '',
-          photo: _photoBase64 ?? '',
-          entityType: _isOrg ? 'organization' : 'individual',
-          orgName: _isOrg ? _orgNameController.text.trim() : '',
-          orgType: _isOrg ? _orgTypeController.text.trim() : '',
-          jurisdiction: _isOrg ? _jurisdictionController.text.trim() : '',
-        ));
-        coreService.dispose();
-      } catch (_) {}
-
+      // Profile is saved in _submitProfile() after the user fills it in
       setState(() => _processingStep = 4);
       await Future.delayed(const Duration(milliseconds: 700));
 
@@ -317,15 +176,12 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
 
       setState(() {
         _aid = result.aid;
-        // If no secure enclave, show dealbreaker warning before proceeding
-        if (_enclaveStatus?.hardwareBacked != true) {
-          _currentStep = WizardStep.enclaveWarning;
-        } else {
-          _currentStep = WizardStep.identityCreated;
-        }
+        // Show enclave warning if no hardware security, otherwise go to profile
+        _currentStep = (_enclaveStatus?.hardwareBacked == true)
+            ? WizardStep.profile
+            : WizardStep.enclaveWarning;
       });
 
-      _fetchOobi();
     } catch (e) {
       String errorMsg = e.toString();
       if (errorMsg.contains('KERI_BRIDGE_NOT_AVAILABLE')) {
@@ -357,18 +213,9 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
       setState(() {
         _errorMessage = errorMsg;
         _processingStep = 0;
-        _currentStep = WizardStep.profile;
+        _currentStep = WizardStep.creatingIdentity;
       });
     }
-  }
-
-  Future<void> _fetchOobi() async {
-    try {
-      final coreService = CoreService(baseUrl: _coreBaseUrl);
-      final oobi = await coreService.getOobi();
-      coreService.dispose();
-      if (mounted) setState(() => _oobiUrl = oobi.oobiUrl);
-    } catch (_) {}
   }
 
   // ── Build ───────────────────────────────────────────────────────────────────
@@ -393,15 +240,12 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
 
   Widget _buildCurrentStep() {
     switch (_currentStep) {
-      case WizardStep.profile:
-        return _buildProfile();
-      case WizardStep.seedDisplay:
-        // Seed display is now in setup checklist; redirect to profile
-        return _buildProfile();
       case WizardStep.creatingIdentity:
         return _buildCreating();
       case WizardStep.enclaveWarning:
         return _buildEnclaveWarning();
+      case WizardStep.profile:
+        return _buildProfile();
       case WizardStep.identityCreated:
         return _buildIdentityCreated();
     }
@@ -543,7 +387,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
                   fontFamily: 'monospace',
                 ),
                 decoration: InputDecoration(
-                  hintText: isOrg ? 'e.g. Riverside Elementary School' : 'What your contacts will see',
+                  hintText: isOrg ? 'e.g. Riverside Elementary School' : 'A name others will see when they interact with you',
                   hintStyle: TextStyle(
                     color: AppColors.textMuted.withOpacity(0.5),
                     fontFamily: 'monospace',
@@ -633,7 +477,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
             onPressed: _submitProfile,
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.accent,
-              foregroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(vertical: 16),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
@@ -684,376 +528,6 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
           autocorrect: false,
         ),
       ],
-    );
-  }
-
-  // ── Screen: Seed Phrase (with inline verify) ────────────────────────────────
-
-  Widget _buildSeedDisplay() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const SizedBox(height: 8),
-        Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: AppColors.corePending.withOpacity(0.08),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              color: AppColors.corePending.withOpacity(0.3),
-              width: 1,
-            ),
-          ),
-          child: const Row(
-            children: [
-              Icon(Icons.warning_amber_rounded,
-                  color: AppColors.corePending, size: 20),
-              SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  'Your master key — store it safely.',
-                  style: TextStyle(
-                    color: AppColors.corePending,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    fontFamily: 'monospace',
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 12),
-        const Text(
-          'These 12 words are the only way to recover your identity if you lose this device. Never share them. Never store them on this device.',
-          style: TextStyle(
-            color: AppColors.textSecondary,
-            fontSize: 13,
-            height: 1.6,
-            fontFamily: 'monospace',
-          ),
-        ),
-        const SizedBox(height: 20),
-        // Word grid
-        Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: AppColors.corePending.withOpacity(0.3),
-              width: 1,
-            ),
-          ),
-          child: Column(
-            children: [
-              for (int row = 0; row < 4; row++)
-                Padding(
-                  padding: EdgeInsets.only(bottom: row < 3 ? 12 : 0),
-                  child: Row(
-                    children: [
-                      for (int col = 0; col < 3; col++)
-                        Expanded(
-                          child: Padding(
-                            padding: EdgeInsets.only(left: col > 0 ? 8 : 0),
-                            child: _buildWordCell(row * 3 + col),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 12),
-        _buildBackupTip(
-          icon: '✍️',
-          title: 'Write it on paper',
-          subtitle:
-              'Keep it somewhere physically safe. Fireproof safe, safety deposit box, etc.',
-        ),
-        const SizedBox(height: 8),
-        GestureDetector(
-          onTap: () {
-            _generateSeedPhrase();
-            setState(() {
-              _verifyController1.clear();
-              _verifyController2.clear();
-              _verifyError = false;
-            });
-          },
-          child: _buildBackupTip(
-            icon: '🔄',
-            title: 'Generate a new phrase',
-            subtitle: 'Start over with a different seed phrase.',
-            isAction: true,
-          ),
-        ),
-        const SizedBox(height: 24),
-        // Inline verify section
-        Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: AppColors.border, width: 1),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'CONFIRM YOU SAVED IT',
-                style: TextStyle(
-                  color: AppColors.textMuted,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 1.5,
-                  fontFamily: 'monospace',
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                'Enter word #${_verifyWordIndex1 + 1} and word #${_verifyWordIndex2 + 1} from your seed phrase.',
-                style: const TextStyle(
-                  color: AppColors.textSecondary,
-                  fontSize: 12,
-                  height: 1.5,
-                  fontFamily: 'monospace',
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Word #${_verifyWordIndex1 + 1}',
-                style: const TextStyle(
-                  color: AppColors.textMuted,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 1.0,
-                  fontFamily: 'monospace',
-                ),
-              ),
-              const SizedBox(height: 6),
-              _buildVerifyField(_verifyController1, _verifyWordIndex1 + 1),
-              const SizedBox(height: 14),
-              Text(
-                'Word #${_verifyWordIndex2 + 1}',
-                style: const TextStyle(
-                  color: AppColors.textMuted,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 1.0,
-                  fontFamily: 'monospace',
-                ),
-              ),
-              const SizedBox(height: 6),
-              _buildVerifyField(_verifyController2, _verifyWordIndex2 + 1),
-              if (_verifyError) ...[
-                const SizedBox(height: 10),
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: AppColors.coreInactive.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                        color: AppColors.coreInactive.withOpacity(0.3)),
-                  ),
-                  child: const Row(
-                    children: [
-                      Icon(Icons.close, color: AppColors.coreInactive, size: 16),
-                      SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'Words do not match. Check your backup and try again.',
-                          style: TextStyle(
-                            color: AppColors.coreInactive,
-                            fontSize: 11,
-                            fontFamily: 'monospace',
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
-        const SizedBox(height: 20),
-        SizedBox(
-          width: double.infinity,
-          child: ElevatedButton(
-            onPressed: _proceedFromSeed,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.accent,
-              foregroundColor: AppColors.primary,
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            child: const Text(
-              "I'VE BACKED IT UP — CONTINUE",
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 1.2,
-                fontFamily: 'monospace',
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 10),
-        SizedBox(
-          width: double.infinity,
-          child: TextButton(
-            onPressed: _skipWithWarning,
-            child: const Text(
-              'Skip backup verification (not recommended)',
-              style: TextStyle(
-                color: AppColors.corePending,
-                fontSize: 11,
-                fontFamily: 'monospace',
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 8),
-        SizedBox(
-          width: double.infinity,
-          child: TextButton(
-            onPressed: () => setState(() => _currentStep = WizardStep.profile),
-            child: const Text(
-              'GO BACK',
-              style: TextStyle(
-                color: AppColors.textMuted,
-                fontSize: 12,
-                letterSpacing: 1.0,
-                fontFamily: 'monospace',
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 32),
-      ],
-    );
-  }
-
-  Widget _buildWordCell(int index) {
-    if (index >= _mnemonic.length) return const SizedBox.shrink();
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceLight,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppColors.border, width: 1),
-      ),
-      child: Row(
-        children: [
-          Text(
-            '${index + 1}.',
-            style: const TextStyle(
-              color: AppColors.textMuted,
-              fontSize: 11,
-              fontFamily: 'monospace',
-            ),
-          ),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-              _mnemonic[index],
-              style: const TextStyle(
-                color: AppColors.textPrimary,
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                fontFamily: 'monospace',
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildBackupTip({
-    required String icon,
-    required String title,
-    required String subtitle,
-    bool isAction = false,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppColors.border, width: 1),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(icon, style: const TextStyle(fontSize: 18)),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: TextStyle(
-                    color: isAction ? AppColors.accent : AppColors.textPrimary,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    fontFamily: 'monospace',
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  subtitle,
-                  style: const TextStyle(
-                    color: AppColors.textSecondary,
-                    fontSize: 11,
-                    height: 1.4,
-                    fontFamily: 'monospace',
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildVerifyField(TextEditingController controller, int wordNum) {
-    return TextField(
-      controller: controller,
-      style: const TextStyle(
-        color: AppColors.textPrimary,
-        fontSize: 15,
-        fontFamily: 'monospace',
-      ),
-      decoration: InputDecoration(
-        hintText: 'Enter word #$wordNum',
-        hintStyle: TextStyle(
-          color: AppColors.textMuted.withOpacity(0.5),
-          fontFamily: 'monospace',
-        ),
-        filled: true,
-        fillColor: AppColors.surfaceLight,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: AppColors.border),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: AppColors.border),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: AppColors.accent),
-        ),
-      ),
-      autocorrect: false,
-      enableSuggestions: false,
     );
   }
 
@@ -1155,6 +629,227 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  // ── Screen: Enclave Warning ─────────────────────────────────────────────────
+
+  bool _technicalExpanded = false;
+
+  Widget _buildEnclaveWarning() {
+    const warningRed = Color(0xFFE53935);
+
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        const SizedBox(height: 32),
+        // Shield icon
+        Container(
+          width: 80,
+          height: 80,
+          decoration: BoxDecoration(
+            color: warningRed.withOpacity(0.10),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: const Icon(
+            Icons.shield_outlined,
+            color: warningRed,
+            size: 40,
+          ),
+        ),
+        const SizedBox(height: 24),
+        const Text(
+          'YOUR DEVICE LACKS A SECURE ENCLAVE.',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: warningRed,
+            fontSize: 18,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 1.5,
+            fontFamily: 'monospace',
+          ),
+        ),
+        const SizedBox(height: 12),
+        const Text(
+          'Without hardware security, other people and organizations cannot verify that you — and only you — control your keys. Most Identity Agents will not trust yours.',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: AppColors.textPrimary,
+            fontSize: 13,
+            height: 1.6,
+            fontFamily: 'monospace',
+          ),
+        ),
+        const SizedBox(height: 24),
+        // Recommended action
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: AppColors.border, width: 1),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'RECOMMENDED ACTION',
+                style: TextStyle(
+                  color: AppColors.textMuted,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.5,
+                  fontFamily: 'monospace',
+                ),
+              ),
+              const SizedBox(height: 10),
+              const Text(
+                'Install the Identity Agent on a device with hardware security:',
+                style: TextStyle(
+                  color: AppColors.textPrimary,
+                  fontSize: 12,
+                  height: 1.5,
+                  fontFamily: 'monospace',
+                ),
+              ),
+              const SizedBox(height: 8),
+              _buildDeviceRow('iPhone (Secure Enclave)'),
+              _buildDeviceRow('Modern Android (StrongBox / TEE)'),
+              _buildDeviceRow('Apple Silicon Mac (Secure Enclave)'),
+              _buildDeviceRow('PC with TPM 2.0 enabled in BIOS'),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        // Collapsible technical explanation
+        GestureDetector(
+          onTap: () => setState(() => _technicalExpanded = !_technicalExpanded),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppColors.border, width: 1),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'TECHNICAL DETAILS',
+                        style: TextStyle(
+                          color: AppColors.textMuted,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1.5,
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                    ),
+                    Icon(
+                      _technicalExpanded ? Icons.expand_less : Icons.expand_more,
+                      color: AppColors.textMuted,
+                      size: 20,
+                    ),
+                  ],
+                ),
+                if (_technicalExpanded) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    'Current: ${_enclaveStatus?.backingLabel ?? "Software"}',
+                    style: TextStyle(
+                      color: warningRed.withOpacity(0.8),
+                      fontSize: 12,
+                      fontFamily: 'monospace',
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Without a hardware secure enclave (TPM, Secure Enclave, or StrongBox), '
+                    'your private signing keys are stored in software only. This means:',
+                    style: TextStyle(
+                      color: AppColors.textSecondary,
+                      fontSize: 11,
+                      height: 1.6,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    '- Your signing keys can be extracted and used without your knowledge\n'
+                    '- There is no hardware-level protection against key theft\n'
+                    '- Malware with device access can silently impersonate you',
+                    style: TextStyle(
+                      color: warningRed,
+                      fontSize: 11,
+                      height: 1.6,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 24),
+        // Accept risk button — red themed
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton(
+            onPressed: () {
+              setState(() => _currentStep = WizardStep.profile);
+            },
+            style: OutlinedButton.styleFrom(
+              foregroundColor: warningRed,
+              side: const BorderSide(color: warningRed, width: 1.5),
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            child: const Text(
+              'CONTINUE — OTHERS MAY NOT TRUST ME',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1.0,
+                fontFamily: 'monospace',
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 32),
+      ],
+    );
+  }
+
+  Widget _buildDeviceRow(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Row(
+        children: [
+          const Text('- ', style: TextStyle(
+            color: AppColors.textSecondary,
+            fontSize: 12,
+            fontFamily: 'monospace',
+          )),
+          Expanded(
+            child: Text(
+              text,
+              style: const TextStyle(
+                color: AppColors.textSecondary,
+                fontSize: 12,
+                fontFamily: 'monospace',
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1379,225 +1074,13 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
     );
   }
 
-  // ── Screen: Secure Enclave Warning (dealbreaker) ────────────────────────
-
-  Widget _buildEnclaveWarning() {
-    final status = _enclaveStatus;
-    final backingLabel = status?.backingLabel ?? 'Software (unknown)';
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const SizedBox(height: 32),
-        Center(
-          child: Container(
-            width: 80,
-            height: 80,
-            decoration: BoxDecoration(
-              color: const Color(0xFFFFB74D).withOpacity(0.12),
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: const Center(
-              child: Icon(Icons.shield_outlined,
-                  color: Color(0xFFFFB74D), size: 44),
-            ),
-          ),
-        ),
-        const SizedBox(height: 24),
-        const Center(
-          child: Text(
-            'SECURITY WARNING',
-            style: TextStyle(
-              color: Color(0xFFFFB74D),
-              fontSize: 20,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 2.0,
-              fontFamily: 'monospace',
-            ),
-          ),
-        ),
-        const SizedBox(height: 8),
-        const Center(
-          child: Text(
-            'Your device lacks a hardware secure enclave',
-            style: TextStyle(
-              color: AppColors.textSecondary,
-              fontSize: 13,
-              fontFamily: 'monospace',
-            ),
-          ),
-        ),
-        const SizedBox(height: 24),
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: const Color(0xFFFFB74D).withOpacity(0.06),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-                color: const Color(0xFFFFB74D).withOpacity(0.25)),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  const Icon(Icons.warning_amber_rounded,
-                      color: Color(0xFFFFB74D), size: 18),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Current: $backingLabel',
-                    style: const TextStyle(
-                      color: Color(0xFFFFB74D),
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      fontFamily: 'monospace',
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                'Without a hardware secure enclave (TPM, Secure Enclave, or StrongBox), '
-                'your private signing keys are stored in software only. This means:',
-                style: TextStyle(
-                  color: AppColors.textSecondary,
-                  fontSize: 12,
-                  fontFamily: 'monospace',
-                  height: 1.6,
-                ),
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                '- Malware or hackers who gain access to your device can steal your identity\n'
-                '- Your signing keys can be extracted and used without your knowledge\n'
-                '- There is no hardware-level protection against key theft',
-                style: TextStyle(
-                  color: AppColors.coreInactive,
-                  fontSize: 12,
-                  fontFamily: 'monospace',
-                  height: 1.6,
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 20),
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: AppColors.border),
-          ),
-          child: const Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'RECOMMENDED ACTION',
-                style: TextStyle(
-                  color: AppColors.textMuted,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1.5,
-                  fontFamily: 'monospace',
-                ),
-              ),
-              SizedBox(height: 8),
-              Text(
-                'Install the Identity Agent on a device with hardware security:\n'
-                '- iPhone (Secure Enclave)\n'
-                '- Modern Android (StrongBox / TEE)\n'
-                '- Apple Silicon Mac (Secure Enclave)\n'
-                '- PC with TPM 2.0 enabled in BIOS',
-                style: TextStyle(
-                  color: AppColors.textSecondary,
-                  fontSize: 12,
-                  fontFamily: 'monospace',
-                  height: 1.6,
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 28),
-        // Option 1: Acknowledge risk and continue
-        SizedBox(
-          width: double.infinity,
-          child: OutlinedButton(
-            onPressed: () {
-              setState(() => _currentStep = WizardStep.identityCreated);
-            },
-            style: OutlinedButton.styleFrom(
-              foregroundColor: const Color(0xFFFFB74D),
-              side: const BorderSide(color: Color(0xFFFFB74D)),
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            child: const Text(
-              'I UNDERSTAND THE RISK — CONTINUE',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 1.0,
-                fontFamily: 'monospace',
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 12),
-        // Option 2: Cancel and use a different device
-        SizedBox(
-          width: double.infinity,
-          child: ElevatedButton(
-            onPressed: () async {
-              // Reset identity and go back to start
-              try {
-                final coreService = CoreService(baseUrl: _coreBaseUrl);
-                await coreService.resetAll();
-                coreService.dispose();
-              } catch (_) {}
-              await SecureKeyStore.clearMnemonic();
-              if (mounted) {
-                setState(() {
-                  _currentStep = WizardStep.profile;
-                  _aid = null;
-                  _errorMessage = 'Identity removed. Please set up on a device with hardware security.';
-                  _processingStep = 0;
-                });
-              }
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.accent,
-              foregroundColor: AppColors.primary,
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            child: const Text(
-              "I'LL USE A DIFFERENT DEVICE",
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 1.2,
-                fontFamily: 'monospace',
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 32),
-      ],
-    );
-  }
-
   // ── Screen: Identity Created (+ contacts) ───────────────────────────────────
 
   Widget _buildIdentityCreated() {
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        const SizedBox(height: 16),
+        const SizedBox(height: 32),
         // Avatar
         Container(
           width: 88,
@@ -1687,104 +1170,25 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
             ],
           ),
         ),
-        const SizedBox(height: 20),
-        // Contacts invite section
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: AppColors.border, width: 1),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Invite trusted contacts',
-                style: TextStyle(
-                  color: AppColors.textPrimary,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  fontFamily: 'monospace',
-                ),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'Contacts help verify your identity is genuine and can help you recover access if you ever get locked out. We recommend at least 3 — 7 is ideal.',
-                style: TextStyle(
-                  color: AppColors.textSecondary,
-                  fontSize: 12,
-                  height: 1.6,
-                  fontFamily: 'monospace',
-                ),
-              ),
-              const SizedBox(height: 6),
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                decoration: BoxDecoration(
-                  color: AppColors.coreActive.withOpacity(0.06),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color: AppColors.coreActive.withOpacity(0.2),
-                  ),
-                ),
-                child: const Row(
-                  children: [
-                    Icon(Icons.shield_outlined,
-                        color: AppColors.coreActive, size: 16),
-                    SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Grape ID is already protecting your identity. Personal contacts make it even stronger.',
-                        style: TextStyle(
-                          color: AppColors.coreActive,
-                          fontSize: 11,
-                          fontFamily: 'monospace',
-                          height: 1.4,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 20),
+        const SizedBox(height: 24),
         SizedBox(
           width: double.infinity,
           child: ElevatedButton(
-            onPressed: _showInviteDialog,
+            onPressed: widget.onComplete,
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.accent,
-              foregroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(vertical: 16),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
             ),
             child: const Text(
-              'INVITE YOUR FIRST CONTACTS',
+              'GO TO DASHBOARD',
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w700,
                 letterSpacing: 1.2,
-                fontFamily: 'monospace',
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 10),
-        SizedBox(
-          width: double.infinity,
-          child: TextButton(
-            onPressed: widget.onComplete,
-            child: const Text(
-              'Skip — go to dashboard',
-              style: TextStyle(
-                color: AppColors.textMuted,
-                fontSize: 12,
                 fontFamily: 'monospace',
               ),
             ),
@@ -1795,88 +1199,4 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
     );
   }
 
-  Future<void> _showInviteDialog() async {
-    final url = _oobiUrl ?? 'Fetching your address...';
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.surface,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-          side: BorderSide(color: AppColors.accent.withOpacity(0.3)),
-        ),
-        title: const Text(
-          'INVITE CONTACTS',
-          style: TextStyle(
-            color: AppColors.textPrimary,
-            fontSize: 15,
-            fontWeight: FontWeight.w700,
-            fontFamily: 'monospace',
-            letterSpacing: 1.0,
-          ),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Share your Identity Address with people you trust:',
-              style: TextStyle(
-                color: AppColors.textSecondary,
-                fontSize: 12,
-                fontFamily: 'monospace',
-              ),
-            ),
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: AppColors.surfaceLight,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: AppColors.border),
-              ),
-              child: SelectableText(
-                url,
-                style: const TextStyle(
-                  color: AppColors.accent,
-                  fontSize: 11,
-                  fontFamily: 'monospace',
-                ),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          if (_oobiUrl != null)
-            TextButton(
-              onPressed: () async {
-                await Clipboard.setData(ClipboardData(text: _oobiUrl!));
-                if (ctx.mounted) Navigator.of(ctx).pop();
-              },
-              child: const Text(
-                'COPY & CLOSE',
-                style: TextStyle(
-                  color: AppColors.accent,
-                  fontFamily: 'monospace',
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          TextButton(
-            onPressed: () {
-              Navigator.of(ctx).pop();
-              widget.onComplete();
-            },
-            child: const Text(
-              'DONE',
-              style: TextStyle(
-                color: AppColors.textMuted,
-                fontFamily: 'monospace',
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 }

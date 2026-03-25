@@ -70,7 +70,7 @@ class _MobileHostingChoiceScreenState
                   children: [
                     const SizedBox(height: 32),
                     const Text(
-                      'Where do you want your keys and brain?',
+                      'Your keys will live on this device.',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         color: MobileColors.textPrimary,
@@ -81,8 +81,7 @@ class _MobileHostingChoiceScreenState
                     ),
                     const SizedBox(height: 10),
                     const Text(
-                      'Your keys (Identity) are your secret seed — whoever holds them is you. '
-                      'Your brain (Agent) is the software that runs your identity.',
+                      'Now, where do you want the heavy processing done?',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         color: MobileColors.textSecondary,
@@ -92,35 +91,29 @@ class _MobileHostingChoiceScreenState
                     ),
                     const SizedBox(height: 28),
                     _buildOptionCard(
+                      choice: HostingChoice.keysHereBrainRemote,
+                      icon: Icons.cloud_outlined,
+                      title: 'On a remote server',
+                      subtitle:
+                          'This device manages your keys. A server handles the heavy processing.',
+                      badge: 'RECOMMENDED',
+                      disabledBadge: 'COMING SOON',
+                      enabled: false,
+                    ),
+                    const SizedBox(height: 12),
+                    _buildOptionCard(
                       choice: HostingChoice.keysHereBrainHere,
                       icon: Icons.phone_android,
-                      title: 'Keys here · Brain here',
+                      title: 'Right here on this phone',
                       subtitle:
-                          'Both on this phone. Works offline. Some advanced features limited.',
-                    ),
-                    const SizedBox(height: 12),
-                    _buildOptionCard(
-                      choice: HostingChoice.keysHereBrainRemote,
-                      icon: Icons.hub_outlined,
-                      title: 'Keys here · Brain on a remote computer',
-                      subtitle:
-                          'Your phone holds your identity. A desktop or server handles the heavy lifting.',
-                      badge: 'RECOMMENDED',
-                    ),
-                    const SizedBox(height: 12),
-                    _buildOptionCard(
-                      choice: HostingChoice.keysHereBrainLater,
-                      icon: Icons.schedule_outlined,
-                      title: 'Keys here · Connect brain later',
-                      subtitle:
-                          'Start standalone now. Connect a remote brain from your dashboard anytime.',
+                          'Everything runs on this phone. No server needed.',
+                      warningBadge: 'LIMITED FEATURES',
                     ),
                     if (_selected == HostingChoice.keysHereBrainRemote) ...[
                       const SizedBox(height: 16),
                       _buildRemoteUrlPanel(),
                     ],
-                    if (_selected == HostingChoice.keysHereBrainHere ||
-                        _selected == HostingChoice.keysHereBrainLater) ...[
+                    if (_selected == HostingChoice.keysHereBrainHere) ...[
                       const SizedBox(height: 24),
                       SizedBox(
                         width: double.infinity,
@@ -162,45 +155,61 @@ class _MobileHostingChoiceScreenState
     required String title,
     required String subtitle,
     String? badge,
+    String? warningBadge,
+    String? disabledBadge,
+    bool enabled = true,
   }) {
     final selected = _selected == choice;
+    final isDisabled = !enabled;
     return GestureDetector(
-      onTap: () => setState(() {
-        _selected = choice;
-        _connectError = null;
-      }),
+      onTap: isDisabled
+          ? null
+          : () => setState(() {
+              _selected = choice;
+              _connectError = null;
+            }),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
         width: double.infinity,
         padding: const EdgeInsets.all(18),
         decoration: BoxDecoration(
-          color: MobileColors.surface,
+          color: isDisabled
+              ? MobileColors.surface.withOpacity(0.5)
+              : MobileColors.surface,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: selected ? MobileColors.primary : MobileColors.border,
-            width: selected ? 2 : 1,
+            color: isDisabled
+                ? MobileColors.border.withOpacity(0.5)
+                : selected
+                    ? MobileColors.primary
+                    : MobileColors.border,
+            width: selected && !isDisabled ? 2 : 1,
           ),
-          boxShadow: [
-            BoxShadow(
-              color: MobileColors.cardShadow,
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
-          ],
+          boxShadow: isDisabled
+              ? []
+              : [
+                  BoxShadow(
+                    color: MobileColors.cardShadow,
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
         ),
-        child: Row(
+        child: Opacity(
+          opacity: isDisabled ? 0.5 : 1.0,
+          child: Row(
           children: [
             Container(
               width: 44,
               height: 44,
               decoration: BoxDecoration(
-                color: (selected ? MobileColors.primary : MobileColors.textMuted)
+                color: (selected && !isDisabled ? MobileColors.primary : MobileColors.textMuted)
                     .withOpacity(0.1),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Icon(
                 icon,
-                color: selected ? MobileColors.primary : MobileColors.textMuted,
+                color: selected && !isDisabled ? MobileColors.primary : MobileColors.textMuted,
                 size: 24,
               ),
             ),
@@ -215,7 +224,7 @@ class _MobileHostingChoiceScreenState
                         child: Text(
                           title,
                           style: TextStyle(
-                            color: selected
+                            color: selected && !isDisabled
                                 ? MobileColors.textPrimary
                                 : MobileColors.textSecondary,
                             fontSize: 14,
@@ -223,7 +232,7 @@ class _MobileHostingChoiceScreenState
                           ),
                         ),
                       ),
-                      if (badge != null)
+                      if (badge != null && !isDisabled)
                         Container(
                           padding: const EdgeInsets.symmetric(
                               horizontal: 6, vertical: 2),
@@ -235,6 +244,42 @@ class _MobileHostingChoiceScreenState
                             badge,
                             style: const TextStyle(
                               color: MobileColors.primary,
+                              fontSize: 9,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                        ),
+                      if (disabledBadge != null && isDisabled)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: MobileColors.textMuted.withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            disabledBadge,
+                            style: const TextStyle(
+                              color: MobileColors.textMuted,
+                              fontSize: 9,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                        ),
+                      if (warningBadge != null)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.amber.withOpacity(0.15),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            warningBadge,
+                            style: TextStyle(
+                              color: Colors.amber.shade700,
                               fontSize: 9,
                               fontWeight: FontWeight.w700,
                               letterSpacing: 0.5,
@@ -262,6 +307,7 @@ class _MobileHostingChoiceScreenState
               size: 22,
             ),
           ],
+        ),
         ),
       ),
     );
