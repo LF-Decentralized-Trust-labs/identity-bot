@@ -260,7 +260,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
       children: [
         const SizedBox(height: 32),
         Text(
-          isOrg ? 'SET UP YOUR ORGANIZATION.' : 'SET UP YOUR PROFILE.',
+          isOrg ? 'Set up your organization.' : 'Set up your profile.',
           style: TextStyle(
             color: AppColors.textPrimary,
             fontSize: 20,
@@ -561,7 +561,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
         ),
         const SizedBox(height: 32),
         const Text(
-          'SETTING UP YOUR IDENTITY',
+          'Setting up your identity',
           style: TextStyle(
             color: AppColors.textPrimary,
             fontSize: 18,
@@ -662,7 +662,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
         ),
         const SizedBox(height: 24),
         const Text(
-          'YOUR DEVICE LACKS A SECURE ENCLAVE.',
+          'Your device lacks a secure enclave.',
           textAlign: TextAlign.center,
           style: TextStyle(
             color: warningRed,
