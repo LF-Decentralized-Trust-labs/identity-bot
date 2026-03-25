@@ -69,7 +69,7 @@ class _MobileHostingChoiceScreenState
                   children: [
                     const SizedBox(height: 32),
                     const Text(
-                      'Your keys will live on this device. Where do you want the heavy processing done?',
+                      'Your keys will live on this device. Now, where do you want the heavy processing done?',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         color: MobileColors.textPrimary,

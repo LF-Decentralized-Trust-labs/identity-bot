@@ -459,7 +459,7 @@ class _MobileSetupWizardScreenState extends State<MobileSetupWizardScreen> {
         const SizedBox(height: 8),
         const Center(
           child: Text(
-            'Tap to add a photo (optional)',
+            'Tap to add a photo (recommended)',
             style: TextStyle(
               color: MobileColors.textMuted,
               fontSize: 12,

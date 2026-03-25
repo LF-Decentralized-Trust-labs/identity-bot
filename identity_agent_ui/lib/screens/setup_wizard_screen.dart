@@ -259,23 +259,29 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const SizedBox(height: 32),
-        Text(
-          isOrg ? 'Set up your organization.' : 'Set up your profile.',
-          style: TextStyle(
-            color: AppColors.textPrimary,
-            fontSize: 20,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 1.5,
-            fontFamily: 'monospace',
+        Center(
+          child: Text(
+            isOrg ? 'Set up your organization.' : 'Set up your profile.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: AppColors.textPrimary,
+              fontSize: 20,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.5,
+              fontFamily: 'monospace',
+            ),
           ),
         ),
         const SizedBox(height: 8),
-        Text(
-          isOrg ? 'Enter your organization details.' : 'This is how others will see your profile.',
-          style: TextStyle(
-            color: AppColors.textSecondary,
-            fontSize: 13,
-            fontFamily: 'monospace',
+        Center(
+          child: Text(
+            isOrg ? 'Enter your organization details.' : 'This is how others will see your profile.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: 13,
+              fontFamily: 'monospace',
+            ),
           ),
         ),
         const SizedBox(height: 28),
@@ -339,7 +345,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
         const SizedBox(height: 8),
         const Center(
           child: Text(
-            'Tap to add a photo (optional)',
+            'Tap to add a photo (recommended)',
             style: TextStyle(
               color: AppColors.textMuted,
               fontSize: 11,
@@ -662,7 +668,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
         ),
         const SizedBox(height: 24),
         const Text(
-          'Your device lacks a secure enclave.',
+          'Your device lacks a secure enclave. We recommend using a different device.',
           textAlign: TextAlign.center,
           style: TextStyle(
             color: warningRed,
@@ -816,7 +822,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
               ),
             ),
             child: const Text(
-              'CONTINUE — OTHERS WON\'T TRUST ME',
+              'CONTINUE WITH INSECURE HARDWARE',
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w700,
