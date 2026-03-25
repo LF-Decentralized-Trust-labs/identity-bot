@@ -259,16 +259,18 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
         const SizedBox(height: 28),
         // Photo picker
         Center(
-          child: GestureDetector(
-            onTap: () async {
-              try {
-                final base64 = await photo_picker.pickAndCropPhotoBase64(context);
-                if (base64 != null && base64.isNotEmpty) {
-                  setState(() => _photoBase64 = base64);
-                }
-              } catch (_) {}
-            },
-            child: Stack(
+          child: MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: GestureDetector(
+              onTap: () async {
+                try {
+                  final base64 = await photo_picker.pickAndCropPhotoBase64(context);
+                  if (base64 != null && base64.isNotEmpty) {
+                    setState(() => _photoBase64 = base64);
+                  }
+                } catch (_) {}
+              },
+              child: Stack(
               alignment: Alignment.bottomRight,
               children: [
                 Container(
@@ -309,6 +311,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
                 ),
               ],
             ),
+          ),
           ),
         ),
         const SizedBox(height: 8),
@@ -1059,9 +1062,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
             fontFamily: 'monospace',
           ),
         ),
-        const SizedBox(height: 16),
-        if (_enclaveStatus != null) _buildEnclaveBadge(),
-        const SizedBox(height: 16),
+        const SizedBox(height: 20),
         // AID display
         Container(
           width: double.infinity,

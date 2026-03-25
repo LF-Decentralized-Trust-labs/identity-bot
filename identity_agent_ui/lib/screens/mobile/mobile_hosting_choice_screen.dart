@@ -30,7 +30,7 @@ class _MobileHostingChoiceScreenState
   Future<void> _connectRemoteBrain() async {
     final url = _urlController.text.trim();
     if (url.isEmpty) {
-      setState(() => _connectError = 'Enter a server URL.');
+      setState(() => _connectError = 'Invalid URL.');
       return;
     }
     setState(() {
@@ -48,8 +48,7 @@ class _MobileHostingChoiceScreenState
     } catch (_) {
       setState(() {
         _connecting = false;
-        _connectError =
-            'Could not reach that server. Check the URL and try again.';
+        _connectError = 'Invalid URL. Could not reach a server at that address.';
       });
     }
   }
@@ -70,7 +69,7 @@ class _MobileHostingChoiceScreenState
                   children: [
                     const SizedBox(height: 32),
                     const Text(
-                      'Your keys will live on this device.',
+                      'Where do you want the heavy processing done?',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         color: MobileColors.textPrimary,
@@ -81,7 +80,7 @@ class _MobileHostingChoiceScreenState
                     ),
                     const SizedBox(height: 10),
                     const Text(
-                      'Now, where do you want the heavy processing done?',
+                      'Your keys will live on this device. Now choose where the processing happens.',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         color: MobileColors.textSecondary,
@@ -412,23 +411,6 @@ class _MobileHostingChoiceScreenState
                         fontWeight: FontWeight.w600,
                       ),
                     ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          SizedBox(
-            width: double.infinity,
-            child: TextButton(
-              onPressed: () => widget.onHostingChosen(
-                HostingChoice.keysHereBrainLater,
-              ),
-              child: const Text(
-                'Connect later — start standalone for now',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: MobileColors.textMuted,
-                  fontSize: 12,
-                ),
-              ),
             ),
           ),
         ],
