@@ -69,7 +69,7 @@ class _MobileHostingChoiceScreenState
                   children: [
                     const SizedBox(height: 32),
                     const Text(
-                      'Where do you want the heavy processing done?',
+                      'Your keys will live on this device. Where do you want the heavy processing done?',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         color: MobileColors.textPrimary,
@@ -80,7 +80,7 @@ class _MobileHostingChoiceScreenState
                     ),
                     const SizedBox(height: 10),
                     const Text(
-                      'Your keys will live on this device. Now choose where the processing happens.',
+                      'This app will manage your keys. The heavy processing \u2014 your agent\'s brain \u2014 can run right here, or on a more powerful remote server for better performance.',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         color: MobileColors.textSecondary,

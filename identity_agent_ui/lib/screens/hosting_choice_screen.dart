@@ -66,19 +66,19 @@ class _HostingChoiceScreenState extends State<HostingChoiceScreen> {
                 children: [
                   const SizedBox(height: 32),
                   const Text(
-                    'WHERE DO YOU WANT THE HEAVY PROCESSING DONE?',
+                    'Your keys will live on this device. Where do you want the heavy processing done?',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: AppColors.textPrimary,
                       fontSize: 18,
                       fontWeight: FontWeight.w700,
-                      letterSpacing: 1.5,
+                      height: 1.4,
                       fontFamily: 'monospace',
                     ),
                   ),
                   const SizedBox(height: 12),
                   const Text(
-                    'Your keys will live on this device. Now choose where the processing happens.',
+                    'This app will manage your keys. The heavy processing \u2014 your agent\'s brain \u2014 can run right here, or on a more powerful remote server for better performance.',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: AppColors.textSecondary,
@@ -292,7 +292,7 @@ class _HostingChoiceScreenState extends State<HostingChoiceScreen> {
                 fontSize: 12,
               ),
               filled: true,
-              fillColor: AppColors.primary,
+              fillColor: AppColors.surface,
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
                 borderSide: const BorderSide(color: AppColors.border),
