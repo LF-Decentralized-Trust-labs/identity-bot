@@ -91,24 +91,13 @@ class _HostingChoiceScreenState extends State<HostingChoiceScreen> {
                       fontFamily: 'monospace',
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  const Text(
-                    'The heavy processing \u2014 your agent\'s brain \u2014 can run right here, or on a more powerful remote server for better performance.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: AppColors.textSecondary,
-                      fontSize: 13,
-                      height: 1.6,
-                      fontFamily: 'monospace',
-                    ),
-                  ),
                   const SizedBox(height: 32),
                   _buildOptionCard(
                     choice: HostingChoice.keysHereBrainHere,
                     icon: Icons.computer,
                     title: 'Right here',
                     subtitle:
-                        'This computer handles everything. Fully self-contained.',
+                        'This computer will handle everything.',
                     badge: 'RECOMMENDED',
                   ),
                   const SizedBox(height: 12),
@@ -117,7 +106,7 @@ class _HostingChoiceScreenState extends State<HostingChoiceScreen> {
                     icon: Icons.cloud_outlined,
                     title: 'On a remote server',
                     subtitle:
-                        'A more powerful server handles the processing.',
+                        'A more powerful server will handle the processing.',
                   ),
                   if (_selected == HostingChoice.keysHereBrainRemote) ...[
                     const SizedBox(height: 16),

@@ -73,12 +73,12 @@ class _MobileHostingChoiceScreenState
                       width: 56,
                       height: 56,
                       decoration: BoxDecoration(
-                        color: MobileColors.accent.withOpacity(0.1),
+                        color: MobileColors.primary.withOpacity(0.1),
                         shape: BoxShape.circle,
                       ),
                       child: const Icon(
                         Icons.psychology,
-                        color: MobileColors.accent,
+                        color: MobileColors.primary,
                         size: 28,
                       ),
                     ),
@@ -93,23 +93,13 @@ class _MobileHostingChoiceScreenState
                         height: 1.3,
                       ),
                     ),
-                    const SizedBox(height: 10),
-                    const Text(
-                      'The heavy processing \u2014 your agent\'s brain \u2014 can run right here, or on a more powerful remote server for better performance.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: MobileColors.textSecondary,
-                        fontSize: 13,
-                        height: 1.5,
-                      ),
-                    ),
                     const SizedBox(height: 28),
                     _buildOptionCard(
                       choice: HostingChoice.keysHereBrainRemote,
                       icon: Icons.cloud_outlined,
                       title: 'On a remote server',
                       subtitle:
-                          'A more powerful server handles the processing.',
+                          'A more powerful server will handle the processing.',
                       badge: 'RECOMMENDED',
                       disabledBadge: 'COMING SOON',
                       enabled: false,
