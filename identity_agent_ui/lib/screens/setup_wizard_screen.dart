@@ -17,8 +17,9 @@ import '../services/photo_picker_stub.dart'
 
 enum WizardStep {
   profile,
-  seedDisplay,
+  seedDisplay, // kept for compile safety; skipped in flow
   creatingIdentity,
+  enclaveWarning,
   identityCreated,
 }
 
@@ -77,6 +78,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
   @override
   void initState() {
     super.initState();
+    _displayNameController.text = 'Rob Anderson';
     _generateSeedPhrase();
   }
 
@@ -118,11 +120,9 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
     setState(() {
       _displayName = name;
       _profileFormError = null;
-      _verifyController1.clear();
-      _verifyController2.clear();
-      _verifyError = false;
-      _currentStep = WizardStep.seedDisplay;
     });
+    // Skip seed phrase step — backup is now in the setup checklist
+    _startInception();
   }
 
   // ── Seed verify & skip ─────────────────────────────────────────────────────
@@ -317,7 +317,12 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
 
       setState(() {
         _aid = result.aid;
-        _currentStep = WizardStep.identityCreated;
+        // If no secure enclave, show dealbreaker warning before proceeding
+        if (_enclaveStatus?.hardwareBacked != true) {
+          _currentStep = WizardStep.enclaveWarning;
+        } else {
+          _currentStep = WizardStep.identityCreated;
+        }
       });
 
       _fetchOobi();
@@ -391,9 +396,12 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
       case WizardStep.profile:
         return _buildProfile();
       case WizardStep.seedDisplay:
-        return _buildSeedDisplay();
+        // Seed display is now in setup checklist; redirect to profile
+        return _buildProfile();
       case WizardStep.creatingIdentity:
         return _buildCreating();
+      case WizardStep.enclaveWarning:
+        return _buildEnclaveWarning();
       case WizardStep.identityCreated:
         return _buildIdentityCreated();
     }
@@ -1368,6 +1376,218 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  // ── Screen: Secure Enclave Warning (dealbreaker) ────────────────────────
+
+  Widget _buildEnclaveWarning() {
+    final status = _enclaveStatus;
+    final backingLabel = status?.backingLabel ?? 'Software (unknown)';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 32),
+        Center(
+          child: Container(
+            width: 80,
+            height: 80,
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFB74D).withOpacity(0.12),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: const Center(
+              child: Icon(Icons.shield_outlined,
+                  color: Color(0xFFFFB74D), size: 44),
+            ),
+          ),
+        ),
+        const SizedBox(height: 24),
+        const Center(
+          child: Text(
+            'SECURITY WARNING',
+            style: TextStyle(
+              color: Color(0xFFFFB74D),
+              fontSize: 20,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 2.0,
+              fontFamily: 'monospace',
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        const Center(
+          child: Text(
+            'Your device lacks a hardware secure enclave',
+            style: TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: 13,
+              fontFamily: 'monospace',
+            ),
+          ),
+        ),
+        const SizedBox(height: 24),
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFFB74D).withOpacity(0.06),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+                color: const Color(0xFFFFB74D).withOpacity(0.25)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.warning_amber_rounded,
+                      color: Color(0xFFFFB74D), size: 18),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Current: $backingLabel',
+                    style: const TextStyle(
+                      color: Color(0xFFFFB74D),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Without a hardware secure enclave (TPM, Secure Enclave, or StrongBox), '
+                'your private signing keys are stored in software only. This means:',
+                style: TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 12,
+                  fontFamily: 'monospace',
+                  height: 1.6,
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                '- Malware or hackers who gain access to your device can steal your identity\n'
+                '- Your signing keys can be extracted and used without your knowledge\n'
+                '- There is no hardware-level protection against key theft',
+                style: TextStyle(
+                  color: AppColors.coreInactive,
+                  fontSize: 12,
+                  fontFamily: 'monospace',
+                  height: 1.6,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: AppColors.border),
+          ),
+          child: const Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'RECOMMENDED ACTION',
+                style: TextStyle(
+                  color: AppColors.textMuted,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.5,
+                  fontFamily: 'monospace',
+                ),
+              ),
+              SizedBox(height: 8),
+              Text(
+                'Install the Identity Agent on a device with hardware security:\n'
+                '- iPhone (Secure Enclave)\n'
+                '- Modern Android (StrongBox / TEE)\n'
+                '- Apple Silicon Mac (Secure Enclave)\n'
+                '- PC with TPM 2.0 enabled in BIOS',
+                style: TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 12,
+                  fontFamily: 'monospace',
+                  height: 1.6,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 28),
+        // Option 1: Acknowledge risk and continue
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton(
+            onPressed: () {
+              setState(() => _currentStep = WizardStep.identityCreated);
+            },
+            style: OutlinedButton.styleFrom(
+              foregroundColor: const Color(0xFFFFB74D),
+              side: const BorderSide(color: Color(0xFFFFB74D)),
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            child: const Text(
+              'I UNDERSTAND THE RISK — CONTINUE',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1.0,
+                fontFamily: 'monospace',
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        // Option 2: Cancel and use a different device
+        SizedBox(
+          width: double.infinity,
+          child: ElevatedButton(
+            onPressed: () async {
+              // Reset identity and go back to start
+              try {
+                final coreService = CoreService(baseUrl: _coreBaseUrl);
+                await coreService.resetAll();
+                coreService.dispose();
+              } catch (_) {}
+              await SecureKeyStore.clearMnemonic();
+              if (mounted) {
+                setState(() {
+                  _currentStep = WizardStep.profile;
+                  _aid = null;
+                  _errorMessage = 'Identity removed. Please set up on a device with hardware security.';
+                  _processingStep = 0;
+                });
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.accent,
+              foregroundColor: AppColors.primary,
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            child: const Text(
+              "I'LL USE A DIFFERENT DEVICE",
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1.2,
+                fontFamily: 'monospace',
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 32),
+      ],
     );
   }
 

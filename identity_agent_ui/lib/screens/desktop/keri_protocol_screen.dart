@@ -148,8 +148,10 @@ class _KeriProtocolScreenState extends State<KeriProtocolScreen> {
       backgroundColor: cs.surface,
       body: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(32, 32, 32, 32),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 720),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
@@ -187,6 +189,7 @@ class _KeriProtocolScreenState extends State<KeriProtocolScreen> {
               _buildRotateCard(),
             ],
           ],
+        ),
         ),
       ),
     );

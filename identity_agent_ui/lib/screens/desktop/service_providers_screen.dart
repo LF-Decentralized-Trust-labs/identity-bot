@@ -33,7 +33,7 @@ class _ServiceProvidersScreenState extends State<ServiceProvidersScreen> with Si
   void initState() {
     super.initState();
     _coreService = CoreService(baseUrl: widget.serverUrl ?? AgentConfig.coreBaseUrl);
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
     _loadProviders();
   }
 
@@ -155,6 +155,7 @@ class _ServiceProvidersScreenState extends State<ServiceProvidersScreen> with Si
                 TabBar(
                   controller: _tabController,
                   tabs: [
+                    Tab(text: 'All (${_filtered.length})'),
                     Tab(text: 'Connected (${_connected.length})'),
                     Tab(text: 'Available (${_available.length})'),
                   ],
@@ -175,6 +176,7 @@ class _ServiceProvidersScreenState extends State<ServiceProvidersScreen> with Si
                     : TabBarView(
                         controller: _tabController,
                         children: [
+                          _buildProviderList(_filtered, isConnectedView: false),
                           _buildProviderList(_connected, isConnectedView: true),
                           _buildProviderList(_available, isConnectedView: false),
                         ],
@@ -216,7 +218,10 @@ class _ServiceProvidersScreenState extends State<ServiceProvidersScreen> with Si
     return ListView.builder(
       padding: const EdgeInsets.all(24),
       itemCount: providers.length,
-      itemBuilder: (_, i) => _buildProviderCard(providers[i], isConnectedView: isConnectedView),
+      itemBuilder: (_, i) => ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 720),
+        child: _buildProviderCard(providers[i], isConnectedView: isConnectedView),
+      ),
     );
   }
 

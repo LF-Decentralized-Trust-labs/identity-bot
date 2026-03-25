@@ -20,6 +20,18 @@ enum DesktopRoute {
   myDevices,
   apps,
 
+  // My Data
+  dataVaultOverview,
+  dataVaultIdentity,
+  dataVaultCommunications,
+  dataVaultHealth,
+  dataVaultFitness,
+  dataVaultFinance,
+  dataVaultMedia,
+  dataVaultSocial,
+  dataVaultVehicles,
+  dataVaultHousing,
+
   // Guardianship
   guardianship,
   guardianshipDependents,
@@ -79,11 +91,8 @@ class DesktopSidebar extends StatefulWidget {
 }
 
 class _DesktopSidebarState extends State<DesktopSidebar> {
-  // Section expand state
-  bool _guardianshipOpen = false;
-  bool _hubsOpen     = false;
-  bool _settingsOpen = false;
-  bool _orgOpen      = false;
+  // Section expand state — only one section open at a time
+  String? _openSection; // 'myData' | 'guardianship' | 'hubs' | 'settings' | null
 
   // Profile
   String _displayName = '';
@@ -114,16 +123,20 @@ class _DesktopSidebarState extends State<DesktopSidebar> {
   }
 
   void _expandForRoute(DesktopRoute r) {
-    if (_isGuardianshipRoute(r)) setState(() => _guardianshipOpen = true);
-    if (_isHubRoute(r))          setState(() => _hubsOpen         = true);
-    if (_isSettingsRoute(r))     setState(() => _settingsOpen     = true);
-    if (_isOrgRoute(r))          setState(() => _orgOpen          = true);
+    if (_isDataVaultRoute(r))          setState(() => _openSection = 'myData');
+    else if (_isGuardianshipRoute(r)) setState(() => _openSection = 'guardianship');
+    else if (_isHubRoute(r))          setState(() => _openSection = 'hubs');
+    else if (_isSettingsRoute(r))     setState(() => _openSection = 'settings');
   }
 
+  void _toggleSection(String section) {
+    setState(() => _openSection = _openSection == section ? null : section);
+  }
+
+  bool _isDataVaultRoute(DesktopRoute r)    => r.name.startsWith('dataVault');
   bool _isGuardianshipRoute(DesktopRoute r) => r.name.startsWith('guardianship');
   bool _isHubRoute(DesktopRoute r)          => r.name.startsWith('hubs');
   bool _isSettingsRoute(DesktopRoute r)     => r.name.startsWith('settings');
-  bool _isOrgRoute(DesktopRoute r)          => r.name.startsWith('org');
 
   Future<void> _loadProfile() async {
     try {
@@ -176,23 +189,43 @@ class _DesktopSidebarState extends State<DesktopSidebar> {
                 _NavItem(icon: Icons.verified_user_outlined,          label: 'Credentials', route: DesktopRoute.credentials, current: widget.currentRoute, onTap: _select),
                 _NavItem(icon: Icons.password_outlined,               label: 'Passwords',   route: DesktopRoute.passwords,   current: widget.currentRoute, onTap: _select, comingSoon: true),
                 _NavItem(icon: Icons.account_balance_wallet_outlined, label: 'Wallet',      route: DesktopRoute.wallet,      current: widget.currentRoute, onTap: _select, comingSoon: true),
-                _NavItem(icon: Icons.storage_outlined,                label: 'My Data',     route: DesktopRoute.dataVault,   current: widget.currentRoute, onTap: _select, comingSoon: true),
                 _NavItem(icon: Icons.devices,                         label: 'My Devices',  route: DesktopRoute.myDevices,   current: widget.currentRoute, onTap: _select),
                 _NavItem(icon: Icons.apps,                            label: 'Apps',        route: DesktopRoute.apps,        current: widget.currentRoute, onTap: _select),
+                _sectionDivider(),
+
+                // ── My Data ──────────────────────────────────────────────
+                _SectionHeader(
+                  icon: Icons.storage_outlined,
+                  label: 'My Data',
+                  expanded: _openSection == 'myData',
+                  onToggle: () => _toggleSection('myData'),
+                ),
+                if (_openSection == 'myData') ...[
+                  _SubItem(icon: Icons.dashboard_outlined,     label: 'Overview',         route: DesktopRoute.dataVaultOverview,        current: widget.currentRoute, onTap: _select, comingSoon: true),
+                  _SubItem(icon: Icons.person_outline,         label: 'Identity & Profile', route: DesktopRoute.dataVaultIdentity,      current: widget.currentRoute, onTap: _select, comingSoon: true),
+                  _SubItem(icon: Icons.chat_bubble_outline,    label: 'Communications',   route: DesktopRoute.dataVaultCommunications,  current: widget.currentRoute, onTap: _select, comingSoon: true),
+                  _SubItem(icon: Icons.favorite_border,        label: 'Health',           route: DesktopRoute.dataVaultHealth,          current: widget.currentRoute, onTap: _select, comingSoon: true),
+                  _SubItem(icon: Icons.fitness_center_outlined, label: 'Fitness',          route: DesktopRoute.dataVaultFitness,         current: widget.currentRoute, onTap: _select, comingSoon: true),
+                  _SubItem(icon: Icons.account_balance_wallet_outlined, label: 'Finance',  route: DesktopRoute.dataVaultFinance,         current: widget.currentRoute, onTap: _select, comingSoon: true),
+                  _SubItem(icon: Icons.photo_library_outlined, label: 'Media',            route: DesktopRoute.dataVaultMedia,           current: widget.currentRoute, onTap: _select, comingSoon: true),
+                  _SubItem(icon: Icons.tag,                    label: 'Social',           route: DesktopRoute.dataVaultSocial,          current: widget.currentRoute, onTap: _select, comingSoon: true),
+                  _SubItem(icon: Icons.directions_car_outlined, label: 'Vehicles',        route: DesktopRoute.dataVaultVehicles,        current: widget.currentRoute, onTap: _select, comingSoon: true),
+                  _SubItem(icon: Icons.home_outlined,          label: 'Housing',          route: DesktopRoute.dataVaultHousing,         current: widget.currentRoute, onTap: _select, comingSoon: true),
+                ],
                 _sectionDivider(),
 
                 // ── Guardianship ─────────────────────────────────────────
                 _SectionHeader(
                   icon: Icons.family_restroom_outlined,
                   label: 'Guardianship',
-                  expanded: _guardianshipOpen,
-                  onToggle: () => setState(() => _guardianshipOpen = !_guardianshipOpen),
+                  expanded: _openSection == 'guardianship',
+                  onToggle: () => _toggleSection('guardianship'),
                 ),
-                if (_guardianshipOpen) ...[
-                  _SubItem(icon: Icons.people_outline,            label: 'My Dependents',     route: DesktopRoute.guardianshipDependents, current: widget.currentRoute, onTap: _select),
-                  _SubItem(icon: Icons.shield_outlined,           label: 'My Guardians',      route: DesktopRoute.guardianshipGuardians,  current: widget.currentRoute, onTap: _select, comingSoon: true),
-                  _SubItem(icon: Icons.description_outlined,      label: 'Succession Plan',   route: DesktopRoute.guardianshipSuccession, current: widget.currentRoute, onTap: _select, comingSoon: true),
-                  _SubItem(icon: Icons.account_balance_outlined,  label: 'Estate Management', route: DesktopRoute.guardianshipEstate,     current: widget.currentRoute, onTap: _select, comingSoon: true),
+                if (_openSection == 'guardianship') ...[
+                  _SubItem(icon: Icons.people_outline,                label: 'My Dependents',  route: DesktopRoute.guardianshipDependents, current: widget.currentRoute, onTap: _select),
+                  _SubItem(icon: Icons.shield_outlined,               label: 'My Guardians',   route: DesktopRoute.guardianshipGuardians,  current: widget.currentRoute, onTap: _select, comingSoon: true),
+                  _SubItem(icon: Icons.article_outlined,              label: 'Digital Will',     route: DesktopRoute.guardianshipSuccession, current: widget.currentRoute, onTap: _select, comingSoon: true),
+                  _SubItem(icon: Icons.account_balance_outlined,      label: 'Estate Planning', route: DesktopRoute.guardianshipEstate,     current: widget.currentRoute, onTap: _select, comingSoon: true),
                 ],
                 _sectionDivider(),
 
@@ -200,11 +233,11 @@ class _DesktopSidebarState extends State<DesktopSidebar> {
                 _SectionHeader(
                   icon: Icons.hub_outlined,
                   label: 'Hubs',
-                  expanded: _hubsOpen,
-                  onToggle: () => setState(() => _hubsOpen = !_hubsOpen),
+                  expanded: _openSection == 'hubs',
+                  onToggle: () => _toggleSection('hubs'),
                   comingSoon: true,
                 ),
-                if (_hubsOpen) ...[
+                if (_openSection == 'hubs') ...[
                   _SubItem(icon: Icons.chat_bubble_outline, label: 'Communications', route: DesktopRoute.hubsCommunications, current: widget.currentRoute, onTap: _select, comingSoon: true),
                   _SubItem(icon: Icons.auto_awesome,        label: 'AI',             route: DesktopRoute.hubsAi,            current: widget.currentRoute, onTap: _select, comingSoon: true),
                   _SubItem(icon: Icons.favorite_border,     label: 'Health',         route: DesktopRoute.hubsHealth,        current: widget.currentRoute, onTap: _select, comingSoon: true),
@@ -219,10 +252,10 @@ class _DesktopSidebarState extends State<DesktopSidebar> {
                 _SectionHeader(
                   icon: Icons.settings_outlined,
                   label: 'Settings',
-                  expanded: _settingsOpen,
-                  onToggle: () => setState(() => _settingsOpen = !_settingsOpen),
+                  expanded: _openSection == 'settings',
+                  onToggle: () => _toggleSection('settings'),
                 ),
-                if (_settingsOpen) ...[
+                if (_openSection == 'settings') ...[
                   _SubItem(icon: Icons.manage_accounts_outlined, label: 'Agent',             route: DesktopRoute.settingsAccount,         current: widget.currentRoute, onTap: _select),
                   _SubItem(icon: Icons.shield_outlined,          label: 'Security',          route: DesktopRoute.settingsAuthentication,  current: widget.currentRoute, onTap: _select),
                   _SubItem(icon: Icons.privacy_tip_outlined,     label: 'Privacy & Data',    route: DesktopRoute.settingsPrivacy,         current: widget.currentRoute, onTap: _select, comingSoon: true),
@@ -241,22 +274,6 @@ class _DesktopSidebarState extends State<DesktopSidebar> {
 
                 // ── History ────────────────────────────────────────────────
                 _NavItem(icon: Icons.history, label: 'History', route: DesktopRoute.activityLog, current: widget.currentRoute, onTap: _select),
-                _sectionDivider(),
-
-                // ── Organization ───────────────────────────────────────────
-                _SectionHeader(
-                  icon: Icons.business,
-                  label: 'Organization',
-                  expanded: _orgOpen,
-                  onToggle: () => setState(() => _orgOpen = !_orgOpen),
-                  comingSoon: true,
-                ),
-                if (_orgOpen) ...[
-                  _SubItem(icon: Icons.space_dashboard_outlined, label: 'Overview',    route: DesktopRoute.orgOverview,    current: widget.currentRoute, onTap: _select, comingSoon: true),
-                  _SubItem(icon: Icons.group_outlined,           label: 'Team & Roles',route: DesktopRoute.orgEmployees,   current: widget.currentRoute, onTap: _select, comingSoon: true),
-                  _SubItem(icon: Icons.verified_user_outlined,   label: 'Credentials', route: DesktopRoute.orgCredentials, current: widget.currentRoute, onTap: _select, comingSoon: true),
-                  _SubItem(icon: Icons.settings_outlined,        label: 'Settings',    route: DesktopRoute.orgSettings,    current: widget.currentRoute, onTap: _select, comingSoon: true),
-                ],
 
                 const SizedBox(height: 16),
               ],

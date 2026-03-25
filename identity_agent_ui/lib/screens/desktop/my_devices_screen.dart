@@ -64,8 +64,10 @@ class _MyDevicesScreenState extends State<MyDevicesScreen> {
       backgroundColor: Theme.of(context).colorScheme.surface,
       body: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(32, 32, 32, 32),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 720),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
@@ -119,6 +121,7 @@ class _MyDevicesScreenState extends State<MyDevicesScreen> {
             else
               _buildDeviceList(isRemote),
           ],
+        ),
         ),
       ),
     );

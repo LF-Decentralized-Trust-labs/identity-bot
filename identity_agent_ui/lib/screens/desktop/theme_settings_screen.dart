@@ -10,8 +10,10 @@ class ThemeSettingsScreen extends StatelessWidget {
       backgroundColor: Theme.of(context).colorScheme.surface,
       body: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(32, 32, 32, 32),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 720),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('Theme', style: Theme.of(context).textTheme.headlineMedium),
             const SizedBox(height: 4),
@@ -45,6 +47,7 @@ class ThemeSettingsScreen extends StatelessWidget {
               },
             ),
           ],
+        ),
         ),
       ),
     );

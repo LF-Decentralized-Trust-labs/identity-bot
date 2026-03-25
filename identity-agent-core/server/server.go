@@ -3101,6 +3101,30 @@ func (s *CoreServer) loadTunnelConfig() tunnel.Config {
         }
         cfg := tunnel.DefaultConfig()
         cfg.AID = aid
+
+        // Auto-generate a Grape ID tunnel name if defaulting to GrapeID with no extension.
+        if cfg.Provider == tunnel.ProviderGrapeID && cfg.TunnelExtension == "" {
+                domain := cfg.TunnelDomain
+                if domain == "" {
+                        domain = "grapeid.org"
+                }
+                name, err := tunnel.FindAvailableName(domain, 10)
+                if err != nil {
+                        log.Printf("[identity-agent-core] Auto-tunnel: could not find available name: %v — falling back to no tunnel", err)
+                        cfg.Provider = tunnel.ProviderNone
+                        return cfg
+                }
+                cfg.TunnelExtension = name
+
+                // Persist so the same name is used on restart.
+                s.DataStore.SaveSettings(store.SettingsData{
+                        TunnelProvider:  string(tunnel.ProviderGrapeID),
+                        TunnelDomain:    domain,
+                        TunnelExtension: name,
+                })
+                log.Printf("[identity-agent-core] Auto-tunnel: assigned Grape ID name '%s'", name)
+        }
+
         return cfg
 }
 

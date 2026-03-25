@@ -60,8 +60,10 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
           ? const Center(child: CircularProgressIndicator())
           : SingleChildScrollView(
               padding: const EdgeInsets.fromLTRB(32, 32, 32, 32),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 720),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text('Account', style: Theme.of(context).textTheme.headlineMedium),
                   const SizedBox(height: 4),
@@ -91,6 +93,7 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
                     ),
                   ),
                 ],
+              ),
               ),
             ),
     );

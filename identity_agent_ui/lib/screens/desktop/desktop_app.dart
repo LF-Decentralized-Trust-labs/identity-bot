@@ -124,9 +124,11 @@ class _DesktopAppState extends State<DesktopApp> {
       case DesktopRoute.guardianshipGuardians:
         return const ComingSoonScreen(title: 'My Guardians', icon: Icons.shield_outlined);
       case DesktopRoute.guardianshipSuccession:
-        return const ComingSoonScreen(title: 'Succession Plan', icon: Icons.description_outlined);
+        return const ComingSoonScreen(title: 'Digital Will', icon: Icons.article_outlined,
+            description: 'Designate who inherits control of your digital identity if you pass away or become incapacitated. Your chosen successor receives cryptographic authority to manage your credentials, contacts, and keys.');
       case DesktopRoute.guardianshipEstate:
-        return const ComingSoonScreen(title: 'Estate Management', icon: Icons.account_balance_outlined);
+        return const ComingSoonScreen(title: 'Estate Planning', icon: Icons.account_balance_outlined,
+            description: 'Plan the long-term management and transfer of your digital estate — credentials, keys, signed documents, and data vault contents. Define how each asset is handled in your Digital Will.');
 
       // ── Credentials ────────────────────────────────────────────────────────
       case DesktopRoute.credentials:
@@ -137,6 +139,36 @@ class _DesktopAppState extends State<DesktopApp> {
         return const ComingSoonScreen(title: 'Wallet', icon: Icons.account_balance_wallet_outlined);
       case DesktopRoute.dataVault:
         return const ComingSoonScreen(title: 'My Data', icon: Icons.storage_outlined);
+      case DesktopRoute.dataVaultOverview:
+        return const ComingSoonScreen(title: 'Data Overview', icon: Icons.dashboard_outlined,
+            description: 'Total storage, encryption status, connected data sources, and import tools.');
+      case DesktopRoute.dataVaultIdentity:
+        return const ComingSoonScreen(title: 'Identity & Profile', icon: Icons.person_outline,
+            description: 'Personal attributes, social profiles, and credential-derived data.');
+      case DesktopRoute.dataVaultCommunications:
+        return const ComingSoonScreen(title: 'Communications', icon: Icons.chat_bubble_outline,
+            description: 'Archived emails, messages, and call history.');
+      case DesktopRoute.dataVaultHealth:
+        return const ComingSoonScreen(title: 'Health', icon: Icons.favorite_border,
+            description: 'Medical records, prescriptions, lab results, and clinical visit notes.');
+      case DesktopRoute.dataVaultFitness:
+        return const ComingSoonScreen(title: 'Fitness', icon: Icons.fitness_center_outlined,
+            description: 'Workouts, activity tracking, and biometric data from wearables.');
+      case DesktopRoute.dataVaultFinance:
+        return const ComingSoonScreen(title: 'Finance', icon: Icons.account_balance_wallet_outlined,
+            description: 'Transaction history and financial records from connected accounts.');
+      case DesktopRoute.dataVaultMedia:
+        return const ComingSoonScreen(title: 'Media', icon: Icons.photo_library_outlined,
+            description: 'Photos, videos, music, and documents.');
+      case DesktopRoute.dataVaultSocial:
+        return const ComingSoonScreen(title: 'Social', icon: Icons.tag,
+            description: 'Downloaded history from social media and content platforms.');
+      case DesktopRoute.dataVaultVehicles:
+        return const ComingSoonScreen(title: 'Vehicles', icon: Icons.directions_car_outlined,
+            description: 'Telemetry, maintenance logs, and data exported from your vehicles.');
+      case DesktopRoute.dataVaultHousing:
+        return const ComingSoonScreen(title: 'Housing', icon: Icons.home_outlined,
+            description: 'Property records, utility history, and home-related documents.');
       case DesktopRoute.myDevices:
         return MyDevicesScreen(keriService: keri, serverUrl: url);
       case DesktopRoute.hubsCommunications:
@@ -165,14 +197,13 @@ class _DesktopAppState extends State<DesktopApp> {
         return const ComingSoonScreen(title: 'Backup & Recovery', icon: Icons.backup_outlined);
       case DesktopRoute.activityLog:
         return HistoryScreen(serverUrl: url, initialTab: _historyInitialTab);
+      // Organization routes removed from individual agent — these are Grape ID proprietary.
+      // Enum values kept for compile safety; routes redirect to dashboard.
       case DesktopRoute.orgOverview:
-        return const ComingSoonScreen(title: 'Organization Overview', icon: Icons.business);
       case DesktopRoute.orgEmployees:
-        return const ComingSoonScreen(title: 'Employees & Roles', icon: Icons.group_outlined);
       case DesktopRoute.orgCredentials:
-        return const ComingSoonScreen(title: 'Organization Credentials', icon: Icons.verified_user_outlined);
       case DesktopRoute.orgSettings:
-        return const ComingSoonScreen(title: 'Organization Settings', icon: Icons.settings_outlined);
+        return const SizedBox.shrink();
     }
   }
 

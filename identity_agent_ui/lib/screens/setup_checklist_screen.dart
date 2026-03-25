@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import '../theme/app_theme.dart';
 import '../services/setup_task_service.dart';
 import '../services/preferences_service.dart';
@@ -6,8 +8,12 @@ import '../services/keri_service.dart';
 import '../services/core_service.dart';
 import '../services/enclave_service.dart';
 import '../services/secure_key_store.dart';
-import 'auth_setup_screen.dart';
-import 'desktop/coming_soon_screen.dart';
+import '../services/identity_level_service.dart';
+import '../services/pin_password_service.dart';
+import '../services/local_auth_service.dart';
+
+/// Internal page state — all pages render inside the same modal container.
+enum _Page { taskList, backupSeed, seedWords, setupAuth, inviteContacts, connectBrain }
 
 class SetupChecklistScreen extends StatefulWidget {
   final VoidCallback onDone;
@@ -32,13 +38,42 @@ class SetupChecklistScreen extends StatefulWidget {
 class _SetupChecklistScreenState extends State<SetupChecklistScreen> {
   Map<SetupTask, bool> _state = {};
   bool _loading = true;
-  EnclaveStatusResponse? _enclaveStatus;
+  _Page _page = _Page.taskList;
+
+  // Auth setup state
+  ActiveFactors? _authFactors;
+  BiometricAvailability _fpState = BiometricAvailability.unavailable;
+  BiometricAvailability _faceState = BiometricAvailability.unavailable;
+  String? _authExpanded; // 'pin' or 'password' or null
+  final _pinCtrl = TextEditingController();
+  final _pinConfirmCtrl = TextEditingController();
+  final _pwCtrl = TextEditingController();
+  final _pwConfirmCtrl = TextEditingController();
+  String? _authError;
+  bool _pwObscure = true;
+
+  // Invite contacts state
+  String? _oobiUrl;
+  String? _inviterName;
+  bool _inviteCopied = false;
+  int _totalContacts = 0;
+  int _trustedContacts = 0;
+
+  // Connect brain state
+  final _brainUrlCtrl = TextEditingController();
+  String? _brainError;
+  bool _brainConnecting = false;
+
+  // Seed display state
+  bool _seedConfirmed = false;
 
   bool get _needsRemoteBrain =>
       widget.hostingChoice == HostingChoice.keysHereBrainLater;
 
   List<SetupTask> get _tasks =>
-      SetupTaskService.orderedTasks(needsRemoteBrain: _needsRemoteBrain);
+      SetupTaskService.orderedTasks(needsRemoteBrain: _needsRemoteBrain, includeSecureKeyStorage: false);
+
+  String get _baseUrl => widget.serverUrl ?? 'http://127.0.0.1:5000';
 
   @override
   void initState() {
@@ -46,59 +81,65 @@ class _SetupChecklistScreenState extends State<SetupChecklistScreen> {
     _load();
   }
 
+  @override
+  void dispose() {
+    _pinCtrl.dispose();
+    _pinConfirmCtrl.dispose();
+    _pwCtrl.dispose();
+    _pwConfirmCtrl.dispose();
+    _brainUrlCtrl.dispose();
+    super.dispose();
+  }
+
   Future<void> _load() async {
     final s = await SetupTaskService.loadState(_tasks);
     if (mounted) setState(() { _state = s; _loading = false; });
   }
 
-  int get _doneCount => _state.values.where((v) => v).length;
-  int get _totalCount => _tasks.length;
+  void _goBack() {
+    setState(() {
+      _page = _Page.taskList;
+      _authExpanded = null;
+      _authError = null;
+      _inviteCopied = false;
+      _brainError = null;
+      _brainConnecting = false;
+      _seedConfirmed = false;
+    });
+    _load();
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  BUILD
+  // ═══════════════════════════════════════════════════════════════════════════
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: cs.surface,
       body: SafeArea(
         child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 560),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 560, maxHeight: 680),
+            child: Container(
+              decoration: BoxDecoration(
+                color: cs.surface,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: cs.outline),
+              ),
+              clipBehavior: Clip.antiAlias,
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _buildHeader(),
-                  const SizedBox(height: 32),
-                  if (_loading)
-                    const Center(
-                      child: CircularProgressIndicator(color: AppColors.accent),
-                    )
-                  else ...[
-                    // Only show incomplete tasks — completed ones disappear
-                    ...(_tasks
-                        .where((t) => !(_state[t] ?? false))
-                        .map((t) => Padding(
-                              padding: const EdgeInsets.only(bottom: 8),
-                              child: _buildTaskCard(t),
-                            ))),
-                  ],
-                  const SizedBox(height: 32),
-                  SizedBox(
-                    width: double.infinity,
-                    child: TextButton(
-                      onPressed: widget.onDone,
-                      child: const Text(
-                        "I'LL DO THIS LATER — GO TO DASHBOARD",
-                        style: TextStyle(
-                          color: AppColors.textMuted,
-                          fontSize: 12,
-                          letterSpacing: 0.5,
-                          fontFamily: 'monospace',
-                        ),
-                      ),
+                  _buildTopBar(cs),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+                      child: _buildPageContent(cs, isDark),
                     ),
                   ),
-                  const SizedBox(height: 16),
                 ],
               ),
             ),
@@ -108,484 +149,144 @@ class _SetupChecklistScreenState extends State<SetupChecklistScreen> {
     );
   }
 
-  Widget _buildHeader() {
-    final remaining = _totalCount - _doneCount;
-    final remainingLabel = _loading
-        ? ''
-        : remaining == 1
-            ? '1 step remaining'
-            : '$remaining steps remaining';
+  Widget _buildTopBar(ColorScheme cs) {
+    final showBack = _page != _Page.taskList;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: cs.outline.withOpacity(0.5))),
+      ),
+      child: Row(
+        children: [
+          if (showBack)
+            IconButton(
+              icon: Icon(Icons.arrow_back, size: 18, color: cs.onSurface),
+              onPressed: _goBack,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              tooltip: 'Back',
+            ),
+          if (showBack) const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              _pageTitle(),
+              style: TextStyle(
+                color: cs.onSurface,
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.5,
+              ),
+            ),
+          ),
+          IconButton(
+            icon: Icon(Icons.close, size: 18, color: cs.onSurface.withOpacity(0.5)),
+            onPressed: widget.onDone,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+            tooltip: 'Close',
+          ),
+        ],
+      ),
+    );
+  }
 
-    return Row(
+  String _pageTitle() {
+    switch (_page) {
+      case _Page.taskList: return 'Complete Your Setup';
+      case _Page.backupSeed: return 'Back Up Your Seed Phrase';
+      case _Page.seedWords: return 'Your Seed Phrase';
+      case _Page.setupAuth: return 'Set Up Authentication';
+      case _Page.inviteContacts: return 'Invite Trusted Contacts';
+      case _Page.connectBrain: return 'Connect Remote Server';
+    }
+  }
+
+  Widget _buildPageContent(ColorScheme cs, bool isDark) {
+    switch (_page) {
+      case _Page.taskList:
+        return _buildTaskList(cs);
+      case _Page.backupSeed:
+        return _buildBackupSeedPage(cs);
+      case _Page.seedWords:
+        return _buildSeedWordsPage(cs);
+      case _Page.setupAuth:
+        return _buildAuthPage(cs);
+      case _Page.inviteContacts:
+        return _buildInvitePage(cs);
+      case _Page.connectBrain:
+        return _buildConnectBrainPage(cs);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  PAGE: Task List
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  Widget _buildTaskList(ColorScheme cs) {
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'COMPLETE YOUR SETUP',
-                style: TextStyle(
-                  color: AppColors.textPrimary,
-                  fontSize: 20,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1.0,
-                  fontFamily: 'monospace',
-                ),
-              ),
-              const SizedBox(height: 6),
-              if (!_loading)
-                Text(
-                  remainingLabel,
-                  style: const TextStyle(
-                    color: AppColors.textSecondary,
-                    fontSize: 13,
-                    fontFamily: 'monospace',
-                  ),
-                ),
-              const SizedBox(height: 12),
-              const Text(
-                'These steps are required for basic security. '
-                'Complete them to protect your identity and enable key recovery.',
-                style: TextStyle(
-                  color: AppColors.textSecondary,
-                  fontSize: 12,
-                  height: 1.6,
-                  fontFamily: 'monospace',
-                ),
-              ),
-            ],
-          ),
+        Text(
+          'These steps help protect your identity and enable key recovery.',
+          style: TextStyle(color: cs.onSurface.withOpacity(0.6), fontSize: 13, height: 1.5),
         ),
-        IconButton(
-          icon: const Icon(Icons.close, size: 18),
-          color: AppColors.textMuted,
-          onPressed: widget.onDone,
-          tooltip: 'Close',
-          padding: EdgeInsets.zero,
-          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+        const SizedBox(height: 20),
+        if (_loading)
+          const Center(child: Padding(
+            padding: EdgeInsets.all(32),
+            child: CircularProgressIndicator(),
+          ))
+        else ...[
+          ...(_tasks
+              .where((t) => !(_state[t] ?? false))
+              .map((t) => Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: _buildTaskCard(t, cs),
+                  ))),
+          if (_tasks.every((t) => _state[t] == true))
+            _buildAllDone(cs),
+        ],
+        const SizedBox(height: 24),
+        SizedBox(
+          width: double.infinity,
+          child: TextButton(
+            onPressed: widget.onDone,
+            child: Text(
+              "I'LL DO THIS LATER",
+              style: TextStyle(color: cs.onSurface.withOpacity(0.4), fontSize: 12, letterSpacing: 0.5),
+            ),
+          ),
         ),
       ],
     );
   }
 
-  // _buildSection removed — tasks are now shown as a flat list of remaining items only.
-
-  Widget _buildTaskCard(SetupTask task) {
-    final meta = SetupTaskMeta(
-      task: task,
-      title: SetupTaskService.meta(task).title,
-      description: SetupTaskService.meta(task).description,
-      isStub: SetupTaskService.meta(task).isStub,
-      isCritical: SetupTaskService.meta(task).isCritical,
-    );
-    final done = _state[task] ?? false;
-
-    return GestureDetector(
-      onTap: done ? null : () => _handleTaskTap(task, meta),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        width: double.infinity,
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: done
-              ? AppColors.coreActive.withOpacity(0.04)
-              : AppColors.surface,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: done
-                ? AppColors.coreActive.withOpacity(0.2)
-                : meta.isCritical && !done
-                    ? AppColors.accent.withOpacity(0.3)
-                    : AppColors.border,
-            width: 1,
-          ),
-        ),
-        child: Row(
-          children: [
-            _buildStatusIcon(task, done, meta.isStub),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          meta.title,
-                          style: TextStyle(
-                            color: done
-                                ? AppColors.textMuted
-                                : AppColors.textPrimary,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            fontFamily: 'monospace',
-                            decoration:
-                                done ? TextDecoration.lineThrough : null,
-                          ),
-                        ),
-                      ),
-                      if (meta.isStub && !done)
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: AppColors.textMuted.withOpacity(0.08),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: const Text(
-                            'COMING SOON',
-                            style: TextStyle(
-                              color: AppColors.textMuted,
-                              fontSize: 8,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: 0.8,
-                              fontFamily: 'monospace',
-                            ),
-                          ),
-                        ),
-                      if (meta.isCritical && !done)
-                        Padding(
-                          padding: const EdgeInsets.only(left: 6),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: AppColors.corePending.withOpacity(0.12),
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: const Text(
-                              'IMPORTANT',
-                              style: TextStyle(
-                                color: AppColors.corePending,
-                                fontSize: 8,
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: 0.8,
-                                fontFamily: 'monospace',
-                              ),
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    meta.description,
-                    style: const TextStyle(
-                      color: AppColors.textSecondary,
-                      fontSize: 11,
-                      height: 1.5,
-                      fontFamily: 'monospace',
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-            if (!done)
-              const Icon(
-                Icons.chevron_right,
-                color: AppColors.textMuted,
-                size: 20,
-              ),
-          ],
-        ),
+  Widget _buildAllDone(ColorScheme cs) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppColors.coreActive.withOpacity(0.06),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.coreActive.withOpacity(0.2)),
       ),
-    );
-  }
-
-  Widget _buildStatusIcon(SetupTask task, bool done, bool isStub) {
-    if (done) {
-      return const Icon(Icons.check_circle, color: AppColors.coreActive, size: 22);
-    }
-    if (isStub) {
-      return const Icon(Icons.schedule_outlined, color: AppColors.textMuted, size: 22);
-    }
-    return const Icon(Icons.radio_button_unchecked, color: AppColors.accent, size: 22);
-  }
-
-  Future<void> _handleTaskTap(SetupTask task, SetupTaskMeta meta) async {
-    if (meta.isStub) {
-      // Navigate to placeholder
-      await Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => ComingSoonScreen(
-          title: meta.title,
-          description:
-              '${meta.description}\n\nThis feature is actively being built.',
-          icon: _taskIcon(task),
-        ),
-      ));
-      return;
-    }
-
-    switch (task) {
-      case SetupTask.connectRemoteBrain:
-        await _doConnectRemoteBrain();
-      case SetupTask.backupSeedPhrase:
-        await _doBackupSeedPhrase();
-      case SetupTask.setupAuthentication:
-        await _doSetupAuthentication();
-      case SetupTask.secureKeyStorage:
-        await _doSecureKeyStorage();
-      case SetupTask.inviteContacts:
-        await _doInviteContacts();
-    }
-  }
-
-  Future<void> _doSetupAuthentication() async {
-    await Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => const AuthSetupScreen(),
-    ));
-    // Reload state — AuthSetupScreen calls markComplete when Tier 2 is reached
-    await _load();
-  }
-
-  Future<void> _doConnectRemoteBrain() async {
-    // Show inline connect dialog
-    final urlController = TextEditingController();
-    String? error;
-    bool connecting = false;
-
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setS) => AlertDialog(
-          backgroundColor: AppColors.surface,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-            side: BorderSide(color: AppColors.accent.withOpacity(0.3)),
-          ),
-          title: const Text(
-            'CONNECT REMOTE BRAIN',
-            style: TextStyle(
-              color: AppColors.textPrimary,
-              fontSize: 14,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 1.0,
-              fontFamily: 'monospace',
-            ),
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Enter the URL of your remote server to unlock full features.',
-                style: TextStyle(
-                  color: AppColors.textSecondary,
-                  fontSize: 12,
-                  fontFamily: 'monospace',
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: urlController,
-                style: const TextStyle(
-                  color: AppColors.textPrimary,
-                  fontSize: 13,
-                  fontFamily: 'monospace',
-                ),
-                decoration: InputDecoration(
-                  hintText: 'https://my-server.example.com',
-                  hintStyle: TextStyle(
-                    color: AppColors.textMuted.withOpacity(0.5),
-                    fontFamily: 'monospace',
-                    fontSize: 12,
-                  ),
-                  filled: true,
-                  fillColor: AppColors.primary,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: AppColors.border),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: AppColors.border),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: AppColors.accent),
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 10),
-                ),
-                autocorrect: false,
-                keyboardType: TextInputType.url,
-              ),
-              if (error != null) ...[
-                const SizedBox(height: 8),
-                Text(
-                  error!,
-                  style: const TextStyle(
-                    color: AppColors.coreInactive,
-                    fontSize: 11,
-                    fontFamily: 'monospace',
-                  ),
-                ),
-              ],
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text(
-                'CANCEL',
-                style: TextStyle(
-                  color: AppColors.textMuted,
-                  fontFamily: 'monospace',
-                ),
-              ),
-            ),
-            ElevatedButton(
-              onPressed: connecting
-                  ? null
-                  : () async {
-                      final url = urlController.text.trim();
-                      if (url.isEmpty) {
-                        setS(() => error = 'Enter a server URL.');
-                        return;
-                      }
-                      setS(() { connecting = true; error = null; });
-                      try {
-                        final svc = CoreService(baseUrl: url);
-                        await svc.getHealth();
-                        svc.dispose();
-                        await SetupTaskService.markComplete(
-                            SetupTask.connectRemoteBrain);
-                        if (ctx.mounted) Navigator.of(ctx).pop();
-                        _load();
-                      } catch (_) {
-                        setS(() {
-                          connecting = false;
-                          error = 'Could not reach that server. Check the URL.';
-                        });
-                      }
-                    },
+      child: Column(
+        children: [
+          const Icon(Icons.check_circle, color: AppColors.coreActive, size: 40),
+          const SizedBox(height: 12),
+          Text('All setup tasks complete!',
+              style: TextStyle(color: cs.onSurface, fontSize: 15, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: widget.onDone,
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.accent,
-                foregroundColor: AppColors.primary,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8)),
+                backgroundColor: AppColors.coreActive,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               ),
-              child: connecting
-                  ? const SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(
-                          color: AppColors.primary, strokeWidth: 2),
-                    )
-                  : const Text(
-                      'CONNECT',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        fontFamily: 'monospace',
-                      ),
-                    ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<void> _doBackupSeedPhrase() async {
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.surface,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-          side: BorderSide(color: AppColors.corePending.withOpacity(0.4)),
-        ),
-        title: const Text(
-          'BACK UP YOUR SEED PHRASE',
-          style: TextStyle(
-            color: AppColors.textPrimary,
-            fontSize: 14,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 1.0,
-            fontFamily: 'monospace',
-          ),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _buildBackupOption(
-              ctx: ctx,
-              icon: Icons.edit_note,
-              title: "Write it down",
-              description: "View your 12 words and write them on paper.",
-              onTap: () async {
-                Navigator.of(ctx).pop();
-                await _showSeedWords();
-              },
-            ),
-            const SizedBox(height: 10),
-            _buildBackupOption(
-              ctx: ctx,
-              icon: Icons.nfc,
-              title: "Write to NFC tag",
-              description: "Available on the Identity Agent mobile app.",
-              isStub: false,
-              onTap: () {
-                Navigator.of(ctx).pop();
-                showDialog<void>(
-                  context: context,
-                  builder: (dctx) => AlertDialog(
-                    backgroundColor: AppColors.surface,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                      side: BorderSide(color: AppColors.border),
-                    ),
-                    title: const Text(
-                      'NFC BACKUP — MOBILE ONLY',
-                      style: TextStyle(
-                        color: AppColors.textPrimary,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 1.0,
-                        fontFamily: 'monospace',
-                      ),
-                    ),
-                    content: const Text(
-                      'NFC tag writing requires hardware that desktop computers '
-                      'don\'t have. Open the Identity Agent mobile app on your '
-                      'phone, go to Settings → Back Up Seed Phrase, and tap '
-                      '"Write to NFC tag" there.',
-                      style: TextStyle(
-                        color: AppColors.textSecondary,
-                        fontSize: 12,
-                        fontFamily: 'monospace',
-                        height: 1.5,
-                      ),
-                    ),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.of(dctx).pop(),
-                        child: const Text('GOT IT',
-                            style: TextStyle(
-                                color: AppColors.accent,
-                                fontFamily: 'monospace')),
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text(
-              'CLOSE',
-              style: TextStyle(
-                color: AppColors.textMuted,
-                fontFamily: 'monospace',
-              ),
+              child: const Text('GO TO DASHBOARD', style: TextStyle(fontWeight: FontWeight.w700, letterSpacing: 0.5)),
             ),
           ),
         ],
@@ -593,228 +294,217 @@ class _SetupChecklistScreenState extends State<SetupChecklistScreen> {
     );
   }
 
-  Widget _buildBackupOption({
-    required BuildContext ctx,
-    required IconData icon,
-    required String title,
-    required String description,
-    required VoidCallback onTap,
-    bool isStub = false,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: AppColors.primary,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: AppColors.border),
-        ),
-        child: Row(
-          children: [
-            Icon(icon,
-                color: isStub ? AppColors.textMuted : AppColors.accent,
-                size: 22),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Text(
-                        title,
-                        style: TextStyle(
-                          color: isStub
-                              ? AppColors.textMuted
-                              : AppColors.textPrimary,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          fontFamily: 'monospace',
+  Widget _buildTaskCard(SetupTask task, ColorScheme cs) {
+    final meta = SetupTaskService.meta(task);
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: meta.isStub ? null : () => _openTask(task),
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: cs.surfaceContainerHighest.withOpacity(0.5),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: cs.outline.withOpacity(0.5)),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                meta.isStub ? Icons.schedule_outlined : Icons.radio_button_unchecked,
+                color: meta.isStub ? cs.onSurface.withOpacity(0.3) : cs.primary,
+                size: 20,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(meta.title,
+                              style: TextStyle(color: cs.onSurface, fontSize: 13, fontWeight: FontWeight.w600)),
                         ),
-                      ),
-                      if (isStub) ...[
-                        const SizedBox(width: 6),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 5, vertical: 1),
-                          decoration: BoxDecoration(
-                            color: AppColors.textMuted.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(3),
-                          ),
-                          child: const Text(
-                            'COMING SOON',
-                            style: TextStyle(
-                              color: AppColors.textMuted,
-                              fontSize: 8,
-                              letterSpacing: 0.5,
-                              fontFamily: 'monospace',
+                        if (meta.isStub)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: cs.onSurface.withOpacity(0.06),
+                              borderRadius: BorderRadius.circular(4),
                             ),
+                            child: Text('SOON',
+                                style: TextStyle(color: cs.onSurface.withOpacity(0.35), fontSize: 9, fontWeight: FontWeight.w700, letterSpacing: 0.8)),
                           ),
-                        ),
+                        if (meta.isCritical && !meta.isStub)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: AppColors.corePending.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: const Text('IMPORTANT',
+                                style: TextStyle(color: AppColors.corePending, fontSize: 9, fontWeight: FontWeight.w700, letterSpacing: 0.8)),
+                          ),
                       ],
-                    ],
+                    ),
+                    const SizedBox(height: 3),
+                    Text(meta.description,
+                        style: TextStyle(color: cs.onSurface.withOpacity(0.5), fontSize: 11, height: 1.4)),
+                  ],
+                ),
+              ),
+              if (!meta.isStub)
+                Icon(Icons.chevron_right, color: cs.onSurface.withOpacity(0.3), size: 20),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _openTask(SetupTask task) {
+    switch (task) {
+      case SetupTask.backupSeedPhrase:
+        setState(() => _page = _Page.backupSeed);
+      case SetupTask.setupAuthentication:
+        _loadAuthState();
+        setState(() => _page = _Page.setupAuth);
+      case SetupTask.inviteContacts:
+        _loadInviteData();
+        setState(() => _page = _Page.inviteContacts);
+      case SetupTask.connectRemoteBrain:
+        setState(() => _page = _Page.connectBrain);
+      case SetupTask.secureKeyStorage:
+        break; // excluded from checklist
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  PAGE: Backup Seed Phrase
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  Widget _buildBackupSeedPage(ColorScheme cs) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _infoBox(cs,
+          icon: Icons.warning_amber_rounded,
+          color: AppColors.corePending,
+          text: 'Your seed phrase is the only way to recover your identity if you lose this device.',
+        ),
+        const SizedBox(height: 20),
+        // Option: Write it down
+        _actionTile(cs,
+          icon: Icons.edit_note,
+          title: 'Write it down on paper',
+          subtitle: 'View your 12 words and write them somewhere safe.',
+          onTap: () async {
+            setState(() => _page = _Page.seedWords);
+          },
+        ),
+        const SizedBox(height: 10),
+        // Option: NFC
+        _actionTile(cs,
+          icon: Icons.nfc,
+          title: 'Write to NFC tag',
+          subtitle: 'Available on the Identity Agent mobile app.',
+          onTap: () {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('NFC tag writing requires the mobile app.')),
+            );
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSeedWordsPage(ColorScheme cs) {
+    return FutureBuilder<List<String>?>(
+      future: SecureKeyStore.loadMnemonic(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Center(child: Padding(padding: EdgeInsets.all(32), child: CircularProgressIndicator()));
+        }
+        final words = snapshot.data;
+        if (words == null || words.isEmpty) {
+          return _infoBox(cs,
+            icon: Icons.error_outline,
+            color: AppColors.coreInactive,
+            text: 'Could not retrieve seed phrase. It may have been cleared from secure storage.',
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _infoBox(cs,
+              icon: Icons.warning_amber_rounded,
+              color: AppColors.corePending,
+              text: 'Never share these words. Never store them digitally. Write them on paper and keep them safe.',
+            ),
+            const SizedBox(height: 20),
+            _buildWordGrid(words, cs),
+            const SizedBox(height: 20),
+            // Confirmation checkbox
+            GestureDetector(
+              onTap: () => setState(() => _seedConfirmed = !_seedConfirmed),
+              child: Row(
+                children: [
+                  Icon(
+                    _seedConfirmed ? Icons.check_box : Icons.check_box_outline_blank,
+                    color: _seedConfirmed ? AppColors.coreActive : cs.onSurface.withOpacity(0.4),
+                    size: 20,
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    description,
-                    style: const TextStyle(
-                      color: AppColors.textSecondary,
-                      fontSize: 11,
-                      fontFamily: 'monospace',
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      "I've written these words down in a safe place.",
+                      style: TextStyle(color: cs.onSurface.withOpacity(0.7), fontSize: 13),
                     ),
                   ),
                 ],
               ),
             ),
-            const Icon(Icons.chevron_right, color: AppColors.textMuted, size: 18),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<void> _showSeedWords() async {
-    final mnemonic = await _loadMnemonic();
-    if (!mounted) return;
-    bool confirmed = false;
-
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setS) => AlertDialog(
-          backgroundColor: AppColors.surface,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-            side: BorderSide(color: AppColors.corePending.withOpacity(0.4)),
-          ),
-          title: const Row(
-            children: [
-              Icon(Icons.warning_amber_rounded,
-                  color: AppColors.corePending, size: 22),
-              SizedBox(width: 8),
-              Text(
-                'YOUR SEED PHRASE',
-                style: TextStyle(
-                  color: AppColors.corePending,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1.0,
-                  fontFamily: 'monospace',
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: _seedConfirmed
+                    ? () async {
+                        await SetupTaskService.markComplete(SetupTask.backupSeedPhrase);
+                        _goBack();
+                      }
+                    : null,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.coreActive,
+                  foregroundColor: Colors.white,
+                  disabledBackgroundColor: cs.onSurface.withOpacity(0.08),
+                  disabledForegroundColor: cs.onSurface.withOpacity(0.3),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 ),
-              ),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                'Never share these words. Never store them digitally. Write them on paper and keep them safe.',
-                style: TextStyle(
-                  color: AppColors.textSecondary,
-                  fontSize: 12,
-                  fontFamily: 'monospace',
-                  height: 1.5,
-                ),
-              ),
-              const SizedBox(height: 16),
-              if (mnemonic == null)
-                const Text(
-                  'Could not retrieve seed phrase. It may have been cleared from secure storage.',
-                  style: TextStyle(
-                    color: AppColors.coreInactive,
-                    fontSize: 12,
-                    fontFamily: 'monospace',
-                  ),
-                )
-              else
-                _buildWordGrid(mnemonic),
-              const SizedBox(height: 16),
-              GestureDetector(
-                onTap: () => setS(() => confirmed = !confirmed),
-                child: Row(
-                  children: [
-                    Icon(
-                      confirmed
-                          ? Icons.check_box
-                          : Icons.check_box_outline_blank,
-                      color: confirmed
-                          ? AppColors.coreActive
-                          : AppColors.textMuted,
-                      size: 20,
-                    ),
-                    const SizedBox(width: 8),
-                    const Expanded(
-                      child: Text(
-                        "I've written these words down in a safe place.",
-                        style: TextStyle(
-                          color: AppColors.textSecondary,
-                          fontSize: 12,
-                          fontFamily: 'monospace',
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text(
-                'CANCEL',
-                style: TextStyle(
-                  color: AppColors.textMuted,
-                  fontFamily: 'monospace',
-                ),
-              ),
-            ),
-            ElevatedButton(
-              onPressed: confirmed
-                  ? () async {
-                      await SetupTaskService.markComplete(
-                          SetupTask.backupSeedPhrase);
-                      if (ctx.mounted) Navigator.of(ctx).pop();
-                      _load();
-                    }
-                  : null,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.coreActive,
-                foregroundColor: AppColors.primary,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8)),
-              ),
-              child: const Text(
-                'DONE — MARK AS BACKED UP',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  fontFamily: 'monospace',
-                ),
+                child: const Text('MARK AS BACKED UP', style: TextStyle(fontWeight: FontWeight.w700, letterSpacing: 0.5)),
               ),
             ),
           ],
-        ),
-      ),
+        );
+      },
     );
   }
 
-  Widget _buildWordGrid(List<String> words) {
+  Widget _buildWordGrid(List<String> words, ColorScheme cs) {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: AppColors.primary,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-            color: AppColors.corePending.withOpacity(0.3), width: 1),
+        color: cs.surfaceContainerHighest.withOpacity(0.5),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.corePending.withOpacity(0.2)),
       ),
       child: Column(
         children: [
           for (int row = 0; row < (words.length / 3).ceil(); row++)
             Padding(
-              padding:
-                  EdgeInsets.only(bottom: row < (words.length / 3).ceil() - 1 ? 8 : 0),
+              padding: EdgeInsets.only(bottom: row < (words.length / 3).ceil() - 1 ? 8 : 0),
               child: Row(
                 children: [
                   for (int col = 0; col < 3; col++)
@@ -823,34 +513,20 @@ class _SetupChecklistScreenState extends State<SetupChecklistScreen> {
                         child: Padding(
                           padding: EdgeInsets.only(left: col > 0 ? 6 : 0),
                           child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 8),
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                             decoration: BoxDecoration(
-                              color: AppColors.surface,
+                              color: cs.surface,
                               borderRadius: BorderRadius.circular(6),
-                              border: Border.all(color: AppColors.border),
+                              border: Border.all(color: cs.outline.withOpacity(0.5)),
                             ),
                             child: Row(
                               children: [
-                                Text(
-                                  '${row * 3 + col + 1}.',
-                                  style: const TextStyle(
-                                    color: AppColors.textMuted,
-                                    fontSize: 10,
-                                    fontFamily: 'monospace',
-                                  ),
-                                ),
+                                Text('${row * 3 + col + 1}.',
+                                    style: TextStyle(color: cs.onSurface.withOpacity(0.35), fontSize: 10)),
                                 const SizedBox(width: 4),
                                 Expanded(
-                                  child: Text(
-                                    words[row * 3 + col],
-                                    style: const TextStyle(
-                                      color: AppColors.textPrimary,
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w600,
-                                      fontFamily: 'monospace',
-                                    ),
-                                  ),
+                                  child: Text(words[row * 3 + col],
+                                      style: TextStyle(color: cs.onSurface, fontSize: 12, fontWeight: FontWeight.w600)),
                                 ),
                               ],
                             ),
@@ -867,325 +543,676 @@ class _SetupChecklistScreenState extends State<SetupChecklistScreen> {
     );
   }
 
-  Future<List<String>?> _loadMnemonic() async {
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  PAGE: Auth Setup
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  Future<void> _loadAuthState() async {
     try {
-      return await SecureKeyStore.loadMnemonic();
-    } catch (_) {
-      return null;
-    }
+      final f = await IdentityLevelService.loadFactors();
+      final fp = await LocalAuthService.fingerprintAvailability();
+      final face = await LocalAuthService.faceAvailability();
+      if (mounted) {
+        setState(() {
+          _authFactors = f;
+          _fpState = fp;
+          _faceState = face;
+        });
+      }
+    } catch (_) {}
   }
 
-  Future<void> _doSecureKeyStorage() async {
-    // Load enclave status if not already available
-    if (_enclaveStatus == null) {
-      try {
-        final svc = EnclaveService(
-          coreService: CoreService(baseUrl: widget.serverUrl ?? 'http://127.0.0.1:5000'),
-        );
-        final status = await svc.detect();
-        if (mounted) setState(() => _enclaveStatus = status);
-      } catch (_) {}
+  Widget _buildAuthPage(ColorScheme cs) {
+    if (_authFactors == null) {
+      return const Center(child: Padding(padding: EdgeInsets.all(32), child: CircularProgressIndicator()));
+    }
+    final f = _authFactors!;
+    final enabledCount = [f.hasPassword, f.hasPin,
+      _fpState == BiometricAvailability.available,
+      _faceState == BiometricAvailability.available,
+    ].where((v) => v).length;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Protect your identity from unauthorized access. Enable at least one method${enabledCount < 2 ? " (we recommend two)" : ""}.',
+          style: TextStyle(color: cs.onSurface.withOpacity(0.6), fontSize: 13, height: 1.5),
+        ),
+        if (enabledCount >= 1) ...[
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: AppColors.coreActive.withOpacity(0.06),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: AppColors.coreActive.withOpacity(0.2)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.check_circle, color: AppColors.coreActive, size: 16),
+                const SizedBox(width: 8),
+                Text('$enabledCount method${enabledCount == 1 ? "" : "s"} enabled',
+                    style: const TextStyle(color: AppColors.coreActive, fontSize: 12, fontWeight: FontWeight.w600)),
+              ],
+            ),
+          ),
+        ],
+        const SizedBox(height: 16),
+
+        // ── Password ──────────────────────────────────────────────────────
+        _authMethodTile(cs,
+          icon: Icons.password_outlined,
+          label: 'Password',
+          subtitle: f.hasPassword ? 'Enabled' : 'Set a password to lock the app',
+          active: f.hasPassword,
+          expandKey: 'password',
+        ),
+        if (_authExpanded == 'password' && !f.hasPassword) _buildPasswordForm(cs),
+        const SizedBox(height: 8),
+
+        // ── PIN ───────────────────────────────────────────────────────────
+        _authMethodTile(cs,
+          icon: Icons.pin_outlined,
+          label: 'PIN',
+          subtitle: f.hasPin ? 'Enabled' : 'Set a 4–6 digit PIN',
+          active: f.hasPin,
+          expandKey: 'pin',
+        ),
+        if (_authExpanded == 'pin' && !f.hasPin) _buildPinForm(cs),
+        const SizedBox(height: 8),
+
+        // ── Fingerprint ───────────────────────────────────────────────────
+        _authMethodTile(cs,
+          icon: Icons.fingerprint,
+          label: 'Fingerprint',
+          subtitle: _fpState == BiometricAvailability.available
+              ? 'Enabled'
+              : _fpState == BiometricAvailability.availableNotEnrolled
+                  ? 'Supported — enable in OS settings'
+                  : 'Not available on this device',
+          active: _fpState == BiometricAvailability.available,
+          caution: _fpState == BiometricAvailability.availableNotEnrolled,
+          unavailable: _fpState == BiometricAvailability.unavailable,
+        ),
+        const SizedBox(height: 8),
+
+        // ── Face Scan ─────────────────────────────────────────────────────
+        _authMethodTile(cs,
+          icon: Icons.face_outlined,
+          label: 'Face Scan',
+          subtitle: _faceState == BiometricAvailability.available
+              ? 'Enabled'
+              : _faceState == BiometricAvailability.availableNotEnrolled
+                  ? 'Supported — enable in OS settings'
+                  : 'Not available on this device',
+          active: _faceState == BiometricAvailability.available,
+          caution: _faceState == BiometricAvailability.availableNotEnrolled,
+          unavailable: _faceState == BiometricAvailability.unavailable,
+        ),
+
+        if (enabledCount >= 1) ...[
+          const SizedBox(height: 24),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: () async {
+                await SetupTaskService.markComplete(SetupTask.setupAuthentication);
+                _goBack();
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.coreActive,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+              child: const Text('DONE', style: TextStyle(fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _authMethodTile(ColorScheme cs, {
+    required IconData icon,
+    required String label,
+    required String subtitle,
+    bool active = false,
+    bool caution = false,
+    bool unavailable = false,
+    String? expandKey,
+  }) {
+    final Color tileColor;
+    final Color tileBorder;
+    if (active) {
+      tileColor = AppColors.coreActive.withOpacity(0.04);
+      tileBorder = AppColors.coreActive.withOpacity(0.25);
+    } else if (caution) {
+      tileColor = const Color(0xFFFFB74D).withOpacity(0.04);
+      tileBorder = const Color(0xFFFFB74D).withOpacity(0.25);
+    } else {
+      tileColor = cs.surfaceContainerHighest.withOpacity(0.5);
+      tileBorder = cs.outline.withOpacity(0.5);
     }
 
-    final status = _enclaveStatus;
-    if (status == null) return;
-
-    if (status.hardwareBacked) {
-      // Already hardware-backed — mark complete and confirm to user
-      await SetupTaskService.markComplete(SetupTask.secureKeyStorage);
-      await _load();
-      if (!mounted) return;
-      await showDialog<void>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          backgroundColor: AppColors.surface,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-            side: BorderSide(color: AppColors.coreActive.withOpacity(0.4)),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: (active || unavailable || expandKey == null)
+            ? null
+            : () => setState(() {
+                _authExpanded = _authExpanded == expandKey ? null : expandKey;
+                _authError = null;
+                _pinCtrl.clear();
+                _pinConfirmCtrl.clear();
+                _pwCtrl.clear();
+                _pwConfirmCtrl.clear();
+              }),
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: tileColor,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: tileBorder),
           ),
-          title: Row(
+          child: Row(
             children: [
-              const Icon(Icons.shield, color: AppColors.coreActive, size: 20),
-              const SizedBox(width: 8),
-              const Text(
-                'KEYS SECURED',
-                style: TextStyle(
-                  color: AppColors.textPrimary,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1.0,
-                  fontFamily: 'monospace',
+              Icon(icon,
+                  color: active
+                      ? AppColors.coreActive
+                      : caution
+                          ? const Color(0xFFFFB74D)
+                          : unavailable
+                              ? cs.onSurface.withOpacity(0.25)
+                              : cs.primary,
+                  size: 22),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(children: [
+                      Text(label, style: TextStyle(
+                          color: unavailable ? cs.onSurface.withOpacity(0.35) : cs.onSurface,
+                          fontSize: 13, fontWeight: FontWeight.w600)),
+                      if (active) ...[
+                        const SizedBox(width: 6),
+                        const Icon(Icons.check_circle, color: AppColors.coreActive, size: 14),
+                      ],
+                    ]),
+                    const SizedBox(height: 2),
+                    Text(subtitle, style: TextStyle(
+                        color: caution ? const Color(0xFFFFB74D) : cs.onSurface.withOpacity(0.5),
+                        fontSize: 11)),
+                  ],
                 ),
               ),
+              if (!active && !unavailable && expandKey != null)
+                Icon(
+                  _authExpanded == expandKey ? Icons.expand_less : Icons.chevron_right,
+                  color: cs.onSurface.withOpacity(0.3), size: 20,
+                ),
             ],
           ),
-          content: Text(
-            'Your signing keys are protected by ${status.backingLabel}.',
-            style: const TextStyle(
-              color: AppColors.textSecondary,
-              fontSize: 13,
-              fontFamily: 'monospace',
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Done', style: TextStyle(color: AppColors.accent)),
-            ),
-          ],
         ),
-      );
-      return;
-    }
+      ),
+    );
+  }
 
-    // Not hardware-backed — show options
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.surface,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-          side: BorderSide(color: AppColors.border),
+  Widget _buildPasswordForm(ColorScheme cs) {
+    return Container(
+      margin: const EdgeInsets.only(top: 4),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest.withOpacity(0.3),
+        borderRadius: const BorderRadius.only(
+          bottomLeft: Radius.circular(10),
+          bottomRight: Radius.circular(10),
         ),
-        title: Row(
-          children: [
-            const Icon(Icons.shield_outlined, color: Color(0xFFFFB74D), size: 20),
-            const SizedBox(width: 8),
-            const Expanded(
-              child: Text(
-                'KEY STORAGE OPTIONS',
-                style: TextStyle(
-                  color: AppColors.textPrimary,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1.0,
-                  fontFamily: 'monospace',
-                ),
+        border: Border.all(color: cs.outline.withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Minimum 8 characters.', style: TextStyle(color: cs.onSurface.withOpacity(0.5), fontSize: 12)),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _pwCtrl,
+            obscureText: _pwObscure,
+            style: TextStyle(color: cs.onSurface, fontSize: 14),
+            decoration: InputDecoration(
+              labelText: 'Password',
+              errorText: _authError,
+              suffixIcon: IconButton(
+                icon: Icon(_pwObscure ? Icons.visibility_off_outlined : Icons.visibility_outlined, size: 18),
+                onPressed: () => setState(() => _pwObscure = !_pwObscure),
               ),
             ),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Current: ${status.backingLabel}',
-              style: const TextStyle(
-                color: AppColors.textPrimary,
-                fontSize: 13,
-                fontFamily: 'monospace',
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _pwConfirmCtrl,
+            obscureText: true,
+            style: TextStyle(color: cs.onSurface, fontSize: 14),
+            decoration: const InputDecoration(labelText: 'Confirm password'),
+          ),
+          const SizedBox(height: 14),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton(
+                onPressed: () => setState(() => _authExpanded = null),
+                child: Text('Cancel', style: TextStyle(color: cs.onSurface.withOpacity(0.5))),
               ),
-            ),
-            if (status.tpmPresent == true && status.tpmEnabled == false) ...[
-              const SizedBox(height: 8),
-              const Text(
-                'A TPM was detected but is not enabled. Enable it in BIOS/UEFI for hardware protection.',
-                style: TextStyle(
-                  color: AppColors.textSecondary,
-                  fontSize: 12,
-                  fontFamily: 'monospace',
-                  height: 1.5,
+              const SizedBox(width: 8),
+              ElevatedButton(
+                onPressed: () async {
+                  final pw = _pwCtrl.text;
+                  if (pw.length < 8) { setState(() => _authError = 'Minimum 8 characters'); return; }
+                  if (pw != _pwConfirmCtrl.text) { setState(() => _authError = 'Passwords do not match'); return; }
+                  await PinPasswordService.setPassword(pw);
+                  await IdentityLevelService.refresh();
+                  await _loadAuthState();
+                  setState(() { _authExpanded = null; _authError = null; });
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: cs.primary,
+                  foregroundColor: cs.onPrimary,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 ),
+                child: const Text('Save', style: TextStyle(fontWeight: FontWeight.w700)),
               ),
             ],
-            const SizedBox(height: 16),
-            _optionRow(Icons.devices_other, 'Migrate to different device',
-                'Use a device with a hardware secure enclave. This task will remain open as a reminder.'),
-            const SizedBox(height: 10),
-            _optionRow(Icons.cloud_outlined, 'Cloud HSM — Coming Soon',
-                'Delegate to a hardware-backed cloud HSM (future release).', disabled: true),
-            const SizedBox(height: 10),
-            _optionRow(Icons.usb, 'YubiKey — Coming Soon',
-                'Hardware token for multi-factor signing (future release).', disabled: true),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Keep open', style: TextStyle(color: AppColors.textMuted)),
-          ),
-          TextButton(
-            onPressed: () async {
-              Navigator.pop(ctx);
-              // Mark complete — user acknowledged; task stays relevant but cleared
-              await SetupTaskService.markComplete(SetupTask.secureKeyStorage);
-              await _load();
-            },
-            child: const Text('Continue with software', style: TextStyle(color: AppColors.accent)),
           ),
         ],
       ),
     );
   }
 
-  Widget _optionRow(IconData icon, String title, String subtitle, {bool disabled = false}) {
-    return Row(
+  Widget _buildPinForm(ColorScheme cs) {
+    return Container(
+      margin: const EdgeInsets.only(top: 4),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest.withOpacity(0.3),
+        borderRadius: const BorderRadius.only(
+          bottomLeft: Radius.circular(10),
+          bottomRight: Radius.circular(10),
+        ),
+        border: Border.all(color: cs.outline.withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Enter a 4–6 digit PIN.', style: TextStyle(color: cs.onSurface.withOpacity(0.5), fontSize: 12)),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _pinCtrl,
+            obscureText: true,
+            keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(6)],
+            style: TextStyle(color: cs.onSurface, fontSize: 14),
+            decoration: InputDecoration(labelText: 'PIN', errorText: _authError),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _pinConfirmCtrl,
+            obscureText: true,
+            keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(6)],
+            style: TextStyle(color: cs.onSurface, fontSize: 14),
+            decoration: const InputDecoration(labelText: 'Confirm PIN'),
+          ),
+          const SizedBox(height: 14),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton(
+                onPressed: () => setState(() => _authExpanded = null),
+                child: Text('Cancel', style: TextStyle(color: cs.onSurface.withOpacity(0.5))),
+              ),
+              const SizedBox(width: 8),
+              ElevatedButton(
+                onPressed: () async {
+                  final pin = _pinCtrl.text.trim();
+                  if (pin.length < 4 || pin.length > 6) { setState(() => _authError = 'PIN must be 4–6 digits'); return; }
+                  if (pin != _pinConfirmCtrl.text.trim()) { setState(() => _authError = 'PINs do not match'); return; }
+                  await PinPasswordService.setPin(pin);
+                  await IdentityLevelService.refresh();
+                  await _loadAuthState();
+                  setState(() { _authExpanded = null; _authError = null; });
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: cs.primary,
+                  foregroundColor: cs.onPrimary,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                child: const Text('Save', style: TextStyle(fontWeight: FontWeight.w700)),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  PAGE: Invite Contacts
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  Future<void> _loadInviteData() async {
+    try {
+      final coreService = CoreService(baseUrl: _baseUrl);
+      final results = await Future.wait([
+        coreService.getOobi(),
+        coreService.getProfile(),
+        coreService.getContacts(),
+      ]);
+      coreService.dispose();
+      final oobi = results[0] as OobiResponse;
+      final profile = results[1] as ProfileResponse;
+      final contacts = results[2] as ContactsListResponse;
+      if (mounted) {
+        setState(() {
+          _oobiUrl = oobi.oobiUrl;
+          _inviterName = profile.fullName.isNotEmpty ? profile.fullName : null;
+          _totalContacts = contacts.contacts.length;
+          _trustedContacts = contacts.contacts.where((c) => c.contactType == 'trusted').length;
+        });
+      }
+    } catch (_) {}
+  }
+
+  Widget _buildInvitePage(ColorScheme cs) {
+    final contactUrl = _oobiUrl ?? '';
+    final inviteMessage =
+        "Hey! I set up a self-sovereign identity. Will you be one of my trusted contacts? "
+        "Add me here: $contactUrl\n\n"
+        "Questions? Ask me!";
+    final hasEnough = _trustedContacts >= 3;
+
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(icon, size: 18, color: disabled ? AppColors.textMuted : AppColors.accent),
-        const SizedBox(width: 10),
-        Expanded(
+        Text(
+          "Invite people you trust to be witnesses for your identity. You need at least 3 trusted contacts.",
+          style: TextStyle(color: cs.onSurface.withOpacity(0.6), fontSize: 13, height: 1.5),
+        ),
+        const SizedBox(height: 12),
+        // Contact progress
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: hasEnough
+                ? AppColors.coreActive.withOpacity(0.06)
+                : cs.surfaceContainerHighest.withOpacity(0.5),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: hasEnough
+                ? AppColors.coreActive.withOpacity(0.2)
+                : cs.outline.withOpacity(0.5)),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                hasEnough ? Icons.check_circle : Icons.people_outline,
+                color: hasEnough ? AppColors.coreActive : cs.primary,
+                size: 18,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  '$_totalContacts contact${_totalContacts == 1 ? "" : "s"}, '
+                  '$_trustedContacts trusted (need 3+)',
+                  style: TextStyle(
+                    color: hasEnough ? AppColors.coreActive : cs.onSurface.withOpacity(0.7),
+                    fontSize: 12, fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: _loadInviteData,
+                child: Text('Refresh', style: TextStyle(color: cs.primary, fontSize: 11)),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        // Invite message preview
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: cs.surfaceContainerHighest.withOpacity(0.5),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: cs.primary.withOpacity(0.15)),
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
                 children: [
-                  Expanded(
-                    child: Text(
-                      title,
-                      style: TextStyle(
-                        color: disabled ? AppColors.textMuted : AppColors.textPrimary,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        fontFamily: 'monospace',
-                      ),
-                    ),
-                  ),
-                  if (disabled)
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                      decoration: BoxDecoration(
-                        color: AppColors.border,
-                        borderRadius: BorderRadius.circular(3),
-                      ),
-                      child: const Text('SOON',
-                          style: TextStyle(
-                            color: AppColors.textMuted,
-                            fontSize: 8,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 1.0,
-                          )),
-                    ),
+                  Icon(Icons.mail_outline, size: 14, color: cs.primary),
+                  const SizedBox(width: 6),
+                  Text('INVITE MESSAGE',
+                      style: TextStyle(color: cs.primary, fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 0.8)),
                 ],
               ),
-              Text(
-                subtitle,
-                style: const TextStyle(
-                  color: AppColors.textMuted,
-                  fontSize: 11,
-                  fontFamily: 'monospace',
-                  height: 1.4,
-                ),
-              ),
+              const SizedBox(height: 10),
+              Text(inviteMessage,
+                  style: TextStyle(color: cs.onSurface.withOpacity(0.6), fontSize: 12, height: 1.5)),
             ],
+          ),
+        ),
+        const SizedBox(height: 14),
+        // Copy button
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: inviteMessage));
+              setState(() => _inviteCopied = true);
+              Future.delayed(const Duration(seconds: 2), () {
+                if (mounted) setState(() => _inviteCopied = false);
+              });
+            },
+            icon: Icon(_inviteCopied ? Icons.check : Icons.copy, size: 14),
+            label: Text(_inviteCopied ? 'Copied!' : 'Copy Message', style: const TextStyle(fontSize: 12)),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: _inviteCopied ? AppColors.coreActive : cs.onSurface.withOpacity(0.6),
+              side: BorderSide(color: _inviteCopied ? AppColors.coreActive : cs.outline),
+              padding: const EdgeInsets.symmetric(vertical: 12),
+            ),
+          ),
+        ),
+        if (contactUrl.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          Center(
+            child: Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: QrImageView(
+                data: contactUrl,
+                version: QrVersions.auto,
+                size: 140,
+                padding: EdgeInsets.zero,
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Center(
+            child: Text('Scan to add you as a contact',
+                style: TextStyle(color: cs.onSurface.withOpacity(0.35), fontSize: 10)),
+          ),
+        ],
+        const SizedBox(height: 24),
+        SizedBox(
+          width: double.infinity,
+          child: ElevatedButton(
+            onPressed: hasEnough
+                ? () async {
+                    await SetupTaskService.markComplete(SetupTask.inviteContacts);
+                    _goBack();
+                  }
+                : null,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.coreActive,
+              foregroundColor: Colors.white,
+              disabledBackgroundColor: cs.onSurface.withOpacity(0.08),
+              disabledForegroundColor: cs.onSurface.withOpacity(0.3),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            child: Text(
+              hasEnough ? 'DONE' : 'NEED ${3 - _trustedContacts} MORE TRUSTED CONTACT${3 - _trustedContacts == 1 ? "" : "S"}',
+              style: const TextStyle(fontWeight: FontWeight.w700, letterSpacing: 0.3),
+            ),
+          ),
+        ),
+        if (!hasEnough) ...[
+          const SizedBox(height: 8),
+          Center(
+            child: Text(
+              'Contacts must be marked as "Trusted" in your Contacts screen',
+              style: TextStyle(color: cs.onSurface.withOpacity(0.4), fontSize: 11),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  PAGE: Connect Remote Brain
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  Widget _buildConnectBrainPage(ColorScheme cs) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Enter the URL of your remote server to unlock full features.',
+          style: TextStyle(color: cs.onSurface.withOpacity(0.6), fontSize: 13, height: 1.5),
+        ),
+        const SizedBox(height: 16),
+        TextField(
+          controller: _brainUrlCtrl,
+          style: TextStyle(color: cs.onSurface, fontSize: 13),
+          decoration: InputDecoration(
+            hintText: 'https://my-server.example.com',
+            errorText: _brainError,
+          ),
+          autocorrect: false,
+          keyboardType: TextInputType.url,
+        ),
+        const SizedBox(height: 20),
+        SizedBox(
+          width: double.infinity,
+          child: ElevatedButton(
+            onPressed: _brainConnecting
+                ? null
+                : () async {
+                    final url = _brainUrlCtrl.text.trim();
+                    if (url.isEmpty) {
+                      setState(() => _brainError = 'Enter a server URL.');
+                      return;
+                    }
+                    setState(() { _brainConnecting = true; _brainError = null; });
+                    try {
+                      final svc = CoreService(baseUrl: url);
+                      await svc.getHealth();
+                      svc.dispose();
+                      await SetupTaskService.markComplete(SetupTask.connectRemoteBrain);
+                      _goBack();
+                    } catch (_) {
+                      setState(() {
+                        _brainConnecting = false;
+                        _brainError = 'Could not reach that server. Check the URL.';
+                      });
+                    }
+                  },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: cs.primary,
+              foregroundColor: cs.onPrimary,
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            child: _brainConnecting
+                ? const SizedBox(width: 16, height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                : const Text('CONNECT', style: TextStyle(fontWeight: FontWeight.w700, letterSpacing: 0.5)),
           ),
         ),
       ],
     );
   }
 
-  Future<void> _doInviteContacts() async {
-    String? oobiUrl;
-    try {
-      final coreService = CoreService(
-          baseUrl: widget.serverUrl ?? 'http://127.0.0.1:5000');
-      final oobi = await coreService.getOobi();
-      coreService.dispose();
-      oobiUrl = oobi.oobiUrl;
-    } catch (_) {}
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  Shared helpers
+  // ═══════════════════════════════════════════════════════════════════════════
 
-    if (!mounted) return;
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.surface,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-          side: BorderSide(color: AppColors.accent.withOpacity(0.3)),
-        ),
-        title: const Text(
-          'INVITE CONTACTS',
-          style: TextStyle(
-            color: AppColors.textPrimary,
-            fontSize: 14,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 1.0,
-            fontFamily: 'monospace',
+  Widget _infoBox(ColorScheme cs, {required IconData icon, required Color color, required String text}) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.06),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withOpacity(0.2)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: color, size: 18),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(text, style: TextStyle(color: color, fontSize: 12, height: 1.5, fontWeight: FontWeight.w500)),
           ),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Share your Identity Address with people you trust. They will be your witnesses and recovery contacts.',
-              style: TextStyle(
-                color: AppColors.textSecondary,
-                fontSize: 12,
-                fontFamily: 'monospace',
-                height: 1.5,
-              ),
-            ),
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: AppColors.primary,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: AppColors.border),
-              ),
-              child: SelectableText(
-                oobiUrl ?? 'Could not fetch your address. Is the backend running?',
-                style: const TextStyle(
-                  color: AppColors.accent,
-                  fontSize: 11,
-                  fontFamily: 'monospace',
-                ),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text(
-              'CLOSE',
-              style: TextStyle(
-                color: AppColors.textMuted,
-                fontFamily: 'monospace',
-              ),
-            ),
-          ),
-          if (oobiUrl != null)
-            ElevatedButton(
-              onPressed: () async {
-                await SetupTaskService.markComplete(SetupTask.inviteContacts);
-                if (ctx.mounted) Navigator.of(ctx).pop();
-                _load();
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.accent,
-                foregroundColor: AppColors.primary,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8)),
-              ),
-              child: const Text(
-                'MARK AS DONE',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  fontFamily: 'monospace',
-                ),
-              ),
-            ),
         ],
       ),
     );
   }
 
-  IconData _taskIcon(SetupTask task) {
-    switch (task) {
-      case SetupTask.connectRemoteBrain:
-        return Icons.cloud_outlined;
-      case SetupTask.backupSeedPhrase:
-        return Icons.key_outlined;
-      case SetupTask.setupAuthentication:
-        return Icons.lock_outlined;
-      case SetupTask.secureKeyStorage:
-        return Icons.shield_outlined;
-      case SetupTask.inviteContacts:
-        return Icons.people_outline;
-    }
+  Widget _actionTile(ColorScheme cs, {
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: cs.surfaceContainerHighest.withOpacity(0.5),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: cs.outline.withOpacity(0.5)),
+          ),
+          child: Row(
+            children: [
+              Icon(icon, color: cs.primary, size: 22),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title, style: TextStyle(color: cs.onSurface, fontSize: 13, fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 2),
+                    Text(subtitle, style: TextStyle(color: cs.onSurface.withOpacity(0.5), fontSize: 11)),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right, color: cs.onSurface.withOpacity(0.3), size: 20),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }

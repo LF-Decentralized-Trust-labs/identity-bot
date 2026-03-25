@@ -13,6 +13,7 @@ import '../../services/mobile_on_device_keri_service.dart';
 import '../../widgets/identity_level_badge.dart';
 import '../../widgets/key_storage_badge.dart';
 import '../../widgets/alert_detail_modal.dart';
+import 'credentials_screen.dart' show CredentialDetail;
 import '../../widgets/confirmation_toast.dart';
 import '../../widgets/log_entry.dart';
 import '../../widgets/setup_task_banner.dart';
@@ -93,6 +94,9 @@ class _DesktopDashboardScreenState extends State<DesktopDashboardScreen> {
   // Engagement — pre-seeded with fallback so the card is never empty while loading
   List<ShareAction> _shareActions = _kFallbackShareActions;
   bool _cameraAvailable = false;
+
+  // OOBI — loaded for identity card server URL
+  OobiResponse? _oobi;
 
   // Status
   HealthResponse? _health;
@@ -179,11 +183,13 @@ class _DesktopDashboardScreenState extends State<DesktopDashboardScreen> {
       final results = await Future.wait([
         _coreService.getIdentity(),
         _coreService.getProfile(),
+        _coreService.getOobi(),
       ]);
       if (mounted) {
         setState(() {
           _identity = results[0] as IdentityResponse;
           _profile = results[1] as ProfileResponse;
+          _oobi = results[2] as OobiResponse;
         });
         if ((_identity?.initialized ?? false) && _identity?.aid != null) {
           _addLog('Identity: ${_identity!.aid!.substring(0, 12)}…', LogLevel.info);
@@ -325,7 +331,55 @@ class _DesktopDashboardScreenState extends State<DesktopDashboardScreen> {
   }
 
   Future<void> _showCredentialDetail(CredentialRecord cred) async {
-    final action = await AlertDetailModal.showCredentialDetail(context, credential: cred);
+    final action = await showDialog<String>(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) => Dialog(
+        backgroundColor: Theme.of(ctx).colorScheme.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 560, maxHeight: 680),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Flexible(
+                child: CredentialDetail(
+                  cred: cred,
+                  onClose: () => Navigator.pop(ctx),
+                  onDelete: () => Navigator.pop(ctx),
+                  onVerify: () {},
+                  serverUrl: widget.serverUrl,
+                ),
+              ),
+              // Accept / Reject actions for pending credentials
+              Container(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx, 'reject'),
+                      style: TextButton.styleFrom(foregroundColor: AppColors.error),
+                      child: const Text('Reject'),
+                    ),
+                    const SizedBox(width: 8),
+                    ElevatedButton(
+                      onPressed: () => Navigator.pop(ctx, 'accept'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.success,
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                      ),
+                      child: const Text('Accept'),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
     if (action == 'accept') {
       _acceptCredential(cred.said);
     } else if (action == 'reject') {
@@ -338,6 +392,12 @@ class _DesktopDashboardScreenState extends State<DesktopDashboardScreen> {
     if (action == 'dismiss') {
       _dismissPendingRequest(req.aid);
     }
+  }
+
+  void _onScanTap() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('QR scanner coming soon.')),
+    );
   }
 
   void _showShareQrDialog() {
@@ -367,7 +427,7 @@ class _DesktopDashboardScreenState extends State<DesktopDashboardScreen> {
               serverUrl: widget.serverUrl,
             ),
             const SizedBox(height: 20),
-            // 3-column dashboard layout
+            // 2-column dashboard layout
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -390,12 +450,6 @@ class _DesktopDashboardScreenState extends State<DesktopDashboardScreen> {
                       _buildDashboardActivityCard(),
                     ],
                   ),
-                ),
-                const SizedBox(width: 16),
-                // ── Engagement column ────────────────────────────────────
-                Expanded(
-                  flex: 2,
-                  child: _buildEngagementSection(),
                 ),
               ],
             ),
@@ -444,51 +498,136 @@ class _DesktopDashboardScreenState extends State<DesktopDashboardScreen> {
           tooltip: 'Refresh',
           iconSize: 18,
         ),
+        const SizedBox(width: 8),
+        FilledButton.icon(
+          onPressed: _showShareQrDialog,
+          icon: const Icon(Icons.share_outlined, size: 16),
+          label: const Text('Share Code',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, letterSpacing: 0.2)),
+          style: FilledButton.styleFrom(
+            backgroundColor: AppColors.primary,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            minimumSize: const Size(0, 36),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            elevation: 0,
+          ),
+        ),
+        const SizedBox(width: 8),
+        FilledButton.icon(
+          onPressed: _cameraAvailable ? _onScanTap : null,
+          icon: const Icon(Icons.qr_code_scanner, size: 16),
+          label: const Text('Scan',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, letterSpacing: 0.2)),
+          style: FilledButton.styleFrom(
+            backgroundColor: _cameraAvailable ? AppColors.accent : AppColors.textMuted,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            minimumSize: const Size(0, 36),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            elevation: 0,
+          ),
+        ),
       ],
     );
   }
 
   Widget _buildIdentitySection() {
     final hasIdentity = _identity?.initialized == true && _identity?.aid != null;
+    final name = _profile?.fullName.isNotEmpty == true ? _profile!.fullName : 'Identity Agent';
+    final serverUrl = _oobi?.endpointUrl.isNotEmpty == true
+        ? _oobi!.endpointUrl
+        : _oobi?.baseUrl ?? '';
 
-    return _sectionCard(
-      title: 'Identity',
-      icon: Icons.fingerprint,
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            AppColors.primary.withOpacity(0.08),
+            AppColors.surface,
+          ],
+        ),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.primary.withOpacity(0.15)),
+      ),
+      padding: const EdgeInsets.all(20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Profile header
-          _buildProfileHeader(),
-          if (hasIdentity) ...[
-            const SizedBox(height: 16),
-            // AID
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: AppColors.surfaceLight,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: AppColors.border),
-              ),
-              child: SelectableText(
-                _identity!.aid!,
-                style: const TextStyle(
-                  color: AppColors.primary,
-                  fontSize: 10,
-                  fontFamily: 'monospace',
-                  height: 1.4,
+          // ── Avatar + Name + Badge ──────────────────────────────
+          Row(
+            children: [
+              _buildProfileAvatar(),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(name,
+                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700,
+                            color: AppColors.textPrimary),
+                        maxLines: 1, overflow: TextOverflow.ellipsis),
+                    if (_profile?.org.isNotEmpty == true)
+                      Text(_profile!.org,
+                          style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
+                          maxLines: 1, overflow: TextOverflow.ellipsis),
+                  ],
                 ),
               ),
+              if (hasIdentity)
+                LiveIdentityLevelBadge(
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const AuthSetupScreen()),
+                  ),
+                ),
+            ],
+          ),
+
+          if (hasIdentity) ...[
+            const SizedBox(height: 18),
+            // ── AID ──────────────────────────────────────────────
+            _identityField(
+              label: 'Your Identifier (AID)',
+              value: _identity!.aid!,
+              monospace: true,
+              copiable: true,
             ),
-            const SizedBox(height: 12),
-            KeyStorageBadge(coreService: _coreService),
-            const SizedBox(height: 10),
-            // Event count
-            if (_identity!.eventCount != null)
-              Text(
-                '${_identity!.eventCount} key event${_identity!.eventCount == 1 ? '' : 's'}',
-                style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
+
+            // ── Server URL ───────────────────────────────────────
+            if (serverUrl.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              _identityField(
+                label: 'Agent Address',
+                value: serverUrl,
+                monospace: false,
+                copiable: true,
               ),
+            ],
+
+            const SizedBox(height: 14),
+            // ── Status row ───────────────────────────────────────
+            Row(
+              children: [
+                KeyStorageBadge(coreService: _coreService),
+                const SizedBox(width: 10),
+                if (_identity!.eventCount != null)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      '${_identity!.eventCount} key event${_identity!.eventCount == 1 ? '' : 's'}',
+                      style: const TextStyle(color: AppColors.primary, fontSize: 11, fontWeight: FontWeight.w500),
+                    ),
+                  ),
+              ],
+            ),
           ] else if (_connectionState == CoreConnectionState.connected) ...[
             const SizedBox(height: 16),
             Container(
@@ -516,6 +655,76 @@ class _DesktopDashboardScreenState extends State<DesktopDashboardScreen> {
         ],
       ),
     );
+  }
+
+  Widget _identityField({
+    required String label,
+    required String value,
+    required bool monospace,
+    required bool copiable,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label,
+            style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600,
+                color: AppColors.textMuted, letterSpacing: 0.5)),
+        const SizedBox(height: 3),
+        InkWell(
+          onTap: copiable ? () {
+            Clipboard.setData(ClipboardData(text: value));
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Copied: ${value.length > 30 ? '${value.substring(0, 30)}...' : value}'),
+                  duration: const Duration(seconds: 1)),
+            );
+          } : null,
+          borderRadius: BorderRadius.circular(6),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    value,
+                    style: TextStyle(
+                      color: AppColors.textPrimary,
+                      fontSize: 11,
+                      fontFamily: monospace ? 'monospace' : null,
+                      height: 1.3,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                if (copiable)
+                  const Padding(
+                    padding: EdgeInsets.only(left: 6),
+                    child: Icon(Icons.copy, size: 12, color: AppColors.textMuted),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildProfileAvatar() {
+    if (_profile?.photo != null && _profile!.photo.isNotEmpty) {
+      try {
+        final bytes = base64Decode(_profile!.photo);
+        return CircleAvatar(radius: 24, backgroundImage: MemoryImage(bytes));
+      } catch (_) {
+        return _initialsAvatar();
+      }
+    }
+    return _initialsAvatar();
   }
 
   Widget _buildProfileHeader() {
@@ -942,95 +1151,6 @@ class _DesktopDashboardScreenState extends State<DesktopDashboardScreen> {
                 ),
               ],
             ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildEngagementSection() {
-    final scanColor = _cameraAvailable ? AppColors.accent : AppColors.textMuted;
-
-    return _sectionCard(
-      title: 'Engagement',
-      icon: Icons.hub_outlined,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _engagementButton(
-            icon: Icons.share_outlined,
-            label: 'Share QR Code',
-            description: 'Generate a QR code to share your identity.',
-            color: AppColors.primary,
-            onTap: _showShareQrDialog,
-          ),
-          const SizedBox(height: 10),
-          Opacity(
-            opacity: _cameraAvailable ? 1.0 : 0.45,
-            child: _engagementButton(
-              icon: Icons.qr_code_scanner,
-              label: 'Scan',
-              description: _cameraAvailable
-                  ? 'Camera available — scan a contact QR code.'
-                  : 'Device not available.',
-              color: scanColor,
-              onTap: _cameraAvailable ? _onScanTap : null,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _onScanTap() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('QR scanner coming soon.')),
-    );
-  }
-
-  Widget _engagementButton({
-    required IconData icon,
-    required String label,
-    required String description,
-    required Color color,
-    VoidCallback? onTap,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(10),
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: color.withOpacity(0.06),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: color.withOpacity(0.2)),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: color.withOpacity(0.12),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Icon(icon, color: color, size: 18),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(label,
-                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: color)),
-                  const SizedBox(height: 2),
-                  Text(description,
-                      style: const TextStyle(fontSize: 11, color: AppColors.textMuted,
-                          height: 1.3)),
-                ],
-              ),
-            ),
-            Icon(Icons.chevron_right, color: color.withOpacity(0.5), size: 18),
           ],
         ),
       ),

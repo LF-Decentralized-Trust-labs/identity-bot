@@ -180,8 +180,10 @@ class _ApiKeysScreenState extends State<ApiKeysScreen> {
           ? const Center(child: CircularProgressIndicator())
           : SingleChildScrollView(
               padding: const EdgeInsets.all(32),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 720),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   // ── Page header ──────────────────────────────────────────
                   const Text(
@@ -233,6 +235,7 @@ class _ApiKeysScreenState extends State<ApiKeysScreen> {
                     ),
                   ),
                 ],
+              ),
               ),
             ),
     );

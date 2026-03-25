@@ -57,7 +57,7 @@ class _ModeSelectionScreenState extends State<ModeSelectionScreen> {
                   ),
                   const SizedBox(height: 16),
                   const Text(
-                    'Manage your entire digital life.',
+                    'One place to manage your entire digital life.',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: AppColors.textPrimary,

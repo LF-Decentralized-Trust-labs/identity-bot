@@ -1532,11 +1532,23 @@ class CredentialRecord {
 
   // Attempt to extract a primary claim from the ACDC JSON.
   // Returns a human-readable string representing the most prominent claim.
+  /// Decode acdcJson which may be base64-encoded or raw JSON.
+  String get decodedAcdcJson {
+    if (acdcJson.isEmpty) return '';
+    if (acdcJson.trimLeft().startsWith('{')) return acdcJson;
+    try {
+      return utf8.decode(base64Decode(acdcJson));
+    } catch (_) {
+      return acdcJson;
+    }
+  }
+
   String get primaryClaim {
     if (acdcJson.isEmpty) return said.length > 20 ? '${said.substring(0, 20)}...' : said;
     try {
-      final Map<String, dynamic> acdc = jsonDecode(acdcJson) as Map<String, dynamic>;
-      final attrs = acdc['a'] as Map<String, dynamic>?;
+      final acdc = Map<String, dynamic>.from(jsonDecode(decodedAcdcJson) as Map);
+      final a = acdc['a'];
+      final attrs = a is Map ? Map<String, dynamic>.from(a) : null;
       if (attrs != null) {
         for (final key in ['email', 'name', 'fullName', 'full_name', 'identifier',
                            'licenseNumber', 'license_number', 'id', 'subject']) {

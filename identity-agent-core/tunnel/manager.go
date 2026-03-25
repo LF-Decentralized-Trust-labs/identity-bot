@@ -173,7 +173,12 @@ func DefaultConfig() Config {
                 return Config{Provider: ProviderCloudflare}
         }
 
-        return Config{Provider: ProviderNone}
+        // Default to Grape ID tunneling. TunnelExtension will be auto-generated
+        // by the server on startup if not set.
+        return Config{
+                Provider:     ProviderGrapeID,
+                TunnelDomain: "grapeid.org",
+        }
 }
 
 func LookupCloudflared() (string, error) {

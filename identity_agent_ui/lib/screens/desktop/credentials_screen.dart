@@ -8,6 +8,29 @@ import '../../config/agent_config.dart';
 
 // ignore_for_file: library_private_types_in_public_api
 
+/// Derive a human-readable credential type from schema SAID / ACDC JSON.
+String _deriveTypeFromSchemaSaid(String schemaSaid, String decodedAcdc) {
+  String schema = schemaSaid;
+  if (schema.isEmpty && decodedAcdc.isNotEmpty) {
+    try {
+      schema = (Map<String, dynamic>.from(jsonDecode(decodedAcdc) as Map))['s']?.toString() ?? '';
+    } catch (_) {}
+  }
+  if (schema.isEmpty) return 'Credential';
+  // Schema SAIDs often look like "ESchoolPickupAuthorization__placeholder__v1"
+  var name = schema;
+  if (name.startsWith('E') && name.length > 1 && name[1] == name[1].toUpperCase()) {
+    name = name.substring(1);
+  }
+  name = name.replaceAll(RegExp(r'__.*$'), '');
+  name = name.replaceAll(RegExp(r'X+$'), '');
+  name = name.replaceAllMapped(RegExp(r'([a-z])([A-Z])'), (m) => '${m.group(1)} ${m.group(2)}');
+  name = name.replaceAll('_', ' ').trim();
+  // Clean up common schema naming patterns
+  name = name.replaceAll(RegExp(r'\s+'), ' ');
+  return name.isEmpty ? 'Credential' : name;
+}
+
 // ── Filter tabs ───────────────────────────────────────────────────────────────
 
 enum _CredFilter { all, received, issued, expired }
@@ -28,7 +51,6 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
   bool _loading = true;
   String? _error;
   _CredFilter _filter = _CredFilter.all;
-  CredentialRecord? _selected; // detail panel
 
   @override
   void initState() {
@@ -642,7 +664,6 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
       if (mounted) {
         setState(() {
           _all.remove(cred);
-          if (_selected?.said == cred.said) _selected = null;
         });
       }
     } catch (e) {
@@ -728,7 +749,7 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
           return Padding(
             padding: const EdgeInsets.only(right: 8),
             child: InkWell(
-              onTap: () => setState(() { _filter = f; _selected = null; }),
+              onTap: () => setState(() { _filter = f; }),
               borderRadius: BorderRadius.circular(20),
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
@@ -777,21 +798,33 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
     final list = _filtered;
     if (list.isEmpty) return _buildEmpty();
 
-    if (_selected != null) {
-      return Row(
-        children: [
-          Expanded(flex: 4, child: _buildList(list)),
-          VerticalDivider(width: 1, color: AppColors.border),
-          Expanded(flex: 3, child: _CredentialDetail(
-              cred: _selected!,
-              onDelete: () => _delete(_selected!),
-              onClose: () => setState(() => _selected = null),
-              onVerify: () => _showVerifyDialog(prefillSaid: _selected!.said))),
-        ],
-      );
-    }
-
     return _buildList(list);
+  }
+
+  void _showDetailDialog(CredentialRecord cred) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: Theme.of(ctx).colorScheme.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 560, maxHeight: 680),
+          child: CredentialDetail(
+            cred: cred,
+            onClose: () => Navigator.pop(ctx),
+            onDelete: () {
+              Navigator.pop(ctx);
+              _delete(cred);
+            },
+            onVerify: () {
+              Navigator.pop(ctx);
+              _showVerifyDialog(prefillSaid: cred.said);
+            },
+            serverUrl: widget.serverUrl,
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _buildEmpty() {
@@ -820,7 +853,8 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
   }
 
   Widget _buildList(List<CredentialRecord> list) {
-    return Center(
+    return Align(
+      alignment: Alignment.topLeft,
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 640),
         child: ListView.separated(
@@ -829,8 +863,8 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
           separatorBuilder: (_, __) => const SizedBox(height: 10),
           itemBuilder: (_, i) => _CredentialCard(
             cred: list[i],
-            selected: _selected?.said == list[i].said,
-            onTap: () => setState(() => _selected = list[i].said == _selected?.said ? null : list[i]),
+            selected: false,
+            onTap: () => _showDetailDialog(list[i]),
             onDelete: () => _delete(list[i]),
           ),
         ),
@@ -851,6 +885,73 @@ IconData _credTypeIcon(String type) {
   if (t.contains('passport') || t.contains('travel')) return Icons.travel_explore;
   if (t.contains('health') || t.contains('medical')) return Icons.health_and_safety_outlined;
   return Icons.verified_user_outlined;
+}
+
+/// Build a short content summary for a credential card based on its type and ACDC attributes.
+String _credContentSummary(CredentialRecord cred, String typeLabel) {
+  Map<String, dynamic>? attrs;
+  try {
+    final decoded = cred.decodedAcdcJson;
+    if (decoded.isNotEmpty) {
+      final acdc = jsonDecode(decoded);
+      if (acdc is Map) {
+        final a = acdc['a'];
+        if (a is Map) attrs = Map<String, dynamic>.from(a);
+      }
+    }
+  } catch (_) {}
+
+  if (attrs == null) return '';
+
+  final tl = typeLabel.toLowerCase();
+  // Guardianship: "Issuer Name (Dependent: dependent_name)"
+  if (tl.contains('guardian')) {
+    final dep = (attrs['dependent_name'] ?? '').toString();
+    if (dep.isNotEmpty) {
+      final issuer = cred.issuerName.isNotEmpty ? cred.issuerName : 'Guardian';
+      return '$issuer (Dependent: $dep)';
+    }
+  }
+  // Proof of Age: show "21+" or the minimum age
+  if (tl.contains('age') || tl.contains('over')) {
+    final over21 = attrs['over_21'];
+    final minAge = (attrs['minimum_age'] ?? '').toString();
+    if (over21 == true || over21 == 'true' || over21 == 'True') {
+      return '21+';
+    }
+    if (minAge.isNotEmpty) return '$minAge+';
+    return 'Age verified';
+  }
+  // School Pickup: child name + school
+  if (tl.contains('pickup') || tl.contains('school')) {
+    final child = (attrs['child_name'] ?? '').toString();
+    final school = (attrs['school_name'] ?? '').toString();
+    if (child.isNotEmpty && school.isNotEmpty) return '$child — $school';
+    if (child.isNotEmpty) return child;
+  }
+  // Contact Attestation: subject name + relationship
+  if (tl.contains('contact') && tl.contains('attest')) {
+    final name = (attrs['subject_name'] ?? '').toString();
+    final rel = (attrs['relationship'] ?? '').toString();
+    if (name.isNotEmpty && rel.isNotEmpty) return '$name ($rel)';
+    if (name.isNotEmpty) return name;
+  }
+  // Identity Attestation: subject name + assurance level
+  if (tl.contains('identity') && tl.contains('attest')) {
+    final name = (attrs['subject_name'] ?? '').toString();
+    final level = (attrs['assurance_level'] ?? '').toString().toUpperCase();
+    if (name.isNotEmpty && level.isNotEmpty) return '$name — $level';
+    if (name.isNotEmpty) return name;
+  }
+  // Generic fallback: first non-empty string value that isn't a SAID
+  for (final e in attrs.entries) {
+    if (e.key == 'd' || e.key == 'i') continue;
+    final v = (e.value ?? '').toString();
+    if (v.isNotEmpty && !(v.startsWith('E') && v.length >= 44 && !v.contains(' '))) {
+      return v;
+    }
+  }
+  return '';
 }
 
 Color _credTypeColor(String type) {
@@ -878,13 +979,20 @@ class _CredentialCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final typeLabel = cred.credentialType.isNotEmpty ? cred.credentialType : 'Credential';
+    final typeLabel = cred.credentialType.isNotEmpty
+        ? cred.credentialType
+        : _deriveTypeFromSchemaSaid(cred.schemaSaid, cred.decodedAcdcJson);
     final typeColor = _credTypeColor(typeLabel);
     final typeIcon = _credTypeIcon(typeLabel);
-    final primary = cred.primaryClaim;
-    // Only show primaryClaim if it's not a raw SAID (starts with 'E' and 44+ chars)
-    final showClaim = primary.isNotEmpty &&
-        !(primary.startsWith('E') && primary.length >= 44 && !primary.contains(' '));
+
+    // Build a content summary based on credential type
+    final contentSummary = _credContentSummary(cred, typeLabel);
+    // Issuer / from line
+    final fromLine = cred.issuerName.isNotEmpty
+        ? 'From ${cred.issuerName}'
+        : (cred.issuerAid.isNotEmpty
+            ? 'From ${cred.issuerAid.substring(0, (cred.issuerAid.length).clamp(0, 16))}...'
+            : '');
 
     return InkWell(
       onTap: onTap,
@@ -917,7 +1025,9 @@ class _CredentialCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // Type (title) + badges in upper right
                   Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Expanded(
                         child: Text(
@@ -929,33 +1039,32 @@ class _CredentialCard extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(width: 6),
-                      _RoleBadge(status: cred.status),
-                    ],
-                  ),
-                  if (showClaim) ...[
-                    const SizedBox(height: 3),
-                    Text(
-                      primary,
-                      style: const TextStyle(fontSize: 13, color: AppColors.textSecondary),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                  const SizedBox(height: 5),
-                  Row(
-                    children: [
-                      if (cred.issuerName.isNotEmpty) ...[
-                        Text(cred.issuerName,
-                            style: TextStyle(fontSize: 11, color: AppColors.textMuted)),
-                        const SizedBox(width: 8),
-                      ],
                       _FormatBadge(format: cred.format),
+                      const SizedBox(width: 4),
+                      _RoleBadge(status: cred.status),
                       if (cred.expiryDate.isNotEmpty) ...[
-                        const SizedBox(width: 6),
+                        const SizedBox(width: 4),
                         _ExpiryBadge(cred: cred),
                       ],
                     ],
                   ),
+                  // From (issuer)
+                  if (fromLine.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(fromLine,
+                        style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
+                        maxLines: 1, overflow: TextOverflow.ellipsis),
+                  ],
+                  // Content summary
+                  if (contentSummary.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      contentSummary,
+                      style: TextStyle(fontSize: 13, color: typeColor, fontWeight: FontWeight.w500),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -977,26 +1086,161 @@ class _CredentialCard extends StatelessWidget {
 
 // ── Credential detail panel ───────────────────────────────────────────────────
 
-class _CredentialDetail extends StatelessWidget {
+class CredentialDetail extends StatefulWidget {
   final CredentialRecord cred;
   final VoidCallback onDelete;
   final VoidCallback onClose;
   final VoidCallback onVerify;
+  final String? serverUrl;
 
-  const _CredentialDetail({
+  const CredentialDetail({
+    super.key,
     required this.cred,
     required this.onDelete,
     required this.onClose,
     required this.onVerify,
+    this.serverUrl,
   });
 
   @override
-  Widget build(BuildContext context) {
-    Map<String, dynamic>? attrs;
+  State<CredentialDetail> createState() => CredentialDetailState();
+}
+
+class CredentialDetailState extends State<CredentialDetail> {
+  List<Map<String, dynamic>>? _chain;
+  bool _verifying = false;
+  String? _verifyError;
+  bool? _chainValid;
+
+  @override
+  void initState() {
+    super.initState();
+    _verifyChain();
+  }
+
+  @override
+  void didUpdateWidget(CredentialDetail old) {
+    super.didUpdateWidget(old);
+    if (old.cred.said != widget.cred.said) {
+      _chain = null;
+      _chainValid = null;
+      _verifyError = null;
+      _verifyChain();
+    }
+  }
+
+  Future<void> _verifyChain() async {
+    setState(() { _verifying = true; _verifyError = null; });
     try {
-      final acdc = jsonDecode(cred.acdcJson) as Map<String, dynamic>;
-      attrs = acdc['a'] as Map<String, dynamic>?;
+      final svc = CoreService(baseUrl: widget.serverUrl ?? AgentConfig.coreBaseUrl);
+      final result = await svc.verifyCredentialChain(acdcSaid: widget.cred.said);
+      svc.dispose();
+      if (!mounted) return;
+      try {
+        final chainValid = result['valid'] == true;
+        final rawChain = result['chain'];
+        final List<Map<String, dynamic>> parsedChain = [];
+        if (rawChain is List) {
+          for (final item in rawChain) {
+            if (item is Map) {
+              parsedChain.add(
+                item.map((k, v) => MapEntry(k.toString(), v)),
+              );
+            }
+          }
+        }
+        setState(() {
+          _verifying = false;
+          _chainValid = chainValid;
+          _chain = parsedChain;
+        });
+      } catch (mapError) {
+        setState(() {
+          _verifying = false;
+          _verifyError = 'Chain data format error: $mapError';
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _verifying = false;
+        _verifyError = e.toString().replaceFirst('Exception: ', '');
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    try {
+      return _buildDetailContent(context);
+    } catch (e) {
+      // Error boundary fallback — show raw credential info instead of crashing
+      final cred = widget.cred;
+      return Container(
+        color: AppColors.surface,
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.warning_amber_rounded, size: 20, color: AppColors.warning),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text('Could not render credential details',
+                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary)),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close, size: 18),
+                  color: AppColors.textMuted,
+                  onPressed: widget.onClose,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Text('SAID: ${cred.said}',
+                style: const TextStyle(fontSize: 12, fontFamily: 'monospace',
+                    color: AppColors.textSecondary)),
+            const SizedBox(height: 6),
+            Text('Issuer: ${cred.issuerAid}',
+                style: const TextStyle(fontSize: 12, fontFamily: 'monospace',
+                    color: AppColors.textSecondary)),
+            const SizedBox(height: 6),
+            Text('Type: ${cred.credentialType.isNotEmpty ? cred.credentialType : cred.schemaSaid}',
+                style: const TextStyle(fontSize: 12, fontFamily: 'monospace',
+                    color: AppColors.textSecondary)),
+            const SizedBox(height: 6),
+            Text('Format: ${cred.format}  |  Status: ${cred.status}',
+                style: const TextStyle(fontSize: 12, fontFamily: 'monospace',
+                    color: AppColors.textSecondary)),
+            const SizedBox(height: 12),
+            Text('Rendering error: $e',
+                style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
+          ],
+        ),
+      );
+    }
+  }
+
+  Widget _buildDetailContent(BuildContext context) {
+    Map<String, dynamic>? attrs;
+    String? schemaHint;
+    try {
+      final raw = jsonDecode(widget.cred.decodedAcdcJson);
+      final acdc = Map<String, dynamic>.from(raw as Map);
+      final a = acdc['a'];
+      if (a is Map) attrs = Map<String, dynamic>.from(a);
+      schemaHint = acdc['s']?.toString();
     } catch (_) {}
+
+    final cred = widget.cred;
+    final typeLabel = cred.credentialType.isNotEmpty
+        ? cred.credentialType
+        : _deriveTypeFromSchemaSaid(schemaHint ?? cred.schemaSaid, cred.decodedAcdcJson);
+    final typeColor = _credTypeColor(typeLabel);
 
     return Container(
       color: AppColors.surface,
@@ -1021,19 +1265,19 @@ class _CredentialDetail extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(cred.credentialType.isNotEmpty ? cred.credentialType : 'Credential',
+                      Text(typeLabel,
                           style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600,
                               color: AppColors.textPrimary)),
                       if (cred.issuerName.isNotEmpty)
-                        Text(cred.issuerName,
-                            style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
+                        Text('Issued by ${cred.issuerName}',
+                            style: const TextStyle(fontSize: 12, color: AppColors.textMuted)),
                     ],
                   ),
                 ),
                 IconButton(
                   icon: const Icon(Icons.close, size: 18),
                   color: AppColors.textMuted,
-                  onPressed: onClose,
+                  onPressed: widget.onClose,
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
                 ),
@@ -1045,7 +1289,7 @@ class _CredentialDetail extends StatelessWidget {
             child: ListView(
               padding: const EdgeInsets.all(20),
               children: [
-                // Format + Expiry row
+                // Status badges row
                 Row(
                   children: [
                     _FormatBadge(format: cred.format),
@@ -1055,29 +1299,124 @@ class _CredentialDetail extends StatelessWidget {
                     _StatusBadge(status: cred.status),
                   ],
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 20),
 
-                // Claims
+                // ── Issuer section ──────────────────────────────
+                _sectionLabel('ISSUER'),
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceLight,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  child: Row(
+                    children: [
+                      _IssuerAvatar(
+                        name: cred.issuerName.isNotEmpty ? cred.issuerName : cred.issuerAid,
+                        logoUrl: cred.issuerLogoUrl.isNotEmpty ? cred.issuerLogoUrl : null,
+                        size: 40,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              cred.issuerName.isNotEmpty ? cred.issuerName : 'Unknown Issuer',
+                              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600,
+                                  color: AppColors.textPrimary),
+                            ),
+                            const SizedBox(height: 4),
+                            InkWell(
+                              onTap: () => Clipboard.setData(ClipboardData(text: cred.issuerAid)),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      cred.issuerAid.length > 32
+                                          ? '${cred.issuerAid.substring(0, 16)}...${cred.issuerAid.substring(cred.issuerAid.length - 8)}'
+                                          : cred.issuerAid,
+                                      style: const TextStyle(fontSize: 11, fontFamily: 'monospace',
+                                          color: AppColors.textMuted),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  const Icon(Icons.copy, size: 11, color: AppColors.textMuted),
+                                ],
+                              ),
+                            ),
+                            if (cred.issuedAt.isNotEmpty) ...[
+                              const SizedBox(height: 4),
+                              Text('Issued ${cred.issuedAt.length > 10 ? cred.issuedAt.substring(0, 10) : cred.issuedAt}',
+                                  style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 20),
+
+                // ── Human-readable details ──────────────────────
                 if (attrs != null && attrs.isNotEmpty) ...[
-                  _sectionLabel('Claims'),
-                  ...attrs.entries
-                      .where((e) => e.key != 'd' && e.key != 'i')
-                      .map((e) => _claimRow(e.key, e.value?.toString() ?? '')),
-                  const SizedBox(height: 16),
+                  _sectionLabel('DETAILS'),
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: typeColor.withOpacity(0.04),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: typeColor.withOpacity(0.12)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: attrs.entries
+                          .where((e) => e.key != 'd' && e.key != 'i')
+                          .map((e) => _detailRow(e.key, e.value?.toString() ?? ''))
+                          .toList(),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
                 ],
 
-                // Technical fields
-                _sectionLabel('Technical'),
-                _copyRow('SAID', cred.said),
-                _copyRow('Issuer AID', cred.issuerAid),
-                _copyRow('Schema SAID', cred.schemaSaid),
-                if (cred.ixnSaid.isNotEmpty) _copyRow('IXN SAID', cred.ixnSaid),
-                _copyRow('Issued', cred.issuedAt),
+                // ── Verification chain ──────────────────────────
+                _sectionLabel('VERIFICATION'),
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: AppColors.background,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  child: _buildChainSection(),
+                ),
+                const SizedBox(height: 20),
 
+                // ── Technical (collapsed by default) ────────────
+                Theme(
+                  data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                  child: ExpansionTile(
+                    tilePadding: EdgeInsets.zero,
+                    title: const Text('Technical Details',
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
+                            color: AppColors.textMuted, letterSpacing: 0.8)),
+                    initiallyExpanded: false,
+                    children: [
+                      _copyRow('SAID', cred.said),
+                      _copyRow('Issuer AID', cred.issuerAid),
+                      _copyRow('Schema SAID', cred.schemaSaid),
+                      if (cred.ixnSaid.isNotEmpty) _copyRow('IXN SAID', cred.ixnSaid),
+                      _copyRow('Issued', cred.issuedAt),
+                    ],
+                  ),
+                ),
                 const SizedBox(height: 16),
 
                 // Actions
-                Row(
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
                   children: [
                     OutlinedButton.icon(
                       onPressed: () {
@@ -1094,20 +1433,18 @@ class _CredentialDetail extends StatelessWidget {
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                       ),
                     ),
-                    const SizedBox(width: 8),
                     OutlinedButton.icon(
-                      onPressed: onVerify,
+                      onPressed: widget.onVerify,
                       icon: const Icon(Icons.verified_outlined, size: 14),
-                      label: const Text('Verify Chain', style: TextStyle(fontSize: 12)),
+                      label: const Text('Full Verify', style: TextStyle(fontSize: 12)),
                       style: OutlinedButton.styleFrom(
                         foregroundColor: const Color(0xFF9B59B6),
                         side: const BorderSide(color: Color(0xFF9B59B6)),
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                       ),
                     ),
-                    const SizedBox(width: 8),
                     OutlinedButton.icon(
-                      onPressed: onDelete,
+                      onPressed: widget.onDelete,
                       icon: const Icon(Icons.delete_outline, size: 14),
                       label: const Text('Remove', style: TextStyle(fontSize: 12)),
                       style: OutlinedButton.styleFrom(
@@ -1126,6 +1463,152 @@ class _CredentialDetail extends StatelessWidget {
     );
   }
 
+  Widget _buildChainSection() {
+    if (_verifying) {
+      return const Row(
+        children: [
+          SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary)),
+          SizedBox(width: 10),
+          Text('Verifying credential chain...', style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
+        ],
+      );
+    }
+    if (_verifyError != null) {
+      return Row(
+        children: [
+          const Icon(Icons.warning_amber_rounded, size: 16, color: AppColors.warning),
+          const SizedBox(width: 8),
+          Expanded(child: Text('Could not verify: $_verifyError',
+              style: const TextStyle(fontSize: 12, color: AppColors.textMuted))),
+          IconButton(
+            icon: const Icon(Icons.refresh, size: 14),
+            onPressed: _verifyChain,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+          ),
+        ],
+      );
+    }
+    if (_chain == null || _chain!.isEmpty) {
+      return const Text('No chain data available.',
+          style: TextStyle(fontSize: 12, color: AppColors.textMuted));
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(
+              _chainValid == true ? Icons.verified : Icons.gpp_maybe_outlined,
+              size: 16,
+              color: _chainValid == true ? AppColors.success : AppColors.warning,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              _chainValid == true
+                  ? 'Credential chain verified (${_chain!.length} ${_chain!.length == 1 ? "step" : "steps"})'
+                  : 'Chain verification incomplete',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: _chainValid == true ? AppColors.success : AppColors.warning,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        ..._chain!.asMap().entries.map((entry) {
+          final idx = entry.key;
+          final step = entry.value;
+          final stepValid = step['valid'] == true;
+          final edgeLabel = (step['edge_label'] ?? '').toString();
+          final isLast = idx == _chain!.length - 1;
+
+          // checks can be a Map<String,bool> or a List — handle both safely
+          final rawChecks = step['checks'];
+          Map<String, bool> checksMap = {};
+          if (rawChecks is Map) {
+            checksMap = rawChecks.map((k, v) => MapEntry(k.toString(), v == true));
+          } else if (rawChecks is List) {
+            for (final c in rawChecks) {
+              checksMap[c.toString()] = true;
+            }
+          }
+
+          // errors is a List<String>
+          final rawErrors = step['errors'];
+          List<String> errors = [];
+          if (rawErrors is List) {
+            errors = rawErrors.map((e) => e.toString()).toList();
+          }
+
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Chain connector
+                Column(
+                  children: [
+                    Icon(
+                      stepValid ? Icons.check_circle : Icons.cancel,
+                      size: 16,
+                      color: stepValid ? AppColors.success : AppColors.error,
+                    ),
+                    if (!isLast) Container(
+                      width: 1.5, height: 20,
+                      color: AppColors.border,
+                    ),
+                  ],
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        edgeLabel.isNotEmpty
+                            ? 'Step ${idx + 1}: ${_formatKey(edgeLabel)}'
+                            : 'Step ${idx + 1}: Root credential',
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
+                            color: AppColors.textPrimary),
+                      ),
+                      if (checksMap.isNotEmpty)
+                        Wrap(
+                          spacing: 4,
+                          runSpacing: 2,
+                          children: checksMap.entries.map((e) {
+                            final passed = e.value;
+                            return Container(
+                              margin: const EdgeInsets.only(top: 2),
+                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: (passed ? AppColors.success : AppColors.error).withOpacity(0.08),
+                                borderRadius: BorderRadius.circular(3),
+                              ),
+                              child: Text(
+                                e.key.replaceAll('_', ' '),
+                                style: TextStyle(fontSize: 9, color: passed ? AppColors.success : AppColors.error),
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                      if (errors.isNotEmpty)
+                        ...errors.map((e) => Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Text(e, style: const TextStyle(fontSize: 10, color: AppColors.error)),
+                        )),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          );
+        }),
+      ],
+    );
+  }
+
   Widget _sectionLabel(String label) => Padding(
     padding: const EdgeInsets.only(bottom: 8),
     child: Text(label,
@@ -1133,23 +1616,30 @@ class _CredentialDetail extends StatelessWidget {
             color: AppColors.textMuted, letterSpacing: 0.8)),
   );
 
-  Widget _claimRow(String key, String value) => Padding(
-    padding: const EdgeInsets.only(bottom: 6),
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SizedBox(
-          width: 120,
-          child: Text(_formatKey(key),
-              style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
-        ),
-        Expanded(
-          child: Text(value,
-              style: const TextStyle(fontSize: 12, color: AppColors.textPrimary)),
-        ),
-      ],
-    ),
-  );
+  Widget _detailRow(String key, String value) {
+    // Format booleans nicely
+    String displayValue = value;
+    if (value == 'true') displayValue = 'Yes';
+    if (value == 'false') displayValue = 'No';
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 130,
+            child: Text(_formatKey(key),
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: AppColors.textMuted)),
+          ),
+          Expanded(
+            child: Text(displayValue,
+                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: AppColors.textPrimary)),
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _copyRow(String label, String value) => InkWell(
     onTap: () => Clipboard.setData(ClipboardData(text: value)),
@@ -1161,7 +1651,7 @@ class _CredentialDetail extends StatelessWidget {
           SizedBox(
             width: 120,
             child: Text(label,
-                style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
+                style: const TextStyle(fontSize: 12, color: AppColors.textMuted)),
           ),
           Expanded(
             child: Text(
@@ -1169,7 +1659,7 @@ class _CredentialDetail extends StatelessWidget {
               style: const TextStyle(fontSize: 12, color: AppColors.textPrimary, fontFamily: 'monospace'),
             ),
           ),
-          Icon(Icons.copy, size: 12, color: AppColors.textMuted),
+          const Icon(Icons.copy, size: 12, color: AppColors.textMuted),
         ],
       ),
     ),
@@ -1179,8 +1669,9 @@ class _CredentialDetail extends StatelessWidget {
     return key.replaceAll('_', ' ').replaceAllMapped(
       RegExp(r'([A-Z])'),
       (m) => ' ${m.group(1)}',
-    ).trim();
+    ).trim().split(' ').map((w) => w.isNotEmpty ? '${w[0].toUpperCase()}${w.substring(1)}' : '').join(' ');
   }
+
 }
 
 // ── Small reusable widgets ────────────────────────────────────────────────────
@@ -1325,7 +1816,7 @@ class _RoleBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     final isIssued = status == 'issued';
     final color = isIssued ? AppColors.success : AppColors.primary;
-    final label = isIssued ? 'Issued' : 'Received';
+    final label = isIssued ? 'Issued' : 'Accepted';
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
@@ -1353,17 +1844,19 @@ class _HeaderActionButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return OutlinedButton.icon(
+    return FilledButton.icon(
       onPressed: onPressed,
-      icon: Icon(icon, size: 14),
-      label: Text(label, style: const TextStyle(fontSize: 12)),
-      style: OutlinedButton.styleFrom(
-        foregroundColor: color,
-        side: BorderSide(color: color.withOpacity(0.5)),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        minimumSize: Size.zero,
+      icon: Icon(icon, size: 16),
+      label: Text(label,
+          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500, letterSpacing: 0.2)),
+      style: FilledButton.styleFrom(
+        backgroundColor: color,
+        foregroundColor: Colors.white,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        minimumSize: const Size(0, 36),
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        elevation: 0,
       ),
     );
   }
@@ -1405,6 +1898,8 @@ class _IssueCredentialDialogState extends State<_IssueCredentialDialog> {
   String? _issuedSaid;
   String? _deliveryUrl;
   bool _deliveryUrlCopied = false;
+  bool _shareExternally = false; // true = show QR/link on success even for known contact
+  bool _delivered = false; // true = recipient server responded OK
 
   @override
   void dispose() {
@@ -1412,22 +1907,65 @@ class _IssueCredentialDialogState extends State<_IssueCredentialDialog> {
     super.dispose();
   }
 
+  /// Example data per schema for demo purposes.
+  static const _dummyData = <String, Map<String, String>>{
+    'Guardianship Credential': {
+      'dependent_name': 'Emma Anderson',
+      'guardian_type': 'minor_child',
+      'effective_date': '2025-06-15',
+      'jurisdiction': 'State of Utah',
+      'notes': 'Primary legal guardian, full custody',
+    },
+    'Proof of Age': {
+      'over_21': 'true',
+      'minimum_age': '21',
+      'verified_by': 'Government-issued photo ID',
+      'issued_date': '2026-03-20',
+    },
+    'Contact Attestation': {
+      'attestation': 'in_person_verified',
+      'subject_name': 'Sarah Chen',
+      'relationship': 'colleague',
+      'verified_date': '2026-03-15',
+      'notes': 'Met at quarterly offsite, verified against govt ID',
+    },
+    'Identity Attestation': {
+      'subject_name': 'James Roberts',
+      'assurance_level': 'ial3',
+      'auth_assurance': 'aal3',
+      'confidence_score': '92',
+      'verification_methods': 'government_id, biometric_liveness',
+      'jurisdiction': 'US-UT',
+      'issued_date': '2026-03-18',
+      'issuer_type': 'witness',
+    },
+    'School Pickup Authorization': {
+      'child_name': 'Emma Anderson',
+      'school_name': 'Lincoln Elementary',
+      'authorized_until': '2026-06-15',
+      'authorized_from': '2026-01-10',
+      'authorized_days': 'Monday, Wednesday, Friday',
+      'notes': 'Grandparent authorized for after-school pickup',
+    },
+  };
+
   void _selectSchema(BuiltinSchema schema) {
     _controllers.clear();
     _boolValues.clear();
+    final dummy = _dummyData[schema.name] ?? {};
     for (final f in schema.fields) {
       if (f.key == 'd' || f.key == 'i') continue; // auto-filled by backend
       if (f.type == 'boolean') {
-        _boolValues[f.key] = false;
+        _boolValues[f.key] = dummy.containsKey(f.key) ? dummy[f.key] == 'true' : false;
       } else {
-        _controllers[f.key] = TextEditingController();
+        _controllers[f.key] = TextEditingController(text: dummy[f.key] ?? '');
       }
     }
     setState(() { _schema = schema; _step = 1; });
   }
 
   Future<void> _issue() async {
-    if (_contact == null || _schema == null) return;
+    if ((_contact == null && !_shareExternally) || _schema == null) return;
     setState(() { _issuing = true; _error = null; });
 
     final claims = <String, String>{};
@@ -1445,22 +1983,23 @@ class _IssueCredentialDialogState extends State<_IssueCredentialDialog> {
       final results = await Future.wait([
         widget.coreService.issueCredential(
           schemaSaid: _schema!.said,
-          holderAid: _contact!.aid,
+          holderAid: _contact?.aid ?? '',
           claims: claims,
         ),
         widget.coreService.getOobi(),
       ]);
-      final result = results[0] as Map<String, dynamic>;
+      final result = Map<String, dynamic>.from(results[0] as Map);
       final oobi = results[1] as OobiResponse;
-      final said = result['acdc_said'] as String? ?? '';
+      final said = result['acdc_said']?.toString() ?? '';
       final endpointBase = oobi.endpointUrl.isNotEmpty ? oobi.endpointUrl : oobi.baseUrl;
-      // Strip trailing slash
       final baseClean = endpointBase.endsWith('/') ? endpointBase.substring(0, endpointBase.length - 1) : endpointBase;
+      final delivered = result['delivered'] == true;
       setState(() {
         _issuing = false;
         _issuedSaid = said;
-        _issuedAcdcJson = result['acdc_json_b64'] as String? ?? '';
+        _issuedAcdcJson = result['acdc_json_b64']?.toString() ?? '';
         _deliveryUrl = said.isNotEmpty ? '$baseClean/public/credential/$said' : null;
+        _delivered = delivered;
         _step = 3; // success step
       });
     } catch (e) {
@@ -1522,7 +2061,9 @@ class _IssueCredentialDialogState extends State<_IssueCredentialDialog> {
         Text('What type of credential do you want to issue?',
             style: TextStyle(color: AppColors.textSecondary, fontSize: 13)),
         const SizedBox(height: 12),
-        ...widget.schemas.map((s) => _SchemaOption(
+        ...widget.schemas
+            .where((s) => s.name != 'Contact Attestation' && s.name != 'Identity Attestation')
+            .map((s) => _SchemaOption(
           schema: s,
           onTap: () => _selectSchema(s),
         )),
@@ -1597,16 +2138,6 @@ class _IssueCredentialDialogState extends State<_IssueCredentialDialog> {
   }
 
   Widget _buildContactPicker() {
-    if (widget.contacts.isEmpty) {
-      return const Padding(
-        padding: EdgeInsets.symmetric(vertical: 24),
-        child: Center(child: Text(
-          'No accepted contacts. Add contacts first to issue credentials to them.',
-          style: TextStyle(color: AppColors.textMuted, fontSize: 13),
-          textAlign: TextAlign.center,
-        )),
-      );
-    }
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1614,54 +2145,102 @@ class _IssueCredentialDialogState extends State<_IssueCredentialDialog> {
         Text('Who should receive this credential?',
             style: TextStyle(color: AppColors.textSecondary, fontSize: 13)),
         const SizedBox(height: 12),
-        ConstrainedBox(
-          constraints: const BoxConstraints(maxHeight: 300),
-          child: ListView.separated(
-            shrinkWrap: true,
-            itemCount: widget.contacts.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 4),
-            itemBuilder: (_, i) {
-              final c = widget.contacts[i];
-              final isSelected = _contact?.aid == c.aid;
-              return InkWell(
-                onTap: () => setState(() => _contact = c),
-                borderRadius: BorderRadius.circular(6),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: isSelected ? AppColors.primary.withOpacity(0.08) : Colors.transparent,
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(
-                      color: isSelected ? AppColors.primary : AppColors.border,
+        if (widget.contacts.isNotEmpty)
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 260),
+            child: ListView.separated(
+              shrinkWrap: true,
+              itemCount: widget.contacts.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 4),
+              itemBuilder: (_, i) {
+                final c = widget.contacts[i];
+                final isSelected = !_shareExternally && _contact?.aid == c.aid;
+                return InkWell(
+                  onTap: () => setState(() { _contact = c; _shareExternally = false; }),
+                  borderRadius: BorderRadius.circular(6),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: isSelected ? AppColors.primary.withOpacity(0.08) : Colors.transparent,
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(
+                        color: isSelected ? AppColors.primary : AppColors.border,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        _IssuerAvatar(
+                          name: c.alias.isNotEmpty ? c.alias : c.aid,
+                          size: 32,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(c.alias.isNotEmpty ? c.alias : 'Unknown',
+                                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500,
+                                      color: AppColors.textPrimary)),
+                              Text(
+                                c.aid.length > 30 ? '${c.aid.substring(0, 20)}...' : c.aid,
+                                style: TextStyle(fontSize: 11, color: AppColors.textMuted, fontFamily: 'monospace'),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (isSelected) Icon(Icons.check_circle, size: 18, color: AppColors.primary),
+                      ],
                     ),
                   ),
-                  child: Row(
-                    children: [
-                      _IssuerAvatar(
-                        name: c.alias.isNotEmpty ? c.alias : c.aid,
-                        size: 32,
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(c.alias.isNotEmpty ? c.alias : 'Unknown',
-                                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500,
-                                    color: AppColors.textPrimary)),
-                            Text(
-                              c.aid.length > 30 ? '${c.aid.substring(0, 20)}...' : c.aid,
-                              style: TextStyle(fontSize: 11, color: AppColors.textMuted, fontFamily: 'monospace'),
-                            ),
-                          ],
-                        ),
-                      ),
-                      if (isSelected) Icon(Icons.check_circle, size: 18, color: AppColors.primary),
+                );
+              },
+            ),
+          ),
+        if (widget.contacts.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Text('No accepted contacts yet.',
+                style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
+          ),
+        const SizedBox(height: 8),
+        // ── Share externally option ────────────────────────────────────
+        InkWell(
+          onTap: () => setState(() { _shareExternally = true; _contact = null; }),
+          borderRadius: BorderRadius.circular(6),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: _shareExternally ? AppColors.accent.withOpacity(0.08) : Colors.transparent,
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(
+                color: _shareExternally ? AppColors.accent : AppColors.border,
+              ),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 32, height: 32,
+                  decoration: BoxDecoration(
+                    color: AppColors.accent.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: const Icon(Icons.share_outlined, size: 16, color: AppColors.accent),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: const [
+                      Text('Share externally',
+                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: AppColors.textPrimary)),
+                      Text('Via QR code, link, or text — for someone not in your contacts',
+                          style: TextStyle(fontSize: 11, color: AppColors.textMuted)),
                     ],
                   ),
                 ),
-              );
-            },
+                if (_shareExternally) Icon(Icons.check_circle, size: 18, color: AppColors.accent),
+              ],
+            ),
           ),
         ),
         if (_error != null) ...[
@@ -1673,6 +2252,10 @@ class _IssueCredentialDialogState extends State<_IssueCredentialDialog> {
   }
 
   Widget _buildSuccess() {
+    final recipientName = _contact?.alias ?? _contact?.aid ?? 'external recipient';
+    // Show sharing UI when: sharing externally, OR delivered to a contact but their server didn't confirm
+    final showShareUI = _shareExternally || !_delivered;
+
     return SingleChildScrollView(
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -1680,14 +2263,23 @@ class _IssueCredentialDialogState extends State<_IssueCredentialDialog> {
           const SizedBox(height: 8),
           Icon(Icons.check_circle_outline, size: 44, color: AppColors.success),
           const SizedBox(height: 10),
-          Text('Credential issued to ${_contact?.alias ?? _contact?.aid ?? "holder"}',
-              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: AppColors.textPrimary),
-              textAlign: TextAlign.center),
+          Text(
+            _shareExternally
+                ? 'Credential issued — share it with the recipient below'
+                : 'Credential issued to $recipientName',
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: AppColors.textPrimary),
+            textAlign: TextAlign.center,
+          ),
           const SizedBox(height: 6),
-          Text('Signed and anchored to your Key Event Log.',
-              style: TextStyle(fontSize: 12, color: AppColors.textMuted),
-              textAlign: TextAlign.center),
-          if (_deliveryUrl != null) ...[
+          Text(
+            _delivered && !_shareExternally
+                ? 'Signed, anchored to your Key Event Log, and delivered.'
+                : 'Signed and anchored to your Key Event Log.',
+            style: TextStyle(fontSize: 12, color: AppColors.textMuted),
+            textAlign: TextAlign.center,
+          ),
+          // ── Sharing UI: QR + link + copy (shown for external or undelivered) ──
+          if (_deliveryUrl != null && showShareUI) ...[
             const SizedBox(height: 20),
             Container(
               padding: const EdgeInsets.all(14),
@@ -1701,19 +2293,36 @@ class _IssueCredentialDialogState extends State<_IssueCredentialDialog> {
                 children: [
                   Row(
                     children: [
-                      const Icon(Icons.link, size: 14, color: AppColors.primary),
+                      const Icon(Icons.share_outlined, size: 14, color: AppColors.primary),
                       const SizedBox(width: 6),
-                      const Text('DELIVERY LINK',
-                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700,
-                              color: AppColors.primary, letterSpacing: 0.8)),
+                      Text(
+                        _shareExternally ? 'SHARE CREDENTIAL' : 'DELIVERY LINK',
+                        style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700,
+                            color: AppColors.primary, letterSpacing: 0.8),
+                      ),
                     ],
                   ),
+                  const SizedBox(height: 10),
+                  Center(
+                    child: QrImageView(
+                      data: _deliveryUrl!,
+                      version: QrVersions.auto,
+                      size: 140,
+                      backgroundColor: Colors.white,
+                      padding: const EdgeInsets.all(6),
+                    ),
+                  ),
                   const SizedBox(height: 8),
+                  const Center(
+                    child: Text('Scan to accept in the Identity Agent app',
+                        style: TextStyle(fontSize: 10, color: AppColors.textMuted)),
+                  ),
+                  const SizedBox(height: 12),
                   Text(
                     _deliveryUrl!,
                     style: const TextStyle(fontSize: 10, color: AppColors.textSecondary,
                         fontFamily: 'monospace'),
-                    maxLines: 3,
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
                   const SizedBox(height: 10),
@@ -1737,21 +2346,6 @@ class _IssueCredentialDialogState extends State<_IssueCredentialDialog> {
                         ),
                       ),
                     ],
-                  ),
-                  const SizedBox(height: 12),
-                  Center(
-                    child: QrImageView(
-                      data: _deliveryUrl!,
-                      version: QrVersions.auto,
-                      size: 160,
-                      backgroundColor: Colors.white,
-                      padding: const EdgeInsets.all(6),
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  const Center(
-                    child: Text('Scan to accept in the Identity Agent app',
-                        style: TextStyle(fontSize: 10, color: AppColors.textMuted)),
                   ),
                 ],
               ),
@@ -1794,16 +2388,17 @@ class _IssueCredentialDialogState extends State<_IssueCredentialDialog> {
       ];
     }
     if (_step == 2) {
+      final canIssue = _contact != null || _shareExternally;
       return [
         TextButton(onPressed: () => setState(() { _step = 1; _error = null; }),
             child: Text('Back', style: TextStyle(color: AppColors.textSecondary))),
         ElevatedButton(
-          onPressed: (_contact == null || _issuing) ? null : _issue,
+          onPressed: (!canIssue || _issuing) ? null : _issue,
           style: ElevatedButton.styleFrom(backgroundColor: AppColors.success, foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6))),
           child: _issuing
               ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-              : const Text('Issue Credential'),
+              : Text(_shareExternally ? 'Issue & Share' : 'Issue Credential'),
         ),
       ];
     }
