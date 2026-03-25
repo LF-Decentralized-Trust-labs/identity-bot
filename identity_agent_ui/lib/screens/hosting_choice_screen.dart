@@ -65,8 +65,23 @@ class _HostingChoiceScreenState extends State<HostingChoiceScreen> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   const SizedBox(height: 32),
+                  // Brain icon
+                  Container(
+                    width: 64,
+                    height: 64,
+                    decoration: BoxDecoration(
+                      color: AppColors.accent.withOpacity(0.1),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.psychology,
+                      color: AppColors.accent,
+                      size: 32,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
                   const Text(
-                    'Your keys will live on this device. Now, where do you want the heavy processing done?',
+                    'This app will manage your private keys. Where do you want the heavy processing done?',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: AppColors.textPrimary,
@@ -78,7 +93,7 @@ class _HostingChoiceScreenState extends State<HostingChoiceScreen> {
                   ),
                   const SizedBox(height: 12),
                   const Text(
-                    'This app will manage your keys. The heavy processing \u2014 your agent\'s brain \u2014 can run right here, or on a more powerful remote server for better performance.',
+                    'The heavy processing \u2014 your agent\'s brain \u2014 can run right here, or on a more powerful remote server for better performance.',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: AppColors.textSecondary,
@@ -93,7 +108,7 @@ class _HostingChoiceScreenState extends State<HostingChoiceScreen> {
                     icon: Icons.computer,
                     title: 'Right here',
                     subtitle:
-                        'I\'m happy with this computer. Run everything here.',
+                        'This computer handles everything. Fully self-contained.',
                     badge: 'RECOMMENDED',
                   ),
                   const SizedBox(height: 12),
@@ -102,7 +117,7 @@ class _HostingChoiceScreenState extends State<HostingChoiceScreen> {
                     icon: Icons.cloud_outlined,
                     title: 'On a remote server',
                     subtitle:
-                        'I\'ll use a more powerful remote server.',
+                        'A more powerful server handles the processing.',
                   ),
                   if (_selected == HostingChoice.keysHereBrainRemote) ...[
                     const SizedBox(height: 16),

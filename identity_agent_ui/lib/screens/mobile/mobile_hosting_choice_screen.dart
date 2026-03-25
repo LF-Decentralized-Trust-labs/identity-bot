@@ -68,8 +68,23 @@ class _MobileHostingChoiceScreenState
                 child: Column(
                   children: [
                     const SizedBox(height: 32),
+                    // Brain icon
+                    Container(
+                      width: 56,
+                      height: 56,
+                      decoration: BoxDecoration(
+                        color: MobileColors.accent.withOpacity(0.1),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.psychology,
+                        color: MobileColors.accent,
+                        size: 28,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
                     const Text(
-                      'Your keys will live on this device. Now, where do you want the heavy processing done?',
+                      'This app will manage your private keys. Where do you want the heavy processing done?',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         color: MobileColors.textPrimary,
@@ -80,7 +95,7 @@ class _MobileHostingChoiceScreenState
                     ),
                     const SizedBox(height: 10),
                     const Text(
-                      'This app will manage your keys. The heavy processing \u2014 your agent\'s brain \u2014 can run right here, or on a more powerful remote server for better performance.',
+                      'The heavy processing \u2014 your agent\'s brain \u2014 can run right here, or on a more powerful remote server for better performance.',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         color: MobileColors.textSecondary,
@@ -94,7 +109,7 @@ class _MobileHostingChoiceScreenState
                       icon: Icons.cloud_outlined,
                       title: 'On a remote server',
                       subtitle:
-                          'This device manages your keys. A server handles the heavy processing.',
+                          'A more powerful server handles the processing.',
                       badge: 'RECOMMENDED',
                       disabledBadge: 'COMING SOON',
                       enabled: false,
