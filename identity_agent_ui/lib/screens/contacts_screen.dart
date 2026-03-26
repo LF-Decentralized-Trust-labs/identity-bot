@@ -366,11 +366,16 @@ class _ContactsScreenState extends State<ContactsScreen> {
     }
   }
 
+  bool get _isMobileLayout {
+    final isNarrowScreen = MediaQuery.of(context).size.width < 768;
+    return _isMobilePlatform || isNarrowScreen;
+  }
+
   Future<void> _showShareDialog() async {
     try {
       final oobi = await _coreService.getOobi();
       if (!mounted) return;
-      if (_isMobilePlatform) {
+      if (_isMobileLayout) {
         Navigator.of(context).push(
           MaterialPageRoute(builder: (_) => _ContactsShareScreen(oobi: oobi)),
         );
@@ -718,7 +723,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                       ? _buildErrorState()
                       : _contacts.isEmpty
                           ? _buildEmptyState()
-                          : _isMobilePlatform
+                          : _isMobileLayout
                               ? _buildContactsList()
                               : _buildDesktopLayout(),
             ),

@@ -18,7 +18,7 @@ class _ModeSelectionScreenState extends State<ModeSelectionScreen> {
 
   bool _isMobileLayout(BuildContext context) {
     final isNativelyMobile = !kIsWeb && (Platform.isIOS || Platform.isAndroid);
-    final isNarrowScreen = MediaQuery.of(context).size.width < 600;
+    final isNarrowScreen = MediaQuery.of(context).size.width < 768;
     return isNativelyMobile || isNarrowScreen;
   }
 
