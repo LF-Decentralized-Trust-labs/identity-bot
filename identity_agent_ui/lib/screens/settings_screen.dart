@@ -303,13 +303,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Builder(builder: (context) => Text('Settings', style: Theme.of(context).textTheme.headlineMedium)),
-                  const SizedBox(height: 4),
-                  const Text(
-                    'Configure connectivity and preferences.',
-                    style: TextStyle(color: AppColors.textSecondary, fontSize: 14),
-                  ),
-                  const SizedBox(height: 24),
+                  if (!AppLayout.isMobile(context)) ...[
+                    Builder(builder: (context) => Text('Settings', style: Theme.of(context).textTheme.headlineMedium)),
+                    const SizedBox(height: 4),
+                    const Text(
+                      'Configure connectivity and preferences.',
+                      style: TextStyle(color: AppColors.textSecondary, fontSize: 14),
+                    ),
+                    const SizedBox(height: 24),
+                  ],
                   _buildAgentInfoCard(),
                   const SizedBox(height: 24),
                   const Text(

@@ -123,46 +123,56 @@ class _GuardianshipDependentsScreenState extends State<GuardianshipDependentsScr
     final cs = Theme.of(context).colorScheme;
     return Scaffold(
       backgroundColor: cs.surface,
+      floatingActionButton: AppLayout.isMobile(context)
+          ? FloatingActionButton(
+              onPressed: _addDependent,
+              backgroundColor: AppColors.accent,
+              foregroundColor: Colors.white,
+              child: const Icon(Icons.add),
+            )
+          : null,
       body: Column(
         children: [
-          // Header
-          Container(
-            padding: const EdgeInsets.fromLTRB(32, 24, 32, 16),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('My Dependents', style: Theme.of(context).textTheme.headlineSmall),
-                      const SizedBox(height: 4),
-                      Text(
-                        'People you are guardian of. Their identities are managed through your Identity Agent.',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
-                      ),
-                    ],
+          if (!AppLayout.isMobile(context)) ...[
+            // Header (desktop only)
+            Container(
+              padding: const EdgeInsets.fromLTRB(32, 24, 32, 16),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('My Dependents', style: Theme.of(context).textTheme.headlineSmall),
+                        const SizedBox(height: 4),
+                        Text(
+                          'People you are guardian of. Their identities are managed through your Identity Agent.',
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-                const SizedBox(width: 16),
-                FilledButton.icon(
-                  onPressed: _addDependent,
-                  icon: const Icon(Icons.add, size: 16),
-                  label: const Text('Add Dependent',
-                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, letterSpacing: 0.2)),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppColors.accent,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                    minimumSize: const Size(0, 36),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    elevation: 0,
+                  const SizedBox(width: 16),
+                  FilledButton.icon(
+                    onPressed: _addDependent,
+                    icon: const Icon(Icons.add, size: 16),
+                    label: const Text('Add Dependent',
+                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, letterSpacing: 0.2)),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppColors.accent,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                      minimumSize: const Size(0, 36),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      elevation: 0,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-          const Divider(height: 1),
+            const Divider(height: 1),
+          ],
           // Content
           Expanded(
             child: _loading

@@ -633,7 +633,9 @@ class _AgentMainScreenState extends State<AgentMainScreen>
     if (bg == null) return;
     if (DateTime.now().difference(bg) < _lockAfter) return;
     _backgroundedAt = null;
-    // Only lock if the user has actually set up authentication
+    // Only lock if screen lock is enabled AND the user has set up authentication
+    final enabled = await PreferencesService.isScreenLockEnabled();
+    if (!enabled) return;
     final hasAuth = await PinPasswordService.hasAnyCredential();
     if (hasAuth && mounted) setState(() => _locked = true);
   }

@@ -60,9 +60,9 @@ const _allTaskMeta = <SetupTask, SetupTaskMeta>{
   ),
   SetupTask.inviteContacts: SetupTaskMeta(
     task: SetupTask.inviteContacts,
-    title: 'Add 3+ trusted contacts',
+    title: 'Add a trusted contact',
     description:
-        'Trusted contacts serve as witnesses to your identity in the background. You need a minimum of 3 to secure your identity (Goal: 7+).',
+        'Trusted contacts serve as witnesses to your identity in the background. You need at least 1 to complete setup (recommended: 7+).',
     isStub: false,
     isCritical: true,
   ),

@@ -678,16 +678,72 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
   // ── Build ──────────────────────────────────────────────────────────────────
 
   @override
+  bool get _isMobileLayout => AppLayout.isMobile(context);
+
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildHeader(),
+          if (!_isMobileLayout) _buildHeader(),
           _buildFilterBar(),
           Expanded(child: _buildBody()),
         ],
+      ),
+      floatingActionButton: _isMobileLayout ? _buildMobileFab() : null,
+    );
+  }
+
+  Widget _buildMobileFab() {
+    return PopupMenuButton<String>(
+      onSelected: (value) {
+        switch (value) {
+          case 'issue':
+            _showIssueDialog();
+            break;
+          case 'receive':
+            _showReceiveDialog();
+            break;
+          case 'verify':
+            _showVerifyDialog();
+            break;
+          case 'refresh':
+            _load();
+            break;
+        }
+      },
+      itemBuilder: (_) => [
+        const PopupMenuItem(value: 'issue', child: ListTile(
+          leading: Icon(Icons.send_outlined, color: AppColors.success, size: 20),
+          title: Text('Issue', style: TextStyle(fontSize: 14)),
+          dense: true, contentPadding: EdgeInsets.zero,
+        )),
+        const PopupMenuItem(value: 'receive', child: ListTile(
+          leading: Icon(Icons.download_outlined, color: AppColors.primary, size: 20),
+          title: Text('Receive', style: TextStyle(fontSize: 14)),
+          dense: true, contentPadding: EdgeInsets.zero,
+        )),
+        const PopupMenuItem(value: 'verify', child: ListTile(
+          leading: Icon(Icons.verified_outlined, color: Color(0xFF6A0DAD), size: 20),
+          title: Text('Verify', style: TextStyle(fontSize: 14)),
+          dense: true, contentPadding: EdgeInsets.zero,
+        )),
+        const PopupMenuDivider(),
+        const PopupMenuItem(value: 'refresh', child: ListTile(
+          leading: Icon(Icons.refresh, color: AppColors.textSecondary, size: 20),
+          title: Text('Refresh', style: TextStyle(fontSize: 14)),
+          dense: true, contentPadding: EdgeInsets.zero,
+        )),
+      ],
+      offset: const Offset(0, -240),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      color: AppColors.surface,
+      child: FloatingActionButton(
+        onPressed: null, // handled by PopupMenuButton
+        backgroundColor: AppColors.accent,
+        foregroundColor: Colors.white,
+        child: const Icon(Icons.add, size: 24),
       ),
     );
   }
@@ -736,7 +792,7 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
 
   Widget _buildFilterBar() {
     return Container(
-      padding: const EdgeInsets.fromLTRB(24, 12, 24, 0),
+      padding: EdgeInsets.fromLTRB(_isMobileLayout ? 16 : 24, _isMobileLayout ? 16 : 12, _isMobileLayout ? 16 : 24, 0),
       child: Row(
         children: _CredFilter.values.map((f) {
           final label = switch (f) {

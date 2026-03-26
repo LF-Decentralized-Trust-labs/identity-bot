@@ -29,11 +29,18 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
 
   IdentityResponse? _identity;
   bool _loading = true;
+  bool _screenLockEnabled = false;
 
   @override
   void initState() {
     super.initState();
     _load();
+    _loadScreenLockPref();
+  }
+
+  Future<void> _loadScreenLockPref() async {
+    final enabled = await PreferencesService.isScreenLockEnabled();
+    if (mounted) setState(() => _screenLockEnabled = enabled);
   }
 
   @override
@@ -65,13 +72,16 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Account', style: Theme.of(context).textTheme.headlineMedium),
-                  const SizedBox(height: 4),
-                  Text('Identity and agent configuration.', style: TextStyle(color: AppColors.textSecondary, fontSize: 14)),
-                  const SizedBox(height: 32),
+                  if (!AppLayout.isMobile(context)) ...[
+                    Text('Identity Agent', style: Theme.of(context).textTheme.headlineMedium),
+                    const SizedBox(height: 4),
+                    Text('Identity and agent configuration.', style: TextStyle(color: AppColors.textSecondary, fontSize: 14)),
+                    const SizedBox(height: 32),
+                  ],
                   _buildInfoCard(context),
                   const SizedBox(height: 24),
-                  // Reset Identity has moved to Settings → Developer Tools.
+                  _buildScreenLockToggle(),
+                  const SizedBox(height: 24),
                   Container(
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
@@ -96,6 +106,34 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
               ),
               ),
             ),
+    );
+  }
+
+  Widget _buildScreenLockToggle() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+      decoration: BoxDecoration(
+        border: Border.all(color: AppColors.border),
+        borderRadius: BorderRadius.circular(12),
+        color: Theme.of(context).colorScheme.surface,
+      ),
+      child: SwitchListTile(
+        contentPadding: EdgeInsets.zero,
+        title: const Text(
+          'Screen Lock',
+          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: AppColors.textPrimary),
+        ),
+        subtitle: const Text(
+          'Lock the app after 5 minutes of inactivity. Requires authentication to be set up.',
+          style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+        ),
+        value: _screenLockEnabled,
+        activeColor: AppColors.accent,
+        onChanged: (v) async {
+          setState(() => _screenLockEnabled = v);
+          await PreferencesService.setScreenLockEnabled(v);
+        },
+      ),
     );
   }
 

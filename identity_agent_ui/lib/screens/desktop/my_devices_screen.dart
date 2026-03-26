@@ -69,32 +69,34 @@ class _MyDevicesScreenState extends State<MyDevicesScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('My Devices',
-                          style: Theme.of(context).textTheme.headlineMedium),
-                      const SizedBox(height: 4),
-                      const Text(
-                        'Devices and servers connected to this identity.',
-                        style: TextStyle(
-                            color: AppColors.textSecondary, fontSize: 14),
-                      ),
-                    ],
+            if (!AppLayout.isMobile(context)) ...[
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('My Devices',
+                            style: Theme.of(context).textTheme.headlineMedium),
+                        const SizedBox(height: 4),
+                        const Text(
+                          'Devices and servers connected to this identity.',
+                          style: TextStyle(
+                              color: AppColors.textSecondary, fontSize: 14),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-                IconButton(
-                  onPressed: _load,
-                  icon: const Icon(Icons.refresh),
-                  color: AppColors.textSecondary,
-                  tooltip: 'Refresh',
-                ),
-              ],
-            ),
-            const SizedBox(height: 32),
+                  IconButton(
+                    onPressed: _load,
+                    icon: const Icon(Icons.refresh),
+                    color: AppColors.textSecondary,
+                    tooltip: 'Refresh',
+                  ),
+                ],
+              ),
+              const SizedBox(height: 32),
+            ],
             if (_loading)
               const Center(child: CircularProgressIndicator())
             else if (_error != null)

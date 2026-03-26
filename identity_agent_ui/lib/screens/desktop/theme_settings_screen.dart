@@ -15,13 +15,15 @@ class ThemeSettingsScreen extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Theme', style: Theme.of(context).textTheme.headlineMedium),
-            const SizedBox(height: 4),
-            Text(
-              'Choose the appearance of your Identity Agent.',
-              style: TextStyle(color: AppColors.textSecondary, fontSize: 14),
-            ),
-            const SizedBox(height: 32),
+            if (!AppLayout.isMobile(context)) ...[
+              Text('Theme', style: Theme.of(context).textTheme.headlineMedium),
+              const SizedBox(height: 4),
+              Text(
+                'Choose the appearance of your Identity Agent.',
+                style: TextStyle(color: AppColors.textSecondary, fontSize: 14),
+              ),
+              const SizedBox(height: 32),
+            ],
             ValueListenableBuilder<ThemeMode>(
               valueListenable: ThemeNotifier.instance,
               builder: (context, mode, _) {

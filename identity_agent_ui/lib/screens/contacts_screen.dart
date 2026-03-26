@@ -40,6 +40,18 @@ class _ContactsScreenState extends State<ContactsScreen> {
   ContactResponse? _selectedContact;
   bool _loading = true;
   String? _error;
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+
+  List<ContactResponse> get _filteredContacts {
+    if (_searchQuery.isEmpty) return _contacts;
+    final q = _searchQuery.toLowerCase();
+    return _contacts.where((c) {
+      final alias = c.alias.toLowerCase();
+      final aid = c.aid.toLowerCase();
+      return alias.contains(q) || aid.contains(q);
+    }).toList();
+  }
 
   @override
   void initState() {
@@ -50,6 +62,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
 
   @override
   void dispose() {
+    _searchController.dispose();
     _coreService.dispose();
     super.dispose();
   }
@@ -710,7 +723,9 @@ class _ContactsScreenState extends State<ContactsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _buildHeader(),
+            if (!_isMobileLayout) _buildHeader(),
+            if (!_loading && _error == null && _contacts.isNotEmpty)
+              _buildSearchBar(),
             Expanded(
               child: _loading
                   ? const Center(
@@ -727,7 +742,80 @@ class _ContactsScreenState extends State<ContactsScreen> {
           ],
         ),
       ),
+      floatingActionButton: _isMobileLayout ? _buildMobileFab() : null,
     );
+  }
+
+  Widget _buildMobileFab() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (_isMobilePlatform)
+          FloatingActionButton.small(
+            heroTag: 'nfc',
+            onPressed: _writeNfc,
+            backgroundColor: AppColors.surface,
+            foregroundColor: AppColors.accent,
+            tooltip: 'Write to NFC',
+            child: const Icon(Icons.nfc, size: 20),
+          ),
+        if (_isMobilePlatform) const SizedBox(height: 12),
+        FloatingActionButton(
+          heroTag: 'addContact',
+          onPressed: _showShareDialog,
+          backgroundColor: AppColors.accent,
+          foregroundColor: Colors.white,
+          tooltip: 'Add Contact',
+          child: const Icon(Icons.person_add_outlined, size: 22),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _writeNfc() async {
+    try {
+      final oobi = await _coreService.getOobi();
+      if (!mounted) return;
+      final addContactUrl = oobi.oobiUrl;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Hold your phone near the NFC tag...'),
+          backgroundColor: AppColors.accent,
+          duration: const Duration(seconds: 4),
+        ),
+      );
+      if (_isMobilePlatform) {
+        await _nfcWrite(addContactUrl);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to get OOBI: $e'), backgroundColor: AppColors.error),
+        );
+      }
+    }
+  }
+
+  Future<void> _nfcWrite(String url) async {
+    // Use platform channel to write URL to NFC tag
+    try {
+      const channel = MethodChannel('identity_agent/nfc');
+      await channel.invokeMethod('writeUrl', {'url': url});
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('URL written to NFC tag successfully.'),
+            backgroundColor: AppColors.success,
+          ),
+        );
+      }
+    } on PlatformException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('NFC write failed: ${e.message}'), backgroundColor: AppColors.error),
+        );
+      }
+    }
   }
 
   Widget _buildDesktopLayout() {
@@ -753,9 +841,9 @@ class _ContactsScreenState extends State<ContactsScreen> {
   Widget _buildContactsPanelList() {
     return ListView.builder(
       padding: const EdgeInsets.symmetric(vertical: 8),
-      itemCount: _contacts.length,
+      itemCount: _filteredContacts.length,
       itemBuilder: (context, i) {
-        final contact = _contacts[i];
+        final contact = _filteredContacts[i];
         final isSelected = _selectedContact?.aid == contact.aid;
         return _buildContactRow(contact, isSelected);
       },
@@ -1126,6 +1214,47 @@ class _ContactsScreenState extends State<ContactsScreen> {
     );
   }
 
+  Widget _buildSearchBar() {
+    final hPad = _isMobileLayout ? 16.0 : 32.0;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(hPad, _isMobileLayout ? 12 : 16, hPad, 0),
+      child: TextField(
+        controller: _searchController,
+        onChanged: (v) => setState(() => _searchQuery = v),
+        style: const TextStyle(fontSize: 14, color: AppColors.textPrimary),
+        decoration: InputDecoration(
+          hintText: 'Search contacts...',
+          hintStyle: const TextStyle(color: AppColors.textMuted, fontSize: 14),
+          prefixIcon: const Icon(Icons.search, color: AppColors.textMuted, size: 20),
+          suffixIcon: _searchQuery.isNotEmpty
+              ? IconButton(
+                  icon: const Icon(Icons.close, size: 18, color: AppColors.textMuted),
+                  onPressed: () {
+                    _searchController.clear();
+                    setState(() => _searchQuery = '');
+                  },
+                )
+              : null,
+          filled: true,
+          fillColor: AppColors.surfaceLight,
+          contentPadding: const EdgeInsets.symmetric(vertical: 10),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide(color: AppColors.border),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide(color: AppColors.border),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide(color: AppColors.accent),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildEmptyState() {
     return Center(
       child: Column(
@@ -1192,8 +1321,9 @@ class _ContactsScreenState extends State<ContactsScreen> {
   }
 
   Widget _buildContactsList() {
-    final mutualCount = _contacts.where((c) => c.isAccepted).length;
-    final pendingCount = _contacts.where((c) => c.isPendingOutbound || c.isPendingInbound).length;
+    final filtered = _filteredContacts;
+    final mutualCount = filtered.where((c) => c.isAccepted).length;
+    final pendingCount = filtered.where((c) => c.isPendingOutbound || c.isPendingInbound).length;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -1204,7 +1334,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
           Row(
             children: [
               Text(
-                '${_contacts.length} CONTACT${_contacts.length == 1 ? '' : 'S'}',
+                '${filtered.length} CONTACT${filtered.length == 1 ? '' : 'S'}',
                 style: const TextStyle(
                   color: AppColors.textMuted,
                   fontSize: 11,
@@ -1256,7 +1386,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
             ],
           ),
           const SizedBox(height: 12),
-          ..._contacts.map((contact) => Padding(
+          ...filtered.map((contact) => Padding(
                 padding: const EdgeInsets.only(bottom: 12),
                 child: _buildContactCard(contact),
               )),

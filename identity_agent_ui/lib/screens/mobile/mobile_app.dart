@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../theme/mobile_theme.dart';
 import '../../services/keri_service.dart';
 import '../../services/preferences_service.dart';
+import '../../widgets/mobile_screen_scaffold.dart';
 import '../profile_screen.dart';
 import '../contacts_screen.dart';
 import '../settings_screen.dart';
@@ -92,44 +93,56 @@ class _MobileAppState extends State<MobileApp> {
     final url = widget.serverUrl;
     final keri = widget.keriService;
 
-    Widget screen;
+    String title;
+    Widget body;
     switch (screenKey) {
       // ── Core items ────────────────────────────────────────────────────────
       case 'profile':
-        screen = ProfileScreen(keriService: keri, serverUrl: url);
+        title = 'My Profile';
+        body = ProfileScreen(keriService: keri, serverUrl: url);
         break;
       case 'contacts':
-        _pushAndRefresh(ContactsScreen(keriService: keri, serverUrl: url));
+        title = 'Contacts';
+        body = ContactsScreen(keriService: keri, serverUrl: url);
+        _pushWrappedAndRefresh(title, body);
         return;
       case 'credentials':
-        screen = CredentialsScreen(serverUrl: url);
+        title = 'Credentials';
+        body = CredentialsScreen(serverUrl: url);
         break;
       case 'passwords':
-        screen = const ComingSoonScreen(title: 'Passwords', icon: Icons.password_outlined);
+        title = 'Passwords';
+        body = const ComingSoonScreen(title: 'Passwords', icon: Icons.password_outlined);
         break;
       case 'wallet':
-        screen = const ComingSoonScreen(title: 'Wallet', icon: Icons.account_balance_wallet_outlined);
+        title = 'Wallet';
+        body = const ComingSoonScreen(title: 'Wallet', icon: Icons.account_balance_wallet_outlined);
         break;
       case 'myDevices':
-        screen = MyDevicesScreen(keriService: keri, serverUrl: url);
+        title = 'My Devices';
+        body = MyDevicesScreen(keriService: keri, serverUrl: url);
         break;
 
       // ── Guardianship ──────────────────────────────────────────────────────
       case 'guardianshipDependents':
-        screen = GuardianshipDependentsScreen(serverUrl: url);
+        title = 'My Dependents';
+        body = GuardianshipDependentsScreen(serverUrl: url);
         break;
       case 'guardianshipGuardians':
-        screen = const ComingSoonScreen(title: 'My Guardians', icon: Icons.shield_outlined);
+        title = 'My Guardians';
+        body = const ComingSoonScreen(title: 'My Guardians', icon: Icons.shield_outlined);
         break;
       case 'guardianshipSuccession':
-        screen = const ComingSoonScreen(
+        title = 'Digital Will';
+        body = const ComingSoonScreen(
           title: 'Digital Will',
           icon: Icons.article_outlined,
           description: 'Designate who inherits control of your digital identity if you pass away or become incapacitated.',
         );
         break;
       case 'guardianshipEstate':
-        screen = const ComingSoonScreen(
+        title = 'Estate Planning';
+        body = const ComingSoonScreen(
           title: 'Estate Planning',
           icon: Icons.account_balance_outlined,
           description: 'Plan the long-term management and transfer of your digital estate.',
@@ -138,54 +151,68 @@ class _MobileAppState extends State<MobileApp> {
 
       // ── Hubs ──────────────────────────────────────────────────────────────
       case 'hubsCommunications':
-        screen = const ComingSoonScreen(title: 'Communications', icon: Icons.chat_bubble_outline);
+        title = 'Communications';
+        body = const ComingSoonScreen(title: 'Communications', icon: Icons.chat_bubble_outline);
         break;
       case 'hubsAi':
-        screen = const ComingSoonScreen(title: 'AI', icon: Icons.auto_awesome);
+        title = 'AI';
+        body = const ComingSoonScreen(title: 'AI', icon: Icons.auto_awesome);
         break;
       case 'hubsHealth':
-        screen = const ComingSoonScreen(title: 'Health', icon: Icons.favorite_border);
+        title = 'Health';
+        body = const ComingSoonScreen(title: 'Health', icon: Icons.favorite_border);
         break;
       case 'hubsFinance':
-        screen = const ComingSoonScreen(title: 'Finance', icon: Icons.bar_chart);
+        title = 'Finance';
+        body = const ComingSoonScreen(title: 'Finance', icon: Icons.bar_chart);
         break;
       case 'hubsSocialMedia':
-        screen = const ComingSoonScreen(title: 'Social Media', icon: Icons.tag);
+        title = 'Social Media';
+        body = const ComingSoonScreen(title: 'Social Media', icon: Icons.tag);
         break;
       case 'hubsLegal':
-        screen = const ComingSoonScreen(title: 'Legal', icon: Icons.gavel);
+        title = 'Legal';
+        body = const ComingSoonScreen(title: 'Legal', icon: Icons.gavel);
         break;
       case 'hubsSecurity':
-        screen = const ComingSoonScreen(title: 'Security', icon: Icons.security);
+        title = 'Security';
+        body = const ComingSoonScreen(title: 'Security', icon: Icons.security);
         break;
 
       // ── History ───────────────────────────────────────────────────────────
       case 'history':
-        screen = HistoryScreen(serverUrl: url);
+        title = 'History';
+        body = HistoryScreen(serverUrl: url);
         break;
 
       // ── Settings ──────────────────────────────────────────────────────────
       case 'settingsAccount':
-        screen = AccountSettingsScreen(
+        title = 'Identity Agent';
+        body = AccountSettingsScreen(
           mode: widget.mode,
           entityType: widget.entityType,
           serverUrl: url,
         );
         break;
       case 'settingsAuthentication':
-        screen = const AuthManagementScreen();
+        title = 'Authentication';
+        body = const AuthManagementScreen();
         break;
       case 'settingsPrivacy':
-        screen = const ComingSoonScreen(title: 'Privacy & Data', icon: Icons.privacy_tip_outlined);
+        title = 'Privacy & Data';
+        body = const ComingSoonScreen(title: 'Privacy & Data', icon: Icons.privacy_tip_outlined);
         break;
       case 'settingsTheme':
-        screen = const ThemeSettingsScreen();
+        title = 'Appearance';
+        body = const ThemeSettingsScreen();
         break;
       case 'settingsNotifications':
-        screen = const ComingSoonScreen(title: 'Notifications', icon: Icons.notifications_outlined);
+        title = 'Notifications';
+        body = const ComingSoonScreen(title: 'Notifications', icon: Icons.notifications_outlined);
         break;
       case 'settingsTunneling':
-        screen = SettingsScreen(
+        title = 'Tunneling';
+        body = SettingsScreen(
           keriService: keri,
           mode: widget.mode,
           entityType: widget.entityType,
@@ -193,34 +220,51 @@ class _MobileAppState extends State<MobileApp> {
         );
         break;
       case 'settingsEndpoints':
-        screen = EndpointsScreen(serverUrl: url);
+        title = 'Endpoints';
+        body = EndpointsScreen(serverUrl: url);
         break;
       case 'settingsServiceProviders':
-        screen = ServiceProvidersScreen(serverUrl: url);
+        title = 'Service Providers';
+        body = ServiceProvidersScreen(serverUrl: url);
         break;
       case 'settingsGovernance':
-        screen = const ComingSoonScreen(title: 'Governance', icon: Icons.gavel);
+        title = 'Governance';
+        body = const ComingSoonScreen(title: 'Governance', icon: Icons.gavel);
         break;
       case 'settingsKeri':
-        screen = KeriProtocolScreen(keriService: keri, serverUrl: url);
+        title = 'KERI Protocol';
+        body = KeriProtocolScreen(keriService: keri, serverUrl: url);
         break;
       case 'settingsBackup':
-        screen = const ComingSoonScreen(title: 'Backup & Recovery', icon: Icons.backup_outlined);
+        title = 'Backup & Recovery';
+        body = const ComingSoonScreen(title: 'Backup & Recovery', icon: Icons.backup_outlined);
         break;
       case 'settingsDeveloperTools':
-        screen = DeveloperToolsScreen(serverUrl: url);
+        title = 'Developer Tools';
+        body = DeveloperToolsScreen(serverUrl: url);
         break;
 
       default:
-        screen = const ComingSoonScreen(title: 'Coming Soon', icon: Icons.construction);
+        title = 'Coming Soon';
+        body = const ComingSoonScreen(title: 'Coming Soon', icon: Icons.construction);
     }
 
-    Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
+    _pushWrapped(title, body);
   }
 
-  void _pushAndRefresh(Widget screen) {
+  void _pushWrapped(String title, Widget body) {
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => screen),
+      MaterialPageRoute(
+        builder: (_) => MobileScreenScaffold(title: title, child: body),
+      ),
+    );
+  }
+
+  void _pushWrappedAndRefresh(String title, Widget body) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => MobileScreenScaffold(title: title, child: body),
+      ),
     ).then((_) {
       _dashboardKey.currentState?.refreshAlerts();
     });

@@ -66,23 +66,27 @@ class _HostingChoiceScreenState extends State<HostingChoiceScreen> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   const SizedBox(height: 32),
-                  // Brain icon
+                  // Brain icon — large and recognizable
                   Container(
-                    width: 64,
-                    height: 64,
+                    width: 100,
+                    height: 100,
                     decoration: BoxDecoration(
-                      color: AppColors.accent.withOpacity(0.1),
+                      color: AppColors.accent.withOpacity(0.08),
                       shape: BoxShape.circle,
+                      border: Border.all(
+                        color: AppColors.accent.withOpacity(0.3),
+                        width: 1.5,
+                      ),
                     ),
                     child: const Icon(
                       Icons.psychology,
                       color: AppColors.accent,
-                      size: 32,
+                      size: 56,
                     ),
                   ),
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 32),
                   const Text(
-                    'This app will manage your private keys. Where do you want the heavy processing done?',
+                    'Where do you want the heavy processing done?',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: AppColors.textPrimary,
@@ -102,7 +106,7 @@ class _HostingChoiceScreenState extends State<HostingChoiceScreen> {
                       title: 'On a remote server',
                       subtitle:
                           'A more powerful server will handle the processing.',
-                      badge: 'RECOMMENDED',
+                      badge: 'DEFAULT',
                       comingSoon: true,
                     ),
                     const SizedBox(height: 12),
@@ -121,7 +125,7 @@ class _HostingChoiceScreenState extends State<HostingChoiceScreen> {
                       title: 'Right here',
                       subtitle:
                           'This computer will handle everything.',
-                      badge: 'RECOMMENDED',
+                      badge: 'DEFAULT',
                     ),
                     const SizedBox(height: 12),
                     _buildOptionCard(
@@ -135,18 +139,23 @@ class _HostingChoiceScreenState extends State<HostingChoiceScreen> {
                   if (_selected == HostingChoice.keysHereBrainRemote) ...[
                     const SizedBox(height: 16),
                     _buildRemoteUrlPanel(),
-                  ],
-                  if (_selected == HostingChoice.keysHereBrainHere) ...[
+                  ] else ...[
                     const SizedBox(height: 24),
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
-                        onPressed: () => widget.onHostingChosen(
-                          HostingChoice.keysHereBrainHere,
-                        ),
+                        onPressed: _selected == HostingChoice.keysHereBrainHere
+                            ? () => widget.onHostingChosen(
+                                  HostingChoice.keysHereBrainHere,
+                                )
+                            : null,
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.accent,
+                          backgroundColor: _selected != null
+                              ? AppColors.accent
+                              : AppColors.textMuted.withOpacity(0.3),
                           foregroundColor: Colors.white,
+                          disabledBackgroundColor: AppColors.textMuted.withOpacity(0.15),
+                          disabledForegroundColor: AppColors.textMuted,
                           padding: const EdgeInsets.symmetric(vertical: 16),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),

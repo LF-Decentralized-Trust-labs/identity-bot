@@ -18,6 +18,8 @@ import '../../widgets/confirmation_toast.dart';
 import '../../widgets/log_entry.dart';
 import '../../widgets/setup_task_banner.dart';
 import '../auth_setup_screen.dart';
+import '../qr_scanner_screen.dart';
+import '../../widgets/contact_action_popup.dart';
 
 // Fallback share actions shown immediately while the backend is loading or
 // unreachable. Mirrors the seeded rows in migration 7. The Data Manager sandbox
@@ -395,9 +397,178 @@ class _DesktopDashboardScreenState extends State<DesktopDashboardScreen> {
   }
 
   void _onScanTap() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('QR scanner coming soon.')),
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => QrScannerScreen(
+          onScanned: (scannedData) {
+            Navigator.of(context).pop();
+            _handleScannedUrl(scannedData);
+          },
+        ),
+      ),
     );
+  }
+
+  /// Parses a scanned URL, determines the action, and routes accordingly.
+  /// Matches the mobile MobileQrScanner behavior.
+  void _handleScannedUrl(String scannedUrl) {
+    // Must contain /oobi/ to be a valid OOBI URL
+    if (!scannedUrl.contains('/oobi/')) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Unrecognized QR code. Expected an OOBI URL.'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+      return;
+    }
+
+    // Parse action from query parameters — no default; absent means user chooses
+    final uri = Uri.tryParse(scannedUrl);
+    final action = uri?.queryParameters['action'];
+
+    if (action == 'add_contact') {
+      _resolveAndAddContact(scannedUrl);
+    } else if (action != null) {
+      // Explicit but unsupported action
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Action "$action" is not yet supported.'),
+          backgroundColor: AppColors.warning,
+        ),
+      );
+    } else {
+      // No action parameter — resolve OOBI and let user choose
+      _resolveAndShowIdentity(scannedUrl);
+    }
+  }
+
+  Future<void> _resolveAndShowIdentity(String oobiUrl) async {
+    // Show resolving overlay via snackbar
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Row(
+          children: [
+            SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
+            SizedBox(width: 12),
+            Text('Resolving identity...'),
+          ],
+        ),
+        duration: Duration(seconds: 15),
+      ),
+    );
+
+    try {
+      final resolved = await _coreService.resolveOobiContact(oobiUrl: oobiUrl);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+
+      // Show identity info — user decides what to do
+      final confirmed = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => ContactActionPopup(
+          name: resolved.displayName,
+          photo: resolved.photo,
+          aid: resolved.aid,
+          kelVerified: resolved.kelVerified,
+          intentLabel: 'Scanned identity',
+          confirmLabel: 'Add Contact',
+          dismissLabel: 'Dismiss',
+          onConfirm: () => Navigator.of(ctx).pop(true),
+          onDismiss: () => Navigator.of(ctx).pop(false),
+        ),
+      );
+
+      if (confirmed == true) {
+        await _coreService.addContact(
+          oobiUrl: oobiUrl,
+          alias: resolved.alias,
+        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Contact "${resolved.displayName}" added'),
+              backgroundColor: AppColors.coreActive,
+            ),
+          );
+          _load();
+        }
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to resolve: ${e.toString().split(': ').last}'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+    }
+  }
+
+  Future<void> _resolveAndAddContact(String oobiUrl) async {
+    // Show resolving overlay via snackbar
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Row(
+          children: [
+            SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
+            SizedBox(width: 12),
+            Text('Resolving identity...'),
+          ],
+        ),
+        duration: Duration(seconds: 15),
+      ),
+    );
+
+    try {
+      final resolved = await _coreService.resolveOobiContact(oobiUrl: oobiUrl);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+
+      // Show confirmation popup (matches mobile ContactActionPopup flow)
+      final confirmed = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => ContactActionPopup(
+          name: resolved.displayName,
+          photo: resolved.photo,
+          aid: resolved.aid,
+          kelVerified: resolved.kelVerified,
+          intentLabel: 'Wants to add you as a contact',
+          confirmLabel: 'Add Contact',
+          dismissLabel: 'Dismiss',
+          onConfirm: () => Navigator.of(ctx).pop(true),
+          onDismiss: () => Navigator.of(ctx).pop(false),
+        ),
+      );
+
+      if (confirmed == true) {
+        await _coreService.addContact(
+          oobiUrl: oobiUrl,
+          alias: resolved.alias,
+        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Contact "${resolved.displayName}" added'),
+              backgroundColor: AppColors.coreActive,
+            ),
+          );
+          _load();
+        }
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to resolve: ${e.toString().split(': ').last}'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+    }
   }
 
   void _showShareQrDialog() {

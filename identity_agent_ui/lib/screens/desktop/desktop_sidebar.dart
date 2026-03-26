@@ -254,7 +254,7 @@ class _DesktopSidebarState extends State<DesktopSidebar> {
                   onToggle: () => _toggleSection('settings'),
                 ),
                 if (_openSection == 'settings') ...[
-                  _SubItem(icon: Icons.manage_accounts_outlined, label: 'Agent',             route: DesktopRoute.settingsAccount,         current: widget.currentRoute, onTap: _select),
+                  _SubItem(icon: Icons.manage_accounts_outlined, label: 'Identity Agent',    route: DesktopRoute.settingsAccount,         current: widget.currentRoute, onTap: _select),
                   _SubItem(icon: Icons.fingerprint,              label: 'Authentication',    route: DesktopRoute.settingsAuthentication,  current: widget.currentRoute, onTap: _select),
                   _SubItem(icon: Icons.privacy_tip_outlined,     label: 'Privacy & Data',    route: DesktopRoute.settingsPrivacy,         current: widget.currentRoute, onTap: _select, comingSoon: true),
                   _SubItem(icon: Icons.palette_outlined,         label: 'Appearance',        route: DesktopRoute.settingsTheme,           current: widget.currentRoute, onTap: _select),

@@ -39,12 +39,24 @@ class _MobileQrScannerState extends State<MobileQrScanner> with SingleTickerProv
     await NfcService.startOobiReadSession(
       onSuccess: (oobiUrl) {
         if (!mounted || _processing) return;
-        // Only handle add_contact action (or no explicit action — default intent)
+        if (!oobiUrl.contains('/oobi/')) return;
         final uri = Uri.tryParse(oobiUrl);
-        final action = uri?.queryParameters['action'] ?? 'add_contact';
-        if (action == 'add_contact' && oobiUrl.contains('/oobi/')) {
-          setState(() => _processing = true);
+        final action = uri?.queryParameters['action'];
+        setState(() => _processing = true);
+        if (action == 'add_contact') {
           _resolveAndAddContact(oobiUrl);
+        } else if (action != null) {
+          // Explicit but unsupported action
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Action "$action" is not yet supported.'),
+              backgroundColor: MobileColors.warning,
+            ),
+          );
+          setState(() => _processing = false);
+        } else {
+          // No action parameter — resolve and let user choose
+          _resolveAndShowIdentity(oobiUrl);
         }
       },
       onError: (_) {
@@ -69,9 +81,78 @@ class _MobileQrScannerState extends State<MobileQrScanner> with SingleTickerProv
     final code = barcodes.first.rawValue;
     if (code == null || code.isEmpty) return;
 
-    if (code.contains('/oobi/')) {
-      setState(() => _processing = true);
+    if (!code.contains('/oobi/')) return;
+
+    final uri = Uri.tryParse(code);
+    final action = uri?.queryParameters['action'];
+    setState(() => _processing = true);
+
+    if (action == 'add_contact') {
       _resolveAndAddContact(code);
+    } else if (action != null) {
+      // Explicit but unsupported action
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Action "$action" is not yet supported.'),
+          backgroundColor: MobileColors.warning,
+        ),
+      );
+      setState(() => _processing = false);
+    } else {
+      // No action parameter — resolve and let user choose
+      _resolveAndShowIdentity(code);
+    }
+  }
+
+  Future<void> _resolveAndShowIdentity(String oobiUrl) async {
+    try {
+      final resolved = await _coreService.resolveOobiContact(oobiUrl: oobiUrl);
+
+      if (!mounted) return;
+
+      final confirmed = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => ContactActionPopup(
+          name: resolved.displayName,
+          photo: resolved.photo,
+          aid: resolved.aid,
+          kelVerified: resolved.kelVerified,
+          intentLabel: 'Scanned identity',
+          confirmLabel: 'Add Contact',
+          dismissLabel: 'Dismiss',
+          onConfirm: () => Navigator.of(ctx).pop(true),
+          onDismiss: () => Navigator.of(ctx).pop(false),
+        ),
+      );
+
+      if (confirmed == true) {
+        await _coreService.addContact(
+          oobiUrl: oobiUrl,
+          alias: resolved.alias,
+        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Contact "${resolved.displayName}" added'),
+              backgroundColor: MobileColors.success,
+            ),
+          );
+          Navigator.of(context).pop(true);
+        }
+      } else {
+        setState(() => _processing = false);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to resolve: $e'),
+            backgroundColor: MobileColors.error,
+          ),
+        );
+        setState(() => _processing = false);
+      }
     }
   }
 

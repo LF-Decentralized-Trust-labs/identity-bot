@@ -87,7 +87,9 @@ class _DrawerMenuState extends State<DrawerMenu> {
                       _MenuItem(icon: Icons.person_outline, label: 'My Profile', onTap: () => _nav('profile')),
                       _MenuItem(icon: Icons.people_outline, label: 'Contacts', onTap: () => _nav('contacts')),
                       _MenuItem(icon: Icons.verified_user_outlined, label: 'Credentials', onTap: () => _nav('credentials')),
-                      _MenuItem(icon: Icons.password_outlined, label: 'Passwords', onTap: () => _nav('passwords'), trailing: _comingSoonBadge()),
+                      // Passwords requires a server (Bitwarden self-hosted) — only show on mobile if remote server is connected
+                      if (widget.serverUrl != null)
+                        _MenuItem(icon: Icons.password_outlined, label: 'Passwords', onTap: () => _nav('passwords'), trailing: _comingSoonBadge()),
                       _MenuItem(icon: Icons.account_balance_wallet_outlined, label: 'Wallet', onTap: () => _nav('wallet'), trailing: _comingSoonBadge()),
                       _MenuItem(icon: Icons.devices_outlined, label: 'My Devices', onTap: () => _nav('myDevices')),
                       const _SectionDivider(),
@@ -133,7 +135,7 @@ class _DrawerMenuState extends State<DrawerMenu> {
                         icon: Icons.settings_outlined,
                         label: 'Settings',
                         children: [
-                          _SubMenuItem(icon: Icons.manage_accounts_outlined, label: 'Agent', onTap: () => _nav('settingsAccount')),
+                          _SubMenuItem(icon: Icons.manage_accounts_outlined, label: 'Identity Agent', onTap: () => _nav('settingsAccount')),
                           _SubMenuItem(icon: Icons.fingerprint, label: 'Authentication', onTap: () => _nav('settingsAuthentication')),
                           _SubMenuItem(icon: Icons.privacy_tip_outlined, label: 'Privacy & Data', onTap: () => _nav('settingsPrivacy'), comingSoon: true),
                           _SubMenuItem(icon: Icons.palette_outlined, label: 'Appearance', onTap: () => _nav('settingsTheme')),

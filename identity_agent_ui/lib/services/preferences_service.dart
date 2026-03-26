@@ -23,6 +23,7 @@ class PreferencesService {
   static const String _setupCompleteKey = 'setup_complete';
   static const String _hostingChoiceKey = 'hosting_choice';
   static const String _remoteBrainUrlKey = 'remote_brain_url';
+  static const String _screenLockEnabledKey = 'screen_lock_enabled';
 
   static Future<SharedPreferences> get _prefs => SharedPreferences.getInstance();
 
@@ -101,6 +102,16 @@ class PreferencesService {
     await prefs.setString(_remoteBrainUrlKey, url);
   }
 
+  static Future<bool> isScreenLockEnabled() async {
+    final prefs = await _prefs;
+    return prefs.getBool(_screenLockEnabledKey) ?? false;
+  }
+
+  static Future<void> setScreenLockEnabled(bool enabled) async {
+    final prefs = await _prefs;
+    await prefs.setBool(_screenLockEnabledKey, enabled);
+  }
+
   static Future<void> clearAll() async {
     final prefs = await _prefs;
     await prefs.remove(_modeKey);
@@ -109,6 +120,7 @@ class PreferencesService {
     await prefs.remove(_setupCompleteKey);
     await prefs.remove(_hostingChoiceKey);
     await prefs.remove(_remoteBrainUrlKey);
+    await prefs.remove(_screenLockEnabledKey);
   }
 
   static String modeDisplayName(AgentMode mode) {

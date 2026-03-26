@@ -275,7 +275,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
         const SizedBox(height: 8),
         Center(
           child: Text(
-            isOrg ? 'Enter your organization details.' : 'This is how others will see your profile.',
+            isOrg ? 'Enter your organization details.' : 'This is how others will see you.',
             textAlign: TextAlign.center,
             style: TextStyle(
               color: AppColors.textSecondary,
@@ -589,11 +589,11 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
               _buildProcessingRow(1, 'Generating your keys...'),
               const SizedBox(height: 14),
               _buildProcessingRow(
-                  2, 'Creating your identity on the network...'),
+                  2, 'Creating your identity...'),
               const SizedBox(height: 14),
               _buildProcessingRow(3, 'Saving keys to secure storage...'),
               const SizedBox(height: 14),
-              _buildProcessingRow(4, 'Enrolling in identity protection...'),
+              _buildProcessingRow(4, 'Configuring your Identity Agent...'),
               const SizedBox(height: 14),
               _buildProcessingRow(5, 'Checking hardware security...'),
             ],

@@ -151,8 +151,10 @@ class _AuthManagementScreenState extends State<AuthManagementScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _buildPageHeader(),
-                    const SizedBox(height: 32),
+                    if (!AppLayout.isMobile(context)) ...[
+                      _buildPageHeader(),
+                      const SizedBox(height: 32),
+                    ],
                     _buildStatusCard(),
                     const SizedBox(height: 24),
                     _buildFactorSection(),

@@ -153,28 +153,30 @@ class _KeriProtocolScreenState extends State<KeriProtocolScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('KERI Protocol', style: Theme.of(context).textTheme.headlineMedium),
-                      const SizedBox(height: 4),
-                      Text('Your identifier, OOBI, key event log, and key rotation.',
-                          style: TextStyle(color: AppColors.textSecondary, fontSize: 14)),
-                    ],
+            if (!AppLayout.isMobile(context)) ...[
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('KERI Protocol', style: Theme.of(context).textTheme.headlineMedium),
+                        const SizedBox(height: 4),
+                        Text('Your identifier, OOBI, key event log, and key rotation.',
+                            style: TextStyle(color: AppColors.textSecondary, fontSize: 14)),
+                      ],
+                    ),
                   ),
-                ),
-                IconButton(
-                  onPressed: _load,
-                  icon: const Icon(Icons.refresh),
-                  color: AppColors.textSecondary,
-                  tooltip: 'Refresh',
-                ),
-              ],
-            ),
-            const SizedBox(height: 32),
+                  IconButton(
+                    onPressed: _load,
+                    icon: const Icon(Icons.refresh),
+                    color: AppColors.textSecondary,
+                    tooltip: 'Refresh',
+                  ),
+                ],
+              ),
+              const SizedBox(height: 32),
+            ],
             if (_loading)
               const Center(child: CircularProgressIndicator())
             else if (_error != null)

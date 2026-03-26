@@ -118,19 +118,25 @@ class _ServiceProvidersScreenState extends State<ServiceProvidersScreen> with Si
       backgroundColor: cs.surface,
       body: Column(
         children: [
-          // Header
           Container(
-            padding: const EdgeInsets.fromLTRB(32, 24, 32, 0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Service Providers', style: Theme.of(context).textTheme.headlineSmall),
-                const SizedBox(height: 4),
-                Text(
-                  'Manage external services your Identity Agent depends on for infrastructure, witnessing, key storage, and tunneling.',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
-                ),
-                const SizedBox(height: 16),
+              padding: EdgeInsets.fromLTRB(
+                AppLayout.isMobile(context) ? 16 : 32,
+                AppLayout.isMobile(context) ? 12 : 24,
+                AppLayout.isMobile(context) ? 16 : 32,
+                0,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (!AppLayout.isMobile(context)) ...[
+                    Text('Service Providers', style: Theme.of(context).textTheme.headlineSmall),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Manage external services your Identity Agent depends on for infrastructure, witnessing, key storage, and tunneling.',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
                 // Category filter chips
                 SingleChildScrollView(
                   scrollDirection: Axis.horizontal,

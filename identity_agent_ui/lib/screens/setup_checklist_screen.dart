@@ -196,7 +196,7 @@ class _SetupChecklistScreenState extends State<SetupChecklistScreen> {
       case _Page.backupSeed: return 'Back Up Your Seed Phrase';
       case _Page.seedWords: return 'Your Seed Phrase';
       case _Page.setupAuth: return 'Set Up Authentication';
-      case _Page.inviteContacts: return 'Invite Trusted Contacts';
+      case _Page.inviteContacts: return 'Add Trusted Contacts';
       case _Page.connectBrain: return 'Connect Remote Server';
     }
   }
@@ -932,13 +932,13 @@ class _SetupChecklistScreenState extends State<SetupChecklistScreen> {
         "Hey! I set up a self-sovereign identity. Will you be one of my trusted contacts? "
         "Add me here: $contactUrl\n\n"
         "Questions? Ask me!";
-    final hasEnough = _trustedContacts >= 3;
+    final hasEnough = _trustedContacts >= 1;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          "Invite people you trust to be witnesses for your identity. You need at least 3 trusted contacts.",
+          "Invite people you trust to be witnesses for your identity. You need at least 1 trusted contact to complete setup (recommended: 7+).",
           style: TextStyle(color: cs.onSurface.withOpacity(0.6), fontSize: 13, height: 1.5),
         ),
         const SizedBox(height: 12),
@@ -965,7 +965,7 @@ class _SetupChecklistScreenState extends State<SetupChecklistScreen> {
               Expanded(
                 child: Text(
                   '$_totalContacts contact${_totalContacts == 1 ? "" : "s"}, '
-                  '$_trustedContacts trusted (need 3+)',
+                  '$_trustedContacts trusted (need 1, recommended 7+)',
                   style: TextStyle(
                     color: hasEnough ? AppColors.coreActive : cs.onSurface.withOpacity(0.7),
                     fontSize: 12, fontWeight: FontWeight.w600,
