@@ -13,7 +13,7 @@ import '../../widgets/activity_entry.dart';
 import '../../widgets/setup_task_banner.dart';
 import '../../widgets/key_storage_badge.dart';
 import '../../models/activity_log_entry.dart';
-import 'mobile_auth_setup_screen.dart';
+import '../desktop/auth_management_screen.dart';
 
 class MobileDashboard extends StatefulWidget {
   final String? serverUrl;
@@ -275,7 +275,7 @@ class MobileDashboardState extends State<MobileDashboard> with SingleTickerProvi
                       photoBase64: _photoBase64,
                       onBadgeTap: () => Navigator.of(context).push(
                         MaterialPageRoute(
-                          builder: (_) => const MobileAuthSetupScreen(),
+                          builder: (_) => const AuthManagementScreen(),
                         ),
                       ),
                     ),

@@ -260,7 +260,7 @@ class _DesktopSidebarState extends State<DesktopSidebar> {
                 ),
                 if (_openSection == 'settings') ...[
                   _SubItem(icon: Icons.manage_accounts_outlined, label: 'Agent',             route: DesktopRoute.settingsAccount,         current: widget.currentRoute, onTap: _select),
-                  _SubItem(icon: Icons.shield_outlined,          label: 'Security',          route: DesktopRoute.settingsAuthentication,  current: widget.currentRoute, onTap: _select),
+                  _SubItem(icon: Icons.fingerprint,              label: 'Authentication',    route: DesktopRoute.settingsAuthentication,  current: widget.currentRoute, onTap: _select),
                   _SubItem(icon: Icons.privacy_tip_outlined,     label: 'Privacy & Data',    route: DesktopRoute.settingsPrivacy,         current: widget.currentRoute, onTap: _select, comingSoon: true),
                   _SubItem(icon: Icons.palette_outlined,         label: 'Appearance',        route: DesktopRoute.settingsTheme,           current: widget.currentRoute, onTap: _select),
                   _SubItem(icon: Icons.notifications_outlined,   label: 'Notifications',     route: DesktopRoute.settingsNotifications,   current: widget.currentRoute, onTap: _select, comingSoon: true),

@@ -7,7 +7,6 @@ import '../../services/core_service.dart';
 import '../../services/event_service.dart';
 import '../../config/agent_config.dart';
 import '../../widgets/contact_action_popup.dart';
-import 'mobile_settings_screen.dart';
 
 // Default action list — mirrors the seeded DB rows; used as a fallback if the
 // API is unreachable so the Share menu is never empty.
@@ -445,10 +444,11 @@ class _AddContactScreenState extends State<_AddContactScreen> {
           ElevatedButton(
             onPressed: () {
               Navigator.of(ctx).pop();
-              Navigator.of(context).pushReplacement(
-                MaterialPageRoute(
-                  builder: (_) =>
-                      MobileSettingsScreen(serverUrl: widget.serverUrl),
+              Navigator.of(context).pop();
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Open Settings from the menu to configure tunneling.'),
+                  behavior: SnackBarBehavior.floating,
                 ),
               );
             },
@@ -458,7 +458,7 @@ class _AddContactScreenState extends State<_AddContactScreen> {
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8)),
             ),
-            child: const Text('Go to Settings'),
+            child: const Text('OK'),
           ),
         ],
       ),

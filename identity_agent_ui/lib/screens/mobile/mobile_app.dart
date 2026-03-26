@@ -2,16 +2,16 @@ import 'package:flutter/material.dart';
 import '../../theme/mobile_theme.dart';
 import '../../services/keri_service.dart';
 import '../../services/preferences_service.dart';
+import '../profile_screen.dart';
+import '../contacts_screen.dart';
+import '../settings_screen.dart';
 import 'mobile_dashboard.dart';
 import 'bottom_nav.dart';
 import 'drawer_menu.dart';
 import 'share_menu.dart';
 import 'chatbot_panel.dart';
 import 'mobile_qr_scanner.dart';
-import 'mobile_profile_screen.dart';
-import 'mobile_contacts_screen.dart';
 import 'mobile_credentials_screen.dart';
-import 'mobile_settings_screen.dart';
 
 class MobileApp extends StatefulWidget {
   final KeriService keriService;
@@ -79,7 +79,10 @@ class _MobileAppState extends State<MobileApp> {
     _closeDrawer();
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => MobileProfileScreen(serverUrl: widget.serverUrl),
+        builder: (_) => ProfileScreen(
+          keriService: widget.keriService,
+          serverUrl: widget.serverUrl,
+        ),
       ),
     );
   }
@@ -88,7 +91,10 @@ class _MobileAppState extends State<MobileApp> {
     _closeDrawer();
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => MobileContactsScreen(serverUrl: widget.serverUrl),
+        builder: (_) => ContactsScreen(
+          keriService: widget.keriService,
+          serverUrl: widget.serverUrl,
+        ),
       ),
     ).then((_) {
       _dashboardKey.currentState?.refreshAlerts();
@@ -110,7 +116,12 @@ class _MobileAppState extends State<MobileApp> {
     _closeDrawer();
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => MobileSettingsScreen(serverUrl: widget.serverUrl),
+        builder: (_) => SettingsScreen(
+          keriService: widget.keriService,
+          mode: widget.mode,
+          entityType: widget.entityType,
+          serverUrl: widget.serverUrl,
+        ),
       ),
     );
   }
