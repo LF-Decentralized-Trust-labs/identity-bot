@@ -53,12 +53,16 @@ class _HostingChoiceScreenState extends State<HostingChoiceScreen> {
     }
   }
 
-  bool get _isMobile =>
-      !kIsWeb && (Platform.isIOS || Platform.isAndroid);
+  bool _isMobileLayout(BuildContext context) {
+    // True on actual mobile platforms OR narrow screens (for web testing)
+    final isNativelyMobile = !kIsWeb && (Platform.isIOS || Platform.isAndroid);
+    final isNarrowScreen = MediaQuery.of(context).size.width < 600;
+    return isNativelyMobile || isNarrowScreen;
+  }
 
   @override
   Widget build(BuildContext context) {
-    final isMobile = _isMobile;
+    final isMobile = _isMobileLayout(context);
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
