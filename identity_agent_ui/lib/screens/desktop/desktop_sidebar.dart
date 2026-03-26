@@ -66,11 +66,6 @@ enum DesktopRoute {
   // History
   activityLog,
 
-  // Organization
-  orgOverview,
-  orgEmployees,
-  orgCredentials,
-  orgSettings,
 }
 
 // ── Sidebar widget ────────────────────────────────────────────────────────────

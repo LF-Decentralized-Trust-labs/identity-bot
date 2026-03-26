@@ -197,13 +197,6 @@ class _DesktopAppState extends State<DesktopApp> {
         return const ComingSoonScreen(title: 'Backup & Recovery', icon: Icons.backup_outlined);
       case DesktopRoute.activityLog:
         return HistoryScreen(serverUrl: url, initialTab: _historyInitialTab);
-      // Organization routes removed from individual agent — these are Grape ID proprietary.
-      // Enum values kept for compile safety; routes redirect to dashboard.
-      case DesktopRoute.orgOverview:
-      case DesktopRoute.orgEmployees:
-      case DesktopRoute.orgCredentials:
-      case DesktopRoute.orgSettings:
-        return const SizedBox.shrink();
     }
   }
 
