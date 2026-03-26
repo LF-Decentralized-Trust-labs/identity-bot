@@ -3,7 +3,6 @@ import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'dart:io' show Platform;
 import 'theme/app_theme.dart';
-import 'theme/mobile_theme.dart';
 import 'screens/desktop/desktop_app.dart';
 import 'screens/setup_wizard_screen.dart';
 import 'screens/mode_selection_screen.dart';
@@ -19,13 +18,8 @@ import 'config/agent_config.dart';
 import 'bridge/keri_bridge_stub.dart'
     if (dart.library.io) 'bridge/keri_bridge.dart';
 import 'screens/mobile/mobile_app.dart';
-import 'screens/mobile/mobile_mode_selection_screen.dart';
-import 'screens/mobile/mobile_connect_server_screen.dart';
-import 'screens/mobile/mobile_setup_wizard_screen.dart';
 import 'screens/hosting_choice_screen.dart';
-import 'screens/mobile/mobile_hosting_choice_screen.dart';
 import 'screens/setup_checklist_screen.dart';
-import 'screens/mobile/mobile_setup_checklist_screen.dart';
 import 'screens/lock_screen.dart';
 import 'services/pin_password_service.dart';
 
@@ -514,37 +508,6 @@ class _AgentRouterState extends State<AgentRouter> {
   Widget _buildForMode(bool isMobile) {
     switch (_step) {
       case OnboardingStep.loading:
-        if (isMobile) {
-          return Theme(
-            data: MobileTheme.lightTheme,
-            child: Scaffold(
-              backgroundColor: MobileColors.background,
-              body: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    SizedBox(
-                      width: 40,
-                      height: 40,
-                      child: CircularProgressIndicator(
-                        color: MobileColors.primary,
-                        strokeWidth: 3,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    const Text(
-                      'Initializing...',
-                      style: TextStyle(
-                        color: MobileColors.textMuted,
-                        fontSize: 14,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          );
-        }
         return Scaffold(
           backgroundColor: AppColors.background,
           body: Center(
@@ -581,37 +544,18 @@ class _AgentRouterState extends State<AgentRouter> {
             _showBackendErrorDialog(context, _backendStartupError!);
           });
         }
-        if (isMobile) {
-          return MobileModeSelectionScreen(onModeSelected: _onModeSelected);
-        }
         return ModeSelectionScreen(onModeSelected: _onModeSelected);
 
       case OnboardingStep.hostingChoice:
-        if (isMobile) {
-          return MobileHostingChoiceScreen(onHostingChosen: _onHostingChosen);
-        }
         return HostingChoiceScreen(onHostingChosen: _onHostingChosen);
 
       case OnboardingStep.connectServer:
-        if (isMobile) {
-          return MobileConnectServerScreen(
-            onConnected: _onServerConnected,
-            onBack: _goBackToModeSelection,
-          );
-        }
         return ConnectServerScreen(
           onConnected: _onServerConnected,
           onBack: _goBackToModeSelection,
         );
 
       case OnboardingStep.setupWizard:
-        if (isMobile) {
-          return MobileSetupWizardScreen(
-            onComplete: _onSetupComplete,
-            keriService: _keriService!,
-            remoteBrainUrl: _remoteBrainUrl,
-          );
-        }
         return SetupWizardScreen(
           onComplete: _onSetupComplete,
           keriService: _keriService!,
@@ -620,15 +564,6 @@ class _AgentRouterState extends State<AgentRouter> {
         );
 
       case OnboardingStep.setupChecklist:
-        if (isMobile) {
-          return MobileSetupChecklistScreen(
-            onDone: _onChecklistDone,
-            keriService: _keriService!,
-            serverUrl: _serverUrl,
-            hostingChoice: _hostingChoice,
-            remoteBrainUrl: _remoteBrainUrl,
-          );
-        }
         return SetupChecklistScreen(
           onDone: _onChecklistDone,
           keriService: _keriService!,

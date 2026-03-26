@@ -3,7 +3,6 @@ import '../services/setup_task_service.dart';
 import '../services/preferences_service.dart';
 import '../services/keri_service.dart';
 import '../screens/setup_checklist_screen.dart';
-import '../screens/mobile/mobile_setup_checklist_screen.dart';
 
 /// Persistent banner shown at the top of the dashboard while setup tasks remain
 /// incomplete. Self-dismissible. Loads [HostingChoice] from [PreferencesService].
@@ -155,7 +154,7 @@ class _SetupTaskBannerState extends State<SetupTaskBanner> {
           builder: (_, ctrl) => ClipRRect(
             borderRadius:
                 const BorderRadius.vertical(top: Radius.circular(20)),
-            child: MobileSetupChecklistScreen(
+            child: SetupChecklistScreen(
               onDone: () => Navigator.of(context).pop(),
               keriService: widget.keriService,
               serverUrl: widget.serverUrl,

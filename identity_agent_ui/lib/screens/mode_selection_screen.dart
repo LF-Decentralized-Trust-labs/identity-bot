@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'dart:io' show Platform;
 import '../theme/app_theme.dart';
 import '../services/preferences_service.dart';
 
@@ -101,7 +103,8 @@ class _ModeSelectionScreenState extends State<ModeSelectionScreen> {
                         widget.onModeSelected(AgentMode.connectExisting),
                   ),
                   const SizedBox(height: 24),
-                  _buildAdvancedSection(context),
+                  if (!kIsWeb && !(Platform.isIOS || Platform.isAndroid))
+                    _buildAdvancedSection(context),
                   const SizedBox(height: 32),
                 ],
               ),

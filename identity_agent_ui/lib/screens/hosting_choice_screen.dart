@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'dart:io' show Platform;
 import '../theme/app_theme.dart';
 import '../services/preferences_service.dart';
 import '../services/core_service.dart';
@@ -51,8 +53,12 @@ class _HostingChoiceScreenState extends State<HostingChoiceScreen> {
     }
   }
 
+  bool get _isMobile =>
+      !kIsWeb && (Platform.isIOS || Platform.isAndroid);
+
   @override
   Widget build(BuildContext context) {
+    final isMobile = _isMobile;
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
@@ -92,22 +98,45 @@ class _HostingChoiceScreenState extends State<HostingChoiceScreen> {
                     ),
                   ),
                   const SizedBox(height: 32),
-                  _buildOptionCard(
-                    choice: HostingChoice.keysHereBrainHere,
-                    icon: Icons.computer,
-                    title: 'Right here',
-                    subtitle:
-                        'This computer will handle everything.',
-                    badge: 'RECOMMENDED',
-                  ),
-                  const SizedBox(height: 12),
-                  _buildOptionCard(
-                    choice: HostingChoice.keysHereBrainRemote,
-                    icon: Icons.cloud_outlined,
-                    title: 'On a remote server',
-                    subtitle:
-                        'A more powerful server will handle the processing.',
-                  ),
+                  // On mobile: remote server first (recommended), local second (limited)
+                  // On desktop: local first (recommended), remote second
+                  if (isMobile) ...[
+                    _buildOptionCard(
+                      choice: HostingChoice.keysHereBrainRemote,
+                      icon: Icons.cloud_outlined,
+                      title: 'On a remote server',
+                      subtitle:
+                          'A more powerful server will handle the processing.',
+                      badge: 'RECOMMENDED',
+                      comingSoon: true,
+                    ),
+                    const SizedBox(height: 12),
+                    _buildOptionCard(
+                      choice: HostingChoice.keysHereBrainHere,
+                      icon: Icons.phone_android,
+                      title: 'Right here on this phone',
+                      subtitle:
+                          'This phone will handle everything.',
+                      warningBadge: 'LIMITED FEATURES',
+                    ),
+                  ] else ...[
+                    _buildOptionCard(
+                      choice: HostingChoice.keysHereBrainHere,
+                      icon: Icons.computer,
+                      title: 'Right here',
+                      subtitle:
+                          'This computer will handle everything.',
+                      badge: 'RECOMMENDED',
+                    ),
+                    const SizedBox(height: 12),
+                    _buildOptionCard(
+                      choice: HostingChoice.keysHereBrainRemote,
+                      icon: Icons.cloud_outlined,
+                      title: 'On a remote server',
+                      subtitle:
+                          'A more powerful server will handle the processing.',
+                    ),
+                  ],
                   if (_selected == HostingChoice.keysHereBrainRemote) ...[
                     const SizedBox(height: 16),
                     _buildRemoteUrlPanel(),
@@ -156,14 +185,21 @@ class _HostingChoiceScreenState extends State<HostingChoiceScreen> {
     required String title,
     required String subtitle,
     String? badge,
+    String? warningBadge,
+    bool comingSoon = false,
   }) {
     final selected = _selected == choice;
+    final disabled = comingSoon;
     return GestureDetector(
-      onTap: () => setState(() {
-        _selected = choice;
-        _connectError = null;
-      }),
-      child: AnimatedContainer(
+      onTap: disabled
+          ? null
+          : () => setState(() {
+              _selected = choice;
+              _connectError = null;
+            }),
+      child: Opacity(
+        opacity: disabled ? 0.5 : 1.0,
+        child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
         width: double.infinity,
         padding: const EdgeInsets.all(20),
@@ -171,10 +207,10 @@ class _HostingChoiceScreenState extends State<HostingChoiceScreen> {
           color: AppColors.surface,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: selected
+            color: selected && !disabled
                 ? AppColors.accent
                 : AppColors.border,
-            width: selected ? 2 : 1,
+            width: selected && !disabled ? 2 : 1,
           ),
         ),
         child: Row(
@@ -219,13 +255,36 @@ class _HostingChoiceScreenState extends State<HostingChoiceScreen> {
                           padding: const EdgeInsets.symmetric(
                               horizontal: 8, vertical: 2),
                           decoration: BoxDecoration(
-                            color: AppColors.accent.withOpacity(0.15),
+                            color: comingSoon
+                                ? AppColors.textMuted.withOpacity(0.15)
+                                : AppColors.accent.withOpacity(0.15),
                             borderRadius: BorderRadius.circular(4),
                           ),
                           child: Text(
-                            badge,
+                            comingSoon ? 'COMING SOON' : badge,
+                            style: TextStyle(
+                              color: comingSoon
+                                  ? AppColors.textMuted
+                                  : AppColors.accent,
+                              fontSize: 9,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 1.0,
+                              fontFamily: 'monospace',
+                            ),
+                          ),
+                        ),
+                      if (warningBadge != null)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.amber.withOpacity(0.15),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            warningBadge,
                             style: const TextStyle(
-                              color: AppColors.accent,
+                              color: Colors.amber,
                               fontSize: 9,
                               fontWeight: FontWeight.w600,
                               letterSpacing: 1.0,
@@ -255,6 +314,7 @@ class _HostingChoiceScreenState extends State<HostingChoiceScreen> {
             ),
           ],
         ),
+      ),
       ),
     );
   }
