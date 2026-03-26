@@ -1,6 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
-import 'dart:io' show Platform;
 import '../theme/app_theme.dart';
 import '../services/preferences_service.dart';
 
@@ -15,12 +13,6 @@ class ModeSelectionScreen extends StatefulWidget {
 
 class _ModeSelectionScreenState extends State<ModeSelectionScreen> {
   bool _advancedExpanded = false;
-
-  bool _isMobileLayout(BuildContext context) {
-    final isNativelyMobile = !kIsWeb && (Platform.isIOS || Platform.isAndroid);
-    final isNarrowScreen = MediaQuery.of(context).size.width < 768;
-    return isNativelyMobile || isNarrowScreen;
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -109,7 +101,7 @@ class _ModeSelectionScreenState extends State<ModeSelectionScreen> {
                         widget.onModeSelected(AgentMode.connectExisting),
                   ),
                   const SizedBox(height: 24),
-                  if (!_isMobileLayout(context))
+                  if (!AppLayout.isMobile(context))
                     _buildAdvancedSection(context),
                   const SizedBox(height: 32),
                 ],

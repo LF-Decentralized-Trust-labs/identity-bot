@@ -494,15 +494,7 @@ class _AgentRouterState extends State<AgentRouter> {
 
   @override
   Widget build(BuildContext context) {
-    if (_isMobilePlatform) {
-      return _buildForMode(true);
-    }
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        return _buildForMode(constraints.maxWidth < 768);
-      },
-    );
+    return _buildForMode(AppLayout.isMobile(context));
   }
 
   Widget _buildForMode(bool isMobile) {
@@ -656,7 +648,7 @@ class _AgentMainScreenState extends State<AgentMainScreen>
   }
 
   Widget _buildMain() {
-    if (_isMobilePlatform) {
+    if (AppLayout.isMobile(context)) {
       return MobileApp(
         keriService: widget.keriService,
         mode: widget.mode,
@@ -664,24 +656,12 @@ class _AgentMainScreenState extends State<AgentMainScreen>
         serverUrl: widget.serverUrl,
       );
     }
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        if (constraints.maxWidth < 768) {
-          return MobileApp(
-            keriService: widget.keriService,
-            mode: widget.mode,
-            entityType: widget.entityType,
-            serverUrl: widget.serverUrl,
-          );
-        }
-        return DesktopApp(
-          keriService: widget.keriService,
-          mode: widget.mode,
-          entityType: widget.entityType,
-          serverUrl: widget.serverUrl,
-          onResetIdentity: _handleReset,
-        );
-      },
+    return DesktopApp(
+      keriService: widget.keriService,
+      mode: widget.mode,
+      entityType: widget.entityType,
+      serverUrl: widget.serverUrl,
+      onResetIdentity: _handleReset,
     );
   }
 

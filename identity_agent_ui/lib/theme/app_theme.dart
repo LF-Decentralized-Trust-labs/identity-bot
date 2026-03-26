@@ -38,6 +38,20 @@ class AppColors {
   static const Color corePending   = Color(0xFFF1C21B);
 }
 
+// ── Layout breakpoint helper ─────────────────────────────────────────────────
+// Single source of truth for mobile vs desktop layout decisions.
+// Uses screen width so mobile layouts can be tested in a browser by resizing.
+// For hardware-only checks (NFC, Rust FFI, ports), use Platform directly.
+class AppLayout {
+  static const double mobileBreakpoint = 768;
+
+  /// True when the screen should show mobile layout — either on a native
+  /// mobile platform or when the window is narrower than [mobileBreakpoint].
+  static bool isMobile(BuildContext context) {
+    return MediaQuery.of(context).size.width < mobileBreakpoint;
+  }
+}
+
 // ── Theme notifier (global singleton) ────────────────────────────────────────
 class ThemeNotifier {
   static const String _prefKey = 'app_theme_mode';

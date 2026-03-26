@@ -366,10 +366,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
     }
   }
 
-  bool get _isMobileLayout {
-    final isNarrowScreen = MediaQuery.of(context).size.width < 768;
-    return _isMobilePlatform || isNarrowScreen;
-  }
+  bool get _isMobileLayout => AppLayout.isMobile(context);
 
   Future<void> _showShareDialog() async {
     try {

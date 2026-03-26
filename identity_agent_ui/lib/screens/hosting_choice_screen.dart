@@ -1,6 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
-import 'dart:io' show Platform;
 import '../theme/app_theme.dart';
 import '../services/preferences_service.dart';
 import '../services/core_service.dart';
@@ -53,16 +51,9 @@ class _HostingChoiceScreenState extends State<HostingChoiceScreen> {
     }
   }
 
-  bool _isMobileLayout(BuildContext context) {
-    // True on actual mobile platforms OR narrow screens (for web testing)
-    final isNativelyMobile = !kIsWeb && (Platform.isIOS || Platform.isAndroid);
-    final isNarrowScreen = MediaQuery.of(context).size.width < 768;
-    return isNativelyMobile || isNarrowScreen;
-  }
-
   @override
   Widget build(BuildContext context) {
-    final isMobile = _isMobileLayout(context);
+    final isMobile = AppLayout.isMobile(context);
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
