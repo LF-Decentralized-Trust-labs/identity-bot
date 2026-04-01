@@ -610,9 +610,14 @@ workflows:
             security find-identity -v -p codesigning
           else
             echo "Signing with: $IDENTITY"
-            # Sign all nested binaries and frameworks first, then the app
-            find "$APP" -type f \( -name "*.dylib" -o -name "*.framework" -o -perm +111 \) -exec \
-              codesign --force --sign "$IDENTITY" --timestamp {} \; 2>/dev/null || true
+            # Sign all nested executables and libraries with hardened runtime
+            find "$APP/Contents/Resources/backend" -type f -perm +111 -exec \
+              codesign --force --sign "$IDENTITY" --timestamp --options runtime {} \;
+            find "$APP" -type f -name "*.dylib" -exec \
+              codesign --force --sign "$IDENTITY" --timestamp --options runtime {} \; 2>/dev/null || true
+            find "$APP" -type d -name "*.framework" -exec \
+              codesign --force --sign "$IDENTITY" --timestamp --options runtime {} \; 2>/dev/null || true
+            # Sign the top-level app bundle
             codesign --force --deep --sign "$IDENTITY" --timestamp --options runtime "$APP"
             echo "--- Verifying signature ---"
             codesign --verify --deep --strict "$APP" && echo "Signature valid" || echo "Signature verification failed"
