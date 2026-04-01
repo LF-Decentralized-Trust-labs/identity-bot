@@ -530,19 +530,29 @@ workflows:
           # Decode the .p12 certificate from env var
           echo "$CM_CERTIFICATE" | base64 --decode > /tmp/developer_id.p12
 
+          # Download Apple intermediate certificates (required for valid chain)
+          curl -sL https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer -o /tmp/DeveloperIDG2CA.cer
+          curl -sL https://www.apple.com/certificateauthority/AppleWWDRCAG2.cer -o /tmp/AppleWWDRCAG2.cer
+
           # Create and configure keychain
           keychain initialize
+          KEYCHAIN=$(ls ~/Library/codemagic-cli-tools/keychains/*.keychain-db)
+
+          # Import Apple intermediate CAs
+          security import /tmp/DeveloperIDG2CA.cer -k "$KEYCHAIN" -T /usr/bin/codesign
+          security import /tmp/AppleWWDRCAG2.cer -k "$KEYCHAIN" -T /usr/bin/codesign
+
+          # Import our Developer ID certificate + private key
           security import /tmp/developer_id.p12 \
-            -k ~/Library/codemagic-cli-tools/keychains/*.keychain-db \
+            -k "$KEYCHAIN" \
             -P "$CM_CERTIFICATE_PASSWORD" \
             -T /usr/bin/codesign \
             -T /usr/bin/security
-          security set-key-partition-list -S apple-tool:,apple: -k "" \
-            ~/Library/codemagic-cli-tools/keychains/*.keychain-db
+          security set-key-partition-list -S apple-tool:,apple: -k "" "$KEYCHAIN"
 
           echo "--- Verifying certificate in keychain ---"
           security find-identity -v -p codesigning
-          rm /tmp/developer_id.p12
+          rm /tmp/developer_id.p12 /tmp/DeveloperIDG2CA.cer /tmp/AppleWWDRCAG2.cer
 
       - name: Build Flutter macOS app
         script: |
