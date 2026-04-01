@@ -631,7 +631,20 @@ workflows:
             --key /tmp/api_key.p8 \
             --key-id "$APP_STORE_CONNECT_KEY_IDENTIFIER" \
             --issuer "$APP_STORE_CONNECT_ISSUER_ID" \
-            --wait
+            --wait 2>&1 | tee /tmp/notarytool_output.txt
+          # Extract submission ID and fetch log if it failed
+          SUBMISSION_ID=$(grep "id:" /tmp/notarytool_output.txt | head -1 | awk '{print $2}')
+          if grep -q "Invalid" /tmp/notarytool_output.txt; then
+            echo "--- Notarization FAILED — fetching detailed log ---"
+            xcrun notarytool log "$SUBMISSION_ID" \
+              --key /tmp/api_key.p8 \
+              --key-id "$APP_STORE_CONNECT_KEY_IDENTIFIER" \
+              --issuer "$APP_STORE_CONNECT_ISSUER_ID" \
+              /tmp/notary_log.json
+            cat /tmp/notary_log.json
+            rm /tmp/api_key.p8 /tmp/Identity_Agent.zip
+            exit 1
+          fi
           rm /tmp/api_key.p8
           echo "--- Stapling notarization ticket ---"
           xcrun stapler staple "$APP"
