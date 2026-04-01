@@ -178,9 +178,6 @@ workflows:
       flutter: 3.27.3
       xcode: latest
       cocoapods: default
-      ios_signing:
-        distribution_type: development
-        bundle_identifier: com.identityagent.identityAgentUi
       vars:
         BUNDLE_ID: "com.identityagent.identityAgentUi"
     scripts:
@@ -376,6 +373,16 @@ workflows:
           echo "--- Verifying Rust static library ---"
           ls -la Frameworks/RustKeri/device/libidentity_agent_keri.a || echo "WARNING: Rust library not found!"
 
+      - name: Fetch iOS signing files
+        script: |
+          app-store-connect fetch-signing-files "$BUNDLE_ID" \
+            --platform IOS \
+            --type IOS_APP_DEVELOPMENT \
+            --create
+          keychain initialize
+          keychain add-certificates
+          xcode-project use-profiles
+
       - name: Build signed iOS IPA
         script: |
           cd identity_agent_ui
@@ -498,9 +505,8 @@ workflows:
       flutter: 3.27.3
       xcode: latest
       cocoapods: default
-      macos_signing:
-        distribution_type: developer_id
-        bundle_identifier: com.identityagent.identityAgentUi
+      vars:
+        BUNDLE_ID: "com.identityagent.identityAgentUi"
     scripts:
       - name: Install Go toolchain
         script: |
@@ -521,6 +527,16 @@ workflows:
         script: |
           cd identity_agent_ui
           flutter pub get
+
+      - name: Fetch macOS signing files
+        script: |
+          app-store-connect fetch-signing-files "$BUNDLE_ID" \
+            --platform MAC_OS \
+            --type DEVELOPER_ID_APPLICATION \
+            --create
+          keychain initialize
+          keychain add-certificates
+          xcode-project use-profiles
 
       - name: Build Flutter macOS app
         script: |
