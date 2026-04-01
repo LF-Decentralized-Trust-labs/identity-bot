@@ -241,28 +241,20 @@ workflows:
           echo "--- XCFramework slices ---"
           ls -la "$XCFW/"
 
-          # For simulator builds, extract the simulator slice
-          # gomobile produces ios-arm64-simulator/ for Apple Silicon simulators
-          SIMULATOR_SLICE=$(find "$XCFW" -type d -name "*.framework" -path "*simulator*" | head -1)
+          # Extract the device slice for signed IPA builds
           DEVICE_SLICE=$(find "$XCFW" -type d -name "*.framework" ! -path "*simulator*" | head -1)
 
-          if [ -n "$SIMULATOR_SLICE" ]; then
-            echo "--- Found simulator framework: $SIMULATOR_SLICE ---"
-            cp -R "$SIMULATOR_SLICE" "$DEST/"
+          if [ -n "$DEVICE_SLICE" ]; then
+            echo "--- Found device framework: $DEVICE_SLICE ---"
+            cp -R "$DEVICE_SLICE" "$DEST/"
             echo "--- Extracted to $DEST/Mobilecore.framework ---"
             ls -la "$DEST/Mobilecore.framework/"
             echo "--- Binary architecture ---"
             lipo -info "$DEST/Mobilecore.framework/Mobilecore"
           else
-            echo "WARNING: No simulator slice found in xcframework, using device slice"
-            if [ -n "$DEVICE_SLICE" ]; then
-              cp -R "$DEVICE_SLICE" "$DEST/"
-              ls -la "$DEST/Mobilecore.framework/"
-            else
-              echo "ERROR: No framework slices found in xcframework!"
-              find "$XCFW" -type d
-              exit 1
-            fi
+            echo "ERROR: No device framework slice found in xcframework!"
+            find "$XCFW" -type d
+            exit 1
           fi
 
           echo "--- Checking module map ---"
