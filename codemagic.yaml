@@ -369,7 +369,7 @@ workflows:
         script: |
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
             --platform IOS \
-            --type IOS_APP_DEVELOPMENT \
+            --type IOS_APP_STORE \
             --create
           keychain initialize
           keychain add-certificates
@@ -377,7 +377,6 @@ workflows:
           echo "--- Verifying keychain certificates ---"
           security find-identity -v -p codesigning
           echo "--- Verifying export options plist ---"
-          find /Users/builder -name "export_options.plist" -maxdepth 3 2>/dev/null
           cat /Users/builder/export_options.plist 2>/dev/null || echo "No plist at /Users/builder/export_options.plist"
 
       - name: Build signed iOS IPA
@@ -395,6 +394,12 @@ workflows:
     artifacts:
       - identity_agent_ui/build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
+    publishing:
+      app_store_connect:
+        api_key: $APP_STORE_CONNECT_PRIVATE_KEY
+        key_id: $APP_STORE_CONNECT_KEY_IDENTIFIER
+        issuer_id: $APP_STORE_CONNECT_ISSUER_ID
+        submit_to_testflight: true
 
   windows-release:
     name: Windows Release (Desktop)
@@ -613,6 +618,26 @@ workflows:
             codesign --verify --deep --strict "$APP" && echo "Signature valid" || echo "Signature verification failed"
             spctl --assess --type execute "$APP" 2>&1 || echo "Note: spctl may fail without notarization"
           fi
+
+      - name: Notarize the macOS app
+        script: |
+          APP="identity_agent_ui/build/macos/Build/Products/Release/Identity Agent.app"
+          # Create a ZIP for notarization submission
+          ditto -c -k --keepParent "$APP" /tmp/Identity_Agent.zip
+          # Write API key to temp file for notarytool
+          echo "$APP_STORE_CONNECT_PRIVATE_KEY" > /tmp/api_key.p8
+          echo "--- Submitting to Apple for notarization ---"
+          xcrun notarytool submit /tmp/Identity_Agent.zip \
+            --key /tmp/api_key.p8 \
+            --key-id "$APP_STORE_CONNECT_KEY_IDENTIFIER" \
+            --issuer "$APP_STORE_CONNECT_ISSUER_ID" \
+            --wait
+          rm /tmp/api_key.p8
+          echo "--- Stapling notarization ticket ---"
+          xcrun stapler staple "$APP"
+          echo "--- Verifying notarization ---"
+          spctl --assess --type execute "$APP" && echo "App is notarized and accepted by Gatekeeper"
+          rm /tmp/Identity_Agent.zip
 
       - name: Create DMG archive
         script: |
