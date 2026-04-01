@@ -525,15 +525,24 @@ workflows:
           cd identity_agent_ui
           flutter pub get
 
-      - name: Fetch macOS signing files
+      - name: Set up macOS code signing
         script: |
-          app-store-connect fetch-signing-files "$BUNDLE_ID" \
-            --platform MAC_OS \
-            --type MAC_APP_DIRECT \
-            --create
+          # Decode the .p12 certificate from env var
+          echo "$CM_CERTIFICATE" | base64 --decode > /tmp/developer_id.p12
+
+          # Create and configure keychain
           keychain initialize
-          keychain add-certificates
-          xcode-project use-profiles
+          security import /tmp/developer_id.p12 \
+            -k ~/Library/codemagic-cli-tools/keychains/*.keychain-db \
+            -P "$CM_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple: -k "" \
+            ~/Library/codemagic-cli-tools/keychains/*.keychain-db
+
+          echo "--- Verifying certificate in keychain ---"
+          security find-identity -v -p codesigning
+          rm /tmp/developer_id.p12
 
       - name: Build Flutter macOS app
         script: |
@@ -575,6 +584,25 @@ workflows:
 
           echo "--- Bundled packages size ---"
           du -sh "$PKG_DIR"
+
+      - name: Sign the macOS app bundle
+        script: |
+          APP="identity_agent_ui/build/macos/Build/Products/Release/Identity Agent.app"
+          # Find the Developer ID certificate identity
+          IDENTITY=$(security find-identity -v -p codesigning | grep "Developer ID Application" | head -1 | awk -F'"' '{print $2}')
+          if [ -z "$IDENTITY" ]; then
+            echo "WARNING: No Developer ID Application certificate found, app will be unsigned"
+            security find-identity -v -p codesigning
+          else
+            echo "Signing with: $IDENTITY"
+            # Sign all nested binaries and frameworks first, then the app
+            find "$APP" -type f \( -name "*.dylib" -o -name "*.framework" -o -perm +111 \) -exec \
+              codesign --force --sign "$IDENTITY" --timestamp {} \; 2>/dev/null || true
+            codesign --force --deep --sign "$IDENTITY" --timestamp --options runtime "$APP"
+            echo "--- Verifying signature ---"
+            codesign --verify --deep --strict "$APP" && echo "Signature valid" || echo "Signature verification failed"
+            spctl --assess --type execute "$APP" 2>&1 || echo "Note: spctl may fail without notarization"
+          fi
 
       - name: Create DMG archive
         script: |
