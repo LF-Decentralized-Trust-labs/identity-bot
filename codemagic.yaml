@@ -382,6 +382,11 @@ workflows:
           keychain initialize
           keychain add-certificates
           xcode-project use-profiles
+          echo "--- Verifying keychain certificates ---"
+          security find-identity -v -p codesigning
+          echo "--- Verifying export options plist ---"
+          find /Users/builder -name "export_options.plist" -maxdepth 3 2>/dev/null
+          cat /Users/builder/export_options.plist 2>/dev/null || echo "No plist at /Users/builder/export_options.plist"
 
       - name: Build signed iOS IPA
         script: |
