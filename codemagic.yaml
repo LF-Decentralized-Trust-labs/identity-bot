@@ -173,9 +173,14 @@ workflows:
     max_build_duration: 120
     instance_type: mac_mini_m2
     environment:
+      groups:
+        - Apple
       flutter: 3.27.3
       xcode: latest
       cocoapods: default
+      ios_signing:
+        distribution_type: development
+        bundle_identifier: com.identityagent.identityAgentUi
       vars:
         BUNDLE_ID: "com.identityagent.identityAgentUi"
     scripts:
@@ -371,28 +376,20 @@ workflows:
           echo "--- Verifying Rust static library ---"
           ls -la Frameworks/RustKeri/device/libidentity_agent_keri.a || echo "WARNING: Rust library not found!"
 
-      - name: Build iOS for Simulator testing
+      - name: Build signed iOS IPA
         script: |
           cd identity_agent_ui
           echo "--- Build machine architecture ---"
           uname -m
           echo "--- Xcode version ---"
           xcodebuild -version
-          echo "--- Ensuring x86_64 excluded for simulator ---"
-          sed -i '' 's/EXCLUDED_ARCHS\[sdk=iphonesimulator\*\]=i386/EXCLUDED_ARCHS[sdk=iphonesimulator*]=i386 x86_64/' ios/Flutter/Generated.xcconfig || true
-          echo "--- Updated Generated.xcconfig ---"
-          cat ios/Flutter/Generated.xcconfig
-          echo "--- Listing workspace schemes and targets ---"
-          xcodebuild -workspace ios/Runner.xcworkspace -list 2>&1 || true
-          echo "--- Release.xcconfig contents ---"
-          cat ios/Flutter/Release.xcconfig
-          echo "--- Debug.xcconfig contents ---"
-          cat ios/Flutter/Debug.xcconfig
-          echo "--- Building Flutter iOS for simulator (verbose) ---"
-          flutter build ios --debug --simulator --verbose --build-number=$BUILD_NUMBER 2>&1 | tail -80
+          echo "--- Building signed iOS IPA ---"
+          flutter build ipa --release \
+            --build-number=$BUILD_NUMBER \
+            --export-options-plist=/Users/builder/export_options.plist
 
     artifacts:
-      - identity_agent_ui/build/ios/iphonesimulator/*.app
+      - identity_agent_ui/build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
 
   windows-release:
@@ -496,9 +493,14 @@ workflows:
     max_build_duration: 60
     instance_type: mac_mini_m2
     environment:
+      groups:
+        - Apple
       flutter: 3.27.3
       xcode: latest
       cocoapods: default
+      macos_signing:
+        distribution_type: developer_id
+        bundle_identifier: com.identityagent.identityAgentUi
     scripts:
       - name: Install Go toolchain
         script: |
