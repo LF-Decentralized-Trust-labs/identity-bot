@@ -1,9 +1,12 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import '../theme/app_theme.dart';
 import '../crypto/bip39.dart';
 import '../services/keri_service.dart';
+import '../bridge/keri_bridge_stub.dart'
+    if (dart.library.io) '../bridge/keri_bridge.dart';
 import '../services/core_service.dart';
 import '../services/preferences_service.dart' show EntityType;
 import '../services/secure_key_store.dart';
@@ -141,12 +144,28 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
     setState(() => _processingStep = 2);
 
     try {
+      final serviceType = widget.keriService.runtimeType.toString();
+      final bridgeAvailable = KeriBridge.isAvailable;
+      final bridgeError = KeriBridge.loadError;
       debugPrint('[SetupWizard] Calling inceptAid...');
-      debugPrint('[SetupWizard] KeriService type: ${widget.keriService.runtimeType}');
+      debugPrint('[SetupWizard] KeriService type: $serviceType');
+      debugPrint('[SetupWizard] Bridge available: $bridgeAvailable, error: $bridgeError');
+
+      // Race inceptAid against a 15-second timeout so we can surface diagnostics
       final stopwatch = Stopwatch()..start();
       final result = await widget.keriService.inceptAid(
         name: 'default',
         code: _mnemonic.join(' '),
+      ).timeout(
+        const Duration(seconds: 15),
+        onTimeout: () {
+          throw TimeoutException(
+            'DIAGNOSTIC: inceptAid timed out after 15s.\n'
+            'Service: $serviceType\n'
+            'Rust bridge available: $bridgeAvailable\n'
+            'Bridge load error: $bridgeError',
+          );
+        },
       );
       debugPrint('[SetupWizard] inceptAid completed in ${stopwatch.elapsedMilliseconds}ms, AID: ${result.aid}');
 
@@ -200,6 +219,9 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
           errorMsg.contains('Placeholder')) {
         errorMsg = 'The native KERI engine is not available in this build. '
             'Please rebuild using the Codemagic CI/CD pipeline.';
+      } else if (errorMsg.contains('DIAGNOSTIC:')) {
+        // Show raw diagnostic info on screen for TestFlight debugging
+        errorMsg = errorMsg.replaceFirst('TimeoutException: ', '');
       } else if (errorMsg.contains('SocketException') ||
           errorMsg.contains('Connection refused') ||
           errorMsg.contains('Connection reset') ||
