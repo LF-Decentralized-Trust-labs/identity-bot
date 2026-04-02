@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'keri_service.dart';
 import 'mobile_core_service.dart';
@@ -109,7 +110,10 @@ class MobileOnDeviceKeriService extends KeriService {
     required String name,
     required String code,
   }) async {
+    debugPrint('[MobileOnDeviceKeri] inceptAid called, bridge available: ${KeriBridge.isAvailable}');
+    debugPrint('[MobileOnDeviceKeri] Calling _bridge.inceptAid...');
     final result = await _bridge.inceptAid(name: name, code: code);
+    debugPrint('[MobileOnDeviceKeri] _bridge.inceptAid returned, AID: ${result.aid}');
 
     if (_coreStarted) {
       try {

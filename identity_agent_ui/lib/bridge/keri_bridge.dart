@@ -106,7 +106,9 @@ class KeriBridge {
   }) async {
     await ensureInitialized();
     _ensureBridgeReady('inceptAid');
+    debugPrint('[KeriBridge] Calling rust_api.inceptAid (sync FFI)...');
     final result = rust_api.inceptAid(name: name, code: code);
+    debugPrint('[KeriBridge] rust_api.inceptAid returned, AID: ${result.aid}');
     return BridgeInceptionResult(
       aid: result.aid,
       publicKey: result.publicKey,

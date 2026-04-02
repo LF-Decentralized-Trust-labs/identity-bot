@@ -141,10 +141,14 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
     setState(() => _processingStep = 2);
 
     try {
+      debugPrint('[SetupWizard] Calling inceptAid...');
+      debugPrint('[SetupWizard] KeriService type: ${widget.keriService.runtimeType}');
+      final stopwatch = Stopwatch()..start();
       final result = await widget.keriService.inceptAid(
         name: 'default',
         code: _mnemonic.join(' '),
       );
+      debugPrint('[SetupWizard] inceptAid completed in ${stopwatch.elapsedMilliseconds}ms, AID: ${result.aid}');
 
       setState(() => _processingStep = 3);
       await SecureKeyStore.saveMnemonic(_mnemonic);
