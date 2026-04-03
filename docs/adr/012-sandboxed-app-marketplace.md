@@ -99,7 +99,7 @@ Container web UIs previously loaded their display port URL directly in the Flutt
 
 ```
 Before: Flutter WebView → http://127.0.0.1:{container_port}/
-After:  Flutter WebView → http://127.0.0.1:5000/apps/{app_id}/
+After:  Flutter WebView → http://127.0.0.1:5050/apps/{app_id}/
                                     ↓
                         Identity Agent display proxy
                            ↓                    ↓
@@ -129,7 +129,7 @@ Two separate control layers both live inside the Identity Agent process:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                 IDENTITY AGENT (port 5000)                      │
+│                 IDENTITY AGENT (port 5050)                      │
 │                                                                 │
 │  ┌────────────────────┐    ┌─────────────────────────────────┐  │
 │  │  LLM Proxy         │    │  MITM Inspection Proxy          │  │
@@ -146,7 +146,7 @@ Two separate control layers both live inside the Identity Agent process:
 
 **Container env vars at launch:**
 ```
-OPENAI_API_BASE_URL = http://agent.internal:5000/sandbox/llm/v1   ← direct to LLM Proxy
+OPENAI_API_BASE_URL = http://agent.internal:5050/sandbox/llm/v1   ← direct to LLM Proxy
 HTTP_PROXY          = http://<host_ip>:<random_port>       ← all other traffic
 HTTPS_PROXY         = http://<host_ip>:<random_port>       ← including HTTPS
 NO_PROXY            = agent.internal                       ← bypasses MITM for agent itself
@@ -156,7 +156,7 @@ no_proxy            = agent.internal                       ← (lowercase for Li
 ```
 OUTBOUND — LLM calls (Open WebUI → OpenRouter via Identity Agent):
   Container
-    → GET/POST http://agent.internal:5000/sandbox/llm/v1/*
+    → GET/POST http://agent.internal:5050/sandbox/llm/v1/*
       (direct — NO_PROXY bypasses MITM inspection proxy)
     → Identity Agent LLM Proxy (/sandbox/llm/v1)
         → Looks up API key from credential vault
@@ -275,7 +275,7 @@ External API keys (OpenRouter, OpenAI, etc.) are **never stored inside sandbox c
 **V1 Implementation:**
 - OpenRouter API key entered in Identity Agent settings, stored in `settings.json` (existing persistence layer)
 - Proxy middleware matches requests to `openrouter.ai` and injects the key header
-- Open WebUI configured via container environment to use `http://agent.internal:5000/sandbox/llm/v1` as its API base URL
+- Open WebUI configured via container environment to use `http://agent.internal:5050/sandbox/llm/v1` as its API base URL
 - Future: dedicated credential management UI for multiple services
 
 ### 7. Policy Engine
@@ -534,7 +534,7 @@ Podman detection differs from Docker — there is no persistent daemon to ping. 
 
 ### 14. Open WebUI LLM Provider Configuration
 
-Open WebUI is configured to call the **Identity Agent's LLM proxy** at `http://agent.internal:5000/sandbox/llm/v1` (not OpenRouter directly). The Identity Agent then forwards to OpenRouter, injecting the user's API key from its credential vault. This means:
+Open WebUI is configured to call the **Identity Agent's LLM proxy** at `http://agent.internal:5050/sandbox/llm/v1` (not OpenRouter directly). The Identity Agent then forwards to OpenRouter, injecting the user's API key from its credential vault. This means:
 
 - Open WebUI never sees or stores the real API key
 - All LLM calls are logged by the Identity Agent
@@ -542,7 +542,7 @@ Open WebUI is configured to call the **Identity Agent's LLM proxy** at `http://a
 - The user's key can be rotated without touching the container
 
 ```
-Open WebUI → agent.internal:5000/sandbox/llm/v1 → Identity Agent LLM Proxy → openrouter.ai
+Open WebUI → agent.internal:5050/sandbox/llm/v1 → Identity Agent LLM Proxy → openrouter.ai
 ```
 
 The `OPENAI_API_BASE_URL` env var points Open WebUI at the Identity Agent's OpenAI-compatible endpoint. Open WebUI thinks it is talking to OpenAI; the Identity Agent proxies to OpenRouter.

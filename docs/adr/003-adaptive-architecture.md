@@ -37,7 +37,7 @@ All four modes present the same user interface through the abstract `KeriService
 │  User's Computer (Linux, macOS, or Windows)         │
 │                                                     │
 │  Flutter UI ──→ Go Backend ──→ Python KERI Driver   │
-│                 (port 5000)    (port 9999, local)    │
+│                 (port 5050)    (port 9999, local)    │
 │                                                     │
 │  Everything runs on one machine.                    │
 │  Python is always a child process of Go.            │
@@ -101,7 +101,7 @@ Backend operations (data persistence, OOBI serving, contacts) are handled by the
 │  User's Phone             │       │  User's Server (Desktop Mode)    │
 │  (iOS / Android)          │       │                                  │
 │                           │ HTTPS │  Go Backend ──→ Python KERI      │
-│  Rust Bridge (FFI)        │──────→│  (port 5000)    Driver (9999)    │
+│  Rust Bridge (FFI)        │──────→│  (port 5050)    Driver (9999)    │
 │  Creates delegated child  │       │                                  │
 │  AID locally. Phone has   │       │  Parent AID and full KEL live    │
 │  child keys only.         │       │  here. User owns and controls    │
@@ -250,7 +250,7 @@ The `getPublicURL()` function resolves the agent's externally-reachable URL in t
 
 | Variable | What it does | Which mode uses it |
 |---|---|---|
-| `CORE_URL` | URL of the local Go backend (default: `http://localhost:5000`) | Desktop Mode |
+| `CORE_URL` | URL of the local Go backend (default: `http://localhost:5050`) | Desktop Mode |
 | `PUBLIC_URL` | Explicit public URL override for OOBI generation | Desktop Mode |
 | `NGROK_AUTHTOKEN` | ngrok auth token for automatic tunnel creation | Desktop Mode (optional) |
 | `TUNNEL_PROVIDER` | Which tunnel provider to use (`cloudflare` or `ngrok`) | Desktop Mode (optional) |

@@ -49,7 +49,7 @@ else
 fi
 
 # Check port
-echo "[diag] PORT: ${PORT:-5000}"
+echo "[diag] PORT: ${PORT:-5050}"
 
 echo "============================================"
 echo " Starting Identity Agent..."

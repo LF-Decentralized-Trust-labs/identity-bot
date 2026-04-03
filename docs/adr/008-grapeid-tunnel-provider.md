@@ -89,7 +89,7 @@ Each tunnel name on the hub is associated with the agent's AID (Autonomic Identi
 │          │          │         │           │              │
 │  ┌───────┴───────┐  │         │  ┌────────┴───────────┐  │
 │  │ Go Core       │  │         │  │  Reverse Proxy     │  │
-│  │ (port 5000)   │  │         │  │  (HTTPS → tunnel)  │  │
+│  │ (port 5050)   │  │         │  │  (HTTPS → tunnel)  │  │
 │  └───────────────┘  │         │  └────────────────────┘  │
 └─────────────────────┘         └──────────────────────────┘
                                            ▲

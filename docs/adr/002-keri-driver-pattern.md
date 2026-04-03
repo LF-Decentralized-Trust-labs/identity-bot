@@ -34,10 +34,10 @@ commands, the driver executes KERI protocol operations, and returns results.
 ```
 ┌──────────────┐       HTTP        ┌──────────────────┐
 │   Go Core    │ ───────────────── │  Python KERI      │
-│  (port 5000) │  localhost:9999   │  Driver (keripy)  │
+│  (port 5050) │  localhost:9999   │  Driver (keripy)  │
 └──────────────┘                   └──────────────────┘
        ▲
-       │ HTTP (port 5000)
+       │ HTTP (port 5050)
        │
 ┌──────────────┐
 │   Flutter    │

@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:identity_agent_ui/config/agent_config.dart';
 
 class PortConflictInfo {
   final String pid;
@@ -388,19 +389,15 @@ class BackendProcessService {
     final backendDir = File(_backendPath!).parent.path;
 
     _portConflict = null;
-    final conflict = await checkPortConflict(5000);
+    final defaultPort = AgentConfig.defaultDesktopPort;
+    final conflict = await checkPortConflict(defaultPort);
     if (conflict != null) {
       if (conflict.isIdentityAgent) {
         _appendOutput('[startup] Found stale Identity Agent process (PID ${conflict.pid}) — auto-killing');
         await killProcessOnPort(conflict);
       } else {
-        _appendOutput('[startup] Port 5000 is in use by ${conflict.processName} (PID ${conflict.pid})');
-        _portConflict = conflict;
-        _startupError =
-            'Port 5000 is already in use by "${conflict.processName}" (PID ${conflict.pid}).\n\n'
-            'Identity Agent needs port 5000 to run its backend.\n'
-            'You can stop that application and retry, or allow Identity Agent to close it.';
-        return false;
+        // Don't block startup — the Go backend will auto-select a fallback port
+        _appendOutput('[startup] Port $defaultPort is in use by ${conflict.processName} (PID ${conflict.pid}) — backend will auto-select fallback port');
       }
     }
 
@@ -443,7 +440,7 @@ class BackendProcessService {
 
     try {
       final env = Map<String, String>.from(Platform.environment);
-      env['PORT'] = '5000';
+      env['PORT'] = '${AgentConfig.defaultDesktopPort}';
       env['HOST'] = '0.0.0.0';
       env['KERI_DRIVER_PYTHON'] = pythonBin;
       if (keriScript != null) {
@@ -515,7 +512,7 @@ class BackendProcessService {
         }
       });
 
-      final healthy = await _waitForHealthy(() => processExited);
+      final healthy = await _waitForHealthy(() => processExited, backendDir: backendDir);
       if (!healthy) {
         if (processExited && exitCode != null && exitCode != 0) {
           // _startupError already set by exitCode.then callback with backend output
@@ -546,7 +543,26 @@ class BackendProcessService {
     }
   }
 
-  Future<bool> _waitForHealthy(bool Function() hasProcessExited) async {
+  /// Read the actual port from the .port file written by the Go backend.
+  /// Returns the discovered port, or the default if the file doesn't exist yet.
+  int _discoverActualPort(String backendDir) {
+    // The Go backend writes data/.port relative to its working directory
+    final portFile = File('$backendDir${Platform.pathSeparator}data${Platform.pathSeparator}.port');
+    try {
+      if (portFile.existsSync()) {
+        final content = portFile.readAsStringSync().trim();
+        final port = int.tryParse(content);
+        if (port != null && port > 0 && port < 65536) {
+          return port;
+        }
+      }
+    } catch (e) {
+      debugPrint('[BackendProcess] Could not read .port file: $e');
+    }
+    return AgentConfig.defaultDesktopPort;
+  }
+
+  Future<bool> _waitForHealthy(bool Function() hasProcessExited, {required String backendDir}) async {
     final client = HttpClient();
     client.connectionTimeout = const Duration(seconds: 2);
 
@@ -556,14 +572,23 @@ class BackendProcessService {
         client.close();
         return false;
       }
+
+      // On each attempt, check for the .port file to discover the actual port
+      final actualPort = _discoverActualPort(backendDir);
+      if (actualPort != AgentConfig.desktopPort) {
+        AgentConfig.desktopPort = actualPort;
+        _appendOutput('[startup] Backend running on fallback port $actualPort');
+        debugPrint('[BackendProcess] Discovered actual port: $actualPort');
+      }
+
       try {
         final request = await client.getUrl(
-          Uri.parse('http://127.0.0.1:5000/api/health'),
+          Uri.parse('http://127.0.0.1:${AgentConfig.desktopPort}/api/health'),
         );
         final response = await request.close();
         if (response.statusCode == 200) {
-          debugPrint('[BackendProcess] Backend is healthy (attempt ${i + 1})');
-          _appendOutput('[startup] Backend healthy (attempt ${i + 1})');
+          debugPrint('[BackendProcess] Backend is healthy (attempt ${i + 1}) on port ${AgentConfig.desktopPort}');
+          _appendOutput('[startup] Backend healthy (attempt ${i + 1}) on port ${AgentConfig.desktopPort}');
           client.close();
           return true;
         }

@@ -2,7 +2,7 @@
 Phase B2 — Two-instance KERI interoperability tests.
 
 Requires two running Identity Agent instances:
-  Instance A: AGENT_A_URL (default http://127.0.0.1:5000)
+  Instance A: AGENT_A_URL (default http://127.0.0.1:5050)
   Instance B: AGENT_B_URL (e.g. http://127.0.0.1:5001)
 
 These tests prove the core interoperability property:

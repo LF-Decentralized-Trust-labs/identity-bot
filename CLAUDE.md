@@ -77,18 +77,18 @@ pip install flask keri==1.1.17
 # Start Go backend (also spawns Python KERI driver automatically)
 cd identity-agent-core
 go run .
-# → API: http://127.0.0.1:5000/api
-# → Flutter web UI (if built): http://127.0.0.1:5000/
+# → API: http://127.0.0.1:5050/api
+# → Flutter web UI (if built): http://127.0.0.1:5050/
 
 # Optional: Flutter hot reload during UI development
 cd identity_agent_ui
-flutter run -d chrome   # Connects to backend on port 5000
+flutter run -d chrome   # Connects to backend on port 5050
 ```
 
 Key environment variables for the Go backend:
 | Variable | Default | Purpose |
 |---|---|---|
-| `PORT` | `5000` | HTTP listen port |
+| `PORT` | `5050` | HTTP listen port |
 | `AGENT_DATA_DIR` | `./data` | JSON data persistence directory |
 | `FLUTTER_WEB_DIR` | `../identity_agent_ui/build/web` | Served Flutter web assets |
 | `KERI_DRIVER_SCRIPT` | `./drivers/keri-core/server.py` | Path to Python KERI driver |
@@ -115,7 +115,7 @@ Every running Identity Agent instance is in exactly one of **3 topological state
 
 | Device | KERI Engine | Backend Engine |
 |---|---|---|
-| Desktop (Linux/macOS/Windows) | Go backend → Python `keripy` (child process) | Go Core (local binary, port 5000) |
+| Desktop (Linux/macOS/Windows) | Go backend → Python `keripy` (child process) | Go Core (local binary, port 5050) |
 | Mobile (iOS/Android) | Rust bridge via `flutter_rust_bridge` FFI | Go Core via `gomobile` (embedded, port 8642) |
 
 **6 Architectural Combinations:**
@@ -137,7 +137,7 @@ Every running Identity Agent instance is in exactly one of **3 topological state
 
 | Service | Port |
 |---|---|
-| Go backend (desktop) | `127.0.0.1:5000` |
+| Go backend (desktop) | `127.0.0.1:5050` |
 | Go Core (mobile embedded) | `127.0.0.1:8642` |
 | Python KERI driver | `127.0.0.1:9999` |
 
@@ -175,7 +175,7 @@ The driver's endpoint paths are the **single source of truth** for naming — Ru
 ### Flutter UI (`identity_agent_ui/`)
 
 - `lib/main.dart` — App entry point; `AgentRouter` state machine drives the onboarding flow; `_initializeServiceForMode()` instantiates the correct `KeriService`
-- `lib/config/agent_config.dart` — Platform-aware backend URL (`desktopPort=5000`, `mobilePort=8642`); supports `CORE_URL` env override
+- `lib/config/agent_config.dart` — Platform-aware backend URL (`defaultDesktopPort=5050`, `mobilePort=8642`); supports `CORE_URL` env override
 - `lib/services/keri_service.dart` — Abstract `KeriService` interface; all screens are mode-agnostic
 - `lib/services/backend_process_service.dart` — Spawns/monitors the Go binary on desktop; handles port conflicts (auto-kills stale Identity Agent processes, prompts for others)
 - `lib/bridge/keri_bridge.dart` — Dart ↔ Rust FFI; gracefully sets `isAvailable=false` if native lib not found (development fallback)

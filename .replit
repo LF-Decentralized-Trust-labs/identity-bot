@@ -6,11 +6,11 @@ channel = "stable-24_11"
 packages = ["flutter", "go", "python-3.11", "libsodium", "cloudflared", "rustc", "cargo", "rustup", "cacert"]
 
 [[ports]]
-localPort = 5000
+localPort = 5050
 externalPort = 80
 
 [env]
-PORT = "5000"
+PORT = "5050"
 
 [workflows]
 runButton = "Project"
@@ -45,7 +45,7 @@ mode = "sequential"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "sh ./scripts/start-backend.sh"
-waitForPort = 5000
+waitForPort = 5050
 
 [[workflows.workflow]]
 name = "Start Frontend"
@@ -59,7 +59,7 @@ args = "sh ./scripts/build-flutter.sh"
 [userenv]
 
 [userenv.shared]
-PORT = "5000"
+PORT = "5050"
 KERI_HELPER_URL = "https://keri-helper-microservice.replit.app"
 
 [deployment]

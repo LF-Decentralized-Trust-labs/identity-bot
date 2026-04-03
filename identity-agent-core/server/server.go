@@ -61,7 +61,7 @@ func DefaultConfig() Config {
                 dataDir = filepath.Join(".", "data")
         }
 
-        port := 5000
+        port := 5050
         if p := os.Getenv("PORT"); p != "" {
                 fmt.Sscanf(p, "%d", &port)
         }
@@ -151,20 +151,45 @@ func (s *CoreServer) Start() error {
                 return fmt.Errorf("server already running")
         }
 
+        // Try the configured port first, then fallback to 5051–5059
+        requestedPort := s.Port
+        var bindErr error
+        for attempt := 0; attempt < 10; attempt++ {
+                tryPort := requestedPort + attempt
+                addr := fmt.Sprintf("0.0.0.0:%d", tryPort)
+                s.listener, bindErr = net.Listen("tcp4", addr)
+                if bindErr == nil {
+                        if tryPort != requestedPort {
+                                log.Printf("[identity-agent-core] Port %d in use — using fallback port %d", requestedPort, tryPort)
+                        }
+                        s.Port = tryPort
+                        break
+                }
+                log.Printf("[identity-agent-core] Port %d unavailable: %v", tryPort, bindErr)
+        }
+        if s.listener == nil {
+                return fmt.Errorf("failed to bind on ports %d–%d: %w", requestedPort, requestedPort+9, bindErr)
+        }
+
+        // Update endpoint service with actual port (may differ from configured)
+        s.EndpointService.SetPort(s.Port)
+
+        // Write actual port to .port file so Flutter UI can discover it
+        portFilePath := filepath.Join(s.DataDir, ".port")
+        if err := os.MkdirAll(s.DataDir, 0755); err != nil {
+                log.Printf("[identity-agent-core] Warning: could not create data dir for .port file: %v", err)
+        } else if err := os.WriteFile(portFilePath, []byte(fmt.Sprintf("%d", s.Port)), 0644); err != nil {
+                log.Printf("[identity-agent-core] Warning: could not write .port file: %v", err)
+        }
+
         tunnelCfg := s.loadTunnelConfig()
         s.TunnelManager = tunnel.NewManager(tunnelCfg, s.Port)
         s.EndpointService.SetTunnelManager(s.TunnelManager)
         s.EndpointService.Refresh()
 
-        addr := fmt.Sprintf("0.0.0.0:%d", s.Port)
-        var err error
-        s.listener, err = net.Listen("tcp4", addr)
-        if err != nil {
-                return fmt.Errorf("failed to bind on %s: %w", addr, err)
-        }
-
         s.running = true
 
+        addr := fmt.Sprintf("0.0.0.0:%d", s.Port)
         log.Printf("[identity-agent-core] Server listening on %s", addr)
         log.Printf("[identity-agent-core] Endpoint URL: %s (source: %s)", s.EndpointService.CurrentURL(), s.EndpointService.Source())
         if s.KeriDriver != nil {
@@ -216,6 +241,10 @@ func (s *CoreServer) Stop() {
         }
 
         log.Println("[identity-agent-core] Shutting down...")
+
+        // Clean up .port file
+        portFilePath := filepath.Join(s.DataDir, ".port")
+        os.Remove(portFilePath)
 
         if s.SandboxManager != nil {
                 s.SandboxManager.Stop()

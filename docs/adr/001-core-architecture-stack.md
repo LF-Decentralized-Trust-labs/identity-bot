@@ -17,7 +17,7 @@ We will utilize a **Hybrid Local-Client/Server Architecture** composed of the fo
 * **Language:** Go (Golang)
 * **KERI Engine:** Python `keripy` v1.1.17 on desktop (see [ADR 002](002-keri-driver-pattern.md)); Rust `keriox/keri-core` on mobile via FFI (see [ADR 004](004-ffi-bridge-and-ci-pipeline.md)).
 * **Role:** Runs as a persistent background service. On desktop, it spawns the Python KERI driver as a child process. On mobile, it runs embedded via gomobile (platform channels) with the KERI driver disabled — the Rust bridge handles crypto instead. Handles data persistence (file-based JSON store), OOBI serving, contact management, and tunneling.
-* **API:** Exposes a local HTTP API (port 5000) for the frontend to command.
+* **API:** Exposes a local HTTP API (port 5050) for the frontend to command.
 
 ### 2. The Frontend (The "Controller")
 * **Framework:** Flutter (Dart)

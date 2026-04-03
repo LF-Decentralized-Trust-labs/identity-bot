@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import '../config/agent_config.dart';
 import '../theme/app_theme.dart';
 import '../services/setup_task_service.dart';
 import '../services/preferences_service.dart';
@@ -73,7 +74,7 @@ class _SetupChecklistScreenState extends State<SetupChecklistScreen> {
   List<SetupTask> get _tasks =>
       SetupTaskService.orderedTasks(needsRemoteBrain: _needsRemoteBrain, includeSecureKeyStorage: false);
 
-  String get _baseUrl => widget.serverUrl ?? 'http://127.0.0.1:5000';
+  String get _baseUrl => widget.serverUrl ?? 'http://127.0.0.1:${AgentConfig.desktopPort}';
 
   @override
   void initState() {

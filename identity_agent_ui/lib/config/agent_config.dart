@@ -3,7 +3,11 @@ import 'platform_helper_stub.dart'
     if (dart.library.io) 'platform_helper_io.dart';
 
 class AgentConfig {
-  static const int desktopPort = 5000;
+  static const int defaultDesktopPort = 5050;
+
+  /// The actual port the backend is running on (may differ from default
+  /// if port 5050 was occupied and the backend auto-selected a fallback).
+  static int desktopPort = defaultDesktopPort;
   static const int mobilePort = 8642;
 
   static String get coreBaseUrl {

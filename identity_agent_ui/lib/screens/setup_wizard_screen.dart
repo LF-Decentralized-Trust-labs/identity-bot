@@ -229,7 +229,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
         if (!kIsWeb && BackendProcessService.isDesktopPlatform) {
           final backendError = BackendProcessService.instance.startupError;
           errorMsg = backendError ??
-              'Cannot connect to the identity backend (127.0.0.1:5000). '
+              'Cannot connect to the identity backend (127.0.0.1:${AgentConfig.desktopPort}). '
                   'Please ensure Python 3.10+ is installed and try restarting the app.';
         } else {
           errorMsg = 'Cannot reach the Identity Agent server. '

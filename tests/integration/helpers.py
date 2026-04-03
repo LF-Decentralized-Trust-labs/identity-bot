@@ -58,7 +58,7 @@ from keri.core.coring import MtrDex
 # ---------------------------------------------------------------------------
 TIMEOUT = 10  # HTTP request timeout in seconds
 
-AGENT_A_URL = os.environ.get("AGENT_A_URL", "http://127.0.0.1:5000").rstrip("/")
+AGENT_A_URL = os.environ.get("AGENT_A_URL", "http://127.0.0.1:5050").rstrip("/")
 AGENT_B_URL = os.environ.get("AGENT_B_URL", "").rstrip("/")
 SKIP_RESET  = os.environ.get("SKIP_RESET", "0") == "1"
 
