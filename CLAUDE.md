@@ -24,6 +24,40 @@ All planning docs live in `C:\Users\Boogie Bob\Documents\GitHub\strategy\` (also
 
 **Plan doc → Task rule (mandatory):** Every new document created in `2. Plans/` MUST have a corresponding entry in the high-level task list in `tasks.md` AND a detailed breakdown section under `## Detailed Breakdown`. Never create a plan document without first adding both. The plan doc is the "why and how"; the task entries are the actionable checkboxes. One cannot exist without the other. See `tasks.md` → "Convention for new high-level tasks" for the full convention.
 
+**Milestone STATUS formatting (mandatory):** When updating STATUS sections in `product-roadmap-v2.md`, follow this convention exactly:
+- `[x]` alone = fully complete (NO trailing description, NO file references, NO sizes)
+- `[x] note` = started / in-progress (trailing note describes what's done AND what remains)
+- `[ ]` alone = not started
+- `[ ] note` = not started but has context about what's needed or blocking
+
+**Task list cleanup on completion (mandatory):** When a task or document is finished, distinguish between two kinds of locations and treat them differently:
+
+1. **TODO / "what's missing" / pending-work lists** — these exist ONLY to tell future readers what still needs to be done. Examples: `daily.md` Priority A/B/C action lists, `daily.md` "What's Actually Missing" tables, "Recommended Next Actions" lists, "Pending ARCH docs" sections, ad-hoc TODO bullets. **When the work is done, DELETE the entry entirely. Do NOT replace it with "✅ complete" commentary or "now done — see X" notes.** The list is a queue, not a journal. If it isn't pending, it doesn't belong on the queue. Renumber surrounding items if needed.
+
+2. **High-level completion trackers** — these exist explicitly to record what has been done. Examples: `product-roadmap-v2.md` STATUS checkbox blocks (`- [x] Architecture — ...`), `tasks.md` high-level checkboxes, `tasks-completed.md` archive, milestone STATUS headers. **These get marked done in place** — flip `[ ]` → `[x]`, update the trailing description to point at the completed artifact, follow the Milestone STATUS formatting rules above.
+
+The principle: if the line exists to say "this still needs doing," delete it when it doesn't. If the line exists to track historical completion, mark it done. Never leave completion commentary in pending-work lists — it adds noise and makes the queue harder to scan.
+
+Session-log fields (`daily.md` "Last updated" header, commit messages, audit logs) are journals — they record what happened and stay forever. Don't delete from those.
+
+**Document Status Taxonomy (mandatory — canonical source: `strategy/system/task-creation-process.md`):** Every document in `strategy/2. Plans/`, `strategy/3. Design/`, public docs, and the public website uses a `STATUS:` header. Use these labels verbatim — do NOT invent new words (no "AGREED", "ARCHITECTED", "FINAL", "DRAFT", "BRIEFING", etc.). If a new state seems needed, amend `strategy/system/task-creation-process.md` first.
+
+*Internal work products* — arch docs (`2. Plans/`), design docs (`3. Design/`), and task breakdowns (`1. Strategy/tasks.md` sections):
+
+| Label | Meaning |
+|---|---|
+| `STATUS: OUTLINE` | In progress. Still being written. Not ready for Rob to read end-to-end. |
+| `STATUS: AWAITING REVIEW` | Claude believes it is complete. Rob needs to read and approve or send back. If Rob sends it back, the doc stays in AWAITING REVIEW (or drops to OUTLINE for major rework). |
+| `STATUS: APPROVED (YYYY-MM-DD)` | Rob has signed off. Locked in. Include the approval date. |
+
+*Public Documentation* — developer docs, API docs, user guides:
+`STATUS: OUTLINE` → `STATUS: AWAITING REVIEW` → `STATUS: APPROVED (YYYY-MM-DD)` → `STATUS: PUBLISHED (YYYY-MM-DD)`
+
+*Public Website* — marketing / landing / pricing pages:
+`STATUS: OUTLINE` → `STATUS: COPY` → `STATUS: DESIGN` → `STATUS: AWAITING REVIEW` → `STATUS: APPROVED (YYYY-MM-DD)` → `STATUS: LIVE (YYYY-MM-DD)`
+
+**Important distinction:** Arch docs and design docs are INTERNAL work products (for Rob + Claude). Public documentation and the public website are EXTERNAL outputs shipped to users. Do not conflate phase 9/10 "Docs" and "Website" in task-creation-process.md with internal arch/design docs — they are different things with different lifecycles.
+
 ## What This Is
 
 The **Identity Agent** is a self-hosted, self-sovereign digital identity infrastructure. It is software that individuals (and eventually organizations) install on their own devices. It is not a platform — it is a user-controlled agent where the cryptographic identity is fully owned and managed by the user under the KERI (Key Event Receipt Infrastructure) protocol. There is no central server, no third-party custody of keys, and no dependency on any external service for core identity operations.

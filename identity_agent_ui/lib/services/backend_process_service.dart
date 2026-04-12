@@ -390,14 +390,17 @@ class BackendProcessService {
 
     _portConflict = null;
     final defaultPort = AgentConfig.defaultDesktopPort;
-    final conflict = await checkPortConflict(defaultPort);
-    if (conflict != null) {
-      if (conflict.isIdentityAgent) {
-        _appendOutput('[startup] Found stale Identity Agent process (PID ${conflict.pid}) — auto-killing');
-        await killProcessOnPort(conflict);
-      } else {
-        // Don't block startup — the Go backend will auto-select a fallback port
-        _appendOutput('[startup] Port $defaultPort is in use by ${conflict.processName} (PID ${conflict.pid}) — backend will auto-select fallback port');
+    // Scan the full fallback range (5050–5059) to kill any orphaned Identity Agent processes
+    for (int port = defaultPort; port < defaultPort + 10; port++) {
+      final conflict = await checkPortConflict(port);
+      if (conflict != null) {
+        if (conflict.isIdentityAgent) {
+          _appendOutput('[startup] Found stale Identity Agent on port $port (PID ${conflict.pid}) — auto-killing');
+          await killProcessOnPort(conflict);
+        } else if (port == defaultPort) {
+          // Only log non-Identity-Agent conflicts on the default port
+          _appendOutput('[startup] Port $defaultPort is in use by ${conflict.processName} (PID ${conflict.pid}) — backend will auto-select fallback port');
+        }
       }
     }
 
