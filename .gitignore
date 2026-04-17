@@ -53,3 +53,9 @@ attached_assets/
 
 # MCP config (personal dev tooling)
 .mcp.json
+
+# Claude Code project instructions (local-only, not for public repo)
+CLAUDE.md
+
+# Local personal tooling (markdown-to-docx converter, etc.)
+md_to_docx.py
