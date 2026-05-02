@@ -6,23 +6,23 @@
 
 ## Overview
 
-Backend migration is the process of transferring an Identity Agent's backend from one device to another — most commonly from a mobile standalone device to a desktop server. The primary motivation is to increase compute power, storage, and uptime by moving the backend "brain" from a resource-constrained mobile device to a dedicated desktop or server environment.
+Backend migration is the process of transferring an Identity Agent's backend from one device to another — most commonly from a phone (running in the offline-credential-verification fallback within Phone + Computer) to a computer (own or black box). The primary motivation is to increase compute power, storage, and uptime by moving the backend "brain" from a resource-constrained phone to a dedicated computer or black box computer environment.
 
-After migration, the user's identity (AID, keys, contacts, tunnel URL, etc.) continues to function seamlessly on the new device. The mobile device may then operate as a Remote Controller (WITH or WITHOUT Root Keys) connected to the new desktop backend, or it may be decommissioned entirely.
+After migration, the user's identity (AID, keys, contacts, tunnel URL, etc.) continues to function seamlessly on the new device. The phone then operates as the key-holder paired with the computer (Phone + Computer topology), or it may be decommissioned entirely.
 
 ### Migration Direction
 
 The initial and most common migration path is:
 
 ```
-Mobile Standalone → Desktop Standalone
+Phone-only fallback → Phone + Computer (own or black box)
 ```
 
 Future migration paths may include:
 
-- Desktop Standalone → Desktop Standalone (server replacement)
-- Mobile Standalone → Mobile Standalone (phone upgrade)
-- Any Standalone → Remote Controller + new Standalone (splitting roles)
+- Computer only ↔ Computer only (computer replacement / move between own and black box)
+- Phone + Computer (own) ↔ Phone + Computer (black box) (move computer side)
+- Any Computer-only configuration → Phone + Computer (add a phone as key holder via key rotation)
 
 ## Migration Flow
 

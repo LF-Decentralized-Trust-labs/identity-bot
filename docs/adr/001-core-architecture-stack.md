@@ -30,5 +30,5 @@ We will utilize a **Hybrid Local-Client/Server Architecture** composed of the fo
 * **Constraint:** All AI Egress must pass through a strict "Deterministic Whitelist" filter enforced by the Go backend before reaching the network.
 
 ## Consequences
-* **Pros:** Strict type safety (Go/Dart), high performance, clear separation of UI and Logic (allows the backend to be moved to a cloud server later if the user chooses "Remote" mode). Four operating modes support desktop, mobile standalone, and two remote controller configurations.
+* **Pros:** Strict type safety (Go/Dart), high performance, clear separation of UI and Logic (allows the backend to be moved to a black box computer or paired computer later). Two topologies (Phone + Computer, Computer only) and four launch configurations cover phone-paired, own-computer, and black-box-computer scenarios. See ADR-006.
 * **Cons:** Requires managing multiple build pipelines (Go binary, Go gomobile library, Rust bridge, Flutter bundle) and platform-specific bridges (HTTP on desktop, platform channels + FFI on mobile).

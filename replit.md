@@ -15,18 +15,24 @@ Build versioning: All Codemagic workflows pass `--build-number=$BUILD_NUMBER` (C
 
 ## System Architecture
 
-The system uses a standardized topology model based on three topological states (Standalone, Remote Controller WITHOUT Root Keys, Remote Controller WITH Root Keys) and two device types (Desktop, Mobile), resulting in six architectural combinations. A critical invariant is that stateful KERI operations always use the local engine, with remote servers handling only backend services and stateless operations.
+The system uses a two-topology model with four launch configurations. Every Identity Agent instance is in one of two topologies: **Phone + Computer** (keys on phone, computer handles storage and always-on services) or **Computer only** (keys and data on the computer). In either topology, the computer can be the user's own or a **black box computer** — professionally managed in a data center, sealed via TEE attestation so the operator provably cannot read into it. Internal/architecture term: **black box infrastructure** (doctrine D10). A critical invariant is that stateful KERI operations always use the local engine, with paired/remote computers handling only backend services and stateless operations.
 
-### Topological States
+### Topologies and Configurations
 
-1.  **Standalone**: Device holds root AID keys and runs all backend services locally.
-2.  **Remote Controller WITHOUT Root Keys**: Device creates a delegated child AID locally and connects to a remote parent server for backend services.
-3.  **Remote Controller WITH Root Keys**: Device retains primary parent AID and keys locally, using a remote server for compute-heavy backend operations.
+**Two topologies:**
+1. **Phone + Computer**: Identity created on the phone; keys live on the phone. The phone pairs with a computer that handles storage, computing, and always-on services.
+2. **Computer only**: Identity and keys live on the computer. No phone required.
+
+**Four launch configurations:**
+1. Phone + Computer (black box computer) — recommended default; 60-second setup, no hardware to maintain, always-on.
+2. Phone + Computer (own computer) — willing to leave a laptop/desktop on 24/7 and maintain it.
+3. Computer only (own computer) — power users, privacy maximalists, single-device households.
+4. Computer only (black box computer) — no smartphone *and* no personal computer.
 
 ### Device Types
 
--   **Desktop** (Linux/macOS/Windows): Utilizes a Go backend with Python `keripy` for KERI and Go Core for backend services.
--   **Mobile** (iOS/Android): Employs a Rust bridge via FFI for KERI and Go Core via `gomobile` for backend services (Standalone only).
+-   **Computer** (Linux/macOS/Windows): Utilizes a Go backend with Python `keripy` for KERI and Go Core for backend services.
+-   **Phone** (iOS/Android): Employs a Rust bridge via FFI for KERI and Go Core via `gomobile` for embedded backend (used in phone-only fallback / offline credential verification mode within Phone + Computer).
 
 ### Core Components and Technologies
 
@@ -68,7 +74,7 @@ A developer-only diagnostic tool providing real-time visibility into sandbox req
 
 ### Persistence Layer
 
-Defaults to a file-based JSON store in `./data/` (`identity.json`, `kel.json`, `contacts.json`, `settings.json`, `pending_requests.json`, `profile.json`, `endpoint.json`), with a modular `store.Store` interface for swappable backends. On mobile standalone, Go Core stores data in the app's documents directory. Onboarding state (mode, entity type, setup completion) is persisted via SharedPreferences. Profile data (jCard fields + photo) is stored in `profile.json` and served via OOBI endpoints and exchange introductions.
+Defaults to a file-based JSON store in `./data/` (`identity.json`, `kel.json`, `contacts.json`, `settings.json`, `pending_requests.json`, `profile.json`, `endpoint.json`), with a modular `store.Store` interface for swappable backends. In phone-only fallback mode (offline credential verification within Phone + Computer), Go Core stores data in the app's documents directory. Onboarding state (mode, entity type, setup completion) is persisted via SharedPreferences. Profile data (jCard fields + photo) is stored in `profile.json` and served via OOBI endpoints and exchange introductions.
 
 ### Mobile UI Architecture
 

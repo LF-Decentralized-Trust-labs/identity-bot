@@ -2,10 +2,10 @@
 
 **Date:** 2026-02-21
 **Updated:** 2026-02-22
-**Status:** Accepted (mode definitions superseded by ADR-006 — Standardized Topology)
+**Status:** Accepted (mode definitions superseded by ADR-006 — Standardized Topology, revised 2026-05-01)
 **Related:** ADR-003 (Adaptive Architecture), ADR-006 (Standardized Topology)
 
-> **Note:** The mobile mode definitions in this ADR (Standalone, Remote WITH Keys, Remote WITHOUT Keys) have been superseded by the 3-state × 2-device-type topology model in ADR-006. This ADR remains the authoritative source for the onboarding flow UI, state machine, persistence keys, and graceful degradation behavior. See ADR-006 for the current architectural topology.
+> **Note:** The mobile mode definitions in this ADR (Standalone, Remote WITH Keys, Remote WITHOUT Keys) have been superseded by ADR-006's two-topology + four-configuration model (2026-05-01 revision). This ADR remains the authoritative source for the onboarding flow UI, state machine, persistence keys, and graceful degradation behavior. The mobile-mode terms used below are historical — the current model is "Phone + Computer" / "Computer only" with auto-detection of key location. See ADR-006 for the current architectural topology.
 
 ## The Problem This Solves
 

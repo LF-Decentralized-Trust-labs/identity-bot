@@ -2,10 +2,10 @@
 
 **Date:** 2026-02-18
 **Updated:** 2026-02-22
-**Status:** Accepted (mode definitions superseded by ADR-006 — Standardized Topology)
+**Status:** Accepted (mode definitions superseded by ADR-006 — Standardized Topology, revised 2026-05-01)
 **Context:** Phase 3 (Connectivity) — OOBI serving, contact management, and tunneling
 
-> **Note:** The four-mode model described in this ADR has been superseded by the 3-state × 2-device-type topology model in ADR-006. This ADR remains the authoritative source for OOBI serving, contact management, tunneling, endpoint naming conventions, trust boundaries, and configuration variables. See ADR-006 for the current architectural topology.
+> **Note:** The four-mode model described in this ADR has been superseded twice: first by the 3-state × 2-device-type model in ADR-006 (2026-02-22), then by the two-topology + four-configuration model in ADR-006's 2026-05-01 revision. This ADR remains the authoritative source for OOBI serving, contact management, tunneling, endpoint naming conventions, trust boundaries, and configuration variables. The terms "Mobile Standalone," "Mobile Remote WITHOUT Keys," and "Mobile Remote WITH Keys" used below are historical — the current model is "Phone + Computer" / "Computer only" (with auto-detection of key location). See ADR-006 for the current architectural topology.
 
 ## The Problem This Solves
 

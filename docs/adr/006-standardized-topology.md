@@ -1,136 +1,130 @@
-# ADR 006: Standardized Topology — 3 States × 2 Device Types
+# ADR 006: Standardized Topology — Two Topologies, Four Configurations
 
-**Date:** 2026-02-22
-**Status:** Accepted
-**Supersedes:** Mode definitions in ADR-003 and ADR-005
+**Date:** 2026-02-22 (revised 2026-05-01)
+**Status:** Accepted (revised)
+**Supersedes:** Mode definitions in ADR-003 and ADR-005; the original "3 states × 2 device types" formulation in this same ADR (2026-02-22).
 
-## The Problem This Solves
+## Revision Note (2026-05-01)
 
-ADR-003 described "Four Operating Modes" and ADR-005 described "Three Mobile Operating Modes." These overlapping mode definitions created confusion:
+The original ADR-006 defined 3 topological states × 2 device types = 6 architectural combinations. That model was structurally accurate but proved too complex for users and contributors to internalize. This revision collapses it into **two topologies** with **four launch configurations**, mapping cleanly to consumer language ("phone with a computer, or computer only — and the computer can be yours or one we provide that's sealed").
 
-- ADR-003 listed Desktop, Mobile Standalone, Mobile Remote WITHOUT Keys, and Mobile Remote WITH Keys — four modes total, but the first was device-specific while the other three were topology-specific.
-- ADR-005 correctly identified three mobile topologies but did not extend them to desktop.
-- The term "mode" was overloaded — it sometimes meant device type, sometimes meant topology, sometimes meant both.
+Vocabulary update: "Sealed Infrastructure" / "Sealed Desktop" are retired in favor of **"black box infrastructure"** (engineering / architecture term) and **"black box computer"** (consumer-facing noun). See doctrine D10 in `architecture-doctrines.md`.
 
-In reality, there are **3 fundamental topological states** that apply to **both device types** (desktop and mobile), giving 6 architectural combinations. This ADR standardizes the terminology.
+The 6-combination engineering model is preserved internally as `KeriService` implementation choices, but is no longer the primary mental model for the project.
 
 ## The Decision
 
-### Three Topological States
+### Two Topologies
 
-Every Identity Agent instance is in exactly one of three topological states, regardless of whether it runs on a desktop or mobile device:
+Every Identity Agent instance is in exactly one of two topologies:
 
-| State | Short Name | Description |
-|---|---|---|
-| **Standalone** | Root Keys + Backend Brain | The device holds the root AID keys AND runs all backend services (persistence, OOBI, contacts, tunneling) locally. Complete self-contained operation. |
-| **Remote Controller WITHOUT Root Keys** | Delegated Device | The device creates a delegated child AID locally. It connects to a remote parent server for backend services and stateless operations. The parent server holds the root AID. |
-| **Remote Controller WITH Root Keys** | Sovereign Controller | The device retains the primary parent AID and its root keys locally. It connects to a remote server for compute-heavy backend services. The server never receives private keys. |
+| Topology | Description |
+|---|---|
+| **Phone + Computer** | Identity created on the phone; keys live on the phone. The phone pairs with a computer that handles storage, computing, and always-on services. |
+| **Computer only** | Identity and keys live on the computer. No phone required. |
 
-### Two Device Types
+In either topology, the **computer** can be the user's own (laptop, desktop, mini-PC) or a **black box computer** — professionally managed in a data center, sealed via TEE attestation so even the operator cannot read into it. Internal architecture term: **black box infrastructure** (D10).
+
+### Four Launch Configurations
+
+| # | Topology | Computer | Who it suits |
+|---|---|---|---|
+| 1 | Phone + Computer | Black box computer (data center) | **Most common at launch.** 60-second setup, no hardware to maintain, always-on. The default. |
+| 2 | Phone + Computer | Own computer | Willing to leave a laptop/desktop on 24/7 and maintain it. Wants control of hardware. |
+| 3 | Computer only | Own computer | Power users, privacy maximalists, people without smartphones, single-device households. |
+| 4 | Computer only | Black box computer | No smartphone *and* no personal computer. Needs 24/7 service. Elderly, accessibility-constrained, regions where smartphones aren't practical. |
+
+**Future:** Personal black box infrastructure (single- or multi-tenant TEE hardware operated by you, family, neighbor, or community steward — same protocol, different operator). M9 Backup is orthogonal — any configuration can mirror to a second computer.
+
+### Two Device Types (engineering view)
 
 | Device Type | KERI Engine | Backend Engine |
 |---|---|---|
-| **Desktop** (Linux, macOS, Windows) | Go backend → Python keripy (local child process) | Go Core (local binary) |
-| **Mobile** (iOS, Android) | Rust bridge via flutter_rust_bridge FFI | Go Core via gomobile (embedded, platform channels) |
-
-### 6 Architectural Combinations
-
-| # | Device | Topology | KERI Engine | Backend | KeriService Implementation | How Entered |
-|---|---|---|---|---|---|---|
-| 1 | Desktop | Standalone | Go → Python keripy | Go Core (local) | `DesktopOnDeviceKeriService()` | "Create New Identity" on desktop |
-| 2 | Desktop | Remote WITHOUT Keys | Go → Python keripy (local child AID) | Remote parent server | `DesktopOnDeviceKeriService()` + remote serverUrl passed to screens | "Connect to Existing" on desktop |
-| 3 | Desktop | Remote WITH Keys | Go → Python keripy (primary AID) | Remote server for compute | `DesktopOnDeviceKeriService()` + remote serverUrl passed to screens | Migration from Desktop Standalone (planned) |
-| 4 | Mobile | Standalone | Rust bridge (FFI) | Go Core (gomobile, embedded) | `MobileOnDeviceKeriService()` | "Create New Identity" on mobile |
-| 5 | Mobile | Remote WITHOUT Keys | (none — all ops forwarded) | Remote parent server | `MobileRemoteKeriService(serverUrl:)` | "Connect to Existing" when Rust bridge unavailable |
-| 6 | Mobile | Remote WITH Keys | Rust bridge (FFI, primary AID) | Remote parent server (stateless ops only) | `MobileOnDeviceKeriService(pairedServerUrl:)` | "Connect to Existing" when Rust bridge available |
+| **Computer** (Linux, macOS, Windows) | Go backend → Python keripy (local child process) | Go Core (local binary) |
+| **Phone** (iOS, Android) | Rust bridge via flutter_rust_bridge FFI | Go Core via gomobile (embedded, platform channels) |
 
 ### Critical Architecture Invariant
 
-In ALL 6 combinations, **stateful KERI operations always use the LOCAL engine**:
+In every configuration, **stateful KERI operations always use the LOCAL engine**:
 
-- Desktop: Local Go+Python creates and manages the AID (whether root or child)
-- Mobile: Local Rust bridge creates and manages the AID (whether root or child)
+- Computer: Local Go+Python creates and manages the AID
+- Phone: Local Rust bridge creates and manages the AID
 
-The remote parent server is ONLY used for:
+The remote/paired component is ONLY used for:
 - Backend services (persistence, OOBI serving, contacts, tunneling)
 - Stateless KERI operations (format-credential, resolve-oobi, generate-multisig-event)
 
-**The remote server NEVER performs stateful KERI operations on behalf of the local device.** This is the fundamental trust invariant of the architecture.
+**The remote/paired component NEVER performs stateful KERI operations on behalf of the local device.** This is the fundamental trust invariant of the architecture.
 
 ## KeriService Implementations
 
-Service class naming follows the convention **`{Platform}{KeriLocation}KeriService`**: the platform first, then where KERI logic executes, then the suffix. This makes any class name self-documenting.
+The 6-combination internal engineering model still exists at the code level, because Phone + Computer behaves differently depending on which device the identity was created on first (this determines which device holds the keys). The code-level mapping:
 
 | Service Class | Used By | What It Does |
 |---|---|---|
-| `DesktopOnDeviceKeriService` | Combinations 1, 2, 3 | Talks to local Go Core → Python keripy via HTTP. Same class for all desktop topologies — the difference is which serverUrl the screens use for backend/stateless ops. |
-| `MobileOnDeviceKeriService` | Combinations 4, 6 | Rust bridge (FFI) for all stateful KERI ops. Embedded Go Core (gomobile) for standalone backend; paired server for backend in Remote WITH Keys. The 3 stateless ops (`format-credential`, `resolve-oobi`, `generate-multisig-event`) go to the paired server if one is configured, otherwise to the public KERI microservice (`keri.grapeid.org`). |
-| `MobileRemoteKeriService` | Combination 5 (and fallback) | Forwards ALL KERI operations to the paired server via HTTP. The Rust bridge is never used. Used when the device intentionally has no local keys (Remote WITHOUT Keys topology), or as a fallback when the Rust bridge fails to load. |
+| `DesktopOnDeviceKeriService` | Configurations 3, 4 (Computer only — own or black box). Also runs on the computer side of Configurations 1 and 2 (Phone + Computer) when the phone is absent or as the backend. | Talks to local Go Core → Python keripy via HTTP. Same class for own computer and black box computer — the difference is the deployment target, not the code. |
+| `MobileOnDeviceKeriService` | Phone in Configurations 1 and 2 when keys are on the phone (identity created on phone first). Also covers fully-local Phone-only mode (offline credential verification). | Rust bridge (FFI) for all stateful KERI ops. Embedded Go Core (gomobile) for local backend; paired server for backend when paired. The 3 stateless ops (`format-credential`, `resolve-oobi`, `generate-multisig-event`) go to the paired server if one is configured, otherwise to the public KERI microservice (`keri.grapeid.org`). |
+| `MobileRemoteKeriService` | Phone in Configurations 1 and 2 when keys are on the computer (identity created on computer first). Also serves as the fallback when the Rust bridge fails to load on the phone. | Forwards ALL KERI operations to the paired server via HTTP. The Rust bridge is never used. |
+
+### Auto-detection: where do the keys live?
+
+In Phone + Computer topology, the user does not choose between "with keys" and "without keys" modes. Instead:
+
+- **Identity created on phone first** → keys live on phone. Computer (own or black box) is added as paired backend. Phone uses `MobileOnDeviceKeriService(pairedServerUrl:)`.
+- **Identity created on computer first** → keys live on computer. Phone (added later) is a thin controller. Phone uses `MobileRemoteKeriService(serverUrl:)`.
+
+The two paths converge to the same UX from the user's perspective; only the implementation differs.
 
 ### Fallback Behavior
 
 When the local KERI engine is unavailable (typically during development before native compilation):
 
-- **Mobile + Rust bridge unavailable:** Falls back to `MobileRemoteKeriService`, which forwards all operations to the paired server. This breaks the trust invariant but keeps the app functional for development/testing.
-- **Desktop:** No fallback needed — Go+Python always available on desktop platforms.
+- **Phone + Rust bridge unavailable:** Falls back to `MobileRemoteKeriService`, which forwards all operations to the paired server. This breaks the trust invariant but keeps the app functional for development/testing.
+- **Computer:** No fallback needed — Go+Python always available on Linux/macOS/Windows.
 
-## Migration: Standalone → Remote Controller WITH Keys
+## Migration Between Configurations
 
-The 9-step migration flow moves a device from Standalone to Remote Controller WITH Keys. This applies to both desktop and mobile, though the initial implementation targets mobile:
+Migration between configurations is reversible and reuses the same primitives.
 
 ### Prerequisites
 
-- Device is in Standalone topology with an active identity
-- User has a remote server running Identity Agent in Desktop Standalone mode
-- Network connectivity between device and server
+- Source device is in any active configuration with an active identity
+- Target configuration's hardware is provisioned (e.g., a black box computer is reserved, or a new own-computer install is ready)
+- Network connectivity between source and target
 
-### Steps
+### Steps (high level)
 
-1. **User initiates migration** — Taps "Migrate to External Server" button on the dashboard (visible only in Standalone topology with an active identity).
-
-2. **User enters remote server URL** — The app validates the server is reachable and running Identity Agent by calling `GET /api/health`.
-
-3. **Server health confirmed** — The server responds with `status: "active"` and `agent: "identity-agent-core"`.
-
-4. **Device exports public identity data** — The device's AID, public key, and current KEL are packaged for transfer. Private keys are NEVER included.
-
-5. **Device sends public data to server** — The device calls the server's identity registration endpoint to establish itself as the primary identity the server will serve.
-
-6. **Server acknowledges registration** — The server stores the device's public identity data and begins serving its OOBI.
-
-7. **Device switches topology** — The app changes from Standalone to Remote Controller WITH Keys:
-   - On mobile: Go Core (gomobile) is stopped. `MobileOnDeviceKeriService` is re-instantiated with `pairedServerUrl` set so stateless ops route to the paired server instead of the public microservice.
-   - On desktop: No engine changes needed — `DesktopKeriService` continues to use local Go+Python for KERI, but screens switch to using the remote serverUrl for backend operations.
-
-8. **Device persists new configuration** — The server URL and new topology are saved to SharedPreferences.
-
-9. **Device verifies connection** — The app confirms it can reach the server and that the server is correctly serving the device's OOBI.
+1. **User initiates migration** — Selects the target configuration from the dashboard (e.g., "Move to a black box computer").
+2. **Target hardware health confirmed** — The target responds with `status: "active"` and `agent: "identity-agent-core"`.
+3. **Device exports public identity data** — AID, public key, current KEL packaged for transfer. Private keys are NEVER included if keys must remain on the source.
+4. **Device sends public data to target** — Establishes target as the new backend (or new key holder, depending on direction).
+5. **Target acknowledges registration** — Stores the device's public identity data and begins serving its OOBI.
+6. **Source switches topology / configuration** — `KeriService` is re-instantiated for the new layout (e.g., `MobileOnDeviceKeriService` re-instantiated with `pairedServerUrl` set when adding a black box computer to a previously phone-only setup).
+7. **Persist new configuration** — Server URL and new configuration saved to SharedPreferences.
+8. **Verify connection** — Confirm reachability and OOBI continuity.
 
 ### Reversibility
 
-Migration is designed to be reversible. The device retains its root keys and complete KEL locally. To revert:
-- Mobile: Restart the embedded Go Core, switch back to `MobileStandaloneKeriService`
-- Desktop: Stop using the remote server for backend ops, revert to fully local operation
+Migration is designed to be reversible. The source device retains its root keys and complete KEL locally (when keys must stay with the user). To revert: stop using the new backend, switch the `KeriService` back, fall back to fully local operation.
 
 ## AgentEnvironment Enum Mapping
 
-The existing `AgentEnvironment` enum maps to the topology model:
+The existing `AgentEnvironment` enum maps to the new model:
 
-| Enum Value | Topology | Device |
+| Enum Value | Configuration | Device |
 |---|---|---|
-| `desktop` | Standalone (default) | Desktop |
-| `mobileStandalone` | Standalone | Mobile |
-| `mobileRemoteWithoutKeys` | Remote WITHOUT Keys | Mobile |
-| `mobileRemoteWithKeys` | Remote WITH Keys | Mobile |
+| `desktop` | Computer only (Configurations 3, 4) — deployment target distinguishes own vs. black box | Computer |
+| `mobileStandalone` | Phone-only fallback / offline-credential-verification mode within Phone + Computer | Phone |
+| `mobileRemoteWithoutKeys` | Phone in Configurations 1, 2 when keys are on the computer | Phone |
+| `mobileRemoteWithKeys` | Phone in Configurations 1, 2 when keys are on the phone | Phone |
 
-Note: Desktop Remote topologies (combinations 2 and 3) currently report as `desktop` since `DesktopKeriService` always reports `AgentEnvironment.desktop`. A future change may add `desktopRemoteWithoutKeys` and `desktopRemoteWithKeys` enum values for more precise reporting.
+Note: The enum continues to expose the engineering model. Consumer-facing UI does not surface these values.
 
 ## Consequences
 
-- The 3-state topology model replaces the 4-mode model from ADR-003 and the 3-mode mobile model from ADR-005 as the authoritative terminology.
-- All 6 architectural combinations use local KERI engines for stateful operations — this is the non-negotiable trust invariant.
-- `MobileOnDeviceKeriService` covers both Standalone (combination 4) and Remote WITH Keys (combination 6) — the only difference is whether `pairedServerUrl` is set.
-- `MobileRemoteKeriService` covers Remote WITHOUT Keys (combination 5) and serves as the fallback when the Rust bridge fails to load.
-- Desktop "Connect to Existing" now correctly uses `DesktopKeriService()` (local Go+Python) instead of forwarding stateful operations to the remote server.
-- Migration from Standalone → Remote WITH Keys is a planned feature with a defined 9-step process.
-- The topology model naturally extends to future device types (tablets, embedded devices) without requiring new "modes."
+- The two-topology + four-configuration model replaces the 6-combination model as the **primary** terminology for users, contributors, and documentation.
+- The 6-combination engineering view persists internally as `KeriService` implementation choices and `AgentEnvironment` enum values — but is no longer the project's main mental model.
+- All configurations use local KERI engines for stateful operations — non-negotiable trust invariant.
+- "Black box computer" replaces "Sealed Desktop" in consumer copy. "Black box infrastructure" replaces "Sealed Infrastructure" in engineering / architecture docs.
+- Migration between configurations is one workflow with multiple targets, not a separate "Standalone → Remote WITH Keys" special case.
+- Future device types (tablets, embedded devices, wearables) extend the model by adding new device entries to the engineering table; the topology model itself does not change.
