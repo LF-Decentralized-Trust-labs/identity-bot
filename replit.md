@@ -15,18 +15,24 @@ Build versioning: All Codemagic workflows pass `--build-number=$BUILD_NUMBER` (C
 
 ## System Architecture
 
-The system uses a standardized topology model based on three topological states (Standalone, Remote Controller WITHOUT Root Keys, Remote Controller WITH Root Keys) and two device types (Desktop, Mobile), resulting in six architectural combinations. A critical invariant is that stateful KERI operations always use the local engine, with remote servers handling only backend services and stateless operations.
+The system uses a two-topology model with four launch configurations. Every Identity Agent instance is in one of two topologies: **Phone + Computer** (keys on phone, computer handles storage and always-on services) or **Computer only** (keys and data on the computer). In either topology, the computer can be the user's own or a **black box computer** — professionally managed in a data center, sealed via TEE attestation so the operator provably cannot read into it. Internal/architecture term: **black box infrastructure** (doctrine D10). A critical invariant is that stateful KERI operations always use the local engine, with paired/remote computers handling only backend services and stateless operations.
 
-### Topological States
+### Topologies and Configurations
 
-1.  **Standalone**: Device holds root AID keys and runs all backend services locally.
-2.  **Remote Controller WITHOUT Root Keys**: Device creates a delegated child AID locally and connects to a remote parent server for backend services.
-3.  **Remote Controller WITH Root Keys**: Device retains primary parent AID and keys locally, using a remote server for compute-heavy backend operations.
+**Two topologies:**
+1. **Phone + Computer**: Identity created on the phone; keys live on the phone. The phone pairs with a computer that handles storage, computing, and always-on services.
+2. **Computer only**: Identity and keys live on the computer. No phone required.
+
+**Four launch configurations:**
+1. Phone + Computer (black box computer) — recommended default; 60-second setup, no hardware to maintain, always-on.
+2. Phone + Computer (own computer) — willing to leave a laptop/desktop on 24/7 and maintain it.
+3. Computer only (own computer) — power users, privacy maximalists, single-device households.
+4. Computer only (black box computer) — no smartphone *and* no personal computer.
 
 ### Device Types
 
--   **Desktop** (Linux/macOS/Windows): Utilizes a Go backend with Python `keripy` for KERI and Go Core for backend services.
--   **Mobile** (iOS/Android): Employs a Rust bridge via FFI for KERI and Go Core via `gomobile` for backend services (Standalone only).
+-   **Computer** (Linux/macOS/Windows): Utilizes a Go backend with Python `keripy` for KERI and Go Core for backend services.
+-   **Phone** (iOS/Android): Employs a Rust bridge via FFI for KERI and Go Core via `gomobile` for embedded backend (used in phone-only fallback / offline credential verification mode within Phone + Computer).
 
 ### Core Components and Technologies
 
@@ -51,7 +57,7 @@ The system uses a standardized topology model based on three topological states 
 -   **Mutual OOBI Contact Relationships:** Supports mutual relationships with jCard schema for rich contact information and reverse introduction flows.
 -   **IPv4 Loopback for Desktop:** All desktop backend connections use `127.0.0.1` (not `localhost`) to avoid Windows IPv6 resolution issues where `localhost` can map to `::1` while the Go backend binds IPv4 only.
 -   **Backend Startup Error Dialog:** Desktop builds show a modal error dialog with RETRY button if the bundled Go backend fails to start (missing binary, Python not installed, dependency issues).
--   **Port Conflict Handling:** On startup, checks if port 5000 is occupied. Stale Identity Agent processes are auto-killed; other apps trigger a user confirmation dialog with "CLOSE IT AND RETRY" option.
+-   **Port Conflict Handling:** Default port is 5050. On startup, the Go backend auto-detects port conflicts and falls back to 5051–5059 if needed. The actual port is written to `data/.port` for the Flutter UI to discover. Stale Identity Agent processes are auto-killed.
 -   **libsodium Bundling (Windows):** `libsodium.dll` is downloaded from the official release and bundled into the embedded Python dir, backend dir, and keri-driver dir. The KERI driver's `server.py` has Windows-specific detection logic to find the DLL.
 -   **Podman Setup UX (APPS tab):** When Podman is not available, the marketplace shows a multi-step setup wizard that automatically installs Podman and configures the Podman machine. The wizard uses platform-specific package managers (`winget` on Windows, `brew` on macOS, `apt`/`dnf` on Linux) and handles machine init/start on macOS/Windows. Users only need to approve system prompts (UAC/password). Falls back to manual download links if no supported package manager is detected. Backend endpoints: `POST /api/sandbox/podman/setup` (actions: `install`, `init-machine`, `start-machine`) and `GET /api/sandbox/podman/setup-status` for progress polling.
 -   **Sandbox Security:** Runtime-injected environment variables (`HTTP_PROXY`, `HTTPS_PROXY`, `http_proxy`, `https_proxy`, `IDENTITY_AGENT_API`) are reserved and cannot be overridden by manifest-defined environment variables. This prevents sandbox bypass via manifest manipulation. Applied in both binary and container runtimes.
@@ -68,7 +74,7 @@ A developer-only diagnostic tool providing real-time visibility into sandbox req
 
 ### Persistence Layer
 
-Defaults to a file-based JSON store in `./data/` (`identity.json`, `kel.json`, `contacts.json`, `settings.json`, `pending_requests.json`, `profile.json`, `endpoint.json`), with a modular `store.Store` interface for swappable backends. On mobile standalone, Go Core stores data in the app's documents directory. Onboarding state (mode, entity type, setup completion) is persisted via SharedPreferences. Profile data (jCard fields + photo) is stored in `profile.json` and served via OOBI endpoints and exchange introductions.
+Defaults to a file-based JSON store in `./data/` (`identity.json`, `kel.json`, `contacts.json`, `settings.json`, `pending_requests.json`, `profile.json`, `endpoint.json`), with a modular `store.Store` interface for swappable backends. In phone-only fallback mode (offline credential verification within Phone + Computer), Go Core stores data in the app's documents directory. Onboarding state (mode, entity type, setup completion) is persisted via SharedPreferences. Profile data (jCard fields + photo) is stored in `profile.json` and served via OOBI endpoints and exchange introductions.
 
 ### Mobile UI Architecture
 

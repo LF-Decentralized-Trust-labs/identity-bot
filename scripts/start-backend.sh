@@ -54,9 +54,9 @@ fi
 
 echo ""
 echo "[3/3] Starting Identity Agent..."
-echo "      Go Core:     http://0.0.0.0:${PORT:-5000}/api/health"
+echo "      Go Core:     http://0.0.0.0:${PORT:-5050}/api/health"
 echo "      KERI Driver: http://127.0.0.1:${KERI_DRIVER_PORT:-9999}/status"
-echo "      UI:          http://0.0.0.0:${PORT:-5000}/"
+echo "      UI:          http://0.0.0.0:${PORT:-5050}/"
 echo "============================================"
 echo ""
 

@@ -6,7 +6,7 @@ import 'identity_badge_widget.dart';
 ///
 /// Colors:
 ///   Red   → Not Verified (tier 0)
-///   Amber → Self-Asserted or Authenticated (tiers 1–2)
+///   Amber → Basic or Authenticated (tiers 1–2)
 ///   Green → Verified or Highly Verified (tiers 3–4)
 ///
 /// Tapping opens the authentication setup screen (handled by the parent card).

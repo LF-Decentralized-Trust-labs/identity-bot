@@ -14,14 +14,39 @@ Usage:
 
 import argparse
 import json
+import os
 import sys
 import time
 import urllib.request
 import urllib.error
 
+
+def _load_env_file():
+    """Load KEY=VALUE pairs from a .env in the repo root into os.environ.
+    No external dependency; real environment variables take precedence."""
+    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, ".env")
+    try:
+        with open(env_path, "r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, val = line.partition("=")
+                os.environ.setdefault(key.strip(), val.strip().strip('"').strip("'"))
+    except FileNotFoundError:
+        pass
+
+
+_load_env_file()
+
 API_BASE = "https://api.codemagic.io"
-API_KEY  = "kjGL-i5hFdJItB7pzA1iwZ4NhVemNSEQVZNGez6H5pk"
-APP_ID   = "69976a0ba4f5fa66579c4326"
+API_KEY = os.environ.get("CODEMAGIC_API_TOKEN")
+if not API_KEY:
+    sys.exit(
+        "ERROR: CODEMAGIC_API_TOKEN is not set. Add it to a .env file in the repo "
+        "root (CODEMAGIC_API_TOKEN=...) or export it as an environment variable."
+    )
+APP_ID = "69976a0ba4f5fa66579c4326"
 
 WORKFLOWS = [
     "android-release",

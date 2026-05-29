@@ -2,11 +2,11 @@
 
 **Status:** Accepted
 **Date:** 2026-03-15
-**Extends:** ADR-006 (Standardized Topology — 3 States × 2 Device Types)
+**Extends:** ADR-006 (Standardized Topology — Two Topologies, Four Configurations; revised 2026-05-01)
 
 ## Context
 
-ADR-006 defined the 6 architectural combinations (3 topological states × 2 device types) and described the migration from Standalone → Remote Controller WITH Keys as a "planned feature." Several decisions left open by ADR-006 are now resolved:
+ADR-006 (in its 2026-05-01 revision) defines two topologies (Phone + Computer, Computer only) and four launch configurations. The original 6-combination model is preserved internally as `KeriService` implementation choices. Several decisions left open by ADR-006 are now resolved:
 
 1. How and where private keys are stored and used for signing
 2. What the "Backend Server" device role is, how it is set up, and what UI label it surfaces

@@ -33,7 +33,7 @@ class _ServiceProvidersScreenState extends State<ServiceProvidersScreen> with Si
   void initState() {
     super.initState();
     _coreService = CoreService(baseUrl: widget.serverUrl ?? AgentConfig.coreBaseUrl);
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
     _loadProviders();
   }
 
@@ -118,19 +118,25 @@ class _ServiceProvidersScreenState extends State<ServiceProvidersScreen> with Si
       backgroundColor: cs.surface,
       body: Column(
         children: [
-          // Header
           Container(
-            padding: const EdgeInsets.fromLTRB(32, 24, 32, 0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Service Providers', style: Theme.of(context).textTheme.headlineSmall),
-                const SizedBox(height: 4),
-                Text(
-                  'Manage external services your Identity Agent depends on for infrastructure, witnessing, key storage, and tunneling.',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
-                ),
-                const SizedBox(height: 16),
+              padding: EdgeInsets.fromLTRB(
+                AppLayout.isMobile(context) ? 16 : 32,
+                AppLayout.isMobile(context) ? 12 : 24,
+                AppLayout.isMobile(context) ? 16 : 32,
+                0,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (!AppLayout.isMobile(context)) ...[
+                    Text('Service Providers', style: Theme.of(context).textTheme.headlineSmall),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Manage external services your Identity Agent depends on for infrastructure, witnessing, key storage, and tunneling.',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
                 // Category filter chips
                 SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
@@ -155,6 +161,7 @@ class _ServiceProvidersScreenState extends State<ServiceProvidersScreen> with Si
                 TabBar(
                   controller: _tabController,
                   tabs: [
+                    Tab(text: 'All (${_filtered.length})'),
                     Tab(text: 'Connected (${_connected.length})'),
                     Tab(text: 'Available (${_available.length})'),
                   ],
@@ -175,6 +182,7 @@ class _ServiceProvidersScreenState extends State<ServiceProvidersScreen> with Si
                     : TabBarView(
                         controller: _tabController,
                         children: [
+                          _buildProviderList(_filtered, isConnectedView: false),
                           _buildProviderList(_connected, isConnectedView: true),
                           _buildProviderList(_available, isConnectedView: false),
                         ],
@@ -216,7 +224,10 @@ class _ServiceProvidersScreenState extends State<ServiceProvidersScreen> with Si
     return ListView.builder(
       padding: const EdgeInsets.all(24),
       itemCount: providers.length,
-      itemBuilder: (_, i) => _buildProviderCard(providers[i], isConnectedView: isConnectedView),
+      itemBuilder: (_, i) => ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 720),
+        child: _buildProviderCard(providers[i], isConnectedView: isConnectedView),
+      ),
     );
   }
 

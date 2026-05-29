@@ -74,30 +74,31 @@ class _HistoryScreenState extends State<HistoryScreen> with SingleTickerProvider
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(32, 32, 32, 0),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('History', style: Theme.of(context).textTheme.headlineMedium),
-                      const SizedBox(height: 4),
-                      const Text('Activity, key events, and system logs.',
-                          style: TextStyle(color: AppColors.textSecondary, fontSize: 14)),
-                    ],
+          if (!AppLayout.isMobile(context))
+            Padding(
+              padding: const EdgeInsets.fromLTRB(32, 32, 32, 0),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('History', style: Theme.of(context).textTheme.headlineMedium),
+                        const SizedBox(height: 4),
+                        const Text('Activity, key events, and system logs.',
+                            style: TextStyle(color: AppColors.textSecondary, fontSize: 14)),
+                      ],
+                    ),
                   ),
-                ),
-                IconButton(
-                  onPressed: _loadKel,
-                  icon: const Icon(Icons.refresh),
-                  color: AppColors.textSecondary,
-                  tooltip: 'Refresh',
-                ),
-              ],
+                  IconButton(
+                    onPressed: _loadKel,
+                    icon: const Icon(Icons.refresh),
+                    color: AppColors.textSecondary,
+                    tooltip: 'Refresh',
+                  ),
+                ],
+              ),
             ),
-          ),
           Container(
             margin: const EdgeInsets.fromLTRB(32, 16, 32, 0),
             decoration: const BoxDecoration(

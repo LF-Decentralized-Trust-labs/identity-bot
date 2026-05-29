@@ -10,16 +10,20 @@ class ThemeSettingsScreen extends StatelessWidget {
       backgroundColor: Theme.of(context).colorScheme.surface,
       body: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(32, 32, 32, 32),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 720),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Theme', style: Theme.of(context).textTheme.headlineMedium),
-            const SizedBox(height: 4),
-            Text(
-              'Choose the appearance of your Identity Agent.',
-              style: TextStyle(color: AppColors.textSecondary, fontSize: 14),
-            ),
-            const SizedBox(height: 32),
+            if (!AppLayout.isMobile(context)) ...[
+              Text('Theme', style: Theme.of(context).textTheme.headlineMedium),
+              const SizedBox(height: 4),
+              Text(
+                'Choose the appearance of your Identity Agent.',
+                style: TextStyle(color: AppColors.textSecondary, fontSize: 14),
+              ),
+              const SizedBox(height: 32),
+            ],
             ValueListenableBuilder<ThemeMode>(
               valueListenable: ThemeNotifier.instance,
               builder: (context, mode, _) {
@@ -45,6 +49,7 @@ class ThemeSettingsScreen extends StatelessWidget {
               },
             ),
           ],
+        ),
         ),
       ),
     );

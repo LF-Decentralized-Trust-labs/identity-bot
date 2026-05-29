@@ -298,16 +298,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ? const Center(child: CircularProgressIndicator(color: AppColors.accent))
           : SingleChildScrollView(
               padding: const EdgeInsets.fromLTRB(32, 32, 32, 32),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 720),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Builder(builder: (context) => Text('Settings', style: Theme.of(context).textTheme.headlineMedium)),
-                  const SizedBox(height: 4),
-                  const Text(
-                    'Configure connectivity and preferences.',
-                    style: TextStyle(color: AppColors.textSecondary, fontSize: 14),
-                  ),
-                  const SizedBox(height: 24),
+                  if (!AppLayout.isMobile(context)) ...[
+                    Builder(builder: (context) => Text('Settings', style: Theme.of(context).textTheme.headlineMedium)),
+                    const SizedBox(height: 4),
+                    const Text(
+                      'Configure connectivity and preferences.',
+                      style: TextStyle(color: AppColors.textSecondary, fontSize: 14),
+                    ),
+                    const SizedBox(height: 24),
+                  ],
                   _buildAgentInfoCard(),
                   const SizedBox(height: 24),
                   const Text(
@@ -346,6 +350,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   const SizedBox(height: 24),
                   _buildResetSection(),
                 ],
+              ),
               ),
             ),
     );

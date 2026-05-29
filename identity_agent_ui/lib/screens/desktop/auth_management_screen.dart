@@ -147,17 +147,17 @@ class _AuthManagementScreenState extends State<AuthManagementScreen> {
           : SingleChildScrollView(
               padding: const EdgeInsets.all(32),
               child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 560),
+                constraints: const BoxConstraints(maxWidth: 720),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _buildPageHeader(),
-                    const SizedBox(height: 32),
+                    if (!AppLayout.isMobile(context)) ...[
+                      _buildPageHeader(),
+                      const SizedBox(height: 32),
+                    ],
                     _buildStatusCard(),
                     const SizedBox(height: 24),
                     _buildFactorSection(),
-                    const SizedBox(height: 24),
-                    _buildAddMethodButton(),
                   ],
                 ),
               ),
@@ -166,27 +166,53 @@ class _AuthManagementScreenState extends State<AuthManagementScreen> {
   }
 
   Widget _buildPageHeader() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return Row(
       children: [
-        const Text(
-          'AUTHENTICATION',
-          style: TextStyle(
-            color: AppColors.textPrimary,
-            fontSize: 20,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 1.5,
-            fontFamily: 'monospace',
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'AUTHENTICATION',
+                style: TextStyle(
+                  color: AppColors.textPrimary,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.5,
+                  fontFamily: 'monospace',
+                ),
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'Manage the methods used to unlock this device and verify your identity.',
+                style: TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 12,
+                  height: 1.5,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ],
           ),
         ),
-        const SizedBox(height: 6),
-        const Text(
-          'Manage the methods used to unlock this device and verify your identity.',
-          style: TextStyle(
-            color: AppColors.textSecondary,
-            fontSize: 12,
-            height: 1.5,
-            fontFamily: 'monospace',
+        FilledButton.icon(
+          onPressed: () async {
+            await Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const AuthSetupScreen()),
+            );
+            _load();
+          },
+          icon: const Icon(Icons.add, size: 16),
+          label: const Text('Add Method',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, letterSpacing: 0.2)),
+          style: FilledButton.styleFrom(
+            backgroundColor: AppColors.accent,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            minimumSize: const Size(0, 36),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            elevation: 0,
           ),
         ),
       ],

@@ -3,7 +3,6 @@ import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'dart:io' show Platform;
 import 'theme/app_theme.dart';
-import 'theme/mobile_theme.dart';
 import 'screens/desktop/desktop_app.dart';
 import 'screens/setup_wizard_screen.dart';
 import 'screens/mode_selection_screen.dart';
@@ -19,13 +18,8 @@ import 'config/agent_config.dart';
 import 'bridge/keri_bridge_stub.dart'
     if (dart.library.io) 'bridge/keri_bridge.dart';
 import 'screens/mobile/mobile_app.dart';
-import 'screens/mobile/mobile_mode_selection_screen.dart';
-import 'screens/mobile/mobile_connect_server_screen.dart';
-import 'screens/mobile/mobile_setup_wizard_screen.dart';
 import 'screens/hosting_choice_screen.dart';
-import 'screens/mobile/mobile_hosting_choice_screen.dart';
 import 'screens/setup_checklist_screen.dart';
-import 'screens/mobile/mobile_setup_checklist_screen.dart';
 import 'screens/lock_screen.dart';
 import 'services/pin_password_service.dart';
 
@@ -310,7 +304,9 @@ class _AgentRouterState extends State<AgentRouter> {
 
   void _onSetupComplete() async {
     await PreferencesService.setSetupComplete(true);
-    setState(() => _step = OnboardingStep.setupChecklist);
+    // Go straight to dashboard; the SetupTaskBanner will auto-open the
+    // checklist modal on first load (no white-background intermediate page).
+    setState(() => _step = OnboardingStep.dashboard);
   }
 
   void _onChecklistDone() {
@@ -498,51 +494,12 @@ class _AgentRouterState extends State<AgentRouter> {
 
   @override
   Widget build(BuildContext context) {
-    if (_isMobilePlatform) {
-      return _buildForMode(true);
-    }
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        return _buildForMode(constraints.maxWidth < 768);
-      },
-    );
+    return _buildForMode(AppLayout.isMobile(context));
   }
 
   Widget _buildForMode(bool isMobile) {
     switch (_step) {
       case OnboardingStep.loading:
-        if (isMobile) {
-          return Theme(
-            data: MobileTheme.lightTheme,
-            child: Scaffold(
-              backgroundColor: MobileColors.background,
-              body: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    SizedBox(
-                      width: 40,
-                      height: 40,
-                      child: CircularProgressIndicator(
-                        color: MobileColors.primary,
-                        strokeWidth: 3,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    const Text(
-                      'Initializing...',
-                      style: TextStyle(
-                        color: MobileColors.textMuted,
-                        fontSize: 14,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          );
-        }
         return Scaffold(
           backgroundColor: AppColors.background,
           body: Center(
@@ -579,37 +536,18 @@ class _AgentRouterState extends State<AgentRouter> {
             _showBackendErrorDialog(context, _backendStartupError!);
           });
         }
-        if (isMobile) {
-          return MobileModeSelectionScreen(onModeSelected: _onModeSelected);
-        }
         return ModeSelectionScreen(onModeSelected: _onModeSelected);
 
       case OnboardingStep.hostingChoice:
-        if (isMobile) {
-          return MobileHostingChoiceScreen(onHostingChosen: _onHostingChosen);
-        }
         return HostingChoiceScreen(onHostingChosen: _onHostingChosen);
 
       case OnboardingStep.connectServer:
-        if (isMobile) {
-          return MobileConnectServerScreen(
-            onConnected: _onServerConnected,
-            onBack: _goBackToModeSelection,
-          );
-        }
         return ConnectServerScreen(
           onConnected: _onServerConnected,
           onBack: _goBackToModeSelection,
         );
 
       case OnboardingStep.setupWizard:
-        if (isMobile) {
-          return MobileSetupWizardScreen(
-            onComplete: _onSetupComplete,
-            keriService: _keriService!,
-            remoteBrainUrl: _remoteBrainUrl,
-          );
-        }
         return SetupWizardScreen(
           onComplete: _onSetupComplete,
           keriService: _keriService!,
@@ -618,15 +556,6 @@ class _AgentRouterState extends State<AgentRouter> {
         );
 
       case OnboardingStep.setupChecklist:
-        if (isMobile) {
-          return MobileSetupChecklistScreen(
-            onDone: _onChecklistDone,
-            keriService: _keriService!,
-            serverUrl: _serverUrl,
-            hostingChoice: _hostingChoice,
-            remoteBrainUrl: _remoteBrainUrl,
-          );
-        }
         return SetupChecklistScreen(
           onDone: _onChecklistDone,
           keriService: _keriService!,
@@ -704,7 +633,9 @@ class _AgentMainScreenState extends State<AgentMainScreen>
     if (bg == null) return;
     if (DateTime.now().difference(bg) < _lockAfter) return;
     _backgroundedAt = null;
-    // Only lock if the user has actually set up authentication
+    // Only lock if screen lock is enabled AND the user has set up authentication
+    final enabled = await PreferencesService.isScreenLockEnabled();
+    if (!enabled) return;
     final hasAuth = await PinPasswordService.hasAnyCredential();
     if (hasAuth && mounted) setState(() => _locked = true);
   }
@@ -719,7 +650,7 @@ class _AgentMainScreenState extends State<AgentMainScreen>
   }
 
   Widget _buildMain() {
-    if (_isMobilePlatform) {
+    if (AppLayout.isMobile(context)) {
       return MobileApp(
         keriService: widget.keriService,
         mode: widget.mode,
@@ -727,24 +658,12 @@ class _AgentMainScreenState extends State<AgentMainScreen>
         serverUrl: widget.serverUrl,
       );
     }
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        if (constraints.maxWidth < 768) {
-          return MobileApp(
-            keriService: widget.keriService,
-            mode: widget.mode,
-            entityType: widget.entityType,
-            serverUrl: widget.serverUrl,
-          );
-        }
-        return DesktopApp(
-          keriService: widget.keriService,
-          mode: widget.mode,
-          entityType: widget.entityType,
-          serverUrl: widget.serverUrl,
-          onResetIdentity: _handleReset,
-        );
-      },
+    return DesktopApp(
+      keriService: widget.keriService,
+      mode: widget.mode,
+      entityType: widget.entityType,
+      serverUrl: widget.serverUrl,
+      onResetIdentity: _handleReset,
     );
   }
 

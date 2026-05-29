@@ -57,7 +57,7 @@ class _ModeSelectionScreenState extends State<ModeSelectionScreen> {
                   ),
                   const SizedBox(height: 16),
                   const Text(
-                    'Manage your entire digital life.',
+                    'One place to manage your entire digital life.',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: AppColors.textPrimary,
@@ -67,20 +67,14 @@ class _ModeSelectionScreenState extends State<ModeSelectionScreen> {
                       fontFamily: 'monospace',
                     ),
                   ),
-                  const SizedBox(height: 20),
-                  _buildBulletRow(Icons.person_outline, 'Your identity.'),
-                  const SizedBox(height: 10),
-                  _buildBulletRow(Icons.vpn_key_outlined, 'Your keys.'),
-                  const SizedBox(height: 10),
-                  _buildBulletRow(Icons.folder_outlined, 'Your data.'),
                   const SizedBox(height: 16),
                   const Text(
-                    'This app will manage your digital life for as long as you choose to use it.',
+                    'Your identity. Your keys. Your data.',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: AppColors.textSecondary,
-                      fontSize: 12,
-                      height: 1.5,
+                      fontSize: 14,
+                      height: 1.4,
                       fontFamily: 'monospace',
                     ),
                   ),
@@ -107,7 +101,8 @@ class _ModeSelectionScreenState extends State<ModeSelectionScreen> {
                         widget.onModeSelected(AgentMode.connectExisting),
                   ),
                   const SizedBox(height: 24),
-                  _buildAdvancedSection(context),
+                  if (!AppLayout.isMobile(context))
+                    _buildAdvancedSection(context),
                   const SizedBox(height: 32),
                 ],
               ),
@@ -115,25 +110,6 @@ class _ModeSelectionScreenState extends State<ModeSelectionScreen> {
           ),
         ),
       ),
-    );
-  }
-
-  Widget _buildBulletRow(IconData icon, String text) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, color: AppColors.accent, size: 20),
-        const SizedBox(width: 10),
-        Text(
-          text,
-          style: const TextStyle(
-            color: AppColors.textPrimary,
-            fontSize: 14,
-            fontFamily: 'monospace',
-          ),
-        ),
-      ],
     );
   }
 

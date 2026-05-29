@@ -2,11 +2,11 @@
 
 **Status:** Accepted
 **Date:** 2026-03-16
-**Related:** ADR-004 (FFI Bridge), ADR-006 (Standardized Topology), ADR-002 (KERI Driver Pattern)
+**Related:** ADR-004 (FFI Bridge), ADR-006 (Standardized Topology — revised 2026-05-01), ADR-002 (KERI Driver Pattern)
 
 ## Context
 
-ADR-006 defined 6 architectural combinations across 3 topological states × 2 device types. ADR-004 established the Rust bridge (flutter_rust_bridge) and Go Mobile Core (gomobile) as the two mobile native integrations. This ADR documents three decisions made during the March 2026 mobile KERI implementation:
+ADR-006 (revised 2026-05-01) defines two topologies (Phone + Computer, Computer only) with four launch configurations; the original 6-combination engineering model is preserved internally as `KeriService` implementation choices. ADR-004 established the Rust bridge (flutter_rust_bridge) and Go Mobile Core (gomobile) as the two phone-side native integrations. This ADR documents three decisions made during the March 2026 mobile KERI implementation:
 
 1. **keri_core v0.11 capability constraints** — what operations can and cannot be implemented locally on mobile
 2. **Service class consolidation** — how the mobile KeriService classes map to topologies

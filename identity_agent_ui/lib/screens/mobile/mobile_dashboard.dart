@@ -7,11 +7,13 @@ import '../../services/keri_service.dart';
 import '../../config/agent_config.dart';
 import '../../widgets/identity_card.dart';
 import '../../widgets/alert_card.dart';
+import '../../widgets/alert_detail_modal.dart';
+import '../../widgets/confirmation_toast.dart';
 import '../../widgets/activity_entry.dart';
 import '../../widgets/setup_task_banner.dart';
 import '../../widgets/key_storage_badge.dart';
 import '../../models/activity_log_entry.dart';
-import 'mobile_auth_setup_screen.dart';
+import '../desktop/auth_management_screen.dart';
 
 class MobileDashboard extends StatefulWidget {
   final String? serverUrl;
@@ -139,9 +141,7 @@ class MobileDashboardState extends State<MobileDashboard> with SingleTickerProvi
       await _coreService.acceptContact(aid);
       await _loadAlerts();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Contact accepted')),
-        );
+        ConfirmationToast.show(context, message: 'Contact Added', icon: Icons.person_add);
       }
     } catch (e) {
       if (mounted) {
@@ -157,8 +157,10 @@ class MobileDashboardState extends State<MobileDashboard> with SingleTickerProvi
       await _coreService.rejectContact(aid);
       await _loadAlerts();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Contact rejected')),
+        ConfirmationToast.show(context,
+          message: 'Contact Rejected',
+          icon: Icons.person_off,
+          color: const Color(0xFFDA1E28),
         );
       }
     } catch (e) {
@@ -174,6 +176,13 @@ class MobileDashboardState extends State<MobileDashboard> with SingleTickerProvi
     try {
       await _coreService.deletePendingRequest(aid);
       await _loadAlerts();
+      if (mounted) {
+        ConfirmationToast.show(context,
+          message: 'Dismissed',
+          icon: Icons.close,
+          color: MobileColors.textMuted,
+        );
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -188,9 +197,7 @@ class MobileDashboardState extends State<MobileDashboard> with SingleTickerProvi
       await _coreService.acceptCredential(said);
       await _loadAlerts();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Credential accepted')),
-        );
+        ConfirmationToast.show(context, message: 'Credential Accepted', icon: Icons.verified);
       }
     } catch (e) {
       if (mounted) {
@@ -206,8 +213,10 @@ class MobileDashboardState extends State<MobileDashboard> with SingleTickerProvi
       await _coreService.rejectCredential(said);
       await _loadAlerts();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Credential rejected')),
+        ConfirmationToast.show(context,
+          message: 'Credential Rejected',
+          icon: Icons.cancel_outlined,
+          color: const Color(0xFFDA1E28),
         );
       }
     } catch (e) {
@@ -216,6 +225,31 @@ class MobileDashboardState extends State<MobileDashboard> with SingleTickerProvi
           SnackBar(content: Text('Failed to reject credential: $e')),
         );
       }
+    }
+  }
+
+  Future<void> _showContactDetail(ContactResponse contact) async {
+    final action = await AlertDetailModal.showContactDetail(context, contact: contact);
+    if (action == 'accept') {
+      _onAcceptContact(contact.aid);
+    } else if (action == 'reject') {
+      _onRejectContact(contact.aid);
+    }
+  }
+
+  Future<void> _showCredentialDetail(CredentialRecord cred) async {
+    final action = await AlertDetailModal.showCredentialDetail(context, credential: cred);
+    if (action == 'accept') {
+      _onAcceptCredential(cred.said);
+    } else if (action == 'reject') {
+      _onRejectCredential(cred.said);
+    }
+  }
+
+  Future<void> _showPendingDetail(PendingRequestResponse req) async {
+    final action = await AlertDetailModal.showPendingDetail(context, request: req);
+    if (action == 'dismiss') {
+      _onDismissPending(req.aid);
     }
   }
 
@@ -241,7 +275,7 @@ class MobileDashboardState extends State<MobileDashboard> with SingleTickerProvi
                       photoBase64: _photoBase64,
                       onBadgeTap: () => Navigator.of(context).push(
                         MaterialPageRoute(
-                          builder: (_) => const MobileAuthSetupScreen(),
+                          builder: (_) => const AuthManagementScreen(),
                         ),
                       ),
                     ),
@@ -376,6 +410,7 @@ class MobileDashboardState extends State<MobileDashboard> with SingleTickerProvi
         photo: contact.photo,
         onApprove: () => _onAcceptContact(contact.aid),
         onDeny: () => _onRejectContact(contact.aid),
+        onTap: () => _showContactDetail(contact),
       ));
     }
 
@@ -386,6 +421,7 @@ class MobileDashboardState extends State<MobileDashboard> with SingleTickerProvi
         type: AlertCardType.pendingRequest,
         subtitle: pending.errorReason,
         onDismiss: () => _onDismissPending(pending.aid),
+        onTap: () => _showPendingDetail(pending),
       ));
     }
 
@@ -400,6 +436,7 @@ class MobileDashboardState extends State<MobileDashboard> with SingleTickerProvi
         subtitle: typeDisplay,
         onApprove: () => _onAcceptCredential(cred.said),
         onDeny: () => _onRejectCredential(cred.said),
+        onTap: () => _showCredentialDetail(cred),
       ));
     }
 

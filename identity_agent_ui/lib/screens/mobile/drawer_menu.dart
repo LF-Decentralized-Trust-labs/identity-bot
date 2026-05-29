@@ -4,22 +4,19 @@ import '../../theme/mobile_theme.dart';
 import '../../services/core_service.dart';
 import '../../config/agent_config.dart';
 
+/// Callback type for navigating to a named screen.
+typedef DrawerNavCallback = void Function(String screenKey);
+
 class DrawerMenu extends StatefulWidget {
   final String? serverUrl;
   final VoidCallback onClose;
-  final VoidCallback onProfileTap;
-  final VoidCallback onContactsTap;
-  final VoidCallback onCredentialsTap;
-  final VoidCallback onSettingsTap;
+  final DrawerNavCallback onNavigate;
 
   const DrawerMenu({
     super.key,
     this.serverUrl,
     required this.onClose,
-    required this.onProfileTap,
-    required this.onContactsTap,
-    required this.onCredentialsTap,
-    required this.onSettingsTap,
+    required this.onNavigate,
   });
 
   @override
@@ -31,7 +28,7 @@ class _DrawerMenuState extends State<DrawerMenu> {
   String _displayName = 'Identity Agent';
   String _email = '';
   String? _photoBase64;
-  bool _settingsExpanded = false;
+  String? _expandedSection;
 
   @override
   void initState() {
@@ -59,21 +56,13 @@ class _DrawerMenuState extends State<DrawerMenu> {
     } catch (_) {}
   }
 
-  void _showComingSoon(String feature) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Coming Soon'),
-        content: Text('$feature will be available in a future update.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    );
+  void _toggleSection(String section) {
+    setState(() {
+      _expandedSection = _expandedSection == section ? null : section;
+    });
   }
+
+  void _nav(String key) => widget.onNavigate(key);
 
   @override
   Widget build(BuildContext context) {
@@ -94,41 +83,74 @@ class _DrawerMenuState extends State<DrawerMenu> {
                   child: ListView(
                     padding: const EdgeInsets.symmetric(vertical: 8),
                     children: [
-                      _MenuItem(
-                        icon: Icons.person_outline,
-                        label: 'My Profile',
-                        onTap: widget.onProfileTap,
+                      // ── Core items ──────────────────────────────────────
+                      _MenuItem(icon: Icons.person_outline, label: 'My Profile', onTap: () => _nav('profile')),
+                      _MenuItem(icon: Icons.people_outline, label: 'Contacts', onTap: () => _nav('contacts')),
+                      _MenuItem(icon: Icons.verified_user_outlined, label: 'Credentials', onTap: () => _nav('credentials')),
+                      // Passwords requires a server (Bitwarden self-hosted) — only show on mobile if remote server is connected
+                      if (widget.serverUrl != null)
+                        _MenuItem(icon: Icons.password_outlined, label: 'Passwords', onTap: () => _nav('passwords'), trailing: _comingSoonBadge()),
+                      _MenuItem(icon: Icons.account_balance_wallet_outlined, label: 'Wallet', onTap: () => _nav('wallet'), trailing: _comingSoonBadge()),
+                      _MenuItem(icon: Icons.devices_outlined, label: 'My Devices', onTap: () => _nav('myDevices')),
+                      const _SectionDivider(),
+
+                      // ── Guardianship ────────────────────────────────────
+                      _buildExpandableSection(
+                        key: 'guardianship',
+                        icon: Icons.family_restroom_outlined,
+                        label: 'Guardianship',
+                        children: [
+                          _SubMenuItem(icon: Icons.people_outline, label: 'My Dependents', onTap: () => _nav('guardianshipDependents')),
+                          _SubMenuItem(icon: Icons.shield_outlined, label: 'My Guardians', onTap: () => _nav('guardianshipGuardians'), comingSoon: true),
+                          _SubMenuItem(icon: Icons.article_outlined, label: 'Digital Will', onTap: () => _nav('guardianshipSuccession'), comingSoon: true),
+                          _SubMenuItem(icon: Icons.account_balance_outlined, label: 'Estate Planning', onTap: () => _nav('guardianshipEstate'), comingSoon: true),
+                        ],
                       ),
-                      _MenuItem(
-                        icon: Icons.people_outline,
-                        label: 'Contacts',
-                        onTap: widget.onContactsTap,
+                      const _SectionDivider(),
+
+                      // ── Hubs ────────────────────────────────────────────
+                      _buildExpandableSection(
+                        key: 'hubs',
+                        icon: Icons.hub_outlined,
+                        label: 'Hubs',
+                        children: [
+                          _SubMenuItem(icon: Icons.chat_bubble_outline, label: 'Communications', onTap: () => _nav('hubsCommunications'), comingSoon: true),
+                          _SubMenuItem(icon: Icons.auto_awesome, label: 'AI', onTap: () => _nav('hubsAi'), comingSoon: true),
+                          _SubMenuItem(icon: Icons.favorite_border, label: 'Health', onTap: () => _nav('hubsHealth'), comingSoon: true),
+                          _SubMenuItem(icon: Icons.bar_chart, label: 'Finance', onTap: () => _nav('hubsFinance'), comingSoon: true),
+                          _SubMenuItem(icon: Icons.tag, label: 'Social Media', onTap: () => _nav('hubsSocialMedia'), comingSoon: true),
+                          _SubMenuItem(icon: Icons.gavel, label: 'Legal', onTap: () => _nav('hubsLegal'), comingSoon: true),
+                          _SubMenuItem(icon: Icons.security, label: 'Security', onTap: () => _nav('hubsSecurity'), comingSoon: true),
+                        ],
                       ),
-                      _MenuItem(
-                        icon: Icons.verified_user_outlined,
-                        label: 'Credentials',
-                        onTap: widget.onCredentialsTap,
+                      const _SectionDivider(),
+
+                      // ── History ─────────────────────────────────────────
+                      _MenuItem(icon: Icons.history, label: 'History', onTap: () => _nav('history')),
+                      const _SectionDivider(),
+
+                      // ── Settings ────────────────────────────────────────
+                      _buildExpandableSection(
+                        key: 'settings',
+                        icon: Icons.settings_outlined,
+                        label: 'Settings',
+                        children: [
+                          _SubMenuItem(icon: Icons.manage_accounts_outlined, label: 'Identity Agent', onTap: () => _nav('settingsAccount')),
+                          _SubMenuItem(icon: Icons.fingerprint, label: 'Authentication', onTap: () => _nav('settingsAuthentication')),
+                          _SubMenuItem(icon: Icons.privacy_tip_outlined, label: 'Privacy & Data', onTap: () => _nav('settingsPrivacy'), comingSoon: true),
+                          _SubMenuItem(icon: Icons.palette_outlined, label: 'Appearance', onTap: () => _nav('settingsTheme')),
+                          _SubMenuItem(icon: Icons.notifications_outlined, label: 'Notifications', onTap: () => _nav('settingsNotifications'), comingSoon: true),
+                          _SubMenuItem(icon: Icons.vpn_lock_outlined, label: 'Tunneling', onTap: () => _nav('settingsTunneling')),
+                          _SubMenuItem(icon: Icons.hub_outlined, label: 'Endpoints', onTap: () => _nav('settingsEndpoints')),
+                          _SubMenuItem(icon: Icons.cloud_outlined, label: 'Service Providers', onTap: () => _nav('settingsServiceProviders')),
+                          _SubMenuItem(icon: Icons.gavel, label: 'Governance', onTap: () => _nav('settingsGovernance'), comingSoon: true),
+                          _SubMenuItem(icon: Icons.key, label: 'KERI Protocol', onTap: () => _nav('settingsKeri')),
+                          _SubMenuItem(icon: Icons.backup_outlined, label: 'Backup & Recovery', onTap: () => _nav('settingsBackup'), comingSoon: true),
+                          _SubMenuItem(icon: Icons.terminal, label: 'Developer Tools', onTap: () => _nav('settingsDeveloperTools')),
+                        ],
                       ),
-                      _buildSettingsSection(),
-                      const Divider(indent: 16, endIndent: 16),
-                      _MenuItem(
-                        icon: Icons.account_balance_wallet_outlined,
-                        label: 'Wallet',
-                        onTap: () => _showComingSoon('Wallet'),
-                        trailing: _comingSoonBadge(),
-                      ),
-                      _MenuItem(
-                        icon: Icons.storage_outlined,
-                        label: 'Data Vault',
-                        onTap: () => _showComingSoon('Data Vault'),
-                        trailing: _comingSoonBadge(),
-                      ),
-                      _MenuItem(
-                        icon: Icons.devices_outlined,
-                        label: 'My Devices',
-                        onTap: () => _showComingSoon('My Devices'),
-                        trailing: _comingSoonBadge(),
-                      ),
+
+                      const SizedBox(height: 16),
                     ],
                   ),
                 ),
@@ -136,7 +158,7 @@ class _DrawerMenuState extends State<DrawerMenu> {
                 const Padding(
                   padding: EdgeInsets.all(16),
                   child: Text(
-                    'Powered by IdentityBot',
+                    'Identity Agent',
                     style: TextStyle(
                       fontSize: 11,
                       color: MobileColors.textMuted,
@@ -151,39 +173,37 @@ class _DrawerMenuState extends State<DrawerMenu> {
     );
   }
 
-  Widget _buildSettingsSection() {
+  Widget _buildExpandableSection({
+    required String key,
+    required IconData icon,
+    required String label,
+    required List<Widget> children,
+  }) {
+    final expanded = _expandedSection == key;
     return Column(
       children: [
         ListTile(
-          leading: const Icon(Icons.settings_outlined, color: MobileColors.textSecondary, size: 22),
-          title: const Text(
-            'Settings',
-            style: TextStyle(
+          leading: Icon(icon, color: MobileColors.textSecondary, size: 22),
+          title: Text(
+            label,
+            style: const TextStyle(
               fontSize: 15,
               fontWeight: FontWeight.w500,
               color: MobileColors.textPrimary,
             ),
           ),
           trailing: AnimatedRotation(
-            turns: _settingsExpanded ? 0.5 : 0.0,
+            turns: expanded ? 0.5 : 0.0,
             duration: const Duration(milliseconds: 200),
             child: const Icon(Icons.expand_more, color: MobileColors.textMuted, size: 22),
           ),
-          onTap: () => setState(() => _settingsExpanded = !_settingsExpanded),
+          onTap: () => _toggleSection(key),
           contentPadding: const EdgeInsets.symmetric(horizontal: 20),
         ),
         AnimatedCrossFade(
           firstChild: const SizedBox(width: double.infinity, height: 0),
-          secondChild: Column(
-            children: [
-              _SubMenuItem(
-                icon: Icons.dns_outlined,
-                label: 'Tunneling',
-                onTap: widget.onSettingsTap,
-              ),
-            ],
-          ),
-          crossFadeState: _settingsExpanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+          secondChild: Column(children: children),
+          crossFadeState: expanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
           duration: const Duration(milliseconds: 200),
         ),
       ],
@@ -286,6 +306,14 @@ class _DrawerMenuState extends State<DrawerMenu> {
   }
 }
 
+// ── Reusable menu widgets ─────────────────────────────────────────────────────
+
+class _SectionDivider extends StatelessWidget {
+  const _SectionDivider();
+  @override
+  Widget build(BuildContext context) => const Divider(indent: 16, endIndent: 16);
+}
+
 class _MenuItem extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -322,11 +350,13 @@ class _SubMenuItem extends StatelessWidget {
   final IconData icon;
   final String label;
   final VoidCallback onTap;
+  final bool comingSoon;
 
   const _SubMenuItem({
     required this.icon,
     required this.label,
     required this.onTap,
+    this.comingSoon = false,
   });
 
   @override
@@ -338,12 +368,25 @@ class _SubMenuItem extends StatelessWidget {
       ),
       title: Text(
         label,
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 14,
           fontWeight: FontWeight.w400,
-          color: MobileColors.textSecondary,
+          color: comingSoon ? MobileColors.textMuted : MobileColors.textSecondary,
         ),
       ),
+      trailing: comingSoon
+          ? Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: MobileColors.surfaceTertiary,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: const Text(
+                'Soon',
+                style: TextStyle(fontSize: 9, color: MobileColors.textMuted, fontWeight: FontWeight.w600),
+              ),
+            )
+          : null,
       onTap: onTap,
       contentPadding: const EdgeInsets.symmetric(horizontal: 20),
       dense: true,

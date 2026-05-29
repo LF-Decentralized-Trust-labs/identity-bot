@@ -14,7 +14,7 @@ Two bugs were discovered and fixed that share the same root cause — Flutter ma
 
 ### Bug 2: Wrong Port Fallback on Mobile
 
-`AgentConfig.coreBaseUrl` returned `http://localhost:5000` for ALL non-web platforms, including Android and iOS, where Go Core runs on port **8642** (not 5000). When `widget.serverUrl` was null — during Go Core startup, a timing race, or any error — every screen's `CoreService` fell back to the wrong port. The result was `Connection refused` on every API call.
+`AgentConfig.coreBaseUrl` returned `http://localhost:5050` for ALL non-web platforms, including Android and iOS, where Go Core runs on port **8642** (not 5050). When `widget.serverUrl` was null — during Go Core startup, a timing race, or any error — every screen's `CoreService` fell back to the wrong port. The result was `Connection refused` on every API call.
 
 ## The Decisions
 
@@ -40,7 +40,7 @@ The Flutter UI needs to know which local port its Go backend is on. This is now 
 | Platform | Go Backend Port | `AgentConfig.coreBaseUrl` |
 |---|---|---|
 | Flutter Web | (same origin, no port) | `''` (empty string — relative URLs) |
-| Desktop (Linux/macOS/Windows) | 5000 | `http://localhost:5000` |
+| Desktop (Linux/macOS/Windows) | 5050 | `http://localhost:5050` |
 | Mobile (Android/iOS) | 8642 | `http://127.0.0.1:8642` |
 
 The `dart:io` `Platform` class cannot be imported in files that compile for web. The solution is conditional imports:
@@ -68,7 +68,7 @@ Every screen that holds a `CoreService` uses the same three-step resolution chai
 3. AgentConfig.coreBaseUrl  — platform-aware default (final fallback)
 ```
 
-This is implemented as `_resolveServerUrl()` on all five main screens (Dashboard, Profile, Contacts, OOBI, Settings). The method is identical across screens and must stay that way — it is the safety net that prevents port 5000 from ever being used on mobile.
+This is implemented as `_resolveServerUrl()` on all five main screens (Dashboard, Profile, Contacts, OOBI, Settings). The method is identical across screens and must stay that way — it is the safety net that prevents port 5050 from ever being used on mobile.
 
 ## How to Add a New External Call
 
@@ -135,7 +135,7 @@ When adding new entries to this inventory, update this table.
 ## Consequences
 
 - **Web platform works correctly.** Browser CORS is never triggered because Flutter only calls same-origin or loopback URLs.
-- **Mobile connects to the correct port.** `AgentConfig.coreBaseUrl` now returns port 8642 on Android/iOS, 5000 on desktop, and empty string on web. The wrong-port fallback bug cannot recur.
+- **Mobile connects to the correct port.** `AgentConfig.coreBaseUrl` now returns port 8642 on Android/iOS, 5050 on desktop, and empty string on web. The wrong-port fallback bug cannot recur.
 - **One rule to remember.** Any developer adding a feature that needs an external API knows immediately: add a Go proxy endpoint, then call that from Flutter. No exceptions.
 - **Go backend is the trust boundary.** Certificate validation, authentication headers, timeouts, and retries are all handled by Go — not scattered across Flutter code that runs differently on each platform.
 - **Mobile core startup calls are exempt.** `MobileCoreService` calls `http://127.0.0.1:8642/api/health` and `/api/store/*` directly during Go Core startup, before `CoreService` is initialized. These are loopback calls to the local embedded Go Core, not external calls, and are intentionally not routed through `CoreService`.

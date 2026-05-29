@@ -43,7 +43,7 @@ The Identity Agent's Go HTTP server handled requests on paths that had no consis
 All LLM traffic from containers passes through `handleLLMProxy` in `server/llm_handlers.go`. This is the correct and only interception point:
 
 ```
-Container → POST http://agent.internal:5000/sandbox/llm/v1/chat/completions
+Container → POST http://agent.internal:5050/sandbox/llm/v1/chat/completions
           → Identity Agent LLM Proxy (handleLLMProxy)
               → Parse request (model, messages[])
               → Forward to OpenRouter (inject API key from vault)
@@ -62,7 +62,7 @@ Container → POST http://agent.internal:5000/sandbox/llm/v1/chat/completions
 When a chat app's browser frontend makes API calls to list conversations (`GET /api/v1/chats`), the Identity Agent intercepts those calls before they reach the container and serves from `ai-memory.db`. This is implemented as a reverse proxy at `/apps/{app_id}/*`:
 
 ```
-Flutter WebView loads: http://127.0.0.1:5000/apps/openwebui/
+Flutter WebView loads: http://127.0.0.1:5050/apps/openwebui/
                                                      ↓
                          Identity Agent display proxy (handleAppDisplayProxy)
                                                      ↓
@@ -71,7 +71,7 @@ Flutter WebView loads: http://127.0.0.1:5000/apps/openwebui/
            All other paths → forward to container's display port (HTML, JS, CSS, WebSocket)
 ```
 
-The `GET /api/apps/{id}/display` handler now returns the Identity Agent's proxy URL (`http://127.0.0.1:5000/apps/{app_id}/`) instead of the container's raw port URL. The Flutter WebView loads this proxy URL, unaware of the interception layer.
+The `GET /api/apps/{id}/display` handler now returns the Identity Agent's proxy URL (`http://127.0.0.1:5050/apps/{app_id}/`) instead of the container's raw port URL. The Flutter WebView loads this proxy URL, unaware of the interception layer.
 
 **Container data is intentionally ephemeral.** Container volumes for chat apps are empty (`"volumes": {}`). If a container is deleted and reinstalled, all conversation history reappears from `ai-memory.db`. The container's internal database never matters.
 
@@ -123,7 +123,7 @@ Each endpoint entry in the schema specifies:
 
 ```
 Open WebUI frontend
-  → POST http://agent.internal:5000/sandbox/llm/v1/chat/completions
+  → POST http://agent.internal:5050/sandbox/llm/v1/chat/completions
     (direct — NO_PROXY bypasses MITM inspection proxy)
   → Identity Agent LLM Proxy (handleLLMProxy)
       → Inject API key from credential vault
@@ -135,7 +135,7 @@ Open WebUI frontend
 ### Inbound: Conversation list (Open WebUI frontend → Identity Agent)
 
 ```
-Open WebUI frontend (running in Flutter WebView at http://127.0.0.1:5000/apps/openwebui/)
+Open WebUI frontend (running in Flutter WebView at http://127.0.0.1:5050/apps/openwebui/)
   → GET /api/v1/chats
   → Identity Agent display proxy (handleAppDisplayProxy)
       → Intercept: path matches /api/v1/chats

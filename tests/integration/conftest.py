@@ -7,7 +7,7 @@ DEDICATED TEST INSTANCES only, never against instances holding real keys.
 
 Configuration via environment variables:
 
-  AGENT_A_URL   URL of instance A (default: http://127.0.0.1:5000)
+  AGENT_A_URL   URL of instance A (default: http://127.0.0.1:5050)
   AGENT_B_URL   URL of instance B (required for two-instance tests;
                 tests are skipped if not set)
 

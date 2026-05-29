@@ -12,7 +12,7 @@ Proves:
   STEP 7: Any IXN events present have correct structure (type, sequence, anchor data)
   STEP 8: keripy independently constructs a reference IXN and verifies the format
            matches what the Rust bridge produces
-  STEP 9: Cross-instance -- the LOCAL desktop agent (port 5000) resolves the mobile OOBI
+  STEP 9: Cross-instance -- the LOCAL desktop agent (port 5050) resolves the mobile OOBI
            using Python keripy and confirms the KEL is valid
   STEP 10: (Optional) IXN count -- reports how many IXN events are in the live KEL
 
@@ -120,7 +120,7 @@ def warn(label, detail=""):
 # Configuration
 # ---------------------------------------------------------------------------
 MOBILE_BASE_URL  = "https://grapeid.org/agents"
-DESKTOP_BASE_URL = "http://127.0.0.1:5000"
+DESKTOP_BASE_URL = "http://127.0.0.1:5050"
 MAX_WAIT_SECONDS = 600   # 10 minutes
 RETRY_INTERVAL   = 30    # seconds between health-check retries
 

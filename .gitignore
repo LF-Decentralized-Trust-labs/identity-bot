@@ -25,9 +25,10 @@ identity_agent_ui/.pub/
 *.swp
 *.swo
 
-# Claude Code (local permissions and worktrees — machine-specific, not for VCS)
+# Claude Code (local permissions, worktrees, and runtime lock files — machine-specific, not for VCS)
 .claude/settings.local.json
 .claude/worktrees/
+.claude/*.lock
 
 # macOS
 .DS_Store
@@ -52,3 +53,12 @@ attached_assets/
 
 # MCP config (personal dev tooling)
 .mcp.json
+
+# Claude Code project instructions (local-only, not for public repo)
+CLAUDE.md
+
+# Local personal tooling (markdown-to-docx converter, etc.)
+md_to_docx.py
+
+# Runtime agent state (AGENT_DATA_DIR) — never commit
+data/

@@ -3,6 +3,9 @@ import 'package:flutter/material.dart';
 import '../../theme/app_theme.dart';
 import '../../services/core_service.dart';
 import '../../services/preferences_service.dart';
+import '../../services/secure_key_store.dart';
+import '../../services/setup_task_service.dart';
+import '../../services/identity_level_service.dart';
 import '../../config/agent_config.dart';
 
 class DeveloperToolsScreen extends StatefulWidget {
@@ -64,31 +67,35 @@ class _DeveloperToolsScreenState extends State<DeveloperToolsScreen> {
       backgroundColor: cs.surface,
       body: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(32, 32, 32, 32),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 720),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Developer Tools', style: Theme.of(context).textTheme.headlineMedium),
-                      const SizedBox(height: 4),
-                      Text('Backend status, engine info, and diagnostics.',
-                          style: TextStyle(color: AppColors.textSecondary, fontSize: 14)),
-                    ],
+            if (!AppLayout.isMobile(context)) ...[
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Developer Tools', style: Theme.of(context).textTheme.headlineMedium),
+                        const SizedBox(height: 4),
+                        Text('Backend status, engine info, and diagnostics.',
+                            style: TextStyle(color: AppColors.textSecondary, fontSize: 14)),
+                      ],
+                    ),
                   ),
-                ),
-                IconButton(
-                  onPressed: _load,
-                  icon: const Icon(Icons.refresh),
-                  color: AppColors.textSecondary,
-                  tooltip: 'Refresh',
-                ),
-              ],
-            ),
-            const SizedBox(height: 32),
+                  IconButton(
+                    onPressed: _load,
+                    icon: const Icon(Icons.refresh),
+                    color: AppColors.textSecondary,
+                    tooltip: 'Refresh',
+                  ),
+                ],
+              ),
+              const SizedBox(height: 32),
+            ],
             if (_loading)
               const Center(child: CircularProgressIndicator())
             else if (_error != null)
@@ -101,6 +108,7 @@ class _DeveloperToolsScreenState extends State<DeveloperToolsScreen> {
             const SizedBox(height: 20),
             _buildResetCard(context),
           ],
+        ),
         ),
       ),
     );
@@ -225,7 +233,27 @@ class _DeveloperToolsScreenState extends State<DeveloperToolsScreen> {
       ),
     );
     if (confirmed == true) {
+      // 1. Reset backend data (contacts, credentials, KEL, etc.)
+      try {
+        await _coreService.resetAll();
+      } catch (_) {
+        // Backend may already be down — continue with local cleanup
+      }
+
+      // 2. Clear secure storage (mnemonic / keys)
+      await SecureKeyStore.clearMnemonic();
+
+      // 3. Clear setup task state
+      for (final task in SetupTask.values) {
+        await SetupTaskService.markIncomplete(task);
+      }
+
+      // 4. Clear identity level state (PIN, password, witness count, etc.)
+      await IdentityLevelService.clearAll();
+
+      // 5. Clear SharedPreferences (onboarding, settings, etc.)
       await PreferencesService.clearAll();
+
       widget.onResetIdentity?.call();
     }
   }

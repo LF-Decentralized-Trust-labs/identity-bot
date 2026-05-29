@@ -28,7 +28,7 @@ class _HostingChoiceScreenState extends State<HostingChoiceScreen> {
   Future<void> _connectRemoteBrain() async {
     final url = _urlController.text.trim();
     if (url.isEmpty) {
-      setState(() => _connectError = 'Enter a server URL.');
+      setState(() => _connectError = 'Invalid URL.');
       return;
     }
     setState(() {
@@ -46,14 +46,14 @@ class _HostingChoiceScreenState extends State<HostingChoiceScreen> {
     } catch (_) {
       setState(() {
         _connecting = false;
-        _connectError =
-            'Could not reach that server. Check the URL and try again.';
+        _connectError = 'Invalid URL. Could not reach a server at that address.';
       });
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final isMobile = AppLayout.isMobile(context);
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
@@ -66,60 +66,96 @@ class _HostingChoiceScreenState extends State<HostingChoiceScreen> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   const SizedBox(height: 32),
+                  // Brain icon — large and recognizable
+                  Container(
+                    width: 100,
+                    height: 100,
+                    decoration: BoxDecoration(
+                      color: AppColors.accent.withOpacity(0.08),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: AppColors.accent.withOpacity(0.3),
+                        width: 1.5,
+                      ),
+                    ),
+                    child: const Icon(
+                      Icons.psychology,
+                      color: AppColors.accent,
+                      size: 56,
+                    ),
+                  ),
+                  const SizedBox(height: 32),
                   const Text(
-                    'WHERE DO YOU WANT YOUR KEYS AND BRAIN?',
+                    'Where do you want the heavy processing done?',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: AppColors.textPrimary,
                       fontSize: 18,
                       fontWeight: FontWeight.w700,
-                      letterSpacing: 1.5,
-                      fontFamily: 'monospace',
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  const Text(
-                    'Your keys (Identity) are your secret seed — whoever holds them is you.\n'
-                    'Your brain (Agent) is the software that runs your identity.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: AppColors.textSecondary,
-                      fontSize: 12,
-                      height: 1.6,
+                      height: 1.4,
                       fontFamily: 'monospace',
                     ),
                   ),
                   const SizedBox(height: 32),
-                  _buildOptionCard(
-                    choice: HostingChoice.keysHereBrainHere,
-                    icon: Icons.computer,
-                    title: 'Keys here · Brain here',
-                    subtitle:
-                        'Both on this computer. Fully self-contained. Full features.',
-                  ),
-                  const SizedBox(height: 12),
-                  _buildOptionCard(
-                    choice: HostingChoice.keysHereBrainRemote,
-                    icon: Icons.cloud_outlined,
-                    title: 'Keys here · Brain on a remote server',
-                    subtitle:
-                        'Your keys stay on this computer. A cloud server or VPS runs the agent.',
-                  ),
+                  // On mobile: remote server first (recommended), local second (limited)
+                  // On desktop: local first (recommended), remote second
+                  if (isMobile) ...[
+                    _buildOptionCard(
+                      choice: HostingChoice.keysHereBrainRemote,
+                      icon: Icons.cloud_outlined,
+                      title: 'On a remote server',
+                      subtitle:
+                          'A more powerful server will handle the processing.',
+                      badge: 'DEFAULT',
+                      comingSoon: true,
+                    ),
+                    const SizedBox(height: 12),
+                    _buildOptionCard(
+                      choice: HostingChoice.keysHereBrainHere,
+                      icon: Icons.phone_android,
+                      title: 'Right here on this phone',
+                      subtitle:
+                          'This phone will handle everything.',
+                      warningBadge: 'LIMITED FEATURES',
+                    ),
+                  ] else ...[
+                    _buildOptionCard(
+                      choice: HostingChoice.keysHereBrainHere,
+                      icon: Icons.computer,
+                      title: 'Right here',
+                      subtitle:
+                          'This computer will handle everything.',
+                      badge: 'DEFAULT',
+                    ),
+                    const SizedBox(height: 12),
+                    _buildOptionCard(
+                      choice: HostingChoice.keysHereBrainRemote,
+                      icon: Icons.cloud_outlined,
+                      title: 'On a remote server',
+                      subtitle:
+                          'A more powerful server will handle the processing.',
+                    ),
+                  ],
                   if (_selected == HostingChoice.keysHereBrainRemote) ...[
                     const SizedBox(height: 16),
                     _buildRemoteUrlPanel(),
-                  ],
-                  if (_selected == HostingChoice.keysHereBrainHere) ...[
+                  ] else ...[
                     const SizedBox(height: 24),
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
-                        onPressed: () => widget.onHostingChosen(
-                          HostingChoice.keysHereBrainHere,
-                        ),
+                        onPressed: _selected == HostingChoice.keysHereBrainHere
+                            ? () => widget.onHostingChosen(
+                                  HostingChoice.keysHereBrainHere,
+                                )
+                            : null,
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.accent,
-                          foregroundColor: AppColors.primary,
+                          backgroundColor: _selected != null
+                              ? AppColors.accent
+                              : AppColors.textMuted.withOpacity(0.3),
+                          foregroundColor: Colors.white,
+                          disabledBackgroundColor: AppColors.textMuted.withOpacity(0.15),
+                          disabledForegroundColor: AppColors.textMuted,
                           padding: const EdgeInsets.symmetric(vertical: 16),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
@@ -152,14 +188,22 @@ class _HostingChoiceScreenState extends State<HostingChoiceScreen> {
     required IconData icon,
     required String title,
     required String subtitle,
+    String? badge,
+    String? warningBadge,
+    bool comingSoon = false,
   }) {
     final selected = _selected == choice;
+    final disabled = comingSoon;
     return GestureDetector(
-      onTap: () => setState(() {
-        _selected = choice;
-        _connectError = null;
-      }),
-      child: AnimatedContainer(
+      onTap: disabled
+          ? null
+          : () => setState(() {
+              _selected = choice;
+              _connectError = null;
+            }),
+      child: Opacity(
+        opacity: disabled ? 0.5 : 1.0,
+        child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
         width: double.infinity,
         padding: const EdgeInsets.all(20),
@@ -167,10 +211,10 @@ class _HostingChoiceScreenState extends State<HostingChoiceScreen> {
           color: AppColors.surface,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: selected
+            color: selected && !disabled
                 ? AppColors.accent
                 : AppColors.border,
-            width: selected ? 2 : 1,
+            width: selected && !disabled ? 2 : 1,
           ),
         ),
         child: Row(
@@ -194,17 +238,65 @@ class _HostingChoiceScreenState extends State<HostingChoiceScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    title,
-                    style: TextStyle(
-                      color: selected
-                          ? AppColors.textPrimary
-                          : AppColors.textSecondary,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 0.5,
-                      fontFamily: 'monospace',
-                    ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          title,
+                          style: TextStyle(
+                            color: selected
+                                ? AppColors.textPrimary
+                                : AppColors.textSecondary,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.5,
+                            fontFamily: 'monospace',
+                          ),
+                        ),
+                      ),
+                      if (badge != null)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: comingSoon
+                                ? AppColors.textMuted.withOpacity(0.15)
+                                : AppColors.accent.withOpacity(0.15),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            comingSoon ? 'COMING SOON' : badge,
+                            style: TextStyle(
+                              color: comingSoon
+                                  ? AppColors.textMuted
+                                  : AppColors.accent,
+                              fontSize: 9,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 1.0,
+                              fontFamily: 'monospace',
+                            ),
+                          ),
+                        ),
+                      if (warningBadge != null)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.amber.withOpacity(0.15),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            warningBadge,
+                            style: const TextStyle(
+                              color: Colors.amber,
+                              fontSize: 9,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 1.0,
+                              fontFamily: 'monospace',
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                   const SizedBox(height: 4),
                   Text(
@@ -226,6 +318,7 @@ class _HostingChoiceScreenState extends State<HostingChoiceScreen> {
             ),
           ],
         ),
+      ),
       ),
     );
   }
@@ -267,7 +360,7 @@ class _HostingChoiceScreenState extends State<HostingChoiceScreen> {
                 fontSize: 12,
               ),
               filled: true,
-              fillColor: AppColors.primary,
+              fillColor: AppColors.surface,
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
                 borderSide: const BorderSide(color: AppColors.border),
@@ -304,7 +397,7 @@ class _HostingChoiceScreenState extends State<HostingChoiceScreen> {
               onPressed: _connecting ? null : _connectRemoteBrain,
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.accent,
-                foregroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10),
@@ -315,7 +408,7 @@ class _HostingChoiceScreenState extends State<HostingChoiceScreen> {
                       width: 18,
                       height: 18,
                       child: CircularProgressIndicator(
-                        color: AppColors.primary,
+                        color: Colors.white,
                         strokeWidth: 2,
                       ),
                     )
@@ -328,24 +421,6 @@ class _HostingChoiceScreenState extends State<HostingChoiceScreen> {
                         fontFamily: 'monospace',
                       ),
                     ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          SizedBox(
-            width: double.infinity,
-            child: TextButton(
-              onPressed: () => widget.onHostingChosen(
-                HostingChoice.keysHereBrainLater,
-              ),
-              child: const Text(
-                'Connect later — start standalone for now',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: AppColors.textMuted,
-                  fontSize: 11,
-                  fontFamily: 'monospace',
-                ),
-              ),
             ),
           ),
         ],

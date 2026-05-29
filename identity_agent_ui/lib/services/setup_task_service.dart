@@ -44,25 +44,25 @@ const _allTaskMeta = <SetupTask, SetupTaskMeta>{
   ),
   SetupTask.setupAuthentication: SetupTaskMeta(
     task: SetupTask.setupAuthentication,
-    title: 'Set up app authentication',
+    title: 'Set up authentication',
     description:
         'Require a PIN or biometrics to open this app. Prevents anyone with physical access to your device from using your identity.',
-    isStub: true,
+    isStub: false,
     isCritical: true,
   ),
   SetupTask.secureKeyStorage: SetupTaskMeta(
     task: SetupTask.secureKeyStorage,
     title: 'Secure your signing keys',
     description:
-        'Your signing key controls your entire digital identity. If stored in software only, any app or attacker with OS-level access could steal it and impersonate you. Move it to a hardware enclave if available.',
+        'Your signing keys are currently exposed. If a hacker gains access to your device, they could steal your identity.',
     isStub: false,
     isCritical: true,
   ),
   SetupTask.inviteContacts: SetupTaskMeta(
     task: SetupTask.inviteContacts,
-    title: 'Add at least 3 trusted contacts',
+    title: 'Add a trusted contact',
     description:
-        'Trusted contacts serve as witnesses to your identity. You need a minimum of 3 to enable key rotation and identity recovery. The more you add, the more resilient your identity becomes.',
+        'Trusted contacts serve as witnesses to your identity in the background. You need at least 1 to complete setup (recommended: 7+).',
     isStub: false,
     isCritical: true,
   ),

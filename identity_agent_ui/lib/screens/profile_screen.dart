@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
+// ignore_for_file: library_private_types_in_public_api
 import '../services/core_service.dart';
 import '../services/keri_service.dart';
 import '../services/mobile_on_device_keri_service.dart';
@@ -275,7 +276,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
         child: _loading
             ? const Center(child: CircularProgressIndicator(color: AppColors.accent))
             : SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(32, 32, 32, 48),
+                padding: EdgeInsets.fromLTRB(
+                  AppLayout.isMobile(context) ? 16 : 32,
+                  AppLayout.isMobile(context) ? 16 : 32,
+                  AppLayout.isMobile(context) ? 16 : 32,
+                  48,
+                ),
                 child: Align(
                   alignment: Alignment.topLeft,
                   child: ConstrainedBox(
@@ -283,27 +289,28 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // ── Header ──────────────────────────────────────────
-                        const Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'My Profile',
-                              style: TextStyle(
-                                color: AppColors.textPrimary,
-                                fontSize: 22,
-                                fontWeight: FontWeight.w700,
+                        // ── Header (desktop only) ───────────────────────────
+                        if (!AppLayout.isMobile(context)) ...[
+                          const Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'My Profile',
+                                style: TextStyle(
+                                  color: AppColors.textPrimary,
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.w700,
+                                ),
                               ),
-                            ),
-                            SizedBox(height: 2),
-                            Text(
-                              'Your digital identity card.',
-                              style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
-                            ),
-                          ],
-                        ),
-
-                        const SizedBox(height: 28),
+                              SizedBox(height: 2),
+                              Text(
+                                'Your digital identity card.',
+                                style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 28),
+                        ],
 
                         // ── Photo ────────────────────────────────────────────
                         _buildPhotoSection(),

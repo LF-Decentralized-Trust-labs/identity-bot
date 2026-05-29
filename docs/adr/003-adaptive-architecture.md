@@ -2,10 +2,10 @@
 
 **Date:** 2026-02-18
 **Updated:** 2026-02-22
-**Status:** Accepted (mode definitions superseded by ADR-006 — Standardized Topology)
+**Status:** Accepted (mode definitions superseded by ADR-006 — Standardized Topology, revised 2026-05-01)
 **Context:** Phase 3 (Connectivity) — OOBI serving, contact management, and tunneling
 
-> **Note:** The four-mode model described in this ADR has been superseded by the 3-state × 2-device-type topology model in ADR-006. This ADR remains the authoritative source for OOBI serving, contact management, tunneling, endpoint naming conventions, trust boundaries, and configuration variables. See ADR-006 for the current architectural topology.
+> **Note:** The four-mode model described in this ADR has been superseded twice: first by the 3-state × 2-device-type model in ADR-006 (2026-02-22), then by the two-topology + four-configuration model in ADR-006's 2026-05-01 revision. This ADR remains the authoritative source for OOBI serving, contact management, tunneling, endpoint naming conventions, trust boundaries, and configuration variables. The terms "Mobile Standalone," "Mobile Remote WITHOUT Keys," and "Mobile Remote WITH Keys" used below are historical — the current model is "Phone + Computer" / "Computer only" (with auto-detection of key location). See ADR-006 for the current architectural topology.
 
 ## The Problem This Solves
 
@@ -37,7 +37,7 @@ All four modes present the same user interface through the abstract `KeriService
 │  User's Computer (Linux, macOS, or Windows)         │
 │                                                     │
 │  Flutter UI ──→ Go Backend ──→ Python KERI Driver   │
-│                 (port 5000)    (port 9999, local)    │
+│                 (port 5050)    (port 9999, local)    │
 │                                                     │
 │  Everything runs on one machine.                    │
 │  Python is always a child process of Go.            │
@@ -101,7 +101,7 @@ Backend operations (data persistence, OOBI serving, contacts) are handled by the
 │  User's Phone             │       │  User's Server (Desktop Mode)    │
 │  (iOS / Android)          │       │                                  │
 │                           │ HTTPS │  Go Backend ──→ Python KERI      │
-│  Rust Bridge (FFI)        │──────→│  (port 5000)    Driver (9999)    │
+│  Rust Bridge (FFI)        │──────→│  (port 5050)    Driver (9999)    │
 │  Creates delegated child  │       │                                  │
 │  AID locally. Phone has   │       │  Parent AID and full KEL live    │
 │  child keys only.         │       │  here. User owns and controls    │
@@ -250,7 +250,7 @@ The `getPublicURL()` function resolves the agent's externally-reachable URL in t
 
 | Variable | What it does | Which mode uses it |
 |---|---|---|
-| `CORE_URL` | URL of the local Go backend (default: `http://localhost:5000`) | Desktop Mode |
+| `CORE_URL` | URL of the local Go backend (default: `http://localhost:5050`) | Desktop Mode |
 | `PUBLIC_URL` | Explicit public URL override for OOBI generation | Desktop Mode |
 | `NGROK_AUTHTOKEN` | ngrok auth token for automatic tunnel creation | Desktop Mode (optional) |
 | `TUNNEL_PROVIDER` | Which tunnel provider to use (`cloudflare` or `ngrok`) | Desktop Mode (optional) |

@@ -8,10 +8,10 @@
 
 ## Context
 
-ADR-003 established the four operating modes (Desktop, Mobile Standalone, Mobile Remote Controller WITHOUT Keys, Mobile Remote Controller WITH Keys). Two mobile-specific native integrations are required:
+ADR-003 established the original four operating modes; ADR-006 (revised 2026-05-01) supersedes that with two topologies (Phone + Computer, Computer only) and four launch configurations. Two phone-specific native integrations are required:
 
-1. **Rust KERI Bridge** (`keriox/keri-core`): Provides all cryptographic KERI operations on mobile via FFI. Used in ALL mobile modes.
-2. **Go Mobile Core** (`identity-agent-core`): Provides backend services (data persistence, OOBI serving, contact management, tunneling) on mobile via gomobile platform channels. Used in Mobile Standalone mode.
+1. **Rust KERI Bridge** (`keriox/keri-core`): Provides all cryptographic KERI operations on the phone via FFI. Used whenever the phone holds keys.
+2. **Go Mobile Core** (`identity-agent-core`): Provides backend services (data persistence, OOBI serving, contact management, tunneling) on the phone via gomobile platform channels. Used in phone-only fallback / offline credential verification within Phone + Computer topology.
 
 This ADR records the decisions made to complete both native integrations and the CI/CD pipeline.
 

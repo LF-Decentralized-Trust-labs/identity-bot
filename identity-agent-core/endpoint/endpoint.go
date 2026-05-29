@@ -46,6 +46,13 @@ func New(store EndpointPersister, localPort int) *EndpointService {
         return es
 }
 
+func (es *EndpointService) SetPort(port int) {
+        es.mu.Lock()
+        es.localPort = port
+        es.mu.Unlock()
+        es.Refresh()
+}
+
 func (es *EndpointService) SetTunnelManager(tm *tunnel.Manager) {
         es.mu.Lock()
         defer es.mu.Unlock()

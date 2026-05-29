@@ -21,7 +21,7 @@ func main() {
 		log.Fatalf("[identity-agent-core] Failed to start: %v", err)
 	}
 
-	log.Printf("[identity-agent-core] Server started on port %d", cfg.Port)
+	log.Printf("[identity-agent-core] Server started on port %d", srv.Port)
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)

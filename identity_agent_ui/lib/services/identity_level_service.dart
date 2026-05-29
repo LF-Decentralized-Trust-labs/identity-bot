@@ -1,5 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import '../config/agent_config.dart';
 import 'pin_password_service.dart';
 import 'local_auth_service.dart';
 
@@ -25,7 +28,7 @@ extension IdentityTierX on IdentityTier {
   String get label {
     switch (this) {
       case IdentityTier.notVerified:    return 'Not Verified';
-      case IdentityTier.selfAsserted:   return 'Self-Asserted';
+      case IdentityTier.selfAsserted:   return 'Basic';
       case IdentityTier.authenticated:  return 'Authenticated';
       case IdentityTier.verified:       return 'Verified';
       case IdentityTier.highlyVerified: return 'Highly Verified';
@@ -81,7 +84,7 @@ class IdentityLevelService {
   static Future<ActiveFactors> loadFactors() async {
     final prefs = await SharedPreferences.getInstance();
     final witnessCount = prefs.getInt(_witnessCountKey) ?? 0;
-    final hasCredential = prefs.getBool(_hasCredentialKey) ?? false;
+    final hasCredential = await _checkHasCredentialFromDB();
     final hasPin = await PinPasswordService.hasPin();
     final hasPassword = await PinPasswordService.hasPassword();
     final biometricState = await LocalAuthService.fingerprintAvailability();
@@ -97,6 +100,33 @@ class IdentityLevelService {
       witnessCount: witnessCount,
       hasCredential: hasCredential,
     );
+  }
+
+  /// Checks the credentials database via the backend API for any held,
+  /// valid (non-expired, non-revoked) externally-issued credential.
+  ///
+  /// On success the result is cached in SharedPreferences so that a
+  /// reasonable fallback exists when the backend is temporarily unreachable.
+  static Future<bool> _checkHasCredentialFromDB() async {
+    try {
+      final baseUrl = AgentConfig.coreBaseUrl;
+      final uri = Uri.parse('$baseUrl/api/credentials?role=holder&status=valid');
+      final response = await http.get(uri).timeout(const Duration(seconds: 3));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        final list = data['credentials'] as List<dynamic>? ?? [];
+        final result = list.isNotEmpty;
+        // Update the local cache so the offline fallback stays current.
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool(_hasCredentialKey, result);
+        return result;
+      }
+    } catch (_) {
+      // Backend unavailable — fall back to cached SharedPreferences value.
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getBool(_hasCredentialKey) ?? false;
+    }
+    return false;
   }
 
   // ── Tier computation ──────────────────────────────────────────────────────
@@ -133,9 +163,9 @@ class IdentityLevelService {
     return prefs.getInt(_witnessCountKey) ?? 0;
   }
 
-  static Future<void> setHasCredential({required bool value}) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_hasCredentialKey, value);
+  /// Forces a re-check of credential state from the backend and refreshes
+  /// the tier.  Call this after issuing, receiving, or revoking a credential.
+  static Future<void> refreshCredentialState() async {
     await refresh();
   }
 

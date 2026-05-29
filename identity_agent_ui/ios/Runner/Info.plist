@@ -54,5 +54,7 @@
         <string>Identity Agent needs access to your photo library to set your profile photo.</string>
         <key>NSFaceIDUsageDescription</key>
         <string>Identity Agent uses Face ID to verify your identity when unlocking the app.</string>
+        <key>NSCameraUsageDescription</key>
+        <string>Identity Agent uses the camera to scan QR codes for identity verification.</string>
 </dict>
 </plist>

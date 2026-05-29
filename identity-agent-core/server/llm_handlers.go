@@ -73,7 +73,7 @@ func (s *CoreServer) llmRoutes(r chi.Router) {
         r.Post("/api/settings/llm", s.handleSaveLLMKey)
         r.Delete("/api/settings/llm/{service}", s.handleDeleteLLMKey)
         // /sandbox/llm/v1/* — container egress namespace: LLM proxy for sandboxed apps.
-        // Containers call http://agent.internal:5000/sandbox/llm/v1 as their OpenAI-compatible base URL.
+        // Containers call http://agent.internal:5050/sandbox/llm/v1 as their OpenAI-compatible base URL.
         r.HandleFunc("/sandbox/llm/v1", s.handleLLMProxy)
         r.HandleFunc("/sandbox/llm/v1/*", s.handleLLMProxy)
 }

@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - Docker Desktop installed and running
-- Identity Agent backend running (port 5000)
+- Identity Agent backend running (port 5050)
 - Identity Agent Flutter UI running (desktop build)
 - For Open WebUI: OpenRouter API key configured in Identity Agent settings
 
@@ -139,5 +139,5 @@ After each demo, verify the clean shutdown checklist:
 
 - **Docker not available**: Check that Docker Desktop is running. The APPS tab shows a warning banner.
 - **WebView blank**: On Linux, install `libwebkit2gtk-4.1-dev`. The "Open in browser" fallback button is always available.
-- **Port conflict on 5000**: Run `pkill -f identity-agent-core` then restart the backend.
+- **Port conflict on 5050**: The backend auto-selects a fallback port (5051–5059). If needed, run `pkill -f identity-agent-core` then restart.
 - **Container won't stop**: Use `docker kill <container_id>` manually, then restart the agent for reconciliation.

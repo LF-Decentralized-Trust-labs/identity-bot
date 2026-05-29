@@ -1,0 +1,43 @@
+name: Desktop — Windows Release
+
+# Side-by-side with codemagic.yaml's `windows-release` during the GitHub Actions
+# migration. Produces identity-agent-windows-x64.zip as a build artifact.
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "ci/github-actions-desktop" ]
+    paths:
+      - "identity-agent-core/**"
+      - "identity_agent_ui/**"
+      - "drivers/**"
+      - "sandbox-apps/go-demo/**"
+      - "manifests/**"
+      - "scripts/build-desktop-windows.ps1"
+      - ".github/workflows/desktop-windows.yml"
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    env:
+      BUILD_NUMBER: ${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.0"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.27.3"
+          channel: stable
+
+      - name: Build + bundle Windows release
+        shell: pwsh
+        run: ./scripts/build-desktop-windows.ps1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: identity-agent-windows-x64
+          path: identity-agent-windows-x64.zip
+          if-no-files-found: error
