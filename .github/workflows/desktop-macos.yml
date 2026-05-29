@@ -1,0 +1,78 @@
+name: Desktop — macOS Release
+
+# Side-by-side with codemagic.yaml's `macos-release` during the GitHub Actions
+# migration. Produces identity-agent-macos.dmg as a build artifact.
+#
+# Signing + notarization run ONLY when the Apple signing secrets are present
+# (see .github/CI_MACOS_SIGNING_SETUP.md). Until they are configured, the build
+# still runs and produces an UNSIGNED DMG so we can validate compile + bundle.
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "ci/github-actions-desktop" ]
+    paths:
+      - "identity-agent-core/**"
+      - "identity_agent_ui/**"
+      - "drivers/**"
+      - "sandbox-apps/go-demo/**"
+      - "manifests/**"
+      - "scripts/build-desktop-macos.sh"
+      - "scripts/sign-notarize-macos.sh"
+      - "scripts/package-dmg-macos.sh"
+      - ".github/workflows/desktop-macos.yml"
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    env:
+      BUILD_NUMBER: ${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.0"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.27.3"
+          channel: stable
+
+      - name: Build + bundle macOS .app (unsigned)
+        run: bash scripts/build-desktop-macos.sh
+
+      - name: Detect signing secrets
+        id: signing
+        env:
+          CM_CERTIFICATE: ${{ secrets.CM_CERTIFICATE }}
+        run: |
+          if [ -n "$CM_CERTIFICATE" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            echo "Signing secrets present — will sign + notarize."
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "No signing secrets — producing an UNSIGNED DMG."
+          fi
+
+      - name: Sign + notarize
+        if: steps.signing.outputs.enabled == 'true'
+        env:
+          CM_CERTIFICATE: ${{ secrets.CM_CERTIFICATE }}
+          CM_CERTIFICATE_PASSWORD: ${{ secrets.CM_CERTIFICATE_PASSWORD }}
+          APP_STORE_CONNECT_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
+          APP_STORE_CONNECT_KEY_IDENTIFIER: ${{ secrets.APP_STORE_CONNECT_KEY_IDENTIFIER }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: bash scripts/sign-notarize-macos.sh
+
+      - name: Package DMG
+        run: bash scripts/package-dmg-macos.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: identity-agent-macos
+          path: identity-agent-macos.dmg
+          if-no-files-found: error
