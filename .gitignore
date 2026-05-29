@@ -59,3 +59,6 @@ CLAUDE.md
 
 # Local personal tooling (markdown-to-docx converter, etc.)
 md_to_docx.py
+
+# Runtime agent state (AGENT_DATA_DIR) — never commit
+data/
