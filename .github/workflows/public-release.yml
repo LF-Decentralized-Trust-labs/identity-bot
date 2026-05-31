@@ -1,0 +1,114 @@
+name: Public Release (Desktop)
+
+# Publishes the open-source desktop binaries (Linux / Windows / macOS) to a
+# GitHub Release so developers can easily download an unsigned build to test.
+#
+# These binaries are intentionally UNSIGNED — that is the nature of the
+# open-source project (no single entity owns it to sign on its behalf).
+#
+# Manual (workflow_dispatch) only for now. An optional version-tag trigger is
+# included but commented out; uncomment the `push: tags` block to auto-release
+# on `vX.Y.Z` tags if/when that cadence is wanted.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v0.5.0). Must already exist or will be created from the current ref.'
+        required: true
+      prerelease:
+        description: 'Mark as a pre-release?'
+        type: boolean
+        default: true
+  # Optional: auto-release on version tags (uncomment to enable):
+  # push:
+  #   tags: ['v*']
+
+permissions:
+  contents: write   # required to create the GitHub Release
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    env:
+      BUILD_NUMBER: ${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux desktop build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang cmake ninja-build pkg-config \
+            libgtk-3-dev liblzma-dev libsecret-1-dev
+      - uses: actions/setup-go@v5
+        with: { go-version: "1.24.0" }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - uses: subosito/flutter-action@v2
+        with: { flutter-version: "3.27.3", channel: stable }
+      - name: Build + bundle Linux release
+        run: bash scripts/build-desktop-linux.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-linux
+          path: identity-agent-linux-x64.tar.gz
+          if-no-files-found: error
+
+  windows:
+    runs-on: windows-latest
+    env:
+      BUILD_NUMBER: ${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: "1.24.0" }
+      - uses: subosito/flutter-action@v2
+        with: { flutter-version: "3.27.3", channel: stable }
+      - name: Build + bundle Windows release
+        shell: pwsh
+        run: ./scripts/build-desktop-windows.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: identity-agent-windows-x64.zip
+          if-no-files-found: error
+
+  macos:
+    runs-on: macos-latest
+    env:
+      BUILD_NUMBER: ${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: "1.24.0" }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - uses: subosito/flutter-action@v2
+        with: { flutter-version: "3.27.3", channel: stable }
+      - name: Build + bundle macOS .app (unsigned)
+        run: bash scripts/build-desktop-macos.sh
+      - name: Package DMG
+        run: bash scripts/package-dmg-macos.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-macos
+          path: identity-agent-macos.dmg
+          if-no-files-found: error
+
+  publish:
+    needs: [linux, windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all platform artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          prerelease: ${{ inputs.prerelease }}
+          generate_release_notes: true
+          files: |
+            dist/release-linux/identity-agent-linux-x64.tar.gz
+            dist/release-windows/identity-agent-windows-x64.zip
+            dist/release-macos/identity-agent-macos.dmg
