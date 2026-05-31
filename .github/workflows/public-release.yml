@@ -7,9 +7,7 @@ name: Public Release (Desktop)
 # trigger is intentionally commented out until the public-launch decision —
 # uncomment the `push: tags` block to enable auto-release on `vX.Y.Z` tags.
 #
-# Note: signed STORE releases (iOS TestFlight, Android Play, signed macOS DMG)
-# are handled separately in the private grapeid/release-pipeline repo. This
-# workflow covers the open-source desktop downloads only.
+# Scope: this workflow publishes the open-source desktop downloads only.
 on:
   workflow_dispatch:
     inputs:
