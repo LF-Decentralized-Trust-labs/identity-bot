@@ -1,13 +1,14 @@
 name: Public Release (Desktop)
 
-# Builds the OSS desktop artifacts (Linux / Windows / macOS unsigned) and
-# publishes them to a GitHub Release.
+# Publishes the open-source desktop binaries (Linux / Windows / macOS) to a
+# GitHub Release so developers can easily download an unsigned build to test.
 #
-# DISABLED for now: manual (workflow_dispatch) only. The automatic version-tag
-# trigger is intentionally commented out until the public-launch decision —
-# uncomment the `push: tags` block to enable auto-release on `vX.Y.Z` tags.
+# These binaries are intentionally UNSIGNED — that is the nature of the
+# open-source project (no single entity owns it to sign on its behalf).
 #
-# Scope: this workflow publishes the open-source desktop downloads only.
+# Manual (workflow_dispatch) only for now. An optional version-tag trigger is
+# included but commented out; uncomment the `push: tags` block to auto-release
+# on `vX.Y.Z` tags if/when that cadence is wanted.
 on:
   workflow_dispatch:
     inputs:
@@ -18,7 +19,7 @@ on:
         description: 'Mark as a pre-release?'
         type: boolean
         default: true
-  # Enable automatic release on version tags at launch:
+  # Optional: auto-release on version tags (uncomment to enable):
   # push:
   #   tags: ['v*']
 
