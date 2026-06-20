@@ -27,6 +27,7 @@ import (
         "identity-agent-core/store"
         "identity-agent-core/tunnel"
         "identity-agent-core/linkverifier"
+        "identity-agent-core/update"
         "identity-agent-core/witness"
         "identity-agent-core/watcher"
 
@@ -55,6 +56,7 @@ type CoreServer struct {
         WatcherService  *watcher.Service
         WitnessService  *witness.Service
         LinkVerifier    *linkverifier.SDK
+        UpdateService   *update.Service
         mu              sync.Mutex
         running         bool
 }
@@ -207,6 +209,14 @@ func New(cfg Config) (*CoreServer, error) {
                 log.Printf("[identity-agent-core] OIDC adapter init failed (non-fatal): %v", err)
         }
 
+        updCfg := update.DefaultConfig(cfg.DataDir)
+        updCfg.HealthCheckURL = fmt.Sprintf("http://127.0.0.1:%d/api/health", cfg.Port)
+        if updSvc, err := update.NewService(updCfg); err != nil {
+                log.Printf("[identity-agent-core] update service init failed (non-fatal): %v", err)
+        } else {
+                s.UpdateService = updSvc
+        }
+
         s.router = s.buildRouter(cfg.FlutterWebDir)
 
         return s, nil
@@ -255,6 +265,22 @@ func (s *CoreServer) Start() error {
         s.TunnelManager = tunnel.NewManager(tunnelCfg, s.Port)
         s.EndpointService.SetTunnelManager(s.TunnelManager)
         s.EndpointService.Refresh()
+
+        if s.UpdateService != nil {
+                healthURL := fmt.Sprintf("http://127.0.0.1:%d/api/health", s.Port)
+                s.UpdateService.SetHealthCheck(func() error {
+                        resp, err := http.Get(healthURL)
+                        if err != nil {
+                                return err
+                        }
+                        defer resp.Body.Close()
+                        if resp.StatusCode != http.StatusOK {
+                                return fmt.Errorf("health status %d", resp.StatusCode)
+                        }
+                        return nil
+                })
+                s.UpdateService.Start(s.AppCtx)
+        }
 
         s.running = true
 
@@ -314,6 +340,10 @@ func (s *CoreServer) Stop() {
         // Clean up .port file
         portFilePath := filepath.Join(s.DataDir, ".port")
         os.Remove(portFilePath)
+
+        if s.UpdateService != nil {
+                s.UpdateService.Stop()
+        }
 
         if s.SandboxManager != nil {
                 s.SandboxManager.Stop()
@@ -460,6 +490,7 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
                 s.mountLoginRoutes(r)
                 s.mountVerificationRoutes(r)
                 s.mountWitnessRoutes(r)
+                s.mountUpdateRoutes(r)
         })
 
         s.traceRoutes(r)

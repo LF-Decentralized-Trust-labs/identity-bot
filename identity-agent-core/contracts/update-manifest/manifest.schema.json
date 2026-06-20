@@ -1,0 +1,133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://grapeid.org/contracts/update-manifest/manifest.schema.json",
+  "title": "Signed Release Manifest",
+  "description": "SEAM-20 signed release manifest — code plane of the two-plane trust model.",
+  "type": "object",
+  "required": [
+    "manifest_version",
+    "published_at",
+    "signing_key_id",
+    "channels",
+    "components",
+    "compatibility",
+    "changelog",
+    "signature"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "manifest_version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Schema version; unknown values MUST be rejected (UM-1)."
+    },
+    "published_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "signing_key_id": {
+      "type": "string"
+    },
+    "channels": {
+      "type": "object",
+      "required": ["stable"],
+      "additionalProperties": {
+        "type": "object",
+        "required": ["min_supported_manifest_version"],
+        "properties": {
+          "min_supported_manifest_version": { "type": "integer", "minimum": 1 }
+        }
+      }
+    },
+    "components": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/component"
+      }
+    },
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "min_go_backend": { "type": "string" },
+          "max_go_backend": { "type": "string" }
+        }
+      }
+    },
+    "changelog": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/changelog_entry" }
+    },
+    "next_signing_key": {
+      "type": "object",
+      "required": ["key_id", "public_key", "activates_at"],
+      "properties": {
+        "key_id": { "type": "string" },
+        "public_key": { "type": "string" },
+        "activates_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "signature": {
+      "type": "string",
+      "description": "Base64url Ed25519 signature over canonical JSON without this field."
+    }
+  },
+  "$defs": {
+    "component": {
+      "type": "object",
+      "required": ["version", "minimum_version", "critical", "artifacts"],
+      "properties": {
+        "version": { "type": "string" },
+        "minimum_version": { "type": "string" },
+        "critical": { "type": "boolean" },
+        "artifacts": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/artifact" }
+        }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "required": ["platform", "url", "blake3_256", "sha256", "size_bytes"],
+      "properties": {
+        "platform": {
+          "type": "string",
+          "enum": [
+            "linux_amd64",
+            "windows_amd64",
+            "darwin_amd64",
+            "darwin_arm64"
+          ]
+        },
+        "url": { "type": "string", "format": "uri" },
+        "blake3_256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "Agent integrity gate (UM-4)."
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "Signed interop fingerprint; not the apply gate."
+        },
+        "size_bytes": { "type": "integer", "minimum": 0 },
+        "diff_url": { "type": "string", "format": "uri" }
+      }
+    },
+    "changelog_entry": {
+      "type": "object",
+      "required": ["version", "date", "critical", "summary", "entries"],
+      "properties": {
+        "version": { "type": "string" },
+        "date": { "type": "string" },
+        "critical": { "type": "boolean" },
+        "summary": { "type": "string" },
+        "entries": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    }
+  }
+}
