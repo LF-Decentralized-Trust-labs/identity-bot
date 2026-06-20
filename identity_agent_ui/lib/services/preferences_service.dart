@@ -4,6 +4,7 @@ enum AgentMode {
   createNew,
   connectExisting,
   backupOnly,
+  recoverFromBackup,
 }
 
 enum EntityType {

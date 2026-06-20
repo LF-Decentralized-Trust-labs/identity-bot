@@ -8,6 +8,8 @@ import 'screens/setup_wizard_screen.dart';
 import 'screens/mode_selection_screen.dart';
 import 'screens/connect_server_screen.dart';
 import 'screens/backup/backup_only_standby_screen.dart';
+import 'screens/recovery/recovery_onboarding_screen.dart';
+import 'services/recovery_service.dart';
 import 'services/core_service.dart';
 import 'services/keri_service.dart';
 import 'services/desktop_on_device_keri_service.dart';
@@ -78,6 +80,7 @@ enum OnboardingStep {
   setupWizard,
   setupChecklist,
   backupOnlyStandby,
+  recoveryOnboarding,
   dashboard,
 }
 
@@ -105,6 +108,7 @@ class _AgentRouterState extends State<AgentRouter> {
   String? _serverUrl;
   String? _remoteBrainUrl;
   HostingChoice? _hostingChoice;
+  RecoverySession? _recoverySession;
   bool _showedBackendError = false;
 
   @override
@@ -282,6 +286,8 @@ class _AgentRouterState extends State<AgentRouter> {
     } else if (mode == AgentMode.backupOnly) {
       await PreferencesService.setSetupComplete(true);
       setState(() => _step = OnboardingStep.backupOnlyStandby);
+    } else if (mode == AgentMode.recoverFromBackup) {
+      setState(() => _step = OnboardingStep.recoveryOnboarding);
     } else {
       setState(() => _step = OnboardingStep.connectServer);
     }
@@ -321,6 +327,16 @@ class _AgentRouterState extends State<AgentRouter> {
 
   void _goBackToModeSelection() {
     setState(() => _step = OnboardingStep.modeSelection);
+  }
+
+  void _onRecoveryStarted(RecoverySession session) async {
+    _recoverySession = session;
+    _selectedMode = AgentMode.recoverFromBackup;
+    await PreferencesService.setMode(AgentMode.recoverFromBackup);
+    await PreferencesService.setEntityType(EntityType.individual);
+    await PreferencesService.setSetupComplete(true);
+    await _initializeServiceForMode(AgentMode.recoverFromBackup, null);
+    setState(() => _step = OnboardingStep.dashboard);
   }
 
   @override
@@ -542,7 +558,11 @@ class _AgentRouterState extends State<AgentRouter> {
             _showBackendErrorDialog(context, _backendStartupError!);
           });
         }
-        return ModeSelectionScreen(onModeSelected: _onModeSelected);
+        return ModeSelectionScreen(
+          onModeSelected: _onModeSelected,
+          onRecoverFromBackup: () =>
+              setState(() => _step = OnboardingStep.recoveryOnboarding),
+        );
 
       case OnboardingStep.hostingChoice:
         return HostingChoiceScreen(onHostingChosen: _onHostingChosen);
@@ -572,6 +592,12 @@ class _AgentRouterState extends State<AgentRouter> {
 
       case OnboardingStep.backupOnlyStandby:
         return const BackupOnlyStandbyScreen(connectionStatus: 'paired');
+
+      case OnboardingStep.recoveryOnboarding:
+        return RecoveryOnboardingScreen(
+          onBack: _goBackToModeSelection,
+          onRecoveryStarted: _onRecoveryStarted,
+        );
 
       case OnboardingStep.dashboard:
         String? effectiveServerUrl = _serverUrl;

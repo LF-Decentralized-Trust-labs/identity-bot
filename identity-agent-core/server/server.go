@@ -18,6 +18,7 @@ import (
         "time"
 
         "identity-agent-core/backup"
+        "identity-agent-core/recovery"
         "identity-agent-core/drivers"
         "identity-agent-core/login"
         "identity-agent-core/oidc"
@@ -57,6 +58,7 @@ type CoreServer struct {
         WitnessService  *witness.Service
         LinkVerifier    *linkverifier.SDK
         BackupService   *backup.Service
+        RecoveryService *recovery.Service
         mu              sync.Mutex
         running         bool
 }
@@ -462,6 +464,7 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
                 s.serviceProviderRoutes(r)
                 s.aiMemoryRoutes(r)
                 s.mountBackupRoutes(r)
+                s.mountRecoveryRoutes(r)
                 r.Get("/ws/events", s.handleWebSocketEvents)
 
                 s.mountLoginRoutes(r)
