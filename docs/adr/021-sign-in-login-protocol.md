@@ -8,7 +8,7 @@
 
 ## Context
 
-A self-sovereign Identity Agent is only useful if a user can actually *use* it to log in to the websites and apps they already touch every day. The dominant pattern on the web — "Sign in with Google/Apple/Facebook" — hands an identity provider a tracking position over every login and makes the user a tenant of someone else's platform. We need the opposite: a login the user fully owns, where no central party sees the login graph, and where each relying party (RP) gets a *different* identifier for the same person so RPs cannot correlate users across the web.
+A user-controlled Identity Agent is only useful if a user can actually *use* it to log in to the websites and apps they already touch every day. The dominant pattern on the web — "Sign in with Google/Apple/Facebook" — hands an identity provider a tracking position over every login and makes the user a tenant of someone else's platform. We need the opposite: a login the user fully owns, where no central party sees the login graph, and where each relying party (RP) gets a *different* identifier for the same person so RPs cannot correlate users across the web.
 
 The login flow also has to be a special case of a more general capability. A relying party does not only want "prove you are a returning user" — it may also want a credential presented, a payment authorized, or contact details shared. Designing a bespoke protocol for each of these would fragment the agent's interaction surface. We want one envelope that carries any of these requests.
 

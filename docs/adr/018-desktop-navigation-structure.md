@@ -17,7 +17,7 @@ The Identity Agent desktop sidebar navigation grew organically during Sprint 1�
 - "API Keys" lived in Settings even though it is a credential type, not a configuration option
 - "Connected Apps" lived in Settings even though it is a feature launcher (home screen), not a setting
 - "Hubs" covered only 4 domains; Social Media, Legal, and a Security hub were absent
-- "Account" in Settings implied a record on someone else's system — inconsistent with the self-sovereign premise
+- "Account" in Settings implied a record on someone else's system — inconsistent with the user-controlled premise
 - "Theme" in Settings is non-standard consumer terminology (should be "Appearance")
 - "Key Management" and "Authentication" were separate Settings items; for non-technical users, both belong under a single "Security" entry
 
@@ -130,7 +130,7 @@ The Organization section is shown in addition to all individual items, and only 
 
 **Settings** (ordered consumer-to-technical):
 - *Agent* — Name the Identity Agent instance (pet name for the software, distinct from the human's name in My Profile), configure AI assistant, general preferences
-- *Security* — Authentication method selection (Grape Score / OmniFactor vs. NIST Identity Assurance Levels) + key rotation (rotate primary signing key). Replaces the separate Authentication and Key Management items.
+- *Security* — Authentication method selection (OmniFactor authentication (OFA) vs. NIST Identity Assurance Levels) + key rotation (rotate primary signing key). Replaces the separate Authentication and Key Management items.
 - *Privacy & Data* — Control what data is shared, stored, and for how long
 - *Appearance* — Theme, colors, display preferences (renamed from "Theme")
 - *Notifications* — Alert types, frequency, delivery channels

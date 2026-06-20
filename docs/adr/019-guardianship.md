@@ -8,7 +8,7 @@
 
 ## Context
 
-The Identity Agent manages an individual's self-sovereign digital identity. However, many people cannot — or should not — manage their own identity independently:
+The Identity Agent manages an individual's user-controlled digital identity. However, many people cannot — or should not — manage their own identity independently:
 
 - **Minor children** have no legal capacity to manage identity; a parent or legal guardian acts on their behalf.
 - **Elderly family members** may become incapacitated and need a family member or attorney to manage their identity.
@@ -36,7 +36,7 @@ KERI already provides the cryptographic primitives needed for all of these scena
 
 4. **Plain language over technical vocabulary.** The four sections use consumer terms: **My Dependents**, **My Guardians**, **My Will**, **Estate Planning**. Templates use consumer terms: "Minor Child", "Elderly Family Member", "Person with a Disability", "Temporary Guardianship". Contact labels are directional plain English: "You are guardian of [Name]".
 
-5. **Black Box Infrastructure Stewardship for dependent provisioning.** Dependent identities without a physical device are provisioned via Black Box Infrastructure Stewardship providers (see the compliance Doctrine 1) — the provider operates TEE-sealed enclaves and provably cannot access key material or user data. Grape ID is the default provider on the Grape ID build. The term "cloud hosting" is not used — see the compliance model.
+5. **Black Box Infrastructure Stewardship for dependent provisioning.** Dependent identities without a physical device are provisioned via Black Box Infrastructure Stewardship providers (see the compliance Doctrine 1) — the provider operates TEE-sealed enclaves and provably cannot access key material or user data. A given build may pre-configure a default provider. The term "cloud hosting" is not used — see the compliance model.
 
 6. **Phased delivery.** Phase 0: P-AID primitives. Phase 1: My Dependents (reworked creation flow). Phase 2: My Guardians. Phase 3: My Will. Phase 4: Estate Planning. Phase 5+: Family section, custom types, court integration.
 
@@ -67,7 +67,7 @@ The dependent's Identity Agent instance runs on a **separate, dedicated device**
 
 The Add Dependent flow branches early:
 - **Connect existing Identity Agent** — the dependent already has a functioning Identity Agent; pair via QR/link
-- **Create new Identity Agent** — install on a separate device, OR instant creation via a Black Box Infrastructure Stewardship provider (Grape ID build default; see the compliance Doctrine 1)
+- **Create new Identity Agent** — install on a separate device, OR instant creation via a Black Box Infrastructure Stewardship provider (the build's default provider; see the compliance Doctrine 1)
 
 **Why black box infrastructure is the recommended default for dependents without devices:**
 - Instant provisioning — no hardware needed
@@ -76,7 +76,7 @@ The Add Dependent flow branches early:
 - TEE security — provider enclaves are cryptographically attested; operator cannot access key material or user data
 - No storage burden on the guardian's device
 
-**Black Box Infrastructure Stewardship providers** are configured in Settings > Service Providers. Grape ID is pre-configured on the Grape ID build. Any service that runs isolated Identity Agent instances in TEE-backed enclaves and exposes the standard Identity Agent API qualifies as a provider.
+**Black Box Infrastructure Stewardship providers** are configured in Settings > Service Providers. A given build may pre-configure a default provider. Any service that runs isolated Identity Agent instances in TEE-backed enclaves and exposes the standard Identity Agent API qualifies as a provider.
 
 ### Guardianship Templates
 
@@ -166,7 +166,7 @@ Contacts involved in guardianship relationships display a directional role label
 3. **New REST API surface** under `/api/guardianship`.
 4. **Desktop sidebar gains a "Guardianship" collapsible section** (ADR-018 canonical structure updated).
 5. **Contact cards gain role labels** — directional guardianship badges alongside existing contact type badges.
-6. **Identity Agent Infrastructure Service Provider** established as a new provider type in Settings > Service Providers (Grape ID default, additional providers configurable).
+6. **Identity Agent Infrastructure Service Provider** established as a new provider type in Settings > Service Providers (a default provider may be pre-configured; additional providers configurable).
 7. **One AID per instance rule** is now explicit policy — no same-device multi-AID.
 8. **Agent URL Relay is a hard prerequisite.** Guardianship cannot ship until the Agent URL Relay architecture (Pairwise AIDs, Root AID isolation) is built — Guardianship P-AIDs are a subclass of Pairwise AIDs defined there.
 9. **Python KERI driver must gain delegated-inception support.** The current `drivers/keri-core/server.py` has `/inception` and `/rotation` endpoints that produce standard (non-delegated) events. A `delegator` parameter (or a dedicated `/delegation/inception` endpoint) must be added so the dependent's instance can produce a DIP event anchored to the guardian's Guardianship P-AID. Same for `/delegation/rotation` (DRT) to support guardian-authorized rotation, revocation, and emancipation. No protocol-level spike is required — KERI does not distinguish root from non-root delegators, so keripy's existing delegation primitives work unchanged.
