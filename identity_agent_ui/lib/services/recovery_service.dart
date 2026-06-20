@@ -112,7 +112,7 @@ class RecoveryService {
   final String baseUrl;
 
   RecoveryService({String? baseUrl})
-      : baseUrl = baseUrl ?? AgentConfig.backendUrl;
+      : baseUrl = baseUrl ?? AgentConfig.coreBaseUrl;
 
   String get _base => '$baseUrl/api/recovery';
 
