@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Create Python 3.12+ venv with pinned keri 1.1.17 for M63 conformance tests.
+# Create Python 3.12+ venv with pinned keri 1.1.17 for hybrid PQC conformance tests.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VENV="${ROOT}/drivers/keri-core/.venv-keri1117"

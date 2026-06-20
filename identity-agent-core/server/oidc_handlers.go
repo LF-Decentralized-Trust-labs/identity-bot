@@ -77,6 +77,6 @@ func (s *CoreServer) handleOIDCComplete(w http.ResponseWriter, r *http.Request) 
 	w.WriteHeader(http.StatusAccepted)
 	_ = json.NewEncoder(w).Encode(map[string]string{
 		"status": "pending",
-		"note":   "BLOCKED: cross-device SIOPv2 request_uri flow requires M35 relay broker",
+		"note":   "BLOCKED: cross-device SIOPv2 request_uri flow requires the relay broker",
 	})
 }

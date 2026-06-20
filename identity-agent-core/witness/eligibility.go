@@ -2,7 +2,7 @@ package witness
 
 import "identity-agent-core/store"
 
-// IsBackendEligible returns true for always-on desktop or hosted (M02) backends.
+// IsBackendEligible returns true for always-on desktop or hosted (attestation-backed) backends.
 func IsBackendEligible(backendType string) bool {
 	switch backendType {
 	case BackendDesktop, BackendHosted, BackendCommercial:
@@ -12,7 +12,7 @@ func IsBackendEligible(backendType string) bool {
 	}
 }
 
-// IsContactWitnessEligible applies M11 enrollment rules.
+// IsContactWitnessEligible applies witness enrollment rules.
 func IsContactWitnessEligible(c store.ContactRecord) bool {
 	if c.Status != "accepted" {
 		return false

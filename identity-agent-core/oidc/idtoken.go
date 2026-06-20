@@ -16,7 +16,7 @@ const (
 	ClaimSeam8AssertionDigest = ClaimNamespace + "/seam8_assertion_digest"
 )
 
-// BuildIDToken wraps a signed SEAM-8 assertion as a self-issued OIDC ID token (JWT-primary).
+// BuildIDToken wraps a signed login assertion as a self-issued OIDC ID token (JWT-primary).
 func BuildIDToken(host string, assertion *login.Assertion, seed []byte, ttl time.Duration) (string, error) {
 	if assertion == nil || assertion.Sig == "" {
 		return "", fmt.Errorf("assertion must be signed")

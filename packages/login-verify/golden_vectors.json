@@ -1,8 +1,6 @@
 {
   "login_assertion": {
-    "description": "M29 SEAM-8 OQ-1 frozen — deterministic login assertion (seed 0x29..0x48)",
-    "seam": "SEAM-8",
-    "oq": "OQ-1",
+    "description": "Frozen login contract — deterministic login assertion (seed 0x29..0x48)",
     "version": "IALOGIN10JSON",
     "seed_hex": "292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748",
     "field_order": "v,t,d,i,relationship_aid_oobi,audience,nonce,dt,disclosures,presented_acdcs",

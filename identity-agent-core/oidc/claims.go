@@ -7,14 +7,14 @@ import (
 
 const ClaimNamespace = "https://identityagent.org/claims"
 
-// ScopeAliases expand coarse OIDC scopes into explicit SEAM-8 disclosure fields.
+// ScopeAliases expand coarse OIDC scopes into explicit login-contract disclosure fields.
 var ScopeAliases = map[string][]string{
 	"openid":  {},
 	"profile": {"display_name"},
 	"email":   {"email"},
 }
 
-// DisclosureToClaim maps SEAM-8 disclosure field names to OIDC claim names.
+// DisclosureToClaim maps login-contract disclosure field names to OIDC claim names.
 var DisclosureToClaim = map[string]string{
 	"display_name": "name",
 	"email":        "email",
@@ -26,7 +26,7 @@ var ClaimToDisclosure = map[string]string{
 	"email": "email",
 }
 
-// ExpandScopes returns deduplicated SEAM-8 disclosure fields for scope + claims request.
+// ExpandScopes returns deduplicated login-contract disclosure fields for scope + claims request.
 func ExpandScopes(scope string, requestedClaims []string) []string {
 	seen := map[string]bool{}
 	var out []string
@@ -54,7 +54,7 @@ func ExpandScopes(scope string, requestedClaims []string) []string {
 	return out
 }
 
-// ClaimsFromDisclosures maps granted SEAM-8 disclosures to OIDC ID token claims.
+// ClaimsFromDisclosures maps granted login-contract disclosures to OIDC ID token claims.
 func ClaimsFromDisclosures(disclosures map[string]string) map[string]interface{} {
 	claims := map[string]interface{}{}
 	for field, value := range disclosures {

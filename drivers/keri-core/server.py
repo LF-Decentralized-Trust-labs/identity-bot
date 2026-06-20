@@ -172,7 +172,7 @@ def _extract_raw_key(cesr_key: str) -> bytes:
 
 
 def create_hybrid_inception_event(use_synthetic: bool = False) -> dict:
-    from m63.hybrid_inception import (
+    from pqc.hybrid_inception import (
         build_hybrid_inception,
         generate_hybrid_key_material,
         synthetic_hybrid_key_material,

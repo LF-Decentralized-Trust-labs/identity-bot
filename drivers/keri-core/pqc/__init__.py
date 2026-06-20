@@ -1,4 +1,4 @@
-"""M63 hybrid PQC cipher suite helpers (keripy reference engine)."""
+"""hybrid PQC hybrid PQC cipher suite helpers (keripy reference engine)."""
 
 from .cesr import (
     CESR_MLDSA65_VERKEY,

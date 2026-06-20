@@ -47,7 +47,7 @@ func NewHandler(dataDir string, keri *drivers.KeriDriver) (*Handler, error) {
 }
 
 func (h *Handler) fetchChallengeBundle(rpBase, sessionToken string) (*ChallengeBundle, error) {
-	// Minimal Ask pointer (SEAM-8 §5.2 / SM10): {origin}/i/{token}.
+	// Minimal Ask pointer (the login contract §5.2 / the shared module): {origin}/i/{token}.
 	url := fmt.Sprintf("%s/i/%s", trimSlash(rpBase), sessionToken)
 	resp, err := h.HTTPClient.Get(url)
 	if err != nil {
@@ -150,7 +150,7 @@ func (h *Handler) getOrCreateRelationship(siteAID string, bundle *ChallengeBundl
 	return &rel, nil
 }
 
-// BuildAssertion signs a SEAM-8 login assertion (exported for OIDC adapter).
+// BuildAssertion signs a login assertion (exported for OIDC adapter).
 func (h *Handler) BuildAssertion(rel *SiteRelationship, bundle *ChallengeBundle, customData map[string]interface{}) (*Assertion, error) {
 	return h.buildAssertion(rel, bundle, customData)
 }

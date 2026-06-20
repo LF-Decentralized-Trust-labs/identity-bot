@@ -1,10 +1,10 @@
-# M29 login SDK packages + verify microservice
+# Login SDK packages + verify microservice
 packages/*/node_modules/
 packages/*/dist/
 services/*/node_modules/
 services/*/dist/
 
-# Python venv (M63 keri 1.1.17 conformance)
+# Python venv (hybrid PQC keri 1.1.17 conformance)
 drivers/keri-core/.venv-keri1117/
 
 # Go

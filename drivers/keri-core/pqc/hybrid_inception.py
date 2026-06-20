@@ -1,4 +1,4 @@
-"""Build M63 KERI-conformant hybrid icp — keripy reference (keri==1.1.17)."""
+"""Build hybrid PQC KERI-conformant hybrid icp — keripy reference (keri==1.1.17)."""
 
 from __future__ import annotations
 

@@ -1,7 +1,7 @@
 {
   "name": "@identity-agent/link-verify-web",
   "version": "0.1.0",
-  "description": "SEAM-15 embeddable link verification SDK for browser surfaces (loopback via IA core)",
+  "description": "Embeddable link verification SDK for browser surfaces (loopback via IA core)",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

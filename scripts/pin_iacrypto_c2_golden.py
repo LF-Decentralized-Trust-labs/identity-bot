@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pin M63 C2 hybrid-signature golden vectors from keripy reference."""
+"""Pin hybrid PQC C2 hybrid-signature golden vectors from keripy reference."""
 
 from __future__ import annotations
 
@@ -10,14 +10,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 KERI_CORE = ROOT / "drivers" / "keri-core"
-GOLDEN = ROOT / "identity-agent-core" / "m63" / "golden_vectors.json"
+GOLDEN = ROOT / "identity-agent-core" / "iacrypto" / "golden_vectors.json"
 VENV_PY = KERI_CORE / ".venv-keri1117" / "bin" / "python"
 
 
 def main() -> int:
     sys.path.insert(0, str(KERI_CORE))
-    from m63.hybrid_inception import build_hybrid_inception, synthetic_hybrid_key_material
-    from m63.hybrid_signature import (
+    from pqc.hybrid_inception import build_hybrid_inception, synthetic_hybrid_key_material
+    from pqc.hybrid_signature import (
         c2_signing_verkeys,
         sign_hybrid_message,
         verify_hybrid_signature,
@@ -64,7 +64,7 @@ def main() -> int:
 
     data = json.loads(GOLDEN.read_text()) if GOLDEN.exists() else {}
     data["hybrid_signature"] = {
-        "description": "M63 C2 composite signature — deterministic C2 seeds (pinned)",
+        "description": "hybrid PQC C2 composite signature — deterministic C2 seeds (pinned)",
         "message": "m63-c2-hybrid-signature-golden-vector",
         "composite_wire": sig["composite_wire"],
         "composite_wire_len": sig["composite_wire_len"],

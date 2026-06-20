@@ -1,7 +1,7 @@
 {
   "name": "@identity-agent/login-verify",
   "version": "0.1.1",
-  "description": "SEAM-8 login challenge + assertion verification for relying parties",
+  "description": "Login challenge + assertion verification for relying parties",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

@@ -1,4 +1,4 @@
-package m63
+package iacrypto
 
 import (
 	"crypto/ed25519"

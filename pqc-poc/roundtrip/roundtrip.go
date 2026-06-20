@@ -55,7 +55,7 @@ func runSig(res *Result) error {
 		return fmt.Errorf("%s not in enabled signatures: %v", SigAlg, oqs.EnabledSigs())
 	}
 
-	msg := []byte("m63-c4-poc-signature-roundtrip")
+	msg := []byte("pqc-c4-poc-signature-roundtrip")
 	pubKey, err := signer.GenerateKeyPair()
 	if err != nil {
 		return fmt.Errorf("generate keypair: %w", err)

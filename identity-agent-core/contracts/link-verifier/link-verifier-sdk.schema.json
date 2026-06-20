@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://grapeid.org/contracts/m58/link-verifier-sdk.schema.json",
-  "title": "SEAM-15 Link Verification SDK (SM7)",
-  "description": "Machine-readable contract for verify() request/response shapes (M58 / T-134).",
+  "$id": "https://grapeid.org/contracts/link-verifier/link-verifier-sdk.schema.json",
+  "title": "Link Verification SDK",
+  "description": "Machine-readable contract for verify() request/response shapes (link verification).",
   "definitions": {
     "VerifyRequest": {
       "type": "object",
@@ -33,7 +33,7 @@
         },
         "gating_token": {
           "type": "string",
-          "description": "Present only when tier=gated; wire shape BLOCKED (SEAM-15 OQ-1)"
+          "description": "Present only when tier=gated; wire shape BLOCKED (an open question)"
         },
         "force_refresh": {
           "type": "boolean",
@@ -61,7 +61,7 @@
         "outcome": {
           "type": "string",
           "enum": ["verified", "tampered", "unverified", "incomplete"],
-          "description": "Sole rendering driver (SEAM-15 §2.3)"
+          "description": "Sole rendering driver (the contract §2.3)"
         },
         "aid": { "type": ["string", "null"] },
         "verification_path": {
@@ -77,7 +77,7 @@
         "contact_correlation": {
           "type": ["string", "null"],
           "enum": ["known", "stranger", null],
-          "description": "Loopback IF7 only; in-process SDK returns null by construction"
+          "description": "Loopback interface only; in-process SDK returns null by construction"
         },
         "ownership": {
           "oneOf": [
@@ -93,13 +93,13 @@
         "band_style": {
           "type": "string",
           "enum": ["generic"],
-          "description": "FREE tier always generic (LV-5)"
+          "description": "FREE tier always generic"
         },
         "grape_score": {
           "type": "integer",
           "minimum": 0,
           "maximum": 100,
-          "description": "GATED tier only; absent on free tier (LV-4)"
+          "description": "GATED tier only; absent on free tier"
         },
         "grape_score_as_of": { "type": "string", "format": "date-time" },
         "badge": {

@@ -10,7 +10,7 @@ import (
 	"identity-agent-core/login"
 )
 
-// AuthRequest is a parsed OIDC/SIOPv2 authorization request mapped to SEAM-8 fields.
+// AuthRequest is a parsed OIDC/SIOPv2 authorization request mapped to login-contract fields.
 type AuthRequest struct {
 	ClientID            string
 	RedirectURI         string
@@ -75,11 +75,11 @@ func ParseAuthRequest(r *http.Request) (*AuthRequest, error) {
 	return req, nil
 }
 
-// ToChallengeBundle maps the OIDC request onto a SEAM-8 challenge bundle for consent/signing.
+// ToChallengeBundle maps the OIDC request onto a login-contract challenge bundle for consent/signing.
 func (a *AuthRequest) ToChallengeBundle(siteOOBI, audience, callbackURL, sessionToken string) login.ChallengeBundle {
 	return login.ChallengeBundle{
 		V:                    "ASK1",
-		T:                    1, // AskIntent.login
+		T:                    1, // AskAction.login
 		SiteAID:              a.ClientID,
 		SiteOOBI:             siteOOBI,
 		Audience:             audience,

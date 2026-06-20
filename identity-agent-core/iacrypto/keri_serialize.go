@@ -1,4 +1,4 @@
-package m63
+package iacrypto
 
 import (
 	"encoding/json"
@@ -14,7 +14,7 @@ const (
 	saidDummyLen     = 44 // Blake3_256 fs — Serder.Dummy × fs
 )
 
-// anchorSeal is the IA-HYBRID-1 typed seal in standard a anchor (OQ-2 D1).
+// anchorSeal is the IA-HYBRID-1 typed seal in standard a anchor.
 type anchorSeal struct {
 	Ia string   `json:"ia"`
 	Ka []string `json:"ka"`

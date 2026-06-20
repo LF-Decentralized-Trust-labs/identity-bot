@@ -12,7 +12,7 @@ import {
 import { resolveFromDidWebs } from "./resolver.js";
 import { InMemorySessionStore } from "./session-store.js";
 import { buildLoginQrUrl } from "./qr-url.js";
-import { AskIntent } from "./types.js";
+import { AskAction } from "./types.js";
 import type {
   CreateChallengeOptions,
   LoginAssertion,
@@ -60,7 +60,7 @@ export class IdentityAgentVerifier {
 
     const challenge: LoginChallenge = {
       v: "ASK1",
-      t: AskIntent.login,
+      t: AskAction.login,
       site_aid: this.site.aid,
       site_oobi: this.site.oobiUrl,
       audience: opts.audience,
@@ -80,7 +80,7 @@ export class IdentityAgentVerifier {
     challenge.sig = await signCanonical(body, this.site.privateKey);
 
     // Copy-link / manual-entry fallback keeps the full OOBI form. The QR itself
-    // is the minimal bundle pointer on the RP origin (== audience), SEAM-8 §5.2.
+    // is the minimal bundle pointer on the RP origin (== audience).
     const relayOrQrUrl = `${this.site.oobiUrl}?action=login&session=${sessionToken}`;
     const qrUrl = buildLoginQrUrl(opts.audience, sessionToken);
 

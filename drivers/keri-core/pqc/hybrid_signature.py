@@ -1,4 +1,4 @@
-"""M63 C2 — hybrid composite signature wire format + both-must-verify."""
+"""hybrid PQC C2 — hybrid composite signature wire format + both-must-verify."""
 
 from __future__ import annotations
 

@@ -20,7 +20,7 @@ import (
         "identity-agent-core/drivers"
         "identity-agent-core/login"
         "identity-agent-core/oidc"
-        "identity-agent-core/m63"
+        "identity-agent-core/iacrypto"
         "identity-agent-core/endpoint"
         "identity-agent-core/sandbox"
         "identity-agent-core/schemas"
@@ -201,10 +201,10 @@ func New(cfg Config) (*CoreServer, error) {
         }
 
         if err := s.initLoginHandler(); err != nil {
-                log.Printf("[identity-agent-core] M29 login handler init failed (non-fatal): %v", err)
+                log.Printf("[identity-agent-core] login handler init failed (non-fatal): %v", err)
         }
         if err := s.initOIDCHandler(); err != nil {
-                log.Printf("[identity-agent-core] M29 OIDC adapter init failed (non-fatal): %v", err)
+                log.Printf("[identity-agent-core] OIDC adapter init failed (non-fatal): %v", err)
         }
 
         s.router = s.buildRouter(cfg.FlutterWebDir)
@@ -802,7 +802,7 @@ func (s *CoreServer) handleHybridInception(w http.ResponseWriter, r *http.Reques
                 return
         }
 
-        result, err := m63.BuildHybridInception(m63.SyntheticHybridKeyMaterial(0))
+        result, err := iacrypto.BuildHybridInception(iacrypto.SyntheticHybridKeyMaterial(0))
         if err != nil {
                 writeError(w, http.StatusInternalServerError, "Failed to create hybrid inception event", err.Error())
                 return

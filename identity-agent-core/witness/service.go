@@ -16,7 +16,7 @@ import (
 	"identity-agent-core/store"
 )
 
-// ContactStore is the M16 contact read/write surface.
+// ContactStore is the contacts read/write surface.
 type ContactStore interface {
 	GetContacts() ([]store.ContactRecord, error)
 	GetContact(aid string) (*store.ContactRecord, error)
@@ -30,7 +30,7 @@ type ContactStore interface {
 // EventPoster broadcasts to remote witness HTTP endpoints.
 type EventPoster func(ctx context.Context, witnessURL string, body []byte) (map[string]interface{}, error)
 
-// Service is the M11 IA-side witness engine.
+// Service is the IA-side witness engine.
 type Service struct {
 	Store        Store
 	Contacts     ContactStore
@@ -110,7 +110,7 @@ func (s *Service) OOBIExtensions() map[string]interface{} {
 	}
 }
 
-// ReceiveEvent implements C2 — witness-side receipt of a key event (IF1).
+// ReceiveEvent implements C2 — witness-side receipt of a key event.
 func (s *Service) ReceiveEvent(signerAID string, event map[string]interface{}) (map[string]interface{}, error) {
 	if signerAID == "" {
 		signerAID = eventAID(event)
@@ -198,7 +198,7 @@ func (s *Service) verifyEventChain(signerAID string, event map[string]interface{
 	return nil
 }
 
-// GetKelReplica implements C4 (IF4).
+// GetKelReplica implements C4.
 func (s *Service) GetKelReplica(signerAID string) ([]map[string]interface{}, error) {
 	kel, err := s.Store.GetKelEvents(signerAID)
 	if err != nil {
@@ -438,7 +438,7 @@ func (s *Service) trySelfHeal() {
 	}
 }
 
-// BuildStatus implements IF5.
+// BuildStatus implements the status interface.
 func (s *Service) BuildStatus() (*StatusResponse, error) {
 	contacts, err := s.Contacts.GetContacts()
 	if err != nil {
@@ -471,10 +471,10 @@ func (s *Service) BuildStatus() (*StatusResponse, error) {
 	return resp, nil
 }
 
-// ServeTELStub is IF6 placeholder — BLOCKED: M04/M36 joint freeze.
+// ServeTELStub is an interface placeholder — BLOCKED: credential/revocation-registry joint freeze.
 func (s *Service) ServeTELStub(issuerAID string) map[string]interface{} {
 	return map[string]interface{}{
-		"blocked": true, "reason": "BLOCKED: TEL-serving endpoint contract pending M04/M36 joint freeze",
+		"blocked": true, "reason": "BLOCKED: TEL-serving endpoint contract pending credential/revocation-registry joint freeze",
 		"issuer_aid": issuerAID,
 	}
 }

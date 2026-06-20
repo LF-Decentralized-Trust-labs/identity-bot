@@ -2,7 +2,7 @@ import { blake3 } from "@noble/hashes/blake3";
 import * as ed from "@noble/ed25519";
 import type { LoginAssertion, LoginChallenge } from "./types.js";
 
-/** keri 1.1.17 Matter fixed-size qb64 (matches identity-agent-core/m63/cesr.go). */
+/** keri 1.1.17 Matter fixed-size qb64 (matches the core hybrid PQC CESR encoding). */
 export function matterFixedQb64(code: string, raw: Uint8Array): string {
   const ps = (3 - (raw.length % 3)) % 3;
   const padded = new Uint8Array(ps + raw.length);
@@ -36,7 +36,7 @@ function jsonField(key: string, value: unknown): string {
   return `"${key}":${JSON.stringify(value)}`;
 }
 
-/** Canonical challenge body (sig excluded) per SEAM-8 §2 field order. */
+/** Canonical challenge body (sig excluded) per the login contract field order. */
 export function canonicalChallengeBody(challenge: LoginChallenge): string {
   const parts = [
     jsonField("v", challenge.v),
@@ -60,7 +60,7 @@ export function canonicalChallengeBody(challenge: LoginChallenge): string {
   return `{${parts.filter(Boolean).join(",")}}`;
 }
 
-/** Canonical assertion body (sig excluded) per SEAM-8 §4 field order. */
+/** Canonical assertion body (sig excluded) per the login contract field order. */
 export function canonicalAssertionBody(assertion: LoginAssertion): string {
   const parts = [
     jsonField("v", assertion.v),

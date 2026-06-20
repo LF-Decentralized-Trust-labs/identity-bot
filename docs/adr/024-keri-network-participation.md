@@ -45,7 +45,7 @@ The flow is descriptor → enroll → allocate → serve:
 1. `Client.FetchDescriptor` reads the relay's `/.well-known/url-relay-service.json` to discover its endpoints, path allowlist, and rate limits.
 2. `Client.Enroll` registers the agent's AID/OOBI/public key and receives an enrollment token.
 3. `Client.Allocate` (signed) requests a public URL with the intent to serve did:webs artifacts; it is idempotent (a 409 returns the existing allocation). `Client.Release` decommissions it.
-4. `TunnelAgent.Run` (`relay/tunnel.go`) maintains the outbound WebSocket with exponential-backoff reconnect, receives request frames (`t:"req"`), dispatches them to the local HTTP server, and streams responses back as `res` / `res_chunk` frames (32 KB chunks, base64url bodies). The frame schema is pinned in `identity-agent-core/contracts/m35/relay-tunnel-frame.schema.json`.
+4. `TunnelAgent.Run` (`relay/tunnel.go`) maintains the outbound WebSocket with exponential-backoff reconnect, receives request frames (`t:"req"`), dispatches them to the local HTTP server, and streams responses back as `res` / `res_chunk` frames (32 KB chunks, base64url bodies). The frame schema is pinned in `identity-agent-core/contracts/relay/relay-tunnel-frame.schema.json`.
 
 Allocation requests are signed over a canonical (sorted-key, signature-field-stripped) body, so the relay can authenticate the agent but cannot impersonate it. Because the protocol is open and discovery-driven, the agent is not bound to any single relay operator — `relay.grapeid.org` is one provider, not a dependency.
 
@@ -83,5 +83,5 @@ Only pairwise AIDs are published — never the agent's root AID — keeping the 
 
 - Witness: `identity-agent-core/witness/` (`service.go`, `enrollment.go`, `pool.go`, `eligibility.go`, `types.go`).
 - Watcher: `identity-agent-core/watcher/` (`service.go` = L1, `l2_client.go`, `l3_client.go`, `types.go`); public URLs `watcher.grapeid.org`.
-- Relay client: `identity-agent-core/relay/` (`client.go`, `tunnel.go`, `protocol.go`); frame schema `contracts/m35/relay-tunnel-frame.schema.json`; public URL `relay.grapeid.org`.
+- Relay client: `identity-agent-core/relay/` (`client.go`, `tunnel.go`, `protocol.go`); frame schema `contracts/relay/relay-tunnel-frame.schema.json`; public URL `relay.grapeid.org`.
 - did:webs publisher: `identity-agent-core/didwebs/publisher.go`, `urls.go`, served by `server/didwebs_handlers.go`. The resolver / verification side is ADR-023.

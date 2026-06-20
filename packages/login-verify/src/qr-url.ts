@@ -9,7 +9,7 @@ export function isRpHostedOobi(oobiUrl: string): boolean {
 }
 
 /**
- * Minimal login QR payload (SEAM-8 §5.2): a bare `request_uri` pointer to the
+ * Minimal login QR payload: a bare `request_uri` pointer to the
  * signed challenge bundle. It carries ONLY the cross-device correlation handle
  * (the session token, in the path) — the one thing the QR must convey so the
  * phone's response binds back to the waiting browser session. The host IS the
@@ -21,7 +21,7 @@ export function isRpHostedOobi(oobiUrl: string): boolean {
  *
  * `/i/` is the one-char Ask namespace (keeps the pointer off the site's own
  * routes); the path segment is the session token. The IA fetches this URL to
- * get the signed Ask envelope and dispatches on the Ask's `t` (intent).
+ * get the signed Ask envelope and dispatches on the Ask's `t` (action).
  */
 export function buildLoginQrUrl(
   rpOrigin: string,

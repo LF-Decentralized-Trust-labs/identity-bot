@@ -11,14 +11,14 @@ import (
 	"identity-agent-core/store"
 )
 
-// WitnessRequest is IF2 inbound body.
+// WitnessRequest is the inbound enrollment-request body.
 type WitnessRequest struct {
 	RequesterAID  string
 	RequesterOOBI string
 	BackendType   string
 }
 
-// AcceptCallback is IF3 POST-back body.
+// AcceptCallback is the accept POST-back body.
 type AcceptCallback struct {
 	RequesterAID string `json:"requester_aid"`
 	ResponderAID string `json:"responder_aid"`
@@ -28,7 +28,7 @@ type AcceptCallback struct {
 	TaskID       string `json:"task_id,omitempty"`
 }
 
-// InboundResult is the outcome of evaluating an inbound IF2 request.
+// InboundResult is the outcome of evaluating an inbound enrollment request.
 type InboundResult struct {
 	Accepted bool
 	Reason   string
@@ -76,7 +76,7 @@ func (s *Service) localWitnessCapacityOK() bool {
 	return outgoing < MaxOutgoingWitnessing && IsBackendEligible(s.BackendType)
 }
 
-// ProcessInboundRequest handles IF2: evaluate, enroll as witnessing-for, task, POST-back, reciprocal.
+// ProcessInboundRequest handles the inbound enrollment request: evaluate, enroll as witnessing-for, task, POST-back, reciprocal.
 func (s *Service) ProcessInboundRequest(ctx context.Context, req WitnessRequest) InboundResult {
 	accept, reason := s.EvaluateInboundRequest(req)
 	taskID := fmt.Sprintf("witness-recv-%s-%d", req.RequesterAID, time.Now().Unix())
@@ -152,7 +152,7 @@ func (s *Service) enrollWitnessingFor(requesterAID, backendType string) error {
 	})
 }
 
-// SendAcceptCallback implements IF3 outbound POST-back to the requester's agent.
+// SendAcceptCallback sends the accept POST-back to the requester's agent.
 func (s *Service) SendAcceptCallback(ctx context.Context, requesterOOBI string, cb AcceptCallback) error {
 	if requesterOOBI == "" {
 		return fmt.Errorf("missing requester oobi")
@@ -169,7 +169,7 @@ func (s *Service) SendAcceptCallback(ctx context.Context, requesterOOBI string, 
 	return err
 }
 
-// ApplyAcceptCallback handles IF3 on the original requester after remote POST-back.
+// ApplyAcceptCallback handles the accept POST-back on the original requester after the remote POST-back.
 func (s *Service) ApplyAcceptCallback(cb AcceptCallback) error {
 	if cb.RequesterAID == "" || cb.ResponderAID == "" {
 		return fmt.Errorf("missing aids")

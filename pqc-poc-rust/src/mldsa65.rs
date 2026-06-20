@@ -1,4 +1,4 @@
-//! Deterministic ML-DSA-65 helpers for M63 C2 cross-engine golden vectors.
+//! Deterministic ML-DSA-65 helpers for hybrid PQC C2 cross-engine golden vectors.
 
 use ml_dsa::{
     EncodedVerifyingKey, Keypair, MlDsa65, Seed as SigSeed, Signature, SignatureEncoding, Signer,

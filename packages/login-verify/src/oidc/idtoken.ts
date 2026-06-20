@@ -49,14 +49,14 @@ export async function verifyIDTokenSignature(
   return { ok: true, publicKey };
 }
 
-/** Extract SEAM-8 assertion embedded in JWT for verifyAssertion substrate check. */
+/** Extract the login assertion embedded in JWT for verifyAssertion substrate check. */
 export function assertionFromIDToken(payload: Record<string, unknown>): LoginAssertion | null {
   const embedded = payload[CLAIM_SEAM8_ASSERTION];
   if (!embedded || typeof embedded !== "object") return null;
   return embedded as LoginAssertion;
 }
 
-/** Map OIDC claims back to SEAM-8 disclosures. */
+/** Map OIDC claims back to login disclosures. */
 export function disclosuresFromIDToken(payload: Record<string, unknown>): Record<string, string> {
   const out: Record<string, string> = {};
   if (typeof payload.name === "string") out.display_name = payload.name;
@@ -77,7 +77,7 @@ export interface VerifyIDTokenOptions {
 }
 
 /**
- * Verify OIDC ID token: JWT sig via did:webs, then delegate SEAM-8 checks to verifyAssertion.
+ * Verify OIDC ID token: JWT sig via did:webs, then delegate login checks to verifyAssertion.
  */
 export async function verifyIDToken(
   token: string,
@@ -112,7 +112,7 @@ export async function verifyIDToken(
     expectedNonce: opts.expectedNonce,
     maxSkewSeconds: opts.maxSkewSeconds,
   });
-  if (!substrate.ok) return { ok: false, reason: `seam8: ${substrate.reason}` };
+  if (!substrate.ok) return { ok: false, reason: `login: ${substrate.reason}` };
 
   return {
     ok: true,

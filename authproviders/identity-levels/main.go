@@ -1,4 +1,4 @@
-// Identity Levels AuthProvider stub (SEAM-11) — band-only score for M29 steel thread.
+// Identity Levels AuthProvider stub (the contract) — band-only score for the login steel thread.
 package main
 
 import (
@@ -21,7 +21,7 @@ func main() {
 	mux.HandleFunc("/score", handleScore)
 	mux.HandleFunc("/check", handleCheck)
 	addr := "127.0.0.1:" + port
-	log.Printf("[identity-levels] listening on %s (SEAM-11 stub)", addr)
+	log.Printf("[identity-levels] listening on %s (contract stub)", addr)
 	log.Fatal(http.ListenAndServe(addr, mux))
 }
 

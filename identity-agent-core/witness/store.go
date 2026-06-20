@@ -1,6 +1,6 @@
 package witness
 
-// Store persists M11 witness pool state, KEL replicas, and finalization.
+// Store persists witness pool state, KEL replicas, and finalization.
 type Store interface {
 	GetConfig(key string) (string, error)
 	SetConfig(key, value string) error

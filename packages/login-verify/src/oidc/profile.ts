@@ -1,4 +1,4 @@
-/** Pinned EUDI ARF profile versions (OWD-2) — must match Go oidc/profile.go */
+/** Pinned EUDI ARF profile versions — must match Go oidc/profile.go */
 export const EUDI_ARF_PROFILE_VERSION = "2.2.0";
 export const OPENID4VP_PROFILE = "openid4vp_1_0";
 export const SIOPV2_PROFILE = "siopv2_openid_connect_self_issued_v2";

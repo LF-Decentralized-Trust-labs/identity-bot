@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""M29 web login steel thread — challenge → assertion → verify (classical Ed25519)."""
+"""Web login steel thread — challenge → assertion → verify (classical Ed25519)."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ def http_json(method: str, url: str, body: dict | None = None) -> dict:
 
 
 def main() -> int:
-    print("M29 steel thread test — run login-verify package tests via node")
+    print("Login steel thread test — run login-verify package tests via node")
     verify_pkg = ROOT / "packages/login-verify"
     os.chdir(verify_pkg)
     subprocess.check_call(["npm", "install", "--silent"], cwd=verify_pkg)
@@ -39,7 +39,7 @@ def main() -> int:
         print("steel-thread.test.mjs missing — skipping")
         return 0
     subprocess.check_call(["node", str(test_script)])
-    print("✅ M29 steel thread passed")
+    print("✅ Login steel thread passed")
     return 0
 
 

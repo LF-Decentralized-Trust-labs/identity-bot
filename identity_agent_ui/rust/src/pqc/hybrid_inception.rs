@@ -1,4 +1,4 @@
-//! Build M63 KERI-conformant hybrid icp events — Rust bridge (keri 1.1.17).
+//! Build hybrid PQC KERI-conformant hybrid icp events — Rust bridge (keri 1.1.17).
 
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -141,7 +141,7 @@ pub fn build_hybrid_inception(m: &HybridKeyMaterial) -> Result<HybridInceptionRe
 mod tests {
     use super::*;
 
-    include!("../../tests/m63_golden_constants.rs");
+    include!("../../tests/pqc_golden_constants.rs");
 
     #[test]
     fn cross_engine_byte_identity_seed0() {

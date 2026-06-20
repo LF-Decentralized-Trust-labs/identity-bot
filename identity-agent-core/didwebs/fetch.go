@@ -145,7 +145,7 @@ func parseKELEvents(body []byte) ([]map[string]interface{}, error) {
 		}
 		return events, nil
 	}
-	// BLOCKED: raw CESR byte stream decode requires keripy cesr-stream endpoint (M35 IF7).
+	// BLOCKED: raw CESR byte stream decode requires keripy cesr-stream endpoint (relay).
 	return nil, fmt.Errorf("binary cesr not supported without driver cesr-stream")
 }
 

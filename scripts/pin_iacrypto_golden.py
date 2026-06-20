@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regenerate M63 C3 golden_vectors.json from keripy 1.1.17 reference."""
+"""Regenerate hybrid PQC C3 golden_vectors.json from keripy 1.1.17 reference."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 KERI_CORE = ROOT / "drivers" / "keri-core"
-GOLDEN = ROOT / "identity-agent-core" / "m63" / "golden_vectors.json"
+GOLDEN = ROOT / "identity-agent-core" / "iacrypto" / "golden_vectors.json"
 VENV_PY = KERI_CORE / ".venv-keri1117" / "bin" / "python"
 
 
@@ -39,8 +39,8 @@ def main() -> int:
 
     import importlib.metadata
 
-    from m63.conformance import verify_hybrid_icp_conformance
-    from m63.hybrid_inception import build_hybrid_inception, synthetic_hybrid_key_material
+    from pqc.conformance import verify_hybrid_icp_conformance
+    from pqc.hybrid_inception import build_hybrid_inception, synthetic_hybrid_key_material
 
     version = importlib.metadata.version("keri")
     if version != "1.1.17":
@@ -54,7 +54,7 @@ def main() -> int:
     cesr = result["cesr"]
     golden = {
         "hybrid_inception": {
-            "description": "M63 keri 1.1.17 conformant hybrid icp — synthetic seed=0 (C3 pinned)",
+            "description": "hybrid PQC keri 1.1.17 conformant hybrid icp — synthetic seed=0 (C3 pinned)",
             "keri_version": "1.1.17",
             "seed": seed,
             "aid": result["aid"],

@@ -146,7 +146,7 @@ The exchange payload includes `sender_photo` and `sender_jcard` fields. WebSocke
 3. Go backend receives exchange → broadcasts WebSocket event
 4. EventService delivers 'introduction_received' to UI
 5. Layer 2: Show ContactActionPopup
-   → Display: sender photo, name, AID, intent label
+   → Display: sender photo, name, AID, action label
    → User taps "Add Contact" (accept) or "Dismiss" (reject)
 6. If accepted: POST /api/contacts/{aid}/accept
    If rejected: POST /api/contacts/{aid}/reject

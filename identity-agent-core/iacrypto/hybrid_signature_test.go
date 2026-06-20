@@ -1,4 +1,4 @@
-package m63_test
+package iacrypto_test
 
 import (
 	"encoding/json"
@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"identity-agent-core/m63"
+	"identity-agent-core/iacrypto"
 )
 
 type c2Golden struct {
@@ -28,7 +28,7 @@ func loadC2Golden(t *testing.T) c2Golden {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join("golden_vectors.json"))
 	if err != nil {
-		data, err = os.ReadFile(filepath.Join("m63", "golden_vectors.json"))
+		data, err = os.ReadFile(filepath.Join("iacrypto", "golden_vectors.json"))
 	}
 	if err != nil {
 		t.Fatalf("read golden_vectors.json: %v", err)
@@ -43,10 +43,10 @@ func loadC2Golden(t *testing.T) c2Golden {
 func TestC2HybridSignatureGolden(t *testing.T) {
 	golden := loadC2Golden(t)
 	if golden.HybridSignature.CompositeWire == "" {
-		t.Fatal("hybrid_signature not pinned — run scripts/pin_m63_c2_golden.py")
+		t.Fatal("hybrid_signature not pinned — run scripts/pin_iacrypto_c2_golden.py")
 	}
 
-	res, err := m63.SignHybridMessage()
+	res, err := iacrypto.SignHybridMessage()
 	if err != nil {
 		t.Fatalf("SignHybridMessage: %v", err)
 	}
@@ -57,33 +57,33 @@ func TestC2HybridSignatureGolden(t *testing.T) {
 		t.Fatalf("composite_wire len: got %d want %d", len(res.CompositeWire), golden.HybridSignature.CompositeWireLen)
 	}
 
-	mat := m63.SyntheticHybridKeyMaterial(golden.HybridInception.Seed)
-	inc, err := m63.BuildHybridInception(mat)
+	mat := iacrypto.SyntheticHybridKeyMaterial(golden.HybridInception.Seed)
+	inc, err := iacrypto.BuildHybridInception(mat)
 	if err != nil {
 		t.Fatalf("BuildHybridInception: %v", err)
 	}
-	edVK, mldsaVK, err := m63.C2SigningVerkeys()
+	edVK, mldsaVK, err := iacrypto.C2SigningVerkeys()
 	if err != nil {
 		t.Fatalf("C2SigningVerkeys: %v", err)
 	}
 	msg := []byte(golden.HybridSignature.Message)
-	if !m63.VerifyHybridSignature(msg, golden.HybridSignature.CompositeWire, edVK, mldsaVK, nil) {
+	if !iacrypto.VerifyHybridSignature(msg, golden.HybridSignature.CompositeWire, edVK, mldsaVK, nil) {
 		t.Fatal("crypto-only hybrid signature should verify")
 	}
-	if !m63.IsHybridIdentity(inc.InceptionEvent) {
+	if !iacrypto.IsHybridIdentity(inc.InceptionEvent) {
 		t.Fatalf("expected hybrid identity, a=%v", inc.InceptionEvent["a"])
 	}
-	if m63.SigningKeyCount(inc.InceptionEvent) != 2 {
-		t.Fatalf("expected 2 signing keys, got %d", m63.SigningKeyCount(inc.InceptionEvent))
+	if iacrypto.SigningKeyCount(inc.InceptionEvent) != 2 {
+		t.Fatalf("expected 2 signing keys, got %d", iacrypto.SigningKeyCount(inc.InceptionEvent))
 	}
-	if !m63.VerifyHybridSignature(msg, golden.HybridSignature.CompositeWire, edVK, mldsaVK, inc.InceptionEvent) {
+	if !iacrypto.VerifyHybridSignature(msg, golden.HybridSignature.CompositeWire, edVK, mldsaVK, inc.InceptionEvent) {
 		t.Fatal("positive hybrid signature should verify")
 	}
 	neg := golden.HybridSignature.NegativeVectors
-	if m63.VerifyHybridSignature(msg, neg.HybridSigClassicalCorrupt, edVK, mldsaVK, inc.InceptionEvent) {
+	if iacrypto.VerifyHybridSignature(msg, neg.HybridSigClassicalCorrupt, edVK, mldsaVK, inc.InceptionEvent) {
 		t.Fatal("classical-corrupt vector should reject")
 	}
-	if m63.VerifyHybridSignature(msg, neg.HybridSigPqcCorrupt, edVK, mldsaVK, inc.InceptionEvent) {
+	if iacrypto.VerifyHybridSignature(msg, neg.HybridSigPqcCorrupt, edVK, mldsaVK, inc.InceptionEvent) {
 		t.Fatal("pqc-corrupt vector should reject")
 	}
 	single := copyMap(inc.InceptionEvent)
@@ -92,7 +92,7 @@ func TestC2HybridSignatureGolden(t *testing.T) {
 		t.Fatalf("unexpected k type: %T", inc.InceptionEvent["k"])
 	}
 	single["k"] = []string{keys[0]}
-	if m63.VerifyHybridSignature(msg, golden.HybridSignature.CompositeWire, edVK, mldsaVK, single) {
+	if iacrypto.VerifyHybridSignature(msg, golden.HybridSignature.CompositeWire, edVK, mldsaVK, single) {
 		t.Fatal("single-half inception should reject")
 	}
 }

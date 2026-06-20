@@ -14,7 +14,7 @@ PQC_RUST = ROOT / "pqc-poc-rust"
 
 def _run_rust(op: str, payload: dict) -> dict:
     proc = subprocess.run(
-        ["cargo", "run", "--quiet", "--bin", "m63_mldsa_cli", "--", op, json.dumps(payload)],
+        ["cargo", "run", "--quiet", "--bin", "pqc_mldsa_cli", "--", op, json.dumps(payload)],
         cwd=PQC_RUST,
         capture_output=True,
         text=True,

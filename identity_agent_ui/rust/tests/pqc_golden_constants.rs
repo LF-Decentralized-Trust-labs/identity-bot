@@ -7,7 +7,7 @@ pub const EXPECTED_RAW_B64_LEN: usize = 6160;
 pub fn load_pinned_raw_b64() -> Option<String> {
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../identity-agent-core/m63/golden_vectors.json"
+        "/../../identity-agent-core/iacrypto/golden_vectors.json"
     );
     let data = std::fs::read_to_string(path).ok()?;
     let v: serde_json::Value = serde_json::from_str(&data).ok()?;

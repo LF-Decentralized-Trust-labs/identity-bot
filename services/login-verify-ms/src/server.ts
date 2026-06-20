@@ -21,7 +21,6 @@ app.get("/health", (_req, res) => {
     status: goldenOk ? "active" : "degraded",
     service: "login-verify-ms",
     version: "0.1.0",
-    seam: "SEAM-8",
     golden_vector_ok: goldenOk,
     ...(goldenOk ? {} : { golden_vector_error: goldenReason }),
   });
@@ -90,7 +89,7 @@ async function main() {
   if (!goldenOk) {
     console.error(`[login-verify-ms] GOLDEN VECTOR SELF-TEST FAILED: ${goldenReason}`);
   } else {
-    console.log("[login-verify-ms] golden vector self-test passed (T-140)");
+    console.log("[login-verify-ms] golden vector self-test passed");
   }
 
   app.listen(PORT, HOST, () => {

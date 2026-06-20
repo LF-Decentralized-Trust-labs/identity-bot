@@ -1,7 +1,7 @@
 package login
 
-// ChallengeBundle is the login Ask (SEAM-8 §2 / SM10): v="ASK1", t=1 (login
-// intent). The IA fetches it from the minimal QR pointer (/i/{token}) and
+// ChallengeBundle is the login Ask (the login contract §2 / the shared module): v="ASK1", t=1 (login
+// action). The IA fetches it from the minimal QR pointer (/i/{token}) and
 // verifies its signature against the site KEL before showing consent.
 type ChallengeBundle struct {
 	V                    string                 `json:"v"`

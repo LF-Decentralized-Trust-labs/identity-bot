@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** T-140 — regenerate golden_vectors.json from frozen M29 seed. */
+/** Regenerate golden_vectors.json from the frozen login seed. */
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { createHash } from "node:crypto";
@@ -31,9 +31,7 @@ async function main() {
   const golden = {
     login_assertion: {
       description:
-        "M29 SEAM-8 OQ-1 frozen — deterministic login assertion (seed 0x29..0x48)",
-      seam: "SEAM-8",
-      oq: "OQ-1",
+        "Frozen login contract — deterministic login assertion (seed 0x29..0x48)",
       version: "IALOGIN10JSON",
       seed_hex: Buffer.from(M29_GOLDEN_SIGNING_SEED).toString("hex"),
       field_order:

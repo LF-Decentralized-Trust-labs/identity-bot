@@ -7,7 +7,7 @@ import (
 	"identity-agent-core/login"
 )
 
-// Adapter bridges OIDC/SIOPv2/OIDC4VP to the native SEAM-8 login substrate.
+// Adapter bridges OIDC/SIOPv2/OIDC4VP to the native login substrate.
 type Adapter struct {
 	Login       *login.Handler
 	IssuerHost  string
@@ -43,7 +43,7 @@ type AuthorizationResponse struct {
 	Assertion *login.Assertion
 }
 
-// CompleteAuthorization signs SEAM-8 assertion + wraps OIDC response (wrap, don't replace).
+// CompleteAuthorization signs the login assertion + wraps OIDC response (wrap, don't replace).
 func (a *Adapter) CompleteAuthorization(
 	auth *AuthRequest,
 	rel *login.SiteRelationship,

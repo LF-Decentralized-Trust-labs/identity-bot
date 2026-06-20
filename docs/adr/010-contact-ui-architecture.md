@@ -31,7 +31,7 @@ A single reusable popup widget (`lib/widgets/contact_action_popup.dart`) replace
 | `aid` | String | The contact's AID (displayed truncated) |
 | `kelVerified` | bool? | KEL verification status (null = not checked, true = verified, false = unverified) |
 | `confidenceScore` | int | Confidence score placeholder (default 82%) |
-| `intentLabel` | String | What the contact wants (e.g., "Wants to add you as a contact") |
+| `actionLabel` | String | What the contact wants (e.g., "Wants to add you as a contact") |
 | `confirmLabel` | String | Confirm button text (e.g., "Add Contact") |
 | `dismissLabel` | String | Dismiss button text (e.g., "Dismiss") |
 | `onConfirm` | VoidCallback | Called when confirm button is tapped |
@@ -43,7 +43,7 @@ A single reusable popup widget (`lib/widgets/contact_action_popup.dart`) replace
 2. Display name — 18pt bold, max 2 lines
 3. AID — truncated monospace text in a rounded chip
 4. Verification row — KEL verified/unverified icon + label (when `kelVerified` is provided), green check + confidence score
-5. Intent label — secondary text describing what the contact wants
+5. Action label — secondary text describing what the contact wants
 6. Two buttons — "Dismiss" (outlined) and "Add Contact" (filled primary)
 
 **Animation:** Scale-in (0.8 → 1.0) with `easeOutBack` curve + fade-in, matching the previous `_ConnectionPopup` behavior.
@@ -133,7 +133,7 @@ All Flutter UI surfaces use a consistent avatar pattern:
 
 ### Positive
 
-- **Consistent identity display.** All contact popups now use the same widget with the same layout: photo, name, AID, confidence score, and intent label. KEL verification status is shown when available — the outbound scan flow passes `kelVerified` from the resolve response, while the inbound WebSocket flow does not currently include KEL status (the `kelVerified` parameter is omitted, so the badge is hidden). Future work may add KEL data to WebSocket introduction events.
+- **Consistent identity display.** All contact popups now use the same widget with the same layout: photo, name, AID, confidence score, and action label. KEL verification status is shown when available — the outbound scan flow passes `kelVerified` from the resolve response, while the inbound WebSocket flow does not currently include KEL status (the `kelVerified` parameter is omitted, so the badge is hidden). Future work may add KEL data to WebSocket introduction events.
 - **No accidental rejects.** Backdrop taps on inbound request popups close the popup without calling reject. Only the explicit "Dismiss" button triggers a backend reject.
 - **Dashboard stays fresh.** Alert badge counts update immediately when returning from any sub-screen, without waiting for the 60-second fallback poll.
 - **Single widget to maintain.** Bug fixes and design changes to the contact popup only need to happen in one file (`contact_action_popup.dart`), not three separate implementations.

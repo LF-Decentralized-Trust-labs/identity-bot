@@ -315,7 +315,7 @@ class _AddContactScreenState extends State<_AddContactScreen> {
         name: name.isNotEmpty ? name : (aid.length > 12 ? '${aid.substring(0, 12)}...' : aid),
         photo: photo,
         aid: aid,
-        intentLabel: 'Wants to add you as a contact',
+        actionLabel: 'Wants to add you as a contact',
         confirmLabel: 'Add Contact',
         dismissLabel: 'Dismiss',
         onConfirm: () {

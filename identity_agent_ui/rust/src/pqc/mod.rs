@@ -1,4 +1,4 @@
-//! M63 IA-HYBRID-1 hybrid inception — Rust bridge engine (bytes pinned at C3).
+//! hybrid PQC IA-HYBRID-1 hybrid inception — Rust bridge engine (bytes pinned at C3).
 
 mod cesr;
 mod hybrid_inception;

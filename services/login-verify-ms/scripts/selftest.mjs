@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** Integration self-test: golden vector library + HTTP POST /verify (T-140/T-141). */
+/** Integration self-test: golden vector library + HTTP POST /verify. */
 import { spawn } from "node:child_process";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";

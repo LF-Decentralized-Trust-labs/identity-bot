@@ -2,7 +2,7 @@ package witness
 
 import "time"
 
-// M11 protocol constants (SEAM / M11-ARCH).
+// Witness protocol constants.
 const (
 	MaxWitnessSetSize       = 9
 	TargetContactWitnesses  = 7
@@ -19,7 +19,7 @@ const (
 
 const (
 	BackendDesktop  = "desktop"
-	BackendHosted   = "hosted" // black-box / M02 rented infra
+	BackendHosted   = "hosted" // black-box / attestation-backed rented infra
 	BackendMobile   = "mobile"
 	BackendCommercial = "commercial"
 )
@@ -96,7 +96,7 @@ type FinalizationState struct {
 	UpdatedAt     string
 }
 
-// StatusResponse is IF5 shape for the Witnesses tab.
+// StatusResponse is the status-interface shape for the Witnesses tab.
 type StatusResponse struct {
 	ActiveCount       int              `json:"active_count"`
 	Threshold         int              `json:"threshold"`

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** T-140 conformance harness — byte-pin + verify golden assertion. */
+/** Conformance harness — byte-pin + verify golden assertion. */
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -63,7 +63,7 @@ async function main() {
   });
   if (bad.ok) fail("corrupt sig should reject");
 
-  console.log("✅ M29 SEAM-8 golden harness passed");
+  console.log("✅ login golden harness passed");
   console.log(`   canonical_body_len=${v.canonical_body_len}`);
   console.log(`   said=${v.said}`);
 }

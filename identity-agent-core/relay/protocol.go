@@ -1,6 +1,6 @@
 package relay
 
-// SEAM-16 IARELAY protocol shapes (consumer side).
+// IARELAY protocol shapes (consumer side).
 const JSONVersion = "IARELAY10JSON"
 
 type ServiceDescriptor struct {

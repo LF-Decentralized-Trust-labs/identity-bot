@@ -81,7 +81,7 @@ func TestMutualEnrollmentPostBack(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// B receives IF2 and POSTs accept back to A.
+	// B receives the enrollment request and POSTs accept back to A.
 	result := sB.ProcessInboundRequest(context.Background(), WitnessRequest{
 		RequesterAID: aidA, RequesterOOBI: sA.OurOOBI(), BackendType: BackendDesktop,
 	})
@@ -98,7 +98,7 @@ func TestMutualEnrollmentPostBack(t *testing.T) {
 		t.Fatalf("expected accept URL, got %s", cap.posts[len(cap.posts)-1].URL)
 	}
 
-	// A receives IF3 callback — B is now A's witness.
+	// A receives the accept callback — B is now A's witness.
 	if err := sA.ApplyAcceptCallback(cb); err != nil {
 		t.Fatal(err)
 	}

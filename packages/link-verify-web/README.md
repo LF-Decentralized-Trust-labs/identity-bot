@@ -1,6 +1,6 @@
 # @identity-agent/link-verify-web
 
-Embeddable **SEAM-15** link verification SDK for browser surfaces (M58 / SM7).
+Embeddable link verification SDK for browser surfaces.
 
 ## Usage
 
@@ -19,12 +19,12 @@ renderBadge(el, result, { showOwnership: true });
 
 ## Architecture
 
-- Browser embedders call the IA loopback route `GET /api/verification/badge` (IF7, `127.0.0.1` only).
+- Browser embedders call the IA loopback route `GET /api/verification/badge` (`127.0.0.1` only).
 - `contact_correlation` is populated only on that loopback path inside the user's IA.
 - Without a local IA core, `verify()` returns neutral `unverified` (never errors).
 
 ## BLOCKED
 
 - **BLOCKED:** Standalone browser verification without IA — no in-browser KEL replay; loopback or Go SDK required.
-- **BLOCKED:** Gated tier in third-party embedders — silently degrades to free per SEAM-15 §3.2.
-- **BLOCKED:** Production M35 did:webs publisher — verified path needs live `did.json` + `keri.cesr`.
+- **BLOCKED:** Gated tier in third-party embedders — silently degrades to free per the link verification contract.
+- **BLOCKED:** Production relay did:webs publisher — verified path needs live `did.json` + `keri.cesr`.

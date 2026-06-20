@@ -12,7 +12,7 @@ import type { ConformanceResult, OIDCDiscoveryDocument } from "./types.js";
 const VP_FORMAT_SDJWT = "vc+sd-jwt";
 const VP_FORMAT_ACDC = "acdc";
 
-/** Validate discovery document against pinned EUDI ARF profile (OWD-2). */
+/** Validate discovery document against pinned EUDI ARF profile. */
 export function validateDiscoveryConformance(doc: OIDCDiscoveryDocument): ConformanceResult {
   const errors: string[] = [];
   const check = (ok: boolean, msg: string) => {

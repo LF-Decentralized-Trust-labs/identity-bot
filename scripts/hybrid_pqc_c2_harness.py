@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""M63 C2 — cross-engine hybrid-signature + both-must-verify harness."""
+"""Hybrid PQC C2 — cross-engine hybrid-signature + both-must-verify harness."""
 
 from __future__ import annotations
 
@@ -12,14 +12,14 @@ ROOT = Path(__file__).resolve().parents[1]
 KERI_CORE = ROOT / "drivers" / "keri-core"
 GO_CORE = ROOT / "identity-agent-core"
 RUST_CRATE = ROOT / "identity_agent_ui" / "rust"
-GOLDEN = GO_CORE / "m63" / "golden_vectors.json"
+GOLDEN = GO_CORE / "iacrypto" / "golden_vectors.json"
 
 
 def main() -> int:
     sys.path.insert(0, str(KERI_CORE))
 
-    from m63.hybrid_inception import build_hybrid_inception, synthetic_hybrid_key_material
-    from m63.hybrid_signature import (
+    from pqc.hybrid_inception import build_hybrid_inception, synthetic_hybrid_key_material
+    from pqc.hybrid_signature import (
         c2_signing_verkeys,
         sign_hybrid_message,
         verify_hybrid_signature,
@@ -27,7 +27,7 @@ def main() -> int:
 
     golden = json.loads(GOLDEN.read_text())
     if "hybrid_signature" not in golden:
-        print("FAIL: hybrid_signature missing from golden_vectors.json — run pin_m63_c2_golden.py", file=sys.stderr)
+        print("FAIL: hybrid_signature missing from golden_vectors.json — run pin_iacrypto_c2_golden.py", file=sys.stderr)
         return 1
 
     vec = golden["hybrid_signature"]
@@ -55,7 +55,7 @@ def main() -> int:
     print("PASS: negative vectors reject (keripy)")
 
     go = subprocess.run(
-        ["go", "test", "./m63/", "-run", "TestC2HybridSignatureGolden", "-count=1"],
+        ["go", "test", "./iacrypto/", "-run", "TestC2HybridSignatureGolden", "-count=1"],
         cwd=GO_CORE,
         capture_output=True,
         text=True,

@@ -16,7 +16,7 @@ type ArtifactURLs struct {
 	OobiURL    string
 }
 
-// DeriveFromDID maps did:webs:host:aid → HTTPS artifact URLs (SEAM-17 §1).
+// DeriveFromDID maps did:webs:host:aid → HTTPS artifact URLs (the contract §1).
 func DeriveFromDID(did string) (*ArtifactURLs, error) {
 	if !strings.HasPrefix(did, "did:webs:") {
 		return nil, fmt.Errorf("not a did:webs identifier")

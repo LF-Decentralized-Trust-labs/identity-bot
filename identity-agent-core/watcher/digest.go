@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strconv"
 
-	"identity-agent-core/m63"
+	"identity-agent-core/iacrypto"
 )
 
 // KelDigestAtSeq returns Blake3-256 CESR qb64 (code E) over the canonical serialized
@@ -21,7 +21,7 @@ func KelDigestAtSeq(events []map[string]interface{}, seq int) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return m63.Blake3QB64(raw)
+	return iacrypto.Blake3QB64(raw)
 }
 
 // CurrentSeq returns the highest sequence number present in KEL events.

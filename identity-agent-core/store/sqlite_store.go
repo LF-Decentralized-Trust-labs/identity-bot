@@ -62,7 +62,7 @@ func (s *SQLiteStore) Close() error {
 	return s.db.Close()
 }
 
-// DB exposes the underlying SQLite handle for domain packages (e.g. M12 watcher).
+// DB exposes the underlying SQLite handle for domain packages (e.g. watcher).
 func (s *SQLiteStore) DB() *sql.DB {
 	return s.db
 }

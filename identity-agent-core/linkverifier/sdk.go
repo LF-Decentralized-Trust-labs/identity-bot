@@ -10,7 +10,7 @@ import (
 	"identity-agent-core/drivers"
 )
 
-// SDK is the SM7 Link Verification engine (M58).
+// SDK is the shared Link Verification engine.
 type SDK struct {
 	resolver *didwebs.Resolver
 	driver   *drivers.KeriDriver
@@ -30,7 +30,7 @@ func New(driver *drivers.KeriDriver, cfg Config) *SDK {
 	}
 }
 
-// Verify is the single SM7 entry point (SEAM-15 §2.1).
+// Verify is the single shared-module entry point (the contract §2.1).
 func (s *SDK) Verify(ctx context.Context, req VerifyRequest) (*VerificationResult, error) {
 	if req.Flow == "" {
 		req.Flow = FlowLink
@@ -184,7 +184,7 @@ func (s *SDK) applyFlowAndTier(req VerifyRequest, result *VerificationResult, re
 		result.Ownership = nil
 	}
 	if req.Tier == TierGated && s.cfg.GrapeScoreProviderActive {
-		score := 75 // BLOCKED: wire to AuthProvider GET /api/auth/score (SEAM-11 LV-7)
+		score := 75 // BLOCKED: wire to AuthProvider GET /api/auth/score
 		asOf := time.Now().UTC().Format(time.RFC3339)
 		badge := "grape_branded"
 		result.GrapeScore = &score
@@ -193,7 +193,7 @@ func (s *SDK) applyFlowAndTier(req VerifyRequest, result *VerificationResult, re
 	} else {
 		result.BandStyle = "generic"
 	}
-	// LV-6: silent degrade when gated requested but not entitled — omit score fields
+	// silent degrade when gated requested but not entitled — omit score fields
 }
 
 func (s *SDK) applyContactCorrelation(result *VerificationResult, populate bool) {
@@ -210,7 +210,7 @@ func (s *SDK) applyContactCorrelation(result *VerificationResult, populate bool)
 	}
 }
 
-// VerifyWithContacts is the IA loopback path (SEAM-15 §2.6) — populates contact_correlation.
+// VerifyWithContacts is the IA loopback path (the contract §2.6) — populates contact_correlation.
 func (s *SDK) VerifyWithContacts(ctx context.Context, req VerifyRequest) (*VerificationResult, error) {
 	res, err := s.Verify(ctx, req)
 	if err != nil || res == nil {

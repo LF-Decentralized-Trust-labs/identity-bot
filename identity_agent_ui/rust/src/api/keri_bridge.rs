@@ -1,4 +1,4 @@
-use crate::m63::{build_hybrid_inception, synthetic_hybrid_key_material, HybridInceptionResult};
+use crate::pqc::{build_hybrid_inception, synthetic_hybrid_key_material, HybridInceptionResult};
 use flutter_rust_bridge::frb;
 use keri_core::actor::prelude::*;
 use keri_core::event::event_data::inception::InceptionEvent;
@@ -58,7 +58,7 @@ pub struct SignResult {
     pub public_key: String,
 }
 
-/// M63 C1 — build IA-HYBRID-1 four-key inception (synthetic harness material when synthetic=true).
+/// hybrid PQC C1 — build IA-HYBRID-1 four-key inception (synthetic harness material when synthetic=true).
 #[frb(sync)]
 pub fn incept_hybrid_aid(synthetic: bool) -> Result<HybridInceptionBridgeResult, String> {
     let material = if synthetic {

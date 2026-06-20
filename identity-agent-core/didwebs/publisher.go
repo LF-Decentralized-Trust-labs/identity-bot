@@ -9,7 +9,7 @@ import (
 	"github.com/mr-tron/base58"
 )
 
-// PublishInput is the live keystate used to derive SEAM-17 artifacts.
+// PublishInput is the live keystate used to derive did:webs artifacts.
 type PublishInput struct {
 	AID            string
 	Host           string
@@ -20,7 +20,7 @@ type PublishInput struct {
 	WitnessThreshold int
 }
 
-// BuildDidJSON returns the SEAM-17 §2 did.json document.
+// BuildDidJSON returns the did.json document (the contract §2).
 func BuildDidJSON(in PublishInput) ([]byte, error) {
 	if in.AID == "" || in.Host == "" {
 		return nil, fmt.Errorf("aid and host required")
@@ -71,7 +71,7 @@ func colonHost(host string) string {
 	return ColonHost(host)
 }
 
-// ColonHost maps URL host/path segments to did:webs colon form (SEAM-17 §1).
+// ColonHost maps URL host/path segments to did:webs colon form (the contract §1).
 func ColonHost(host string) string {
 	return strings.ReplaceAll(host, "/", ":")
 }

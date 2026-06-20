@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://grapeid.org/contracts/m35/relay-tunnel-frame.schema.json",
-  "title": "SEAM-16 tunnel frame (IF4)",
+  "$id": "https://grapeid.org/contracts/relay/relay-tunnel-frame.schema.json",
+  "title": "relay tunnel frame",
   "oneOf": [
     {
       "type": "object",

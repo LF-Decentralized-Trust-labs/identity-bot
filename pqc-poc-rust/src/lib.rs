@@ -1,4 +1,4 @@
-//! M63 C4 — Rust mobile PQC fallback spike using pure-Rust RustCrypto crates.
+//! Hybrid PQC C4 — Rust mobile PQC fallback spike using pure-Rust RustCrypto crates.
 
 pub mod mldsa65;
 
@@ -13,7 +13,7 @@ pub const KEM_ALG: &str = "ML-KEM-768";
 pub const CRATE_STACK: &str = "ml-dsa 0.1.1 + ml-kem 0.3.2 (RustCrypto pure Rust)";
 
 fn sig_seed() -> SigSeed {
-    (*b"m63-c4-rust-fallback-sig-seed!!!").into()
+    (*b"pqc-c4-rust-fallback-sig-seed!!!").into()
 }
 
 fn kem_seed() -> KemSeed {
@@ -65,7 +65,7 @@ fn run_sig_roundtrip() -> Result<bool, String> {
     let sk = SigningKey::<MlDsa65>::from_seed(&sig_seed());
     let vk = sk.verifying_key();
 
-    let msg = b"m63-c4-rust-mobile-fallback-signature";
+    let msg = b"pqc-c4-rust-mobile-fallback-signature";
     let sig: Signature<MlDsa65> = sk.sign(msg);
     vk.verify(msg, &sig)
         .map(|_| true)

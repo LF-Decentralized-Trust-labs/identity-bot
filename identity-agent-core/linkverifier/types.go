@@ -1,6 +1,6 @@
 package linkverifier
 
-// Outcome is the 4-value SEAM-15 rendering driver.
+// Outcome is the 4-value rendering driver.
 type Outcome string
 
 const (
@@ -40,7 +40,7 @@ const (
 	TierGated Tier = "gated"
 )
 
-// VerifyRequest is the SM7 verify() input (SEAM-15 §2.1).
+// VerifyRequest is the verify() input (the contract §2.1).
 type VerifyRequest struct {
 	Input       string    `json:"input"`
 	InputKind   InputKind `json:"input_kind,omitempty"`
@@ -51,13 +51,13 @@ type VerifyRequest struct {
 	ForceRefresh bool     `json:"force_refresh,omitempty"`
 }
 
-// Ownership is the link-flow registration payload (SEAM-15 §4).
+// Ownership is the link-flow registration payload (the contract §4).
 type Ownership struct {
 	RegisteredTo string `json:"registered_to"`
 	Disclosure   string `json:"disclosure"`
 }
 
-// VerificationResult is the SM7 verify() output (SEAM-15 §2.2).
+// VerificationResult is the verify() output (the contract §2.2).
 type VerificationResult struct {
 	Outcome            Outcome    `json:"outcome"`
 	AID                *string    `json:"aid"`

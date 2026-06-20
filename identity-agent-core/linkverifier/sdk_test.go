@@ -188,7 +188,7 @@ func TestVerifySeqMismatchUnverified(t *testing.T) {
 		t.Fatal(err)
 	}
 	if result.Outcome != OutcomeUnverified {
-		t.Fatalf("LV-14: seq mismatch outcome=%s want unverified", result.Outcome)
+		t.Fatalf("seq mismatch outcome=%s want unverified", result.Outcome)
 	}
 }
 
@@ -217,7 +217,7 @@ func TestVerifyPartialFetchUnverified(t *testing.T) {
 		t.Fatal(err)
 	}
 	if result.Outcome != OutcomeUnverified {
-		t.Fatalf("LV-15: partial fetch outcome=%s want unverified", result.Outcome)
+		t.Fatalf("partial fetch outcome=%s want unverified", result.Outcome)
 	}
 }
 
@@ -228,7 +228,7 @@ func TestVerifyIncompleteWitnesses(t *testing.T) {
 		t.Fatal(err)
 	}
 	if result.Outcome != OutcomeIncomplete {
-		t.Fatalf("LV-12: outcome=%s want incomplete", result.Outcome)
+		t.Fatalf("outcome=%s want incomplete", result.Outcome)
 	}
 	if result.Band != "amber" {
 		t.Fatalf("band=%s want amber", result.Band)
@@ -260,7 +260,7 @@ func TestGatedTierSilentDegrade(t *testing.T) {
 		t.Fatal(err)
 	}
 	if result.GrapeScore != nil {
-		t.Fatal("LV-6: gated without entitlement must omit score")
+		t.Fatal("gated without entitlement must omit score")
 	}
 	if result.BandStyle != "generic" {
 		t.Fatalf("band_style=%q want generic on degrade", result.BandStyle)
@@ -307,6 +307,6 @@ func TestVerifyInProcessNoContactCorrelation(t *testing.T) {
 		t.Fatal(err)
 	}
 	if result.ContactCorrelation != nil {
-		t.Fatal("LV-8: in-process Verify must not populate contact_correlation")
+		t.Fatal("in-process Verify must not populate contact_correlation")
 	}
 }

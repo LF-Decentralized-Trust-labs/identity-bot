@@ -44,7 +44,7 @@ type DuplicityAlert struct {
 	ResolutionNote string
 }
 
-// DigestResponse is the M12 /public/kel-digest contract.
+// DigestResponse is the watcher /public/kel-digest contract.
 type DigestResponse struct {
 	AID            string  `json:"aid"`
 	SequenceNumber int     `json:"sequence_number"`
@@ -55,14 +55,14 @@ type DigestResponse struct {
 	Signature      string  `json:"signature,omitempty"`
 }
 
-// KelCheckRequest is the M12 /public/kel-check contract.
+// KelCheckRequest is the watcher /public/kel-check contract.
 type KelCheckRequest struct {
 	AID    string `json:"aid"`
 	Seq    int    `json:"seq"`
 	Digest string `json:"digest"`
 }
 
-// KelCheckResponse is the M12 /public/kel-check response.
+// KelCheckResponse is the watcher /public/kel-check response.
 type KelCheckResponse struct {
 	Match         bool    `json:"match"`
 	OurDigest     *string `json:"our_digest"`

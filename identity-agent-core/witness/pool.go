@@ -10,7 +10,7 @@ import (
 	"identity-agent-core/store"
 )
 
-// SendWitnessRequest implements IF2 outbound enrollment.
+// SendWitnessRequest implements outbound enrollment.
 func (s *Service) SendWitnessRequest(ctx context.Context, contactAID string) error {
 	c, err := s.Contacts.GetContact(contactAID)
 	if err != nil || c == nil {

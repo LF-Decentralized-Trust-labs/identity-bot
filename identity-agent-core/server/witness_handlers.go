@@ -71,7 +71,7 @@ func (s *CoreServer) handleWitnessKel(w http.ResponseWriter, r *http.Request) {
 
 func (s *CoreServer) handleWitnessStatus(w http.ResponseWriter, r *http.Request) {
 	if !isLocalhost(r) {
-		writeError(w, http.StatusForbidden, "localhost only", "IF5 internal route")
+		writeError(w, http.StatusForbidden, "localhost only", "internal route")
 		return
 	}
 	st, err := s.WitnessService.BuildStatus()
@@ -90,7 +90,7 @@ func (s *CoreServer) handleWitnessTELStub(w http.ResponseWriter, r *http.Request
 	json.NewEncoder(w).Encode(s.WitnessService.ServeTELStub(issuerAID))
 }
 
-// handleWitnessRequest is IF2 — inbound witness enrollment from a remote agent.
+// handleWitnessRequest handles inbound witness enrollment from a remote agent.
 func (s *CoreServer) handleWitnessRequest(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		RequesterAID  string `json:"requester_aid"`
@@ -127,7 +127,7 @@ func (s *CoreServer) handleWitnessRequest(w http.ResponseWriter, r *http.Request
 	})
 }
 
-// handleWitnessAccept is IF3 — accept/decline POST-back from remote agent.
+// handleWitnessAccept handles the accept/decline POST-back from a remote agent.
 func (s *CoreServer) handleWitnessAccept(w http.ResponseWriter, r *http.Request) {
 	var req witness.AcceptCallback
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

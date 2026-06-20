@@ -9,9 +9,9 @@ import type {
 const DEFAULT_CORE = "http://127.0.0.1:5050";
 
 /**
- * verify() — SEAM-15 SM7 entry for browser embedders.
+ * verify() — link verification entry for browser embedders.
  *
- * Calls the IA loopback route GET /api/verification/badge (IF7).
+ * Calls the IA loopback route GET /api/verification/badge.
  * Third-party embedders without a local IA receive unverified from fetch failures.
  * In-process Go SDK is preferred when available; this package is for web surfaces.
  */

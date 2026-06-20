@@ -316,7 +316,7 @@ INSERT OR IGNORE INTO service_providers (id, provider_name, provider_aid, catego
 	},
 	{
 		Version:     12,
-		Description: "M12 KERI Watchers: kel_first_seen, duplicity_alerts, watcher config",
+		Description: "KERI Watchers: kel_first_seen, duplicity_alerts, watcher config",
 		SQL: `
 CREATE TABLE IF NOT EXISTS kel_first_seen (
     aid                TEXT     NOT NULL,
@@ -360,7 +360,7 @@ INSERT OR IGNORE INTO watcher_config (key, value) VALUES
 	},
 	{
 		Version:     13,
-		Description: "M11 KERI Witnesses: pool meta, KEL replicas, finalization",
+		Description: "KERI Witnesses: pool meta, KEL replicas, finalization",
 		SQL: `
 ALTER TABLE contacts ADD COLUMN contact_source TEXT NOT NULL DEFAULT 'manual';
 
@@ -427,7 +427,7 @@ INSERT OR IGNORE INTO witness_config (key, value) VALUES
 	},
 	{
 		Version:     14,
-		Description: "M35 URL relay allocations",
+		Description: "URL relay allocations",
 		SQL: `
 CREATE TABLE IF NOT EXISTS relay_allocations (
     raid              TEXT PRIMARY KEY,
@@ -442,7 +442,7 @@ CREATE TABLE IF NOT EXISTS relay_allocations (
 	},
 	{
 		Version:     15,
-		Description: "M11 mutual enrollment: witnessing_for direction flag",
+		Description: "witness mutual enrollment: witnessing_for direction flag",
 		SQL: `
 ALTER TABLE witness_contact_meta ADD COLUMN witnessing_for INTEGER NOT NULL DEFAULT 0;
 `,

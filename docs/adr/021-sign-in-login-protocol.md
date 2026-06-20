@@ -20,9 +20,9 @@ Finally, the world already has OpenID Connect, SIOPv2, and OpenID4VP deployed at
 
 ### The "Ask" — a universal signed interaction envelope
 
-Every RP-initiated interaction is an **Ask**: a signed, typed request that the user reviews and grants, producing a signed assertion in return. The Ask is versioned `"ASK1"` and carries an integer intent discriminator `t`:
+Every RP-initiated interaction is an **Ask**: a signed, typed request that the user reviews and grants, producing a signed assertion in return. The Ask is versioned `"ASK1"` and carries an integer action discriminator `t`:
 
-| `t` | Intent | Meaning |
+| `t` | Action | Meaning |
 |---|---|---|
 | 1 | `login` | Prove a (pairwise) identity to an RP, optionally disclosing fields / credentials / a score band |
 | 2 | `present` | Present a credential |
@@ -30,7 +30,7 @@ Every RP-initiated interaction is an **Ask**: a signed, typed request that the u
 | 4 | `contact` | Share contact information |
 | 5 | `issue` | Receive an offered credential |
 
-Only `login` (t=1) is implemented in this change; the rest are reserved registry slots so future interaction types extend the same envelope rather than inventing new ones. The intent registry lives in `packages/login-verify/src/types.ts` (`AskIntent`).
+Only `login` (t=1) is implemented in this change; the rest are reserved registry slots so future interaction types extend the same envelope rather than inventing new ones. The action registry lives in `packages/login-verify/src/types.ts` (`AskAction`).
 
 ### The login challenge / assertion flow
 
@@ -94,7 +94,7 @@ The adapter (`identity-agent-core/oidc/`, mirrored in `packages/login-verify/src
 
 - The IA must manage one keypair and pairwise relationship per RP, which grows the agent's key inventory over time (mitigated: relationships are cached and reused).
 - The OIDC adapter pins specific profile versions; bumping a profile requires a coordinated Go+TypeScript change plus a discovery-conformance update.
-- Only the `login` intent is implemented; present/pay/contact/issue are reserved and not yet wired to user flows.
+- Only the `login` action is implemented; present/pay/contact/issue are reserved and not yet wired to user flows.
 
 ---
 

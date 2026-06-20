@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""M63 C3 — cross-engine golden-vector + keripy conformance harness."""
+"""Hybrid PQC C3 — cross-engine golden-vector + keripy conformance harness."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 KERI_CORE = ROOT / "drivers" / "keri-core"
 GO_CORE = ROOT / "identity-agent-core"
 RUST_CRATE = ROOT / "identity_agent_ui" / "rust"
-GOLDEN = GO_CORE / "m63" / "golden_vectors.json"
+GOLDEN = GO_CORE / "iacrypto" / "golden_vectors.json"
 VENV_PY = KERI_CORE / ".venv-keri1117" / "bin" / "python"
 REQUIRED_KERI = "1.1.17"
 
@@ -40,8 +40,8 @@ def main() -> int:
 
     import importlib.metadata
 
-    from m63.conformance import REQUIRED_KERI_VERSION, verify_hybrid_icp_conformance
-    from m63.hybrid_inception import build_hybrid_inception, synthetic_hybrid_key_material
+    from pqc.conformance import REQUIRED_KERI_VERSION, verify_hybrid_icp_conformance
+    from pqc.hybrid_inception import build_hybrid_inception, synthetic_hybrid_key_material
 
     installed = importlib.metadata.version("keri")
     if installed != REQUIRED_KERI_VERSION:
@@ -62,7 +62,7 @@ def main() -> int:
 
     # Go core
     go = subprocess.run(
-        ["go", "test", "./m63/", "-run", "TestCrossEngineByteIdentitySeed0", "-count=1"],
+        ["go", "test", "./iacrypto/", "-run", "TestCrossEngineByteIdentitySeed0", "-count=1"],
         cwd=GO_CORE,
         capture_output=True,
         text=True,

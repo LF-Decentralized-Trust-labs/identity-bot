@@ -7,10 +7,10 @@ import (
 	"log"
 	"time"
 
-	"identity-agent-core/m63"
+	"identity-agent-core/iacrypto"
 )
 
-// Service is the M12 watcher engine (L1 self-watch + L2/L3 clients).
+// Service is the watcher engine (L1 self-watch + L2/L3 clients).
 type Service struct {
 	Store    Store
 	L2       *L2Client
@@ -132,7 +132,7 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 	}
 	result.SourcesQueried = append(result.SourcesQueried, SourceOutcome{Type: "L1", Outcome: l1Outcome})
 
-	// L2-standing query (default M67)
+	// L2-standing query (default the commercial witness/watcher service)
 	l2URL := s.DefaultL2URL()
 	l2Resp, latency, l2Err := s.L2.QueryDigest(ctx, l2URL, in.AID, seq)
 	l2Outcome := "unknown"
@@ -305,7 +305,7 @@ func (s *Service) AnchorAlertToKEL(alert *DuplicityAlert) error {
 		"our_digest": alert.OurDigest, "their_digest": alert.TheirDigest,
 		"detected_at": alert.DetectedAt.UTC().Format(time.RFC3339),
 	})
-	said := m63.Blake3QB64Must(payload)
+	said := iacrypto.Blake3QB64Must(payload)
 	log.Printf("[watcher] AnchorAlertToKEL: alert_id=%d said=%s (ixn deferred)", alert.ID, said)
 	return nil
 }

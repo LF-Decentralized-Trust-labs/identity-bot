@@ -35,7 +35,7 @@ type ResponseFrame struct {
 	Seq      int               `json:"seq,omitempty"`
 }
 
-// TunnelAgent maintains the outbound WSS and serves framed inbound requests (SEAM-16 §4).
+// TunnelAgent maintains the outbound WSS and serves framed inbound requests (the contract §4).
 type TunnelAgent struct {
 	Endpoint   string
 	Token      string

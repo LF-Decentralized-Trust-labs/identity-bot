@@ -6,15 +6,15 @@ import (
 	"fmt"
 	"strings"
 
-	"identity-agent-core/m63"
+	"identity-agent-core/iacrypto"
 )
 
 func ed25519SigQB64(sig []byte) (string, error) {
-	return m63.MatterFixedQB64("0B", sig)
+	return iacrypto.MatterFixedQB64("0B", sig)
 }
 
 func ed25519VerkeyQB64(pub []byte) (string, error) {
-	return m63.MatterFixedQB64("D", pub)
+	return iacrypto.MatterFixedQB64("D", pub)
 }
 
 func signUTF8(body string, seed []byte) (string, []byte, error) {

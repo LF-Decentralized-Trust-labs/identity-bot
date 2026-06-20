@@ -1,6 +1,6 @@
-# M63 C4 — liboqs-go toolchain POC (local)
+# Hybrid PQC C4 — liboqs-go toolchain POC (local)
 
-Gating feasibility test for `liboqs-go` × CGO × `gomobile`. **Not published** to `identity-bot` remote until Rob/Claude approve.
+Gating feasibility test for `liboqs-go` × CGO × `gomobile`.
 
 ## macOS desktop
 

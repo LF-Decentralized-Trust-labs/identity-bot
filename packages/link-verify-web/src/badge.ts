@@ -20,7 +20,7 @@ const BAND_COLOR: Record<string, string> = {
 };
 
 /**
- * Minimal DOM badge renderer (SCR1). Keys off `outcome` per SEAM-15 §2.3.
+ * Minimal DOM badge renderer. Keys off `outcome` per the link verification contract.
  */
 export function renderBadge(
   container: HTMLElement,

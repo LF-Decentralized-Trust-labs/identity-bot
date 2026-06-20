@@ -1,4 +1,4 @@
-"""M63 C1/C3 keripy hybrid inception + KERI-conformance tests."""
+"""hybrid PQC C1/C3 keripy hybrid inception + KERI-conformance tests."""
 
 from __future__ import annotations
 
@@ -31,13 +31,13 @@ _preload_libsodium()
 
 import importlib.metadata
 
-from m63.conformance import REQUIRED_KERI_VERSION, verify_hybrid_icp_conformance  # noqa: E402
-from m63.hybrid_inception import build_hybrid_inception, synthetic_hybrid_key_material  # noqa: E402
+from pqc.conformance import REQUIRED_KERI_VERSION, verify_hybrid_icp_conformance  # noqa: E402
+from pqc.hybrid_inception import build_hybrid_inception, synthetic_hybrid_key_material  # noqa: E402
 
 GOLDEN_PATH = (
     Path(__file__).resolve().parents[3]
     / "identity-agent-core"
-    / "m63"
+    / "pqc"
     / "golden_vectors.json"
 )
 

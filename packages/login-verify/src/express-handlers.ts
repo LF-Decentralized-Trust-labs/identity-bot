@@ -65,7 +65,7 @@ export function mountIdentityAgentLoginRoutes(
     }
   });
 
-  // Minimal Ask pointer (SEAM-8 §5.2 / SM10): the QR encodes {origin}/i/{token};
+  // Minimal Ask pointer: the QR encodes {origin}/i/{token};
   // the IA GETs it to fetch the signed Ask envelope. `/i/` is the one-char Ask
   // namespace, kept off the site's own routes.
   app.get(`/i/:token`, (req: Request, res: Response) => {

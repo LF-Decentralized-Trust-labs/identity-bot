@@ -18,27 +18,28 @@ export interface RequestedScore {
 }
 
 /**
- * Ask intent registry (SEAM-8 / SM10). The `t` discriminator the IA dispatches
- * on after fetching the Ask. Numeric + named for a compact, language-neutral
- * wire; each value MUST map to a governed action in the M15 Action Registry.
+ * Ask action registry (the login contract / the shared module). The `t`
+ * discriminator the IA dispatches on after fetching the Ask. Numeric + named
+ * for a compact, language-neutral wire; each value MUST map to a governed
+ * action in the governance Action Registry.
  */
-export const AskIntent = {
+export const AskAction = {
   login: 1,
   present: 2,
   pay: 3,
   contact: 4,
   issue: 5,
 } as const;
-export type AskIntentCode = (typeof AskIntent)[keyof typeof AskIntent];
+export type AskActionCode = (typeof AskAction)[keyof typeof AskAction];
 
 /**
  * An "Ask" — a signed, typed request one Identity Agent fetches from a minimal
  * QR pointer (`/i/{token}`). The login Ask (`t: 1`) keeps site_* fields as its
- * intent params; other intents carry their own fields (see the SM10 proposal).
+ * action params; other actions carry their own fields (see the shared module proposal).
  */
 export interface LoginChallenge {
   v: "ASK1";
-  t: typeof AskIntent.login;
+  t: typeof AskAction.login;
   site_aid: string;
   site_oobi: string;
   audience: string;

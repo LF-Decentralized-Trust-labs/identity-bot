@@ -1,7 +1,7 @@
 {
   "name": "@identity-agent/login-verify-ms",
   "version": "0.1.0",
-  "description": "Standalone HTTP verify microservice for SEAM-8 login assertions",
+  "description": "Standalone HTTP verify microservice for login assertions",
   "type": "module",
   "main": "./dist/server.js",
   "scripts": {

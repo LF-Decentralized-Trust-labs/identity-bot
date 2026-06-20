@@ -276,7 +276,6 @@ Some features appear on both platforms but with different capability levels:
 
 ## References
 
-- `navigation-menu.md` in the strategy repo — full item descriptions, open questions, and detailed hub breakdowns
 - ADR-006 — standardized topology (3 states × 2 device types)
 - `identity_agent_ui/lib/screens/desktop/desktop_sidebar.dart` — desktop implementation
 - `identity_agent_ui/lib/screens/desktop/desktop_app.dart` — desktop route → screen mapping

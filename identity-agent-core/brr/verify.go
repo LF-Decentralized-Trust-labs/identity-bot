@@ -2,7 +2,7 @@ package brr
 
 import "fmt"
 
-// RevocationStatus is one of four verifier outcomes (M36 DESIGN §2.1).
+// RevocationStatus is one of four verifier outcomes (revocation registry design §2.1).
 type RevocationStatus string
 
 const (

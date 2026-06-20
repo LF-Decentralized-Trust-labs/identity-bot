@@ -7,7 +7,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"identity-agent-core/m63"
+	"identity-agent-core/iacrypto"
 )
 
 func nfc(s string) string {
@@ -71,7 +71,7 @@ func canonicalAssertionBody(a Assertion) string {
 func assertionDigest(a Assertion) (string, error) {
 	a.D = ""
 	body := canonicalAssertionBody(a)
-	return m63.Blake3QB64([]byte(body))
+	return iacrypto.Blake3QB64([]byte(body))
 }
 
 func filterEmpty(ss []string) []string {

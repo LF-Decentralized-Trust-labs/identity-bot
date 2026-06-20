@@ -1,4 +1,4 @@
-/** SEAM-15 §2.1 / §2.2 — Link Verification SDK shapes */
+/** Link Verification SDK shapes */
 
 export type Outcome = "verified" | "tampered" | "unverified" | "incomplete";
 export type Flow = "badge" | "link";

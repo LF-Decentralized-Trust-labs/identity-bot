@@ -3,7 +3,7 @@ import { buildLoginQrUrl, isRpHostedOobi } from "../dist/qr-url.js";
 
 const SESSION = "Joy6X61xwxdQhhQ-8XvK1L";
 
-// SEAM-8 §5.2 / SM10: the QR is a bare Ask pointer on the RP origin (== audience),
+// The QR is a bare Ask pointer on the RP origin (== audience),
 // `/i/{token}` — one-char namespace + the session token. No oobi/AID, no action,
 // no rp, no session= query. Everything else is in the signed Ask fetched after scan.
 assert.equal(

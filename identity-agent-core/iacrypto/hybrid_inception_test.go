@@ -1,4 +1,4 @@
-package m63_test
+package iacrypto_test
 
 import (
 	"encoding/json"
@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"identity-agent-core/m63"
+	"identity-agent-core/iacrypto"
 )
 
 type goldenVector struct {
@@ -29,7 +29,7 @@ func loadGolden(t *testing.T) goldenVector {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		// fallback when tests run from module root
-		data, err = os.ReadFile(filepath.Join("m63", "golden_vectors.json"))
+		data, err = os.ReadFile(filepath.Join("iacrypto", "golden_vectors.json"))
 	}
 	if err != nil {
 		t.Fatalf("read golden_vectors.json: %v", err)
@@ -43,8 +43,8 @@ func loadGolden(t *testing.T) goldenVector {
 
 func TestCrossEngineByteIdentitySeed0(t *testing.T) {
 	golden := loadGolden(t)
-	mat := m63.SyntheticHybridKeyMaterial(golden.HybridInception.Seed)
-	res, err := m63.BuildHybridInception(mat)
+	mat := iacrypto.SyntheticHybridKeyMaterial(golden.HybridInception.Seed)
+	res, err := iacrypto.BuildHybridInception(mat)
 	if err != nil {
 		t.Fatalf("BuildHybridInception: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestCrossEngineByteIdentitySeed0(t *testing.T) {
 	}
 	switch a := ked["a"].(type) {
 	case []map[string]interface{}:
-		if len(a) != 1 || a[0]["ia"] != m63.CipherSuiteIAHybrid1 {
+		if len(a) != 1 || a[0]["ia"] != iacrypto.CipherSuiteIAHybrid1 {
 			t.Fatalf("anchor seal: %v", a)
 		}
 	case []interface{}:
@@ -84,7 +84,7 @@ func TestCrossEngineByteIdentitySeed0(t *testing.T) {
 			t.Fatalf("a anchor: %v", ked["a"])
 		}
 		seal, ok := a[0].(map[string]interface{})
-		if !ok || seal["ia"] != m63.CipherSuiteIAHybrid1 {
+		if !ok || seal["ia"] != iacrypto.CipherSuiteIAHybrid1 {
 			t.Fatalf("anchor seal: %v", a[0])
 		}
 	default:
@@ -93,12 +93,12 @@ func TestCrossEngineByteIdentitySeed0(t *testing.T) {
 }
 
 func TestSyntheticHybridInceptionStructure(t *testing.T) {
-	mat := m63.SyntheticHybridKeyMaterial(0)
-	res, err := m63.BuildHybridInception(mat)
+	mat := iacrypto.SyntheticHybridKeyMaterial(0)
+	res, err := iacrypto.BuildHybridInception(mat)
 	if err != nil {
 		t.Fatalf("BuildHybridInception: %v", err)
 	}
-	if res.CipherSuite != m63.CipherSuiteIAHybrid1 {
+	if res.CipherSuite != iacrypto.CipherSuiteIAHybrid1 {
 		t.Fatalf("cipher suite: got %q", res.CipherSuite)
 	}
 	if res.AID == "" || res.SAID == "" {
@@ -111,7 +111,7 @@ func TestSyntheticHybridInceptionStructure(t *testing.T) {
 	if k[0][0:1] != "D" {
 		t.Fatalf("Ed25519 key should use D prefix, got %s", k[0][:4])
 	}
-	if k[1][0:4] != m63.CESRMLDSA65Verkey {
+	if k[1][0:4] != iacrypto.CESRMLDSA65Verkey {
 		t.Fatalf("ML-DSA key prefix: %s", k[1][:4])
 	}
 }

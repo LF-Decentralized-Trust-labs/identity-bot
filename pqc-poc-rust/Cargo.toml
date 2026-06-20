@@ -2,7 +2,7 @@
 name = "pqc_poc_rust"
 version = "0.1.0"
 edition = "2021"
-description = "M63 C4 Rust mobile PQC fallback spike (ML-DSA-65 + ML-KEM-768)"
+description = "Hybrid PQC C4 Rust mobile PQC fallback spike (ML-DSA-65 + ML-KEM-768)"
 
 [lib]
 crate-type = ["cdylib", "staticlib", "rlib"]
@@ -12,8 +12,8 @@ name = "c4roundtrip"
 path = "src/bin/c4roundtrip.rs"
 
 [[bin]]
-name = "m63_mldsa_cli"
-path = "src/bin/m63_mldsa_cli.rs"
+name = "pqc_mldsa_cli"
+path = "src/bin/pqc_mldsa_cli.rs"
 
 [dependencies]
 ml-dsa = { version = "0.1.1", default-features = false, features = ["alloc"] }

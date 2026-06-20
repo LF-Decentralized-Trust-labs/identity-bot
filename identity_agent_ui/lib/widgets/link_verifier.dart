@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/link_verification_service.dart';
 
-/// SCR1 trust badge widget — renders from `outcome` only (SEAM-15 §2.3).
+/// Trust badge widget — renders from `outcome` only, matching the link verification contract.
 class LinkVerifier extends StatefulWidget {
   final String input;
   final String flow;

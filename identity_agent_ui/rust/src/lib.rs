@@ -1,5 +1,5 @@
 mod api;
-mod m63;
+mod pqc;
 
 // The frb_generated module is created by `flutter_rust_bridge_codegen generate`.
 // During CI/CD builds, codegen runs before compilation and creates

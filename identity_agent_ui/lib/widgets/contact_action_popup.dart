@@ -6,7 +6,7 @@ class ContactActionPopup extends StatefulWidget {
   final String name;
   final String photo;
   final String aid;
-  final String intentLabel;
+  final String actionLabel;
   final String confirmLabel;
   final String dismissLabel;
   final int confidenceScore;
@@ -20,7 +20,7 @@ class ContactActionPopup extends StatefulWidget {
     required this.name,
     this.photo = '',
     required this.aid,
-    this.intentLabel = 'Wants to add you as a contact',
+    this.actionLabel = 'Wants to add you as a contact',
     this.confirmLabel = 'Add Contact',
     this.dismissLabel = 'Dismiss',
     this.confidenceScore = 82,
@@ -211,7 +211,7 @@ class _ContactActionPopupState extends State<ContactActionPopup>
                         ),
                         const SizedBox(height: 12),
                         Text(
-                          widget.intentLabel,
+                          widget.actionLabel,
                           style: const TextStyle(
                             fontSize: 14,
                             color: MobileColors.textSecondary,

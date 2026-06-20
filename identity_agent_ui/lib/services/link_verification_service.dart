@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../config/agent_config.dart';
 
-/// SEAM-15 §2.2 VerificationResult mirror for Flutter surfaces.
+/// VerificationResult mirror for Flutter surfaces, matching the link verification contract.
 class VerificationResult {
   final String outcome;
   final String? aid;
@@ -82,7 +82,7 @@ class LinkOwnership {
       );
 }
 
-/// Calls IF7 loopback GET /api/verification/badge on the local Go Core.
+/// Calls the loopback GET /api/verification/badge on the local Go Core.
 class LinkVerificationService {
   final http.Client _client;
   final String? _baseUrl;

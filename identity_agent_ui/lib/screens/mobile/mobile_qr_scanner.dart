@@ -71,7 +71,7 @@ class _MobileQrScannerState extends State<MobileQrScanner> with SingleTickerProv
 
   /// Shared dispatch for both camera and NFC scans.
   ///
-  /// Recognizes the SEAM-8 §5.2 login bundle pointer
+  /// Recognizes the login contract's login bundle pointer
   /// (`{origin}/auth/ia/session/{token}/bundle`) first — that carries no query
   /// params, so it must be matched before the legacy `/oobi/?action=...` forms.
   void _dispatchScannedCode(String code) {
@@ -113,7 +113,7 @@ class _MobileQrScannerState extends State<MobileQrScanner> with SingleTickerProv
   }
 
   /// Returns the session token when [uri] is an Ask pointer (`.../i/{token}`,
-  /// SEAM-8 §5.2 / SM10), else null. The token is the last segment under the
+  /// per the login contract and the shared module), else null. The token is the last segment under the
   /// one-char `/i/` Ask namespace; the IA fetches the signed Ask from this URL.
   String? _loginPointerToken(Uri? uri) {
     if (uri == null) return null;
@@ -247,7 +247,7 @@ class _MobileQrScannerState extends State<MobileQrScanner> with SingleTickerProv
           photo: resolved.photo,
           aid: resolved.aid,
           kelVerified: resolved.kelVerified,
-          intentLabel: 'Scanned identity',
+          actionLabel: 'Scanned identity',
           confirmLabel: 'Add Contact',
           dismissLabel: 'Dismiss',
           onConfirm: () => Navigator.of(ctx).pop(true),
@@ -299,7 +299,7 @@ class _MobileQrScannerState extends State<MobileQrScanner> with SingleTickerProv
           photo: resolved.photo,
           aid: resolved.aid,
           kelVerified: resolved.kelVerified,
-          intentLabel: 'Wants to add you as a contact',
+          actionLabel: 'Wants to add you as a contact',
           confirmLabel: 'Add Contact',
           dismissLabel: 'Dismiss',
           onConfirm: () => Navigator.of(ctx).pop(true),

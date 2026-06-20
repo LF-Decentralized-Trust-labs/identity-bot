@@ -9,7 +9,7 @@ export interface DevRelayOptions {
   identities?: SiteIdentity[];
 }
 
-/** BLOCKED: M35 production relay — dev stub only for local steel thread. */
+/** BLOCKED: production relay — dev stub only for local steel thread. */
 export function createDevRelayServer(opts: DevRelayOptions = {}): {
   app: express.Express;
   start: () => Promise<{ url: string; server: Server }>;
@@ -33,7 +33,7 @@ export function createDevRelayServer(opts: DevRelayOptions = {}): {
   });
 
   app.get("/oobi/:aid", (_req, res) => {
-    res.json({ status: "dev-relay-stub", note: "BLOCKED: M35 production relay not shipped" });
+    res.json({ status: "dev-relay-stub", note: "BLOCKED: production relay not shipped" });
   });
 
   // Dev-only: IA registers pairwise AIDs for did.json resolution during local steel thread.

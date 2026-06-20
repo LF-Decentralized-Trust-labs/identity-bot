@@ -1,4 +1,4 @@
-//! M63 C2 — hybrid composite signature wire format + both-must-verify.
+//! hybrid PQC C2 — hybrid composite signature wire format + both-must-verify.
 
 use ed25519_dalek::{Signer as _, SigningKey, VerifyingKey};
 use pqc_poc_rust::mldsa65;
@@ -220,21 +220,21 @@ fn decode_ed25519_siger_raw(siger_qb64: &str) -> Result<Vec<u8>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::m63::hybrid_inception::{build_hybrid_inception, synthetic_hybrid_key_material};
+    use crate::pqc::hybrid_inception::{build_hybrid_inception, synthetic_hybrid_key_material};
     use serde_json::Value;
 
     #[test]
     fn c2_hybrid_signature_golden() {
         let path = concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../identity-agent-core/m63/golden_vectors.json"
+            "/../../identity-agent-core/iacrypto/golden_vectors.json"
         );
         let data = std::fs::read_to_string(path).expect("golden_vectors.json");
         let v: Value = serde_json::from_str(&data).expect("json");
         let vec = &v["hybrid_signature"];
         assert!(
             vec["composite_wire"].is_string(),
-            "hybrid_signature not pinned — run scripts/pin_m63_c2_golden.py"
+            "hybrid_signature not pinned — run scripts/pin_iacrypto_c2_golden.py"
         );
 
         let res = sign_hybrid_message().expect("sign");
