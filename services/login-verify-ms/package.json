@@ -1,0 +1,24 @@
+{
+  "name": "@identity-agent/login-verify-ms",
+  "version": "0.1.0",
+  "description": "Standalone HTTP verify microservice for SEAM-8 login assertions",
+  "type": "module",
+  "main": "./dist/server.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "dev": "tsx src/server.ts",
+    "test": "node scripts/selftest.mjs"
+  },
+  "dependencies": {
+    "@identity-agent/login-verify": "file:../../packages/login-verify",
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.16.11",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.3"
+  },
+  "license": "Apache-2.0"
+}

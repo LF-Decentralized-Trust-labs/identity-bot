@@ -1,0 +1,61 @@
+{
+  "login_assertion": {
+    "description": "M29 SEAM-8 OQ-1 frozen — deterministic login assertion (seed 0x29..0x48)",
+    "seam": "SEAM-8",
+    "oq": "OQ-1",
+    "version": "IALOGIN10JSON",
+    "seed_hex": "292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748",
+    "field_order": "v,t,d,i,relationship_aid_oobi,audience,nonce,dt,disclosures,presented_acdcs",
+    "canonical_rules": {
+      "json": "compact, no insignificant whitespace, no trailing newline",
+      "strings": "NFC-normalized UTF-8",
+      "timestamps": "RFC 3339 UTC trailing Z, integer seconds",
+      "nonce": "base64url no-pad",
+      "said_algorithm": "Blake3-256 Matter qb64 code E over body minus d and sig",
+      "signature": "Ed25519 over UTF-8 canonical body including d, excluding sig; CESR 0B qb64"
+    },
+    "pairwise_aid": "Em29GoldenPairwiseAID0123456789ABCDEFGHIJK",
+    "signing_verkey_qb64": "DMeqSmzk9eaEKz3sm_edMYm2gEgqQi2dqDX-m_-mfy7x",
+    "relationship_aid_oobi": "https://k7f2p.relay.grapeid.org/oobi/Em29GoldenPairwiseAID0123456789ABCDEFGHIJK",
+    "audience": "https://app.example.com",
+    "nonce": "m29GoldenNonce0123456789ABCDEFGH",
+    "dt": "2026-06-17T12:00:00Z",
+    "disclosures": {
+      "display_name": "Alice",
+      "email": "alice@example.com"
+    },
+    "presented_acdcs": [],
+    "said": "EH40V_99-zmaIJ1E5pc8fAYGqOFJlpYED3cnYyk9RaON",
+    "sig": "0BDZMOUyAYbzvD1jcGF3YjdvWMF-jIgN3t5Gs7E9ihT9NsgeJGJ_cruAODgaInt11f_5MBWFS5fRlG9OJ-hmH5wD",
+    "canonical_body": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EH40V_99-zmaIJ1E5pc8fAYGqOFJlpYED3cnYyk9RaON\",\"i\":\"Em29GoldenPairwiseAID0123456789ABCDEFGHIJK\",\"relationship_aid_oobi\":\"https://k7f2p.relay.grapeid.org/oobi/Em29GoldenPairwiseAID0123456789ABCDEFGHIJK\",\"audience\":\"https://app.example.com\",\"nonce\":\"m29GoldenNonce0123456789ABCDEFGH\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\",\"email\":\"alice@example.com\"},\"presented_acdcs\":[]}",
+    "canonical_body_len": 445,
+    "canonical_body_sha256_hex": "1dd75bd95e5b96adf83895ad9d593a48f2afac097c2e204f8c3fb91d66b3fa3b",
+    "assertion": {
+      "v": "IALOGIN10JSON",
+      "t": "login-assertion",
+      "i": "Em29GoldenPairwiseAID0123456789ABCDEFGHIJK",
+      "relationship_aid_oobi": "https://k7f2p.relay.grapeid.org/oobi/Em29GoldenPairwiseAID0123456789ABCDEFGHIJK",
+      "audience": "https://app.example.com",
+      "nonce": "m29GoldenNonce0123456789ABCDEFGH",
+      "dt": "2026-06-17T12:00:00Z",
+      "disclosures": {
+        "display_name": "Alice",
+        "email": "alice@example.com"
+      },
+      "presented_acdcs": [],
+      "d": "EH40V_99-zmaIJ1E5pc8fAYGqOFJlpYED3cnYyk9RaON",
+      "sig": "0BDZMOUyAYbzvD1jcGF3YjdvWMF-jIgN3t5Gs7E9ihT9NsgeJGJ_cruAODgaInt11f_5MBWFS5fRlG9OJ-hmH5wD"
+    },
+    "expected_verify": {
+      "audience": "https://app.example.com",
+      "nonce": "m29GoldenNonce0123456789ABCDEFGH",
+      "max_skew_seconds": 300,
+      "reference_now_rfc3339": "2026-06-17T12:00:00Z"
+    },
+    "negative_vectors": {
+      "corrupt_sig_last_char": "0BDZMOUyAYbzvD1jcGF3YjdvWMF-jIgN3t5Gs7E9ihT9NsgeJGJ_cruAODgaInt11f_5MBWFS5fRlG9OJ-hmH5wA",
+      "wrong_nonce": "m29GoldenNonce0123456789ABCDEFG0",
+      "wrong_audience": "https://evil.example.com"
+    }
+  }
+}
