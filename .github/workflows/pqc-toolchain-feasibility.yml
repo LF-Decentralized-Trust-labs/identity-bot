@@ -1,0 +1,200 @@
+name: PQC cipher-suite toolchain feasibility (desktop)
+
+# Toolchain-feasibility gate for the hybrid post-quantum cipher suite.
+# Builds + runs the ML-DSA-65 / ML-KEM-768 round-trip in `pqc-poc/` on the three
+# desktop platforms. macOS was confirmed locally; this reproduces it on a clean
+# runner and adds the Linux + Windows legs.
+#
+# Per the cipher-suite feasibility matrix: if a DESKTOP platform fails to build,
+# that is the FAIL row — stop and escalate (the Rust-bridge fallback only covers
+# mobile). Mobile (gomobile iOS/Android) is NOT built here — it is handled by the
+# Rust-bridge fallback spike, not liboqs-go.
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "pqc-poc/**"
+      - ".github/workflows/pqc-toolchain-feasibility.yml"
+
+# liboqs release tag to build against (matches the Homebrew 0.15.0 that passed
+# locally). Bump here if a different parameter-set version is adopted.
+env:
+  LIBOQS_VERSION: "0.15.0"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Linux — the first missing desktop leg. Builds liboqs from source (static,
+  # no OpenSSL) so the link is fully self-contained and reproducible.
+  # ---------------------------------------------------------------------------
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: pqc-poc/go.mod
+
+      - name: Build liboqs (static, no OpenSSL)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build pkg-config
+          git clone --depth 1 --branch "$LIBOQS_VERSION" \
+            https://github.com/open-quantum-safe/liboqs /tmp/liboqs-src
+          cmake -S /tmp/liboqs-src -B /tmp/liboqs-build -GNinja \
+            -DCMAKE_INSTALL_PREFIX=/tmp/liboqs-install \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DOQS_USE_OPENSSL=OFF \
+            -DOQS_BUILD_ONLY_LIB=ON
+          cmake --build /tmp/liboqs-build --parallel
+          cmake --install /tmp/liboqs-build
+
+      - name: Clone liboqs-go bindings + write pkg-config
+        run: |
+          git clone --depth 1 https://github.com/open-quantum-safe/liboqs-go \
+            "$GITHUB_WORKSPACE/liboqs-go"
+          mkdir -p "$GITHUB_WORKSPACE/liboqs-go/.config"
+          cat > "$GITHUB_WORKSPACE/liboqs-go/.config/liboqs-go.pc" <<'EOF'
+          LIBOQS_INCLUDE_DIR=/tmp/liboqs-install/include
+          LIBOQS_LIB_DIR=/tmp/liboqs-install/lib
+          Name: liboqs-go
+          Description: Go bindings for liboqs
+          Version: 0.15.0
+          Cflags: -I${LIBOQS_INCLUDE_DIR}
+          Libs: -L${LIBOQS_LIB_DIR} -loqs
+          EOF
+
+      - name: Build + run C4 round-trip
+        working-directory: pqc-poc
+        env:
+          PKG_CONFIG_PATH: ${{ github.workspace }}/liboqs-go/.config
+          CGO_ENABLED: "1"
+        run: |
+          # Point the local replace at this runner's liboqs-go clone (the
+          # committed go.mod hard-codes /tmp/liboqs-go for Rob's machine).
+          go mod edit -replace \
+            github.com/open-quantum-safe/liboqs-go="$GITHUB_WORKSPACE/liboqs-go"
+          go vet ./roundtrip ./cmd/...
+          out="$(go run ./cmd/c4roundtrip)"
+          echo "$out"
+          echo "$out" | grep -q '^PASS:' || { echo "::error::Linux C4 round-trip did not PASS"; exit 1; }
+
+  # ---------------------------------------------------------------------------
+  # macOS — reproduces the already-confirmed leg on a clean arm64 runner using
+  # the same Homebrew path the local run used (liboqs built WITH OpenSSL, so the
+  # link needs -lcrypto).
+  # ---------------------------------------------------------------------------
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: pqc-poc/go.mod
+
+      - name: Install liboqs (Homebrew)
+        run: brew install liboqs pkg-config openssl@3
+
+      - name: Clone liboqs-go bindings + write pkg-config
+        run: |
+          git clone --depth 1 https://github.com/open-quantum-safe/liboqs-go \
+            "$GITHUB_WORKSPACE/liboqs-go"
+          mkdir -p "$GITHUB_WORKSPACE/liboqs-go/.config"
+          cat > "$GITHUB_WORKSPACE/liboqs-go/.config/liboqs-go.pc" <<'EOF'
+          LIBOQS_INCLUDE_DIR=/opt/homebrew/include
+          LIBOQS_LIB_DIR=/opt/homebrew/lib
+          Name: liboqs-go
+          Description: Go bindings for liboqs
+          Version: 0.15.0
+          Cflags: -I${LIBOQS_INCLUDE_DIR}
+          Libs: -L${LIBOQS_LIB_DIR} -loqs
+          EOF
+
+      - name: Build + run C4 round-trip
+        working-directory: pqc-poc
+        env:
+          PKG_CONFIG_PATH: ${{ github.workspace }}/liboqs-go/.config
+          CGO_ENABLED: "1"
+          # Homebrew liboqs links OpenSSL → -lcrypto required (matches local run).
+          CGO_LDFLAGS: "-L/opt/homebrew/lib -loqs -lcrypto"
+          DYLD_LIBRARY_PATH: /opt/homebrew/lib
+        run: |
+          go mod edit -replace \
+            github.com/open-quantum-safe/liboqs-go="$GITHUB_WORKSPACE/liboqs-go"
+          go vet ./roundtrip ./cmd/...
+          out="$(go run ./cmd/c4roundtrip)"
+          echo "$out"
+          echo "$out" | grep -q '^PASS:' || { echo "::error::macOS C4 round-trip did not PASS"; exit 1; }
+
+  # ---------------------------------------------------------------------------
+  # Windows — the second missing desktop leg, and the fiddliest (CGO needs a
+  # mingw gcc, so Go + gcc + cmake all run inside MSYS2/MINGW64). This is a
+  # best-effort starting point; expect a round of iteration. If it cannot be
+  # made to build, that is the C4 FAIL row → raise BLOCKED: for Rob, do not
+  # paper over it.
+  # ---------------------------------------------------------------------------
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            git
+            mingw-w64-x86_64-go
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-pkgconf
+
+      - name: Build liboqs (static, no OpenSSL)
+        run: |
+          # Use mixed (C:/...) paths so the mingw gcc/cmake toolchain — which is
+          # NOT msys-path-aware — can resolve them.
+          INSTALL_DIR="$(cygpath -m "$HOME/liboqs-install")"
+          git clone --depth 1 --branch "$LIBOQS_VERSION" \
+            https://github.com/open-quantum-safe/liboqs "$HOME/liboqs-src"
+          cmake -S "$(cygpath -m "$HOME/liboqs-src")" -B "$(cygpath -m "$HOME/liboqs-build")" -GNinja \
+            -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DOQS_USE_OPENSSL=OFF \
+            -DOQS_BUILD_ONLY_LIB=ON
+          cmake --build "$(cygpath -m "$HOME/liboqs-build")" --parallel
+          cmake --install "$(cygpath -m "$HOME/liboqs-build")"
+
+      - name: Clone liboqs-go bindings + write pkg-config
+        run: |
+          git clone --depth 1 https://github.com/open-quantum-safe/liboqs-go "$HOME/liboqs-go"
+          mkdir -p "$HOME/liboqs-go/.config"
+          INC="$(cygpath -m "$HOME/liboqs-install/include")"
+          LIB="$(cygpath -m "$HOME/liboqs-install/lib")"
+          {
+            echo "LIBOQS_INCLUDE_DIR=$INC"
+            echo "LIBOQS_LIB_DIR=$LIB"
+            echo "Name: liboqs-go"
+            echo "Description: Go bindings for liboqs"
+            echo "Version: 0.15.0"
+            echo 'Cflags: -I${LIBOQS_INCLUDE_DIR}'
+            echo 'Libs: -L${LIBOQS_LIB_DIR} -loqs'
+          } > "$HOME/liboqs-go/.config/liboqs-go.pc"
+
+      - name: Build + run C4 round-trip
+        working-directory: pqc-poc
+        env:
+          CGO_ENABLED: "1"
+        run: |
+          export PKG_CONFIG_PATH="$HOME/liboqs-go/.config"
+          go mod edit -replace \
+            github.com/open-quantum-safe/liboqs-go="$(cygpath -w "$HOME/liboqs-go")"
+          go vet ./roundtrip ./cmd/...
+          out="$(go run ./cmd/c4roundtrip)"
+          echo "$out"
+          echo "$out" | grep -q '^PASS:' || { echo "::error::Windows C4 round-trip did not PASS"; exit 1; }
