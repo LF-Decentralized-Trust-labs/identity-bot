@@ -18,11 +18,17 @@ import (
         "time"
 
         "identity-agent-core/drivers"
+        "identity-agent-core/login"
+        "identity-agent-core/oidc"
+        "identity-agent-core/m63"
         "identity-agent-core/endpoint"
         "identity-agent-core/sandbox"
         "identity-agent-core/schemas"
         "identity-agent-core/store"
         "identity-agent-core/tunnel"
+        "identity-agent-core/linkverifier"
+        "identity-agent-core/witness"
+        "identity-agent-core/watcher"
 
         "github.com/go-chi/chi/v5"
         "github.com/go-chi/chi/v5/middleware"
@@ -44,6 +50,11 @@ type CoreServer struct {
         cancel          context.CancelFunc
         listener        net.Listener
         router          chi.Router
+        loginHandler    *login.Handler
+        oidcAdapter     *oidc.Adapter
+        WatcherService  *watcher.Service
+        WitnessService  *witness.Service
+        LinkVerifier    *linkverifier.SDK
         mu              sync.Mutex
         running         bool
 }
@@ -71,11 +82,16 @@ func DefaultConfig() Config {
                 webDir = filepath.Join("..", "identity_agent_ui", "build", "web")
         }
 
+        enableKeri := true
+        if v := os.Getenv("ENABLE_KERI_DRIVER"); v == "false" || v == "0" {
+                enableKeri = false
+        }
+
         return Config{
-                DataDir:         dataDir,
-                Port:            port,
-                EnableKeriDriver: true,
-                FlutterWebDir:   webDir,
+                DataDir:          dataDir,
+                Port:             port,
+                EnableKeriDriver: enableKeri,
+                FlutterWebDir:    webDir,
         }
 }
 
@@ -112,6 +128,38 @@ func New(cfg Config) (*CoreServer, error) {
                 cancel:          cancel,
         }
 
+        ws := watcher.NewService(watcher.NewSQLiteStore(dataStore.DB()))
+        ws.OnEvent = func(eventType string, payload map[string]interface{}) {
+                s.EventHub.Broadcast(AgentEvent{Type: eventType, Payload: payload})
+        }
+        s.WatcherService = ws
+        watcher.StartPruneLoop(ws, 24*time.Hour)
+
+        backendType := witness.BackendDesktop
+        if os.Getenv("IA_BACKEND_TYPE") != "" {
+                backendType = os.Getenv("IA_BACKEND_TYPE")
+        }
+        wsvc := witness.NewService(witness.NewSQLiteStore(dataStore.DB()), dataStore, nil, backendType)
+        wsvc.OurAID = func() string {
+                id, _ := dataStore.GetIdentity()
+                if id != nil {
+                        return id.AID
+                }
+                return ""
+        }
+        wsvc.OurOOBI = func() string {
+                id, _ := dataStore.GetIdentity()
+                if id == nil {
+                        return ""
+                }
+                return fmt.Sprintf("http://127.0.0.1:%d/public/oobi/%s", cfg.Port, id.AID)
+        }
+        wsvc.OnEvent = func(eventType string, payload map[string]interface{}) {
+                s.EventHub.Broadcast(AgentEvent{Type: eventType, Payload: payload})
+        }
+        s.WitnessService = wsvc
+        go witness.StartHeartbeatLoop(wsvc, ctx.Done())
+
         if cfg.EnableKeriDriver {
                 s.KeriDriver = drivers.NewKeriDriver()
                 if err := s.KeriDriver.Start(); err != nil {
@@ -123,6 +171,20 @@ func New(cfg Config) (*CoreServer, error) {
                 // state so IssueCredential and Interact work without a fresh inception.
                 s.reloadIdentityIntoDriver()
         }
+
+        if s.WitnessService != nil {
+                s.WitnessService.Driver = s.KeriDriver
+        }
+
+        s.LinkVerifier = linkverifier.New(s.KeriDriver, linkverifier.Config{
+                ContactLookup: func(aid string) (bool, string) {
+                        c, err := dataStore.GetContact(aid)
+                        if err != nil || c == nil {
+                                return false, ""
+                        }
+                        return c.Status == "accepted", c.Alias
+                },
+        })
 
         manifestsDir := filepath.Join(".", "manifests")
         sbxMgr, err := sandbox.NewManager(sandbox.ManagerConfig{
@@ -136,6 +198,13 @@ func New(cfg Config) (*CoreServer, error) {
                 if startErr := s.SandboxManager.Start(); startErr != nil {
                         log.Printf("[identity-agent-core] Sandbox manager start failed (non-fatal): %v", startErr)
                 }
+        }
+
+        if err := s.initLoginHandler(); err != nil {
+                log.Printf("[identity-agent-core] M29 login handler init failed (non-fatal): %v", err)
+        }
+        if err := s.initOIDCHandler(); err != nil {
+                log.Printf("[identity-agent-core] M29 OIDC adapter init failed (non-fatal): %v", err)
         }
 
         s.router = s.buildRouter(cfg.FlutterWebDir)
@@ -302,6 +371,7 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
                 r.Get("/security/enclave", s.handleSecurityEnclave)
 
                 r.Post("/inception", s.handleInception)
+                r.Post("/hybrid-inception", s.handleHybridInception)
                 r.Post("/rotation", s.handleRotation)
                 r.Post("/interact", s.handleInteract)
                 r.Post("/sign", s.handleSign)
@@ -386,6 +456,10 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
                 s.serviceProviderRoutes(r)
                 s.aiMemoryRoutes(r)
                 r.Get("/ws/events", s.handleWebSocketEvents)
+
+                s.mountLoginRoutes(r)
+                s.mountVerificationRoutes(r)
+                s.mountWitnessRoutes(r)
         })
 
         s.traceRoutes(r)
@@ -396,6 +470,9 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 
         // /public/oobi/{aid} — public namespace: KERI OOBI endpoint shared with external agents.
         r.Get("/public/oobi/{aid}", s.handleOobiServe)
+        s.mountDidWebsPublicRoutes(r)
+        s.mountOIDCRoutes(r)
+        s.mountWatcherPublicRoutes(r)
 
         // /public/credential/{said} — public credential delivery endpoint for sharing issued credentials.
         r.Get("/public/credential/{said}", s.handlePublicCredentialServe)
@@ -497,6 +574,23 @@ type InceptionResponse struct {
         RawBytesB64    string                 `json:"raw_bytes_b64"`
         PublicKey      string                 `json:"public_key"`
         Created        string                 `json:"created"`
+}
+
+type HybridInceptionRequest struct {
+        // Synthetic: use fixed seed=0 harness material (C3 golden-vector prep).
+        Synthetic bool `json:"synthetic"`
+        Name      string `json:"name,omitempty"`
+}
+
+type HybridInceptionResponse struct {
+        AID            string                 `json:"aid"`
+        SAID           string                 `json:"said"`
+        InceptionEvent map[string]interface{} `json:"inception_event"`
+        RawBytesB64    string                 `json:"raw_bytes_b64"`
+        CipherSuite    string                 `json:"cipher_suite"`
+        PublicKey      string                 `json:"public_key"`
+        NextKeyDigest  string                 `json:"next_key_digest"`
+        Created        string                 `json:"created,omitempty"`
 }
 
 type IdentityResponse struct {
@@ -694,6 +788,42 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
         json.NewEncoder(w).Encode(resp)
 }
 
+func (s *CoreServer) handleHybridInception(w http.ResponseWriter, r *http.Request) {
+        var req HybridInceptionRequest
+        if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+                writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+                return
+        }
+
+        if !req.Synthetic {
+                writeError(w, http.StatusNotImplemented,
+                        "Non-synthetic hybrid inception not yet wired",
+                        "Use synthetic=true for C1 harness vectors; production keygen routes through keripy driver or Rust bridge")
+                return
+        }
+
+        result, err := m63.BuildHybridInception(m63.SyntheticHybridKeyMaterial(0))
+        if err != nil {
+                writeError(w, http.StatusInternalServerError, "Failed to create hybrid inception event", err.Error())
+                return
+        }
+
+        resp := HybridInceptionResponse{
+                AID:            result.AID,
+                SAID:           result.SAID,
+                InceptionEvent: result.InceptionEvent,
+                RawBytesB64:    result.RawBytesB64,
+                CipherSuite:    result.CipherSuite,
+                PublicKey:      result.PublicKey,
+                NextKeyDigest:  result.NextKeyDigest,
+                Created:        time.Now().UTC().Format(time.RFC3339),
+        }
+
+        w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(http.StatusCreated)
+        json.NewEncoder(w).Encode(resp)
+}
+
 func (s *CoreServer) handleStoreIdentity(w http.ResponseWriter, r *http.Request) {
         var req store.IdentityState
         if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -744,6 +874,7 @@ func (s *CoreServer) handleStoreEvent(w http.ResponseWriter, r *http.Request) {
         }
 
         log.Printf("[identity-agent-core] STORE: Event saved - AID: %s type: %s sn: %d", req.AID, req.EventType, req.SequenceNumber)
+        s.broadcastWitnessEvent(req.AID, req.EventJSON)
 
         w.Header().Set("Content-Type", "application/json")
         w.WriteHeader(http.StatusCreated)
@@ -804,6 +935,7 @@ func (s *CoreServer) handleRotation(w http.ResponseWriter, r *http.Request) {
         }
 
         log.Printf("[identity-agent-core] ROTATION: Key rotated for AID: %s (sn: %d)", result.AID, result.SequenceNumber)
+        s.broadcastWitnessEvent(result.AID, string(eventJSON))
 
         w.Header().Set("Content-Type", "application/json")
         json.NewEncoder(w).Encode(result)
@@ -1626,6 +1758,21 @@ func (s *CoreServer) handleVerifyCredential(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	if result != nil && issuerKelEvents != nil {
+		issuerAid := ""
+		if acdcBody != nil {
+			if ia, ok := acdcBody["i"].(string); ok {
+				issuerAid = ia
+			}
+		}
+		if issuerAid != "" {
+			if wRes := s.runWatcherOnKel(r.Context(), issuerAid, issuerKelEvents, watcher.SourceCredential, "", nil); wRes != nil && wRes.Blocked {
+				writeError(w, http.StatusConflict, "Issuer KEL duplicity detected", wRes.Reason)
+				return
+			}
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
 }
@@ -2235,9 +2382,30 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
         if profile != nil && profile.Photo != "" {
                 resp["photo"] = profile.Photo
         }
+        if s.WatcherService != nil {
+                resp["watchers"] = s.WatcherService.WatcherHints()
+        } else {
+                resp["watchers"] = []string{}
+        }
+        if s.WitnessService != nil {
+                for k, v := range s.WitnessService.OOBIExtensions() {
+                        resp[k] = v
+                }
+        }
 
         w.Header().Set("Content-Type", "application/json")
         json.NewEncoder(w).Encode(resp)
+}
+
+func (s *CoreServer) broadcastWitnessEvent(aid string, eventJSON string) {
+        if s.WitnessService == nil || eventJSON == "" {
+                return
+        }
+        var ked map[string]interface{}
+        if err := json.Unmarshal([]byte(eventJSON), &ked); err != nil {
+                return
+        }
+        s.triggerWitnessBroadcast(aid, ked)
 }
 
 func (s *CoreServer) handlePublicCredentialServe(w http.ResponseWriter, r *http.Request) {
@@ -2420,6 +2588,7 @@ func (s *CoreServer) handleResolveOobiContact(w http.ResponseWriter, r *http.Req
                 Created    string                   `json:"created"`
                 JCard      *store.JCard             `json:"jcard,omitempty"`
                 Photo      string                   `json:"photo,omitempty"`
+                Watchers   []string                 `json:"watchers"`
         }
         if err := json.NewDecoder(resp.Body).Decode(&oobiData); err != nil {
                 writeError(w, http.StatusBadGateway, "Invalid OOBI response", fmt.Sprintf("Could not parse response: %v", err))
@@ -2464,6 +2633,13 @@ func (s *CoreServer) handleResolveOobiContact(w http.ResponseWriter, r *http.Req
                 }
                 if err := s.DataStore.SaveContactKEL(kelRecord); err != nil {
                         log.Printf("[identity-agent-core] OOBI-RESOLVE: Failed to store contact KEL for %s: %v", oobiData.AID, err)
+                }
+        }
+
+        if kelCount > 0 {
+                if wRes := s.runWatcherOnKel(r.Context(), oobiData.AID, oobiData.KEL, watcher.SourceOOBI, req.OobiURL, oobiData.Watchers); wRes != nil && wRes.Blocked {
+                        writeError(w, http.StatusConflict, "KEL duplicity detected", wRes.Reason)
+                        return
                 }
         }
 
@@ -2981,6 +3157,12 @@ func (s *CoreServer) handleAcceptContact(w http.ResponseWriter, r *http.Request)
                 defer exnResp.Body.Close()
                 log.Printf("[identity-agent-core] EXCHANGE: Acceptance sent to %s (status: %d)", exchangeURL, exnResp.StatusCode)
         }()
+
+        if s.WitnessService != nil && contact.ContactType == "trusted" {
+                go func(contactAID string) {
+                        _ = s.WitnessService.SendWitnessRequest(context.Background(), contactAID)
+                }(aid)
+        }
 
         w.Header().Set("Content-Type", "application/json")
         json.NewEncoder(w).Encode(map[string]string{"status": "accepted", "aid": aid})
@@ -3622,74 +3804,4 @@ func (s *CoreServer) handleGetTasks(w http.ResponseWriter, r *http.Request) {
         })
 }
 
-// handleWitnessRequest is an inbound inter-agent endpoint.
-// A remote Identity Agent calls this when it wants our agent to act as a
-// witness for its key events. The request is processed automatically —
-// no human action is required or presented. The agent evaluates capacity
-// and policy, then calls handleWitnessAccept on the requester's OOBI URL.
-//
-// ADR-016: Witness Protocol — server-to-server, fully automated.
-//
-// TODO (Sprint 4): implement witness capacity check, policy evaluation,
-//   outbound accept/decline call to requester, task lifecycle tracking.
-func (s *CoreServer) handleWitnessRequest(w http.ResponseWriter, r *http.Request) {
-        var req struct {
-                RequesterAID  string `json:"requester_aid"`
-                RequesterOOBI string `json:"requester_oobi"`
-                EventJSON     string `json:"event_json"`
-        }
-        if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-                writeError(w, http.StatusBadRequest, "Invalid witness request body", err.Error())
-                return
-        }
-        if req.RequesterAID == "" || req.RequesterOOBI == "" {
-                writeError(w, http.StatusBadRequest, "Missing required fields", "requester_aid and requester_oobi are required")
-                return
-        }
 
-        log.Printf("[identity-agent-core] WITNESS: Received witness request from AID %s (OOBI: %s) [stub — not yet processed]",
-                req.RequesterAID, req.RequesterOOBI)
-
-        // Stub: acknowledge receipt. Full implementation in Sprint 4 (ADR-016).
-        w.Header().Set("Content-Type", "application/json")
-        json.NewEncoder(w).Encode(map[string]string{
-                "status":  "received",
-                "message": "Witness request received. Processing automatically.",
-        })
-}
-
-// handleWitnessAccept is an inbound inter-agent endpoint.
-// A remote Identity Agent calls this to deliver its accept/decline response
-// to a witness request we previously sent. The response is processed
-// automatically; if accepted, the contact's is_witness flag is set to true.
-//
-// ADR-016: Witness Protocol — server-to-server, fully automated.
-//
-// TODO (Sprint 4): resolve task by ID, update contact.IsWitness on accept,
-//   update task status to completed/failed, emit WebSocket event.
-func (s *CoreServer) handleWitnessAccept(w http.ResponseWriter, r *http.Request) {
-        var req struct {
-                TaskID       string `json:"task_id"`
-                RequesterAID string `json:"requester_aid"`
-                Decision     string `json:"decision"` // "accepted" | "declined"
-                Reason       string `json:"reason"`
-        }
-        if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-                writeError(w, http.StatusBadRequest, "Invalid witness accept body", err.Error())
-                return
-        }
-        if req.RequesterAID == "" || req.Decision == "" {
-                writeError(w, http.StatusBadRequest, "Missing required fields", "requester_aid and decision are required")
-                return
-        }
-
-        log.Printf("[identity-agent-core] WITNESS: Received witness decision=%s from AID %s (task_id=%s) [stub — not yet applied]",
-                req.Decision, req.RequesterAID, req.TaskID)
-
-        // Stub: acknowledge receipt. Full implementation in Sprint 4 (ADR-016).
-        w.Header().Set("Content-Type", "application/json")
-        json.NewEncoder(w).Encode(map[string]string{
-                "status":  "received",
-                "message": "Witness decision received.",
-        })
-}

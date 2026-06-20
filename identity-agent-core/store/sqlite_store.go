@@ -62,6 +62,11 @@ func (s *SQLiteStore) Close() error {
 	return s.db.Close()
 }
 
+// DB exposes the underlying SQLite handle for domain packages (e.g. M12 watcher).
+func (s *SQLiteStore) DB() *sql.DB {
+	return s.db
+}
+
 // ── Events / KEL ─────────────────────────────────────────────────────────────
 
 func (s *SQLiteStore) SaveEvent(record EventRecord) error {
@@ -149,25 +154,29 @@ func (s *SQLiteStore) SaveContact(contact ContactRecord) error {
 	if contact.ContactType == "" {
 		contact.ContactType = "general"
 	}
+	if contact.ContactSource == "" {
+		contact.ContactSource = "manual"
+	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := s.db.Exec(`
-		INSERT INTO contacts (aid, alias, public_key, oobi_url, verified, discovered_at, status, contact_type, is_witness, jcard_json, photo, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO contacts (aid, alias, public_key, oobi_url, verified, discovered_at, status, contact_type, contact_source, is_witness, jcard_json, photo, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(aid) DO UPDATE SET
-			alias        = excluded.alias,
-			public_key   = excluded.public_key,
-			oobi_url     = excluded.oobi_url,
-			verified     = excluded.verified,
-			status       = excluded.status,
-			contact_type = excluded.contact_type,
-			is_witness   = excluded.is_witness,
-			jcard_json   = excluded.jcard_json,
-			photo        = excluded.photo,
-			updated_at   = excluded.updated_at`,
+			alias          = excluded.alias,
+			public_key     = excluded.public_key,
+			oobi_url       = excluded.oobi_url,
+			verified       = excluded.verified,
+			status         = excluded.status,
+			contact_type   = excluded.contact_type,
+			contact_source = excluded.contact_source,
+			is_witness     = excluded.is_witness,
+			jcard_json     = excluded.jcard_json,
+			photo          = excluded.photo,
+			updated_at     = excluded.updated_at`,
 		contact.AID, contact.Alias, contact.PublicKey, contact.OobiURL,
 		contact.Verified, contact.DiscoveredAt, contact.Status,
-		contact.ContactType, contact.IsWitness,
+		contact.ContactType, contact.ContactSource, contact.IsWitness,
 		jcardJSON, contact.Photo, now,
 	)
 	if err != nil {
@@ -178,7 +187,7 @@ func (s *SQLiteStore) SaveContact(contact ContactRecord) error {
 
 func (s *SQLiteStore) GetContacts() ([]ContactRecord, error) {
 	rows, err := s.db.Query(
-		`SELECT aid, alias, public_key, oobi_url, verified, discovered_at, status, contact_type, is_witness, jcard_json, photo
+		`SELECT aid, alias, public_key, oobi_url, verified, discovered_at, status, contact_type, contact_source, is_witness, jcard_json, photo
 		 FROM contacts ORDER BY alias ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query contacts: %w", err)
@@ -189,7 +198,7 @@ func (s *SQLiteStore) GetContacts() ([]ContactRecord, error) {
 
 func (s *SQLiteStore) GetContact(aid string) (*ContactRecord, error) {
 	rows, err := s.db.Query(
-		`SELECT aid, alias, public_key, oobi_url, verified, discovered_at, status, contact_type, is_witness, jcard_json, photo
+		`SELECT aid, alias, public_key, oobi_url, verified, discovered_at, status, contact_type, contact_source, is_witness, jcard_json, photo
 		 FROM contacts WHERE aid = ?`, aid)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query contact: %w", err)
@@ -216,7 +225,7 @@ func (s *SQLiteStore) DeleteContact(aid string) error {
 
 func (s *SQLiteStore) GetContactsByStatus(status string) ([]ContactRecord, error) {
 	rows, err := s.db.Query(
-		`SELECT aid, alias, public_key, oobi_url, verified, discovered_at, status, contact_type, is_witness, jcard_json, photo
+		`SELECT aid, alias, public_key, oobi_url, verified, discovered_at, status, contact_type, contact_source, is_witness, jcard_json, photo
 		 FROM contacts WHERE status = ? ORDER BY alias ASC`, status)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query contacts by status: %w", err)
@@ -231,7 +240,7 @@ func (s *SQLiteStore) scanContacts(rows *sql.Rows) ([]ContactRecord, error) {
 		var c ContactRecord
 		var jcardJSON string
 		if err := rows.Scan(&c.AID, &c.Alias, &c.PublicKey, &c.OobiURL,
-			&c.Verified, &c.DiscoveredAt, &c.Status, &c.ContactType, &c.IsWitness,
+			&c.Verified, &c.DiscoveredAt, &c.Status, &c.ContactType, &c.ContactSource, &c.IsWitness,
 			&jcardJSON, &c.Photo); err != nil {
 			return nil, fmt.Errorf("failed to scan contact: %w", err)
 		}

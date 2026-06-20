@@ -1,3 +1,12 @@
+# M29 login SDK packages + verify microservice
+packages/*/node_modules/
+packages/*/dist/
+services/*/node_modules/
+services/*/dist/
+
+# Python venv (M63 keri 1.1.17 conformance)
+drivers/keri-core/.venv-keri1117/
+
 # Go
 bin/
 *.exe
@@ -54,8 +63,10 @@ attached_assets/
 # MCP config (personal dev tooling)
 .mcp.json
 
-# Claude Code project instructions (local-only, not for public repo)
+# Claude Code / Codex project instructions (local-only, not for public repo —
+# they reference the private strategy repo + planning docs)
 CLAUDE.md
+AGENTS.md
 
 # Local personal tooling (markdown-to-docx converter, etc.)
 md_to_docx.py

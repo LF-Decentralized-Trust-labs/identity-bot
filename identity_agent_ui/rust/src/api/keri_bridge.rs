@@ -1,3 +1,4 @@
+use crate::m63::{build_hybrid_inception, synthetic_hybrid_key_material, HybridInceptionResult};
 use flutter_rust_bridge::frb;
 use keri_core::actor::prelude::*;
 use keri_core::event::event_data::inception::InceptionEvent;
@@ -34,6 +35,17 @@ pub struct InceptionResult {
 }
 
 #[derive(Serialize, Deserialize)]
+pub struct HybridInceptionBridgeResult {
+    pub aid: String,
+    pub said: String,
+    pub inception_event: String,
+    pub raw_bytes_b64: String,
+    pub cipher_suite: String,
+    pub public_key: String,
+    pub next_key_digest: String,
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct RotationResult {
     pub aid: String,
     pub new_public_key: String,
@@ -44,6 +56,42 @@ pub struct RotationResult {
 pub struct SignResult {
     pub signature: String,
     pub public_key: String,
+}
+
+/// M63 C1 — build IA-HYBRID-1 four-key inception (synthetic harness material when synthetic=true).
+#[frb(sync)]
+pub fn incept_hybrid_aid(synthetic: bool) -> Result<HybridInceptionBridgeResult, String> {
+    let material = if synthetic {
+        synthetic_hybrid_key_material(0)
+    } else {
+        return Err(
+            "Non-synthetic hybrid inception requires PQC keygen (mobile Rust bridge path); use synthetic=true for harness".into(),
+        );
+    };
+    let result = build_hybrid_inception(&material)?;
+    bridge_hybrid_result(result)
+}
+
+fn bridge_hybrid_result(result: HybridInceptionResult) -> Result<HybridInceptionBridgeResult, String> {
+    let inception_event = serde_json::to_string(&result.inception_event)
+        .map_err(|e| format!("inception_event serialization failed: {e}"))?;
+    Ok(HybridInceptionBridgeResult {
+        aid: result.aid,
+        said: result.said,
+        inception_event,
+        raw_bytes_b64: result.raw_bytes_b64,
+        cipher_suite: result.cipher_suite,
+        public_key: result.public_key,
+        next_key_digest: result.next_key_digest,
+    })
+}
+
+/// C4 mobile PQC smoke test — delegates to pure-Rust ml-dsa/ml-kem round-trip crate.
+#[frb(sync)]
+pub fn pqc_rust_roundtrip_smoke() -> bool {
+    pqc_poc_rust::run_roundtrip()
+        .map(|r| r.pass())
+        .unwrap_or(false)
 }
 
 #[frb(sync)]

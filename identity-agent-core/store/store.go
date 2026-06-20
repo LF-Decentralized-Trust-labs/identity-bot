@@ -48,8 +48,9 @@ type ContactRecord struct {
         Verified     bool   `json:"verified"`
         DiscoveredAt string `json:"discovered_at"`
         Status       string `json:"status"`
-        ContactType  string `json:"contact_type"` // general | trusted | professional
-        IsWitness    bool   `json:"is_witness"`   // KERI witness role — auto-managed
+        ContactType   string `json:"contact_type"`   // general | trusted | professional | coworker
+        ContactSource string `json:"contact_source"` // manual | transactional (M11: transactional excluded from witness pool)
+        IsWitness     bool   `json:"is_witness"`     // KERI witness role — auto-managed
         JCard        *JCard `json:"jcard,omitempty"`
         Photo        string `json:"photo,omitempty"`
 }

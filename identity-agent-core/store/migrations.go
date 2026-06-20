@@ -314,6 +314,139 @@ INSERT OR IGNORE INTO service_providers (id, provider_name, provider_aid, catego
     ('sp-grapeid-tunnel',  'Grape ID', '', 'tunneling',       'Grape ID Tunnel',         'https://grapeid.org/api/tunnel',          'available', 'unknown', 'United States', 'US-West', 0, 0, '["tunnel_chisel","custom_domain"]',                      'https://grapeid.org/terms', 1, 'builtin', datetime('now'), datetime('now'));
 `,
 	},
+	{
+		Version:     12,
+		Description: "M12 KERI Watchers: kel_first_seen, duplicity_alerts, watcher config",
+		SQL: `
+CREATE TABLE IF NOT EXISTS kel_first_seen (
+    aid                TEXT     NOT NULL,
+    sequence_num       INTEGER  NOT NULL,
+    kel_digest         TEXT     NOT NULL,
+    first_seen_at      TEXT     NOT NULL,
+    last_confirmed_at  TEXT     NOT NULL,
+    seen_count         INTEGER  DEFAULT 1,
+    source_type        TEXT     NOT NULL,
+    source_url         TEXT,
+    PRIMARY KEY (aid, sequence_num)
+);
+CREATE INDEX IF NOT EXISTS idx_kel_first_seen_aid ON kel_first_seen(aid);
+
+CREATE TABLE IF NOT EXISTS duplicity_alerts (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    aid             TEXT     NOT NULL,
+    sequence_num    INTEGER  NOT NULL,
+    our_digest      TEXT     NOT NULL,
+    their_digest    TEXT     NOT NULL,
+    source_url      TEXT,
+    detected_at     TEXT     NOT NULL,
+    resolved        INTEGER  DEFAULT 0,
+    resolution_note TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_duplicity_alerts_aid ON duplicity_alerts(aid);
+
+CREATE TABLE IF NOT EXISTS watcher_opt_out (
+    aid TEXT PRIMARY KEY
+);
+
+CREATE TABLE IF NOT EXISTS watcher_config (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+INSERT OR IGNORE INTO watcher_config (key, value) VALUES
+    ('default_l2_url', 'https://watcher.grapeid.org/public/kel-digest'),
+    ('watcher_hints', '[]');
+`,
+	},
+	{
+		Version:     13,
+		Description: "M11 KERI Witnesses: pool meta, KEL replicas, finalization",
+		SQL: `
+ALTER TABLE contacts ADD COLUMN contact_source TEXT NOT NULL DEFAULT 'manual';
+
+CREATE TABLE IF NOT EXISTS witness_contact_meta (
+    contact_aid       TEXT PRIMARY KEY,
+    backend_type      TEXT NOT NULL DEFAULT '',
+    witness_status    TEXT NOT NULL DEFAULT 'online',
+    offline_count     INTEGER NOT NULL DEFAULT 0,
+    is_mutual         INTEGER NOT NULL DEFAULT 0,
+    is_commercial     INTEGER NOT NULL DEFAULT 0,
+    enrolled_at       TEXT NOT NULL DEFAULT '',
+    last_receipt_at   TEXT NOT NULL DEFAULT '',
+    last_health_check TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS witness_kel_events (
+    signer_aid    TEXT NOT NULL,
+    sequence_num  INTEGER NOT NULL,
+    event_json    TEXT NOT NULL,
+    event_said    TEXT NOT NULL DEFAULT '',
+    stored_at     TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (signer_aid, sequence_num)
+);
+
+CREATE TABLE IF NOT EXISTS witness_receipts_issued (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    signer_aid      TEXT NOT NULL,
+    event_said      TEXT NOT NULL,
+    sequence_num    INTEGER NOT NULL,
+    witness_aid     TEXT NOT NULL,
+    receipt_json    TEXT NOT NULL,
+    cesr_signature  TEXT NOT NULL DEFAULT '',
+    issued_at       TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS witness_finalization (
+    event_said     TEXT PRIMARY KEY,
+    signer_aid     TEXT NOT NULL,
+    sequence_num   INTEGER NOT NULL,
+    state          TEXT NOT NULL,
+    receipt_count  INTEGER NOT NULL DEFAULT 0,
+    threshold      INTEGER NOT NULL,
+    started_at     TEXT NOT NULL,
+    updated_at     TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS witness_config (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS witness_self_heal_log (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    contact_aid  TEXT NOT NULL,
+    attempted_at TEXT NOT NULL
+);
+
+INSERT OR IGNORE INTO witness_config (key, value) VALUES
+    ('threshold', '5'),
+    ('max_witnesses', '9'),
+    ('target_contacts', '7'),
+    ('backend_type', 'desktop');
+`,
+	},
+	{
+		Version:     14,
+		Description: "M35 URL relay allocations",
+		SQL: `
+CREATE TABLE IF NOT EXISTS relay_allocations (
+    raid              TEXT PRIMARY KEY,
+    public_url        TEXT NOT NULL,
+    public_hostname   TEXT NOT NULL,
+    allocation_token  TEXT NOT NULL,
+    relay_provider    TEXT NOT NULL DEFAULT '',
+    enrollment_aid    TEXT NOT NULL DEFAULT '',
+    created_at        TEXT NOT NULL DEFAULT ''
+);
+`,
+	},
+	{
+		Version:     15,
+		Description: "M11 mutual enrollment: witnessing_for direction flag",
+		SQL: `
+ALTER TABLE witness_contact_meta ADD COLUMN witnessing_for INTEGER NOT NULL DEFAULT 0;
+`,
+	},
 }
 
 // ApplyIdentityMigrations creates the migrations table and applies any pending migrations.

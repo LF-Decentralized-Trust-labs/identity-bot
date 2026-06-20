@@ -38,6 +38,21 @@ type DriverInceptionResponse struct {
 	NextKeyDigest  string `json:"next_key_digest"`
 }
 
+type DriverHybridInceptionRequest struct {
+	Synthetic bool   `json:"synthetic"`
+	Name      string `json:"name,omitempty"`
+}
+
+type DriverHybridInceptionResponse struct {
+	AID            string                 `json:"aid"`
+	SAID           string                 `json:"said"`
+	InceptionEvent map[string]interface{} `json:"inception_event"`
+	RawBytesB64    string                 `json:"raw_bytes_b64"`
+	CipherSuite    string                 `json:"cipher_suite"`
+	PublicKey      string                 `json:"public_key"`
+	NextKeyDigest  string                 `json:"next_key_digest"`
+}
+
 type DriverRotationRequest struct {
 	Name             string `json:"name"`
 	NewPublicKey     string `json:"new_public_key"`
@@ -432,6 +447,19 @@ func (d *KeriDriver) GetStatus() (*DriverStatus, error) {
 
 func (d *KeriDriver) CreateInception(publicKey, nextPublicKey string) (*DriverInceptionResponse, error) {
 	return d.postInception(publicKey, nextPublicKey, "")
+}
+
+func (d *KeriDriver) CreateHybridInception(synthetic bool, name string) (*DriverHybridInceptionResponse, error) {
+	reqBody := DriverHybridInceptionRequest{Synthetic: synthetic, Name: name}
+	body, err := d.doPost("/hybrid-inception", reqBody, http.StatusCreated)
+	if err != nil {
+		return nil, err
+	}
+	var result DriverHybridInceptionResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode hybrid-inception response: %w", err)
+	}
+	return &result, nil
 }
 
 func (d *KeriDriver) CreateInceptionNamed(publicKey, nextPublicKey, name string) (*DriverInceptionResponse, error) {

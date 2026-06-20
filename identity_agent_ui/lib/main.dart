@@ -22,6 +22,7 @@ import 'screens/hosting_choice_screen.dart';
 import 'screens/setup_checklist_screen.dart';
 import 'screens/lock_screen.dart';
 import 'services/pin_password_service.dart';
+import 'widgets/login_consent_listener.dart';
 
 String? _backendStartupError;
 Future<bool>? _backendStartupFuture;
@@ -650,20 +651,24 @@ class _AgentMainScreenState extends State<AgentMainScreen>
   }
 
   Widget _buildMain() {
-    if (AppLayout.isMobile(context)) {
-      return MobileApp(
-        keriService: widget.keriService,
-        mode: widget.mode,
-        entityType: widget.entityType,
-        serverUrl: widget.serverUrl,
-      );
-    }
-    return DesktopApp(
-      keriService: widget.keriService,
-      mode: widget.mode,
-      entityType: widget.entityType,
+    final app = AppLayout.isMobile(context)
+        ? MobileApp(
+            keriService: widget.keriService,
+            mode: widget.mode,
+            entityType: widget.entityType,
+            serverUrl: widget.serverUrl,
+          )
+        : DesktopApp(
+            keriService: widget.keriService,
+            mode: widget.mode,
+            entityType: widget.entityType,
+            serverUrl: widget.serverUrl,
+            onResetIdentity: _handleReset,
+          );
+
+    return LoginConsentListener(
       serverUrl: widget.serverUrl,
-      onResetIdentity: _handleReset,
+      child: app,
     );
   }
 

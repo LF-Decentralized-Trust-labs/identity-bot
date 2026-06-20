@@ -16,6 +16,11 @@ keri-core = "0.11"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.13"
+blake3 = "1"
+regex = "1"
+pqc_poc_rust = { path = "../../pqc-poc-rust" }
+ed25519-dalek = { version = "2", default-features = false, features = ["rand_core"] }
+hex = "0.4"
 
 [profile.release]
 lto = true
