@@ -5,7 +5,10 @@ import '../services/preferences_service.dart';
 class ModeSelectionScreen extends StatefulWidget {
   final void Function(AgentMode mode) onModeSelected;
 
-  const ModeSelectionScreen({super.key, required this.onModeSelected});
+  const ModeSelectionScreen({
+    super.key,
+    required this.onModeSelected,
+  });
 
   @override
   State<ModeSelectionScreen> createState() => _ModeSelectionScreenState();
@@ -99,6 +102,15 @@ class _ModeSelectionScreenState extends State<ModeSelectionScreen> {
                         'the server URL.',
                     onTap: () =>
                         widget.onModeSelected(AgentMode.connectExisting),
+                  ),
+                  const SizedBox(height: 16),
+                  _buildModeCard(
+                    icon: Icons.archive_outlined,
+                    title: 'BACK UP ANOTHER IDENTITY',
+                    description:
+                        'Use this spare device as an encrypted backup destination. '
+                        'It stores opaque archives only — no signing or control.',
+                    onTap: () => widget.onModeSelected(AgentMode.backupOnly),
                   ),
                   const SizedBox(height: 24),
                   if (!AppLayout.isMobile(context))

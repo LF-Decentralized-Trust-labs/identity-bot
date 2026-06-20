@@ -7,6 +7,7 @@ import 'screens/desktop/desktop_app.dart';
 import 'screens/setup_wizard_screen.dart';
 import 'screens/mode_selection_screen.dart';
 import 'screens/connect_server_screen.dart';
+import 'screens/backup/backup_only_standby_screen.dart';
 import 'services/core_service.dart';
 import 'services/keri_service.dart';
 import 'services/desktop_on_device_keri_service.dart';
@@ -76,6 +77,7 @@ enum OnboardingStep {
   connectServer,
   setupWizard,
   setupChecklist,
+  backupOnlyStandby,
   dashboard,
 }
 
@@ -277,6 +279,9 @@ class _AgentRouterState extends State<AgentRouter> {
       _selectedEntityType = EntityType.individual;
       await PreferencesService.setEntityType(EntityType.individual);
       setState(() => _step = OnboardingStep.hostingChoice);
+    } else if (mode == AgentMode.backupOnly) {
+      await PreferencesService.setSetupComplete(true);
+      setState(() => _step = OnboardingStep.backupOnlyStandby);
     } else {
       setState(() => _step = OnboardingStep.connectServer);
     }
@@ -564,6 +569,9 @@ class _AgentRouterState extends State<AgentRouter> {
           hostingChoice: _hostingChoice,
           remoteBrainUrl: _remoteBrainUrl,
         );
+
+      case OnboardingStep.backupOnlyStandby:
+        return const BackupOnlyStandbyScreen(connectionStatus: 'paired');
 
       case OnboardingStep.dashboard:
         String? effectiveServerUrl = _serverUrl;

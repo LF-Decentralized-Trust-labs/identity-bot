@@ -265,7 +265,7 @@ class _DesktopSidebarState extends State<DesktopSidebar> {
                   _SubItem(icon: Icons.cloud_outlined,           label: 'Service Providers', route: DesktopRoute.settingsServiceProviders, current: widget.currentRoute, onTap: _select),
                   _SubItem(icon: Icons.gavel,                    label: 'Governance',        route: DesktopRoute.settingsGovernance,      current: widget.currentRoute, onTap: _select, comingSoon: true),
                   _SubItem(icon: Icons.key,                      label: 'KERI Protocol',     route: DesktopRoute.settingsKeri,            current: widget.currentRoute, onTap: _select),
-                  _SubItem(icon: Icons.backup_outlined,          label: 'Backup & Recovery', route: DesktopRoute.settingsBackup,          current: widget.currentRoute, onTap: _select, comingSoon: true),
+                  _SubItem(icon: Icons.backup_outlined,          label: 'Backup & Recovery', route: DesktopRoute.settingsBackup,          current: widget.currentRoute, onTap: _select),
                   _SubItem(icon: Icons.terminal,                 label: 'Developer Tools',   route: DesktopRoute.settingsDeveloperTools,  current: widget.currentRoute, onTap: _select),
                 ],
 

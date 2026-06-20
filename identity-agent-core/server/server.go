@@ -17,10 +17,11 @@ import (
         "sync"
         "time"
 
+        "identity-agent-core/backup"
         "identity-agent-core/drivers"
         "identity-agent-core/login"
         "identity-agent-core/oidc"
-        "identity-agent-core/iacrypto"
+        "identity-agent-core/m63"
         "identity-agent-core/endpoint"
         "identity-agent-core/sandbox"
         "identity-agent-core/schemas"
@@ -55,6 +56,7 @@ type CoreServer struct {
         WatcherService  *watcher.Service
         WitnessService  *witness.Service
         LinkVerifier    *linkverifier.SDK
+        BackupService   *backup.Service
         mu              sync.Mutex
         running         bool
 }
@@ -455,6 +457,7 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
                 s.guardianshipRoutes(r)
                 s.serviceProviderRoutes(r)
                 s.aiMemoryRoutes(r)
+                s.mountBackupRoutes(r)
                 r.Get("/ws/events", s.handleWebSocketEvents)
 
                 s.mountLoginRoutes(r)
@@ -802,7 +805,7 @@ func (s *CoreServer) handleHybridInception(w http.ResponseWriter, r *http.Reques
                 return
         }
 
-        result, err := iacrypto.BuildHybridInception(iacrypto.SyntheticHybridKeyMaterial(0))
+        result, err := m63.BuildHybridInception(m63.SyntheticHybridKeyMaterial(0))
         if err != nil {
                 writeError(w, http.StatusInternalServerError, "Failed to create hybrid inception event", err.Error())
                 return

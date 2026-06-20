@@ -18,6 +18,7 @@ import '../desktop/my_devices_screen.dart';
 import '../desktop/guardianship_dependents_screen.dart';
 import '../desktop/credentials_screen.dart';
 import '../desktop/service_providers_screen.dart';
+import '../backup/backup_settings_screen.dart';
 import 'mobile_dashboard.dart';
 import 'bottom_nav.dart';
 import 'drawer_menu.dart';
@@ -237,7 +238,7 @@ class _MobileAppState extends State<MobileApp> {
         break;
       case 'settingsBackup':
         title = 'Backup & Recovery';
-        body = const ComingSoonScreen(title: 'Backup & Recovery', icon: Icons.backup_outlined);
+        body = const BackupSettingsScreen();
         break;
       case 'settingsDeveloperTools':
         title = 'Developer Tools';
