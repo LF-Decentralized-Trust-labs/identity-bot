@@ -130,6 +130,8 @@ class PreferencesService {
         return 'Primary (New Identity)';
       case AgentMode.connectExisting:
         return 'Connected Device';
+      case AgentMode.backupOnly:
+        return 'Backup Only';
     }
   }
 

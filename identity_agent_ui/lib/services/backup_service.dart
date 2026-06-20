@@ -125,7 +125,7 @@ class BackupConfig {
 }
 
 class BackupService {
-  static String get _base => '${AgentConfig.backendUrl}/api/backup';
+  static String get _base => '${AgentConfig.coreBaseUrl}/api/backup';
 
   static Future<BackupStatus> getStatus() async {
     final resp = await http.get(Uri.parse('$_base/status'));
