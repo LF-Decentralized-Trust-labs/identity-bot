@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://grapeid.org/contracts/link-verifier/link-verifier-sdk.schema.json",
+  "title": "Link Verification SDK",
+  "description": "Machine-readable contract for verify() request/response shapes (link verification).",
+  "definitions": {
+    "VerifyRequest": {
+      "type": "object",
+      "required": ["input", "flow"],
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "type": "string",
+          "description": "URL | did:webs DID | OOBI URL | QR payload"
+        },
+        "input_kind": {
+          "type": "string",
+          "enum": ["url", "did_webs", "oobi", "qr_payload"]
+        },
+        "flow": {
+          "type": "string",
+          "enum": ["badge", "link"]
+        },
+        "timing": {
+          "type": "string",
+          "enum": ["eager", "lazy"],
+          "default": "lazy"
+        },
+        "tier": {
+          "type": "string",
+          "enum": ["free", "gated"],
+          "default": "free"
+        },
+        "gating_token": {
+          "type": "string",
+          "description": "Present only when tier=gated; wire shape BLOCKED (an open question)"
+        },
+        "force_refresh": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "Ownership": {
+      "type": "object",
+      "required": ["registered_to", "disclosure"],
+      "additionalProperties": false,
+      "properties": {
+        "registered_to": { "type": "string" },
+        "disclosure": {
+          "type": "string",
+          "enum": ["disclosed", "undisclosed_verified"]
+        }
+      }
+    },
+    "VerificationResult": {
+      "type": "object",
+      "required": ["outcome", "verification_path", "last_verified", "contact_correlation"],
+      "additionalProperties": false,
+      "properties": {
+        "outcome": {
+          "type": "string",
+          "enum": ["verified", "tampered", "unverified", "incomplete"],
+          "description": "Sole rendering driver (the contract §2.3)"
+        },
+        "aid": { "type": ["string", "null"] },
+        "verification_path": {
+          "type": "string",
+          "enum": ["did_webs", "oobi", "none"]
+        },
+        "kel_replay": {
+          "type": "string",
+          "enum": ["ok", "failed", "incomplete"],
+          "description": "Debug/detail only — never the badge driver"
+        },
+        "last_verified": { "type": "string", "format": "date-time" },
+        "contact_correlation": {
+          "type": ["string", "null"],
+          "enum": ["known", "stranger", null],
+          "description": "Loopback interface only; in-process SDK returns null by construction"
+        },
+        "ownership": {
+          "oneOf": [
+            { "$ref": "#/definitions/Ownership" },
+            { "type": "null" }
+          ],
+          "description": "flow=link only; null for flow=badge or verification_path=oobi"
+        },
+        "band": {
+          "type": "string",
+          "enum": ["red", "amber", "green", "gray"]
+        },
+        "band_style": {
+          "type": "string",
+          "enum": ["generic"],
+          "description": "FREE tier always generic"
+        },
+        "grape_score": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "GATED tier only; absent on free tier"
+        },
+        "grape_score_as_of": { "type": "string", "format": "date-time" },
+        "badge": {
+          "type": "string",
+          "enum": ["grape_branded"],
+          "description": "GATED tier only"
+        },
+        "cached": { "type": "boolean" }
+      }
+    }
+  },
+  "oneOf": [
+    { "$ref": "#/definitions/VerifyRequest" },
+    { "$ref": "#/definitions/VerificationResult" }
+  ]
+}

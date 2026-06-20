@@ -36,7 +36,7 @@ KERI already provides the cryptographic primitives needed for all of these scena
 
 4. **Plain language over technical vocabulary.** The four sections use consumer terms: **My Dependents**, **My Guardians**, **My Will**, **Estate Planning**. Templates use consumer terms: "Minor Child", "Elderly Family Member", "Person with a Disability", "Temporary Guardianship". Contact labels are directional plain English: "You are guardian of [Name]".
 
-5. **Black Box Infrastructure Stewardship for dependent provisioning.** Dependent identities without a physical device are provisioned via Black Box Infrastructure Stewardship providers (see M43 Doctrine 1) — the provider operates TEE-sealed enclaves and provably cannot access key material or user data. Grape ID is the default provider on the Grape ID build. The term "cloud hosting" is not used — see M43.
+5. **Black Box Infrastructure Stewardship for dependent provisioning.** Dependent identities without a physical device are provisioned via Black Box Infrastructure Stewardship providers (see the compliance Doctrine 1) — the provider operates TEE-sealed enclaves and provably cannot access key material or user data. Grape ID is the default provider on the Grape ID build. The term "cloud hosting" is not used — see the compliance model.
 
 6. **Phased delivery.** Phase 0: P-AID primitives. Phase 1: My Dependents (reworked creation flow). Phase 2: My Guardians. Phase 3: My Will. Phase 4: Estate Planning. Phase 5+: Family section, custom types, court integration.
 
@@ -67,7 +67,7 @@ The dependent's Identity Agent instance runs on a **separate, dedicated device**
 
 The Add Dependent flow branches early:
 - **Connect existing Identity Agent** — the dependent already has a functioning Identity Agent; pair via QR/link
-- **Create new Identity Agent** — install on a separate device, OR instant creation via a Black Box Infrastructure Stewardship provider (Grape ID build default; see M43 Doctrine 1)
+- **Create new Identity Agent** — install on a separate device, OR instant creation via a Black Box Infrastructure Stewardship provider (Grape ID build default; see the compliance Doctrine 1)
 
 **Why black box infrastructure is the recommended default for dependents without devices:**
 - Instant provisioning — no hardware needed
@@ -115,7 +115,7 @@ Contacts involved in guardianship relationships display a directional role label
 | Nav Location | Content |
 |---|---|
 | **Guardianship** (top-level nav) | My Dependents, My Guardians, My Will, Estate Planning |
-| **My Data > Family** (future, when My Data is implemented) | Read-only family tree, succession status summary (documents owned by M21) |
+| **My Data > Family** (future, when My Data is implemented) | Read-only family tree, succession status summary (documents owned by the data taxonomy) |
 
 ### Data Model
 

@@ -1,0 +1,37 @@
+{
+  "name": "@identity-agent/link-verify-web",
+  "version": "0.1.0",
+  "description": "Embeddable link verification SDK for browser surfaces (loopback via IA core)",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/LF-Decentralized-Trust-labs/identity-bot.git",
+    "directory": "packages/link-verify-web"
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build",
+    "test": "node src/verify.test.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.11",
+    "typescript": "^5.6.3"
+  },
+  "license": "Apache-2.0"
+}

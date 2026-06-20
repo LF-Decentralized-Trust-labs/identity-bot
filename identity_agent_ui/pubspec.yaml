@@ -16,7 +16,10 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.0+1
+# versionName (1.0.x) is semver — bump patch for fixes, minor for features.
+# versionCode (the +N) is overridden by CI with the build/run number (Play
+# requires it to strictly increase), so the +1 here is just a local placeholder.
+version: 1.0.1+1
 
 environment:
   sdk: '>=3.4.0 <4.0.0'

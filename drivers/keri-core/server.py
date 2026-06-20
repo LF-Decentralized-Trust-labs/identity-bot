@@ -171,6 +171,21 @@ def _extract_raw_key(cesr_key: str) -> bytes:
     return _b64url_decode(cesr_key)
 
 
+def create_hybrid_inception_event(use_synthetic: bool = False) -> dict:
+    from pqc.hybrid_inception import (
+        build_hybrid_inception,
+        generate_hybrid_key_material,
+        synthetic_hybrid_key_material,
+    )
+
+    material = (
+        synthetic_hybrid_key_material(seed=0)
+        if use_synthetic
+        else generate_hybrid_key_material()
+    )
+    return build_hybrid_inception(material)
+
+
 def create_inception_event(public_key: str, next_public_key: str) -> dict:
     pub_bytes = _extract_raw_key(public_key)
     next_bytes = _extract_raw_key(next_public_key)
@@ -213,6 +228,30 @@ def status():
 # ---------------------------------------------------------------------------
 # HTTP routes — Stateful KERI operations
 # ---------------------------------------------------------------------------
+
+@app.route("/hybrid-inception", methods=["POST"])
+def hybrid_inception():
+    data = request.get_json(silent=True) or {}
+    use_synthetic = bool(data.get("synthetic", False))
+
+    try:
+        result = create_hybrid_inception_event(use_synthetic=use_synthetic)
+
+        name = data.get("name", result["aid"])
+        _identities[name] = {
+            "aid": result["aid"],
+            "public_key": result["public_key"],
+            "next_key_digest": result["next_key_digest"],
+            "kel": [result["inception_event"]],
+            "sequence_number": 0,
+            "last_said": result.get("said", ""),
+            "cipher_suite": result.get("cipher_suite", "IA-HYBRID-1"),
+        }
+
+        return jsonify(result), 201
+    except Exception as e:
+        return jsonify({"error": f"Hybrid inception failed: {str(e)}"}), 500
+
 
 @app.route("/inception", methods=["POST"])
 def inception():

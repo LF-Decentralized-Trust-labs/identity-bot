@@ -5,6 +5,9 @@ import '../../services/core_service.dart';
 import '../../services/nfc_service.dart';
 import '../../config/agent_config.dart';
 import '../../widgets/contact_action_popup.dart';
+import '../../services/login_service.dart';
+import '../../widgets/consent_modal.dart';
+import '../../theme/app_theme.dart';
 
 class MobileQrScanner extends StatefulWidget {
   final String? serverUrl;
@@ -39,25 +42,7 @@ class _MobileQrScannerState extends State<MobileQrScanner> with SingleTickerProv
     await NfcService.startOobiReadSession(
       onSuccess: (oobiUrl) {
         if (!mounted || _processing) return;
-        if (!oobiUrl.contains('/oobi/')) return;
-        final uri = Uri.tryParse(oobiUrl);
-        final action = uri?.queryParameters['action'];
-        setState(() => _processing = true);
-        if (action == 'add_contact') {
-          _resolveAndAddContact(oobiUrl);
-        } else if (action != null) {
-          // Explicit but unsupported action
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Action "$action" is not yet supported.'),
-              backgroundColor: MobileColors.warning,
-            ),
-          );
-          setState(() => _processing = false);
-        } else {
-          // No action parameter — resolve and let user choose
-          _resolveAndShowIdentity(oobiUrl);
-        }
+        _dispatchScannedCode(oobiUrl);
       },
       onError: (_) {
         // Ignore NFC errors silently — camera scan is the primary path
@@ -81,16 +66,39 @@ class _MobileQrScannerState extends State<MobileQrScanner> with SingleTickerProv
     final code = barcodes.first.rawValue;
     if (code == null || code.isEmpty) return;
 
-    if (!code.contains('/oobi/')) return;
+    _dispatchScannedCode(code);
+  }
 
+  /// Shared dispatch for both camera and NFC scans.
+  ///
+  /// Recognizes the login contract's login bundle pointer
+  /// (`{origin}/auth/ia/session/{token}/bundle`) first — that carries no query
+  /// params, so it must be matched before the legacy `/oobi/?action=...` forms.
+  void _dispatchScannedCode(String code) {
     final uri = Uri.tryParse(code);
+
+    // Login bundle pointer: minimal QR, everything else is in the fetched bundle.
+    final pointerToken = _loginPointerToken(uri);
+    if (pointerToken != null) {
+      setState(() => _processing = true);
+      _runLogin(pointerToken, uri!.origin);
+      return;
+    }
+
+    // Everything else is an OOBI-style code.
+    if (!code.contains('/oobi/')) return;
     final action = uri?.queryParameters['action'];
     setState(() => _processing = true);
 
     if (action == 'add_contact') {
       _resolveAndAddContact(code);
+    } else if (action == 'login') {
+      // Legacy login QR form (full OOBI URL + session/rp). Pointer form preferred.
+      _runLogin(
+        uri?.queryParameters['session'] ?? '',
+        _resolveLoginRp(uri) ?? '',
+      );
     } else if (action != null) {
-      // Explicit but unsupported action
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Action "$action" is not yet supported.'),
@@ -101,6 +109,127 @@ class _MobileQrScannerState extends State<MobileQrScanner> with SingleTickerProv
     } else {
       // No action parameter — resolve and let user choose
       _resolveAndShowIdentity(code);
+    }
+  }
+
+  /// Returns the session token when [uri] is an Ask pointer (`.../i/{token}`,
+  /// per the login contract and the shared module), else null. The token is the last segment under the
+  /// one-char `/i/` Ask namespace; the IA fetches the signed Ask from this URL.
+  String? _loginPointerToken(Uri? uri) {
+    if (uri == null) return null;
+    final segs = uri.pathSegments;
+    final n = segs.length;
+    if (n >= 2 && segs[n - 2] == 'i') {
+      final token = segs[n - 1];
+      return token.isEmpty ? null : token;
+    }
+    return null;
+  }
+
+  String? _resolveLoginRp(Uri? uri) {
+    if (uri == null) return null;
+    final rp = uri.queryParameters['rp'] ?? '';
+    if (rp.isNotEmpty) {
+      if (rp.startsWith('http://') || rp.startsWith('https://')) return rp;
+      return 'https://$rp';
+    }
+    // RP-hosted site OOBI — session API is on the same origin as the OOBI URL.
+    if (uri.path.contains('/auth/ia/site/oobi/')) {
+      return uri.origin;
+    }
+    return null;
+  }
+
+  Future<void> _runLogin(String sessionToken, String rpSessionUrl) async {
+    if (sessionToken.isEmpty || rpSessionUrl.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Login QR missing session or site origin'),
+            backgroundColor: MobileColors.error,
+          ),
+        );
+        setState(() => _processing = false);
+      }
+      return;
+    }
+
+    final loginService = LoginService(
+      baseUrl: widget.serverUrl ?? AgentConfig.coreBaseUrl,
+    );
+
+    try {
+      final preview = await loginService.preview(
+        sessionToken: sessionToken,
+        rpSessionUrl: rpSessionUrl,
+      );
+
+      if (!mounted) return;
+
+      final details = preview.requestedDisclosures.map((field) {
+        return ConsentDetailItem(
+          label: field.replaceAll('_', ' '),
+          value: preview.disclosurePreview[field] ?? '—',
+          isMonospace: field.contains('aid') || field.contains('email'),
+        );
+      }).toList();
+
+      final result = await ConsentModal.show(
+        context: context,
+        title: 'Sign in request',
+        subtitle: preview.audience,
+        name: preview.siteLabel,
+        avatarLabel: preview.siteLabel.isNotEmpty
+            ? preview.siteLabel[0].toUpperCase()
+            : '?',
+        details: details,
+        confirmLabel: 'Approve',
+        cancelLabel: 'Deny',
+        accentColor: AppColors.accent,
+        icon: Icons.login_rounded,
+        warningMessage:
+            'You are signing in to this site. Only the fields above will be shared.',
+      );
+
+      if (result?.confirmed == true) {
+        await loginService.approve(
+          sessionToken: sessionToken,
+          rpSessionUrl: rpSessionUrl,
+        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Signed in successfully'),
+              backgroundColor: MobileColors.success,
+            ),
+          );
+          // KNOWN UI BUG (test-plan T3): the consent modal/scanner can linger
+          // after approve. Reverted the delayed-pop attempt (it made it worse —
+          // a dispose during the wait left the user stuck). Needs Tier-3
+          // computer-use UI testing on a real device to fix reliably.
+          Navigator.of(context).pop(true);
+        }
+      } else if (result?.confirmed == false) {
+        await loginService.decline(
+          sessionToken: sessionToken,
+          rpSessionUrl: rpSessionUrl,
+        );
+        setState(() => _processing = false);
+      } else {
+        setState(() => _processing = false);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Login failed: $e'),
+            backgroundColor: MobileColors.error,
+          ),
+        );
+        setState(() => _processing = false);
+      }
+    } finally {
+      loginService.dispose();
     }
   }
 
@@ -118,7 +247,7 @@ class _MobileQrScannerState extends State<MobileQrScanner> with SingleTickerProv
           photo: resolved.photo,
           aid: resolved.aid,
           kelVerified: resolved.kelVerified,
-          intentLabel: 'Scanned identity',
+          actionLabel: 'Scanned identity',
           confirmLabel: 'Add Contact',
           dismissLabel: 'Dismiss',
           onConfirm: () => Navigator.of(ctx).pop(true),
@@ -170,7 +299,7 @@ class _MobileQrScannerState extends State<MobileQrScanner> with SingleTickerProv
           photo: resolved.photo,
           aid: resolved.aid,
           kelVerified: resolved.kelVerified,
-          intentLabel: 'Wants to add you as a contact',
+          actionLabel: 'Wants to add you as a contact',
           confirmLabel: 'Add Contact',
           dismissLabel: 'Dismiss',
           onConfirm: () => Navigator.of(ctx).pop(true),
@@ -338,7 +467,7 @@ class _MobileQrScannerState extends State<MobileQrScanner> with SingleTickerProv
             CircularProgressIndicator(color: MobileColors.primary),
             SizedBox(height: 16),
             Text(
-              'Resolving identity...',
+              'Processing...',
               style: TextStyle(color: Colors.white, fontSize: 16),
             ),
           ],

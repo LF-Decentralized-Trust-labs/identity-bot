@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://grapeid.org/contracts/relay/relay-tunnel-frame.schema.json",
+  "title": "relay tunnel frame",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": ["t", "stream_id", "raid", "method", "path"],
+      "properties": {
+        "t": { "const": "req" },
+        "stream_id": { "type": "string" },
+        "raid": { "type": "string" },
+        "method": { "type": "string" },
+        "path": { "type": "string" },
+        "headers": { "type": "object" },
+        "body_b64": { "type": ["string", "null"] }
+      }
+    },
+    {
+      "type": "object",
+      "required": ["t", "stream_id", "status"],
+      "properties": {
+        "t": { "enum": ["res", "res_chunk"] },
+        "stream_id": { "type": "string" },
+        "status": { "type": "integer" },
+        "headers": { "type": "object" },
+        "body_b64": { "type": "string" },
+        "final": { "type": "boolean" },
+        "seq": { "type": "integer" }
+      }
+    }
+  ]
+}
