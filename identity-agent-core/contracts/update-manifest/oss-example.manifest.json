@@ -1,0 +1,60 @@
+{
+  "manifest_version": 1,
+  "published_at": "2026-06-15T00:00:00Z",
+  "signing_key_id": "identitybot-release-example",
+  "channels": {
+    "stable": {
+      "min_supported_manifest_version": 1
+    }
+  },
+  "components": {
+    "go_backend": {
+      "version": "0.1.0",
+      "minimum_version": "0.1.0",
+      "critical": false,
+      "artifacts": [
+        {
+          "platform": "darwin_arm64",
+          "url": "https://updates.identitybot.org/v1/artifacts/go_backend/0.1.0/darwin_arm64",
+          "blake3_256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "size_bytes": 0
+        },
+        {
+          "platform": "darwin_amd64",
+          "url": "https://updates.identitybot.org/v1/artifacts/go_backend/0.1.0/darwin_amd64",
+          "blake3_256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "size_bytes": 0
+        },
+        {
+          "platform": "linux_amd64",
+          "url": "https://updates.identitybot.org/v1/artifacts/go_backend/0.1.0/linux_amd64",
+          "blake3_256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "size_bytes": 0
+        },
+        {
+          "platform": "windows_amd64",
+          "url": "https://updates.identitybot.org/v1/artifacts/go_backend/0.1.0/windows_amd64",
+          "blake3_256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "size_bytes": 0
+        }
+      ]
+    }
+  },
+  "compatibility": {},
+  "changelog": [
+    {
+      "version": "0.1.0",
+      "date": "2026-06-15",
+      "critical": false,
+      "summary": "OSS example manifest for identitybot.org update channel",
+      "entries": [
+        "Example placeholder artifact digests — replace before publishing"
+      ]
+    }
+  ],
+  "signature": ""
+}

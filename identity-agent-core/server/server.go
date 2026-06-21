@@ -27,6 +27,7 @@ import (
         "identity-agent-core/store"
         "identity-agent-core/tunnel"
         "identity-agent-core/linkverifier"
+        "identity-agent-core/secureenclave"
         "identity-agent-core/update"
         "identity-agent-core/witness"
         "identity-agent-core/watcher"
@@ -56,7 +57,9 @@ type CoreServer struct {
         WatcherService  *watcher.Service
         WitnessService  *witness.Service
         LinkVerifier    *linkverifier.SDK
-        UpdateService   *update.Service
+        UpdateService     *update.Service
+        AttestationRunner *secureenclave.Runner
+        TrustGate         *secureenclave.TrustGate
         mu              sync.Mutex
         running         bool
 }
@@ -217,6 +220,13 @@ func New(cfg Config) (*CoreServer, error) {
                 s.UpdateService = updSvc
         }
 
+        s.AttestationRunner = secureenclave.NewRunner(secureenclave.RunnerConfig{DataDir: cfg.DataDir})
+        if s.UpdateService != nil {
+                s.TrustGate = secureenclave.NewTrustGate(s.AttestationRunner, s.UpdateService.Attestation())
+        } else {
+                s.TrustGate = secureenclave.NewTrustGate(s.AttestationRunner, nil)
+        }
+
         s.router = s.buildRouter(cfg.FlutterWebDir)
 
         return s, nil
@@ -280,6 +290,12 @@ func (s *CoreServer) Start() error {
                         return nil
                 })
                 s.UpdateService.Start(s.AppCtx)
+        }
+        if s.AttestationRunner != nil {
+                s.AttestationRunner.Start(s.AppCtx)
+        }
+        if s.loginHandler != nil && s.TrustGate != nil {
+                s.loginHandler.TrustGate = s.TrustGate
         }
 
         s.running = true

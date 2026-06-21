@@ -26,6 +26,7 @@ type StatusResponse struct {
 	Available       []AvailableUpdate `json:"available"`
 	Settings        Settings          `json:"settings"`
 	Genuineness     GenuinenessAxis   `json:"genuineness"`
+	Currency        CurrencyAxis      `json:"currency"`
 	ManifestPresent bool              `json:"manifest_present"`
 }
 
@@ -58,10 +59,7 @@ type Config struct {
 }
 
 func DefaultConfig(dataDir string) Config {
-	url := os.Getenv("UPDATE_MANIFEST_URL")
-	if url == "" {
-		url = "https://updates.grapeid.com/v1/manifest.json"
-	}
+	url := ResolveManifestURL(dataDir)
 	ta, err := DefaultTrustAnchor()
 	if err != nil {
 		log.Printf("[update] trust anchor init failed: %v", err)
@@ -145,6 +143,14 @@ func (s *Service) Genuineness() GenuinenessAxis {
 	return s.attestation.Genuineness()
 }
 
+func (s *Service) Currency() CurrencyAxis {
+	return s.attestation.Currency()
+}
+
+func (s *Service) Attestation() *Attestation {
+	return s.attestation
+}
+
 func (s *Service) Status() StatusResponse {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -154,6 +160,7 @@ func (s *Service) Status() StatusResponse {
 		Available:       s.computeAvailableLocked(),
 		Settings:        s.settings,
 		Genuineness:     s.attestation.Genuineness(),
+		Currency:        s.attestation.Currency(),
 		ManifestPresent: s.cached != nil,
 	}
 }
