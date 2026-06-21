@@ -22,6 +22,7 @@ import 'guardianship_screen.dart';
 import 'guardianship_dependents_screen.dart';
 import 'credentials_screen.dart';
 import 'service_providers_screen.dart';
+import '../backup/backup_settings_screen.dart';
 import 'update_settings_screen.dart';
 
 class DesktopApp extends StatefulWidget {
@@ -195,7 +196,7 @@ class _DesktopAppState extends State<DesktopApp> {
       case DesktopRoute.settingsNotifications:
         return const ComingSoonScreen(title: 'Notifications', icon: Icons.notifications_outlined);
       case DesktopRoute.settingsBackup:
-        return const ComingSoonScreen(title: 'Backup & Recovery', icon: Icons.backup_outlined);
+        return const BackupSettingsScreen();
 
       case DesktopRoute.settingsUpdates:
         return UpdateSettingsScreen(serverUrl: url);

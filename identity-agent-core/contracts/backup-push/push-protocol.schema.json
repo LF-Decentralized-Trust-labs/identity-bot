@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://identity-agent.dev/contracts/backup-push/v1",
+  "title": "Paired Device Backup Push Protocol",
+  "description": "Agent-to-agent push of opaque encrypted .iab archives (SEAM-19).",
+  "oneOf": [
+    {
+      "title": "PushRequest",
+      "type": "object",
+      "required": ["protocol_version", "archive_b64", "archive_size", "sent_at"],
+      "properties": {
+        "protocol_version": { "type": "integer", "const": 1 },
+        "identity_aid": { "type": "string" },
+        "archive_b64": { "type": "string" },
+        "archive_size": { "type": "integer", "minimum": 1 },
+        "sent_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    {
+      "title": "PushResponse",
+      "type": "object",
+      "required": ["received"],
+      "properties": {
+        "received": { "type": "boolean" },
+        "stored_path": { "type": "string" },
+        "message": { "type": "string" }
+      }
+    }
+  ]
+}

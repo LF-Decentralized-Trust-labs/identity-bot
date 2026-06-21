@@ -3,6 +3,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 enum AgentMode {
   createNew,
   connectExisting,
+  backupOnly,
+  recoverFromBackup,
 }
 
 enum EntityType {
@@ -129,6 +131,10 @@ class PreferencesService {
         return 'Primary (New Identity)';
       case AgentMode.connectExisting:
         return 'Connected Device';
+      case AgentMode.backupOnly:
+        return 'Backup Only';
+      case AgentMode.recoverFromBackup:
+        return 'Recover from Backup';
     }
   }
 

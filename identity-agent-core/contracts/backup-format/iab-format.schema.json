@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://identity-agent.dev/contracts/backup-format/v1",
+  "title": "Identity Agent Backup (.iab) Manifest",
+  "description": "Cleartext manifest header for envelope-encrypted identity backups (SEAM-18).",
+  "type": "object",
+  "required": ["format_version", "created_at", "tiers", "snapshot_type", "sections", "key_slots", "slot_policy", "payload_nonce_b64"],
+  "properties": {
+    "format_version": { "type": "integer", "minimum": 1 },
+    "created_at": { "type": "string", "format": "date-time" },
+    "identity_aid": { "type": "string" },
+    "tiers": {
+      "type": "array",
+      "items": { "enum": ["tier1", "tier2", "tier3"] },
+      "minItems": 1
+    },
+    "snapshot_type": { "enum": ["full", "delta"] },
+    "sections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "digest_blake3_qb64", "size_plaintext"],
+        "properties": {
+          "name": { "type": "string" },
+          "digest_blake3_qb64": { "type": "string", "pattern": "^E" },
+          "size_plaintext": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "key_slots": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["type", "wrapped_bek_b64", "nonce_b64"],
+        "properties": {
+          "type": { "enum": ["seed_hd_v1", "passphrase_argon2id_v1", "guardian_multisig_v1"] },
+          "policy": { "enum": ["or", "and"] },
+          "wrapped_bek_b64": { "type": "string" },
+          "nonce_b64": { "type": "string" },
+          "argon2_salt_b64": { "type": "string" },
+          "guardian_group_aid": { "type": "string" },
+          "threshold_m": { "type": "integer" },
+          "threshold_n": { "type": "integer" }
+        }
+      }
+    },
+    "slot_policy": { "enum": ["or", "and"] },
+    "argon2_params": {
+      "type": "object",
+      "properties": {
+        "memory_kib": { "type": "integer" },
+        "iterations": { "type": "integer" },
+        "parallelism": { "type": "integer" },
+        "salt_len": { "type": "integer" }
+      }
+    },
+    "delta_state_digest_blake3_qb64": { "type": "string" },
+    "external_pointers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["domain", "locator", "key_ref"],
+        "properties": {
+          "domain": { "type": "string" },
+          "locator": { "type": "string" },
+          "key_ref": { "type": "string" },
+          "size_bytes": { "type": "integer" },
+          "archived_at": { "type": "string" }
+        }
+      }
+    },
+    "payload_nonce_b64": { "type": "string" }
+  }
+}

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"time"
 
+	"identity-agent-core/backup"
 	"identity-agent-core/store"
 )
 
@@ -137,6 +138,7 @@ func (s *CoreServer) handleStoreCredential(w http.ResponseWriter, r *http.Reques
 	}
 
 	log.Printf("[identity-agent-core] STORE: Credential saved - SAID: %s issuer: %s", req.SAID, req.IssuerAID)
+	s.notifyBackupEvent(backup.EventCredential)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
