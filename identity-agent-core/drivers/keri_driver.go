@@ -54,9 +54,10 @@ type DriverHybridInceptionResponse struct {
 }
 
 type DriverRotationRequest struct {
-	Name             string `json:"name"`
-	NewPublicKey     string `json:"new_public_key"`
-	NewNextPublicKey string `json:"new_next_public_key"`
+	Name             string        `json:"name"`
+	NewPublicKey     string        `json:"new_public_key"`
+	NewNextPublicKey string        `json:"new_next_public_key"`
+	Data             []interface{} `json:"data,omitempty"`
 }
 
 type DriverRotationResponse struct {
@@ -64,6 +65,7 @@ type DriverRotationResponse struct {
 	NewPublicKey     string                 `json:"new_public_key"`
 	NewNextKeyDigest string                 `json:"new_next_key_digest"`
 	RotationEvent    map[string]interface{} `json:"rotation_event"`
+	Said             string                 `json:"said"`
 	// RawBytesB64: sign with the PRE-ROTATED key (mnemonic index 1), then /cesr-encode.
 	RawBytesB64    string `json:"raw_bytes_b64"`
 	SequenceNumber   int                    `json:"sequence_number"`
@@ -487,10 +489,15 @@ func (d *KeriDriver) postInception(publicKey, nextPublicKey, name string) (*Driv
 }
 
 func (d *KeriDriver) RotateAid(name, newPublicKey, newNextPublicKey string) (*DriverRotationResponse, error) {
+	return d.RotateAidWithAnchor(name, newPublicKey, newNextPublicKey, nil)
+}
+
+func (d *KeriDriver) RotateAidWithAnchor(name, newPublicKey, newNextPublicKey string, anchorData []interface{}) (*DriverRotationResponse, error) {
 	reqBody := DriverRotationRequest{
 		Name:             name,
 		NewPublicKey:     newPublicKey,
 		NewNextPublicKey: newNextPublicKey,
+		Data:             anchorData,
 	}
 
 	body, err := d.doPost("/rotation", reqBody, http.StatusOK)

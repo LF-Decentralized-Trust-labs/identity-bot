@@ -4,6 +4,7 @@ enum AgentMode {
   createNew,
   connectExisting,
   backupOnly,
+  recoverFromBackup,
 }
 
 enum EntityType {
@@ -132,6 +133,8 @@ class PreferencesService {
         return 'Connected Device';
       case AgentMode.backupOnly:
         return 'Backup Only';
+      case AgentMode.recoverFromBackup:
+        return 'Recover from Backup';
     }
   }
 

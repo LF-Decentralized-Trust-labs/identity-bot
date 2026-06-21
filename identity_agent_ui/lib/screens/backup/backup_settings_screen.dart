@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import '../../services/backup_service.dart';
 import '../../services/secure_key_store.dart';
 import '../../theme/app_theme.dart';
-
 class BackupSettingsScreen extends StatefulWidget {
   const BackupSettingsScreen({super.key});
 

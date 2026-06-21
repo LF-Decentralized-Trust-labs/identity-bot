@@ -4,10 +4,12 @@ import '../services/preferences_service.dart';
 
 class ModeSelectionScreen extends StatefulWidget {
   final void Function(AgentMode mode) onModeSelected;
+  final VoidCallback? onRecoverFromBackup;
 
   const ModeSelectionScreen({
     super.key,
     required this.onModeSelected,
+    this.onRecoverFromBackup,
   });
 
   @override
@@ -111,6 +113,21 @@ class _ModeSelectionScreenState extends State<ModeSelectionScreen> {
                         'Use this spare device as an encrypted backup destination. '
                         'It stores opaque archives only — no signing or control.',
                     onTap: () => widget.onModeSelected(AgentMode.backupOnly),
+                  ),
+                  const SizedBox(height: 16),
+                  _buildModeCard(
+                    icon: Icons.restore_page_outlined,
+                    title: 'RECOVER FROM BACKUP',
+                    description:
+                        'Restore your identity from an encrypted .iab archive using '
+                        'your seed phrase. Mandatory key rotation applies after restore.',
+                    onTap: () {
+                      if (widget.onRecoverFromBackup != null) {
+                        widget.onRecoverFromBackup!();
+                      } else {
+                        widget.onModeSelected(AgentMode.recoverFromBackup);
+                      }
+                    },
                   ),
                   const SizedBox(height: 24),
                   if (!AppLayout.isMobile(context))

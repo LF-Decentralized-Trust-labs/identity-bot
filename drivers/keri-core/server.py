@@ -293,6 +293,7 @@ def rotation():
     name = data.get("name", "")
     new_public_key = data.get("new_public_key", "")
     new_next_public_key = data.get("new_next_public_key", "")
+    seal_data = data.get("data", [])
 
     if not name:
         return jsonify({"error": "name is required"}), 400
@@ -319,6 +320,7 @@ def rotation():
             dig=prev_said,
             ndigs=[new_diger.qb64],
             sn=sn,
+            data=seal_data,
         )
 
         identity["public_key"] = new_verfer.qb64
@@ -332,6 +334,7 @@ def rotation():
             "new_public_key": new_verfer.qb64,
             "new_next_key_digest": new_diger.qb64,
             "rotation_event": serder.ked,
+            "said": serder.said,
             # raw_bytes_b64: sign these with the PRE-ROTATED key (index 1 from mnemonic)
             "raw_bytes_b64": base64.b64encode(serder.raw).decode(),
             "sequence_number": sn,
