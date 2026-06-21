@@ -4,7 +4,7 @@
 Accepted (KERI implementation details superseded by [ADR 002](002-keri-driver-pattern.md) and [ADR 003](003-adaptive-architecture.md))
 
 ## Context
-We are building an "Identity Agent" that functions as a self-sovereign digital territory. The system requires:
+We are building an "Identity Agent" that functions as a user-controlled digital territory. The system requires:
 1.  **High-Performance Cryptography:** For KERI event logs (KEL) and signature verification.
 2.  **Cross-Platform UI:** Mobile (iOS/Android) and Desktop control.
 3.  **Strict Separation of Concerns:** A "Decoupled-but-Bundled" architecture where the UI (Controller) is distinct from the State Machine (Agent).

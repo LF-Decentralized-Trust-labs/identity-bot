@@ -74,7 +74,7 @@ The user sees two options:
 
 If the user chose "Create New Identity," they are asked what kind of entity this identity represents:
 
-- **Individual** — A personal identity for a single human being. Used for personal credentials, communications, and self-sovereign identity management.
+- **Individual** — A personal identity for a single human being. Used for personal credentials, communications, and user-controlled identity management.
 
 - **Organization** — An identity representing a group, company, or institution. This choice enables future features like multi-signature key management, delegated authority hierarchies, and group credential issuance.
 

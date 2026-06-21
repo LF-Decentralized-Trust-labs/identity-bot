@@ -34,7 +34,7 @@ In either topology, the **computer** can be the user's own (laptop, desktop, min
 | 3 | Computer only | Own computer | Power users, privacy maximalists, people without smartphones, single-device households. |
 | 4 | Computer only | Black box computer | No smartphone *and* no personal computer. Needs 24/7 service. Elderly, accessibility-constrained, regions where smartphones aren't practical. |
 
-**Future:** Personal black box infrastructure (single- or multi-tenant TEE hardware operated by you, family, neighbor, or community steward — same protocol, different operator). M9 Backup is orthogonal — any configuration can mirror to a second computer.
+**Future:** Personal black box infrastructure (single- or multi-tenant TEE hardware operated by you, family, neighbor, or community steward — same protocol, different operator). Backup is orthogonal — any configuration can mirror to a second computer.
 
 ### Two Device Types (engineering view)
 

@@ -14,7 +14,7 @@ The Identity Agent needs a way for users to share their identity with others thr
 
 The naive approach is to hardcode the list of share actions in the Flutter UI. This has a critical limitation: **every change to the list — adding an action, renaming one, enabling one that was previously "coming soon", or changing the user flow it triggers — requires a full app update pushed to every user.**
 
-For a self-hosted, self-sovereign identity agent this is particularly unacceptable because:
+For a self-hosted, user-controlled identity agent this is particularly unacceptable because:
 
 1. Users self-host and self-install. There is no forced update mechanism.
 2. The Data Manager (a sandboxed app service provider) needs to be able to extend and configure the agent's capabilities without modifying the core Identity Agent binary.

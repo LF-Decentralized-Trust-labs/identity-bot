@@ -8,7 +8,7 @@
 
 ## Context
 
-The Identity Agent Protocol is designed around individual self-sovereign identity — one AID per person, managed on their own device. However, organizations (businesses, schools, hospitals, government agencies) also require verifiable identity, credential issuance authority, and participation in the KERI trust ecosystem.
+The Identity Agent Protocol is designed around individual user-controlled identity — one AID per person, managed on their own device. However, organizations (businesses, schools, hospitals, government agencies) also require verifiable identity, credential issuance authority, and participation in the KERI trust ecosystem.
 
 Key questions this ADR resolves:
 
