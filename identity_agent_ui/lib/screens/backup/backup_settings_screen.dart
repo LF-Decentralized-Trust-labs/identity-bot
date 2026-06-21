@@ -2,8 +2,6 @@ import 'package:flutter/material.dart';
 import '../../services/backup_service.dart';
 import '../../services/secure_key_store.dart';
 import '../../theme/app_theme.dart';
-import '../recovery/root_aid_rotation_screen.dart';
-
 class BackupSettingsScreen extends StatefulWidget {
   const BackupSettingsScreen({super.key});
 
@@ -180,45 +178,6 @@ class _BackupSettingsScreenState extends State<BackupSettingsScreen> {
                 backgroundColor: AppColors.accent,
                 foregroundColor: AppColors.background,
                 padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-              ),
-            ),
-            const SizedBox(height: 32),
-            const Text(
-              'BREAK-GLASS ROOT AID',
-              style: TextStyle(
-                color: AppColors.textMuted,
-                fontSize: 12,
-                letterSpacing: 1.5,
-                fontFamily: 'monospace',
-              ),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'After recovery, rotate your root AID and anchor continuity to the prior KEL tail '
-              'via a KERI IXN seal. Select which pairwise relationships carry forward.',
-              style: TextStyle(
-                color: AppColors.textSecondary,
-                fontSize: 12,
-                fontFamily: 'monospace',
-                height: 1.5,
-              ),
-            ),
-            const SizedBox(height: 12),
-            OutlinedButton.icon(
-              onPressed: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => const Scaffold(
-                      backgroundColor: AppColors.background,
-                      body: SafeArea(child: RootAidRotationScreen()),
-                    ),
-                  ),
-                );
-              },
-              icon: const Icon(Icons.swap_horiz),
-              label: const Text(
-                'ROOT AID ROTATION',
-                style: TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.w700),
               ),
             ),
             const SizedBox(height: 32),

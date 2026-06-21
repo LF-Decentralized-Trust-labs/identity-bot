@@ -62,22 +62,24 @@ func TestRetrieveFromCloudStub(t *testing.T) {
 }
 
 func TestRootAIDRotationRequiresDriver(t *testing.T) {
-	st := &memNotifyStore{
-		identity: &store.IdentityState{AID: "EoldRootAID0123456789ABCDEFGHIJKLMN"},
-		events: []store.EventRecord{{
-			AID: "EoldRootAID0123456789ABCDEFGHIJKLMN", SequenceNumber: 0, EventType: "icp",
-			EventJSON: `{"d":"EpriorTailSAID0123456789ABCDEFGHIJKLMN"}`,
-		}},
-	}
-	_, err := RotateRootAID(RootAIDRotationRequest{
-		RecoverySessionID:    "sess-1",
-		NewRootPublicKey:     "pub",
-		NewRootNextPublicKey: "next",
-	}, nil, st, t.TempDir(), nil)
-	if err == nil {
-		t.Fatal("root-AID rotation without driver must error")
-	}
-	if !RootAIDRotationAvailable() {
-		t.Fatal("root-AID rotation should be available")
-	}
+	withRootAIDRotationEnabled(t, func() {
+		st := &memNotifyStore{
+			identity: &store.IdentityState{AID: "EoldRootAID0123456789ABCDEFGHIJKLMN"},
+			events: []store.EventRecord{{
+				AID: "EoldRootAID0123456789ABCDEFGHIJKLMN", SequenceNumber: 0, EventType: "icp",
+				EventJSON: `{"d":"EpriorTailSAID0123456789ABCDEFGHIJKLMN"}`,
+			}},
+		}
+		_, err := RotateRootAID(RootAIDRotationRequest{
+			RecoverySessionID:          "sess-1",
+			NewRootPublicKey:           "pub",
+			NewRootNextPublicKey:       "next",
+			PreRotationPublicKey:       "prepub",
+			PreRotationNextPublicKey:   "prenext",
+			AuthorizationCesrSignature: "0Bsig",
+		}, nil, st, t.TempDir(), nil)
+		if err == nil {
+			t.Fatal("root-AID rotation without driver must error")
+		}
+	})
 }

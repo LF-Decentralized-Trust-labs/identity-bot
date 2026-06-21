@@ -139,7 +139,9 @@ class RootAidRotationResult {
   final String message;
   final String oldRootAid;
   final String newRootAid;
-  final String anchorIxnSaid;
+  final String newInceptionSaid;
+  final String authorizationEventSaid;
+  final String? backAnchorEventSaid;
   final int notificationsSent;
   final List<String> carriedForwardAids;
 
@@ -148,7 +150,9 @@ class RootAidRotationResult {
     required this.message,
     required this.oldRootAid,
     required this.newRootAid,
-    required this.anchorIxnSaid,
+    required this.newInceptionSaid,
+    required this.authorizationEventSaid,
+    this.backAnchorEventSaid,
     required this.notificationsSent,
     required this.carriedForwardAids,
   });
@@ -160,7 +164,9 @@ class RootAidRotationResult {
       message: json['message'] ?? '',
       oldRootAid: json['old_root_aid'] ?? '',
       newRootAid: json['new_root_aid'] ?? '',
-      anchorIxnSaid: proof['anchor_ixn_said'] ?? '',
+      newInceptionSaid: proof['new_inception_said'] ?? '',
+      authorizationEventSaid: proof['authorization_event_said'] ?? '',
+      backAnchorEventSaid: proof['back_anchor_event_said'],
       notificationsSent: json['notifications_sent'] ?? 0,
       carriedForwardAids: (json['carried_forward_aids'] as List<dynamic>? ?? [])
           .map((e) => e.toString())
@@ -273,9 +279,12 @@ class RecoveryService {
     required String recoverySessionId,
     required String newRootPublicKey,
     required String newRootNextPublicKey,
+    required String preRotationPublicKey,
+    required String preRotationNextPublicKey,
+    required String authorizationCesrSignature,
     List<String> carryForwardAids = const [],
     int witnessThreshold = 0,
-    String? cesrSignature,
+    String? backAnchorCesrSignature,
   }) async {
     final resp = await http.post(
       Uri.parse('$_base/root-aid-rotation'),
@@ -284,9 +293,13 @@ class RecoveryService {
         'recovery_session_id': recoverySessionId,
         'new_root_public_key': newRootPublicKey,
         'new_root_next_public_key': newRootNextPublicKey,
+        'pre_rotation_public_key': preRotationPublicKey,
+        'pre_rotation_next_public_key': preRotationNextPublicKey,
+        'authorization_cesr_signature': authorizationCesrSignature,
         if (carryForwardAids.isNotEmpty) 'carry_forward_aids': carryForwardAids,
         if (witnessThreshold > 0) 'witness_threshold': witnessThreshold,
-        if (cesrSignature != null) 'cesr_signature': cesrSignature,
+        if (backAnchorCesrSignature != null)
+          'back_anchor_cesr_signature': backAnchorCesrSignature,
       }),
     );
     if (resp.statusCode != 200) {

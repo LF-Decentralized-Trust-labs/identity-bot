@@ -162,6 +162,11 @@ func (s *CoreServer) handleRecoveryRetrieve(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *CoreServer) handleRecoveryRootAIDRotation(w http.ResponseWriter, r *http.Request) {
+	if !recovery.RootAIDRotationAvailable() {
+		writeError(w, http.StatusServiceUnavailable, "Root-AID rotation not available",
+			"Break-glass root-AID rotation is gated pending security review of the signed old-root delegation anchor")
+		return
+	}
 	var req recovery.RootAIDRotationRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request", err.Error())
@@ -195,7 +200,7 @@ func (s *CoreServer) handleRecoveryRootAIDRotation(w http.ResponseWriter, r *htt
 func (s *CoreServer) handleRecoveryRootAIDStatus(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]interface{}{
 		"available": recovery.RootAIDRotationAvailable(),
-		"message":   "break-glass root-AID rotation mints a new root via inception and anchors prior KEL tail SAID on the new KEL via IXN",
+		"message":   "break-glass root-AID rotation requires an old-root signed rot event sealing the new inception SAID; gated pending security review",
 	}
 	if s.DataDir != "" {
 		if m, err := recovery.LoadRootAIDMap(s.DataDir); err == nil && len(m.Entries) > 0 {

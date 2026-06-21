@@ -1,38 +1,63 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://identity-agent.dev/contracts/root-aid-continuity/v1",
+  "$id": "https://identity-agent.dev/contracts/root-aid-continuity/v2",
   "title": "Root AID Continuity Proof",
-  "description": "Break-glass root-AID rotation continuity artifact. The prior root KEL tail SAID is sealed on the new root KEL via a KERI IXN anchor (not ACDC). External notifications carry this document plus the new root AID; the prior root AID prefix is omitted from the anchor to limit correlation.",
+  "description": "Break-glass root-AID rotation continuity artifact. The compromised old root must emit a signed rot event sealing the new root inception SAID (delegation anchor in field a). Verifiers check the CESR signature against the old KEL copy held by witnesses/watchers/contacts. An optional new-root IXN back-reference to the prior KEL tail is supplementary only.",
   "type": "object",
   "required": [
     "v",
+    "old_root_aid",
     "new_root_aid",
-    "prior_kel_tail_said",
-    "anchor_ixn_said",
-    "proof_digest_blake3_qb64",
+    "new_inception_said",
+    "authorization_event",
+    "authorization_cesr_signature",
+    "authorization_event_said",
     "rotated_at"
   ],
   "properties": {
     "v": {
       "type": "string",
-      "const": "1"
+      "const": "2"
+    },
+    "old_root_aid": {
+      "type": "string",
+      "description": "Compromised/restored root AID that authorized the handoff"
     },
     "new_root_aid": {
       "type": "string",
       "description": "Fresh root AID minted via KERI inception after break-glass recovery"
     },
+    "new_inception_said": {
+      "type": "string",
+      "description": "SAID of the new root inception event sealed in the old-root authorization rot"
+    },
+    "authorization_event": {
+      "type": "object",
+      "description": "Old-root rot event with seal [{\"d\":\"<new_inception_said>\"}] in field a, signed by the pre-rotated key"
+    },
+    "authorization_cesr_signature": {
+      "type": "string",
+      "description": "CESR Cigar signature over the authorization rot event raw bytes"
+    },
+    "authorization_event_said": {
+      "type": "string",
+      "description": "SAID of the authorization rot event"
+    },
+    "back_anchor_event": {
+      "type": "object",
+      "description": "Optional new-root IXN event sealing prior_kel_tail_said (bidirectional link only)"
+    },
+    "back_anchor_cesr_signature": {
+      "type": "string",
+      "description": "CESR signature over the optional back-anchor IXN event"
+    },
+    "back_anchor_event_said": {
+      "type": "string",
+      "description": "SAID of the optional back-anchor IXN event"
+    },
     "prior_kel_tail_said": {
       "type": "string",
-      "description": "SAID of the last event on the compromised/restored root KEL; sealed in the new root IXN anchor"
-    },
-    "anchor_ixn_said": {
-      "type": "string",
-      "description": "SAID of the new-root IXN event that anchors prior_kel_tail_said"
-    },
-    "proof_digest_blake3_qb64": {
-      "type": "string",
-      "pattern": "^E",
-      "description": "Blake3-256 CESR qb64 digest over the canonical proof body (excluding this field)"
+      "description": "SAID of the last event on the old root KEL before authorization rot"
     },
     "rotated_at": {
       "type": "string",

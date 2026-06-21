@@ -14,6 +14,9 @@ class _RootAidRotationScreenState extends State<RootAidRotationScreen> {
   final _sessionIdController = TextEditingController();
   final _newPubController = TextEditingController();
   final _newNextPubController = TextEditingController();
+  final _preRotPubController = TextEditingController();
+  final _preRotNextPubController = TextEditingController();
+  final _authSigController = TextEditingController();
   final _carryForwardController = TextEditingController();
 
   RootAidRotationStatus? _status;
@@ -33,6 +36,9 @@ class _RootAidRotationScreenState extends State<RootAidRotationScreen> {
     _sessionIdController.dispose();
     _newPubController.dispose();
     _newNextPubController.dispose();
+    _preRotPubController.dispose();
+    _preRotNextPubController.dispose();
+    _authSigController.dispose();
     _carryForwardController.dispose();
     super.dispose();
   }
@@ -60,8 +66,17 @@ class _RootAidRotationScreenState extends State<RootAidRotationScreen> {
     final sessionId = _sessionIdController.text.trim();
     final newPub = _newPubController.text.trim();
     final newNext = _newNextPubController.text.trim();
-    if (sessionId.isEmpty || newPub.isEmpty || newNext.isEmpty) {
-      setState(() => _error = 'Session ID and new root keys are required');
+    final preRotPub = _preRotPubController.text.trim();
+    final preRotNext = _preRotNextPubController.text.trim();
+    final authSig = _authSigController.text.trim();
+    if (sessionId.isEmpty ||
+        newPub.isEmpty ||
+        newNext.isEmpty ||
+        preRotPub.isEmpty ||
+        preRotNext.isEmpty ||
+        authSig.isEmpty) {
+      setState(() => _error =
+          'Session ID, new root keys, pre-rotation keys, and authorization signature are required');
       return;
     }
 
@@ -80,6 +95,9 @@ class _RootAidRotationScreenState extends State<RootAidRotationScreen> {
         recoverySessionId: sessionId,
         newRootPublicKey: newPub,
         newRootNextPublicKey: newNext,
+        preRotationPublicKey: preRotPub,
+        preRotationNextPublicKey: preRotNext,
+        authorizationCesrSignature: authSig,
         carryForwardAids: carryForward,
       );
       setState(() => _lastResult = result);
@@ -119,8 +137,8 @@ class _RootAidRotationScreenState extends State<RootAidRotationScreen> {
             const SizedBox(height: 12),
             Text(
               _status?.message ??
-                  'Mint a new root AID after recovery. Continuity is proven by anchoring '
-                  'the prior KEL tail SAID on the new root KEL via a KERI IXN seal.',
+                  'Mint a new root AID after recovery. Continuity requires an old-root signed '
+                  'rot event sealing the new inception SAID. Gated pending security review.',
               style: const TextStyle(
                 color: AppColors.textSecondary,
                 fontSize: 12,
@@ -160,6 +178,33 @@ class _RootAidRotationScreenState extends State<RootAidRotationScreen> {
               style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
               decoration: const InputDecoration(
                 labelText: 'New root next public key (CESR qb64)',
+                labelStyle: TextStyle(fontFamily: 'monospace'),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _preRotPubController,
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+              decoration: const InputDecoration(
+                labelText: 'Old root pre-rotation public key (CESR qb64)',
+                labelStyle: TextStyle(fontFamily: 'monospace'),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _preRotNextPubController,
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+              decoration: const InputDecoration(
+                labelText: 'Old root pre-rotation next public key (CESR qb64)',
+                labelStyle: TextStyle(fontFamily: 'monospace'),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _authSigController,
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+              decoration: const InputDecoration(
+                labelText: 'Authorization rot CESR signature',
                 labelStyle: TextStyle(fontFamily: 'monospace'),
               ),
             ),
@@ -208,7 +253,10 @@ class _RootAidRotationScreenState extends State<RootAidRotationScreen> {
                     const SizedBox(height: 8),
                     _infoRow('Old root', _lastResult!.oldRootAid),
                     _infoRow('New root', _lastResult!.newRootAid),
-                    _infoRow('Anchor IXN', _lastResult!.anchorIxnSaid),
+                    _infoRow('New inception', _lastResult!.newInceptionSaid),
+                    _infoRow('Auth rot', _lastResult!.authorizationEventSaid),
+                    if (_lastResult!.backAnchorEventSaid != null)
+                      _infoRow('Back IXN', _lastResult!.backAnchorEventSaid!),
                     _infoRow('Notified', '${_lastResult!.notificationsSent} parties'),
                   ],
                 ),

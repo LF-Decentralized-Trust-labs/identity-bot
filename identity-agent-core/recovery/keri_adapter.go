@@ -17,6 +17,7 @@ func (a *KeriDriverAdapter) CreateInception(publicKey, nextPublicKey string) (*K
 		PublicKey:      resp.PublicKey,
 		NextKeyDigest:  resp.NextKeyDigest,
 		InceptionEvent: resp.InceptionEvent,
+		InceptionSAID:  eventSAID(resp.InceptionEvent),
 		SequenceNumber: 0,
 	}, nil
 }
@@ -31,7 +32,28 @@ func (a *KeriDriverAdapter) CreateHybridInception(synthetic bool, name string) (
 		PublicKey:      resp.PublicKey,
 		NextKeyDigest:  resp.NextKeyDigest,
 		InceptionEvent: resp.InceptionEvent,
+		InceptionSAID:  eventSAID(resp.InceptionEvent),
 		SequenceNumber: 0,
+	}, nil
+}
+
+func (a *KeriDriverAdapter) RotateWithAnchor(name, newPublicKey, newNextPublicKey string, anchorData []interface{}) (*KeriRotationResult, error) {
+	resp, err := a.Driver.RotateAidWithAnchor(name, newPublicKey, newNextPublicKey, anchorData)
+	if err != nil {
+		return nil, err
+	}
+	said := resp.Said
+	if said == "" {
+		said = eventSAID(resp.RotationEvent)
+	}
+	return &KeriRotationResult{
+		AID:              resp.AID,
+		NewPublicKey:     resp.NewPublicKey,
+		NewNextKeyDigest: resp.NewNextKeyDigest,
+		RotationEvent:    resp.RotationEvent,
+		RotationSAID:     said,
+		RawBytesB64:      resp.RawBytesB64,
+		SequenceNumber:   resp.SequenceNumber,
 	}, nil
 }
 
