@@ -260,6 +260,10 @@ func (s *CoreServer) Start() error {
 
         s.running = true
 
+        if cfg, err := s.backupService().LoadConfig(); err == nil && cfg.Enabled && cfg.ScheduleDaily {
+                s.backupService().Scheduler.StartDaily()
+        }
+
         addr := fmt.Sprintf("0.0.0.0:%d", s.Port)
         log.Printf("[identity-agent-core] Server listening on %s", addr)
         log.Printf("[identity-agent-core] Endpoint URL: %s (source: %s)", s.EndpointService.CurrentURL(), s.EndpointService.Source())
@@ -939,6 +943,7 @@ func (s *CoreServer) handleRotation(w http.ResponseWriter, r *http.Request) {
 
         log.Printf("[identity-agent-core] ROTATION: Key rotated for AID: %s (sn: %d)", result.AID, result.SequenceNumber)
         s.broadcastWitnessEvent(result.AID, string(eventJSON))
+        s.notifyBackupEvent(backup.EventKeyRotation)
 
         w.Header().Set("Content-Type", "application/json")
         json.NewEncoder(w).Encode(result)
@@ -1236,6 +1241,8 @@ func (s *CoreServer) handleIssueCredential(w http.ResponseWriter, r *http.Reques
         }
         if err := s.DataStore.SaveCredential(record); err != nil {
                 log.Printf("[identity-agent-core] CREDENTIAL: Failed to persist credential %s: %v", result.AcdcSaid, err)
+        } else {
+                s.notifyBackupEvent(backup.EventCredential)
         }
 
         // Attempt automatic push delivery to the holder if they are a known contact
@@ -1363,6 +1370,7 @@ func (s *CoreServer) handleReceiveCredential(w http.ResponseWriter, r *http.Requ
                 writeError(w, http.StatusInternalServerError, "Failed to save credential", err.Error())
                 return
         }
+        s.notifyBackupEvent(backup.EventCredential)
 
         log.Printf("[identity-agent-core] CREDENTIAL: Received %s (format=%s) for holder %s", said, req.Format, identity.AID)
         w.Header().Set("Content-Type", "application/json")
@@ -1434,6 +1442,7 @@ func (s *CoreServer) handleDeliverCredential(w http.ResponseWriter, r *http.Requ
                 writeError(w, http.StatusInternalServerError, "Failed to save credential", err.Error())
                 return
         }
+        s.notifyBackupEvent(backup.EventCredential)
 
         s.EventHub.Broadcast(AgentEvent{
                 Type: "credential_received",
@@ -2800,6 +2809,9 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
                 writeError(w, http.StatusInternalServerError, "Failed to save contact", err.Error())
                 return
         }
+        if contact.Verified {
+                s.notifyBackupEvent(backup.EventContactVerified)
+        }
 
         log.Printf("[identity-agent-core] CONTACT: Added %s (AID: %s) status=%s kel_verified=%v", alias, oobiData.AID, contactStatus, kelVerified)
 
@@ -3067,6 +3079,9 @@ func (s *CoreServer) handleExchange(w http.ResponseWriter, r *http.Request) {
         if err := s.DataStore.SaveContact(contact); err != nil {
                 writeError(w, http.StatusInternalServerError, "Failed to save contact", err.Error())
                 return
+        }
+        if contact.Verified {
+                s.notifyBackupEvent(backup.EventContactVerified)
         }
 
         log.Printf("[identity-agent-core] EXCHANGE: Introduction received from %s (AID: %s) — saved as pending_inbound, kel_verified=%v", alias, req.SenderAID, kelPresent)
@@ -3601,6 +3616,7 @@ func (s *CoreServer) handlePutProfile(w http.ResponseWriter, r *http.Request) {
                 writeError(w, http.StatusInternalServerError, "Failed to save profile", err.Error())
                 return
         }
+        s.notifyBackupEvent(backup.EventProfileChange)
 
         log.Printf("[identity-agent-core] Profile updated: fn=%q", profile.FullName)
 

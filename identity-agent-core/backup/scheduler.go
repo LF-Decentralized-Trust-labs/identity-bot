@@ -8,20 +8,30 @@ import (
 
 // Scheduler handles debounced event-triggered and daily backups.
 type Scheduler struct {
-	svc          *Service
-	mu           sync.Mutex
-	debounce     *time.Timer
-	lastExport   time.Time
-	dailyTicker  *time.Ticker
-	stopCh       chan struct{}
-	mnemonicFunc func() (string, error) // injected — never persisted
+	svc              *Service
+	mu               sync.Mutex
+	debounce         *time.Timer
+	debounceInterval time.Duration
+	lastExport       time.Time
+	dailyTicker      *time.Ticker
+	stopCh           chan struct{}
+	mnemonicFunc     func() (string, error) // injected — never persisted
+	afterRunHook     func(reason string)    // tests only
 }
 
 func NewScheduler(svc *Service) *Scheduler {
 	return &Scheduler{
-		svc:    svc,
-		stopCh: make(chan struct{}),
+		svc:              svc,
+		stopCh:           make(chan struct{}),
+		debounceInterval: 5 * time.Minute,
 	}
+}
+
+// SetDebounceInterval overrides the default 5-minute debounce (tests only).
+func (sch *Scheduler) SetDebounceInterval(d time.Duration) {
+	sch.mu.Lock()
+	defer sch.mu.Unlock()
+	sch.debounceInterval = d
 }
 
 // SetMnemonicProvider supplies the seed at export time (transient, never stored).
@@ -36,7 +46,11 @@ func (sch *Scheduler) TriggerEvent(reason string) {
 	if sch.debounce != nil {
 		sch.debounce.Stop()
 	}
-	sch.debounce = time.AfterFunc(5*time.Minute, func() {
+	interval := sch.debounceInterval
+	if interval <= 0 {
+		interval = 5 * time.Minute
+	}
+	sch.debounce = time.AfterFunc(interval, func() {
 		sch.runBackup(reason)
 	})
 }
@@ -67,10 +81,25 @@ func (sch *Scheduler) Stop() {
 	if sch.dailyTicker != nil {
 		sch.dailyTicker.Stop()
 	}
-	close(sch.stopCh)
+	if sch.debounce != nil {
+		sch.debounce.Stop()
+	}
+	select {
+	case <-sch.stopCh:
+	default:
+		close(sch.stopCh)
+	}
+}
+
+// SetAfterRunHook observes debounced scheduler invocations (tests only).
+func (sch *Scheduler) SetAfterRunHook(fn func(reason string)) {
+	sch.afterRunHook = fn
 }
 
 func (sch *Scheduler) runBackup(reason string) {
+	if sch.afterRunHook != nil {
+		sch.afterRunHook(reason)
+	}
 	cfg, err := sch.svc.ConfigStore.LoadConfig()
 	if err != nil || !cfg.Enabled {
 		return
@@ -84,7 +113,7 @@ func (sch *Scheduler) runBackup(reason string) {
 		log.Printf("[backup] skip %s: mnemonic unavailable", reason)
 		return
 	}
-	_, err = sch.svc.Export(mnemonic, "", "", cfg.DefaultTiers)
+	_, err = sch.svc.ExportWithReason(mnemonic, "", "", cfg.DefaultTiers, reason)
 	if err != nil {
 		log.Printf("[backup] %s export failed: %v", reason, err)
 		return

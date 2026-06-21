@@ -26,6 +26,8 @@ func (s *CoreServer) mountBackupRoutes(r chi.Router) {
 		r.Get("/receive/{identityAID}", s.handleBackupListReceived)
 		r.Get("/receive/{identityAID}/download/{name}", s.handleBackupDownload)
 		r.Post("/trigger", s.handleBackupTrigger)
+		r.Post("/credentials", s.handleBackupSaveCredentials)
+		r.Post("/pull/{destID}", s.handleBackupPull)
 	})
 }
 
@@ -42,6 +44,10 @@ func (s *CoreServer) backupService() *backup.Service {
 		s.BackupService = backup.NewService(s.DataDir, s.DataStore)
 	}
 	return s.BackupService
+}
+
+func (s *CoreServer) notifyBackupEvent(reason backup.EventReason) {
+	s.backupService().NotifyEvent(reason)
 }
 
 func (s *CoreServer) handleBackupExport(w http.ResponseWriter, r *http.Request) {
@@ -205,9 +211,59 @@ func (s *CoreServer) handleBackupListReceived(w http.ResponseWriter, r *http.Req
 }
 
 func (s *CoreServer) handleBackupTrigger(w http.ResponseWriter, r *http.Request) {
-	s.backupService().Scheduler.TriggerEvent("manual_trigger")
+	s.notifyBackupEvent(backup.EventManual)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "scheduled"})
+}
+
+type backupCredentialsRequest struct {
+	Credentials backup.RemoteCredentialSecrets `json:"credentials"`
+}
+
+func (s *CoreServer) handleBackupSaveCredentials(w http.ResponseWriter, r *http.Request) {
+	var req backupCredentialsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request", err.Error())
+		return
+	}
+	id, err := s.backupService().SaveDestinationCredentials(req.Credentials)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Save credentials failed", err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"credential_id": id})
+}
+
+func (s *CoreServer) handleBackupPull(w http.ResponseWriter, r *http.Request) {
+	destID := chi.URLParam(r, "destID")
+	cfg, err := s.backupService().LoadConfig()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Load config failed", err.Error())
+		return
+	}
+	var dest *backup.Destination
+	for i := range cfg.Destinations {
+		if cfg.Destinations[i].ID == destID {
+			dest = &cfg.Destinations[i]
+			break
+		}
+	}
+	if dest == nil {
+		writeError(w, http.StatusNotFound, "Destination not found", destID)
+		return
+	}
+	data, key, err := s.backupService().PullLatestArchive(*dest)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Pull failed", err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"object_key":  key,
+		"size_bytes":  len(data),
+		"archive_b64": backup.EncodeB64(data),
+	})
 }
 
 // handleBackupDownload serves a received opaque archive for recovery retrieval (C7).

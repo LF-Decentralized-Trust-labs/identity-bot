@@ -1,33 +1,75 @@
 package backup
 
 import (
+	"context"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"time"
 
+	"identity-agent-core/backup/remote"
 	"identity-agent-core/store"
 
 	"github.com/google/uuid"
 )
 
+type remoteBackend interface {
+	Push(ctx context.Context, objectKey string, data []byte) error
+	Pull(ctx context.Context, objectKey string) ([]byte, error)
+	List(ctx context.Context, prefix string) ([]string, error)
+}
+
+var remoteBackendFactory = func(dest Destination, creds RemoteCredentialSecrets) (remoteBackend, error) {
+	return remote.NewBackend(toRemoteDestination(dest), toRemoteCredentials(creds))
+}
+
+func toRemoteDestination(dest Destination) remote.DestinationConfig {
+	return remote.DestinationConfig{
+		Provider:  dest.CloudProvider,
+		Bucket:    dest.CloudBucket,
+		Prefix:    dest.CloudPrefix,
+		Endpoint:  dest.CloudEndpoint,
+		Region:    dest.CloudRegion,
+		RemoteURL: dest.RemoteURL,
+	}
+}
+
+func toRemoteCredentials(creds RemoteCredentialSecrets) remote.CredentialSecrets {
+	return remote.CredentialSecrets{
+		AccessKey:          creds.AccessKey,
+		SecretKey:          creds.SecretKey,
+		SessionToken:       creds.SessionToken,
+		Username:           creds.Username,
+		Password:           creds.Password,
+		AccountName:        creds.AccountName,
+		ServiceAccountJSON: creds.ServiceAccountJSON,
+	}
+}
+
 // Service orchestrates backup export, push, and status.
 type Service struct {
-	DataDir     string
-	Store       store.Store
-	ConfigStore *ConfigStore
-	Pusher      *PairedPusher
-	Scheduler   *Scheduler
-	failures    int
+	DataDir          string
+	Store            store.Store
+	ConfigStore      *ConfigStore
+	CredentialStore  *CredentialStore
+	Pusher           *PairedPusher
+	Scheduler        *Scheduler
+	failures         int
 }
 
 func NewService(dataDir string, st store.Store) *Service {
 	cs := NewConfigStore(dataDir)
+	credStore, err := NewCredentialStore(dataDir)
+	if err != nil {
+		log.Printf("[backup] credential store init failed: %v", err)
+	}
 	svc := &Service{
-		DataDir:     dataDir,
-		Store:       st,
-		ConfigStore: cs,
-		Pusher:      NewPairedPusher(),
+		DataDir:         dataDir,
+		Store:           st,
+		ConfigStore:     cs,
+		CredentialStore: credStore,
+		Pusher:          NewPairedPusher(),
 	}
 	svc.Scheduler = NewScheduler(svc)
 	return svc
@@ -37,8 +79,21 @@ func (s *Service) Collector() *Collector {
 	return &Collector{DataDir: s.DataDir, Store: s.Store}
 }
 
+// NotifyEvent schedules a debounced backup for a store-layer change.
+func (s *Service) NotifyEvent(reason EventReason) {
+	if s == nil || s.Scheduler == nil {
+		return
+	}
+	s.Scheduler.TriggerEvent(string(reason))
+}
+
 // Export writes an encrypted archive to disk and optionally pushes to destinations.
 func (s *Service) Export(mnemonic, passphrase, destPath string, tiers []string) (*ExportResult, error) {
+	return s.ExportWithReason(mnemonic, passphrase, destPath, tiers, "")
+}
+
+// ExportWithReason creates a full or delta archive based on schedule and delta chain health.
+func (s *Service) ExportWithReason(mnemonic, passphrase, destPath string, tiers []string, reason string) (*ExportResult, error) {
 	start := time.Now()
 	collector := s.Collector()
 	opts := DefaultCollectOptions(tiers)
@@ -46,7 +101,6 @@ func (s *Service) Export(mnemonic, passphrase, destPath string, tiers []string) 
 		cfg, _ := s.ConfigStore.LoadConfig()
 		opts.Tiers = cfg.DefaultTiers
 	}
-	// Tier 1 always included
 	hasTier1 := false
 	for _, t := range opts.Tiers {
 		if t == TierCritical {
@@ -57,10 +111,62 @@ func (s *Service) Export(mnemonic, passphrase, destPath string, tiers []string) 
 		opts.Tiers = append([]string{TierCritical}, opts.Tiers...)
 	}
 
+	deltaState, err := s.ConfigStore.LoadDeltaState()
+	if err != nil {
+		s.recordFailure(opts.Tiers, err, time.Since(start))
+		return nil, err
+	}
+
+	forceFull := false
+	chainReset := false
+	if deltaState.ChainDigestQB64 != "" {
+		if err := deltaState.VerifyChain(); err != nil {
+			log.Printf("[backup] delta chain mismatch, discarding chain: %v", err)
+			deltaState = ResetDeltaState()
+			forceFull = true
+			chainReset = true
+		}
+	}
+
+	snapshotType, compaction := DecideSnapshotType(deltaState, reason, forceFull)
+	if chainReset {
+		compaction = true
+	}
+
+	fullBundle, pointers, err := collector.Collect(opts)
+	if err != nil {
+		s.recordFailure(opts.Tiers, err, time.Since(start))
+		return nil, err
+	}
+
+	archiveBundle := fullBundle
+	if snapshotType == SnapshotDelta {
+		archiveBundle = FilterDeltaBundle(fullBundle, &deltaState, opts.Tiers)
+		if len(archiveBundle.Ordered) == 0 {
+			log.Printf("[backup] no delta changes for %s — skipping export", reason)
+			return &ExportResult{
+				Bytes:        nil,
+				Size:         0,
+				Tiers:        opts.Tiers,
+				SnapshotType: SnapshotDelta,
+			}, nil
+		}
+	}
+
+	pendingState := deltaState
+	if err := UpdateDeltaStateAfterBackup(&pendingState, fullBundle, snapshotType, compaction); err != nil {
+		s.recordFailure(opts.Tiers, err, time.Since(start))
+		return nil, err
+	}
+
 	result, err := collector.CreateArchive(opts, ExportRequest{
-		Mnemonic:   mnemonic,
-		Passphrase: passphrase,
-		Tiers:      opts.Tiers,
+		Mnemonic:               mnemonic,
+		Passphrase:             passphrase,
+		Tiers:                  opts.Tiers,
+		SnapshotType:           snapshotType,
+		Bundle:                 archiveBundle,
+		ExternalPointers:       pointers,
+		DeltaStateDigestQB64:   pendingState.ChainDigestQB64,
 	})
 	if err != nil {
 		s.recordFailure(opts.Tiers, err, time.Since(start))
@@ -79,6 +185,18 @@ func (s *Service) Export(mnemonic, passphrase, destPath string, tiers []string) 
 	}
 
 	cfg, _ := s.ConfigStore.LoadConfig()
+	destIDs := s.pushToDestinations(cfg, result)
+
+	if err := s.ConfigStore.SaveDeltaState(pendingState); err != nil {
+		log.Printf("[backup] failed to persist delta state: %v", err)
+	}
+
+	s.recordSuccess(opts.Tiers, result.Size, destIDs, time.Since(start), result.SnapshotType)
+	s.failures = 0
+	return result, nil
+}
+
+func (s *Service) pushToDestinations(cfg Config, result *ExportResult) []string {
 	destIDs := []string{}
 	for _, d := range cfg.Destinations {
 		if !d.Enabled {
@@ -90,31 +208,93 @@ func (s *Service) Export(mnemonic, passphrase, destPath string, tiers []string) 
 			if path == "" {
 				continue
 			}
-			name := fmt.Sprintf("backup-%s.iab", time.Now().UTC().Format("20060102-150405"))
+			name := fmt.Sprintf("backup-%s-%s.iab", result.SnapshotType, time.Now().UTC().Format("20060102-150405"))
 			full := filepath.Join(path, name)
 			if err := os.MkdirAll(path, 0755); err == nil {
-				_ = os.WriteFile(full, result.Bytes, 0600)
-				destIDs = append(destIDs, d.ID)
+				if err := os.WriteFile(full, result.Bytes, 0600); err == nil {
+					destIDs = append(destIDs, d.ID)
+				}
 			}
 		case DestPairedAgent:
 			if err := s.Pusher.Push(d.PairedURL, result.Bytes); err == nil {
 				destIDs = append(destIDs, d.ID)
 			}
+		case DestCloudUser:
+			if err := s.pushCloudDestination(d, result); err == nil {
+				destIDs = append(destIDs, d.ID)
+			} else {
+				log.Printf("[backup] cloud push %s failed: %v", d.ID, err)
+			}
+		case DestCloudHosted:
+			log.Printf("[backup] cloud_hosted destination %s is a commercial stub", d.ID)
 		}
 	}
-
-	s.recordSuccess(opts.Tiers, result.Size, destIDs, time.Since(start))
-	s.failures = 0
-	return result, nil
+	return destIDs
 }
 
-func (s *Service) recordSuccess(tiers []string, size int, dests []string, dur time.Duration) {
+func (s *Service) pushCloudDestination(dest Destination, result *ExportResult) error {
+	if s.CredentialStore == nil {
+		return fmt.Errorf("credential store unavailable")
+	}
+	creds, err := s.CredentialStore.Load(dest.CredentialID)
+	if err != nil {
+		return err
+	}
+	backend, err := remoteBackendFactory(dest, creds)
+	if err != nil {
+		return err
+	}
+	key := remote.ArchiveObjectKey(toRemoteDestination(dest), result.SnapshotType)
+	return backend.Push(context.Background(), key, result.Bytes)
+}
+
+// PullLatestArchive downloads the newest encrypted .iab from a user-managed destination.
+func (s *Service) PullLatestArchive(dest Destination) ([]byte, string, error) {
+	if dest.Type != DestCloudUser {
+		return nil, "", fmt.Errorf("pull only supported for cloud_user_managed destinations")
+	}
+	if s.CredentialStore == nil {
+		return nil, "", fmt.Errorf("credential store unavailable")
+	}
+	creds, err := s.CredentialStore.Load(dest.CredentialID)
+	if err != nil {
+		return nil, "", err
+	}
+	backend, err := remoteBackendFactory(dest, creds)
+	if err != nil {
+		return nil, "", err
+	}
+	ctx := context.Background()
+	key, err := remote.LatestArchiveKey(ctx, backend, dest.CloudPrefix)
+	if err != nil {
+		return nil, "", err
+	}
+	data, err := backend.Pull(ctx, key)
+	if err != nil {
+		return nil, "", err
+	}
+	return data, key, nil
+}
+
+// SaveDestinationCredentials stores encrypted remote credentials and returns the credential ID.
+func (s *Service) SaveDestinationCredentials(creds RemoteCredentialSecrets) (string, error) {
+	if s.CredentialStore == nil {
+		return "", fmt.Errorf("credential store unavailable")
+	}
+	id := uuid.New().String()
+	return id, s.CredentialStore.Save(id, creds)
+}
+
+func (s *Service) recordSuccess(tiers []string, size int, dests []string, dur time.Duration, snapshotType string) {
+	if snapshotType == "" {
+		snapshotType = SnapshotFull
+	}
 	_ = s.ConfigStore.AppendHistory(HistoryEntry{
 		ID:           uuid.New().String(),
 		Timestamp:    time.Now().UTC().Format(time.RFC3339),
 		Tiers:        tiers,
 		SizeBytes:    size,
-		SnapshotType: "full",
+		SnapshotType: snapshotType,
 		Success:      true,
 		DurationMs:   dur.Milliseconds(),
 		Destinations: dests,

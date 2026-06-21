@@ -28,6 +28,12 @@ type Destination struct {
 	PairedURL       string          `json:"paired_url,omitempty"`
 	PairedRole      string          `json:"paired_role,omitempty"` // backup_only
 	CloudProvider   string          `json:"cloud_provider,omitempty"`
+	CloudBucket     string          `json:"cloud_bucket,omitempty"`
+	CloudPrefix     string          `json:"cloud_prefix,omitempty"`
+	CloudEndpoint   string          `json:"cloud_endpoint,omitempty"`
+	CloudRegion     string          `json:"cloud_region,omitempty"`
+	RemoteURL       string          `json:"remote_url,omitempty"`
+	CredentialID    string          `json:"credential_id,omitempty"`
 	IAGated         bool            `json:"ia_gated"` // true = requires working IA to retrieve
 	Enabled         bool            `json:"enabled"`
 	LastSuccessAt   string          `json:"last_success_at,omitempty"`
@@ -91,6 +97,39 @@ func (s *ConfigStore) historyPath() string {
 
 func (s *ConfigStore) deltaStatePath() string {
 	return filepath.Join(s.dir, "backup_delta_state.json")
+}
+
+func (s *ConfigStore) LoadDeltaState() (DeltaState, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	data, err := os.ReadFile(s.deltaStatePath())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return ResetDeltaState(), nil
+		}
+		return DeltaState{}, err
+	}
+	var ds DeltaState
+	if err := json.Unmarshal(data, &ds); err != nil {
+		return DeltaState{}, err
+	}
+	if ds.SectionDigests == nil {
+		ds.SectionDigests = map[string]string{}
+	}
+	return ds, nil
+}
+
+func (s *ConfigStore) SaveDeltaState(ds DeltaState) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if ds.SectionDigests == nil {
+		ds.SectionDigests = map[string]string{}
+	}
+	data, err := json.MarshalIndent(ds, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(s.deltaStatePath(), data, 0600)
 }
 
 func DefaultConfig() Config {
@@ -268,6 +307,15 @@ func ValidateDestination(dest Destination) error {
 		if dest.PairedURL == "" {
 			return fmt.Errorf("paired_agent destination requires paired_url")
 		}
+	case DestCloudUser:
+		if dest.CloudProvider == "" {
+			return fmt.Errorf("cloud_user_managed destination requires cloud_provider")
+		}
+		if dest.CredentialID == "" {
+			return fmt.Errorf("cloud_user_managed destination requires credential_id")
+		}
+	case DestCloudHosted:
+		return fmt.Errorf("cloud_hosted is a commercial service — not yet available")
 	default:
 		return nil
 	}

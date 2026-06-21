@@ -7,13 +7,16 @@ import (
 
 // ExportRequest parameters for creating an archive.
 type ExportRequest struct {
-	Mnemonic       string
-	Passphrase     string // optional — adds passphrase slot
-	Tiers          []string
-	SnapshotType   string // full | delta
-	BIP39Seed      []byte // alternative to Mnemonic (API may pass derived seed)
-	GuardianSlots  []KeySlot
-	SlotPolicy     SlotPolicy
+	Mnemonic             string
+	Passphrase           string // optional — adds passphrase slot
+	Tiers                []string
+	SnapshotType         string // full | delta
+	BIP39Seed            []byte // alternative to Mnemonic (API may pass derived seed)
+	GuardianSlots        []KeySlot
+	SlotPolicy           SlotPolicy
+	Bundle               *PayloadBundle
+	ExternalPointers     []ExternalDataPointer
+	DeltaStateDigestQB64 string
 }
 
 // ExportResult describes a completed export.
@@ -31,9 +34,17 @@ func (c *Collector) CreateArchive(opts CollectOptions, req ExportRequest) (*Expo
 		return nil, fmt.Errorf("mnemonic or bip39 seed required for encryption")
 	}
 
-	bundle, pointers, err := c.Collect(opts)
-	if err != nil {
-		return nil, err
+	var bundle *PayloadBundle
+	var pointers []ExternalDataPointer
+	var err error
+	if req.Bundle != nil {
+		bundle = req.Bundle
+		pointers = req.ExternalPointers
+	} else {
+		bundle, pointers, err = c.Collect(opts)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	identity, _ := c.Store.GetIdentity()
@@ -54,6 +65,7 @@ func (c *Collector) CreateArchive(opts CollectOptions, req ExportRequest) (*Expo
 
 	manifest := NewManifest(aid, tiers, snapshotType)
 	manifest.ExternalPointers = pointers
+	manifest.DeltaStateDigestQB64 = req.DeltaStateDigestQB64
 	if req.SlotPolicy != "" {
 		manifest.SlotPolicy = req.SlotPolicy
 	}
