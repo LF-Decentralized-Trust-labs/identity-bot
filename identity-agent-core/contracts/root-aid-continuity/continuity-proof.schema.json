@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://identity-agent.dev/contracts/root-aid-continuity/v1",
+  "title": "Root AID Continuity Proof",
+  "description": "Break-glass root-AID rotation continuity artifact. The prior root KEL tail SAID is sealed on the new root KEL via a KERI IXN anchor (not ACDC). External notifications carry this document plus the new root AID; the prior root AID prefix is omitted from the anchor to limit correlation.",
+  "type": "object",
+  "required": [
+    "v",
+    "new_root_aid",
+    "prior_kel_tail_said",
+    "anchor_ixn_said",
+    "proof_digest_blake3_qb64",
+    "rotated_at"
+  ],
+  "properties": {
+    "v": {
+      "type": "string",
+      "const": "1"
+    },
+    "new_root_aid": {
+      "type": "string",
+      "description": "Fresh root AID minted via KERI inception after break-glass recovery"
+    },
+    "prior_kel_tail_said": {
+      "type": "string",
+      "description": "SAID of the last event on the compromised/restored root KEL; sealed in the new root IXN anchor"
+    },
+    "anchor_ixn_said": {
+      "type": "string",
+      "description": "SAID of the new-root IXN event that anchors prior_kel_tail_said"
+    },
+    "proof_digest_blake3_qb64": {
+      "type": "string",
+      "pattern": "^E",
+      "description": "Blake3-256 CESR qb64 digest over the canonical proof body (excluding this field)"
+    },
+    "rotated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "recovery_session_id": {
+      "type": "string"
+    },
+    "carry_forward_aids": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Pairwise/contact AIDs the user chose to preserve across rotation"
+    },
+    "witness_threshold": {
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": false
+}

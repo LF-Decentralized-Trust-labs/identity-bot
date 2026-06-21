@@ -167,9 +167,25 @@ func (s *CoreServer) handleRecoveryRootAIDRotation(w http.ResponseWriter, r *htt
 		writeError(w, http.StatusBadRequest, "Invalid request", err.Error())
 		return
 	}
-	result, err := recovery.RotateRootAID(req)
+	if s.KeriDriver == nil {
+		writeError(w, http.StatusServiceUnavailable, "KERI driver not available",
+			"Root-AID rotation requires the KERI driver on desktop or Rust bridge on mobile")
+		return
+	}
+	if s.DataStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "Store not available", "identity store is required")
+		return
+	}
+
+	var watcherHints []string
+	if s.WatcherService != nil {
+		watcherHints = s.WatcherService.WatcherHints()
+	}
+
+	adapter := &recovery.KeriDriverAdapter{Driver: s.KeriDriver}
+	result, err := recovery.RotateRootAID(req, adapter, s.DataStore, s.DataDir, watcherHints)
 	if err != nil {
-		writeError(w, http.StatusNotImplemented, "Not implemented", err.Error())
+		writeError(w, http.StatusUnprocessableEntity, "Root-AID rotation failed", err.Error())
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -177,9 +193,18 @@ func (s *CoreServer) handleRecoveryRootAIDRotation(w http.ResponseWriter, r *htt
 }
 
 func (s *CoreServer) handleRecoveryRootAIDStatus(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	resp := map[string]interface{}{
 		"available": recovery.RootAIDRotationAvailable(),
-		"message":   "root-AID break-glass rotation is stubbed pending KERI research",
-	})
+		"message":   "break-glass root-AID rotation mints a new root via inception and anchors prior KEL tail SAID on the new KEL via IXN",
+	}
+	if s.DataDir != "" {
+		if m, err := recovery.LoadRootAIDMap(s.DataDir); err == nil && len(m.Entries) > 0 {
+			resp["rotation_count"] = len(m.Entries)
+			last := m.Entries[len(m.Entries)-1]
+			resp["last_rotation_at"] = last.RotatedAt
+			resp["current_root_aid"] = last.NewRootAID
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }

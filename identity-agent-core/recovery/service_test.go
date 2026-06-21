@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"identity-agent-core/backup"
+	"identity-agent-core/store"
 )
 
 func TestRetrieveFromBackupOnlyDevice(t *testing.T) {
@@ -60,12 +61,23 @@ func TestRetrieveFromCloudStub(t *testing.T) {
 	}
 }
 
-func TestRootAIDRotationStub(t *testing.T) {
-	_, err := RotateRootAID(RootAIDRotationRequest{RecoverySessionID: "sess-1"})
-	if err == nil {
-		t.Fatal("root-AID rotation stub must error")
+func TestRootAIDRotationRequiresDriver(t *testing.T) {
+	st := &memNotifyStore{
+		identity: &store.IdentityState{AID: "EoldRootAID0123456789ABCDEFGHIJKLMN"},
+		events: []store.EventRecord{{
+			AID: "EoldRootAID0123456789ABCDEFGHIJKLMN", SequenceNumber: 0, EventType: "icp",
+			EventJSON: `{"d":"EpriorTailSAID0123456789ABCDEFGHIJKLMN"}`,
+		}},
 	}
-	if RootAIDRotationAvailable() {
-		t.Fatal("root-AID rotation should not be available yet")
+	_, err := RotateRootAID(RootAIDRotationRequest{
+		RecoverySessionID:    "sess-1",
+		NewRootPublicKey:     "pub",
+		NewRootNextPublicKey: "next",
+	}, nil, st, t.TempDir(), nil)
+	if err == nil {
+		t.Fatal("root-AID rotation without driver must error")
+	}
+	if !RootAIDRotationAvailable() {
+		t.Fatal("root-AID rotation should be available")
 	}
 }

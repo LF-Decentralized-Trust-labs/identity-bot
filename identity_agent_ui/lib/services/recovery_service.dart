@@ -108,6 +108,67 @@ class RecoveryRetrieveResult {
   }
 }
 
+class RootAidRotationStatus {
+  final bool available;
+  final String? message;
+  final int? rotationCount;
+  final String? currentRootAid;
+  final String? lastRotationAt;
+
+  RootAidRotationStatus({
+    required this.available,
+    this.message,
+    this.rotationCount,
+    this.currentRootAid,
+    this.lastRotationAt,
+  });
+
+  factory RootAidRotationStatus.fromJson(Map<String, dynamic> json) {
+    return RootAidRotationStatus(
+      available: json['available'] ?? false,
+      message: json['message'],
+      rotationCount: json['rotation_count'],
+      currentRootAid: json['current_root_aid'],
+      lastRotationAt: json['last_rotation_at'],
+    );
+  }
+}
+
+class RootAidRotationResult {
+  final String status;
+  final String message;
+  final String oldRootAid;
+  final String newRootAid;
+  final String anchorIxnSaid;
+  final int notificationsSent;
+  final List<String> carriedForwardAids;
+
+  RootAidRotationResult({
+    required this.status,
+    required this.message,
+    required this.oldRootAid,
+    required this.newRootAid,
+    required this.anchorIxnSaid,
+    required this.notificationsSent,
+    required this.carriedForwardAids,
+  });
+
+  factory RootAidRotationResult.fromJson(Map<String, dynamic> json) {
+    final proof = json['continuity_proof'] as Map<String, dynamic>? ?? {};
+    return RootAidRotationResult(
+      status: json['status'] ?? '',
+      message: json['message'] ?? '',
+      oldRootAid: json['old_root_aid'] ?? '',
+      newRootAid: json['new_root_aid'] ?? '',
+      anchorIxnSaid: proof['anchor_ixn_said'] ?? '',
+      notificationsSent: json['notifications_sent'] ?? 0,
+      carriedForwardAids: (json['carried_forward_aids'] as List<dynamic>? ?? [])
+          .map((e) => e.toString())
+          .toList(),
+    );
+  }
+}
+
 class RecoveryService {
   final String baseUrl;
 
@@ -196,6 +257,42 @@ class RecoveryService {
       throw Exception(_errorMessage(resp));
     }
     return RecoveryRetrieveResult.fromJson(
+        jsonDecode(resp.body) as Map<String, dynamic>);
+  }
+
+  Future<RootAidRotationStatus> rootAidRotationStatus() async {
+    final resp = await http.get(Uri.parse('$_base/root-aid-rotation/status'));
+    if (resp.statusCode != 200) {
+      throw Exception(_errorMessage(resp));
+    }
+    return RootAidRotationStatus.fromJson(
+        jsonDecode(resp.body) as Map<String, dynamic>);
+  }
+
+  Future<RootAidRotationResult> rotateRootAid({
+    required String recoverySessionId,
+    required String newRootPublicKey,
+    required String newRootNextPublicKey,
+    List<String> carryForwardAids = const [],
+    int witnessThreshold = 0,
+    String? cesrSignature,
+  }) async {
+    final resp = await http.post(
+      Uri.parse('$_base/root-aid-rotation'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'recovery_session_id': recoverySessionId,
+        'new_root_public_key': newRootPublicKey,
+        'new_root_next_public_key': newRootNextPublicKey,
+        if (carryForwardAids.isNotEmpty) 'carry_forward_aids': carryForwardAids,
+        if (witnessThreshold > 0) 'witness_threshold': witnessThreshold,
+        if (cesrSignature != null) 'cesr_signature': cesrSignature,
+      }),
+    );
+    if (resp.statusCode != 200) {
+      throw Exception(_errorMessage(resp));
+    }
+    return RootAidRotationResult.fromJson(
         jsonDecode(resp.body) as Map<String, dynamic>);
   }
 
