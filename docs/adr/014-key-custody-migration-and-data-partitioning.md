@@ -50,7 +50,7 @@ The Python driver's `/sign` endpoint is therefore bypassed entirely for desktop.
 | Remote WITH Keys | Holds root AID keys + BIP39. Signs locally. | Never receives keys. Compute only. |
 | Remote WITHOUT Keys | Holds delegated child AID keys + child BIP39. Signs locally. | Holds root AID keys + root BIP39. Root key custody belongs to this device. |
 
-BIP39 mnemonic recovery applies to whichever device holds the keys for a given AID. Users who run Standalone or Remote WITH Keys on their mobile device are responsible for backing up their mobile's mnemonic. Users who connect to a Grape ID hosted server (Remote WITHOUT Keys) have their root AID managed by Grape ID's institutional key management — no user-facing BIP39 for the root in that case.
+BIP39 mnemonic recovery applies to whichever device holds the keys for a given AID. Users who run Standalone or Remote WITH Keys on their mobile device are responsible for backing up their mobile's mnemonic. Users who connect to a hosted server (Remote WITHOUT Keys) have their root AID managed by the host's institutional key management — no user-facing BIP39 for the root in that case.
 
 ---
 

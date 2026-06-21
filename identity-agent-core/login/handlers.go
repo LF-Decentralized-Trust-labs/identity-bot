@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"identity-agent-core/drivers"
+	"identity-agent-core/secureenclave"
 )
 
 type Handler struct {
@@ -22,6 +23,7 @@ type Handler struct {
 	KeriDriver   *drivers.KeriDriver
 	DevRelay     string
 	HTTPClient   *http.Client
+	TrustGate    *secureenclave.TrustGate
 	OnLoginPending func(LoginPreviewResponse)
 }
 
@@ -233,6 +235,9 @@ func (h *Handler) ScoreAttestation(rel *SiteRelationship) (map[string]interface{
 }
 
 func (h *Handler) scoreAttestation(rel *SiteRelationship) (map[string]interface{}, error) {
+	if err := h.checkTrustGate(); err != nil {
+		return nil, err
+	}
 	seed, err := base64.StdEncoding.DecodeString(rel.SeedB64)
 	if err != nil {
 		return nil, err
@@ -382,6 +387,9 @@ func (h *Handler) registerPairwiseOnDevRelay(rel *SiteRelationship) error {
 }
 
 func (h *Handler) completeLogin(p *pendingLogin) (map[string]interface{}, error) {
+	if err := h.checkTrustGate(); err != nil {
+		return nil, err
+	}
 	rel := p.Relationship
 	bundle := p.Bundle
 
@@ -523,4 +531,11 @@ func trimSlash(s string) string {
 		s = s[:len(s)-1]
 	}
 	return s
+}
+
+func (h *Handler) checkTrustGate() error {
+	if h.TrustGate == nil || h.TrustGate.AllowsTrustOperations() {
+		return nil
+	}
+	return fmt.Errorf("trust gate blocked: %s", h.TrustGate.TrustBlockedReason())
 }

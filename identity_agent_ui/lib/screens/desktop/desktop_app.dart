@@ -23,6 +23,7 @@ import 'guardianship_dependents_screen.dart';
 import 'credentials_screen.dart';
 import 'service_providers_screen.dart';
 import '../backup/backup_settings_screen.dart';
+import 'update_settings_screen.dart';
 
 class DesktopApp extends StatefulWidget {
   final KeriService keriService;
@@ -196,6 +197,9 @@ class _DesktopAppState extends State<DesktopApp> {
         return const ComingSoonScreen(title: 'Notifications', icon: Icons.notifications_outlined);
       case DesktopRoute.settingsBackup:
         return const BackupSettingsScreen();
+
+      case DesktopRoute.settingsUpdates:
+        return UpdateSettingsScreen(serverUrl: url);
       case DesktopRoute.activityLog:
         return HistoryScreen(serverUrl: url, initialTab: _historyInitialTab);
     }

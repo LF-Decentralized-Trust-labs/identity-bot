@@ -8,7 +8,7 @@
 
 ## Context
 
-The Grape ID Identity Agent currently manages self-sovereign identity (KERI AIDs, contacts, OOBIs, tunneling). The next evolution is to become a **platform** — enabling users to run third-party applications inside sandboxed environments where the agent controls all network egress, enforces policy, and mediates resource access.
+The Identity Agent currently manages user-controlled identity (KERI AIDs, contacts, OOBIs, tunneling). The next evolution is to become a **platform** — enabling users to run third-party applications inside sandboxed environments where the agent controls all network egress, enforces policy, and mediates resource access.
 
 This is a desktop-only feature (Phase 1). Mobile platforms lack container runtimes and the process isolation primitives required for meaningful sandboxing.
 
@@ -630,8 +630,8 @@ This is the primary mitigation for the compiled binary isolation gap on macOS/Wi
 
 **The Solution**: A decentralized code audit and verification system that ensures only verified, audited binaries are available to users through the discoverable app registry.
 
-**Key Design Principles** (aligned with KERI/SSI philosophy):
-1. **No centralized gatekeeper** — the audit system must not depend on a single entity. A centralized app store would contradict the self-sovereign identity model.
+**Key Design Principles** (aligned with KERI and user-controlled-identity philosophy):
+1. **No centralized gatekeeper** — the audit system must not depend on a single entity. A centralized app store would contradict the user-controlled identity model.
 2. **Multiple independent auditors** — a set of recognized audit firms/organizations that can independently review and cryptographically sign off on application code and binaries.
 3. **User-chosen trust anchors** — each agent operator chooses which auditors they trust (similar to how users choose which certificate authorities to trust, but without a mandatory root).
 4. **Cryptographic verification** — the manifest signature fields (`signature`, `publisher_key`, `signature_algorithm`) already in the V1 schema become the foundation. Agents verify signatures before installation.
