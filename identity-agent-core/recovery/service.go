@@ -387,9 +387,41 @@ func (s *Service) retrieveFromLocal(req RetrieveRequest) (*RetrieveResponse, err
 	}, nil
 }
 
-func (s *Service) retrieveFromCloud(_ RetrieveRequest) (*RetrieveResponse, error) {
-	// Cloud retrieval stub — wire to object-store providers when backup cloud sync ships.
-	return nil, fmt.Errorf("cloud recovery retrieval not implemented (stub)")
+func (s *Service) retrieveFromCloud(req RetrieveRequest) (*RetrieveResponse, error) {
+	if s.BackupService == nil {
+		return nil, fmt.Errorf("backup service not configured")
+	}
+	if req.CloudRef == "" {
+		return nil, fmt.Errorf("cloud_ref (destination id) required for cloud retrieval")
+	}
+	cfg, err := s.BackupService.LoadConfig()
+	if err != nil {
+		return nil, err
+	}
+	var dest *backup.Destination
+	for i := range cfg.Destinations {
+		if cfg.Destinations[i].ID == req.CloudRef {
+			dest = &cfg.Destinations[i]
+			break
+		}
+	}
+	if dest == nil {
+		return nil, fmt.Errorf("backup destination %q not found", req.CloudRef)
+	}
+	if dest.Type != backup.DestCloudUser {
+		return nil, fmt.Errorf("destination %q is not user-managed cloud", req.CloudRef)
+	}
+	raw, key, err := s.BackupService.PullLatestArchive(*dest)
+	if err != nil {
+		return nil, err
+	}
+	return &RetrieveResponse{
+		Source:     SourceCloud,
+		Path:       key,
+		ArchiveB64: base64.StdEncoding.EncodeToString(raw),
+		SizeBytes:  len(raw),
+		Message:    "retrieved encrypted archive from user-managed cloud",
+	}, nil
 }
 
 // FetchBackupOnlyArchive downloads opaque archive bytes from a paired backup-only agent.
