@@ -143,6 +143,14 @@ func LoadManifestsFromDir(dir string) ([]*AppManifest, error) {
         return manifests, nil
 }
 
+// Validate checks an app manifest against the rules the agent enforces at load.
+//
+// CROSS-REPO CONTRACT: an external plug-in build tool validates manifests against
+// these same rules *before* producing them, so a manifest that passes the build also
+// loads here ("builds implies installs"). If you change the schema or these rules,
+// the build-side validator must be updated to match — otherwise it will emit manifests
+// the agent rejects, or carry fields the agent silently ignores. Until a shared schema
+// package exists, keep the two validators in sync by hand.
 func (m *AppManifest) Validate() error {
         if m.ID == "" {
                 return fmt.Errorf("id is required")
