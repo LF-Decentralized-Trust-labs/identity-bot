@@ -79,11 +79,7 @@ func (s *CoreServer) handleInvokeCapability(w http.ResponseWriter, r *http.Reque
                 jsonError(w, err.Error(), http.StatusBadRequest)
                 return
         }
-        host, _, _ := net.SplitHostPort(r.RemoteAddr)
-        caller := sandbox.CallerContext{
-                Remote: !sandbox.IsLoopbackHost(host),
-                // TODO(gateway): resolve the caller's AID + granted ACDC scopes here.
-        }
+        caller := s.resolveCaller(r)
 
         res, err := s.SandboxManager.InvokeCapability(r.Context(), caller, id, body)
         if err != nil {

@@ -51,7 +51,8 @@ func (m *Manager) InvokeCapability(ctx context.Context, caller CallerContext, ca
 	if !ok {
 		return nil, ErrCapabilityNotFound
 	}
-	if err := m.authorizeIngress(caller, capDef); err != nil {
+	auth := m.authz()
+	if err := auth.AuthorizeIngress(ctx, caller, capDef); err != nil {
 		return nil, err
 	}
 	inv := m.invoker
@@ -62,7 +63,7 @@ func (m *Manager) InvokeCapability(ctx context.Context, caller CallerContext, ca
 	if err != nil {
 		return nil, err
 	}
-	return m.checkEgress(caller, capDef, res), nil
+	return auth.FilterEgress(ctx, caller, capDef, res), nil
 }
 
 // findProvider resolves which installed plug-in offers a capability.
@@ -77,32 +78,6 @@ func (m *Manager) findProvider(capabilityID string) (*AppManifest, ProvidedCapab
 		}
 	}
 	return nil, ProvidedCapability{}, false
-}
-
-// authorizeIngress is the ingress half of the gateway: default-deny, with two
-// structural rules enforced here today. Full per-asker ACDC-scope authorization is
-// enforced by the governance gateway; wire it in here.
-func (m *Manager) authorizeIngress(caller CallerContext, capDef ProvidedCapability) error {
-	// A host-control capability (drives the host UI) is never invocable by a remote
-	// caller — "don't let the internet drive my desktop".
-	if capDef.HostControl && caller.Remote {
-		return fmt.Errorf("%w: host_control capability %q is not invocable by a remote caller", ErrDenied, capDef.ID)
-	}
-	// Remote callers must carry the capability in their granted scope (default-deny).
-	// The local owner is allowed. This is the structural default-deny until the gateway
-	// + delegated-identity scope check is wired.
-	if caller.Remote && !containsStr(caller.Scopes, capDef.ID) {
-		return fmt.Errorf("%w: caller lacks scope for capability %q", ErrDenied, capDef.ID)
-	}
-	return nil
-}
-
-// checkEgress is the egress half of the gateway: re-assess a result before it leaves.
-// Pass-through + audit hook today; disclosure/filtering rules are wired through the
-// governance gateway. The point is the order — results ALWAYS return via egress.
-func (m *Manager) checkEgress(caller CallerContext, capDef ProvidedCapability, res *InvokeResult) *InvokeResult {
-	// TODO(gateway): apply egress disclosure/filter rules + audit here.
-	return res
 }
 
 // httpInvoker routes to the running plug-in's local capability API (the plug-in SDK's

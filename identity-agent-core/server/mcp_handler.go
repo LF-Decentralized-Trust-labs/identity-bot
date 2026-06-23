@@ -3,10 +3,7 @@ package server
 import (
 	"encoding/json"
 	"io"
-	"net"
 	"net/http"
-
-	"identity-agent-core/sandbox"
 )
 
 // The agent exposes ONE MCP server (this handler). tools/list = capability discovery;
@@ -49,11 +46,7 @@ func (s *CoreServer) handleMCP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	host, _, _ := net.SplitHostPort(r.RemoteAddr)
-	caller := sandbox.CallerContext{
-		Remote: !sandbox.IsLoopbackHost(host),
-		// TODO(gateway): resolve the caller's AID + granted ACDC scopes here.
-	}
+	caller := s.resolveCaller(r)
 
 	switch req.Method {
 	case "notifications/initialized":

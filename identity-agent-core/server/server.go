@@ -64,6 +64,7 @@ type CoreServer struct {
         UpdateService     *update.Service
         AttestationRunner *secureenclave.Runner
         TrustGate         *secureenclave.TrustGate
+        CallerResolver    CallerResolver // resolves endpoint caller identity/scopes; nil = loopback default (delegated-identity injects the real one)
         mu              sync.Mutex
         running         bool
 }
