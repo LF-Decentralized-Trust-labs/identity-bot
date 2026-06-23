@@ -41,11 +41,23 @@ func (s *CoreServer) sandboxRoutes(r chi.Router) {
         r.Put("/apps/{id}/settings", s.handleUpdateAppSettings)
         r.Get("/apps/{id}/install-progress", s.handleInstallProgress)
         r.Get("/apps/{id}/display", s.handleAppDisplay)
+        r.Get("/capabilities", s.handleListCapabilities)
         r.Get("/sandbox/health", s.handleSandboxHealth)
         r.Post("/sandbox/podman/setup", s.handlePodmanSetup)
         r.Get("/sandbox/podman/setup-status", s.handlePodmanSetupStatus)
         r.Get("/ws/sandbox", s.handleSandboxWebSocket)
         r.Get("/ws/terminal/{instanceId}", s.handleTerminalWebSocket)
+}
+
+// handleListCapabilities returns the functional capabilities offered by installed
+// plug-ins (aggregated from manifests' provides[]). Discovery surface for the agent's
+// governed capability endpoint; invoking a capability is governed separately.
+func (s *CoreServer) handleListCapabilities(w http.ResponseWriter, r *http.Request) {
+        if s.SandboxManager == nil {
+                jsonError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
+                return
+        }
+        jsonResponse(w, s.SandboxManager.ProvidedCapabilities())
 }
 
 func (s *CoreServer) handleListApps(w http.ResponseWriter, r *http.Request) {
