@@ -3,7 +3,9 @@ package server
 import (
         "context"
         "encoding/json"
+        "errors"
         "fmt"
+        "io"
         "log"
         "net"
         "net/http"
@@ -42,6 +44,7 @@ func (s *CoreServer) sandboxRoutes(r chi.Router) {
         r.Get("/apps/{id}/install-progress", s.handleInstallProgress)
         r.Get("/apps/{id}/display", s.handleAppDisplay)
         r.Get("/capabilities", s.handleListCapabilities)
+        r.Post("/capabilities/{id}/invoke", s.handleInvokeCapability)
         r.Get("/sandbox/health", s.handleSandboxHealth)
         r.Post("/sandbox/podman/setup", s.handlePodmanSetup)
         r.Get("/sandbox/podman/setup-status", s.handlePodmanSetupStatus)
@@ -58,6 +61,43 @@ func (s *CoreServer) handleListCapabilities(w http.ResponseWriter, r *http.Reque
                 return
         }
         jsonResponse(w, s.SandboxManager.ProvidedCapabilities())
+}
+
+// handleInvokeCapability is the governed capability-invocation endpoint:
+// ingress-authorize -> route to the providing plug-in -> egress-recheck -> return.
+// A host-control capability is never invocable by a remote caller.
+func (s *CoreServer) handleInvokeCapability(w http.ResponseWriter, r *http.Request) {
+        if s.SandboxManager == nil {
+                jsonError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
+                return
+        }
+        id := chi.URLParam(r, "id")
+        body, err := io.ReadAll(io.LimitReader(r.Body, 8<<20))
+        if err != nil {
+                jsonError(w, err.Error(), http.StatusBadRequest)
+                return
+        }
+        host, _, _ := net.SplitHostPort(r.RemoteAddr)
+        caller := sandbox.CallerContext{
+                Remote: !sandbox.IsLoopbackHost(host),
+                // TODO(gateway): resolve the caller's AID + granted ACDC scopes here.
+        }
+
+        res, err := s.SandboxManager.InvokeCapability(r.Context(), caller, id, body)
+        if err != nil {
+                switch {
+                case errors.Is(err, sandbox.ErrCapabilityNotFound):
+                        jsonError(w, err.Error(), http.StatusNotFound)
+                case errors.Is(err, sandbox.ErrDenied):
+                        jsonError(w, err.Error(), http.StatusForbidden)
+                default:
+                        jsonError(w, err.Error(), http.StatusBadGateway)
+                }
+                return
+        }
+        w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(res.Status)
+        w.Write(res.Body)
 }
 
 func (s *CoreServer) handleListApps(w http.ResponseWriter, r *http.Request) {

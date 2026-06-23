@@ -45,6 +45,7 @@ type Manager struct {
         manifestsDir        string
         mu                  sync.RWMutex
         installProgressMap  sync.Map // map[appID string]*InstallProgressInfo
+        invoker             CapabilityInvoker // governed capability routing; nil = default HTTP invoker
 }
 
 type ManagerConfig struct {
