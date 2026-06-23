@@ -45,6 +45,8 @@ func (s *CoreServer) sandboxRoutes(r chi.Router) {
         r.Get("/apps/{id}/display", s.handleAppDisplay)
         r.Get("/capabilities", s.handleListCapabilities)
         r.Post("/capabilities/{id}/invoke", s.handleInvokeCapability)
+        r.Post("/mcp", s.handleMCP)
+        r.Get("/endpoint/health", s.handleEndpointHealth)
         r.Get("/sandbox/health", s.handleSandboxHealth)
         r.Post("/sandbox/podman/setup", s.handlePodmanSetup)
         r.Get("/sandbox/podman/setup-status", s.handlePodmanSetupStatus)
