@@ -486,6 +486,22 @@ UPDATE contacts SET relationship_index = (SELECT idx FROM ordered o WHERE o.aid 
 WHERE relationship_index = 0;
 `,
 	},
+	{
+		Version:     19,
+		Description: "Add relationship_counters table for true monotonic never-reused high-water-mark indices (survives deletes, separate namespaces for contacts vs login)",
+		SQL: `
+CREATE TABLE IF NOT EXISTS relationship_counters (
+    namespace  TEXT PRIMARY KEY,
+    next_index INTEGER NOT NULL DEFAULT 1
+);
+INSERT OR IGNORE INTO relationship_counters (namespace, next_index) VALUES ('contacts', 1);
+INSERT OR IGNORE INTO relationship_counters (namespace, next_index) VALUES ('login', 1000001);
+-- ensure counters are at least one past any backfilled indices
+UPDATE relationship_counters SET next_index = (
+  SELECT MAX(next_index, (SELECT COALESCE(MAX(relationship_index), 0) + 1 FROM contacts))
+) WHERE namespace = 'contacts';
+`,
+	},
 }
 
 // ApplyIdentityMigrations creates the migrations table and applies any pending migrations.

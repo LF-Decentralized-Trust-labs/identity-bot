@@ -3,7 +3,10 @@ package backup
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"testing"
+
+	"identity-agent-core/store"
 )
 
 // Golden test mnemonic — test vector only, never use in production.
@@ -146,5 +149,29 @@ func TestPairwiseHDGoldenVector(t *testing.T) {
 	}
 	if bytes.Equal(got0, got5) {
 		t.Fatal("different persisted index must differ")
+	}
+}
+
+// Test that index allocation is true high-water mark: after "deleting" highest (counter independent of rows),
+// next allocate is strictly larger. Uses FileStore counters.
+func TestRelationshipIndexNoReuseAfterDelete(t *testing.T) {
+	tmp := t.TempDir()
+	defer os.RemoveAll(tmp)
+	fs, err := store.NewFileStore(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	idx1, err := fs.AllocateNextRelationshipIndex("contacts")
+	if err != nil || idx1 != 1 {
+		t.Fatalf("first got %d err=%v", idx1, err)
+	}
+	idx2, err := fs.AllocateNextRelationshipIndex("contacts")
+	if err != nil || idx2 != 2 {
+		t.Fatalf("second got %d", idx2)
+	}
+	// "delete top" by not storing record; counter must not go back
+	idx3, err := fs.AllocateNextRelationshipIndex("contacts")
+	if err != nil || idx3 != 3 {
+		t.Fatalf("after delete-top got %d (must be strictly > 2)", idx3)
 	}
 }

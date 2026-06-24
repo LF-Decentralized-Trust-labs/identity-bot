@@ -129,39 +129,8 @@ var ErrSignerUnavailable = fmt.Errorf("platform signer unavailable")
 // SQLite / login_relationships.json contain only the public AID (the handle/reference).
 // Never persist raw seeds in main data stores.
 
-const relSeedsSubdir = "secureenclave/relationships"
-
-func relationshipSeedPath(dataDir, aid string) string {
-	// AID chars (E + base64url) are filesystem-safe; no sanitization needed beyond dir.
-	return filepath.Join(dataDir, relSeedsSubdir, aid+".seed")
-}
-
-// StoreRelationshipSeed writes the seed to the protected location. Caller must ensure
-// the seed corresponds to the AID minted via the local KERI engine.
-func StoreRelationshipSeed(dataDir, aid string, seed []byte) error {
-	if len(seed) != ed25519.SeedSize {
-		return fmt.Errorf("seed must be %d bytes", ed25519.SeedSize)
-	}
-	p := relationshipSeedPath(dataDir, aid)
-	if err := os.MkdirAll(filepath.Dir(p), 0700); err != nil {
-		return err
-	}
-	return os.WriteFile(p, seed, 0600)
-}
-
-// LoadRelationshipSeed reads a previously stored seed for the given relationship AID.
-// Returns error if not found or invalid (no plaintext seeds in main stores).
-func LoadRelationshipSeed(dataDir, aid string) ([]byte, error) {
-	p := relationshipSeedPath(dataDir, aid)
-	raw, err := os.ReadFile(p)
-	if err != nil {
-		return nil, fmt.Errorf("relationship seed not available for %s (must be loaded from secure storage): %w", aid, err)
-	}
-	if len(raw) != ed25519.SeedSize {
-		return nil, fmt.Errorf("invalid relationship seed size for %s", aid)
-	}
-	return raw, nil
-}
+// (per-relationship seed storage removed; only root seed persists in secure enclave.
+// Pairwise seeds are re-derived from root + persisted RelationshipIndex.)
 
 // Root seed storage (the keystore root seed for HD pairwise derivation).
 // Stored in secure location alongside relationship seeds. 64-byte BIP39 seed.

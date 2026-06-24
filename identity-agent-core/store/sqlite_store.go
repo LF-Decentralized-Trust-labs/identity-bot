@@ -164,13 +164,13 @@ func (s *SQLiteStore) SaveContact(contact ContactRecord) error {
 		contact.RelationshipSeedB64 = ""
 	}
 
-	// Allocate stable monotonic relationship_index if not set (for HD derivation).
-	// Use max(existing) + 1 so indices are persistent and never reused even after deletes/reorders.
+	// Allocate via persisted monotonic counter (never reuses even after deletes).
 	if contact.RelationshipIndex == 0 {
-		var maxIdx int
-		row := s.db.QueryRow(`SELECT COALESCE(MAX(relationship_index), 0) FROM contacts`)
-		row.Scan(&maxIdx)
-		contact.RelationshipIndex = maxIdx + 1
+		idx, err := s.AllocateNextRelationshipIndex("contacts")
+		if err != nil {
+			return fmt.Errorf("allocate relationship index: %w", err)
+		}
+		contact.RelationshipIndex = idx
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -1282,6 +1282,53 @@ func (s *SQLiteStore) scanServiceProviders(rows *sql.Rows) ([]ServiceProviderRec
 		records = []ServiceProviderRecord{}
 	}
 	return records, nil
+}
+
+// AllocateNextRelationshipIndex atomically allocates and returns the next never-reused index
+// for the namespace from the persisted high-water mark counter table. Separate namespaces
+// ("contacts", "login") ensure independent sequences.
+func (s *SQLiteStore) AllocateNextRelationshipIndex(namespace string) (int, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			tx.Rollback()
+		}
+	}()
+
+	var nextIdx int
+	err = tx.QueryRow(`SELECT next_index FROM relationship_counters WHERE namespace = ?`, namespace).Scan(&nextIdx)
+	if err == sql.ErrNoRows {
+		nextIdx = 1
+		if namespace == "login" {
+			nextIdx = 1000001
+		}
+		_, err = tx.Exec(`INSERT INTO relationship_counters (namespace, next_index) VALUES (?, ?)`, namespace, nextIdx+1)
+		if err != nil {
+			return 0, err
+		}
+		if err = tx.Commit(); err != nil {
+			return 0, err
+		}
+		committed = true
+		return nextIdx, nil
+	} else if err != nil {
+		return 0, err
+	}
+
+	// allocate current, bump
+	_, err = tx.Exec(`UPDATE relationship_counters SET next_index = next_index + 1 WHERE namespace = ?`, namespace)
+	if err != nil {
+		return 0, err
+	}
+	if err = tx.Commit(); err != nil {
+		return 0, err
+	}
+	committed = true
+	return nextIdx, nil
 }
 
 // ── Reset ─────────────────────────────────────────────────────────────────────

@@ -2914,14 +2914,11 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
                         writeError(w, http.StatusInternalServerError, "Root keystore seed required for HD pairwise derivation (not found in secure storage)", rerr.Error())
                         return
                 }
-                existingContacts, _ := s.DataStore.GetContacts()
-                contactIdx := 0
-                for _, c := range existingContacts {
-                        if c.RelationshipIndex > contactIdx {
-                                contactIdx = c.RelationshipIndex
-                        }
+                contactIdx, err := s.DataStore.AllocateNextRelationshipIndex("contacts")
+                if err != nil {
+                        writeError(w, http.StatusInternalServerError, "Failed to allocate relationship index", err.Error())
+                        return
                 }
-                contactIdx++ // monotonic next
                 contact.RelationshipIndex = contactIdx
 
                 pairwiseSeed, derr := backup.DerivePairwiseSeed(rootSeed, contactIdx, 0)
@@ -3225,14 +3222,11 @@ func (s *CoreServer) handleExchange(w http.ResponseWriter, r *http.Request) {
                         writeError(w, http.StatusInternalServerError, "Root keystore seed required for HD pairwise derivation", rerr.Error())
                         return
                 }
-                existing, _ := s.DataStore.GetContacts()
-                cidx := 0
-                for _, c := range existing {
-                        if c.RelationshipIndex > cidx {
-                                cidx = c.RelationshipIndex
-                        }
+                cidx, err := s.DataStore.AllocateNextRelationshipIndex("contacts")
+                if err != nil {
+                        writeError(w, http.StatusInternalServerError, "Failed to allocate relationship index", err.Error())
+                        return
                 }
-                cidx++
                 contact.RelationshipIndex = cidx
 
                 pwiseSeed, derr := backup.DerivePairwiseSeed(rootSeed, cidx, 0)
