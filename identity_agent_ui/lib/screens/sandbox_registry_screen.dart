@@ -8,14 +8,14 @@ import '../config/agent_config.dart';
 import '../models/sandbox_app.dart';
 import 'sandbox_viewer.dart';
 
-class MarketplaceScreen extends StatefulWidget {
+class SandboxRegistryScreen extends StatefulWidget {
   final String? serverUrl;
-  const MarketplaceScreen({super.key, this.serverUrl});
+  const SandboxRegistryScreen({super.key, this.serverUrl});
   @override
-  State<MarketplaceScreen> createState() => _MarketplaceScreenState();
+  State<SandboxRegistryScreen> createState() => _SandboxRegistryScreenState();
 }
 
-class _MarketplaceScreenState extends State<MarketplaceScreen> {
+class _SandboxRegistryScreenState extends State<SandboxRegistryScreen> {
   List<SandboxApp> _apps = [];
   Map<String, AppStatus> _statuses = {};
   Map<String, _InstallProgress> _installProgress = {};
@@ -843,7 +843,7 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
       title = 'Podman needs to be started';
       subtitle = 'Podman is installed but not running yet.\nTap below to start it automatically.';
     } else {
-      title = 'Sandbox Apps Setup';
+      title = 'Sandbox Plugins Setup';
       subtitle = 'Sandboxed apps need Podman — a free, open-source tool — to run securely.\nWould you like to set it up now?';
     }
 

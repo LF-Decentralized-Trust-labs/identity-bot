@@ -20,11 +20,11 @@ func IsContactWitnessEligible(c store.ContactRecord) bool {
 	if c.ContactSource == ContactSourceTransactional {
 		return false
 	}
-	switch c.ContactType {
-	case "general", "trusted", "professional", "coworker":
+	switch c.ContactCategory {
+	case "general", "trusted", "professional", "transactional":
 		return true
 	default:
-		return c.ContactType == "" || c.ContactType == "general"
+		return c.ContactCategory == "" || c.ContactCategory == "general"
 	}
 }
 

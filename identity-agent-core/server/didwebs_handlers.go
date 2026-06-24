@@ -86,9 +86,27 @@ func (s *CoreServer) handleAidOobi(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *CoreServer) publisherInput(r *http.Request, aid string) (didwebs.PublishInput, error) {
+	// Derive host from relay allocation / active tunnel public_url (not raw r.Host).
+	// This ensures did.json for a re-randomized relay P-AID uses the stable public_url host.
 	host := r.Host
 	if idx := strings.Index(host, ":"); idx != -1 {
 		host = host[:idx]
+	}
+	if s.EndpointService != nil {
+		if u := s.EndpointService.CurrentURL(); u != "" {
+			if idx := strings.Index(u, "://"); idx != -1 {
+				u = u[idx+3:]
+			}
+			if idx := strings.Index(u, "/"); idx != -1 {
+				u = u[:idx]
+			}
+			if idx := strings.Index(u, ":"); idx != -1 {
+				u = u[:idx]
+			}
+			if u != "" {
+				host = u
+			}
+		}
 	}
 	identity, _ := s.DataStore.GetIdentity()
 	if identity != nil && identity.AID == aid {
@@ -112,8 +130,10 @@ func (s *CoreServer) publisherInput(r *http.Request, aid string) (didwebs.Publis
 	if pubKey == "" {
 		return didwebs.PublishInput{}, fmt.Errorf("no public key for aid %s", aid)
 	}
+	// Real witness receipt counts (plumbed; default conservative until per-AID tracking is wired in witness service).
 	receipts, threshold := 0, 5
 	if s.WitnessService != nil {
+		// TODO(joint M35): query actual receipt count / threshold for this aid from witness state.
 		threshold = 5
 	}
 	return didwebs.PublishInput{

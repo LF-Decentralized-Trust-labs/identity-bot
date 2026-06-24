@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"identity-agent-core/m63"
+	"identity-agent-core/iacrypto"
 )
 
 const (
@@ -121,11 +121,11 @@ func NewManifest(aid string, tiers []string, snapshotType string) Manifest {
 }
 
 func DigestSection(data []byte) (string, error) {
-	return m63.Blake3QB64(data)
+	return iacrypto.Blake3QB64(data)
 }
 
 func DigestSectionMust(data []byte) string {
-	return m63.Blake3QB64Must(data)
+	return iacrypto.Blake3QB64Must(data)
 }
 
 func (m *Manifest) ValidateSections(bundle *PayloadBundle) error {

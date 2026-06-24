@@ -64,7 +64,7 @@ class EntityTypeScreen extends StatelessWidget {
                     title: 'INDIVIDUAL',
                     description:
                         'A personal digital identity for a single human. '
-                        'Ideal for personal use, self-sovereign credentials, '
+                        'Ideal for personal use, user-controlled credentials, '
                         'and individual communications.',
                     onTap: () => onEntityTypeSelected(EntityType.individual),
                   ),

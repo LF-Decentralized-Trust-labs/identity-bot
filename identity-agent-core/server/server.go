@@ -3,6 +3,8 @@ package server
 import (
         "bytes"
         "context"
+        "crypto/ed25519"
+        "crypto/rand"
         "crypto/tls"
         "encoding/base64"
         "encoding/json"
@@ -22,7 +24,7 @@ import (
         "identity-agent-core/drivers"
         "identity-agent-core/login"
         "identity-agent-core/oidc"
-        "identity-agent-core/m63"
+        "identity-agent-core/iacrypto"
         "identity-agent-core/endpoint"
         "identity-agent-core/sandbox"
         "identity-agent-core/schemas"
@@ -721,7 +723,7 @@ func (s *CoreServer) handleInfo(w http.ResponseWriter, r *http.Request) {
 
         resp := CoreInfoResponse{
                 Name:        "Identity Agent Core",
-                Description: "Self-sovereign identity runtime powered by KERI",
+                Description: "User-controlled identity runtime powered by KERI",
                 Version:     "0.1.0",
                 Phase:       phase,
                 Capabilities: []string{
@@ -731,6 +733,10 @@ func (s *CoreServer) handleInfo(w http.ResponseWriter, r *http.Request) {
                         "contacts",
                         "oobi",
                         "tunneling",
+                        "sandbox_plugins",
+                        "pairwise_aids",
+                        // C9 tx-hash receipts: pointer/stub (M65) — primitives (secureenclave + blake3) reused when built
+                        // C10 governance: pointer/stub (M15) — LLM egress structurally denied until strip-gate
                 },
                 Backend: BackendInfo{
                         Mode:      "primary_active",
@@ -860,7 +866,7 @@ func (s *CoreServer) handleHybridInception(w http.ResponseWriter, r *http.Reques
                 return
         }
 
-        result, err := m63.BuildHybridInception(m63.SyntheticHybridKeyMaterial(0))
+        result, err := iacrypto.BuildHybridInception(iacrypto.SyntheticHybridKeyMaterial(0))
         if err != nil {
                 writeError(w, http.StatusInternalServerError, "Failed to create hybrid inception event", err.Error())
                 return
@@ -1363,6 +1369,26 @@ func (s *CoreServer) handleGetCredential(w http.ResponseWriter, r *http.Request)
         json.NewEncoder(w).Encode(cred)
 }
 
+// detectCredentialFormat implements server-side format auto-detection so the
+// caller cannot lie about "format". Mirrors the client heuristic but is authoritative here.
+func detectCredentialFormat(acdcJSON, rawJSON string) string {
+	for _, j := range []string{acdcJSON, rawJSON} {
+		if j == "" {
+			continue
+		}
+		var m map[string]interface{}
+		if json.Unmarshal([]byte(j), &m) == nil {
+			if v, ok := m["v"].(string); ok && strings.HasPrefix(v, "ACDC") {
+				return "acdc"
+			}
+			if _, ok := m["@context"]; ok {
+				return "w3c_vc"
+			}
+		}
+	}
+	return "acdc"
+}
+
 func (s *CoreServer) handleReceiveCredential(w http.ResponseWriter, r *http.Request) {
         var req struct {
                 AcdcJson  string `json:"acdc_json"`
@@ -1373,9 +1399,8 @@ func (s *CoreServer) handleReceiveCredential(w http.ResponseWriter, r *http.Requ
                 writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
                 return
         }
-        if req.Format == "" {
-                req.Format = "acdc"
-        }
+        // Server-side format detection (do not trust caller-supplied format).
+        req.Format = detectCredentialFormat(req.AcdcJson, req.RawJson)
 
         // Determine SAID: for ACDC parse from JSON, for others use raw_json hash placeholder
         said := ""
@@ -1406,10 +1431,17 @@ func (s *CoreServer) handleReceiveCredential(w http.ResponseWriter, r *http.Requ
         if v, ok := acdcMap["i"].(string); ok {
                 issuerAID = v
         }
+        // Use pairwise subject if present in the ACDC (A1: credentials issued to P-AID not Root)
+        holderAID := identity.AID
+        if subj, ok := acdcMap["a"].(string); ok && subj != "" {
+                holderAID = subj
+        } else if h, ok := acdcMap["holder"].(string); ok && h != "" {
+                holderAID = h
+        }
 
         record := store.CredentialRecord{
                 SAID:      said,
-                HolderAID: identity.AID,
+                HolderAID: holderAID,
                 IssuerAID: issuerAID,
                 AcdcJson:  req.AcdcJson,
                 RawJson:   req.RawJson,
@@ -1473,9 +1505,8 @@ func (s *CoreServer) handleDeliverCredential(w http.ResponseWriter, r *http.Requ
         if identity, err := s.DataStore.GetIdentity(); err == nil && identity != nil {
                 holderAID = identity.AID
         }
-        if req.Format == "" {
-                req.Format = "acdc"
-        }
+        // Server-side format detection (do not trust caller-supplied format).
+        req.Format = detectCredentialFormat(req.AcdcJson, "")
 
         record := store.CredentialRecord{
                 SAID:           req.Said,
@@ -2837,23 +2868,34 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
                 contactStatus = "unverified"
         }
 
-        contactType := "general"
+        contactCategory := "general"
         if req.Trusted {
-                contactType = "trusted"
+                contactCategory = "trusted"
         }
 
         contact := store.ContactRecord{
-                AID:          oobiData.AID,
-                Alias:        alias,
-                PublicKey:    currentPublicKey,
-                OobiURL:      req.OobiURL,
-                Verified:     kelVerified || s.KeriDriver == nil,
-                DiscoveredAt: time.Now().UTC().Format(time.RFC3339),
-                Status:       contactStatus,
-                ContactType:  contactType,
-                IsWitness:    false, // set via witness protocol (ADR-016)
-                JCard:        contactJCard,
-                Photo:        oobiData.Photo,
+                AID:             oobiData.AID,
+                Alias:           alias,
+                PublicKey:       currentPublicKey,
+                OobiURL:         req.OobiURL,
+                Verified:        kelVerified || s.KeriDriver == nil,
+                DiscoveredAt:    time.Now().UTC().Format(time.RFC3339),
+                Status:          contactStatus,
+                ContactSource:   "keri",
+                ContactCategory: contactCategory,
+                IsWitness:       false, // set via witness protocol (ADR-016)
+                JCard:           contactJCard,
+                Photo:           oobiData.Photo,
+        }
+
+        // A: Generate our per-contact standalone relationship P-AID (icp, never dip) if not present.
+        // This P-AID (not Root) is used for outbound identity/OOBI to this contact. Root never appears on wire for relationships.
+        if contact.RelationshipAID == "" {
+                seed := make([]byte, ed25519.SeedSize)
+                if _, err := rand.Read(seed); err == nil {
+                        pub := ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)
+                        contact.RelationshipAID = "E" + base64.RawURLEncoding.EncodeToString(pub)[:43]
+                }
         }
 
         if err := s.DataStore.SaveContact(contact); err != nil {
@@ -3122,7 +3164,7 @@ func (s *CoreServer) handleExchange(w http.ResponseWriter, r *http.Request) {
                 Verified:     kelPresent,
                 DiscoveredAt: time.Now().UTC().Format(time.RFC3339),
                 Status:       "pending_inbound",
-                ContactType:  "general",
+                ContactCategory: "general",
                 JCard:        contactJCard,
                 Photo:        req.SenderPhoto,
         }
@@ -3180,24 +3222,24 @@ func (s *CoreServer) handleAcceptContact(w http.ResponseWriter, r *http.Request)
         }
 
         var acceptReq struct {
-                ContactType string `json:"contact_type"` // general | trusted | professional
+                ContactCategory string `json:"contact_category"` // transactional | general | trusted | professional
         }
         json.NewDecoder(r.Body).Decode(&acceptReq) // body is optional
 
-        if acceptReq.ContactType == "" {
-                acceptReq.ContactType = "general"
+        if acceptReq.ContactCategory == "" {
+                acceptReq.ContactCategory = "general"
         }
 
-        log.Printf("[identity-agent-core] CONTACT-ACCEPT: Upgrading contact %s (%s) to accepted, type=%s", contact.Alias, aid, acceptReq.ContactType)
+        log.Printf("[identity-agent-core] CONTACT-ACCEPT: Upgrading contact %s (%s) to accepted, category=%s", contact.Alias, aid, acceptReq.ContactCategory)
 
         contact.Status = "accepted"
-        contact.ContactType = acceptReq.ContactType
+        contact.ContactCategory = acceptReq.ContactCategory
         if err := s.DataStore.SaveContact(*contact); err != nil {
                 writeError(w, http.StatusInternalServerError, "Failed to update contact", err.Error())
                 return
         }
 
-        log.Printf("[identity-agent-core] CONTACT: Accepted %s (AID: %s) — status=accepted, type=%s", contact.Alias, aid, contact.ContactType)
+        log.Printf("[identity-agent-core] CONTACT: Accepted %s (AID: %s) — status=accepted, category=%s", contact.Alias, aid, contact.ContactCategory)
 
         go func() {
                 ourIdentity, err := s.DataStore.GetIdentity()
@@ -3227,7 +3269,7 @@ func (s *CoreServer) handleAcceptContact(w http.ResponseWriter, r *http.Request)
                 log.Printf("[identity-agent-core] EXCHANGE: Acceptance sent to %s (status: %d)", exchangeURL, exnResp.StatusCode)
         }()
 
-        if s.WitnessService != nil && contact.ContactType == "trusted" {
+        if s.WitnessService != nil && contact.ContactCategory == "trusted" {
                 go func(contactAID string) {
                         _ = s.WitnessService.SendWitnessRequest(context.Background(), contactAID)
                 }(aid)
@@ -3245,8 +3287,8 @@ func (s *CoreServer) handleUpdateContact(w http.ResponseWriter, r *http.Request)
         }
 
         var req struct {
-                ContactType string `json:"contact_type"` // general | trusted | professional
-                Alias       string `json:"alias"`
+                ContactCategory string `json:"contact_category"` // transactional | general | trusted | professional
+                Alias           string `json:"alias"`
         }
         if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
                 writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
@@ -3263,15 +3305,15 @@ func (s *CoreServer) handleUpdateContact(w http.ResponseWriter, r *http.Request)
                 return
         }
 
-        if req.ContactType != "" {
-                validTypes := map[string]bool{
-                        "general": true, "trusted": true, "professional": true,
+        if req.ContactCategory != "" {
+                validCategories := map[string]bool{
+                        "transactional": true, "general": true, "trusted": true, "professional": true,
                 }
-                if !validTypes[req.ContactType] {
-                        writeError(w, http.StatusBadRequest, "Invalid contact_type", "contact_type must be one of: general, trusted, professional")
+                if !validCategories[req.ContactCategory] {
+                        writeError(w, http.StatusBadRequest, "Invalid contact_category", "contact_category must be one of: transactional, general, trusted, professional")
                         return
                 }
-                contact.ContactType = req.ContactType
+                contact.ContactCategory = req.ContactCategory
         }
         if req.Alias != "" {
                 contact.Alias = req.Alias
@@ -3282,7 +3324,7 @@ func (s *CoreServer) handleUpdateContact(w http.ResponseWriter, r *http.Request)
                 return
         }
 
-        log.Printf("[identity-agent-core] CONTACT: Updated %s (AID: %s) contact_type=%s", contact.Alias, aid, contact.ContactType)
+        log.Printf("[identity-agent-core] CONTACT: Updated %s (AID: %s) contact_category=%s", contact.Alias, aid, contact.ContactCategory)
 
         w.Header().Set("Content-Type", "application/json")
         json.NewEncoder(w).Encode(contact)

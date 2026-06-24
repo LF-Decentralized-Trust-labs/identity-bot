@@ -930,7 +930,7 @@ class _SetupChecklistScreenState extends State<SetupChecklistScreen> {
   Widget _buildInvitePage(ColorScheme cs) {
     final contactUrl = _oobiUrl ?? '';
     final inviteMessage =
-        "Hey! I set up a self-sovereign identity. Will you be one of my trusted contacts? "
+        "Hey! I set up a user-controlled identity. Will you be one of my trusted contacts? "
         "Add me here: $contactUrl\n\n"
         "Questions? Ask me!";
     final hasEnough = _trustedContacts >= 1;

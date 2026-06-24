@@ -33,26 +33,27 @@ type IdentityState struct {
 
 // ContactRecord stores a resolved contact in the Identity Agent.
 //
-// Protocol layers kept separate:
-//   - ContactType (Identity Agent protocol): user-facing relationship category.
-//     Values: "general" | "trusted" | "professional"
-//   - IsWitness (KERI protocol): set automatically when this contact's Identity
-//     Agent is serving as a witness for our key events. Full witness exchange
-//     protocol is a future task — see ADR-016.
-//   - Status (connection state): pending_inbound | pending_outbound | accepted | rejected
+// Two-axis model (per M16):
+//   - ContactSource (provenance): "keri" | "imported" | "manual"
+//   - ContactCategory (user-facing label): "transactional" | "general" | "trusted" | "professional"
+// Relationship AIDs are standalone icp (never dip for ordinary relationships).
+// The Root AID never appears in OOBI/QR/bundle/DIDComm for relationships; a per-contact
+// RelationshipAID (our local standalone P-AID) is used for outbound identity with this contact.
+// A private salted-hash binding (at issuer) anchors the contact's Root to its relationship P-AID.
 type ContactRecord struct {
-        AID          string `json:"aid"`
-        Alias        string `json:"alias"`
-        PublicKey    string `json:"public_key"`
-        OobiURL      string `json:"oobi_url"`
-        Verified     bool   `json:"verified"`
-        DiscoveredAt string `json:"discovered_at"`
-        Status       string `json:"status"`
-        ContactType   string `json:"contact_type"`   // general | trusted | professional | coworker
-        ContactSource string `json:"contact_source"` // manual | transactional (transactional excluded from witness pool)
-        IsWitness     bool   `json:"is_witness"`     // KERI witness role — auto-managed
-        JCard        *JCard `json:"jcard,omitempty"`
-        Photo        string `json:"photo,omitempty"`
+        AID             string `json:"aid"`
+        Alias           string `json:"alias"`
+        PublicKey       string `json:"public_key"`
+        OobiURL         string `json:"oobi_url"`
+        Verified        bool   `json:"verified"`
+        DiscoveredAt    string `json:"discovered_at"`
+        Status          string `json:"status"`
+        ContactSource   string `json:"contact_source"`   // keri | imported | manual
+        ContactCategory string `json:"contact_category"` // transactional | general | trusted | professional
+        RelationshipAID string `json:"relationship_aid,omitempty"` // our per-contact standalone icp P-AID for this contact (Root never disclosed for relationships)
+        IsWitness       bool   `json:"is_witness"`     // KERI witness role — auto-managed
+        JCard           *JCard `json:"jcard,omitempty"`
+        Photo           string `json:"photo,omitempty"`
 }
 
 // TaskRecord represents an automated background task tracked by the Identity Agent.

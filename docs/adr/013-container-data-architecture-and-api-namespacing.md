@@ -192,6 +192,6 @@ Open WebUI frontend
 
 ## References
 
-- [ADR-009](009-data-domain-architecture.md) — Data domain architecture (one SQLite DB per domain)
+- [ADR-026](026-data-domain-architecture.md) — Data domain architecture (one SQLite DB per domain)
 - [ADR-012](012-sandboxed-app-marketplace.md) — Sandbox marketplace, MITM proxy, credential vault
 - [ADR-007](007-external-http-routing-and-platform-ports.md) — Flutter only calls local Go backend

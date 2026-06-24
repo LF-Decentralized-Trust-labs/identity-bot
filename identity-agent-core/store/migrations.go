@@ -221,7 +221,7 @@ INSERT OR IGNORE INTO share_actions (id, action_key, name, subtitle, icon, is_en
     ('sa-show-id',          'show_id',          'Show ID',          'Display your identity QR code',                               'badge_outlined',      0, 2, datetime('now')),
     ('sa-request-payment',  'request_payment',  'Request Payment',  'Send a payment request to a contact',                        'payment_outlined',    0, 3, datetime('now')),
     ('sa-share-file',       'share_file',       'Share a File',     'Send an encrypted file to a contact',                        'attach_file',         0, 4, datetime('now')),
-    ('sa-share-credential', 'share_credential', 'Share Credential', 'Present a verifiable credential',                            'verified_outlined',   0, 5, datetime('now'));
+    ('sa-credential-request', 'credential_request', 'Credential Request', 'Present a verifiable credential (SEAM-7)', 'verified_outlined', 0, 5, datetime('now'));
 `,
 	},
 	{
@@ -445,6 +445,24 @@ CREATE TABLE IF NOT EXISTS relay_allocations (
 		Description: "witness mutual enrollment: witnessing_for direction flag",
 		SQL: `
 ALTER TABLE witness_contact_meta ADD COLUMN witnessing_for INTEGER NOT NULL DEFAULT 0;
+`,
+	},
+	{
+		Version:     16,
+		Description: "Contacts two-axis model + relationship_aid: add contact_category, relationship_aid; backfill from legacy contact_type; drop coworker",
+		SQL: `
+ALTER TABLE contacts ADD COLUMN contact_category TEXT NOT NULL DEFAULT '';
+ALTER TABLE contacts ADD COLUMN relationship_aid TEXT NOT NULL DEFAULT '';
+-- Backfill: legacy contact_type values become category (coworker -> professional per model cleanup)
+UPDATE contacts SET contact_category = CASE
+	WHEN contact_type = 'coworker' THEN 'professional'
+	WHEN contact_type IN ('general','trusted','professional','transactional') THEN contact_type
+	ELSE 'general'
+END WHERE contact_category = '' OR contact_category IS NULL;
+-- Ensure source has sane default if missing (added in prior migration as 'manual')
+UPDATE contacts SET contact_source = 'manual' WHERE contact_source = '' OR contact_source IS NULL;
+-- relationship_aid left empty here; generated on-demand or at next contact use (standalone icp)
+CREATE INDEX IF NOT EXISTS idx_contacts_category ON contacts(contact_category);
 `,
 	},
 }
