@@ -32,11 +32,10 @@ func TestLoginPairwiseAndDisclosures(t *testing.T) {
 	}
 	// bundleB not needed for direct rel construction in this headless contract test.
 
-	// Test constructs relationships directly (real mint requires local engine/driver; main code never fabricates).
-	// This keeps the test headless while the production getOrCreateRelationship enforces real engine mint.
-	relA := &SiteRelationship{SiteAID: "EsiteAAA", PairwiseAID: "EtestpairwiseAIDforA00000000000000000001", RelayOOBI: "https://a.example/auth/ia/site/oobi/EtestpairwiseAIDforA00000000000000000001"}
-	relA2 := relA // same for stability
-	relB := &SiteRelationship{SiteAID: "EsiteBBB", PairwiseAID: "EtestpairwiseAIDforB00000000000000000002", RelayOOBI: "https://b.example/auth/ia/site/oobi/EtestpairwiseAIDforB00000000000000000002"}
+	// Direct construction for headless test (production uses driver + stable index).
+	relA := &SiteRelationship{SiteAID: "EsiteAAA", PairwiseAID: "EtestpairwiseAIDforA00000000000000000001", RelayOOBI: "https://a.example/auth/ia/site/oobi/EtestpairwiseAIDforA00000000000000000001", RelationshipIndex: 1}
+	relA2 := relA
+	relB := &SiteRelationship{SiteAID: "EsiteBBB", PairwiseAID: "EtestpairwiseAIDforB00000000000000000002", RelayOOBI: "https://b.example/auth/ia/site/oobi/EtestpairwiseAIDforB00000000000000000002", RelationshipIndex: 2}
 
 	// Pairwise AID present and well-formed (E-prefixed), never empty/root.
 	if len(relA.PairwiseAID) == 0 || relA.PairwiseAID[0] != 'E' {
@@ -55,11 +54,10 @@ func TestLoginPairwiseAndDisclosures(t *testing.T) {
 		t.Fatalf("relationship OOBI dropped the RP-hosted path: %q", relA.RelayOOBI)
 	}
 
-	// Pre-store a dummy seed in secure location for the test rels (so loadRelationshipSeed succeeds without fabrication).
-	dummySeed := make([]byte, 32) // 32-byte seed
-	copy(dummySeed, "testseedfortestonly0000000000000")
-	_ = secureenclave.StoreRelationshipSeed(h.dataDir, relA.PairwiseAID, dummySeed)
-	_ = secureenclave.StoreRelationshipSeed(h.dataDir, relB.PairwiseAID, dummySeed)
+	// Bootstrap dummy root seed so load re-derives using index (new model: root + persisted index).
+	dummyRoot := make([]byte, 64)
+	copy(dummyRoot, "testrootseedforhdderivationtestonly0000000000000000000000000000")
+	_ = secureenclave.StoreRootSeed(h.dataDir, dummyRoot)
 
 	// The signed Grant carries the pairwise AID as `i` and only requested fields.
 	asrt, err := h.buildAssertion(relA, bundleA, nil)

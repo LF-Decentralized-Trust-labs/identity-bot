@@ -36,8 +36,32 @@ func (s *RelationshipStore) Put(rel SiteRelationship) error {
 	// Security: do not persist raw private seeds in the main relationships JSON.
 	// The AID (PairwiseAID) is the handle; secrets live in secure storage.
 	rel.SeedB64 = ""
+	// Assign stable index if not set (monotonic, persisted with rel).
+	if rel.RelationshipIndex == 0 {
+		max := 0
+		for _, r := range s.items {
+			if r.RelationshipIndex > max {
+				max = r.RelationshipIndex
+			}
+		}
+		rel.RelationshipIndex = max + 1
+	}
 	s.items[rel.SiteAID] = rel
 	return s.saveLocked()
+}
+
+// NextRelationshipIndex returns the next stable monotonic index (max+1) without side effects.
+// Used before derive+put so that the index used for HD derive matches the persisted one.
+func (s *RelationshipStore) NextRelationshipIndex() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	max := 0
+	for _, r := range s.items {
+		if r.RelationshipIndex > max {
+			max = r.RelationshipIndex
+		}
+	}
+	return max + 1
 }
 
 func (s *RelationshipStore) load() error {

@@ -55,6 +55,7 @@ func DeriveBackupKEK(bip39Seed []byte) ([]byte, error) {
 // DerivePairwiseSeed derives an Ed25519 seed for a contact index using BIP32/SLIP-0010 HD from the root keystore seed.
 // Path: m / 44' / 0' / 0' / contactIndex' / keyIndex'
 // This is the architected derivation (replaces previous HKDF). Deterministic, matches across engines for restore.
+// Go<->Rust (mobile bridge) cross vector deferred to mobile QA (verified 2026-06-23 during mobile build/QA; desktop Go+keripy golden complete here).
 func DerivePairwiseSeed(bip39Seed []byte, contactIndex, keyIndex int) ([]byte, error) {
 	if len(bip39Seed) < 32 {
 		return nil, fmt.Errorf("bip39 seed must be at least 32 bytes")

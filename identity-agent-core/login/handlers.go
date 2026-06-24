@@ -16,30 +16,20 @@ import (
 	"identity-agent-core/backup"
 	"identity-agent-core/drivers"
 	"identity-agent-core/secureenclave"
-
-	"hash/fnv"
 )
 
-// loadRelationshipSeed retrieves the private seed for a relationship using the secure storage
-// (keyed by the PairwiseAID as handle). Falls back to legacy rel.SeedB64 only for old data
-// (but new paths never populate secrets in the main store). On legacy use, migrates the
-// secret out of the main store into secure storage.
+// loadRelationshipSeed re-derives the seed on demand from protected root + persisted RelationshipIndex.
+// No per-rel secret files. Legacy SeedB64 fallback only for old data.
 func loadRelationshipSeed(h *Handler, rel *SiteRelationship) ([]byte, error) {
-	// Prefer secure storage using AID as reference/handle.
-	if h != nil && h.dataDir != "" && rel != nil && rel.PairwiseAID != "" {
-		if s, err := secureenclave.LoadRelationshipSeed(h.dataDir, rel.PairwiseAID); err == nil {
-			return s, nil
+	if h != nil && h.dataDir != "" && rel != nil && rel.RelationshipIndex > 0 {
+		if root, err := secureenclave.LoadRootSeed(h.dataDir); err == nil {
+			return backup.DerivePairwiseSeed(root, rel.RelationshipIndex, 0)
 		}
 	}
-	// Legacy fallback (old persisted data may have it; we no longer write secrets here).
 	if rel != nil && rel.SeedB64 != "" {
-		s, decErr := base64.StdEncoding.DecodeString(rel.SeedB64)
-		if decErr == nil && h != nil && h.dataDir != "" && rel.PairwiseAID != "" {
-			_ = secureenclave.StoreRelationshipSeed(h.dataDir, rel.PairwiseAID, s)
-		}
-		return s, decErr
+		return base64.StdEncoding.DecodeString(rel.SeedB64)
 	}
-	return nil, fmt.Errorf("no seed available for relationship %s (secure storage required)", rel.PairwiseAID)
+	return nil, fmt.Errorf("no seed available for relationship %s (root + index required)", rel.PairwiseAID)
 }
 
 type Handler struct {
@@ -169,10 +159,8 @@ func (h *Handler) getOrCreateRelationship(siteAID string, bundle *ChallengeBundl
 			return nil, fmt.Errorf("failed to store root seed securely: %w", serr)
 		}
 	}
-	// derive index for this login site (deterministic per siteAID)
-	hsh := fnv.New32a()
-	hsh.Write([]byte(siteAID))
-	loginIdx := 100000 + int(hsh.Sum32()%100000) // separate range from contacts
+	loginIdx := h.Store.NextRelationshipIndex()
+
 	pwiseSeed, derr := backup.DerivePairwiseSeed(rootSeed, loginIdx, 0)
 	if derr != nil {
 		return nil, fmt.Errorf("HD derive for login rel failed: %w", derr)
@@ -189,25 +177,22 @@ func (h *Handler) getOrCreateRelationship(siteAID string, bundle *ChallengeBundl
 		return nil, fmt.Errorf("failed to mint real relationship AID via local engine: %w", err)
 	}
 	pairwiseAID := resp.AID
-	// Store the *derived* seed securely (handle = AID in store; never plaintext secret in json)
-	if h.dataDir != "" {
-		if serr := secureenclave.StoreRelationshipSeed(h.dataDir, pairwiseAID, pwiseSeed); serr != nil {
-			return nil, fmt.Errorf("failed to store login rel seed in secure enclave: %w", serr)
-		}
-	}
+	// Do NOT persist derived seed per-rel. Re-derive from root + RelationshipIndex on demand.
+	// Only root seed protected in enclave; index persisted with the rel record.
+
 	relayBase := h.relayBaseFromOOBI(bundle.SiteOOBI)
 	if relayBase == "" {
 		relayBase = h.DevRelay
 	}
 	relayOOBI := h.Store.DevRelayOOBI(pairwiseAID, relayBase)
 	rel := SiteRelationship{
-		SiteAID:     siteAID,
-		PairwiseAID: pairwiseAID,
-		// SeedB64 left empty / not the secret. Use secure load by PairwiseAID for signing.
-		SeedB64:     "",
-		RelayOOBI:   relayOOBI,
-		DisplayName: "IA User",
-		Email:       "user@identity.agent",
+		SiteAID:           siteAID,
+		PairwiseAID:       pairwiseAID,
+		SeedB64:           "",
+		RelayOOBI:         relayOOBI,
+		DisplayName:       "IA User",
+		Email:             "user@identity.agent",
+		RelationshipIndex: loginIdx,  // stable persisted index for HD re-derive from root
 	}
 	if err := h.Store.Put(rel); err != nil {
 		return nil, err

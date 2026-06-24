@@ -472,6 +472,20 @@ CREATE INDEX IF NOT EXISTS idx_contacts_category ON contacts(contact_category);
 ALTER TABLE contacts ADD COLUMN relationship_seed_b64 TEXT NOT NULL DEFAULT '';
 `,
 	},
+	{
+		Version:     18,
+		Description: "Add stable relationship_index column for HD pairwise key derivation (monotonic, persisted at creation for root+index recovery)",
+		SQL: `
+ALTER TABLE contacts ADD COLUMN relationship_index INTEGER NOT NULL DEFAULT 0;
+-- Backfill sequential indices for any pre-existing contacts (order by discovery/aid)
+WITH ordered AS (
+  SELECT aid, (ROW_NUMBER() OVER (ORDER BY discovered_at, aid) - 1) AS idx
+  FROM contacts
+)
+UPDATE contacts SET relationship_index = (SELECT idx FROM ordered o WHERE o.aid = contacts.aid)
+WHERE relationship_index = 0;
+`,
+	},
 }
 
 // ApplyIdentityMigrations creates the migrations table and applies any pending migrations.

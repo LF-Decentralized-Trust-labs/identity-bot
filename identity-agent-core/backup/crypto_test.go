@@ -124,21 +124,27 @@ func TestPairwiseHDDeterministic(t *testing.T) {
 	}
 }
 
-// Go <-> keripy golden vector for the HD pairwise derivation (desktop/keripy path).
-// Proves deterministic SLIP-0010 from root and matches what the engine (via driver icp on derived pub) expects.
-// Rust (mobile) cross-engine vector deferred to mobile QA (2026-06-23 deviation note).
+// Go <-> keripy golden for derive from root + persisted stable index (monotonic at creation, stored in record).
+// Enables root seed phrase + indices for recovery to re-derive pairwise keys. Rust cross deferred.
 func TestPairwiseHDGoldenVector(t *testing.T) {
 	m := "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
 	s, err := MnemonicToBIP39Seed(m, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := DerivePairwiseSeed(s, 0, 0)
+	got0, err := DerivePairwiseSeed(s, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "348de60391d98089828e3ceb3828991313a3a3e3220147e803fd3d4785640f45"
-	if fmt.Sprintf("%x", got) != want {
-		t.Fatalf("Go/keripy golden mismatch got %x want %s (update if path constants change)", got, want)
+	want0 := "348de60391d98089828e3ceb3828991313a3a3e3220147e803fd3d4785640f45"
+	if fmt.Sprintf("%x", got0) != want0 {
+		t.Fatalf("golden[0] mismatch got %x want %s", got0, want0)
+	}
+	got5, err := DerivePairwiseSeed(s, 5, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Equal(got0, got5) {
+		t.Fatal("different persisted index must differ")
 	}
 }
