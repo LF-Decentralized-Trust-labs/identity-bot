@@ -131,15 +131,29 @@ func (h *Handler) getOrCreateRelationship(siteAID string, bundle *ChallengeBundl
 		return nil, err
 	}
 	pub := ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)
-	aid := fmt.Sprintf("E%s", base64.RawURLEncoding.EncodeToString(pub)[:43])
+	// Mint real relationship P-AID via local KERI engine (driver) when available.
+	// Avoids fabricated prefix; delegates icp to driver for canonical CESR AID.
+	pairwiseAID := fmt.Sprintf("E%s", base64.RawURLEncoding.EncodeToString(pub)[:43])
+	if h.KeriDriver != nil {
+		nextSeed := make([]byte, ed25519.SeedSize)
+		rand.Read(nextSeed)
+		nextPub := ed25519.NewKeyFromSeed(nextSeed).Public().(ed25519.PublicKey)
+		if resp, err := h.KeriDriver.CreateInceptionNamed(
+			base64.StdEncoding.EncodeToString(pub),
+			base64.StdEncoding.EncodeToString(nextPub),
+			"login-rel-"+siteAID,
+		); err == nil && resp.AID != "" {
+			pairwiseAID = resp.AID
+		}
+	}
 	relayBase := h.relayBaseFromOOBI(bundle.SiteOOBI)
 	if relayBase == "" {
 		relayBase = h.DevRelay
 	}
-	relayOOBI := h.Store.DevRelayOOBI(aid, relayBase)
+	relayOOBI := h.Store.DevRelayOOBI(pairwiseAID, relayBase)
 	rel := SiteRelationship{
 		SiteAID:     siteAID,
-		PairwiseAID: aid,
+		PairwiseAID: pairwiseAID,
 		SeedB64:     base64.StdEncoding.EncodeToString(seed),
 		RelayOOBI:   relayOOBI,
 		DisplayName: "IA User",

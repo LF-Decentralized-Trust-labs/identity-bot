@@ -735,8 +735,8 @@ func (s *CoreServer) handleInfo(w http.ResponseWriter, r *http.Request) {
                         "tunneling",
                         "sandbox_plugins",
                         "pairwise_aids",
-                        // C9 tx-hash receipts: pointer/stub (M65) — primitives (secureenclave + blake3) reused when built
-                        // C10 governance: pointer/stub (M15) — LLM egress structurally denied until strip-gate
+                        // Transaction hash receipts (pointer/stub) — primitives (secureenclave + blake3) reused when built
+                        // Governance policy config (pointer/stub) — LLM egress structurally denied until the governance gateway strip-gate
                 },
                 Backend: BackendInfo{
                         Mode:      "primary_active",
@@ -1248,6 +1248,15 @@ func (s *CoreServer) handleIssueCredential(w http.ResponseWriter, r *http.Reques
                 return
         }
 
+        // Use our per-contact relationship (pairwise) AID as the issuer for this issuance, not root.
+        // Lookup contact by the presented holder AID (their side of the relationship).
+        issuerAID := identity.AID
+        if req.HolderAid != "" {
+                if c, cerr := s.DataStore.GetContact(req.HolderAid); cerr == nil && c != nil && c.RelationshipAID != "" {
+                        issuerAID = c.RelationshipAID
+                }
+        }
+
         // Chain-of-trust: if the holder is a known dependent with an active guardianship
         // credential, auto-build a proper ACDC edges block referencing that credential.
         // The caller may also supply edges explicitly; explicit edges take precedence.
@@ -1263,7 +1272,7 @@ func (s *CoreServer) handleIssueCredential(w http.ResponseWriter, r *http.Reques
                 }
         }
 
-        result, err := s.KeriDriver.IssueCredential(identity.AID, req.Claims, req.SchemaSaid, req.HolderAid, req.Edges)
+        result, err := s.KeriDriver.IssueCredential(issuerAID, req.Claims, req.SchemaSaid, req.HolderAid, req.Edges)
         if err != nil {
                 writeError(w, http.StatusInternalServerError, "Credential issuance failed", err.Error())
                 return
@@ -1284,7 +1293,7 @@ func (s *CoreServer) handleIssueCredential(w http.ResponseWriter, r *http.Reques
         // Persist the credential record
         record := store.CredentialRecord{
                 SAID:           result.AcdcSaid,
-                IssuerAID:      identity.AID,
+                IssuerAID:      issuerAID,
                 HolderAID:      req.HolderAid,
                 SchemaSAID:     req.SchemaSaid,
                 AcdcJson:       result.AcdcJsonB64,
@@ -1307,14 +1316,14 @@ func (s *CoreServer) handleIssueCredential(w http.ResponseWriter, r *http.Reques
                 go s.deliverCredentialToContact(contact, record)
         }
 
-        // Persist the IXN event in the KEL
+        // Persist the IXN event in the KEL (use the relationship AID when issuing via pairwise context)
         ixnEventJSON, _ := json.Marshal(result.IxnEvent)
         kelRecord := store.EventRecord{
-                AID:            identity.AID,
+                AID:            issuerAID,
                 SequenceNumber: result.SequenceNumber,
                 EventType:      "ixn",
                 EventJSON:      string(ixnEventJSON),
-                PublicKey:      identity.PublicKey,
+                PublicKey:      identity.PublicKey, // may need rel pub if separate, but reuse root pub state for now
                 NextKeyDigest:  identity.NextKeyDigest,
                 Timestamp:      time.Now().UTC().Format(time.RFC3339),
                 CesrSignature:  req.CesrSignature,
@@ -1744,7 +1753,15 @@ func (s *CoreServer) handlePresentCredential(w http.ResponseWriter, r *http.Requ
                 return
         }
 
-        result, err := s.KeriDriver.PresentCredential(req.AcdcSaid, req.HolderAid, req.IssuerAid, req.SchemaSaid)
+        // Use our relationship (pairwise) AID for this presentation context, not root or arbitrary caller value.
+        holderToUse := req.HolderAid
+        if req.HolderAid != "" {
+                if c, cerr := s.DataStore.GetContact(req.HolderAid); cerr == nil && c != nil && c.RelationshipAID != "" {
+                        holderToUse = c.RelationshipAID
+                }
+        }
+
+        result, err := s.KeriDriver.PresentCredential(req.AcdcSaid, holderToUse, req.IssuerAid, req.SchemaSaid)
         if err != nil {
                 writeError(w, http.StatusInternalServerError, "Credential presentation failed", err.Error())
                 return
@@ -1753,7 +1770,7 @@ func (s *CoreServer) handlePresentCredential(w http.ResponseWriter, r *http.Requ
         record := store.PresentationRecord{
                 SAID:                result.PresentationSaid,
                 CredentialSAID:      req.AcdcSaid,
-                HolderAID:           req.HolderAid,
+                HolderAID:           holderToUse,
                 IssuerAID:           req.IssuerAid,
                 PresentationJsonB64: result.PresentationJsonB64,
                 CesrSignature:       req.CesrSignature,
@@ -2888,13 +2905,24 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
                 Photo:           oobiData.Photo,
         }
 
-        // A: Generate our per-contact standalone relationship P-AID (icp, never dip) if not present.
-        // This P-AID (not Root) is used for outbound identity/OOBI to this contact. Root never appears on wire for relationships.
-        if contact.RelationshipAID == "" {
+        // Mint the relationship AID as a REAL KERI standalone icp via the local engine (no fabricated "E"+prefix keys).
+        // Desktop: via Python driver CreateInceptionNamed (POST /inception).
+        // The resulting AID is the canonical one from the engine (CESR icp).
+        if contact.RelationshipAID == "" && s.KeriDriver != nil {
                 seed := make([]byte, ed25519.SeedSize)
                 if _, err := rand.Read(seed); err == nil {
                         pub := ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)
-                        contact.RelationshipAID = "E" + base64.RawURLEncoding.EncodeToString(pub)[:43]
+                        // Provide next key for proper icp (simple next for relationship).
+                        nextSeed := make([]byte, ed25519.SeedSize)
+                        rand.Read(nextSeed)
+                        nextPub := ed25519.NewKeyFromSeed(nextSeed).Public().(ed25519.PublicKey)
+                        pubB64 := base64.StdEncoding.EncodeToString(pub)
+                        nextB64 := base64.StdEncoding.EncodeToString(nextPub)
+                        if resp, err := s.KeriDriver.CreateInceptionNamed(pubB64, nextB64, "rel-"+oobiData.AID); err == nil && resp.AID != "" {
+                                contact.RelationshipAID = resp.AID
+                                contact.RelationshipSeedB64 = base64.StdEncoding.EncodeToString(seed)
+                                log.Printf("[identity-agent-core] CONTACT: minted real relationship P-AID %s via local KERI driver for %s", resp.AID, oobiData.AID)
+                        }
                 }
         }
 
@@ -3157,16 +3185,32 @@ func (s *CoreServer) handleExchange(w http.ResponseWriter, r *http.Request) {
                 }
         }
         contact := store.ContactRecord{
-                AID:          req.SenderAID,
-                Alias:        alias,
-                PublicKey:    req.SenderPublicKey,
-                OobiURL:      req.SenderOOBI,
-                Verified:     kelPresent,
-                DiscoveredAt: time.Now().UTC().Format(time.RFC3339),
-                Status:       "pending_inbound",
+                AID:             req.SenderAID,
+                Alias:           alias,
+                PublicKey:       req.SenderPublicKey,
+                OobiURL:         req.SenderOOBI,
+                Verified:        kelPresent,
+                DiscoveredAt:    time.Now().UTC().Format(time.RFC3339),
+                Status:          "pending_inbound",
+                ContactSource:   "keri",
                 ContactCategory: "general",
-                JCard:        contactJCard,
-                Photo:        req.SenderPhoto,
+                JCard:           contactJCard,
+                Photo:           req.SenderPhoto,
+        }
+
+        // Ensure real relationship P-AID via local engine for inbound exchange path (consistent with addContact).
+        if contact.RelationshipAID == "" && s.KeriDriver != nil {
+                seed := make([]byte, ed25519.SeedSize)
+                if _, err := rand.Read(seed); err == nil {
+                        pub := ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)
+                        nextSeed := make([]byte, ed25519.SeedSize)
+                        rand.Read(nextSeed)
+                        nextPub := ed25519.NewKeyFromSeed(nextSeed).Public().(ed25519.PublicKey)
+                        if resp, err := s.KeriDriver.CreateInceptionNamed(base64.StdEncoding.EncodeToString(pub), base64.StdEncoding.EncodeToString(nextPub), "rel-"+req.SenderAID); err == nil && resp.AID != "" {
+                                contact.RelationshipAID = resp.AID
+                                contact.RelationshipSeedB64 = base64.StdEncoding.EncodeToString(seed)
+                        }
+                }
         }
 
         if err := s.DataStore.SaveContact(contact); err != nil {

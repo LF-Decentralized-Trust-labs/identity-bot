@@ -162,24 +162,25 @@ func (s *SQLiteStore) SaveContact(contact ContactRecord) error {
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := s.db.Exec(`
-		INSERT INTO contacts (aid, alias, public_key, oobi_url, verified, discovered_at, status, contact_source, contact_category, relationship_aid, is_witness, jcard_json, photo, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO contacts (aid, alias, public_key, oobi_url, verified, discovered_at, status, contact_source, contact_category, relationship_aid, relationship_seed_b64, is_witness, jcard_json, photo, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(aid) DO UPDATE SET
-			alias            = excluded.alias,
-			public_key       = excluded.public_key,
-			oobi_url         = excluded.oobi_url,
-			verified         = excluded.verified,
-			status           = excluded.status,
-			contact_source   = excluded.contact_source,
-			contact_category = excluded.contact_category,
-			relationship_aid = excluded.relationship_aid,
-			is_witness       = excluded.is_witness,
-			jcard_json       = excluded.jcard_json,
-			photo            = excluded.photo,
-			updated_at       = excluded.updated_at`,
+			alias               = excluded.alias,
+			public_key          = excluded.public_key,
+			oobi_url            = excluded.oobi_url,
+			verified            = excluded.verified,
+			status              = excluded.status,
+			contact_source      = excluded.contact_source,
+			contact_category    = excluded.contact_category,
+			relationship_aid    = excluded.relationship_aid,
+			relationship_seed_b64 = excluded.relationship_seed_b64,
+			is_witness          = excluded.is_witness,
+			jcard_json          = excluded.jcard_json,
+			photo               = excluded.photo,
+			updated_at          = excluded.updated_at`,
 		contact.AID, contact.Alias, contact.PublicKey, contact.OobiURL,
 		contact.Verified, contact.DiscoveredAt, contact.Status,
-		contact.ContactSource, contact.ContactCategory, contact.RelationshipAID, contact.IsWitness,
+		contact.ContactSource, contact.ContactCategory, contact.RelationshipAID, contact.RelationshipSeedB64, contact.IsWitness,
 		jcardJSON, contact.Photo, now,
 	)
 	if err != nil {
@@ -190,7 +191,7 @@ func (s *SQLiteStore) SaveContact(contact ContactRecord) error {
 
 func (s *SQLiteStore) GetContacts() ([]ContactRecord, error) {
 	rows, err := s.db.Query(
-		`SELECT aid, alias, public_key, oobi_url, verified, discovered_at, status, contact_source, contact_category, relationship_aid, is_witness, jcard_json, photo
+		`SELECT aid, alias, public_key, oobi_url, verified, discovered_at, status, contact_source, contact_category, relationship_aid, relationship_seed_b64, is_witness, jcard_json, photo
 		 FROM contacts ORDER BY alias ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query contacts: %w", err)
@@ -201,7 +202,7 @@ func (s *SQLiteStore) GetContacts() ([]ContactRecord, error) {
 
 func (s *SQLiteStore) GetContact(aid string) (*ContactRecord, error) {
 	rows, err := s.db.Query(
-		`SELECT aid, alias, public_key, oobi_url, verified, discovered_at, status, contact_source, contact_category, relationship_aid, is_witness, jcard_json, photo
+		`SELECT aid, alias, public_key, oobi_url, verified, discovered_at, status, contact_source, contact_category, relationship_aid, relationship_seed_b64, is_witness, jcard_json, photo
 		 FROM contacts WHERE aid = ?`, aid)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query contact: %w", err)
@@ -228,7 +229,7 @@ func (s *SQLiteStore) DeleteContact(aid string) error {
 
 func (s *SQLiteStore) GetContactsByStatus(status string) ([]ContactRecord, error) {
 	rows, err := s.db.Query(
-		`SELECT aid, alias, public_key, oobi_url, verified, discovered_at, status, contact_source, contact_category, relationship_aid, is_witness, jcard_json, photo
+		`SELECT aid, alias, public_key, oobi_url, verified, discovered_at, status, contact_source, contact_category, relationship_aid, relationship_seed_b64, is_witness, jcard_json, photo
 		 FROM contacts WHERE status = ? ORDER BY alias ASC`, status)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query contacts by status: %w", err)
@@ -243,7 +244,7 @@ func (s *SQLiteStore) scanContacts(rows *sql.Rows) ([]ContactRecord, error) {
 		var c ContactRecord
 		var jcardJSON string
 		if err := rows.Scan(&c.AID, &c.Alias, &c.PublicKey, &c.OobiURL,
-			&c.Verified, &c.DiscoveredAt, &c.Status, &c.ContactSource, &c.ContactCategory, &c.RelationshipAID, &c.IsWitness,
+			&c.Verified, &c.DiscoveredAt, &c.Status, &c.ContactSource, &c.ContactCategory, &c.RelationshipAID, &c.RelationshipSeedB64, &c.IsWitness,
 			&jcardJSON, &c.Photo); err != nil {
 			return nil, fmt.Errorf("failed to scan contact: %w", err)
 		}

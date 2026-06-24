@@ -465,6 +465,13 @@ UPDATE contacts SET contact_source = 'manual' WHERE contact_source = '' OR conta
 CREATE INDEX IF NOT EXISTS idx_contacts_category ON contacts(contact_category);
 `,
 	},
+	{
+		Version:     17,
+		Description: "Add relationship_seed_b64 column for per-contact P-AID seeds (to support real engine-backed signing)",
+		SQL: `
+ALTER TABLE contacts ADD COLUMN relationship_seed_b64 TEXT NOT NULL DEFAULT '';
+`,
+	},
 }
 
 // ApplyIdentityMigrations creates the migrations table and applies any pending migrations.

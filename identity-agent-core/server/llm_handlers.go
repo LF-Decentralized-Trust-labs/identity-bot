@@ -173,14 +173,14 @@ func (s *CoreServer) handleLLMProxy(w http.ResponseWriter, r *http.Request) {
                 return
         }
 
-        // Structurally deny third-party LLM egress until the M15 Governance Gateway strip-gate exists.
-        // Third-party inference (OpenRouter etc.) MUST pass credential/PII stripping + explicit consent gate (M15/M34).
-        // Until M15 is implemented, all non-/models LLM proxy requests are rejected by design.
+        // Structurally deny third-party LLM egress until the governance gateway strip-gate exists.
+        // Third-party inference (OpenRouter etc.) MUST pass credential/PII stripping + explicit consent gate.
+        // Until the governance gateway strip-gate is implemented, all non-/models LLM proxy requests are rejected by design.
         // /models remains available for sandbox plugin discovery/UI population (no PII leaves).
         if !(r.Method == http.MethodGet && (subPath == "/models" || subPath == "/models/")) {
                 w.Header().Set("Content-Type", "application/json")
                 w.WriteHeader(http.StatusServiceUnavailable)
-                w.Write([]byte(`{"error":{"message":"Third-party LLM egress is deferred until the governance gateway (M15) strip-gate is implemented. Use local models or wait for the governed path.","code":"llm_egress_deferred","type":"server_error"}}`))
+                w.Write([]byte(`{"error":{"message":"Third-party LLM egress is deferred until the governance gateway strip-gate is implemented. Use local models or wait for the governed path.","code":"llm_egress_deferred","type":"server_error"}}`))
                 return
         }
 

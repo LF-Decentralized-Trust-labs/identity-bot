@@ -133,7 +133,7 @@ func (s *CoreServer) publisherInput(r *http.Request, aid string) (didwebs.Publis
 	// Real witness receipt counts (plumbed; default conservative until per-AID tracking is wired in witness service).
 	receipts, threshold := 0, 5
 	if s.WitnessService != nil {
-		// TODO(joint M35): query actual receipt count / threshold for this aid from witness state.
+		// TODO(joint with the CESR-stream driver): query actual receipt count / threshold for this aid from witness state.
 		threshold = 5
 	}
 	return didwebs.PublishInput{

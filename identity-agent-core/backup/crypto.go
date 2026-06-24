@@ -39,10 +39,9 @@ func DefaultArgon2Params() Argon2Params {
 // DeriveBackupKEK derives the 256-bit backup KEK from a BIP39 seed (64 bytes).
 // Uses HKDF-SHA256 (current implementation).
 //
-// Build/test note (2026-06-23): M10 pins BIP32/SLIP-0010 HD path for pairwise.
+// Build/test note (2026-06-23): the HD-derivation pin in the backup-recovery architecture specifies a BIP32/SLIP-0010 path for pairwise seeds.
 // Current Go uses HKDF (interops with own recovery tests + .iab roundtrips).
-// Cross-engine (keripy/Rust) BIP32 vs HKDF golden interop test is required before
-// recovery is final; result will be written back to M09/M10 ARCH per deviation rule.
+// Cross-engine (keripy/Rust) BIP32 vs HKDF golden interop test is required before recovery is final; result will be written back to the backup-recovery architecture per deviation rule.
 // HKDF chosen for this align pass because it is the proven working code; no overwrite.
 func DeriveBackupKEK(bip39Seed []byte) ([]byte, error) {
 	if len(bip39Seed) < 32 {
@@ -57,7 +56,7 @@ func DeriveBackupKEK(bip39Seed []byte) ([]byte, error) {
 }
 
 // DerivePairwiseSeed derives an Ed25519 seed for a contact index (HD path by index).
-// (See DeriveBackupKEK header for BIP32 vs HKDF interop test note and M10 pin.)
+// (See DeriveBackupKEK header for the HD-derivation pin in the backup-recovery architecture interop test note.)
 func DerivePairwiseSeed(bip39Seed []byte, contactIndex, keyIndex int) ([]byte, error) {
 	if len(bip39Seed) < 32 {
 		return nil, fmt.Errorf("bip39 seed must be at least 32 bytes")

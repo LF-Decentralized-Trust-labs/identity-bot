@@ -1,9 +1,9 @@
-# ADR-009: Data Domain Architecture
+# ADR-026: Data Domain Architecture
 
 - **Status:** Accepted
 - **Date:** 2026-03-13
 - **Supersedes:** None
-- **Related:** ADR-006 (Topology), ADR-012 (Sandbox Marketplace), ADR-013 (Container Data Architecture)
+- **Related:** ADR-006 (Topology), ADR-012 (Sandboxed App Registry), ADR-013 (Container Data Architecture)
 
 ---
 

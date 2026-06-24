@@ -2,14 +2,14 @@
 
 - **Status:** Accepted
 - **Date:** 2026-03-13
-- **Supersedes:** Nothing (extends ADR-009 and ADR-012)
-- **Related:** ADR-009 (Data Domains), ADR-012 (Sandbox Marketplace)
+- **Supersedes:** Nothing (extends ADR-026 and ADR-012)
+- **Related:** ADR-026 (Data Domain Architecture), ADR-012 (Sandboxed App Registry)
 
 ---
 
 ## Context
 
-ADR-009 established the data domain architecture: one SQLite database per data category, never one per app. ADR-012 established the sandboxed app marketplace. A key implementation question remained open: **how does a sandboxed app interact with its data domain, and how does data flow between the container and the Identity Agent?**
+ADR-026 established the data domain architecture: one SQLite database per data category, never one per app. ADR-012 established the sandboxed app registry (plugins). A key implementation question remained open: **how does a sandboxed app interact with its data domain, and how does data flow between the container and the Identity Agent?**
 
 Two specific problems needed solving:
 

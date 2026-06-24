@@ -33,7 +33,7 @@ type IdentityState struct {
 
 // ContactRecord stores a resolved contact in the Identity Agent.
 //
-// Two-axis model (per M16):
+// Two-axis contact model:
 //   - ContactSource (provenance): "keri" | "imported" | "manual"
 //   - ContactCategory (user-facing label): "transactional" | "general" | "trusted" | "professional"
 // Relationship AIDs are standalone icp (never dip for ordinary relationships).
@@ -50,10 +50,11 @@ type ContactRecord struct {
         Status          string `json:"status"`
         ContactSource   string `json:"contact_source"`   // keri | imported | manual
         ContactCategory string `json:"contact_category"` // transactional | general | trusted | professional
-        RelationshipAID string `json:"relationship_aid,omitempty"` // our per-contact standalone icp P-AID for this contact (Root never disclosed for relationships)
-        IsWitness       bool   `json:"is_witness"`     // KERI witness role — auto-managed
-        JCard           *JCard `json:"jcard,omitempty"`
-        Photo           string `json:"photo,omitempty"`
+        RelationshipAID     string `json:"relationship_aid,omitempty"`     // our per-contact standalone icp P-AID for this contact (Root never disclosed for relationships)
+        RelationshipSeedB64 string `json:"relationship_seed_b64,omitempty"` // seed for the relationship P-AID so signing can be delegated to local engine
+        IsWitness           bool   `json:"is_witness"`     // KERI witness role — auto-managed
+        JCard               *JCard `json:"jcard,omitempty"`
+        Photo               string `json:"photo,omitempty"`
 }
 
 // TaskRecord represents an automated background task tracked by the Identity Agent.
