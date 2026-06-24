@@ -2905,24 +2905,48 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
                 Photo:           oobiData.Photo,
         }
 
-        // Mint the relationship AID as a REAL KERI standalone icp via the local engine (no fabricated "E"+prefix keys).
-        // Desktop: via Python driver CreateInceptionNamed (POST /inception).
-        // The resulting AID is the canonical one from the engine (CESR icp).
+        // Mint using architected HD derivation (BIP32/SLIP-0010 from root keystore seed) + real driver icp.
+        // No rand per contact. Deterministic per contact index (append order). Store seed in secure enclave.
+        // Failure to store seed in secure is hard error: do not persist contact with unrecoverable key.
         if contact.RelationshipAID == "" && s.KeriDriver != nil {
-                seed := make([]byte, ed25519.SeedSize)
-                if _, err := rand.Read(seed); err == nil {
-                        pub := ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)
-                        // Provide next key for proper icp (simple next for relationship).
-                        nextSeed := make([]byte, ed25519.SeedSize)
-                        rand.Read(nextSeed)
-                        nextPub := ed25519.NewKeyFromSeed(nextSeed).Public().(ed25519.PublicKey)
-                        pubB64 := base64.StdEncoding.EncodeToString(pub)
-                        nextB64 := base64.StdEncoding.EncodeToString(nextPub)
-                        if resp, err := s.KeriDriver.CreateInceptionNamed(pubB64, nextB64, "rel-"+oobiData.AID); err == nil && resp.AID != "" {
-                                contact.RelationshipAID = resp.AID
-                                contact.RelationshipSeedB64 = base64.StdEncoding.EncodeToString(seed)
-                                log.Printf("[identity-agent-core] CONTACT: minted real relationship P-AID %s via local KERI driver for %s", resp.AID, oobiData.AID)
+                rootSeed, rerr := secureenclave.LoadRootSeed(s.DataDir)
+                if rerr != nil {
+                        // bootstrap root seed for this agent (first use); in production set at setup/recovery
+                        rootSeed = make([]byte, 64)
+                        if _, re := rand.Read(rootSeed); re != nil {
+                                writeError(w, http.StatusInternalServerError, "Failed to bootstrap root seed", re.Error())
+                                return
                         }
+                        if serr := secureenclave.StoreRootSeed(s.DataDir, rootSeed); serr != nil {
+                                writeError(w, http.StatusInternalServerError, "Failed to store root seed securely", serr.Error())
+                                return
+                        }
+                }
+                existingContacts, _ := s.DataStore.GetContacts()
+                contactIdx := len(existingContacts)
+                pairwiseSeed, derr := backup.DerivePairwiseSeed(rootSeed, contactIdx, 0)
+                if derr != nil {
+                        writeError(w, http.StatusInternalServerError, "Failed to HD-derive pairwise seed", derr.Error())
+                        return
+                }
+                // for pre-rot next, use keyIndex 1
+                nextPairwiseSeed, _ := backup.DerivePairwiseSeed(rootSeed, contactIdx, 1)
+                pub := ed25519.NewKeyFromSeed(pairwiseSeed).Public().(ed25519.PublicKey)
+                nextPub := ed25519.NewKeyFromSeed(nextPairwiseSeed).Public().(ed25519.PublicKey)
+                pubB64 := base64.StdEncoding.EncodeToString(pub)
+                nextB64 := base64.StdEncoding.EncodeToString(nextPub)
+                if resp, err := s.KeriDriver.CreateInceptionNamed(pubB64, nextB64, "rel-"+oobiData.AID); err == nil && resp.AID != "" {
+                        contact.RelationshipAID = resp.AID
+                        // store the derived seed (current) securely; use AID as handle
+                        if serr := secureenclave.StoreRelationshipSeed(s.DataDir, contact.RelationshipAID, pairwiseSeed); serr != nil {
+                                writeError(w, http.StatusInternalServerError, "Failed to store relationship seed in secure enclave (key would be unrecoverable)", serr.Error())
+                                return
+                        }
+                        contact.RelationshipSeedB64 = "" // only handle in main store
+                        log.Printf("[identity-agent-core] CONTACT: HD-derived + minted real relationship P-AID %s (index %d) via local KERI driver for %s", resp.AID, contactIdx, oobiData.AID)
+                } else if err != nil {
+                        writeError(w, http.StatusInternalServerError, "Failed to mint relationship icp via driver", err.Error())
+                        return
                 }
         }
 
@@ -3198,18 +3222,42 @@ func (s *CoreServer) handleExchange(w http.ResponseWriter, r *http.Request) {
                 Photo:           req.SenderPhoto,
         }
 
-        // Ensure real relationship P-AID via local engine for inbound exchange path (consistent with addContact).
+        // HD-derive (BIP32/SLIP-0010) + real driver icp for inbound exchange (consistent).
+        // Hard error on secure seed store failure.
         if contact.RelationshipAID == "" && s.KeriDriver != nil {
-                seed := make([]byte, ed25519.SeedSize)
-                if _, err := rand.Read(seed); err == nil {
-                        pub := ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)
-                        nextSeed := make([]byte, ed25519.SeedSize)
-                        rand.Read(nextSeed)
-                        nextPub := ed25519.NewKeyFromSeed(nextSeed).Public().(ed25519.PublicKey)
-                        if resp, err := s.KeriDriver.CreateInceptionNamed(base64.StdEncoding.EncodeToString(pub), base64.StdEncoding.EncodeToString(nextPub), "rel-"+req.SenderAID); err == nil && resp.AID != "" {
-                                contact.RelationshipAID = resp.AID
-                                contact.RelationshipSeedB64 = base64.StdEncoding.EncodeToString(seed)
+                rootSeed, rerr := secureenclave.LoadRootSeed(s.DataDir)
+                if rerr != nil {
+                        rootSeed = make([]byte, 64)
+                        if _, re := rand.Read(rootSeed); re != nil {
+                                writeError(w, http.StatusInternalServerError, "Failed to bootstrap root seed", re.Error())
+                                return
                         }
+                        if serr := secureenclave.StoreRootSeed(s.DataDir, rootSeed); serr != nil {
+                                writeError(w, http.StatusInternalServerError, "Failed to store root seed securely", serr.Error())
+                                return
+                        }
+                }
+                existing, _ := s.DataStore.GetContacts()
+                cidx := len(existing)
+                pwiseSeed, derr := backup.DerivePairwiseSeed(rootSeed, cidx, 0)
+                if derr != nil {
+                        writeError(w, http.StatusInternalServerError, "HD derive failed", derr.Error())
+                        return
+                }
+                nextPwise, _ := backup.DerivePairwiseSeed(rootSeed, cidx, 1)
+                pub := ed25519.NewKeyFromSeed(pwiseSeed).Public().(ed25519.PublicKey)
+                npub := ed25519.NewKeyFromSeed(nextPwise).Public().(ed25519.PublicKey)
+                if resp, err := s.KeriDriver.CreateInceptionNamed(base64.StdEncoding.EncodeToString(pub), base64.StdEncoding.EncodeToString(npub), "rel-"+req.SenderAID); err == nil && resp.AID != "" {
+                        contact.RelationshipAID = resp.AID
+                        if serr := secureenclave.StoreRelationshipSeed(s.DataDir, contact.RelationshipAID, pwiseSeed); serr != nil {
+                                writeError(w, http.StatusInternalServerError, "Failed to store relationship seed in secure enclave (key unrecoverable)", serr.Error())
+                                return
+                        }
+                        contact.RelationshipSeedB64 = ""
+                        log.Printf("[identity-agent-core] EXCHANGE: HD-derived + minted rel P-AID %s", resp.AID)
+                } else if err != nil {
+                        writeError(w, http.StatusInternalServerError, "driver mint failed for exchange rel", err.Error())
+                        return
                 }
         }
 

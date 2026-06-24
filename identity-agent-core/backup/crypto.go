@@ -7,7 +7,9 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/base64"
+	"encoding/binary"
 	"fmt"
 	"strings"
 
@@ -37,12 +39,7 @@ func DefaultArgon2Params() Argon2Params {
 }
 
 // DeriveBackupKEK derives the 256-bit backup KEK from a BIP39 seed (64 bytes).
-// Uses HKDF-SHA256 (current implementation).
-//
-// Build/test note (2026-06-23): the HD-derivation pin in the backup-recovery architecture specifies a BIP32/SLIP-0010 path for pairwise seeds.
-// Current Go uses HKDF (interops with own recovery tests + .iab roundtrips).
-// Cross-engine (keripy/Rust) BIP32 vs HKDF golden interop test is required before recovery is final; result will be written back to the backup-recovery architecture per deviation rule.
-// HKDF chosen for this align pass because it is the proven working code; no overwrite.
+// Uses HKDF-SHA256 (for KEK slot; pairwise uses separate HD path).
 func DeriveBackupKEK(bip39Seed []byte) ([]byte, error) {
 	if len(bip39Seed) < 32 {
 		return nil, fmt.Errorf("bip39 seed must be at least 32 bytes")
@@ -55,19 +52,48 @@ func DeriveBackupKEK(bip39Seed []byte) ([]byte, error) {
 	return out, nil
 }
 
-// DerivePairwiseSeed derives an Ed25519 seed for a contact index (HD path by index).
-// (See DeriveBackupKEK header for the HD-derivation pin in the backup-recovery architecture interop test note.)
+// DerivePairwiseSeed derives an Ed25519 seed for a contact index using BIP32/SLIP-0010 HD from the root keystore seed.
+// Path: m / 44' / 0' / 0' / contactIndex' / keyIndex'
+// This is the architected derivation (replaces previous HKDF). Deterministic, matches across engines for restore.
 func DerivePairwiseSeed(bip39Seed []byte, contactIndex, keyIndex int) ([]byte, error) {
 	if len(bip39Seed) < 32 {
 		return nil, fmt.Errorf("bip39 seed must be at least 32 bytes")
 	}
-	info := fmt.Sprintf("%s/%d/%d", PairwiseHDInfoV1, contactIndex, keyIndex)
-	r := hkdf.New(sha256.New, bip39Seed, []byte("identity-agent-pairwise-salt-v1"), []byte(info))
-	out := make([]byte, ed25519.SeedSize)
-	if _, err := r.Read(out); err != nil {
-		return nil, fmt.Errorf("hkdf pairwise seed: %w", err)
+	path := []uint32{
+		0x8000002C, // purpose' = 44'
+		0x80000000, // coin_type' = 0'
+		0x80000000, // account' = 0'
+		uint32(contactIndex) | 0x80000000,
+		uint32(keyIndex) | 0x80000000,
 	}
-	return out, nil
+	return deriveSLIP10Ed25519(bip39Seed, path)
+}
+
+// deriveMaster and ckd implement SLIP-0010 for Ed25519 (master "ed25519 seed", hardened children).
+func deriveMaster(bip39 []byte) (k, c []byte) {
+	h := hmac.New(sha512.New, []byte("ed25519 seed"))
+	h.Write(bip39)
+	I := h.Sum(nil)
+	return I[:32], I[32:]
+}
+
+func ckd(kPar, cPar []byte, i uint32) (k, c []byte) {
+	data := make([]byte, 1+32+4)
+	data[0] = 0x00
+	copy(data[1:33], kPar)
+	binary.BigEndian.PutUint32(data[33:], i)
+	h := hmac.New(sha512.New, cPar)
+	h.Write(data)
+	I := h.Sum(nil)
+	return I[:32], I[32:]
+}
+
+func deriveSLIP10Ed25519(seed []byte, path []uint32) ([]byte, error) {
+	k, c := deriveMaster(seed)
+	for _, idx := range path {
+		k, c = ckd(k, c, idx)
+	}
+	return k, nil
 }
 
 // PairwisePublicKey returns the Ed25519 public key for a derived pairwise seed.

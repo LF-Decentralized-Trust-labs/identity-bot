@@ -33,6 +33,9 @@ func (s *RelationshipStore) Get(siteAID string) (SiteRelationship, bool) {
 func (s *RelationshipStore) Put(rel SiteRelationship) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Security: do not persist raw private seeds in the main relationships JSON.
+	// The AID (PairwiseAID) is the handle; secrets live in secure storage.
+	rel.SeedB64 = ""
 	s.items[rel.SiteAID] = rel
 	return s.saveLocked()
 }

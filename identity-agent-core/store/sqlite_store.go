@@ -159,6 +159,10 @@ func (s *SQLiteStore) SaveContact(contact ContactRecord) error {
 		contact.ContactCategory = "general"
 	}
 	// relationship_aid may be empty; caller (or add-contact path) populates with a per-contact standalone P-AID
+	// Security: never persist raw private seeds in the main store column (use secureenclave storage keyed by AID).
+	if contact.RelationshipSeedB64 != "" {
+		contact.RelationshipSeedB64 = ""
+	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := s.db.Exec(`

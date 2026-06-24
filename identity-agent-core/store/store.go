@@ -50,8 +50,8 @@ type ContactRecord struct {
         Status          string `json:"status"`
         ContactSource   string `json:"contact_source"`   // keri | imported | manual
         ContactCategory string `json:"contact_category"` // transactional | general | trusted | professional
-        RelationshipAID     string `json:"relationship_aid,omitempty"`     // our per-contact standalone icp P-AID for this contact (Root never disclosed for relationships)
-        RelationshipSeedB64 string `json:"relationship_seed_b64,omitempty"` // seed for the relationship P-AID so signing can be delegated to local engine
+        RelationshipAID     string `json:"relationship_aid,omitempty"`     // our per-contact standalone icp P-AID for this contact (Root never disclosed for relationships) -- the handle/reference
+        RelationshipSeedB64 string `json:"relationship_seed_b64,omitempty"` // deprecated for secrets; kept for schema compat only. Private seeds live in secureenclave storage (AID is the key). Never write raw seeds here.
         IsWitness           bool   `json:"is_witness"`     // KERI witness role — auto-managed
         JCard               *JCard `json:"jcard,omitempty"`
         Photo               string `json:"photo,omitempty"`

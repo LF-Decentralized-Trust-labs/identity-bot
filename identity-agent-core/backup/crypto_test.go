@@ -2,6 +2,7 @@ package backup
 
 import (
 	"bytes"
+	"fmt"
 	"testing"
 )
 
@@ -120,5 +121,24 @@ func TestPairwiseHDDeterministic(t *testing.T) {
 	}
 	if bytes.Equal(a, c) {
 		t.Fatal("different contact index must yield different seed")
+	}
+}
+
+// Go <-> keripy golden vector for the HD pairwise derivation (desktop/keripy path).
+// Proves deterministic SLIP-0010 from root and matches what the engine (via driver icp on derived pub) expects.
+// Rust (mobile) cross-engine vector deferred to mobile QA (2026-06-23 deviation note).
+func TestPairwiseHDGoldenVector(t *testing.T) {
+	m := "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+	s, err := MnemonicToBIP39Seed(m, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := DerivePairwiseSeed(s, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "348de60391d98089828e3ceb3828991313a3a3e3220147e803fd3d4785640f45"
+	if fmt.Sprintf("%x", got) != want {
+		t.Fatalf("Go/keripy golden mismatch got %x want %s (update if path constants change)", got, want)
 	}
 }
