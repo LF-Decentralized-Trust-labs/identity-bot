@@ -159,7 +159,7 @@ func (h *Handler) getOrCreateRelationship(siteAID string, bundle *ChallengeBundl
 			return nil, fmt.Errorf("failed to store root seed securely: %w", serr)
 		}
 	}
-	loginIdx := h.Store.NextRelationshipIndex()
+	loginIdx := h.Store.AllocateNextRelationshipIndex()
 
 	pwiseSeed, derr := backup.DerivePairwiseSeed(rootSeed, loginIdx, 0)
 	if derr != nil {

@@ -152,8 +152,8 @@ func TestPairwiseHDGoldenVector(t *testing.T) {
 	}
 }
 
-// Test that index allocation is true high-water mark: after "deleting" highest (counter independent of rows),
-// next allocate is strictly larger. Uses FileStore counters.
+// Test that index allocation is true high-water mark via real Save/Delete roundtrip.
+// allocate → Save top → Delete top → allocate must yield strictly larger index (counter survives delete).
 func TestRelationshipIndexNoReuseAfterDelete(t *testing.T) {
 	tmp := t.TempDir()
 	defer os.RemoveAll(tmp)
@@ -161,17 +161,35 @@ func TestRelationshipIndexNoReuseAfterDelete(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	// first
 	idx1, err := fs.AllocateNextRelationshipIndex("contacts")
 	if err != nil || idx1 != 1 {
 		t.Fatalf("first got %d err=%v", idx1, err)
 	}
-	idx2, err := fs.AllocateNextRelationshipIndex("contacts")
-	if err != nil || idx2 != 2 {
-		t.Fatalf("second got %d", idx2)
+	c1 := store.ContactRecord{AID: "c1", RelationshipIndex: idx1}
+	if err := fs.SaveContact(c1); err != nil {
+		t.Fatal(err)
 	}
-	// "delete top" by not storing record; counter must not go back
+
+	// allocate top
+	idxTop, err := fs.AllocateNextRelationshipIndex("contacts")
+	if err != nil || idxTop != 2 {
+		t.Fatalf("top got %d", idxTop)
+	}
+	ctop := store.ContactRecord{AID: "ctop", RelationshipIndex: idxTop}
+	if err := fs.SaveContact(ctop); err != nil {
+		t.Fatal(err)
+	}
+
+	// delete the top one
+	if err := fs.DeleteContact("ctop"); err != nil {
+		t.Fatal(err)
+	}
+
+	// next must be 3, not reuse 2
 	idx3, err := fs.AllocateNextRelationshipIndex("contacts")
 	if err != nil || idx3 != 3 {
-		t.Fatalf("after delete-top got %d (must be strictly > 2)", idx3)
+		t.Fatalf("after real delete-top got %d (must be strictly > 2)", idx3)
 	}
 }

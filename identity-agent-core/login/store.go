@@ -71,8 +71,18 @@ func (s *RelationshipStore) Put(rel SiteRelationship) error {
 	return s.saveLocked()
 }
 
-// NextRelationshipIndex returns the next never-reused high-water index without side effects.
-// The highWater is a persisted monotonic counter (updated on Put); it is not recomputed from live items.
+// AllocateNextRelationshipIndex atomically allocates and returns the next never-reused index,
+// bumping the highWater under lock and persisting it. Mirrors the main Store's counter.
+func (s *RelationshipStore) AllocateNextRelationshipIndex() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.highWater++
+	_ = s.saveHighWaterLocked()  // best effort
+	return s.highWater
+}
+
+// NextRelationshipIndex kept for backward compat / peek (returns without bumping).
+// The highWater is a persisted monotonic counter; not recomputed from live items.
 func (s *RelationshipStore) NextRelationshipIndex() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
