@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../brand/brand.dart';
+
 class MobileColors {
   static const Color primary = Color(0xFF4589FF);
   static const Color primaryLight = Color(0xFF78A9FF);
@@ -42,9 +44,9 @@ class MobileTheme {
     return ThemeData(
       brightness: Brightness.light,
       scaffoldBackgroundColor: MobileColors.background,
-      colorScheme: const ColorScheme.light(
-        primary: MobileColors.primary,
-        secondary: MobileColors.primaryLight,
+      colorScheme: ColorScheme.light(
+        primary: currentBrand.primary,
+        secondary: currentBrand.primaryLight,
         surface: MobileColors.surface,
         error: MobileColors.error,
         onPrimary: MobileColors.textOnPrimary,
