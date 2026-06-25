@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../brand/brand.dart';
+
 // ── Unified color tokens ──────────────────────────────────────────────────────
 // Light theme values are the canonical source of truth.
 // The dark theme overrides backgrounds and text via ThemeData; screens that
@@ -82,9 +84,9 @@ class AppTheme {
     return ThemeData(
       brightness: Brightness.light,
       scaffoldBackgroundColor: AppColors.background,
-      colorScheme: const ColorScheme.light(
-        primary:                    AppColors.primary,
-        secondary:                  AppColors.primaryLight,
+      colorScheme: ColorScheme.light(
+        primary:                    currentBrand.primary,
+        secondary:                  currentBrand.primaryLight,
         surface:                    AppColors.surface,
         error:                      AppColors.error,
         onPrimary:                  Colors.white,
@@ -175,9 +177,9 @@ class AppTheme {
     return ThemeData(
       brightness: Brightness.dark,
       scaffoldBackgroundColor: darkBg,
-      colorScheme: const ColorScheme.dark(
-        primary:                    AppColors.primary,
-        secondary:                  AppColors.primaryLight,
+      colorScheme: ColorScheme.dark(
+        primary:                    currentBrand.primary,
+        secondary:                  currentBrand.primaryLight,
         surface:                    darkSurface,
         error:                      AppColors.error,
         onPrimary:                  Colors.white,

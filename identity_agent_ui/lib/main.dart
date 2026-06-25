@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'dart:io' show Platform;
 import 'theme/app_theme.dart';
+import 'brand/brand.dart';
 import 'screens/desktop/desktop_app.dart';
 import 'screens/setup_wizard_screen.dart';
 import 'screens/mode_selection_screen.dart';
@@ -60,7 +61,7 @@ class IdentityAgentApp extends StatelessWidget {
       valueListenable: ThemeNotifier.instance,
       builder: (_, themeMode, __) {
         return MaterialApp(
-          title: 'Identity Agent',
+          title: currentBrand.displayName,
           debugShowCheckedModeBanner: false,
           theme:      AppTheme.light,
           darkTheme:  AppTheme.dark,
