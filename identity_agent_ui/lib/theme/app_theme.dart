@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../brand/brand.dart';
+
 // ── Unified color tokens ──────────────────────────────────────────────────────
 // Light theme values are the canonical source of truth.
 // The dark theme overrides backgrounds and text via ThemeData; screens that
 // use Theme.of(context).colorScheme will automatically adapt.
 class AppColors {
-  // Brand blue (IBM Carbon 60)
+  // Brand-driven values for the *theme* come from currentBrand below (ColorScheme etc).
+  // Legacy direct AppColors.primary usages in screens remain on the OSS default for now
+  // (full migration is follow-up). Brand interface + palette is the source of truth.
   static const Color primary       = Color(0xFF4589FF);
   static const Color primaryLight  = Color(0xFF78A9FF);
   static const Color primaryDark   = Color(0xFF0F62FE);
@@ -82,9 +86,9 @@ class AppTheme {
     return ThemeData(
       brightness: Brightness.light,
       scaffoldBackgroundColor: AppColors.background,
-      colorScheme: const ColorScheme.light(
-        primary:                    AppColors.primary,
-        secondary:                  AppColors.primaryLight,
+      colorScheme: ColorScheme.light(
+        primary:                    currentBrand.primary,
+        secondary:                  currentBrand.primaryLight,
         surface:                    AppColors.surface,
         error:                      AppColors.error,
         onPrimary:                  Colors.white,
@@ -96,7 +100,7 @@ class AppTheme {
         surfaceContainerHighest:    AppColors.surfaceVariant,
       ),
       fontFamily: 'sans-serif',
-      textTheme: const TextTheme(
+      textTheme: TextTheme(
         headlineLarge:  TextStyle(color: AppColors.textPrimary,   fontSize: 28, fontWeight: FontWeight.w700, letterSpacing: -0.5),
         headlineMedium: TextStyle(color: AppColors.textPrimary,   fontSize: 22, fontWeight: FontWeight.w600),
         titleLarge:     TextStyle(color: AppColors.textPrimary,   fontSize: 18, fontWeight: FontWeight.w600),
@@ -104,7 +108,7 @@ class AppTheme {
         bodyLarge:      TextStyle(color: AppColors.textPrimary,   fontSize: 16),
         bodyMedium:     TextStyle(color: AppColors.textSecondary, fontSize: 14),
         bodySmall:      TextStyle(color: AppColors.textMuted,     fontSize: 12),
-        labelLarge:     TextStyle(color: AppColors.primary,       fontSize: 14, fontWeight: FontWeight.w600),
+        labelLarge:     TextStyle(color: currentBrand.primary,       fontSize: 14, fontWeight: FontWeight.w600),
         labelSmall:     TextStyle(color: AppColors.textMuted,     fontSize: 11, fontWeight: FontWeight.w500, letterSpacing: 0.5),
       ),
       appBarTheme: const AppBarTheme(
@@ -175,9 +179,9 @@ class AppTheme {
     return ThemeData(
       brightness: Brightness.dark,
       scaffoldBackgroundColor: darkBg,
-      colorScheme: const ColorScheme.dark(
-        primary:                    AppColors.primary,
-        secondary:                  AppColors.primaryLight,
+      colorScheme: ColorScheme.dark(
+        primary:                    currentBrand.primary,
+        secondary:                  currentBrand.primaryLight,
         surface:                    darkSurface,
         error:                      AppColors.error,
         onPrimary:                  Colors.white,
@@ -189,7 +193,7 @@ class AppTheme {
         surfaceContainerHighest:    darkSurfaceVar,
       ),
       fontFamily: 'sans-serif',
-      textTheme: const TextTheme(
+      textTheme: TextTheme(
         headlineLarge:  TextStyle(color: darkText,      fontSize: 28, fontWeight: FontWeight.w700, letterSpacing: -0.5),
         headlineMedium: TextStyle(color: darkText,      fontSize: 22, fontWeight: FontWeight.w600),
         titleLarge:     TextStyle(color: darkText,      fontSize: 18, fontWeight: FontWeight.w600),
@@ -197,7 +201,7 @@ class AppTheme {
         bodyLarge:      TextStyle(color: darkText,      fontSize: 16),
         bodyMedium:     TextStyle(color: darkTextSec,   fontSize: 14),
         bodySmall:      TextStyle(color: darkTextMuted, fontSize: 12),
-        labelLarge:     TextStyle(color: AppColors.primary, fontSize: 14, fontWeight: FontWeight.w600),
+        labelLarge:     TextStyle(color: currentBrand.primary, fontSize: 14, fontWeight: FontWeight.w600),
         labelSmall:     TextStyle(color: darkTextMuted, fontSize: 11, fontWeight: FontWeight.w500, letterSpacing: 0.5),
       ),
       appBarTheme: const AppBarTheme(

@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 
+import '../brand/brand.dart';
+
 class MobileColors {
-  static const Color primary = Color(0xFF4589FF);
-  static const Color primaryLight = Color(0xFF78A9FF);
-  static const Color primaryDark = Color(0xFF0F62FE);
+  // Driven by Brand so --dart-define affects mobile theme elements.
+  static final Color primary = currentBrand.primary;
+  static final Color primaryLight = currentBrand.primaryLight;
+  static final Color primaryDark = currentBrand.primaryDark;
 
   static const Color background = Color(0xFFF4F4F4);
   static const Color surface = Color(0xFFFFFFFF);
@@ -22,7 +25,7 @@ class MobileColors {
   static const Color success = Color(0xFF24A148);
   static const Color warning = Color(0xFFF1C21B);
   static const Color error = Color(0xFFDA1E28);
-  static const Color info = Color(0xFF4589FF);
+  static final Color info = currentBrand.primary;
 
   static const Color confidenceHigh = Color(0xFF24A148);
   static const Color confidenceMedium = Color(0xFFF1C21B);
@@ -33,8 +36,8 @@ class MobileColors {
   static const Color cardShadow = Color(0x1A000000);
 
   static const Color scannerBackground = Color(0xFF000000);
-  static const Color scannerFrame = Color(0xFF4589FF);
-  static const Color scannerLine = Color(0xFF4589FF);
+  static final Color scannerFrame = currentBrand.primary;
+  static final Color scannerLine = currentBrand.primary;
 }
 
 class MobileTheme {
@@ -42,7 +45,7 @@ class MobileTheme {
     return ThemeData(
       brightness: Brightness.light,
       scaffoldBackgroundColor: MobileColors.background,
-      colorScheme: const ColorScheme.light(
+      colorScheme: ColorScheme.light(
         primary: MobileColors.primary,
         secondary: MobileColors.primaryLight,
         surface: MobileColors.surface,
@@ -52,7 +55,7 @@ class MobileTheme {
         onError: MobileColors.textOnPrimary,
       ),
       fontFamily: 'sans-serif',
-      textTheme: const TextTheme(
+      textTheme: TextTheme(
         headlineLarge: TextStyle(
           color: MobileColors.textPrimary,
           fontSize: 28,
@@ -136,7 +139,7 @@ class MobileTheme {
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           foregroundColor: MobileColors.primary,
-          side: const BorderSide(color: MobileColors.primary),
+          side: BorderSide(color: MobileColors.primary),
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(8),
@@ -160,7 +163,7 @@ class MobileTheme {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: MobileColors.primary, width: 2),
+          borderSide: BorderSide(color: MobileColors.primary, width: 2),
         ),
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         labelStyle: const TextStyle(color: MobileColors.textSecondary),
