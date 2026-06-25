@@ -3,6 +3,7 @@ package server
 import (
         "bytes"
         "context"
+        "crypto/ed25519"
         "crypto/tls"
         "encoding/base64"
         "encoding/json"
@@ -22,7 +23,7 @@ import (
         "identity-agent-core/drivers"
         "identity-agent-core/login"
         "identity-agent-core/oidc"
-        "identity-agent-core/m63"
+        "identity-agent-core/iacrypto"
         "identity-agent-core/endpoint"
         "identity-agent-core/sandbox"
         "identity-agent-core/schemas"
@@ -721,7 +722,7 @@ func (s *CoreServer) handleInfo(w http.ResponseWriter, r *http.Request) {
 
         resp := CoreInfoResponse{
                 Name:        "Identity Agent Core",
-                Description: "Self-sovereign identity runtime powered by KERI",
+                Description: "User-controlled identity runtime powered by KERI",
                 Version:     "0.1.0",
                 Phase:       phase,
                 Capabilities: []string{
@@ -731,6 +732,10 @@ func (s *CoreServer) handleInfo(w http.ResponseWriter, r *http.Request) {
                         "contacts",
                         "oobi",
                         "tunneling",
+                        "sandbox_plugins",
+                        "pairwise_aids",
+                        // Transaction hash receipts (pointer/stub) — primitives (secureenclave + blake3) reused when built
+                        // Governance policy config (pointer/stub) — LLM egress structurally denied until the governance gateway strip-gate
                 },
                 Backend: BackendInfo{
                         Mode:      "primary_active",
@@ -860,7 +865,7 @@ func (s *CoreServer) handleHybridInception(w http.ResponseWriter, r *http.Reques
                 return
         }
 
-        result, err := m63.BuildHybridInception(m63.SyntheticHybridKeyMaterial(0))
+        result, err := iacrypto.BuildHybridInception(iacrypto.SyntheticHybridKeyMaterial(0))
         if err != nil {
                 writeError(w, http.StatusInternalServerError, "Failed to create hybrid inception event", err.Error())
                 return
@@ -1242,6 +1247,15 @@ func (s *CoreServer) handleIssueCredential(w http.ResponseWriter, r *http.Reques
                 return
         }
 
+        // Use our per-contact relationship (pairwise) AID as the issuer for this issuance, not root.
+        // Lookup contact by the presented holder AID (their side of the relationship).
+        issuerAID := identity.AID
+        if req.HolderAid != "" {
+                if c, cerr := s.DataStore.GetContact(req.HolderAid); cerr == nil && c != nil && c.RelationshipAID != "" {
+                        issuerAID = c.RelationshipAID
+                }
+        }
+
         // Chain-of-trust: if the holder is a known dependent with an active guardianship
         // credential, auto-build a proper ACDC edges block referencing that credential.
         // The caller may also supply edges explicitly; explicit edges take precedence.
@@ -1257,7 +1271,7 @@ func (s *CoreServer) handleIssueCredential(w http.ResponseWriter, r *http.Reques
                 }
         }
 
-        result, err := s.KeriDriver.IssueCredential(identity.AID, req.Claims, req.SchemaSaid, req.HolderAid, req.Edges)
+        result, err := s.KeriDriver.IssueCredential(issuerAID, req.Claims, req.SchemaSaid, req.HolderAid, req.Edges)
         if err != nil {
                 writeError(w, http.StatusInternalServerError, "Credential issuance failed", err.Error())
                 return
@@ -1278,7 +1292,7 @@ func (s *CoreServer) handleIssueCredential(w http.ResponseWriter, r *http.Reques
         // Persist the credential record
         record := store.CredentialRecord{
                 SAID:           result.AcdcSaid,
-                IssuerAID:      identity.AID,
+                IssuerAID:      issuerAID,
                 HolderAID:      req.HolderAid,
                 SchemaSAID:     req.SchemaSaid,
                 AcdcJson:       result.AcdcJsonB64,
@@ -1301,14 +1315,14 @@ func (s *CoreServer) handleIssueCredential(w http.ResponseWriter, r *http.Reques
                 go s.deliverCredentialToContact(contact, record)
         }
 
-        // Persist the IXN event in the KEL
+        // Persist the IXN event in the KEL (use the relationship AID when issuing via pairwise context)
         ixnEventJSON, _ := json.Marshal(result.IxnEvent)
         kelRecord := store.EventRecord{
-                AID:            identity.AID,
+                AID:            issuerAID,
                 SequenceNumber: result.SequenceNumber,
                 EventType:      "ixn",
                 EventJSON:      string(ixnEventJSON),
-                PublicKey:      identity.PublicKey,
+                PublicKey:      identity.PublicKey, // may need rel pub if separate, but reuse root pub state for now
                 NextKeyDigest:  identity.NextKeyDigest,
                 Timestamp:      time.Now().UTC().Format(time.RFC3339),
                 CesrSignature:  req.CesrSignature,
@@ -1363,6 +1377,26 @@ func (s *CoreServer) handleGetCredential(w http.ResponseWriter, r *http.Request)
         json.NewEncoder(w).Encode(cred)
 }
 
+// detectCredentialFormat implements server-side format auto-detection so the
+// caller cannot lie about "format". Mirrors the client heuristic but is authoritative here.
+func detectCredentialFormat(acdcJSON, rawJSON string) string {
+	for _, j := range []string{acdcJSON, rawJSON} {
+		if j == "" {
+			continue
+		}
+		var m map[string]interface{}
+		if json.Unmarshal([]byte(j), &m) == nil {
+			if v, ok := m["v"].(string); ok && strings.HasPrefix(v, "ACDC") {
+				return "acdc"
+			}
+			if _, ok := m["@context"]; ok {
+				return "w3c_vc"
+			}
+		}
+	}
+	return "acdc"
+}
+
 func (s *CoreServer) handleReceiveCredential(w http.ResponseWriter, r *http.Request) {
         var req struct {
                 AcdcJson  string `json:"acdc_json"`
@@ -1373,9 +1407,8 @@ func (s *CoreServer) handleReceiveCredential(w http.ResponseWriter, r *http.Requ
                 writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
                 return
         }
-        if req.Format == "" {
-                req.Format = "acdc"
-        }
+        // Server-side format detection (do not trust caller-supplied format).
+        req.Format = detectCredentialFormat(req.AcdcJson, req.RawJson)
 
         // Determine SAID: for ACDC parse from JSON, for others use raw_json hash placeholder
         said := ""
@@ -1406,10 +1439,17 @@ func (s *CoreServer) handleReceiveCredential(w http.ResponseWriter, r *http.Requ
         if v, ok := acdcMap["i"].(string); ok {
                 issuerAID = v
         }
+        // Use pairwise subject if present in the ACDC (A1: credentials issued to P-AID not Root)
+        holderAID := identity.AID
+        if subj, ok := acdcMap["a"].(string); ok && subj != "" {
+                holderAID = subj
+        } else if h, ok := acdcMap["holder"].(string); ok && h != "" {
+                holderAID = h
+        }
 
         record := store.CredentialRecord{
                 SAID:      said,
-                HolderAID: identity.AID,
+                HolderAID: holderAID,
                 IssuerAID: issuerAID,
                 AcdcJson:  req.AcdcJson,
                 RawJson:   req.RawJson,
@@ -1473,9 +1513,8 @@ func (s *CoreServer) handleDeliverCredential(w http.ResponseWriter, r *http.Requ
         if identity, err := s.DataStore.GetIdentity(); err == nil && identity != nil {
                 holderAID = identity.AID
         }
-        if req.Format == "" {
-                req.Format = "acdc"
-        }
+        // Server-side format detection (do not trust caller-supplied format).
+        req.Format = detectCredentialFormat(req.AcdcJson, "")
 
         record := store.CredentialRecord{
                 SAID:           req.Said,
@@ -1713,7 +1752,15 @@ func (s *CoreServer) handlePresentCredential(w http.ResponseWriter, r *http.Requ
                 return
         }
 
-        result, err := s.KeriDriver.PresentCredential(req.AcdcSaid, req.HolderAid, req.IssuerAid, req.SchemaSaid)
+        // Use our relationship (pairwise) AID for this presentation context, not root or arbitrary caller value.
+        holderToUse := req.HolderAid
+        if req.HolderAid != "" {
+                if c, cerr := s.DataStore.GetContact(req.HolderAid); cerr == nil && c != nil && c.RelationshipAID != "" {
+                        holderToUse = c.RelationshipAID
+                }
+        }
+
+        result, err := s.KeriDriver.PresentCredential(req.AcdcSaid, holderToUse, req.IssuerAid, req.SchemaSaid)
         if err != nil {
                 writeError(w, http.StatusInternalServerError, "Credential presentation failed", err.Error())
                 return
@@ -1722,7 +1769,7 @@ func (s *CoreServer) handlePresentCredential(w http.ResponseWriter, r *http.Requ
         record := store.PresentationRecord{
                 SAID:                result.PresentationSaid,
                 CredentialSAID:      req.AcdcSaid,
-                HolderAID:           req.HolderAid,
+                HolderAID:           holderToUse,
                 IssuerAID:           req.IssuerAid,
                 PresentationJsonB64: result.PresentationJsonB64,
                 CesrSignature:       req.CesrSignature,
@@ -2837,23 +2884,62 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
                 contactStatus = "unverified"
         }
 
-        contactType := "general"
+        contactCategory := "general"
         if req.Trusted {
-                contactType = "trusted"
+                contactCategory = "trusted"
         }
 
         contact := store.ContactRecord{
-                AID:          oobiData.AID,
-                Alias:        alias,
-                PublicKey:    currentPublicKey,
-                OobiURL:      req.OobiURL,
-                Verified:     kelVerified || s.KeriDriver == nil,
-                DiscoveredAt: time.Now().UTC().Format(time.RFC3339),
-                Status:       contactStatus,
-                ContactType:  contactType,
-                IsWitness:    false, // set via witness protocol (ADR-016)
-                JCard:        contactJCard,
-                Photo:        oobiData.Photo,
+                AID:             oobiData.AID,
+                Alias:           alias,
+                PublicKey:       currentPublicKey,
+                OobiURL:         req.OobiURL,
+                Verified:        kelVerified || s.KeriDriver == nil,
+                DiscoveredAt:    time.Now().UTC().Format(time.RFC3339),
+                Status:          contactStatus,
+                ContactSource:   "keri",
+                ContactCategory: contactCategory,
+                IsWitness:       false, // set via witness protocol (ADR-016)
+                JCard:           contactJCard,
+                Photo:           oobiData.Photo,
+        }
+
+        // Mint using architected HD derivation (BIP32/SLIP-0010 from root keystore seed) + real driver icp.
+        // Assign stable monotonic RelationshipIndex at creation (persisted in record + used for derive).
+        // Never derive index from len() or hash. Re-derive seed on demand from root + index (no per-rel seed files).
+        // Hard error if root seed unavailable for derivation.
+        if contact.RelationshipAID == "" && s.KeriDriver != nil {
+                rootSeed, rerr := secureenclave.LoadRootSeed(s.DataDir)
+                if rerr != nil {
+                        writeError(w, http.StatusInternalServerError, "Root keystore seed required for HD pairwise derivation (not found in secure storage)", rerr.Error())
+                        return
+                }
+                contactIdx, err := s.DataStore.AllocateNextRelationshipIndex("contacts")
+                if err != nil {
+                        writeError(w, http.StatusInternalServerError, "Failed to allocate relationship index", err.Error())
+                        return
+                }
+                contact.RelationshipIndex = contactIdx
+
+                pairwiseSeed, derr := backup.DerivePairwiseSeed(rootSeed, contactIdx, 0)
+                if derr != nil {
+                        writeError(w, http.StatusInternalServerError, "Failed to HD-derive pairwise seed", derr.Error())
+                        return
+                }
+                // for pre-rot next key, derive keyIndex=1 under same relationship slot
+                nextPairwiseSeed, _ := backup.DerivePairwiseSeed(rootSeed, contactIdx, 1)
+                pub := ed25519.NewKeyFromSeed(pairwiseSeed).Public().(ed25519.PublicKey)
+                nextPub := ed25519.NewKeyFromSeed(nextPairwiseSeed).Public().(ed25519.PublicKey)
+                pubB64 := base64.StdEncoding.EncodeToString(pub)
+                nextB64 := base64.StdEncoding.EncodeToString(nextPub)
+                if resp, err := s.KeriDriver.CreateInceptionNamed(pubB64, nextB64, "rel-"+oobiData.AID); err == nil && resp.AID != "" {
+                        contact.RelationshipAID = resp.AID
+                        contact.RelationshipSeedB64 = "" // no per-contact secret; re-derive from root+index
+                        log.Printf("[identity-agent-core] CONTACT: HD-derived (index %d) + minted real relationship P-AID %s via local KERI driver for %s", contactIdx, resp.AID, oobiData.AID)
+                } else if err != nil {
+                        writeError(w, http.StatusInternalServerError, "Failed to mint relationship icp via driver", err.Error())
+                        return
+                }
         }
 
         if err := s.DataStore.SaveContact(contact); err != nil {
@@ -3115,16 +3201,50 @@ func (s *CoreServer) handleExchange(w http.ResponseWriter, r *http.Request) {
                 }
         }
         contact := store.ContactRecord{
-                AID:          req.SenderAID,
-                Alias:        alias,
-                PublicKey:    req.SenderPublicKey,
-                OobiURL:      req.SenderOOBI,
-                Verified:     kelPresent,
-                DiscoveredAt: time.Now().UTC().Format(time.RFC3339),
-                Status:       "pending_inbound",
-                ContactType:  "general",
-                JCard:        contactJCard,
-                Photo:        req.SenderPhoto,
+                AID:             req.SenderAID,
+                Alias:           alias,
+                PublicKey:       req.SenderPublicKey,
+                OobiURL:         req.SenderOOBI,
+                Verified:        kelPresent,
+                DiscoveredAt:    time.Now().UTC().Format(time.RFC3339),
+                Status:          "pending_inbound",
+                ContactSource:   "keri",
+                ContactCategory: "general",
+                JCard:           contactJCard,
+                Photo:           req.SenderPhoto,
+        }
+
+        // HD-derive (BIP32/SLIP-0010) + real driver icp for inbound exchange (consistent with add).
+        // Assign and persist stable RelationshipIndex; no per-rel seed persist, re-derive later.
+        if contact.RelationshipAID == "" && s.KeriDriver != nil {
+                rootSeed, rerr := secureenclave.LoadRootSeed(s.DataDir)
+                if rerr != nil {
+                        writeError(w, http.StatusInternalServerError, "Root keystore seed required for HD pairwise derivation", rerr.Error())
+                        return
+                }
+                cidx, err := s.DataStore.AllocateNextRelationshipIndex("contacts")
+                if err != nil {
+                        writeError(w, http.StatusInternalServerError, "Failed to allocate relationship index", err.Error())
+                        return
+                }
+                contact.RelationshipIndex = cidx
+
+                pwiseSeed, derr := backup.DerivePairwiseSeed(rootSeed, cidx, 0)
+                if derr != nil {
+                        writeError(w, http.StatusInternalServerError, "HD derive failed", derr.Error())
+                        return
+                }
+                nextPwise, _ := backup.DerivePairwiseSeed(rootSeed, cidx, 1)
+                pub := ed25519.NewKeyFromSeed(pwiseSeed).Public().(ed25519.PublicKey)
+                npub := ed25519.NewKeyFromSeed(nextPwise).Public().(ed25519.PublicKey)
+                if resp, err := s.KeriDriver.CreateInceptionNamed(base64.StdEncoding.EncodeToString(pub), base64.StdEncoding.EncodeToString(npub), "rel-"+req.SenderAID); err == nil && resp.AID != "" {
+                        contact.RelationshipAID = resp.AID
+                        contact.RelationshipSeedB64 = ""
+                        log.Printf("[identity-agent-core] EXCHANGE: HD-derived (index %d) + minted rel P-AID %s", cidx, resp.AID)
+                } else if err != nil {
+                        writeError(w, http.StatusInternalServerError, "driver mint failed for exchange rel", err.Error())
+                        return
+                }
         }
 
         if err := s.DataStore.SaveContact(contact); err != nil {
@@ -3180,24 +3300,24 @@ func (s *CoreServer) handleAcceptContact(w http.ResponseWriter, r *http.Request)
         }
 
         var acceptReq struct {
-                ContactType string `json:"contact_type"` // general | trusted | professional
+                ContactCategory string `json:"contact_category"` // transactional | general | trusted | professional
         }
         json.NewDecoder(r.Body).Decode(&acceptReq) // body is optional
 
-        if acceptReq.ContactType == "" {
-                acceptReq.ContactType = "general"
+        if acceptReq.ContactCategory == "" {
+                acceptReq.ContactCategory = "general"
         }
 
-        log.Printf("[identity-agent-core] CONTACT-ACCEPT: Upgrading contact %s (%s) to accepted, type=%s", contact.Alias, aid, acceptReq.ContactType)
+        log.Printf("[identity-agent-core] CONTACT-ACCEPT: Upgrading contact %s (%s) to accepted, category=%s", contact.Alias, aid, acceptReq.ContactCategory)
 
         contact.Status = "accepted"
-        contact.ContactType = acceptReq.ContactType
+        contact.ContactCategory = acceptReq.ContactCategory
         if err := s.DataStore.SaveContact(*contact); err != nil {
                 writeError(w, http.StatusInternalServerError, "Failed to update contact", err.Error())
                 return
         }
 
-        log.Printf("[identity-agent-core] CONTACT: Accepted %s (AID: %s) — status=accepted, type=%s", contact.Alias, aid, contact.ContactType)
+        log.Printf("[identity-agent-core] CONTACT: Accepted %s (AID: %s) — status=accepted, category=%s", contact.Alias, aid, contact.ContactCategory)
 
         go func() {
                 ourIdentity, err := s.DataStore.GetIdentity()
@@ -3227,7 +3347,7 @@ func (s *CoreServer) handleAcceptContact(w http.ResponseWriter, r *http.Request)
                 log.Printf("[identity-agent-core] EXCHANGE: Acceptance sent to %s (status: %d)", exchangeURL, exnResp.StatusCode)
         }()
 
-        if s.WitnessService != nil && contact.ContactType == "trusted" {
+        if s.WitnessService != nil && contact.ContactCategory == "trusted" {
                 go func(contactAID string) {
                         _ = s.WitnessService.SendWitnessRequest(context.Background(), contactAID)
                 }(aid)
@@ -3245,8 +3365,8 @@ func (s *CoreServer) handleUpdateContact(w http.ResponseWriter, r *http.Request)
         }
 
         var req struct {
-                ContactType string `json:"contact_type"` // general | trusted | professional
-                Alias       string `json:"alias"`
+                ContactCategory string `json:"contact_category"` // transactional | general | trusted | professional
+                Alias           string `json:"alias"`
         }
         if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
                 writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
@@ -3263,15 +3383,15 @@ func (s *CoreServer) handleUpdateContact(w http.ResponseWriter, r *http.Request)
                 return
         }
 
-        if req.ContactType != "" {
-                validTypes := map[string]bool{
-                        "general": true, "trusted": true, "professional": true,
+        if req.ContactCategory != "" {
+                validCategories := map[string]bool{
+                        "transactional": true, "general": true, "trusted": true, "professional": true,
                 }
-                if !validTypes[req.ContactType] {
-                        writeError(w, http.StatusBadRequest, "Invalid contact_type", "contact_type must be one of: general, trusted, professional")
+                if !validCategories[req.ContactCategory] {
+                        writeError(w, http.StatusBadRequest, "Invalid contact_category", "contact_category must be one of: transactional, general, trusted, professional")
                         return
                 }
-                contact.ContactType = req.ContactType
+                contact.ContactCategory = req.ContactCategory
         }
         if req.Alias != "" {
                 contact.Alias = req.Alias
@@ -3282,7 +3402,7 @@ func (s *CoreServer) handleUpdateContact(w http.ResponseWriter, r *http.Request)
                 return
         }
 
-        log.Printf("[identity-agent-core] CONTACT: Updated %s (AID: %s) contact_type=%s", contact.Alias, aid, contact.ContactType)
+        log.Printf("[identity-agent-core] CONTACT: Updated %s (AID: %s) contact_category=%s", contact.Alias, aid, contact.ContactCategory)
 
         w.Header().Set("Content-Type", "application/json")
         json.NewEncoder(w).Encode(contact)

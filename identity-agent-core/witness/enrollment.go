@@ -50,10 +50,10 @@ func (s *Service) EvaluateInboundRequest(req WitnessRequest) (bool, string) {
 	if !IsContactWitnessEligible(*contact) {
 		return false, "contact_ineligible"
 	}
-	switch contact.ContactType {
-	case "trusted", "professional", "coworker":
+	switch contact.ContactCategory {
+	case "trusted", "professional":
 	default:
-		return false, "contact_type_ineligible"
+		return false, "contact_category_ineligible"
 	}
 	if req.BackendType == BackendMobile || strings.EqualFold(req.BackendType, "phone") {
 		return false, "mobile_backend"
@@ -148,7 +148,7 @@ func (s *Service) enrollWitnessingFor(requesterAID, backendType string) error {
 	}
 	return s.Contacts.SaveContact(store.ContactRecord{
 		AID: requesterAID, Alias: requesterAID[:12] + "…", Status: "accepted",
-		ContactType: "general", ContactSource: ContactSourceManual,
+		ContactCategory: "general", ContactSource: ContactSourceManual,
 	})
 }
 
@@ -210,7 +210,7 @@ func (s *Service) enrollWitnessForUs(responderAID, backendType string) error {
 	if c == nil {
 		c = &store.ContactRecord{
 			AID: responderAID, Alias: responderAID[:12] + "…", Status: "accepted",
-			ContactType: "trusted", ContactSource: ContactSourceManual,
+			ContactCategory: "trusted", ContactSource: ContactSourceManual,
 		}
 	}
 	c.IsWitness = true
@@ -274,7 +274,7 @@ func (s *Service) maybeReciprocalRequest(ctx context.Context, req WitnessRequest
 	if c == nil || c.IsWitness {
 		return
 	}
-	if c.ContactType != "trusted" && c.ContactType != "professional" && c.ContactType != "coworker" {
+	if c.ContactCategory != "trusted" && c.ContactCategory != "professional" {
 		return
 	}
 	_ = s.SendWitnessRequest(ctx, req.RequesterAID)

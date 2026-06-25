@@ -75,7 +75,7 @@ func TestMobileBackendRejected(t *testing.T) {
 }
 
 func TestTransactionalContactIneligible(t *testing.T) {
-	c := store.ContactRecord{Status: "accepted", ContactType: "general", ContactSource: ContactSourceTransactional}
+	c := store.ContactRecord{Status: "accepted", ContactCategory: "general", ContactSource: ContactSourceTransactional}
 	if IsContactWitnessEligible(c) {
 		t.Fatal("transactional must be excluded")
 	}

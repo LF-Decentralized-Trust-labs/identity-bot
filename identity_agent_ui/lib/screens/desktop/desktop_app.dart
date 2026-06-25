@@ -6,7 +6,7 @@ import 'desktop_dashboard_screen.dart';
 import '../../screens/contacts_screen.dart';
 import '../../screens/profile_screen.dart';
 import '../../screens/settings_screen.dart';
-import '../../screens/marketplace_screen.dart';
+import '../../screens/sandbox_registry_screen.dart';
 import 'desktop_sidebar.dart';
 import 'coming_soon_screen.dart';
 import 'developer_tools_screen.dart';
@@ -71,7 +71,7 @@ class _DesktopAppState extends State<DesktopApp> {
         return ContactsScreen(keriService: keri, serverUrl: url);
 
       case DesktopRoute.apps:
-        return MarketplaceScreen(serverUrl: url);
+        return SandboxRegistryScreen(serverUrl: url);
 
       // ── Settings ───────────────────────────────────────────────────────────
       case DesktopRoute.settingsAuthentication:

@@ -46,7 +46,7 @@ type Manager struct {
         mu                  sync.RWMutex
         installProgressMap  sync.Map // map[appID string]*InstallProgressInfo
         invoker             CapabilityInvoker // governed capability routing; nil = default HTTP invoker
-        authorizer          Authorizer        // gateway decision seam; nil = structural default (M15 injects the real one)
+        authorizer          Authorizer        // gateway decision seam; nil = structural default (governance gateway injects the real one)
 }
 
 type ManagerConfig struct {
