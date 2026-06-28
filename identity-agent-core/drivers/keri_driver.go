@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -569,7 +570,7 @@ func (d *KeriDriver) SignPayload(name, dataB64 string) (*DriverSignResponse, err
 }
 
 func (d *KeriDriver) GetKel(name string) (*DriverKelResponse, error) {
-	resp, err := d.client.Get(fmt.Sprintf("%s/kel?name=%s", d.BaseURL, name))
+	resp, err := d.client.Get(fmt.Sprintf("%s/kel?name=%s", d.BaseURL, url.QueryEscape(name)))
 	if err != nil {
 		return nil, fmt.Errorf("KEL request failed: %w", err)
 	}
