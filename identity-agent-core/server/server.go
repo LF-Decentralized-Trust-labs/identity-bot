@@ -34,6 +34,7 @@ import (
         "identity-agent-core/update"
         "identity-agent-core/witness"
         "identity-agent-core/watcher"
+        "identity-agent-core/asset"
 
         "github.com/go-chi/chi/v5"
         "github.com/go-chi/chi/v5/middleware"
@@ -56,6 +57,7 @@ type CoreServer struct {
         listener        net.Listener
         router          chi.Router
         loginHandler    *login.Handler
+        assetHandler    *asset.Handler
         oidcAdapter     *oidc.Adapter
         WatcherService  *watcher.Service
         WitnessService  *witness.Service
@@ -213,6 +215,9 @@ func New(cfg Config) (*CoreServer, error) {
 
         if err := s.initLoginHandler(); err != nil {
                 log.Printf("[identity-agent-core] login handler init failed (non-fatal): %v", err)
+        }
+        if err := s.initAssetHandler(); err != nil {
+                log.Printf("[identity-agent-core] asset handler init failed (non-fatal): %v", err)
         }
         if err := s.initOIDCHandler(); err != nil {
                 log.Printf("[identity-agent-core] OIDC adapter init failed (non-fatal): %v", err)
@@ -516,6 +521,7 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
                 r.Get("/ws/events", s.handleWebSocketEvents)
 
                 s.mountLoginRoutes(r)
+                s.mountAssetRoutes(r)
                 s.mountVerificationRoutes(r)
                 s.mountWitnessRoutes(r)
                 s.mountUpdateRoutes(r)
