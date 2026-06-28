@@ -22,13 +22,13 @@ export async function verifyLoginAssertion(
   opts: StandaloneVerifyOptions,
 ): Promise<VerifyAssertionResult> {
   if (!assertion.sig) {
-    return { ok: false, reason: "missing sig" };
+    return { valid: false, reason: "missing sig" };
   }
   if (assertion.nonce !== opts.expectedNonce) {
-    return { ok: false, reason: "nonce mismatch" };
+    return { valid: false, reason: "nonce mismatch" };
   }
   if (assertion.audience !== opts.expectedAudience) {
-    return { ok: false, reason: "audience mismatch" };
+    return { valid: false, reason: "audience mismatch" };
   }
 
   if (!opts.skipDtCheck) {
@@ -36,7 +36,7 @@ export async function verifyLoginAssertion(
     const now = opts.nowMs ?? Date.now();
     const dtMs = parseRfc3339(assertion.dt);
     if (Math.abs(now - dtMs) > maxSkew * 1000) {
-      return { ok: false, reason: "dt outside freshness window" };
+      return { valid: false, reason: "dt outside freshness window" };
     }
   }
 
@@ -50,22 +50,23 @@ export async function verifyLoginAssertion(
       );
       publicKey = resolved.publicKey;
     } catch (err) {
-      return { ok: false, reason: `key resolve failed: ${(err as Error).message}` };
+      return { valid: false, reason: `key resolve failed: ${(err as Error).message}` };
     }
   }
 
   const body = canonicalAssertionBody(assertion);
-  const valid = await verifyCanonical(body, assertion.sig, publicKey);
-  if (!valid) {
-    return { ok: false, reason: "invalid signature" };
+  const validSig = await verifyCanonical(body, assertion.sig, publicKey);
+  if (!validSig) {
+    return { valid: false, reason: "invalid signature" };
   }
 
   return {
-    ok: true,
-    i: assertion.i,
+    valid: true,
+    pairwiseAID: assertion.i,
     disclosures: assertion.disclosures,
     presentedAcdcs: assertion.presented_acdcs,
     customData: assertion.custom_data,
+    score: typeof assertion.custom_data?.ofa_score === 'number' ? assertion.custom_data.ofa_score : undefined,
     nonce: assertion.nonce,
     audience: assertion.audience,
     dt: assertion.dt,
