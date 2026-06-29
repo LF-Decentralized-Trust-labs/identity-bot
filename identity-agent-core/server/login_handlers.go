@@ -26,6 +26,9 @@ func (s *CoreServer) mountLoginRoutes(r chi.Router) {
 		}
 		// G-052: asset challenge creation (available even without per-user loginHandler)
 		r.Post("/challenge", s.handleCreateAssetChallenge)
+		// G-052: mobile app posts completed assertion; browser polls for completion
+		r.Post("/callback", s.handleLoginCallback)
+		r.Get("/challenge/{token}/status", s.handleChallengeStatus)
 	})
 }
 
@@ -100,17 +103,19 @@ func (s *CoreServer) handleCreateAssetChallenge(w http.ResponseWriter, r *http.R
 	rand.Read(sessB)
 	sessionToken := hex.EncodeToString(sessB)
 
+	publicURL := s.getPublicURL(r)
+
 	bundle := login.ChallengeBundle{
 		V:                    "ASK1",
 		T:                    1,
 		SiteAID:              foundAsset.PairwiseAID,
-		SiteOOBI:             fmt.Sprintf("http://127.0.0.1:5050/public/oobi/%s", foundAsset.PairwiseAID),
+		SiteOOBI:             fmt.Sprintf("%s/public/oobi/%s", publicURL, foundAsset.PairwiseAID),
 		Audience:             body.Audience,
 		Nonce:                nonce,
 		Dt:                   time.Now().UTC().Format(time.RFC3339),
 		Expiry:               time.Now().Add(10 * time.Minute).UTC().Format(time.RFC3339),
 		RequestedDisclosures: body.RequestedDisclosures,
-		CallbackURL:          "http://127.0.0.1:5050/api/login/callback",
+		CallbackURL:          fmt.Sprintf("%s/api/login/callback", publicURL),
 		SessionToken:         sessionToken,
 	}
 
@@ -125,6 +130,9 @@ func (s *CoreServer) handleCreateAssetChallenge(w http.ResponseWriter, r *http.R
 	if s.challenges == nil {
 		s.challenges = make(map[string]login.ChallengeBundle)
 	}
+	if s.challengeStatus == nil {
+		s.challengeStatus = make(map[string]map[string]interface{})
+	}
 	if len(s.challenges) > 1000 {
 		// naive: clear oldest? for now just overwrite or drop
 		for k := range s.challenges {
@@ -133,12 +141,13 @@ func (s *CoreServer) handleCreateAssetChallenge(w http.ResponseWriter, r *http.R
 		}
 	}
 	s.challenges[sessionToken] = bundle
+	s.challengeStatus[sessionToken] = map[string]interface{}{"status": "pending"}
 	s.challengeMu.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
 		"session_token": sessionToken,
-		"qr_url":        fmt.Sprintf("http://127.0.0.1:5050/i/%s", sessionToken),
+		"qr_url":        fmt.Sprintf("%s/i/%s", publicURL, sessionToken),
 	})
 }
 
@@ -170,4 +179,46 @@ func (s *CoreServer) mountAssetLoginChallenge(r chi.Router) {
 	r.Route("/login", func(r chi.Router) {
 		r.Post("/challenge", s.handleCreateAssetChallenge)
 	})
+}
+
+// POST /api/login/callback — mobile app posts completed assertion here
+func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request) {
+	var body map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "bad json", http.StatusBadRequest)
+		return
+	}
+	token, _ := body["session_token"].(string)
+	if token == "" {
+		token = r.URL.Query().Get("session")
+	}
+	if token == "" {
+		http.Error(w, "session_token required", http.StatusBadRequest)
+		return
+	}
+	pairwiseAID, _ := body["pairwise_aid"].(string)
+	s.challengeMu.Lock()
+	if s.challengeStatus == nil {
+		s.challengeStatus = make(map[string]map[string]interface{})
+	}
+	s.challengeStatus[token] = map[string]interface{}{
+		"status":       "complete",
+		"pairwise_aid": pairwiseAID,
+	}
+	s.challengeMu.Unlock()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
+// GET /api/login/challenge/{token}/status — browser polls this
+func (s *CoreServer) handleChallengeStatus(w http.ResponseWriter, r *http.Request) {
+	token := chi.URLParam(r, "token")
+	s.challengeMu.Lock()
+	st := s.challengeStatus[token]
+	s.challengeMu.Unlock()
+	if st == nil {
+		st = map[string]interface{}{"status": "pending"}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(st)
 }

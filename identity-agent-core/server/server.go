@@ -60,8 +60,9 @@ type CoreServer struct {
         assetHandler    *asset.Handler
 
         // G-052: asset login challenge store (per-session bundles for /i/{token})
-        challengeMu sync.Mutex
-        challenges  map[string]login.ChallengeBundle // keyed by session_token
+        challengeMu     sync.Mutex
+        challenges      map[string]login.ChallengeBundle    // keyed by session_token
+        challengeStatus map[string]map[string]interface{}   // keyed by session_token; tracks pending/complete
 
         oidcAdapter     *oidc.Adapter
         WatcherService  *watcher.Service
