@@ -107,9 +107,9 @@ export function mountIdentityAgentLoginRoutes(
       }
 
       const verified = verifier.sessionStore.get(token);
-      if (verified?.verifiedResult?.i && verified.appSessionToken && opts.onVerified) {
+      if (verified?.verifiedResult?.pairwiseAID && verified.appSessionToken && opts.onVerified) {
         await opts.onVerified({
-          pairwiseAid: verified.verifiedResult.i,
+          pairwiseAid: verified.verifiedResult.pairwiseAID,
           disclosures: verified.verifiedResult.disclosures ?? {},
           sessionToken: token,
           appSessionToken: verified.appSessionToken,

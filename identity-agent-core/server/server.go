@@ -34,6 +34,7 @@ import (
         "identity-agent-core/update"
         "identity-agent-core/witness"
         "identity-agent-core/watcher"
+        "identity-agent-core/asset"
 
         "github.com/go-chi/chi/v5"
         "github.com/go-chi/chi/v5/middleware"
@@ -56,6 +57,7 @@ type CoreServer struct {
         listener        net.Listener
         router          chi.Router
         loginHandler    *login.Handler
+        assetHandler    *asset.Handler
         oidcAdapter     *oidc.Adapter
         WatcherService  *watcher.Service
         WitnessService  *witness.Service
@@ -213,6 +215,9 @@ func New(cfg Config) (*CoreServer, error) {
 
         if err := s.initLoginHandler(); err != nil {
                 log.Printf("[identity-agent-core] login handler init failed (non-fatal): %v", err)
+        }
+        if err := s.initAssetHandler(); err != nil {
+                log.Printf("[identity-agent-core] asset handler init failed (non-fatal): %v", err)
         }
         if err := s.initOIDCHandler(); err != nil {
                 log.Printf("[identity-agent-core] OIDC adapter init failed (non-fatal): %v", err)
@@ -516,6 +521,7 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
                 r.Get("/ws/events", s.handleWebSocketEvents)
 
                 s.mountLoginRoutes(r)
+                s.mountAssetRoutes(r)
                 s.mountVerificationRoutes(r)
                 s.mountWitnessRoutes(r)
                 s.mountUpdateRoutes(r)
@@ -2408,6 +2414,32 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
                 return
         }
         if identity == nil || identity.AID != requestedAID {
+                // check asset store for a matching pairwise AID (G-049: serve asset AIDs for login verify)
+                if s.assetHandler != nil {
+                        for _, a := range s.assetHandler.Store.ListAssets() {
+                                if a.PairwiseAID == requestedAID {
+                                        // serve a minimal OOBI response for the asset AID
+                                        kelResp, err := s.KeriDriver.GetKel(a.DisplayName)
+                                        if err != nil {
+                                                writeError(w, http.StatusInternalServerError, "KEL unavailable", err.Error())
+                                                return
+                                        }
+                                        publicURL := s.getPublicURL(r)
+                                        oobiURL := fmt.Sprintf("%s/public/oobi/%s", publicURL, a.PairwiseAID)
+                                        w.Header().Set("Content-Type", "application/json")
+                                        json.NewEncoder(w).Encode(map[string]interface{}{
+                                                "aid":           a.PairwiseAID,
+                                                "oobi":          oobiURL,
+                                                "kel":           kelResp.KEL,
+                                                "type":          "asset",
+                                                "asset_id":      a.ID,
+                                                "display_name":  a.DisplayName,
+                                                "delegator_aid": a.DelegatorAID,
+                                        })
+                                        return
+                                }
+                        }
+                }
                 writeError(w, http.StatusNotFound, "AID not found", fmt.Sprintf("No identity found for AID: %s", requestedAID))
                 return
         }

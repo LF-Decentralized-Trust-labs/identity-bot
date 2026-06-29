@@ -9,3 +9,6 @@ export * from "./express-handlers.js";
 export * from "./dev-relay.js";
 export * from "./qr-url.js";
 export * as oidc from "./oidc/index.js";
+
+// G-051: top-level verifyAssertion per spec (alias to implementation)
+export { verifyLoginAssertion as verifyAssertion } from "./standalone-verify.js";
