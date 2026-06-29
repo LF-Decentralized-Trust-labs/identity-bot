@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Demo RP — Sign In with Identity Agent</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #ffffff;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+    }
+    .card {
+      text-align: center;
+      padding: 2.5rem 2rem;
+      border: 1px solid #e5e7eb;
+      border-radius: 12px;
+      max-width: 320px;
+      width: 100%;
+    }
+    h1 { font-size: 1.25rem; font-weight: 600; color: #111827; margin-bottom: 1.5rem; }
+    #qr {
+      display: block;
+      margin: 0 auto;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+    }
+    button {
+      margin-top: 1rem;
+      padding: 0.5rem 1.25rem;
+      background: #111827;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      cursor: pointer;
+    }
+    button:hover { background: #374151; }
+    #status {
+      margin-top: 1.25rem;
+      font-size: 0.9rem;
+      color: #6b7280;
+      min-height: 1.2em;
+    }
+    #status.success { color: #059669; font-weight: 600; }
+    #status.error { color: #dc2626; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Sign in with Identity Agent</h1>
+    <img id="qr" src="" width="200" height="200" alt="QR code — scan with your Identity Agent">
+    <br>
+    <button onclick="startLogin()">Refresh</button>
+    <div id="status">Waiting for login...</div>
+  </div>
+
+  <script>
+    let pollTimer = null;
+
+    function setStatus(text, cls) {
+      const el = document.getElementById('status');
+      el.textContent = text;
+      el.className = cls || '';
+    }
+
+    async function startLogin() {
+      clearInterval(pollTimer);
+      pollTimer = null;
+      setStatus('Waiting for login...');
+      document.getElementById('qr').src = '';
+
+      let data;
+      try {
+        const res = await fetch('/login-start');
+        data = await res.json();
+      } catch (e) {
+        setStatus('Error connecting to server.', 'error');
+        return;
+      }
+
+      if (!data.qr_url) {
+        setStatus('No QR URL returned from server.', 'error');
+        return;
+      }
+
+      const qrSrc =
+        'https://api.qrserver.com/v1/create-qr-code/?data=' +
+        encodeURIComponent(data.qr_url) +
+        '&size=200x200';
+      document.getElementById('qr').src = qrSrc;
+
+      if (data.session_token) {
+        pollTimer = setInterval(() => poll(data.session_token), 2000);
+      }
+    }
+
+    async function poll(token) {
+      let data;
+      try {
+        const res = await fetch('/login-status/' + token);
+        data = await res.json();
+      } catch (e) {
+        return; // transient error — keep polling
+      }
+
+      if (data.status === 'complete') {
+        clearInterval(pollTimer);
+        pollTimer = null;
+        setStatus('Logged in as ' + data.pairwiseAID, 'success');
+      }
+    }
+
+    startLogin();
+  </script>
+</body>
+</html>

@@ -133,6 +133,16 @@ type DriverSignResponse struct {
 	PublicKey string `json:"public_key"`
 }
 
+type DriverSignForNameRequest struct {
+	Name string `json:"name"`
+	Body string `json:"body"`
+}
+
+type DriverSignForNameResponse struct {
+	Sig string `json:"sig"`
+	AID string `json:"aid"`
+}
+
 type DriverKelResponse struct {
 	AID            string                   `json:"aid"`
 	KEL            []map[string]interface{} `json:"kel"`
@@ -566,6 +576,22 @@ func (d *KeriDriver) SignPayload(name, dataB64 string) (*DriverSignResponse, err
 		return nil, fmt.Errorf("failed to decode sign response: %w", err)
 	}
 
+	return &result, nil
+}
+
+func (d *KeriDriver) SignForName(name, body string) (*DriverSignForNameResponse, error) {
+	reqBody := DriverSignForNameRequest{
+		Name: name,
+		Body: body,
+	}
+	respBody, err := d.doPost("/sign-for-name", reqBody, http.StatusOK)
+	if err != nil {
+		return nil, err
+	}
+	var result DriverSignForNameResponse
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode sign-for-name response: %w", err)
+	}
 	return &result, nil
 }
 

@@ -232,6 +232,7 @@ def status():
             "POST /delegated-inception",
             "POST /delegated-rotation",
             "POST /sign",
+            "POST /sign-for-name",
             "GET /kel",
             "POST /verify",
             "POST /cesr-encode",
@@ -1550,6 +1551,25 @@ def reload_identity():
     }), 200
 
 
+@app.route('/sign-for-name', methods=['POST'])
+def sign_for_name():
+    data = request.json
+    name = data.get('name')
+    body = data.get('body')  # string to sign
+    if not name or not body:
+        return jsonify({'error': 'name and body required'}), 400
+    try:
+        hab = hby.habByName(name)
+        if hab is None:
+            return jsonify({'error': f'no AID named {name}'}), 404
+        sig = hab.sign(body.encode('utf-8'), indexed=False)
+        # sig is a list of Siger objects; take first
+        sig_qb64 = sig[0].qb64 if sig else ''
+        return jsonify({'sig': sig_qb64, 'aid': hab.pre})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -1560,7 +1580,7 @@ if __name__ == "__main__":
 
     print(f"[keri-driver] Starting KERI Core Driver on {host}:{port}")
     print(f"[keri-driver] KERI library: keripy (reference)")
-    print(f"[keri-driver] Stateful endpoints:  /status, /inception, /rotation, /interact, /reload-identity, /sign, /kel, /verify")
+    print(f"[keri-driver] Stateful endpoints:  /status, /inception, /rotation, /interact, /reload-identity, /sign, /sign-for-name, /kel, /verify")
     print(f"[keri-driver] Stateless endpoints: /cesr-encode, /validate-kel, /resolve-oobi, /format-credential, /generate-multisig-event")
     print(f"[keri-driver] Credential endpoints: /credential/issue, /credential/present, /credential/verify")
     print(f"[keri-driver] KERL endpoints:       /receipt/submit, /receipt/kerl")
