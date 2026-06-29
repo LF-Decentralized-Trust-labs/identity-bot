@@ -118,10 +118,25 @@ func (s *CoreServer) publisherInput(r *http.Request, aid string) (didwebs.Publis
 	}
 	var kelEvents []map[string]interface{}
 	seq := 0
+	kelName := aid
+	if s.assetHandler != nil {
+		for _, a := range s.assetHandler.Store.ListAssets() {
+			if a.PairwiseAID == aid {
+				kelName = a.DisplayName
+				break
+			}
+		}
+	}
 	if s.KeriDriver != nil {
-		if kel, err := s.KeriDriver.GetKel(aid); err == nil {
+		if kel, err := s.KeriDriver.GetKel(kelName); err == nil {
 			kelEvents = kel.KEL
 			seq = kel.SequenceNumber
+			// Extract pubKey from first event k[0] if still empty
+			if pubKey == "" && len(kel.KEL) > 0 {
+				if keys, ok := kel.KEL[0]["k"].([]interface{}); ok && len(keys) > 0 {
+					pubKey = fmt.Sprintf("%v", keys[0])
+				}
+			}
 		}
 	}
 	if pubKey == "" && identity != nil {

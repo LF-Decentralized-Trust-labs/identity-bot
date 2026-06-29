@@ -58,6 +58,11 @@ type CoreServer struct {
         router          chi.Router
         loginHandler    *login.Handler
         assetHandler    *asset.Handler
+
+        // G-052: asset login challenge store (per-session bundles for /i/{token})
+        challengeMu sync.Mutex
+        challenges  map[string]login.ChallengeBundle // keyed by session_token
+
         oidcAdapter     *oidc.Adapter
         WatcherService  *watcher.Service
         WitnessService  *witness.Service
@@ -424,6 +429,9 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
                 AllowCredentials: true,
                 MaxAge:           300,
         }))
+
+        // G-052: public endpoint for IA to fetch signed login challenge bundle (QR pointer)
+        r.Get("/i/{token}", s.handleChallengeBundleServe)
 
         r.Route("/api", func(r chi.Router) {
                 r.Get("/health", s.handleHealth)
