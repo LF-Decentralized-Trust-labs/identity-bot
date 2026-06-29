@@ -16,8 +16,6 @@ func (s *strongBoxSigner) Label() string  { return "Android StrongBox (stub)" }
 func (s *strongBoxSigner) PublicKey() ([]byte, error) { return nil, ErrSignerUnavailable }
 func (s *strongBoxSigner) Sign([]byte) ([]byte, error) { return nil, ErrSignerUnavailable }
 
-// newDarwinSecureEnclaveSigner and newTPMSigner are called unconditionally from
-// signer.go but are only defined in darwin/linux-tagged files. Provide no-op
-// stubs so gomobile cross-compilation for Android resolves the symbols.
+// newDarwinSecureEnclaveSigner is called unconditionally from signer.go but only
+// defined in darwin-tagged files. Stub it out for Android cross-compilation.
 func newDarwinSecureEnclaveSigner() PlatformSigner { return nil }
-func newTPMSigner() PlatformSigner                 { return nil }
