@@ -551,6 +551,9 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
         // /public/credential/{said} — public credential delivery endpoint for sharing issued credentials.
         r.Get("/public/credential/{said}", s.handlePublicCredentialServe)
 
+        // Dumb-router scan gate: forward a scanned Ask pointer here; Go decodes + dispatches by t.
+        s.mountScanRoutes(r)
+
         absWebDir, err := filepath.Abs(flutterWebDir)
         if err != nil {
                 absWebDir = flutterWebDir

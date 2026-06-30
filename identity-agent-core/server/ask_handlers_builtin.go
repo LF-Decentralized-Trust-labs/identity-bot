@@ -1,0 +1,187 @@
+package server
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"log"
+	"net/http"
+	"time"
+
+	"identity-agent-core/login"
+)
+
+// Built-in Ask actions. Each new transaction type registers here.
+func init() {
+	registerAsk(1, loginAsk{})
+	registerAsk(2, addContactAsk{})
+}
+
+// tierRank orders the escalation tiers so we only ever escalate, never downgrade.
+func tierRank(c string) int {
+	switch c {
+	case "transactional":
+		return 0
+	case "general":
+		return 1
+	case "professional":
+		return 2
+	case "trusted":
+		return 3
+	default:
+		return 0
+	}
+}
+
+// ---- t=1: login (the RP asks you to prove who you are) ----
+
+type loginAsk struct{}
+
+func (loginAsk) Action() string { return "login" }
+
+func (loginAsk) Preview(s *CoreServer, ctx AskContext) (GenericPreview, error) {
+	if s.loginHandler == nil {
+		return GenericPreview{}, fmt.Errorf("login handler unavailable")
+	}
+	pv, err := s.loginHandler.Preview(login.StartLoginRequest{SessionToken: ctx.Token, RPSessionURL: ctx.Base})
+	if err != nil {
+		return GenericPreview{}, err
+	}
+	details := make([]PreviewDetail, 0, len(pv.RequestedDisclosures))
+	for _, f := range pv.RequestedDisclosures {
+		details = append(details, PreviewDetail{Label: f, Value: pv.DisclosurePreview[f]})
+	}
+	return GenericPreview{
+		T: 1, Action: "login", Title: "Sign-in request",
+		Subtitle: pv.Audience, Counterparty: pv.SiteAID, Details: details,
+		Warning: "Only the fields above will be shared.",
+	}, nil
+}
+
+func (loginAsk) Execute(s *CoreServer, ctx AskContext, d ScanDecision) (map[string]interface{}, error) {
+	req := login.StartLoginRequest{SessionToken: ctx.Token, RPSessionURL: ctx.Base}
+	if !d.Approved {
+		s.loginHandler.Decline(req)
+		return map[string]interface{}{"ok": true, "declined": true}, nil
+	}
+	res, err := s.loginHandler.Approve(req)
+	if err != nil {
+		return nil, err
+	}
+	// Foundational layer: logging in is a KERI interaction, so the site becomes (at least) a
+	// transactional contact. Best-effort — never fail a successful login over this.
+	if siteOOBI := jsonStringField(ctx.AskBytes, "site_oobi"); siteOOBI != "" {
+		if _, _, cerr := s.EnsureKeriContact(siteOOBI); cerr != nil {
+			log.Printf("[identity-agent-core] login: could not record site as transactional contact: %v", cerr)
+		}
+	}
+	return res, nil
+}
+
+// ---- t=2: add-contact (a peer asks to become your contact) ----
+
+type addContactAsk struct{}
+
+func (addContactAsk) Action() string { return "add_contact" }
+
+type addContactPayload struct {
+	AskerAID   string `json:"asker_aid"`
+	AskerOOBI  string `json:"asker_oobi"`
+	AskerAlias string `json:"asker_alias"`
+}
+
+func (addContactAsk) Preview(_ *CoreServer, ctx AskContext) (GenericPreview, error) {
+	var p addContactPayload
+	_ = json.Unmarshal(ctx.AskBytes, &p)
+	if p.AskerOOBI == "" {
+		return GenericPreview{}, fmt.Errorf("add-contact Ask missing asker_oobi")
+	}
+	name := p.AskerAlias
+	if name == "" {
+		name = p.AskerAID
+	}
+	return GenericPreview{
+		T: 2, Action: "add_contact", Title: "Contact request",
+		Subtitle: name + " wants to be your contact", Counterparty: p.AskerAID,
+		TierOptions: []string{"general", "trusted", "professional"}, DefaultTier: "general",
+	}, nil
+}
+
+func (addContactAsk) Execute(s *CoreServer, ctx AskContext, d ScanDecision) (map[string]interface{}, error) {
+	if !d.Approved {
+		return map[string]interface{}{"ok": true, "declined": true}, nil
+	}
+	var p addContactPayload
+	if err := json.Unmarshal(ctx.AskBytes, &p); err != nil || p.AskerOOBI == "" {
+		return nil, fmt.Errorf("add-contact Ask missing asker_oobi")
+	}
+	// Foundational layer establishes the baseline transactional/keri contact.
+	contact, _, err := s.EnsureKeriContact(p.AskerOOBI)
+	if err != nil {
+		return nil, err
+	}
+	// Escalate to the chosen tier (default general), never downgrade.
+	tier := d.Tier
+	if tier == "" {
+		tier = "general"
+	}
+	if tierRank(tier) > tierRank(contact.ContactCategory) {
+		contact.ContactCategory = tier
+		if serr := s.DataStore.SaveContact(*contact); serr != nil {
+			return nil, serr
+		}
+	}
+	// Tell the asker we accepted, so they record us too (best-effort).
+	go s.sendIntroduction(ctx.Base)
+	return map[string]interface{}{"ok": true, "contact_aid": contact.AID, "tier": contact.ContactCategory}, nil
+}
+
+// sendIntroduction posts our identity to a peer's /api/exchange so they can record us as a
+// contact. Extracted from handleAddContact; uses the tunnel/endpoint URL for our OOBI.
+func (s *CoreServer) sendIntroduction(remoteBase string) {
+	ourIdentity, err := s.DataStore.GetIdentity()
+	if err != nil || ourIdentity == nil {
+		return
+	}
+	publicURL := s.EndpointService.CurrentURL()
+	if publicURL == "" {
+		return
+	}
+	ourOOBI := fmt.Sprintf("%s/public/oobi/%s", publicURL, ourIdentity.AID)
+	ourAlias := ourIdentity.AID
+	if len(ourAlias) >= 12 {
+		ourAlias = ourAlias[:12] + "..."
+	}
+	profile, _ := s.DataStore.GetProfile()
+	if profile != nil && profile.FullName != "" {
+		ourAlias = profile.FullName
+	}
+	payload := map[string]interface{}{
+		"type": "introduction", "sender_aid": ourIdentity.AID,
+		"sender_oobi": ourOOBI, "sender_alias": ourAlias, "sender_public_key": ourIdentity.PublicKey,
+	}
+	if profile != nil {
+		payload["sender_jcard"] = profile.ToJCard(ourIdentity.AID, ourOOBI)
+		if profile.Photo != "" {
+			payload["sender_photo"] = profile.Photo
+		}
+	}
+	body, _ := json.Marshal(payload)
+	client := &http.Client{Timeout: 15 * time.Second}
+	if resp, perr := client.Post(remoteBase+"/api/exchange", "application/json", bytes.NewReader(body)); perr == nil {
+		resp.Body.Close()
+	}
+}
+
+// jsonStringField pulls a top-level string field out of raw JSON without a full struct.
+func jsonStringField(raw []byte, field string) string {
+	var m map[string]json.RawMessage
+	if json.Unmarshal(raw, &m) != nil {
+		return ""
+	}
+	var v string
+	if r, ok := m[field]; ok {
+		_ = json.Unmarshal(r, &v)
+	}
+	return v
+}
