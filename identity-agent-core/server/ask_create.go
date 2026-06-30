@@ -59,13 +59,13 @@ func (addContactAsk) Mint(s *CoreServer) ([]byte, error) {
 	})
 }
 
-func (s *CoreServer) mountAskMintRoute(r chi.Router) {
-	r.Post("/api/ask/mint", s.handleAskMint)
+func (s *CoreServer) mountAskCreateRoute(r chi.Router) {
+	r.Post("/api/ask/create", s.handleAskCreate)
 }
 
-// POST /api/ask/mint {t} -> {token, url}. Mints an IA-originated Ask of action t and hosts it
+// POST /api/ask/create {t} -> {token, url}. Mints an IA-originated Ask of action t and hosts it
 // at /i/{token} so it can be shown as a QR.
-func (s *CoreServer) handleAskMint(w http.ResponseWriter, r *http.Request) {
+func (s *CoreServer) handleAskCreate(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		T int `json:"t"`
 	}
