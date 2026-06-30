@@ -312,7 +312,14 @@ func (s *CoreServer) Start() error {
                 s.AttestationRunner.Start(s.AppCtx)
         }
         if s.loginHandler != nil && s.TrustGate != nil {
-                s.loginHandler.TrustGate = s.TrustGate
+                // Local dev escape hatch: the enclave attestation chain can't be produced under
+                // `go run`, so the trust gate hard-blocks login. Off by default; when set, the
+                // gate is simply not wired to the login handler (production keeps the gate).
+                if os.Getenv("IA_DISABLE_TRUST_GATE") == "1" {
+                        log.Printf("[identity-agent-core] TRUST GATE DISABLED for login (IA_DISABLE_TRUST_GATE=1) — local dev only")
+                } else {
+                        s.loginHandler.TrustGate = s.TrustGate
+                }
         }
 
         s.running = true
@@ -550,6 +557,13 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 
         // /public/credential/{said} — public credential delivery endpoint for sharing issued credentials.
         r.Get("/public/credential/{said}", s.handlePublicCredentialServe)
+
+        // Local-only dev relay (IA_DEV_RELAY=1) — registered before the SPA catch-all so
+        // /public/{aid}/did.json resolves to real did.json for local login round-trips.
+        if DevRelayEnabled() {
+                log.Printf("[identity-agent-core] DEV RELAY ENABLED (IA_DEV_RELAY=1) — local login key resolution; not for production")
+                s.mountDevRelayRoutes(r)
+        }
 
         absWebDir, err := filepath.Abs(flutterWebDir)
         if err != nil {
