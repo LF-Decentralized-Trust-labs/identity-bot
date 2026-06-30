@@ -553,6 +553,8 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 
         // Dumb-router scan gate: forward a scanned Ask pointer here; Go decodes + dispatches by t.
         s.mountScanRoutes(r)
+        // Mint IA-originated Asks (e.g. an add-contact "add me" QR) hosted at /i/{token}.
+        s.mountAskMintRoute(r)
 
         absWebDir, err := filepath.Abs(flutterWebDir)
         if err != nil {
