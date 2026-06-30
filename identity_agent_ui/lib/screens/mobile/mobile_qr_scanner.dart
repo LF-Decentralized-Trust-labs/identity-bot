@@ -77,11 +77,14 @@ class _MobileQrScannerState extends State<MobileQrScanner> with SingleTickerProv
   void _dispatchScannedCode(String code) {
     final uri = Uri.tryParse(code);
 
-    // Login bundle pointer: minimal QR, everything else is in the fetched bundle.
-    final pointerToken = _loginPointerToken(uri);
+    // `.../i/{token}` is the UNIVERSAL Ask pointer (ADR-021; qr-url.ts buildLoginQrUrl):
+    // the IA fetches the signed, typed Ask envelope and dispatches on its action `t`
+    // (login=1, present=2, …). Only login is implemented today, so we route there — but the
+    // Ask base (RP origin) is recovered the same, type-agnostic way for any future Ask type.
+    final pointerToken = _askPointerToken(uri);
     if (pointerToken != null) {
       setState(() => _processing = true);
-      _runLogin(pointerToken, uri!.origin);
+      _runLogin(pointerToken, _askBaseFromPointer(uri!));
       return;
     }
 
@@ -112,10 +115,10 @@ class _MobileQrScannerState extends State<MobileQrScanner> with SingleTickerProv
     }
   }
 
-  /// Returns the session token when [uri] is an Ask pointer (`.../i/{token}`,
-  /// per the login contract and the shared module), else null. The token is the last segment under the
-  /// one-char `/i/` Ask namespace; the IA fetches the signed Ask from this URL.
-  String? _loginPointerToken(Uri? uri) {
+  /// Returns the session token when [uri] is an Ask pointer (`.../i/{token}` — the one-char
+  /// `/i/` Ask namespace; ADR-021 / qr-url.ts), else null. Universal across Ask types: the
+  /// IA fetches the signed Ask envelope from this URL and dispatches on its action `t`.
+  String? _askPointerToken(Uri? uri) {
     if (uri == null) return null;
     final segs = uri.pathSegments;
     final n = segs.length;
@@ -124,6 +127,24 @@ class _MobileQrScannerState extends State<MobileQrScanner> with SingleTickerProv
       return token.isEmpty ? null : token;
     }
     return null;
+  }
+
+  /// RP origin (Ask base) for an Ask pointer: the pointer URL with the trailing `/i/{token}`
+  /// removed, PRESERVING any path prefix. This is the exact inverse of the Ask-pointer
+  /// builder (`buildLoginQrUrl`: base + `/i/{token}`), so it is transaction-type-agnostic —
+  /// it recovers the base for login (t=1) and any future Ask type identically.
+  ///
+  /// `uri.origin` is scheme://host:port only; it drops the path, which breaks path-based
+  /// relay tunnels (e.g. `https://grapeid.org/green-oak-87/i/{token}` → the IA would fetch
+  /// from `https://grapeid.org/i/{token}` = relay root → 404). For subdomain/apex origins
+  /// this equals `uri.origin`.
+  String _askBaseFromPointer(Uri uri) {
+    final segs = List<String>.from(uri.pathSegments);
+    if (segs.length >= 2 && segs[segs.length - 2] == 'i') {
+      segs.removeRange(segs.length - 2, segs.length);
+    }
+    final path = segs.isEmpty ? '' : '/${segs.join('/')}';
+    return '${uri.scheme}://${uri.authority}$path';
   }
 
   String? _resolveLoginRp(Uri? uri) {
