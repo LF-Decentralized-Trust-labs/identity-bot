@@ -2,6 +2,7 @@ package server
 
 import (
 	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -24,7 +25,14 @@ import (
 func (s *CoreServer) mintPairwise(name string) (aid, oobi string, seed []byte, err error) {
 	rootSeed, rerr := secureenclave.LoadRootSeed(s.DataDir)
 	if rerr != nil {
-		return "", "", nil, fmt.Errorf("root seed unavailable: %w", rerr)
+		// Bootstrap the root seed if absent (mirrors the login/contact flow).
+		rootSeed = make([]byte, 64)
+		if _, re := rand.Read(rootSeed); re != nil {
+			return "", "", nil, re
+		}
+		if se := secureenclave.StoreRootSeed(s.DataDir, rootSeed); se != nil {
+			return "", "", nil, fmt.Errorf("bootstrap root seed: %w", se)
+		}
 	}
 	idx, aerr := s.DataStore.AllocateNextRelationshipIndex("contacts")
 	if aerr != nil {
