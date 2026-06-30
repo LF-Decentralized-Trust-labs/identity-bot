@@ -174,6 +174,12 @@ func (s *CoreServer) handleChallengeBundleServe(w http.ResponseWriter, r *http.R
 	b, ok := s.challenges[token]
 	s.challengeMu.Unlock()
 	if !ok {
+		// Fall back to an IA-minted Ask (e.g. an add-contact "add me" QR).
+		if raw, mok := getMintedAsk(token); mok {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write(raw)
+			return
+		}
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
