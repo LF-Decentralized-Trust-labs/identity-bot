@@ -30,6 +30,10 @@ type Asset struct {
 	DelegationModel string           `json:"delegation_model"` // "delegated" | "standalone"
 	DelegatorAID    string           `json:"delegator_aid,omitempty"`
 	Policy          EnrollmentPolicy `json:"policy"`
+	// SigningIndex is the HD derivation index (from the controller root seed) for this
+	// asset's signing key. Re-derive the seed on demand (root + SigningIndex) — the
+	// raw private key is never persisted. >0 means the asset can sign login challenges.
+	SigningIndex    int              `json:"signing_index,omitempty"`
 	CreatedAt       time.Time        `json:"created_at"`
 	UpdatedAt       time.Time        `json:"updated_at"`
 }

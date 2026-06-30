@@ -24,9 +24,10 @@ func (s *CoreServer) mountLoginRoutes(r chi.Router) {
 			r.Post("/decline", s.loginHandler.HandleDecline)
 			r.Get("/pending", s.loginHandler.HandlePendingList)
 		}
-		// G-052: asset challenge creation (available even without per-user loginHandler)
+		// Issue a signed login challenge for an asset (available even without a
+		// per-user loginHandler).
 		r.Post("/challenge", s.handleCreateAssetChallenge)
-		// G-052: mobile app posts completed assertion; browser polls for completion
+		// The user's agent posts the completed assertion here; the browser polls for completion.
 		r.Post("/callback", s.handleLoginCallback)
 		r.Get("/challenge/{token}/status", s.handleChallengeStatus)
 	})
@@ -58,8 +59,8 @@ func (s *CoreServer) initLoginHandler() error {
 	return nil
 }
 
-// G-052: asset-backed login challenge issuance (for QR demo / RP using assets)
-// POST /api/login/challenge  (called by the asset owner / demo page)
+// handleCreateAssetChallenge issues a signed login challenge bound to an asset.
+// POST /api/login/challenge — called by the asset owner / a relying party.
 func (s *CoreServer) handleCreateAssetChallenge(w http.ResponseWriter, r *http.Request) {
 	if s.assetHandler == nil || s.KeriDriver == nil {
 		http.Error(w, "asset or keri driver not available", http.StatusServiceUnavailable)
@@ -119,8 +120,19 @@ func (s *CoreServer) handleCreateAssetChallenge(w http.ResponseWriter, r *http.R
 		SessionToken:         sessionToken,
 	}
 
-	// sign using asset name + driver
-	if err := login.SignChallengeForAsset(bundle, foundAsset.DisplayName, s.KeriDriver); err != nil {
+	// Re-derive the asset's signing seed (controller root + asset SigningIndex) and sign the
+	// challenge Go-native. Replaces the broken Python /sign-for-name path (the driver
+	// holds no private keys, ADR-014, and the asset key used to be discarded at creation).
+	if foundAsset.SigningIndex == 0 {
+		http.Error(w, "asset has no signing key (re-create the asset to provision one)", http.StatusConflict)
+		return
+	}
+	seed, derr := asset.AssetSigningSeed(s.DataDir, foundAsset.SigningIndex)
+	if derr != nil {
+		http.Error(w, "asset seed: "+derr.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := login.SignChallengeForAsset(&bundle, seed); err != nil {
 		http.Error(w, "sign failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
