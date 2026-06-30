@@ -1,11 +1,7 @@
 package server
 
 import (
-	"crypto/rand"
-	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"time"
 
@@ -81,85 +77,15 @@ func (s *CoreServer) handleCreateAssetChallenge(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	assets := s.assetHandler.Store.ListAssets()
-	var foundAsset *asset.Asset
-	for i := range assets {
-		if assets[i].ID == body.AssetID {
-			a := assets[i]
-			foundAsset = &a
-			break
-		}
-	}
-	if foundAsset == nil {
-		http.Error(w, "asset not found", http.StatusNotFound)
+	token, qrURL, code, msg := s.createSignedAssetChallenge(body.AssetID, body.Audience, body.RequestedDisclosures, s.getPublicURL(r))
+	if code != 0 {
+		http.Error(w, msg, code)
 		return
 	}
-
-	// generate nonce + session token
-	nonceB := make([]byte, 32)
-	rand.Read(nonceB)
-	nonce := base64.RawURLEncoding.EncodeToString(nonceB)
-
-	sessB := make([]byte, 16)
-	rand.Read(sessB)
-	sessionToken := hex.EncodeToString(sessB)
-
-	publicURL := s.getPublicURL(r)
-
-	bundle := login.ChallengeBundle{
-		V:                    "ASK1",
-		T:                    1,
-		SiteAID:              foundAsset.PairwiseAID,
-		SiteOOBI:             fmt.Sprintf("%s/public/oobi/%s", publicURL, foundAsset.PairwiseAID),
-		Audience:             body.Audience,
-		Nonce:                nonce,
-		Dt:                   time.Now().UTC().Format(time.RFC3339),
-		Expiry:               time.Now().Add(10 * time.Minute).UTC().Format(time.RFC3339),
-		RequestedDisclosures: body.RequestedDisclosures,
-		CallbackURL:          fmt.Sprintf("%s/api/login/callback", publicURL),
-		SessionToken:         sessionToken,
-	}
-
-	// Re-derive the asset's signing seed (controller root + asset SigningIndex) and sign the
-	// challenge Go-native. Replaces the broken Python /sign-for-name path (the driver
-	// holds no private keys, ADR-014, and the asset key used to be discarded at creation).
-	if foundAsset.SigningIndex == 0 {
-		http.Error(w, "asset has no signing key (re-create the asset to provision one)", http.StatusConflict)
-		return
-	}
-	seed, derr := asset.AssetSigningSeed(s.DataDir, foundAsset.SigningIndex)
-	if derr != nil {
-		http.Error(w, "asset seed: "+derr.Error(), http.StatusInternalServerError)
-		return
-	}
-	if err := login.SignChallengeForAsset(&bundle, seed); err != nil {
-		http.Error(w, "sign failed: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// store (cap 1000 simple)
-	s.challengeMu.Lock()
-	if s.challenges == nil {
-		s.challenges = make(map[string]login.ChallengeBundle)
-	}
-	if s.challengeStatus == nil {
-		s.challengeStatus = make(map[string]map[string]interface{})
-	}
-	if len(s.challenges) > 1000 {
-		// naive: clear oldest? for now just overwrite or drop
-		for k := range s.challenges {
-			delete(s.challenges, k)
-			break
-		}
-	}
-	s.challenges[sessionToken] = bundle
-	s.challengeStatus[sessionToken] = map[string]interface{}{"status": "pending"}
-	s.challengeMu.Unlock()
-
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
-		"session_token": sessionToken,
-		"qr_url":        fmt.Sprintf("%s/i/%s", publicURL, sessionToken),
+		"session_token": token,
+		"qr_url":        qrURL,
 	})
 }
 

@@ -558,6 +558,8 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
         s.mountScanRoutes(r)
         // Mint IA-originated Asks (e.g. an add-contact "add me" QR) hosted at /i/{token}.
         s.mountAskCreateRoute(r)
+        // login-web SignInButton-compatible endpoints (drop-in widget → an Identity Agent, no per-site backend).
+        s.mountLoginWidgetRoutes(r)
 
         absWebDir, err := filepath.Abs(flutterWebDir)
         if err != nil {
