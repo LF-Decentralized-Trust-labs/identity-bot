@@ -1,7 +1,6 @@
 package asset
 
 import (
-	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -73,10 +72,19 @@ func (h *Handler) HandleCreateAsset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// generate keypair
-	pub, _, _ := ed25519.GenerateKey(rand.Reader)
+	// Derive the asset's signing keypair from the controller root seed (HD), keyed by a
+	// stable per-asset index. The private seed is never stored — re-derived on demand
+	// (root + SigningIndex) so the agent can sign challenges on behalf of this asset.
+	// (Previously the keypair was random and the private half discarded, so the asset
+	// could never sign at all.)
+	id := genID()
+	signingIndex := signingIndexForID(id)
+	pub, nextPub, derr := deriveAssetKeypair(h.dataDir, signingIndex)
+	if derr != nil {
+		h.writeJSON(w, map[string]string{"error": "derive asset key: " + derr.Error()}, http.StatusInternalServerError)
+		return
+	}
 	pubB64 := base64.StdEncoding.EncodeToString(pub)
-	nextPub, _, _ := ed25519.GenerateKey(rand.Reader)
 	nextB64 := base64.StdEncoding.EncodeToString(nextPub)
 
 	var pairwise string
@@ -103,7 +111,7 @@ func (h *Handler) HandleCreateAsset(w http.ResponseWriter, r *http.Request) {
 	}
 
 	asset := Asset{
-		ID:              genID(),
+		ID:              id,
 		DisplayName:     body.DisplayName,
 		AssetType:       body.AssetType,
 		Origin:          body.Origin,
@@ -111,6 +119,7 @@ func (h *Handler) HandleCreateAsset(w http.ResponseWriter, r *http.Request) {
 		DelegationModel: body.DelegationModel,
 		DelegatorAID:    delegator,
 		Policy:          body.Policy,
+		SigningIndex:    signingIndex,
 		CreatedAt:       time.Now().UTC(),
 		UpdatedAt:       time.Now().UTC(),
 	}
