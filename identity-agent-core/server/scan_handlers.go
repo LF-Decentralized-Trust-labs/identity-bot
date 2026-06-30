@@ -71,6 +71,11 @@ func (s *CoreServer) handleScanDecode(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
+	// Base-layer verification: a base-layer-signed Ask must have a valid signature.
+	if verr := s.verifyAskSignature(ctx.AskBytes); verr != nil {
+		http.Error(w, verr.Error(), http.StatusUnauthorized)
+		return
+	}
 	h, ok := lookupAsk(ctx.T)
 	if !ok {
 		http.Error(w, fmt.Sprintf("unknown Ask action t=%d", ctx.T), http.StatusNotImplemented)
@@ -97,6 +102,11 @@ func (s *CoreServer) handleScanExecute(w http.ResponseWriter, r *http.Request) {
 	ctx, err := s.buildAskContext(body.URL)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	// Base-layer verification: a base-layer-signed Ask must have a valid signature.
+	if verr := s.verifyAskSignature(ctx.AskBytes); verr != nil {
+		http.Error(w, verr.Error(), http.StatusUnauthorized)
 		return
 	}
 	h, ok := lookupAsk(ctx.T)

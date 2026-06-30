@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"sync"
 
+	"identity-agent-core/login"
+
 	"github.com/go-chi/chi/v5"
 )
 
@@ -30,33 +32,37 @@ func getMintedAsk(token string) ([]byte, bool) {
 // Login is minted by the relying-party website, so loginAsk does NOT implement this;
 // add-contact does (you mint your own "add me" QR for others to scan).
 type AskMinter interface {
-	Mint(s *CoreServer) ([]byte, error)
+	// Mint returns the unsigned Ask bytes and the (pairwise) seed the base layer signs it with.
+	Mint(s *CoreServer) (askBytes []byte, signingSeed []byte, err error)
 }
 
-// Mint builds this agent's add-contact Ask (t=2): "add me as a contact".
-func (addContactAsk) Mint(s *CoreServer) ([]byte, error) {
-	id, err := s.DataStore.GetIdentity()
-	if err != nil || id == nil {
-		return nil, fmt.Errorf("no local identity")
-	}
-	publicURL := s.EndpointService.CurrentURL()
-	if publicURL == "" {
-		return nil, fmt.Errorf("no public URL (tunnel) available")
-	}
-	alias := id.AID
-	if len(alias) >= 12 {
-		alias = alias[:12] + "..."
+// Mint builds this agent's add-contact Ask (t=2): "add me as a contact". Signed with a fresh
+// PAIRWISE AID (not the root key); asker_aid/asker_oobi point at that pairwise, which becomes
+// the relationship identifier when the scanner adds us.
+func (addContactAsk) Mint(s *CoreServer) ([]byte, []byte, error) {
+	alias := ""
+	if id, _ := s.DataStore.GetIdentity(); id != nil {
+		alias = id.AID
+		if len(alias) >= 12 {
+			alias = alias[:12] + "..."
+		}
 	}
 	if p, _ := s.DataStore.GetProfile(); p != nil && p.FullName != "" {
 		alias = p.FullName
 	}
-	return json.Marshal(map[string]interface{}{
+	pwAID, pwOOBI, seed, err := s.mintPairwise("addcontact")
+	if err != nil {
+		return nil, nil, err
+	}
+	ask, err := json.Marshal(map[string]interface{}{
 		"v":           "ASK1",
 		"t":           2,
-		"asker_aid":   id.AID,
-		"asker_oobi":  fmt.Sprintf("%s/public/oobi/%s", publicURL, id.AID),
+		"asker_aid":   pwAID,
+		"asker_oobi":  pwOOBI,
+		"signer_oobi": pwOOBI,
 		"asker_alias": alias,
 	})
+	return ask, seed, err
 }
 
 func (s *CoreServer) mountAskCreateRoute(r chi.Router) {
@@ -83,10 +89,19 @@ func (s *CoreServer) handleAskCreate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("action t=%d is not IA-mintable (originated elsewhere)", body.T), http.StatusBadRequest)
 		return
 	}
-	ask, err := minter.Mint(s)
+	ask, seed, err := minter.Mint(s)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+	// Base-layer signing: sign the canonical Ask with the pairwise key and attach the sig.
+	sig, serr := login.SignAsk(ask, seed)
+	if serr != nil {
+		http.Error(w, "sign ask: "+serr.Error(), http.StatusInternalServerError)
+		return
+	}
+	if signed, ierr := injectSig(ask, sig); ierr == nil {
+		ask = signed
 	}
 	tb := make([]byte, 16)
 	_, _ = rand.Read(tb)

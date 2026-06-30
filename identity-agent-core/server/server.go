@@ -551,6 +551,9 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
         // /public/credential/{said} — public credential delivery endpoint for sharing issued credentials.
         r.Get("/public/credential/{said}", s.handlePublicCredentialServe)
 
+        // Serve did.json for owned/registered AIDs at /public/{aid}/did.json (before the SPA), so
+        // login site keys and minted pairwise signer keys resolve.
+        s.mountPublicDidWebsRoutes(r)
         // Dumb-router scan gate: forward a scanned Ask pointer here; Go decodes + dispatches by t.
         s.mountScanRoutes(r)
         // Mint IA-originated Asks (e.g. an add-contact "add me" QR) hosted at /i/{token}.
