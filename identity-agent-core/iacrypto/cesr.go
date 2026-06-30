@@ -6,19 +6,19 @@ import (
 )
 
 const (
-	CipherSuiteIAHybrid1   = "IA-HYBRID-1"
-	CESRMLDSA65Verkey      = "1PDA"
-	CESRMLDSA65Sig         = "1PDS"
-	CESRMLKEM768Encap      = "1PKM"
-	CESRX25519Pubkey       = "1PXB"
-	MLDSA65VerkeyBytes     = 1952
-	MLDSA65SigBytes        = 3309
-	MLKEM768EncapBytes     = 1184
-	X25519PubkeyBytes      = 32
-	Ed25519PubkeyBytes     = 32
-	Ed25519SigBytes        = 64
-	CtrControllerIdxSigs   = "-A"
-	C2Message              = "m63-c2-hybrid-signature-golden-vector"
+	CipherSuiteIAHybrid1 = "IA-HYBRID-1"
+	CESRMLDSA65Verkey    = "1PDA"
+	CESRMLDSA65Sig       = "1PDS"
+	CESRMLKEM768Encap    = "1PKM"
+	CESRX25519Pubkey     = "1PXB"
+	MLDSA65VerkeyBytes   = 1952
+	MLDSA65SigBytes      = 3309
+	MLKEM768EncapBytes   = 1184
+	X25519PubkeyBytes    = 32
+	Ed25519PubkeyBytes   = 32
+	Ed25519SigBytes      = 64
+	CtrControllerIdxSigs = "-A"
+	C2Message            = "m63-c2-hybrid-signature-golden-vector"
 )
 
 var (
@@ -88,4 +88,16 @@ func EncodeLargeFixed(code string, raw []byte, expectedLen int) (string, error) 
 		return "", fmt.Errorf("expected %d raw bytes for %s, got %d", expectedLen, code, len(raw))
 	}
 	return code + base64.RawURLEncoding.EncodeToString(raw), nil
+}
+
+// VerkeyQB64 encodes a raw Ed25519 public key as a CESR qb64 verfer (code "D"). Use this for
+// keys passed to the KERI driver's inception endpoints: the driver's _extract_raw_key reads a
+// leading "B"/"D" as a CESR code, so a raw base64 key that happens to start with B/D is
+// misparsed. qb64 is unambiguous. Falls back to empty string only on an impossible encode error.
+func VerkeyQB64(pub []byte) string {
+	s, err := MatterFixedQB64("D", pub)
+	if err != nil {
+		return ""
+	}
+	return s
 }

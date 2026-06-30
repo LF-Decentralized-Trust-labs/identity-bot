@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"identity-agent-core/drivers"
+	"identity-agent-core/iacrypto"
 )
 
 type Handler struct {
@@ -84,8 +85,8 @@ func (h *Handler) HandleCreateAsset(w http.ResponseWriter, r *http.Request) {
 		h.writeJSON(w, map[string]string{"error": "derive asset key: " + derr.Error()}, http.StatusInternalServerError)
 		return
 	}
-	pubB64 := base64.StdEncoding.EncodeToString(pub)
-	nextB64 := base64.StdEncoding.EncodeToString(nextPub)
+	pubB64 := iacrypto.VerkeyQB64(pub)
+	nextB64 := iacrypto.VerkeyQB64(nextPub)
 
 	var pairwise string
 	var delegator string

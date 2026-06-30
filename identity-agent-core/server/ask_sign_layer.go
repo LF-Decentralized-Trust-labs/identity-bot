@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"identity-agent-core/backup"
+	"identity-agent-core/iacrypto"
 	"identity-agent-core/login"
 	"identity-agent-core/secureenclave"
 )
@@ -49,8 +50,8 @@ func (s *CoreServer) mintPairwise(name string) (aid, oobi string, seed []byte, e
 		return "", "", nil, fmt.Errorf("keri driver required to mint pairwise AID")
 	}
 	icp, ierr := s.KeriDriver.CreateInceptionNamed(
-		base64.StdEncoding.EncodeToString(pub),
-		base64.StdEncoding.EncodeToString(nextPub),
+		iacrypto.VerkeyQB64(pub),
+		iacrypto.VerkeyQB64(nextPub),
 		name,
 	)
 	if ierr != nil || icp.AID == "" {

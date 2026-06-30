@@ -2,9 +2,9 @@ package server
 
 import (
 	"crypto/ed25519"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"identity-agent-core/iacrypto"
 	"io"
 	"log"
 	"net/http"
@@ -146,8 +146,8 @@ func (s *CoreServer) EnsureKeriContact(oobiURL string) (*store.ContactRecord, bo
 		pub := ed25519.NewKeyFromSeed(pwSeed).Public().(ed25519.PublicKey)
 		nextPub := ed25519.NewKeyFromSeed(nextSeed).Public().(ed25519.PublicKey)
 		if icp, ierr := s.KeriDriver.CreateInceptionNamed(
-			base64.StdEncoding.EncodeToString(pub),
-			base64.StdEncoding.EncodeToString(nextPub),
+			iacrypto.VerkeyQB64(pub),
+			iacrypto.VerkeyQB64(nextPub),
 			"rel-"+oobiData.AID,
 		); ierr == nil && icp.AID != "" {
 			contact.RelationshipAID = icp.AID

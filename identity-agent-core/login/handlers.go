@@ -15,6 +15,7 @@ import (
 
 	"identity-agent-core/backup"
 	"identity-agent-core/drivers"
+	"identity-agent-core/iacrypto"
 	"identity-agent-core/secureenclave"
 )
 
@@ -33,13 +34,13 @@ func loadRelationshipSeed(h *Handler, rel *SiteRelationship) ([]byte, error) {
 }
 
 type Handler struct {
-	Store        *RelationshipStore
-	Pending      *PendingStore
-	KeriDriver   *drivers.KeriDriver
-	DevRelay     string
-	HTTPClient   *http.Client
-	TrustGate    *secureenclave.TrustGate
-	dataDir      string // for secure relationship seed storage (never put raw seeds in main JSON)
+	Store          *RelationshipStore
+	Pending        *PendingStore
+	KeriDriver     *drivers.KeriDriver
+	DevRelay       string
+	HTTPClient     *http.Client
+	TrustGate      *secureenclave.TrustGate
+	dataDir        string // for secure relationship seed storage (never put raw seeds in main JSON)
 	OnLoginPending func(LoginPreviewResponse)
 }
 
@@ -56,12 +57,12 @@ func NewHandler(dataDir string, keri *drivers.KeriDriver) (*Handler, error) {
 		relay = "http://127.0.0.1:8765"
 	}
 	return &Handler{
-		Store:        store,
-		Pending:      NewPendingStore(),
-		KeriDriver:   keri,
-		DevRelay:     relay,
-		HTTPClient:   &http.Client{Timeout: 15 * time.Second},
-		dataDir:      dataDir,
+		Store:      store,
+		Pending:    NewPendingStore(),
+		KeriDriver: keri,
+		DevRelay:   relay,
+		HTTPClient: &http.Client{Timeout: 15 * time.Second},
+		dataDir:    dataDir,
 	}, nil
 }
 
@@ -169,8 +170,8 @@ func (h *Handler) getOrCreateRelationship(siteAID string, bundle *ChallengeBundl
 	pub := ed25519.NewKeyFromSeed(pwiseSeed).Public().(ed25519.PublicKey)
 	nextPub := ed25519.NewKeyFromSeed(nextPwise).Public().(ed25519.PublicKey)
 	resp, err := h.KeriDriver.CreateInceptionNamed(
-		base64.StdEncoding.EncodeToString(pub),
-		base64.StdEncoding.EncodeToString(nextPub),
+		iacrypto.VerkeyQB64(pub),
+		iacrypto.VerkeyQB64(nextPub),
 		"login-rel-"+siteAID,
 	)
 	if err != nil || resp.AID == "" {
@@ -192,7 +193,7 @@ func (h *Handler) getOrCreateRelationship(siteAID string, bundle *ChallengeBundl
 		RelayOOBI:         relayOOBI,
 		DisplayName:       "IA User",
 		Email:             "user@identity.agent",
-		RelationshipIndex: loginIdx,  // stable persisted index for HD re-derive from root
+		RelationshipIndex: loginIdx, // stable persisted index for HD re-derive from root
 	}
 	if err := h.Store.Put(rel); err != nil {
 		return nil, err
