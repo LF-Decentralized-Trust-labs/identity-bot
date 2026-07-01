@@ -2459,6 +2459,19 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+		// Minted pairwise AID (e.g. an add-contact Ask signer): serve its OOBI from the
+		// registered KEL so a peer can resolve + add it.
+		if kel, ok := getPairwiseKEL(requestedAID); ok {
+			publicURL := s.getPublicURL(r)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"aid":  requestedAID,
+				"oobi": fmt.Sprintf("%s/public/oobi/%s", publicURL, requestedAID),
+				"kel":  kel,
+				"type": "pairwise",
+			})
+			return
+		}
 		writeError(w, http.StatusNotFound, "AID not found", fmt.Sprintf("No identity found for AID: %s", requestedAID))
 		return
 	}
