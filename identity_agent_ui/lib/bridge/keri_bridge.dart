@@ -1,5 +1,6 @@
 import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart' show kIsWeb, debugPrint;
+import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import '../src/rust/frb_generated.dart';
 import '../src/rust/api/keri_bridge.dart' as rust_api;
 
@@ -70,7 +71,22 @@ class KeriBridge {
     if (_rustInitialized) return;
     if (!_isMobilePlatform) return;
     try {
-      await RustLib.init();
+      if (Platform.isIOS) {
+        // build-ios.sh links libidentity_agent_keri.a directly into the
+        // Runner binary (-lidentity_agent_keri) rather than shipping a
+        // separate dynamic framework, so the FFI symbols are already
+        // present in this process. flutter_rust_bridge's default iOS
+        // loader assumes a dynamic <crate>.framework bundle and can never
+        // find one here — a hardened-runtime dlopen of a relative path
+        // is also disallowed on-device regardless. ExternalLibrary.process()
+        // is FRB's documented mechanism for exactly this (statically
+        // linked) case.
+        await RustLib.init(
+          externalLibrary: ExternalLibrary.process(iKnowHowToUseIt: true),
+        );
+      } else {
+        await RustLib.init();
+      }
       _rustAvailable = true;
       _rustInitialized = true;
       debugPrint('[KeriBridge] Rust library loaded successfully');
