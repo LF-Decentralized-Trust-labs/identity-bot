@@ -19,7 +19,8 @@ import '../../widgets/log_entry.dart';
 import '../../widgets/setup_task_banner.dart';
 import '../auth_setup_screen.dart';
 import '../qr_scanner_screen.dart';
-import '../../widgets/contact_action_popup.dart';
+import '../../services/scan_service.dart';
+import '../../widgets/consent_modal.dart';
 
 // Fallback share actions shown immediately while the backend is loading or
 // unreachable. Mirrors the seeded rows in migration 7. The Data Manager sandbox
@@ -96,6 +97,7 @@ class _DesktopDashboardScreenState extends State<DesktopDashboardScreen> {
   // Engagement — pre-seeded with fallback so the card is never empty while loading
   List<ShareAction> _shareActions = _kFallbackShareActions;
   bool _cameraAvailable = false;
+  bool _scanProcessing = false;
 
   // OOBI — loaded for identity card server URL
   OobiResponse? _oobi;
@@ -411,163 +413,90 @@ class _DesktopDashboardScreenState extends State<DesktopDashboardScreen> {
 
   /// Parses a scanned URL, determines the action, and routes accordingly.
   /// Matches the mobile MobileQrScanner behavior.
+  /// Dumb router: forward whatever was scanned to the Go core's scan gate, which fetches the
+  /// Ask, reads its action `t`, and decides what to do. No per-transaction logic lives here —
+  /// adding a new transaction type is a Go-only change. This mirrors the mobile scanner; the
+  /// desktop just renders the generic consent Go returns and sends back the user's decision.
   void _handleScannedUrl(String scannedUrl) {
-    // Must contain /oobi/ to be a valid OOBI URL
-    if (!scannedUrl.contains('/oobi/')) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Unrecognized QR code. Expected an OOBI URL.'),
-          backgroundColor: AppColors.error,
-        ),
-      );
-      return;
-    }
-
-    // Parse action from query parameters — no default; absent means user chooses
-    final uri = Uri.tryParse(scannedUrl);
-    final action = uri?.queryParameters['action'];
-
-    if (action == 'add_contact') {
-      _resolveAndAddContact(scannedUrl);
-    } else if (action != null) {
-      // Explicit but unsupported action
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Action "$action" is not yet supported.'),
-          backgroundColor: AppColors.warning,
-        ),
-      );
-    } else {
-      // No action parameter — resolve OOBI and let user choose
-      _resolveAndShowIdentity(scannedUrl);
-    }
+    if (_scanProcessing) return;
+    setState(() => _scanProcessing = true);
+    _runScan(scannedUrl);
   }
 
-  Future<void> _resolveAndShowIdentity(String oobiUrl) async {
-    // Show resolving overlay via snackbar
+  Future<void> _runScan(String url) async {
+    final scan = ScanService(baseUrl: _coreService.baseUrl);
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Row(
           children: [
             SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
             SizedBox(width: 12),
-            Text('Resolving identity...'),
+            Text('Reading request...'),
           ],
         ),
         duration: Duration(seconds: 15),
       ),
     );
-
     try {
-      final resolved = await _coreService.resolveOobiContact(oobiUrl: oobiUrl);
+      final preview = await scan.decode(url);
       if (!mounted) return;
       ScaffoldMessenger.of(context).hideCurrentSnackBar();
 
-      // Show identity info — user decides what to do
-      final confirmed = await showDialog<bool>(
+      final details = preview.details
+          .map((d) => ConsentDetailItem(
+                label: d.label.replaceAll('_', ' '),
+                value: d.value.isEmpty ? '—' : d.value,
+                isMonospace: d.label.contains('aid') || d.label.contains('email'),
+              ))
+          .toList();
+
+      final result = await ConsentModal.show(
         context: context,
-        barrierDismissible: false,
-        builder: (ctx) => ContactActionPopup(
-          name: resolved.displayName,
-          photo: resolved.photo,
-          aid: resolved.aid,
-          kelVerified: resolved.kelVerified,
-          actionLabel: 'Scanned identity',
-          confirmLabel: 'Add Contact',
-          dismissLabel: 'Dismiss',
-          onConfirm: () => Navigator.of(ctx).pop(true),
-          onDismiss: () => Navigator.of(ctx).pop(false),
-        ),
+        title: preview.title,
+        subtitle: preview.subtitle,
+        name: preview.counterparty,
+        avatarLabel: preview.counterparty.isNotEmpty
+            ? preview.counterparty[0].toUpperCase()
+            : '?',
+        details: details,
+        confirmLabel: 'Approve',
+        cancelLabel: 'Deny',
+        accentColor: AppColors.accent,
+        icon: preview.action == 'login'
+            ? Icons.login_rounded
+            : Icons.person_add_alt_1_rounded,
+        warningMessage: preview.warning,
       );
 
-      if (confirmed == true) {
-        await _coreService.addContact(
-          oobiUrl: oobiUrl,
-          alias: resolved.alias,
-        );
+      if (result?.confirmed == true) {
+        await scan.execute(url, approved: true, tier: preview.defaultTier);
         if (mounted) {
+          final msg = preview.action == 'login'
+              ? 'Signed in successfully'
+              : preview.action == 'add_contact'
+                  ? 'Contact added'
+                  : 'Done';
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Contact "${resolved.displayName}" added'),
-              backgroundColor: AppColors.coreActive,
-            ),
+            SnackBar(content: Text(msg), backgroundColor: AppColors.coreActive),
           );
           _load();
         }
+      } else if (result?.confirmed == false) {
+        await scan.execute(url, approved: false);
       }
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).hideCurrentSnackBar();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to resolve: ${e.toString().split(': ').last}'),
-          backgroundColor: AppColors.error,
-        ),
-      );
-    }
-  }
-
-  Future<void> _resolveAndAddContact(String oobiUrl) async {
-    // Show resolving overlay via snackbar
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Row(
-          children: [
-            SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
-            SizedBox(width: 12),
-            Text('Resolving identity...'),
-          ],
-        ),
-        duration: Duration(seconds: 15),
-      ),
-    );
-
-    try {
-      final resolved = await _coreService.resolveOobiContact(oobiUrl: oobiUrl);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).hideCurrentSnackBar();
-
-      // Show confirmation popup (matches mobile ContactActionPopup flow)
-      final confirmed = await showDialog<bool>(
-        context: context,
-        barrierDismissible: false,
-        builder: (ctx) => ContactActionPopup(
-          name: resolved.displayName,
-          photo: resolved.photo,
-          aid: resolved.aid,
-          kelVerified: resolved.kelVerified,
-          actionLabel: 'Wants to add you as a contact',
-          confirmLabel: 'Add Contact',
-          dismissLabel: 'Dismiss',
-          onConfirm: () => Navigator.of(ctx).pop(true),
-          onDismiss: () => Navigator.of(ctx).pop(false),
-        ),
-      );
-
-      if (confirmed == true) {
-        await _coreService.addContact(
-          oobiUrl: oobiUrl,
-          alias: resolved.alias,
+      if (mounted) {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Scan failed: ${e.toString().split(': ').last}'),
+            backgroundColor: AppColors.error,
+          ),
         );
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Contact "${resolved.displayName}" added'),
-              backgroundColor: AppColors.coreActive,
-            ),
-          );
-          _load();
-        }
       }
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).hideCurrentSnackBar();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to resolve: ${e.toString().split(': ').last}'),
-          backgroundColor: AppColors.error,
-        ),
-      );
+    } finally {
+      scan.dispose();
+      if (mounted) setState(() => _scanProcessing = false);
     }
   }
 

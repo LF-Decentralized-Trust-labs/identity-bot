@@ -18,6 +18,20 @@ type Handler struct {
 	Store      *Store
 	KeriDriver *drivers.KeriDriver
 	dataDir    string
+
+	// RootAID returns the AID of the agent's root identity (the delegator for per-asset
+	// delegated inception), or "" if no root identity exists yet. Injected by the server so
+	// this package stays free of the identity store. Nil is treated as "".
+	RootAID func() string
+
+	// DefaultDelegationModel returns the agent's configured default delegation model for new
+	// assets when the request doesn't specify one: "delegated" | "standalone" | "" (unset).
+	// This is the flexibility seam: an org deployment configures "delegated" (per-asset AIDs
+	// anchor to the org root — provable ownership); an individual leaves it standalone (no
+	// forced root<->asset correlation). An explicit request field always overrides this, and
+	// the resolver can later read a stored per-agent setting instead of an env var without
+	// touching this handler. Nil / "" falls through to the neutral built-in default.
+	DefaultDelegationModel func() string
 }
 
 func NewHandler(dataDir string, keri *drivers.KeriDriver) (*Handler, error) {
@@ -88,14 +102,42 @@ func (h *Handler) HandleCreateAsset(w http.ResponseWriter, r *http.Request) {
 	pubB64 := iacrypto.VerkeyQB64(pub)
 	nextB64 := iacrypto.VerkeyQB64(nextPub)
 
+	// Resolve the delegation model with an explicit precedence, so the org-vs-individual choice
+	// is a policy — not baked into the code:
+	//   1. an explicit request field always wins ("delegated" | "standalone");
+	//   2. otherwise the agent's configured default (org deployments set "delegated");
+	//   3. otherwise a neutral built-in default of "standalone" (an individual gets an
+	//      unlinked per-asset AID unless something opts into delegation).
+	// A delegated AID anchors back to the root AID (the driver keys identities by AID, so the
+	// root AID IS the delegator name), which is what an org wants for provable ownership.
+	rootAID := ""
+	if h.RootAID != nil {
+		rootAID = h.RootAID()
+	}
+	requested := body.DelegationModel
+	model := requested
+	if model == "" && h.DefaultDelegationModel != nil {
+		model = h.DefaultDelegationModel()
+	}
+	if model == "" {
+		model = "standalone"
+	}
+	// Delegation needs a root identity to delegate from. If the caller explicitly asked for it
+	// without one, that's an error; if it was only the default, degrade gracefully to standalone
+	// rather than failing asset creation.
+	if model == "delegated" && rootAID == "" {
+		if requested == "delegated" {
+			h.writeJSON(w, map[string]string{"error": "delegated inception requires a root identity"}, http.StatusBadRequest)
+			return
+		}
+		model = "standalone"
+	}
+
 	var pairwise string
 	var delegator string
 
-	if body.DelegationModel == "delegated" {
-		// find delegator name
-		delegatorName := "root"
-		// TODO: lookup real name from stored AID if available
-		resp, err := h.KeriDriver.CreateDelegatedInception(pubB64, nextB64, body.DisplayName, delegatorName)
+	if model == "delegated" {
+		resp, err := h.KeriDriver.CreateDelegatedInception(pubB64, nextB64, body.DisplayName, rootAID)
 		if err != nil {
 			h.writeJSON(w, map[string]string{"error": err.Error()}, http.StatusInternalServerError)
 			return
@@ -117,7 +159,7 @@ func (h *Handler) HandleCreateAsset(w http.ResponseWriter, r *http.Request) {
 		AssetType:       body.AssetType,
 		Origin:          body.Origin,
 		PairwiseAID:     pairwise,
-		DelegationModel: body.DelegationModel,
+		DelegationModel: model,
 		DelegatorAID:    delegator,
 		Policy:          body.Policy,
 		SigningIndex:    signingIndex,

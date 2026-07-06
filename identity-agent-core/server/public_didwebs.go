@@ -21,6 +21,26 @@ var pairwiseKeys = struct {
 	m map[string]string // aid -> base64url Ed25519 pubkey
 }{m: map[string]string{}}
 
+// KELs of minted pairwise AIDs, so their OOBI (/public/oobi/{aid}) resolves when a peer adds
+// us as a contact.
+var pairwiseKELs = struct {
+	sync.Mutex
+	m map[string][]map[string]interface{}
+}{m: map[string][]map[string]interface{}{}}
+
+func registerPairwiseKEL(aid string, kel []map[string]interface{}) {
+	pairwiseKELs.Lock()
+	pairwiseKELs.m[aid] = kel
+	pairwiseKELs.Unlock()
+}
+
+func getPairwiseKEL(aid string) ([]map[string]interface{}, bool) {
+	pairwiseKELs.Lock()
+	defer pairwiseKELs.Unlock()
+	k, ok := pairwiseKELs.m[aid]
+	return k, ok
+}
+
 func (s *CoreServer) mountPublicDidWebsRoutes(r chi.Router) {
 	r.Get("/public/{aid}/did.json", s.handlePublicDidJSON)
 	r.Post("/public/_register", s.handleRegisterPairwise)

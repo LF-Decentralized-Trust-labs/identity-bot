@@ -49,18 +49,25 @@ func (s *CoreServer) mintPairwise(name string) (aid, oobi string, seed []byte, e
 	if s.KeriDriver == nil {
 		return "", "", nil, fmt.Errorf("keri driver required to mint pairwise AID")
 	}
+	// Unique driver name per mint (the index is a never-reused counter) so GetKel resolves
+	// this exact pairwise, not a collision on a shared name.
+	uniqueName := fmt.Sprintf("%s-%d", name, idx)
 	icp, ierr := s.KeriDriver.CreateInceptionNamed(
 		iacrypto.VerkeyQB64(pub),
 		iacrypto.VerkeyQB64(nextPub),
-		name,
+		uniqueName,
 	)
 	if ierr != nil || icp.AID == "" {
 		return "", "", nil, fmt.Errorf("mint pairwise inception: %w", ierr)
 	}
-	// Publish the key so a verifier can resolve it at /public/{aid}/did.json.
+	// Publish the key (did.json, for signature verification) and the KEL (OOBI, so a peer can
+	// resolve this pairwise AID when adding us as a contact).
 	pairwiseKeys.Lock()
 	pairwiseKeys.m[icp.AID] = base64.RawURLEncoding.EncodeToString(pub)
 	pairwiseKeys.Unlock()
+	if kel, kerr := s.KeriDriver.GetKel(uniqueName); kerr == nil {
+		registerPairwiseKEL(icp.AID, kel.KEL)
+	}
 
 	publicURL := s.EndpointService.CurrentURL()
 	oobi = fmt.Sprintf("%s/public/oobi/%s", publicURL, icp.AID)
