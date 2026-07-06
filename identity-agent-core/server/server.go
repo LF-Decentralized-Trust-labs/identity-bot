@@ -237,7 +237,10 @@ func New(cfg Config) (*CoreServer, error) {
 		s.UpdateService = updSvc
 	}
 
-	s.AttestationRunner = secureenclave.NewRunner(secureenclave.RunnerConfig{DataDir: cfg.DataDir})
+	s.AttestationRunner = secureenclave.NewRunner(secureenclave.RunnerConfig{
+		DataDir:          cfg.DataDir,
+		EnableKeriDriver: cfg.EnableKeriDriver,
+	})
 	if s.UpdateService != nil {
 		s.TrustGate = secureenclave.NewTrustGate(s.AttestationRunner, s.UpdateService.Attestation())
 	} else {

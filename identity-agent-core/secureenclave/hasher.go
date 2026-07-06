@@ -75,10 +75,18 @@ func (r *Registry) ChainHash() (string, map[string]string, error) {
 }
 
 // DefaultRegistry wires the standard identity-agent component chain.
-func DefaultRegistry(dataDir string) *Registry {
+// includeKeriDriver should be false on mobile (gomobile-embedded) builds,
+// where there is no separate Python KERI driver script to hash at all —
+// registering it unconditionally there made every self-attestation run
+// fail (component "python_keri_driver": path not configured), which in
+// turn made TrustGate report a hard block on every phone regardless of
+// hardware.
+func DefaultRegistry(dataDir string, includeKeriDriver bool) *Registry {
 	reg := NewRegistry()
 	reg.Register("go_backend", fileHasher(resolveBinaryPath()))
-	reg.Register("python_keri_driver", fileHasher(resolveKeriDriverScript()))
+	if includeKeriDriver {
+		reg.Register("python_keri_driver", fileHasher(resolveKeriDriverScript()))
+	}
 	if path := resolveAuthProviderBinary(); path != "" {
 		reg.Register("auth_provider", fileHasher(path))
 	}
