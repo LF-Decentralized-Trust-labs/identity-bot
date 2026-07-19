@@ -137,6 +137,41 @@ class BackendProcessService {
     return null;
   }
 
+  // Absolute, per-app writable data dir. Namespaced by the app/executable name
+  // so the oss / Grape ID / Grape ID Org flavors don't collide when run together.
+  String _resolveDataDir() {
+    final sep = Platform.pathSeparator;
+    final home = Platform.environment['HOME'] ??
+        Platform.environment['USERPROFILE'] ??
+        '';
+    String appName;
+    try {
+      appName = Platform.resolvedExecutable.split(sep).last;
+    } catch (_) {
+      appName = 'IdentityAgent';
+    }
+    if (appName.isEmpty) appName = 'IdentityAgent';
+
+    String base;
+    if (Platform.isMacOS) {
+      base = '$home${sep}Library${sep}Application Support${sep}$appName';
+    } else if (Platform.isWindows) {
+      final appData =
+          Platform.environment['APPDATA'] ?? '$home${sep}AppData${sep}Roaming';
+      base = '$appData$sep$appName';
+    } else {
+      final xdg = Platform.environment['XDG_DATA_HOME'];
+      base = (xdg != null && xdg.isNotEmpty)
+          ? '$xdg$sep$appName'
+          : '$home${sep}.local${sep}share${sep}$appName';
+    }
+    final dataDir = '$base${sep}data';
+    try {
+      Directory(dataDir).createSync(recursive: true);
+    } catch (_) {}
+    return dataDir;
+  }
+
   String? _findBundledPython(String backendDir) {
     final sep = Platform.pathSeparator;
 
@@ -462,6 +497,12 @@ class BackendProcessService {
       final env = Map<String, String>.from(Platform.environment);
       env['PORT'] = '${AgentConfig.defaultDesktopPort}';
       env['HOST'] = '0.0.0.0';
+      // The backend's working dir is inside the read-only .app bundle, so its
+      // default relative "./data" store can't be created. Point it at an
+      // absolute, per-app writable location so multiple flavors (oss / Grape ID
+      // / Grape ID Org) keep separate state.
+      env['AGENT_DATA_DIR'] = _resolveDataDir();
+      debugPrint('[BackendProcess] AGENT_DATA_DIR: ${env['AGENT_DATA_DIR']}');
       env['KERI_DRIVER_PYTHON'] = pythonBin;
       if (keriScript != null) {
         env['KERI_DRIVER_SCRIPT'] = keriScript;
