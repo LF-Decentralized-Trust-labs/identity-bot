@@ -38,7 +38,7 @@ class SecureKeyStore {
     // carry — it fails onboarding with errSecMissingEntitlement (-34018), and
     // declaring the entitlement makes the app un-launchable. The legacy keychain
     // needs no entitlement for a non-sandboxed app.
-    mOptions: MacOsOptions(useDataProtectionKeychain: false),
+    mOptions: MacOsOptions(useDataProtectionKeyChain: false),
   );
 
   static const _mnemonicKey = 'agent_mnemonic';
