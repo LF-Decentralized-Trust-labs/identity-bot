@@ -32,6 +32,13 @@ import 'hardware_key_wrapper.dart';
 class SecureKeyStore {
   static const _storage = FlutterSecureStorage(
     aOptions: AndroidOptions(encryptedSharedPreferences: true),
+    // Use the LEGACY macOS keychain, not the iOS-style data-protection keychain.
+    // The data-protection keychain requires a keychain-access-groups entitlement
+    // (provisioning-profile-backed) that a non-sandboxed Developer-ID app can't
+    // carry — it fails onboarding with errSecMissingEntitlement (-34018), and
+    // declaring the entitlement makes the app un-launchable. The legacy keychain
+    // needs no entitlement for a non-sandboxed app.
+    mOptions: MacOsOptions(useDataProtectionKeychain: false),
   );
 
   static const _mnemonicKey = 'agent_mnemonic';
