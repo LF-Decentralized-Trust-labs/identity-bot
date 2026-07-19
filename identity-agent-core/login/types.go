@@ -25,6 +25,18 @@ type RequestedCredential struct {
 	Required   bool   `json:"required"`
 }
 
+// PresentedCredential is a held ACDC the signer presents in an assertion to
+// satisfy a RequestedCredential. It carries the fields the relying party needs
+// to authorize (schema + issuer + status), plus the raw ACDC for verification.
+type PresentedCredential struct {
+	SAID       string                 `json:"said"`
+	SchemaSAID string                 `json:"schema_said"`
+	IssuerAID  string                 `json:"issuer_aid"`
+	HolderAID  string                 `json:"holder_aid"`
+	Status     string                 `json:"status"`
+	ACDC       map[string]interface{} `json:"acdc,omitempty"`
+}
+
 type RequestedScore struct {
 	MinBand   string `json:"min_band,omitempty"`
 	MinScore  int    `json:"min_score,omitempty"`

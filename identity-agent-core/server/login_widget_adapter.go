@@ -44,6 +44,15 @@ func (s *CoreServer) createSignedAssetChallenge(assetID, audience string, disclo
 	rand.Read(sessB)
 	sessionToken = hex.EncodeToString(sessB)
 
+	// A credential-gated asset asks the signer to present the required ACDC.
+	var reqCreds []login.RequestedCredential
+	if found.Policy.RequiredCredSchema != "" {
+		reqCreds = append(reqCreds, login.RequestedCredential{
+			SchemaSAID: found.Policy.RequiredCredSchema,
+			Required:   true,
+		})
+	}
+
 	bundle := login.ChallengeBundle{
 		V:                    "ASK1",
 		T:                    1,
@@ -54,6 +63,7 @@ func (s *CoreServer) createSignedAssetChallenge(assetID, audience string, disclo
 		Dt:                   time.Now().UTC().Format(time.RFC3339),
 		Expiry:               time.Now().Add(10 * time.Minute).UTC().Format(time.RFC3339),
 		RequestedDisclosures: disclosures,
+		RequestedCredentials: reqCreds,
 		CallbackURL:          fmt.Sprintf("%s/api/login/callback", publicURL),
 		SessionToken:         sessionToken,
 	}

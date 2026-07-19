@@ -34,6 +34,29 @@ func (s *CoreServer) initLoginHandler() error {
 	if err != nil {
 		return err
 	}
+	// Let a credential-gated login present a matching held ACDC.
+	h.HeldCredentials = func() []login.PresentedCredential {
+		recs, err := s.DataStore.GetCredentials()
+		if err != nil {
+			return nil
+		}
+		out := make([]login.PresentedCredential, 0, len(recs))
+		for _, c := range recs {
+			var acdc map[string]interface{}
+			if c.AcdcJson != "" {
+				_ = json.Unmarshal([]byte(c.AcdcJson), &acdc)
+			}
+			out = append(out, login.PresentedCredential{
+				SAID:       c.SAID,
+				SchemaSAID: c.SchemaSAID,
+				IssuerAID:  c.IssuerAID,
+				HolderAID:  c.HolderAID,
+				Status:     c.Status,
+				ACDC:       acdc,
+			})
+		}
+		return out
+	}
 	h.OnLoginPending = func(preview login.LoginPreviewResponse) {
 		s.EventHub.Broadcast(AgentEvent{
 			Type:      "login_pending",
@@ -161,8 +184,9 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// 2) Authorize: enforce the asset's enrollment policy for the asserter.
-	if allowed, reason := s.authorizeAssetAccess(bundle.SiteAID, res.PairwiseAID); !allowed {
+	// 2) Authorize: enforce the asset's enrollment policy for the asserter,
+	// including any required credential presented in the (verified) assertion.
+	if allowed, reason := s.authorizeAssetAccess(bundle.SiteAID, res.PairwiseAID, a.PresentedACDCs); !allowed {
 		s.setChallengeStatus(token, map[string]interface{}{"status": "denied", "reason": reason})
 		http.Error(w, "not authorized: "+reason, http.StatusForbidden)
 		return
@@ -187,10 +211,12 @@ func (s *CoreServer) setChallengeStatus(token string, st map[string]interface{})
 	s.challengeMu.Unlock()
 }
 
-// authorizeAssetAccess enforces an asset's enrollment policy for an asserter: "open"
-// admits any verified identity; otherwise the asserter's pairwise AID must be a member
-// of the asset. (Membership is managed by the relying party / a management layer on top.)
-func (s *CoreServer) authorizeAssetAccess(siteAID, pairwiseAID string) (bool, string) {
+// authorizeAssetAccess enforces an asset's enrollment policy for an asserter.
+// Requirements are ADDITIVE: the enrollment mode ("open" admits any verified
+// identity; otherwise the pairwise AID must be a member) AND, if the policy sets
+// a required credential, a matching valid ACDC must be present in the verified
+// assertion. `presented` is the assertion's presented_acdcs.
+func (s *CoreServer) authorizeAssetAccess(siteAID, pairwiseAID string, presented []interface{}) (bool, string) {
 	if s.assetHandler == nil {
 		return false, "asset store unavailable"
 	}
@@ -198,17 +224,58 @@ func (s *CoreServer) authorizeAssetAccess(siteAID, pairwiseAID string) (bool, st
 		if a.PairwiseAID != siteAID {
 			continue
 		}
-		if a.Policy.Mode == asset.EnrollmentOpen {
-			return true, ""
-		}
-		for _, m := range s.assetHandler.Store.ListMembers(a.ID) {
-			if m.PairwiseAID == pairwiseAID {
-				return true, ""
+		// Enrollment mode gate.
+		if a.Policy.Mode != asset.EnrollmentOpen {
+			member := false
+			for _, m := range s.assetHandler.Store.ListMembers(a.ID) {
+				if m.PairwiseAID == pairwiseAID {
+					member = true
+					break
+				}
+			}
+			if !member {
+				return false, "not a member of this asset"
 			}
 		}
-		return false, "not a member of this asset"
+		// Credential gate (additive).
+		if a.Policy.RequiredCredSchema != "" {
+			if !presentsRequiredCredential(presented, a.Policy.RequiredCredSchema, a.Policy.RequiredCredIssuer) {
+				return false, "required credential not presented"
+			}
+		}
+		return true, ""
 	}
 	return false, "asset not found"
+}
+
+// presentsRequiredCredential reports whether the presented ACDCs include a
+// usable credential of the required schema (and issuer, if constrained).
+// NOTE: this checks the credential's declared schema/issuer/status as carried
+// in the (signed) assertion. Full ACDC cryptographic verification + holder
+// binding via the KERI driver is a hardening follow-up.
+func presentsRequiredCredential(presented []interface{}, schemaSAID, issuerAID string) bool {
+	for _, p := range presented {
+		m, ok := p.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if credStr(m["schema_said"]) != schemaSAID {
+			continue
+		}
+		if issuerAID != "" && credStr(m["issuer_aid"]) != issuerAID {
+			continue
+		}
+		switch credStr(m["status"]) {
+		case "", "issued", "valid", "active":
+			return true
+		}
+	}
+	return false
+}
+
+func credStr(v interface{}) string {
+	s, _ := v.(string)
+	return s
 }
 
 // GET /api/login/challenge/{token}/status — browser polls this
