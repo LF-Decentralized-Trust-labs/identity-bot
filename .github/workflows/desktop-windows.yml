@@ -27,10 +27,20 @@ jobs:
         with:
           go-version: "1.24.0"
 
+      # Latest stable Flutter: 3.27.3 fell back to the "Visual Studio 16 2019"
+      # generator and couldn't find VS on the VS-2022 windows-latest runner.
+      # A current Flutter detects VS 2022. (The login/credential-gating logic
+      # lives in the Go backend, so the UI's Flutter version is not load-bearing;
+      # the resulting .exe still targets Windows 10+.)
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: "3.27.3"
           channel: stable
+
+      - name: Diagnose toolchain (Flutter + Visual Studio detection)
+        shell: pwsh
+        run: |
+          flutter --version
+          flutter doctor -v
 
       - name: Build + bundle Windows release
         shell: pwsh
