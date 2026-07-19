@@ -27,14 +27,21 @@ type RequestedCredential struct {
 
 // PresentedCredential is a held ACDC the signer presents in an assertion to
 // satisfy a RequestedCredential. It carries the fields the relying party needs
-// to authorize (schema + issuer + status), plus the raw ACDC for verification.
+// to authorize (schema + issuer + status) and the RAW ACDC bytes (base64) so the
+// RP can cryptographically verify the SAID + issuer anchoring via the KERI driver.
+// The presentation-signature fields (holder binding) are optional and filled when
+// the signer produces a signed presentation.
 type PresentedCredential struct {
-	SAID       string                 `json:"said"`
-	SchemaSAID string                 `json:"schema_said"`
-	IssuerAID  string                 `json:"issuer_aid"`
-	HolderAID  string                 `json:"holder_aid"`
-	Status     string                 `json:"status"`
-	ACDC       map[string]interface{} `json:"acdc,omitempty"`
+	SAID        string `json:"said"`
+	SchemaSAID  string `json:"schema_said"`
+	IssuerAID   string `json:"issuer_aid"`
+	HolderAID   string `json:"holder_aid"`
+	Status      string `json:"status"`
+	AcdcJsonB64 string `json:"acdc_json_b64"` // base64 of the ORIGINAL acdc_json (exact bytes for SAID)
+	// Holder-binding presentation (optional; proves the presenter controls the holder AID).
+	PresSaidB64     string `json:"pres_said_b64,omitempty"`
+	CesrSig         string `json:"cesr_sig,omitempty"`
+	HolderPublicKey string `json:"holder_public_key,omitempty"`
 }
 
 type RequestedScore struct {

@@ -1,12 +1,17 @@
 package server
 
 import (
+	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
 	"identity-agent-core/asset"
+	"identity-agent-core/drivers"
 	"identity-agent-core/login"
+	"identity-agent-core/watcher"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -42,17 +47,17 @@ func (s *CoreServer) initLoginHandler() error {
 		}
 		out := make([]login.PresentedCredential, 0, len(recs))
 		for _, c := range recs {
-			var acdc map[string]interface{}
+			acdcB64 := ""
 			if c.AcdcJson != "" {
-				_ = json.Unmarshal([]byte(c.AcdcJson), &acdc)
+				acdcB64 = base64.StdEncoding.EncodeToString([]byte(c.AcdcJson))
 			}
 			out = append(out, login.PresentedCredential{
-				SAID:       c.SAID,
-				SchemaSAID: c.SchemaSAID,
-				IssuerAID:  c.IssuerAID,
-				HolderAID:  c.HolderAID,
-				Status:     c.Status,
-				ACDC:       acdc,
+				SAID:        c.SAID,
+				SchemaSAID:  c.SchemaSAID,
+				IssuerAID:   c.IssuerAID,
+				HolderAID:   c.HolderAID,
+				Status:      c.Status,
+				AcdcJsonB64: acdcB64,
 			})
 		}
 		return out
@@ -186,7 +191,7 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 
 	// 2) Authorize: enforce the asset's enrollment policy for the asserter,
 	// including any required credential presented in the (verified) assertion.
-	if allowed, reason := s.authorizeAssetAccess(bundle.SiteAID, res.PairwiseAID, a.PresentedACDCs); !allowed {
+	if allowed, reason := s.authorizeAssetAccess(r.Context(), bundle.SiteAID, res.PairwiseAID, a.PresentedACDCs); !allowed {
 		s.setChallengeStatus(token, map[string]interface{}{"status": "denied", "reason": reason})
 		http.Error(w, "not authorized: "+reason, http.StatusForbidden)
 		return
@@ -216,7 +221,7 @@ func (s *CoreServer) setChallengeStatus(token string, st map[string]interface{})
 // identity; otherwise the pairwise AID must be a member) AND, if the policy sets
 // a required credential, a matching valid ACDC must be present in the verified
 // assertion. `presented` is the assertion's presented_acdcs.
-func (s *CoreServer) authorizeAssetAccess(siteAID, pairwiseAID string, presented []interface{}) (bool, string) {
+func (s *CoreServer) authorizeAssetAccess(ctx context.Context, siteAID, pairwiseAID string, presented []interface{}) (bool, string) {
 	if s.assetHandler == nil {
 		return false, "asset store unavailable"
 	}
@@ -239,13 +244,116 @@ func (s *CoreServer) authorizeAssetAccess(siteAID, pairwiseAID string, presented
 		}
 		// Credential gate (additive).
 		if a.Policy.RequiredCredSchema != "" {
-			if !presentsRequiredCredential(presented, a.Policy.RequiredCredSchema, a.Policy.RequiredCredIssuer) {
-				return false, "required credential not presented"
+			if ok, reason := s.credentialGateSatisfied(ctx, presented, a.Policy.RequiredCredSchema, a.Policy.RequiredCredIssuer); !ok {
+				return false, reason
 			}
 		}
 		return true, ""
 	}
 	return false, "asset not found"
+}
+
+// credentialGateSatisfied returns true if the presented ACDCs include one that
+// satisfies the required schema (and issuer). When the KERI driver + raw ACDC
+// bytes are available it CRYPTOGRAPHICALLY verifies the credential (SAID + issuer
+// KEL anchoring + watcher duplicity, and holder-binding if a presentation
+// signature is present). Without the driver it degrades to a declared-field
+// check so open/score-gated flows and driverless environments still work.
+func (s *CoreServer) credentialGateSatisfied(ctx context.Context, presented []interface{}, schema, issuer string) (bool, string) {
+	lastReason := "required credential not presented"
+	for _, p := range presented {
+		m, ok := p.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if credStr(m["schema_said"]) != schema {
+			continue
+		}
+		if issuer != "" && credStr(m["issuer_aid"]) != issuer {
+			lastReason = "credential from an unexpected issuer"
+			continue
+		}
+		acdcB64 := credStr(m["acdc_json_b64"])
+		if s.KeriDriver != nil && acdcB64 != "" {
+			verified, iss, reason := s.verifyPresentedCredentialACDC(ctx, acdcB64,
+				credStr(m["holder_aid"]), credStr(m["pres_said_b64"]),
+				credStr(m["cesr_sig"]), credStr(m["holder_public_key"]), []string{schema})
+			if verified && (issuer == "" || iss == issuer) {
+				return true, ""
+			}
+			lastReason = "credential verification failed: " + reason
+			continue
+		}
+		// No driver / no ACDC bytes → declared-field fallback.
+		if isUsableStatus(credStr(m["status"])) {
+			return true, ""
+		}
+	}
+	return false, lastReason
+}
+
+// verifyPresentedCredentialACDC cryptographically verifies a presented ACDC via
+// the KERI driver, resolving the issuer's KEL (contact KEL for a third-party
+// issuer, own KEL for self-issued) and running the watcher for issuer-KEL
+// duplicity. Returns (verified, issuerAID, reason). Mirrors handleVerifyCredential.
+func (s *CoreServer) verifyPresentedCredentialACDC(ctx context.Context, acdcJsonB64, holderAid, presSaidB64, cesrSig, holderPubKey string, trustedSchemas []string) (bool, string, string) {
+	if s.KeriDriver == nil {
+		return false, "", "keri driver unavailable"
+	}
+	var acdcBody map[string]interface{}
+	var issuerKelEvents []map[string]interface{}
+	issuerAid := ""
+	if acdcBytes, err := base64.StdEncoding.DecodeString(acdcJsonB64); err == nil {
+		if json.Unmarshal(acdcBytes, &acdcBody) == nil {
+			if ia, ok := acdcBody["i"].(string); ok && ia != "" {
+				issuerAid = ia
+				if kelRecord, err3 := s.DataStore.GetContactKEL(issuerAid); err3 == nil && kelRecord != nil {
+					issuerKelEvents = unwrapEventJSON(kelRecord.KEL)
+				}
+				if issuerKelEvents == nil {
+					if ownEvents, err3 := s.DataStore.GetEvents(issuerAid); err3 == nil && len(ownEvents) > 0 {
+						issuerKelEvents = eventRecordsToKEDs(ownEvents)
+					}
+				}
+			}
+		}
+	}
+	if issuerKelEvents == nil {
+		return false, issuerAid, "issuer KEL not found"
+	}
+	result, err := s.KeriDriver.VerifyCredential(&drivers.DriverVerifyCredentialRequest{
+		AcdcJson:           acdcJsonB64,
+		IssuerKelEvents:    issuerKelEvents,
+		HolderAid:          holderAid,
+		PresentationSaid:   presSaidB64,
+		CesrSignature:      cesrSig,
+		HolderPublicKey:    holderPubKey,
+		TrustedSchemaSaids: trustedSchemas,
+	})
+	if err != nil {
+		return false, issuerAid, "verify error: " + err.Error()
+	}
+	if result == nil || !result.Verified {
+		reason := "credential not verified"
+		if result != nil && len(result.Errors) > 0 {
+			reason = strings.Join(result.Errors, "; ")
+		}
+		return false, issuerAid, reason
+	}
+	// Watcher: reject if the issuer's KEL shows duplicity (matters for third-party issuers).
+	if wRes := s.runWatcherOnKel(ctx, issuerAid, issuerKelEvents, watcher.SourceCredential, "", nil); wRes != nil && wRes.Blocked {
+		return false, issuerAid, "issuer KEL duplicity: " + wRes.Reason
+	}
+	return true, issuerAid, ""
+}
+
+func isUsableStatus(status string) bool {
+	switch status {
+	case "", "issued", "valid", "active":
+		return true
+	default:
+		return false
+	}
 }
 
 // presentsRequiredCredential reports whether the presented ACDCs include a
