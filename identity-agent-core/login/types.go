@@ -50,10 +50,12 @@ type Assertion struct {
 type SiteRelationship struct {
 	SiteAID    string `json:"site_aid"`
 	PairwiseAID string `json:"pairwise_aid"`
+	// SeedB64 kept for compat but not used for secrets (re-derive from root + RelationshipIndex)
 	SeedB64    string `json:"seed_b64"`
 	RelayOOBI  string `json:"relay_oobi"`
 	DisplayName string `json:"display_name,omitempty"`
 	Email      string `json:"email,omitempty"`
+	RelationshipIndex int `json:"relationship_index,omitempty"` // stable index for HD derivation (do not hash AID)
 }
 
 type StartLoginRequest struct {

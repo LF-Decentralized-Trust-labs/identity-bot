@@ -151,32 +151,50 @@ func (s *SQLiteStore) SaveContact(contact ContactRecord) error {
 		}
 		jcardJSON = string(b)
 	}
-	if contact.ContactType == "" {
-		contact.ContactType = "general"
-	}
 	if contact.ContactSource == "" {
 		contact.ContactSource = "manual"
+	}
+	if contact.ContactCategory == "" {
+		// migrate legacy or default
+		contact.ContactCategory = "general"
+	}
+	// relationship_aid may be empty; caller (or add-contact path) populates with a per-contact standalone P-AID
+	// Security: never persist raw private seeds in the main store column (use secureenclave storage keyed by AID).
+	if contact.RelationshipSeedB64 != "" {
+		contact.RelationshipSeedB64 = ""
+	}
+
+	// Allocate via persisted monotonic counter (never reuses even after deletes).
+	if contact.RelationshipIndex == 0 {
+		idx, err := s.AllocateNextRelationshipIndex("contacts")
+		if err != nil {
+			return fmt.Errorf("allocate relationship index: %w", err)
+		}
+		contact.RelationshipIndex = idx
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := s.db.Exec(`
-		INSERT INTO contacts (aid, alias, public_key, oobi_url, verified, discovered_at, status, contact_type, contact_source, is_witness, jcard_json, photo, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO contacts (aid, alias, public_key, oobi_url, verified, discovered_at, status, contact_source, contact_category, relationship_aid, relationship_index, relationship_seed_b64, is_witness, jcard_json, photo, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(aid) DO UPDATE SET
-			alias          = excluded.alias,
-			public_key     = excluded.public_key,
-			oobi_url       = excluded.oobi_url,
-			verified       = excluded.verified,
-			status         = excluded.status,
-			contact_type   = excluded.contact_type,
-			contact_source = excluded.contact_source,
-			is_witness     = excluded.is_witness,
-			jcard_json     = excluded.jcard_json,
-			photo          = excluded.photo,
-			updated_at     = excluded.updated_at`,
+			alias               = excluded.alias,
+			public_key          = excluded.public_key,
+			oobi_url            = excluded.oobi_url,
+			verified            = excluded.verified,
+			status              = excluded.status,
+			contact_source      = excluded.contact_source,
+			contact_category    = excluded.contact_category,
+			relationship_aid    = excluded.relationship_aid,
+			relationship_index  = excluded.relationship_index,
+			relationship_seed_b64 = excluded.relationship_seed_b64,
+			is_witness          = excluded.is_witness,
+			jcard_json          = excluded.jcard_json,
+			photo               = excluded.photo,
+			updated_at          = excluded.updated_at`,
 		contact.AID, contact.Alias, contact.PublicKey, contact.OobiURL,
 		contact.Verified, contact.DiscoveredAt, contact.Status,
-		contact.ContactType, contact.ContactSource, contact.IsWitness,
+		contact.ContactSource, contact.ContactCategory, contact.RelationshipAID, contact.RelationshipIndex, contact.RelationshipSeedB64, contact.IsWitness,
 		jcardJSON, contact.Photo, now,
 	)
 	if err != nil {
@@ -187,7 +205,7 @@ func (s *SQLiteStore) SaveContact(contact ContactRecord) error {
 
 func (s *SQLiteStore) GetContacts() ([]ContactRecord, error) {
 	rows, err := s.db.Query(
-		`SELECT aid, alias, public_key, oobi_url, verified, discovered_at, status, contact_type, contact_source, is_witness, jcard_json, photo
+		`SELECT aid, alias, public_key, oobi_url, verified, discovered_at, status, contact_source, contact_category, relationship_aid, relationship_index, relationship_seed_b64, is_witness, jcard_json, photo
 		 FROM contacts ORDER BY alias ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query contacts: %w", err)
@@ -198,7 +216,7 @@ func (s *SQLiteStore) GetContacts() ([]ContactRecord, error) {
 
 func (s *SQLiteStore) GetContact(aid string) (*ContactRecord, error) {
 	rows, err := s.db.Query(
-		`SELECT aid, alias, public_key, oobi_url, verified, discovered_at, status, contact_type, contact_source, is_witness, jcard_json, photo
+		`SELECT aid, alias, public_key, oobi_url, verified, discovered_at, status, contact_source, contact_category, relationship_aid, relationship_index, relationship_seed_b64, is_witness, jcard_json, photo
 		 FROM contacts WHERE aid = ?`, aid)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query contact: %w", err)
@@ -225,7 +243,7 @@ func (s *SQLiteStore) DeleteContact(aid string) error {
 
 func (s *SQLiteStore) GetContactsByStatus(status string) ([]ContactRecord, error) {
 	rows, err := s.db.Query(
-		`SELECT aid, alias, public_key, oobi_url, verified, discovered_at, status, contact_type, contact_source, is_witness, jcard_json, photo
+		`SELECT aid, alias, public_key, oobi_url, verified, discovered_at, status, contact_source, contact_category, relationship_aid, relationship_index, relationship_seed_b64, is_witness, jcard_json, photo
 		 FROM contacts WHERE status = ? ORDER BY alias ASC`, status)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query contacts by status: %w", err)
@@ -240,7 +258,7 @@ func (s *SQLiteStore) scanContacts(rows *sql.Rows) ([]ContactRecord, error) {
 		var c ContactRecord
 		var jcardJSON string
 		if err := rows.Scan(&c.AID, &c.Alias, &c.PublicKey, &c.OobiURL,
-			&c.Verified, &c.DiscoveredAt, &c.Status, &c.ContactType, &c.ContactSource, &c.IsWitness,
+			&c.Verified, &c.DiscoveredAt, &c.Status, &c.ContactSource, &c.ContactCategory, &c.RelationshipAID, &c.RelationshipIndex, &c.RelationshipSeedB64, &c.IsWitness,
 			&jcardJSON, &c.Photo); err != nil {
 			return nil, fmt.Errorf("failed to scan contact: %w", err)
 		}
@@ -1264,6 +1282,53 @@ func (s *SQLiteStore) scanServiceProviders(rows *sql.Rows) ([]ServiceProviderRec
 		records = []ServiceProviderRecord{}
 	}
 	return records, nil
+}
+
+// AllocateNextRelationshipIndex atomically allocates and returns the next never-reused index
+// for the namespace from the persisted high-water mark counter table. Separate namespaces
+// ("contacts", "login") ensure independent sequences.
+func (s *SQLiteStore) AllocateNextRelationshipIndex(namespace string) (int, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			tx.Rollback()
+		}
+	}()
+
+	var nextIdx int
+	err = tx.QueryRow(`SELECT next_index FROM relationship_counters WHERE namespace = ?`, namespace).Scan(&nextIdx)
+	if err == sql.ErrNoRows {
+		nextIdx = 1
+		if namespace == "login" {
+			nextIdx = 1000001
+		}
+		_, err = tx.Exec(`INSERT INTO relationship_counters (namespace, next_index) VALUES (?, ?)`, namespace, nextIdx+1)
+		if err != nil {
+			return 0, err
+		}
+		if err = tx.Commit(); err != nil {
+			return 0, err
+		}
+		committed = true
+		return nextIdx, nil
+	} else if err != nil {
+		return 0, err
+	}
+
+	// allocate current, bump
+	_, err = tx.Exec(`UPDATE relationship_counters SET next_index = next_index + 1 WHERE namespace = ?`, namespace)
+	if err != nil {
+		return 0, err
+	}
+	if err = tx.Commit(); err != nil {
+		return 0, err
+	}
+	committed = true
+	return nextIdx, nil
 }
 
 // ── Reset ─────────────────────────────────────────────────────────────────────

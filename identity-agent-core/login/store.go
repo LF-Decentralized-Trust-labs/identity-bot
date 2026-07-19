@@ -9,9 +9,10 @@ import (
 )
 
 type RelationshipStore struct {
-	mu    sync.RWMutex
-	path  string
-	items map[string]SiteRelationship
+	mu        sync.RWMutex
+	path      string
+	items     map[string]SiteRelationship
+	highWater int // never-decrementing high-water mark for RelationshipIndex; survives deletes
 }
 
 func NewRelationshipStore(dataDir string) (*RelationshipStore, error) {
@@ -20,7 +21,30 @@ func NewRelationshipStore(dataDir string) (*RelationshipStore, error) {
 	if err := s.load(); err != nil {
 		return nil, err
 	}
+	s.loadHighWater()
+	// ensure highWater >= max in items
+	for _, r := range s.items {
+		if r.RelationshipIndex > s.highWater {
+			s.highWater = r.RelationshipIndex
+		}
+	}
 	return s, nil
+}
+
+func (s *RelationshipStore) loadHighWater() {
+	hpath := s.path + ".highwater"
+	if b, err := os.ReadFile(hpath); err == nil {
+		var hw int
+		fmt.Sscanf(string(b), "%d", &hw)
+		if hw > s.highWater {
+			s.highWater = hw
+		}
+	}
+}
+
+func (s *RelationshipStore) saveHighWaterLocked() error {
+	hpath := s.path + ".highwater"
+	return os.WriteFile(hpath, []byte(fmt.Sprintf("%d\n", s.highWater)), 0600)
 }
 
 func (s *RelationshipStore) Get(siteAID string) (SiteRelationship, bool) {
@@ -33,8 +57,36 @@ func (s *RelationshipStore) Get(siteAID string) (SiteRelationship, bool) {
 func (s *RelationshipStore) Put(rel SiteRelationship) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Security: do not persist raw private seeds in the main relationships JSON.
+	// The AID (PairwiseAID) is the handle; secrets live in secure storage.
+	rel.SeedB64 = ""
+	// Assign stable monotonic index from highWater (never reuses after delete).
+	if rel.RelationshipIndex == 0 {
+		s.highWater++
+		rel.RelationshipIndex = s.highWater
+	} else if rel.RelationshipIndex > s.highWater {
+		s.highWater = rel.RelationshipIndex
+	}
 	s.items[rel.SiteAID] = rel
 	return s.saveLocked()
+}
+
+// AllocateNextRelationshipIndex atomically allocates and returns the next never-reused index,
+// bumping the highWater under lock and persisting it. Mirrors the main Store's counter.
+func (s *RelationshipStore) AllocateNextRelationshipIndex() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.highWater++
+	_ = s.saveHighWaterLocked()  // best effort
+	return s.highWater
+}
+
+// NextRelationshipIndex kept for backward compat / peek (returns without bumping).
+// The highWater is a persisted monotonic counter; not recomputed from live items.
+func (s *RelationshipStore) NextRelationshipIndex() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.highWater + 1
 }
 
 func (s *RelationshipStore) load() error {
@@ -60,7 +112,10 @@ func (s *RelationshipStore) saveLocked() error {
 	if err := os.WriteFile(tmp, b, 0o600); err != nil {
 		return err
 	}
-	return os.Rename(tmp, s.path)
+	if err := os.Rename(tmp, s.path); err != nil {
+		return err
+	}
+	return s.saveHighWaterLocked()
 }
 
 func (s *RelationshipStore) DevRelayOOBI(pairwiseAID, relayBase string) string {

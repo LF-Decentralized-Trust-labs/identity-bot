@@ -78,7 +78,7 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
                             borderRadius: BorderRadius.circular(10),
                           ),
                           child: const Text(
-                            'SCAN OOBI QR CODE',
+                            'SCAN QR CODE',
                             style: TextStyle(
                               color: AppColors.textPrimary,
                               fontSize: 13,
@@ -118,7 +118,7 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: const Text(
-                    'Point your camera at another Identity Agent\'s OOBI QR code to add them as a contact',
+                    'Point your camera at any Identity Agent QR code — sign in, add a contact, or complete a request',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: AppColors.textSecondary,

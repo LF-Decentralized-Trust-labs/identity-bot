@@ -13,17 +13,34 @@ import (
 	"strings"
 	"time"
 
+	"identity-agent-core/backup"
 	"identity-agent-core/drivers"
+	"identity-agent-core/iacrypto"
 	"identity-agent-core/secureenclave"
 )
 
+// loadRelationshipSeed re-derives the seed on demand from protected root + persisted RelationshipIndex.
+// No per-rel secret files. Legacy SeedB64 fallback only for old data.
+func loadRelationshipSeed(h *Handler, rel *SiteRelationship) ([]byte, error) {
+	if h != nil && h.dataDir != "" && rel != nil && rel.RelationshipIndex > 0 {
+		if root, err := secureenclave.LoadRootSeed(h.dataDir); err == nil {
+			return backup.DerivePairwiseSeed(root, rel.RelationshipIndex, 0)
+		}
+	}
+	if rel != nil && rel.SeedB64 != "" {
+		return base64.StdEncoding.DecodeString(rel.SeedB64)
+	}
+	return nil, fmt.Errorf("no seed available for relationship %s (root + index required)", rel.PairwiseAID)
+}
+
 type Handler struct {
-	Store        *RelationshipStore
-	Pending      *PendingStore
-	KeriDriver   *drivers.KeriDriver
-	DevRelay     string
-	HTTPClient   *http.Client
-	TrustGate    *secureenclave.TrustGate
+	Store          *RelationshipStore
+	Pending        *PendingStore
+	KeriDriver     *drivers.KeriDriver
+	DevRelay       string
+	HTTPClient     *http.Client
+	TrustGate      *secureenclave.TrustGate
+	dataDir        string // for secure relationship seed storage (never put raw seeds in main JSON)
 	OnLoginPending func(LoginPreviewResponse)
 }
 
@@ -40,11 +57,12 @@ func NewHandler(dataDir string, keri *drivers.KeriDriver) (*Handler, error) {
 		relay = "http://127.0.0.1:8765"
 	}
 	return &Handler{
-		Store:        store,
-		Pending:      NewPendingStore(),
-		KeriDriver:   keri,
-		DevRelay:     relay,
-		HTTPClient:   &http.Client{Timeout: 15 * time.Second},
+		Store:      store,
+		Pending:    NewPendingStore(),
+		KeriDriver: keri,
+		DevRelay:   relay,
+		HTTPClient: &http.Client{Timeout: 15 * time.Second},
+		dataDir:    dataDir,
 	}, nil
 }
 
@@ -117,33 +135,65 @@ func (h *Handler) GetOrCreateRelationship(siteAID string, bundle *ChallengeBundl
 	return h.getOrCreateRelationship(siteAID, bundle)
 }
 
-// RelationshipSeed decodes the pairwise Ed25519 seed for local signing.
+// RelationshipSeed returns the pairwise Ed25519 seed for local signing, loaded from secure storage
+// (AID is the handle; secret never in main persisted store).
 func (h *Handler) RelationshipSeed(rel *SiteRelationship) ([]byte, error) {
-	return base64.StdEncoding.DecodeString(rel.SeedB64)
+	return loadRelationshipSeed(h, rel)
 }
 
 func (h *Handler) getOrCreateRelationship(siteAID string, bundle *ChallengeBundle) (*SiteRelationship, error) {
 	if rel, ok := h.Store.Get(siteAID); ok {
 		return &rel, nil
 	}
-	seed := make([]byte, ed25519.SeedSize)
-	if _, err := rand.Read(seed); err != nil {
-		return nil, err
+	if h.KeriDriver == nil {
+		// Never fabricate on any platform. Mint must go through local engine (driver on desktop, bridge on mobile).
+		// Defer to caller / error to enforce the rule.
+		return nil, fmt.Errorf("local KERI engine required to mint relationship AID (no custom fabrication allowed)")
 	}
-	pub := ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)
-	aid := fmt.Sprintf("E%s", base64.RawURLEncoding.EncodeToString(pub)[:43])
+	rootSeed, rerr := secureenclave.LoadRootSeed(h.dataDir)
+	if rerr != nil {
+		rootSeed = make([]byte, 64)
+		if _, re := rand.Read(rootSeed); re != nil {
+			return nil, fmt.Errorf("failed to bootstrap root seed: %w", re)
+		}
+		if serr := secureenclave.StoreRootSeed(h.dataDir, rootSeed); serr != nil {
+			return nil, fmt.Errorf("failed to store root seed securely: %w", serr)
+		}
+	}
+	loginIdx := h.Store.AllocateNextRelationshipIndex()
+
+	pwiseSeed, derr := backup.DerivePairwiseSeed(rootSeed, loginIdx, 0)
+	if derr != nil {
+		return nil, fmt.Errorf("HD derive for login rel failed: %w", derr)
+	}
+	nextPwise, _ := backup.DerivePairwiseSeed(rootSeed, loginIdx, 1)
+	pub := ed25519.NewKeyFromSeed(pwiseSeed).Public().(ed25519.PublicKey)
+	nextPub := ed25519.NewKeyFromSeed(nextPwise).Public().(ed25519.PublicKey)
+	resp, err := h.KeriDriver.CreateInceptionNamed(
+		iacrypto.VerkeyQB64(pub),
+		iacrypto.VerkeyQB64(nextPub),
+		"login-rel-"+siteAID,
+	)
+	if err != nil || resp.AID == "" {
+		return nil, fmt.Errorf("failed to mint real relationship AID via local engine: %w", err)
+	}
+	pairwiseAID := resp.AID
+	// Do NOT persist derived seed per-rel. Re-derive from root + RelationshipIndex on demand.
+	// Only root seed protected in enclave; index persisted with the rel record.
+
 	relayBase := h.relayBaseFromOOBI(bundle.SiteOOBI)
 	if relayBase == "" {
 		relayBase = h.DevRelay
 	}
-	relayOOBI := h.Store.DevRelayOOBI(aid, relayBase)
+	relayOOBI := h.Store.DevRelayOOBI(pairwiseAID, relayBase)
 	rel := SiteRelationship{
-		SiteAID:     siteAID,
-		PairwiseAID: aid,
-		SeedB64:     base64.StdEncoding.EncodeToString(seed),
-		RelayOOBI:   relayOOBI,
-		DisplayName: "IA User",
-		Email:       "user@identity.agent",
+		SiteAID:           siteAID,
+		PairwiseAID:       pairwiseAID,
+		SeedB64:           "",
+		RelayOOBI:         relayOOBI,
+		DisplayName:       "IA User",
+		Email:             "user@identity.agent",
+		RelationshipIndex: loginIdx, // stable persisted index for HD re-derive from root
 	}
 	if err := h.Store.Put(rel); err != nil {
 		return nil, err
@@ -158,7 +208,7 @@ func (h *Handler) BuildAssertion(rel *SiteRelationship, bundle *ChallengeBundle,
 }
 
 func (h *Handler) buildAssertion(rel *SiteRelationship, bundle *ChallengeBundle, customData map[string]interface{}) (*Assertion, error) {
-	seed, err := base64.StdEncoding.DecodeString(rel.SeedB64)
+	seed, err := loadRelationshipSeed(h, rel)
 	if err != nil {
 		return nil, err
 	}
@@ -238,7 +288,7 @@ func (h *Handler) scoreAttestation(rel *SiteRelationship) (map[string]interface{
 	if err := h.checkTrustGate(); err != nil {
 		return nil, err
 	}
-	seed, err := base64.StdEncoding.DecodeString(rel.SeedB64)
+	seed, err := loadRelationshipSeed(h, rel)
 	if err != nil {
 		return nil, err
 	}
@@ -358,7 +408,7 @@ func (h *Handler) registerPairwiseOnDevRelay(rel *SiteRelationship) error {
 	if relayBase == "" {
 		relayBase = h.DevRelay
 	}
-	seed, err := base64.StdEncoding.DecodeString(rel.SeedB64)
+	seed, err := loadRelationshipSeed(h, rel)
 	if err != nil {
 		return err
 	}

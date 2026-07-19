@@ -2,7 +2,11 @@ package backup
 
 import (
 	"bytes"
+	"fmt"
+	"os"
 	"testing"
+
+	"identity-agent-core/store"
 )
 
 // Golden test mnemonic — test vector only, never use in production.
@@ -120,5 +124,72 @@ func TestPairwiseHDDeterministic(t *testing.T) {
 	}
 	if bytes.Equal(a, c) {
 		t.Fatal("different contact index must yield different seed")
+	}
+}
+
+// Go <-> keripy golden for derive from root + persisted stable index (monotonic at creation, stored in record).
+// Enables root seed phrase + indices for recovery to re-derive pairwise keys. Rust cross deferred.
+func TestPairwiseHDGoldenVector(t *testing.T) {
+	m := "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+	s, err := MnemonicToBIP39Seed(m, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got0, err := DerivePairwiseSeed(s, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want0 := "348de60391d98089828e3ceb3828991313a3a3e3220147e803fd3d4785640f45"
+	if fmt.Sprintf("%x", got0) != want0 {
+		t.Fatalf("golden[0] mismatch got %x want %s", got0, want0)
+	}
+	got5, err := DerivePairwiseSeed(s, 5, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Equal(got0, got5) {
+		t.Fatal("different persisted index must differ")
+	}
+}
+
+// Test that index allocation is true high-water mark via real Save/Delete roundtrip.
+// allocate → Save top → Delete top → allocate must yield strictly larger index (counter survives delete).
+func TestRelationshipIndexNoReuseAfterDelete(t *testing.T) {
+	tmp := t.TempDir()
+	defer os.RemoveAll(tmp)
+	fs, err := store.NewFileStore(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// first
+	idx1, err := fs.AllocateNextRelationshipIndex("contacts")
+	if err != nil || idx1 != 1 {
+		t.Fatalf("first got %d err=%v", idx1, err)
+	}
+	c1 := store.ContactRecord{AID: "c1", RelationshipIndex: idx1}
+	if err := fs.SaveContact(c1); err != nil {
+		t.Fatal(err)
+	}
+
+	// allocate top
+	idxTop, err := fs.AllocateNextRelationshipIndex("contacts")
+	if err != nil || idxTop != 2 {
+		t.Fatalf("top got %d", idxTop)
+	}
+	ctop := store.ContactRecord{AID: "ctop", RelationshipIndex: idxTop}
+	if err := fs.SaveContact(ctop); err != nil {
+		t.Fatal(err)
+	}
+
+	// delete the top one
+	if err := fs.DeleteContact("ctop"); err != nil {
+		t.Fatal(err)
+	}
+
+	// next must be 3, not reuse 2
+	idx3, err := fs.AllocateNextRelationshipIndex("contacts")
+	if err != nil || idx3 != 3 {
+		t.Fatalf("after real delete-top got %d (must be strictly > 2)", idx3)
 	}
 }

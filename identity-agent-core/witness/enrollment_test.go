@@ -57,14 +57,14 @@ func TestMutualEnrollmentPostBack(t *testing.T) {
 
 	mcA := &memContacts{
 		contacts: map[string]store.ContactRecord{
-			aidB: {AID: aidB, Alias: "B", Status: "accepted", ContactType: "trusted",
+			aidB: {AID: aidB, Alias: "B", Status: "accepted", ContactCategory: "trusted",
 				OobiURL: "http://127.0.0.1:5051/public/oobi/" + aidB},
 		},
 		identity: &store.IdentityState{AID: aidA},
 	}
 	mcB := &memContacts{
 		contacts: map[string]store.ContactRecord{
-			aidA: {AID: aidA, Alias: "A", Status: "accepted", ContactType: "trusted",
+			aidA: {AID: aidA, Alias: "A", Status: "accepted", ContactCategory: "trusted",
 				OobiURL: "http://127.0.0.1:5050/public/oobi/" + aidA},
 		},
 		identity: &store.IdentityState{AID: aidB},
@@ -142,7 +142,7 @@ func TestApplyAcceptCallbackCompletesTask(t *testing.T) {
 	aidB := "EAgentB00000000000000000000000000007"
 	mcA := &memContacts{
 		contacts: map[string]store.ContactRecord{
-			aidB: {AID: aidB, Status: "accepted", ContactType: "trusted"},
+			aidB: {AID: aidB, Status: "accepted", ContactCategory: "trusted"},
 		},
 		identity: &store.IdentityState{AID: aidA},
 		tasks: []store.TaskRecord{{

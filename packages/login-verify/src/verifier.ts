@@ -118,16 +118,16 @@ export class IdentityAgentVerifier {
     const now = Date.now();
     const dtMs = parseRfc3339(assertion.dt);
     if (Math.abs(now - dtMs) > maxSkew * 1000) {
-      return { ok: false, reason: "dt outside freshness window" };
+      return { valid: false, reason: "dt outside freshness window" };
     }
     if (assertion.nonce !== opts.expectedNonce) {
-      return { ok: false, reason: "nonce mismatch" };
+      return { valid: false, reason: "nonce mismatch" };
     }
     if (assertion.audience !== opts.expectedAudience) {
-      return { ok: false, reason: "audience mismatch" };
+      return { valid: false, reason: "audience mismatch" };
     }
     if (!assertion.sig) {
-      return { ok: false, reason: "missing sig" };
+      return { valid: false, reason: "missing sig" };
     }
 
     let publicKey: Uint8Array;
@@ -138,21 +138,22 @@ export class IdentityAgentVerifier {
       );
       publicKey = resolved.publicKey;
     } catch (err) {
-      return { ok: false, reason: `key resolve failed: ${(err as Error).message}` };
+      return { valid: false, reason: `key resolve failed: ${(err as Error).message}` };
     }
 
     const body = canonicalAssertionBody(assertion);
-    const valid = await verifyCanonical(body, assertion.sig, publicKey);
-    if (!valid) {
-      return { ok: false, reason: "invalid signature" };
+    const validSig = await verifyCanonical(body, assertion.sig, publicKey);
+    if (!validSig) {
+      return { valid: false, reason: "invalid signature" };
     }
 
     return {
-      ok: true,
-      i: assertion.i,
+      valid: true,
+      pairwiseAID: assertion.i,
       disclosures: assertion.disclosures,
       presentedAcdcs: assertion.presented_acdcs,
       customData: assertion.custom_data,
+      score: typeof assertion.custom_data?.ofa_score === 'number' ? assertion.custom_data.ofa_score : undefined,
       nonce: assertion.nonce,
       audience: assertion.audience,
       dt: assertion.dt,
@@ -176,12 +177,12 @@ export class IdentityAgentVerifier {
       expectedAudience: rec.challenge.audience,
       expectedNonce: rec.challenge.nonce,
     });
-    if (!result.ok || !result.i) {
+    if (!result.valid || !result.pairwiseAID) {
       return { ok: false, reason: result.reason };
     }
 
-    const appToken = issueAppSession(result.i, result.disclosures ?? {});
-    this.store.markVerified(sessionToken, result, result.i, appToken);
+    const appToken = issueAppSession(result.pairwiseAID, result.disclosures ?? {});
+    this.store.markVerified(sessionToken, result, result.pairwiseAID, appToken);
     return { ok: true };
   }
 }

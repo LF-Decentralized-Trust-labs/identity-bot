@@ -1,23 +1,31 @@
 package server
 
 import (
+	"encoding/json"
+	"net/http"
 	"time"
 
+	"identity-agent-core/asset"
 	"identity-agent-core/login"
 
 	"github.com/go-chi/chi/v5"
 )
 
 func (s *CoreServer) mountLoginRoutes(r chi.Router) {
-	if s.loginHandler == nil {
-		return
-	}
 	r.Route("/login", func(r chi.Router) {
-		r.Post("/start", s.loginHandler.HandleStart)
-		r.Post("/preview", s.loginHandler.HandlePreview)
-		r.Post("/approve", s.loginHandler.HandleApprove)
-		r.Post("/decline", s.loginHandler.HandleDecline)
-		r.Get("/pending", s.loginHandler.HandlePendingList)
+		if s.loginHandler != nil {
+			r.Post("/start", s.loginHandler.HandleStart)
+			r.Post("/preview", s.loginHandler.HandlePreview)
+			r.Post("/approve", s.loginHandler.HandleApprove)
+			r.Post("/decline", s.loginHandler.HandleDecline)
+			r.Get("/pending", s.loginHandler.HandlePendingList)
+		}
+		// Issue a signed login challenge for an asset (available even without a
+		// per-user loginHandler).
+		r.Post("/challenge", s.handleCreateAssetChallenge)
+		// The user's agent posts the completed assertion here; the browser polls for completion.
+		r.Post("/callback", s.handleLoginCallback)
+		r.Get("/challenge/{token}/status", s.handleChallengeStatus)
 	})
 }
 
@@ -45,4 +53,173 @@ func (s *CoreServer) initLoginHandler() error {
 	}
 	s.loginHandler = h
 	return nil
+}
+
+// handleCreateAssetChallenge issues a signed login challenge bound to an asset.
+// POST /api/login/challenge — called by the asset owner / a relying party.
+func (s *CoreServer) handleCreateAssetChallenge(w http.ResponseWriter, r *http.Request) {
+	if s.assetHandler == nil || s.KeriDriver == nil {
+		http.Error(w, "asset or keri driver not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	var body struct {
+		AssetID              string   `json:"asset_id"`
+		Audience             string   `json:"audience"`
+		RequestedDisclosures []string `json:"requested_disclosures"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "bad json", http.StatusBadRequest)
+		return
+	}
+	if body.AssetID == "" {
+		http.Error(w, "asset_id required", http.StatusBadRequest)
+		return
+	}
+
+	token, qrURL, code, msg := s.createSignedAssetChallenge(body.AssetID, body.Audience, body.RequestedDisclosures, s.getPublicURL(r))
+	if code != 0 {
+		http.Error(w, msg, code)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"session_token": token,
+		"qr_url":        qrURL,
+	})
+}
+
+// GET /i/{token} — public endpoint the IA fetches to get the signed bundle
+func (s *CoreServer) handleChallengeBundleServe(w http.ResponseWriter, r *http.Request) {
+	token := chi.URLParam(r, "token")
+	if token == "" {
+		http.Error(w, "token required", http.StatusBadRequest)
+		return
+	}
+	s.challengeMu.Lock()
+	b, ok := s.challenges[token]
+	s.challengeMu.Unlock()
+	if !ok {
+		// Fall back to an IA-minted Ask (e.g. an add-contact "add me" QR).
+		if raw, mok := getMintedAsk(token); mok {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write(raw)
+			return
+		}
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(b)
+}
+
+// mount the /i route at root (called from buildRouter)
+func (s *CoreServer) mountChallengeBundleRoute(r chi.Router) {
+	r.Get("/i/{token}", s.handleChallengeBundleServe)
+}
+
+// Also expose a way to add the POST under /api/login
+func (s *CoreServer) mountAssetLoginChallenge(r chi.Router) {
+	r.Route("/login", func(r chi.Router) {
+		r.Post("/challenge", s.handleCreateAssetChallenge)
+	})
+}
+
+// POST /api/login/callback — the user's agent posts the signed assertion here. The
+// assertion is the raw body; the session token is the ?session= query param.
+//
+// This VERIFIES the assertion before completing the session: the signature must check
+// out against the asserter's key (resolved from its KERI AID/OOBI), bound to the
+// challenge's nonce + audience and fresh, and the asserter must satisfy the asset's
+// enrollment policy. (Previously this endpoint trusted the post blindly and just flipped
+// the status — no verification, no authorization.)
+func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request) {
+	var a login.Assertion
+	if err := json.NewDecoder(r.Body).Decode(&a); err != nil {
+		http.Error(w, "bad json", http.StatusBadRequest)
+		return
+	}
+	token := r.URL.Query().Get("session")
+	if token == "" {
+		http.Error(w, "session query param required", http.StatusBadRequest)
+		return
+	}
+
+	s.challengeMu.Lock()
+	bundle, ok := s.challenges[token]
+	s.challengeMu.Unlock()
+	if !ok {
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+
+	// 1) Authenticate: verify the assertion signature + binding to this challenge.
+	res := login.VerifyAssertion(a, bundle.Nonce, bundle.Audience, 300, &http.Client{Timeout: 15 * time.Second})
+	if !res.Valid {
+		s.setChallengeStatus(token, map[string]interface{}{"status": "denied", "reason": res.Reason})
+		http.Error(w, "assertion verification failed: "+res.Reason, http.StatusUnauthorized)
+		return
+	}
+
+	// 2) Authorize: enforce the asset's enrollment policy for the asserter.
+	if allowed, reason := s.authorizeAssetAccess(bundle.SiteAID, res.PairwiseAID); !allowed {
+		s.setChallengeStatus(token, map[string]interface{}{"status": "denied", "reason": reason})
+		http.Error(w, "not authorized: "+reason, http.StatusForbidden)
+		return
+	}
+
+	s.setChallengeStatus(token, map[string]interface{}{
+		"status":       "complete",
+		"pairwise_aid": res.PairwiseAID,
+		"disclosures":  res.Disclosures,
+	})
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
+// setChallengeStatus stores a session's status under the challenge lock.
+func (s *CoreServer) setChallengeStatus(token string, st map[string]interface{}) {
+	s.challengeMu.Lock()
+	if s.challengeStatus == nil {
+		s.challengeStatus = make(map[string]map[string]interface{})
+	}
+	s.challengeStatus[token] = st
+	s.challengeMu.Unlock()
+}
+
+// authorizeAssetAccess enforces an asset's enrollment policy for an asserter: "open"
+// admits any verified identity; otherwise the asserter's pairwise AID must be a member
+// of the asset. (Membership is managed by the relying party / a management layer on top.)
+func (s *CoreServer) authorizeAssetAccess(siteAID, pairwiseAID string) (bool, string) {
+	if s.assetHandler == nil {
+		return false, "asset store unavailable"
+	}
+	for _, a := range s.assetHandler.Store.ListAssets() {
+		if a.PairwiseAID != siteAID {
+			continue
+		}
+		if a.Policy.Mode == asset.EnrollmentOpen {
+			return true, ""
+		}
+		for _, m := range s.assetHandler.Store.ListMembers(a.ID) {
+			if m.PairwiseAID == pairwiseAID {
+				return true, ""
+			}
+		}
+		return false, "not a member of this asset"
+	}
+	return false, "asset not found"
+}
+
+// GET /api/login/challenge/{token}/status — browser polls this
+func (s *CoreServer) handleChallengeStatus(w http.ResponseWriter, r *http.Request) {
+	token := chi.URLParam(r, "token")
+	s.challengeMu.Lock()
+	st := s.challengeStatus[token]
+	s.challengeMu.Unlock()
+	if st == nil {
+		st = map[string]interface{}{"status": "pending"}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(st)
 }

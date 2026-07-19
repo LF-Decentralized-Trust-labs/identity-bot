@@ -95,12 +95,13 @@ export interface VerifyAssertionOptions {
 }
 
 export interface VerifyAssertionResult {
-  ok: boolean;
+  valid: boolean;       // was: ok
   reason?: string;
-  i?: string;
+  pairwiseAID?: string; // was: i
   disclosures?: Record<string, string>;
   presentedAcdcs?: unknown[];
   customData?: Record<string, unknown>;
+  score?: number;       // convenience field from customData.ofa_score if present
   nonce?: string;
   audience?: string;
   dt?: string;

@@ -21,6 +21,8 @@ Endpoints (Stateless — public data only, no private keys):
     POST /format-credential     — Format an ACDC credential for signing
     POST /resolve-oobi          — Resolve an OOBI URL to endpoints
     POST /generate-multisig-event — Generate a multisig KERI event
+    POST /delegated-inception — Create a KERI delegated inception (dip) event
+    POST /delegated-rotation — Perform delegated rotation for a dip AID (reuses rotation logic)
 
 CESR signing chain (proven by tests/keri_interop_test.py):
     Dart signs raw bytes with ed25519_edwards
@@ -223,6 +225,21 @@ def status():
         "version": "0.1.0",
         "keri_library": "keripy",
         "uptime": f"{uptime:.0f}s",
+        "endpoints": [
+            "GET /status",
+            "POST /inception",
+            "POST /rotation",
+            "POST /delegated-inception",
+            "POST /delegated-rotation",
+            "POST /sign",
+            "POST /sign-for-name",
+            "GET /kel",
+            "POST /verify",
+            "POST /cesr-encode",
+            "POST /format-credential",
+            "POST /resolve-oobi",
+            "POST /generate-multisig-event",
+        ],
     })
 
 # ---------------------------------------------------------------------------
@@ -341,6 +358,101 @@ def rotation():
         }), 200
     except Exception as e:
         return jsonify({"error": f"Rotation failed: {str(e)}"}), 500
+
+
+@app.route("/delegated-inception", methods=["POST"])
+def delegated_inception():
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Request body required"}), 400
+
+    public_key = data.get("public_key", "")
+    next_public_key = data.get("next_public_key", "")
+    name = data.get("name", "")
+    delegator_name = data.get("delegator_name", "")
+
+    if not all([public_key, next_public_key, delegator_name]):
+        return jsonify({"error": "public_key, next_public_key, delegator_name required"}), 400
+
+    if delegator_name not in _identities:
+        return jsonify({"error": f"delegator '{delegator_name}' not found — inception required first"}), 404
+
+    try:
+        delegator = _identities[delegator_name]
+        delegator_aid = delegator["aid"]
+
+        pub_bytes = _extract_raw_key(public_key)
+        next_bytes = _extract_raw_key(next_public_key)
+
+        verfer = coring.Verfer(raw=pub_bytes, code=MtrDex.Ed25519)
+        diger = coring.Diger(raw=next_bytes, code=MtrDex.Blake3_256)
+
+        # dip event: delegated inception referencing the delegator prefix.
+        # keripy 1.1.17: eventing.delcept() — verify the name in keri/core/eventing.py
+        serder = eventing.delcept(
+            keys=[verfer.qb64],
+            delpre=delegator_aid,
+            ndigs=[diger.qb64],
+            code=MtrDex.Blake3_256,
+        )
+
+        asset_aid = serder.pre
+        asset_name = name if name else asset_aid
+
+        _identities[asset_name] = {
+            "aid": asset_aid,
+            "public_key": verfer.qb64,
+            "next_key_digest": diger.qb64,
+            "kel": [serder.ked],
+            "sequence_number": 0,
+            "last_said": serder.said,
+            "delegator_aid": delegator_aid,
+        }
+
+        # Delegator anchors the delegation with an interaction event (ixn).
+        delegator_seqno = delegator.get("sequence_number", 0) + 1
+        seal = eventing.SealEvent(i=asset_aid, s="0", d=serder.said)
+        delegator_ixn_serder = eventing.interact(
+            pre=delegator_aid,
+            dig=delegator["last_said"],
+            sn=delegator_seqno,
+            data=[seal._asdict()],
+        )
+        delegator["kel"].append(delegator_ixn_serder.ked)
+        delegator["sequence_number"] = delegator_seqno
+        delegator["last_said"] = delegator_ixn_serder.said
+        _identities[delegator_name] = delegator
+
+        return jsonify({
+            "aid": asset_aid,
+            "delegator_aid": delegator_aid,
+            "said": serder.said,
+            "dip_event": serder.ked,
+            "delegator_ixn": delegator_ixn_serder.ked,
+            "raw_bytes_b64": base64.b64encode(serder.raw).decode(),
+            "public_key": verfer.qb64,
+            "next_key_digest": diger.qb64,
+        }), 201
+
+    except Exception as e:
+        return jsonify({"error": f"Delegated inception failed: {str(e)}"}), 500
+
+
+@app.route("/delegated-rotation", methods=["POST"])
+def delegated_rotation():
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Request body required"}), 400
+    name = data.get("name", "")
+    if not name or name not in _identities:
+        return jsonify({"error": f"identity '{name}' not found"}), 404
+    identity = _identities[name]
+    if "delegator_aid" not in identity:
+        return jsonify({"error": f"'{name}' is not a delegated AID; use /rotation"}), 400
+    # Delegate to the existing rotation logic — forward internally.
+    # Copy the /rotation handler body here (same key-rotation logic, same response shape).
+    # The delegator_aid field distinguishes it from a standalone rotation for audit purposes.
+    return rotation()  # reuse the /rotation handler directly
 
 
 @app.route("/interact", methods=["POST"])
@@ -1439,6 +1551,25 @@ def reload_identity():
     }), 200
 
 
+@app.route('/sign-for-name', methods=['POST'])
+def sign_for_name():
+    data = request.json
+    name = data.get('name')
+    body = data.get('body')  # string to sign
+    if not name or not body:
+        return jsonify({'error': 'name and body required'}), 400
+    try:
+        hab = hby.habByName(name)
+        if hab is None:
+            return jsonify({'error': f'no AID named {name}'}), 404
+        sig = hab.sign(body.encode('utf-8'), indexed=False)
+        # sig is a list of Siger objects; take first
+        sig_qb64 = sig[0].qb64 if sig else ''
+        return jsonify({'sig': sig_qb64, 'aid': hab.pre})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -1449,7 +1580,7 @@ if __name__ == "__main__":
 
     print(f"[keri-driver] Starting KERI Core Driver on {host}:{port}")
     print(f"[keri-driver] KERI library: keripy (reference)")
-    print(f"[keri-driver] Stateful endpoints:  /status, /inception, /rotation, /interact, /reload-identity, /sign, /kel, /verify")
+    print(f"[keri-driver] Stateful endpoints:  /status, /inception, /rotation, /interact, /reload-identity, /sign, /sign-for-name, /kel, /verify")
     print(f"[keri-driver] Stateless endpoints: /cesr-encode, /validate-kel, /resolve-oobi, /format-credential, /generate-multisig-event")
     print(f"[keri-driver] Credential endpoints: /credential/issue, /credential/present, /credential/verify")
     print(f"[keri-driver] KERL endpoints:       /receipt/submit, /receipt/kerl")

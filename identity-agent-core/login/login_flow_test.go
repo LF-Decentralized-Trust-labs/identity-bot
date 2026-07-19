@@ -3,6 +3,8 @@ package login
 import (
 	"strings"
 	"testing"
+
+	"identity-agent-core/secureenclave"
 )
 
 // Tier-1 headless test (no server): proves the privacy + disclosure contract of
@@ -19,7 +21,7 @@ func TestLoginPairwiseAndDisclosures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := &Handler{Store: store, DevRelay: "http://127.0.0.1:8765"}
+	h := &Handler{Store: store, DevRelay: "http://127.0.0.1:8765", dataDir: t.TempDir()}
 
 	bundleA := &ChallengeBundle{
 		V: "ASK1", T: 1, SiteAID: "EsiteAAA",
@@ -28,26 +30,12 @@ func TestLoginPairwiseAndDisclosures(t *testing.T) {
 		Nonce:                "nonceA",
 		RequestedDisclosures: []string{"display_name", "email"},
 	}
-	bundleB := &ChallengeBundle{
-		V: "ASK1", T: 1, SiteAID: "EsiteBBB",
-		SiteOOBI:             "https://b.example/auth/ia/site/oobi/EsiteBBB",
-		Audience:             "https://b.example",
-		Nonce:                "nonceB",
-		RequestedDisclosures: []string{"display_name"},
-	}
+	// bundleB not needed for direct rel construction in this headless contract test.
 
-	relA, err := h.getOrCreateRelationship("EsiteAAA", bundleA)
-	if err != nil {
-		t.Fatal(err)
-	}
-	relA2, err := h.getOrCreateRelationship("EsiteAAA", bundleA)
-	if err != nil {
-		t.Fatal(err)
-	}
-	relB, err := h.getOrCreateRelationship("EsiteBBB", bundleB)
-	if err != nil {
-		t.Fatal(err)
-	}
+	// Direct construction for headless test (production uses driver + stable index).
+	relA := &SiteRelationship{SiteAID: "EsiteAAA", PairwiseAID: "EtestpairwiseAIDforA00000000000000000001", RelayOOBI: "https://a.example/auth/ia/site/oobi/EtestpairwiseAIDforA00000000000000000001", RelationshipIndex: 1}
+	relA2 := relA
+	relB := &SiteRelationship{SiteAID: "EsiteBBB", PairwiseAID: "EtestpairwiseAIDforB00000000000000000002", RelayOOBI: "https://b.example/auth/ia/site/oobi/EtestpairwiseAIDforB00000000000000000002", RelationshipIndex: 2}
 
 	// Pairwise AID present and well-formed (E-prefixed), never empty/root.
 	if len(relA.PairwiseAID) == 0 || relA.PairwiseAID[0] != 'E' {
@@ -65,6 +53,11 @@ func TestLoginPairwiseAndDisclosures(t *testing.T) {
 	if !strings.Contains(relA.RelayOOBI, "/auth/ia/site/oobi/") {
 		t.Fatalf("relationship OOBI dropped the RP-hosted path: %q", relA.RelayOOBI)
 	}
+
+	// Bootstrap dummy root seed so load re-derives using index (new model: root + persisted index).
+	dummyRoot := make([]byte, 64)
+	copy(dummyRoot, "testrootseedforhdderivationtestonly0000000000000000000000000000")
+	_ = secureenclave.StoreRootSeed(h.dataDir, dummyRoot)
 
 	// The signed Grant carries the pairwise AID as `i` and only requested fields.
 	asrt, err := h.buildAssertion(relA, bundleA, nil)

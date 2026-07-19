@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Identity Agent is a self-sovereign digital identity platform that unifies identity, data, communications, and assets using the KERI protocol. Its core purpose is to empower users with full control over their digital identities, enhancing privacy and security across digital interactions. Key capabilities include identity creation, KERI inception events, Key Event Log (KEL) persistence, adaptive mobile architecture, OOBI serving/sharing, QR code generation/scanning, contact management, multi-provider tunneling, and user onboarding with OOBI-based server connection for cryptographic trust establishment.
+The Identity Agent is a user-controlled digital identity agent that unifies identity, data, communications, and assets using the KERI protocol. Its core purpose is to empower users with full control over their digital identities, enhancing privacy and security across digital interactions. Key capabilities include identity creation, KERI inception events, Key Event Log (KEL) persistence, adaptive mobile architecture, OOBI serving/sharing, QR code generation/scanning, contact management, multi-provider tunneling, and user onboarding with OOBI-based server connection for cryptographic trust establishment.
 
 ## User Preferences
 

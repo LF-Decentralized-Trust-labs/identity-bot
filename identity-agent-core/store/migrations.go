@@ -221,7 +221,7 @@ INSERT OR IGNORE INTO share_actions (id, action_key, name, subtitle, icon, is_en
     ('sa-show-id',          'show_id',          'Show ID',          'Display your identity QR code',                               'badge_outlined',      0, 2, datetime('now')),
     ('sa-request-payment',  'request_payment',  'Request Payment',  'Send a payment request to a contact',                        'payment_outlined',    0, 3, datetime('now')),
     ('sa-share-file',       'share_file',       'Share a File',     'Send an encrypted file to a contact',                        'attach_file',         0, 4, datetime('now')),
-    ('sa-share-credential', 'share_credential', 'Share Credential', 'Present a verifiable credential',                            'verified_outlined',   0, 5, datetime('now'));
+    ('sa-credential-request', 'credential_request', 'Credential Request', 'Present a verifiable credential (SEAM-7)', 'verified_outlined', 0, 5, datetime('now'));
 `,
 	},
 	{
@@ -445,6 +445,61 @@ CREATE TABLE IF NOT EXISTS relay_allocations (
 		Description: "witness mutual enrollment: witnessing_for direction flag",
 		SQL: `
 ALTER TABLE witness_contact_meta ADD COLUMN witnessing_for INTEGER NOT NULL DEFAULT 0;
+`,
+	},
+	{
+		Version:     16,
+		Description: "Contacts two-axis model + relationship_aid: add contact_category, relationship_aid; backfill from legacy contact_type; drop coworker",
+		SQL: `
+ALTER TABLE contacts ADD COLUMN contact_category TEXT NOT NULL DEFAULT '';
+ALTER TABLE contacts ADD COLUMN relationship_aid TEXT NOT NULL DEFAULT '';
+-- Backfill: legacy contact_type values become category (coworker -> professional per model cleanup)
+UPDATE contacts SET contact_category = CASE
+	WHEN contact_type = 'coworker' THEN 'professional'
+	WHEN contact_type IN ('general','trusted','professional','transactional') THEN contact_type
+	ELSE 'general'
+END WHERE contact_category = '' OR contact_category IS NULL;
+-- Ensure source has sane default if missing (added in prior migration as 'manual')
+UPDATE contacts SET contact_source = 'manual' WHERE contact_source = '' OR contact_source IS NULL;
+-- relationship_aid left empty here; generated on-demand or at next contact use (standalone icp)
+CREATE INDEX IF NOT EXISTS idx_contacts_category ON contacts(contact_category);
+`,
+	},
+	{
+		Version:     17,
+		Description: "Add relationship_seed_b64 column for per-contact P-AID seeds (to support real engine-backed signing)",
+		SQL: `
+ALTER TABLE contacts ADD COLUMN relationship_seed_b64 TEXT NOT NULL DEFAULT '';
+`,
+	},
+	{
+		Version:     18,
+		Description: "Add stable relationship_index column for HD pairwise key derivation (monotonic, persisted at creation for root+index recovery)",
+		SQL: `
+ALTER TABLE contacts ADD COLUMN relationship_index INTEGER NOT NULL DEFAULT 0;
+-- Backfill sequential indices for any pre-existing contacts (order by discovery/aid)
+WITH ordered AS (
+  SELECT aid, (ROW_NUMBER() OVER (ORDER BY discovered_at, aid) - 1) AS idx
+  FROM contacts
+)
+UPDATE contacts SET relationship_index = (SELECT idx FROM ordered o WHERE o.aid = contacts.aid)
+WHERE relationship_index = 0;
+`,
+	},
+	{
+		Version:     19,
+		Description: "Add relationship_counters table for true monotonic never-reused high-water-mark indices (survives deletes, separate namespaces for contacts vs login)",
+		SQL: `
+CREATE TABLE IF NOT EXISTS relationship_counters (
+    namespace  TEXT PRIMARY KEY,
+    next_index INTEGER NOT NULL DEFAULT 1
+);
+INSERT OR IGNORE INTO relationship_counters (namespace, next_index) VALUES ('contacts', 1);
+INSERT OR IGNORE INTO relationship_counters (namespace, next_index) VALUES ('login', 1000001);
+-- ensure counters are at least one past any backfilled indices
+UPDATE relationship_counters SET next_index = (
+  SELECT MAX(next_index, (SELECT COALESCE(MAX(relationship_index), 0) + 1 FROM contacts))
+) WHERE namespace = 'contacts';
 `,
 	},
 }

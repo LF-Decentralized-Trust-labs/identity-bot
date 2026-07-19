@@ -33,26 +33,29 @@ type IdentityState struct {
 
 // ContactRecord stores a resolved contact in the Identity Agent.
 //
-// Protocol layers kept separate:
-//   - ContactType (Identity Agent protocol): user-facing relationship category.
-//     Values: "general" | "trusted" | "professional"
-//   - IsWitness (KERI protocol): set automatically when this contact's Identity
-//     Agent is serving as a witness for our key events. Full witness exchange
-//     protocol is a future task — see ADR-016.
-//   - Status (connection state): pending_inbound | pending_outbound | accepted | rejected
+// Two-axis contact model:
+//   - ContactSource (provenance): "keri" | "imported" | "manual"
+//   - ContactCategory (user-facing label): "transactional" | "general" | "trusted" | "professional"
+// Relationship AIDs are standalone icp (never dip for ordinary relationships).
+// The Root AID never appears in OOBI/QR/bundle/DIDComm for relationships; a per-contact
+// RelationshipAID (our local standalone P-AID) is used for outbound identity with this contact.
+// A private salted-hash binding (at issuer) anchors the contact's Root to its relationship P-AID.
 type ContactRecord struct {
-        AID          string `json:"aid"`
-        Alias        string `json:"alias"`
-        PublicKey    string `json:"public_key"`
-        OobiURL      string `json:"oobi_url"`
-        Verified     bool   `json:"verified"`
-        DiscoveredAt string `json:"discovered_at"`
-        Status       string `json:"status"`
-        ContactType   string `json:"contact_type"`   // general | trusted | professional | coworker
-        ContactSource string `json:"contact_source"` // manual | transactional (transactional excluded from witness pool)
-        IsWitness     bool   `json:"is_witness"`     // KERI witness role — auto-managed
-        JCard        *JCard `json:"jcard,omitempty"`
-        Photo        string `json:"photo,omitempty"`
+        AID             string `json:"aid"`
+        Alias           string `json:"alias"`
+        PublicKey       string `json:"public_key"`
+        OobiURL         string `json:"oobi_url"`
+        Verified        bool   `json:"verified"`
+        DiscoveredAt    string `json:"discovered_at"`
+        Status          string `json:"status"`
+        ContactSource   string `json:"contact_source"`   // keri | imported | manual
+        ContactCategory string `json:"contact_category"` // transactional | general | trusted | professional
+        RelationshipAID     string `json:"relationship_aid,omitempty"`     // our per-contact standalone icp P-AID for this contact (Root never disclosed for relationships) -- the handle/reference
+        RelationshipIndex   int    `json:"relationship_index,omitempty"`   // stable monotonic HD index for BIP32/SLIP-0010 derivation from root seed (allocated via never-reused counter, survives deletes)
+        RelationshipSeedB64 string `json:"relationship_seed_b64,omitempty"` // deprecated for secrets; kept for schema compat only. Private seeds live in secureenclave storage (AID is the key). Never write raw seeds here.
+        IsWitness           bool   `json:"is_witness"`     // KERI witness role — auto-managed
+        JCard               *JCard `json:"jcard,omitempty"`
+        Photo               string `json:"photo,omitempty"`
 }
 
 // TaskRecord represents an automated background task tracked by the Identity Agent.
@@ -293,6 +296,10 @@ type Store interface {
         DeleteContact(aid string) error
         GetContactsByStatus(status string) ([]ContactRecord, error)
         SaveContactKEL(record ContactKELRecord) error
+        // AllocateNextRelationshipIndex returns a strictly increasing, never-reused index
+        // for the given namespace ("contacts" or "login"). It is a persisted high-water mark
+        // that survives row deletions (unlike MAX over live rows).
+        AllocateNextRelationshipIndex(namespace string) (int, error)
         GetContactKEL(aid string) (*ContactKELRecord, error)
         SaveCredential(record CredentialRecord) error
         GetCredential(said string) (*CredentialRecord, error)
@@ -339,16 +346,59 @@ type Store interface {
 }
 
 type FileStore struct {
-        dir   string
-        mu    sync.RWMutex
+        dir      string
+        mu       sync.RWMutex
+        counters map[string]int // persisted high-water marks for relationship indices
 }
 
 func NewFileStore(dir string) (*FileStore, error) {
         if err := os.MkdirAll(dir, 0755); err != nil {
                 return nil, fmt.Errorf("failed to create store directory: %w", err)
         }
+        fs := &FileStore{dir: dir, counters: map[string]int{}}
+        if err := fs.loadCounters(); err != nil {
+                return nil, err
+        }
         log.Printf("[store] Initialized file store at: %s", dir)
-        return &FileStore{dir: dir}, nil
+        return fs, nil
+}
+
+func (s *FileStore) loadCounters() error {
+        path := filepath.Join(s.dir, "counters.json")
+        b, err := os.ReadFile(path)
+        if os.IsNotExist(err) {
+                s.counters = map[string]int{"contacts": 1, "login": 1000001}
+                return nil
+        }
+        if err != nil {
+                return err
+        }
+        if err := json.Unmarshal(b, &s.counters); err != nil {
+                return err
+        }
+        if s.counters == nil {
+                s.counters = map[string]int{}
+        }
+        if _, ok := s.counters["contacts"]; !ok {
+                s.counters["contacts"] = 1
+        }
+        if _, ok := s.counters["login"]; !ok {
+                s.counters["login"] = 1000001
+        }
+        return nil
+}
+
+func (s *FileStore) saveCountersLocked() error {
+        path := filepath.Join(s.dir, "counters.json")
+        b, err := json.MarshalIndent(s.counters, "", "  ")
+        if err != nil {
+                return err
+        }
+        tmp := path + ".tmp"
+        if err := os.WriteFile(tmp, b, 0600); err != nil {
+                return err
+        }
+        return os.Rename(tmp, path)
 }
 
 func (s *FileStore) SaveEvent(record EventRecord) error {
@@ -524,6 +574,28 @@ func (s *FileStore) SaveSettings(settings SettingsData) error {
 
 func (s *FileStore) Close() error {
         return nil
+}
+
+func (s *FileStore) AllocateNextRelationshipIndex(namespace string) (int, error) {
+        s.mu.Lock()
+        defer s.mu.Unlock()
+
+        if s.counters == nil {
+                s.counters = map[string]int{}
+        }
+        idx := s.counters[namespace]
+        if idx == 0 {
+                if namespace == "login" {
+                        idx = 1000001
+                } else {
+                        idx = 1
+                }
+        }
+        s.counters[namespace] = idx + 1
+        if err := s.saveCountersLocked(); err != nil {
+                return 0, err
+        }
+        return idx, nil
 }
 
 func (s *FileStore) loadContacts() ([]ContactRecord, error) {

@@ -1,4 +1,4 @@
-# ADR 012: Sandboxed App Marketplace
+# ADR 012: Sandboxed App Registry (Plugins)
 
 **Date:** 2025-07-14
 **Status:** Accepted
@@ -8,11 +8,11 @@
 
 ## Context
 
-The Identity Agent currently manages user-controlled identity (KERI AIDs, contacts, OOBIs, tunneling). The next evolution is to become a **platform** — enabling users to run third-party applications inside sandboxed environments where the agent controls all network egress, enforces policy, and mediates resource access.
+The Identity Agent currently manages user-controlled identity (KERI AIDs, contacts, OOBIs, tunneling). It is a self-hosted identity agent server with a sandbox container system that allows sandbox plugins to run on it — enabling users to run third-party sandbox plugins inside sandboxed environments where the agent controls all network egress, enforces policy, and mediates resource access. The discovery surface for plugins is the App Registry (not a marketplace; separate from any paid marketplace milestone).
 
 This is a desktop-only feature (Phase 1). Mobile platforms lack container runtimes and the process isolation primitives required for meaningful sandboxing.
 
-The marketplace must support two fundamentally different app types: OCI containers (for web and GUI applications) and compiled binaries (for lightweight agent-native tools). Both must be network-sandboxed, policy-governed, and displayable in the Flutter UI.
+The App Registry (sandbox plugin discovery surface) must support two fundamentally different plugin types: OCI containers (for web and GUI applications) and compiled binaries (for lightweight agent-native tools). Both must be network-sandboxed, policy-governed, and displayable in the Flutter UI. "sandbox plugin" terminology is used for the software adhering to the manifest; "sandbox" refers to the container runtime offered by the agent.
 
 Four demo apps prove the architecture works end-to-end:
 1. **Chromium** — GUI app streaming via KasmVNC (OCI container)
@@ -285,7 +285,7 @@ The policy engine evaluates every outbound request and resource request against 
 **Policy evaluation order:**
 1. Check explicit block rules → auto-block
 2. Check explicit allow rules (manifest `allowed_domains` + user overrides) → auto-approve
-3. Unknown → hold for operator (queued in `sandbox.db`, shown in Marketplace UI)
+3. Unknown → hold for operator (queued in `sandbox.db`, shown in sandbox registry / App Registry UI)
 
 **Policy sources:**
 - `manifest` — declared by the app author (initial rules)
@@ -301,7 +301,7 @@ The policy engine evaluates every outbound request and resource request against 
 
 ### 8. Resource Limit Escalation (V1 — Simplified)
 
-1. App approaches limit (80% threshold) → **warn user** (notification in Marketplace UI)
+1. App approaches limit (80% threshold) → **warn user** (notification in sandbox registry / App Registry UI)
 2. App exceeds limit → **ask user** if they want to allocate more resources
 3. No user response within configurable timeout (default 60s) → **kill** (terminate sandbox, log with full context)
 
@@ -593,7 +593,7 @@ All containers managed by the agent are labeled with `identity-agent=true` for d
 
 ### Positive
 
-- **Platform evolution**: The Identity Agent becomes a platform, not just an identity manager. Apps run in controlled environments with full network visibility.
+- **Self-hosted identity agent server**: The Identity Agent is a self-hosted identity agent server (not a platform) with a sandbox container system for sandbox plugins. Plugins run in controlled environments with full network visibility and policy enforcement. "sandbox" = the container offered by the IA; "sandbox plugin" = the manifest-adhering app/SDK that runs inside it. The discovery surface is the App Registry.
 - **Strong container isolation**: Containers are network-sandboxed on all platforms via proxy env vars + Podman network rules. Linux adds iptables for defense-in-depth.
 - **No licensing concerns**: Podman is Apache 2.0 licensed — no commercial restrictions unlike Docker Desktop.
 - **Rootless by default**: Podman's rootless mode provides better security posture than Docker's default root-mode operation.

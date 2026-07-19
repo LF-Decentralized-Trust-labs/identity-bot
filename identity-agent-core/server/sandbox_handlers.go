@@ -3,7 +3,9 @@ package server
 import (
         "context"
         "encoding/json"
+        "errors"
         "fmt"
+        "io"
         "log"
         "net"
         "net/http"
@@ -41,11 +43,59 @@ func (s *CoreServer) sandboxRoutes(r chi.Router) {
         r.Put("/apps/{id}/settings", s.handleUpdateAppSettings)
         r.Get("/apps/{id}/install-progress", s.handleInstallProgress)
         r.Get("/apps/{id}/display", s.handleAppDisplay)
+        r.Get("/capabilities", s.handleListCapabilities)
+        r.Post("/capabilities/{id}/invoke", s.handleInvokeCapability)
+        r.Post("/mcp", s.handleMCP)
+        r.Get("/endpoint/health", s.handleEndpointHealth)
         r.Get("/sandbox/health", s.handleSandboxHealth)
         r.Post("/sandbox/podman/setup", s.handlePodmanSetup)
         r.Get("/sandbox/podman/setup-status", s.handlePodmanSetupStatus)
         r.Get("/ws/sandbox", s.handleSandboxWebSocket)
         r.Get("/ws/terminal/{instanceId}", s.handleTerminalWebSocket)
+}
+
+// handleListCapabilities returns the functional capabilities offered by installed
+// plug-ins (aggregated from manifests' provides[]). Discovery surface for the agent's
+// governed capability endpoint; invoking a capability is governed separately.
+func (s *CoreServer) handleListCapabilities(w http.ResponseWriter, r *http.Request) {
+        if s.SandboxManager == nil {
+                jsonError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
+                return
+        }
+        jsonResponse(w, s.SandboxManager.ProvidedCapabilities())
+}
+
+// handleInvokeCapability is the governed capability-invocation endpoint:
+// ingress-authorize -> route to the providing plug-in -> egress-recheck -> return.
+// A host-control capability is never invocable by a remote caller.
+func (s *CoreServer) handleInvokeCapability(w http.ResponseWriter, r *http.Request) {
+        if s.SandboxManager == nil {
+                jsonError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
+                return
+        }
+        id := chi.URLParam(r, "id")
+        body, err := io.ReadAll(io.LimitReader(r.Body, 8<<20))
+        if err != nil {
+                jsonError(w, err.Error(), http.StatusBadRequest)
+                return
+        }
+        caller := s.resolveCaller(r)
+
+        res, err := s.SandboxManager.InvokeCapability(r.Context(), caller, id, body)
+        if err != nil {
+                switch {
+                case errors.Is(err, sandbox.ErrCapabilityNotFound):
+                        jsonError(w, err.Error(), http.StatusNotFound)
+                case errors.Is(err, sandbox.ErrDenied):
+                        jsonError(w, err.Error(), http.StatusForbidden)
+                default:
+                        jsonError(w, err.Error(), http.StatusBadGateway)
+                }
+                return
+        }
+        w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(res.Status)
+        w.Write(res.Body)
 }
 
 func (s *CoreServer) handleListApps(w http.ResponseWriter, r *http.Request) {

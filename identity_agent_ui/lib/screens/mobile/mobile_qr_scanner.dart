@@ -1,14 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../theme/mobile_theme.dart';
-import '../../services/core_service.dart';
 import '../../services/nfc_service.dart';
 import '../../config/agent_config.dart';
-import '../../widgets/contact_action_popup.dart';
-import '../../services/login_service.dart';
+import '../../services/scan_service.dart';
 import '../../widgets/consent_modal.dart';
 import '../../theme/app_theme.dart';
 
+/// The universal transaction initiator. The Scan button is a DUMB ROUTER: it forwards whatever
+/// was scanned (or NFC-tapped) to the Go core's scan gate, which fetches the Ask, reads its
+/// action `t`, and decides what to do. No per-transaction logic lives here — adding a new
+/// transaction type is a Go-only change.
 class MobileQrScanner extends StatefulWidget {
   final String? serverUrl;
 
@@ -19,7 +21,6 @@ class MobileQrScanner extends StatefulWidget {
 }
 
 class _MobileQrScannerState extends State<MobileQrScanner> with SingleTickerProviderStateMixin {
-  late final CoreService _coreService;
   late final AnimationController _scanLineController;
   bool _processing = false;
   bool _nfcActive = false;
@@ -27,7 +28,6 @@ class _MobileQrScannerState extends State<MobileQrScanner> with SingleTickerProv
   @override
   void initState() {
     super.initState();
-    _coreService = CoreService(baseUrl: widget.serverUrl ?? AgentConfig.coreBaseUrl);
     _scanLineController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 2),
@@ -40,9 +40,9 @@ class _MobileQrScannerState extends State<MobileQrScanner> with SingleTickerProv
     if (!available || !mounted) return;
     setState(() => _nfcActive = true);
     await NfcService.startOobiReadSession(
-      onSuccess: (oobiUrl) {
+      onSuccess: (url) {
         if (!mounted || _processing) return;
-        _dispatchScannedCode(oobiUrl);
+        _dispatchScannedCode(url);
       },
       onError: (_) {
         // Ignore NFC errors silently — camera scan is the primary path
@@ -54,7 +54,6 @@ class _MobileQrScannerState extends State<MobileQrScanner> with SingleTickerProv
   void dispose() {
     NfcService.stopSession();
     _scanLineController.dispose();
-    _coreService.dispose();
     super.dispose();
   }
 
@@ -62,278 +61,80 @@ class _MobileQrScannerState extends State<MobileQrScanner> with SingleTickerProv
     if (_processing) return;
     final barcodes = capture.barcodes;
     if (barcodes.isEmpty) return;
-
     final code = barcodes.first.rawValue;
     if (code == null || code.isEmpty) return;
-
     _dispatchScannedCode(code);
   }
 
-  /// Shared dispatch for both camera and NFC scans.
-  ///
-  /// Recognizes the login contract's login bundle pointer
-  /// (`{origin}/auth/ia/session/{token}/bundle`) first — that carries no query
-  /// params, so it must be matched before the legacy `/oobi/?action=...` forms.
+  /// Dumb router: forward the scanned code to Go and let it decide. The only thing the scanner
+  /// does is render the generic consent Go returns and send back the user's decision.
   void _dispatchScannedCode(String code) {
-    final uri = Uri.tryParse(code);
-
-    // Login bundle pointer: minimal QR, everything else is in the fetched bundle.
-    final pointerToken = _loginPointerToken(uri);
-    if (pointerToken != null) {
-      setState(() => _processing = true);
-      _runLogin(pointerToken, uri!.origin);
-      return;
-    }
-
-    // Everything else is an OOBI-style code.
-    if (!code.contains('/oobi/')) return;
-    final action = uri?.queryParameters['action'];
+    if (_processing) return;
     setState(() => _processing = true);
-
-    if (action == 'add_contact') {
-      _resolveAndAddContact(code);
-    } else if (action == 'login') {
-      // Legacy login QR form (full OOBI URL + session/rp). Pointer form preferred.
-      _runLogin(
-        uri?.queryParameters['session'] ?? '',
-        _resolveLoginRp(uri) ?? '',
-      );
-    } else if (action != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Action "$action" is not yet supported.'),
-          backgroundColor: MobileColors.warning,
-        ),
-      );
-      setState(() => _processing = false);
-    } else {
-      // No action parameter — resolve and let user choose
-      _resolveAndShowIdentity(code);
-    }
+    _runScan(code);
   }
 
-  /// Returns the session token when [uri] is an Ask pointer (`.../i/{token}`,
-  /// per the login contract and the shared module), else null. The token is the last segment under the
-  /// one-char `/i/` Ask namespace; the IA fetches the signed Ask from this URL.
-  String? _loginPointerToken(Uri? uri) {
-    if (uri == null) return null;
-    final segs = uri.pathSegments;
-    final n = segs.length;
-    if (n >= 2 && segs[n - 2] == 'i') {
-      final token = segs[n - 1];
-      return token.isEmpty ? null : token;
-    }
-    return null;
-  }
-
-  String? _resolveLoginRp(Uri? uri) {
-    if (uri == null) return null;
-    final rp = uri.queryParameters['rp'] ?? '';
-    if (rp.isNotEmpty) {
-      if (rp.startsWith('http://') || rp.startsWith('https://')) return rp;
-      return 'https://$rp';
-    }
-    // RP-hosted site OOBI — session API is on the same origin as the OOBI URL.
-    if (uri.path.contains('/auth/ia/site/oobi/')) {
-      return uri.origin;
-    }
-    return null;
-  }
-
-  Future<void> _runLogin(String sessionToken, String rpSessionUrl) async {
-    if (sessionToken.isEmpty || rpSessionUrl.isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Login QR missing session or site origin'),
-            backgroundColor: MobileColors.error,
-          ),
-        );
-        setState(() => _processing = false);
-      }
-      return;
-    }
-
-    final loginService = LoginService(
-      baseUrl: widget.serverUrl ?? AgentConfig.coreBaseUrl,
-    );
-
+  Future<void> _runScan(String url) async {
+    final scan = ScanService(baseUrl: widget.serverUrl ?? AgentConfig.coreBaseUrl);
     try {
-      final preview = await loginService.preview(
-        sessionToken: sessionToken,
-        rpSessionUrl: rpSessionUrl,
-      );
-
+      final preview = await scan.decode(url);
       if (!mounted) return;
 
-      final details = preview.requestedDisclosures.map((field) {
-        return ConsentDetailItem(
-          label: field.replaceAll('_', ' '),
-          value: preview.disclosurePreview[field] ?? '—',
-          isMonospace: field.contains('aid') || field.contains('email'),
-        );
-      }).toList();
+      final details = preview.details
+          .map((d) => ConsentDetailItem(
+                label: d.label.replaceAll('_', ' '),
+                value: d.value.isEmpty ? '—' : d.value,
+                isMonospace: d.label.contains('aid') || d.label.contains('email'),
+              ))
+          .toList();
 
       final result = await ConsentModal.show(
         context: context,
-        title: 'Sign in request',
-        subtitle: preview.audience,
-        name: preview.siteLabel,
-        avatarLabel: preview.siteLabel.isNotEmpty
-            ? preview.siteLabel[0].toUpperCase()
+        title: preview.title,
+        subtitle: preview.subtitle,
+        name: preview.counterparty,
+        avatarLabel: preview.counterparty.isNotEmpty
+            ? preview.counterparty[0].toUpperCase()
             : '?',
         details: details,
         confirmLabel: 'Approve',
         cancelLabel: 'Deny',
         accentColor: AppColors.accent,
-        icon: Icons.login_rounded,
-        warningMessage:
-            'You are signing in to this site. Only the fields above will be shared.',
+        icon: preview.action == 'login'
+            ? Icons.login_rounded
+            : Icons.person_add_alt_1_rounded,
+        warningMessage: preview.warning,
       );
 
       if (result?.confirmed == true) {
-        await loginService.approve(
-          sessionToken: sessionToken,
-          rpSessionUrl: rpSessionUrl,
-        );
+        // Default-tier for now; a tier picker on the consent screen is a follow-up UI step.
+        await scan.execute(url, approved: true, tier: preview.defaultTier);
         if (mounted) {
+          final msg = preview.action == 'login'
+              ? 'Signed in successfully'
+              : preview.action == 'add_contact'
+                  ? 'Contact added'
+                  : 'Done';
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Signed in successfully'),
-              backgroundColor: MobileColors.success,
-            ),
+            SnackBar(content: Text(msg), backgroundColor: MobileColors.success),
           );
-          // KNOWN UI BUG (test-plan T3): the consent modal/scanner can linger
-          // after approve. Reverted the delayed-pop attempt (it made it worse —
-          // a dispose during the wait left the user stuck). Needs Tier-3
-          // computer-use UI testing on a real device to fix reliably.
           Navigator.of(context).pop(true);
         }
       } else if (result?.confirmed == false) {
-        await loginService.decline(
-          sessionToken: sessionToken,
-          rpSessionUrl: rpSessionUrl,
-        );
-        setState(() => _processing = false);
+        await scan.execute(url, approved: false);
+        if (mounted) setState(() => _processing = false);
       } else {
-        setState(() => _processing = false);
+        if (mounted) setState(() => _processing = false);
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Login failed: $e'),
-            backgroundColor: MobileColors.error,
-          ),
+          SnackBar(content: Text('Scan failed: $e'), backgroundColor: MobileColors.error),
         );
         setState(() => _processing = false);
       }
     } finally {
-      loginService.dispose();
-    }
-  }
-
-  Future<void> _resolveAndShowIdentity(String oobiUrl) async {
-    try {
-      final resolved = await _coreService.resolveOobiContact(oobiUrl: oobiUrl);
-
-      if (!mounted) return;
-
-      final confirmed = await showDialog<bool>(
-        context: context,
-        barrierDismissible: false,
-        builder: (ctx) => ContactActionPopup(
-          name: resolved.displayName,
-          photo: resolved.photo,
-          aid: resolved.aid,
-          kelVerified: resolved.kelVerified,
-          actionLabel: 'Scanned identity',
-          confirmLabel: 'Add Contact',
-          dismissLabel: 'Dismiss',
-          onConfirm: () => Navigator.of(ctx).pop(true),
-          onDismiss: () => Navigator.of(ctx).pop(false),
-        ),
-      );
-
-      if (confirmed == true) {
-        await _coreService.addContact(
-          oobiUrl: oobiUrl,
-          alias: resolved.alias,
-        );
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Contact "${resolved.displayName}" added'),
-              backgroundColor: MobileColors.success,
-            ),
-          );
-          Navigator.of(context).pop(true);
-        }
-      } else {
-        setState(() => _processing = false);
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to resolve: $e'),
-            backgroundColor: MobileColors.error,
-          ),
-        );
-        setState(() => _processing = false);
-      }
-    }
-  }
-
-  Future<void> _resolveAndAddContact(String oobiUrl) async {
-    try {
-      final resolved = await _coreService.resolveOobiContact(oobiUrl: oobiUrl);
-
-      if (!mounted) return;
-
-      final confirmed = await showDialog<bool>(
-        context: context,
-        barrierDismissible: false,
-        builder: (ctx) => ContactActionPopup(
-          name: resolved.displayName,
-          photo: resolved.photo,
-          aid: resolved.aid,
-          kelVerified: resolved.kelVerified,
-          actionLabel: 'Wants to add you as a contact',
-          confirmLabel: 'Add Contact',
-          dismissLabel: 'Dismiss',
-          onConfirm: () => Navigator.of(ctx).pop(true),
-          onDismiss: () => Navigator.of(ctx).pop(false),
-        ),
-      );
-
-      if (confirmed == true) {
-        await _coreService.addContact(
-          oobiUrl: oobiUrl,
-          alias: resolved.alias,
-        );
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Contact "${resolved.displayName}" added'),
-              backgroundColor: MobileColors.success,
-            ),
-          );
-          Navigator.of(context).pop(true);
-        }
-      } else {
-        setState(() => _processing = false);
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to resolve: $e'),
-            backgroundColor: MobileColors.error,
-          ),
-        );
-        setState(() => _processing = false);
-      }
+      scan.dispose();
     }
   }
 
@@ -521,4 +322,3 @@ class _CornerBracket extends StatelessWidget {
     );
   }
 }
-

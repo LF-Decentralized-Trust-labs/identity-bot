@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -51,6 +52,24 @@ type DriverHybridInceptionResponse struct {
 	CipherSuite    string                 `json:"cipher_suite"`
 	PublicKey      string                 `json:"public_key"`
 	NextKeyDigest  string                 `json:"next_key_digest"`
+}
+
+type DriverDelegatedInceptionRequest struct {
+	PublicKey     string `json:"public_key"`
+	NextPublicKey string `json:"next_public_key"`
+	Name          string `json:"name"`
+	DelegatorName string `json:"delegator_name"`
+}
+
+type DriverDelegatedInceptionResponse struct {
+	AID           string                 `json:"aid"`
+	DelegatorAID  string                 `json:"delegator_aid"`
+	Said          string                 `json:"said"`
+	DipEvent      map[string]interface{} `json:"dip_event"`
+	DelegatorIxn  map[string]interface{} `json:"delegator_ixn,omitempty"`
+	RawBytesB64   string                 `json:"raw_bytes_b64"`
+	PublicKey     string                 `json:"public_key"`
+	NextKeyDigest string                 `json:"next_key_digest"`
 }
 
 type DriverRotationRequest struct {
@@ -112,6 +131,16 @@ type DriverSignRequest struct {
 type DriverSignResponse struct {
 	Signature string `json:"signature"`
 	PublicKey string `json:"public_key"`
+}
+
+type DriverSignForNameRequest struct {
+	Name string `json:"name"`
+	Body string `json:"body"`
+}
+
+type DriverSignForNameResponse struct {
+	Sig string `json:"sig"`
+	AID string `json:"aid"`
 }
 
 type DriverKelResponse struct {
@@ -468,6 +497,24 @@ func (d *KeriDriver) CreateInceptionNamed(publicKey, nextPublicKey, name string)
 	return d.postInception(publicKey, nextPublicKey, name)
 }
 
+func (d *KeriDriver) CreateDelegatedInception(publicKey, nextPublicKey, name, delegatorName string) (*DriverDelegatedInceptionResponse, error) {
+	reqBody := DriverDelegatedInceptionRequest{
+		PublicKey:     publicKey,
+		NextPublicKey: nextPublicKey,
+		Name:          name,
+		DelegatorName: delegatorName,
+	}
+	body, err := d.doPost("/delegated-inception", reqBody, http.StatusCreated)
+	if err != nil {
+		return nil, err
+	}
+	var result DriverDelegatedInceptionResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode delegated-inception response: %w", err)
+	}
+	return &result, nil
+}
+
 func (d *KeriDriver) postInception(publicKey, nextPublicKey, name string) (*DriverInceptionResponse, error) {
 	reqBody := DriverInceptionRequest{
 		PublicKey:     publicKey,
@@ -532,8 +579,24 @@ func (d *KeriDriver) SignPayload(name, dataB64 string) (*DriverSignResponse, err
 	return &result, nil
 }
 
+func (d *KeriDriver) SignForName(name, body string) (*DriverSignForNameResponse, error) {
+	reqBody := DriverSignForNameRequest{
+		Name: name,
+		Body: body,
+	}
+	respBody, err := d.doPost("/sign-for-name", reqBody, http.StatusOK)
+	if err != nil {
+		return nil, err
+	}
+	var result DriverSignForNameResponse
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode sign-for-name response: %w", err)
+	}
+	return &result, nil
+}
+
 func (d *KeriDriver) GetKel(name string) (*DriverKelResponse, error) {
-	resp, err := d.client.Get(fmt.Sprintf("%s/kel?name=%s", d.BaseURL, name))
+	resp, err := d.client.Get(fmt.Sprintf("%s/kel?name=%s", d.BaseURL, url.QueryEscape(name)))
 	if err != nil {
 		return nil, fmt.Errorf("KEL request failed: %w", err)
 	}

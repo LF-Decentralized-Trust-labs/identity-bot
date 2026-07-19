@@ -82,8 +82,8 @@ Layer 2 is where profile data (jCard, photo) is fetched and displayed. This sepa
 **Planned extension:** The OOBI URL will include an optional `intent` query parameter:
 
 ```
-https://grapeid.org/alice/oobi/{AID}?intent=add_contact
-https://grapeid.org/alice/oobi/{AID}?intent=request_payment
+https://grapeid.org/alice/oobi/{AID}?action=add_contact
+https://grapeid.org/alice/oobi/{AID}?action=request_payment
 https://grapeid.org/alice/oobi/{AID}                        (defaults to add_contact)
 ```
 
