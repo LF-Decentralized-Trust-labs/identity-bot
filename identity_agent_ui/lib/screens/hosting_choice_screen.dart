@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
-import '../services/preferences_service.dart';
-import '../services/core_service.dart';
+import 'package:agent_client/services/preferences_service.dart';
+import 'package:agent_client/services/core_service.dart';
 
 class HostingChoiceScreen extends StatefulWidget {
   final void Function(HostingChoice choice, {String? remoteBrainUrl})

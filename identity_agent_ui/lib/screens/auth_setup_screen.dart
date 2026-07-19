@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../theme/app_theme.dart';
-import '../services/identity_level_service.dart';
-import '../services/pin_password_service.dart';
-import '../services/local_auth_service.dart';
-import '../services/setup_task_service.dart';
+import 'package:agent_client/services/identity_level_service.dart';
+import 'package:agent_client/services/pin_password_service.dart';
+import 'package:agent_client/services/local_auth_service.dart';
+import 'package:agent_client/services/setup_task_service.dart';
 
 /// Desktop authentication setup screen.
 ///

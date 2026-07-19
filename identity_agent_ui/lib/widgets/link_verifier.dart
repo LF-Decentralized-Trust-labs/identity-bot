@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../services/link_verification_service.dart';
+import 'package:agent_client/services/link_verification_service.dart';
 
 /// Trust badge widget — renders from `outcome` only, matching the link verification contract.
 class LinkVerifier extends StatefulWidget {

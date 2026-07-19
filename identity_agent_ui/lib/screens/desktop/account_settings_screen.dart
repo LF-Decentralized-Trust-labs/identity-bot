@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import '../../theme/app_theme.dart';
-import '../../services/preferences_service.dart';
-import '../../services/core_service.dart';
-import '../../config/agent_config.dart';
+import 'package:agent_client/services/preferences_service.dart';
+import 'package:agent_client/services/core_service.dart';
+import 'package:agent_client/config/agent_config.dart';
 
 class AccountSettingsScreen extends StatefulWidget {
   final AgentMode? mode;

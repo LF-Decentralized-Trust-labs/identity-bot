@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import '../services/event_service.dart';
-import '../services/login_service.dart';
+import 'package:agent_client/services/event_service.dart';
+import 'package:agent_client/services/login_service.dart';
 import '../theme/app_theme.dart';
 import 'consent_modal.dart';
 

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
-import '../services/preferences_service.dart';
+import 'package:agent_client/services/preferences_service.dart';
 
 class EntityTypeScreen extends StatelessWidget {
   final void Function(EntityType type) onEntityTypeSelected;

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme/mobile_theme.dart';
-import '../models/background_task.dart';
+import 'package:agent_client/models/background_task.dart';
 
 class TaskCard extends StatelessWidget {
   final BackgroundTask task;

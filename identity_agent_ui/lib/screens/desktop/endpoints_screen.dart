@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../theme/app_theme.dart';
-import '../../services/core_service.dart';
-import '../../config/agent_config.dart';
+import 'package:agent_client/services/core_service.dart';
+import 'package:agent_client/config/agent_config.dart';
 
 /// Endpoints screen — shows all live public endpoints and available actions.
 ///

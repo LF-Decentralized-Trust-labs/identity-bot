@@ -3,9 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import '../../theme/mobile_theme.dart';
-import '../../services/core_service.dart';
-import '../../services/event_service.dart';
-import '../../config/agent_config.dart';
+import 'package:agent_client/services/core_service.dart';
+import 'package:agent_client/services/event_service.dart';
+import 'package:agent_client/config/agent_config.dart';
 import '../../widgets/contact_action_popup.dart';
 
 // Default action list — mirrors the seeded DB rows; used as a fallback if the

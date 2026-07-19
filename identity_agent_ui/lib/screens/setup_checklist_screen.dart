@@ -1,17 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
-import '../config/agent_config.dart';
+import 'package:agent_client/config/agent_config.dart';
 import '../theme/app_theme.dart';
-import '../services/setup_task_service.dart';
-import '../services/preferences_service.dart';
-import '../services/keri_service.dart';
-import '../services/core_service.dart';
-import '../services/enclave_service.dart';
-import '../services/secure_key_store.dart';
-import '../services/identity_level_service.dart';
-import '../services/pin_password_service.dart';
-import '../services/local_auth_service.dart';
+import 'package:agent_client/services/setup_task_service.dart';
+import 'package:agent_client/services/preferences_service.dart';
+import 'package:agent_client/services/keri_service.dart';
+import 'package:agent_client/services/core_service.dart';
+import 'package:agent_client/services/enclave_service.dart';
+import 'package:agent_client/services/secure_key_store.dart';
+import 'package:agent_client/services/identity_level_service.dart';
+import 'package:agent_client/services/pin_password_service.dart';
+import 'package:agent_client/services/local_auth_service.dart';
 
 /// Internal page state — all pages render inside the same modal container.
 enum _Page { taskList, backupSeed, seedWords, setupAuth, inviteContacts, connectBrain }

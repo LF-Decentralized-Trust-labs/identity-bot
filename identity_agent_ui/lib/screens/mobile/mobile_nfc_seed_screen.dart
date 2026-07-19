@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import '../../theme/mobile_theme.dart';
-import '../../services/nfc_service.dart';
-import '../../services/secure_key_store.dart';
-import '../../services/setup_task_service.dart';
+import 'package:agent_client/services/nfc_service.dart';
+import 'package:agent_client/services/secure_key_store.dart';
+import 'package:agent_client/services/setup_task_service.dart';
 
 enum NfcSeedMode { write, verify }
 

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../theme/mobile_theme.dart';
-import '../../services/keri_service.dart';
-import '../../services/preferences_service.dart';
+import 'package:agent_client/services/keri_service.dart';
+import 'package:agent_client/services/preferences_service.dart';
 import '../../widgets/mobile_screen_scaffold.dart';
 import '../profile_screen.dart';
 import '../contacts_screen.dart';

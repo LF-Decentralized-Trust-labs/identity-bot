@@ -3,17 +3,17 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import '../theme/app_theme.dart';
-import '../crypto/bip39.dart';
-import '../services/keri_service.dart';
-import '../bridge/keri_bridge_stub.dart'
-    if (dart.library.io) '../bridge/keri_bridge.dart';
-import '../services/core_service.dart';
-import '../services/preferences_service.dart' show EntityType;
-import '../services/secure_key_store.dart';
-import '../services/backend_process_service.dart';
-import '../services/enclave_service.dart';
-import '../services/setup_task_service.dart';
-import '../config/agent_config.dart';
+import 'package:agent_client/crypto/bip39.dart';
+import 'package:agent_client/services/keri_service.dart';
+import 'package:agent_client/bridge/keri_bridge_stub.dart'
+    if (dart.library.io) 'package:agent_client/bridge/keri_bridge.dart';
+import 'package:agent_client/services/core_service.dart';
+import 'package:agent_client/services/preferences_service.dart' show EntityType;
+import 'package:agent_client/services/secure_key_store.dart';
+import 'package:agent_client/services/backend_process_service.dart';
+import 'package:agent_client/services/enclave_service.dart';
+import 'package:agent_client/services/setup_task_service.dart';
+import 'package:agent_client/config/agent_config.dart';
 import '../services/photo_picker_stub.dart'
     if (dart.library.html) '../services/photo_picker_web.dart' as photo_picker;
 

@@ -4,12 +4,12 @@ import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:qr_flutter/qr_flutter.dart';
 import '../theme/app_theme.dart';
-import '../services/core_service.dart';
-import '../services/keri_service.dart';
-import '../services/mobile_on_device_keri_service.dart';
+import 'package:agent_client/services/core_service.dart';
+import 'package:agent_client/services/keri_service.dart';
+import 'package:agent_client/services/mobile_on_device_keri_service.dart';
 import '../widgets/consent_modal.dart';
-import '../services/identity_level_service.dart';
-import '../services/setup_task_service.dart';
+import 'package:agent_client/services/identity_level_service.dart';
+import 'package:agent_client/services/setup_task_service.dart';
 import 'qr_scanner_screen.dart';
 
 class ContactsScreen extends StatefulWidget {

@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import '../../theme/app_theme.dart';
-import '../../services/pin_password_service.dart';
-import '../../services/local_auth_service.dart';
-import '../../services/identity_level_service.dart';
+import 'package:agent_client/services/pin_password_service.dart';
+import 'package:agent_client/services/local_auth_service.dart';
+import 'package:agent_client/services/identity_level_service.dart';
 import '../../widgets/identity_level_badge.dart';
 import '../auth_setup_screen.dart';
 

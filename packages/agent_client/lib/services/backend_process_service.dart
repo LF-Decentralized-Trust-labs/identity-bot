@@ -1,6 +1,6 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
-import 'package:identity_agent_ui/config/agent_config.dart';
+import 'package:agent_client/config/agent_config.dart';
 
 class PortConflictInfo {
   final String pid;

@@ -67,6 +67,12 @@ dependencies:
   local_auth: ^2.3.0
   nfc_manager: ^3.3.0
 
+  # Backend-client glue (services, config, models, crypto, bridge) extracted
+  # into a standalone package so downstream apps can depend on the client
+  # without pulling in any OSS UI.
+  agent_client:
+    path: ../packages/agent_client
+
 
 dev_dependencies:
   flutter_test:

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme/mobile_theme.dart';
-import '../models/activity_log_entry.dart';
+import 'package:agent_client/models/activity_log_entry.dart';
 
 class ActivityEntryWidget extends StatelessWidget {
   final ActivityLogEntry entry;

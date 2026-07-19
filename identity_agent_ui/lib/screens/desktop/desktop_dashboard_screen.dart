@@ -4,12 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import '../../theme/app_theme.dart';
-import '../../config/agent_config.dart';
-import '../../services/camera_service.dart';
-import '../../services/core_service.dart';
-import '../../services/event_service.dart';
-import '../../services/keri_service.dart';
-import '../../services/mobile_on_device_keri_service.dart';
+import 'package:agent_client/config/agent_config.dart';
+import 'package:agent_client/services/camera_service.dart';
+import 'package:agent_client/services/core_service.dart';
+import 'package:agent_client/services/event_service.dart';
+import 'package:agent_client/services/keri_service.dart';
+import 'package:agent_client/services/mobile_on_device_keri_service.dart';
 import '../../widgets/identity_level_badge.dart';
 import '../../widgets/key_storage_badge.dart';
 import '../../widgets/alert_detail_modal.dart';
@@ -19,7 +19,7 @@ import '../../widgets/log_entry.dart';
 import '../../widgets/setup_task_banner.dart';
 import '../auth_setup_screen.dart';
 import '../qr_scanner_screen.dart';
-import '../../services/scan_service.dart';
+import 'package:agent_client/services/scan_service.dart';
 import '../../widgets/consent_modal.dart';
 
 // Fallback share actions shown immediately while the backend is loading or

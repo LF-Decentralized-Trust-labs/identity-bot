@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../services/core_service.dart';
+import 'package:agent_client/services/core_service.dart';
 import '../theme/app_theme.dart';
 
 /// Shows a detail modal for an alert item. Displays full contact info for

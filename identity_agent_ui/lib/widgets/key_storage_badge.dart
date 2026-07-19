@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import '../services/enclave_service.dart';
-import '../services/core_service.dart';
+import 'package:agent_client/services/enclave_service.dart';
+import 'package:agent_client/services/core_service.dart';
 
 /// Small inline badge showing hardware key-backing status.
 /// Renders nothing until the first detection completes.

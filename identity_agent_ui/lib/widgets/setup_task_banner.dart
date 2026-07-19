@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import '../services/setup_task_service.dart';
-import '../services/preferences_service.dart';
-import '../services/keri_service.dart';
+import 'package:agent_client/services/setup_task_service.dart';
+import 'package:agent_client/services/preferences_service.dart';
+import 'package:agent_client/services/keri_service.dart';
 import '../screens/setup_checklist_screen.dart';
 
 /// Persistent banner shown at the top of the dashboard while setup tasks remain

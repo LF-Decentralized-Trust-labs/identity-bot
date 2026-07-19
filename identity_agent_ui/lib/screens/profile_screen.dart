@@ -3,9 +3,9 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 // ignore_for_file: library_private_types_in_public_api
-import '../services/core_service.dart';
-import '../services/keri_service.dart';
-import '../services/mobile_on_device_keri_service.dart';
+import 'package:agent_client/services/core_service.dart';
+import 'package:agent_client/services/keri_service.dart';
+import 'package:agent_client/services/mobile_on_device_keri_service.dart';
 import '../services/photo_picker_stub.dart'
     if (dart.library.html) '../services/photo_picker_web.dart' as photo_picker;
 

@@ -1,10 +1,10 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../theme/mobile_theme.dart';
-import '../../services/core_service.dart';
-import '../../services/event_service.dart';
-import '../../services/keri_service.dart';
-import '../../config/agent_config.dart';
+import 'package:agent_client/services/core_service.dart';
+import 'package:agent_client/services/event_service.dart';
+import 'package:agent_client/services/keri_service.dart';
+import 'package:agent_client/config/agent_config.dart';
 import '../../widgets/identity_card.dart';
 import '../../widgets/alert_card.dart';
 import '../../widgets/alert_detail_modal.dart';
@@ -12,7 +12,7 @@ import '../../widgets/confirmation_toast.dart';
 import '../../widgets/activity_entry.dart';
 import '../../widgets/setup_task_banner.dart';
 import '../../widgets/key_storage_badge.dart';
-import '../../models/activity_log_entry.dart';
+import 'package:agent_client/models/activity_log_entry.dart';
 import '../desktop/auth_management_screen.dart';
 
 class MobileDashboard extends StatefulWidget {

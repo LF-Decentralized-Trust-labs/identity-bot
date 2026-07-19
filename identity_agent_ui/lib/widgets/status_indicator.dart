@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
-import '../services/core_service.dart';
+import 'package:agent_client/services/core_service.dart';
 
 class StatusIndicator extends StatelessWidget {
   final CoreConnectionState state;

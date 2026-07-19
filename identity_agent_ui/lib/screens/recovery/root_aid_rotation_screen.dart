@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../../services/recovery_service.dart';
+import 'package:agent_client/services/recovery_service.dart';
 import '../../theme/app_theme.dart';
 
 class RootAidRotationScreen extends StatefulWidget {

@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
 import '../theme/app_theme.dart';
-import '../config/agent_config.dart';
-import '../services/core_service.dart';
-import '../services/keri_service.dart';
-import '../services/mobile_on_device_keri_service.dart';
+import 'package:agent_client/config/agent_config.dart';
+import 'package:agent_client/services/core_service.dart';
+import 'package:agent_client/services/keri_service.dart';
+import 'package:agent_client/services/mobile_on_device_keri_service.dart';
 import '../widgets/status_indicator.dart';
 import '../widgets/info_card.dart';
 import '../widgets/log_entry.dart';
