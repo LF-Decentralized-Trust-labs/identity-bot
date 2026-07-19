@@ -2,6 +2,11 @@
 
 package secureenclave
 
+// Windows has no Apple Secure Enclave or Android StrongBox — these hardware-backed
+// signers are unavailable here; NewPlatformSigner falls back to TPM/software.
+func newDarwinSecureEnclaveSigner() PlatformSigner { return nil }
+func newStrongBoxSigner() PlatformSigner           { return nil }
+
 // tpmSigner is a TPM 2.0 stub; production wiring will bind to Windows TPM APIs.
 type tpmSigner struct{}
 
