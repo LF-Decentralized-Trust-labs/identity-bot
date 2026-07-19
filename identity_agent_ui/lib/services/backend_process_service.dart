@@ -140,16 +140,21 @@ class BackendProcessService {
   String? _findBundledPython(String backendDir) {
     final sep = Platform.pathSeparator;
 
-    if (Platform.isWindows) {
-      final candidates = [
-        '$backendDir${sep}python${sep}python.exe',
-        '$backendDir${sep}python${sep}python3.exe',
-      ];
-      for (final path in candidates) {
-        if (File(path).existsSync()) {
-          debugPrint('[BackendProcess] Found bundled Python at: $path');
-          return path;
-        }
+    // Each desktop build bundles a relocatable interpreter under backend/python.
+    // Windows: backend\python\python.exe ; macOS/Linux: backend/python/bin/python3
+    final candidates = Platform.isWindows
+        ? [
+            '$backendDir${sep}python${sep}python.exe',
+            '$backendDir${sep}python${sep}python3.exe',
+          ]
+        : [
+            '$backendDir${sep}python${sep}bin${sep}python3',
+            '$backendDir${sep}python${sep}bin${sep}python3.11',
+          ];
+    for (final path in candidates) {
+      if (File(path).existsSync()) {
+        debugPrint('[BackendProcess] Found bundled Python at: $path');
+        return path;
       }
     }
 
@@ -173,9 +178,21 @@ class BackendProcessService {
     }
 
     debugPrint('[BackendProcess] No bundled Python — searching system PATH...');
+    // GUI-launched apps inherit a minimal PATH (no /opt/homebrew, /usr/local),
+    // so bare-name lookups miss an installed Python. Search PATH names first,
+    // then well-known absolute locations. Prefer 3.11 to match bundled packages.
     final candidates = Platform.isWindows
-        ? ['python', 'python3', 'py']
-        : ['python3', 'python'];
+        ? <String>['python', 'python3', 'py']
+        : <String>[
+            'python3.11', 'python3', 'python',
+            '/opt/homebrew/opt/python@3.11/bin/python3',
+            '/opt/homebrew/bin/python3.11',
+            '/opt/homebrew/bin/python3',
+            '/usr/local/opt/python@3.11/bin/python3',
+            '/usr/local/bin/python3.11',
+            '/usr/local/bin/python3',
+            '/usr/bin/python3',
+          ];
 
     for (final bin in candidates) {
       try {
