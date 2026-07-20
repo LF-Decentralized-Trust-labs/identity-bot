@@ -412,6 +412,39 @@ func (d *KeriDriver) Start() error {
 		log.Printf("[keri-driver] Prepended keri-driver dir to PATH for libsodium: %s", driverDir)
 	}
 
+	// On macOS/Linux, pysodium loads libsodium via ctypes.util.find_library('sodium'),
+	// which macOS resolves through DYLD_FALLBACK_LIBRARY_PATH (Linux via LD_LIBRARY_PATH).
+	// The self-contained app bundles libsodium in <backend>/lib (scriptPath is
+	// <backend>/keri-driver/server.py). Point the driver there so KERI crypto works
+	// without a system libsodium. The bundled Python is signed with the
+	// allow-dyld-environment-variables entitlement so this survives the hardened runtime.
+	if runtime.GOOS == "darwin" || runtime.GOOS == "linux" {
+		backendDir := filepath.Dir(filepath.Dir(scriptPath)) // <backend>
+		libDir := filepath.Join(backendDir, "lib")
+		if abs, err := filepath.Abs(libDir); err == nil {
+			libDir = abs
+		}
+		if fi, err := os.Stat(libDir); err == nil && fi.IsDir() {
+			key := "DYLD_FALLBACK_LIBRARY_PATH="
+			if runtime.GOOS == "linux" {
+				key = "LD_LIBRARY_PATH="
+			}
+			n := len(key)
+			merged := false
+			for i, e := range env {
+				if len(e) >= n && e[:n] == key {
+					env[i] = key + libDir + string(os.PathListSeparator) + e[n:]
+					merged = true
+					break
+				}
+			}
+			if !merged {
+				env = append(env, key+libDir)
+			}
+			log.Printf("[keri-driver] Added bundled lib dir for libsodium: %s", libDir)
+		}
+	}
+
 	cmd.Env = env
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

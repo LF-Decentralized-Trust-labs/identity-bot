@@ -19,6 +19,12 @@ type EnrollmentPolicy struct {
 	RequiredAAL      int            `json:"required_aal"`
 	RequiredBadge    string         `json:"required_badge"`      // ""|"green"|"yellow"|"red"
 	RequiredOFAScore int            `json:"required_ofa_score"`  // 0 = not required
+	// Credential gating: when RequiredCredSchema is set, a sign-in is authorized
+	// only if the assertion presents a valid, unrevoked ACDC of that schema. If
+	// RequiredCredIssuer is also set, the credential must have been issued by
+	// that issuer AID (e.g. the org's own AID → an employee credential).
+	RequiredCredSchema string `json:"required_cred_schema"` // schema SAID; "" = no credential required
+	RequiredCredIssuer string `json:"required_cred_issuer"` // issuer AID; "" = any issuer
 }
 
 type Asset struct {

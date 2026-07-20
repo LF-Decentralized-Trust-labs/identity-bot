@@ -42,6 +42,40 @@ type Handler struct {
 	TrustGate      *secureenclave.TrustGate
 	dataDir        string // for secure relationship seed storage (never put raw seeds in main JSON)
 	OnLoginPending func(LoginPreviewResponse)
+	// HeldCredentials returns the ACDCs this agent holds, so a credential-gated
+	// login can present a matching one. Wired by the server from the data store;
+	// nil in contexts without a credential store (then nothing is presented).
+	HeldCredentials func() []PresentedCredential
+}
+
+// presentCredentials selects held ACDCs that satisfy the bundle's requested
+// credentials (matched by schema SAID), to embed in the assertion.
+func (h *Handler) presentCredentials(bundle *ChallengeBundle) []interface{} {
+	out := []interface{}{}
+	if len(bundle.RequestedCredentials) == 0 || h == nil || h.HeldCredentials == nil {
+		return out
+	}
+	held := h.HeldCredentials()
+	for _, rc := range bundle.RequestedCredentials {
+		for _, c := range held {
+			if c.SchemaSAID == rc.SchemaSAID && isCredentialUsable(c.Status) {
+				out = append(out, c)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// isCredentialUsable treats an empty/issued/valid status as presentable; a
+// revoked/expired credential is never presented.
+func isCredentialUsable(status string) bool {
+	switch status {
+	case "", "issued", "valid", "active":
+		return true
+	default:
+		return false
+	}
 }
 
 func NewHandler(dataDir string, keri *drivers.KeriDriver) (*Handler, error) {
@@ -232,7 +266,7 @@ func (h *Handler) buildAssertion(rel *SiteRelationship, bundle *ChallengeBundle,
 		Nonce:               bundle.Nonce,
 		Dt:                  rfc3339UTC(time.Now()),
 		Disclosures:         disclosures,
-		PresentedACDCs:      []interface{}{},
+		PresentedACDCs:      h.presentCredentials(bundle),
 		CustomData:          customData,
 	}
 	d, err := assertionDigest(a)
