@@ -1220,6 +1220,196 @@ class CoreService {
     throw Exception('Failed to check health: ${response.statusCode}');
   }
 
+  // ── Assets (credential-gated access) ─────────────────────────────────────
+  //
+  // An "asset" is a website/domain or application the controller owns and gates
+  // sign-in to. The EnrollmentPolicy on each asset is the credential gate: set
+  // `requiredCredSchema` (+ optionally `requiredCredIssuer`) so a login is only
+  // authorized when the assertion presents a valid ACDC of that schema issued by
+  // that AID — e.g. gate a website behind an employee credential the org issued.
+
+  Future<AssetsListResponse> listAssets() async {
+    final response = await _client.get(Uri.parse('$baseUrl/api/assets'));
+    if (response.statusCode == 200) {
+      return AssetsListResponse.fromJson(jsonDecode(response.body));
+    }
+    throw Exception('Failed to list assets: ${response.statusCode}');
+  }
+
+  Future<AssetDetailResponse> createAsset({
+    required String displayName,
+    required String origin,
+    required String assetType, // "domain" | "application"
+    String? delegationModel, // "delegated" | "standalone"
+    EnrollmentPolicy? policy,
+  }) async {
+    final body = <String, dynamic>{
+      'display_name': displayName,
+      'origin': origin,
+      'asset_type': assetType,
+      if (delegationModel != null) 'delegation_model': delegationModel,
+      'policy': (policy ?? const EnrollmentPolicy()).toJson(),
+    };
+    final response = await _client.post(
+      Uri.parse('$baseUrl/api/assets'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(body),
+    );
+    if (response.statusCode == 201) {
+      return AssetDetailResponse.fromJson(jsonDecode(response.body));
+    }
+    final err = jsonDecode(response.body);
+    throw Exception(err['error'] ?? 'Failed to create asset: ${response.statusCode}');
+  }
+
+  Future<AssetDetailResponse> getAsset(String id) async {
+    final response = await _client.get(Uri.parse('$baseUrl/api/assets/${Uri.encodeComponent(id)}'));
+    if (response.statusCode == 200) {
+      return AssetDetailResponse.fromJson(jsonDecode(response.body));
+    }
+    throw Exception('Failed to get asset: ${response.statusCode}');
+  }
+
+  /// Updates the enrollment policy — this is the credential gate. To gate a
+  /// website login on an employee credential, set the policy's
+  /// [EnrollmentPolicy.requiredCredSchema] (schema SAID) and, to require the
+  /// org's own issuance, [EnrollmentPolicy.requiredCredIssuer] (the org AID).
+  Future<AssetResponse> updateAssetPolicy(String id, EnrollmentPolicy policy) async {
+    final response = await _client.put(
+      Uri.parse('$baseUrl/api/assets/${Uri.encodeComponent(id)}/policy'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(policy.toJson()),
+    );
+    if (response.statusCode == 200) {
+      return AssetResponse.fromJson(jsonDecode(response.body));
+    }
+    final err = jsonDecode(response.body);
+    throw Exception(err['error'] ?? 'Failed to update policy: ${response.statusCode}');
+  }
+
+  // Invites ─────────────────────────────────────────────────────────────────
+
+  Future<List<AssetInvite>> listAssetInvites(String id) async {
+    final response = await _client.get(Uri.parse('$baseUrl/api/assets/${Uri.encodeComponent(id)}/invites'));
+    if (response.statusCode == 200) {
+      final list = jsonDecode(response.body) as List<dynamic>? ?? [];
+      return list.map((e) => AssetInvite.fromJson(e as Map<String, dynamic>)).toList();
+    }
+    throw Exception('Failed to list invites: ${response.statusCode}');
+  }
+
+  Future<AssetInvite> createAssetInvite(String id, {String? label, int maxUses = 0}) async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/api/assets/${Uri.encodeComponent(id)}/invites'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({if (label != null) 'label': label, 'max_uses': maxUses}),
+    );
+    if (response.statusCode == 201) {
+      return AssetInvite.fromJson(jsonDecode(response.body));
+    }
+    throw Exception('Failed to create invite: ${response.statusCode}');
+  }
+
+  Future<void> revokeAssetInvite(String id, String token) async {
+    final response = await _client.delete(
+      Uri.parse('$baseUrl/api/assets/${Uri.encodeComponent(id)}/invites/${Uri.encodeComponent(token)}'),
+    );
+    if (response.statusCode != 200) {
+      throw Exception('Failed to revoke invite: ${response.statusCode}');
+    }
+  }
+
+  // Access requests ───────────────────────────────────────────────────────────
+
+  Future<List<AssetAccessRequest>> listAssetRequests(String id) async {
+    final response = await _client.get(Uri.parse('$baseUrl/api/assets/${Uri.encodeComponent(id)}/requests'));
+    if (response.statusCode == 200) {
+      final list = jsonDecode(response.body) as List<dynamic>? ?? [];
+      return list.map((e) => AssetAccessRequest.fromJson(e as Map<String, dynamic>)).toList();
+    }
+    throw Exception('Failed to list requests: ${response.statusCode}');
+  }
+
+  Future<void> approveAssetRequest(String id, String reqId) async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/api/assets/${Uri.encodeComponent(id)}/requests/${Uri.encodeComponent(reqId)}/approve'),
+    );
+    if (response.statusCode != 200) {
+      throw Exception('Failed to approve request: ${response.statusCode}');
+    }
+  }
+
+  Future<void> denyAssetRequest(String id, String reqId) async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/api/assets/${Uri.encodeComponent(id)}/requests/${Uri.encodeComponent(reqId)}/deny'),
+    );
+    if (response.statusCode != 200) {
+      throw Exception('Failed to deny request: ${response.statusCode}');
+    }
+  }
+
+  // Members ───────────────────────────────────────────────────────────────────
+
+  Future<List<AssetMember>> listAssetMembers(String id) async {
+    final response = await _client.get(Uri.parse('$baseUrl/api/assets/${Uri.encodeComponent(id)}/members'));
+    if (response.statusCode == 200) {
+      final list = jsonDecode(response.body) as List<dynamic>? ?? [];
+      return list.map((e) => AssetMember.fromJson(e as Map<String, dynamic>)).toList();
+    }
+    throw Exception('Failed to list members: ${response.statusCode}');
+  }
+
+  Future<void> removeAssetMember(String id, String aid) async {
+    final response = await _client.delete(
+      Uri.parse('$baseUrl/api/assets/${Uri.encodeComponent(id)}/members/${Uri.encodeComponent(aid)}'),
+    );
+    if (response.statusCode != 200) {
+      throw Exception('Failed to remove member: ${response.statusCode}');
+    }
+  }
+
+  // ── Contacts (read-one) ──────────────────────────────────────────────────
+
+  Future<ContactResponse> getContact(String aid) async {
+    final response = await _client.get(Uri.parse('$baseUrl/api/contacts/${Uri.encodeComponent(aid)}'));
+    if (response.statusCode == 200) {
+      return ContactResponse.fromJson(jsonDecode(response.body));
+    }
+    final err = jsonDecode(response.body);
+    throw Exception(err['error'] ?? 'Failed to get contact: ${response.statusCode}');
+  }
+
+  // ── Credentials (present) ────────────────────────────────────────────────
+
+  /// Creates an ACDC presentation of a held credential for a verifier.
+  /// Returns {presentation_said, presentation_json_b64, pres_said_b64, status}.
+  /// (Desktop-only — requires the Python KERI driver.)
+  Future<Map<String, dynamic>> presentCredential({
+    required String acdcSaid,
+    required String holderAid,
+    String? issuerAid,
+    String? schemaSaid,
+    String? cesrSignature,
+  }) async {
+    final body = <String, dynamic>{
+      'acdc_said': acdcSaid,
+      'holder_aid': holderAid,
+      if (issuerAid != null) 'issuer_aid': issuerAid,
+      if (schemaSaid != null) 'schema_said': schemaSaid,
+      if (cesrSignature != null) 'cesr_signature': cesrSignature,
+    };
+    final response = await _client.post(
+      Uri.parse('$baseUrl/api/credential/present'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(body),
+    );
+    if (response.statusCode == 201) {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    }
+    final err = jsonDecode(response.body) as Map<String, dynamic>;
+    throw Exception(err['error'] ?? 'Credential presentation failed: ${response.statusCode}');
+  }
+
   void dispose() {
     _client.close();
   }
@@ -1669,4 +1859,240 @@ class ServiceProvidersListResponse {
       count: (json['count'] as num?)?.toInt() ?? 0,
     );
   }
+}
+
+// ── Asset models (credential-gated access) ───────────────────────────────────
+
+// EnrollmentPolicy is the per-asset access gate. `mode` is enforced by OSS core
+// along with `requiredAal`; the credential-gating fields (`requiredCredSchema`
+// /`requiredCredIssuer`) authorize a sign-in only when the assertion presents a
+// valid, unrevoked ACDC of that schema (and, if set, issued by that AID).
+// `requiredBadge`/`requiredOfaScore` are stored+returned but enforced by the
+// commercial layer on top.
+class EnrollmentPolicy {
+  final String mode; // "open" | "request" | "invite"
+  final int requiredAal; // NIST 800-63B level 1/2/3; 0 = not required
+  final String requiredBadge; // ""|"green"|"yellow"|"red"
+  final int requiredOfaScore; // 0 = not required
+  final String requiredCredSchema; // schema SAID; "" = no credential required
+  final String requiredCredIssuer; // issuer AID; "" = any issuer
+
+  const EnrollmentPolicy({
+    this.mode = 'open',
+    this.requiredAal = 0,
+    this.requiredBadge = '',
+    this.requiredOfaScore = 0,
+    this.requiredCredSchema = '',
+    this.requiredCredIssuer = '',
+  });
+
+  factory EnrollmentPolicy.fromJson(Map<String, dynamic> json) => EnrollmentPolicy(
+    mode: json['mode'] as String? ?? 'open',
+    requiredAal: (json['required_aal'] as num?)?.toInt() ?? 0,
+    requiredBadge: json['required_badge'] as String? ?? '',
+    requiredOfaScore: (json['required_ofa_score'] as num?)?.toInt() ?? 0,
+    requiredCredSchema: json['required_cred_schema'] as String? ?? '',
+    requiredCredIssuer: json['required_cred_issuer'] as String? ?? '',
+  );
+
+  Map<String, dynamic> toJson() => {
+    'mode': mode,
+    'required_aal': requiredAal,
+    'required_badge': requiredBadge,
+    'required_ofa_score': requiredOfaScore,
+    'required_cred_schema': requiredCredSchema,
+    'required_cred_issuer': requiredCredIssuer,
+  };
+
+  EnrollmentPolicy copyWith({
+    String? mode,
+    int? requiredAal,
+    String? requiredBadge,
+    int? requiredOfaScore,
+    String? requiredCredSchema,
+    String? requiredCredIssuer,
+  }) => EnrollmentPolicy(
+    mode: mode ?? this.mode,
+    requiredAal: requiredAal ?? this.requiredAal,
+    requiredBadge: requiredBadge ?? this.requiredBadge,
+    requiredOfaScore: requiredOfaScore ?? this.requiredOfaScore,
+    requiredCredSchema: requiredCredSchema ?? this.requiredCredSchema,
+    requiredCredIssuer: requiredCredIssuer ?? this.requiredCredIssuer,
+  );
+
+  bool get gatesOnCredential => requiredCredSchema.isNotEmpty;
+}
+
+class AssetResponse {
+  final String id;
+  final String displayName;
+  final String assetType; // "domain" | "application"
+  final String origin;
+  final String pairwiseAid;
+  final String delegationModel; // "delegated" | "standalone"
+  final String delegatorAid;
+  final EnrollmentPolicy policy;
+  final int signingIndex;
+  final String createdAt;
+  final String updatedAt;
+
+  const AssetResponse({
+    required this.id,
+    required this.displayName,
+    required this.assetType,
+    required this.origin,
+    required this.pairwiseAid,
+    required this.delegationModel,
+    this.delegatorAid = '',
+    required this.policy,
+    this.signingIndex = 0,
+    this.createdAt = '',
+    this.updatedAt = '',
+  });
+
+  /// The asset can sign login challenges once it has a derived signing key.
+  bool get canSign => signingIndex > 0;
+
+  factory AssetResponse.fromJson(Map<String, dynamic> json) => AssetResponse(
+    id: json['id'] as String? ?? '',
+    displayName: json['display_name'] as String? ?? '',
+    assetType: json['asset_type'] as String? ?? '',
+    origin: json['origin'] as String? ?? '',
+    pairwiseAid: json['pairwise_aid'] as String? ?? '',
+    delegationModel: json['delegation_model'] as String? ?? '',
+    delegatorAid: json['delegator_aid'] as String? ?? '',
+    policy: json['policy'] != null
+        ? EnrollmentPolicy.fromJson(json['policy'] as Map<String, dynamic>)
+        : const EnrollmentPolicy(),
+    signingIndex: (json['signing_index'] as num?)?.toInt() ?? 0,
+    createdAt: json['created_at'] as String? ?? '',
+    updatedAt: json['updated_at'] as String? ?? '',
+  );
+}
+
+// AssetListItem wraps an asset with its aggregate counts, as returned by the
+// list endpoint (`{"assets": [{asset, member_count, pending_count}]}`).
+class AssetListItem {
+  final AssetResponse asset;
+  final int memberCount;
+  final int pendingCount;
+
+  const AssetListItem({
+    required this.asset,
+    this.memberCount = 0,
+    this.pendingCount = 0,
+  });
+
+  factory AssetListItem.fromJson(Map<String, dynamic> json) => AssetListItem(
+    asset: AssetResponse.fromJson(json['asset'] as Map<String, dynamic>),
+    memberCount: (json['member_count'] as num?)?.toInt() ?? 0,
+    pendingCount: (json['pending_count'] as num?)?.toInt() ?? 0,
+  );
+}
+
+class AssetsListResponse {
+  final List<AssetListItem> assets;
+
+  const AssetsListResponse({required this.assets});
+
+  factory AssetsListResponse.fromJson(Map<String, dynamic> json) => AssetsListResponse(
+    assets: (json['assets'] as List<dynamic>?)
+        ?.map((e) => AssetListItem.fromJson(e as Map<String, dynamic>))
+        .toList() ?? [],
+  );
+}
+
+// AssetDetailResponse is returned by create/get (`{asset, sdk_config}`).
+// sdkConfig carries the login-SDK env for the asset's site (pairwise AID, OOBI,
+// asset id, enrollment mode).
+class AssetDetailResponse {
+  final AssetResponse asset;
+  final Map<String, String> sdkConfig;
+
+  const AssetDetailResponse({required this.asset, this.sdkConfig = const {}});
+
+  factory AssetDetailResponse.fromJson(Map<String, dynamic> json) => AssetDetailResponse(
+    asset: AssetResponse.fromJson(json['asset'] as Map<String, dynamic>),
+    sdkConfig: (json['sdk_config'] as Map<String, dynamic>?)
+        ?.map((k, v) => MapEntry(k, v?.toString() ?? '')) ?? {},
+  );
+}
+
+class AssetInvite {
+  final String token;
+  final String assetId;
+  final String label;
+  final int maxUses; // 0 = unlimited
+  final int useCount;
+  final String createdAt;
+  final bool revoked;
+
+  const AssetInvite({
+    required this.token,
+    required this.assetId,
+    this.label = '',
+    this.maxUses = 0,
+    this.useCount = 0,
+    this.createdAt = '',
+    this.revoked = false,
+  });
+
+  factory AssetInvite.fromJson(Map<String, dynamic> json) => AssetInvite(
+    token: json['token'] as String? ?? '',
+    assetId: json['asset_id'] as String? ?? '',
+    label: json['label'] as String? ?? '',
+    maxUses: (json['max_uses'] as num?)?.toInt() ?? 0,
+    useCount: (json['use_count'] as num?)?.toInt() ?? 0,
+    createdAt: json['created_at'] as String? ?? '',
+    revoked: json['revoked'] == true,
+  );
+}
+
+class AssetAccessRequest {
+  final String id;
+  final String assetId;
+  final Map<String, String> requesterInfo;
+  final String status; // "pending" | "approved" | "denied"
+  final String createdAt;
+  final String? resolvedAt;
+
+  const AssetAccessRequest({
+    required this.id,
+    required this.assetId,
+    this.requesterInfo = const {},
+    this.status = 'pending',
+    this.createdAt = '',
+    this.resolvedAt,
+  });
+
+  factory AssetAccessRequest.fromJson(Map<String, dynamic> json) => AssetAccessRequest(
+    id: json['id'] as String? ?? '',
+    assetId: json['asset_id'] as String? ?? '',
+    requesterInfo: (json['requester_info'] as Map<String, dynamic>?)
+        ?.map((k, v) => MapEntry(k, v?.toString() ?? '')) ?? {},
+    status: json['status'] as String? ?? 'pending',
+    createdAt: json['created_at'] as String? ?? '',
+    resolvedAt: json['resolved_at'] as String?,
+  );
+}
+
+class AssetMember {
+  final String assetId;
+  final String pairwiseAid;
+  final String joinedAt;
+  final String inviteToken;
+
+  const AssetMember({
+    required this.assetId,
+    required this.pairwiseAid,
+    this.joinedAt = '',
+    this.inviteToken = '',
+  });
+
+  factory AssetMember.fromJson(Map<String, dynamic> json) => AssetMember(
+    assetId: json['asset_id'] as String? ?? '',
+    pairwiseAid: json['pairwise_aid'] as String? ?? '',
+    joinedAt: json['joined_at'] as String? ?? '',
+    inviteToken: json['invite_token'] as String? ?? '',
+  );
 }
