@@ -11,6 +11,7 @@ import Mobilecore
     GeneratedPluginRegistrant.register(with: self)
 
     let controller = window?.rootViewController as! FlutterViewController
+    HardwareKeyWrapper.register(messenger: controller.binaryMessenger)
     let channel = FlutterMethodChannel(name: "com.identityagent/mobilecore",
                                        binaryMessenger: controller.binaryMessenger)
 
