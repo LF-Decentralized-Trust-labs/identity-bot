@@ -504,6 +504,70 @@ enum CoreConnectionState {
   error,
 }
 
+/// One label→value row from a scan preview (a requested disclosure, a reference
+/// field, …). Mirrors the Go `PreviewDetail`.
+class ScanPreviewDetail {
+  final String label;
+  final String value;
+
+  const ScanPreviewDetail({required this.label, this.value = ''});
+
+  factory ScanPreviewDetail.fromJson(Map<String, dynamic> json) =>
+      ScanPreviewDetail(
+        label: json['label']?.toString() ?? '',
+        value: json['value']?.toString() ?? '',
+      );
+}
+
+/// The type-agnostic consent preview returned by `POST /api/scan/decode`. The
+/// scanner is a dumb router: the backend fetches the Ask, reads its action `t`,
+/// and returns this generic preview from the registered handler (login,
+/// add-contact, present/receive-credential, …). One consent screen renders every
+/// action type. Mirrors the Go `GenericPreview`.
+class ScanDecodeResult {
+  final int t; // action discriminator (1=login, 2=add_contact, …)
+  final String action; // "login" | "add_contact" | …
+  final String title; // "Sign-in request", "Contact request"
+  final String subtitle; // audience / who is asking
+  final String counterparty; // AID or display name of the asker
+  final List<ScanPreviewDetail> details; // fields being shared, reference rows
+  final List<String> tierOptions; // e.g. add-contact: general/trusted/professional
+  final String defaultTier;
+  final String warning; // amber caution line, if any
+
+  const ScanDecodeResult({
+    required this.t,
+    required this.action,
+    this.title = '',
+    this.subtitle = '',
+    this.counterparty = '',
+    this.details = const [],
+    this.tierOptions = const [],
+    this.defaultTier = '',
+    this.warning = '',
+  });
+
+  factory ScanDecodeResult.fromJson(Map<String, dynamic> json) {
+    return ScanDecodeResult(
+      t: (json['t'] as num?)?.toInt() ?? 0,
+      action: json['action']?.toString() ?? '',
+      title: json['title']?.toString() ?? '',
+      subtitle: json['subtitle']?.toString() ?? '',
+      counterparty: json['counterparty']?.toString() ?? '',
+      details: (json['details'] as List<dynamic>?)
+              ?.map((e) => ScanPreviewDetail.fromJson(e as Map<String, dynamic>))
+              .toList() ??
+          const [],
+      tierOptions: (json['tier_options'] as List<dynamic>?)
+              ?.map((e) => e.toString())
+              .toList() ??
+          const [],
+      defaultTier: json['default_tier']?.toString() ?? '',
+      warning: json['warning']?.toString() ?? '',
+    );
+  }
+}
+
 class CoreService {
   final String baseUrl;
   final http.Client _client;
@@ -1408,6 +1472,59 @@ class CoreService {
     }
     final err = jsonDecode(response.body) as Map<String, dynamic>;
     throw Exception(err['error'] ?? 'Credential presentation failed: ${response.statusCode}');
+  }
+
+  // ── Universal scan (the one-click transaction initiator) ─────────────────
+  //
+  // The scanner is a dumb router: it forwards the scanned/pasted Ask pointer
+  // (.../i/{token}) to the backend, which fetches the Ask, reads its action `t`,
+  // and dispatches to the registered handler. `decode` returns a generic
+  // preview; `execute` completes (or declines) the transaction. This covers ANY
+  // Ask action — login, add-contact, present/receive-credential, … — through the
+  // same two calls; no per-type client logic.
+
+  /// Decodes a scanned/pasted Ask pointer into a generic consent preview.
+  /// The backend resolves the action type from the fetched Ask.
+  Future<ScanDecodeResult> scanDecode(String url) async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/api/scan/decode'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'url': url}),
+    );
+    if (response.statusCode == 200) {
+      return ScanDecodeResult.fromJson(
+          jsonDecode(response.body) as Map<String, dynamic>);
+    }
+    // The scan handlers return plain-text errors (http.Error), not JSON.
+    final detail = response.body.trim();
+    throw Exception(detail.isNotEmpty
+        ? detail
+        : 'Scan decode failed: ${response.statusCode}');
+  }
+
+  /// Completes (or declines) the decoded transaction. [tier] is the chosen
+  /// escalation tier for actions that take one (e.g. add-contact).
+  Future<Map<String, dynamic>> scanExecute({
+    required String url,
+    required bool approved,
+    String? tier,
+  }) async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/api/scan/execute'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'url': url,
+        'approved': approved,
+        if (tier != null) 'tier': tier,
+      }),
+    );
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    }
+    final detail = response.body.trim();
+    throw Exception(detail.isNotEmpty
+        ? detail
+        : 'Scan execute failed: ${response.statusCode}');
   }
 
   void dispose() {
