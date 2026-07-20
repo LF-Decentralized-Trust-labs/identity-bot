@@ -1725,6 +1725,11 @@ class EnclaveStatusResponse {
   final String backingLabel;
   final bool? tpmPresent;
   final bool? tpmEnabled;
+  // The real device-trust verdict computed by the backend TrustGate from the
+  // attestation chain (identity-agent-core/server/enclave_detect.go →
+  // trustAllowed). Null means the backend didn't evaluate trust. Onboarding
+  // gates fail-closed on this: only `true` proceeds.
+  final bool? trustAllowed;
 
   EnclaveStatusResponse({
     required this.hardwareBacked,
@@ -1732,6 +1737,7 @@ class EnclaveStatusResponse {
     required this.backingLabel,
     this.tpmPresent,
     this.tpmEnabled,
+    this.trustAllowed,
   });
 
   factory EnclaveStatusResponse.fromJson(Map<String, dynamic> json) {
@@ -1741,6 +1747,7 @@ class EnclaveStatusResponse {
       backingLabel: json['backingLabel'] as String? ?? 'Software',
       tpmPresent: json['tpmPresent'] as bool?,
       tpmEnabled: json['tpmEnabled'] as bool?,
+      trustAllowed: json['trustAllowed'] as bool?,
     );
   }
 }
