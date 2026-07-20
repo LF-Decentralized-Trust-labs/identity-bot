@@ -1383,6 +1383,84 @@ class CoreService {
     }
   }
 
+  // Employees (org roster + add_employee t=3) ─────────────────────────────────
+
+  /// Mint an employee invite for [assetId] (the portal it grants access to) and
+  /// its signed t=3 Ask. Returns {invite, token, url} — share `url` as a QR/link.
+  /// [maxUses] 1 = invite one; 0 = invite many.
+  Future<Map<String, dynamic>> createEmployeeInvite({
+    required String role,
+    required String assetId,
+    String? label,
+    int maxUses = 0,
+  }) async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/api/employees/invites'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'role': role,
+        'asset_id': assetId,
+        if (label != null) 'label': label,
+        'max_uses': maxUses,
+      }),
+    );
+    if (response.statusCode == 200 || response.statusCode == 201) {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    }
+    throw Exception('Failed to create employee invite: ${response.statusCode}');
+  }
+
+  /// The org roster. Each entry: {pairwise_aid, name, role, status, ...}.
+  Future<List<Map<String, dynamic>>> listEmployees() async {
+    final response = await _client.get(Uri.parse('$baseUrl/api/employees/'));
+    if (response.statusCode == 200) {
+      final list = jsonDecode(response.body) as List<dynamic>? ?? [];
+      return list.map((e) => e as Map<String, dynamic>).toList();
+    }
+    throw Exception('Failed to list employees: ${response.statusCode}');
+  }
+
+  Future<List<Map<String, dynamic>>> listEmployeeInvites() async {
+    final response = await _client.get(Uri.parse('$baseUrl/api/employees/invites'));
+    if (response.statusCode == 200) {
+      final list = jsonDecode(response.body) as List<dynamic>? ?? [];
+      return list.map((e) => e as Map<String, dynamic>).toList();
+    }
+    throw Exception('Failed to list employee invites: ${response.statusCode}');
+  }
+
+  Future<void> revokeEmployeeInvite(String token) async {
+    final response = await _client.delete(
+      Uri.parse('$baseUrl/api/employees/invites/${Uri.encodeComponent(token)}'),
+    );
+    if (response.statusCode != 200) {
+      throw Exception('Failed to revoke employee invite: ${response.statusCode}');
+    }
+  }
+
+  /// Approve a pending employee (pending → active). They can now pass the
+  /// membership gate on assets sourced to the employee list.
+  Future<Map<String, dynamic>> approveEmployee(String pairwiseAid) async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/api/employees/${Uri.encodeComponent(pairwiseAid)}/approve'),
+    );
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    }
+    throw Exception('Failed to approve employee: ${response.statusCode}');
+  }
+
+  /// Revoke an employee (→ revoked). They immediately fail the membership gate.
+  Future<Map<String, dynamic>> revokeEmployee(String pairwiseAid) async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/api/employees/${Uri.encodeComponent(pairwiseAid)}/revoke'),
+    );
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    }
+    throw Exception('Failed to revoke employee: ${response.statusCode}');
+  }
+
   // Access requests ───────────────────────────────────────────────────────────
 
   Future<List<AssetAccessRequest>> listAssetRequests(String id) async {
@@ -1993,6 +2071,9 @@ class EnrollmentPolicy {
   final int requiredOfaScore; // 0 = not required
   final String requiredCredSchema; // schema SAID; "" = no credential required
   final String requiredCredIssuer; // issuer AID; "" = any issuer
+  // "" | "asset" = gate on this asset's own members; "employees" = gate on the
+  // org's ACTIVE employee list (the AID method for an employee portal).
+  final String membershipSource;
 
   const EnrollmentPolicy({
     this.mode = 'open',
@@ -2001,6 +2082,7 @@ class EnrollmentPolicy {
     this.requiredOfaScore = 0,
     this.requiredCredSchema = '',
     this.requiredCredIssuer = '',
+    this.membershipSource = '',
   });
 
   factory EnrollmentPolicy.fromJson(Map<String, dynamic> json) => EnrollmentPolicy(
@@ -2010,6 +2092,7 @@ class EnrollmentPolicy {
     requiredOfaScore: (json['required_ofa_score'] as num?)?.toInt() ?? 0,
     requiredCredSchema: json['required_cred_schema'] as String? ?? '',
     requiredCredIssuer: json['required_cred_issuer'] as String? ?? '',
+    membershipSource: json['membership_source'] as String? ?? '',
   );
 
   Map<String, dynamic> toJson() => {
@@ -2019,6 +2102,7 @@ class EnrollmentPolicy {
     'required_ofa_score': requiredOfaScore,
     'required_cred_schema': requiredCredSchema,
     'required_cred_issuer': requiredCredIssuer,
+    'membership_source': membershipSource,
   };
 
   EnrollmentPolicy copyWith({
@@ -2028,6 +2112,7 @@ class EnrollmentPolicy {
     int? requiredOfaScore,
     String? requiredCredSchema,
     String? requiredCredIssuer,
+    String? membershipSource,
   }) => EnrollmentPolicy(
     mode: mode ?? this.mode,
     requiredAal: requiredAal ?? this.requiredAal,
@@ -2035,9 +2120,11 @@ class EnrollmentPolicy {
     requiredOfaScore: requiredOfaScore ?? this.requiredOfaScore,
     requiredCredSchema: requiredCredSchema ?? this.requiredCredSchema,
     requiredCredIssuer: requiredCredIssuer ?? this.requiredCredIssuer,
+    membershipSource: membershipSource ?? this.membershipSource,
   );
 
   bool get gatesOnCredential => requiredCredSchema.isNotEmpty;
+  bool get gatesOnEmployees => membershipSource == 'employees';
 }
 
 class AssetResponse {

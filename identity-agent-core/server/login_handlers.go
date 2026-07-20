@@ -231,15 +231,25 @@ func (s *CoreServer) authorizeAssetAccess(ctx context.Context, siteAID, pairwise
 		}
 		// Enrollment mode gate.
 		if a.Policy.Mode != asset.EnrollmentOpen {
-			member := false
-			for _, m := range s.assetHandler.Store.ListMembers(a.ID) {
-				if m.PairwiseAID == pairwiseAID {
-					member = true
-					break
+			// MembershipSource selects which roster the AID must appear in. "employees"
+			// gates on the org's employee list and admits ONLY active employees (a
+			// revoked/terminated employee is denied even though the AID once passed).
+			// Default ("" / "asset") checks this asset's own member list.
+			if a.Policy.MembershipSource == "employees" {
+				if !s.assetHandler.Store.IsActiveEmployee(pairwiseAID) {
+					return false, "not an active employee"
 				}
-			}
-			if !member {
-				return false, "not a member of this asset"
+			} else {
+				member := false
+				for _, m := range s.assetHandler.Store.ListMembers(a.ID) {
+					if m.PairwiseAID == pairwiseAID {
+						member = true
+						break
+					}
+				}
+				if !member {
+					return false, "not a member of this asset"
+				}
 			}
 		}
 		// Credential gate (additive).
