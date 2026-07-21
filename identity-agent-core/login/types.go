@@ -17,7 +17,13 @@ type ChallengeBundle struct {
 	RequestedScore       *RequestedScore        `json:"requested_score,omitempty"`
 	CallbackURL          string                 `json:"callback_url"`
 	SessionToken         string                 `json:"session_token"`
-	Sig                  string                 `json:"sig,omitempty"`
+	// For org-owned, employees-gated assets: the relationship ANCHOR is the ORG
+	// (not the per-asset AID), so the pairwise presented at login is the same
+	// constant AID the org enrolled at sponsorship/add_employee. Empty → anchor
+	// to SiteAID (the default per-RP unlinkability model).
+	RelationshipAnchorAID  string `json:"relationship_anchor_aid,omitempty"`
+	RelationshipAnchorOOBI string `json:"relationship_anchor_oobi,omitempty"`
+	Sig                    string `json:"sig,omitempty"`
 }
 
 type RequestedCredential struct {

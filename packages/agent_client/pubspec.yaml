@@ -1,0 +1,25 @@
+name: agent_client
+description: "Backend-client glue (services, config, models, crypto, bridge) for the Identity Agent, extracted from identity_agent_ui so downstream apps can depend on the client without pulling in any OSS UI."
+publish_to: 'none'
+version: 0.1.0
+
+environment:
+  sdk: '>=3.4.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  http: ^1.6.0
+  crypto: ^3.0.7
+  pointycastle: ^4.0.0
+  ed25519_edwards: ^0.3.1
+  shared_preferences: ^2.2.3
+  flutter_rust_bridge: ^2.7.0
+  web_socket_channel: ^3.0.3
+  flutter_secure_storage: ^9.2.2
+  local_auth: ^2.3.0
+  nfc_manager: ^3.3.0
+
+flutter:
+  uses-material-design: true

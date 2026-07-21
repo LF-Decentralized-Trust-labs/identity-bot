@@ -15,6 +15,8 @@ import (
 func init() {
 	registerAsk(1, loginAsk{})
 	registerAsk(2, addContactAsk{})
+	registerAsk(3, addEmployeeAsk{})
+	registerAsk(4, addSponsorAsk{})
 }
 
 // tierRank orders the escalation tiers so we only ever escalate, never downgrade.

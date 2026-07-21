@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -90,6 +92,15 @@ func (s *CoreServer) handleScanDecode(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *CoreServer) handleScanExecute(w http.ResponseWriter, r *http.Request) {
+	// Surface handler panics as a readable 500 body (mobile has no attached
+	// console; the recovered stack is the only way to see what broke).
+	defer func() {
+		if rec := recover(); rec != nil {
+			msg := fmt.Sprintf("scan execute panic: %v\n%s", rec, debug.Stack())
+			log.Printf("[identity-agent-core] %s", msg)
+			http.Error(w, msg, http.StatusInternalServerError)
+		}
+	}()
 	var body struct {
 		URL      string `json:"url"`
 		Approved bool   `json:"approved"`

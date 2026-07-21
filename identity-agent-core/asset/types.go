@@ -15,8 +15,16 @@ const (
 // required_badge / required_ofa_score are stored and returned
 // but enforcement is handled by the commercial layer on top.
 type EnrollmentPolicy struct {
-	Mode             EnrollmentMode `json:"mode"`
-	RequiredAAL      int            `json:"required_aal"`
+	Mode EnrollmentMode `json:"mode"`
+	// MembershipSource selects which roster the membership gate consults when
+	// Mode != "open". "" or "asset" = this asset's own member list (the built-in
+	// path). Any other value (e.g. "employees") is resolved by a MembershipResolver
+	// registered at runtime — see server.RegisterMembershipResolver. This is the
+	// generic seam that lets an overlay (or a third-party org agent) gate login on
+	// its own roster without forking the core; the core ships no non-default
+	// resolvers, so an unrecognized source fails closed.
+	MembershipSource string `json:"membership_source"` // ""|"asset"|<resolver key>
+	RequiredAAL      int    `json:"required_aal"`
 	RequiredBadge    string         `json:"required_badge"`      // ""|"green"|"yellow"|"red"
 	RequiredOFAScore int            `json:"required_ofa_score"`  // 0 = not required
 	// Credential gating: when RequiredCredSchema is set, a sign-in is authorized
