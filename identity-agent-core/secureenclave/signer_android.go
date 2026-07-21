@@ -19,3 +19,6 @@ func (s *strongBoxSigner) Sign([]byte) ([]byte, error) { return nil, ErrSignerUn
 // newDarwinSecureEnclaveSigner is called unconditionally from signer.go but only
 // defined in darwin-tagged files. Stub it out for Android cross-compilation.
 func newDarwinSecureEnclaveSigner() PlatformSigner { return nil }
+// newTPMSigner is called unconditionally from signer.go; Android has no TPM
+// path (StrongBox is the hardware story there).
+func newTPMSigner() PlatformSigner { return nil }
