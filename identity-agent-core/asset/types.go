@@ -87,9 +87,13 @@ type EmployeeInvite struct {
 	// The portal (asset) this employment grants access to. The accepting employee
 	// derives their stable per-site pairwise AID against SiteAID during add_employee,
 	// so it equals the AID they later present at that portal's login (AID method).
-	AssetID   string    `json:"asset_id,omitempty"`
-	SiteAID   string    `json:"site_aid,omitempty"`
-	SiteOOBI  string    `json:"site_oobi,omitempty"`
+	AssetID  string `json:"asset_id,omitempty"`
+	SiteAID  string `json:"site_aid,omitempty"`
+	SiteOOBI string `json:"site_oobi,omitempty"`
+	// IsSponsor marks the org-creation sponsor invite (t=4): redeeming it makes the
+	// individual an ACTIVE super-admin immediately (they're the founding sponsor,
+	// there's no one above them to approve), and requires a vouch signature.
+	IsSponsor bool      `json:"is_sponsor,omitempty"`
 	UseCount  int       `json:"use_count"`
 	CreatedAt time.Time `json:"created_at"`
 	Revoked   bool      `json:"revoked"`
@@ -109,6 +113,12 @@ type Employee struct {
 	InviteToken    string    `json:"invite_token,omitempty"`
 	CredentialSAID string    `json:"credential_said,omitempty"`
 	OOBI           string    `json:"oobi,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	// IsSponsor + the vouch: set when this employee is the org's founding sponsor.
+	// VouchSig is the individual's signature over {sponsor_aid, org_aid} — the
+	// org's stored proof that a real person stands behind it.
+	IsSponsor    bool      `json:"is_sponsor,omitempty"`
+	VouchSig     string    `json:"vouch_sig,omitempty"`
+	VouchPayload string    `json:"vouch_payload,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
