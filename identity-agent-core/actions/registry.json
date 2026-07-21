@@ -1,0 +1,101 @@
+{
+  "$schema": "./registry.schema.json",
+  "registry_version": "1.0",
+  "envelope_version": "ASK1",
+  "description": "Canonical machine-readable registry of Identity Agent action codes. Integer `code` (t) is the canonical wire identifier; `key` is the stable human/URL handle (used as ?action= in OOBI URLs and as the share_actions.action_key). This file is the single source of truth: it seeds identity.db and is imported by any Identity Agent. See docs/action-code-registry.md for the spec + governance.",
+  "actions": [
+    {
+      "code": 1,
+      "key": "login",
+      "name": "Sign in",
+      "summary": "Authenticate to a relying party (website/app/device) with a pairwise identity.",
+      "who_mints": "relying_party",
+      "status": "active",
+      "version": "1.0",
+      "request_schema": {
+        "site_aid": { "type": "string", "required": true, "kind": "open" },
+        "site_oobi": { "type": "string", "required": true, "kind": "open" },
+        "audience": { "type": "string", "required": true, "kind": "open" },
+        "nonce": { "type": "string", "required": true, "kind": "open" },
+        "dt": { "type": "string", "required": true, "kind": "open" },
+        "expiry": { "type": "string", "required": true, "kind": "open" },
+        "requested_disclosures": { "type": "array", "required": false, "kind": "open" },
+        "requested_credentials": { "type": "array", "required": false, "kind": "open" },
+        "requested_score": { "type": "boolean", "required": false, "kind": "open" },
+        "callback_url": { "type": "string", "required": false, "kind": "open" },
+        "session_token": { "type": "string", "required": false, "kind": "open" },
+        "relationship_anchor_aid": { "type": "string", "required": false, "kind": "open" },
+        "relationship_anchor_oobi": { "type": "string", "required": false, "kind": "open" }
+      },
+      "preview_contract": { "title": "Sign in to {site}", "conveys": ["site", "requested data/credentials/score"] },
+      "outcome": "The agent presents a pairwise AID (per-RP by default; anchored to a chosen identity when relationship_anchor_aid is set), signs the challenge, and the RP verifies and optionally applies its access policy.",
+      "tiers": null,
+      "ui": { "share_menu": false, "icon": "", "enabled": true, "sort_order": 0, "subtitle": "" }
+    },
+    {
+      "code": 2,
+      "key": "add_contact",
+      "name": "Add Contact",
+      "summary": "A mutual, front-facing \"we know each other\" contact ceremony between two agents.",
+      "who_mints": "peer",
+      "status": "active",
+      "version": "1.0",
+      "request_schema": {
+        "tier": {
+          "type": "string",
+          "required": true,
+          "kind": "closed_enum",
+          "values": ["general", "trusted", "professional"]
+        },
+        "display_name": { "type": "string", "required": false, "kind": "open" }
+      },
+      "preview_contract": { "title": "Add {name} as a contact.", "conveys": ["name", "tier"] },
+      "outcome": "Each side records the other as a contact at the chosen tier (distinct from low-level transactional KERI contacts, which are automatic and unceremonious).",
+      "tiers": ["general", "trusted", "professional"],
+      "ui": { "share_menu": true, "icon": "person_add", "enabled": true, "sort_order": 1, "subtitle": "" }
+    },
+    {
+      "code": 3,
+      "key": "add_employee",
+      "name": "Add Employee",
+      "summary": "An organization invites an individual to become an employee; the individual's agent presents a stable per-org pairwise identity to be enrolled.",
+      "who_mints": "organization",
+      "status": "active",
+      "version": "1.0",
+      "request_schema": {
+        "org_name": { "type": "string", "required": true, "kind": "open" },
+        "org_aid": { "type": "string", "required": true, "kind": "open" },
+        "org_oobi": { "type": "string", "required": true, "kind": "open" },
+        "site_aid": { "type": "string", "required": true, "kind": "open" },
+        "site_oobi": { "type": "string", "required": true, "kind": "open" },
+        "role": { "type": "string", "required": false, "kind": "open" },
+        "invite_token": { "type": "string", "required": true, "kind": "open" }
+      },
+      "preview_contract": { "title": "Join {org} as {role}.", "conveys": ["org", "role"] },
+      "outcome": "The individual derives/reuses a stable pairwise AID for the org and is added to the counterpart's roster (pending -> active on approval). The code + schema are universal; the roster/approval mechanics are an implementation concern.",
+      "tiers": null,
+      "ui": { "share_menu": false, "icon": "", "enabled": true, "sort_order": 0, "subtitle": "" }
+    },
+    {
+      "code": 4,
+      "key": "sponsor_org",
+      "name": "Sponsor Organization",
+      "summary": "An individual attests (vouches) that a real person stands behind a newly created organization, becoming its founding super-admin.",
+      "who_mints": "organization",
+      "status": "active",
+      "version": "1.0",
+      "request_schema": {
+        "org_name": { "type": "string", "required": true, "kind": "open" },
+        "org_aid": { "type": "string", "required": true, "kind": "open" },
+        "org_oobi": { "type": "string", "required": true, "kind": "open" },
+        "site_aid": { "type": "string", "required": true, "kind": "open" },
+        "site_oobi": { "type": "string", "required": true, "kind": "open" },
+        "invite_token": { "type": "string", "required": true, "kind": "open" }
+      },
+      "preview_contract": { "title": "Sponsor {org} — become its super-admin and first employee.", "conveys": ["org"] },
+      "outcome": "The individual signs a vouch over the organization's AID (stored by the counterpart as proof) and is enrolled as the active super-admin. No delegated inception — the organization controls its own keys; the sponsor only attests.",
+      "tiers": null,
+      "ui": { "share_menu": false, "icon": "", "enabled": true, "sort_order": 0, "subtitle": "" }
+    }
+  ]
+}
