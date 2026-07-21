@@ -157,3 +157,33 @@ The LF Decentralized Trust project publishes signed release artifacts for each `
 - Multi-admin model: how do multiple org admins co-manage an org AID within the protocol?
 - Org-to-org credential issuance: any additional protocol conventions beyond standard ACDC?
 - **Org profile field specification** *(task required before first org demo)*: The current open source org profile includes `org_name`, `org_type`, and `jurisdiction`. The `jurisdiction` format is **RESOLVED (2026-06-13)**: store the **incorporation jurisdiction** as an **ISO 3166 country code** plus an **optional ISO 3166-2 subdivision** (e.g. US state), and keep a **separate optional `operating_jurisdictions[]` list** for where the org operates. Rationale: free-text jurisdiction would break the rights-profile match that the compliance jurisdiction model already uses — structured codes let org profiles bind cleanly to the canonical jurisdiction-keyed Digital Rights Profiles. Still open: what other profile fields are universally applicable vs. industry-specific. This must be resolved before the org onboarding flow is built. Tracked in `tasks.md`.
+
+---
+
+## Amendment (2026-07-21): Core extension seams
+
+The extension model above ("embed `identity-agent-core`, extend the REST API +
+schema") is realized through a small, generic set of **extension seams** in
+`identity-agent-core` (package `server`), so a service provider's implementation
+attaches to the core **without forking it**. These seams are the *public
+contract*; the implementation behind them is each provider's own.
+
+| Seam | Purpose |
+|---|---|
+| `RegisterMembershipResolver(source, resolver)` | Gate a sign-in on your own roster. The core's access check resolves a non-default `EnrollmentPolicy.MembershipSource` (any value other than `""` / `"asset"`) through your registered resolver, which returns admit/deny for a presented pairwise AID. Unregistered sources fail closed. |
+| `CoreServer.MountExtraRoutes(fn)` | Mount your own HTTP endpoints under `/api` (your management / invite / redeem routes). |
+| `StoreAsk(token, ask)` | Publish an Ask your implementation mints at the canonical `/i/{token}` URL, so scanners fetch it exactly like a core-minted Ask. |
+| `CoreServer.AssetStore()` · `MintPairwise()` · `PublicURL()` | The minimal read / mint / URL accessors those endpoints need. |
+
+The **universal action language** (action codes + schemas — ADR-017, `actions/registry.json`)
+and the **individual side of every action** are open source; that is what
+guarantees any individual agent interoperates with any org agent regardless of
+who built it. What a provider keeps to itself is the **implementation** behind the
+seams — its roster, approval/lifecycle, access policy, and storage layout (kept in
+its own Data Domain per ADR-026).
+
+**Shape of building an org agent (a direction, not a recipe):** embed
+`identity-agent-core`; register a membership resolver backed by your own roster;
+mount your endpoints via `MountExtraRoutes`; mint invites/QRs as Asks and publish
+them with `StoreAsk`; store your org data in its own domain database. How you
+model and run any of that is yours to decide.

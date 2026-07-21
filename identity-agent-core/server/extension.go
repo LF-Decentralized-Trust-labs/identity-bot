@@ -61,7 +61,18 @@ func (s *CoreServer) PublicURL(r *http.Request) string {
 
 // MountExtraRoutes registers fn to add routes under the core's /api router. Call
 // during startup, before serving; fn runs inside the /api chi.Route group, so an
-// overlay can add e.g. POST /api/employees/invites/{token}/redeem.
+// overlay can add its own endpoints.
 func (s *CoreServer) MountExtraRoutes(fn func(chi.Router)) {
 	s.extraRoutes = append(s.extraRoutes, fn)
+}
+
+// StoreAsk registers a pre-built, signed Ask under token so the core serves it at
+// the canonical /i/{token} URL — the same fetch path every scanner already uses
+// for core-minted Asks. An overlay that originates its own Asks (e.g. a QR a
+// counterpart agent mints for someone to scan) calls this instead of hosting a
+// separate route, so its Asks are indistinguishable to scanners from core ones.
+func StoreAsk(token string, ask []byte) {
+	mintedAsks.Lock()
+	mintedAsks.m[token] = ask
+	mintedAsks.Unlock()
 }
