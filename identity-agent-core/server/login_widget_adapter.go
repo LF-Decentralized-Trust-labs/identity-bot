@@ -67,6 +67,14 @@ func (s *CoreServer) createSignedAssetChallenge(assetID, audience string, disclo
 		CallbackURL:          fmt.Sprintf("%s/api/login/callback", publicURL),
 		SessionToken:         sessionToken,
 	}
+	// Employees-gated org portal: anchor the signer's relationship to the ORG
+	// root so the presented pairwise equals the roster-enrolled one.
+	if found.Policy.MembershipSource == "employees" {
+		if id, _ := s.DataStore.GetIdentity(); id != nil && id.AID != "" {
+			bundle.RelationshipAnchorAID = id.AID
+			bundle.RelationshipAnchorOOBI = fmt.Sprintf("%s/public/oobi/%s", publicURL, id.AID)
+		}
+	}
 	seed, derr := asset.AssetSigningSeed(s.DataDir, found.SigningIndex)
 	if derr != nil {
 		return "", "", http.StatusInternalServerError, "asset seed: " + derr.Error()

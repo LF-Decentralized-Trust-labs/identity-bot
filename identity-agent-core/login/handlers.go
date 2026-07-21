@@ -367,7 +367,13 @@ func (h *Handler) prepareLogin(req StartLoginRequest) (*ChallengeBundle, *SiteRe
 		return nil, nil, nil, fmt.Errorf("challenge verification failed")
 	}
 
-	rel, err := h.getOrCreateRelationship(bundle.SiteAID, bundle)
+	// Employees-gated org portals anchor the relationship to the ORG so the
+	// presented pairwise equals the one enrolled at sponsorship/add_employee.
+	relKey := bundle.SiteAID
+	if bundle.RelationshipAnchorAID != "" {
+		relKey = bundle.RelationshipAnchorAID
+	}
+	rel, err := h.getOrCreateRelationship(relKey, bundle)
 	if err != nil {
 		return nil, nil, nil, err
 	}
