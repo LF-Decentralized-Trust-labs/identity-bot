@@ -140,3 +140,19 @@ The fallback is intentionally a subset (3 items) rather than all 5, reflecting t
 - `ShareAction` in `identity_agent_ui/lib/services/core_service.dart` is the Dart model; uses `const` constructor so fallback lists can be compile-time constants
 - `camera_service.dart` / `camera_service_web.dart` / `camera_service_stub.dart` follow the existing conditional import pattern from ADR-013
 - The `action_key` field is the stable identifier used as `?action=<key>` in OOBI URLs; `id` is the DB primary key (prefixed `sa-`)
+
+---
+
+## Amendment (2026-07-21): canonical action registry
+
+The runtime `share_actions` table is now backed by a **canonical, machine-readable registry** so the set of actions is defined once and imported everywhere, rather than hardcoded per seed. See the spec in [`docs/action-code-registry.md`](../action-code-registry.md) and the data in [`identity-agent-core/actions/registry.json`](../../identity-agent-core/actions/registry.json) (validated by `registry.schema.json`).
+
+**Identifier reconciliation.** Each action now has **two identifiers that bind to one registry entry**:
+- **`code` (integer `t`) — canonical on the wire.** It is what an Ask envelope carries (`"t": 3`) and is immutable once assigned.
+- **`key` (string) — the stable human/URL handle.** It is what this ADR called `action_key` (`?action=add_contact`, `share_actions.action_key`).
+
+So `share_actions` rows reference a registry entry by `key`, and the same entry's `code` is the wire identifier. The registry entry also carries a `ui` block (`share_menu`, `icon`, `enabled`, `sort_order`, `subtitle`) — the seed source for the presentation fields this ADR defined.
+
+**Relationship of the two lists.** `share_actions` is the **user-initiable share-menu view** — the subset of registered actions a person can start from the Share sheet (those with `ui.share_menu = true`). The registry is the full protocol vocabulary (including actions a person only ever *receives*, e.g. `login`). Actions in this ADR's original seed that do not yet have an assigned `code` (e.g. `show_id`, `request_payment`, `share_file`) remain UI-menu entries pending a registry `code` assignment via the proposal process in the spec.
+
+**Intended seeding path (follow-up).** The migration that seeds `share_actions` should read `registry.json` (filtered to `ui.share_menu = true`) rather than hardcoded values, so adding a share action is a registry change, not a code change. That wiring is a distinct change tracked separately; this amendment establishes the canonical data + identifier binding it depends on.

@@ -4,6 +4,16 @@
 
 *Formalizes the actions system decided in [ADR-017](adr/017-share-actions-system.md): this is the canonical, living registry of action codes + their schemas.*
 
+> **Data vs. spec.** The **canonical registry is machine-readable data**:
+> [`identity-agent-core/actions/registry.json`](../identity-agent-core/actions/registry.json),
+> validated by
+> [`registry.schema.json`](../identity-agent-core/actions/registry.schema.json).
+> That JSON is the single source of truth — it seeds `identity.db` and is imported
+> by any Identity Agent (see ADR-017). **This document is the *spec*** — it explains
+> how the registry works, its governance, and how to propose codes; it does not hold
+> the data. §10 below is a human-readable rendering of `registry.json`, which is
+> authoritative if the two ever differ.
+
 ---
 
 ## 1. Why this exists
@@ -238,7 +248,9 @@ private-use range or inside an implementation.
 
 ---
 
-## 10. The registry (v0.1 — current codes)
+## 10. The registered codes (human rendering of `registry.json`)
+
+*Canonical data: [`identity-agent-core/actions/registry.json`](../identity-agent-core/actions/registry.json). Integer `code` (t) is the canonical wire identifier; `key` is the stable string handle (used as `?action=` in OOBI URLs and as `share_actions.action_key`).*
 
 ### `t = 1` · `login`
 - **Summary:** authenticate to a relying party (website/app/device) with a pairwise identity.

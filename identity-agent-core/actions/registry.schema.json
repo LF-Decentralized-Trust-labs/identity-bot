@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://identitybot.org/schemas/action-registry.schema.json",
+  "title": "Identity Agent Action Code Registry",
+  "description": "Validates registry.json — the canonical machine-readable list of action codes. A proposal (see docs/action-code-registry.md) must produce an entry that validates against this schema.",
+  "type": "object",
+  "required": ["registry_version", "envelope_version", "actions"],
+  "additionalProperties": true,
+  "properties": {
+    "registry_version": { "type": "string" },
+    "envelope_version": { "type": "string" },
+    "description": { "type": "string" },
+    "actions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/action" }
+    }
+  },
+  "$defs": {
+    "action": {
+      "type": "object",
+      "required": ["code", "key", "name", "summary", "who_mints", "status", "version", "request_schema", "preview_contract", "outcome"],
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Canonical wire identifier (t). Immutable once assigned. Ranges: 1-999 core, 1000-8999 extended, 9000-9999 experimental, >=100000 private-use."
+        },
+        "key": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "Stable human/URL handle (used as ?action= and share_actions.action_key)."
+        },
+        "name": { "type": "string" },
+        "summary": { "type": "string" },
+        "who_mints": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "reserved", "deprecated"] },
+        "version": { "type": "string" },
+        "request_schema": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/field" }
+        },
+        "preview_contract": { "type": "object" },
+        "outcome": { "type": "string" },
+        "tiers": { "type": ["array", "null"], "items": { "type": "string" } },
+        "ui": { "$ref": "#/$defs/ui" }
+      }
+    },
+    "field": {
+      "type": "object",
+      "required": ["type", "required", "kind"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "type": "string", "enum": ["string", "integer", "boolean", "array", "object"] },
+        "required": { "type": "boolean" },
+        "kind": {
+          "type": "string",
+          "enum": ["open", "closed_enum"],
+          "description": "open = free-form (no interop meaning); closed_enum = canonical fixed value set all agents must use on the wire."
+        },
+        "values": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Required when kind == closed_enum: the canonical allowed values."
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "closed_enum" } } },
+          "then": { "required": ["values"] }
+        }
+      ]
+    },
+    "ui": {
+      "type": "object",
+      "description": "Presentation/runtime metadata used to seed the share_actions table (ADR-017). Optional; absent/share_menu=false means the action is not a user-initiable share-menu item.",
+      "additionalProperties": false,
+      "properties": {
+        "share_menu": { "type": "boolean" },
+        "icon": { "type": "string" },
+        "enabled": { "type": "boolean" },
+        "sort_order": { "type": "integer" },
+        "subtitle": { "type": "string" }
+      }
+    }
+  }
+}
