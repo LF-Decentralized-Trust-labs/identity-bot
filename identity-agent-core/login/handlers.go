@@ -179,11 +179,6 @@ func (h *Handler) getOrCreateRelationship(siteAID string, bundle *ChallengeBundl
 	if rel, ok := h.Store.Get(siteAID); ok {
 		return &rel, nil
 	}
-	if h.KeriDriver == nil {
-		// Never fabricate on any platform. Mint must go through local engine (driver on desktop, bridge on mobile).
-		// Defer to caller / error to enforce the rule.
-		return nil, fmt.Errorf("local KERI engine required to mint relationship AID (no custom fabrication allowed)")
-	}
 	rootSeed, rerr := secureenclave.LoadRootSeed(h.dataDir)
 	if rerr != nil {
 		rootSeed = make([]byte, 64)
@@ -203,15 +198,27 @@ func (h *Handler) getOrCreateRelationship(siteAID string, bundle *ChallengeBundl
 	nextPwise, _ := backup.DerivePairwiseSeed(rootSeed, loginIdx, 1)
 	pub := ed25519.NewKeyFromSeed(pwiseSeed).Public().(ed25519.PublicKey)
 	nextPub := ed25519.NewKeyFromSeed(nextPwise).Public().(ed25519.PublicKey)
-	resp, err := h.KeriDriver.CreateInceptionNamed(
-		iacrypto.VerkeyQB64(pub),
-		iacrypto.VerkeyQB64(nextPub),
-		"login-rel-"+siteAID,
-	)
-	if err != nil || resp.AID == "" {
-		return nil, fmt.Errorf("failed to mint real relationship AID via local engine: %w", err)
+	// Mint through a local KERI engine — never fabricate. Desktop: the Python
+	// keripy driver. Driverless (mobile): the keri-go native builder, which uses
+	// the same keri-1.1.17 SerderKERI makify (Blake3 self-addressing) mechanics.
+	var pairwiseAID string
+	if h.KeriDriver != nil {
+		resp, err := h.KeriDriver.CreateInceptionNamed(
+			iacrypto.VerkeyQB64(pub),
+			iacrypto.VerkeyQB64(nextPub),
+			"login-rel-"+siteAID,
+		)
+		if err != nil || resp.AID == "" {
+			return nil, fmt.Errorf("failed to mint real relationship AID via local engine: %w", err)
+		}
+		pairwiseAID = resp.AID
+	} else {
+		res, err := iacrypto.BuildEd25519Inception(pub, nextPub)
+		if err != nil || res.AID == "" {
+			return nil, fmt.Errorf("failed to mint relationship AID via keri-go: %w", err)
+		}
+		pairwiseAID = res.AID
 	}
-	pairwiseAID := resp.AID
 	// Do NOT persist derived seed per-rel. Re-derive from root + RelationshipIndex on demand.
 	// Only root seed protected in enclave; index persisted with the rel record.
 
