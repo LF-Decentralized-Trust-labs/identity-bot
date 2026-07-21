@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+
+	"identity-agent-core/actions"
 )
 
 // identityMigrations defines the schema evolution for identity.db (Identity Core domain).
@@ -547,6 +549,42 @@ func ApplyIdentityMigrations(db *sql.DB) error {
 		log.Printf("[store] Identity migration %d applied successfully", m.Version)
 	}
 
+	// Seed share_actions from the canonical action registry. Runs after
+	// migrations so the table exists; non-destructive (see seedShareActionsFromRegistry).
+	if err := seedShareActionsFromRegistry(db); err != nil {
+		return fmt.Errorf("failed to seed share actions from registry: %w", err)
+	}
+
+	return nil
+}
+
+// seedShareActionsFromRegistry inserts any share-menu actions declared in the
+// canonical action registry (actions/registry.json) that are not already present
+// in share_actions. INSERT OR IGNORE (keyed on action_key) keeps it
+// non-destructive: existing rows and any runtime edits (enable/disable,
+// Data-Manager changes) are preserved; only missing actions are added. This makes
+// "add a share action" a registry change rather than a code change. Actions
+// without an assigned wire code yet (e.g. legacy UI placeholders seeded by an
+// earlier migration) simply stay as they are until they gain a registry entry.
+func seedShareActionsFromRegistry(db *sql.DB) error {
+	reg, err := actions.Load()
+	if err != nil {
+		return err
+	}
+	for _, a := range reg.ShareMenuActions() {
+		enabled := 0
+		if a.UI.Enabled {
+			enabled = 1
+		}
+		if _, err := db.Exec(
+			`INSERT OR IGNORE INTO share_actions
+			   (id, action_key, name, subtitle, icon, is_enabled, sort_order, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+			"sa-"+a.Key, a.Key, a.Name, a.UI.Subtitle, a.UI.Icon, enabled, a.UI.SortOrder,
+		); err != nil {
+			return fmt.Errorf("seed share action %q: %w", a.Key, err)
+		}
+	}
 	return nil
 }
 
