@@ -47,10 +47,17 @@ func BuildEd25519Inception(pubRaw32, nextPubRaw32 []byte) (*Ed25519InceptionResu
 	if err != nil {
 		return nil, err
 	}
+	// Map built inline: wireToInceptionMap assumes the hybrid anchor (A[0])
+	// which a plain icp doesn't have.
+	event := map[string]interface{}{
+		"v": final.V, "t": final.T, "d": final.D, "i": final.I, "s": final.S,
+		"kt": final.Kt, "k": final.K, "nt": final.Nt, "n": final.N,
+		"bt": final.Bt, "b": final.B, "c": final.C, "a": []interface{}{},
+	}
 	return &Ed25519InceptionResult{
 		AID:            final.I,
 		SAID:           final.D,
-		InceptionEvent: wireToInceptionMap(final),
+		InceptionEvent: event,
 		RawBytesB64:    base64.StdEncoding.EncodeToString(raw),
 		PublicKey:      verkey,
 		NextKeyDigest:  nextDigest,
