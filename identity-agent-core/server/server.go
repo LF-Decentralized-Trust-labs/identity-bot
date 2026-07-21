@@ -59,6 +59,10 @@ type CoreServer struct {
 	loginHandler    *login.Handler
 	assetHandler    *asset.Handler
 
+	// Overlay-registered extra routes, mounted under /api by buildRouter. See
+	// MountExtraRoutes / extension.go — inert unless an overlay registers.
+	extraRoutes []func(chi.Router)
+
 	// G-052: asset login challenge store (per-session bundles for /i/{token})
 	challengeMu     sync.Mutex
 	challenges      map[string]login.ChallengeBundle  // keyed by session_token
@@ -537,6 +541,11 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		s.mountVerificationRoutes(r)
 		s.mountWitnessRoutes(r)
 		s.mountUpdateRoutes(r)
+
+		// Overlay-registered routes (MountExtraRoutes) mount last, under /api.
+		for _, fn := range s.extraRoutes {
+			fn(r)
+		}
 	})
 
 	s.traceRoutes(r)

@@ -229,17 +229,30 @@ func (s *CoreServer) authorizeAssetAccess(ctx context.Context, siteAID, pairwise
 		if a.PairwiseAID != siteAID {
 			continue
 		}
-		// Enrollment mode gate.
+		// Enrollment mode gate. A non-default MembershipSource is resolved by a
+		// registered MembershipResolver (org overlays register e.g. "employees");
+		// the default ("" / "asset") checks this asset's own member list. An
+		// unrecognized source with no resolver fails closed.
 		if a.Policy.Mode != asset.EnrollmentOpen {
-			member := false
-			for _, m := range s.assetHandler.Store.ListMembers(a.ID) {
-				if m.PairwiseAID == pairwiseAID {
-					member = true
-					break
+			if src := a.Policy.MembershipSource; src != "" && src != "asset" {
+				r := membershipResolverFor(src)
+				if r == nil {
+					return false, "no membership resolver for source: " + src
 				}
-			}
-			if !member {
-				return false, "not a member of this asset"
+				if ok, reason := r.Admit(pairwiseAID, a.ID); !ok {
+					return false, reason
+				}
+			} else {
+				member := false
+				for _, m := range s.assetHandler.Store.ListMembers(a.ID) {
+					if m.PairwiseAID == pairwiseAID {
+						member = true
+						break
+					}
+				}
+				if !member {
+					return false, "not a member of this asset"
+				}
 			}
 		}
 		// Credential gate (additive).
