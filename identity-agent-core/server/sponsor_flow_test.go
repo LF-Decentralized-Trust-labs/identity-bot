@@ -69,7 +69,10 @@ func TestSponsorRedeemMakesActiveSuperAdmin(t *testing.T) {
 
 	// A non-sponsor invite token must be rejected by the sponsor redeem path.
 	_ = h.Store.CreateEmployeeInvite(asset.EmployeeInvite{Token: "emptok", Role: "Employee"})
-	resp2, _ := http.Post(srv.URL+"/api/sponsor/invites/emptok/redeem", "application/json", strings.NewReader(body))
+	resp2, err2 := http.Post(srv.URL+"/api/sponsor/invites/emptok/redeem", "application/json", strings.NewReader(body))
+	if err2 != nil {
+		t.Fatalf("redeem post 2: %v", err2)
+	}
 	defer resp2.Body.Close()
 	if resp2.StatusCode == http.StatusOK {
 		t.Fatal("sponsor redeem accepted a non-sponsor invite")

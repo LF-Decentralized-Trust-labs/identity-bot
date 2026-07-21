@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"io"
 	"fmt"
 	"net/http"
 	"strings"
@@ -104,7 +105,14 @@ func (addEmployeeAsk) Execute(s *CoreServer, ctx AskContext, d ScanDecision) (ma
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		return nil, fmt.Errorf("redeem employee invite: status %d", resp.StatusCode)
+		// Carry the org's explanation through (e.g. "employee invite already
+		// used") so the person sees a real reason, not a status code.
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
+		reason := strings.TrimSpace(string(msg))
+		if reason == "" {
+			reason = fmt.Sprintf("status %d", resp.StatusCode)
+		}
+		return nil, fmt.Errorf("the organization declined: %s", reason)
 	}
 
 	org := p.OrgName
