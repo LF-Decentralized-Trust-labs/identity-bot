@@ -504,6 +504,16 @@ UPDATE relationship_counters SET next_index = (
 ) WHERE namespace = 'contacts';
 `,
 	},
+	{
+		Version:     20,
+		Description: "Profile: add organization fields (entity_type, org_name, org_type, jurisdiction) — previously accepted by the API but silently dropped",
+		SQL: `
+ALTER TABLE profile ADD COLUMN entity_type  TEXT NOT NULL DEFAULT '';
+ALTER TABLE profile ADD COLUMN org_name     TEXT NOT NULL DEFAULT '';
+ALTER TABLE profile ADD COLUMN org_type     TEXT NOT NULL DEFAULT '';
+ALTER TABLE profile ADD COLUMN jurisdiction TEXT NOT NULL DEFAULT '';
+`,
+	},
 }
 
 // ApplyIdentityMigrations creates the migrations table and applies any pending migrations.

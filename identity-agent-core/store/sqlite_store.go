@@ -567,10 +567,12 @@ func (s *SQLiteStore) DeletePendingRequest(aid string) error {
 func (s *SQLiteStore) GetProfile() (*ProfileData, error) {
 	var profile ProfileData
 	err := s.db.QueryRow(
-		`SELECT full_name, family_name, given_name, org, title, email, tel, note, photo, uid
+		`SELECT full_name, family_name, given_name, org, title, email, tel, note, photo, uid,
+		        entity_type, org_name, org_type, jurisdiction
 		 FROM profile LIMIT 1`,
 	).Scan(&profile.FullName, &profile.FamilyName, &profile.GivenName, &profile.Org,
-		&profile.Title, &profile.Email, &profile.Tel, &profile.Note, &profile.Photo, &profile.UID)
+		&profile.Title, &profile.Email, &profile.Tel, &profile.Note, &profile.Photo, &profile.UID,
+		&profile.EntityType, &profile.OrgName, &profile.OrgType, &profile.Jurisdiction)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -581,27 +583,30 @@ func (s *SQLiteStore) GetProfile() (*ProfileData, error) {
 }
 
 func (s *SQLiteStore) SaveProfile(profile ProfileData) error {
-	_, err := s.db.Exec(`
-		INSERT INTO profile (full_name, family_name, given_name, org, title, email, tel, note, photo, uid)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(rowid) DO UPDATE SET
-			full_name = excluded.full_name,
-			family_name = excluded.family_name,
-			given_name = excluded.given_name,
-			org = excluded.org,
-			title = excluded.title,
-			email = excluded.email,
-			tel = excluded.tel,
-			note = excluded.note,
-			photo = excluded.photo,
-			uid = excluded.uid`,
+	// Single-row table with no PK: replace the row in a transaction. The previous
+	// `ON CONFLICT(rowid) DO UPDATE` never fired (a bare INSERT allocates a fresh
+	// rowid, so there is nothing to conflict with) — every save appended a new
+	// row while GetProfile kept reading the oldest one, so updates (and the
+	// organization fields, which the INSERT also omitted) silently vanished.
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin profile tx: %w", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM profile`); err != nil {
+		return fmt.Errorf("failed to clear profile: %w", err)
+	}
+	if _, err := tx.Exec(`
+		INSERT INTO profile (full_name, family_name, given_name, org, title, email, tel, note, photo, uid,
+		                     entity_type, org_name, org_type, jurisdiction)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		profile.FullName, profile.FamilyName, profile.GivenName, profile.Org,
 		profile.Title, profile.Email, profile.Tel, profile.Note, profile.Photo, profile.UID,
-	)
-	if err != nil {
+		profile.EntityType, profile.OrgName, profile.OrgType, profile.Jurisdiction,
+	); err != nil {
 		return fmt.Errorf("failed to save profile: %w", err)
 	}
-	return nil
+	return tx.Commit()
 }
 
 // ── Presentations ─────────────────────────────────────────────────────────────
