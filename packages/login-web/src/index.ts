@@ -4,6 +4,10 @@ export { LoginQrCode } from "./LoginQrCode.js";
 export type { LoginQrCodeProps } from "./LoginQrCode.js";
 export { detectLocalAgent, triggerLocalLogin } from "./agentDetect.js";
 export { useSessionPoll } from "./useSessionPoll.js";
+// Server-side session confirmation (also available React-free via the
+// "@identity-agent/login-web/server" subpath export).
+export { confirmLoginSession } from "./confirmSession.js";
+export type { ConfirmSessionOptions, ConfirmedSession } from "./confirmSession.js";
 
 // G-051: imperative API for script-tag / CommonJS embed (no bundler dep)
 export function createLoginButton(options: any = {}) {
