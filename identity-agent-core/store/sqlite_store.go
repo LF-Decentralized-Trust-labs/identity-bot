@@ -458,23 +458,30 @@ func (s *SQLiteStore) GetSettings() (*SettingsData, error) {
 	return &settings, nil
 }
 
+// SaveSettings persists the single settings row. The table holds at most one row
+// (GetSettings reads LIMIT 1); we replace it in a transaction rather than relying
+// on an upsert. The previous `ON CONFLICT(rowid)` target is not a valid conflict
+// target on this PK-less table, so writes silently never persisted — which is why
+// tunnel provider/token settings were lost on restart.
 func (s *SQLiteStore) SaveSettings(settings SettingsData) error {
-	_, err := s.db.Exec(`
-		INSERT INTO settings (tunnel_provider, ngrok_auth_token, cloudflare_tunnel_token, tunnel_domain, tunnel_extension)
-		VALUES (?, ?, ?, ?, ?)
-		ON CONFLICT(rowid) DO UPDATE SET
-			tunnel_provider = excluded.tunnel_provider,
-			ngrok_auth_token = excluded.ngrok_auth_token,
-			cloudflare_tunnel_token = excluded.cloudflare_tunnel_token,
-			tunnel_domain = excluded.tunnel_domain,
-			tunnel_extension = excluded.tunnel_extension`,
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin settings tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`DELETE FROM settings`); err != nil {
+		return fmt.Errorf("failed to clear settings: %w", err)
+	}
+	if _, err := tx.Exec(
+		`INSERT INTO settings (tunnel_provider, ngrok_auth_token, cloudflare_tunnel_token, tunnel_domain, tunnel_extension)
+		 VALUES (?, ?, ?, ?, ?)`,
 		settings.TunnelProvider, settings.NgrokAuthToken,
 		settings.CloudflareTunnelToken, settings.TunnelDomain, settings.TunnelExtension,
-	)
-	if err != nil {
+	); err != nil {
 		return fmt.Errorf("failed to save settings: %w", err)
 	}
-	return nil
+	return tx.Commit()
 }
 
 // ── Pending Requests ──────────────────────────────────────────────────────────
