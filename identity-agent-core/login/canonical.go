@@ -39,7 +39,7 @@ func canonicalChallengeBody(c ChallengeBundle) string {
 	if c.RequestedScore != nil {
 		parts = append(parts, jsonField("requested_score", c.RequestedScore))
 	}
-	// The relationship anchor (org-owned membership-gated assets) MUST be part
+	// The relationship anchor (membership-gated assets) MUST be part
 	// of the signed body: an unsigned anchor would let a tampering page rewrite
 	// which relationship the scanner presents. Omitted when empty so pre-anchor
 	// bundles keep their original canonical form (signatures stay valid).

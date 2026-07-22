@@ -120,10 +120,10 @@ func (h *Handler) fetchChallengeBundle(rpBase, sessionToken string) (*ChallengeB
 }
 
 // verifyDelegationAnchor checks that the challenge's site AID is genuinely
-// DELEGATED by the claimed relationship-anchor org: the site's served KEL must
+// DELEGATED by the claimed relationship-anchor controller: its served KEL must
 // open with a delegated inception (dip) for that exact AID naming the anchor as
 // delegator (`di`). The delegator commitment is inside the signed inception
-// event whose SAID *is* the site AID, so a site cannot claim an org it does not
+// event whose SAID *is* the site AID, so a site cannot claim a controller it does not
 // belong to without changing its own identity.
 func (h *Handler) verifyDelegationAnchor(bundle *ChallengeBundle) error {
 	if bundle.SiteOOBI == "" {
@@ -411,13 +411,15 @@ func (h *Handler) prepareLogin(req StartLoginRequest) (*ChallengeBundle, *SiteRe
 		return nil, nil, nil, fmt.Errorf("challenge verification failed")
 	}
 
-	// Membership-gated org portals anchor the relationship to the ORG so the
-	// presented pairwise equals the one enrolled at sponsorship/add_employee.
-	// The anchor is only honored after independently verifying the site is
-	// DELEGATED by the claimed org (its dip event names the org as delegator):
-	// without this check any page could claim an org anchor and harvest the
-	// scanner's constant membership AID. Fail closed — a bad anchor rejects the
-	// login rather than silently downgrading to a fresh per-site identity.
+	// Membership-gated assets anchor the relationship to the asset's CONTROLLER
+	// (the delegating identity — an organization or an individual) so the
+	// presented pairwise equals the one the controller enrolled (e.g. at
+	// sponsorship/add_employee). The anchor is only honored after independently
+	// verifying the site is DELEGATED by the claimed controller (its dip event
+	// names it as delegator): without this check any page could claim an anchor
+	// and harvest the scanner's constant membership AID. Fail closed — a bad
+	// anchor rejects the login rather than silently downgrading to a fresh
+	// per-site identity.
 	relKey := bundle.SiteAID
 	if bundle.RelationshipAnchorAID != "" {
 		if err := h.verifyDelegationAnchor(bundle); err != nil {

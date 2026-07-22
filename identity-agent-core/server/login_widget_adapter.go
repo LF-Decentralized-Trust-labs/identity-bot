@@ -67,12 +67,13 @@ func (s *CoreServer) createSignedAssetChallenge(assetID, audience string, disclo
 		CallbackURL:          fmt.Sprintf("%s/api/login/callback", publicURL),
 		SessionToken:         sessionToken,
 	}
-	// Membership-gated asset owned by an organization: anchor the relationship
-	// to the ORG (the asset's delegator), not the per-asset AID, so the signer
-	// presents the same constant pairwise it enrolled with (sponsorship /
-	// add_employee) — "prove you're the identity the org already knows" instead
-	// of creating a fresh per-site account. The scanner independently verifies
-	// the delegation (the asset's dip event) before honoring the anchor.
+	// Membership-gated asset: anchor the relationship to the asset's CONTROLLER
+	// (its delegator — an organization or an individual), not the per-asset AID,
+	// so the signer presents the same constant pairwise it enrolled with
+	// (sponsorship / add_employee) — "prove you're the identity the controller
+	// already knows" instead of creating a fresh per-site account. The scanner
+	// independently verifies the delegation (the asset's dip event) before
+	// honoring the anchor.
 	if src := found.Policy.MembershipSource; src != "" && src != "asset" && found.DelegatorAID != "" {
 		bundle.RelationshipAnchorAID = found.DelegatorAID
 		bundle.RelationshipAnchorOOBI = fmt.Sprintf("%s/public/oobi/%s", publicURL, found.DelegatorAID)
