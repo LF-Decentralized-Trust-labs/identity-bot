@@ -79,11 +79,20 @@ func (addEmployeeAsk) Execute(s *CoreServer, ctx AskContext, d ScanDecision) (ma
 		}
 	}
 
-	// 2) Derive our STABLE pairwise AID for the portal — the same one login will
-	//    reuse (getOrCreateRelationship returns the stored rel on later logins).
-	rel, rerr := s.loginHandler.GetOrCreateRelationship(p.SiteAID, &login.ChallengeBundle{SiteAID: p.SiteAID, SiteOOBI: p.SiteOOBI})
+	// 2) Derive our STABLE pairwise AID for the ORG — your "employee number".
+	//    Anchoring on the org (not any one portal asset) means the same AID works
+	//    on every asset the org delegates, now or later, with zero re-enrollment;
+	//    login reuses it via the challenge's relationship anchor (also the org).
+	//    This is the same anchor the sponsor flow uses, so sponsor + employee
+	//    rows in the org roster are one consistent identifier space. Falls back
+	//    to the site AID only for legacy invites that carry no org identity.
+	anchorAID, anchorOOBI := p.OrgAID, p.OrgOOBI
+	if anchorAID == "" {
+		anchorAID, anchorOOBI = p.SiteAID, p.SiteOOBI
+	}
+	rel, rerr := s.loginHandler.GetOrCreateRelationship(anchorAID, &login.ChallengeBundle{SiteAID: anchorAID, SiteOOBI: anchorOOBI})
 	if rerr != nil || rel == nil || rel.PairwiseAID == "" {
-		return nil, fmt.Errorf("derive portal relationship: %w", rerr)
+		return nil, fmt.Errorf("derive org relationship: %w", rerr)
 	}
 
 	// 3) Redeem at the org: hand them our pairwise AID + display name so they can add

@@ -119,6 +119,50 @@ func (h *Handler) fetchChallengeBundle(rpBase, sessionToken string) (*ChallengeB
 	return &bundle, nil
 }
 
+// verifyDelegationAnchor checks that the challenge's site AID is genuinely
+// DELEGATED by the claimed relationship-anchor org: the site's served KEL must
+// open with a delegated inception (dip) for that exact AID naming the anchor as
+// delegator (`di`). The delegator commitment is inside the signed inception
+// event whose SAID *is* the site AID, so a site cannot claim an org it does not
+// belong to without changing its own identity.
+func (h *Handler) verifyDelegationAnchor(bundle *ChallengeBundle) error {
+	if bundle.SiteOOBI == "" {
+		return fmt.Errorf("anchor requires a site OOBI")
+	}
+	resp, err := h.HTTPClient.Get(bundle.SiteOOBI)
+	if err != nil {
+		return fmt.Errorf("site OOBI fetch: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("site OOBI fetch: HTTP %d", resp.StatusCode)
+	}
+	var oobi struct {
+		AID string                   `json:"aid"`
+		KEL []map[string]interface{} `json:"kel"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&oobi); err != nil {
+		return fmt.Errorf("site OOBI parse: %w", err)
+	}
+	if oobi.AID != bundle.SiteAID {
+		return fmt.Errorf("site OOBI serves %s, challenge names %s", oobi.AID, bundle.SiteAID)
+	}
+	if len(oobi.KEL) == 0 {
+		return fmt.Errorf("site OOBI has no KEL")
+	}
+	icp := oobi.KEL[0]
+	if t, _ := icp["t"].(string); t != "dip" {
+		return fmt.Errorf("site inception is %q, not a delegated inception", icp["t"])
+	}
+	if i, _ := icp["i"].(string); i != bundle.SiteAID {
+		return fmt.Errorf("inception AID %q does not match site AID", i)
+	}
+	if di, _ := icp["di"].(string); di != bundle.RelationshipAnchorAID {
+		return fmt.Errorf("site is delegated by %q, not the claimed anchor %q", icp["di"], bundle.RelationshipAnchorAID)
+	}
+	return nil
+}
+
 func (h *Handler) verifyChallengeSig(bundle *ChallengeBundle) (bool, []byte, error) {
 	if bundle.Sig == "" {
 		return false, nil, fmt.Errorf("challenge missing sig")
@@ -367,10 +411,18 @@ func (h *Handler) prepareLogin(req StartLoginRequest) (*ChallengeBundle, *SiteRe
 		return nil, nil, nil, fmt.Errorf("challenge verification failed")
 	}
 
-	// Employees-gated org portals anchor the relationship to the ORG so the
+	// Membership-gated org portals anchor the relationship to the ORG so the
 	// presented pairwise equals the one enrolled at sponsorship/add_employee.
+	// The anchor is only honored after independently verifying the site is
+	// DELEGATED by the claimed org (its dip event names the org as delegator):
+	// without this check any page could claim an org anchor and harvest the
+	// scanner's constant membership AID. Fail closed — a bad anchor rejects the
+	// login rather than silently downgrading to a fresh per-site identity.
 	relKey := bundle.SiteAID
 	if bundle.RelationshipAnchorAID != "" {
+		if err := h.verifyDelegationAnchor(bundle); err != nil {
+			return nil, nil, nil, fmt.Errorf("relationship anchor rejected: %w", err)
+		}
 		relKey = bundle.RelationshipAnchorAID
 	}
 	rel, err := h.getOrCreateRelationship(relKey, bundle)
@@ -383,16 +435,17 @@ func (h *Handler) prepareLogin(req StartLoginRequest) (*ChallengeBundle, *SiteRe
 	}
 
 	preview := &LoginPreviewResponse{
-		Pending:              true,
-		SessionToken:         req.SessionToken,
-		SiteAID:              bundle.SiteAID,
-		SiteOOBI:             bundle.SiteOOBI,
-		Audience:             bundle.Audience,
-		RequestedDisclosures: bundle.RequestedDisclosures,
-		DisclosurePreview:    h.previewDisclosures(rel, bundle),
-		Expiry:               bundle.Expiry,
-		PairwiseAID:          rel.PairwiseAID,
-		RPSessionURL:         req.RPSessionURL,
+		Pending:               true,
+		SessionToken:          req.SessionToken,
+		SiteAID:               bundle.SiteAID,
+		SiteOOBI:              bundle.SiteOOBI,
+		Audience:              bundle.Audience,
+		RequestedDisclosures:  bundle.RequestedDisclosures,
+		DisclosurePreview:     h.previewDisclosures(rel, bundle),
+		Expiry:                bundle.Expiry,
+		PairwiseAID:           rel.PairwiseAID,
+		RelationshipAnchorAID: bundle.RelationshipAnchorAID,
+		RPSessionURL:          req.RPSessionURL,
 	}
 	return bundle, rel, preview, nil
 }

@@ -25,6 +25,16 @@ type MembershipResolver interface {
 	Admit(pairwiseAID, assetID string) (ok bool, reason string)
 }
 
+// MemberInfoResolver is an OPTIONAL companion interface a MembershipResolver
+// may also implement to describe an admitted member — e.g. {"role": "Editor",
+// "display_name": "Ada"}. When present, the info rides the login result to the
+// relying party, so the RP never needs to query org-internal rosters: the
+// membership source that admitted the identity is also the authority on who it
+// admitted.
+type MemberInfoResolver interface {
+	MemberInfo(pairwiseAID, assetID string) (info map[string]string, ok bool)
+}
+
 var membershipResolvers = map[string]MembershipResolver{}
 
 // RegisterMembershipResolver registers r as the resolver for policies whose

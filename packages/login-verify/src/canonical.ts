@@ -53,6 +53,15 @@ export function canonicalChallengeBody(challenge: LoginChallenge): string {
   if (challenge.requested_score !== undefined) {
     parts.push(jsonField("requested_score", challenge.requested_score));
   }
+  // Relationship anchor (org-owned membership-gated assets) is part of the
+  // signed body — mirrors the Go canonicalizer. Omitted when absent so
+  // pre-anchor challenges keep their original canonical form.
+  if (challenge.relationship_anchor_aid) {
+    parts.push(
+      jsonField("relationship_anchor_aid", nfc(challenge.relationship_anchor_aid)),
+      jsonField("relationship_anchor_oobi", nfc(challenge.relationship_anchor_oobi ?? "")),
+    );
+  }
   parts.push(
     jsonField("callback_url", nfc(challenge.callback_url)),
     jsonField("session_token", challenge.session_token),

@@ -98,7 +98,11 @@ type LoginPreviewResponse struct {
 	DisclosurePreview    map[string]string `json:"disclosure_preview"`
 	Expiry               string            `json:"expiry"`
 	PairwiseAID          string            `json:"pairwise_aid,omitempty"`
-	RPSessionURL         string            `json:"rp_session_url"`
+	// Set when the login uses an org-anchored membership relationship (verified
+	// delegation) — lets consent UI say "sign in as a member of this org" vs.
+	// "use your account with this site".
+	RelationshipAnchorAID string `json:"relationship_anchor_aid,omitempty"`
+	RPSessionURL          string `json:"rp_session_url"`
 }
 
 type ScoreAttestation struct {

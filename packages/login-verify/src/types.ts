@@ -49,6 +49,11 @@ export interface LoginChallenge {
   requested_disclosures: string[];
   requested_credentials: RequestedCredential[];
   requested_score?: RequestedScore;
+  /** Org-owned membership-gated assets: anchor the scanner's relationship to
+   * the ORG (the asset's delegator) so the presented pairwise is the constant
+   * one the org enrolled. Signed as part of the canonical body. */
+  relationship_anchor_aid?: string;
+  relationship_anchor_oobi?: string;
   callback_url: string;
   session_token: string;
   sig?: string;
