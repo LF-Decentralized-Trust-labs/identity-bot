@@ -197,13 +197,46 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	s.setChallengeStatus(token, map[string]interface{}{
+	st := map[string]interface{}{
 		"status":       "complete",
 		"pairwise_aid": res.PairwiseAID,
 		"disclosures":  res.Disclosures,
-	})
+	}
+	// Membership-admitted logins carry the member's info (role, display name)
+	// from the admitting resolver, so the relying party gets "who this is" in
+	// the login result instead of querying org-internal rosters.
+	if info := s.memberInfoFor(bundle.SiteAID, res.PairwiseAID); len(info) > 0 {
+		st["member_info"] = info
+	}
+	s.setChallengeStatus(token, st)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
+// memberInfoFor returns the admitting membership resolver's description of a
+// member (e.g. role + display name) for the asset behind siteAID, when the
+// resolver implements the optional MemberInfoResolver interface. Empty when the
+// asset isn't membership-gated or the resolver has nothing to say.
+func (s *CoreServer) memberInfoFor(siteAID, pairwiseAID string) map[string]string {
+	if s.assetHandler == nil {
+		return nil
+	}
+	for _, a := range s.assetHandler.Store.ListAssets() {
+		if a.PairwiseAID != siteAID {
+			continue
+		}
+		if src := a.Policy.MembershipSource; src != "" && src != "asset" {
+			if r := membershipResolverFor(src); r != nil {
+				if ir, ok := r.(MemberInfoResolver); ok {
+					if info, found := ir.MemberInfo(pairwiseAID, a.ID); found {
+						return info
+					}
+				}
+			}
+		}
+		return nil
+	}
+	return nil
 }
 
 // setChallengeStatus stores a session's status under the challenge lock.

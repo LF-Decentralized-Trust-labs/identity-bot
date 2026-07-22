@@ -67,6 +67,17 @@ func (s *CoreServer) createSignedAssetChallenge(assetID, audience string, disclo
 		CallbackURL:          fmt.Sprintf("%s/api/login/callback", publicURL),
 		SessionToken:         sessionToken,
 	}
+	// Membership-gated asset: anchor the relationship to the asset's CONTROLLER
+	// (its delegator — an organization or an individual), not the per-asset AID,
+	// so the signer presents the same constant pairwise it enrolled with
+	// (sponsorship / add_employee) — "prove you're the identity the controller
+	// already knows" instead of creating a fresh per-site account. The scanner
+	// independently verifies the delegation (the asset's dip event) before
+	// honoring the anchor.
+	if src := found.Policy.MembershipSource; src != "" && src != "asset" && found.DelegatorAID != "" {
+		bundle.RelationshipAnchorAID = found.DelegatorAID
+		bundle.RelationshipAnchorOOBI = fmt.Sprintf("%s/public/oobi/%s", publicURL, found.DelegatorAID)
+	}
 	seed, derr := asset.AssetSigningSeed(s.DataDir, found.SigningIndex)
 	if derr != nil {
 		return "", "", http.StatusInternalServerError, "asset seed: " + derr.Error()
@@ -146,6 +157,11 @@ func (s *CoreServer) handleLoginSessionStatus(w http.ResponseWriter, r *http.Req
 			}
 			if d, ok := st["disclosures"]; ok {
 				resp["disclosures"] = d
+			}
+			// Membership-admitted logins: who the admitting roster says this is
+			// (e.g. role + display_name), so the RP needs no org-internal lookups.
+			if mi, ok := st["member_info"]; ok {
+				resp["member_info"] = mi
 			}
 		case "denied":
 			resp["state"] = "declined"

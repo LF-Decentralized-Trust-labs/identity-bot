@@ -47,6 +47,14 @@ func AssetSigningSeed(dataDir string, signingIndex int) ([]byte, error) {
 	return backup.DerivePairwiseSeed(root, signingIndex, 0)
 }
 
+// DeriveAssetKeypair re-derives an asset's current + next Ed25519 public keys
+// (HD: root + signing index). The derivation is deterministic, so an asset's
+// inception event — and therefore its AID — can be regenerated after a restart
+// (the KERI driver's state is in-memory).
+func DeriveAssetKeypair(dataDir string, signingIndex int) (pub, nextPub ed25519.PublicKey, err error) {
+	return deriveAssetKeypair(dataDir, signingIndex)
+}
+
 // deriveAssetKeypair derives the current + next Ed25519 public keys for an asset at the
 // given signing index, used at inception so the asset's KEL key == the key it signs with.
 func deriveAssetKeypair(dataDir string, signingIndex int) (pub, nextPub ed25519.PublicKey, err error) {

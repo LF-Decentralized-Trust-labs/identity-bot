@@ -2462,6 +2462,18 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
 					// serve a minimal OOBI response for the asset AID
 					kelResp, err := s.KeriDriver.GetKel(a.DisplayName)
 					if err != nil {
+						// The KERI driver's state is in-memory: after a restart the
+						// asset's KEL is gone. Asset keys are HD-derived, so the same
+						// inception (same AID) regenerates deterministically — revive
+						// it and retry, keeping asset OOBIs (and the scanner's
+						// delegation verification) valid across restarts.
+						if rerr := s.reviveAssetIdentity(a); rerr == nil {
+							kelResp, err = s.KeriDriver.GetKel(a.DisplayName)
+						} else {
+							log.Printf("[identity-agent-core] asset identity revive failed for %s: %v", a.DisplayName, rerr)
+						}
+					}
+					if err != nil {
 						writeError(w, http.StatusInternalServerError, "KEL unavailable", err.Error())
 						return
 					}
@@ -3952,6 +3964,43 @@ func (s *CoreServer) reloadIdentityIntoDriver() {
 	}
 	log.Printf("[identity-agent-core] KERI driver: reloaded identity %s (sn=%d, %d KEL events)",
 		result.AID, result.SequenceNumber, result.KelEvents)
+}
+
+// reviveAssetIdentity re-creates an asset's identity in the KERI driver after a
+// restart. Asset keys are HD-derived (root seed + the asset's persisted signing
+// index), so re-running the inception regenerates the identical event — and the
+// identical AID — deterministically; the stored PairwiseAID is checked to prove
+// it. Keeps asset OOBIs (KEL + delegation proof) servable across restarts.
+func (s *CoreServer) reviveAssetIdentity(a asset.Asset) error {
+	if s.KeriDriver == nil {
+		return fmt.Errorf("keri driver unavailable")
+	}
+	if a.SigningIndex == 0 {
+		return fmt.Errorf("asset has no signing index")
+	}
+	pub, nextPub, err := asset.DeriveAssetKeypair(s.DataDir, a.SigningIndex)
+	if err != nil {
+		return fmt.Errorf("derive asset keys: %w", err)
+	}
+	pubB64, nextB64 := iacrypto.VerkeyQB64(pub), iacrypto.VerkeyQB64(nextPub)
+	if a.DelegationModel == "delegated" && a.DelegatorAID != "" {
+		resp, derr := s.KeriDriver.CreateDelegatedInception(pubB64, nextB64, a.DisplayName, a.DelegatorAID)
+		if derr != nil {
+			return fmt.Errorf("delegated re-inception: %w", derr)
+		}
+		if resp.AID != a.PairwiseAID {
+			return fmt.Errorf("revived AID %s != stored %s", resp.AID, a.PairwiseAID)
+		}
+		return nil
+	}
+	resp, ierr := s.KeriDriver.CreateInceptionNamed(pubB64, nextB64, a.DisplayName)
+	if ierr != nil {
+		return fmt.Errorf("re-inception: %w", ierr)
+	}
+	if resp.AID != a.PairwiseAID {
+		return fmt.Errorf("revived AID %s != stored %s", resp.AID, a.PairwiseAID)
+	}
+	return nil
 }
 
 func (s *CoreServer) handleReset(w http.ResponseWriter, r *http.Request) {

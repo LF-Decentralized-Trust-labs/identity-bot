@@ -17,9 +17,10 @@ type ChallengeBundle struct {
 	RequestedScore       *RequestedScore        `json:"requested_score,omitempty"`
 	CallbackURL          string                 `json:"callback_url"`
 	SessionToken         string                 `json:"session_token"`
-	// For org-owned, employees-gated assets: the relationship ANCHOR is the ORG
-	// (not the per-asset AID), so the pairwise presented at login is the same
-	// constant AID the org enrolled at sponsorship/add_employee. Empty → anchor
+	// Membership-gated assets: the relationship ANCHOR is the asset's CONTROLLER
+	// (the delegating identity — an organization or an individual), not the
+	// per-asset AID, so the pairwise presented at login is the same constant AID
+	// the controller enrolled (e.g. at sponsorship/add_employee). Empty → anchor
 	// to SiteAID (the default per-RP unlinkability model).
 	RelationshipAnchorAID  string `json:"relationship_anchor_aid,omitempty"`
 	RelationshipAnchorOOBI string `json:"relationship_anchor_oobi,omitempty"`
@@ -98,7 +99,11 @@ type LoginPreviewResponse struct {
 	DisclosurePreview    map[string]string `json:"disclosure_preview"`
 	Expiry               string            `json:"expiry"`
 	PairwiseAID          string            `json:"pairwise_aid,omitempty"`
-	RPSessionURL         string            `json:"rp_session_url"`
+	// Set when the login uses a controller-anchored membership relationship
+	// (verified delegation) — lets consent UI say "sign in as a member" vs.
+	// "use your account with this site".
+	RelationshipAnchorAID string `json:"relationship_anchor_aid,omitempty"`
+	RPSessionURL          string `json:"rp_session_url"`
 }
 
 type ScoreAttestation struct {
