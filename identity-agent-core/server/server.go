@@ -56,6 +56,7 @@ type CoreServer struct {
 	cancel          context.CancelFunc
 	listener        net.Listener
 	router          chi.Router
+	flutterWebDir   string
 	loginHandler    *login.Handler
 	assetHandler    *asset.Handler
 
@@ -251,7 +252,10 @@ func New(cfg Config) (*CoreServer, error) {
 		s.TrustGate = secureenclave.NewTrustGate(s.AttestationRunner, nil)
 	}
 
-	s.router = s.buildRouter(cfg.FlutterWebDir)
+	// Defer router construction to Start() so overlays can register routes
+	// (MountExtraRoutes) after New() returns but before serving. Building here
+	// would consume an empty extraRoutes slice, silently dropping overlay routes.
+	s.flutterWebDir = cfg.FlutterWebDir
 
 	return s, nil
 }
@@ -262,6 +266,12 @@ func (s *CoreServer) Start() error {
 
 	if s.running {
 		return fmt.Errorf("server already running")
+	}
+
+	// Build the router now that all overlay routes (MountExtraRoutes) are
+	// registered. Idempotent-safe: Start guards against double-run above.
+	if s.router == nil {
+		s.router = s.buildRouter(s.flutterWebDir)
 	}
 
 	// Try the configured port first, then fallback to 5051–5059
