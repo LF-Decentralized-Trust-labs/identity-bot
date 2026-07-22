@@ -22,7 +22,15 @@ export interface ConfirmSessionOptions {
 }
 
 export type ConfirmedSession =
-  | { state: "verified"; pairwiseAid: string; disclosures?: Record<string, unknown> }
+  | {
+      state: "verified";
+      pairwiseAid: string;
+      disclosures?: Record<string, unknown>;
+      /** Membership-admitted logins: who the admitting roster says this is
+       * (carried in the Identity Agent's login result) — e.g. role + display
+       * name. RPs use this instead of querying org-internal rosters. */
+      memberInfo?: { role?: string; displayName?: string };
+    }
   | { state: "declined"; reason?: string }
   | { state: "pending" };
 
@@ -45,10 +53,18 @@ export async function confirmLoginSession(opts: ConfirmSessionOptions): Promise<
     state?: string;
     app_session_token?: string;
     disclosures?: Record<string, unknown>;
+    member_info?: { role?: string; display_name?: string };
     reason?: string;
   };
   if (body.state === "verified" && body.app_session_token) {
-    return { state: "verified", pairwiseAid: body.app_session_token, disclosures: body.disclosures };
+    return {
+      state: "verified",
+      pairwiseAid: body.app_session_token,
+      disclosures: body.disclosures,
+      memberInfo: body.member_info
+        ? { role: body.member_info.role, displayName: body.member_info.display_name }
+        : undefined,
+    };
   }
   if (body.state === "declined") return { state: "declined", reason: body.reason };
   return { state: "pending" };
