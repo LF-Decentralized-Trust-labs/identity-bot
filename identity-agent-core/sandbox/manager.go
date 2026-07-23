@@ -47,6 +47,7 @@ type Manager struct {
         installProgressMap  sync.Map // map[appID string]*InstallProgressInfo
         invoker             CapabilityInvoker // governed capability routing; nil = default HTTP invoker
         authorizer          Authorizer        // gateway decision seam; nil = structural default (governance gateway injects the real one)
+        eventSigner         EventSigner       // invocation-log signing identity; nil = events written unsigned (degraded)
 }
 
 type ManagerConfig struct {
@@ -58,6 +59,10 @@ func NewManager(cfg ManagerConfig) (*Manager, error) {
         store, err := NewSandboxStore(cfg.DataDir)
         if err != nil {
                 return nil, fmt.Errorf("failed to initialize sandbox store: %w", err)
+        }
+
+        if err := store.SeedDefaultCapabilities(); err != nil {
+                log.Printf("[registry] failed to seed default capabilities: %v", err)
         }
 
         eventBus := NewEventBus()
