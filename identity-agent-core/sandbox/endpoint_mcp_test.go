@@ -8,12 +8,17 @@ import (
 func TestMCPToolsList(t *testing.T) {
 	m := invokeTestManager(&fakeInvoker{})
 	tools := m.MCPToolsList()
-	if len(tools) != 2 {
-		t.Fatalf("expected 2 tools, got %d", len(tools))
+	// Plug-in capabilities plus the trailing execute meta-tool.
+	if len(tools) != 3 {
+		t.Fatalf("expected 3 tools, got %d", len(tools))
 	}
-	// Sorted by id (ProvidedCapabilities sorts): headless-browser, native-computer-use.
+	// Sorted by id (ProvidedCapabilities sorts): headless-browser, native-computer-use;
+	// the execute meta-tool is appended last.
 	if tools[0].Name != "headless-browser" || tools[1].Name != "native-computer-use" {
 		t.Fatalf("tool names/order: %s, %s", tools[0].Name, tools[1].Name)
+	}
+	if tools[2].Name != ExecuteToolName {
+		t.Fatalf("expected trailing execute meta-tool, got %s", tools[2].Name)
 	}
 	// host_control capability is flagged in its description (local-owner-only).
 	if !contains(tools[1].Description, "host-control") {

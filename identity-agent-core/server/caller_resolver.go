@@ -16,8 +16,9 @@ type CallerResolver interface {
 	Resolve(r *http.Request) sandbox.CallerContext
 }
 
-// loopbackCallerResolver is the default: a request from the loopback interface is the
-// local owner; anything else is a remote caller with no granted scopes (default-deny).
+// loopbackCallerResolver derives only local-vs-remote from the connection. It is no
+// longer the default: a tunnel daemon connects from localhost, so loopback alone must
+// not imply the owner. Kept for callers that explicitly want the structural check.
 type loopbackCallerResolver struct{}
 
 func (loopbackCallerResolver) Resolve(r *http.Request) sandbox.CallerContext {
@@ -25,10 +26,13 @@ func (loopbackCallerResolver) Resolve(r *http.Request) sandbox.CallerContext {
 	return sandbox.CallerContext{Remote: !sandbox.IsLoopbackHost(host)}
 }
 
-// resolveCaller returns the configured CallerResolver's result, or the loopback default.
+// resolveCaller returns the configured CallerResolver's result, or the token-aware
+// default: a positive credential (MCP token today, ACDC presentation when delegated
+// identity lands) grants scopes; a genuinely local request (loopback AND no forwarding
+// headers) is the owner; everything else is remote with no scopes.
 func (s *CoreServer) resolveCaller(r *http.Request) sandbox.CallerContext {
 	if s.CallerResolver != nil {
 		return s.CallerResolver.Resolve(r)
 	}
-	return loopbackCallerResolver{}.Resolve(r)
+	return tokenAwareResolver{s: s}.Resolve(r)
 }

@@ -159,6 +159,51 @@ ALTER TABLE apps RENAME COLUMN docker_image TO container_image;
 ALTER TABLE apps RENAME COLUMN docker_image_size_bytes TO container_image_size_bytes;
 `,
         },
+        {
+                Version:     3,
+                Description: "Capability registry (registry-native records) + signed invocation log",
+                SQL: `
+CREATE TABLE IF NOT EXISTS capability_registry (
+    id TEXT PRIMARY KEY,
+    said TEXT,
+    name TEXT,
+    description TEXT,
+    domain TEXT,
+    executor_type TEXT NOT NULL,
+    input_schema TEXT,
+    impact TEXT,
+    required_cred_schema TEXT,
+    required_cred_issuer TEXT,
+    egress_json TEXT,
+    provider TEXT,
+    enabled INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS invocation_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts DATETIME DEFAULT CURRENT_TIMESTAMP,
+    caller_aid TEXT,
+    delegation_chain TEXT,
+    grant_said TEXT,
+    capability_id TEXT NOT NULL,
+    args_hash TEXT,
+    result_status TEXT,
+    duration_ms INTEGER,
+    transport TEXT,
+    executor_type TEXT,
+    correlation_id TEXT,
+    parent_event_id TEXT,
+    signer_aid TEXT,
+    signature TEXT,
+    event_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_invocation_correlation ON invocation_log(correlation_id);
+CREATE INDEX IF NOT EXISTS idx_invocation_capability ON invocation_log(capability_id);
+CREATE INDEX IF NOT EXISTS idx_invocation_ts ON invocation_log(ts);
+`,
+        },
 }
 
 func ensureMigrationsTable(db *sql.DB) error {

@@ -21,12 +21,18 @@ var (
 
 // CallerContext is who is invoking a capability, as far as governance needs. Remote
 // marks a request that arrived over the network (not the local owner); Scopes are the
-// capability ids the caller has been granted. Full caller identity + ACDC-scope
-// resolution is wired through the governance gateway + delegated identity; this is the
-// minimal governance input the endpoint enforces today.
+// capability ids the caller has been granted. CallerAID identifies the caller for the
+// audit trail (a delegated AID once ACDC resolution lands; a token identity or
+// "local-owner" until then). CorrelationID is minted at the origin request and
+// propagated through every hop so one action's full path is one query. Full caller
+// identity + ACDC-scope resolution is wired through the governance gateway + delegated
+// identity; this is the minimal governance input the endpoint enforces today.
 type CallerContext struct {
-	Remote bool
-	Scopes []string
+	Remote        bool
+	Scopes        []string
+	CallerAID     string
+	CorrelationID string
+	Transport     string
 }
 
 // InvokeResult is a capability's response, routed back through the endpoint.
@@ -45,25 +51,53 @@ type CapabilityInvoker interface {
 // InvokeCapability is the governed invoke path. The gateway governs BOTH directions;
 // neither may be skipped:
 //
-//	resolve provider -> INGRESS authorize -> route to the plug-in -> EGRESS re-check -> return.
+//	resolve provider -> INGRESS authorize -> route to the executor -> EGRESS re-check -> return.
+//
+// A capability resolves either to a running plug-in (manifest-provided) or to a
+// registry-native record (e.g. a governed external API); both route through the same
+// Authorizer. Every outcome — including a denial — writes one signed audit event.
 func (m *Manager) InvokeCapability(ctx context.Context, caller CallerContext, capabilityID string, body []byte) (*InvokeResult, error) {
+	start := time.Now()
+	executorType := "plugin"
 	provider, capDef, ok := m.findProvider(capabilityID)
+	var rec *CapabilityRecord
 	if !ok {
-		return nil, ErrCapabilityNotFound
+		rec = m.registryRecord(capabilityID)
+		if rec == nil {
+			return nil, ErrCapabilityNotFound
+		}
+		capDef = rec.asProvidedCapability()
+		executorType = rec.ExecutorType
 	}
 	auth := m.authz()
 	if err := auth.AuthorizeIngress(ctx, caller, capDef); err != nil {
+		m.recordInvocation(caller, capabilityID, executorType, body, "denied", start)
 		return nil, err
 	}
-	inv := m.invoker
-	if inv == nil {
-		inv = &httpInvoker{mgr: m}
+	var res *InvokeResult
+	var err error
+	if rec != nil && rec.ExecutorType == "external_api" {
+		res, err = m.invokeExternalAPI(ctx, rec, body)
+	} else if rec != nil {
+		err = fmt.Errorf("capability %q: executor type %q is not yet invocable", capabilityID, rec.ExecutorType)
+	} else {
+		inv := m.invoker
+		if inv == nil {
+			inv = &httpInvoker{mgr: m}
+		}
+		res, err = inv.Invoke(ctx, provider.ID, capabilityID, body)
 	}
-	res, err := inv.Invoke(ctx, provider.ID, capabilityID, body)
 	if err != nil {
+		m.recordInvocation(caller, capabilityID, executorType, body, "error", start)
 		return nil, err
 	}
-	return auth.FilterEgress(ctx, caller, capDef, res), nil
+	out := auth.FilterEgress(ctx, caller, capDef, res)
+	status := "ok"
+	if out != nil && out.Status >= 400 {
+		status = "error"
+	}
+	m.recordInvocation(caller, capabilityID, executorType, body, status, start)
+	return out, nil
 }
 
 // findProvider resolves which installed plug-in offers a capability.

@@ -219,6 +219,7 @@ func New(cfg Config) (*CoreServer, error) {
 		log.Printf("[identity-agent-core] Sandbox manager init failed (non-fatal): %v", err)
 	} else {
 		s.SandboxManager = sbxMgr
+		s.SandboxManager.SetEventSigner(&invocationSigner{s: s})
 		if startErr := s.SandboxManager.Start(); startErr != nil {
 			log.Printf("[identity-agent-core] Sandbox manager start failed (non-fatal): %v", startErr)
 		}
