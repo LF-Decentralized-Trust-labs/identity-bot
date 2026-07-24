@@ -57,8 +57,14 @@ type CurrencyInfo struct {
 func (s *CoreServer) handleSecurityEnclave(w http.ResponseWriter, r *http.Request) {
 	result := detectEnclave()
 	if s.AttestationRunner != nil {
-		if signer := s.AttestationRunner.Signer(); signer != nil {
-			result.HardwareBacked = signer.Available() && signer.Platform() != "software"
+		// Only let a USABLE signer refine the platform detection. An
+		// uninitializable signer (e.g. the Security-framework key create failing
+		// in a mobile app context) must not downgrade the device's hardware
+		// capability — on mobile the keys live in the on-device KERI engine, not
+		// this signer, and reporting "no secure enclave" on an iPhone that has
+		// one blocks onboarding with a falsehood.
+		if signer := s.AttestationRunner.Signer(); signer != nil && signer.Available() {
+			result.HardwareBacked = signer.Platform() != "software"
 			result.BackingType = signer.Platform()
 			result.BackingLabel = signer.Label()
 		}
