@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"identity-agent-core/secureenclave"
 	"identity-agent-core/store"
 )
 
@@ -105,6 +106,17 @@ func (c *Collector) collectTier1(bundle *PayloadBundle) error {
 	loginPath := filepath.Join(c.DataDir, "login_relationships.json")
 	if data, err := os.ReadFile(loginPath); err == nil {
 		c.addRawSection(bundle, "login_relationships", data)
+	}
+
+	// The root keystore seed — the HD derivation root every pairwise/login/asset/
+	// audit key and the credential-vault key re-derive from. Captured UNWRAPPED
+	// here (the archive payload is encrypted under the backup key), because the
+	// on-disk copy may be sealed to this device's hardware: recovery on another
+	// device must be mnemonic -> archive -> seed, never depend on the old
+	// device's secure element. Without this section, device loss loses every
+	// derived key even with a backup in hand.
+	if seed, err := secureenclave.LoadRootSeed(c.DataDir); err == nil {
+		c.addRawSection(bundle, "root_seed", seed)
 	}
 
 	return nil

@@ -132,37 +132,6 @@ var ErrSignerUnavailable = fmt.Errorf("platform signer unavailable")
 // (per-relationship seed storage removed; only root seed persists in secure enclave.
 // Pairwise seeds are re-derived from root + persisted RelationshipIndex.)
 
-// Root seed storage (the keystore root seed for HD pairwise derivation).
-// Stored in secure location alongside relationship seeds. 64-byte BIP39 seed.
-
-func rootSeedPath(dataDir string) string {
-	return filepath.Join(dataDir, "secureenclave", "root_seed.key")
-}
-
-func StoreRootSeed(dataDir string, seed []byte) error {
-	if len(seed) < 32 {
-		return fmt.Errorf("root seed must be at least 32 bytes")
-	}
-	p := rootSeedPath(dataDir)
-	if err := os.MkdirAll(filepath.Dir(p), 0700); err != nil {
-		return err
-	}
-	// store up to 64 bytes
-	toStore := seed
-	if len(toStore) > 64 {
-		toStore = toStore[:64]
-	}
-	return os.WriteFile(p, toStore, 0600)
-}
-
-func LoadRootSeed(dataDir string) ([]byte, error) {
-	p := rootSeedPath(dataDir)
-	raw, err := os.ReadFile(p)
-	if err != nil {
-		return nil, fmt.Errorf("root keystore seed not available in secure storage: %w", err)
-	}
-	if len(raw) < 32 {
-		return nil, fmt.Errorf("invalid root seed size")
-	}
-	return raw, nil
-}
+// Root seed storage lives in seedwrap.go: the keystore root seed (64-byte BIP39
+// class, the HD derivation root) is stored in a self-describing envelope, wrapped
+// under a platform hardware key where one is usable.
