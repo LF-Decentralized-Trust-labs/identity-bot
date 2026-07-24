@@ -716,6 +716,23 @@ func (m *Manager) ListLLMServices() []string {
         return m.credentials.ListServices()
 }
 
+// SetServiceCredential stores a provider credential with explicit egress match
+// domains — the complete form (the LLM helpers above only know LLM providers'
+// domains). One credential per service; injected at egress only.
+func (m *Manager) SetServiceCredential(service string, matchDomains []string, headers map[string]string) error {
+        return m.credentials.SetCredential(service, matchDomains, headers)
+}
+
+// RemoveServiceCredential deletes one service credential from the vault.
+func (m *Manager) RemoveServiceCredential(service string) error {
+        return m.credentials.RemoveCredential(service)
+}
+
+// ListServiceCredentials lists configured service names (never key material).
+func (m *Manager) ListServiceCredentials() []string {
+        return m.credentials.ListServices()
+}
+
 func (m *Manager) HealthCheck() map[string]interface{} {
         containerEngine := CheckContainerEngine()
 
