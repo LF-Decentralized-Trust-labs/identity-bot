@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../services/recovery_service.dart';
+import '../../services/root_seed_handoff.dart';
 import '../../theme/app_theme.dart';
 
 enum RecoverySource { localFile, backupOnlyDevice, cloud }
@@ -112,6 +113,12 @@ class _RecoveryOnboardingScreenState extends State<RecoveryOnboardingScreen> {
         mnemonic: mnemonic,
         archiveB64: _archiveB64!,
       );
+
+      // Reseat the HD root on this device from the verified phrase, so every
+      // derived key (pairwise, logins, assets, audit, credential vault)
+      // re-derives here — recovery never depends on the old device.
+      await RootSeedHandoff.register(mnemonic.split(RegExp(r'\s+')));
+
       widget.onRecoveryStarted(session);
     } catch (e) {
       setState(() => _error = e.toString());

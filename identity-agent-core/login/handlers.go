@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -225,6 +226,10 @@ func (h *Handler) getOrCreateRelationship(siteAID string, bundle *ChallengeBundl
 	}
 	rootSeed, rerr := secureenclave.LoadRootSeed(h.dataDir)
 	if rerr != nil {
+		// FALLBACK ONLY: canonical path is the onboarding handoff installing the
+		// mnemonic-derived seed (POST /api/keystore/root-seed). A random root is
+		// device-local — recoverable from backup archives, never the phrase.
+		log.Printf("[keystore] WARNING: bootstrapping a random DEVICE-LOCAL root seed (no onboarding seed handoff yet) — HD-derived keys will not be recoverable from the seed phrase alone")
 		rootSeed = make([]byte, 64)
 		if _, re := rand.Read(rootSeed); re != nil {
 			return nil, fmt.Errorf("failed to bootstrap root seed: %w", re)
