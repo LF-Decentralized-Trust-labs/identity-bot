@@ -13,7 +13,7 @@ const testPackJSON = `{
   "publisher": "test",
   "capabilities": [
     {
-      "id": "testsvc.widget.list",
+      "id": "dev.widget.list",
       "name": "List widgets",
       "description": "List widgets.",
       "domain": "dev",
@@ -36,11 +36,26 @@ func TestParseCapabilityPackValidation(t *testing.T) {
 	if _, err := ParseCapabilityPack([]byte(`{"pack":"p","capabilities":[]}`)); err == nil {
 		t.Fatal("empty capability list must error")
 	}
-	if _, err := ParseCapabilityPack([]byte(`{"pack":"p","capabilities":[{"id":"x","executor_type":"teleport"}]}`)); err == nil || !strings.Contains(err.Error(), "executor_type") {
+	if _, err := ParseCapabilityPack([]byte(`{"pack":"p","capabilities":[{"id":"dev.x.run","executor_type":"teleport"}]}`)); err == nil || !strings.Contains(err.Error(), "executor_type") {
 		t.Fatalf("unknown executor_type must error, got %v", err)
 	}
-	if _, err := ParseCapabilityPack([]byte(`{"pack":"p","capabilities":[{"id":"x","executor_type":"external_api"}]}`)); err == nil || !strings.Contains(err.Error(), "base_url") {
+	if _, err := ParseCapabilityPack([]byte(`{"pack":"p","capabilities":[{"id":"dev.x.run","executor_type":"external_api"}]}`)); err == nil || !strings.Contains(err.Error(), "base_url") {
 		t.Fatalf("external_api without egress must error, got %v", err)
+	}
+	// Capability-first naming is enforced: dotted lowercase segments, and the domain
+	// field must match the id's first segment (filled from it when omitted).
+	if _, err := ParseCapabilityPack([]byte(`{"pack":"p","capabilities":[{"id":"openrouter","executor_type":"internal_api"}]}`)); err == nil || !strings.Contains(err.Error(), "capability-first") {
+		t.Fatalf("single-segment id must error, got %v", err)
+	}
+	if _, err := ParseCapabilityPack([]byte(`{"pack":"p","capabilities":[{"id":"media.image.create","domain":"infra","executor_type":"internal_api"}]}`)); err == nil || !strings.Contains(err.Error(), "first segment") {
+		t.Fatalf("domain/id mismatch must error, got %v", err)
+	}
+	p, err := ParseCapabilityPack([]byte(`{"pack":"p","capabilities":[{"id":"media.image.create","executor_type":"internal_api"}]}`))
+	if err != nil || p.Capabilities[0].Domain != "media" {
+		t.Fatalf("omitted domain must fill from the id prefix, got %v (%v)", p, err)
+	}
+	if _, err := ParseCapabilityPack([]byte(`{"pack":"p","capabilities":[{"id":"media.image.create@selfhosted","domain":"media","executor_type":"internal_api"}]}`)); err != nil {
+		t.Fatalf("@binding suffix must be accepted, got %v", err)
 	}
 }
 
@@ -52,7 +67,7 @@ func TestImportCapabilityPackRollsForward(t *testing.T) {
 	if err != nil || n != 1 || p.Pack != "testpack" {
 		t.Fatalf("import: %v (n=%d)", err, n)
 	}
-	rec, err := m.store.GetCapabilityRecord("testsvc.widget.list")
+	rec, err := m.store.GetCapabilityRecord("dev.widget.list")
 	if err != nil || rec == nil {
 		t.Fatalf("record missing after import: %v", err)
 	}
@@ -67,7 +82,7 @@ func TestImportCapabilityPackRollsForward(t *testing.T) {
 	if _, _, err := m.ImportCapabilityPackJSON([]byte(updated)); err != nil {
 		t.Fatalf("re-import: %v", err)
 	}
-	rec2, _ := m.store.GetCapabilityRecord("testsvc.widget.list")
+	rec2, _ := m.store.GetCapabilityRecord("dev.widget.list")
 	if rec2.Description != "List all widgets." {
 		t.Fatalf("re-import must roll forward, got %q", rec2.Description)
 	}
@@ -101,10 +116,10 @@ func TestLoadCapabilityPacksFromDataDir(t *testing.T) {
 	for _, r := range recs {
 		ids[r.ID] = true
 	}
-	if !ids["testsvc.widget.list"] {
+	if !ids["dev.widget.list"] {
 		t.Fatalf("operator pack not loaded: %v", ids)
 	}
-	if !ids["cloudflare.dns.list"] {
+	if !ids["infra.dns_record.list"] {
 		t.Fatalf("embedded reference pack not loaded: %v", ids)
 	}
 }
@@ -117,11 +132,11 @@ func TestCapabilityEnableDisableDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ok, err := m.store.SetCapabilityEnabled("testsvc.widget.list", false)
+	ok, err := m.store.SetCapabilityEnabled("dev.widget.list", false)
 	if err != nil || !ok {
 		t.Fatalf("disable: %v", err)
 	}
-	if rec := m.registryRecord("testsvc.widget.list"); rec != nil {
+	if rec := m.registryRecord("dev.widget.list"); rec != nil {
 		t.Fatal("disabled record must not resolve for invocation")
 	}
 	enabled, _ := m.store.ListCapabilityRecords()
@@ -133,19 +148,19 @@ func TestCapabilityEnableDisableDelete(t *testing.T) {
 		t.Fatalf("management view must still show it disabled, got %+v", all)
 	}
 
-	ok, err = m.store.SetCapabilityEnabled("testsvc.widget.list", true)
+	ok, err = m.store.SetCapabilityEnabled("dev.widget.list", true)
 	if err != nil || !ok {
 		t.Fatalf("re-enable: %v", err)
 	}
-	if rec := m.registryRecord("testsvc.widget.list"); rec == nil {
+	if rec := m.registryRecord("dev.widget.list"); rec == nil {
 		t.Fatal("re-enabled record must resolve again")
 	}
 
-	ok, err = m.store.DeleteCapabilityRecord("testsvc.widget.list")
+	ok, err = m.store.DeleteCapabilityRecord("dev.widget.list")
 	if err != nil || !ok {
 		t.Fatalf("delete: %v", err)
 	}
-	if ok, _ := m.store.DeleteCapabilityRecord("testsvc.widget.list"); ok {
+	if ok, _ := m.store.DeleteCapabilityRecord("dev.widget.list"); ok {
 		t.Fatal("second delete must report not found")
 	}
 }

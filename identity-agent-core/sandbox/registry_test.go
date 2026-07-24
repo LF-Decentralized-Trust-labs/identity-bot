@@ -150,7 +150,7 @@ func TestEmbeddedPackAndMCPProjection(t *testing.T) {
 	for _, tl := range tools {
 		names[tl.Name] = true
 	}
-	for _, want := range []string{"cloudflare.zone.list", "cloudflare.dns.create", ExecuteToolName} {
+	for _, want := range []string{"infra.zone.list", "infra.dns_record.create", ExecuteToolName} {
 		if !names[want] {
 			t.Fatalf("tools/list missing %s (have %v)", want, names)
 		}

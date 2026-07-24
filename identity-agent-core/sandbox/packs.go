@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -41,6 +42,14 @@ var validExecutorTypes = map[string]bool{
 	"host_control": true,
 }
 
+// Capability ids are CAPABILITY-first, never provider-first: "domain.resource.verb"
+// (e.g. infra.dns_record.create, media.image.create). The pack is the provider-shaped
+// maintenance unit; the id names the function a caller wants, so a different backing
+// can serve the same capability later without renaming anything callers depend on.
+// An optional "@binding" suffix is reserved for that future: concrete records that
+// implement an abstract capability (media.image.create@selfhosted).
+var capabilityIDRe = regexp.MustCompile(`^[a-z0-9_]+(\.[a-z0-9_]+)+(@[a-z0-9_-]+)?$`)
+
 // ParseCapabilityPack decodes and validates a pack document.
 func ParseCapabilityPack(data []byte) (*CapabilityPack, error) {
 	var p CapabilityPack
@@ -56,6 +65,15 @@ func ParseCapabilityPack(data []byte) (*CapabilityPack, error) {
 	for i, r := range p.Capabilities {
 		if strings.TrimSpace(r.ID) == "" {
 			return nil, fmt.Errorf("pack %q: capability %d has no id", p.Pack, i)
+		}
+		if !capabilityIDRe.MatchString(r.ID) {
+			return nil, fmt.Errorf("pack %q: capability id %q must be capability-first \"domain.resource.verb\" (lowercase segments)", p.Pack, r.ID)
+		}
+		idDomain := r.ID[:strings.IndexByte(r.ID, '.')]
+		if r.Domain == "" {
+			p.Capabilities[i].Domain = idDomain
+		} else if r.Domain != idDomain {
+			return nil, fmt.Errorf("pack %q: capability %q domain %q must match its id's first segment %q", p.Pack, r.ID, r.Domain, idDomain)
 		}
 		if !validExecutorTypes[r.ExecutorType] {
 			return nil, fmt.Errorf("pack %q: capability %q has unknown executor_type %q", p.Pack, r.ID, r.ExecutorType)
