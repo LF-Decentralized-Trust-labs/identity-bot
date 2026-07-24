@@ -48,6 +48,12 @@ func (m *Manager) SetEventSigner(s EventSigner) {
 	m.eventSigner = s
 }
 
+// SetVaultKeyProvider injects the credential-vault key source (server layer,
+// at startup) — the vault stays encrypted at rest and unlocks lazily.
+func (m *Manager) SetVaultKeyProvider(p VaultKeyProvider) {
+	m.credentials.SetKeyProvider(p)
+}
+
 func (m *Manager) getEventSigner() EventSigner {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

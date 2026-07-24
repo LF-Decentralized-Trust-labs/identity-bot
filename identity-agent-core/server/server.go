@@ -220,6 +220,13 @@ func New(cfg Config) (*CoreServer, error) {
 	} else {
 		s.SandboxManager = sbxMgr
 		s.SandboxManager.SetEventSigner(&invocationSigner{s: s})
+		s.SandboxManager.SetVaultKeyProvider(func() ([]byte, error) {
+			rootSeed, rerr := secureenclave.LoadRootSeed(cfg.DataDir)
+			if rerr != nil {
+				return nil, rerr
+			}
+			return backup.DeriveVaultKEK(rootSeed)
+		})
 		if startErr := s.SandboxManager.Start(); startErr != nil {
 			log.Printf("[identity-agent-core] Sandbox manager start failed (non-fatal): %v", startErr)
 		}

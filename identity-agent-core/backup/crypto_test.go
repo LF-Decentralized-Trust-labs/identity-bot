@@ -102,6 +102,34 @@ func TestDeriveBackupKEKStable(t *testing.T) {
 	}
 }
 
+func TestDeriveVaultKEKStableAndDistinct(t *testing.T) {
+	seed, err := MnemonicToBIP39Seed(testMnemonic, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := DeriveVaultKEK(seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := DeriveVaultKEK(seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(a, b) {
+		t.Fatal("vault KEK must be deterministic from the root seed")
+	}
+	backupKEK, err := DeriveBackupKEK(seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Equal(a, backupKEK) {
+		t.Fatal("vault KEK must be domain-separated from the backup KEK")
+	}
+	if _, err := DeriveVaultKEK([]byte("short")); err == nil {
+		t.Fatal("short seed must be rejected")
+	}
+}
+
 func TestPairwiseHDDeterministic(t *testing.T) {
 	seed, err := MnemonicToBIP39Seed(testMnemonic, "")
 	if err != nil {
