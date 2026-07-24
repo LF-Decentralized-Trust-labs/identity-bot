@@ -35,6 +35,24 @@ type AppManifest struct {
         Provides           []ProvidedCapability `json:"provides,omitempty"`            // functional capabilities offered (NOT device permissions)
         HostControl        *HostControlSpec     `json:"host_control,omitempty"`        // host-takeover grants (e.g. native computer use)
         SupportedPlatforms []PlatformBinary     `json:"supported_platforms,omitempty"` // per-OS binaries; resolved into Binary at load
+
+        // Isolation is the plug-in's isolation class — ONE property, same name in
+        // UI, docs, and manifests: "sandbox" (default; container/proxy isolation)
+        // or "host" (deliberately unsandboxed because its job IS the host, e.g. a
+        // computer-use driver). A host plug-in is constrained differently, not
+        // less: it must be a compiled binary whose hash is pinned in the manifest
+        // and verified at every launch, and its host_control capabilities are
+        // never remote-invocable (structural rule) and serialized per capability
+        // (one screen = one driver).
+        Isolation string `json:"isolation,omitempty"` // "" (legacy=sandbox) | sandbox | host
+}
+
+// EffectiveIsolation resolves the isolation class; legacy manifests are sandboxed.
+func (m *AppManifest) EffectiveIsolation() string {
+        if m.Isolation == "host" {
+                return "host"
+        }
+        return "sandbox"
 }
 
 // ProvidedCapability is one functional capability a plug-in offers. Distinct from
@@ -65,6 +83,10 @@ type PlatformBinary struct {
         MinVersion string   `json:"min_version"`
         Arch       []string `json:"arch"`
         Binary     string   `json:"binary"`
+        // Hash pins the binary's content ("blake3:<hex>"). Required for host
+        // plug-ins; verified before every launch so the unsandboxed binary that
+        // runs is exactly the one the manifest was written for.
+        Hash string `json:"hash,omitempty"`
 }
 
 type ContainerConfig struct {
@@ -79,6 +101,7 @@ type BinaryConfig struct {
         Path       string            `json:"path"`
         Args       []string          `json:"args"`
         Environment map[string]string `json:"environment"`
+        Hash        string            `json:"hash,omitempty"` // "blake3:<hex>"; required + verified for host plug-ins
 }
 
 type ResourceLimits struct {
@@ -221,6 +244,23 @@ func (m *AppManifest) Validate() error {
                         return fmt.Errorf("supported_platforms[%d].binary is required", i)
                 }
         }
+        if m.Isolation != "" && m.Isolation != "sandbox" && m.Isolation != "host" {
+                return fmt.Errorf("isolation must be 'sandbox' or 'host', got '%s'", m.Isolation)
+        }
+        if m.Isolation == "host" {
+                if m.ExecutionType != "compiled" {
+                        return fmt.Errorf("a host plug-in must be a compiled binary (execution_type 'compiled'), got '%s'", m.ExecutionType)
+                }
+                // The hash requirement: every launchable binary must be pinned.
+                if m.Binary != nil && m.Binary.Hash == "" && len(m.SupportedPlatforms) == 0 {
+                        return fmt.Errorf("a host plug-in requires binary.hash (blake3:<hex>)")
+                }
+                for i, p := range m.SupportedPlatforms {
+                        if p.Hash == "" {
+                                return fmt.Errorf("a host plug-in requires supported_platforms[%d].hash (blake3:<hex>)", i)
+                        }
+                }
+        }
         return nil
 }
 
@@ -233,7 +273,14 @@ func (m *AppManifest) resolveHostBinary() {
                 return
         }
         if path, ok := m.SelectPlatformBinary(runtime.GOOS, runtime.GOARCH); ok {
-                m.Binary = &BinaryConfig{Path: path}
+                b := &BinaryConfig{Path: path}
+                for _, p := range m.SupportedPlatforms {
+                        if strings.EqualFold(p.OS, runtime.GOOS) && p.Binary == path {
+                                b.Hash = p.Hash
+                                break
+                        }
+                }
+                m.Binary = b
         }
 }
 

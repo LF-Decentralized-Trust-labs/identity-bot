@@ -77,6 +77,13 @@ func (m *Manager) InvokeCapability(ctx context.Context, caller CallerContext, ca
 		m.recordInvocation(caller, capabilityID, executorType, body, "denied", start)
 		return nil, err
 	}
+	// One screen = one driver: host_control invocations serialize per capability
+	// so concurrent callers queue instead of interleaving primitives.
+	if capDef.HostControl {
+		l := hostControlLock(capabilityID)
+		l.Lock()
+		defer l.Unlock()
+	}
 	var res *InvokeResult
 	var err error
 	if rec != nil && rec.ExecutorType == "external_api" {
