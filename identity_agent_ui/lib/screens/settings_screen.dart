@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../theme/app_theme.dart';
+import '../widgets/connected_services_section.dart';
 import '../services/core_service.dart';
 import '../services/keri_service.dart';
 import '../services/mobile_on_device_keri_service.dart';
@@ -345,6 +346,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   const SizedBox(height: 12),
                   _buildLLMKeysSection(),
+                  const SizedBox(height: 24),
+                  const Text(
+                    'Connected Services',
+                    style: TextStyle(
+                      color: AppColors.textSecondary,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  ConnectedServicesSection(baseUrl: _coreService.baseUrl),
                   const SizedBox(height: 24),
                   _buildInfoSection(),
                   const SizedBox(height: 24),
