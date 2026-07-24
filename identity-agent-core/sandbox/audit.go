@@ -63,11 +63,12 @@ func hashArgs(args []byte) string {
 	return "blake3:" + hex.EncodeToString(sum[:])
 }
 
-// recordInvocation writes one signed audit event. An audit-write failure never fails
-// the invocation itself, but is logged loudly — the log is the governance record.
-func (m *Manager) recordInvocation(caller CallerContext, capabilityID, executorType string, args []byte, status string, start time.Time) {
+// recordInvocation writes one signed audit event and returns its row id (0 when the
+// write failed or no store is wired). An audit-write failure never fails the
+// invocation itself, but is logged loudly — the log is the governance record.
+func (m *Manager) recordInvocation(caller CallerContext, capabilityID, executorType string, args []byte, status string, start time.Time) int64 {
 	if m.store == nil {
-		return
+		return 0
 	}
 	ev := InvocationEvent{
 		TS:            start.UTC().Format(time.RFC3339Nano),
@@ -92,10 +93,13 @@ func (m *Manager) recordInvocation(caller CallerContext, capabilityID, executorT
 			}
 		}
 	}
-	if _, err := m.store.InsertInvocationEvent(ev); err != nil {
+	id, err := m.store.InsertInvocationEvent(ev)
+	if err != nil {
 		log.Printf("[audit] FAILED to write invocation event for %s (caller %s, status %s): %v",
 			capabilityID, caller.CallerAID, status, err)
+		return 0
 	}
+	return id
 }
 
 // InsertInvocationEvent persists one event; returns its row id.

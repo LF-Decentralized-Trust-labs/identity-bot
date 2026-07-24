@@ -36,9 +36,12 @@ type CallerContext struct {
 }
 
 // InvokeResult is a capability's response, routed back through the endpoint.
+// AuditEventID references the signed invocation-log event this call wrote, so a
+// caller can cite the governance record for its own action.
 type InvokeResult struct {
 	CapabilityID string `json:"capability_id"`
 	Status       int    `json:"status"`
+	AuditEventID int64  `json:"audit_event_id,omitempty"`
 	Body         []byte `json:"-"`
 }
 
@@ -96,7 +99,10 @@ func (m *Manager) InvokeCapability(ctx context.Context, caller CallerContext, ca
 	if out != nil && out.Status >= 400 {
 		status = "error"
 	}
-	m.recordInvocation(caller, capabilityID, executorType, body, status, start)
+	eventID := m.recordInvocation(caller, capabilityID, executorType, body, status, start)
+	if out != nil {
+		out.AuditEventID = eventID
+	}
 	return out, nil
 }
 

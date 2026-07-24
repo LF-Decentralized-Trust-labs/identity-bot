@@ -20,6 +20,14 @@ type MCPTool struct {
 // retracts and the meta-tools remain, keeping a caller's context cost constant.
 const ExecuteToolName = "execute"
 
+// SearchToolName finds capabilities by text + filters, returning ranked summaries
+// (never full schemas) filtered to the caller's entitlements.
+const SearchToolName = "search"
+
+// DescribeToolName serves one capability's full record — the only place full input
+// schemas and auth requirements are served, keeping search results context-cheap.
+const DescribeToolName = "describe"
+
 // MCPToolsList projects the agent's capabilities (plug-in-provided + registry-native)
 // as MCP tools — the tools/list side of the agent's single MCP server.
 func (m *Manager) MCPToolsList() []MCPTool {
@@ -72,8 +80,32 @@ func (m *Manager) MCPToolsList() []MCPTool {
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"capability_id": map[string]any{"type": "string", "description": "the capability to invoke (see tools list / registry)"},
-				"args":          map[string]any{"type": "object", "description": "arguments per the capability's input schema"},
+				"capability_id": map[string]any{"type": "string", "description": "the capability to invoke (see search/describe)"},
+				"args":          map[string]any{"type": "object", "description": "arguments per the capability's input schema (see describe)"},
+			},
+			"required": []string{"capability_id"},
+		},
+	})
+	tools = append(tools, MCPTool{
+		Name:        SearchToolName,
+		Description: "Find capabilities. Returns ranked summaries (id, name, description — no schemas), filtered to what you are entitled to invoke. Use describe for a capability's full record.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"query":         map[string]any{"type": "string", "description": "free-text match against id, name, and description; omit to browse by filters"},
+				"domain":        map[string]any{"type": "string", "description": "exact domain filter (e.g. infrastructure)"},
+				"executor_type": map[string]any{"type": "string", "description": "exact executor filter: internal_api | external_api | ai_agent | host_control | plugin"},
+				"limit":         map[string]any{"type": "integer", "description": "max results (default 20, cap 50)"},
+			},
+		},
+	})
+	tools = append(tools, MCPTool{
+		Name:        DescribeToolName,
+		Description: "Full record for one capability: input schema, auth requirements, and how to invoke it with execute.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"capability_id": map[string]any{"type": "string", "description": "the capability to describe (from search)"},
 			},
 			"required": []string{"capability_id"},
 		},
@@ -112,9 +144,35 @@ func (m *Manager) MCPToolsCall(ctx context.Context, caller CallerContext, name s
 			"capability_id":  res.CapabilityID,
 			"status":         res.Status,
 			"correlation_id": caller.CorrelationID,
+			"audit_event_id": res.AuditEventID,
 			"body":           json.RawMessage(normalizeJSONBody(res.Body)),
 		})
 		return MCPToolResult{Text: string(wrapped), IsError: res.Status >= 400}
+	}
+	if name == SearchToolName {
+		var q SearchQuery
+		if len(args) > 0 {
+			if err := json.Unmarshal(args, &q); err != nil {
+				return MCPToolResult{Text: "search takes {\"query\": ..., \"domain\": ..., \"executor_type\": ..., \"limit\": ...}", IsError: true}
+			}
+		}
+		results := m.SearchCapabilities(ctx, caller, q)
+		out, _ := json.Marshal(map[string]any{"capabilities": results, "count": len(results)})
+		return MCPToolResult{Text: string(out)}
+	}
+	if name == DescribeToolName {
+		var p struct {
+			CapabilityID string `json:"capability_id"`
+		}
+		if err := json.Unmarshal(args, &p); err != nil || p.CapabilityID == "" {
+			return MCPToolResult{Text: "describe requires {\"capability_id\": ...}", IsError: true}
+		}
+		detail, err := m.DescribeCapability(ctx, caller, p.CapabilityID)
+		if err != nil {
+			return MCPToolResult{Text: err.Error(), IsError: true}
+		}
+		out, _ := json.Marshal(detail)
+		return MCPToolResult{Text: string(out)}
 	}
 	res, err := m.InvokeCapability(ctx, caller, name, args)
 	if err != nil {
