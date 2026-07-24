@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"identity-agent-core/backup"
+	"identity-agent-core/secureenclave"
 	"identity-agent-core/store"
 
 	"github.com/google/uuid"
@@ -316,6 +317,16 @@ func (s *Service) applyPayload(payload *RestoredPayload) error {
 		path := filepath.Join(s.DataDir, "login_relationships.json")
 		if err := os.WriteFile(path, raw, 0600); err != nil {
 			return fmt.Errorf("write login_relationships: %w", err)
+		}
+	}
+	// Reseat the root keystore seed so every HD-derived key (pairwise contacts,
+	// login relationships, asset signing, audit signing, credential vault)
+	// re-derives on this device. StoreRootSeed re-wraps it under THIS device's
+	// hardware key where one is usable — the old device's secure element is
+	// never needed.
+	if raw, ok := payload.Bundle.Sections["root_seed"]; ok && len(raw) >= 32 {
+		if err := secureenclave.StoreRootSeed(s.DataDir, raw); err != nil {
+			return fmt.Errorf("reseat root seed: %w", err)
 		}
 	}
 	if raw, ok := payload.Bundle.Sections["sqlite_identity_db"]; ok && len(raw) > 0 {
