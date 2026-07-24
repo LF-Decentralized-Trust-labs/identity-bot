@@ -9,6 +9,7 @@ import '../bridge/keri_bridge_stub.dart'
     if (dart.library.io) '../bridge/keri_bridge.dart';
 import '../services/core_service.dart';
 import '../services/preferences_service.dart' show EntityType;
+import '../services/root_seed_handoff.dart';
 import '../services/secure_key_store.dart';
 import '../services/backend_process_service.dart';
 import '../services/enclave_service.dart';
@@ -171,6 +172,11 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
 
       setState(() => _processingStep = 3);
       await SecureKeyStore.saveMnemonic(_mnemonic);
+
+      // Hand the mnemonic-derived BIP39 seed to the local core: HD-derived keys
+      // (pairwise contacts, logins, assets, audit, credential vault) then share
+      // the identity's single root of trust — the phrase alone recovers all.
+      await RootSeedHandoff.register(_mnemonic, baseUrl: _coreBaseUrl);
 
       // Profile is saved in _submitProfile() after the user fills it in
       setState(() => _processingStep = 4);

@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -26,7 +27,10 @@ import (
 func (s *CoreServer) mintPairwise(name string) (aid, oobi string, seed []byte, err error) {
 	rootSeed, rerr := secureenclave.LoadRootSeed(s.DataDir)
 	if rerr != nil {
-		// Bootstrap the root seed if absent (mirrors the login/contact flow).
+		// FALLBACK ONLY: canonical path is the onboarding handoff installing the
+		// mnemonic-derived seed (POST /api/keystore/root-seed). A random root is
+		// device-local — recoverable from backup archives, never the phrase.
+		log.Printf("[keystore] WARNING: bootstrapping a random DEVICE-LOCAL root seed (no onboarding seed handoff yet) — HD-derived keys will not be recoverable from the seed phrase alone")
 		rootSeed = make([]byte, 64)
 		if _, re := rand.Read(rootSeed); re != nil {
 			return "", "", nil, re

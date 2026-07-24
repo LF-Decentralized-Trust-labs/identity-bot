@@ -465,6 +465,9 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		r.Get("/identity", s.handleIdentity)
 		r.Get("/security/enclave", s.handleSecurityEnclave)
 
+		r.Post("/keystore/root-seed", s.handleSetRootSeed)
+		r.Get("/keystore/root-seed", s.handleRootSeedStatus)
+
 		r.Post("/inception", s.handleInception)
 		r.Post("/hybrid-inception", s.handleHybridInception)
 		r.Post("/rotation", s.handleRotation)
