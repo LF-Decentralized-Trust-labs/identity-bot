@@ -18,13 +18,20 @@ func registryTestManager(t *testing.T) *Manager {
 		t.Fatalf("store: %v", err)
 	}
 	t.Cleanup(func() { st.Close() })
+	cv := NewCredentialVault(dir)
+	cv.SetKeyProvider(testVaultKeyProvider)
 	return &Manager{
 		store:       st,
 		policy:      NewPolicyEngine(st, NewEventBus()),
-		credentials: NewCredentialVault(dir),
+		credentials: cv,
 		manifests:   map[string]*AppManifest{},
 		dataDir:     dir,
 	}
+}
+
+// testVaultKeyProvider supplies a fixed 32-byte vault key for tests.
+func testVaultKeyProvider() ([]byte, error) {
+	return []byte("0123456789abcdef0123456789abcdef"), nil
 }
 
 func TestExpandPathTemplate(t *testing.T) {

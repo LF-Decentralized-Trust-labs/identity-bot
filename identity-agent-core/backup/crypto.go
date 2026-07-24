@@ -19,6 +19,7 @@ import (
 
 const (
 	BackupKEKInfoV1   = "identity-agent-backup-kek-v1"
+	VaultKEKInfoV1    = "identity-agent-credential-vault-kek-v1"
 	PairwiseHDInfoV1  = "identity-agent-pairwise-v1"
 	Argon2MemoryKiB   = 64 * 1024 // 64 MiB — OWASP minimum class
 	Argon2Iterations  = 3
@@ -48,6 +49,20 @@ func DeriveBackupKEK(bip39Seed []byte) ([]byte, error) {
 	out := make([]byte, 32)
 	if _, err := r.Read(out); err != nil {
 		return nil, fmt.Errorf("hkdf backup kek: %w", err)
+	}
+	return out, nil
+}
+
+// DeriveVaultKEK derives the 256-bit credential-vault key from the root BIP39
+// seed (64 bytes). Distinct HKDF salt/info domain-separate it from the backup KEK.
+func DeriveVaultKEK(bip39Seed []byte) ([]byte, error) {
+	if len(bip39Seed) < 32 {
+		return nil, fmt.Errorf("bip39 seed must be at least 32 bytes")
+	}
+	r := hkdf.New(sha256.New, bip39Seed, []byte("identity-agent-vault-salt-v1"), []byte(VaultKEKInfoV1))
+	out := make([]byte, 32)
+	if _, err := r.Read(out); err != nil {
+		return nil, fmt.Errorf("hkdf vault kek: %w", err)
 	}
 	return out, nil
 }

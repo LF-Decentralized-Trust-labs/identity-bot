@@ -1099,7 +1099,7 @@ func (s *FileStore) ResetAll() error {
         s.mu.Lock()
         defer s.mu.Unlock()
 
-        files := []string{"identity.json", "kel.json", "contacts.json", "settings.json", "pending_requests.json", "profile.json", "endpoint.json", "contact_kels.json", "credentials.json", "credential_schemas.json", "presentations.json", "witness_receipts.json"}
+        files := []string{"identity.json", "kel.json", "contacts.json", "settings.json", "pending_requests.json", "profile.json", "endpoint.json", "contact_kels.json", "credentials.json", "credential_schemas.json", "presentations.json", "witness_receipts.json", "service_credentials.enc"}
         for _, f := range files {
                 path := filepath.Join(s.dir, f)
                 if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
