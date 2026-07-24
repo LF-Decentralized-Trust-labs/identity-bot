@@ -128,16 +128,14 @@ func TestRegistryNativeRemoteDeniedAndAudited(t *testing.T) {
 	}
 }
 
-// The seeded Cloudflare records exist, are enabled, and surface through tools/list —
-// including the execute meta-tool with its real schema.
-func TestSeededCapabilitiesAndMCPProjection(t *testing.T) {
+// The embedded Cloudflare reference pack loads, its records are enabled with SAIDs,
+// and they surface through tools/list — including the execute meta-tool.
+func TestEmbeddedPackAndMCPProjection(t *testing.T) {
 	m := registryTestManager(t)
-	if err := m.store.SeedDefaultCapabilities(); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
+	m.loadCapabilityPacks()
 	recs, err := m.store.ListCapabilityRecords()
 	if err != nil || len(recs) != 5 {
-		t.Fatalf("expected 5 seeded records, got %d (err %v)", len(recs), err)
+		t.Fatalf("expected 5 records from the reference pack, got %d (err %v)", len(recs), err)
 	}
 	for _, r := range recs {
 		if r.SAID == "" || !strings.HasPrefix(r.SAID, "blake3:") {

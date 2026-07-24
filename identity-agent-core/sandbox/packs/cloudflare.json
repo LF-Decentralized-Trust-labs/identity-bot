@@ -1,0 +1,134 @@
+{
+  "pack": "cloudflare",
+  "version": "1.0.0",
+  "publisher": "identity-agent",
+  "capabilities": [
+    {
+      "id": "cloudflare.zone.list",
+      "name": "List Cloudflare zones",
+      "description": "List the zones (domains) on the Cloudflare account.",
+      "domain": "dev",
+      "executor_type": "external_api",
+      "impact": "read",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "description": "optional zone name filter" }
+        },
+        "required": []
+      },
+      "egress": {
+        "base_url": "https://api.cloudflare.com/client/v4",
+        "method": "GET",
+        "path_template": "/zones",
+        "credential_service": "cloudflare"
+      },
+      "provider": "registry-native",
+      "enabled": true
+    },
+    {
+      "id": "cloudflare.dns.list",
+      "name": "List DNS records",
+      "description": "List DNS records in a Cloudflare zone.",
+      "domain": "dev",
+      "executor_type": "external_api",
+      "impact": "read",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "zone_id": { "type": "string", "description": "Cloudflare zone id" }
+        },
+        "required": ["zone_id"]
+      },
+      "egress": {
+        "base_url": "https://api.cloudflare.com/client/v4",
+        "method": "GET",
+        "path_template": "/zones/{zone_id}/dns_records",
+        "credential_service": "cloudflare"
+      },
+      "provider": "registry-native",
+      "enabled": true
+    },
+    {
+      "id": "cloudflare.dns.create",
+      "name": "Create a DNS record",
+      "description": "Create a DNS record in a Cloudflare zone.",
+      "domain": "dev",
+      "executor_type": "external_api",
+      "impact": "mutating",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "zone_id": { "type": "string", "description": "Cloudflare zone id" },
+          "type": { "type": "string", "description": "A|AAAA|CNAME|TXT|MX|..." },
+          "name": { "type": "string" },
+          "content": { "type": "string" },
+          "ttl": { "type": "integer" },
+          "proxied": { "type": "boolean" }
+        },
+        "required": ["zone_id", "type", "name", "content"]
+      },
+      "egress": {
+        "base_url": "https://api.cloudflare.com/client/v4",
+        "method": "POST",
+        "path_template": "/zones/{zone_id}/dns_records",
+        "credential_service": "cloudflare"
+      },
+      "provider": "registry-native",
+      "enabled": true
+    },
+    {
+      "id": "cloudflare.dns.update",
+      "name": "Update a DNS record",
+      "description": "Overwrite an existing DNS record in a Cloudflare zone.",
+      "domain": "dev",
+      "executor_type": "external_api",
+      "impact": "mutating",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "zone_id": { "type": "string", "description": "Cloudflare zone id" },
+          "record_id": { "type": "string", "description": "DNS record id" },
+          "type": { "type": "string", "description": "A|AAAA|CNAME|TXT|MX|..." },
+          "name": { "type": "string" },
+          "content": { "type": "string" },
+          "ttl": { "type": "integer" },
+          "proxied": { "type": "boolean" }
+        },
+        "required": ["zone_id", "record_id", "type", "name", "content"]
+      },
+      "egress": {
+        "base_url": "https://api.cloudflare.com/client/v4",
+        "method": "PUT",
+        "path_template": "/zones/{zone_id}/dns_records/{record_id}",
+        "credential_service": "cloudflare"
+      },
+      "provider": "registry-native",
+      "enabled": true
+    },
+    {
+      "id": "cloudflare.dns.delete",
+      "name": "Delete a DNS record",
+      "description": "Delete a DNS record from a Cloudflare zone.",
+      "domain": "dev",
+      "executor_type": "external_api",
+      "impact": "mutating",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "zone_id": { "type": "string", "description": "Cloudflare zone id" },
+          "record_id": { "type": "string", "description": "DNS record id" }
+        },
+        "required": ["zone_id", "record_id"]
+      },
+      "egress": {
+        "base_url": "https://api.cloudflare.com/client/v4",
+        "method": "DELETE",
+        "path_template": "/zones/{zone_id}/dns_records/{record_id}",
+        "credential_service": "cloudflare"
+      },
+      "provider": "registry-native",
+      "enabled": true
+    }
+  ]
+}

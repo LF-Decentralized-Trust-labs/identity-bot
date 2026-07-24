@@ -61,10 +61,6 @@ func NewManager(cfg ManagerConfig) (*Manager, error) {
                 return nil, fmt.Errorf("failed to initialize sandbox store: %w", err)
         }
 
-        if err := store.SeedDefaultCapabilities(); err != nil {
-                log.Printf("[registry] failed to seed default capabilities: %v", err)
-        }
-
         eventBus := NewEventBus()
         policy := NewPolicyEngine(store, eventBus)
         credentials := NewCredentialVault(cfg.DataDir)
@@ -103,6 +99,8 @@ func NewManager(cfg ManagerConfig) (*Manager, error) {
                 dataDir:      cfg.DataDir,
                 manifestsDir: cfg.ManifestsDir,
         }
+
+        m.loadCapabilityPacks()
 
         return m, nil
 }

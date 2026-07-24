@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"log"
 
 	"github.com/zeebo/blake3"
@@ -25,6 +24,18 @@ type EgressSpec struct {
 	Method            string `json:"method"`
 	PathTemplate      string `json:"path_template"` // "{name}" tokens are filled from args
 	CredentialService string `json:"credential_service"`
+	// BodyTemplate, when set, shapes the outbound JSON body: "{name}" placeholders
+	// are filled from args ("{name|default}" makes one optional) on the decoded
+	// JSON tree, so values are inserted safely regardless of quoting. With a
+	// template, args map ONLY through placeholders — leftovers are an error.
+	BodyTemplate json.RawMessage `json:"body_template,omitempty"`
+	// ResponseExtract, when set, projects a successful JSON response down to the
+	// named fields: output field -> dotted path (e.g. "choices.0.message.content").
+	// A path ending in "!" is required — a response missing it is an error.
+	ResponseExtract map[string]string `json:"response_extract,omitempty"`
+	// TimeoutSeconds bounds the outbound call (0 = the transport default). Slow
+	// capabilities (e.g. image generation) declare their own budget here.
+	TimeoutSeconds int `json:"timeout_seconds,omitempty"`
 }
 
 // CapabilityRecord is one registry entry. `search` filters on Domain + text, `execute`
@@ -125,6 +136,52 @@ func (s *SandboxStore) ListCapabilityRecords() ([]CapabilityRecord, error) {
 	return out, rows.Err()
 }
 
+// ListAllCapabilityRecords returns every record including disabled ones — the
+// management view (the invoke/discovery paths use ListCapabilityRecords).
+func (s *SandboxStore) ListAllCapabilityRecords() ([]CapabilityRecord, error) {
+	rows, err := s.db.Query(`SELECT id, said, name, description, domain, executor_type,
+		input_schema, impact, required_cred_schema, required_cred_issuer, egress_json,
+		provider, enabled FROM capability_registry ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []CapabilityRecord
+	for rows.Next() {
+		rec, err := scanCapabilityRecord(rows)
+		if err != nil {
+			return nil, err
+		}
+		if rec != nil {
+			out = append(out, *rec)
+		}
+	}
+	return out, rows.Err()
+}
+
+// SetCapabilityEnabled toggles a record without touching its content (or SAID).
+// Returns false when no such record exists.
+func (s *SandboxStore) SetCapabilityEnabled(id string, enabled bool) (bool, error) {
+	res, err := s.db.Exec(`UPDATE capability_registry SET enabled = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+		boolToInt(enabled), id)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
+// DeleteCapabilityRecord removes a record. Returns false when no such record exists.
+// (Invocation-log events referencing it are history and remain.)
+func (s *SandboxStore) DeleteCapabilityRecord(id string) (bool, error) {
+	res, err := s.db.Exec(`DELETE FROM capability_registry WHERE id = ?`, id)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
 type rowScanner interface{ Scan(dest ...any) error }
 
 func scanCapabilityRecord(row rowScanner) (*CapabilityRecord, error) {
@@ -176,69 +233,4 @@ func (m *Manager) registryRecord(capabilityID string) *CapabilityRecord {
 		return nil
 	}
 	return rec
-}
-
-// SeedDefaultCapabilities registers the built-in registry-native records (idempotent
-// upsert, so edits to the seed set roll forward). First slice: the Cloudflare API.
-// The Cloudflare API token lives ONCE in the CredentialVault
-// (service "cloudflare", matched on api.cloudflare.com) — union-scoped at the
-// provider, per-caller governance at the gateway.
-func (s *SandboxStore) SeedDefaultCapabilities() error {
-	const cfBase = "https://api.cloudflare.com/client/v4"
-	schema := func(props string, required ...string) json.RawMessage {
-		req, _ := json.Marshal(required)
-		return json.RawMessage(fmt.Sprintf(`{"type":"object","properties":{%s},"required":%s}`, props, req))
-	}
-	zoneID := `"zone_id":{"type":"string","description":"Cloudflare zone id"}`
-	recordID := `"record_id":{"type":"string","description":"DNS record id"}`
-	dnsBody := `"type":{"type":"string","description":"A|AAAA|CNAME|TXT|MX|..."},"name":{"type":"string"},"content":{"type":"string"},"ttl":{"type":"integer"},"proxied":{"type":"boolean"}`
-
-	seeds := []CapabilityRecord{
-		{
-			ID: "cloudflare.zone.list", Name: "List Cloudflare zones",
-			Description: "List the zones (domains) on the Cloudflare account.",
-			Domain:      "dev", ExecutorType: "external_api", Impact: "read",
-			InputSchema: schema(`"name":{"type":"string","description":"optional zone name filter"}`),
-			Egress:      &EgressSpec{BaseURL: cfBase, Method: "GET", PathTemplate: "/zones", CredentialService: "cloudflare"},
-			Provider:    "registry-native", Enabled: true,
-		},
-		{
-			ID: "cloudflare.dns.list", Name: "List DNS records",
-			Description: "List DNS records in a Cloudflare zone.",
-			Domain:      "dev", ExecutorType: "external_api", Impact: "read",
-			InputSchema: schema(zoneID, "zone_id"),
-			Egress:      &EgressSpec{BaseURL: cfBase, Method: "GET", PathTemplate: "/zones/{zone_id}/dns_records", CredentialService: "cloudflare"},
-			Provider:    "registry-native", Enabled: true,
-		},
-		{
-			ID: "cloudflare.dns.create", Name: "Create a DNS record",
-			Description: "Create a DNS record in a Cloudflare zone.",
-			Domain:      "dev", ExecutorType: "external_api", Impact: "mutating",
-			InputSchema: schema(zoneID+","+dnsBody, "zone_id", "type", "name", "content"),
-			Egress:      &EgressSpec{BaseURL: cfBase, Method: "POST", PathTemplate: "/zones/{zone_id}/dns_records", CredentialService: "cloudflare"},
-			Provider:    "registry-native", Enabled: true,
-		},
-		{
-			ID: "cloudflare.dns.update", Name: "Update a DNS record",
-			Description: "Overwrite an existing DNS record in a Cloudflare zone.",
-			Domain:      "dev", ExecutorType: "external_api", Impact: "mutating",
-			InputSchema: schema(zoneID+","+recordID+","+dnsBody, "zone_id", "record_id", "type", "name", "content"),
-			Egress:      &EgressSpec{BaseURL: cfBase, Method: "PUT", PathTemplate: "/zones/{zone_id}/dns_records/{record_id}", CredentialService: "cloudflare"},
-			Provider:    "registry-native", Enabled: true,
-		},
-		{
-			ID: "cloudflare.dns.delete", Name: "Delete a DNS record",
-			Description: "Delete a DNS record from a Cloudflare zone.",
-			Domain:      "dev", ExecutorType: "external_api", Impact: "mutating",
-			InputSchema: schema(zoneID+","+recordID, "zone_id", "record_id"),
-			Egress:      &EgressSpec{BaseURL: cfBase, Method: "DELETE", PathTemplate: "/zones/{zone_id}/dns_records/{record_id}", CredentialService: "cloudflare"},
-			Provider:    "registry-native", Enabled: true,
-		},
-	}
-	for _, rec := range seeds {
-		if err := s.UpsertCapabilityRecord(rec); err != nil {
-			return fmt.Errorf("seed capability %s: %w", rec.ID, err)
-		}
-	}
-	return nil
 }
