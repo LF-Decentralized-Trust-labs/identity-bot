@@ -322,12 +322,13 @@ func (s *CoreServer) applyGrantScopes(entry mcpToken, cc *sandbox.CallerContext)
 		return
 	}
 	if !s.grantCredentialValid(rec, entry) {
-		// The grant exists and is not revoked, but couldn't be cryptographically
-		// confirmed THIS request (e.g. the issuer KEL is temporarily unavailable).
-		// That is an infrastructure failure, not a revocation, so fall back to the
-		// server-side ceiling (increment-1 behaviour) rather than brick a
-		// legitimately-provisioned agent. Authority is not credential-proven this
-		// request, so GrantSAID is left unset and the stored ceiling stands.
+		// The grant exists and is not revoked, but did not cryptographically verify.
+		// Fail closed — deny — rather than authorize on the stored ceiling, which
+		// would be an authority state that looks legitimate but is not proven. A
+		// legitimately-provisioned agent's grant always verifies (its owner-root
+		// anchor is persisted at provisioning); a failure here is a real problem
+		// that must surface as a denial, not a silent fallback.
+		cc.Scopes = nil
 		return
 	}
 	// Credential-proven: derive the ceiling from the verified grant and record it.

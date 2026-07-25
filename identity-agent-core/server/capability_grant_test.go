@@ -3,6 +3,9 @@ package server
 import (
 	"encoding/base64"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"identity-agent-core/drivers"
@@ -95,6 +98,61 @@ func TestRevokedGrantDenies(t *testing.T) {
 	cc := tokenAwareResolver{s}.Resolve(reqWithBearer(plaintext))
 	if len(cc.Scopes) != 0 {
 		t.Fatalf("a revoked grant must yield no scopes (deny), got %v", cc.Scopes)
+	}
+}
+
+// The happy path: a valid unrevoked grant whose issuer KEL resolves and whose
+// ACDC the driver verifies → scopes are derived from the credential (not the
+// stored ceiling) and grant_said is recorded. Uses a fake driver so the wiring
+// is exercised independent of a live KERI keystore.
+func TestVerifiedGrantDerivesScopesFromCredential(t *testing.T) {
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/kel":
+			json.NewEncoder(w).Encode(map[string]any{
+				"aid": "ERoot", "sequence_number": 0, "event_count": 1,
+				"kel": []map[string]any{{"t": "icp", "s": "0", "d": "ERoot", "i": "ERoot"}},
+			})
+		case r.URL.Path == "/credential/verify":
+			json.NewEncoder(w).Encode(map[string]any{"verified": true, "acdc_said": "EGrantOK"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer fake.Close()
+
+	// Point NewKeriDriver at the fake server (it builds BaseURL from the port).
+	u, _ := url.Parse(fake.URL)
+	t.Setenv("KERI_DRIVER_PORT", u.Port())
+
+	s := newGrantTestServer(t)
+	s.KeriDriver = drivers.NewKeriDriver()
+
+	// The grant ACDC names infra.zone.list in its attribute block; the stored
+	// token ceiling deliberately differs so we can prove the credential wins.
+	acdc, _ := json.Marshal(map[string]any{
+		"a": map[string]any{"i": "EAgent", "capabilities": []any{"infra.zone.list"}},
+	})
+	if err := s.DataStore.SaveCredential(store.CredentialRecord{
+		SAID: "EGrantOK", Status: "issued", Format: "acdc",
+		SchemaSAID: capabilityGrantSchemaSAID, HolderAID: "EAgent", IssuerAID: "ERoot",
+		AcdcJson: base64.StdEncoding.EncodeToString(acdc),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	plaintext := "iamcp_verified"
+	seedAgentToken(t, s, plaintext, mcpToken{
+		Name: "a4", Scopes: []string{"stored.ceiling.placeholder"},
+		AgentAID: "EAgent", DelegatorAID: "ERoot", GrantSAID: "EGrantOK",
+	})
+
+	cc := tokenAwareResolver{s}.Resolve(reqWithBearer(plaintext))
+	if len(cc.Scopes) != 1 || cc.Scopes[0] != "infra.zone.list" {
+		t.Fatalf("scopes must come from the verified credential, got %v", cc.Scopes)
+	}
+	if cc.GrantSAID != "EGrantOK" {
+		t.Fatalf("grant_said should be recorded on a verified call, got %q", cc.GrantSAID)
 	}
 }
 

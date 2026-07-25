@@ -43,6 +43,11 @@ func (h *Handler) ProvisionAgentAsset(displayName string, capabilities []string)
 	if err != nil {
 		return nil, fmt.Errorf("mint delegated agent AID: %w", err)
 	}
+	// Persist the owner-root anchoring event, or the agent's delegation won't
+	// survive a KEL reload and its capability grant will never verify.
+	if err := h.persistDelegationAnchor(rootAID, resp.DelegatorIxn); err != nil {
+		return nil, fmt.Errorf("persist delegation anchor: %w", err)
+	}
 
 	now := time.Now().UTC()
 	asset := Asset{
