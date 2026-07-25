@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"strconv"
 	"path/filepath"
 	"runtime"
 	"time"
@@ -345,6 +346,51 @@ func NewKeriDriver() *KeriDriver {
 func (d *KeriDriver) Start() error {
 	log.Printf("[keri-driver] Starting managed Python KERI driver...")
 
+	driverPort := os.Getenv("KERI_DRIVER_PORT")
+	if driverPort == "" {
+		driverPort = "9999"
+	}
+
+	// External-driver mode: the KERI driver is supervised as its own process
+	// (a separate launchd/systemd service, or a sidecar container) and this
+	// backend only adopts it — never spawns a child. This is the robust
+	// deployment model: the driver's lifecycle is decoupled from the backend's,
+	// so a backend restart can't orphan a driver or contend for the keystore,
+	// and the driver runs directly under the supervisor rather than as a
+	// grandchild. Wait up to the ready timeout for it (the supervisor may still
+	// be bringing it up), then adopt; if it never appears, fail so the
+	// supervisor retries the backend (no child driver is ever spawned here).
+	if isTruthy(os.Getenv("KERI_DRIVER_EXTERNAL")) {
+		log.Printf("[keri-driver] External driver mode: adopting supervised driver on %s (never spawning a child)", d.BaseURL)
+		d.managed = false
+		deadline := time.Now().Add(driverReadyTimeout())
+		for time.Now().Before(deadline) {
+			if status, err := d.GetStatus(); err == nil && status.Status == "active" {
+				log.Printf("[keri-driver] Adopted external driver (library: %s)", status.KeriLibrary)
+				return nil
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+		return fmt.Errorf("external KERI driver not reachable on %s within %s", d.BaseURL, driverReadyTimeout())
+	}
+
+	// Self-healing startup. Two hazards make a naive spawn crash-loop under a
+	// process supervisor (launchd/systemd KeepAlive):
+	//  1. A previous backend that exited on a fatal error orphaned its child
+	//     driver, which still holds the port and an open lock on the KERI
+	//     keystore (LMDB). A fresh driver then contends for that lock and never
+	//     becomes ready — the failure re-triggers the supervisor, sustaining a
+	//     restart spiral.
+	//  2. A healthy driver from a prior/parallel instance is already serving.
+	// Adopt a healthy one; reclaim the port from a wedged one. Either way a
+	// single, uncontended driver ends up owning the keystore.
+	if status, err := d.GetStatus(); err == nil && status.Status == "active" {
+		log.Printf("[keri-driver] Adopting already-running healthy driver on %s (library: %s)", d.BaseURL, status.KeriLibrary)
+		d.managed = false
+		return nil
+	}
+	reclaimDriverPort(driverPort)
+
 	scriptPath := os.Getenv("KERI_DRIVER_SCRIPT")
 	if scriptPath == "" {
 		// Default: look relative to this executable's directory, then fall back
@@ -379,10 +425,7 @@ func (d *KeriDriver) Start() error {
 		pythonBin = "python3"
 	}
 
-	port := os.Getenv("KERI_DRIVER_PORT")
-	if port == "" {
-		port = "9999"
-	}
+	port := driverPort
 
 	cmd := exec.Command(pythonBin, scriptPath)
 
@@ -456,7 +499,50 @@ func (d *KeriDriver) Start() error {
 	d.process = cmd
 	log.Printf("[keri-driver] Python process started (PID: %d)", cmd.Process.Pid)
 
-	return d.waitForReady(15 * time.Second)
+	return d.waitForReady(driverReadyTimeout())
+}
+
+// isTruthy reports whether an env value means "on".
+func isTruthy(v string) bool {
+	switch v {
+	case "1", "true", "TRUE", "True", "yes", "on":
+		return true
+	}
+	return false
+}
+
+// driverReadyTimeout is how long Start waits for the driver's /status to report
+// active. Override with KERI_DRIVER_READY_TIMEOUT (seconds) for slow cold starts
+// (e.g. first keystore init on constrained hardware). A clean start is ~1s.
+func driverReadyTimeout() time.Duration {
+	if v := os.Getenv("KERI_DRIVER_READY_TIMEOUT"); v != "" {
+		if secs, err := strconv.Atoi(v); err == nil && secs > 0 {
+			return time.Duration(secs) * time.Second
+		}
+	}
+	return 30 * time.Second
+}
+
+// reclaimDriverPort best-effort kills any process holding the driver port. It
+// runs only when no healthy driver answered (Start already adopted a healthy
+// one), so the holder is a wedged/orphaned driver blocking a clean restart.
+// Best-effort by design: failures are logged, never fatal.
+func reclaimDriverPort(port string) {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		// Find the PID owning the port, then kill it.
+		cmd = exec.Command("cmd", "/C",
+			fmt.Sprintf(`for /f "tokens=5" %%a in ('netstat -ano ^| findstr :%s ^| findstr LISTENING') do taskkill /F /PID %%a`, port))
+	default: // darwin, linux
+		cmd = exec.Command("sh", "-c", fmt.Sprintf("lsof -ti tcp:%s | xargs -r kill -9", port))
+	}
+	if out, err := cmd.CombinedOutput(); err != nil {
+		// A non-zero exit usually just means nothing was listening — expected.
+		log.Printf("[keri-driver] port %s reclaim (no stale holder or already free): %v %s", port, err, string(out))
+	} else if len(out) > 0 {
+		log.Printf("[keri-driver] reclaimed port %s from a stale holder: %s", port, string(out))
+	}
 }
 
 func (d *KeriDriver) waitForReady(timeout time.Duration) error {
