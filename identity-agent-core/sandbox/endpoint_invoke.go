@@ -38,6 +38,11 @@ type CallerContext struct {
 	// identity, so the audit event proves "owner -> agent". Empty for a bare
 	// token or the local owner.
 	DelegationChain []string
+	// GrantSAID is the SAID of the verified capability-grant credential the
+	// caller's authority was derived from — the machine-readable sanction ("why")
+	// recorded in the audit event. Empty when scopes came from a bare token
+	// ceiling rather than a verified credential.
+	GrantSAID string
 }
 
 // InvokeResult is a capability's response, routed back through the endpoint.

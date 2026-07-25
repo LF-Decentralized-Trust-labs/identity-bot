@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -17,7 +18,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"identity-agent-core/drivers"
 	"identity-agent-core/sandbox"
+	"identity-agent-core/store"
 )
 
 // MCP access tokens are the first rung of the endpoint's auth ladder: a positive
@@ -42,6 +45,12 @@ type mcpToken struct {
 	AgentAID     string `json:"agent_aid,omitempty"`
 	DelegatorAID string `json:"delegator_aid,omitempty"`
 	AssetID      string `json:"asset_id,omitempty"`
+	// GrantSAID is the capability-grant credential (an ACDC the owner issued to
+	// this agent) whose verified attributes are the authoritative capability
+	// ceiling. When present and the KERI driver is available, authority is
+	// credential-proven at invoke time; otherwise the resolver falls back to
+	// the Scopes list above (the stored ceiling).
+	GrantSAID string `json:"grant_said,omitempty"`
 }
 
 var mcpTokensMu sync.Mutex
@@ -140,6 +149,13 @@ func (t tokenAwareResolver) Resolve(r *http.Request) sandbox.CallerContext {
 					if entry.DelegatorAID != "" {
 						cc.DelegationChain = append(cc.DelegationChain, entry.DelegatorAID)
 					}
+					// Credential-proven authority: when the agent holds a capability
+					// grant (an ACDC the owner issued to it) and the KERI driver is
+					// available, verify it and derive the ceiling FROM the credential
+					// rather than trusting the stored scope list. A revoked, missing,
+					// tampered, or wrong-issuer grant yields no scopes (default-deny).
+					// Driverless builds fall back to the stored ceiling above.
+					t.s.applyGrantScopes(entry, &cc)
 				} else {
 					cc.CallerAID = "token:" + entry.Name
 				}
@@ -278,4 +294,107 @@ func (s *CoreServer) handleListInvocationEvents(w http.ResponseWriter, r *http.R
 		return
 	}
 	jsonResponse(w, map[string]any{"events": events})
+}
+
+// applyGrantScopes derives an agent's capability ceiling from its verified
+// capability-grant credential — credential-proven authority. On success
+// cc.Scopes becomes the credential's capabilities and cc.GrantSAID records the
+// grant — authority is credential-proven. If a grant is present but fails
+// verification (revoked, missing, tampered, or from the wrong issuer), cc.Scopes
+// is cleared so the gateway default-denies. With no grant or no KERI driver it
+// leaves the stored ceiling (already set by the caller) untouched — driverless
+// builds keep working on the increment-1 behaviour.
+func (s *CoreServer) applyGrantScopes(entry mcpToken, cc *sandbox.CallerContext) {
+	if entry.GrantSAID == "" || s.KeriDriver == nil {
+		return // no credential / no driver → the stored ceiling governs
+	}
+	rec, err := s.DataStore.GetCredential(entry.GrantSAID)
+	if err != nil || rec == nil {
+		// The token references a grant that no longer exists — treat as revoked.
+		log.Printf("[mcp] agent %s grant %s not found — denying", entry.AgentAID, entry.GrantSAID)
+		cc.Scopes = nil
+		return
+	}
+	if !isUsableStatus(rec.Status) {
+		// The owner revoked (or expired) the grant — hard deny.
+		log.Printf("[mcp] agent %s grant %s status=%q — denying", entry.AgentAID, entry.GrantSAID, rec.Status)
+		cc.Scopes = nil
+		return
+	}
+	if !s.grantCredentialValid(rec, entry) {
+		// The grant exists and is not revoked, but couldn't be cryptographically
+		// confirmed THIS request (e.g. the issuer KEL is temporarily unavailable).
+		// That is an infrastructure failure, not a revocation, so fall back to the
+		// server-side ceiling (increment-1 behaviour) rather than brick a
+		// legitimately-provisioned agent. Authority is not credential-proven this
+		// request, so GrantSAID is left unset and the stored ceiling stands.
+		return
+	}
+	// Credential-proven: derive the ceiling from the verified grant and record it.
+	if caps := capabilitiesFromACDC(rec.AcdcJson); len(caps) > 0 {
+		cc.Scopes = caps // source of truth = the verified credential
+	}
+	cc.GrantSAID = rec.SAID
+}
+
+// grantCredentialValid cryptographically verifies a capability-grant ACDC against
+// the issuer's authoritative KEL, fetched live from the KERI driver. (The store's
+// copy of the owner-root KEL can lag the anchoring event, so the driver's KEL —
+// not the store — is the source of truth for a self-issued grant.) Verification
+// confirms the ACDC is anchored in the issuer's KEL, binding it to the owner root;
+// the holder must be the agent. Returns false on any failure.
+func (s *CoreServer) grantCredentialValid(rec *store.CredentialRecord, entry mcpToken) bool {
+	issuer := entry.DelegatorAID
+	if issuer == "" {
+		issuer = rec.IssuerAID
+	}
+	kel, err := s.KeriDriver.GetKel(issuer)
+	if err != nil || kel == nil || len(kel.KEL) == 0 {
+		log.Printf("[mcp] grant %s: issuer KEL unavailable: %v", rec.SAID, err)
+		return false
+	}
+	result, err := s.KeriDriver.VerifyCredential(&drivers.DriverVerifyCredentialRequest{
+		AcdcJson:           rec.AcdcJson,
+		IssuerKelEvents:    kel.KEL,
+		HolderAid:          entry.AgentAID,
+		TrustedSchemaSaids: []string{capabilityGrantSchemaSAID},
+	})
+	if err != nil || result == nil || !result.Verified {
+		reason := "not verified"
+		if err != nil {
+			reason = err.Error()
+		} else if result != nil && len(result.Errors) > 0 {
+			reason = strings.Join(result.Errors, "; ")
+		}
+		log.Printf("[mcp] grant %s failed verification: %s — denying", rec.SAID, reason)
+		return false
+	}
+	return true
+}
+
+// capabilitiesFromACDC extracts the granted capability ids from a capability-grant
+// ACDC (base64-encoded JSON). ACDC claims live in the attribute block "a"; a flat
+// top-level "capabilities" is accepted as a fallback.
+func capabilitiesFromACDC(acdcJsonB64 string) []string {
+	raw, err := base64.StdEncoding.DecodeString(acdcJsonB64)
+	if err != nil {
+		return nil
+	}
+	var body map[string]interface{}
+	if json.Unmarshal(raw, &body) != nil {
+		return nil
+	}
+	list, ok := body["capabilities"].([]interface{})
+	if !ok {
+		if attrs, ok2 := body["a"].(map[string]interface{}); ok2 {
+			list, _ = attrs["capabilities"].([]interface{})
+		}
+	}
+	out := make([]string, 0, len(list))
+	for _, c := range list {
+		if str, ok := c.(string); ok && str != "" {
+			out = append(out, str)
+		}
+	}
+	return out
 }

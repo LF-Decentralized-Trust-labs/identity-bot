@@ -80,6 +80,7 @@ func (m *Manager) recordInvocation(caller CallerContext, capabilityID, executorT
 		TS:              start.UTC().Format(time.RFC3339Nano),
 		CallerAID:       caller.CallerAID,
 		DelegationChain: caller.DelegationChain,
+		GrantSAID:       caller.GrantSAID,
 		CapabilityID:    capabilityID,
 		ArgsHash:        hashArgs(args),
 		ResultStatus:    status,
