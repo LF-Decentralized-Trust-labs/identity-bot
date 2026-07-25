@@ -4020,7 +4020,23 @@ func (s *CoreServer) reviveAssetIdentity(a asset.Asset) error {
 	return nil
 }
 
+// handleReset clears identity, contacts, settings and the KEL. It is
+// irreversible and there is no legitimate reason for a remote caller to invoke
+// it, so it is restricted to the local owner — a loopback request with no
+// forwarding headers. A tunnel or reverse proxy connects from loopback but
+// carries forwarding headers, so it is correctly refused.
+//
+// Without this gate the endpoint was reachable by anyone who could reach the
+// port. The server binds 0.0.0.0, CORS allows any origin with credentials, and
+// the tunnel providers forward the whole local port — so any agent exposed
+// through a tunnel could be wiped by anyone who learned the URL.
 func (s *CoreServer) handleReset(w http.ResponseWriter, r *http.Request) {
+	if !isLocalOwnerRequest(r) {
+		writeError(w, http.StatusForbidden, "Forbidden",
+			"reset is restricted to the local owner and cannot be invoked remotely")
+		return
+	}
+
 	if err := s.DataStore.ResetAll(); err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to reset", err.Error())
 		return
