@@ -27,6 +27,7 @@ type BinaryRuntime struct {
         outputMu  sync.Mutex
         outputBuf []string
         done      chan struct{}
+        cancel    context.CancelFunc // cancels the process's own lifecycle context
 }
 
 type OutputCallback func(line string, isStderr bool)
@@ -42,20 +43,26 @@ func NewBinaryRuntime(manifest *AppManifest, instance *Instance, store *SandboxS
                 return nil, fmt.Errorf("failed to find display port: %w", err)
         }
 
+        env := map[string]string{
+                "IDENTITY_AGENT_API": fmt.Sprintf("http://127.0.0.1:%d", agentAPIPort),
+                "DISPLAY_PORT":       fmt.Sprintf("%d", displayPort),
+        }
+        // A host plug-in is deliberately unsandboxed — it is NOT routed through the
+        // MITM egress proxy; injecting HTTP(S)_PROXY would only misdirect any host
+        // calls it legitimately makes. Sandboxed plug-ins keep the proxy env.
+        if manifest.EffectiveIsolation() != "host" {
+                env["HTTP_PROXY"] = proxyURL
+                env["HTTPS_PROXY"] = proxyURL
+                env["http_proxy"] = proxyURL
+                env["https_proxy"] = proxyURL
+        }
         netCfg := &NetworkConfig{
                 ProxyPort:    proxyPort,
                 DisplayPort:  displayPort,
                 AgentAPIPort: agentAPIPort,
                 HostIP:       "127.0.0.1",
                 ProxyURL:     proxyURL,
-                EnvVars: map[string]string{
-                        "HTTP_PROXY":          proxyURL,
-                        "HTTPS_PROXY":         proxyURL,
-                        "http_proxy":          proxyURL,
-                        "https_proxy":         proxyURL,
-                        "IDENTITY_AGENT_API":  fmt.Sprintf("http://127.0.0.1:%d", agentAPIPort),
-                        "DISPLAY_PORT":        fmt.Sprintf("%d", displayPort),
-                },
+                EnvVars:      env,
         }
 
         return &BinaryRuntime{
@@ -109,7 +116,12 @@ func (b *BinaryRuntime) Start(ctx context.Context) error {
 pathFound:
 
         args := b.manifest.Binary.Args
-        b.cmd = exec.CommandContext(ctx, binaryPath, args...)
+        // The plug-in process's lifetime is owned by THIS runtime (torn down in
+        // Stop, which kills it), NOT by the caller's request context — otherwise
+        // the process would be killed the instant the launch HTTP request returns.
+        runCtx, cancel := context.WithCancel(context.Background())
+        b.cancel = cancel
+        b.cmd = exec.CommandContext(runCtx, binaryPath, args...)
 
         reservedKeys := map[string]bool{
                 "HTTP_PROXY": true, "HTTPS_PROXY": true,
@@ -208,7 +220,13 @@ pathFound:
 
 func (b *BinaryRuntime) Stop(ctx context.Context) error {
         if b.cmd == nil || b.cmd.Process == nil {
+                if b.cancel != nil {
+                        b.cancel()
+                }
                 return nil
+        }
+        if b.cancel != nil {
+                defer b.cancel()
         }
 
         log.Printf("[binary-runtime] Stopping process PID %d for app %s", b.cmd.Process.Pid, b.manifest.ID)

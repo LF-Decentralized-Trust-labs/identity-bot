@@ -210,7 +210,13 @@ func New(cfg Config) (*CoreServer, error) {
 		},
 	})
 
+	// Plug-in manifests directory. Defaults to ./manifests (relative to the
+	// working dir); MANIFESTS_DIR overrides it so a service-managed agent (whose
+	// working dir it doesn't control) can point at an absolute plug-in location.
 	manifestsDir := filepath.Join(".", "manifests")
+	if d := os.Getenv("MANIFESTS_DIR"); d != "" {
+		manifestsDir = d
+	}
 	sbxMgr, err := sandbox.NewManager(sandbox.ManagerConfig{
 		DataDir:      cfg.DataDir,
 		ManifestsDir: manifestsDir,
