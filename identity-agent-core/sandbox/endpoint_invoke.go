@@ -136,6 +136,9 @@ func (h *httpInvoker) Invoke(ctx context.Context, appID, capabilityID string, bo
 	if err != nil {
 		return nil, fmt.Errorf("plug-in %q is not running: %w", appID, err)
 	}
+	if inst == nil {
+		return nil, fmt.Errorf("plug-in %q is not running (install and launch it first)", appID)
+	}
 	if inst.DisplayPort == nil {
 		return nil, fmt.Errorf("plug-in %q has no reachable capability port", appID)
 	}
