@@ -115,7 +115,15 @@ func TestVerifiedGrantDerivesScopesFromCredential(t *testing.T) {
 				"kel": []map[string]any{{"t": "icp", "s": "0", "d": "ERoot", "i": "ERoot"}},
 			})
 		case r.URL.Path == "/credential/verify":
-			json.NewEncoder(w).Encode(map[string]any{"verified": true, "acdc_said": "EGrantOK"})
+			json.NewEncoder(w).Encode(map[string]any{
+				"verified":  true,
+				"acdc_said": "EGrantOK",
+				"checks": map[string]any{
+					"said_integrity": true, "issuer_in_kel": true, "kel_chain_valid": true,
+					"schema_trusted": true, "not_revoked": true, "holder_matches_subject": true,
+					"presentation_sig_valid": false, "credential_anchored": true,
+				},
+			})
 		default:
 			http.NotFound(w, r)
 		}

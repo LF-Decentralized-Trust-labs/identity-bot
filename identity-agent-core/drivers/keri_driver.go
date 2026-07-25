@@ -227,7 +227,11 @@ type DriverIssueCredentialRequest struct {
 	// Edges: optional ACDC edge block entries for credential chaining.
 	// Structure: {"<label>": {"n": "<parent-SAID>", "s": "<schema-SAID>"}}
 	// The driver computes the edges block SAID and includes the 'e' field in the ACDC body.
-	Edges      map[string]interface{} `json:"edges,omitempty"`
+	Edges map[string]interface{} `json:"edges,omitempty"`
+	// RegistrySaid, when set, issues the credential into a TEL registry: the ACDC
+	// carries an "ri" field and the KEL anchor is a TEL issuance (iss) seal, so the
+	// credential can later be cryptographically revoked. Empty = legacy issuance.
+	RegistrySaid string `json:"registry_said,omitempty"`
 }
 
 type DriverIssueCredentialResponse struct {
@@ -237,6 +241,29 @@ type DriverIssueCredentialResponse struct {
 	AcdcBody       map[string]interface{} `json:"acdc_body"`
 	// IxnRawBytesB64: sign with the CURRENT signing key then call /cesr-encode.
 	IxnRawBytesB64 string                 `json:"ixn_raw_bytes_b64"`
+	IxnSaid        string                 `json:"ixn_said"`
+	IxnEvent       map[string]interface{} `json:"ixn_event"`
+	SequenceNumber int                    `json:"sequence_number"`
+	// IssSaid is the SAID of the TEL issuance (iss) event when the credential was
+	// issued into a registry. Persist it — revocation needs it as the prior event.
+	IssSaid string `json:"iss_said,omitempty"`
+}
+
+// DriverRegistryInceptResponse is the result of incepting a credential registry (TEL).
+type DriverRegistryInceptResponse struct {
+	RegistrySaid   string                 `json:"registry_said"`
+	VcpSaid        string                 `json:"vcp_said"`
+	VcpEvent       map[string]interface{} `json:"vcp_event"`
+	VcpJsonB64     string                 `json:"vcp_json_b64"`
+	IxnSaid        string                 `json:"ixn_said"`
+	IxnEvent       map[string]interface{} `json:"ixn_event"`
+	SequenceNumber int                    `json:"sequence_number"`
+}
+
+// DriverRevokeCredentialResponse is the result of revoking a registry-backed credential.
+type DriverRevokeCredentialResponse struct {
+	RevSaid        string                 `json:"rev_said"`
+	RevEvent       map[string]interface{} `json:"rev_event"`
 	IxnSaid        string                 `json:"ixn_said"`
 	IxnEvent       map[string]interface{} `json:"ixn_event"`
 	SequenceNumber int                    `json:"sequence_number"`
@@ -862,12 +889,19 @@ func (d *KeriDriver) PresentCredential(acdcSaid, holderAid, issuerAid, schemaSai
 }
 
 func (d *KeriDriver) IssueCredential(name string, claims map[string]interface{}, schemaSaid, holderAid string, edges map[string]interface{}) (*DriverIssueCredentialResponse, error) {
+	return d.IssueCredentialInRegistry(name, claims, schemaSaid, holderAid, edges, "")
+}
+
+// IssueCredentialInRegistry issues a credential, optionally into a TEL registry
+// (registrySaid != ""), which makes it cryptographically revocable.
+func (d *KeriDriver) IssueCredentialInRegistry(name string, claims map[string]interface{}, schemaSaid, holderAid string, edges map[string]interface{}, registrySaid string) (*DriverIssueCredentialResponse, error) {
 	reqBody := DriverIssueCredentialRequest{
-		Name:       name,
-		Claims:     claims,
-		SchemaSaid: schemaSaid,
-		HolderAid:  holderAid,
-		Edges:      edges,
+		Name:         name,
+		Claims:       claims,
+		SchemaSaid:   schemaSaid,
+		HolderAid:    holderAid,
+		Edges:        edges,
+		RegistrySaid: registrySaid,
 	}
 
 	body, err := d.doPost("/credential/issue", reqBody, http.StatusCreated)
@@ -880,6 +914,39 @@ func (d *KeriDriver) IssueCredential(name string, claims map[string]interface{},
 		return nil, fmt.Errorf("failed to decode credential/issue response: %w", err)
 	}
 
+	return &result, nil
+}
+
+// InceptRegistry incepts a backerless credential registry (TEL) for the named
+// issuer identity, anchored in its KEL.
+func (d *KeriDriver) InceptRegistry(name string) (*DriverRegistryInceptResponse, error) {
+	body, err := d.doPost("/registry/incept", map[string]string{"name": name}, http.StatusCreated)
+	if err != nil {
+		return nil, err
+	}
+	var result DriverRegistryInceptResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode registry/incept response: %w", err)
+	}
+	return &result, nil
+}
+
+// RevokeCredential emits a TEL revocation (rev) event for a registry-backed
+// credential and anchors it in the issuer KEL. issSaid is the prior issuance event.
+func (d *KeriDriver) RevokeCredential(name, acdcSaid, registrySaid, issSaid string) (*DriverRevokeCredentialResponse, error) {
+	body, err := d.doPost("/credential/revoke", map[string]string{
+		"name":          name,
+		"acdc_said":     acdcSaid,
+		"registry_said": registrySaid,
+		"iss_said":      issSaid,
+	}, http.StatusCreated)
+	if err != nil {
+		return nil, err
+	}
+	var result DriverRevokeCredentialResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode credential/revoke response: %w", err)
+	}
 	return &result, nil
 }
 

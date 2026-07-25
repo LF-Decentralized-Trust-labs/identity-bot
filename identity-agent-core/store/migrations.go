@@ -514,6 +514,21 @@ ALTER TABLE profile ADD COLUMN org_type     TEXT NOT NULL DEFAULT '';
 ALTER TABLE profile ADD COLUMN jurisdiction TEXT NOT NULL DEFAULT '';
 `,
 	},
+	{
+		Version:     21,
+		Description: "Credential registries (TEL): credential_registries table + registry_said/iss_said on credentials for cryptographic revocation",
+		SQL: `
+CREATE TABLE IF NOT EXISTS credential_registries (
+    registry_said TEXT PRIMARY KEY,
+    issuer_aid    TEXT NOT NULL,
+    vcp_json      TEXT NOT NULL DEFAULT '',
+    created_at    TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_registry_issuer ON credential_registries(issuer_aid);
+ALTER TABLE credentials ADD COLUMN registry_said TEXT NOT NULL DEFAULT '';
+ALTER TABLE credentials ADD COLUMN iss_said      TEXT NOT NULL DEFAULT '';
+`,
+	},
 }
 
 // ApplyIdentityMigrations creates the migrations table and applies any pending migrations.
