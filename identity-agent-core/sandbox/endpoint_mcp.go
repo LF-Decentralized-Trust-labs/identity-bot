@@ -29,11 +29,27 @@ const SearchToolName = "search"
 const DescribeToolName = "describe"
 
 // MCPToolsList projects the agent's capabilities (plug-in-provided + registry-native)
-// as MCP tools — the tools/list side of the agent's single MCP server.
-func (m *Manager) MCPToolsList() []MCPTool {
+// as MCP tools — the tools/list side of the agent's single MCP server. The flat
+// per-capability projections are filtered to the caller's entitlements through the
+// SAME Authorizer that governs execute/search: discovery never reveals a capability
+// the caller could not invoke. The meta-tools (execute/search/describe) are always
+// listed — they are the discovery surface itself and each self-gates on invocation.
+func (m *Manager) MCPToolsList(caller CallerContext) []MCPTool {
+	auth := m.authz()
+	ctx := context.Background()
+	entitled := func(capDef ProvidedCapability) bool {
+		return auth.AuthorizeIngress(ctx, caller, capDef) == nil
+	}
+
 	caps := m.ProvidedCapabilities()
-	tools := make([]MCPTool, 0, len(caps)+1)
+	tools := make([]MCPTool, 0, len(caps)+3)
 	for _, c := range caps {
+		// The Authorizer decides on a ProvidedCapability; the id + host-control class
+		// fully determine the structural decision (and match the ACDC-scope key when
+		// the full gateway lands).
+		if !entitled(ProvidedCapability{ID: c.ID, Name: c.Name, HostControl: c.HostControl}) {
+			continue
+		}
 		desc := c.Name
 		if c.Description != "" {
 			desc = c.Name + " — " + c.Description
@@ -59,6 +75,9 @@ func (m *Manager) MCPToolsList() []MCPTool {
 			log.Printf("[registry] list for tools/list: %v", err)
 		}
 		for _, r := range recs {
+			if !entitled(r.asProvidedCapability()) {
+				continue
+			}
 			desc := r.Name
 			if r.Description != "" {
 				desc = r.Name + " — " + r.Description

@@ -152,7 +152,7 @@ func TestEmbeddedPackAndMCPProjection(t *testing.T) {
 			t.Fatalf("record %s missing cloudflare egress", r.ID)
 		}
 	}
-	tools := m.MCPToolsList()
+	tools := m.MCPToolsList(CallerContext{})
 	names := map[string]bool{}
 	for _, tl := range tools {
 		names[tl.Name] = true
