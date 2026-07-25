@@ -77,15 +77,16 @@ func (m *Manager) recordInvocation(caller CallerContext, capabilityID, executorT
 		return 0
 	}
 	ev := InvocationEvent{
-		TS:            start.UTC().Format(time.RFC3339Nano),
-		CallerAID:     caller.CallerAID,
-		CapabilityID:  capabilityID,
-		ArgsHash:      hashArgs(args),
-		ResultStatus:  status,
-		DurationMs:    time.Since(start).Milliseconds(),
-		Transport:     caller.Transport,
-		ExecutorType:  executorType,
-		CorrelationID: caller.CorrelationID,
+		TS:              start.UTC().Format(time.RFC3339Nano),
+		CallerAID:       caller.CallerAID,
+		DelegationChain: caller.DelegationChain,
+		CapabilityID:    capabilityID,
+		ArgsHash:        hashArgs(args),
+		ResultStatus:    status,
+		DurationMs:      time.Since(start).Milliseconds(),
+		Transport:       caller.Transport,
+		ExecutorType:    executorType,
+		CorrelationID:   caller.CorrelationID,
 	}
 	// Sign the canonical event JSON (signature fields empty in the signed payload).
 	if signer := m.getEventSigner(); signer != nil {

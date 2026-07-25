@@ -33,6 +33,11 @@ type CallerContext struct {
 	CallerAID     string
 	CorrelationID string
 	Transport     string
+	// DelegationChain is the caller's KERI lineage, root-last (e.g.
+	// [agentAID, rootAID]) — populated when the caller is a provisioned agent
+	// identity, so the audit event proves "owner -> agent". Empty for a bare
+	// token or the local owner.
+	DelegationChain []string
 }
 
 // InvokeResult is a capability's response, routed back through the endpoint.

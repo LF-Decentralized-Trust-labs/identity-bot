@@ -25,8 +25,8 @@ type EnrollmentPolicy struct {
 	// resolvers, so an unrecognized source fails closed.
 	MembershipSource string `json:"membership_source"` // ""|"asset"|<resolver key>
 	RequiredAAL      int    `json:"required_aal"`
-	RequiredBadge    string         `json:"required_badge"`      // ""|"green"|"yellow"|"red"
-	RequiredOFAScore int            `json:"required_ofa_score"`  // 0 = not required
+	RequiredBadge    string `json:"required_badge"`     // ""|"green"|"yellow"|"red"
+	RequiredOFAScore int    `json:"required_ofa_score"` // 0 = not required
 	// Credential gating: when RequiredCredSchema is set, a sign-in is authorized
 	// only if the assertion presents a valid, unrevoked ACDC of that schema. If
 	// RequiredCredIssuer is also set, the credential must have been issued by
@@ -38,7 +38,7 @@ type EnrollmentPolicy struct {
 type Asset struct {
 	ID              string           `json:"id"`
 	DisplayName     string           `json:"display_name"`
-	AssetType       string           `json:"asset_type"`       // "domain" | "application"
+	AssetType       string           `json:"asset_type"` // "domain" | "application"
 	Origin          string           `json:"origin"`
 	PairwiseAID     string           `json:"pairwise_aid"`
 	DelegationModel string           `json:"delegation_model"` // "delegated" | "standalone"
@@ -47,16 +47,21 @@ type Asset struct {
 	// SigningIndex is the HD derivation index (from the controller root seed) for this
 	// asset's signing key. Re-derive the seed on demand (root + SigningIndex) — the
 	// raw private key is never persisted. >0 means the asset can sign login challenges.
-	SigningIndex    int              `json:"signing_index,omitempty"`
-	CreatedAt       time.Time        `json:"created_at"`
-	UpdatedAt       time.Time        `json:"updated_at"`
+	SigningIndex int `json:"signing_index,omitempty"`
+	// Capabilities is the capability ceiling for an ai_agent asset: the ids this
+	// agent may invoke through the governed endpoint. It is the granted scope a
+	// capability-endowment ACDC can later formalize; for now it is the
+	// authoritative ceiling the gateway enforces. Empty for non-agent assets.
+	Capabilities []string  `json:"capabilities,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 type AssetInvite struct {
 	Token     string    `json:"token"`
 	AssetID   string    `json:"asset_id"`
 	Label     string    `json:"label,omitempty"`
-	MaxUses   int       `json:"max_uses"`   // 0 = unlimited (Slack-style default)
+	MaxUses   int       `json:"max_uses"` // 0 = unlimited (Slack-style default)
 	UseCount  int       `json:"use_count"`
 	CreatedAt time.Time `json:"created_at"`
 	Revoked   bool      `json:"revoked"`

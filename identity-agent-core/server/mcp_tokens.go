@@ -36,6 +36,12 @@ type mcpToken struct {
 	Hash      string    `json:"hash"` // sha256 hex of the plaintext token
 	Scopes    []string  `json:"scopes"`
 	CreatedAt time.Time `json:"created_at"`
+	// AgentAID + DelegatorAID bind a token to a provisioned ai_agent asset's
+	// delegated identity. When set, the caller resolves to the agent's
+	// real KERI AID and its lineage to the owner root, instead of "token:<name>".
+	AgentAID     string `json:"agent_aid,omitempty"`
+	DelegatorAID string `json:"delegator_aid,omitempty"`
+	AssetID      string `json:"asset_id,omitempty"`
 }
 
 var mcpTokensMu sync.Mutex
@@ -126,7 +132,17 @@ func (t tokenAwareResolver) Resolve(r *http.Request) sandbox.CallerContext {
 		for _, entry := range toks {
 			if subtle.ConstantTimeCompare([]byte(entry.Hash), []byte(presented)) == 1 {
 				cc.Scopes = entry.Scopes
-				cc.CallerAID = "token:" + entry.Name
+				if entry.AgentAID != "" {
+					// A token bound to a provisioned agent identity: the caller IS
+					// that delegated AID, with its lineage to the owner root.
+					cc.CallerAID = entry.AgentAID
+					cc.DelegationChain = []string{entry.AgentAID}
+					if entry.DelegatorAID != "" {
+						cc.DelegationChain = append(cc.DelegationChain, entry.DelegatorAID)
+					}
+				} else {
+					cc.CallerAID = "token:" + entry.Name
+				}
 				return cc
 			}
 		}
