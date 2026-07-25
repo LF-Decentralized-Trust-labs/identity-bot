@@ -43,6 +43,13 @@ type CallerContext struct {
 	// recorded in the audit event. Empty when scopes came from a bare token
 	// ceiling rather than a verified credential.
 	GrantSAID string
+	// EnvelopeVerified is true when the request carried a valid, fresh, non-replayed
+	// signed-request envelope proving the caller signed THIS request (the strongest
+	// caller proof). False for a plain bearer-token request.
+	EnvelopeVerified bool
+	// AuthLevel names how the caller was authenticated: "bearer" (token only) or
+	// "signed_request" (token + a verified per-request signature). Recorded in audit.
+	AuthLevel string
 }
 
 // InvokeResult is a capability's response, routed back through the endpoint.

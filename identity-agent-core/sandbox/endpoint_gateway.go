@@ -37,6 +37,9 @@ func (structuralAuthorizer) AuthorizeIngress(ctx context.Context, caller CallerC
 	if caller.Remote && !containsStr(caller.Scopes, capDef.ID) {
 		return fmt.Errorf("%w: caller lacks scope for capability %q", ErrDenied, capDef.ID)
 	}
+	if capDef.RequireSignedRequest && !caller.EnvelopeVerified {
+		return fmt.Errorf("%w: capability %q requires a signed request envelope", ErrDenied, capDef.ID)
+	}
 	return nil
 }
 

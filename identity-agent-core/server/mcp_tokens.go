@@ -134,6 +134,7 @@ func (t tokenAwareResolver) Resolve(r *http.Request) sandbox.CallerContext {
 		Transport:     "mcp",
 	}
 	if tok := bearerFrom(r); tok != "" {
+		cc.AuthLevel = "bearer" // upgraded to "signed_request" if an envelope verifies
 		presented := hashMCPToken(tok)
 		mcpTokensMu.Lock()
 		toks := t.s.loadMCPTokens()
