@@ -311,6 +311,12 @@ func (m *Manager) LaunchApp(ctx context.Context, id string) (*Instance, error) {
                 return nil, fmt.Errorf("unknown app: %s", id)
         }
 
+        // Host plug-ins run unsandboxed: verify the pinned binary hash on EVERY
+        // launch before anything is spawned.
+        if err := verifyHostBinary(manifest); err != nil {
+                return nil, err
+        }
+
         instanceID := NewInstanceID()
         instance := &Instance{
                 ID:      instanceID,
