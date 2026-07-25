@@ -36,8 +36,9 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 		return
 	}
 	var req struct {
-		Name         string   `json:"name"`
-		Capabilities []string `json:"capabilities"`
+		Name                string                 `json:"name"`
+		Capabilities        []string               `json:"capabilities"`
+		ResourceConstraints map[string]interface{} `json:"resource_constraints,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
 		jsonError(w, "name is required", http.StatusBadRequest)
@@ -60,7 +61,7 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 	// to the agent's AID that formalizes the ceiling. The endpoint verifies it at
 	// invoke time, so authority is credential-proven rather than a server-side list.
 	// Non-fatal: on a driverless build the stored ceiling still governs.
-	grantSAID, err := s.issueCapabilityGrant(agent.PairwiseAID, agent.DelegatorAID, req.Capabilities)
+	grantSAID, err := s.issueCapabilityGrant(agent.PairwiseAID, agent.DelegatorAID, req.Capabilities, req.ResourceConstraints)
 	if err != nil {
 		log.Printf("[mcp] agent %s provisioned without a capability grant (%v) — falling back to the stored ceiling", agent.PairwiseAID, err)
 	}
@@ -111,7 +112,7 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 // agent's AID, persists the credential and its anchoring KEL event (so a verifier
 // can resolve the issuer KEL), and returns the grant SAID. Requires the KERI
 // driver; on any failure the caller falls back to the stored ceiling.
-func (s *CoreServer) issueCapabilityGrant(agentAID, issuerRootAID string, capabilities []string) (string, error) {
+func (s *CoreServer) issueCapabilityGrant(agentAID, issuerRootAID string, capabilities []string, resourceConstraints map[string]interface{}) (string, error) {
 	if s.KeriDriver == nil {
 		return "", fmt.Errorf("keri driver unavailable")
 	}
@@ -123,6 +124,9 @@ func (s *CoreServer) issueCapabilityGrant(agentAID, issuerRootAID string, capabi
 		"i":            agentAID, // holder = the delegated agent
 		"capabilities": capabilities,
 		"issued_date":  time.Now().UTC().Format("2006-01-02"),
+	}
+	if len(resourceConstraints) > 0 {
+		claims["resource_constraints"] = resourceConstraints
 	}
 	result, err := s.KeriDriver.IssueCredential(issuerRootAID, claims, capabilityGrantSchemaSAID, agentAID, nil)
 	if err != nil {

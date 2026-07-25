@@ -332,11 +332,40 @@ func (s *CoreServer) applyGrantScopes(entry mcpToken, cc *sandbox.CallerContext)
 		cc.Scopes = nil
 		return
 	}
-	// Credential-proven: derive the ceiling from the verified grant and record it.
+	// Credential-proven: derive the ceiling and any resource constraints from the
+	// verified grant, and record it.
 	if caps := capabilitiesFromACDC(rec.AcdcJson); len(caps) > 0 {
 		cc.Scopes = caps // source of truth = the verified credential
 	}
+	cc.ResourceConstraints = resourceConstraintsFromACDC(rec.AcdcJson)
 	cc.GrantSAID = rec.SAID
+}
+
+// resourceConstraintsFromACDC extracts the optional per-capability resource
+// constraints (capabilityID -> {argKey: [allowedValues]}) from a capability-grant
+// ACDC's attribute block. Returns nil when absent.
+func resourceConstraintsFromACDC(acdcJsonB64 string) map[string]interface{} {
+	raw, err := base64.StdEncoding.DecodeString(acdcJsonB64)
+	if err != nil {
+		return nil
+	}
+	var body map[string]interface{}
+	if json.Unmarshal(raw, &body) != nil {
+		return nil
+	}
+	get := func(m map[string]interface{}) map[string]interface{} {
+		if rc, ok := m["resource_constraints"].(map[string]interface{}); ok {
+			return rc
+		}
+		return nil
+	}
+	if rc := get(body); rc != nil {
+		return rc
+	}
+	if attrs, ok := body["a"].(map[string]interface{}); ok {
+		return get(attrs)
+	}
+	return nil
 }
 
 // grantCredentialValid cryptographically verifies a capability-grant ACDC against
