@@ -61,7 +61,7 @@ func (s *CoreServer) handleMCP(w http.ResponseWriter, r *http.Request) {
 		jsonResponse(w, mcpResp{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{}})
 	case "tools/list":
 		jsonResponse(w, mcpResp{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{
-			"tools": s.SandboxManager.MCPToolsList(),
+			"tools": s.SandboxManager.MCPToolsList(caller),
 		}})
 	case "tools/call":
 		var p struct {
@@ -93,7 +93,7 @@ func (s *CoreServer) handleMCP(w http.ResponseWriter, r *http.Request) {
 func (s *CoreServer) handleEndpointHealth(w http.ResponseWriter, r *http.Request) {
 	n := 0
 	if s.SandboxManager != nil {
-		n = len(s.SandboxManager.MCPToolsList())
+		n = len(s.SandboxManager.MCPToolsList(s.resolveCaller(r)))
 	}
 	jsonResponse(w, map[string]any{
 		"status": "ok",

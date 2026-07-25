@@ -7,7 +7,8 @@ import (
 
 func TestMCPToolsList(t *testing.T) {
 	m := invokeTestManager(&fakeInvoker{})
-	tools := m.MCPToolsList()
+	// Local owner (Remote false) sees the flat capabilities + the meta-tools.
+	tools := m.MCPToolsList(CallerContext{})
 	// Plug-in capabilities plus the trailing execute/search/describe meta-tools.
 	if len(tools) != 5 {
 		t.Fatalf("expected 5 tools, got %d", len(tools))
@@ -26,6 +27,35 @@ func TestMCPToolsList(t *testing.T) {
 	}
 	if tools[0].InputSchema["type"] != "object" {
 		t.Errorf("expected object input schema")
+	}
+}
+
+// A remote caller with no granted scopes must see ONLY the three meta-tools — no
+// capability names leak through tools/list, matching search/describe filtering.
+func TestMCPToolsListRemoteHidesCapabilities(t *testing.T) {
+	m := invokeTestManager(&fakeInvoker{})
+	tools := m.MCPToolsList(CallerContext{Remote: true, CallerAID: "token:anon"})
+	names := map[string]bool{}
+	for _, tl := range tools {
+		names[tl.Name] = true
+	}
+	if len(tools) != 3 || !names[ExecuteToolName] || !names[SearchToolName] || !names[DescribeToolName] {
+		t.Fatalf("remote caller must see only the 3 meta-tools, got %d: %v", len(tools), names)
+	}
+	for _, leaked := range []string{"headless-browser", "native-computer-use"} {
+		if names[leaked] {
+			t.Fatalf("capability %q leaked to an unentitled remote caller", leaked)
+		}
+	}
+
+	// A remote caller granted one capability sees exactly that one, plus meta-tools.
+	scoped := m.MCPToolsList(CallerContext{Remote: true, CallerAID: "token:ci", Scopes: []string{"headless-browser"}})
+	sn := map[string]bool{}
+	for _, tl := range scoped {
+		sn[tl.Name] = true
+	}
+	if !sn["headless-browser"] || sn["native-computer-use"] || len(scoped) != 4 {
+		t.Fatalf("scoped remote caller should see only its granted capability + meta-tools, got %d: %v", len(scoped), sn)
 	}
 }
 

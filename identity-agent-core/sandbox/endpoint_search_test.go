@@ -135,7 +135,7 @@ func TestMCPSearchDescribeTools(t *testing.T) {
 	m := searchTestManager(t)
 
 	names := map[string]bool{}
-	for _, tl := range m.MCPToolsList() {
+	for _, tl := range m.MCPToolsList(localCaller) {
 		names[tl.Name] = true
 	}
 	for _, want := range []string{ExecuteToolName, SearchToolName, DescribeToolName} {
