@@ -139,6 +139,8 @@ if sys.platform == "win32":
 
 from keri.core import coring, eventing
 from keri.core.coring import MtrDex
+from keri.core.eventing import TraitDex
+from keri.vdr import eventing as veventing
 
 from flask import Flask, request, jsonify
 
@@ -627,7 +629,7 @@ def verify():
 # HTTP routes — Stateless KERI operations (no private keys, public data only)
 # ---------------------------------------------------------------------------
 
-def _format_acdc(issuer_aid: str, schema_said: str, claims: dict, edges: dict = None) -> dict:
+def _format_acdc(issuer_aid: str, schema_said: str, claims: dict, edges: dict = None, registry_said: str = None) -> dict:
     """Format an ACDC credential body with self-addressing SAIDs.
 
     Computes the attribute block SAID first (embedded as 'a.d'), then optionally
@@ -649,14 +651,17 @@ def _format_acdc(issuer_aid: str, schema_said: str, claims: dict, edges: dict = 
     attr_diger = coring.Diger(ser=attr_json, code=MtrDex.Blake3_256)
     attr_block["d"] = attr_diger.qb64
 
-    # Step 2: build ACDC body — include edges block if provided
+    # Step 2: build ACDC body — include the registry ref (ri) and edges if provided.
+    # Per ACDC field order, ri sits after i and before s.
     acdc_body = {
         "v": "ACDC10JSON000000_",
         "d": "",
         "i": issuer_aid,
-        "s": schema_said,
-        "a": attr_block,
     }
+    if registry_said:
+        acdc_body["ri"] = registry_said
+    acdc_body["s"] = schema_said
+    acdc_body["a"] = attr_block
 
     if edges:
         # Build edges block with self-addressing SAID per ACDC spec:
@@ -706,6 +711,97 @@ def format_credential():
         return jsonify({"error": f"Format credential failed: {str(e)}"}), 500
 
 
+@app.route("/registry/incept", methods=["POST"])
+def registry_incept():
+    """Incept a backerless credential registry (a TEL) for an issuer and anchor it
+    in the issuer's KEL. Backerless (NoBackers) — self-anchored, no witnesses.
+
+    Request JSON: name (issuer identity name)
+    Returns: registry_said, vcp_event, vcp_json_b64, ixn_* (the anchoring interaction).
+    """
+    data = request.get_json() or {}
+    name = data.get("name", "")
+    if not name:
+        return jsonify({"error": "name is required"}), 400
+    identity = _identities.get(name)
+    if not identity:
+        return jsonify({"error": f"No identity found with name: {name}"}), 404
+    try:
+        vcp = veventing.incept(pre=identity["aid"], cnfg=[TraitDex.NoBackers], code=MtrDex.Blake3_256)
+        regk = vcp.pre  # registry identifier
+
+        # Anchor the registry inception SAID in the issuer KEL.
+        sn = identity["sequence_number"] + 1
+        seal = {"i": regk, "s": "0", "d": vcp.said}
+        ixn_serder = eventing.interact(
+            pre=identity["aid"],
+            dig=identity.get("last_said", ""),
+            sn=sn,
+            data=[seal],
+        )
+        identity["sequence_number"] = sn
+        identity["last_said"] = ixn_serder.said
+        identity["kel"].append(ixn_serder.ked)
+
+        return jsonify({
+            "registry_said": regk,
+            "vcp_said": vcp.said,
+            "vcp_event": vcp.ked,
+            "vcp_json_b64": base64.b64encode(vcp.raw).decode(),
+            "ixn_raw_bytes_b64": base64.b64encode(ixn_serder.raw).decode(),
+            "ixn_said": ixn_serder.said,
+            "ixn_event": ixn_serder.ked,
+            "sequence_number": sn,
+        }), 201
+    except Exception as e:
+        return jsonify({"error": f"Registry inception failed: {str(e)}"}), 500
+
+
+@app.route("/credential/revoke", methods=["POST"])
+def credential_revoke():
+    """Revoke a registry-backed credential: build a TEL revocation (rev) event and
+    anchor it in the issuer's KEL. The rev anchor seal ({i: acdc_said, s: "1", ...})
+    in the issuer's signed KEL IS the revocation proof — no separate channel needed.
+
+    Request JSON: name, acdc_said, registry_said, iss_said (SAID of the prior iss event)
+    Returns: rev_said, rev_event, ixn_* (the anchoring interaction).
+    """
+    data = request.get_json() or {}
+    name = data.get("name", "")
+    acdc_said = data.get("acdc_said", "")
+    registry_said = data.get("registry_said", "")
+    iss_said = data.get("iss_said", "")
+    if not all([name, acdc_said, registry_said, iss_said]):
+        return jsonify({"error": "name, acdc_said, registry_said, iss_said are required"}), 400
+    identity = _identities.get(name)
+    if not identity:
+        return jsonify({"error": f"No identity found with name: {name}"}), 404
+    try:
+        rev_serder = veventing.revoke(vcdig=acdc_said, regk=registry_said, dig=iss_said)
+        sn = identity["sequence_number"] + 1
+        seal = {"i": acdc_said, "s": "1", "d": rev_serder.said}
+        ixn_serder = eventing.interact(
+            pre=identity["aid"],
+            dig=identity.get("last_said", ""),
+            sn=sn,
+            data=[seal],
+        )
+        identity["sequence_number"] = sn
+        identity["last_said"] = ixn_serder.said
+        identity["kel"].append(ixn_serder.ked)
+
+        return jsonify({
+            "rev_said": rev_serder.said,
+            "rev_event": rev_serder.ked,
+            "ixn_raw_bytes_b64": base64.b64encode(ixn_serder.raw).decode(),
+            "ixn_said": ixn_serder.said,
+            "ixn_event": ixn_serder.ked,
+            "sequence_number": sn,
+        }), 201
+    except Exception as e:
+        return jsonify({"error": f"Credential revocation failed: {str(e)}"}), 500
+
+
 @app.route("/credential/issue", methods=["POST"])
 def credential_issue():
     """Issue an ACDC credential anchored in the issuer's KEL via an IXN event.
@@ -735,6 +831,7 @@ def credential_issue():
     schema_said = data.get("schema_said", "")
     holder_aid = data.get("holder_aid", "")
     edges = data.get("edges") or None  # optional; None means no edges block
+    registry_said = data.get("registry_said") or None  # optional; enables TEL-backed issuance
 
     if not name:
         return jsonify({"error": "name is required"}), 400
@@ -746,15 +843,23 @@ def credential_issue():
         return jsonify({"error": f"No identity found with name: {name}"}), 404
 
     try:
-        # Step 1: format ACDC with full SAID computation (edges block included if provided)
-        credential = _format_acdc(identity["aid"], schema_said, claims, edges=edges)
+        # Step 1: format ACDC with full SAID computation (registry ref + edges if provided)
+        credential = _format_acdc(identity["aid"], schema_said, claims, edges=edges, registry_said=registry_said)
         acdc_said = credential["acdc_said"]
 
-        # Step 2: create IXN anchoring the credential SAID in the issuer's KEL
+        # Step 2: when the credential is registry-backed, build a TEL issuance (iss)
+        # event and anchor ITS said with an {i,s,d} seal; otherwise keep the legacy
+        # {d: acdc_said} anchor seal.
+        iss_said = None
+        if registry_said:
+            iss_serder = veventing.issue(vcdig=acdc_said, regk=registry_said)
+            iss_said = iss_serder.said
+            seal = {"i": acdc_said, "s": "0", "d": iss_said}
+        else:
+            seal = {"d": acdc_said}
+
         sn = identity["sequence_number"] + 1
         prev_said = identity.get("last_said", "")
-        seal = {"d": acdc_said}
-
         ixn_serder = eventing.interact(
             pre=identity["aid"],
             dig=prev_said,
@@ -766,7 +871,7 @@ def credential_issue():
         identity["last_said"] = ixn_serder.said
         identity["kel"].append(ixn_serder.ked)
 
-        return jsonify({
+        resp = {
             "aid": identity["aid"],
             "acdc_said": acdc_said,
             "acdc_json_b64": credential["acdc_json_b64"],
@@ -776,7 +881,10 @@ def credential_issue():
             "ixn_said": ixn_serder.said,
             "ixn_event": ixn_serder.ked,
             "sequence_number": sn,
-        }), 201
+        }
+        if iss_said:
+            resp["iss_said"] = iss_said
+        return jsonify(resp), 201
     except Exception as e:
         return jsonify({"error": f"Credential issuance failed: {str(e)}"}), 500
 
@@ -1221,8 +1329,20 @@ def credential_verify():
         errors.append(f"Check 4 ERROR: {e}")
 
     # -- Check 5: Credential not revoked ---------------------------------------
+    # A TEL-backed credential is revoked iff the issuer's signed KEL carries a
+    # revocation anchor seal ({i: acdc_said, s: "1", ...}) — that seal's presence in
+    # the issuer-only-extendable KEL IS the cryptographic revocation proof. The
+    # passed revocation_list remains an accepted fallback for legacy callers.
     try:
-        checks["not_revoked"] = acdc_said_embedded not in revocation_list
+        revoked_in_kel = False
+        for ev in issuer_kel:
+            for s in ev.get("a", []):
+                if isinstance(s, dict) and s.get("i") == acdc_said_embedded and str(s.get("s")) == "1":
+                    revoked_in_kel = True
+                    break
+            if revoked_in_kel:
+                break
+        checks["not_revoked"] = (acdc_said_embedded not in revocation_list) and not revoked_in_kel
         if not checks["not_revoked"]:
             errors.append(f"Check 5 FAIL: credential {acdc_said_embedded[:16]}… is revoked")
     except Exception as e:
@@ -1276,10 +1396,15 @@ def credential_verify():
             ev_type = ev.get("t", "")
             if ev_type != "ixn":
                 continue
-            # Check if this IXN contains the credential SAID in its seal data
+            # An issuance is anchored either by the legacy seal ({d: acdc_said}) or,
+            # for a TEL-backed credential, by the issuance seal ({i: acdc_said, s: "0", ...}).
             seal_list = ev.get("a", [])
-            if any(s.get("d") == acdc_said_embedded for s in seal_list):
-                # Optionally: verify this is the specific IXN we recorded (by SAID)
+            issuance = any(
+                s.get("d") == acdc_said_embedded
+                or (s.get("i") == acdc_said_embedded and str(s.get("s")) == "0")
+                for s in seal_list
+            )
+            if issuance:
                 if not ixn_said_to_find or ev.get("d", "") == ixn_said_to_find:
                     anchored = True
                     break

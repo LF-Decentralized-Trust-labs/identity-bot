@@ -165,6 +165,20 @@ type CredentialRecord struct {
 	IssuerLogoURL string `json:"issuer_logo_url"`
 	ExpiryDate    string `json:"expiry_date"`
 	RawJson       string `json:"raw_json,omitempty"`
+	// RegistrySAID + IssSAID link a credential to its TEL registry and issuance
+	// event, enabling cryptographic revocation (a `rev` event referencing IssSAID).
+	// Empty for legacy (non-registry) credentials.
+	RegistrySAID string `json:"registry_said,omitempty"`
+	IssSAID      string `json:"iss_said,omitempty"`
+}
+
+// CredentialRegistry is a TEL (transaction event log) registry an issuer creates to
+// back its credentials, so they can be cryptographically revoked. One per issuer AID.
+type CredentialRegistry struct {
+	RegistrySAID string `json:"registry_said"`
+	IssuerAID    string `json:"issuer_aid"`
+	VcpJson      string `json:"vcp_json,omitempty"`
+	CreatedAt    string `json:"created_at"`
 }
 
 // CredentialSchemaRecord caches a fetched ACDC schema by its SAID.
@@ -307,6 +321,8 @@ type Store interface {
         GetCredentialsFiltered(role, status string) ([]CredentialRecord, error)
         UpdateCredentialStatus(said, status string) error
         DeleteCredential(said string) error
+        SaveRegistry(r CredentialRegistry) error
+        GetRegistryByIssuer(issuerAID string) (*CredentialRegistry, error)
         SaveCredentialSchema(record CredentialSchemaRecord) error
         GetCredentialSchemas() ([]CredentialSchemaRecord, error)
         GetCredentialSchema(said string) (*CredentialSchemaRecord, error)

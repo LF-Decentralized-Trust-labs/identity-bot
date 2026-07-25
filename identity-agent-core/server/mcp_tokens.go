@@ -390,15 +390,27 @@ func (s *CoreServer) grantCredentialValid(rec *store.CredentialRecord, entry mcp
 		HolderAid:          entry.AgentAID,
 		TrustedSchemaSaids: []string{capabilityGrantSchemaSAID},
 	})
-	if err != nil || result == nil || !result.Verified {
+	if err != nil || result == nil {
 		reason := "not verified"
 		if err != nil {
 			reason = err.Error()
-		} else if result != nil && len(result.Errors) > 0 {
-			reason = strings.Join(result.Errors, "; ")
 		}
 		log.Printf("[mcp] grant %s failed verification: %s — denying", rec.SAID, reason)
 		return false
+	}
+	// Require the structural, issuer, schema, and revocation checks. The holder
+	// presentation-binding check (presentation_sig_valid) is intentionally NOT
+	// required: the agent authenticates via its bound token, not by presenting a
+	// signed ACDC, and holder_matches_subject already binds the grant to this agent.
+	required := []string{
+		"said_integrity", "issuer_in_kel", "kel_chain_valid",
+		"schema_trusted", "not_revoked", "holder_matches_subject", "credential_anchored",
+	}
+	for _, k := range required {
+		if ok, _ := result.Checks[k].(bool); !ok {
+			log.Printf("[mcp] grant %s failed verification check %q (errors: %v) — denying", rec.SAID, k, result.Errors)
+			return false
+		}
 	}
 	return true
 }

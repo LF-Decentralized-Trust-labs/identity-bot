@@ -669,7 +669,7 @@ func (s *SQLiteStore) GetPresentations() ([]PresentationRecord, error) {
 
 // ── Credentials ───────────────────────────────────────────────────────────────
 
-const credentialCols = `said, issuer_aid, holder_aid, schema_said, acdc_json, ixn_said, cesr_signature, issued_at, status, format, credential_type, issuer_name, issuer_logo_url, expiry_date, raw_json`
+const credentialCols = `said, issuer_aid, holder_aid, schema_said, acdc_json, ixn_said, cesr_signature, issued_at, status, format, credential_type, issuer_name, issuer_logo_url, expiry_date, raw_json, registry_said, iss_said`
 
 func scanCredentialRow(row interface{ Scan(dest ...any) error }) (CredentialRecord, error) {
 	var r CredentialRecord
@@ -677,6 +677,7 @@ func scanCredentialRow(row interface{ Scan(dest ...any) error }) (CredentialReco
 		&r.SAID, &r.IssuerAID, &r.HolderAID, &r.SchemaSAID,
 		&r.AcdcJson, &r.IxnSAID, &r.CesrSignature, &r.IssuedAt, &r.Status,
 		&r.Format, &r.CredentialType, &r.IssuerName, &r.IssuerLogoURL, &r.ExpiryDate, &r.RawJson,
+		&r.RegistrySAID, &r.IssSAID,
 	)
 	return r, err
 }
@@ -687,7 +688,7 @@ func (s *SQLiteStore) SaveCredential(record CredentialRecord) error {
 	}
 	_, err := s.db.Exec(`
 		INSERT INTO credentials (`+credentialCols+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(said) DO UPDATE SET
 			cesr_signature  = excluded.cesr_signature,
 			status          = excluded.status,
@@ -696,10 +697,13 @@ func (s *SQLiteStore) SaveCredential(record CredentialRecord) error {
 			issuer_name     = excluded.issuer_name,
 			issuer_logo_url = excluded.issuer_logo_url,
 			expiry_date     = excluded.expiry_date,
-			raw_json        = excluded.raw_json`,
+			raw_json        = excluded.raw_json,
+			registry_said   = excluded.registry_said,
+			iss_said        = excluded.iss_said`,
 		record.SAID, record.IssuerAID, record.HolderAID, record.SchemaSAID,
 		record.AcdcJson, record.IxnSAID, record.CesrSignature, record.IssuedAt, record.Status,
 		record.Format, record.CredentialType, record.IssuerName, record.IssuerLogoURL, record.ExpiryDate, record.RawJson,
+		record.RegistrySAID, record.IssSAID,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to save credential: %w", err)
@@ -722,6 +726,35 @@ func (s *SQLiteStore) GetCredential(said string) (*CredentialRecord, error) {
 
 func (s *SQLiteStore) GetCredentials() ([]CredentialRecord, error) {
 	return s.GetCredentialsFiltered("", "")
+}
+
+// SaveRegistry persists a credential registry (TEL) record.
+func (s *SQLiteStore) SaveRegistry(r CredentialRegistry) error {
+	_, err := s.db.Exec(`
+		INSERT INTO credential_registries (registry_said, issuer_aid, vcp_json, created_at)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(registry_said) DO UPDATE SET vcp_json = excluded.vcp_json`,
+		r.RegistrySAID, r.IssuerAID, r.VcpJson, r.CreatedAt)
+	if err != nil {
+		return fmt.Errorf("failed to save registry: %w", err)
+	}
+	return nil
+}
+
+// GetRegistryByIssuer returns the (single) registry for an issuer AID, or nil.
+func (s *SQLiteStore) GetRegistryByIssuer(issuerAID string) (*CredentialRegistry, error) {
+	var r CredentialRegistry
+	err := s.db.QueryRow(
+		`SELECT registry_said, issuer_aid, vcp_json, created_at FROM credential_registries WHERE issuer_aid = ? LIMIT 1`,
+		issuerAID,
+	).Scan(&r.RegistrySAID, &r.IssuerAID, &r.VcpJson, &r.CreatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get registry: %w", err)
+	}
+	return &r, nil
 }
 
 func (s *SQLiteStore) GetCredentialsFiltered(role, status string) ([]CredentialRecord, error) {
