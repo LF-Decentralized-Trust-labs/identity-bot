@@ -4,9 +4,18 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
+	"log"
 	"net/http"
 	"time"
+
+	"identity-agent-core/store"
 )
+
+// capabilityGrantSchemaSAID identifies the built-in Capability Grant schema (see
+// the schema catalog). The owner issues an ACDC of this schema to a provisioned
+// agent; the endpoint verifies it to prove the agent's authority at invoke time.
+const capabilityGrantSchemaSAID = "ECapabilityGrant__placeholder__v1"
 
 // Provisioning an AI-agent identity (the IA-mediated model). One
 // local-owner call: mint a delegated agent AID chained to the owner root, bind
@@ -47,6 +56,15 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Endow the agent with a capability-grant credential: an ACDC the owner issues
+	// to the agent's AID that formalizes the ceiling. The endpoint verifies it at
+	// invoke time, so authority is credential-proven rather than a server-side list.
+	// Non-fatal: on a driverless build the stored ceiling still governs.
+	grantSAID, err := s.issueCapabilityGrant(agent.PairwiseAID, agent.DelegatorAID, req.Capabilities)
+	if err != nil {
+		log.Printf("[mcp] agent %s provisioned without a capability grant (%v) — falling back to the stored ceiling", agent.PairwiseAID, err)
+	}
+
 	// Bind an MCP token to the agent identity. Token name = the agent's asset id
 	// so it is unique and traceable back to the asset.
 	raw := make([]byte, 24)
@@ -67,6 +85,7 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 		AgentAID:     agent.PairwiseAID,
 		DelegatorAID: agent.DelegatorAID,
 		AssetID:      agent.ID,
+		GrantSAID:    grantSAID,
 	})
 	if err := s.saveMCPTokens(toks); err != nil {
 		jsonError(w, "failed to persist agent token", http.StatusInternalServerError)
@@ -81,7 +100,63 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 		"agent_aid":     agent.PairwiseAID,
 		"delegator_aid": agent.DelegatorAID,
 		"capabilities":  req.Capabilities,
+		"grant_said":    grantSAID,
+		"grant_issued":  grantSAID != "",
 		"token":         plaintext,
 		"note":          "store this token now; only its hash is kept. Every call it makes is recorded as this agent AID, chained to the owner root.",
 	})
+}
+
+// issueCapabilityGrant issues a capability-grant ACDC from the owner root to the
+// agent's AID, persists the credential and its anchoring KEL event (so a verifier
+// can resolve the issuer KEL), and returns the grant SAID. Requires the KERI
+// driver; on any failure the caller falls back to the stored ceiling.
+func (s *CoreServer) issueCapabilityGrant(agentAID, issuerRootAID string, capabilities []string) (string, error) {
+	if s.KeriDriver == nil {
+		return "", fmt.Errorf("keri driver unavailable")
+	}
+	identity, err := s.DataStore.GetIdentity()
+	if err != nil || identity == nil {
+		return "", fmt.Errorf("no owner identity")
+	}
+	claims := map[string]interface{}{
+		"i":            agentAID, // holder = the delegated agent
+		"capabilities": capabilities,
+		"issued_date":  time.Now().UTC().Format("2006-01-02"),
+	}
+	result, err := s.KeriDriver.IssueCredential(issuerRootAID, claims, capabilityGrantSchemaSAID, agentAID, nil)
+	if err != nil {
+		return "", err
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	if err := s.DataStore.SaveCredential(store.CredentialRecord{
+		SAID:           result.AcdcSaid,
+		IssuerAID:      issuerRootAID,
+		HolderAID:      agentAID,
+		SchemaSAID:     capabilityGrantSchemaSAID,
+		AcdcJson:       result.AcdcJsonB64,
+		IxnSAID:        result.IxnSaid,
+		IssuedAt:       now,
+		Status:         "issued",
+		Format:         "acdc",
+		CredentialType: "Capability Grant",
+	}); err != nil {
+		log.Printf("[mcp] failed to persist capability grant %s: %v", result.AcdcSaid, err)
+	}
+	// Persist the anchoring IXN event on the owner-root KEL so verification can
+	// resolve the issuer KEL for this grant.
+	ixnJSON, _ := json.Marshal(result.IxnEvent)
+	if err := s.DataStore.SaveEvent(store.EventRecord{
+		AID:            issuerRootAID,
+		SequenceNumber: result.SequenceNumber,
+		EventType:      "ixn",
+		EventJSON:      string(ixnJSON),
+		PublicKey:      identity.PublicKey,
+		NextKeyDigest:  identity.NextKeyDigest,
+		Timestamp:      now,
+	}); err != nil {
+		log.Printf("[mcp] failed to persist grant IXN event for %s: %v", result.AcdcSaid, err)
+	}
+	log.Printf("[mcp] issued capability grant %s to agent %s (%d capabilities)", result.AcdcSaid, agentAID, len(capabilities))
+	return result.AcdcSaid, nil
 }
