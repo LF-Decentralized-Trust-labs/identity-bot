@@ -97,14 +97,19 @@ func (addEmployeeAsk) Execute(s *CoreServer, ctx AskContext, d ScanDecision) (ma
 
 	// 3) Redeem at the org: hand them our pairwise AID + display name so they can add
 	//    us to the (pending) employee roster.
-	name := ""
+	name, photo := "", ""
 	if prof, _ := s.DataStore.GetProfile(); prof != nil {
 		name = prof.FullName
+		// Share our profile photo as part of joining: an employer requests it by
+		// default so the roster shows a real face, but it's optional — an empty
+		// photo simply means the org falls back to initials.
+		photo = prof.Photo
 	}
 	body, _ := json.Marshal(map[string]string{
 		"pairwise_aid": rel.PairwiseAID,
 		"name":         name,
 		"oobi":         rel.RelayOOBI,
+		"photo":        photo,
 	})
 	redeemURL := strings.TrimRight(ctx.Base, "/") + "/api/employees/invites/" + p.InviteToken + "/redeem"
 	client := &http.Client{Timeout: 15 * time.Second}
