@@ -53,8 +53,9 @@ var disclosureOrder = []string{
 }
 
 // declaredDisclosure returns the profile fields action `code` declares it
-// sends. An action with no `discloses` list sends nothing about you — absence
-// is read as "discloses nothing", never as "unrestricted".
+// sends. An explicit empty list means the action sends nothing about you; an
+// action that states nothing at all fails to load, so absence can never be
+// read as "unrestricted".
 func declaredDisclosure(code int) ([]string, error) {
 	reg, err := actions.Load()
 	if err != nil {
@@ -64,12 +65,13 @@ func declaredDisclosure(code int) ([]string, error) {
 		if a.Code == nil || *a.Code != code {
 			continue
 		}
-		for _, f := range a.Discloses {
+		fields := a.DisclosureFields()
+		for _, f := range fields {
 			if _, ok := disclosureLabels[f]; !ok {
 				return nil, fmt.Errorf("action %d (%s) declares unknown disclosure field %q", code, a.Key, f)
 			}
 		}
-		return a.Discloses, nil
+		return fields, nil
 	}
 	return nil, fmt.Errorf("action %d is not in the action registry", code)
 }

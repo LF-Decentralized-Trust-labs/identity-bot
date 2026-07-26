@@ -52,9 +52,9 @@ func (addSponsorAsk) Preview(s *CoreServer, ctx AskContext) (GenericPreview, err
 	details = append(details, disclosureRows(fields, profile)...)
 	return GenericPreview{
 		T: 4, Action: "sponsor_org", Title: "Sponsor an organization",
-		Subtitle: "Sponsor " + org + " — you'll become its super-admin and first employee",
+		Subtitle:     "Sponsor " + org + " — you'll become its super-admin and first employee",
 		Counterparty: p.OrgAID,
-		Details: details,
+		Details:      details,
 		Warning: "You are attesting that a real person (you) stands behind this organization. " +
 			disclosureSummary(fields),
 	}, nil
