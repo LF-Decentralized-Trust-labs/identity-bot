@@ -15,6 +15,11 @@ class ScanPreview {
   final String defaultTier;
   final String warning;
 
+  /// Digest of the exact Ask bytes this preview describes. Echoed back on
+  /// execute so the agent can prove it is acting on the request the user
+  /// approved — see bindConsent in the core.
+  final String askDigest;
+
   ScanPreview({
     required this.t,
     required this.action,
@@ -25,6 +30,7 @@ class ScanPreview {
     required this.tierOptions,
     required this.defaultTier,
     required this.warning,
+    this.askDigest = '',
   });
 
   factory ScanPreview.fromJson(Map<String, dynamic> json) {
@@ -45,6 +51,7 @@ class ScanPreview {
           .toList(),
       defaultTier: json['default_tier'] ?? '',
       warning: json['warning'] ?? '',
+      askDigest: (json['ask_digest'] ?? '') as String,
     );
   }
 }
@@ -82,6 +89,10 @@ class ScanService {
     String url, {
     required bool approved,
     String? tier,
+    // The askDigest from the preview the user approved. The core refuses to
+    // execute without it, so consent is always bound to the exact request
+    // that was shown.
+    required String askDigest,
   }) async {
     final resp = await _client.post(
       Uri.parse('$baseUrl/api/scan/execute'),
@@ -89,6 +100,7 @@ class ScanService {
       body: jsonEncode({
         'url': url,
         'approved': approved,
+        'ask_digest': askDigest,
         if (tier != null && tier.isNotEmpty) 'tier': tier,
       }),
     );

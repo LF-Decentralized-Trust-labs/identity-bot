@@ -50,6 +50,11 @@ type GenericPreview struct {
 	TierOptions  []string        `json:"tier_options,omitempty"` // e.g. add-contact: general/trusted/professional
 	DefaultTier  string          `json:"default_tier,omitempty"`
 	Warning      string          `json:"warning,omitempty"`
+
+	// AskDigest is the Blake3 digest of the exact Ask bytes this preview
+	// describes. The client echoes it back on execute so the agent can prove
+	// it is acting on the same document the user saw — see bindConsent.
+	AskDigest string `json:"ask_digest"`
 }
 
 type PreviewDetail struct {

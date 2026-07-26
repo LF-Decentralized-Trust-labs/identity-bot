@@ -88,6 +88,9 @@ func (s *CoreServer) handleScanDecode(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
+	// Bind this preview to the exact bytes it describes. The client echoes this
+	// back on execute so we can prove we are acting on the approved document.
+	preview.AskDigest = askDigest(ctx.AskBytes)
 	scanWriteJSON(w, preview)
 }
 
@@ -102,9 +105,10 @@ func (s *CoreServer) handleScanExecute(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 	var body struct {
-		URL      string `json:"url"`
-		Approved bool   `json:"approved"`
-		Tier     string `json:"tier"`
+		URL       string `json:"url"`
+		Approved  bool   `json:"approved"`
+		Tier      string `json:"tier"`
+		AskDigest string `json:"ask_digest"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.URL == "" {
 		http.Error(w, "url required", http.StatusBadRequest)
@@ -118,6 +122,13 @@ func (s *CoreServer) handleScanExecute(w http.ResponseWriter, r *http.Request) {
 	// Base-layer verification: a base-layer-signed Ask must have a valid signature.
 	if verr := s.verifyAskSignature(ctx.AskBytes); verr != nil {
 		http.Error(w, verr.Error(), http.StatusUnauthorized)
+		return
+	}
+	// Consent integrity: refuse unless these are the bytes the user approved.
+	// A valid signature is not enough — the same minter can sign two different
+	// Asks and serve one at decode and another at execute.
+	if cerr := bindConsent(body.AskDigest, ctx.AskBytes); cerr != nil {
+		http.Error(w, cerr.Error(), http.StatusConflict)
 		return
 	}
 	h, ok := lookupAsk(ctx.T)
