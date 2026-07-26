@@ -112,9 +112,29 @@ func disclosureRows(fields []string, p *store.ProfileData) []PreviewDetail {
 		case v == "":
 			v = "not set"
 		}
-		rows = append(rows, PreviewDetail{Label: disclosureLabels[f], Value: v})
+		rows = append(rows, PreviewDetail{Label: disclosureRowLabel(f), Value: v})
 	}
 	return rows
+}
+
+// disclosureRowLabel says whose data a row describes. A consent screen also
+// lists facts about the request ("Organization: Acme"), so a bare "Name" would
+// be ambiguous — every disclosure row reads "Your name", "Your photo".
+func disclosureRowLabel(field string) string {
+	return "Your " + strings.ToLower(disclosureLabels[field])
+}
+
+// disclosureBody adds the declared profile fields to an outbound body under
+// their canonical names. Used by the flows that post a small JSON body rather
+// than a jCard.
+func disclosureBody(fields []string, p *store.ProfileData, into map[string]string) map[string]string {
+	if into == nil {
+		into = map[string]string{}
+	}
+	for _, f := range orderedDisclosure(fields) {
+		into[f] = disclosureValue(p, f)
+	}
+	return into
 }
 
 // disclosureSummary is the one-line form for a preview subtitle or warning.

@@ -85,8 +85,44 @@ func TestDisclosureRowsMatchWhatIsSent(t *testing.T) {
 		labels[r.Label] = true
 	}
 	for _, f := range fields {
-		if !labels[disclosureLabels[f]] {
+		if !labels[disclosureRowLabel(f)] {
 			t.Errorf("declared %q has no row on the consent screen", f)
+		}
+	}
+}
+
+// A consent screen also lists facts about the request ("Organization: Acme"),
+// so disclosure rows have to say whose data they are.
+func TestDisclosureRowsSayWhoseDataItIs(t *testing.T) {
+	for _, r := range disclosureRows([]string{discloseName, discloseOrg}, fullProfile()) {
+		if !strings.HasPrefix(r.Label, "Your ") {
+			t.Errorf("disclosure row %q is ambiguous next to request details", r.Label)
+		}
+	}
+}
+
+// The org flows post a flat JSON body rather than a jCard, so they get the same
+// treatment: declared fields only, under canonical names.
+func TestOrgFlowsSendOnlyDeclaredFields(t *testing.T) {
+	for _, code := range []int{3, 4} {
+		fields, err := declaredDisclosure(code)
+		if err != nil {
+			t.Fatalf("action %d: %v", code, err)
+		}
+		body := disclosureBody(fields, fullProfile(), map[string]string{"pairwise_aid": "EPAIR"})
+		if body["name"] != "Ada Lovelace" {
+			t.Errorf("action %d: declared name missing from redeem body", code)
+		}
+		if body["photo"] == "" {
+			t.Errorf("action %d: declared photo missing from redeem body", code)
+		}
+		for _, undeclared := range []string{discloseEmail, disclosePhone, discloseOrg, discloseTitle, discloseNote} {
+			if _, present := body[undeclared]; present {
+				t.Errorf("action %d: redeem body carries undeclared %q", code, undeclared)
+			}
+		}
+		if body["pairwise_aid"] != "EPAIR" {
+			t.Errorf("action %d: disclosure overwrote the caller's own fields", code)
 		}
 	}
 }
@@ -98,7 +134,7 @@ func TestDisclosureShowsDeclaredButEmptyFields(t *testing.T) {
 	rows := disclosureRows([]string{discloseName, discloseEmail}, &store.ProfileData{FullName: "Ada"})
 	var email string
 	for _, r := range rows {
-		if r.Label == "Email" {
+		if r.Label == disclosureRowLabel(discloseEmail) {
 			email = r.Value
 		}
 	}

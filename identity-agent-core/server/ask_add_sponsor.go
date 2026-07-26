@@ -31,7 +31,7 @@ type sponsorPayload struct {
 	InviteToken string `json:"invite_token"`
 }
 
-func (addSponsorAsk) Preview(_ *CoreServer, ctx AskContext) (GenericPreview, error) {
+func (addSponsorAsk) Preview(s *CoreServer, ctx AskContext) (GenericPreview, error) {
 	var p sponsorPayload
 	if err := json.Unmarshal(ctx.AskBytes, &p); err != nil || p.InviteToken == "" {
 		return GenericPreview{}, fmt.Errorf("sponsor Ask missing invite_token")
@@ -40,15 +40,23 @@ func (addSponsorAsk) Preview(_ *CoreServer, ctx AskContext) (GenericPreview, err
 	if org == "" {
 		org = p.OrgAID
 	}
+	fields, ferr := declaredDisclosure(4)
+	if ferr != nil {
+		return GenericPreview{}, ferr
+	}
+	profile, _ := s.DataStore.GetProfile()
+	details := []PreviewDetail{
+		{Label: "Organization", Value: org},
+		{Label: "Your role", Value: "Super Admin"},
+	}
+	details = append(details, disclosureRows(fields, profile)...)
 	return GenericPreview{
 		T: 4, Action: "sponsor_org", Title: "Sponsor an organization",
 		Subtitle: "Sponsor " + org + " — you'll become its super-admin and first employee",
 		Counterparty: p.OrgAID,
-		Details: []PreviewDetail{
-			{Label: "Organization", Value: org},
-			{Label: "Your role", Value: "Super Admin"},
-		},
-		Warning: "You are attesting that a real person (you) stands behind this organization.",
+		Details: details,
+		Warning: "You are attesting that a real person (you) stands behind this organization. " +
+			disclosureSummary(fields),
 	}, nil
 }
 
@@ -95,19 +103,21 @@ func (addSponsorAsk) Execute(s *CoreServer, ctx AskContext, d ScanDecision) (map
 		return nil, fmt.Errorf("sign vouch: %w", sigErr)
 	}
 
-	// 4) Redeem at the org: hand over our AID, name, OOBI + the vouch. The org
-	//    verifies + stores the vouch and makes us an active super-admin employee.
-	name := ""
-	if prof, _ := s.DataStore.GetProfile(); prof != nil {
-		name = prof.FullName
+	// 4) Redeem at the org: hand over our AID, OOBI, the vouch, and exactly the
+	//    profile fields this action declares — the same ones the consent screen
+	//    listed. The org verifies + stores the vouch and makes us an active
+	//    super-admin employee.
+	fields, ferr := declaredDisclosure(4)
+	if ferr != nil {
+		return nil, ferr
 	}
-	body, _ := json.Marshal(map[string]string{
+	profile, _ := s.DataStore.GetProfile()
+	body, _ := json.Marshal(disclosureBody(fields, profile, map[string]string{
 		"pairwise_aid":  rel.PairwiseAID,
-		"name":          name,
 		"oobi":          rel.RelayOOBI,
 		"vouch_sig":     vouchSig,
 		"vouch_payload": string(vouchPayload),
-	})
+	}))
 	redeemURL := strings.TrimRight(ctx.Base, "/") + "/api/sponsor/invites/" + p.InviteToken + "/redeem"
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Post(redeemURL, "application/json", strings.NewReader(string(body)))
