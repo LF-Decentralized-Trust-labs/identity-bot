@@ -66,6 +66,10 @@ type ProvidedCapability struct {
         ACDCScope        string `json:"acdc_scope"`
         EnabledByDefault bool   `json:"enabled_by_default"`
         HostControl      bool   `json:"host_control"`
+	// RequireSignedRequest gates a capability on a verified signed-request envelope
+	// (per-request signature + anti-replay), not just a bearer token. Additive and
+	// default-false; set on high-assurance capabilities. Enforced at AuthorizeIngress.
+	RequireSignedRequest bool `json:"require_signed_request,omitempty"`
 }
 
 // HostControlSpec declares the host-OS grants a host_control capability needs before

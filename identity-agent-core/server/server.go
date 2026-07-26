@@ -495,6 +495,7 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		r.Post("/credentials/deliver", s.handleDeliverCredential)
 		r.Post("/credentials/{said}/accept", s.handleAcceptCredential)
 		r.Post("/credentials/{said}/reject", s.handleRejectCredential)
+		r.Post("/credentials/{said}/revoke", s.handleRevokeCredential)
 		r.Delete("/credentials/{said}", s.handleDeleteCredential)
 		r.Post("/credential/present", s.handlePresentCredential)
 		r.Get("/presentations", s.handleGetPresentations)

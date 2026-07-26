@@ -36,8 +36,9 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 		return
 	}
 	var req struct {
-		Name         string   `json:"name"`
-		Capabilities []string `json:"capabilities"`
+		Name                string                 `json:"name"`
+		Capabilities        []string               `json:"capabilities"`
+		ResourceConstraints map[string]interface{} `json:"resource_constraints,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
 		jsonError(w, "name is required", http.StatusBadRequest)
@@ -60,7 +61,7 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 	// to the agent's AID that formalizes the ceiling. The endpoint verifies it at
 	// invoke time, so authority is credential-proven rather than a server-side list.
 	// Non-fatal: on a driverless build the stored ceiling still governs.
-	grantSAID, err := s.issueCapabilityGrant(agent.PairwiseAID, agent.DelegatorAID, req.Capabilities)
+	grantSAID, err := s.issueCapabilityGrant(agent.PairwiseAID, agent.DelegatorAID, req.Capabilities, req.ResourceConstraints)
 	if err != nil {
 		log.Printf("[mcp] agent %s provisioned without a capability grant (%v) — falling back to the stored ceiling", agent.PairwiseAID, err)
 	}
@@ -107,11 +108,55 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 	})
 }
 
+// ensureRegistry returns the issuer's TEL registry SAID, incepting one (backerless,
+// anchored in the issuer KEL) on first use and persisting it. One registry per issuer.
+func (s *CoreServer) ensureRegistry(issuerRootAID string) (string, error) {
+	if reg, err := s.DataStore.GetRegistryByIssuer(issuerRootAID); err == nil && reg != nil {
+		return reg.RegistrySAID, nil
+	}
+	if s.KeriDriver == nil {
+		return "", fmt.Errorf("keri driver unavailable")
+	}
+	identity, err := s.DataStore.GetIdentity()
+	if err != nil || identity == nil {
+		return "", fmt.Errorf("no owner identity")
+	}
+	resp, err := s.KeriDriver.InceptRegistry(issuerRootAID)
+	if err != nil {
+		return "", err
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	vcpJSON, _ := json.Marshal(resp.VcpEvent)
+	if err := s.DataStore.SaveRegistry(store.CredentialRegistry{
+		RegistrySAID: resp.RegistrySaid,
+		IssuerAID:    issuerRootAID,
+		VcpJson:      string(vcpJSON),
+		CreatedAt:    now,
+	}); err != nil {
+		log.Printf("[mcp] failed to persist registry %s: %v", resp.RegistrySaid, err)
+	}
+	// Persist the registry-inception anchoring event to the issuer KEL so it survives reload.
+	ixnJSON, _ := json.Marshal(resp.IxnEvent)
+	if err := s.DataStore.SaveEvent(store.EventRecord{
+		AID:            issuerRootAID,
+		SequenceNumber: resp.SequenceNumber,
+		EventType:      "ixn",
+		EventJSON:      string(ixnJSON),
+		PublicKey:      identity.PublicKey,
+		NextKeyDigest:  identity.NextKeyDigest,
+		Timestamp:      now,
+	}); err != nil {
+		log.Printf("[mcp] failed to persist registry anchor for %s: %v", resp.RegistrySaid, err)
+	}
+	log.Printf("[mcp] incepted TEL registry %s for issuer %s", resp.RegistrySaid, issuerRootAID)
+	return resp.RegistrySaid, nil
+}
+
 // issueCapabilityGrant issues a capability-grant ACDC from the owner root to the
 // agent's AID, persists the credential and its anchoring KEL event (so a verifier
 // can resolve the issuer KEL), and returns the grant SAID. Requires the KERI
 // driver; on any failure the caller falls back to the stored ceiling.
-func (s *CoreServer) issueCapabilityGrant(agentAID, issuerRootAID string, capabilities []string) (string, error) {
+func (s *CoreServer) issueCapabilityGrant(agentAID, issuerRootAID string, capabilities []string, resourceConstraints map[string]interface{}) (string, error) {
 	if s.KeriDriver == nil {
 		return "", fmt.Errorf("keri driver unavailable")
 	}
@@ -124,7 +169,17 @@ func (s *CoreServer) issueCapabilityGrant(agentAID, issuerRootAID string, capabi
 		"capabilities": capabilities,
 		"issued_date":  time.Now().UTC().Format("2006-01-02"),
 	}
-	result, err := s.KeriDriver.IssueCredential(issuerRootAID, claims, capabilityGrantSchemaSAID, agentAID, nil)
+	if len(resourceConstraints) > 0 {
+		claims["resource_constraints"] = resourceConstraints
+	}
+	// Issue into the owner's TEL registry so the grant can be cryptographically
+	// revoked (a `rev` event anchored in the owner KEL). A registry-issuance failure
+	// is non-fatal — fall back to a legacy (non-revocable) issuance.
+	registrySAID, rerr := s.ensureRegistry(issuerRootAID)
+	if rerr != nil {
+		log.Printf("[mcp] no TEL registry for %s (%v) — issuing grant without one", issuerRootAID, rerr)
+	}
+	result, err := s.KeriDriver.IssueCredentialInRegistry(issuerRootAID, claims, capabilityGrantSchemaSAID, agentAID, nil, registrySAID)
 	if err != nil {
 		return "", err
 	}
@@ -140,6 +195,8 @@ func (s *CoreServer) issueCapabilityGrant(agentAID, issuerRootAID string, capabi
 		Status:         "issued",
 		Format:         "acdc",
 		CredentialType: "Capability Grant",
+		RegistrySAID:   registrySAID,
+		IssSAID:        result.IssSaid,
 	}); err != nil {
 		log.Printf("[mcp] failed to persist capability grant %s: %v", result.AcdcSaid, err)
 	}

@@ -30,6 +30,13 @@ func signUTF8(body string, seed []byte) (string, []byte, error) {
 	return sigQB64, priv.Public().(ed25519.PublicKey), nil
 }
 
+// VerifyDetachedSig verifies a detached Ed25519 signature (CESR "0B" code) over
+// body using the given raw public key. Exported for reuse by callers outside the
+// login package (e.g. signed-request-envelope verification at the endpoint).
+func VerifyDetachedSig(body, sigQB64 string, pub []byte) (bool, error) {
+	return verifyUTF8(body, sigQB64, pub)
+}
+
 func verifyUTF8(body, sigQB64 string, pub []byte) (bool, error) {
 	if !hasPrefix(sigQB64, "0B") {
 		return false, fmt.Errorf("expected Ed25519 sig code 0B")

@@ -134,6 +134,7 @@ func (t tokenAwareResolver) Resolve(r *http.Request) sandbox.CallerContext {
 		Transport:     "mcp",
 	}
 	if tok := bearerFrom(r); tok != "" {
+		cc.AuthLevel = "bearer" // upgraded to "signed_request" if an envelope verifies
 		presented := hashMCPToken(tok)
 		mcpTokensMu.Lock()
 		toks := t.s.loadMCPTokens()
@@ -331,11 +332,40 @@ func (s *CoreServer) applyGrantScopes(entry mcpToken, cc *sandbox.CallerContext)
 		cc.Scopes = nil
 		return
 	}
-	// Credential-proven: derive the ceiling from the verified grant and record it.
+	// Credential-proven: derive the ceiling and any resource constraints from the
+	// verified grant, and record it.
 	if caps := capabilitiesFromACDC(rec.AcdcJson); len(caps) > 0 {
 		cc.Scopes = caps // source of truth = the verified credential
 	}
+	cc.ResourceConstraints = resourceConstraintsFromACDC(rec.AcdcJson)
 	cc.GrantSAID = rec.SAID
+}
+
+// resourceConstraintsFromACDC extracts the optional per-capability resource
+// constraints (capabilityID -> {argKey: [allowedValues]}) from a capability-grant
+// ACDC's attribute block. Returns nil when absent.
+func resourceConstraintsFromACDC(acdcJsonB64 string) map[string]interface{} {
+	raw, err := base64.StdEncoding.DecodeString(acdcJsonB64)
+	if err != nil {
+		return nil
+	}
+	var body map[string]interface{}
+	if json.Unmarshal(raw, &body) != nil {
+		return nil
+	}
+	get := func(m map[string]interface{}) map[string]interface{} {
+		if rc, ok := m["resource_constraints"].(map[string]interface{}); ok {
+			return rc
+		}
+		return nil
+	}
+	if rc := get(body); rc != nil {
+		return rc
+	}
+	if attrs, ok := body["a"].(map[string]interface{}); ok {
+		return get(attrs)
+	}
+	return nil
 }
 
 // grantCredentialValid cryptographically verifies a capability-grant ACDC against
@@ -360,15 +390,27 @@ func (s *CoreServer) grantCredentialValid(rec *store.CredentialRecord, entry mcp
 		HolderAid:          entry.AgentAID,
 		TrustedSchemaSaids: []string{capabilityGrantSchemaSAID},
 	})
-	if err != nil || result == nil || !result.Verified {
+	if err != nil || result == nil {
 		reason := "not verified"
 		if err != nil {
 			reason = err.Error()
-		} else if result != nil && len(result.Errors) > 0 {
-			reason = strings.Join(result.Errors, "; ")
 		}
 		log.Printf("[mcp] grant %s failed verification: %s — denying", rec.SAID, reason)
 		return false
+	}
+	// Require the structural, issuer, schema, and revocation checks. The holder
+	// presentation-binding check (presentation_sig_valid) is intentionally NOT
+	// required: the agent authenticates via its bound token, not by presenting a
+	// signed ACDC, and holder_matches_subject already binds the grant to this agent.
+	required := []string{
+		"said_integrity", "issuer_in_kel", "kel_chain_valid",
+		"schema_trusted", "not_revoked", "holder_matches_subject", "credential_anchored",
+	}
+	for _, k := range required {
+		if ok, _ := result.Checks[k].(bool); !ok {
+			log.Printf("[mcp] grant %s failed verification check %q (errors: %v) — denying", rec.SAID, k, result.Errors)
+			return false
+		}
 	}
 	return true
 }

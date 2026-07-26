@@ -29,6 +29,7 @@ type InvocationEvent struct {
 	Transport       string   `json:"transport,omitempty"`
 	ExecutorType    string   `json:"executor_type,omitempty"`
 	CorrelationID   string   `json:"correlation_id,omitempty"`
+	AuthLevel       string   `json:"auth_level,omitempty"`
 	ParentEventID   string   `json:"parent_event_id,omitempty"`
 	SignerAID       string   `json:"signer_aid,omitempty"`
 	Signature       string   `json:"signature,omitempty"`
@@ -88,6 +89,7 @@ func (m *Manager) recordInvocation(caller CallerContext, capabilityID, executorT
 		Transport:       caller.Transport,
 		ExecutorType:    executorType,
 		CorrelationID:   caller.CorrelationID,
+		AuthLevel:       caller.AuthLevel,
 	}
 	// Sign the canonical event JSON (signature fields empty in the signed payload).
 	if signer := m.getEventSigner(); signer != nil {

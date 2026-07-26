@@ -3,6 +3,7 @@ package sandbox
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -10,6 +11,50 @@ import (
 	"strings"
 	"time"
 )
+
+// enforceResourceConstraints denies an invocation whose arguments fall outside the
+// grant's per-capability resource constraints. A constraint maps a capability id to
+// {argKey: [allowedValues]}: for the invoked capability, every constrained argKey
+// must be present in the request and its value must equal one of the allowed values.
+// No constraints, or none for this capability, means unconstrained.
+func enforceResourceConstraints(constraints map[string]interface{}, capabilityID string, body []byte) error {
+	if len(constraints) == 0 {
+		return nil
+	}
+	raw, ok := constraints[capabilityID]
+	if !ok {
+		return nil
+	}
+	capC, ok := raw.(map[string]interface{})
+	if !ok || len(capC) == 0 {
+		return nil
+	}
+	var args map[string]interface{}
+	if len(body) > 0 {
+		_ = json.Unmarshal(body, &args)
+	}
+	for argKey, allowedRaw := range capC {
+		allowed, ok := allowedRaw.([]interface{})
+		if !ok || len(allowed) == 0 {
+			continue
+		}
+		val, present := args[argKey]
+		if !present {
+			return fmt.Errorf("capability %q requires constrained argument %q", capabilityID, argKey)
+		}
+		match := false
+		for _, a := range allowed {
+			if fmt.Sprint(a) == fmt.Sprint(val) {
+				match = true
+				break
+			}
+		}
+		if !match {
+			return fmt.Errorf("argument %q=%v is not permitted for capability %q", argKey, val, capabilityID)
+		}
+	}
+	return nil
+}
 
 // Sentinel errors so the HTTP layer can map governance outcomes to status codes.
 var (
@@ -43,6 +88,17 @@ type CallerContext struct {
 	// recorded in the audit event. Empty when scopes came from a bare token
 	// ceiling rather than a verified credential.
 	GrantSAID string
+	// EnvelopeVerified is true when the request carried a valid, fresh, non-replayed
+	// signed-request envelope proving the caller signed THIS request (the strongest
+	// caller proof). False for a plain bearer-token request.
+	EnvelopeVerified bool
+	// AuthLevel names how the caller was authenticated: "bearer" (token only) or
+	// "signed_request" (token + a verified per-request signature). Recorded in audit.
+	AuthLevel string
+	// ResourceConstraints are per-capability argument limits carried by the caller's
+	// verified capability grant: capabilityID -> {argKey: [allowedValues]}. Enforced
+	// against the request arguments at invoke time. Empty = unconstrained.
+	ResourceConstraints map[string]interface{}
 }
 
 // InvokeResult is a capability's response, routed back through the endpoint.
@@ -86,6 +142,13 @@ func (m *Manager) InvokeCapability(ctx context.Context, caller CallerContext, ca
 	if err := auth.AuthorizeIngress(ctx, caller, capDef); err != nil {
 		m.recordInvocation(caller, capabilityID, executorType, body, "denied", start)
 		return nil, err
+	}
+	// Per-capability resource constraints from the caller's grant (e.g. a zone
+	// allowlist) are enforced against the request arguments here, where the body
+	// is available.
+	if err := enforceResourceConstraints(caller.ResourceConstraints, capabilityID, body); err != nil {
+		m.recordInvocation(caller, capabilityID, executorType, body, "denied", start)
+		return nil, fmt.Errorf("%w: %s", ErrDenied, err.Error())
 	}
 	// One screen = one driver: host_control invocations serialize per capability
 	// so concurrent callers queue instead of interleaving primitives.

@@ -48,6 +48,13 @@ func (s *CoreServer) handleMCP(w http.ResponseWriter, r *http.Request) {
 
 	caller := s.resolveCaller(r)
 
+	// Verify an optional signed-request envelope (per-request signature +
+	// anti-replay). Absent → no-op; present-but-invalid → reject the request.
+	if err := s.verifyRequestEnvelope(r, req.Method, req.Params, &caller); err != nil {
+		jsonResponse(w, mcpResp{JSONRPC: "2.0", ID: req.ID, Error: &mcpErr{Code: -32001, Message: err.Error()}})
+		return
+	}
+
 	switch req.Method {
 	case "notifications/initialized":
 		w.WriteHeader(http.StatusAccepted) // JSON-RPC notification: no response body

@@ -69,3 +69,28 @@ func TestDefaultAuthorizerStillStructural(t *testing.T) {
 		t.Fatalf("default structural authorizer should deny remote host_control, got %v", err)
 	}
 }
+
+// A capability flagged RequireSignedRequest is denied for a caller without a
+// verified signed-request envelope, and allowed once the envelope is verified.
+func TestRequireSignedRequestEnforced(t *testing.T) {
+	cap := ProvidedCapability{ID: "infra.zone.list", RequireSignedRequest: true}
+	az := structuralAuthorizer{}
+
+	// Scoped bearer caller, no envelope → denied.
+	bearer := CallerContext{Remote: true, Scopes: []string{"infra.zone.list"}}
+	if err := az.AuthorizeIngress(context.Background(), bearer, cap); err == nil {
+		t.Fatal("RequireSignedRequest must deny a caller with no verified envelope")
+	}
+
+	// Same caller, envelope verified → allowed.
+	signed := CallerContext{Remote: true, Scopes: []string{"infra.zone.list"}, EnvelopeVerified: true}
+	if err := az.AuthorizeIngress(context.Background(), signed, cap); err != nil {
+		t.Fatalf("a verified signed request should be allowed, got %v", err)
+	}
+
+	// A capability NOT requiring a signed request is unaffected (bearer still works).
+	plain := ProvidedCapability{ID: "infra.zone.list"}
+	if err := az.AuthorizeIngress(context.Background(), bearer, plain); err != nil {
+		t.Fatalf("a normal capability should still accept a scoped bearer caller, got %v", err)
+	}
+}
