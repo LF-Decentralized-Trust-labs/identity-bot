@@ -92,7 +92,7 @@ type addContactPayload struct {
 	AskerAlias string `json:"asker_alias"`
 }
 
-func (addContactAsk) Preview(_ *CoreServer, ctx AskContext) (GenericPreview, error) {
+func (addContactAsk) Preview(s *CoreServer, ctx AskContext) (GenericPreview, error) {
 	var p addContactPayload
 	_ = json.Unmarshal(ctx.AskBytes, &p)
 	if p.AskerOOBI == "" {
@@ -102,10 +102,20 @@ func (addContactAsk) Preview(_ *CoreServer, ctx AskContext) (GenericPreview, err
 	if name == "" {
 		name = p.AskerAID
 	}
+	// Accepting sends our details back — show exactly which ones, from the
+	// action's own declaration, so the consent screen and the payload cannot
+	// disagree.
+	fields, err := declaredDisclosure(2)
+	if err != nil {
+		return GenericPreview{}, err
+	}
+	profile, _ := s.DataStore.GetProfile()
 	return GenericPreview{
 		T: 2, Action: "add_contact", Title: "Contact request",
 		Subtitle: name + " wants to be your contact", Counterparty: p.AskerAID,
+		Details:     disclosureRows(fields, profile),
 		TierOptions: []string{"general", "trusted", "professional"}, DefaultTier: "general",
+		Warning: disclosureSummary(fields),
 	}, nil
 }
 
@@ -134,13 +144,17 @@ func (addContactAsk) Execute(s *CoreServer, ctx AskContext, d ScanDecision) (map
 		}
 	}
 	// Tell the asker we accepted, so they record us too (best-effort).
-	go s.sendIntroduction(ctx.Base)
+	go s.sendIntroduction(ctx.Base, 2)
 	return map[string]interface{}{"ok": true, "contact_aid": contact.AID, "tier": contact.ContactCategory}, nil
 }
 
 // sendIntroduction posts our identity to a peer's /api/exchange so they can record us as a
 // contact. Extracted from handleAddContact; uses the tunnel/endpoint URL for our OOBI.
-func (s *CoreServer) sendIntroduction(remoteBase string) {
+//
+// What we send about ourselves comes from the action's `discloses` declaration
+// — the same list the consent screen showed — not from whatever the profile
+// happens to hold.
+func (s *CoreServer) sendIntroduction(remoteBase string, actionCode int) {
 	ourIdentity, err := s.DataStore.GetIdentity()
 	if err != nil || ourIdentity == nil {
 		return
@@ -149,24 +163,28 @@ func (s *CoreServer) sendIntroduction(remoteBase string) {
 	if publicURL == "" {
 		return
 	}
+	fields, derr := declaredDisclosure(actionCode)
+	if derr != nil {
+		log.Printf("[identity-agent-core] introduction: refusing to send, %v", derr)
+		return
+	}
 	ourOOBI := fmt.Sprintf("%s/public/oobi/%s", publicURL, ourIdentity.AID)
 	ourAlias := ourIdentity.AID
 	if len(ourAlias) >= 12 {
 		ourAlias = ourAlias[:12] + "..."
 	}
 	profile, _ := s.DataStore.GetProfile()
-	if profile != nil && profile.FullName != "" {
-		ourAlias = profile.FullName
+	jcard, photo := buildDisclosure(fields, profile, ourIdentity.AID, ourOOBI)
+	if jcard.FullName != "" {
+		ourAlias = jcard.FullName
 	}
 	payload := map[string]interface{}{
 		"type": "introduction", "sender_aid": ourIdentity.AID,
 		"sender_oobi": ourOOBI, "sender_alias": ourAlias, "sender_public_key": ourIdentity.PublicKey,
+		"sender_jcard": jcard,
 	}
-	if profile != nil {
-		payload["sender_jcard"] = profile.ToJCard(ourIdentity.AID, ourOOBI)
-		if profile.Photo != "" {
-			payload["sender_photo"] = profile.Photo
-		}
+	if photo != "" {
+		payload["sender_photo"] = photo
 	}
 	body, _ := json.Marshal(payload)
 	client := &http.Client{Timeout: 15 * time.Second}

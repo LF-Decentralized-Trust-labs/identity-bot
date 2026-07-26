@@ -29,6 +29,11 @@ type Action struct {
 	Version         string          `json:"version"`
 	RequestSchema   json.RawMessage `json:"request_schema"`
 	PreviewContract json.RawMessage `json:"preview_contract"`
+	// Discloses names the profile fields that leave the agent when this action
+	// executes. It is the action's own declaration of what it sends about you:
+	// the consent screen renders it and the outbound payload is built from it.
+	// An empty list means the action sends nothing about you.
+	Discloses []string `json:"discloses"`
 	Outcome         string          `json:"outcome"`
 	Tiers           []string        `json:"tiers"`
 	UI              ActionUI        `json:"ui"`

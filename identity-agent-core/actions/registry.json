@@ -50,6 +50,7 @@
         "display_name": { "type": "string", "required": false, "kind": "open" }
       },
       "preview_contract": { "title": "Add {name} as a contact.", "conveys": ["name", "tier"] },
+      "discloses": ["name", "photo"],
       "outcome": "Each side records the other as a contact at the chosen tier (distinct from low-level transactional KERI contacts, which are automatic and unceremonious).",
       "tiers": ["general", "trusted", "professional"],
       "ui": { "share_menu": true, "icon": "person_add", "enabled": true, "sort_order": 1, "subtitle": "" }
