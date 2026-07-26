@@ -2534,17 +2534,20 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// An OOBI is a discovery record: it exists so a counterparty can find and
+	// cryptographically verify this AID. It is served UNAUTHENTICATED to anyone
+	// who knows the AID, and the whole router is reachable while a tunnel is up —
+	// so nothing personal may ride along by default.
+	//
+	// Previously this attached the full jCard (name, family/given name, org,
+	// title, EMAIL, TELEPHONE, note, UID) and the profile photo to every
+	// response, disclosing all of it to any unauthenticated caller with no
+	// consent surface anywhere in the path. Personal data is now opt-in per
+	// consented relationship and is not served here.
+	//
+	// The alias stays a truncated AID rather than the profile's real name for
+	// the same reason: it is a display convenience, not a place to leak identity.
 	alias := identity.AID[:12] + "..."
-	profile, _ := s.DataStore.GetProfile()
-	var jcard *store.JCard
-	if profile != nil {
-		publicURL := s.getPublicURL(r)
-		oobiURL := fmt.Sprintf("%s/oobi/%s", publicURL, identity.AID)
-		jcard = profile.ToJCard(identity.AID, oobiURL)
-		if profile.FullName != "" {
-			alias = profile.FullName
-		}
-	}
 
 	// Browser landing page: when a browser (not the Identity Agent app) opens an OOBI link,
 	// return a human-readable HTML page with download instructions and the OOBI URL.
@@ -2602,12 +2605,9 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
 		"event_count": identity.EventCount,
 		"created":     identity.Created,
 	}
-	if jcard != nil {
-		resp["jcard"] = jcard
-	}
-	if profile != nil && profile.Photo != "" {
-		resp["photo"] = profile.Photo
-	}
+	// jcard and photo are deliberately NOT served here — see the note above.
+	// A counterparty receives personal data through a consented exchange
+	// (an introduction the user approved), never by fetching a public OOBI.
 	if s.WatcherService != nil {
 		resp["watchers"] = s.WatcherService.WatcherHints()
 	} else {
