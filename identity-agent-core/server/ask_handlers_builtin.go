@@ -53,11 +53,61 @@ func (loginAsk) Preview(s *CoreServer, ctx AskContext) (GenericPreview, error) {
 	for _, f := range pv.RequestedDisclosures {
 		details = append(details, PreviewDetail{Label: f, Value: pv.DisclosurePreview[f]})
 	}
+	// A site can ask for credentials and a trust score as well as fields.
+	// Listing only the fields and then saying "only the fields above will be
+	// shared" understated what approving does.
+	for _, rc := range pv.RequestedCredentials {
+		details = append(details, PreviewDetail{
+			Label: "Credential " + shortSAID(rc.SchemaSAID),
+			Value: credentialRequestValue(rc),
+		})
+	}
+	if pv.RequestedScore != nil {
+		details = append(details, PreviewDetail{Label: "Trust score", Value: scoreRequestValue(pv.RequestedScore)})
+	}
 	return GenericPreview{
 		T: 1, Action: "login", Title: "Sign-in request",
 		Subtitle: pv.Audience, Counterparty: pv.SiteAID, Details: details,
-		Warning: "Only the fields above will be shared.",
+		Warning: "Only what is listed above is shared.",
 	}, nil
+}
+
+// credentialRequestValue says what approving would actually do about this
+// credential — including that it would present nothing, which is the case a
+// user needs to see before a site rejects them for it.
+func credentialRequestValue(rc login.CredentialRequestPreview) string {
+	switch {
+	case rc.Held && rc.Required:
+		return "required — will be presented"
+	case rc.Held:
+		return "optional — will be presented"
+	case rc.Required:
+		return "required — you hold none, sign-in may be refused"
+	default:
+		return "optional — you hold none, nothing presented"
+	}
+}
+
+func scoreRequestValue(rs *login.RequestedScore) string {
+	v := "your trust score is shared"
+	switch {
+	case rs.MinBand != "":
+		v += " (site asks for band " + rs.MinBand + " or better)"
+	case rs.MinScore > 0:
+		v += fmt.Sprintf(" (site asks for %d or better)", rs.MinScore)
+	}
+	if rs.Required {
+		v += " — required"
+	}
+	return v
+}
+
+// shortSAID keeps a schema identifier recognisable without filling the row.
+func shortSAID(said string) string {
+	if len(said) > 12 {
+		return said[:12] + "…"
+	}
+	return said
 }
 
 func (loginAsk) Execute(s *CoreServer, ctx AskContext, d ScanDecision) (map[string]interface{}, error) {
