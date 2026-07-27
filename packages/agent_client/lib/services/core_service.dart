@@ -964,6 +964,30 @@ class CoreService {
     }
   }
 
+  /// Asks the agent for a freshly generated avatar without saving it, so the
+  /// user can look at it and ask for another. Generation happens on the device.
+  Future<String> generateAvatar() async {
+    final response = await _client.post(Uri.parse('$baseUrl/api/profile/avatar/generate'));
+    if (response.statusCode != 200) {
+      throw Exception('Could not generate an avatar: ${response.body}');
+    }
+    return (jsonDecode(response.body) as Map<String, dynamic>)['avatar'] as String? ?? '';
+  }
+
+  /// Turns a photo into a drawing of itself. The image is processed by the
+  /// local agent — no model download, no upload, nothing leaves the device.
+  Future<String> stylizeAvatar(String imageBase64) async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/api/profile/avatar/stylize'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'image': imageBase64}),
+    );
+    if (response.statusCode != 200) {
+      throw Exception('Could not stylize that image: ${response.body}');
+    }
+    return (jsonDecode(response.body) as Map<String, dynamic>)['avatar'] as String? ?? '';
+  }
+
   Future<Map<String, dynamic>> saveProfile(ProfileResponse profile) async {
     final response = await _client.put(
       Uri.parse('$baseUrl/api/profile'),

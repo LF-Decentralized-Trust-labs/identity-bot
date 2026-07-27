@@ -49,6 +49,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _savedIndicator = false;
   String? _error;
   String _photoBase64  = '';
+  bool _busyAvatar     = false;
 
   @override
   void initState() {
@@ -130,9 +131,47 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  void _removePhoto() {
-    setState(() => _photoBase64 = '');
-    _saveProfile();
+  /// Turns the current picture into a drawing of itself. The agent does this
+  /// locally — no model download, no upload — so the promise that your photo
+  /// stays on your device survives the feature.
+  Future<void> _cartoonPhoto() async {
+    if (_photoBase64.isEmpty) return;
+    setState(() => _busyAvatar = true);
+    try {
+      final drawn = await _coreService.stylizeAvatar(_photoBase64);
+      if (drawn.isNotEmpty) {
+        setState(() => _photoBase64 = _stripDataUri(drawn));
+        _saveProfile();
+      }
+    } catch (e) {
+      setState(() => _error = 'Could not make a cartoon: $e');
+    } finally {
+      if (mounted) setState(() => _busyAvatar = false);
+    }
+  }
+
+  /// Asks for another generated avatar. Rerolling costs nothing and there is
+  /// no reason to like the first one.
+  Future<void> _regenerateAvatar() async {
+    setState(() => _busyAvatar = true);
+    try {
+      final generated = await _coreService.generateAvatar();
+      if (generated.isNotEmpty) {
+        setState(() => _photoBase64 = _stripDataUri(generated));
+        _saveProfile();
+      }
+    } catch (e) {
+      setState(() => _error = 'Could not generate an avatar: $e');
+    } finally {
+      if (mounted) setState(() => _busyAvatar = false);
+    }
+  }
+
+  /// The agent returns a data URI; this screen stores bare base64.
+  String _stripDataUri(String v) {
+    const marker = ';base64,';
+    final i = v.indexOf(marker);
+    return i >= 0 ? v.substring(i + marker.length) : v;
   }
 
   // ── Photo ────────────────────────────────────────────────────────────────────
@@ -181,29 +220,46 @@ class _ProfileScreenState extends State<ProfileScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Profile Photo',
+              'Your avatar',
               style: TextStyle(color: AppColors.textPrimary, fontSize: 14, fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 4),
             const Text(
-              'Click photo to change',
+              'A photo, a cartoon of it, or any picture you like.\nIt stays on this device until you share it.',
               style: TextStyle(color: AppColors.textMuted, fontSize: 12),
             ),
-            if (_photoBase64.isNotEmpty) ...[
-              const SizedBox(height: 6),
-              GestureDetector(
-                onTap: _removePhoto,
-                child: const Text(
-                  'Remove',
-                  style: TextStyle(color: AppColors.error, fontSize: 12),
-                ),
+            const SizedBox(height: 8),
+            if (_busyAvatar)
+              const SizedBox(
+                height: 16, width: 16,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            else
+              Wrap(
+                spacing: 14,
+                children: [
+                  _avatarAction('Use a photo', _pickPhoto),
+                  if (_photoBase64.isNotEmpty)
+                    _avatarAction('Make it a cartoon', _cartoonPhoto),
+                  _avatarAction('Generate one', _regenerateAvatar),
+                ],
               ),
-            ],
           ],
         ),
       ],
     );
   }
+
+  Widget _avatarAction(String label, VoidCallback onTap) => MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          onTap: onTap,
+          child: Text(
+            label,
+            style: const TextStyle(color: AppColors.accent, fontSize: 12),
+          ),
+        ),
+      );
 
   CircleAvatar _defaultAvatar() => const CircleAvatar(
         radius: 52,
