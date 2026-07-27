@@ -1,9 +1,13 @@
 package server
 
 import (
+	"encoding/base64"
 	"encoding/json"
+	"log"
 	"net/http"
 	"sync"
+
+	"identity-agent-core/secureenclave"
 )
 
 // How a freshly provisioned instance offers itself for pairing.
@@ -22,6 +26,15 @@ import (
 type pairingOffer struct {
 	AID  string `json:"aid"`
 	OOBI string `json:"oobi"`
+	// Attestation is the guest's SEV-SNP report, base64, present only when this
+	// instance is running in a sealed VM that can produce one. Absent is a real
+	// answer — it means nobody can verify what this box is — and a caller that
+	// requires sealed infrastructure must treat absence as a failure rather
+	// than as an older version being lenient.
+	Attestation string `json:"attestation,omitempty"`
+	// AttestationBinding names what the report's REPORT_DATA is bound to, so a
+	// verifier can recompute it rather than trust the pairing.
+	AttestationBinding string `json:"attestation_binding,omitempty"`
 }
 
 var pairingOnce struct {
@@ -65,7 +78,24 @@ func (s *CoreServer) handleProvisioningPairing(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusServiceUnavailable, "Could not offer pairing", err.Error())
 		return
 	}
-	pairingOnce.offer = &pairingOffer{AID: aid, OOBI: oobi}
+	offer := &pairingOffer{AID: aid, OOBI: oobi}
+
+	// Bind the attestation to the AID we just minted. A report that only says
+	// "some sealed guest ran the right image" is satisfied by any instance
+	// anywhere, including the provider's own; bound to this AID it says "the
+	// guest that minted THIS identity ran the right image", which is the claim
+	// somebody pairing actually needs.
+	if secureenclave.SNPAvailable() {
+		if report, rerr := secureenclave.GetSNPReport(aid); rerr == nil {
+			offer.Attestation = base64.StdEncoding.EncodeToString(report.Raw)
+			offer.AttestationBinding = "blake3-256(IA-SNP-BIND-V1\\n" + aid + ")"
+		} else {
+			// Being in a sealed VM and failing to prove it is worth saying out
+			// loud: it is the case where the box is fine but nobody can tell.
+			log.Printf("[provisioning] SNP guest present but no report available: %v", rerr)
+		}
+	}
+	pairingOnce.offer = offer
 	writePairingOffer(w, pairingOnce.offer)
 }
 
