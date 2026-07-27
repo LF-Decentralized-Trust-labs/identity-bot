@@ -14,9 +14,9 @@ func newTPMSigner() PlatformSigner {
 	return &tpmSigner{}
 }
 
-func (s *tpmSigner) Available() bool { return false }
+func (s *tpmSigner) Available() bool  { return false }
 func (s *tpmSigner) Platform() string { return "tpm2" }
-func (s *tpmSigner) Label() string  { return "TPM 2.0 (stub)" }
+func (s *tpmSigner) Label() string    { return "TPM 2.0 (stub)" }
 
-func (s *tpmSigner) PublicKey() ([]byte, error) { return nil, ErrSignerUnavailable }
+func (s *tpmSigner) PublicKey() ([]byte, error)  { return nil, ErrSignerUnavailable }
 func (s *tpmSigner) Sign([]byte) ([]byte, error) { return nil, ErrSignerUnavailable }
