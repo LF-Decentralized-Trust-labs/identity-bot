@@ -13,8 +13,8 @@ class VerificationResult {
   final LinkOwnership? ownership;
   final String? band;
   final String? bandStyle;
-  final int? grapeScore;
-  final String? grapeScoreAsOf;
+  final int? identityLevelScore;
+  final String? identityLevelScoreAsOf;
   final String? badge;
   final bool cached;
 
@@ -28,8 +28,8 @@ class VerificationResult {
     this.ownership,
     this.band,
     this.bandStyle,
-    this.grapeScore,
-    this.grapeScoreAsOf,
+    this.identityLevelScore,
+    this.identityLevelScoreAsOf,
     this.badge,
     this.cached = false,
   });
@@ -51,8 +51,8 @@ class VerificationResult {
       ownership: ownership,
       band: json['band'] as String?,
       bandStyle: json['band_style'] as String?,
-      grapeScore: json['grape_score'] as int?,
-      grapeScoreAsOf: json['grape_score_as_of'] as String?,
+      identityLevelScore: json['identity_level_score'] as int?,
+      identityLevelScoreAsOf: json['identity_level_score_as_of'] as String?,
       badge: json['badge'] as String?,
       cached: json['cached'] as bool? ?? false,
     );

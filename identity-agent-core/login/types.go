@@ -4,19 +4,19 @@ package login
 // action). The IA fetches it from the minimal QR pointer (/i/{token}) and
 // verifies its signature against the site KEL before showing consent.
 type ChallengeBundle struct {
-	V                    string                 `json:"v"`
-	T                    int                    `json:"t"`
-	SiteAID              string                 `json:"site_aid"`
-	SiteOOBI             string                 `json:"site_oobi"`
-	Audience             string                 `json:"audience"`
-	Nonce                string                 `json:"nonce"`
-	Dt                   string                 `json:"dt"`
-	Expiry               string                 `json:"expiry"`
-	RequestedDisclosures []string               `json:"requested_disclosures"`
-	RequestedCredentials []RequestedCredential  `json:"requested_credentials"`
-	RequestedScore       *RequestedScore        `json:"requested_score,omitempty"`
-	CallbackURL          string                 `json:"callback_url"`
-	SessionToken         string                 `json:"session_token"`
+	V                    string                `json:"v"`
+	T                    int                   `json:"t"`
+	SiteAID              string                `json:"site_aid"`
+	SiteOOBI             string                `json:"site_oobi"`
+	Audience             string                `json:"audience"`
+	Nonce                string                `json:"nonce"`
+	Dt                   string                `json:"dt"`
+	Expiry               string                `json:"expiry"`
+	RequestedDisclosures []string              `json:"requested_disclosures"`
+	RequestedCredentials []RequestedCredential `json:"requested_credentials"`
+	RequestedScore       *RequestedScore       `json:"requested_score,omitempty"`
+	CallbackURL          string                `json:"callback_url"`
+	SessionToken         string                `json:"session_token"`
 	// Membership-gated assets: the relationship ANCHOR is the asset's CONTROLLER
 	// (the delegating identity — an organization or an individual), not the
 	// per-asset AID, so the pairwise presented at login is the same constant AID
@@ -52,9 +52,9 @@ type PresentedCredential struct {
 }
 
 type RequestedScore struct {
-	MinBand   string `json:"min_band,omitempty"`
-	MinScore  int    `json:"min_score,omitempty"`
-	Required  bool   `json:"required,omitempty"`
+	MinBand  string `json:"min_band,omitempty"`
+	MinScore int    `json:"min_score,omitempty"`
+	Required bool   `json:"required,omitempty"`
 }
 
 type Assertion struct {
@@ -74,14 +74,14 @@ type Assertion struct {
 }
 
 type SiteRelationship struct {
-	SiteAID    string `json:"site_aid"`
+	SiteAID     string `json:"site_aid"`
 	PairwiseAID string `json:"pairwise_aid"`
 	// SeedB64 kept for compat but not used for secrets (re-derive from root + RelationshipIndex)
-	SeedB64    string `json:"seed_b64"`
-	RelayOOBI  string `json:"relay_oobi"`
-	DisplayName string `json:"display_name,omitempty"`
-	Email      string `json:"email,omitempty"`
-	RelationshipIndex int `json:"relationship_index,omitempty"` // stable index for HD derivation (do not hash AID)
+	SeedB64           string `json:"seed_b64"`
+	RelayOOBI         string `json:"relay_oobi"`
+	DisplayName       string `json:"display_name,omitempty"`
+	Email             string `json:"email,omitempty"`
+	RelationshipIndex int    `json:"relationship_index,omitempty"` // stable index for HD derivation (do not hash AID)
 }
 
 type StartLoginRequest struct {
@@ -106,11 +106,23 @@ type LoginPreviewResponse struct {
 	RPSessionURL          string `json:"rp_session_url"`
 }
 
+// ScoreAttestation is a signed statement about the holder's identity level.
+//
+// The level is only meaningful alongside WHO is asserting it: a relying party
+// deciding whether to trust "green" needs to know which provider said so and
+// how they established it. An agent may be configured with any provider, so the
+// envelope carries the issuer rather than the protocol assuming one.
 type ScoreAttestation struct {
-	RelationshipAID          string `json:"relationship_aid"`
-	Band                     string `json:"band"`
-	Score                    int    `json:"score,omitempty"`
-	ScoreAsOf                string `json:"score_as_of"`
-	FreshnessWindowSeconds   int    `json:"freshness_window_seconds"`
-	Sig                      string `json:"sig,omitempty"`
+	RelationshipAID string `json:"relationship_aid"`
+	// Issuer identifies the provider asserting the level — an AID where the
+	// provider has one, otherwise a stable name. Empty means self-asserted.
+	Issuer string `json:"issuer,omitempty"`
+	// Method is how the level was established (e.g. "document_check",
+	// "self_asserted"), free-form because providers differ.
+	Method                 string `json:"method,omitempty"`
+	Band                   string `json:"band"`
+	Score                  int    `json:"score,omitempty"`
+	ScoreAsOf              string `json:"score_as_of"`
+	FreshnessWindowSeconds int    `json:"freshness_window_seconds"`
+	Sig                    string `json:"sig,omitempty"`
 }

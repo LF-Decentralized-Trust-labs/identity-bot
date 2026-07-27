@@ -145,8 +145,8 @@ func TestVerifyDidWebsVerified(t *testing.T) {
 	if result.Ownership == nil {
 		t.Fatal("link flow should include ownership")
 	}
-	if result.GrapeScore != nil {
-		t.Fatal("free tier must omit grape_score")
+	if result.IdentityLevelScore != nil {
+		t.Fatal("free tier must omit identity_level_score")
 	}
 	if result.BandStyle != "generic" {
 		t.Fatalf("band_style=%q want generic", result.BandStyle)
@@ -252,14 +252,14 @@ func TestVerifyUnverifiedNoPublication(t *testing.T) {
 }
 
 func TestGatedTierSilentDegrade(t *testing.T) {
-	sdk := New(nil, Config{GrapeScoreProviderActive: false})
+	sdk := New(nil, Config{})
 	result, err := sdk.Verify(context.Background(), VerifyRequest{
 		Input: "https://example.invalid", Tier: TierGated,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.GrapeScore != nil {
+	if result.IdentityLevelScore != nil {
 		t.Fatal("gated without entitlement must omit score")
 	}
 	if result.BandStyle != "generic" {
@@ -268,14 +268,14 @@ func TestGatedTierSilentDegrade(t *testing.T) {
 }
 
 func TestGatedTierWithProvider(t *testing.T) {
-	fx := startPublisher(t, defaultKel(), defaultDidDoc(), 0, 0, true, true, Config{GrapeScoreProviderActive: true})
+	fx := startPublisher(t, defaultKel(), defaultDidDoc(), 0, 0, true, true, Config{LevelProvider: "example-level-provider"})
 	result, err := fx.sdk.Verify(context.Background(), VerifyRequest{
 		Input: fx.did, Tier: TierGated, Flow: FlowBadge,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.GrapeScore == nil || result.Badge == nil {
+	if result.IdentityLevelScore == nil || result.Badge == nil {
 		t.Fatal("gated with provider should include score and badge")
 	}
 }

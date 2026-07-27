@@ -122,11 +122,13 @@ class _LinkVerifierState extends State<LinkVerifier> {
                     color: color,
                   ),
                 ),
-                if (result.badge == 'grape_branded' && result.grapeScore != null)
+                // The badge is whichever level provider issued the score, so
+                // the widget shows a score without knowing whose it is.
+                if (result.badge != null && result.identityLevelScore != null)
                   Padding(
                     padding: const EdgeInsets.only(left: 6),
                     child: Text(
-                      '${result.grapeScore}',
+                      '${result.identityLevelScore}',
                       style: TextStyle(fontSize: 11, color: color),
                     ),
                   ),

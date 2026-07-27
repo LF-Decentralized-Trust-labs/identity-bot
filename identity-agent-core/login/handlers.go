@@ -369,7 +369,8 @@ func (h *Handler) postAssertion(callbackURL, sessionToken string, assertion *Ass
 	return nil
 }
 
-// ScoreAttestation returns Grape Score custom_data for an assertion (exported for OIDC adapter).
+// ScoreAttestation returns the identity-level custom_data for an assertion
+// (exported for the OIDC adapter).
 func (h *Handler) ScoreAttestation(rel *SiteRelationship) (map[string]interface{}, error) {
 	return h.scoreAttestation(rel)
 }
