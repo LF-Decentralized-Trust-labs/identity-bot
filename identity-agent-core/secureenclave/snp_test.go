@@ -56,16 +56,16 @@ func TestUnavailableIsAnErrorNotAnEmptyReport(t *testing.T) {
 	}
 }
 
-// The guest computes this binding and sp-blackbox's verifier recomputes it.
-// Two implementations of one construction in two repositories, so the value is
-// pinned on both sides: if either changes without the other, this fails here
-// rather than every instance silently failing attestation in production.
+// The guest computes this binding and whoever verifies the report recomputes
+// it. Two implementations of one construction, maintained separately, so the
+// value is pinned on both sides: if either changes without the other, this
+// fails here rather than every instance silently failing attestation.
 func TestBindingGoldenVector(t *testing.T) {
 	got := hex.EncodeToString(BindReportData("EPAIRWISE_GOLDEN")[:32])
 	const want = "d33fdad0f3127ef871d25baa13772085ec95a3fe28bfd5ba5ac3ae33bf75eab6"
 	if got != want {
 		t.Errorf("the binding construction changed.\n got: %s\nwant: %s\n"+
-			"If this was deliberate, sp-blackbox's bindReportData must change identically "+
+			"If this was deliberate, the verifier's binding must change identically "+
 			"and in the same release.", got, want)
 	}
 }
