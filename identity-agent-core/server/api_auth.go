@@ -84,7 +84,12 @@ var publicRoutes = map[string]string{
 	// owner-gated; it discloses a pairwise AID that is about to be published as
 	// an OOBI anyway, nothing else, and it stops answering once paired.
 	"GET /api/provisioning/pairing": "a newly provisioned instance offers itself for pairing, before any owner exists",
-	"GET /*":                        "the Flutter web UI itself; the API it calls is still authorised",
+	// The adoption ceremony itself. Same reasoning and the same window: an
+	// instance with no owner cannot gate these on being the owner. Both refuse
+	// the moment the instance has an identity, so the window closes on success.
+	"POST /api/pairing/begin":    "an unadopted instance offers its own public key material for delegation",
+	"POST /api/pairing/complete": "an unadopted instance accepts a delegation over that key and seals its owner",
+	"GET /*":                     "the Flutter web UI itself; the API it calls is still authorised",
 }
 
 // scopedRoutes are reachable by a caller presenting capability scopes rather
