@@ -78,7 +78,13 @@ var publicRoutes = map[string]string{
 
 	// --- liveness and the app shell ---
 	"GET /api/health": "liveness probe — reveals nothing",
-	"GET /*":          "the Flutter web UI itself; the API it calls is still authorised",
+
+	// The one endpoint that must answer before an owner exists. A freshly
+	// provisioned instance has no identity and no owner, so it cannot be
+	// owner-gated; it discloses a pairwise AID that is about to be published as
+	// an OOBI anyway, nothing else, and it stops answering once paired.
+	"GET /api/provisioning/pairing": "a newly provisioned instance offers itself for pairing, before any owner exists",
+	"GET /*":                        "the Flutter web UI itself; the API it calls is still authorised",
 }
 
 // scopedRoutes are reachable by a caller presenting capability scopes rather

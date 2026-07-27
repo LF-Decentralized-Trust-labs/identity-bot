@@ -518,6 +518,11 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 
 		r.Get("/oobi", s.handleOobiGenerate)
 
+		// How a freshly provisioned instance offers itself for pairing, before
+		// it has an identity or an owner. See provisioning_pairing.go for why
+		// this one endpoint is reachable without authorisation.
+		r.Get("/provisioning/pairing", s.handleProvisioningPairing)
+
 		r.Get("/contacts", s.handleGetContacts)
 		r.Post("/contacts/resolve", s.handleResolveOobiContact)
 		r.Post("/contacts", s.handleAddContact)
