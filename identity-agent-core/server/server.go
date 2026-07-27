@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"identity-agent-core/asset"
+	"identity-agent-core/avatar"
 	"identity-agent-core/backup"
 	"identity-agent-core/drivers"
 	"identity-agent-core/endpoint"
@@ -543,6 +544,8 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 
 		r.Get("/profile", s.handleGetProfile)
 		r.Put("/profile", s.handlePutProfile)
+		r.Post("/profile/avatar/generate", s.handleGenerateAvatar)
+		r.Post("/profile/avatar/stylize", s.handleStylizeAvatar)
 
 		r.Get("/settings/tunnel", s.handleGetTunnelSettings)
 		r.Put("/settings/tunnel", s.handlePutTunnelSettings)
@@ -915,6 +918,15 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("[identity-agent-core] INCEPTION: New identity created - AID: %s", result.AID)
 
+	// Every identity gets a face from the moment it exists, generated here on
+	// the device. It costs the user nothing and removes the "no picture" case
+	// from every screen and every introduction downstream.
+	if created, aerr := s.ensureAvatar(); aerr != nil {
+		log.Printf("[identity-agent-core] INCEPTION: could not generate an avatar: %v", aerr)
+	} else if created {
+		log.Printf("[identity-agent-core] INCEPTION: generated a starting avatar")
+	}
+
 	resp := InceptionResponse{
 		AID:            result.AID,
 		InceptionEvent: result.InceptionEvent,
@@ -986,6 +998,12 @@ func (s *CoreServer) handleStoreIdentity(w http.ResponseWriter, r *http.Request)
 	}
 
 	log.Printf("[identity-agent-core] STORE: Identity saved - AID: %s", req.AID)
+
+	// Same guarantee on the mobile path, where inception happens in the Rust
+	// bridge and only the result is persisted here.
+	if _, aerr := s.ensureAvatar(); aerr != nil {
+		log.Printf("[identity-agent-core] STORE: could not generate an avatar: %v", aerr)
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -3914,6 +3932,17 @@ func (s *CoreServer) handlePutProfile(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&profile); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request", err.Error())
 		return
+	}
+
+	// Square and scale whatever was sent, so one oversized camera original does
+	// not end up travelling inside every introduction.
+	normalizeProfileAvatar(&profile)
+	if profile.Photo == "" {
+		// Clearing the picture is allowed; being without one is not. The user
+		// gets a fresh generated mark rather than an empty space.
+		if generated, gerr := avatar.Generate(); gerr == nil {
+			profile.Photo = generated
+		}
 	}
 
 	if err := s.DataStore.SaveProfile(profile); err != nil {
