@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"crypto/ed25519"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -58,6 +59,9 @@ type pairingCompleteRequest struct {
 	DelegatorIxn map[string]interface{} `json:"delegator_ixn,omitempty"`
 	// DelegatorAID is the controller's root AID.
 	DelegatorAID string `json:"delegator_aid"`
+	// AdoptionCode is the one-time code this instance issued with its pairing
+	// offer. Without it, whoever reaches an unadopted box first takes it.
+	AdoptionCode string `json:"adoption_code"`
 	// OwnerAID and OwnerPublicKey become the owner authority: whose signature
 	// this instance will accept as its owner's from now on.
 	OwnerAID       string `json:"owner_aid"`
@@ -154,6 +158,21 @@ func (s *CoreServer) handlePairingComplete(w http.ResponseWriter, r *http.Reques
 	if pairingState.offered == nil {
 		writeError(w, http.StatusConflict, "Nothing to complete",
 			"call /api/pairing/begin first — there is no key material to delegate over")
+		return
+	}
+
+	// Check the code before anything else is considered. An instance that
+	// validated a delegation first would leak whether the delegation was
+	// well-formed to somebody with no standing to ask.
+	expected := expectedAdoptionCode()
+	if expected == "" {
+		writeError(w, http.StatusConflict, "Not offered for pairing",
+			"this instance has not published a pairing offer, so there is no adoption to complete")
+		return
+	}
+	if subtle.ConstantTimeCompare([]byte(expected), []byte(req.AdoptionCode)) != 1 {
+		writeError(w, http.StatusForbidden, "Wrong adoption code",
+			"this instance was provisioned for somebody, and adopting it needs the code issued with that provisioning")
 		return
 	}
 
@@ -305,9 +324,14 @@ func resetPairingStateForTest() {
 func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		BoxURL string `json:"box_url"`
+		// AdoptionCode comes from whoever provisioned the box — through the
+		// deep link or QR the provisioning page produced. The box will not be
+		// adopted without it.
+		AdoptionCode string `json:"adoption_code"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.BoxURL == "" {
-		writeError(w, http.StatusBadRequest, "Missing box_url", "send {\"box_url\": \"http://…\"}")
+		writeError(w, http.StatusBadRequest, "Missing box_url",
+			"send {\"box_url\": \"http://…\", \"adoption_code\": \"…\"}")
 		return
 	}
 	if s.KeriDriver == nil {
@@ -345,6 +369,7 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 
 	// 3. Hand it back, along with who owns the box from now on: us.
 	result, err := boxPairingComplete(client, base, pairingCompleteRequest{
+		AdoptionCode:   req.AdoptionCode,
 		DipEvent:       dip.DipEvent,
 		DelegatorIxn:   dip.DelegatorIxn,
 		DelegatorAID:   root.AID,
