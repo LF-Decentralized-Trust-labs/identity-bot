@@ -1,0 +1,223 @@
+package server
+
+import (
+	"encoding/json"
+	"net/http"
+	"sync"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+)
+
+// Who is allowed to call what.
+//
+// Until now every route decided for itself, and most decided nothing: sixteen
+// handlers called isLocalOwnerRequest and the other two hundred were reachable
+// by anyone who could reach the port. While a tunnel is up, that is the
+// internet. This middleware makes authorisation a property of the router rather
+// than a habit of the handler.
+//
+// THE DEFAULT IS OWNER-ONLY. A route is exposed to anyone else only by being
+// named in publicRoutes or scopedRoutes below, each with the reason it is there.
+// A new route added tomorrow is private without anybody remembering to make it
+// so — which is the only default that survives people being busy.
+
+type accessClass string
+
+const (
+	// accessOwner is the default: only the person who controls this agent.
+	accessOwner accessClass = "owner"
+	// accessPublic is deliberately unauthenticated — a counterparty, a browser
+	// or a peer agent must be able to reach it without being us.
+	accessPublic accessClass = "public"
+	// accessScoped is reachable by a caller presenting a credential that carries
+	// capability scopes. The handler still checks the specific scope; this class
+	// only says "not owner-only".
+	accessScoped accessClass = "scoped"
+)
+
+// publicRoutes are unauthenticated by design. Keyed by "METHOD /chi/pattern".
+// Each entry states why, because a public route is a decision, not an accident.
+var publicRoutes = map[string]string{
+	// --- discovery and verification: the OOBI layer ---
+	// These answer "who is this AID and how do I verify it". They carry no
+	// personal data (see handleOobiServe), and requiring auth would defeat the
+	// purpose: a stranger must be able to verify us before any relationship.
+	"GET /oobi/{aid}":               "OOBI discovery record",
+	"GET /public/oobi/{aid}":        "OOBI discovery record",
+	"GET /{aid}/oobi":               "OOBI discovery record (did:webs layout)",
+	"GET /{aid}/did.json":           "did:webs document — public key material",
+	"GET /public/{aid}/did.json":    "did:webs document — public key material",
+	"GET /{aid}/kel":                "key event log — public and self-verifying",
+	"GET /{aid}/keri.cesr":          "key event log as a CESR stream",
+	"GET /api/kerl":                 "key event log — public and self-verifying",
+	"POST /_register":               "a pairwise signer registers its key so counterparties can resolve it",
+	"POST /public/_register":        "a pairwise signer registers its key so counterparties can resolve it",
+	"GET /public/credential/{said}": "a credential the user chose to publish at a shareable link",
+
+	// --- the sign-in handshake: the relying party and the browser drive these ---
+	"GET /i/{token}":                                "the scanned pointer — the QR resolves to a signed challenge",
+	"POST /api/login/challenge":                     "a site mints a challenge for its own sign-in page",
+	"POST /api/login/callback":                      "the completed assertion is posted back by the agent that signed it",
+	"GET /api/login/challenge/{token}/status":       "the waiting browser polls for completion",
+	"POST /api/login/session/{asset_id}":            "sign-in widget: a browser starts a session",
+	"GET /api/login/session/{asset_id}/{token}":     "sign-in widget: the browser polls its own session",
+	"OPTIONS /api/login/session/{asset_id}":         "CORS preflight for the sign-in widget",
+	"OPTIONS /api/login/session/{asset_id}/{token}": "CORS preflight for the sign-in widget",
+
+	// --- agent-to-agent protocol: another Identity Agent is the caller ---
+	// These are how a peer reaches us at all. They are authenticated by what
+	// they carry (a signed event, an encrypted archive), not by who connects.
+	"POST /api/exchange":                                    "a peer posts an introduction we consented to receive",
+	"POST /api/witness/request":                             "witnessing protocol — a controller asks us to witness",
+	"POST /api/witness/accept":                              "witnessing protocol — a receipt comes back",
+	"POST /api/receipt/submit":                              "a witness submits a receipt for an event",
+	"POST /api/backup/receive":                              "a peer pushes an opaque, already-encrypted archive",
+	"GET /api/backup/receive/{identityAID}":                 "the owning agent lists its own archives during recovery",
+	"GET /api/backup/receive/{identityAID}/download/{name}": "the owning agent retrieves an opaque archive during recovery",
+
+	// --- liveness and the app shell ---
+	"GET /api/health": "liveness probe — reveals nothing",
+	"GET /*":          "the Flutter web UI itself; the API it calls is still authorised",
+}
+
+// scopedRoutes are reachable by a caller presenting capability scopes rather
+// than being the owner. The handler enforces the specific scope.
+var scopedRoutes = map[string]string{
+	"POST /api/mcp":                      "MCP clients act under a minted token with explicit scopes",
+	"POST /api/capabilities/{id}/invoke": "capability invocation is gated by the grant, not by locality",
+}
+
+// sandboxEgressPrefixes are the container-facing namespaces. A sandboxed app
+// reaches these from the container network, so it is neither the owner nor a
+// token holder; the handlers behind them are their own gate (LLM egress is
+// structurally denied except the static model catalogue).
+var sandboxEgressPrefixes = []string{
+	"/sandbox/llm/v1",
+	"/apps/{app_id}/",
+}
+
+// classify returns the access class for a matched route pattern.
+func classify(method, pattern string) accessClass {
+	key := method + " " + pattern
+	if _, ok := publicRoutes[key]; ok {
+		return accessPublic
+	}
+	if _, ok := scopedRoutes[key]; ok {
+		return accessScoped
+	}
+	for _, p := range sandboxEgressPrefixes {
+		if len(pattern) >= len(p) && pattern[:len(p)] == p {
+			return accessScoped
+		}
+	}
+	return accessOwner
+}
+
+// authorize is the router-wide gate. It runs before every handler, resolves the
+// matched route, and refuses anything the caller has no standing to reach.
+//
+// routes is the router itself: chi fills the route pattern during dispatch,
+// which is after middleware, so we match once up front to learn which route we
+// are about to serve.
+func (s *CoreServer) authorize(routes chi.Routes) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// A CORS preflight carries no credentials by definition and is
+			// answered by the CORS middleware; gating it would break every
+			// browser client without protecting anything.
+			if r.Method == http.MethodOptions {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			pattern := matchedRoutePattern(routes, r)
+			if pattern == "" {
+				// No route matched — let the router answer 404 rather than
+				// telling an unauthenticated caller which paths exist.
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			switch classify(r.Method, pattern) {
+			case accessPublic:
+				next.ServeHTTP(w, r)
+			case accessScoped:
+				if s.isOwner(r) || len(s.resolveCaller(r).Scopes) > 0 {
+					next.ServeHTTP(w, r)
+					return
+				}
+				denyAuthorization(w, "this endpoint needs a token carrying the capability scope for it")
+			default:
+				if s.isOwner(r) {
+					next.ServeHTTP(w, r)
+					return
+				}
+				denyAuthorization(w, "this endpoint is for the owner of this agent; sign the request with the owner key or call it locally")
+			}
+		})
+	}
+}
+
+// matchedRoutePattern resolves which registered route would serve this request.
+func matchedRoutePattern(routes chi.Routes, r *http.Request) string {
+	rctx := chi.NewRouteContext()
+	if !routes.Match(rctx, r.Method, r.URL.Path) {
+		return ""
+	}
+	return rctx.RoutePattern()
+}
+
+func denyAuthorization(w http.ResponseWriter, detail string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusForbidden)
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"error":  "not_authorized",
+		"detail": detail,
+	})
+}
+
+// isOwner answers the only question the default class asks: is this the person
+// who controls this agent?
+//
+// Two ways to be the owner, and they are not alternatives so much as the same
+// claim proved differently. On a machine you are sitting at, a request that
+// originates on that machine is you. On hardware you rent — where you are
+// remote by definition and the local test can never be true — you prove it by
+// signing the request with the owner key sealed into the box at provisioning.
+func (s *CoreServer) isOwner(r *http.Request) bool {
+	if isLocalOwnerRequest(r) {
+		return true
+	}
+	return s.verifyOwnerSignature(r) == nil
+}
+
+// --- replay window ---
+
+// signedRequestWindow is how far a signed request's timestamp may be from now.
+// Long enough to survive clock skew and a slow link, short enough that a
+// captured request stops being useful quickly.
+const signedRequestWindow = 2 * time.Minute
+
+var (
+	seenSignaturesMu sync.Mutex
+	seenSignatures   = map[string]time.Time{}
+)
+
+// rememberSignature records a signature as spent and reports whether it was
+// already used. Within the window a signed request works exactly once, so
+// capturing one off the wire buys nothing.
+func rememberSignature(sig string, now time.Time) (alreadyUsed bool) {
+	seenSignaturesMu.Lock()
+	defer seenSignaturesMu.Unlock()
+	for s, t := range seenSignatures {
+		if now.Sub(t) > signedRequestWindow {
+			delete(seenSignatures, s)
+		}
+	}
+	if _, ok := seenSignatures[sig]; ok {
+		return true
+	}
+	seenSignatures[sig] = now
+	return false
+}

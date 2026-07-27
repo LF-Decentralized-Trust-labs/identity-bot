@@ -454,13 +454,20 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RequestID)
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"*"},
-		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
+		AllowedOrigins: []string{"*"},
+		AllowedMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedHeaders: []string{
+			"Accept", "Authorization", "Content-Type", "X-CSRF-Token",
+			headerOwnerSig, headerOwnerTimestamp, headerOwnerAID,
+		},
 		ExposedHeaders:   []string{"Link"},
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
+
+	// Everything below is owner-only unless api_auth.go names it otherwise.
+	// Registered here, before any route, so no route can be added outside it.
+	r.Use(s.authorize(r))
 
 	// G-052: public endpoint for IA to fetch signed login challenge bundle (QR pointer)
 	r.Get("/i/{token}", s.handleChallengeBundleServe)
@@ -4032,7 +4039,7 @@ func (s *CoreServer) reviveAssetIdentity(a asset.Asset) error {
 // the tunnel providers forward the whole local port — so any agent exposed
 // through a tunnel could be wiped by anyone who learned the URL.
 func (s *CoreServer) handleReset(w http.ResponseWriter, r *http.Request) {
-	if !isLocalOwnerRequest(r) {
+	if !s.isOwner(r) {
 		writeError(w, http.StatusForbidden, "Forbidden",
 			"reset is restricted to the local owner and cannot be invoked remotely")
 		return
