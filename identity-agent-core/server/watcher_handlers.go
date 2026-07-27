@@ -118,8 +118,8 @@ func (s *CoreServer) mountWatcherPublicRoutes(r chi.Router) {
 }
 
 func (s *CoreServer) handleDebugWatcherFirstSeen(w http.ResponseWriter, r *http.Request) {
-	if !isLocalhost(r) {
-		writeError(w, http.StatusForbidden, "localhost only", "")
+	if !s.isOwner(r) {
+		writeError(w, http.StatusForbidden, "owner only", "")
 		return
 	}
 	aid := r.URL.Query().Get("aid")
@@ -137,8 +137,8 @@ func (s *CoreServer) handleDebugWatcherFirstSeen(w http.ResponseWriter, r *http.
 }
 
 func (s *CoreServer) handleDebugWatcherCoverage(w http.ResponseWriter, r *http.Request) {
-	if !isLocalhost(r) {
-		writeError(w, http.StatusForbidden, "localhost only", "")
+	if !s.isOwner(r) {
+		writeError(w, http.StatusForbidden, "owner only", "")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

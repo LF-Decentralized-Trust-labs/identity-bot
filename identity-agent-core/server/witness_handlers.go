@@ -70,8 +70,8 @@ func (s *CoreServer) handleWitnessKel(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *CoreServer) handleWitnessStatus(w http.ResponseWriter, r *http.Request) {
-	if !isLocalhost(r) {
-		writeError(w, http.StatusForbidden, "localhost only", "internal route")
+	if !s.isOwner(r) {
+		writeError(w, http.StatusForbidden, "owner only", "internal route")
 		return
 	}
 	st, err := s.WitnessService.BuildStatus()

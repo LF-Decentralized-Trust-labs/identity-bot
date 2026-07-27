@@ -15,7 +15,7 @@ import (
 
 // handleImportCapabilityPack imports (or rolls forward) one capability pack.
 func (s *CoreServer) handleImportCapabilityPack(w http.ResponseWriter, r *http.Request) {
-	if !isLocalOwnerRequest(r) {
+	if !s.isOwner(r) {
 		jsonError(w, "capability management is local-owner only", http.StatusForbidden)
 		return
 	}
@@ -39,7 +39,7 @@ func (s *CoreServer) handleImportCapabilityPack(w http.ResponseWriter, r *http.R
 // handleListCapabilityRegistry is the management view: every record, disabled ones
 // included.
 func (s *CoreServer) handleListCapabilityRegistry(w http.ResponseWriter, r *http.Request) {
-	if !isLocalOwnerRequest(r) {
+	if !s.isOwner(r) {
 		jsonError(w, "capability management is local-owner only", http.StatusForbidden)
 		return
 	}
@@ -57,7 +57,7 @@ func (s *CoreServer) handleListCapabilityRegistry(w http.ResponseWriter, r *http
 
 // handleSetCapabilityEnabled toggles one record.
 func (s *CoreServer) handleSetCapabilityEnabled(w http.ResponseWriter, r *http.Request) {
-	if !isLocalOwnerRequest(r) {
+	if !s.isOwner(r) {
 		jsonError(w, "capability management is local-owner only", http.StatusForbidden)
 		return
 	}
@@ -87,7 +87,7 @@ func (s *CoreServer) handleSetCapabilityEnabled(w http.ResponseWriter, r *http.R
 
 // handleDeleteCapabilityRecord removes one record (its invocation-log history remains).
 func (s *CoreServer) handleDeleteCapabilityRecord(w http.ResponseWriter, r *http.Request) {
-	if !isLocalOwnerRequest(r) {
+	if !s.isOwner(r) {
 		jsonError(w, "capability management is local-owner only", http.StatusForbidden)
 		return
 	}

@@ -26,8 +26,8 @@ type rootSeedRequest struct {
 // Idempotent for the same seed; a DIFFERENT established seed is refused — the
 // HD root of an identity must never silently rotate.
 func (s *CoreServer) handleSetRootSeed(w http.ResponseWriter, r *http.Request) {
-	if !isLocalOwnerRequest(r) {
-		jsonError(w, "keystore management is local-owner only", http.StatusForbidden)
+	if !s.isOwner(r) {
+		jsonError(w, "keystore management is for the owner of this agent", http.StatusForbidden)
 		return
 	}
 	var req rootSeedRequest
@@ -67,8 +67,8 @@ func (s *CoreServer) handleSetRootSeed(w http.ResponseWriter, r *http.Request) {
 // seed itself). Local owner only. Lets the client decide whether a handoff is
 // still needed.
 func (s *CoreServer) handleRootSeedStatus(w http.ResponseWriter, r *http.Request) {
-	if !isLocalOwnerRequest(r) {
-		jsonError(w, "keystore management is local-owner only", http.StatusForbidden)
+	if !s.isOwner(r) {
+		jsonError(w, "keystore management is for the owner of this agent", http.StatusForbidden)
 		return
 	}
 	_, err := secureenclave.LoadRootSeed(s.DataDir)

@@ -17,8 +17,8 @@ func (s *CoreServer) mountVerificationRoutes(r interface {
 }
 
 func (s *CoreServer) handleVerificationBadge(w http.ResponseWriter, r *http.Request) {
-	if !isLocalhost(r) {
-		writeError(w, http.StatusForbidden, "localhost only", "loopback route")
+	if !s.isOwner(r) {
+		writeError(w, http.StatusForbidden, "owner only", "loopback route")
 		return
 	}
 	urlParam := r.URL.Query().Get("url")

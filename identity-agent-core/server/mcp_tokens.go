@@ -173,11 +173,11 @@ func (t tokenAwareResolver) Resolve(r *http.Request) sandbox.CallerContext {
 	return cc
 }
 
-// handleMintMCPToken mints a token (local owner only). Scopes are capability ids the
+// handleMintMCPToken mints a token (owner only). Scopes are capability ids the
 // token may invoke; the plaintext token is returned once and only its hash is stored.
 func (s *CoreServer) handleMintMCPToken(w http.ResponseWriter, r *http.Request) {
-	if !isLocalOwnerRequest(r) {
-		jsonError(w, "token management is local-owner only", http.StatusForbidden)
+	if !s.isOwner(r) {
+		jsonError(w, "token management is for the owner of this agent", http.StatusForbidden)
 		return
 	}
 	var req struct {
@@ -226,10 +226,10 @@ func (s *CoreServer) handleMintMCPToken(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-// handleListMCPTokens lists token names + scopes (never hashes), local owner only.
+// handleListMCPTokens lists token names + scopes (never hashes), owner only.
 func (s *CoreServer) handleListMCPTokens(w http.ResponseWriter, r *http.Request) {
-	if !isLocalOwnerRequest(r) {
-		jsonError(w, "token management is local-owner only", http.StatusForbidden)
+	if !s.isOwner(r) {
+		jsonError(w, "token management is for the owner of this agent", http.StatusForbidden)
 		return
 	}
 	mcpTokensMu.Lock()
@@ -244,8 +244,8 @@ func (s *CoreServer) handleListMCPTokens(w http.ResponseWriter, r *http.Request)
 
 // handleRevokeMCPToken deletes a token by name, local owner only.
 func (s *CoreServer) handleRevokeMCPToken(w http.ResponseWriter, r *http.Request) {
-	if !isLocalOwnerRequest(r) {
-		jsonError(w, "token management is local-owner only", http.StatusForbidden)
+	if !s.isOwner(r) {
+		jsonError(w, "token management is for the owner of this agent", http.StatusForbidden)
 		return
 	}
 	name := chi.URLParam(r, "name")
@@ -276,7 +276,7 @@ func (s *CoreServer) handleRevokeMCPToken(w http.ResponseWriter, r *http.Request
 // first — who did what, when, under whose authority. Local owner only for now; the
 // governed read for other callers arrives with ACDC resolution.
 func (s *CoreServer) handleListInvocationEvents(w http.ResponseWriter, r *http.Request) {
-	if !isLocalOwnerRequest(r) {
+	if !s.isOwner(r) {
 		jsonError(w, "activity is local-owner only", http.StatusForbidden)
 		return
 	}
