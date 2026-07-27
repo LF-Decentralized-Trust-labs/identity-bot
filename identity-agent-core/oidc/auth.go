@@ -69,7 +69,9 @@ func ParseAuthRequest(r *http.Request) (*AuthRequest, error) {
 	if req.ResponseMode == "" {
 		req.ResponseMode = "fragment"
 	}
-	if q.Get("request_score") == "true" || contains(scope, "grape_score") {
+	// A relying party asks for the holder's identity level by scope. The scope
+	// names what is being asked for, not who issues it.
+	if q.Get("request_score") == "true" || contains(scope, "identity_level") {
 		req.RequestScore = &login.RequestedScore{MinBand: "green", Required: false}
 	}
 	return req, nil

@@ -49,14 +49,15 @@ func BuildVPToken(format string, assertion *login.Assertion) (*VPToken, error) {
 
 func buildACDCVPToken(assertion *login.Assertion) (*VPToken, error) {
 	payload := map[string]interface{}{
-		"@context": []string{"https://identityagent.org/oidc4vp/acdc/v1"},
-		"type":     []string{"VerifiablePresentation"},
-		"holder":   assertion.I,
+		"@context":             []string{"https://identityagent.org/oidc4vp/acdc/v1"},
+		"type":                 []string{"VerifiablePresentation"},
+		"holder":               assertion.I,
 		"verifiableCredential": assertion.PresentedACDCs,
 	}
-	if band, score := grapeScoreFromAssertion(assertion); band != "" {
-		payload["grape_score"] = map[string]interface{}{
-			"band": band, "score": score,
+	if level := identityLevelFromAssertion(assertion); level.Level != "" {
+		payload["identity_level"] = map[string]interface{}{
+			"level": level.Level, "score": level.Score,
+			"issuer": level.Issuer, "method": level.Method,
 		}
 	}
 	return &VPToken{Format: VPFormatACDC, Token: payload}, nil
@@ -67,10 +68,13 @@ func buildSDJWTVPToken(assertion *login.Assertion) (*VPToken, error) {
 		"sub": assertion.I,
 		"iat": assertion.Dt,
 	}
-	if band, score := grapeScoreFromAssertion(assertion); band != "" {
-		claims["grape_score_band"] = band
-		if score > 0 {
-			claims["grape_score"] = score
+	if level := identityLevelFromAssertion(assertion); level.Level != "" {
+		claims["identity_level"] = level.Level
+		if level.Score > 0 {
+			claims["identity_level_score"] = level.Score
+		}
+		if level.Issuer != "" {
+			claims["identity_level_issuer"] = level.Issuer
 		}
 	}
 	if len(assertion.PresentedACDCs) > 0 {
@@ -91,28 +95,42 @@ func sdJWTHeader() string {
 	return base64.RawURLEncoding.EncodeToString(hdr)
 }
 
-func grapeScoreFromAssertion(assertion *login.Assertion) (band string, score int) {
-	if assertion.CustomData == nil {
-		return "", 0
+// identityLevel is what an assertion says about the holder's identity level,
+// flattened for the token builders.
+type identityLevel struct {
+	Level  string
+	Score  int
+	Issuer string
+	Method string
+}
+
+// identityLevelFromAssertion reads the signed level attestation an assertion
+// carries. The attestation names its own issuer, so no provider is assumed.
+func identityLevelFromAssertion(assertion *login.Assertion) identityLevel {
+	var out identityLevel
+	if assertion == nil || assertion.CustomData == nil {
+		return out
 	}
-	raw, ok := assertion.CustomData["score_attestation"]
+	m, ok := assertion.CustomData["score_attestation"].(map[string]interface{})
 	if !ok {
-		return "", 0
+		return out
 	}
-	m, ok := raw.(map[string]interface{})
-	if !ok {
-		return "", 0
+	if v, ok := m["band"].(string); ok {
+		out.Level = v
 	}
-	if b, ok := m["band"].(string); ok {
-		band = b
+	if v, ok := m["issuer"].(string); ok {
+		out.Issuer = v
+	}
+	if v, ok := m["method"].(string); ok {
+		out.Method = v
 	}
 	switch v := m["score"].(type) {
 	case float64:
-		score = int(v)
+		out.Score = int(v)
 	case int:
-		score = v
+		out.Score = v
 	}
-	return band, score
+	return out
 }
 
 // SelectVPFormat picks a format from the RP request (default SD-JWT VC).

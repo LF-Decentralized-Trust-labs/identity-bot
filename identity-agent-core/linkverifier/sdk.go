@@ -183,12 +183,12 @@ func (s *SDK) applyFlowAndTier(req VerifyRequest, result *VerificationResult, re
 	} else if req.Flow == FlowLink && result.VerificationPath == "oobi" {
 		result.Ownership = nil
 	}
-	if req.Tier == TierGated && s.cfg.GrapeScoreProviderActive {
-		score := 75 // BLOCKED: wire to AuthProvider GET /api/auth/score
+	if req.Tier == TierGated && s.cfg.LevelProvider != "" {
+		score := 75 // BLOCKED: wire to the configured level provider's score endpoint
 		asOf := time.Now().UTC().Format(time.RFC3339)
-		badge := "grape_branded"
-		result.GrapeScore = &score
-		result.GrapeScoreAsOf = &asOf
+		badge := s.cfg.LevelProvider
+		result.IdentityLevelScore = &score
+		result.IdentityLevelScoreAsOf = &asOf
 		result.Badge = &badge
 	} else {
 		result.BandStyle = "generic"

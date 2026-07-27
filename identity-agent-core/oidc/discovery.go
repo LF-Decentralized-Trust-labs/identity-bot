@@ -37,7 +37,9 @@ func BuildDiscovery(issuerBase string) DiscoveryDocument {
 		ScopesSupported:                []string{"openid", "profile", "email"},
 		ClaimsSupported: []string{
 			"iss", "sub", "aud", "nonce", "iat", "exp", "name", "email",
-			ClaimNamespace + "/grape_score_band",
+			ClaimIdentityLevel,
+			ClaimIdentityLevelScore,
+			ClaimIdentityLevelIssuer,
 			ClaimNamespace + "/seam8_assertion_digest",
 		},
 		VPFormats: BuildVPFormatsMetadata(),

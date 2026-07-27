@@ -14,6 +14,14 @@ import (
 const (
 	ClaimSeam8Assertion       = ClaimNamespace + "/seam8_assertion"
 	ClaimSeam8AssertionDigest = ClaimNamespace + "/seam8_assertion_digest"
+
+	// Identity level, stated in the protocol's own vocabulary rather than any
+	// one provider's. A relying party reads the level and the issuer that
+	// asserted it; whether that issuer expresses itself as a band, a numeric
+	// score or a badge is the issuer's business, not the protocol's.
+	ClaimIdentityLevel       = ClaimNamespace + "/identity_level"
+	ClaimIdentityLevelScore  = ClaimNamespace + "/identity_level_score"
+	ClaimIdentityLevelIssuer = ClaimNamespace + "/identity_level_issuer"
 )
 
 // BuildIDToken wraps a signed login assertion as a self-issued OIDC ID token (JWT-primary).
@@ -35,22 +43,25 @@ func BuildIDToken(host string, assertion *login.Assertion, seed []byte, ttl time
 	exp := iat.Add(ttl)
 
 	claims := map[string]interface{}{
-		"iss": did,
-		"sub": did,
-		"aud": assertion.Audience,
-		"nonce": assertion.Nonce,
-		"iat": iat.Unix(),
-		"exp": exp.Unix(),
+		"iss":                     did,
+		"sub":                     did,
+		"aud":                     assertion.Audience,
+		"nonce":                   assertion.Nonce,
+		"iat":                     iat.Unix(),
+		"exp":                     exp.Unix(),
 		ClaimSeam8AssertionDigest: assertion.D,
 		ClaimSeam8Assertion:       assertion,
 	}
 	for k, v := range ClaimsFromDisclosures(assertion.Disclosures) {
 		claims[k] = v
 	}
-	if band, score := grapeScoreFromAssertion(assertion); band != "" {
-		claims[ClaimNamespace+"/grape_score_band"] = band
-		if score > 0 {
-			claims[ClaimNamespace+"/grape_score"] = score
+	if level := identityLevelFromAssertion(assertion); level.Level != "" {
+		claims[ClaimIdentityLevel] = level.Level
+		if level.Score > 0 {
+			claims[ClaimIdentityLevelScore] = level.Score
+		}
+		if level.Issuer != "" {
+			claims[ClaimIdentityLevelIssuer] = level.Issuer
 		}
 	}
 
