@@ -449,12 +449,39 @@ func (h *Handler) prepareLogin(req StartLoginRequest) (*ChallengeBundle, *SiteRe
 		Audience:              bundle.Audience,
 		RequestedDisclosures:  bundle.RequestedDisclosures,
 		DisclosurePreview:     h.previewDisclosures(rel, bundle),
+		RequestedCredentials:  h.previewRequestedCredentials(bundle),
+		RequestedScore:        bundle.RequestedScore,
 		Expiry:                bundle.Expiry,
 		PairwiseAID:           rel.PairwiseAID,
 		RelationshipAnchorAID: bundle.RelationshipAnchorAID,
 		RPSessionURL:          req.RPSessionURL,
 	}
 	return bundle, rel, preview, nil
+}
+
+// previewRequestedCredentials describes the credentials the site asks for,
+// including whether we actually hold a usable one — the same match
+// presentCredentials will make, so the screen predicts what approving does.
+func (h *Handler) previewRequestedCredentials(bundle *ChallengeBundle) []CredentialRequestPreview {
+	if bundle == nil || len(bundle.RequestedCredentials) == 0 {
+		return nil
+	}
+	var held []PresentedCredential
+	if h != nil && h.HeldCredentials != nil {
+		held = h.HeldCredentials()
+	}
+	out := make([]CredentialRequestPreview, 0, len(bundle.RequestedCredentials))
+	for _, rc := range bundle.RequestedCredentials {
+		p := CredentialRequestPreview{SchemaSAID: rc.SchemaSAID, Required: rc.Required}
+		for _, c := range held {
+			if c.SchemaSAID == rc.SchemaSAID && isCredentialUsable(c.Status) {
+				p.Held = true
+				break
+			}
+		}
+		out = append(out, p)
+	}
+	return out
 }
 
 func (h *Handler) previewDisclosures(rel *SiteRelationship, bundle *ChallengeBundle) map[string]string {
@@ -669,6 +696,8 @@ func (h *Handler) HandlePendingList(w http.ResponseWriter, _ *http.Request) {
 			Audience:             p.Bundle.Audience,
 			RequestedDisclosures: p.Bundle.RequestedDisclosures,
 			DisclosurePreview:    h.previewDisclosures(p.Relationship, p.Bundle),
+			RequestedCredentials: h.previewRequestedCredentials(p.Bundle),
+			RequestedScore:       p.Bundle.RequestedScore,
 			Expiry:               p.Bundle.Expiry,
 			PairwiseAID:          p.Relationship.PairwiseAID,
 			RPSessionURL:         p.RPSessionURL,

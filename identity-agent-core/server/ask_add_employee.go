@@ -33,7 +33,7 @@ type addEmployeePayload struct {
 	InviteToken string `json:"invite_token"`
 }
 
-func (addEmployeeAsk) Preview(_ *CoreServer, ctx AskContext) (GenericPreview, error) {
+func (addEmployeeAsk) Preview(s *CoreServer, ctx AskContext) (GenericPreview, error) {
 	var p addEmployeePayload
 	if err := json.Unmarshal(ctx.AskBytes, &p); err != nil || p.InviteToken == "" {
 		return GenericPreview{}, fmt.Errorf("add-employee Ask missing invite_token")
@@ -46,13 +46,23 @@ func (addEmployeeAsk) Preview(_ *CoreServer, ctx AskContext) (GenericPreview, er
 	if p.Role != "" {
 		sub = "Join " + org + " as " + p.Role
 	}
+	// Joining hands the org details about you — show which, from the action's
+	// own declaration, so the screen and the redeem body cannot disagree.
+	fields, ferr := declaredDisclosure(3)
+	if ferr != nil {
+		return GenericPreview{}, ferr
+	}
+	profile, _ := s.DataStore.GetProfile()
+	details := []PreviewDetail{
+		{Label: "Organization", Value: org},
+		{Label: "Role", Value: p.Role},
+	}
+	details = append(details, disclosureRows(fields, profile)...)
 	return GenericPreview{
 		T: 3, Action: "add_employee", Title: "Employment invitation",
 		Subtitle: sub, Counterparty: p.OrgAID,
-		Details: []PreviewDetail{
-			{Label: "Organization", Value: org},
-			{Label: "Role", Value: p.Role},
-		},
+		Details: details,
+		Warning: disclosureSummary(fields),
 	}, nil
 }
 
@@ -95,17 +105,18 @@ func (addEmployeeAsk) Execute(s *CoreServer, ctx AskContext, d ScanDecision) (ma
 		return nil, fmt.Errorf("derive org relationship: %w", rerr)
 	}
 
-	// 3) Redeem at the org: hand them our pairwise AID + display name so they can add
-	//    us to the (pending) employee roster.
-	name := ""
-	if prof, _ := s.DataStore.GetProfile(); prof != nil {
-		name = prof.FullName
+	// 3) Redeem at the org: hand them our pairwise AID plus exactly the profile
+	//    fields this action declares — the same ones the consent screen listed —
+	//    so the roster can show a real person without us volunteering more.
+	fields, ferr := declaredDisclosure(3)
+	if ferr != nil {
+		return nil, ferr
 	}
-	body, _ := json.Marshal(map[string]string{
+	profile, _ := s.DataStore.GetProfile()
+	body, _ := json.Marshal(disclosureBody(fields, profile, map[string]string{
 		"pairwise_aid": rel.PairwiseAID,
-		"name":         name,
 		"oobi":         rel.RelayOOBI,
-	})
+	}))
 	redeemURL := strings.TrimRight(ctx.Base, "/") + "/api/employees/invites/" + p.InviteToken + "/redeem"
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Post(redeemURL, "application/json", strings.NewReader(string(body)))

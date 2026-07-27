@@ -469,7 +469,10 @@ class _DesktopDashboardScreenState extends State<DesktopDashboardScreen> {
       );
 
       if (result?.confirmed == true) {
-        await scan.execute(url, approved: true, tier: preview.defaultTier);
+        await scan.execute(url,
+            approved: true,
+            tier: preview.defaultTier,
+            askDigest: preview.askDigest);
         if (mounted) {
           final msg = preview.action == 'login'
               ? 'Signed in successfully'
@@ -482,7 +485,8 @@ class _DesktopDashboardScreenState extends State<DesktopDashboardScreen> {
           _load();
         }
       } else if (result?.confirmed == false) {
-        await scan.execute(url, approved: false);
+        await scan.execute(url,
+            approved: false, askDigest: preview.askDigest);
       }
     } catch (e) {
       if (mounted) {

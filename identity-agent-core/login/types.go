@@ -51,6 +51,15 @@ type PresentedCredential struct {
 	HolderPublicKey string `json:"holder_public_key,omitempty"`
 }
 
+// CredentialRequestPreview is one credential the site asks for, as the consent
+// screen needs to describe it: what is asked, whether it is optional, and
+// whether approving would actually present something.
+type CredentialRequestPreview struct {
+	SchemaSAID string `json:"schema_said"`
+	Required   bool   `json:"required"`
+	Held       bool   `json:"held"`
+}
+
 type RequestedScore struct {
 	MinBand   string `json:"min_band,omitempty"`
 	MinScore  int    `json:"min_score,omitempty"`
@@ -97,6 +106,12 @@ type LoginPreviewResponse struct {
 	Audience             string            `json:"audience"`
 	RequestedDisclosures []string          `json:"requested_disclosures"`
 	DisclosurePreview    map[string]string `json:"disclosure_preview"`
+	// RequestedCredentials and RequestedScore are the rest of what the site is
+	// asking for. They belong in the preview because presenting a credential or
+	// a trust score discloses more than any profile field, and a consent screen
+	// that lists only the fields is telling the user less than the truth.
+	RequestedCredentials []CredentialRequestPreview `json:"requested_credentials,omitempty"`
+	RequestedScore       *RequestedScore            `json:"requested_score,omitempty"`
 	Expiry               string            `json:"expiry"`
 	PairwiseAID          string            `json:"pairwise_aid,omitempty"`
 	// Set when the login uses a controller-anchored membership relationship

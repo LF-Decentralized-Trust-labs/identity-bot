@@ -108,7 +108,10 @@ class _MobileQrScannerState extends State<MobileQrScanner> with SingleTickerProv
 
       if (result?.confirmed == true) {
         // Default-tier for now; a tier picker on the consent screen is a follow-up UI step.
-        await scan.execute(url, approved: true, tier: preview.defaultTier);
+        await scan.execute(url,
+            approved: true,
+            tier: preview.defaultTier,
+            askDigest: preview.askDigest);
         if (mounted) {
           final msg = preview.action == 'login'
               ? 'Signed in successfully'
@@ -121,7 +124,8 @@ class _MobileQrScannerState extends State<MobileQrScanner> with SingleTickerProv
           Navigator.of(context).pop(true);
         }
       } else if (result?.confirmed == false) {
-        await scan.execute(url, approved: false);
+        await scan.execute(url,
+            approved: false, askDigest: preview.askDigest);
         if (mounted) setState(() => _processing = false);
       } else {
         if (mounted) setState(() => _processing = false);

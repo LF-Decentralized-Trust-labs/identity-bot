@@ -3079,8 +3079,16 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
 		ourOOBI := fmt.Sprintf("%s/public/oobi/%s", publicURL, ourIdentity.AID)
 		ourAlias := ourIdentity.AID[:12] + "..."
 		ourProfile, _ := s.DataStore.GetProfile()
-		if ourProfile != nil && ourProfile.FullName != "" {
-			ourAlias = ourProfile.FullName
+		// What we send about ourselves is the add_contact declaration, the same
+		// list the consent screen shows — not the whole profile.
+		fields, derr := declaredDisclosure(2)
+		if derr != nil {
+			log.Printf("[identity-agent-core] EXCHANGE: refusing to send introduction — %v", derr)
+			return
+		}
+		jc, photo := buildDisclosure(fields, ourProfile, ourIdentity.AID, ourOOBI)
+		if jc.FullName != "" {
+			ourAlias = jc.FullName
 		}
 
 		remoteBase := oobiBase(req.OobiURL)
@@ -3097,12 +3105,9 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
 			"sender_alias":      ourAlias,
 			"sender_public_key": ourIdentity.PublicKey,
 		}
-		if ourProfile != nil {
-			jc := ourProfile.ToJCard(ourIdentity.AID, ourOOBI)
-			payload["sender_jcard"] = jc
-			if ourProfile.Photo != "" {
-				payload["sender_photo"] = ourProfile.Photo
-			}
+		payload["sender_jcard"] = jc
+		if photo != "" {
+			payload["sender_photo"] = photo
 		}
 		body, _ := json.Marshal(payload)
 

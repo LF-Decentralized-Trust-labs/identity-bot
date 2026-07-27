@@ -28,6 +28,7 @@
         "relationship_anchor_oobi": { "type": "string", "required": false, "kind": "open" }
       },
       "preview_contract": { "title": "Sign in to {site}", "conveys": ["site", "requested data/credentials/score"] },
+      "discloses": [],
       "outcome": "The agent presents a pairwise AID (per-RP by default; anchored to a chosen identity when relationship_anchor_aid is set), signs the challenge, and the RP verifies and optionally applies its access policy.",
       "tiers": null,
       "ui": { "share_menu": false, "icon": "", "enabled": true, "sort_order": 0, "subtitle": "" }
@@ -50,6 +51,7 @@
         "display_name": { "type": "string", "required": false, "kind": "open" }
       },
       "preview_contract": { "title": "Add {name} as a contact.", "conveys": ["name", "tier"] },
+      "discloses": ["name", "photo"],
       "outcome": "Each side records the other as a contact at the chosen tier (distinct from low-level transactional KERI contacts, which are automatic and unceremonious).",
       "tiers": ["general", "trusted", "professional"],
       "ui": { "share_menu": true, "icon": "person_add", "enabled": true, "sort_order": 1, "subtitle": "" }
@@ -72,6 +74,7 @@
         "invite_token": { "type": "string", "required": true, "kind": "open" }
       },
       "preview_contract": { "title": "Join {org} as {role}.", "conveys": ["org", "role"] },
+      "discloses": ["name", "photo"],
       "outcome": "The individual derives/reuses a stable pairwise AID for the org and is added to the counterpart's roster (pending -> active on approval). The code + schema are universal; the roster/approval mechanics are an implementation concern.",
       "tiers": null,
       "ui": { "share_menu": false, "icon": "", "enabled": true, "sort_order": 0, "subtitle": "" }
@@ -93,6 +96,7 @@
         "invite_token": { "type": "string", "required": true, "kind": "open" }
       },
       "preview_contract": { "title": "Sponsor {org} — become its super-admin and first employee.", "conveys": ["org"] },
+      "discloses": ["name", "photo"],
       "outcome": "The individual signs a vouch over the organization's AID (stored by the counterpart as proof) and is enrolled as the active super-admin. No delegated inception — the organization controls its own keys; the sponsor only attests.",
       "tiers": null,
       "ui": { "share_menu": false, "icon": "", "enabled": true, "sort_order": 0, "subtitle": "" }

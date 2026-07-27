@@ -18,7 +18,7 @@
   "$defs": {
     "action": {
       "type": "object",
-      "required": ["code", "key", "name", "summary", "who_mints", "status", "version", "request_schema", "preview_contract", "outcome"],
+      "required": ["code", "key", "name", "summary", "who_mints", "status", "version", "request_schema", "preview_contract", "discloses", "outcome"],
       "additionalProperties": false,
       "properties": {
         "code": {
@@ -41,6 +41,15 @@
           "additionalProperties": { "$ref": "#/$defs/field" }
         },
         "preview_contract": { "type": "object" },
+        "discloses": {
+          "type": "array",
+          "description": "The profile fields that leave the agent when this action executes. Mandatory: the consent screen is rendered from this list and the outbound payload is built from it, so an action that does not state it cannot be shown honestly. Use [] for an action that sends nothing about the user, or whose disclosures are negotiated per request inside the Ask (login).",
+          "items": {
+            "type": "string",
+            "enum": ["name", "photo", "email", "phone", "organization", "title", "note"]
+          },
+          "uniqueItems": true
+        },
         "outcome": { "type": "string" },
         "tiers": { "type": ["array", "null"], "items": { "type": "string" } },
         "ui": { "$ref": "#/$defs/ui" }

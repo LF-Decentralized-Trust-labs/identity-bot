@@ -78,6 +78,21 @@ class _LoginConsentListenerState extends State<LoginConsentListener> {
       );
     }).toList();
 
+    // A site can ask for credentials and a trust score as well as fields.
+    // Listing only the fields understated what approving does.
+    for (final cred in preview.requestedCredentials) {
+      details.add(ConsentDetailItem(
+        label: 'Credential ${cred.shortSaid}',
+        value: cred.consentValue,
+      ));
+    }
+    if (preview.requestedScore != null) {
+      details.add(ConsentDetailItem(
+        label: 'Trust score',
+        value: preview.requestedScore!.consentValue,
+      ));
+    }
+
     final result = await ConsentModal.show(
       context: context,
       title: 'Sign in request',
@@ -92,7 +107,7 @@ class _LoginConsentListenerState extends State<LoginConsentListener> {
       accentColor: AppColors.accent,
       icon: Icons.login_rounded,
       warningMessage:
-          'You are signing in to this site. Only the fields above will be shared.',
+          'You are signing in to this site. Only what is listed above is shared.',
     );
 
     if (!mounted) {

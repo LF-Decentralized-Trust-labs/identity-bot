@@ -535,6 +535,11 @@ class ScanDecodeResult {
   final String defaultTier;
   final String warning; // amber caution line, if any
 
+  /// Digest of the exact Ask bytes this preview describes. Pass it back to
+  /// [CoreService.scanExecute] so the core can prove it is acting on the
+  /// request the user actually approved.
+  final String askDigest;
+
   const ScanDecodeResult({
     required this.t,
     required this.action,
@@ -545,6 +550,7 @@ class ScanDecodeResult {
     this.tierOptions = const [],
     this.defaultTier = '',
     this.warning = '',
+    this.askDigest = '',
   });
 
   factory ScanDecodeResult.fromJson(Map<String, dynamic> json) {
@@ -564,6 +570,7 @@ class ScanDecodeResult {
           const [],
       defaultTier: json['default_tier']?.toString() ?? '',
       warning: json['warning']?.toString() ?? '',
+      askDigest: json['ask_digest']?.toString() ?? '',
     );
   }
 }
@@ -1602,6 +1609,10 @@ class CoreService {
     required String url,
     required bool approved,
     String? tier,
+    // The ask_digest from the decode response the user approved. The core
+    // refuses to execute without it, so consent is bound to the exact
+    // request that was shown.
+    required String askDigest,
   }) async {
     final response = await _client.post(
       Uri.parse('$baseUrl/api/scan/execute'),
@@ -1609,6 +1620,7 @@ class CoreService {
       body: jsonEncode({
         'url': url,
         'approved': approved,
+        'ask_digest': askDigest,
         if (tier != null) 'tier': tier,
       }),
     );
