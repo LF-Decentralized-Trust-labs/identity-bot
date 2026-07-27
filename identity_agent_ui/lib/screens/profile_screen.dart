@@ -224,31 +224,74 @@ class _ProfileScreenState extends State<ProfileScreen> {
               style: TextStyle(color: AppColors.textPrimary, fontSize: 14, fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 4),
+            // A real photo is the recommendation, and the reason it is safe to
+            // recommend belongs next to it: this is not published anywhere. It
+            // goes to a person only when you approve that specific request.
             const Text(
-              'A photo, a cartoon of it, or any picture you like.\nIt stays on this device until you share it.',
+              'A real photo of you works best — people recognise faces, the same\n'
+              'way they do in person. It is never shared automatically: it goes\n'
+              'to someone only when you approve that request.',
               style: TextStyle(color: AppColors.textMuted, fontSize: 12),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
             if (_busyAvatar)
               const SizedBox(
                 height: 16, width: 16,
                 child: CircularProgressIndicator(strokeWidth: 2),
               )
-            else
+            else ...[
+              _avatarPrimaryAction('Take or choose a photo', _pickPhoto),
+              const SizedBox(height: 8),
+              const Text(
+                'Would rather not?',
+                style: TextStyle(color: AppColors.textMuted, fontSize: 11),
+              ),
+              const SizedBox(height: 4),
               Wrap(
                 spacing: 14,
                 children: [
-                  _avatarAction('Use a photo', _pickPhoto),
                   if (_photoBase64.isNotEmpty)
                     _avatarAction('Make it a cartoon', _cartoonPhoto),
-                  _avatarAction('Generate one', _regenerateAvatar),
+                  _avatarAction('Generate one instead', _regenerateAvatar),
                 ],
               ),
+            ],
           ],
         ),
       ],
     );
   }
+
+  /// The recommended action, styled so it reads as the recommendation rather
+  /// than as one option among three.
+  Widget _avatarPrimaryAction(String label, VoidCallback onTap) => MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          onTap: onTap,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            decoration: BoxDecoration(
+              color: AppColors.accent,
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.photo_camera_rounded, size: 15, color: AppColors.primary),
+                const SizedBox(width: 7),
+                Text(
+                  label,
+                  style: const TextStyle(
+                    color: AppColors.primary,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
 
   Widget _avatarAction(String label, VoidCallback onTap) => MouseRegion(
         cursor: SystemMouseCursors.click,
