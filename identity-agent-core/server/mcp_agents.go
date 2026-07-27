@@ -27,7 +27,7 @@ const capabilityGrantSchemaSAID = "ECapabilityGrant__placeholder__v1"
 
 // handleProvisionAgent creates an ai_agent asset (delegated AID) + a bound token.
 func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request) {
-	if !isLocalOwnerRequest(r) {
+	if !s.isOwner(r) {
 		jsonError(w, "agent provisioning is local-owner only", http.StatusForbidden)
 		return
 	}

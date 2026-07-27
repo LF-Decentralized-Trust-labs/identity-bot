@@ -73,3 +73,8 @@ md_to_docx.py
 
 # Runtime agent state (AGENT_DATA_DIR) — never commit
 data/
+
+# Local Python virtualenvs for the KERI driver — never committed.
+.venv-keri/
+.venv-keri312/
+drivers/keri-core/.venv/

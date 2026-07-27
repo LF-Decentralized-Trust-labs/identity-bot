@@ -24,8 +24,8 @@ type vaultCredentialRequest struct {
 // handleSetVaultCredential stores/replaces one service credential in the
 // encrypted vault.
 func (s *CoreServer) handleSetVaultCredential(w http.ResponseWriter, r *http.Request) {
-	if !isLocalOwnerRequest(r) {
-		jsonError(w, "credential management is local-owner only", http.StatusForbidden)
+	if !s.isOwner(r) {
+		jsonError(w, "credential management is for the owner of this agent", http.StatusForbidden)
 		return
 	}
 	if s.SandboxManager == nil {
@@ -58,8 +58,8 @@ func (s *CoreServer) handleSetVaultCredential(w http.ResponseWriter, r *http.Req
 
 // handleListVaultCredentials lists configured service names only — never keys.
 func (s *CoreServer) handleListVaultCredentials(w http.ResponseWriter, r *http.Request) {
-	if !isLocalOwnerRequest(r) {
-		jsonError(w, "credential management is local-owner only", http.StatusForbidden)
+	if !s.isOwner(r) {
+		jsonError(w, "credential management is for the owner of this agent", http.StatusForbidden)
 		return
 	}
 	if s.SandboxManager == nil {
@@ -75,8 +75,8 @@ func (s *CoreServer) handleListVaultCredentials(w http.ResponseWriter, r *http.R
 
 // handleDeleteVaultCredential removes one service credential.
 func (s *CoreServer) handleDeleteVaultCredential(w http.ResponseWriter, r *http.Request) {
-	if !isLocalOwnerRequest(r) {
-		jsonError(w, "credential management is local-owner only", http.StatusForbidden)
+	if !s.isOwner(r) {
+		jsonError(w, "credential management is for the owner of this agent", http.StatusForbidden)
 		return
 	}
 	if s.SandboxManager == nil {
