@@ -25,19 +25,9 @@ import (
 // mintPairwise derives a fresh pairwise relationship AID from the root seed, registers its key
 // so /public/{aid}/did.json resolves, and returns its AID, OOBI, and signing seed.
 func (s *CoreServer) mintPairwise(name string) (aid, oobi string, seed []byte, err error) {
-	rootSeed, rerr := secureenclave.LoadRootSeed(s.DataDir)
+	rootSeed, rerr := ensureRootSeed(s.DataDir)
 	if rerr != nil {
-		// FALLBACK ONLY: canonical path is the onboarding handoff installing the
-		// mnemonic-derived seed (POST /api/keystore/root-seed). A random root is
-		// device-local — recoverable from backup archives, never the phrase.
-		log.Printf("[keystore] WARNING: bootstrapping a random DEVICE-LOCAL root seed (no onboarding seed handoff yet) — HD-derived keys will not be recoverable from the seed phrase alone")
-		rootSeed = make([]byte, 64)
-		if _, re := rand.Read(rootSeed); re != nil {
-			return "", "", nil, re
-		}
-		if se := secureenclave.StoreRootSeed(s.DataDir, rootSeed); se != nil {
-			return "", "", nil, fmt.Errorf("bootstrap root seed: %w", se)
-		}
+		return "", "", nil, rerr
 	}
 	idx, aerr := s.DataStore.AllocateNextRelationshipIndex("contacts")
 	if aerr != nil {
@@ -76,6 +66,30 @@ func (s *CoreServer) mintPairwise(name string) (aid, oobi string, seed []byte, e
 	publicURL := s.EndpointService.CurrentURL()
 	oobi = fmt.Sprintf("%s/public/oobi/%s", publicURL, icp.AID)
 	return icp.AID, oobi, seed, nil
+}
+
+// ensureRootSeed loads this device's root seed, bootstrapping one if there is
+// none yet.
+//
+// A freshly provisioned instance has never been through onboarding, so it has
+// no seed at all — and it needs one before it can generate any key, including
+// the one it offers for delegation. The canonical path is still the onboarding
+// handoff installing the mnemonic-derived seed; a bootstrapped root is
+// device-local, recoverable from this instance's own backup archives but never
+// from the phrase alone.
+func ensureRootSeed(dataDir string) ([]byte, error) {
+	if seed, err := secureenclave.LoadRootSeed(dataDir); err == nil {
+		return seed, nil
+	}
+	log.Printf("[keystore] WARNING: bootstrapping a random DEVICE-LOCAL root seed (no onboarding seed handoff yet) — HD-derived keys will not be recoverable from the seed phrase alone")
+	seed := make([]byte, 64)
+	if _, err := rand.Read(seed); err != nil {
+		return nil, err
+	}
+	if err := secureenclave.StoreRootSeed(dataDir, seed); err != nil {
+		return nil, fmt.Errorf("bootstrap root seed: %w", err)
+	}
+	return seed, nil
 }
 
 // injectSig adds a "sig" field to an Ask JSON object.

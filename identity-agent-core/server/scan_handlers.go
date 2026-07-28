@@ -17,8 +17,9 @@ import (
 // The single gate for the dumb-router scanner. The scanner forwards the raw scanned URL here;
 // Go fetches the Ask, reads its action `t`, and dispatches to the hardcoded handler. No
 // per-transaction logic lives in the scanner.
-//   POST /api/scan/decode  {url}                  -> GenericPreview (what is being asked)
-//   POST /api/scan/execute {url, approved, tier}  -> result
+//
+//	POST /api/scan/decode  {url}                  -> GenericPreview (what is being asked)
+//	POST /api/scan/execute {url, approved, tier}  -> result
 func (s *CoreServer) mountScanRoutes(r chi.Router) {
 	r.Post("/api/scan/decode", s.handleScanDecode)
 	r.Post("/api/scan/execute", s.handleScanExecute)

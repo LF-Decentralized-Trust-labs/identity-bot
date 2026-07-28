@@ -3,12 +3,12 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/go-chi/chi/v5"
 	"log"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"strings"
-	"github.com/go-chi/chi/v5"
 )
 
 // handleAppDisplayProxy reverse-proxies browser requests to the container's
@@ -183,4 +183,3 @@ func (s *CoreServer) serveConversationDetail(w http.ResponseWriter, _ *http.Requ
 func (s *CoreServer) appDisplayProxyURL(appID string) string {
 	return fmt.Sprintf("http://127.0.0.1:%d/apps/%s/", s.Port, appID)
 }
-

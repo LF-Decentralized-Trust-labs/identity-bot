@@ -1,7 +1,10 @@
 package server
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"sync"
 )
@@ -22,6 +25,16 @@ import (
 type pairingOffer struct {
 	AID  string `json:"aid"`
 	OOBI string `json:"oobi"`
+	// AdoptionCode is generated here, by the instance, and must be presented to
+	// complete an adoption.
+	//
+	// The box URL alone cannot be the only thing standing between a stranger
+	// and an unadopted instance. It travels through a browser, a page, a link
+	// and possibly a screenshot, and whoever reaches an unadopted box first
+	// wins it. The code never appears in the URL: the provisioning service
+	// reads it once, hands it to whoever provisioned, and nobody who merely
+	// learns the address can use it.
+	AdoptionCode string `json:"adoption_code,omitempty"`
 }
 
 var pairingOnce struct {
@@ -72,6 +85,26 @@ func (s *CoreServer) handleProvisioningPairing(w http.ResponseWriter, r *http.Re
 func writePairingOffer(w http.ResponseWriter, offer *pairingOffer) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(offer)
+}
+
+// newAdoptionCode mints the one-time code that gates adoption.
+func newAdoptionCode() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("no source of randomness for an adoption code: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+// expectedAdoptionCode returns the code this instance is waiting for, if it has
+// offered itself for pairing at all.
+func expectedAdoptionCode() string {
+	pairingOnce.Lock()
+	defer pairingOnce.Unlock()
+	if pairingOnce.offer == nil {
+		return ""
+	}
+	return pairingOnce.offer.AdoptionCode
 }
 
 // resetPairingOfferForTest lets tests start from a clean slate; the offer is
