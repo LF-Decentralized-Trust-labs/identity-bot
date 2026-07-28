@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"identity-agent-core/store"
@@ -86,5 +87,54 @@ func TestPairingMintsOnce(t *testing.T) {
 		if aid != seen[0] {
 			t.Fatalf("the offer changed between calls: %v", seen)
 		}
+	}
+}
+
+// Absence of an attestation is a real answer, not a gap. Outside a sealed VM
+// the field is empty, and a caller that requires sealed infrastructure must be
+// able to tell that from a report it simply did not parse.
+func TestPairingOfferOmitsAttestationOutsideASealedVM(t *testing.T) {
+	resetPairingOfferForTest()
+	pairingOnce.Lock()
+	pairingOnce.offer = &pairingOffer{AID: "EPAIRWISE", OOBI: "https://box.example/public/oobi/EPAIRWISE"}
+	pairingOnce.Unlock()
+
+	s := &CoreServer{DataDir: t.TempDir()}
+	w := httptest.NewRecorder()
+	s.handleProvisioningPairing(w, httptest.NewRequest(http.MethodGet, "/api/provisioning/pairing", nil))
+
+	var body map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("not JSON: %v", err)
+	}
+	if _, present := body["attestation"]; present {
+		t.Error("an attestation appeared on a machine that cannot produce one")
+	}
+}
+
+// When a report is present it must be bound to the AID in the same response,
+// or it proves something about a different instance.
+func TestAttestationIsBoundToTheAdvertisedAID(t *testing.T) {
+	resetPairingOfferForTest()
+	pairingOnce.Lock()
+	pairingOnce.offer = &pairingOffer{
+		AID:                "EPAIRWISE",
+		OOBI:               "https://box.example/public/oobi/EPAIRWISE",
+		Attestation:        "AAAA",
+		AttestationBinding: `blake3-256(IA-SNP-BIND-V1\nEPAIRWISE)`,
+	}
+	pairingOnce.Unlock()
+
+	s := &CoreServer{DataDir: t.TempDir()}
+	w := httptest.NewRecorder()
+	s.handleProvisioningPairing(w, httptest.NewRequest(http.MethodGet, "/api/provisioning/pairing", nil))
+
+	var offer pairingOffer
+	if err := json.Unmarshal(w.Body.Bytes(), &offer); err != nil {
+		t.Fatalf("not JSON: %v", err)
+	}
+	if !strings.Contains(offer.AttestationBinding, offer.AID) {
+		t.Errorf("the report is bound to %q but the offer advertises %q — it proves nothing about this instance",
+			offer.AttestationBinding, offer.AID)
 	}
 }

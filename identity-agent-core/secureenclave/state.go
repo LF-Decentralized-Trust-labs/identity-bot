@@ -33,9 +33,9 @@ type FreshnessAxis struct {
 
 // EnclaveGenuinenessAxis reports hardware-backed chain attestation.
 type EnclaveGenuinenessAxis struct {
-	Status        string `json:"status"` // verified | mismatch | failed | unknown
-	ChainHash     string `json:"chain_hash,omitempty"`
-	SignedChain   string `json:"signed_chain_hash,omitempty"`
+	Status         string `json:"status"` // verified | mismatch | failed | unknown
+	ChainHash      string `json:"chain_hash,omitempty"`
+	SignedChain    string `json:"signed_chain_hash,omitempty"`
 	SignerPlatform string `json:"signer_platform,omitempty"`
-	Message       string `json:"message,omitempty"`
+	Message        string `json:"message,omitempty"`
 }

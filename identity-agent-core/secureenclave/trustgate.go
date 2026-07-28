@@ -87,9 +87,9 @@ type State struct {
 
 func (tg *TrustGate) State() State {
 	st := State{
-		TrustAllowed:    tg.AllowsTrustOperations(),
+		TrustAllowed:       tg.AllowsTrustOperations(),
 		TrustBlockedReason: tg.TrustBlockedReason(),
-		CurrencyWarning: tg.CurrencyWarning(),
+		CurrencyWarning:    tg.CurrencyWarning(),
 	}
 	if tg.attestation != nil {
 		st.CodeGenuineness = tg.attestation.Genuineness()
