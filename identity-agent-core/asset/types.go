@@ -120,3 +120,51 @@ type AssetAccessRequest struct {
 	CreatedAt     time.Time         `json:"created_at"`
 	ResolvedAt    *time.Time        `json:"resolved_at,omitempty"`
 }
+
+// EmployeeInvite is an org-scoped (not asset-scoped) invitation to join the org
+// as an employee. Redeeming it via the add_employee (t=3) action creates a
+// pending Employee. MaxUses mirrors AssetInvite (0 = unlimited; 1 = a single
+// named hire). The token is rendered as a QR code / link by the org app.
+type EmployeeInvite struct {
+	Token   string `json:"token"`
+	Role    string `json:"role"`
+	Label   string `json:"label,omitempty"`
+	MaxUses int    `json:"max_uses"` // 0 = unlimited
+	// The portal (asset) this employment grants access to. The accepting employee
+	// derives their stable per-site pairwise AID against SiteAID during add_employee,
+	// so it equals the AID they later present at that portal's login (AID method).
+	AssetID  string `json:"asset_id,omitempty"`
+	SiteAID  string `json:"site_aid,omitempty"`
+	SiteOOBI string `json:"site_oobi,omitempty"`
+	// IsSponsor marks the org-creation sponsor invite (t=4): redeeming it makes the
+	// individual an ACTIVE super-admin immediately (they're the founding sponsor,
+	// there's no one above them to approve), and requires a vouch signature.
+	IsSponsor bool      `json:"is_sponsor,omitempty"`
+	UseCount  int       `json:"use_count"`
+	CreatedAt time.Time `json:"created_at"`
+	Revoked   bool      `json:"revoked"`
+}
+
+// Employee is a first-class org roster entry — employment is org-scoped, not
+// asset-scoped, so it has its own lifecycle (pending → active → revoked) rather
+// than reusing AssetMember. The PairwiseAID is the AID the employee established
+// with the org during add_employee; the membership gate (MembershipSource ==
+// "employees") admits only Status == "active" entries. CredentialSAID records
+// the issued Employee-Authorization ACDC (set on approval).
+type Employee struct {
+	PairwiseAID    string `json:"pairwise_aid"`
+	Name           string `json:"name"`
+	Role           string `json:"role"`
+	Status         string `json:"status"` // "pending"|"active"|"revoked"
+	InviteToken    string `json:"invite_token,omitempty"`
+	CredentialSAID string `json:"credential_said,omitempty"`
+	OOBI           string `json:"oobi,omitempty"`
+	// IsSponsor + the vouch: set when this employee is the org's founding sponsor.
+	// VouchSig is the individual's signature over {sponsor_aid, org_aid} — the
+	// org's stored proof that a real person stands behind it.
+	IsSponsor    bool      `json:"is_sponsor,omitempty"`
+	VouchSig     string    `json:"vouch_sig,omitempty"`
+	VouchPayload string    `json:"vouch_payload,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
