@@ -159,14 +159,24 @@ func (s *Service) ExportWithReason(mnemonic, passphrase, destPath string, tiers 
 		return nil, err
 	}
 
+	// Recipients configured once, at pairing, are what let a scheduled backup
+	// run unattended: nobody is present to type a phrase at 3am, and an agent
+	// that had to store one to keep working would defeat the point.
+	sealTo, err := s.sealRecipients()
+	if err != nil {
+		s.recordFailure(opts.Tiers, err, time.Since(start))
+		return nil, err
+	}
+
 	result, err := collector.CreateArchive(opts, ExportRequest{
-		Mnemonic:               mnemonic,
-		Passphrase:             passphrase,
-		Tiers:                  opts.Tiers,
-		SnapshotType:           snapshotType,
-		Bundle:                 archiveBundle,
-		ExternalPointers:       pointers,
-		DeltaStateDigestQB64:   pendingState.ChainDigestQB64,
+		Mnemonic:             mnemonic,
+		Passphrase:           passphrase,
+		Tiers:                opts.Tiers,
+		SnapshotType:         snapshotType,
+		Bundle:               archiveBundle,
+		ExternalPointers:     pointers,
+		DeltaStateDigestQB64: pendingState.ChainDigestQB64,
+		SealToPublicKeys:     sealTo,
 	})
 	if err != nil {
 		s.recordFailure(opts.Tiers, err, time.Since(start))
@@ -194,6 +204,30 @@ func (s *Service) ExportWithReason(mnemonic, passphrase, destPath string, tiers 
 	s.recordSuccess(opts.Tiers, result.Size, destIDs, time.Since(start), result.SnapshotType)
 	s.failures = 0
 	return result, nil
+}
+
+// sealRecipients reads the configured recovery public keys.
+//
+// A malformed key is fatal rather than skipped. Quietly dropping one would
+// produce an archive the owner believes they can open and cannot, and that is
+// only discovered on the day it matters.
+func (s *Service) sealRecipients() ([][]byte, error) {
+	cfg, err := s.ConfigStore.LoadConfig()
+	if err != nil {
+		return nil, nil // no config yet is not an error; it just means no recipients
+	}
+	var keys [][]byte
+	for i, encoded := range cfg.SealToPublicKeysB64 {
+		raw, err := DecodeB64(encoded)
+		if err != nil {
+			return nil, fmt.Errorf("recovery public key %d is not valid base64: %w", i, err)
+		}
+		if len(raw) != X25519KeyLen {
+			return nil, fmt.Errorf("recovery public key %d must be %d bytes, got %d", i, X25519KeyLen, len(raw))
+		}
+		keys = append(keys, raw)
+	}
+	return keys, nil
 }
 
 func (s *Service) pushToDestinations(cfg Config, result *ExportResult) []string {

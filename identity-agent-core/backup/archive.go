@@ -17,6 +17,10 @@ type ExportRequest struct {
 	Bundle               *PayloadBundle
 	ExternalPointers     []ExternalDataPointer
 	DeltaStateDigestQB64 string
+	// SealToPublicKeys adds one sealed slot per recipient, letting an agent
+	// export without ever being told the seed phrase. Any one of them opens
+	// the archive.
+	SealToPublicKeys [][]byte
 }
 
 // ExportResult describes a completed export.
@@ -30,8 +34,11 @@ type ExportResult struct {
 
 // CreateArchive builds an encrypted .iab from collected data.
 func (c *Collector) CreateArchive(opts CollectOptions, req ExportRequest) (*ExportResult, error) {
-	if req.Mnemonic == "" && len(req.BIP39Seed) == 0 {
-		return nil, fmt.Errorf("mnemonic or bip39 seed required for encryption")
+	// An archive nobody can open is worse than no archive, so there must be at
+	// least one way in. Sealing counts: it needs no secret here, which is the
+	// whole point of it.
+	if req.Mnemonic == "" && len(req.BIP39Seed) == 0 && len(req.SealToPublicKeys) == 0 {
+		return nil, fmt.Errorf("no way to unlock this archive: provide a mnemonic, a bip39 seed, or at least one public key to seal to")
 	}
 
 	var bundle *PayloadBundle
@@ -47,10 +54,14 @@ func (c *Collector) CreateArchive(opts CollectOptions, req ExportRequest) (*Expo
 		}
 	}
 
-	identity, _ := c.Store.GetIdentity()
+	// The AID is a label on the manifest, not something the archive depends on,
+	// so its absence must not stop a backup. Reaching through a nil store to
+	// find that out would panic mid-export and lose the run.
 	aid := ""
-	if identity != nil {
-		aid = identity.AID
+	if c.Store != nil {
+		if identity, _ := c.Store.GetIdentity(); identity != nil {
+			aid = identity.AID
+		}
 	}
 
 	snapshotType := req.SnapshotType
@@ -95,30 +106,49 @@ func (c *Collector) CreateArchive(opts CollectOptions, req ExportRequest) (*Expo
 	}
 	manifest.PayloadNonceB64 = EncodeB64(payloadNonce)
 
+	// Seed slot — only when the caller actually holds the seed. An agent
+	// exporting on a machine it does not own has no seed to offer, and asking
+	// it for one is the thing sealing exists to avoid.
 	var bip39Seed []byte
 	if len(req.BIP39Seed) > 0 {
 		bip39Seed = req.BIP39Seed
-	} else {
+	} else if req.Mnemonic != "" {
 		bip39Seed, err = MnemonicToBIP39Seed(req.Mnemonic, "")
 		if err != nil {
 			return nil, err
 		}
 	}
+	if len(bip39Seed) > 0 {
+		seedKEK, err := DeriveBackupKEK(bip39Seed)
+		if err != nil {
+			return nil, err
+		}
+		wrapped, nonce, err := WrapBEK(seedKEK, bek)
+		if err != nil {
+			return nil, err
+		}
+		manifest.KeySlots = append(manifest.KeySlots, KeySlot{
+			Type:          SlotSeedHD,
+			Policy:        PolicyOR,
+			WrappedBEKB64: EncodeB64(wrapped),
+			NonceB64:      EncodeB64(nonce),
+		})
+	}
 
-	seedKEK, err := DeriveBackupKEK(bip39Seed)
-	if err != nil {
-		return nil, err
+	// Sealed slots — one per recipient, any of which opens the archive.
+	for i, recipientPub := range req.SealToPublicKeys {
+		ephPub, wrappedS, nonceS, err := SealBEK(recipientPub, bek)
+		if err != nil {
+			return nil, fmt.Errorf("seal to recipient %d: %w", i, err)
+		}
+		manifest.KeySlots = append(manifest.KeySlots, KeySlot{
+			Type:            SlotSealedX25519,
+			Policy:          PolicyOR,
+			WrappedBEKB64:   EncodeB64(wrappedS),
+			NonceB64:        EncodeB64(nonceS),
+			EphemeralPubB64: EncodeB64(ephPub),
+		})
 	}
-	wrapped, nonce, err := WrapBEK(seedKEK, bek)
-	if err != nil {
-		return nil, err
-	}
-	manifest.KeySlots = append(manifest.KeySlots, KeySlot{
-		Type:          SlotSeedHD,
-		Policy:        PolicyOR,
-		WrappedBEKB64: EncodeB64(wrapped),
-		NonceB64:      EncodeB64(nonce),
-	})
 
 	// Passphrase slot
 	if req.Passphrase != "" {
@@ -167,6 +197,10 @@ type OpenRequest struct {
 	Mnemonic   string
 	Passphrase string
 	BIP39Seed  []byte
+	// SealPrivateKey opens a sealed slot directly. It is not normally needed:
+	// a mnemonic or seed derives the same key, so recovery from the phrase
+	// alone works without the caller knowing sealing exists.
+	SealPrivateKey []byte
 }
 
 func OpenArchive(data []byte, req OpenRequest) (*PayloadBundle, *Manifest, error) {
@@ -193,10 +227,41 @@ func OpenArchive(data []byte, req OpenRequest) (*PayloadBundle, *Manifest, error
 		}
 	}
 
+	// The sealing key comes from the same seed the phrase produces, so somebody
+	// recovering with nothing but their words opens a sealed archive without
+	// having to supply anything extra.
+	sealPriv := req.SealPrivateKey
+	if len(sealPriv) == 0 && len(bip39Seed) > 0 {
+		if priv, _, derr := DeriveSealKeypair(bip39Seed); derr == nil {
+			sealPriv = priv
+		}
+	}
+
 	var bek []byte
 	var unwrapErr error
 	for _, slot := range arch.Manifest.KeySlots {
 		switch slot.Type {
+		case SlotSealedX25519:
+			if len(sealPriv) == 0 {
+				continue
+			}
+			ephPub, err := DecodeB64(slot.EphemeralPubB64)
+			if err != nil {
+				continue
+			}
+			wrapped, err := DecodeB64(slot.WrappedBEKB64)
+			if err != nil {
+				continue
+			}
+			slotNonce, err := DecodeB64(slot.NonceB64)
+			if err != nil {
+				continue
+			}
+			// A slot meant for a different recipient fails its authentication
+			// tag rather than yielding anything, so walking past it is safe —
+			// that is what lets an archive carry one slot per owner without
+			// saying which is whose.
+			bek, unwrapErr = UnsealBEK(sealPriv, ephPub, wrapped, slotNonce)
 		case SlotSeedHD:
 			if len(bip39Seed) == 0 {
 				continue
