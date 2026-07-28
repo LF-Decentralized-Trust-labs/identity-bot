@@ -20,6 +20,9 @@ dependencies:
   flutter_secure_storage: ^9.2.2
   local_auth: ^2.3.0
   nfc_manager: ^3.3.0
+  blake3_dart: ^1.0.0
 
 flutter:
   uses-material-design: true
+dev_dependencies:
+  test: ^1.26.3
