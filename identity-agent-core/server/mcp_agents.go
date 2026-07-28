@@ -9,7 +9,10 @@ import (
 	"net/http"
 	"time"
 
+	"identity-agent-core/asset"
 	"identity-agent-core/store"
+
+	"github.com/go-chi/chi/v5"
 )
 
 // capabilityGrantSchemaSAID identifies the built-in Capability Grant schema (see
@@ -39,6 +42,10 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 		Name                string                 `json:"name"`
 		Capabilities        []string               `json:"capabilities"`
 		ResourceConstraints map[string]interface{} `json:"resource_constraints,omitempty"`
+		Role                string                 `json:"role,omitempty"`
+		SystemPrompt        string                 `json:"system_prompt,omitempty"`
+		Brain               asset.BrainConfig      `json:"brain,omitempty"`
+		Exposure            *asset.Exposure        `json:"exposure,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
 		jsonError(w, "name is required", http.StatusBadRequest)
@@ -49,9 +56,21 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Its operational config — role, prompt, LLM brain, exposure. Exposure defaults
+	// to the MCP server unless the caller says otherwise.
+	cfg := &asset.AgentConfig{
+		Role:         req.Role,
+		SystemPrompt: req.SystemPrompt,
+		Brain:        req.Brain,
+		Exposure:     asset.Exposure{MCP: true},
+	}
+	if req.Exposure != nil {
+		cfg.Exposure = *req.Exposure
+	}
+
 	// Mint the delegated agent AID (dip anchored to the owner root) + store the
-	// agent asset with its capability ceiling.
-	agent, err := s.assetHandler.ProvisionAgentAsset(req.Name, req.Capabilities)
+	// agent asset with its capability ceiling and config.
+	agent, err := s.assetHandler.ProvisionAgentAsset(req.Name, req.Capabilities, cfg)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusBadRequest)
 		return
@@ -101,10 +120,99 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 		"agent_aid":     agent.PairwiseAID,
 		"delegator_aid": agent.DelegatorAID,
 		"capabilities":  req.Capabilities,
+		"agent_config":  cfg,
 		"grant_said":    grantSAID,
 		"grant_issued":  grantSAID != "",
 		"token":         plaintext,
 		"note":          "store this token now; only its hash is kept. Every call it makes is recorded as this agent AID, chained to the owner root.",
+	})
+}
+
+// agentView is the owner-facing summary of an ai_agent asset — identity + config +
+// status, never any secret (no token, no vault key).
+type agentView struct {
+	AssetID      string             `json:"asset_id"`
+	Name         string             `json:"name"`
+	AgentAID     string             `json:"agent_aid"`
+	DelegatorAID string             `json:"delegator_aid"`
+	Capabilities []string           `json:"capabilities"`
+	Config       *asset.AgentConfig `json:"agent_config,omitempty"`
+	Status       string             `json:"status"` // active | revoked
+	CreatedAt    time.Time          `json:"created_at"`
+}
+
+// handleListAgents lists the org's ai_agent assets — the workforce roster.
+func (s *CoreServer) handleListAgents(w http.ResponseWriter, r *http.Request) {
+	if !s.isOwner(r) {
+		jsonError(w, "the agent roster is for the owner", http.StatusForbidden)
+		return
+	}
+	if s.assetHandler == nil {
+		jsonError(w, "asset handler not initialized", http.StatusServiceUnavailable)
+		return
+	}
+	// Map asset id → grant status via the credential store (revoked grants show as revoked).
+	agents := s.assetHandler.ListAgents()
+	out := make([]agentView, 0, len(agents))
+	for _, a := range agents {
+		out = append(out, agentView{
+			AssetID:      a.ID,
+			Name:         a.DisplayName,
+			AgentAID:     a.PairwiseAID,
+			DelegatorAID: a.DelegatorAID,
+			Capabilities: a.Capabilities,
+			Config:       a.AgentConfig,
+			Status:       s.agentStatus(a.PairwiseAID),
+			CreatedAt:    a.CreatedAt,
+		})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"agents": out})
+}
+
+// agentStatus reports "active" or "revoked" for an agent by its most recent
+// capability-grant credential status.
+func (s *CoreServer) agentStatus(agentAID string) string {
+	creds, err := s.DataStore.GetCredentials()
+	if err != nil {
+		return "active"
+	}
+	for _, c := range creds {
+		if c.HolderAID == agentAID && c.SchemaSAID == capabilityGrantSchemaSAID {
+			if c.Status == "revoked" {
+				return "revoked"
+			}
+		}
+	}
+	return "active"
+}
+
+// handleUpdateAgentConfig updates an agent's role/prompt/brain/exposure. Identity
+// and grant are unchanged; use the provision/revoke paths for those.
+func (s *CoreServer) handleUpdateAgentConfig(w http.ResponseWriter, r *http.Request) {
+	if !s.isOwner(r) {
+		jsonError(w, "agent configuration is for the owner", http.StatusForbidden)
+		return
+	}
+	if s.assetHandler == nil {
+		jsonError(w, "asset handler not initialized", http.StatusServiceUnavailable)
+		return
+	}
+	id := chi.URLParam(r, "id")
+	var cfg asset.AgentConfig
+	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+		jsonError(w, "invalid agent config", http.StatusBadRequest)
+		return
+	}
+	updated, err := s.assetHandler.UpdateAgentConfig(id, &cfg)
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"asset_id":     updated.ID,
+		"agent_config": updated.AgentConfig,
 	})
 }
 

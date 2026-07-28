@@ -14,10 +14,14 @@ type Store struct {
 	invitesPath    string
 	membersPath    string
 	requestsPath   string
+	empInvitesPath string
+	employeesPath  string
 	assets         map[string]Asset
 	invites        map[string]AssetInvite
 	members        []AssetMember
 	requests       []AssetAccessRequest
+	empInvites     map[string]EmployeeInvite
+	employees      map[string]Employee // keyed by PairwiseAID
 }
 
 func NewStore(dataDir string) (*Store, error) {
@@ -27,10 +31,14 @@ func NewStore(dataDir string) (*Store, error) {
 		invitesPath:  filepath.Join(dataDir, "asset_invites.json"),
 		membersPath:  filepath.Join(dataDir, "asset_members.json"),
 		requestsPath: filepath.Join(dataDir, "asset_requests.json"),
+		empInvitesPath: filepath.Join(dataDir, "employee_invites.json"),
+		employeesPath:  filepath.Join(dataDir, "employees.json"),
 		assets:       map[string]Asset{},
 		invites:      map[string]AssetInvite{},
 		members:      []AssetMember{},
 		requests:     []AssetAccessRequest{},
+		empInvites:   map[string]EmployeeInvite{},
+		employees:    map[string]Employee{},
 	}
 	if err := s.load(); err != nil {
 		return nil, err
@@ -56,6 +64,14 @@ func (s *Store) load() error {
 	// requests
 	if b, err := os.ReadFile(s.requestsPath); err == nil {
 		json.Unmarshal(b, &s.requests)
+	}
+	// employee invites
+	if b, err := os.ReadFile(s.empInvitesPath); err == nil {
+		json.Unmarshal(b, &s.empInvites)
+	}
+	// employees
+	if b, err := os.ReadFile(s.employeesPath); err == nil {
+		json.Unmarshal(b, &s.employees)
 	}
 	return nil
 }
