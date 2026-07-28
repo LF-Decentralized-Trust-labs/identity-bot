@@ -2,8 +2,8 @@ package server
 
 import (
 	"encoding/json"
-	"io"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -26,7 +26,7 @@ type sponsorPayload struct {
 	OrgName     string `json:"org_name"`
 	OrgAID      string `json:"org_aid"`
 	OrgOOBI     string `json:"org_oobi"`
-	SiteAID     string `json:"site_aid"`  // the org identity the sponsor relates to (root during onboarding)
+	SiteAID     string `json:"site_aid"` // the org identity the sponsor relates to (root during onboarding)
 	SiteOOBI    string `json:"site_oobi"`
 	InviteToken string `json:"invite_token"`
 }

@@ -40,9 +40,9 @@ func (s *CoreServer) handleUpdatesStatus(w http.ResponseWriter, r *http.Request)
 
 func (s *CoreServer) handleUpdatesApply(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Component       string `json:"component"`
-		Version         string `json:"version"`
-		UserConfirmed   bool   `json:"user_confirmed"`
+		Component     string `json:"component"`
+		Version       string `json:"version"`
+		UserConfirmed bool   `json:"user_confirmed"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid body", err.Error())

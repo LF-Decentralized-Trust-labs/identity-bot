@@ -10,11 +10,11 @@ import (
 
 // EnclaveStatusResponse describes the hardware security backing available on this device.
 type EnclaveStatusResponse struct {
-	HardwareBacked bool    `json:"hardwareBacked"`
-	BackingType    string  `json:"backingType"`    // "tpm2", "secure_enclave", "dpapi", "keychain_software", "software"
-	BackingLabel   string  `json:"backingLabel"`   // Human-readable, e.g. "Apple Secure Enclave"
-	TpmPresent     *bool   `json:"tpmPresent"`     // Windows/Linux only: TPM chip detected
-	TpmEnabled     *bool   `json:"tpmEnabled"`     // Windows/Linux only: TPM accessible to OS
+	HardwareBacked bool             `json:"hardwareBacked"`
+	BackingType    string           `json:"backingType"`  // "tpm2", "secure_enclave", "dpapi", "keychain_software", "software"
+	BackingLabel   string           `json:"backingLabel"` // Human-readable, e.g. "Apple Secure Enclave"
+	TpmPresent     *bool            `json:"tpmPresent"`   // Windows/Linux only: TPM chip detected
+	TpmEnabled     *bool            `json:"tpmEnabled"`   // Windows/Linux only: TPM accessible to OS
 	Genuineness    *GenuinenessInfo `json:"genuineness,omitempty"`
 	Freshness      *FreshnessInfo   `json:"freshness,omitempty"`
 	Currency       *CurrencyInfo    `json:"currency,omitempty"`

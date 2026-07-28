@@ -98,6 +98,15 @@ func (s *CoreServer) SealOwnerAuthority(oa OwnerAuthority) error {
 	return os.WriteFile(filepath.Join(s.DataDir, ownerAuthorityFile), raw, 0o600)
 }
 
+// decodeOwnerKey and verifyOwnerString are the two steps of verification,
+// separated so an interop test can exercise the construction directly rather
+// than through the freshness window — a pinned vector is necessarily old.
+func decodeOwnerKey(key string) ([]byte, error) { return login.DecodeVerkey(key) }
+
+func verifyOwnerString(body, sig string, pub []byte) (bool, error) {
+	return login.VerifyString(body, sig, pub)
+}
+
 // canonicalRequestString is the exact text an owner signs. Method, path,
 // timestamp and a digest of the body — so a captured signature cannot be moved
 // to a different endpoint, replayed later, or reused with a different body.

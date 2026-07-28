@@ -70,11 +70,11 @@ func (s *CoreServer) handleBackupExport(w http.ResponseWriter, r *http.Request) 
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success":       true,
-		"path":          req.DestPath,
-		"size_bytes":    result.Size,
-		"tiers":         result.Tiers,
-		"snapshot_type": result.SnapshotType,
+		"success":        true,
+		"path":           req.DestPath,
+		"size_bytes":     result.Size,
+		"tiers":          result.Tiers,
+		"snapshot_type":  result.SnapshotType,
 		"format_version": result.Manifest.FormatVersion,
 	})
 }

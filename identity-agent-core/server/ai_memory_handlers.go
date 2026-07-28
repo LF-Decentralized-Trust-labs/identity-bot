@@ -209,4 +209,3 @@ func (s *CoreServer) handleSetAISetting(w http.ResponseWriter, r *http.Request) 
 	}
 	writeJSON(w, map[string]string{"status": "ok"})
 }
-

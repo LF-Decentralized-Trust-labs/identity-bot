@@ -2,8 +2,8 @@ package server
 
 import (
 	"encoding/json"
-	"io"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
