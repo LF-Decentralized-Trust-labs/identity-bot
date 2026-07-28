@@ -60,8 +60,39 @@ func TestPairingDisclosesNothingBeyondThePairwiseOffer(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 		t.Fatalf("not JSON: %v", err)
 	}
-	if len(body) != 2 || body["aid"] == nil || body["oobi"] == nil {
-		t.Fatalf("the offer must be exactly {aid, oobi}, got %v", body)
+	// The offer carries what somebody pairing needs and nothing more: where the
+	// box is, and proof they are the one who provisioned it. Anything beyond
+	// this list is a disclosure by an endpoint that answers without authorisation.
+	allowed := map[string]bool{"aid": true, "oobi": true, "adoption_code": true, "attestation": true, "attestation_binding": true}
+	for field := range body {
+		if !allowed[field] {
+			t.Errorf("the offer discloses %q, which nothing pairing needs", field)
+		}
+	}
+	if body["aid"] == nil || body["oobi"] == nil {
+		t.Fatalf("the offer must carry an aid and an oobi, got %v", body)
+	}
+}
+
+// An offer without a code cannot be adopted — adoption compares what it is
+// given against the offer, and an empty expectation refuses everything. So the
+// two have to be built together, and this is the test that says so.
+func TestEveryMintedOfferCarriesAnAdoptionCode(t *testing.T) {
+	offer, err := newPairingOffer("EPAIRWISE", "https://box.example/public/oobi/EPAIRWISE")
+	if err != nil {
+		t.Fatalf("mint offer: %v", err)
+	}
+	if offer.AdoptionCode == "" {
+		t.Fatal("the offer carries no adoption code, so this instance could never be adopted")
+	}
+
+	resetPairingOfferForTest()
+	pairingOnce.Lock()
+	pairingOnce.offer = offer
+	pairingOnce.Unlock()
+
+	if expectedAdoptionCode() != offer.AdoptionCode {
+		t.Fatal("the code an adoption is checked against is not the code that was offered")
 	}
 }
 
