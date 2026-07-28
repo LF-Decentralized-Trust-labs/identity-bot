@@ -222,8 +222,12 @@ func DecryptPayload(bek, ciphertext, nonce []byte) ([]byte, error) {
 // Mirrors the Flutter Bip39.mnemonicToSeed implementation (PBKDF2-HMAC-SHA512).
 func MnemonicToBIP39Seed(mnemonic string, passphrase string) ([]byte, error) {
 	words := strings.Fields(strings.TrimSpace(mnemonic))
-	if len(words) < 12 {
-		return nil, fmt.Errorf("mnemonic must have at least 12 words")
+	// Exactly 24. A recovery phrase is not a password on the identity, it is
+	// the identity, so there is no reason to accept a weaker one — and the
+	// shorter form was never issued to anybody, so accepting it would only
+	// widen what a restore trusts.
+	if len(words) != 24 {
+		return nil, fmt.Errorf("a recovery phrase is 24 words, got %d", len(words))
 	}
 	return bip39PBKDF2(strings.Join(words, " "), passphrase)
 }

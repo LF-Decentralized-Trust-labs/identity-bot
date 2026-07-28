@@ -34,7 +34,7 @@ func postSeed(s *CoreServer, seedB64 string, remote bool) *httptest.ResponseReco
 func TestSetRootSeedLifecycle(t *testing.T) {
 	s := rootSeedServer(t)
 	seed, err := backup.MnemonicToBIP39Seed(
-		"abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about", "")
+		"abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestRootSeedStatus(t *testing.T) {
 // The recovery acceptance: phrase -> BIP39 seed -> handoff on a fresh device
 // re-derives the identical HD pairwise key.
 func TestPhraseAloneRederivesHDKeys(t *testing.T) {
-	mnemonic := "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+	mnemonic := "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art"
 	seed, _ := backup.MnemonicToBIP39Seed(mnemonic, "")
 	b64 := base64.StdEncoding.EncodeToString(seed)
 

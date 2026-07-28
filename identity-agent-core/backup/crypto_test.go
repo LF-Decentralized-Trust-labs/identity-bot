@@ -2,6 +2,7 @@ package backup
 
 import (
 	"bytes"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"testing"
@@ -10,7 +11,7 @@ import (
 )
 
 // Golden test mnemonic — test vector only, never use in production.
-const testMnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+const testMnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art"
 
 func TestEnvelopeEncryptionRoundTrip(t *testing.T) {
 	bek, err := NewBEK()
@@ -38,7 +39,7 @@ func TestWrongSeedFailsUnwrap(t *testing.T) {
 	bek, _ := NewBEK()
 	seedKEK, _ := SeedKEKFromMnemonic(testMnemonic)
 	wrapped, nonce, _ := WrapBEK(seedKEK, bek)
-	wrongKEK, _ := SeedKEKFromMnemonic("legal winner thank year wave sausage worth useful legal winner thank yellow")
+	wrongKEK, _ := SeedKEKFromMnemonic("legal winner thank year wave sausage worth useful legal winner thank year wave sausage worth useful legal winner thank year wave sausage worth title")
 	_, err := UnwrapBEK(wrongKEK, wrapped, nonce)
 	if err == nil {
 		t.Fatal("expected unwrap failure with wrong seed")
@@ -158,8 +159,20 @@ func TestPairwiseHDDeterministic(t *testing.T) {
 // Go <-> keripy golden for derive from root + persisted stable index (monotonic at creation, stored in record).
 // Enables root seed phrase + indices for recovery to re-derive pairwise keys. Rust cross deferred.
 func TestPairwiseHDGoldenVector(t *testing.T) {
-	m := "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
-	s, err := MnemonicToBIP39Seed(m, "")
+	// Pinned against the SEED, not against a phrase.
+	//
+	// The other engines pin this same pair, so the expected value below cannot
+	// be recomputed on one side alone. Deriving it from a mnemonic here made
+	// the vector hostage to a rule about how many words we accept — a policy on
+	// what a person may type, which has nothing to do with the derivation being
+	// pinned. Changing that rule silently invalidated the vector, which is
+	// exactly what a golden vector must not be able to do.
+	//
+	// These bytes are the BIP39 seed of the all-zero-entropy test phrase, and
+	// they do not change.
+	s, err := hex.DecodeString(
+		"5eb00bbddcf069084889a8ab9155568165f5c453ccb85e70811aaed6f6da5fc1" +
+			"9a5ac40b389cd370d086206dec8aa6c43daea6690f20ad3d8d48b2d2ce9e38e4")
 	if err != nil {
 		t.Fatal(err)
 	}
