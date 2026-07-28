@@ -37,7 +37,9 @@ import time
 import ctypes
 import ctypes.util
 import base64
+import functools
 import json
+import threading
 import tempfile
 import shutil
 
@@ -153,6 +155,40 @@ start_time = time.time()
 
 _identities = {}
 
+# Flask serves requests on threads, so two operations on the same identity can
+# run at once. Every stateful operation here is a read-modify-write — read the
+# identity, build the next event from its sequence number and last SAID, write
+# it back — and two of those interleaving produce two events claiming the same
+# sequence number, which is a broken key event log rather than an error anybody
+# would see at the time.
+#
+# The lock is held across a whole operation, not around each dictionary access:
+# locking the reads and writes individually would still allow the read of one
+# request and the write of another to interleave, which is the actual bug.
+#
+# One lock rather than one per identity, deliberately. A driver serves one
+# agent, so contention is not a real cost, and a single lock cannot deadlock
+# against itself the way a lock-per-key scheme can once an operation touches
+# two identities — which delegation does, since it advances both the delegator
+# and the new delegate.
+_identities_lock = threading.RLock()
+
+
+def serialized(handler):
+    """Runs a stateful handler under the identities lock.
+
+    Applied to the operations that read an identity and write it back. Read-only
+    endpoints are left alone: a single dictionary lookup is atomic, and blocking
+    reads behind writes would slow the common path to protect nothing.
+    """
+
+    @functools.wraps(handler)
+    def guarded(*args, **kwargs):
+        with _identities_lock:
+            return handler(*args, **kwargs)
+
+    return guarded
+
 # ---------------------------------------------------------------------------
 # KERI protocol helpers
 # ---------------------------------------------------------------------------
@@ -249,6 +285,7 @@ def status():
 # ---------------------------------------------------------------------------
 
 @app.route("/hybrid-inception", methods=["POST"])
+@serialized
 def hybrid_inception():
     data = request.get_json(silent=True) or {}
     use_synthetic = bool(data.get("synthetic", False))
@@ -273,6 +310,7 @@ def hybrid_inception():
 
 
 @app.route("/inception", methods=["POST"])
+@serialized
 def inception():
     data = request.get_json()
     if not data:
@@ -304,6 +342,7 @@ def inception():
 
 
 @app.route("/rotation", methods=["POST"])
+@serialized
 def rotation():
     data = request.get_json()
     if not data:
@@ -363,6 +402,7 @@ def rotation():
 
 
 @app.route("/delegated-inception", methods=["POST"])
+@serialized
 def delegated_inception():
     data = request.get_json()
     if not data:
@@ -441,6 +481,7 @@ def delegated_inception():
 
 
 @app.route("/delegated-rotation", methods=["POST"])
+@serialized
 def delegated_rotation():
     data = request.get_json()
     if not data:

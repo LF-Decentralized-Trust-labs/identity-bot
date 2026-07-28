@@ -581,6 +581,8 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 
 		s.mountLoginRoutes(r)
 		s.mountAssetRoutes(r)
+		s.mountEmployeeRoutes(r)
+		s.mountSponsorRoutes(r)
 		s.mountVerificationRoutes(r)
 		s.mountWitnessRoutes(r)
 		s.mountUpdateRoutes(r)
@@ -624,28 +626,60 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 	if _, err := os.Stat(absWebDir); err == nil {
 		log.Printf("[identity-agent-core] Serving Flutter web from: %s", absWebDir)
 		fileServer := http.FileServer(http.Dir(absWebDir))
+		// WEB_NO_CACHE=1 opts into a maximally-aggressive dev/dogfood cache
+		// posture; default (unset) is the correct production posture.
+		webNoCache := os.Getenv("WEB_NO_CACHE") == "1"
+
+		// setCache applies the Flutter-web cache posture. The top-level
+		// entrypoints (index.html, the bootstrap/loader JS, and *.json manifests)
+		// have STABLE names — not content hashes — so serving them immutable makes
+		// a rebuilt bundle invisible to returning browsers (the "why am I still
+		// seeing an old build?" bug). They must revalidate; only genuinely
+		// content-hashed assets (assets/, canvaskit/) are cached long-term.
+		// With WEB_NO_CACHE, nothing is cached and the HTML shell also sends
+		// Clear-Site-Data to PURGE whatever a browser cached under a previous
+		// policy — recovering machines poisoned by the old immutable headers, or a
+		// different app that used to run on this port.
+		setCache := func(w http.ResponseWriter, urlPath string, isShell bool) {
+			if webNoCache {
+				w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+				w.Header().Set("Pragma", "no-cache")
+				w.Header().Set("Expires", "0")
+				if isShell {
+					w.Header().Set("Clear-Site-Data", `"cache"`)
+				}
+				return
+			}
+			base := filepath.Base(urlPath)
+			isEntrypoint := isShell ||
+				base == "main.dart.js" ||
+				base == "flutter.js" ||
+				base == "flutter_bootstrap.js" ||
+				base == "flutter_service_worker.js" ||
+				strings.HasSuffix(base, ".json")
+			if isEntrypoint {
+				w.Header().Set("Cache-Control", "no-cache, must-revalidate")
+				w.Header().Set("Pragma", "no-cache")
+			} else {
+				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			}
+		}
+
 		r.Get("/*", func(w http.ResponseWriter, r *http.Request) {
 			urlPath := r.URL.Path
 			filePath := filepath.Join(absWebDir, urlPath)
 			_, statErr := os.Stat(filePath)
 
-			// SPA fallback to index.html for unknown paths
+			// SPA fallback to index.html for unknown (client-side-routed) paths.
 			if os.IsNotExist(statErr) {
-				w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-				w.Header().Set("Pragma", "no-cache")
+				setCache(w, urlPath, true)
 				http.ServeFile(w, r, filepath.Join(absWebDir, "index.html"))
 				return
 			}
 
-			// index.html itself must never be cached — browser must always revalidate
-			if urlPath == "/" || urlPath == "/index.html" || strings.HasSuffix(urlPath, "/index.html") {
-				w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-				w.Header().Set("Pragma", "no-cache")
-			} else {
-				// All other Flutter assets are content-hashed by the build — cache aggressively
-				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-			}
-
+			isShell := urlPath == "/" || urlPath == "/index.html" ||
+				strings.HasSuffix(urlPath, "/index.html")
+			setCache(w, urlPath, isShell)
 			fileServer.ServeHTTP(w, r)
 		})
 	} else {
