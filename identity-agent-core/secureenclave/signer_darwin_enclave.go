@@ -137,6 +137,19 @@ func (s *darwinSecureEnclaveSigner) Available() bool {
 func (s *darwinSecureEnclaveSigner) Platform() string { return "secure_enclave" }
 func (s *darwinSecureEnclaveSigner) Label() string    { return "Apple Secure Enclave" }
 
+// cfStringToGo copies a CFString out as Go text. CFStringGetCStringPtr can
+// return nil depending on the string's internal encoding, so the copying form
+// is used rather than the pointer form.
+func cfStringToGo(ref C.CFStringRef) string {
+	length := C.CFStringGetLength(ref)
+	max := C.CFStringGetMaximumSizeForEncoding(length, C.kCFStringEncodingUTF8) + 1
+	buf := make([]byte, int(max))
+	if C.CFStringGetCString(ref, (*C.char)(unsafe.Pointer(&buf[0])), max, C.kCFStringEncodingUTF8) == 0 {
+		return "(undecodable platform message)"
+	}
+	return C.GoString((*C.char)(unsafe.Pointer(&buf[0])))
+}
+
 func (s *darwinSecureEnclaveSigner) ensureKey() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -146,7 +159,24 @@ func (s *darwinSecureEnclaveSigner) ensureKey() error {
 	var cErr C.CFErrorRef
 	key := C.se_findOrCreateKey(&cErr)
 	if key == 0 {
-		return fmt.Errorf("secure enclave key unavailable")
+		// Carry the platform's own error out rather than flattening every
+		// cause into one sentence. The distinctions matter and are not
+		// guessable from the outside: errSecMissingEntitlement (-34018) means
+		// the binary cannot reach the keychain it needs and says nothing about
+		// the hardware, while errSecUnimplemented means there is genuinely no
+		// enclave. Reporting both as "unavailable" is the same defect this
+		// package exists to fix, one layer down.
+		detail := "no error detail from the platform"
+		if cErr != 0 {
+			code := int(C.CFErrorGetCode(cErr))
+			detail = fmt.Sprintf("OSStatus %d", code)
+			if desc := C.CFErrorCopyDescription(cErr); desc != 0 {
+				detail = fmt.Sprintf("%s: %s", detail, cfStringToGo(desc))
+				C.CFRelease(C.CFTypeRef(desc))
+			}
+			C.CFRelease(C.CFTypeRef(cErr))
+		}
+		return fmt.Errorf("secure enclave key unavailable (%s)", detail)
 	}
 	s.key = key
 	s.ready = true
