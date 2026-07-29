@@ -50,14 +50,29 @@ func (s *CoreServer) notifyBackupEvent(reason backup.EventReason) {
 	s.backupService().NotifyEvent(reason)
 }
 
+// hasSealRecipients reports whether this agent has been given anyone to seal
+// backup keys to.
+func (s *CoreServer) hasSealRecipients() bool {
+	cfg, err := s.backupService().LoadConfig()
+	if err != nil {
+		return false
+	}
+	return len(cfg.SealToPublicKeysB64) > 0
+}
+
 func (s *CoreServer) handleBackupExport(w http.ResponseWriter, r *http.Request) {
 	var req backupExportRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request", err.Error())
 		return
 	}
-	if req.Mnemonic == "" && req.BIP39SeedB64 == "" {
-		writeError(w, http.StatusBadRequest, "mnemonic required", "Provide mnemonic for envelope encryption")
+	// A seed is only required when there is no other way to unlock the result.
+	// Once recovery public keys are configured the agent can export on its own,
+	// and asking for the phrase would hand this machine the identity it is only
+	// supposed to be storing.
+	if req.Mnemonic == "" && req.BIP39SeedB64 == "" && !s.hasSealRecipients() {
+		writeError(w, http.StatusBadRequest, "no way to unlock the archive",
+			"Provide a mnemonic, or configure recovery public keys so the archive can be sealed to their owners")
 		return
 	}
 	if req.DestPath == "" {

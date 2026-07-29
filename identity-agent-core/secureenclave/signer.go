@@ -54,9 +54,9 @@ func newSoftwareSigner(dataDir string) *softwareSigner {
 	return s
 }
 
-func (s *softwareSigner) Available() bool { return true }
+func (s *softwareSigner) Available() bool  { return true }
 func (s *softwareSigner) Platform() string { return s.platform }
-func (s *softwareSigner) Label() string  { return s.label }
+func (s *softwareSigner) Label() string    { return s.label }
 
 func (s *softwareSigner) keyPath() string {
 	return filepath.Join(s.dataDir, "secureenclave", "software_signer.key")

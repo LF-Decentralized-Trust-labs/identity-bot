@@ -50,6 +50,11 @@ type Config struct {
 	WifiOnlyTier23    bool          `json:"wifi_only_tier23"`
 	RecoveryPreset    string        `json:"recovery_preset"` // seed | seed_guardians_or | seed_guardians_and
 	RedundancyWarning bool          `json:"redundancy_warning_ack"`
+	// SealToPublicKeysB64 are the recovery public keys this agent seals backup
+	// keys to — one per owner. Public keys only: an agent holding these can
+	// write archives forever and open none of them. For an organisation there
+	// is one per signer, and any single one restores the data.
+	SealToPublicKeysB64 []string `json:"seal_to_public_keys_b64,omitempty"`
 }
 
 // HistoryEntry is one backup run (D3).

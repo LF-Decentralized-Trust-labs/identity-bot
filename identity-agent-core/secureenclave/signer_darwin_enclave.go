@@ -122,7 +122,7 @@ func (s *darwinSecureEnclaveSigner) Available() bool {
 }
 
 func (s *darwinSecureEnclaveSigner) Platform() string { return "secure_enclave" }
-func (s *darwinSecureEnclaveSigner) Label() string  { return "Apple Secure Enclave" }
+func (s *darwinSecureEnclaveSigner) Label() string    { return "Apple Secure Enclave" }
 
 func (s *darwinSecureEnclaveSigner) ensureKey() error {
 	s.mu.Lock()

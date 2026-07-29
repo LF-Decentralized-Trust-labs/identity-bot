@@ -26,9 +26,12 @@ const (
 type KeySlotType string
 
 const (
-	SlotSeedHD      KeySlotType = "seed_hd_v1"
-	SlotPassphrase  KeySlotType = "passphrase_argon2id_v1"
-	SlotGuardianMS  KeySlotType = "guardian_multisig_v1"
+	SlotSeedHD     KeySlotType = "seed_hd_v1"
+	SlotPassphrase KeySlotType = "passphrase_argon2id_v1"
+	SlotGuardianMS KeySlotType = "guardian_multisig_v1"
+	// SlotSealedX25519 is unlocked by a private key the agent never had. It is
+	// the only slot type that lets a machine write a backup it cannot read.
+	SlotSealedX25519 KeySlotType = "sealed_x25519_v1"
 )
 
 // SlotPolicy is OR or AND across slots.
@@ -64,6 +67,11 @@ type KeySlot struct {
 	GuardianGroup  string      `json:"guardian_group_aid,omitempty"`
 	ThresholdM     int         `json:"threshold_m,omitempty"`
 	ThresholdN     int         `json:"threshold_n,omitempty"`
+	// EphemeralPubB64 is the throwaway public key of a sealed slot. There is
+	// deliberately no field naming the recipient: an archive sealed to several
+	// owners would otherwise publish who owns the identity to anyone holding a
+	// copy of it. Finding the right slot is done by trying them.
+	EphemeralPubB64 string `json:"ephemeral_pub_b64,omitempty"`
 }
 
 // ExternalDataPointer records lean-residency bulk data (keys/pointers only).
