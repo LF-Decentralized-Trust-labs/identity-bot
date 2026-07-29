@@ -9,6 +9,7 @@ import (
         "sync"
         "time"
 
+        "identity-agent-core/relay"
         "identity-agent-core/tunnel"
 )
 
@@ -30,6 +31,7 @@ type EndpointService struct {
         source        string
         updatedAt     time.Time
         tunnelManager *tunnel.Manager
+        relayManager  *relay.Manager
         overrideURL   string
         localPort     int
         store         EndpointPersister
@@ -49,6 +51,21 @@ func New(store EndpointPersister, localPort int) *EndpointService {
 func (es *EndpointService) SetPort(port int) {
         es.mu.Lock()
         es.localPort = port
+        es.mu.Unlock()
+        es.Refresh()
+}
+
+// SetRelayManager installs the relay, which outranks the tunnel when it is up.
+//
+// The ordering is about what the address is FOR rather than which is better
+// plumbing. A tunnel address is ephemeral by nature — it is a byproduct of the
+// vendor's product and dies when the process or the account does. A relay
+// address is allocated to a signed enrollment, which is what makes it worth
+// handing to somebody who has to find this agent again later. When both are
+// available the durable one should be the one being published.
+func (es *EndpointService) SetRelayManager(rm *relay.Manager) {
+        es.mu.Lock()
+        es.relayManager = rm
         es.mu.Unlock()
         es.Refresh()
 }
@@ -127,11 +144,22 @@ func (es *EndpointService) resolve() (string, string) {
         es.mu.RLock()
         override := es.overrideURL
         tm := es.tunnelManager
+        rm := es.relayManager
         port := es.localPort
         es.mu.RUnlock()
 
         if override != "" {
                 return override, "override"
+        }
+
+        // URL() is empty unless the relay is genuinely connected, so an
+        // allocated-but-unreachable relay falls through to the tunnel rather
+        // than shadowing it with an address nothing is listening on.
+        if rm != nil {
+                if relayURL := rm.URL(); relayURL != "" {
+                        return strings.TrimRight(relayURL, "/"),
+                                fmt.Sprintf("relay:%s", rm.GetStatus().Provider)
+                }
         }
 
         if tm != nil {

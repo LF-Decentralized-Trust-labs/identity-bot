@@ -44,6 +44,12 @@ type TunnelAgent struct {
 	dialer     websocket.Dialer
 	mu         sync.Mutex
 	conn       *websocket.Conn
+
+	// onConnect fires once the socket is up, before any request is served.
+	// Without it a caller cannot distinguish "dialing" from "connected" — it
+	// only learns of a session when the session ENDS, which is too late to
+	// report that reachability was restored.
+	onConnect func()
 }
 
 func NewTunnelAgent(endpoint, token, localBase string) *TunnelAgent {
@@ -76,8 +82,12 @@ func (a *TunnelAgent) session(ctx context.Context) error {
 	}
 	a.mu.Lock()
 	a.conn = conn
+	cb := a.onConnect
 	a.mu.Unlock()
 	defer conn.Close()
+	if cb != nil {
+		cb()
+	}
 	for {
 		_, msg, err := conn.ReadMessage()
 		if err != nil {
