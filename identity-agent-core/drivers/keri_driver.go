@@ -21,6 +21,12 @@ type DriverStatus struct {
 	Driver      string `json:"driver"`
 	Version     string `json:"version"`
 	KeriLibrary string `json:"keri_library"`
+	// KeriVersion and ScriptPath identify WHICH driver answered. An agent will
+	// adopt a healthy driver started by something else, so without these an
+	// edit to the driver looks like it took effect when the running code is
+	// somebody else's — a silent no-op that reads as a failed change.
+	KeriVersion string `json:"keri_version"`
+	ScriptPath  string `json:"script_path"`
 	Uptime      string `json:"uptime"`
 }
 
@@ -363,6 +369,41 @@ type KeriDriver struct {
 	managed bool
 }
 
+// resolveDriverScript decides which driver file this agent would start.
+//
+// Extracted so the adoption path can ask the same question. Adopting a driver
+// somebody else started is fine; adopting one running DIFFERENT code without
+// saying so is what turns an edit into a silent no-op.
+func resolveDriverScript() string {
+	if p := os.Getenv("KERI_DRIVER_SCRIPT"); p != "" {
+		return p
+	}
+	// Next to the executable, which is how a packaged build is laid out.
+	if exe, err := os.Executable(); err == nil {
+		candidate := filepath.Join(filepath.Dir(exe), "drivers", "keri-core", "server.py")
+		if _, statErr := os.Stat(candidate); statErr == nil {
+			return candidate
+		}
+	}
+	// Running from source: the drivers directory sits beside or one level above.
+	for _, rel := range []string{
+		"./drivers/keri-core/server.py",
+		"../drivers/keri-core/server.py",
+	} {
+		if _, statErr := os.Stat(rel); statErr == nil {
+			return rel
+		}
+	}
+	return "./drivers/keri-core/server.py" // last resort, keeps the old behaviour
+}
+
+func orUnknown(s string) string {
+	if s == "" {
+		return "unknown — this driver predates reporting it"
+	}
+	return s
+}
+
 func NewKeriDriver() *KeriDriver {
 	port := os.Getenv("KERI_DRIVER_PORT")
 	if port == "" {
@@ -418,40 +459,27 @@ func (d *KeriDriver) Start() error {
 	// Adopt a healthy one; reclaim the port from a wedged one. Either way a
 	// single, uncontended driver ends up owning the keystore.
 	if status, err := d.GetStatus(); err == nil && status.Status == "active" {
-		log.Printf("[keri-driver] Adopting already-running healthy driver on %s (library: %s)", d.BaseURL, status.KeriLibrary)
+		log.Printf("[keri-driver] Adopting already-running healthy driver on %s (library: %s %s, script: %s)",
+			d.BaseURL, status.KeriLibrary, status.KeriVersion, orUnknown(status.ScriptPath))
+
+		// Say so loudly when the adopted driver is running a different file
+		// than this agent was configured with. Adopting avoids duplicate
+		// processes, which is worth having; adopting SILENTLY means a developer
+		// edits the driver, restarts, and measures the old code without any
+		// signal that their change never loaded.
+		if configured := resolveDriverScript(); status.ScriptPath != "" && configured != "" {
+			if want, err := filepath.Abs(configured); err == nil && want != status.ScriptPath {
+				log.Printf("[keri-driver] WARNING: the adopted driver is running %s, not the configured %s — "+
+					"changes to the configured script are NOT in effect",
+					status.ScriptPath, want)
+			}
+		}
 		d.managed = false
 		return nil
 	}
 	reclaimDriverPort(driverPort)
 
-	scriptPath := os.Getenv("KERI_DRIVER_SCRIPT")
-	if scriptPath == "" {
-		// Default: look relative to this executable's directory, then fall back
-		// to the repo-root layout (drivers/ lives one level above identity-agent-core/).
-		exe, err := os.Executable()
-		if err == nil {
-			candidate := filepath.Join(filepath.Dir(exe), "drivers", "keri-core", "server.py")
-			if _, statErr := os.Stat(candidate); statErr == nil {
-				scriptPath = candidate
-			}
-		}
-		if scriptPath == "" {
-			// When running via `go run .` from identity-agent-core/, the CWD is
-			// identity-agent-core/ and the drivers/ dir is one level up.
-			for _, rel := range []string{
-				"./drivers/keri-core/server.py",
-				"../drivers/keri-core/server.py",
-			} {
-				if _, statErr := os.Stat(rel); statErr == nil {
-					scriptPath = rel
-					break
-				}
-			}
-		}
-		if scriptPath == "" {
-			scriptPath = "./drivers/keri-core/server.py" // last resort, keeps old behaviour
-		}
-	}
+	scriptPath := resolveDriverScript()
 
 	pythonBin := os.Getenv("KERI_DRIVER_PYTHON")
 	if pythonBin == "" {

@@ -226,6 +226,38 @@ def create_hybrid_inception_event(use_synthetic: bool = False) -> dict:
     return build_hybrid_inception(material)
 
 
+def _keri_version() -> str:
+    try:
+        import keri
+        return getattr(keri, "__version__", "unknown")
+    except Exception:
+        return "unavailable"
+
+
+def _check_keri_api() -> None:
+    """Fail at startup if keripy is not the version this driver is written for.
+
+    The failure this prevents is a confusing one. An older keripy has
+    eventing.incept(keys, sith, nxt, ...) rather than (keys, isith, ndigs,
+    nsith, ...), so the driver starts fine, serves /status happily, and then
+    fails one specific call with "incept() got an unexpected keyword argument
+    'isith'" — which reads as a bug in the caller rather than as the wrong
+    library being installed. Better to refuse to start and say so.
+    """
+    import inspect
+    from keri.core import eventing
+
+    params = set(inspect.signature(eventing.incept).parameters)
+    missing = {"isith", "ndigs", "nsith"} - params
+    if missing:
+        sys.exit(
+            "FATAL: this driver needs keripy with %s on eventing.incept, and the "
+            "installed keripy (%s) does not have them. Point KERI_DRIVER_PYTHON at "
+            "an interpreter with keri==1.1.17."
+            % (", ".join(sorted(missing)), _keri_version())
+        )
+
+
 def create_inception_event(public_key: str, next_public_key: str) -> dict:
     pub_bytes = _extract_raw_key(public_key)
     next_bytes = _extract_raw_key(next_public_key)
@@ -262,6 +294,13 @@ def status():
         "driver": "keri-core",
         "version": "0.1.0",
         "keri_library": "keripy",
+        # Reported so a client adopting an already-running driver can tell
+        # WHICH driver it adopted. Without these, editing this file and
+        # restarting an agent looks like it took effect when the agent may have
+        # adopted somebody else's driver running older code — a silent no-op
+        # that reads as a failed change.
+        "keri_version": _keri_version(),
+        "script_path": os.path.abspath(__file__),
         "uptime": f"{uptime:.0f}s",
         "endpoints": [
             "GET /status",
@@ -1759,8 +1798,11 @@ if __name__ == "__main__":
     port = int(os.environ.get("KERI_DRIVER_PORT", "9999"))
     host = os.environ.get("KERI_DRIVER_HOST", "127.0.0.1")
 
+    _check_keri_api()
+
     print(f"[keri-driver] Starting KERI Core Driver on {host}:{port}")
-    print(f"[keri-driver] KERI library: keripy (reference)")
+    print(f"[keri-driver] KERI library: keripy {_keri_version()}")
+    print(f"[keri-driver] Script: {os.path.abspath(__file__)}")
     print(f"[keri-driver] Stateful endpoints:  /status, /inception, /rotation, /interact, /reload-identity, /sign, /sign-for-name, /kel, /verify")
     print(f"[keri-driver] Stateless endpoints: /cesr-encode, /validate-kel, /resolve-oobi, /format-credential, /generate-multisig-event")
     print(f"[keri-driver] Credential endpoints: /credential/issue, /credential/present, /credential/verify")
