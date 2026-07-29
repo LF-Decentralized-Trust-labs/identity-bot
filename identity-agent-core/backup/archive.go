@@ -106,6 +106,24 @@ func (c *Collector) CreateArchive(opts CollectOptions, req ExportRequest) (*Expo
 	}
 	manifest.PayloadNonceB64 = EncodeB64(payloadNonce)
 
+	// Under AND, the slots stop holding the payload key and hold this instead.
+	// Opening a slot then yields a secret that is useless on its own, and the
+	// payload key is reached only by combining it with the passphrase.
+	//
+	// Everything below writes `slotSecret` into slots without knowing which
+	// mode it is in, so there is exactly one place where OR and AND differ —
+	// here — rather than a branch in every slot type.
+	requireAll := manifest.SlotPolicy == PolicyAND
+	slotSecret := bek
+	if requireAll {
+		if req.Passphrase == "" {
+			return nil, fmt.Errorf("an AND archive needs a passphrase as its second factor, and none was given")
+		}
+		if slotSecret, err = NewBEK(); err != nil {
+			return nil, err
+		}
+	}
+
 	// Seed slot — only when the caller actually holds the seed. An agent
 	// exporting on a machine it does not own has no seed to offer, and asking
 	// it for one is the thing sealing exists to avoid.
@@ -123,13 +141,13 @@ func (c *Collector) CreateArchive(opts CollectOptions, req ExportRequest) (*Expo
 		if err != nil {
 			return nil, err
 		}
-		wrapped, nonce, err := WrapBEK(seedKEK, bek)
+		wrapped, nonce, err := WrapBEK(seedKEK, slotSecret)
 		if err != nil {
 			return nil, err
 		}
 		manifest.KeySlots = append(manifest.KeySlots, KeySlot{
 			Type:          SlotSeedHD,
-			Policy:        PolicyOR,
+			Policy:        manifest.SlotPolicy,
 			WrappedBEKB64: EncodeB64(wrapped),
 			NonceB64:      EncodeB64(nonce),
 		})
@@ -137,20 +155,26 @@ func (c *Collector) CreateArchive(opts CollectOptions, req ExportRequest) (*Expo
 
 	// Sealed slots — one per recipient, any of which opens the archive.
 	for i, recipientPub := range req.SealToPublicKeys {
-		ephPub, wrappedS, nonceS, err := SealBEK(recipientPub, bek)
+		ephPub, wrappedS, nonceS, err := SealBEK(recipientPub, slotSecret)
 		if err != nil {
 			return nil, fmt.Errorf("seal to recipient %d: %w", i, err)
 		}
 		manifest.KeySlots = append(manifest.KeySlots, KeySlot{
 			Type:            SlotSealedX25519,
-			Policy:          PolicyOR,
+			Policy:          manifest.SlotPolicy,
 			WrappedBEKB64:   EncodeB64(wrappedS),
 			NonceB64:        EncodeB64(nonceS),
 			EphemeralPubB64: EncodeB64(ephPub),
 		})
 	}
 
-	// Passphrase slot
+	// The passphrase. Under OR it is another door; under AND it is the second
+	// lock on every door there is.
+	//
+	// Writing a passphrase SLOT under AND would undo the whole thing — the slot
+	// holds the payload key, so anyone with the passphrase alone would walk in
+	// past the very requirement the archive claims to enforce. So under AND the
+	// passphrase gets no slot at all. It only ever appears combined.
 	if req.Passphrase != "" {
 		params := DefaultArgon2Params()
 		manifest.Argon2Params = &params
@@ -162,17 +186,38 @@ func (c *Collector) CreateArchive(opts CollectOptions, req ExportRequest) (*Expo
 		if err != nil {
 			return nil, err
 		}
-		wrappedP, nonceP, err := WrapBEK(passKEK, bek)
-		if err != nil {
-			return nil, err
+
+		if requireAll {
+			combined, err := CombineFactors(slotSecret, passKEK)
+			if err != nil {
+				return nil, err
+			}
+			wrappedAnd, nonceAnd, err := WrapBEK(combined, bek)
+			if err != nil {
+				return nil, err
+			}
+			manifest.AndWrappedBEKB64 = EncodeB64(wrappedAnd)
+			manifest.AndNonceB64 = EncodeB64(nonceAnd)
+			// The salt still has to travel, or the passphrase cannot be turned
+			// back into the same key. It rides on a slot that unlocks nothing.
+			manifest.KeySlots = append(manifest.KeySlots, KeySlot{
+				Type:          SlotPassphrase,
+				Policy:        PolicyAND,
+				Argon2SaltB64: EncodeB64(salt),
+			})
+		} else {
+			wrappedP, nonceP, err := WrapBEK(passKEK, bek)
+			if err != nil {
+				return nil, err
+			}
+			manifest.KeySlots = append(manifest.KeySlots, KeySlot{
+				Type:          SlotPassphrase,
+				Policy:        PolicyOR,
+				WrappedBEKB64: EncodeB64(wrappedP),
+				NonceB64:      EncodeB64(nonceP),
+				Argon2SaltB64: EncodeB64(salt),
+			})
 		}
-		manifest.KeySlots = append(manifest.KeySlots, KeySlot{
-			Type:          SlotPassphrase,
-			Policy:        PolicyOR,
-			WrappedBEKB64: EncodeB64(wrappedP),
-			NonceB64:      EncodeB64(nonceP),
-			Argon2SaltB64: EncodeB64(salt),
-		})
 	}
 
 	manifest.KeySlots = append(manifest.KeySlots, req.GuardianSlots...)
@@ -230,6 +275,13 @@ func OpenArchive(data []byte, req OpenRequest) (*PayloadBundle, *Manifest, error
 	// The sealing key comes from the same seed the phrase produces, so somebody
 	// recovering with nothing but their words opens a sealed archive without
 	// having to supply anything extra.
+	// Read once, before anything is tried, because it changes what a slot
+	// yielding a secret actually means.
+	requireAll := arch.Manifest.SlotPolicy == PolicyAND
+	if requireAll && req.Passphrase == "" {
+		return nil, nil, fmt.Errorf("this archive requires a passphrase as well as a key, and none was given")
+	}
+
 	sealPriv := req.SealPrivateKey
 	if len(sealPriv) == 0 && len(bip39Seed) > 0 {
 		if priv, _, derr := DeriveSealKeypair(bip39Seed); derr == nil {
@@ -273,6 +325,12 @@ func OpenArchive(data []byte, req OpenRequest) (*PayloadBundle, *Manifest, error
 			}
 			bek, unwrapErr = tryUnwrapSlot(kek, slot)
 		case SlotPassphrase:
+			// Under AND this slot carries only the salt and unlocks nothing.
+			// Treating it as a way in is precisely the bypass AND exists to
+			// prevent, so it is skipped rather than tried.
+			if requireAll {
+				continue
+			}
 			if req.Passphrase == "" || arch.Manifest.Argon2Params == nil {
 				continue
 			}
@@ -297,6 +355,27 @@ func OpenArchive(data []byte, req OpenRequest) (*PayloadBundle, *Manifest, error
 			return nil, nil, fmt.Errorf("no key slot unlocked: %w", unwrapErr)
 		}
 		return nil, nil, fmt.Errorf("no key slot unlocked")
+	}
+
+	// Under AND, what came out of the slot is not the payload key — it is one
+	// half. Without the passphrase the archive stays shut here, which is the
+	// entire difference between saying AND and meaning it.
+	if requireAll {
+		combined, err := combineWithPassphrase(bek, req.Passphrase, &arch.Manifest)
+		if err != nil {
+			return nil, nil, err
+		}
+		wrapped, err := DecodeB64(arch.Manifest.AndWrappedBEKB64)
+		if err != nil {
+			return nil, nil, fmt.Errorf("this archive requires two factors but its second layer is unreadable: %w", err)
+		}
+		andNonce, err := DecodeB64(arch.Manifest.AndNonceB64)
+		if err != nil {
+			return nil, nil, fmt.Errorf("this archive requires two factors but its second layer is unreadable: %w", err)
+		}
+		if bek, err = UnwrapBEK(combined, wrapped, andNonce); err != nil {
+			return nil, nil, fmt.Errorf("the passphrase did not open the second layer: %w", err)
+		}
 	}
 
 	plain, err := DecryptPayload(bek, arch.Ciphertext, nonce)
@@ -331,4 +410,30 @@ func randomBytes(n int) ([]byte, error) {
 		return nil, err
 	}
 	return b, nil
+}
+// combineWithPassphrase joins the secret a slot yielded with the passphrase, to
+// produce the key that opens an AND archive's second layer.
+//
+// The salt travels on the passphrase slot even though that slot unlocks
+// nothing, because without it the same passphrase produces a different key and
+// the archive is unopenable by anybody, including its owner.
+func combineWithPassphrase(slotSecret []byte, passphrase string, manifest *Manifest) ([]byte, error) {
+	if manifest.Argon2Params == nil {
+		return nil, fmt.Errorf("this archive requires a passphrase but records no parameters for deriving it")
+	}
+	for _, slot := range manifest.KeySlots {
+		if slot.Type != SlotPassphrase || slot.Argon2SaltB64 == "" {
+			continue
+		}
+		salt, err := DecodeB64(slot.Argon2SaltB64)
+		if err != nil {
+			return nil, fmt.Errorf("this archive's passphrase salt is unreadable: %w", err)
+		}
+		passKEK, err := DerivePassphraseKEK(passphrase, salt, *manifest.Argon2Params)
+		if err != nil {
+			return nil, err
+		}
+		return CombineFactors(slotSecret, passKEK)
+	}
+	return nil, fmt.Errorf("this archive requires a passphrase but carries no salt to derive it with")
 }

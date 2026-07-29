@@ -50,6 +50,10 @@ const (
 	// the key that actually wraps the backup key.
 	SealSharedInfoV1 = "identity-agent-backup-seal-shared-v1"
 
+	// AndCombineInfoV1 labels the HKDF that joins the two factors of an AND
+	// archive into the key that finally opens it.
+	AndCombineInfoV1 = "identity-agent-backup-and-combine-v1"
+
 	// X25519KeyLen is the length of both halves of an X25519 keypair.
 	X25519KeyLen = 32
 )
@@ -143,6 +147,26 @@ func SealBEK(recipientPub, bek []byte) (ephemeralPub, wrapped, nonce []byte, err
 		return nil, nil, nil, err
 	}
 	return ephemeralPub, wrapped, nonce, nil
+}
+
+// CombineFactors derives the key that opens an AND archive from the two halves
+// that must both be present.
+//
+// Deriving rather than concatenating-and-hashing by hand so the domain is
+// explicit and the result cannot collide with any other key made from the same
+// inputs. Order is fixed: the slot secret is the input keying material and the
+// passphrase key is the salt, because reversing them for one archive and not
+// another would produce two incompatible readings of the same format.
+func CombineFactors(slotSecret, passphraseKEK []byte) ([]byte, error) {
+	if len(slotSecret) != 32 || len(passphraseKEK) != 32 {
+		return nil, fmt.Errorf("both factors must be 32 bytes")
+	}
+	r := hkdf.New(sha256.New, slotSecret, passphraseKEK, []byte(AndCombineInfoV1))
+	out := make([]byte, 32)
+	if _, err := r.Read(out); err != nil {
+		return nil, fmt.Errorf("hkdf combine factors: %w", err)
+	}
+	return out, nil
 }
 
 // UnsealBEK recovers a backup key from a sealed slot.

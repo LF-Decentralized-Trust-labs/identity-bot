@@ -34,7 +34,16 @@ const (
 	SlotSealedX25519 KeySlotType = "sealed_x25519_v1"
 )
 
-// SlotPolicy is OR or AND across slots.
+// SlotPolicy decides whether one way in is enough.
+//
+// OR means any single slot opens the archive: the phrase, or a passphrase, or
+// any one owner's sealed slot. AND means a slot is necessary but not
+// sufficient — something one person knows plus something they have.
+//
+// The distinction is load-bearing rather than decorative. Adding a passphrase
+// under OR does not make an archive harder to open; it makes it easier, by
+// adding a second independent way in. Only AND makes it harder, and an archive
+// that says AND has to mean it.
 type SlotPolicy string
 
 const (
@@ -97,6 +106,14 @@ type Manifest struct {
 	DeltaStateDigestQB64 string              `json:"delta_state_digest_blake3_qb64,omitempty"`
 	ExternalPointers   []ExternalDataPointer `json:"external_pointers,omitempty"`
 	PayloadNonceB64    string                `json:"payload_nonce_b64"`
+
+	// AndWrappedBEKB64 and AndNonceB64 are the second layer, present only under
+	// AND. There, the slots do not hold the payload key at all — they hold an
+	// intermediate secret, and the payload key is wrapped again by that secret
+	// combined with the passphrase. Opening a slot therefore gets you halfway
+	// and no further, which is what AND has to mean to be worth saying.
+	AndWrappedBEKB64 string `json:"and_wrapped_bek_b64,omitempty"`
+	AndNonceB64      string `json:"and_nonce_b64,omitempty"`
 }
 
 // PayloadBundle is the plaintext structure encrypted under the BEK.
