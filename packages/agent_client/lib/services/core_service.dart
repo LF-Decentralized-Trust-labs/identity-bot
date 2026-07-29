@@ -640,6 +640,22 @@ class CoreService {
     }
   }
 
+  /// Create a signer (founding-sponsor) invite — POST /api/signer/invites.
+  /// The backend mints a t=4 invite + signed Ask from the org identity and returns
+  /// its decoded JSON (including `url` for the QR the onboarding flow displays).
+  Future<Map<String, dynamic>> createSignerInvite() async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/api/signer/invites'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({}),
+    );
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    }
+    final body = jsonDecode(response.body);
+    throw Exception(body['error'] ?? 'Signer invite failed: ${response.statusCode}');
+  }
+
   Future<OobiResponse> getOobi({String? action}) async {
     final uri = Uri.parse('$baseUrl/api/oobi').replace(
       queryParameters: action != null ? {'action': action} : null,
