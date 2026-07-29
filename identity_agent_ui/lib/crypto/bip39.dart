@@ -5,7 +5,15 @@ import 'package:pointycastle/export.dart';
 import 'wordlist.dart';
 
 class Bip39 {
-  static List<String> generateMnemonic({int strength = 128}) {
+  /// Generates a recovery phrase.
+  ///
+  /// 256 bits, so 24 words. The phrase is not a password on the identity — it
+  /// IS the identity, and it is the only thing that survives every device
+  /// being lost, so its strength is the ceiling on everything else.
+  ///
+  /// Callers should not pass a weaker strength. The parameter remains only
+  /// because the entropy-to-words conversion below is general.
+  static List<String> generateMnemonic({int strength = 256}) {
     final random = Random.secure();
     final entropy = Uint8List(strength ~/ 8);
     for (int i = 0; i < entropy.length; i++) {
@@ -55,7 +63,10 @@ class Bip39 {
   }
 
   static bool validateMnemonic(List<String> words) {
-    if (words.length != 12 && words.length != 24) return false;
+    // 24 words only. Twelve was never issued to anybody — it was an unnoticed
+    // default rather than a decision — so accepting it here would widen what a
+    // restore trusts without a single real phrase to justify it.
+    if (words.length != 24) return false;
     for (final word in words) {
       if (!bip39EnglishWords.contains(word.toLowerCase())) return false;
     }

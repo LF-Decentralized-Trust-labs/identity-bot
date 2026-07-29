@@ -9,8 +9,8 @@ import (
 )
 
 const (
-	ownerMnemonic    = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
-	strangerMnemonic = "zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong"
+	ownerMnemonic    = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art"
+	strangerMnemonic = "zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo vote"
 )
 
 // sealedArchiveFor builds an archive the way an agent that has never held the
@@ -92,7 +92,7 @@ func TestAStrangerCannotRestoreASealedArchive(t *testing.T) {
 // An organisation's archive: two owners, either of whom can restore the
 // company's data alone.
 func TestEitherOwnerRestoresAnOrganisationArchive(t *testing.T) {
-	owners := []string{ownerMnemonic, "legal winner thank year wave sausage worth useful legal winner thank yellow"}
+	owners := []string{ownerMnemonic, "legal winner thank year wave sausage worth useful legal winner thank year wave sausage worth useful legal winner thank year wave sausage worth title"}
 	archive := sealedArchiveFor(t, owners...)
 
 	for i, m := range owners {

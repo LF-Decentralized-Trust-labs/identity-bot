@@ -12,9 +12,9 @@ import (
 // Standard BIP39 test vectors, standing in for different people: two further
 // owners, and somebody who owns nothing.
 const (
-	secondMnemonic   = "legal winner thank year wave sausage worth useful legal winner thank yellow"
-	thirdMnemonic    = "letter advice cage absurd amount doctor acoustic avoid letter advice cage above"
-	outsiderMnemonic = "zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong"
+	secondMnemonic   = "legal winner thank year wave sausage worth useful legal winner thank year wave sausage worth useful legal winner thank year wave sausage worth title"
+	thirdMnemonic    = "letter advice cage absurd amount doctor acoustic avoid letter advice cage absurd amount doctor acoustic avoid letter advice cage absurd amount doctor acoustic bless"
+	outsiderMnemonic = "zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo vote"
 )
 
 func seedFor(t *testing.T, mnemonic string) []byte {

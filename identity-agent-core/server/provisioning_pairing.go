@@ -94,7 +94,11 @@ func (s *CoreServer) handleProvisioningPairing(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusServiceUnavailable, "Could not offer pairing", err.Error())
 		return
 	}
-	offer := &pairingOffer{AID: aid, OOBI: oobi}
+	offer, err := newPairingOffer(aid, oobi)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "Could not offer pairing", err.Error())
+		return
+	}
 
 	// Bind the attestation to the AID we just minted. A report that only says
 	// "some sealed guest ran the right image" is satisfied by any instance
@@ -113,6 +117,22 @@ func (s *CoreServer) handleProvisioningPairing(w http.ResponseWriter, r *http.Re
 	}
 	pairingOnce.offer = offer
 	writePairingOffer(w, pairingOnce.offer)
+}
+
+// newPairingOffer builds the offer an instance publishes.
+//
+// It exists as its own function so the code and the offer cannot come apart.
+// They were separate once: the code was minted nowhere, every offer carried an
+// empty one, and adoption compares what it is given against exactly that — so
+// the gate did not stand open, it stood shut, and no instance could be adopted
+// at all. Building the two together is what stops that recurring, and it is
+// what the test below holds in place.
+func newPairingOffer(aid, oobi string) (*pairingOffer, error) {
+	code, err := newAdoptionCode()
+	if err != nil {
+		return nil, err
+	}
+	return &pairingOffer{AID: aid, OOBI: oobi, AdoptionCode: code}, nil
 }
 
 func writePairingOffer(w http.ResponseWriter, offer *pairingOffer) {

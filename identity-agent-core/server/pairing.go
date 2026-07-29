@@ -66,6 +66,16 @@ type pairingCompleteRequest struct {
 	// this instance will accept as its owner's from now on.
 	OwnerAID       string `json:"owner_aid"`
 	OwnerPublicKey string `json:"owner_public_key"`
+	// BackupSealPublicKeyB64 is the X25519 public key this instance seals its
+	// backup keys to, so it can write archives it cannot itself read.
+	//
+	// It arrives here rather than being configured afterwards because the gap
+	// between the two is the one window where an instance is running, holding
+	// real data, and unable to back any of it up safely. There is no reason to
+	// have that window: the owner is already talking to it, and already has the
+	// key. For an identity with several owners this carries one key per owner,
+	// any of whom can then restore alone.
+	BackupSealPublicKeysB64 []string `json:"backup_seal_public_keys_b64,omitempty"`
 }
 
 // pairingState holds the key material offered by begin, so complete can check
@@ -215,6 +225,22 @@ func (s *CoreServer) handlePairingComplete(w http.ResponseWriter, r *http.Reques
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "Could not seal the owner", err.Error())
 		return
+	}
+
+	// Record who this instance seals its backups to, in the same act for the
+	// same reason as the owner above.
+	//
+	// A failure here does not undo the adoption. The instance is legitimately
+	// adopted at this point and refusing it now would leave it delegated but
+	// ownerless, which is worse than adopted but not yet backing up. It is
+	// logged loudly instead, because an agent that cannot back up is a real
+	// problem — just not one worth throwing away a valid adoption for.
+	if len(req.BackupSealPublicKeysB64) > 0 {
+		if err := s.recordBackupSealKeys(req.BackupSealPublicKeysB64); err != nil {
+			log.Printf("[pairing] WARNING: adopted, but the recovery keys were refused (%v) — this instance cannot back up until they are set", err)
+		}
+	} else {
+		log.Printf("[pairing] WARNING: adopted with no recovery key — this instance can only back up by being handed a seed phrase, which is what having a recovery key avoids")
 	}
 
 	// The private half has done its work; the identity is persisted and the key
@@ -367,14 +393,30 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// 3. Hand it back, along with who owns the box from now on: us.
+	// 3. Hand it back, along with who owns the box from now on: us, and the
+	// public key it should seal its backups to.
+	//
+	// Derived here rather than by the app, because the seed this comes from is
+	// already on this device and sending only the public half means the box can
+	// write archives forever and open none of them. An app that computed it
+	// would need the seed in a second place to do so.
+	sealKeys, err := s.ownerBackupSealPublicKeys()
+	if err != nil {
+		// Adopting a box that cannot back up would be handing somebody a
+		// machine that quietly accumulates data it can never restore.
+		writeError(w, http.StatusInternalServerError, "Could not derive the recovery key",
+			"the box would have been adopted with no way to back up: "+err.Error())
+		return
+	}
+
 	result, err := boxPairingComplete(client, base, pairingCompleteRequest{
-		AdoptionCode:   req.AdoptionCode,
-		DipEvent:       dip.DipEvent,
-		DelegatorIxn:   dip.DelegatorIxn,
-		DelegatorAID:   root.AID,
-		OwnerAID:       root.AID,
-		OwnerPublicKey: root.PublicKey,
+		AdoptionCode:            req.AdoptionCode,
+		DipEvent:                dip.DipEvent,
+		DelegatorIxn:            dip.DelegatorIxn,
+		DelegatorAID:            root.AID,
+		OwnerAID:                root.AID,
+		OwnerPublicKey:          root.PublicKey,
+		BackupSealPublicKeysB64: sealKeys,
 	})
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "The box refused the delegation", err.Error())

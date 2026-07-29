@@ -82,8 +82,8 @@ class _RecoveryOnboardingScreenState extends State<RecoveryOnboardingScreen> {
 
   Future<void> _verifyAndStart() async {
     final mnemonic = _mnemonicController.text.trim();
-    if (mnemonic.split(RegExp(r'\s+')).length < 12) {
-      setState(() => _error = 'Enter your 12+ word seed phrase');
+    if (mnemonic.split(RegExp(r'\s+')).length != 24) {
+      setState(() => _error = 'Enter all 24 words of your recovery phrase');
       return;
     }
     if (_archiveB64 == null) {
