@@ -20,15 +20,22 @@ func (s *CoreServer) mountSponsorRoutes(r chi.Router) {
 	// Under the parent "/api" router — relative paths.
 	r.Route("/sponsor", func(r chi.Router) {
 		r.Post("/invites", s.handleCreateSponsorInvite)
-		// Public: the sponsoring individual's agent looks up + redeems here (t=4).
+		// Public: the signing individual's agent looks up + redeems here (t=4).
 		r.Get("/invites/{token}", s.assetHandler.HandleGetEmployeeInviteInfo)
 		r.Post("/invites/{token}/redeem", s.handleRedeemSponsorInvite)
 	})
 }
 
-// handleCreateSponsorInvite mints the org-creation sponsor invite + its signed t=4
-// Ask. The sponsor relates to the org's ROOT identity (no portal exists yet during
-// onboarding). The org app renders the returned URL as the sponsor QR / link.
+// handleCreateSponsorInvite mints the founding-signer invite and its signed t=4
+// Ask. The signer relates to the organisation's ROOT identity — no portal exists
+// yet during onboarding. The organisation's app renders the returned URL as the
+// QR or link a founding signer scans.
+//
+// "Sponsor" survives in the identifiers, routes and JSON here because renaming
+// those is a wire change with consumers outside this repository. The word in
+// prose is "signer": what these people do is sign an organisation into
+// existence, and sponsorship implies a financial relationship that is not what
+// this is.
 func (s *CoreServer) handleCreateSponsorInvite(w http.ResponseWriter, r *http.Request) {
 	publicURL := s.EndpointService.CurrentURL()
 	if publicURL == "" {
@@ -40,7 +47,7 @@ func (s *CoreServer) handleCreateSponsorInvite(w http.ResponseWriter, r *http.Re
 		orgOOBI = fmt.Sprintf("%s/public/oobi/%s", publicURL, id.AID)
 	}
 	if orgAID == "" {
-		http.Error(w, "org identity must exist before sponsoring (create keys first)", http.StatusBadRequest)
+		http.Error(w, "the organisation's identity must exist before it can be signed for (create keys first)", http.StatusBadRequest)
 		return
 	}
 	if prof, _ := s.DataStore.GetProfile(); prof != nil {
@@ -54,7 +61,7 @@ func (s *CoreServer) handleCreateSponsorInvite(w http.ResponseWriter, r *http.Re
 		Token:     genInviteToken(),
 		Role:      "Super Admin",
 		IsSponsor: true,
-		MaxUses:   1, // a single founding sponsor
+		MaxUses:   1, // a single founding signer
 		SiteAID:   orgAID,
 		SiteOOBI:  orgOOBI,
 	}

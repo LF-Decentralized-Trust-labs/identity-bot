@@ -7,7 +7,7 @@
 
 An organisation's agent created its own identity, and whoever redeemed a one-time invitation was written into a table as `Super Admin` with a signature filed beside it as evidence.
 
-Nothing consulted that evidence before acting. The owner-authority lookup falls back to *"this agent's own identity is the authority"* when no record is sealed, so the organisation owned itself. On rented hardware that means the box holds the only key that matters and nobody outside it can prove otherwise.
+Nothing consulted that evidence before acting. The owner-authority lookup falls back to *"this agent's own identity is the authority"* when no record is sealed, so the organisation owned itself. Where the agent runs on hardware its owner does not control, that means the host holds the only key that matters and nobody outside it can prove otherwise.
 
 The fallback is why this was invisible rather than broken. Everything kept working — it was simply signed by the wrong party.
 
@@ -36,16 +36,16 @@ Two consequences worth stating explicitly, because they are not obvious:
 
 ## Consequences
 
-**Good.** The organisation stops owning itself. A two-owner company cannot act without both, and cannot be founded by one. Ownership becomes checkable by anyone rather than asserted by a table.
+**Good.** The organisation stops owning itself. A two-owner organisation cannot act without both, and cannot be founded by one. Ownership becomes checkable by anyone rather than asserted by a table.
 
 **Costly.** Founding now requires collecting signatures from every designated signer, which is a multi-party ceremony rather than one HTTP call. An organisation whose signers cannot assemble cannot be founded — correctly, but it is a real constraint.
 
-**Accepted risk.** An `n`-of-`n` threshold means losing any one key ends the organisation's ability to act. This is why the recovery phrase is treated as one key in the signer set rather than a separate mechanism: with two or more owners it works only alongside one of them, so a found printout is not the company, and its presence turns 2-of-2 into 2-of-3.
+**Accepted risk.** An `n`-of-`n` threshold means losing any one key ends the organisation's ability to act. This is why the recovery phrase is treated as one key in the signer set rather than a separate mechanism: with two or more owners it works only alongside one of them, so a found printout is not the organisation, and its presence turns 2-of-2 into 2-of-3.
 
 ## Alternatives Considered
 
 **Keep the roster and check it before acting.** Rejected: it makes ownership a thing the software chooses to honour rather than a thing the identity *is*. The fallback that caused this bug would still exist, one layer up.
 
-**Delegation for organisations that own organisations.** Rejected. A delegation cannot be transferred, only destroyed — so a delegated subsidiary could not be sold without killing its identity and everything it ever signed. Separate inception with the parent as a signer makes a sale a key rotation, and the company survives its owner.
+**Delegation for organisations that own organisations.** Rejected. A delegation cannot be transferred, only destroyed — so a delegated organisation could not change hands without killing its identity and everything it ever signed. Separate inception with the parent as a signer makes a transfer of control a key rotation: the AID is unchanged and everything it signed still verifies. An identity that can outlive a relationship must not have that relationship built into it.
 
 **Weighted thresholds at founding.** Deferred, not rejected. Founding is unanimous regardless; the ongoing threshold is configurable, and weighted forms are a later refinement.

@@ -8,7 +8,7 @@
 
 Every backup key slot derived its wrapping key from something the owner holds — the recovery phrase, a passphrase, a guardian group. That means the machine writing the archive had to be given one of those secrets. The client loaded the phrase and posted it with every export.
 
-When that machine is a rented computer in somebody else's building, handing it the phrase gives away the identity itself, permanently and irrevocably. Unpairing does not undo it; deleting the instance does not undo it. **A backup should not cost more than what it protects.**
+When that machine is one somebody else operates — a hosted instance, a shared server, any hardware whose owner is not the identity's owner — handing it the phrase gives away the identity itself, permanently and irrevocably. Unpairing does not undo it; deleting the instance does not undo it. **A backup should not cost more than what it protects.**
 
 It had two further consequences that were not obvious:
 
@@ -36,7 +36,7 @@ Two related changes follow from the same reasoning:
 
 ## Consequences
 
-**Good.** A rented machine can back up an identity it cannot read. The phrase stops being the price of a routine operation, which is what makes deleting it after recording possible. For an organisation, one slot per signer is the same mechanism with no wire change.
+**Good.** A machine the identity's owner does not control can back up an identity it cannot read. The phrase stops being the price of a routine operation, which is what makes deleting it after recording possible. For an organisation, one slot per signer is the same mechanism with no wire change.
 
 **Costly.** An agent that has neither a seed nor recovery keys must refuse to export rather than write an archive nobody could open — a new failure mode, and the right one. Pairing gained a required field.
 
@@ -48,4 +48,4 @@ Two related changes follow from the same reasoning:
 
 **Name recipients in the manifest so the right slot can be found directly.** Rejected: the manifest is not encrypted, so it would publish an organisation's ownership to anyone holding its backup.
 
-**Keep sending the phrase and accept it.** Rejected. It is the thing that makes renting hardware unsafe, and it forced the phrase to live on the device permanently.
+**Keep sending the phrase and accept it.** Rejected. It is the thing that makes running on hardware you do not control unsafe, and it forced the phrase to live on the device permanently.

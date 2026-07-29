@@ -40,7 +40,7 @@ Four states, and the distinctions are the point:
 
 A platform with no detector returns `Unknown` with the detail *"this says nothing about whether the machine has security hardware"* — not `Absent`.
 
-The Linux detector asks "is it there" and "can I use it" as separate questions, checks confidential computing before the TPM (sealed infrastructure has no TPM at all, so a TPM-first check would reject the strongest environment), and treats a host-side `/dev/sev` as a **provider** capability rather than a key-protection one. A host that can launch sealed guests cannot protect its own keys with any of that, and conflating the two would let a provisioning machine claim the protection it sells rather than provides.
+The Linux detector asks "is it there" and "can I use it" as separate questions, checks confidential computing before the TPM (sealed infrastructure has no TPM at all, so a TPM-first check would reject the strongest environment), and treats a host-side `/dev/sev` as a **provider** capability rather than a key-protection one. A host that can launch sealed guests cannot protect its own keys with any of that, and conflating the two would let a host claim the protection it provides to others rather than the protection it has itself.
 
 ## Consequences
 
