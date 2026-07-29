@@ -31,8 +31,12 @@ type InvocationEvent struct {
 	CorrelationID   string   `json:"correlation_id,omitempty"`
 	AuthLevel       string   `json:"auth_level,omitempty"`
 	ParentEventID   string   `json:"parent_event_id,omitempty"`
-	SignerAID       string   `json:"signer_aid,omitempty"`
-	Signature       string   `json:"signature,omitempty"`
+	// OrchestratedBy records the master orchestrator that dispatched this step (the
+	// "under whose direction" dimension), distinct from CallerAID (the worker that
+	// executed under its own authority). Empty for a direct call.
+	OrchestratedBy string `json:"orchestrated_by,omitempty"`
+	SignerAID      string `json:"signer_aid,omitempty"`
+	Signature      string `json:"signature,omitempty"`
 }
 
 // EventSigner signs an invocation event's canonical JSON. The server layer injects an
@@ -53,6 +57,15 @@ func (m *Manager) SetEventSigner(s EventSigner) {
 // at startup) — the vault stays encrypted at rest and unlocks lazily.
 func (m *Manager) SetVaultKeyProvider(p VaultKeyProvider) {
 	m.credentials.SetKeyProvider(p)
+}
+
+// SetAuthorizer injects the real governance-gateway ingress/egress decision (server
+// layer, at startup), replacing the structural default. Nil leaves the structural
+// authorizer in place.
+func (m *Manager) SetAuthorizer(a Authorizer) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.authorizer = a
 }
 
 func (m *Manager) getEventSigner() EventSigner {
@@ -90,6 +103,8 @@ func (m *Manager) recordInvocation(caller CallerContext, capabilityID, executorT
 		ExecutorType:    executorType,
 		CorrelationID:   caller.CorrelationID,
 		AuthLevel:       caller.AuthLevel,
+		ParentEventID:   caller.ParentEventID,
+		OrchestratedBy:  caller.OrchestratedBy,
 	}
 	// Sign the canonical event JSON (signature fields empty in the signed payload).
 	if signer := m.getEventSigner(); signer != nil {
@@ -110,6 +125,15 @@ func (m *Manager) recordInvocation(caller CallerContext, capabilityID, executorT
 		return 0
 	}
 	return id
+}
+
+// RecordGovernedEvent writes one signed governance event for an action that is not a
+// plug-in capability invocation — today the master orchestrator's dispatch event
+// ("agent.orchestrate"), which anchors the worker steps that follow it (they carry its
+// id as ParentEventID). Returns the event's row id (0 if unwritten). Exposed for the
+// server layer; the same signing + chokepoint as a capability invocation.
+func (m *Manager) RecordGovernedEvent(caller CallerContext, capabilityID, status string) int64 {
+	return m.recordInvocation(caller, capabilityID, "orchestrator", nil, status, time.Now())
 }
 
 // InsertInvocationEvent persists one event; returns its row id.

@@ -49,9 +49,13 @@ func (s *CoreServer) sandboxRoutes(r chi.Router) {
 	r.Post("/mcp/agents", s.handleProvisionAgent)
 	r.Get("/mcp/agents", s.handleListAgents)
 	r.Patch("/mcp/agents/{id}", s.handleUpdateAgentConfig)
+	r.Post("/mcp/orchestrate", s.handleOrchestrate)
 	r.Post("/mcp/tokens", s.handleMintMCPToken)
 	r.Get("/mcp/tokens", s.handleListMCPTokens)
 	r.Delete("/mcp/tokens/{name}", s.handleRevokeMCPToken)
+	r.Get("/mcp/access-policy", s.handleGetAccessPolicies)
+	r.Put("/mcp/access-policy/{capability}", s.handleSetAccessPolicy)
+	r.Delete("/mcp/access-policy/{capability}", s.handleDeleteAccessPolicy)
 	r.Get("/activity/invocations", s.handleListInvocationEvents)
 	r.Post("/vault/credentials", s.handleSetVaultCredential)
 	r.Get("/vault/credentials", s.handleListVaultCredentials)
@@ -94,6 +98,14 @@ func (s *CoreServer) handleInvokeCapability(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	caller := s.resolveCaller(r)
+	// Support the same identity-first path as /mcp: an optional signed-request
+	// envelope proves the caller AID, and a proven agent picks up its lineage +
+	// ceiling. Both are no-ops when no envelope is presented.
+	if err := s.verifyRequestEnvelope(r, "invoke:"+id, body, &caller); err != nil {
+		jsonError(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+	s.enrichCallerFromIdentity(&caller)
 
 	res, err := s.SandboxManager.InvokeCapability(r.Context(), caller, id, body)
 	if err != nil {

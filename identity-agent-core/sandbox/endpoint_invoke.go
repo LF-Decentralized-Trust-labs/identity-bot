@@ -99,6 +99,15 @@ type CallerContext struct {
 	// verified capability grant: capabilityID -> {argKey: [allowedValues]}. Enforced
 	// against the request arguments at invoke time. Empty = unconstrained.
 	ResourceConstraints map[string]interface{}
+	// OrchestratedBy is the AID of the master orchestrator that dispatched this call,
+	// when the invocation is one step of an orchestration. The step still executes
+	// under the worker's OWN authority (CallerAID + grant); OrchestratedBy records who
+	// coordinated it, so the governance log answers "under whose direction" as well as
+	// "under whose authority". Empty for a direct call.
+	OrchestratedBy string
+	// ParentEventID links this invocation to the orchestration's dispatch event, so a
+	// full multi-agent workflow is one parent→children trace. Empty for a direct call.
+	ParentEventID string
 }
 
 // InvokeResult is a capability's response, routed back through the endpoint.

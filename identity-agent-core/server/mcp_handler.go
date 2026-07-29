@@ -54,6 +54,9 @@ func (s *CoreServer) handleMCP(w http.ResponseWriter, r *http.Request) {
 		jsonResponse(w, mcpResp{JSONRPC: "2.0", ID: req.ID, Error: &mcpErr{Code: -32001, Message: err.Error()}})
 		return
 	}
+	// Identity-first: an agent that proved its AID by envelope (no bearer token) picks
+	// up its delegation lineage + capability ceiling from its provisioned asset here.
+	s.enrichCallerFromIdentity(&caller)
 
 	switch req.Method {
 	case "notifications/initialized":
