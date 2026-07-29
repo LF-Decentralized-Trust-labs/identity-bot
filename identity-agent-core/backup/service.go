@@ -92,8 +92,21 @@ func (s *Service) Export(mnemonic, passphrase, destPath string, tiers []string) 
 	return s.ExportWithReason(mnemonic, passphrase, destPath, tiers, "")
 }
 
+// ExportWithSeed is Export for a caller that already holds the seed in bytes.
+//
+// The distinction matters at the edge rather than here: a root device reads its
+// own wrapped seed off disk instead of asking its owner to type the words, so
+// the secret never travels to take a backup. Both paths derive the same key.
+func (s *Service) ExportWithSeed(mnemonic, seedB64, passphrase, destPath string, tiers []string) (*ExportResult, error) {
+	return s.exportWithReason(mnemonic, seedB64, passphrase, destPath, tiers, "")
+}
+
 // ExportWithReason creates a full or delta archive based on schedule and delta chain health.
 func (s *Service) ExportWithReason(mnemonic, passphrase, destPath string, tiers []string, reason string) (*ExportResult, error) {
+	return s.exportWithReason(mnemonic, "", passphrase, destPath, tiers, reason)
+}
+
+func (s *Service) exportWithReason(mnemonic, seedB64, passphrase, destPath string, tiers []string, reason string) (*ExportResult, error) {
 	start := time.Now()
 	collector := s.Collector()
 	opts := DefaultCollectOptions(tiers)
@@ -168,8 +181,17 @@ func (s *Service) ExportWithReason(mnemonic, passphrase, destPath string, tiers 
 		return nil, err
 	}
 
+	var seedBytes []byte
+	if seedB64 != "" {
+		if seedBytes, err = DecodeB64(seedB64); err != nil {
+			s.recordFailure(opts.Tiers, err, time.Since(start))
+			return nil, fmt.Errorf("root seed is not valid base64: %w", err)
+		}
+	}
+
 	result, err := collector.CreateArchive(opts, ExportRequest{
 		Mnemonic:             mnemonic,
+		BIP39Seed:            seedBytes,
 		Passphrase:           passphrase,
 		Tiers:                opts.Tiers,
 		SnapshotType:         snapshotType,

@@ -226,6 +226,38 @@ def create_hybrid_inception_event(use_synthetic: bool = False) -> dict:
     return build_hybrid_inception(material)
 
 
+def _keri_version() -> str:
+    try:
+        import keri
+        return getattr(keri, "__version__", "unknown")
+    except Exception:
+        return "unavailable"
+
+
+def _check_keri_api() -> None:
+    """Fail at startup if keripy is not the version this driver is written for.
+
+    The failure this prevents is a confusing one. An older keripy has
+    eventing.incept(keys, sith, nxt, ...) rather than (keys, isith, ndigs,
+    nsith, ...), so the driver starts fine, serves /status happily, and then
+    fails one specific call with "incept() got an unexpected keyword argument
+    'isith'" — which reads as a bug in the caller rather than as the wrong
+    library being installed. Better to refuse to start and say so.
+    """
+    import inspect
+    from keri.core import eventing
+
+    params = set(inspect.signature(eventing.incept).parameters)
+    missing = {"isith", "ndigs", "nsith"} - params
+    if missing:
+        sys.exit(
+            "FATAL: this driver needs keripy with %s on eventing.incept, and the "
+            "installed keripy (%s) does not have them. Point KERI_DRIVER_PYTHON at "
+            "an interpreter with keri==1.1.17."
+            % (", ".join(sorted(missing)), _keri_version())
+        )
+
+
 def create_inception_event(public_key: str, next_public_key: str) -> dict:
     pub_bytes = _extract_raw_key(public_key)
     next_bytes = _extract_raw_key(next_public_key)
@@ -262,6 +294,13 @@ def status():
         "driver": "keri-core",
         "version": "0.1.0",
         "keri_library": "keripy",
+        # Reported so a client adopting an already-running driver can tell
+        # WHICH driver it adopted. Without these, editing this file and
+        # restarting an agent looks like it took effect when the agent may have
+        # adopted somebody else's driver running older code — a silent no-op
+        # that reads as a failed change.
+        "keri_version": _keri_version(),
+        "script_path": os.path.abspath(__file__),
         "uptime": f"{uptime:.0f}s",
         "endpoints": [
             "GET /status",
@@ -1474,6 +1513,7 @@ def generate_multisig_event():
     aids = data.get("aids", [])
     threshold = data.get("threshold", 1)
     current_keys = data.get("current_keys", [])
+    next_keys = data.get("next_keys", [])
     event_type = data.get("event_type", "inception")
 
     if not aids or not current_keys:
@@ -1488,11 +1528,25 @@ def generate_multisig_event():
         key_qb64s = [v.qb64 for v in verfers]
 
         if event_type == "inception":
+            # Next-key digests, not an empty list.
+            #
+            # An inception with no ndigs commits to no successor keys, so the
+            # identity it creates can never be rotated. For an organisation's
+            # root that is not a limitation, it is a dead end: a signer whose
+            # key is compromised could never be replaced, and transferring
+            # ownership — which is a rotation, replacing one signer's key with
+            # the buyer's — would be impossible. Single-signature inception has
+            # always passed a real digest here; multi-signature did not.
+            ndigs = []
+            for key in next_keys:
+                raw = _extract_raw_key(key)
+                ndigs.append(coring.Diger(raw=raw, code=MtrDex.Blake3_256).qb64)
+
             serder = eventing.incept(
                 keys=key_qb64s,
                 isith=str(threshold),
-                nsith=str(threshold),
-                ndigs=[],
+                nsith=str(threshold) if ndigs else "0",
+                ndigs=ndigs,
                 code=MtrDex.Blake3_256,
             )
         else:
@@ -1744,8 +1798,11 @@ if __name__ == "__main__":
     port = int(os.environ.get("KERI_DRIVER_PORT", "9999"))
     host = os.environ.get("KERI_DRIVER_HOST", "127.0.0.1")
 
+    _check_keri_api()
+
     print(f"[keri-driver] Starting KERI Core Driver on {host}:{port}")
-    print(f"[keri-driver] KERI library: keripy (reference)")
+    print(f"[keri-driver] KERI library: keripy {_keri_version()}")
+    print(f"[keri-driver] Script: {os.path.abspath(__file__)}")
     print(f"[keri-driver] Stateful endpoints:  /status, /inception, /rotation, /interact, /reload-identity, /sign, /sign-for-name, /kel, /verify")
     print(f"[keri-driver] Stateless endpoints: /cesr-encode, /validate-kel, /resolve-oobi, /format-credential, /generate-multisig-event")
     print(f"[keri-driver] Credential endpoints: /credential/issue, /credential/present, /credential/verify")

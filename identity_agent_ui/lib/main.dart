@@ -17,6 +17,7 @@ import 'services/desktop_on_device_keri_service.dart';
 import 'services/mobile_on_device_keri_service.dart';
 import 'services/mobile_remote_keri_service.dart';
 import 'services/preferences_service.dart';
+import 'services/secure_key_store.dart';
 import 'services/backend_process_service.dart';
 import 'config/agent_config.dart';
 import 'bridge/keri_bridge_stub.dart'
@@ -33,6 +34,20 @@ Future<bool>? _backendStartupFuture;
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Move anything stored before profiles existed into the active profile,
+  // before a single read happens.
+  //
+  // Order matters more than it looks: every later read resolves through the
+  // profile scope, so a migration that ran afterwards would find the new
+  // location already consulted and empty — an installation with a perfectly
+  // good recovery phrase behaving as though it had none.
+  //
+  // Both migrations copy, verify, then delete, and leave the original in place
+  // if any step fails. On the phrase that is the difference between a
+  // migration and an identity nobody can recover.
+  await SecureKeyStore.migrateLegacyMnemonic();
+  await PreferencesService.migrateLegacyKeys();
 
   // Load persisted theme before the first frame.
   await ThemeNotifier.initialize();

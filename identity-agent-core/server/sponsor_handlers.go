@@ -20,15 +20,22 @@ func (s *CoreServer) mountSponsorRoutes(r chi.Router) {
 	// Under the parent "/api" router — relative paths.
 	r.Route("/sponsor", func(r chi.Router) {
 		r.Post("/invites", s.handleCreateSponsorInvite)
-		// Public: the sponsoring individual's agent looks up + redeems here (t=4).
+		// Public: the signing individual's agent looks up + redeems here (t=4).
 		r.Get("/invites/{token}", s.assetHandler.HandleGetEmployeeInviteInfo)
 		r.Post("/invites/{token}/redeem", s.handleRedeemSponsorInvite)
 	})
 }
 
-// handleCreateSponsorInvite mints the org-creation sponsor invite + its signed t=4
-// Ask. The sponsor relates to the org's ROOT identity (no portal exists yet during
-// onboarding). The org app renders the returned URL as the sponsor QR / link.
+// handleCreateSponsorInvite mints the founding-signer invite and its signed t=4
+// Ask. The signer relates to the organisation's ROOT identity — no portal exists
+// yet during onboarding. The organisation's app renders the returned URL as the
+// QR or link a founding signer scans.
+//
+// "Sponsor" survives in the identifiers, routes and JSON here because renaming
+// those is a wire change with consumers outside this repository. The word in
+// prose is "signer": what these people do is sign an organisation into
+// existence, and sponsorship implies a financial relationship that is not what
+// this is.
 func (s *CoreServer) handleCreateSponsorInvite(w http.ResponseWriter, r *http.Request) {
 	publicURL := s.EndpointService.CurrentURL()
 	if publicURL == "" {
@@ -40,7 +47,7 @@ func (s *CoreServer) handleCreateSponsorInvite(w http.ResponseWriter, r *http.Re
 		orgOOBI = fmt.Sprintf("%s/public/oobi/%s", publicURL, id.AID)
 	}
 	if orgAID == "" {
-		http.Error(w, "org identity must exist before sponsoring (create keys first)", http.StatusBadRequest)
+		http.Error(w, "the organisation's identity must exist before it can be signed for (create keys first)", http.StatusBadRequest)
 		return
 	}
 	if prof, _ := s.DataStore.GetProfile(); prof != nil {
@@ -54,7 +61,7 @@ func (s *CoreServer) handleCreateSponsorInvite(w http.ResponseWriter, r *http.Re
 		Token:     genInviteToken(),
 		Role:      "Super Admin",
 		IsSponsor: true,
-		MaxUses:   1, // a single founding sponsor
+		MaxUses:   1, // a single founding signer
 		SiteAID:   orgAID,
 		SiteOOBI:  orgOOBI,
 	}
@@ -102,22 +109,46 @@ func (s *CoreServer) handleCreateSponsorInvite(w http.ResponseWriter, r *http.Re
 	})
 }
 
-// handleRedeemSponsorInvite is called by the sponsoring individual's agent (t=4).
-// It stores the vouch (the org's proof a real person stands behind it) and makes
-// the sponsor an ACTIVE super-admin employee immediately — the founder needs no
-// approval above them.
+// handleRedeemSponsorInvite is called by the signing individual's agent (t=4).
+//
+// It seals them as the organisation's owner authority, and records them on the
+// roster as an active administrator.
+//
+// The sealing is the part that matters, and its absence was the bug. Redeeming
+// used to write an employee row saying "Super Admin" and file a signature
+// beside it as evidence — a string in a table with no cryptographic force.
+// Nothing consulted it before acting, so ownerAuthority() fell through to its
+// default of "this agent's own identity is the authority" and the organisation
+// owned itself. On rented hardware that meant the box held the only key that
+// mattered and nobody outside it could prove otherwise.
+//
+// Sealing here closes that by making the signer's key the one this agent
+// answers to, which is what most operations already check.
 func (s *CoreServer) handleRedeemSponsorInvite(w http.ResponseWriter, r *http.Request) {
 	token := chi.URLParam(r, "token")
 	var body struct {
 		PairwiseAID  string `json:"pairwise_aid"`
 		Name         string `json:"name"`
 		OOBI         string `json:"oobi"`
+		PublicKey    string `json:"public_key"`
 		VouchSig     string `json:"vouch_sig"`
 		VouchPayload string `json:"vouch_payload"`
 	}
 	json.NewDecoder(r.Body).Decode(&body)
 	if body.PairwiseAID == "" || body.VouchSig == "" {
 		http.Error(w, "pairwise_aid and vouch_sig required", http.StatusBadRequest)
+		return
+	}
+	// A signer without a public key cannot be sealed, and an organisation whose
+	// owner cannot be verified is the condition this ceremony exists to prevent.
+	// Checked here with the other required fields, before anything reaches into
+	// the roster — a request that cannot succeed should not touch subsystems on
+	// its way to being refused.
+	if body.PublicKey == "" {
+		http.Error(w,
+			"public_key is required: without it this organisation could not verify its own owner, "+
+				"which is the condition this ceremony exists to prevent",
+			http.StatusBadRequest)
 		return
 	}
 	inv, ok := s.assetHandler.Store.GetEmployeeInvite(token)
@@ -140,10 +171,29 @@ func (s *CoreServer) handleRedeemSponsorInvite(w http.ResponseWriter, r *http.Re
 		VouchSig:     body.VouchSig,
 		VouchPayload: body.VouchPayload,
 	}
+	// Seal the signer as this agent's owner BEFORE anything is written down.
+	//
+	// Ordering is the whole point. If the roster were written first and sealing
+	// then failed, the organisation would look founded — an active Super Admin
+	// on the list — while still answering to nobody but itself. Sealing first
+	// means a failure leaves an unfounded org that can be founded again, which
+	// is a recoverable state rather than a misleading one.
+	if err := s.SealOwnerAuthority(OwnerAuthority{
+		AID:       body.PairwiseAID,
+		PublicKey: body.PublicKey,
+	}); err != nil {
+		http.Error(w, "could not seal the owner: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	if err := s.assetHandler.Store.UpsertEmployee(emp); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	_ = s.assetHandler.Store.IncrementEmployeeInviteUse(token)
-	scanWriteJSON(w, map[string]string{"status": "active", "role": "Super Admin"})
+	scanWriteJSON(w, map[string]string{
+		"status": "active",
+		"role":   "Super Admin",
+		"owner":  body.PairwiseAID,
+	})
 }

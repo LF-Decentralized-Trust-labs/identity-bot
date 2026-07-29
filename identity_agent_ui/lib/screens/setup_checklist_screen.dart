@@ -472,6 +472,30 @@ class _SetupChecklistScreenState extends State<SetupChecklistScreen> {
               child: ElevatedButton(
                 onPressed: _seedConfirmed
                     ? () async {
+                        // Confirming is what makes it safe to forget. Until
+                        // this moment the words exist only on the device, so
+                        // deleting them would destroy the identity; afterwards
+                        // they exist on paper, and the copy here is only a
+                        // second place to steal them from.
+                        //
+                        // The seed itself stays — every future contact and
+                        // login key derives from it. What goes is the readable
+                        // encoding of it.
+                        final forgotten =
+                            await SecureKeyStore.forgetWordsAfterRecording();
+                        if (!forgotten) {
+                          // Never claim it was removed when it was not. The
+                          // owner would stop guarding something they believe is
+                          // already gone.
+                          if (!mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                  'Saved, but the phrase could not be removed from this '
+                                  'device. It is still stored here.'),
+                            ),
+                          );
+                        }
                         await SetupTaskService.markComplete(SetupTask.backupSeedPhrase);
                         _goBack();
                       }

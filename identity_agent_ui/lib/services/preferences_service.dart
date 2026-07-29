@@ -1,5 +1,7 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'profile_scope.dart';
+
 enum AgentMode {
   createNew,
   connectExisting,
@@ -29,9 +31,42 @@ class PreferencesService {
 
   static Future<SharedPreferences> get _prefs => SharedPreferences.getInstance();
 
+  /// Every stored value belongs to a profile.
+  ///
+  /// Resolved per call rather than cached in a field, because the active
+  /// profile can change while the app is running and a stale scope would read
+  /// one identity's settings into another's session.
+  static Future<String> _k(String name) => ProfileScope.key(name);
+
+  /// Moves values written before profiles existed into the active profile.
+  ///
+  /// Safe to call repeatedly: each value moves once, and anything already
+  /// written under the new scheme is left alone.
+  static Future<void> migrateLegacyKeys() async {
+    final prefs = await _prefs;
+    for (final name in _allKeys) {
+      await ProfileScope.migrateValue(
+        legacyName: name,
+        read: (k) async => prefs.getString(k),
+        write: (k, v) async => prefs.setString(k, v),
+        remove: (k) async => prefs.remove(k),
+      );
+    }
+  }
+
+  static const List<String> _allKeys = [
+    _modeKey,
+    _entityTypeKey,
+    _serverUrlKey,
+    _setupCompleteKey,
+    _hostingChoiceKey,
+    _remoteBrainUrlKey,
+    _screenLockEnabledKey,
+  ];
+
   static Future<AgentMode?> getMode() async {
     final prefs = await _prefs;
-    final value = prefs.getString(_modeKey);
+    final value = prefs.getString(await _k(_modeKey));
     if (value == null) return null;
     return AgentMode.values.firstWhere(
       (m) => m.name == value,
@@ -41,12 +76,12 @@ class PreferencesService {
 
   static Future<void> setMode(AgentMode mode) async {
     final prefs = await _prefs;
-    await prefs.setString(_modeKey, mode.name);
+    await prefs.setString(await _k(_modeKey), mode.name);
   }
 
   static Future<EntityType?> getEntityType() async {
     final prefs = await _prefs;
-    final value = prefs.getString(_entityTypeKey);
+    final value = prefs.getString(await _k(_entityTypeKey));
     if (value == null) return null;
     return EntityType.values.firstWhere(
       (e) => e.name == value,
@@ -56,32 +91,32 @@ class PreferencesService {
 
   static Future<void> setEntityType(EntityType type) async {
     final prefs = await _prefs;
-    await prefs.setString(_entityTypeKey, type.name);
+    await prefs.setString(await _k(_entityTypeKey), type.name);
   }
 
   static Future<String?> getServerUrl() async {
     final prefs = await _prefs;
-    return prefs.getString(_serverUrlKey);
+    return prefs.getString(await _k(_serverUrlKey));
   }
 
   static Future<void> setServerUrl(String url) async {
     final prefs = await _prefs;
-    await prefs.setString(_serverUrlKey, url);
+    await prefs.setString(await _k(_serverUrlKey), url);
   }
 
   static Future<bool> isSetupComplete() async {
     final prefs = await _prefs;
-    return prefs.getBool(_setupCompleteKey) ?? false;
+    return prefs.getBool(await _k(_setupCompleteKey)) ?? false;
   }
 
   static Future<void> setSetupComplete(bool complete) async {
     final prefs = await _prefs;
-    await prefs.setBool(_setupCompleteKey, complete);
+    await prefs.setBool(await _k(_setupCompleteKey), complete);
   }
 
   static Future<HostingChoice?> getHostingChoice() async {
     final prefs = await _prefs;
-    final value = prefs.getString(_hostingChoiceKey);
+    final value = prefs.getString(await _k(_hostingChoiceKey));
     if (value == null) return null;
     return HostingChoice.values.firstWhere(
       (h) => h.name == value,
@@ -91,38 +126,38 @@ class PreferencesService {
 
   static Future<void> setHostingChoice(HostingChoice choice) async {
     final prefs = await _prefs;
-    await prefs.setString(_hostingChoiceKey, choice.name);
+    await prefs.setString(await _k(_hostingChoiceKey), choice.name);
   }
 
   static Future<String?> getRemoteBrainUrl() async {
     final prefs = await _prefs;
-    return prefs.getString(_remoteBrainUrlKey);
+    return prefs.getString(await _k(_remoteBrainUrlKey));
   }
 
   static Future<void> setRemoteBrainUrl(String url) async {
     final prefs = await _prefs;
-    await prefs.setString(_remoteBrainUrlKey, url);
+    await prefs.setString(await _k(_remoteBrainUrlKey), url);
   }
 
   static Future<bool> isScreenLockEnabled() async {
     final prefs = await _prefs;
-    return prefs.getBool(_screenLockEnabledKey) ?? false;
+    return prefs.getBool(await _k(_screenLockEnabledKey)) ?? false;
   }
 
   static Future<void> setScreenLockEnabled(bool enabled) async {
     final prefs = await _prefs;
-    await prefs.setBool(_screenLockEnabledKey, enabled);
+    await prefs.setBool(await _k(_screenLockEnabledKey), enabled);
   }
 
   static Future<void> clearAll() async {
     final prefs = await _prefs;
-    await prefs.remove(_modeKey);
-    await prefs.remove(_entityTypeKey);
-    await prefs.remove(_serverUrlKey);
-    await prefs.remove(_setupCompleteKey);
-    await prefs.remove(_hostingChoiceKey);
-    await prefs.remove(_remoteBrainUrlKey);
-    await prefs.remove(_screenLockEnabledKey);
+    await prefs.remove(await _k(_modeKey));
+    await prefs.remove(await _k(_entityTypeKey));
+    await prefs.remove(await _k(_serverUrlKey));
+    await prefs.remove(await _k(_setupCompleteKey));
+    await prefs.remove(await _k(_hostingChoiceKey));
+    await prefs.remove(await _k(_remoteBrainUrlKey));
+    await prefs.remove(await _k(_screenLockEnabledKey));
   }
 
   static String modeDisplayName(AgentMode mode) {

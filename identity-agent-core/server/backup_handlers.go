@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"identity-agent-core/backup"
+	"identity-agent-core/secureenclave"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -66,19 +68,32 @@ func (s *CoreServer) handleBackupExport(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "Invalid request", err.Error())
 		return
 	}
-	// A seed is only required when there is no other way to unlock the result.
-	// Once recovery public keys are configured the agent can export on its own,
-	// and asking for the phrase would hand this machine the identity it is only
-	// supposed to be storing.
-	if req.Mnemonic == "" && req.BIP39SeedB64 == "" && !s.hasSealRecipients() {
-		writeError(w, http.StatusBadRequest, "no way to unlock the archive",
-			"Provide a mnemonic, or configure recovery public keys so the archive can be sealed to their owners")
-		return
+	// Nobody has to send a phrase over the wire to take a backup.
+	//
+	// There are two ways an archive can end up openable, and the caller supplying
+	// a secret is neither of them. A delegated device seals to recovery public
+	// keys it was given at pairing. A ROOT device already holds its own seed —
+	// wrapped, on disk, put there at onboarding — so asking its owner to type the
+	// words again only creates a second copy in flight to protect. The seed it
+	// would derive from is the same seed either way.
+	//
+	// A mnemonic in the request is still honoured, because recovery flows pass
+	// one deliberately. It is simply no longer the price of a backup.
+	seed := req.BIP39SeedB64
+	if req.Mnemonic == "" && seed == "" && !s.hasSealRecipients() {
+		local, err := secureenclave.LoadRootSeed(s.DataDir)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "no way to unlock the archive",
+				"this agent holds no root seed and has no recovery keys, so an archive it wrote could never be opened — "+
+					"pair it with an owner, or supply a mnemonic: "+err.Error())
+			return
+		}
+		seed = base64.StdEncoding.EncodeToString(local)
 	}
 	if req.DestPath == "" {
 		req.DestPath = filepath.Join(s.DataDir, "exports", "manual-"+time.Now().UTC().Format("20060102-150405")+".iab")
 	}
-	result, err := s.backupService().Export(req.Mnemonic, req.Passphrase, req.DestPath, req.Tiers)
+	result, err := s.backupService().ExportWithSeed(req.Mnemonic, seed, req.Passphrase, req.DestPath, req.Tiers)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Export failed", err.Error())
 		return

@@ -8,7 +8,11 @@ import (
 	"identity-agent-core/secureenclave"
 )
 
-const sealTestMnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+// The 256-bit test vector. Kept in step with the phrase length the code
+// accepts — this fixture was a 12-word one, written before generation moved to
+// 24, and the two changes met on main as two green branches making a red merge
+// with no overlapping lines.
+const sealTestMnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art"
 
 func seedOnDisk(t *testing.T) *CoreServer {
 	t.Helper()

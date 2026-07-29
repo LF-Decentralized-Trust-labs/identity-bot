@@ -150,8 +150,14 @@ class BackupService {
     if (resp.statusCode != 200) throw Exception('Save config failed');
   }
 
+  /// Takes a backup.
+  ///
+  /// Deliberately does not send the recovery phrase, and no longer accepts one.
+  /// A delegated device seals to the recovery public keys it was given at
+  /// pairing; a root device reads its own wrapped seed off disk. Sending the
+  /// words would put a second copy of the identity on the wire and derive the
+  /// same key that would have been derived anyway.
   static Future<Map<String, dynamic>> exportNow({
-    required String mnemonic,
     String? passphrase,
     List<String>? tiers,
     String? destPath,
@@ -160,7 +166,6 @@ class BackupService {
       Uri.parse('$_base/export'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({
-        'mnemonic': mnemonic,
         if (passphrase != null) 'passphrase': passphrase,
         if (tiers != null) 'tiers': tiers,
         if (destPath != null) 'dest_path': destPath,

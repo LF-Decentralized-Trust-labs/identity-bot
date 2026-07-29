@@ -62,17 +62,14 @@ class _BackupSettingsScreenState extends State<BackupSettingsScreen> {
   }
 
   Future<void> _exportBackup() async {
-    final words = await SecureKeyStore.loadMnemonic();
-    if (words == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No seed phrase available on this device')),
-      );
-      return;
-    }
+    // No longer reads the phrase. It used to be loaded here and posted with
+    // every backup, which meant the words had to stay on the device forever —
+    // and it also meant somebody who had dutifully written them down and wanted
+    // them gone could not have a backup. The agent derives the same key from
+    // what it already holds.
     setState(() => _exporting = true);
     try {
       final result = await BackupService.exportNow(
-        mnemonic: words.join(' '),
         tiers: _config?.defaultTiers,
       );
       if (mounted) {
