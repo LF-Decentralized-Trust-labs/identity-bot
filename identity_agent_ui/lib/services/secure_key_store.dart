@@ -74,4 +74,31 @@ class SecureKeyStore {
   static Future<void> clearMnemonic() async {
     await _storage.delete(key: _mnemonicKey);
   }
+
+  /// Forgets the words, once their owner has confirmed they are written down.
+  ///
+  /// The words and the seed are different things and are kept for different
+  /// lengths of time. The SEED stays — every new pairwise contact key, login
+  /// relationship, asset key and the credential vault derives from it, so a
+  /// root device that discarded it could not form another relationship. The
+  /// WORDS are only an encoding of that seed, and once they exist on paper the
+  /// copy on the device is a second place to steal them from and nothing else.
+  ///
+  /// This is also what gives the reminder somewhere to stop. A prompt that ends
+  /// when a checkbox is ticked measures whether somebody clicked; one that ends
+  /// when the words are gone measures whether they actually wrote them down.
+  ///
+  /// Verifies the deletion rather than assuming it. A silent failure here would
+  /// leave the words in place while the interface said they were gone, which is
+  /// worse than not offering it — the owner would stop protecting something
+  /// they believe no longer exists.
+  static Future<bool> forgetWordsAfterRecording() async {
+    await _storage.delete(key: _mnemonicKey);
+    final stillThere = await _storage.containsKey(key: _mnemonicKey);
+    if (stillThere) {
+      debugPrint('[SecureKeyStore] the phrase is still stored after deletion');
+      return false;
+    }
+    return true;
+  }
 }

@@ -85,6 +85,22 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
   }
 
   void _generateAndStartInception() {
+    // An identity is never born on the web. SecureKeyStore falls back to
+    // localStorage there — readable by any script on the page — so creating a
+    // recovery phrase in a browser writes the whole identity somewhere anything
+    // running alongside it can read.
+    //
+    // The web build's job is being the interface to a local agent that already
+    // has an identity. Refused outright rather than warned about, because by
+    // the time a warning could be shown the phrase would already exist.
+    if (kIsWeb) {
+      setState(() => _profileFormError =
+          'An identity cannot be created in a browser — the recovery phrase '
+          'would be stored where other scripts on the page could read it. '
+          'Create it in the desktop or mobile app, then use this page to work '
+          'with it.');
+      return;
+    }
     final mnemonic = Bip39.generateMnemonic();
     _mnemonic = mnemonic;
     _startInception();
