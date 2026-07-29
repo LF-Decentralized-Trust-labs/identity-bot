@@ -96,7 +96,7 @@ func TestOpenArchiveWrongPassphrase(t *testing.T) {
 	}}
 	raw, _ := EncodeArchive(&ArchiveFile{Manifest: manifest, Ciphertext: ct})
 
-	_, _, err := OpenArchive(raw, OpenRequest{Mnemonic: "legal winner thank year wave sausage worth useful legal winner thank yellow"})
+	_, _, err := OpenArchive(raw, OpenRequest{Mnemonic: "legal winner thank year wave sausage worth useful legal winner thank year wave sausage worth useful legal winner thank year wave sausage worth title"})
 	if err == nil {
 		t.Fatal("wrong mnemonic should fail")
 	}

@@ -9,13 +9,13 @@ import (
 	"identity-agent-core/store"
 )
 
-const testMnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+const testMnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art"
 
 func TestRestoreWrongSeedFails(t *testing.T) {
 	archive := buildTestArchive(t, testMnemonic, nil)
 
 	_, err := RestoreFromArchive(archive, OpenRequest{
-		Mnemonic: "legal winner thank year wave sausage worth useful legal winner thank yellow",
+		Mnemonic: "legal winner thank year wave sausage worth useful legal winner thank year wave sausage worth useful legal winner thank year wave sausage worth title",
 	})
 	if err == nil {
 		t.Fatal("wrong seed must fail archive open")
