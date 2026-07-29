@@ -477,6 +477,9 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 	// G-052: public endpoint for IA to fetch signed login challenge bundle (QR pointer)
 	r.Get("/i/{token}", s.handleChallengeBundleServe)
 
+	// SEAM-5: public inbound DIDComm endpoint — encrypted IA-to-IA envelopes land here.
+	r.Post("/didcomm", s.handleDIDCommInbound)
+
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/health", s.handleHealth)
 		r.Get("/info", s.handleInfo)
@@ -592,7 +595,14 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 
 		s.mountLoginRoutes(r)
 		s.mountAssetRoutes(r)
-		s.mountEmployeeRoutes(r)
+		// An overlay (e.g. the Grape ID org backend) may provide its own, richer
+		// /employees routes. When it opts in via OVERLAY_OWNS_ORG_ROUTES=1, the core
+		// skips its built-in /employees so the overlay's MountExtraRoutes can own it
+		// without a chi double-mount panic. The /signer routes always mount — the org
+		// onboarding UI calls them.
+		if os.Getenv("OVERLAY_OWNS_ORG_ROUTES") != "1" {
+			s.mountEmployeeRoutes(r)
+		}
 		s.mountSignerRoutes(r)
 		s.mountVerificationRoutes(r)
 		s.mountWitnessRoutes(r)
