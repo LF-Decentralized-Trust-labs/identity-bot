@@ -1474,6 +1474,7 @@ def generate_multisig_event():
     aids = data.get("aids", [])
     threshold = data.get("threshold", 1)
     current_keys = data.get("current_keys", [])
+    next_keys = data.get("next_keys", [])
     event_type = data.get("event_type", "inception")
 
     if not aids or not current_keys:
@@ -1488,11 +1489,25 @@ def generate_multisig_event():
         key_qb64s = [v.qb64 for v in verfers]
 
         if event_type == "inception":
+            # Next-key digests, not an empty list.
+            #
+            # An inception with no ndigs commits to no successor keys, so the
+            # identity it creates can never be rotated. For an organisation's
+            # root that is not a limitation, it is a dead end: a signer whose
+            # key is compromised could never be replaced, and transferring
+            # ownership — which is a rotation, replacing one signer's key with
+            # the buyer's — would be impossible. Single-signature inception has
+            # always passed a real digest here; multi-signature did not.
+            ndigs = []
+            for key in next_keys:
+                raw = _extract_raw_key(key)
+                ndigs.append(coring.Diger(raw=raw, code=MtrDex.Blake3_256).qb64)
+
             serder = eventing.incept(
                 keys=key_qb64s,
                 isith=str(threshold),
-                nsith=str(threshold),
-                ndigs=[],
+                nsith=str(threshold) if ndigs else "0",
+                ndigs=ndigs,
                 code=MtrDex.Blake3_256,
             )
         else:

@@ -208,7 +208,13 @@ type DriverMultisigRequest struct {
 	AIDs        []string `json:"aids"`
 	Threshold   int      `json:"threshold"`
 	CurrentKeys []string `json:"current_keys"`
-	EventType   string   `json:"event_type"`
+	// NextKeys are what the identity commits to rotating to. Without them the
+	// inception commits to no successor and the identity can never rotate —
+	// which for an organisation means a compromised signer can never be
+	// replaced and ownership can never be transferred, since transferring is a
+	// rotation.
+	NextKeys  []string `json:"next_keys,omitempty"`
+	EventType string   `json:"event_type"`
 }
 
 type DriverMultisigResponse struct {
@@ -966,11 +972,16 @@ func (d *KeriDriver) ValidateKEL(aid string, events []map[string]interface{}) (*
 	return &result, nil
 }
 
-func (d *KeriDriver) GenerateMultisigEvent(aids []string, threshold int, currentKeys []string, eventType string) (*DriverMultisigResponse, error) {
+// GenerateMultisigEvent builds a multi-signature event.
+//
+// nextKeys may be empty for event types that do not commit to successors, but
+// an inception without them produces an identity that can never be rotated.
+func (d *KeriDriver) GenerateMultisigEvent(aids []string, threshold int, currentKeys, nextKeys []string, eventType string) (*DriverMultisigResponse, error) {
 	reqBody := DriverMultisigRequest{
 		AIDs:        aids,
 		Threshold:   threshold,
 		CurrentKeys: currentKeys,
+		NextKeys:    nextKeys,
 		EventType:   eventType,
 	}
 

@@ -2325,6 +2325,7 @@ func (s *CoreServer) handleGenerateMultisigEvent(w http.ResponseWriter, r *http.
 		AIDs        []string `json:"aids"`
 		Threshold   int      `json:"threshold"`
 		CurrentKeys []string `json:"current_keys"`
+		NextKeys    []string `json:"next_keys"`
 		EventType   string   `json:"event_type"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -2341,7 +2342,19 @@ func (s *CoreServer) handleGenerateMultisigEvent(w http.ResponseWriter, r *http.
 		req.EventType = "inception"
 	}
 
-	result, err := s.KeriDriver.GenerateMultisigEvent(req.AIDs, req.Threshold, req.CurrentKeys, req.EventType)
+	// An inception with no next keys produces an identity that can never
+	// rotate. For an organisation that is a dead end rather than a limitation:
+	// a compromised signer could never be replaced, and transferring ownership
+	// is itself a rotation. Refused rather than quietly produced, because the
+	// consequence only becomes visible on the day somebody needs to rotate and
+	// finds they cannot.
+	if req.EventType == "inception" && len(req.NextKeys) == 0 {
+		writeError(w, http.StatusBadRequest, "next_keys required for a multisig inception",
+			"without them this identity could never rotate its keys or change hands")
+		return
+	}
+
+	result, err := s.KeriDriver.GenerateMultisigEvent(req.AIDs, req.Threshold, req.CurrentKeys, req.NextKeys, req.EventType)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Multisig event generation failed", err.Error())
 		return
