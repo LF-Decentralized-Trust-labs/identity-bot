@@ -1441,20 +1441,21 @@ class CoreService {
     throw Exception('Failed to create employee invite: ${response.statusCode}');
   }
 
-  /// Mint the org-creation sponsor invite (t=4) + its signed Ask. Returns
-  /// {invite, token, url} — the org shows `url` as the sponsor QR/link. The org
-  /// AID must already exist (create keys first). The sponsoring individual scans
-  /// it, signs a vouch, and becomes the org's active super-admin.
-  Future<Map<String, dynamic>> createSponsorInvite() async {
+  /// Mint the organisation-founding invite (t=4) and its signed Ask. Returns
+  /// {invite, token, url} — the organisation shows `url` as the QR code or
+  /// link. The organisation AID must already exist (create keys first). The
+  /// signing individual scans it, signs a vouch, and becomes the
+  /// organisation's active super-admin.
+  Future<Map<String, dynamic>> createSignerInvite() async {
     final response = await _client.post(
-      Uri.parse('$baseUrl/api/sponsor/invites'),
+      Uri.parse('$baseUrl/api/signer/invites'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({}),
     );
     if (response.statusCode == 200 || response.statusCode == 201) {
       return jsonDecode(response.body) as Map<String, dynamic>;
     }
-    throw Exception('Failed to create sponsor invite: ${response.statusCode}');
+    throw Exception('Failed to create signer invite: ${response.statusCode}');
   }
 
   /// The org roster. Each entry: {pairwise_aid, name, role, status, ...}.

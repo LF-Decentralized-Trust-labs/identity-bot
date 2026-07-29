@@ -83,9 +83,9 @@ func TestRedeemingWithoutAPublicKeyIsRefused(t *testing.T) {
 	s, _ := orgServer(t)
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPost, "/api/sponsor/invites/tok/redeem",
+	r := httptest.NewRequest(http.MethodPost, "/api/signer/invites/tok/redeem",
 		strings.NewReader(`{"pairwise_aid":"ESIGNER","vouch_sig":"sig"}`))
-	s.handleRedeemSponsorInvite(w, r)
+	s.handleRedeemSignerInvite(w, r)
 
 	if w.Code == http.StatusOK {
 		t.Fatal("an organisation was founded with an owner it could not verify")

@@ -70,7 +70,7 @@ func (s *CoreServer) createSignedAssetChallenge(assetID, audience string, disclo
 	// Membership-gated asset: anchor the relationship to the asset's CONTROLLER
 	// (its delegator — an organization or an individual), not the per-asset AID,
 	// so the signer presents the same constant pairwise it enrolled with
-	// (sponsorship / add_employee) — "prove you're the identity the controller
+	// (signer enrolment / add_employee) — "prove you're the identity the controller
 	// already knows" instead of creating a fresh per-site account. The scanner
 	// independently verifies the delegation (the asset's dip event) before
 	// honoring the anchor.

@@ -13,30 +13,24 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-func (s *CoreServer) mountSponsorRoutes(r chi.Router) {
+func (s *CoreServer) mountSignerRoutes(r chi.Router) {
 	if s.assetHandler == nil {
 		return
 	}
 	// Under the parent "/api" router — relative paths.
-	r.Route("/sponsor", func(r chi.Router) {
-		r.Post("/invites", s.handleCreateSponsorInvite)
+	r.Route("/signer", func(r chi.Router) {
+		r.Post("/invites", s.handleCreateSignerInvite)
 		// Public: the signing individual's agent looks up + redeems here (t=4).
 		r.Get("/invites/{token}", s.assetHandler.HandleGetEmployeeInviteInfo)
-		r.Post("/invites/{token}/redeem", s.handleRedeemSponsorInvite)
+		r.Post("/invites/{token}/redeem", s.handleRedeemSignerInvite)
 	})
 }
 
-// handleCreateSponsorInvite mints the founding-signer invite and its signed t=4
+// handleCreateSignerInvite mints the founding-signer invite and its signed t=4
 // Ask. The signer relates to the organisation's ROOT identity — no portal exists
 // yet during onboarding. The organisation's app renders the returned URL as the
 // QR or link a founding signer scans.
-//
-// "Sponsor" survives in the identifiers, routes and JSON here because renaming
-// those is a wire change with consumers outside this repository. The word in
-// prose is "signer": what these people do is sign an organisation into
-// existence, and sponsorship implies a financial relationship that is not what
-// this is.
-func (s *CoreServer) handleCreateSponsorInvite(w http.ResponseWriter, r *http.Request) {
+func (s *CoreServer) handleCreateSignerInvite(w http.ResponseWriter, r *http.Request) {
 	publicURL := s.EndpointService.CurrentURL()
 	if publicURL == "" {
 		publicURL = s.getPublicURL(r)
@@ -60,7 +54,7 @@ func (s *CoreServer) handleCreateSponsorInvite(w http.ResponseWriter, r *http.Re
 	inv := asset.EmployeeInvite{
 		Token:     genInviteToken(),
 		Role:      "Super Admin",
-		IsSponsor: true,
+		IsSigner: true,
 		MaxUses:   1, // a single founding signer
 		SiteAID:   orgAID,
 		SiteOOBI:  orgOOBI,
@@ -70,7 +64,7 @@ func (s *CoreServer) handleCreateSponsorInvite(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	pwAID, pwOOBI, seed, err := s.mintPairwise("sponsor")
+	pwAID, pwOOBI, seed, err := s.mintPairwise("signer")
 	if err != nil {
 		http.Error(w, "mint signer: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -109,7 +103,7 @@ func (s *CoreServer) handleCreateSponsorInvite(w http.ResponseWriter, r *http.Re
 	})
 }
 
-// handleRedeemSponsorInvite is called by the signing individual's agent (t=4).
+// handleRedeemSignerInvite is called by the signing individual's agent (t=4).
 //
 // It seals them as the organisation's owner authority, and records them on the
 // roster as an active administrator.
@@ -124,7 +118,7 @@ func (s *CoreServer) handleCreateSponsorInvite(w http.ResponseWriter, r *http.Re
 //
 // Sealing here closes that by making the signer's key the one this agent
 // answers to, which is what most operations already check.
-func (s *CoreServer) handleRedeemSponsorInvite(w http.ResponseWriter, r *http.Request) {
+func (s *CoreServer) handleRedeemSignerInvite(w http.ResponseWriter, r *http.Request) {
 	token := chi.URLParam(r, "token")
 	var body struct {
 		PairwiseAID  string `json:"pairwise_aid"`
@@ -152,22 +146,22 @@ func (s *CoreServer) handleRedeemSponsorInvite(w http.ResponseWriter, r *http.Re
 		return
 	}
 	inv, ok := s.assetHandler.Store.GetEmployeeInvite(token)
-	if !ok || inv.Revoked || !inv.IsSponsor {
-		http.Error(w, "invalid sponsor invite", http.StatusBadRequest)
+	if !ok || inv.Revoked || !inv.IsSigner {
+		http.Error(w, "invalid signer invite", http.StatusBadRequest)
 		return
 	}
 	if inv.MaxUses > 0 && inv.UseCount >= inv.MaxUses {
-		http.Error(w, "sponsor invite already used", http.StatusBadRequest)
+		http.Error(w, "signer invite already used", http.StatusBadRequest)
 		return
 	}
 	emp := asset.Employee{
 		PairwiseAID:  body.PairwiseAID,
 		Name:         body.Name,
 		Role:         "Super Admin",
-		Status:       "active", // founding sponsor is active immediately
+		Status:       "active", // founding signer is active immediately
 		InviteToken:  token,
 		OOBI:         body.OOBI,
-		IsSponsor:    true,
+		IsSigner:    true,
 		VouchSig:     body.VouchSig,
 		VouchPayload: body.VouchPayload,
 	}
