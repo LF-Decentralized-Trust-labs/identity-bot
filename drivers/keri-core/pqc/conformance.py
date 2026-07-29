@@ -1,4 +1,4 @@
-"""Stock keri 1.1.17 conformance checks for hybrid PQC hybrid icp events."""
+"""Stock keri 1.1.17 conformance checks for hybrid post-quantum icp events."""
 
 from __future__ import annotations
 

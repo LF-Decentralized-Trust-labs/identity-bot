@@ -10,7 +10,7 @@ import (
 	"github.com/zeebo/blake3"
 )
 
-// GenuinenessAxis reports code-plane binary attestation (SEAM-20 §5.3).
+// GenuinenessAxis reports code-plane binary attestation.
 // Trust gates on blake3_256; sha256 fields are interop-only.
 type GenuinenessAxis struct {
 	Status             string `json:"status"` // verified | mismatch | unknown

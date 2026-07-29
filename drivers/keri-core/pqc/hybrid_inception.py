@@ -1,4 +1,4 @@
-"""Build hybrid PQC KERI-conformant hybrid icp — keripy reference (keri==1.1.17)."""
+"""Build a KERI-conformant hybrid post-quantum icp — keripy reference (keri==1.1.17)."""
 
 from __future__ import annotations
 
@@ -84,7 +84,7 @@ def material_to_cesr(material: HybridKeyMaterial) -> dict[str, str]:
 
 
 def _hybrid_anchor(cesr: dict[str, str]) -> list[dict[str, Any]]:
-    """IA-HYBRID-1 cipher-suite tag + KA keys in standard a anchor (OQ-2 D1)."""
+    """IA-HYBRID-1 cipher-suite tag + KA keys in the standard `a` anchor."""
     return [
         {
             "ia": CIPHER_SUITE_IA_HYBRID_1,

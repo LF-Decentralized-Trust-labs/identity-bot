@@ -477,7 +477,7 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 	// G-052: public endpoint for IA to fetch signed login challenge bundle (QR pointer)
 	r.Get("/i/{token}", s.handleChallengeBundleServe)
 
-	// SEAM-5: public inbound DIDComm endpoint — encrypted IA-to-IA envelopes land here.
+	// Public inbound DIDComm endpoint — encrypted IA-to-IA envelopes land here.
 	r.Post("/didcomm", s.handleDIDCommInbound)
 
 	r.Route("/api", func(r chi.Router) {

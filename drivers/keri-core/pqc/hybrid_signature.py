@@ -1,4 +1,4 @@
-"""hybrid PQC C2 — hybrid composite signature wire format + both-must-verify."""
+"""Hybrid composite signature wire format, where both signatures must verify."""
 
 from __future__ import annotations
 

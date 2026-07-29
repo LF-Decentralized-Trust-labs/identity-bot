@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// PushRequest is the paired-device backup push protocol (SEAM-19).
+// PushRequest is the paired-device backup push protocol.
 type PushRequest struct {
 	ProtocolVersion int    `json:"protocol_version"`
 	IdentityAID     string `json:"identity_aid,omitempty"`
