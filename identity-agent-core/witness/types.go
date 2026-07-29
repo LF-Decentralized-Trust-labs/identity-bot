@@ -42,7 +42,8 @@ const (
 	ContactSourceTransactional = "transactional"
 )
 
-// AidKind distinguishes Root vs Pairwise witnessing pools (OQ-W2).
+// AidKind distinguishes Root vs Pairwise witnessing pools. The two draw from
+// different sets of witnesses: see ContactWitnessAllowedForAID.
 type AidKind string
 
 const (

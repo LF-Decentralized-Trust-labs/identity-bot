@@ -107,7 +107,7 @@ func TestPairwiseCommercialOnly(t *testing.T) {
 	mc.contacts["ECommercial"] = store.ContactRecord{AID: "ECommercial", IsWitness: true, OobiURL: "http://m/oobi"}
 	_ = s.Store.SaveContactMeta(ContactMeta{ContactAID: "EContact", BackendType: BackendDesktop, WitnessStatus: StatusOnline})
 	_ = s.Store.SaveContactMeta(ContactMeta{ContactAID: "ECommercial", BackendType: BackendCommercial, IsCommercial: true, WitnessStatus: StatusOnline})
-	targets, err := s.enrolledWitnesses(AidKindPairwise)
+	targets, err := s.enrolledWitnesses(AidKindPairwise, "EPairwiseTestAID")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,9 +160,20 @@ func TestBroadcastSkipsOffline(t *testing.T) {
 	root := mc.identity.AID
 	mc.contacts["EW1"] = store.ContactRecord{AID: "EW1", IsWitness: true, OobiURL: "http://w1/oobi"}
 	_ = s.Store.SaveContactMeta(ContactMeta{ContactAID: "EW1", WitnessStatus: StatusOffline, BackendType: BackendDesktop})
-	targets, _ := s.enrolledWitnesses(ClassifyAID(root, root))
-	if len(targets) != 0 {
-		t.Fatalf("offline witness should not broadcast: %+v", targets)
+	targets, _ := s.enrolledWitnesses(ClassifyAID(root, root), root)
+	for _, tg := range targets {
+		if tg.AID == "EW1" {
+			t.Fatalf("an offline witness was included: %+v", targets)
+		}
+	}
+	// Previously this asserted zero targets. That was the intent stated as a
+	// count, and the count stopped being right once a root identity falls back
+	// to the bootstrap pool: an identity whose only contact witness is offline
+	// is exactly the case bootstrap exists for, and having none at all is worse
+	// than having those. The assertion now says what it always meant — the
+	// offline one is excluded.
+	if len(targets) == 0 {
+		t.Fatal("with its only contact witness offline, a root identity fell back to nothing")
 	}
 }
 

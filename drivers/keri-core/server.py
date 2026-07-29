@@ -258,16 +258,45 @@ def _check_keri_api() -> None:
         )
 
 
-def create_inception_event(public_key: str, next_public_key: str) -> dict:
+def create_inception_event(
+    public_key: str,
+    next_public_key: str,
+    witnesses: list | None = None,
+    toad: int | None = None,
+) -> dict:
+    """Build the inception event, optionally designating witnesses.
+
+    Witnesses are named in the event itself — the `b` field, with the threshold
+    in `bt`. That is worth stating plainly because it decides a design question
+    elsewhere: a controller's witnesses are PUBLIC by protocol, so nothing about
+    witnessing can be kept private, and any scheme that assumed otherwise was
+    assuming something the protocol does not offer.
+
+    An identity with no witnesses is valid and is what we produced until now. It
+    simply has nobody to detect duplicity on its behalf, so a second conflicting
+    version of its history has nothing to contradict it.
+    """
     pub_bytes = _extract_raw_key(public_key)
     next_bytes = _extract_raw_key(next_public_key)
 
     verfer = coring.Verfer(raw=pub_bytes, code=MtrDex.Ed25519)
     diger = coring.Diger(raw=next_bytes, code=MtrDex.Blake3_256)
 
+    wits = list(witnesses or [])
+    # Threshold of accountable duplicity. Defaults to a simple majority, which
+    # is the usual KERI guidance: enough that a minority of unavailable or
+    # dishonest witnesses cannot stall or forge, without requiring all of them
+    # to be reachable at once.
+    if wits:
+        bt = toad if toad is not None else (len(wits) // 2) + 1
+    else:
+        bt = 0
+
     serder = eventing.incept(
         keys=[verfer.qb64],
         ndigs=[diger.qb64],
+        wits=wits,
+        toad=bt,
         code=MtrDex.Blake3_256,
     )
 
@@ -362,7 +391,12 @@ def inception():
         return jsonify({"error": "public_key and next_public_key are required"}), 400
 
     try:
-        result = create_inception_event(public_key, next_public_key)
+        result = create_inception_event(
+            public_key,
+            next_public_key,
+            witnesses=data.get("witnesses"),
+            toad=data.get("toad"),
+        )
 
         name = data.get("name", result["aid"])
         _identities[name] = {

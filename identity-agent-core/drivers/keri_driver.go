@@ -34,6 +34,15 @@ type DriverInceptionRequest struct {
 	PublicKey     string `json:"public_key"`
 	NextPublicKey string `json:"next_public_key"`
 	Name          string `json:"name,omitempty"`
+	// Witnesses are designated in the inception event itself and are therefore
+	// public. An identity with none is valid; it simply has nobody to detect
+	// duplicity on its behalf, so a second conflicting version of its history
+	// has nothing to contradict it.
+	Witnesses []string `json:"witnesses,omitempty"`
+	// Toad is the threshold of accountable duplicity. Left at zero the driver
+	// picks a simple majority, which is enough that a minority of unavailable
+	// or dishonest witnesses can neither stall nor forge.
+	Toad int `json:"toad,omitempty"`
 }
 
 type DriverInceptionResponse struct {
