@@ -58,6 +58,7 @@ func (s *CoreServer) sandboxRoutes(r chi.Router) {
 	r.Delete("/mcp/access-policy/{capability}", s.handleDeleteAccessPolicy)
 	r.Get("/didcomm/did", s.handleGetDIDCommDID)
 	r.Post("/didcomm/peers", s.handleRegisterDIDCommPeer)
+	r.Get("/didcomm/peers", s.handleListDIDCommPeers)
 	r.Post("/didcomm/send", s.handleSendDIDCommMessage)
 	r.Get("/didcomm/inbox", s.handleGetDIDCommInbox)
 	r.Get("/activity/invocations", s.handleListInvocationEvents)

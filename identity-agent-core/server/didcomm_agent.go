@@ -24,7 +24,16 @@ func (s *CoreServer) sendDIDCommMessage(fromAID, toAID, typ string, body json.Ra
 	peer, ok := s.loadPeers()[toAID]
 	didcommMu.Unlock()
 	if !ok {
-		return "", 0, fmt.Errorf("no registered peer %s", toAID)
+		// Convenience for intra-org agent-to-agent: if the recipient is one of THIS
+		// IA's own provisioned agents, auto-establish the relationship (mint its DID +
+		// register it against the loopback /didcomm) so the UI can message between two
+		// workforce agents with just from/to/body. Cross-IA peers must be registered
+		// explicitly (we can't mint keys for an identity we don't control).
+		if p, aerr := s.ensureLocalPeer(toAID); aerr == nil {
+			peer = p
+		} else {
+			return "", 0, fmt.Errorf("no registered peer %s", toAID)
+		}
 	}
 	if peer.Endpoint == "" {
 		return "", 0, fmt.Errorf("peer %s has no endpoint", toAID)

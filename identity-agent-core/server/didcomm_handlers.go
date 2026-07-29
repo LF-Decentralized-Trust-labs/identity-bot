@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -297,6 +298,50 @@ func (s *CoreServer) handleDIDCommInbound(w http.ResponseWriter, r *http.Request
 	s.routeInboundDIDComm(kid, skid, jwm)
 	w.WriteHeader(http.StatusAccepted)
 	json.NewEncoder(w).Encode(map[string]any{"status": "accepted", "message_id": jwm.ID, "type": jwm.Type})
+}
+
+// ensureLocalPeer registers one of this IA's own provisioned agents as a DIDComm peer
+// (minting its keyset + pointing at the loopback /didcomm), so intra-org agent-to-agent
+// messaging needs no manual peer exchange. Errors if aid is not a local ai_agent.
+func (s *CoreServer) ensureLocalPeer(aid string) (peerRecord, error) {
+	if s.findAgentAssetByAID(aid) == nil {
+		return peerRecord{}, fmt.Errorf("%s is not a local provisioned agent", aid)
+	}
+	ks, err := s.keySetFor(aid)
+	if err != nil {
+		return peerRecord{}, err
+	}
+	did, err := ks.DID()
+	if err != nil {
+		return peerRecord{}, err
+	}
+	rec := peerRecord{
+		AID: aid, DID: *did,
+		Endpoint: fmt.Sprintf("http://127.0.0.1:%d/didcomm", s.Port),
+		AddedAt:  time.Now().UTC(),
+	}
+	didcommMu.Lock()
+	peers := s.loadPeers()
+	peers[aid] = rec
+	err = s.savePeers(peers)
+	didcommMu.Unlock()
+	return rec, err
+}
+
+// handleListDIDCommPeers lists the registered DIDComm peers (owner only).
+func (s *CoreServer) handleListDIDCommPeers(w http.ResponseWriter, r *http.Request) {
+	if !s.isOwner(r) {
+		jsonError(w, "peers are owner only", http.StatusForbidden)
+		return
+	}
+	didcommMu.Lock()
+	m := s.loadPeers()
+	didcommMu.Unlock()
+	out := make([]map[string]any, 0, len(m))
+	for _, p := range m {
+		out = append(out, map[string]any{"aid": p.AID, "endpoint": p.Endpoint, "added_at": p.AddedAt})
+	}
+	jsonResponse(w, map[string]any{"peers": out})
 }
 
 // handleGetDIDCommInbox returns received messages (owner only).
