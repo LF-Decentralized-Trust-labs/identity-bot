@@ -250,13 +250,19 @@ func (s *CoreServer) handleDIDCommInbound(w http.ResponseWriter, r *http.Request
 		jsonError(w, "missing skid (anoncrypt not supported in v0)", http.StatusBadRequest)
 		return
 	}
-	// Resolve the sender DID from the peer registry.
+	// Resolve the sender DID from the peer registry. If the sender is one of THIS
+	// IA's own provisioned agents (intra-org A2A), auto-resolve it — its DID is ours
+	// to look up. Cross-IA senders must be registered explicitly.
 	didcommMu.Lock()
 	peer, known := s.loadPeers()[skid]
 	didcommMu.Unlock()
 	if !known {
-		jsonError(w, "unknown sender "+skid+" — not a registered peer", http.StatusForbidden)
-		return
+		if p, aerr := s.ensureLocalPeer(skid); aerr == nil {
+			peer = p
+		} else {
+			jsonError(w, "unknown sender "+skid+" — not a registered peer", http.StatusForbidden)
+			return
+		}
 	}
 	// Resolve the recipient keyset from kid.
 	if len(env.Recipients) == 0 {
