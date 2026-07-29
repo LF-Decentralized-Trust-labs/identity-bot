@@ -89,3 +89,39 @@ func withBootstrap(contactWitnesses []witnessTarget, want int) []witnessTarget {
 	}
 	return out
 }
+
+// oneBootstrapFor picks a single bootstrap witness for a pairwise AID.
+//
+// A pairwise AID cannot be witnessed by contacts — a distinctive contact set
+// shared across two pairwise AIDs would let an observer link them to one
+// person, which is exactly what separate AIDs exist to prevent. Witness lists
+// are public, so the set itself is a fingerprint. Commercial witnesses avoid
+// this because they serve a large population: naming one says nothing about
+// who you are.
+//
+// That leaves the question of WHICH one, and the honest answer is that using
+// the same one for all of somebody's pairwise AIDs hands that operator the
+// contact graph in its own logs. So the choice is spread across the pool by
+// the AID itself: stable for a given AID (the same event always goes to the
+// same place, and a receipt can be chased), uniform across the pool, and
+// requiring no stored state.
+//
+// One rather than three because a pairwise AID needs an observer that will
+// notice duplicity, not a quorum. Three would triple the correlation surface
+// to buy availability that a single relationship does not need.
+func oneBootstrapFor(aid string) (witnessTarget, bool) {
+	pool := BootstrapPool()
+	if len(pool) == 0 {
+		return witnessTarget{}, false
+	}
+	// FNV-1a over the AID. Any stable spread does; this one needs no imports
+	// beyond what the file already has and does not pretend to be a security
+	// property — it is a bucketing function, not a secret.
+	var h uint32 = 2166136261
+	for i := 0; i < len(aid); i++ {
+		h ^= uint32(aid[i])
+		h *= 16777619
+	}
+	b := pool[int(h%uint32(len(pool)))]
+	return witnessTarget{AID: b.AID, URL: b.URL, Commercial: true}, true
+}

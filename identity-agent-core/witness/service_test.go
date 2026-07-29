@@ -107,7 +107,7 @@ func TestPairwiseCommercialOnly(t *testing.T) {
 	mc.contacts["ECommercial"] = store.ContactRecord{AID: "ECommercial", IsWitness: true, OobiURL: "http://m/oobi"}
 	_ = s.Store.SaveContactMeta(ContactMeta{ContactAID: "EContact", BackendType: BackendDesktop, WitnessStatus: StatusOnline})
 	_ = s.Store.SaveContactMeta(ContactMeta{ContactAID: "ECommercial", BackendType: BackendCommercial, IsCommercial: true, WitnessStatus: StatusOnline})
-	targets, err := s.enrolledWitnesses(AidKindPairwise)
+	targets, err := s.enrolledWitnesses(AidKindPairwise, "EPairwiseTestAID")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +160,7 @@ func TestBroadcastSkipsOffline(t *testing.T) {
 	root := mc.identity.AID
 	mc.contacts["EW1"] = store.ContactRecord{AID: "EW1", IsWitness: true, OobiURL: "http://w1/oobi"}
 	_ = s.Store.SaveContactMeta(ContactMeta{ContactAID: "EW1", WitnessStatus: StatusOffline, BackendType: BackendDesktop})
-	targets, _ := s.enrolledWitnesses(ClassifyAID(root, root))
+	targets, _ := s.enrolledWitnesses(ClassifyAID(root, root), root)
 	for _, tg := range targets {
 		if tg.AID == "EW1" {
 			t.Fatalf("an offline witness was included: %+v", targets)

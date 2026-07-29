@@ -217,7 +217,7 @@ func (s *Service) BroadcastEvent(ctx context.Context, signerAID string, event ma
 		rootAID = id.AID
 	}
 	kind := ClassifyAID(signerAID, rootAID)
-	witnesses, err := s.enrolledWitnesses(kind)
+	witnesses, err := s.enrolledWitnesses(kind, signerAID)
 	if err != nil {
 		return err
 	}
@@ -246,7 +246,7 @@ type witnessTarget struct {
 	Commercial  bool
 }
 
-func (s *Service) enrolledWitnesses(kind AidKind) ([]witnessTarget, error) {
+func (s *Service) enrolledWitnesses(kind AidKind, aid string) ([]witnessTarget, error) {
 	contacts, err := s.Contacts.GetContacts()
 	if err != nil {
 		return nil, err
@@ -280,6 +280,18 @@ func (s *Service) enrolledWitnesses(kind AidKind) ([]witnessTarget, error) {
 	// the contact graph from its own logs.
 	if kind == AidKindRoot {
 		return withBootstrap(out, s.MaxWitnesses()), nil
+	}
+
+	// A pairwise AID reaches here with only commercial contacts, if any — the
+	// eligibility gate drops the rest, because a distinctive contact set shared
+	// across two pairwise AIDs would link them to one person. That gate is
+	// right, but on its own it leaves a fresh identity's pairwise AIDs with no
+	// witness at all, and an unwitnessed AID has nobody positioned to notice
+	// duplicity. So take exactly one from the bootstrap pool.
+	if len(out) == 0 {
+		if w, ok := oneBootstrapFor(aid); ok {
+			out = append(out, w)
+		}
 	}
 	return out, nil
 }

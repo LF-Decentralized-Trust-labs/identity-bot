@@ -1,6 +1,9 @@
 package witness
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 // The bootstrap pool exists to cover one gap: a new identity has no contacts,
 // and the moment it most needs witnessing — inception — is the moment it has
@@ -97,5 +100,74 @@ func TestTheBootstrapPoolIsThreeDistinctOperators(t *testing.T) {
 func TestAskingForNoWitnessesAddsNone(t *testing.T) {
 	if got := withBootstrap(nil, 0); len(got) != 0 {
 		t.Fatalf("expected none, got %d", len(got))
+	}
+}
+
+// A pairwise AID with no commercial contacts still gets an observer. Before
+// this, it got none — the eligibility gate correctly refuses contact witnesses
+// on a pairwise AID, which on a fresh identity means refusing everything.
+func TestPairwiseAlwaysGetsOneWitness(t *testing.T) {
+	w, ok := oneBootstrapFor("EPairwiseSomeoneJustMet")
+	if !ok {
+		t.Fatal("a pairwise AID was left with no witness at all")
+	}
+	if !w.Commercial {
+		t.Errorf("a pairwise witness must be commercial, got a contact: %s", w.AID)
+	}
+}
+
+// The same AID must always pick the same witness, or a receipt can never be
+// chased: the event goes to one place and the follow-up looks somewhere else.
+func TestPairwiseWitnessIsStableForAnAID(t *testing.T) {
+	const aid = "EPairwiseStableCheck"
+	first, _ := oneBootstrapFor(aid)
+	for i := 0; i < 50; i++ {
+		again, _ := oneBootstrapFor(aid)
+		if again.AID != first.AID {
+			t.Fatalf("same AID chose two witnesses: %s then %s", first.AID, again.AID)
+		}
+	}
+}
+
+// Different pairwise AIDs must not all land on one operator. If they did, that
+// operator could reassemble the contact graph from its own logs — the exact
+// correlation separate pairwise AIDs exist to prevent.
+func TestPairwiseWitnessesSpreadAcrossThePool(t *testing.T) {
+	seen := map[string]int{}
+	for i := 0; i < 300; i++ {
+		w, _ := oneBootstrapFor(fmt.Sprintf("EPairwiseContact%d", i))
+		seen[w.AID]++
+	}
+	if len(seen) != len(BootstrapPool()) {
+		t.Fatalf("expected all %d operators to be used, only %d were: %v",
+			len(BootstrapPool()), len(seen), seen)
+	}
+	// Not a statistical test — just that no operator takes nearly everything.
+	for aid, n := range seen {
+		if n > 200 {
+			t.Errorf("operator %s took %d of 300 pairwise AIDs", aid, n)
+		}
+	}
+}
+
+// The policy, stated as a test so relaxing it has to be deliberate.
+//
+// No number of contact witnesses makes a non-commercial one acceptable on a
+// pairwise AID. Everywhere else contacts are meant to displace commercial
+// witnesses over time; here they never do, because on a pairwise AID the
+// contacts are the thing that leaks. Witness lists are public, so a
+// distinctive set shared between two pairwise AIDs links them to one person.
+func TestPeersNeverDisplaceCommercialOnPairwise(t *testing.T) {
+	for _, commercial := range []bool{true, false} {
+		got := ContactWitnessAllowedForAID(AidKindPairwise, commercial)
+		if got != commercial {
+			t.Errorf("pairwise + commercial=%v: allowed=%v, want %v",
+				commercial, got, commercial)
+		}
+	}
+	// A root AID is the opposite case and must stay that way, or peer
+	// witnessing has no path to displace anything anywhere.
+	if !ContactWitnessAllowedForAID(AidKindRoot, false) {
+		t.Error("a root AID must accept contact witnesses — that is the design")
 	}
 }
