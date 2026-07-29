@@ -1,4 +1,17 @@
-//go:build darwin && cgo && arm64
+//go:build darwin && cgo
+
+// Intel Macs are included deliberately.
+//
+// The tag used to require arm64, which excluded every Intel Mac — including
+// the 2018-and-later machines whose T2 chip carries a Secure Enclave, and the
+// 2016–2017 Touch Bar models with a T1. Those got the software signer while
+// holding exactly the hardware being asked for.
+//
+// Widening the tag is safe because availability is decided by trying: this
+// signer's Available() attempts to create a key in the enclave and reports
+// what happened. A pre-2018 Mac with no enclave fails that and falls through,
+// which is the same outcome as before — just reached by measurement rather
+// than by a guess encoded in a build constraint.
 
 package secureenclave
 
