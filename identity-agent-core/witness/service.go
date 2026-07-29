@@ -266,6 +266,21 @@ func (s *Service) enrolledWitnesses(kind AidKind) ([]witnessTarget, error) {
 		}
 		out = append(out, witnessTarget{AID: c.AID, URL: c.OobiURL, Commercial: commercial})
 	}
+	// Top up from the bootstrap pool while there are too few contacts to reach
+	// a threshold worth having. Appended rather than preferred, so somebody
+	// with enough contacts of their own leans on those and not on us — and so
+	// this contribution shrinks to nothing on its own as contacts accumulate.
+	//
+	// Root identities only, and the reason is structural rather than a policy
+	// choice: a pairwise AID exists BECAUSE there is a contact, so it never has
+	// the problem bootstrap solves. Extending it there would also mean the same
+	// three operators witnessing every one of somebody's pairwise identities,
+	// which is the correlation the pairwise design exists to prevent — witness
+	// lists are public, and one operator seeing all of them could reassemble
+	// the contact graph from its own logs.
+	if kind == AidKindRoot {
+		return withBootstrap(out, s.MaxWitnesses()), nil
+	}
 	return out, nil
 }
 
