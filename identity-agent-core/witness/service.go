@@ -506,6 +506,18 @@ func (s *Service) ServeTELStub(issuerAID string) map[string]interface{} {
 	}
 }
 
+// witnessEndpointURL is where a witness accepts endpoint records. Separate from
+// the event path because these are replies rather than key events, and a
+// witness should be free to treat them differently — not least by serving them
+// back to somebody asking where this identity currently is.
+func witnessEndpointURL(oobi string) string {
+	base := oobi
+	if idx := strings.Index(oobi, "/public/oobi/"); idx != -1 {
+		base = oobi[:idx]
+	}
+	return strings.TrimRight(base, "/") + "/api/witness/endpoint"
+}
+
 func witnessEventURL(oobi string) string {
 	base := oobi
 	if idx := strings.Index(oobi, "/public/oobi/"); idx != -1 {
@@ -524,4 +536,72 @@ func strconvAtoi(v string, def int) (int, error) {
 		return def, err
 	}
 	return n, nil
+}
+// PublishEndpointRecord sends a signed endpoint reply to an AID's witnesses.
+//
+// This is what makes a relay address disposable. An OOBI handed to somebody
+// persists in their store long after the address stops working, so when a relay
+// is left or an allocation expires, every counterparty holding that string is
+// stranded — the relationship breaks from an infrastructure change neither
+// party made. Publishing where this identity currently is, to the witnesses
+// named in its KEL, gives a stranded counterparty somewhere stable to ask.
+//
+// Deliberately NOT BroadcastEvent. An endpoint record is a reply, not a key
+// event: it has no sequence number, takes no place in the KEL, and there is
+// nothing for a receipt threshold to mean. Running it through finalization
+// would invent a pending state that never resolves. What matters here is
+// reaching the witnesses, not agreeing with them.
+//
+// Reaching SOME witnesses is success. A counterparty needs one that answers,
+// not a quorum — and refusing to publish because one operator is down would
+// leave the address stale everywhere, which is the failure being prevented.
+func (s *Service) PublishEndpointRecord(ctx context.Context, signerAID string, record map[string]interface{}) error {
+	rootAID := signerAID
+	if id, _ := s.Contacts.GetIdentity(); id != nil {
+		rootAID = id.AID
+	}
+	kind := ClassifyAID(signerAID, rootAID)
+	witnesses, err := s.enrolledWitnesses(kind, signerAID)
+	if err != nil {
+		return err
+	}
+	if len(witnesses) == 0 {
+		// Worth reporting rather than passing silently: an identity with no
+		// witnesses has nowhere to publish, so a changed address will strand
+		// every counterparty it was ever given to.
+		return fmt.Errorf("no witnesses for %s — a changed address cannot be published", signerAID)
+	}
+
+	body, err := json.Marshal(map[string]interface{}{"aid": signerAID, "record": record})
+	if err != nil {
+		return fmt.Errorf("marshal endpoint record: %w", err)
+	}
+
+	var (
+		wg        sync.WaitGroup
+		mu        sync.Mutex
+		delivered int
+	)
+	for _, w := range witnesses {
+		wg.Add(1)
+		go func(target witnessTarget) {
+			defer wg.Done()
+			if _, perr := s.PostEvent(ctx, witnessEndpointURL(target.URL), body); perr != nil {
+				log.Printf("[witness] endpoint record to %s failed: %v", target.AID, perr)
+				return
+			}
+			mu.Lock()
+			delivered++
+			mu.Unlock()
+		}(w)
+	}
+	wg.Wait()
+
+	if delivered == 0 {
+		return fmt.Errorf("endpoint record for %s reached none of its %d witnesses",
+			signerAID, len(witnesses))
+	}
+	log.Printf("[witness] endpoint record for %s published to %d/%d witnesses",
+		signerAID, delivered, len(witnesses))
+	return nil
 }

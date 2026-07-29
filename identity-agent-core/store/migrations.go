@@ -529,6 +529,27 @@ ALTER TABLE credentials ADD COLUMN registry_said TEXT NOT NULL DEFAULT '';
 ALTER TABLE credentials ADD COLUMN iss_said      TEXT NOT NULL DEFAULT '';
 `,
 	},
+	{
+		Version:     22,
+		Description: "Endpoint records: signed statements of where an identity currently is, held by its witnesses so a counterparty holding a dead address has somewhere stable to ask",
+		SQL: `
+CREATE TABLE IF NOT EXISTS endpoint_records (
+    said        TEXT PRIMARY KEY,
+    cid         TEXT NOT NULL,
+    eid         TEXT NOT NULL DEFAULT '',
+    role        TEXT NOT NULL DEFAULT '',
+    scheme      TEXT NOT NULL DEFAULT '',
+    url         TEXT NOT NULL DEFAULT '',
+    route       TEXT NOT NULL,
+    record_json TEXT NOT NULL,
+    signature   TEXT NOT NULL DEFAULT '',
+    stamp       TEXT NOT NULL DEFAULT '',
+    received_at TEXT NOT NULL DEFAULT ''
+);
+-- Lookups are always "where is this identity now", so the controller leads.
+CREATE INDEX IF NOT EXISTS idx_endpoint_cid ON endpoint_records(cid, route);
+`,
+	},
 }
 
 // ApplyIdentityMigrations creates the migrations table and applies any pending migrations.
