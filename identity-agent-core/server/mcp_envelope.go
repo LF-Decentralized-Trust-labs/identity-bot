@@ -89,6 +89,12 @@ func (s *CoreServer) verifyRequestEnvelope(r *http.Request, method string, param
 	if verr != nil || !ok {
 		return fmt.Errorf("signed request signature invalid")
 	}
+	// Identity-first: a valid envelope proves control of signerAID. When the caller
+	// had no other identity (no bearer token), the proven signer BECOMES the caller
+	// AID — authentication by signature alone, no token required.
+	if caller.CallerAID == "" {
+		caller.CallerAID = signerAID
+	}
 	caller.EnvelopeVerified = true
 	caller.AuthLevel = "signed_request"
 	return nil
