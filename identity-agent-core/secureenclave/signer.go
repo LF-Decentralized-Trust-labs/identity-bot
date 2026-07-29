@@ -35,6 +35,32 @@ func NewPlatformSigner(dataDir string) PlatformSigner {
 	return newSoftwareSigner(dataDir)
 }
 
+// HardwareRootStatus reports what this machine can protect a key with, and why.
+//
+// Separate from NewPlatformSigner because the two answer different questions and
+// merging them is what caused the problem this package is being fixed for.
+// Choosing a signer needs one bit: use hardware or fall back. Telling somebody
+// their identity is capped, or refusing to hold their root key, needs the
+// reason — and `Available() bool` throws the reason away at exactly the moment
+// it becomes load-bearing.
+//
+// The falling-back is fine. Silently reporting the fallback as "this machine has
+// no security hardware" is not, and that is what a bare bool leaves callers no
+// choice but to do.
+func HardwareRootStatus() Capability {
+	return DetectCapability()
+}
+
+// UsingHardware reports whether a signer is hardware-backed.
+//
+// The software signer names itself "software", so anything else came from an
+// enclave, a TPM or StrongBox. Kept as a helper rather than a field so there is
+// one definition of the distinction instead of a string comparison repeated at
+// every call site — the shape of bug where one of them eventually disagrees.
+func UsingHardware(s PlatformSigner) bool {
+	return s != nil && s.Platform() != "software"
+}
+
 // softwareSigner persists an Ed25519 key for development and non-hardware hosts.
 type softwareSigner struct {
 	mu       sync.Mutex
