@@ -420,7 +420,7 @@ func (h *Handler) prepareLogin(req StartLoginRequest) (*ChallengeBundle, *SiteRe
 	// Membership-gated assets anchor the relationship to the asset's CONTROLLER
 	// (the delegating identity — an organization or an individual) so the
 	// presented pairwise equals the one the controller enrolled (e.g. at
-	// sponsorship/add_employee). The anchor is only honored after independently
+	// signer enrolment/add_employee). The anchor is only honored after independently
 	// verifying the site is DELEGATED by the claimed controller (its dip event
 	// names it as delegator): without this check any page could claim an anchor
 	// and harvest the scanner's constant membership AID. Fail closed — a bad

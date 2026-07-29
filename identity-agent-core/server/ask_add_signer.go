@@ -11,30 +11,30 @@ import (
 	"identity-agent-core/login"
 )
 
-// t = 4 -> sponsor_org. During org creation, an individual's PERSONAL Identity
-// Agent scans the org's sponsor QR, signs a vouch over the org AID (the org's
+// t = 4 -> sign_org. During organisation creation, an individual's PERSONAL Identity
+// Agent scans the organisation's signer QR, signs a vouch over the org AID (the org's
 // stored proof that a real person stands behind it), and becomes the org's FIRST
 // employee with the super-admin role. There is no delegated inception — the org
-// controls its own keys; the sponsor merely attests. Unlike add_employee (t=3),
-// the sponsor is ACTIVE immediately (they're the founder — no one above them to
+// controls its own keys; the signer merely attests. Unlike add_employee (t=3),
+// the signer is ACTIVE immediately (they're the founder — no one above them to
 // approve) and provides the vouch signature.
-type addSponsorAsk struct{}
+type addSignerAsk struct{}
 
-func (addSponsorAsk) Action() string { return "sponsor_org" }
+func (addSignerAsk) Action() string { return "sign_org" }
 
-type sponsorPayload struct {
+type signerPayload struct {
 	OrgName     string `json:"org_name"`
 	OrgAID      string `json:"org_aid"`
 	OrgOOBI     string `json:"org_oobi"`
-	SiteAID     string `json:"site_aid"` // the org identity the sponsor relates to (root during onboarding)
+	SiteAID     string `json:"site_aid"` // the org identity the signer relates to (root during onboarding)
 	SiteOOBI    string `json:"site_oobi"`
 	InviteToken string `json:"invite_token"`
 }
 
-func (addSponsorAsk) Preview(s *CoreServer, ctx AskContext) (GenericPreview, error) {
-	var p sponsorPayload
+func (addSignerAsk) Preview(s *CoreServer, ctx AskContext) (GenericPreview, error) {
+	var p signerPayload
 	if err := json.Unmarshal(ctx.AskBytes, &p); err != nil || p.InviteToken == "" {
-		return GenericPreview{}, fmt.Errorf("sponsor Ask missing invite_token")
+		return GenericPreview{}, fmt.Errorf("signer Ask missing invite_token")
 	}
 	org := p.OrgName
 	if org == "" {
@@ -51,8 +51,8 @@ func (addSponsorAsk) Preview(s *CoreServer, ctx AskContext) (GenericPreview, err
 	}
 	details = append(details, disclosureRows(fields, profile)...)
 	return GenericPreview{
-		T: 4, Action: "sponsor_org", Title: "Sponsor an organization",
-		Subtitle:     "Sponsor " + org + " — you'll become its super-admin and first employee",
+		T: 4, Action: "sign_org", Title: "Sign an organization into existence",
+		Subtitle:     "Signer " + org + " — you'll become its super-admin and first employee",
 		Counterparty: p.OrgAID,
 		Details:      details,
 		Warning: "You are attesting that a real person (you) stands behind this organization. " +
@@ -60,16 +60,16 @@ func (addSponsorAsk) Preview(s *CoreServer, ctx AskContext) (GenericPreview, err
 	}, nil
 }
 
-func (addSponsorAsk) Execute(s *CoreServer, ctx AskContext, d ScanDecision) (map[string]interface{}, error) {
+func (addSignerAsk) Execute(s *CoreServer, ctx AskContext, d ScanDecision) (map[string]interface{}, error) {
 	if !d.Approved {
 		return map[string]interface{}{"ok": true, "declined": true}, nil
 	}
-	var p sponsorPayload
+	var p signerPayload
 	if err := json.Unmarshal(ctx.AskBytes, &p); err != nil || p.InviteToken == "" {
-		return nil, fmt.Errorf("sponsor Ask missing invite_token")
+		return nil, fmt.Errorf("signer Ask missing invite_token")
 	}
 	if s.loginHandler == nil {
-		return nil, fmt.Errorf("sponsor_org requires the login engine to derive the org relationship")
+		return nil, fmt.Errorf("signer_org requires the login engine to derive the organisation relationship")
 	}
 
 	// 1) Establish the org as a professional-tier contact (hardwired, no ceremony).
@@ -88,15 +88,15 @@ func (addSponsorAsk) Execute(s *CoreServer, ctx AskContext, d ScanDecision) (map
 		return nil, fmt.Errorf("derive org relationship: %w", rerr)
 	}
 
-	// 3) Sign the vouch: our signature over {sponsor_aid, org_aid} with the pairwise
-	//    key — the org stores this as proof a real person sponsored it.
+	// 3) Sign the vouch: our signature over {signer_aid, org_aid} with the pairwise
+	//    key — the org stores this as proof a real person signered it.
 	seed, serr := s.loginHandler.RelationshipSeed(rel)
 	if serr != nil {
 		return nil, fmt.Errorf("load relationship seed: %w", serr)
 	}
 	vouchPayload, _ := json.Marshal(map[string]string{
-		"v": "VOUCH1", "action": "sponsor_org",
-		"sponsor_aid": rel.PairwiseAID, "org_aid": p.OrgAID,
+		"v": "VOUCH1", "action": "sign_org",
+		"signer_aid": rel.PairwiseAID, "org_aid": p.OrgAID,
 	})
 	vouchSig, sigErr := login.SignAsk(vouchPayload, seed)
 	if sigErr != nil {
@@ -118,15 +118,15 @@ func (addSponsorAsk) Execute(s *CoreServer, ctx AskContext, d ScanDecision) (map
 		"vouch_sig":     vouchSig,
 		"vouch_payload": string(vouchPayload),
 	}))
-	redeemURL := strings.TrimRight(ctx.Base, "/") + "/api/sponsor/invites/" + p.InviteToken + "/redeem"
+	redeemURL := strings.TrimRight(ctx.Base, "/") + "/api/signer/invites/" + p.InviteToken + "/redeem"
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Post(redeemURL, "application/json", strings.NewReader(string(body)))
 	if err != nil {
-		return nil, fmt.Errorf("redeem sponsor invite: %w", err)
+		return nil, fmt.Errorf("redeem signer invite: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		// Carry the org's explanation through (e.g. "sponsor invite already
+		// Carry the org's explanation through (e.g. "signer invite already
 		// used") so the person sees a real reason, not a status code.
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
 		reason := strings.TrimSpace(string(msg))
@@ -145,6 +145,6 @@ func (addSponsorAsk) Execute(s *CoreServer, ctx AskContext, d ScanDecision) (map
 		"employer":     org,
 		"role":         "Super Admin",
 		"pairwise_aid": rel.PairwiseAID,
-		"status":       "active", // the sponsor is active immediately
+		"status":       "active", // the signer is active immediately
 	}, nil
 }

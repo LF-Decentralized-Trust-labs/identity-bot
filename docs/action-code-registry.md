@@ -287,16 +287,18 @@ private-use range or inside an implementation.
   is added to the org's roster (pending → active on approval). The *code + schema
   are universal*; the roster/approval mechanics are an implementation concern.
 
-### `t = 4` · `sponsor_org`
+### `t = 4` · `sign_org`
 - **Summary:** an individual attests (vouches) that a real person stands behind a
-  newly created organization, becoming its founding super-admin.
+  newly created organization, becoming its founding super-admin. These
+  individuals are **signers** — they sign an organization into existence.
 - **Who mints:** an organization (during creation).
 - **Request schema:** `org_name`, `org_aid`, `org_oobi`, `site_aid`, `site_oobi`,
   `invite_token`.
-- **Preview:** "Sponsor {org} — become its super-admin and first employee."
+- **Preview:** "Sign {org} into existence — become its super-admin and first
+  member."
 - **Outcome:** the individual signs a vouch over the org's AID (stored by the org
   as proof) and is enrolled as the active super-admin. No delegated inception —
-  the org controls its own keys; the sponsor only attests.
+  the org controls its own keys; the signer only attests.
 
 ---
 

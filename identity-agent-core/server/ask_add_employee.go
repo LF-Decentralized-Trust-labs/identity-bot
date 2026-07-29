@@ -93,7 +93,7 @@ func (addEmployeeAsk) Execute(s *CoreServer, ctx AskContext, d ScanDecision) (ma
 	//    Anchoring on the org (not any one portal asset) means the same AID works
 	//    on every asset the org delegates, now or later, with zero re-enrollment;
 	//    login reuses it via the challenge's relationship anchor (also the org).
-	//    This is the same anchor the sponsor flow uses, so sponsor + employee
+	//    This is the same anchor the signer flow uses, so signer + employee
 	//    rows in the org roster are one consistent identifier space. Falls back
 	//    to the site AID only for legacy invites that carry no org identity.
 	anchorAID, anchorOOBI := p.OrgAID, p.OrgOOBI

@@ -136,10 +136,10 @@ type EmployeeInvite struct {
 	AssetID  string `json:"asset_id,omitempty"`
 	SiteAID  string `json:"site_aid,omitempty"`
 	SiteOOBI string `json:"site_oobi,omitempty"`
-	// IsSponsor marks the org-creation sponsor invite (t=4): redeeming it makes the
-	// individual an ACTIVE super-admin immediately (they're the founding sponsor,
+	// IsSigner marks the organisation-founding invite (t=4): redeeming it makes the
+	// individual an ACTIVE super-admin immediately (they're a founding signer,
 	// there's no one above them to approve), and requires a vouch signature.
-	IsSponsor bool      `json:"is_sponsor,omitempty"`
+	IsSigner bool `json:"is_signer,omitempty"`
 	UseCount  int       `json:"use_count"`
 	CreatedAt time.Time `json:"created_at"`
 	Revoked   bool      `json:"revoked"`
@@ -159,10 +159,11 @@ type Employee struct {
 	InviteToken    string `json:"invite_token,omitempty"`
 	CredentialSAID string `json:"credential_said,omitempty"`
 	OOBI           string `json:"oobi,omitempty"`
-	// IsSponsor + the vouch: set when this employee is the org's founding sponsor.
-	// VouchSig is the individual's signature over {sponsor_aid, org_aid} — the
+	// IsSigner and the vouch: set when this member is a founding signer of the
+	// organisation.
+	// VouchSig is the individual's signature over {signer_aid, org_aid} — the
 	// org's stored proof that a real person stands behind it.
-	IsSponsor    bool      `json:"is_sponsor,omitempty"`
+	IsSigner     bool      `json:"is_signer,omitempty"`
 	VouchSig     string    `json:"vouch_sig,omitempty"`
 	VouchPayload string    `json:"vouch_payload,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`

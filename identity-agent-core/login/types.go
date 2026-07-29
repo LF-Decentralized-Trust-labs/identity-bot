@@ -20,7 +20,7 @@ type ChallengeBundle struct {
 	// Membership-gated assets: the relationship ANCHOR is the asset's CONTROLLER
 	// (the delegating identity — an organization or an individual), not the
 	// per-asset AID, so the pairwise presented at login is the same constant AID
-	// the controller enrolled (e.g. at sponsorship/add_employee). Empty → anchor
+	// the controller enrolled (e.g. at signer enrolment/add_employee). Empty → anchor
 	// to SiteAID (the default per-RP unlinkability model).
 	RelationshipAnchorAID  string `json:"relationship_anchor_aid,omitempty"`
 	RelationshipAnchorOOBI string `json:"relationship_anchor_oobi,omitempty"`
