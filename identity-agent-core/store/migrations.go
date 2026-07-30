@@ -223,7 +223,7 @@ INSERT OR IGNORE INTO share_actions (id, action_key, name, subtitle, icon, is_en
     ('sa-show-id',          'show_id',          'Show ID',          'Display your identity QR code',                               'badge_outlined',      0, 2, datetime('now')),
     ('sa-request-payment',  'request_payment',  'Request Payment',  'Send a payment request to a contact',                        'payment_outlined',    0, 3, datetime('now')),
     ('sa-share-file',       'share_file',       'Share a File',     'Send an encrypted file to a contact',                        'attach_file',         0, 4, datetime('now')),
-    ('sa-credential-request', 'credential_request', 'Credential Request', 'Present a verifiable credential (SEAM-7)', 'verified_outlined', 0, 5, datetime('now'));
+    ('sa-credential-request', 'credential_request', 'Credential Request', 'Present a verifiable credential', 'verified_outlined', 0, 5, datetime('now'));
 `,
 	},
 	{
@@ -527,6 +527,41 @@ CREATE TABLE IF NOT EXISTS credential_registries (
 CREATE INDEX IF NOT EXISTS idx_registry_issuer ON credential_registries(issuer_aid);
 ALTER TABLE credentials ADD COLUMN registry_said TEXT NOT NULL DEFAULT '';
 ALTER TABLE credentials ADD COLUMN iss_said      TEXT NOT NULL DEFAULT '';
+`,
+	},
+	{
+		Version:     22,
+		Description: "Endpoint records: signed statements of where an identity currently is, held by its witnesses so a counterparty holding a dead address has somewhere stable to ask",
+		SQL: `
+CREATE TABLE IF NOT EXISTS endpoint_records (
+    said        TEXT PRIMARY KEY,
+    cid         TEXT NOT NULL,
+    eid         TEXT NOT NULL DEFAULT '',
+    role        TEXT NOT NULL DEFAULT '',
+    scheme      TEXT NOT NULL DEFAULT '',
+    url         TEXT NOT NULL DEFAULT '',
+    route       TEXT NOT NULL,
+    record_json TEXT NOT NULL,
+    signature   TEXT NOT NULL DEFAULT '',
+    stamp       TEXT NOT NULL DEFAULT '',
+    received_at TEXT NOT NULL DEFAULT ''
+);
+-- Lookups are always "where is this identity now", so the controller leads.
+CREATE INDEX IF NOT EXISTS idx_endpoint_cid ON endpoint_records(cid, route);
+`,
+	},
+	{
+		Version:     23,
+		Description: "Drop an internal contract name that was leaking into a user-visible label",
+		SQL: `
+-- This subtitle is shown to people. It carried an internal identifier that
+-- means nothing outside our own planning documents, so it said less than the
+-- same sentence without it. Fixed in the seed too, for databases created after
+-- this; the update is for those created before.
+UPDATE share_actions
+   SET subtitle = 'Present a verifiable credential'
+ WHERE action_key = 'credential_request'
+   AND subtitle LIKE '%SEAM-7%';
 `,
 	},
 }

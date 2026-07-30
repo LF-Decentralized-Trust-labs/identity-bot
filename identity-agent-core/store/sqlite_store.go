@@ -1389,3 +1389,66 @@ func (s *SQLiteStore) ResetAll() error {
 	return nil
 }
 
+
+// ── Endpoint records ─────────────────────────────────────────────────────────
+
+// SaveEndpointRecord stores a controller's signed statement of where it is.
+//
+// Keyed by SAID, so a witness that receives the same record twice holds it
+// once. Superseding happens by publishing a NEW record rather than mutating
+// this one — the earlier statement stays until something more recent says
+// otherwise, which is what lets a counterparty tell "moved" from "never said".
+func (s *SQLiteStore) SaveEndpointRecord(record EndpointRecord) error {
+	raw, err := json.Marshal(record.Record)
+	if err != nil {
+		return fmt.Errorf("failed to marshal endpoint record: %w", err)
+	}
+	if record.ReceivedAt == "" {
+		record.ReceivedAt = time.Now().UTC().Format(time.RFC3339)
+	}
+	_, err = s.db.Exec(`
+INSERT INTO endpoint_records
+    (said, cid, eid, role, scheme, url, route, record_json, signature, stamp, received_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(said) DO NOTHING`,
+		record.SAID, record.CID, record.EID, record.Role, record.Scheme,
+		record.URL, record.Route, string(raw), record.Signature,
+		record.Stamp, record.ReceivedAt)
+	if err != nil {
+		return fmt.Errorf("failed to save endpoint record: %w", err)
+	}
+	return nil
+}
+
+// GetEndpointRecords returns every endpoint statement held for a controller,
+// most recent first — the answer to "where is this identity now" for somebody
+// whose stored address has stopped working.
+func (s *SQLiteStore) GetEndpointRecords(cid string) ([]EndpointRecord, error) {
+	rows, err := s.db.Query(`
+SELECT said, cid, eid, role, scheme, url, route, record_json, signature, stamp, received_at
+FROM endpoint_records WHERE cid = ?
+ORDER BY received_at DESC`, cid)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query endpoint records: %w", err)
+	}
+	defer rows.Close()
+
+	var out []EndpointRecord
+	for rows.Next() {
+		var r EndpointRecord
+		var raw string
+		if err := rows.Scan(&r.SAID, &r.CID, &r.EID, &r.Role, &r.Scheme,
+			&r.URL, &r.Route, &raw, &r.Signature, &r.Stamp, &r.ReceivedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan endpoint record: %w", err)
+		}
+		if raw != "" {
+			if err := json.Unmarshal([]byte(raw), &r.Record); err != nil {
+				// One malformed row should not hide the others: a counterparty
+				// needs any usable answer, not a perfect set.
+				log.Printf("[store] endpoint record %s has unreadable body: %v", r.SAID, err)
+			}
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}

@@ -626,6 +626,127 @@ def interact():
         return jsonify({"error": f"Interact failed: {str(e)}"}), 500
 
 
+# ── Endpoint records: where an identity currently is ─────────────────────────
+#
+# An OOBI is a URL, and a URL handed to somebody persists in their store long
+# after it stops working. When a relay is left, shut down, or an allocation
+# expires, every counterparty holding that string is stranded — the relationship
+# breaks from an infrastructure change neither party made.
+#
+# KERI's answer is that the controller SIGNS where it currently is, and
+# witnesses carry the record. A counterparty that cannot reach the address it
+# has already holds the KEL, and the KEL names the witnesses, so it can ask them
+# for the current one. That makes witnesses the stable anchor and relay
+# addresses disposable — which is what allows an identity to move between
+# providers, or use several at once, without a migration.
+#
+# Two record types, both plain signed reply messages:
+#
+#   /end/role/add   this endpoint provider acts for me in this role
+#   /loc/scheme     that provider is reachable at this URL
+#
+# Both are built with keripy's own reply() so the SAID and serialisation are the
+# reference implementation's, never ours. As everywhere else in this driver, the
+# raw bytes come back for the caller to sign — this process holds no keys.
+
+
+@app.route("/endpoint/role", methods=["POST"])
+def endpoint_role():
+    """Authorize (or revoke) an endpoint provider in a role.
+
+    Request JSON:
+        cid   (str)  — the controller AID making the statement
+        eid   (str)  — the endpoint provider's AID
+        role  (str)  — controller | agent | mailbox | witness | watcher
+        allow (bool) — True authorizes, False revokes. Default True.
+
+    Returns:
+        rpy_event     (dict) — the reply message body
+        raw_bytes_b64 (str)  — base64 of the bytes to sign, then /cesr-encode
+        said          (str)
+        route         (str)  — /end/role/add or /end/role/cut
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Request body required"}), 400
+
+    cid = data.get("cid", "")
+    eid = data.get("eid", "")
+    role = data.get("role", "controller")
+    allow = data.get("allow", True)
+
+    if not cid or not eid:
+        return jsonify({"error": "cid and eid are required"}), 400
+
+    # Revoking matters as much as granting. An endpoint that simply goes quiet
+    # is indistinguishable from one that is briefly down, so a provider that is
+    # no longer ours has to be said so explicitly rather than left to rot.
+    route = "/end/role/add" if allow else "/end/role/cut"
+
+    try:
+        serder = eventing.reply(
+            route=route,
+            data={"cid": cid, "role": role, "eid": eid},
+        )
+        return jsonify({
+            "cid": cid,
+            "eid": eid,
+            "role": role,
+            "route": route,
+            "rpy_event": serder.ked,
+            "raw_bytes_b64": base64.b64encode(serder.raw).decode(),
+            "said": serder.said,
+        }), 201
+    except Exception as e:
+        return jsonify({"error": f"Endpoint role reply failed: {str(e)}"}), 500
+
+
+@app.route("/endpoint/location", methods=["POST"])
+def endpoint_location():
+    """State the URL at which an endpoint provider is reachable.
+
+    Request JSON:
+        eid    (str) — the endpoint provider's AID (often the controller itself)
+        url    (str) — the current URL. Empty nullifies the location.
+        scheme (str) — url scheme, default https
+
+    Returns:
+        rpy_event     (dict)
+        raw_bytes_b64 (str)  — base64 of the bytes to sign, then /cesr-encode
+        said          (str)
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Request body required"}), 400
+
+    eid = data.get("eid", "")
+    url = data.get("url", "")
+    scheme = data.get("scheme", "https")
+
+    if not eid:
+        return jsonify({"error": "eid is required"}), 400
+
+    # An empty url is meaningful rather than missing: it nullifies the location,
+    # which is how an identity says "not here any more" instead of leaving a
+    # dead address published.
+    try:
+        serder = eventing.reply(
+            route="/loc/scheme",
+            data={"eid": eid, "scheme": scheme, "url": url},
+        )
+        return jsonify({
+            "eid": eid,
+            "url": url,
+            "scheme": scheme,
+            "route": "/loc/scheme",
+            "rpy_event": serder.ked,
+            "raw_bytes_b64": base64.b64encode(serder.raw).decode(),
+            "said": serder.said,
+        }), 201
+    except Exception as e:
+        return jsonify({"error": f"Endpoint location reply failed: {str(e)}"}), 500
+
+
 @app.route("/cesr-encode", methods=["POST"])
 def cesr_encode():
     """Stateless: wrap a raw Ed25519 signature in CESR Cigar encoding ('0B...' 88 chars).

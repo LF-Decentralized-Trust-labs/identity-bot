@@ -1123,3 +1123,81 @@ func (d *KeriDriver) parseError(body []byte, statusCode int, operation string) e
 	}
 	return fmt.Errorf("%s failed with status %d: %s", operation, statusCode, string(body))
 }
+
+// ── Endpoint records ─────────────────────────────────────────────────────────
+//
+// An OOBI is a URL, and a URL handed to somebody outlives the infrastructure it
+// points at. When a relay is left or an allocation expires, every counterparty
+// holding that string is stranded — the relationship breaks because of an
+// infrastructure change neither party made.
+//
+// The fix is that the controller signs where it currently is, and witnesses
+// carry the record. A counterparty that cannot reach the address it has already
+// holds the KEL, and the KEL names the witnesses, so it can ask them instead.
+// Witnesses become the stable anchor and relay addresses become disposable,
+// which is what lets an identity move between providers, or use several at
+// once, without a migration.
+
+// DriverEndpointRoleRequest authorizes or revokes an endpoint provider.
+type DriverEndpointRoleRequest struct {
+	CID   string `json:"cid"`
+	EID   string `json:"eid"`
+	Role  string `json:"role"`
+	Allow bool   `json:"allow"`
+}
+
+// DriverEndpointLocationRequest states where a provider is reachable. An empty
+// URL nullifies the location, which is how an identity says "not here any more"
+// rather than leaving a dead address published.
+type DriverEndpointLocationRequest struct {
+	EID    string `json:"eid"`
+	URL    string `json:"url"`
+	Scheme string `json:"scheme"`
+}
+
+// DriverEndpointResponse is an unsigned reply message. As everywhere else, the
+// driver holds no keys: RawBytesB64 is signed here and returned through
+// CesrEncode.
+type DriverEndpointResponse struct {
+	CID         string                 `json:"cid,omitempty"`
+	EID         string                 `json:"eid"`
+	Role        string                 `json:"role,omitempty"`
+	URL         string                 `json:"url,omitempty"`
+	Scheme      string                 `json:"scheme,omitempty"`
+	Route       string                 `json:"route"`
+	RpyEvent    map[string]interface{} `json:"rpy_event"`
+	RawBytesB64 string                 `json:"raw_bytes_b64"`
+	SAID        string                 `json:"said"`
+}
+
+// EndpointRole builds a signed-reply body authorizing eid to act for cid in a
+// role. Revoking is as important as granting: an endpoint that simply goes
+// quiet is indistinguishable from one that is briefly down.
+func (d *KeriDriver) EndpointRole(req *DriverEndpointRoleRequest) (*DriverEndpointResponse, error) {
+	body, err := d.doPost("/endpoint/role", req, http.StatusCreated)
+	if err != nil {
+		return nil, fmt.Errorf("endpoint role: %w", err)
+	}
+	var result DriverEndpointResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode endpoint role response: %w", err)
+	}
+	return &result, nil
+}
+
+// EndpointLocation builds a signed-reply body stating the URL at which eid is
+// currently reachable.
+func (d *KeriDriver) EndpointLocation(req *DriverEndpointLocationRequest) (*DriverEndpointResponse, error) {
+	if req.Scheme == "" {
+		req.Scheme = "https"
+	}
+	body, err := d.doPost("/endpoint/location", req, http.StatusCreated)
+	if err != nil {
+		return nil, fmt.Errorf("endpoint location: %w", err)
+	}
+	var result DriverEndpointResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode endpoint location response: %w", err)
+	}
+	return &result, nil
+}

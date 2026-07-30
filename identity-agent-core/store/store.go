@@ -202,6 +202,33 @@ type PresentationRecord struct {
 
 // ContactKELRecord stores a contact's validated Key Event Log.
 // This is the cryptographic proof of a contact's identity history.
+// EndpointRecord is a controller's signed statement of where it currently is.
+//
+// It complements the KEL rather than living in it. The KEL says who an identity
+// is and never changes its mind; an endpoint record says where to reach it
+// today and is expected to be superseded. Witnesses hold these so a counterparty
+// whose stored address has stopped working has somewhere stable to ask, instead
+// of being stranded by an infrastructure change neither party made.
+type EndpointRecord struct {
+        SAID string `json:"said"`
+        // CID is the controller the statement is about.
+        CID string `json:"cid"`
+        // EID is the endpoint provider. Often the controller itself.
+        EID  string `json:"eid,omitempty"`
+        Role string `json:"role,omitempty"`
+        // Scheme and URL are set on /loc/scheme records. An empty URL is
+        // meaningful: it nullifies the location, which is how an identity says
+        // "not here any more" rather than leaving a dead address published.
+        Scheme string `json:"scheme,omitempty"`
+        URL    string `json:"url,omitempty"`
+        // Route is /end/role/add, /end/role/cut or /loc/scheme.
+        Route      string                 `json:"route"`
+        Record     map[string]interface{} `json:"record"`
+        Signature  string                 `json:"signature,omitempty"`
+        Stamp      string                 `json:"stamp,omitempty"`
+        ReceivedAt string                 `json:"received_at,omitempty"`
+}
+
 type ContactKELRecord struct {
         AID              string                   `json:"aid"`
         // KEL events as received from the contact's OOBI endpoint.
@@ -310,6 +337,8 @@ type Store interface {
         DeleteContact(aid string) error
         GetContactsByStatus(status string) ([]ContactRecord, error)
         SaveContactKEL(record ContactKELRecord) error
+        SaveEndpointRecord(record EndpointRecord) error
+        GetEndpointRecords(cid string) ([]EndpointRecord, error)
         // AllocateNextRelationshipIndex returns a strictly increasing, never-reused index
         // for the given namespace ("contacts" or "login"). It is a persisted high-water mark
         // that survives row deletions (unlike MAX over live rows).
@@ -1134,4 +1163,63 @@ func (s *FileStore) writeJSON(path string, v interface{}) error {
                 return fmt.Errorf("failed to write file: %w", err)
         }
         return nil
+}
+
+// SaveEndpointRecord stores a controller's statement of where it currently is.
+//
+// Keyed by SAID, so replaying the same record is idempotent — a witness that
+// receives it twice holds it once. Superseding is by publishing a NEW record
+// rather than mutating this one: the old statement stays until something more
+// recent says otherwise, which is what lets a counterparty tell "moved" from
+// "never said".
+func (s *FileStore) SaveEndpointRecord(record EndpointRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	records, err := s.loadEndpointRecords()
+	if err != nil {
+		records = map[string]EndpointRecord{}
+	}
+	records[record.SAID] = record
+	return s.writeJSON(filepath.Join(s.dir, "endpoint_records.json"), records)
+}
+
+// GetEndpointRecords returns every endpoint statement held for a controller,
+// most recently received first — the answer to "where is this identity now".
+func (s *FileStore) GetEndpointRecords(cid string) ([]EndpointRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	records, err := s.loadEndpointRecords()
+	if err != nil {
+		return nil, err
+	}
+	var out []EndpointRecord
+	for _, r := range records {
+		if r.CID == cid {
+			out = append(out, r)
+		}
+	}
+	for i := 1; i < len(out); i++ {
+		for j := i; j > 0 && out[j].ReceivedAt > out[j-1].ReceivedAt; j-- {
+			out[j], out[j-1] = out[j-1], out[j]
+		}
+	}
+	return out, nil
+}
+
+func (s *FileStore) loadEndpointRecords() (map[string]EndpointRecord, error) {
+	path := filepath.Join(s.dir, "endpoint_records.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]EndpointRecord{}, nil
+		}
+		return nil, fmt.Errorf("failed to read endpoint records: %w", err)
+	}
+	records := map[string]EndpointRecord{}
+	if err := json.Unmarshal(data, &records); err != nil {
+		return nil, fmt.Errorf("failed to parse endpoint records: %w", err)
+	}
+	return records, nil
 }
