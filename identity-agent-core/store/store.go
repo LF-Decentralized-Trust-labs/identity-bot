@@ -229,6 +229,36 @@ type EndpointRecord struct {
         ReceivedAt string                 `json:"received_at,omitempty"`
 }
 
+// SigningRequest is something only the device holding the keys can sign,
+// waiting for that device to be opened.
+//
+// The core queues these when it cannot sign for itself — which for the root
+// identity is always, by design. What is stored is the bytes to be signed and
+// enough plain language for a person to know what they are agreeing to; never
+// anything that would let this agent produce the signature on its own.
+type SigningRequest struct {
+        ID   string `json:"id"`
+        AID  string `json:"aid"`
+        // Kind tells whoever queued the request what to do with the signature
+        // once it arrives, so this queue does not have to know.
+        Kind string `json:"kind"`
+        // Summary is the one line a person sees. Detail explains why their
+        // phone has to do this rather than their computer.
+        Summary string `json:"summary"`
+        Detail  string `json:"detail,omitempty"`
+        // PayloadB64 is exactly what gets signed. Stored rather than
+        // reconstructed, so what was shown and what was signed cannot drift.
+        PayloadB64 string `json:"payload_b64"`
+        // ConsentRequired separates a real decision from a logistical one.
+        // Both are shown; only the first is a question.
+        ConsentRequired bool   `json:"consent_required"`
+        Status          string `json:"status"`
+        Signature       string `json:"signature,omitempty"`
+        CreatedAt       string `json:"created_at"`
+        ResolvedAt      string `json:"resolved_at,omitempty"`
+        ExpiresAt       string `json:"expires_at,omitempty"`
+}
+
 type ContactKELRecord struct {
         AID              string                   `json:"aid"`
         // KEL events as received from the contact's OOBI endpoint.
@@ -338,6 +368,9 @@ type Store interface {
         GetContactsByStatus(status string) ([]ContactRecord, error)
         SaveContactKEL(record ContactKELRecord) error
         SaveEndpointRecord(record EndpointRecord) error
+        SaveSigningRequest(req SigningRequest) error
+        GetSigningRequest(id string) (*SigningRequest, error)
+        GetPendingSigningRequests() ([]SigningRequest, error)
         GetEndpointRecords(cid string) ([]EndpointRecord, error)
         // AllocateNextRelationshipIndex returns a strictly increasing, never-reused index
         // for the given namespace ("contacts" or "login"). It is a persisted high-water mark
@@ -1222,4 +1255,76 @@ func (s *FileStore) loadEndpointRecords() (map[string]EndpointRecord, error) {
 		return nil, fmt.Errorf("failed to parse endpoint records: %w", err)
 	}
 	return records, nil
+}
+
+// SaveSigningRequest stores or updates a request for the controller device.
+//
+// Upsert rather than insert-only, because the same record moves through
+// pending, then signed or refused, and keeping one row is what lets "you were
+// asked and said no" be told apart from "you were never asked".
+func (s *FileStore) SaveSigningRequest(req SigningRequest) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	requests, err := s.loadSigningRequests()
+	if err != nil {
+		requests = map[string]SigningRequest{}
+	}
+	requests[req.ID] = req
+	return s.writeJSON(filepath.Join(s.dir, "signing_requests.json"), requests)
+}
+
+func (s *FileStore) GetSigningRequest(id string) (*SigningRequest, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	requests, err := s.loadSigningRequests()
+	if err != nil {
+		return nil, err
+	}
+	r, ok := requests[id]
+	if !ok {
+		return nil, nil
+	}
+	return &r, nil
+}
+
+// GetPendingSigningRequests returns what is still waiting, oldest first — the
+// order somebody would want to work through them.
+func (s *FileStore) GetPendingSigningRequests() ([]SigningRequest, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	requests, err := s.loadSigningRequests()
+	if err != nil {
+		return nil, err
+	}
+	var out []SigningRequest
+	for _, r := range requests {
+		if r.Status == "pending" {
+			out = append(out, r)
+		}
+	}
+	for i := 1; i < len(out); i++ {
+		for j := i; j > 0 && out[j].CreatedAt < out[j-1].CreatedAt; j-- {
+			out[j], out[j-1] = out[j-1], out[j]
+		}
+	}
+	return out, nil
+}
+
+func (s *FileStore) loadSigningRequests() (map[string]SigningRequest, error) {
+	path := filepath.Join(s.dir, "signing_requests.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]SigningRequest{}, nil
+		}
+		return nil, fmt.Errorf("failed to read signing requests: %w", err)
+	}
+	requests := map[string]SigningRequest{}
+	if err := json.Unmarshal(data, &requests); err != nil {
+		return nil, fmt.Errorf("failed to parse signing requests: %w", err)
+	}
+	return requests, nil
 }

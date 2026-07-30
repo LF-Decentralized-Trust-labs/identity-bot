@@ -1452,3 +1452,85 @@ ORDER BY received_at DESC`, cid)
 	}
 	return out, rows.Err()
 }
+
+// ── Signing requests ─────────────────────────────────────────────────────────
+
+// SaveSigningRequest stores or updates a request for the controller device.
+//
+// Upsert rather than insert-only: the same record moves through pending, then
+// signed or refused, and keeping one row is what lets "you were asked and said
+// no" be told apart from "you were never asked".
+func (s *SQLiteStore) SaveSigningRequest(req SigningRequest) error {
+	if req.CreatedAt == "" {
+		req.CreatedAt = time.Now().UTC().Format(time.RFC3339)
+	}
+	consent := 0
+	if req.ConsentRequired {
+		consent = 1
+	}
+	_, err := s.db.Exec(`
+INSERT INTO signing_requests
+    (id, aid, kind, summary, detail, payload_b64, consent_required,
+     status, signature, created_at, resolved_at, expires_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET
+    -- Only the outcome is updatable. What is being signed, what the person was
+    -- shown, and when it lapses are all fixed at creation: a later save that
+    -- could move any of them would let the thing signed differ from the thing
+    -- agreed to, or a deadline be quietly extended.
+    status      = excluded.status,
+    signature   = excluded.signature,
+    resolved_at = excluded.resolved_at`,
+		req.ID, req.AID, req.Kind, req.Summary, req.Detail, req.PayloadB64,
+		consent, req.Status, req.Signature, req.CreatedAt, req.ResolvedAt, req.ExpiresAt)
+	if err != nil {
+		return fmt.Errorf("failed to save signing request: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) GetSigningRequest(id string) (*SigningRequest, error) {
+	row := s.db.QueryRow(`
+SELECT id, aid, kind, summary, detail, payload_b64, consent_required,
+       status, signature, created_at, resolved_at, expires_at
+FROM signing_requests WHERE id = ?`, id)
+
+	var r SigningRequest
+	var consent int
+	err := row.Scan(&r.ID, &r.AID, &r.Kind, &r.Summary, &r.Detail, &r.PayloadB64,
+		&consent, &r.Status, &r.Signature, &r.CreatedAt, &r.ResolvedAt, &r.ExpiresAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to read signing request: %w", err)
+	}
+	r.ConsentRequired = consent == 1
+	return &r, nil
+}
+
+// GetPendingSigningRequests returns what is still waiting, oldest first — the
+// order somebody would want to work through them.
+func (s *SQLiteStore) GetPendingSigningRequests() ([]SigningRequest, error) {
+	rows, err := s.db.Query(`
+SELECT id, aid, kind, summary, detail, payload_b64, consent_required,
+       status, signature, created_at, resolved_at, expires_at
+FROM signing_requests WHERE status = 'pending' ORDER BY created_at ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query signing requests: %w", err)
+	}
+	defer rows.Close()
+
+	var out []SigningRequest
+	for rows.Next() {
+		var r SigningRequest
+		var consent int
+		if err := rows.Scan(&r.ID, &r.AID, &r.Kind, &r.Summary, &r.Detail, &r.PayloadB64,
+			&consent, &r.Status, &r.Signature, &r.CreatedAt, &r.ResolvedAt, &r.ExpiresAt); err != nil {
+			return nil, fmt.Errorf("failed to scan signing request: %w", err)
+		}
+		r.ConsentRequired = consent == 1
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
