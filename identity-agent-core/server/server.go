@@ -27,6 +27,7 @@ import (
 	"identity-agent-core/linkverifier"
 	"identity-agent-core/login"
 	"identity-agent-core/oidc"
+	"identity-agent-core/provider"
 	"identity-agent-core/recovery"
 	"identity-agent-core/sandbox"
 	"identity-agent-core/schemas"
@@ -43,7 +44,10 @@ import (
 )
 
 type CoreServer struct {
-	DataStore       store.Store
+	DataStore store.Store
+	// Providers is the registry of operators this agent can draw services from.
+	// Loaded once at startup; the owner may add to it at runtime.
+	Providers       *provider.Registry
 	AIMemory        *store.AIMemoryStore
 	KeriDriver      *drivers.KeriDriver
 	TunnelManager   *tunnel.Manager
@@ -143,7 +147,10 @@ func New(cfg Config) (*CoreServer, error) {
 	go eventHub.Run()
 
 	s := &CoreServer{
-		DataStore:       dataStore,
+		DataStore: dataStore,
+		// Loaded eagerly: an agent that cannot name an operator cannot become
+		// reachable, so failing here is better found at startup than at first use.
+		Providers:       provider.Load(cfg.DataDir),
 		AIMemory:        aiMemory,
 		EndpointService: endpointSvc,
 		EventHub:        eventHub,
@@ -607,6 +614,7 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		s.mountVerificationRoutes(r)
 		s.mountWitnessRoutes(r)
 		s.mountEndpointRoutes(r)
+		s.mountProviderRoutes(r)
 		s.mountUpdateRoutes(r)
 
 		// Overlay-registered routes (MountExtraRoutes) mount last, under /api.
