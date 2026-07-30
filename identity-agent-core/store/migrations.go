@@ -575,7 +575,11 @@ CREATE TABLE IF NOT EXISTS signing_requests (
     summary          TEXT NOT NULL DEFAULT '',
     detail           TEXT NOT NULL DEFAULT '',
     payload_b64      TEXT NOT NULL,
-    consent_required INTEGER NOT NULL DEFAULT 0,
+    -- How this is put to the person: consent | notify | automatic.
+    -- Not a boolean, because "must decide", "just tap" and "do not ask at all"
+    -- are three different things and collapsing any two loses the distinction
+    -- that matters.
+    presentation     TEXT NOT NULL DEFAULT 'notify',
     status           TEXT NOT NULL DEFAULT 'pending',
     signature        TEXT NOT NULL DEFAULT '',
     created_at       TEXT NOT NULL DEFAULT '',

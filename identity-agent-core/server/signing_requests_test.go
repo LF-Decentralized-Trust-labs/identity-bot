@@ -52,7 +52,7 @@ func TestAQueuedRequestKeepsThePayloadItWillSign(t *testing.T) {
 
 	id, err := s.EnqueueSigningRequest("ERoot", "endpoint-location",
 		"Publish your new address", "Your phone holds the key, so it has to sign this",
-		payload, false)
+		payload, PresentationNotify)
 	if err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
@@ -73,10 +73,10 @@ func TestAQueuedRequestKeepsThePayloadItWillSign(t *testing.T) {
 // A request with nothing to sign is not a request.
 func TestAnEmptyRequestIsRefused(t *testing.T) {
 	s := signingServer(t)
-	if _, err := s.EnqueueSigningRequest("ERoot", "kind", "summary", "", nil, false); err == nil {
+	if _, err := s.EnqueueSigningRequest("ERoot", "kind", "summary", "", nil, PresentationNotify); err == nil {
 		t.Error("a request with no payload was accepted")
 	}
-	if _, err := s.EnqueueSigningRequest("", "kind", "summary", "", []byte("x"), false); err == nil {
+	if _, err := s.EnqueueSigningRequest("", "kind", "summary", "", []byte("x"), PresentationNotify); err == nil {
 		t.Error("a request with no AID was accepted")
 	}
 }
@@ -84,7 +84,7 @@ func TestAnEmptyRequestIsRefused(t *testing.T) {
 // A blank prompt on somebody's phone is worse than an awkward default.
 func TestARequestAlwaysHasSomethingToShow(t *testing.T) {
 	s := signingServer(t)
-	id, err := s.EnqueueSigningRequest("ERoot", "endpoint-location", "", "", []byte("x"), false)
+	id, err := s.EnqueueSigningRequest("ERoot", "endpoint-location", "", "", []byte("x"), PresentationNotify)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestARequestAlwaysHasSomethingToShow(t *testing.T) {
 // The signature is recorded and the request closed.
 func TestFulfillingRecordsTheSignature(t *testing.T) {
 	s := signingServer(t)
-	id, _ := s.EnqueueSigningRequest("ERoot", "endpoint-location", "Publish", "", []byte("x"), false)
+	id, _ := s.EnqueueSigningRequest("ERoot", "endpoint-location", "Publish", "", []byte("x"), PresentationNotify)
 
 	body, _ := json.Marshal(map[string]string{"signature": "0Bsignature"})
 	r := withID(ownerRequest(http.MethodPost, "/api/signing-requests/"+id+"/fulfil",
@@ -118,7 +118,7 @@ func TestFulfillingRecordsTheSignature(t *testing.T) {
 // could silently replace a refusal with a signature.
 func TestAResolvedRequestCannotBeAnsweredTwice(t *testing.T) {
 	s := signingServer(t)
-	id, _ := s.EnqueueSigningRequest("ERoot", "endpoint-location", "Publish", "", []byte("x"), false)
+	id, _ := s.EnqueueSigningRequest("ERoot", "endpoint-location", "Publish", "", []byte("x"), PresentationNotify)
 
 	// Refuse it first.
 	r := withID(ownerRequest(http.MethodPost, "/api/signing-requests/"+id+"/refuse", nil, s), id)
@@ -148,7 +148,7 @@ func TestAResolvedRequestCannotBeAnsweredTwice(t *testing.T) {
 // from "you were never asked".
 func TestARefusalIsRecordedNotErased(t *testing.T) {
 	s := signingServer(t)
-	id, _ := s.EnqueueSigningRequest("ERoot", "endpoint-location", "Publish", "", []byte("x"), false)
+	id, _ := s.EnqueueSigningRequest("ERoot", "endpoint-location", "Publish", "", []byte("x"), PresentationNotify)
 
 	r := withID(ownerRequest(http.MethodPost, "/api/signing-requests/"+id+"/refuse", nil, s), id)
 	s.handleRefuseSigningRequest(httptest.NewRecorder(), r)
@@ -200,7 +200,7 @@ func TestAnExpiredRequestIsNotListed(t *testing.T) {
 // Only the owner can sign for this agent, or see what it is about to assert.
 func TestSigningRequestsAreOwnerOnly(t *testing.T) {
 	s := signingServer(t)
-	id, _ := s.EnqueueSigningRequest("ERoot", "endpoint-location", "Publish", "", []byte("x"), false)
+	id, _ := s.EnqueueSigningRequest("ERoot", "endpoint-location", "Publish", "", []byte("x"), PresentationNotify)
 
 	for name, call := range map[string]func(http.ResponseWriter, *http.Request){
 		"list":   s.handleListSigningRequests,
@@ -213,5 +213,78 @@ func TestSigningRequestsAreOwnerOnly(t *testing.T) {
 		if w.Code != http.StatusForbidden {
 			t.Errorf("%s was reachable without owner credentials: %d", name, w.Code)
 		}
+	}
+}
+
+// The three tiers are one axis: how much of somebody's attention the work is
+// worth. They share a queue because the difficult parts — payload immutability,
+// no double-answer, refusals recorded — are identical, and two copies of that
+// would drift.
+func TestTheThreeTiersAreRecordedAsAsked(t *testing.T) {
+	s := signingServer(t)
+	for _, tier := range []string{PresentationConsent, PresentationNotify} {
+		id, err := s.EnqueueSigningRequest("ERoot", "some-kind", "Summary", "", []byte("x"), tier)
+		if err != nil {
+			t.Fatalf("%s: %v", tier, err)
+		}
+		req, _ := s.DataStore.GetSigningRequest(id)
+		if req.Presentation != tier {
+			t.Errorf("asked for %q, stored %q", tier, req.Presentation)
+		}
+	}
+}
+
+// Automatic is not the caller's to choose. Without this, every caller has an
+// incentive to mark its own work automatic — each one reasonably — and the
+// distinction stops meaning anything.
+func TestAutomaticIsRefusedForWorkNotOnTheList(t *testing.T) {
+	s := signingServer(t)
+	id, err := s.EnqueueSigningRequest("ERoot", "something-new", "Summary", "",
+		[]byte("x"), PresentationAutomatic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, _ := s.DataStore.GetSigningRequest(id)
+	if req.Presentation == PresentationAutomatic {
+		t.Error("an unlisted kind promoted itself to signing without asking")
+	}
+	if req.Presentation != PresentationNotify {
+		t.Errorf("expected a downgrade to notify, got %q", req.Presentation)
+	}
+}
+
+// Downgraded, not refused: a presentation mistake should not become an outage.
+func TestAnUnlistedAutomaticRequestStillGetsQueued(t *testing.T) {
+	s := signingServer(t)
+	id, err := s.EnqueueSigningRequest("ERoot", "something-new", "Summary", "",
+		[]byte("x"), PresentationAutomatic)
+	if err != nil || id == "" {
+		t.Fatal("the request was dropped rather than downgraded")
+	}
+}
+
+// Work that is genuinely on the list keeps its tier. Republishing an address is
+// maintenance of a decision already made: the person chose to be reachable, and
+// the alternative to signing is being unreachable.
+func TestListedWorkMayBeSignedWithoutAsking(t *testing.T) {
+	s := signingServer(t)
+	id, err := s.EnqueueSigningRequest("ERoot", "endpoint-location",
+		"Republish your address", "", []byte("x"), PresentationAutomatic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, _ := s.DataStore.GetSigningRequest(id)
+	if req.Presentation != PresentationAutomatic {
+		t.Errorf("listed work was downgraded to %q", req.Presentation)
+	}
+}
+
+// An unrecognised tier means somebody's phone should ask rather than assume.
+func TestAnUnknownTierFallsBackToShowingIt(t *testing.T) {
+	s := signingServer(t)
+	id, _ := s.EnqueueSigningRequest("ERoot", "some-kind", "Summary", "", []byte("x"), "whatever")
+	req, _ := s.DataStore.GetSigningRequest(id)
+	if req.Presentation != PresentationNotify {
+		t.Errorf("an unknown tier became %q rather than being shown", req.Presentation)
 	}
 }

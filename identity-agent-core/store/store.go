@@ -249,9 +249,9 @@ type SigningRequest struct {
         // PayloadB64 is exactly what gets signed. Stored rather than
         // reconstructed, so what was shown and what was signed cannot drift.
         PayloadB64 string `json:"payload_b64"`
-        // ConsentRequired separates a real decision from a logistical one.
-        // Both are shown; only the first is a question.
-        ConsentRequired bool   `json:"consent_required"`
+        // Presentation is how this reaches the person: consent, notify or
+        // automatic. See the constants in the server package.
+        Presentation string `json:"presentation"`
         Status          string `json:"status"`
         Signature       string `json:"signature,omitempty"`
         CreatedAt       string `json:"created_at"`
