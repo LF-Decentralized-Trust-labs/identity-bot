@@ -171,7 +171,11 @@ func (m *Manager) InvokeCapability(ctx context.Context, caller CallerContext, ca
 	if rec != nil && rec.ExecutorType == "external_api" {
 		res, err = m.invokeExternalAPI(ctx, rec, body)
 	} else if rec != nil {
-		err = fmt.Errorf("capability %q: executor type %q is not yet invocable", capabilityID, rec.ExecutorType)
+		if ex := executorFor(rec.ExecutorType); ex != nil {
+			res, err = ex.Execute(ctx, rec, body)
+		} else {
+			err = fmt.Errorf("capability %q: no executor registered for type %q", capabilityID, rec.ExecutorType)
+		}
 	} else {
 		inv := m.invoker
 		if inv == nil {

@@ -35,13 +35,6 @@ type CapabilityPack struct {
 	Capabilities []CapabilityRecord `json:"capabilities"`
 }
 
-var validExecutorTypes = map[string]bool{
-	"internal_api": true,
-	"external_api": true,
-	"ai_agent":     true,
-	"host_control": true,
-}
-
 // Capability ids are CAPABILITY-first, never provider-first: "domain.resource.verb"
 // (e.g. infra.dns_record.create, media.image.create). The pack is the provider-shaped
 // maintenance unit; the id names the function a caller wants, so a different backing
@@ -75,7 +68,7 @@ func ParseCapabilityPack(data []byte) (*CapabilityPack, error) {
 		} else if r.Domain != idDomain {
 			return nil, fmt.Errorf("pack %q: capability %q domain %q must match its id's first segment %q", p.Pack, r.ID, r.Domain, idDomain)
 		}
-		if !validExecutorTypes[r.ExecutorType] {
+		if !knownExecutorType(r.ExecutorType) {
 			return nil, fmt.Errorf("pack %q: capability %q has unknown executor_type %q", p.Pack, r.ID, r.ExecutorType)
 		}
 		if r.ExecutorType == "external_api" && (r.Egress == nil || r.Egress.BaseURL == "") {
