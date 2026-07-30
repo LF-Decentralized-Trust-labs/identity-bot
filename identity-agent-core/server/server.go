@@ -60,6 +60,7 @@ type CoreServer struct {
 	flutterWebDir   string
 	loginHandler    *login.Handler
 	assetHandler    *asset.Handler
+	inboundDIDComm  InboundDIDCommHandler // overlay hook for inbound DIDComm messages; nil = deliver-only
 
 	// Overlay-registered extra routes, mounted under /api by buildRouter. See
 	// MountExtraRoutes / extension.go — inert unless an overlay registers.
@@ -227,10 +228,9 @@ func New(cfg Config) (*CoreServer, error) {
 	} else {
 		s.SandboxManager = sbxMgr
 		s.SandboxManager.SetEventSigner(&invocationSigner{s: s})
-		// Replace the structural default with the real access-model authorizer:
-		// the four-mode WHO gate (identity-first, token off by default) composed with
-		// the capability-grant WHAT gate.
-		s.SandboxManager.SetAuthorizer(accessAuthorizer{s: s})
+		// The endpoint uses the structural authorizer by default (host-control never
+		// remote; a remote caller must hold the capability in its grant). An overlay
+		// may inject a richer authorizer via SetAuthorizer.
 		s.SandboxManager.SetVaultKeyProvider(func() ([]byte, error) {
 			rootSeed, rerr := secureenclave.LoadRootSeed(cfg.DataDir)
 			if rerr != nil {

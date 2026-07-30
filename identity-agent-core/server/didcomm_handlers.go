@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -141,6 +142,50 @@ func seenBefore(id string, exp time.Time) bool {
 	return false
 }
 
+// ensureLocalPeer registers one of this IA's own provisioned agents as a DIDComm peer
+// (minting its keyset + pointing at the loopback /didcomm), so intra-org agent-to-agent
+// messaging needs no manual peer exchange. Errors if aid is not a local ai_agent.
+func (s *CoreServer) ensureLocalPeer(aid string) (peerRecord, error) {
+	if s.findAgentAssetByAID(aid) == nil {
+		return peerRecord{}, fmt.Errorf("%s is not a local provisioned agent", aid)
+	}
+	ks, err := s.keySetFor(aid)
+	if err != nil {
+		return peerRecord{}, err
+	}
+	did, err := ks.DID()
+	if err != nil {
+		return peerRecord{}, err
+	}
+	rec := peerRecord{
+		AID: aid, DID: *did,
+		Endpoint: fmt.Sprintf("http://127.0.0.1:%d/didcomm", s.Port),
+		AddedAt:  time.Now().UTC(),
+	}
+	didcommMu.Lock()
+	peers := s.loadPeers()
+	peers[aid] = rec
+	err = s.savePeers(peers)
+	didcommMu.Unlock()
+	return rec, err
+}
+
+// handleListDIDCommPeers lists the registered DIDComm peers (owner only).
+func (s *CoreServer) handleListDIDCommPeers(w http.ResponseWriter, r *http.Request) {
+	if !s.isOwner(r) {
+		jsonError(w, "peers are owner only", http.StatusForbidden)
+		return
+	}
+	didcommMu.Lock()
+	m := s.loadPeers()
+	didcommMu.Unlock()
+	out := make([]map[string]any, 0, len(m))
+	for _, p := range m {
+		out = append(out, map[string]any{"aid": p.AID, "endpoint": p.Endpoint, "added_at": p.AddedAt})
+	}
+	jsonResponse(w, map[string]any{"peers": out})
+}
+
 // handleGetDIDCommDID returns this IA's public DID for an AID. Public (public keys);
 // mints the keyset lazily when the local owner asks (so the owner can hand the DID to a
 // peer), but never mints for an anonymous caller.
@@ -218,7 +263,7 @@ func (s *CoreServer) handleSendDIDCommMessage(w http.ResponseWriter, r *http.Req
 		jsonError(w, "unknown_message_type", http.StatusBadRequest)
 		return
 	}
-	msgID, status, err := s.sendDIDCommMessage(req.FromAID, req.ToAID, req.Type, req.Body)
+	msgID, status, err := s.SendDIDCommMessage(req.FromAID, req.ToAID, req.Type, req.Body)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusBadGateway)
 		return
@@ -249,13 +294,18 @@ func (s *CoreServer) handleDIDCommInbound(w http.ResponseWriter, r *http.Request
 		jsonError(w, "missing skid (anoncrypt not supported in v0)", http.StatusBadRequest)
 		return
 	}
-	// Resolve the sender DID from the peer registry.
+	// Resolve the sender DID from the peer registry. If the sender is one of THIS IA's
+	// own provisioned agents (intra-org A2A), auto-resolve it — its DID is ours.
 	didcommMu.Lock()
 	peer, known := s.loadPeers()[skid]
 	didcommMu.Unlock()
 	if !known {
-		jsonError(w, "unknown sender "+skid+" — not a registered peer", http.StatusForbidden)
-		return
+		if p, aerr := s.ensureLocalPeer(skid); aerr == nil {
+			peer = p
+		} else {
+			jsonError(w, "unknown sender "+skid+" — not a registered peer", http.StatusForbidden)
+			return
+		}
 	}
 	// Resolve the recipient keyset from kid.
 	if len(env.Recipients) == 0 {
@@ -325,15 +375,23 @@ func newMessageID() string {
 	return "msg-" + hex.EncodeToString(b)
 }
 
-// routeInboundDIDComm dispatches a decrypted, verified message by type. The /agent/*
-// namespace routes to the AI-agent handler, which — when the recipient is a
-// provisioned agent with a brain — answers a question and replies with an agent-result
-// (see didcomm_agent.go). Other types are stored in the inbox for the UI to render.
+// InboundDIDCommHandler is invoked for each decrypted, verified inbound message (after
+// it is stored in the inbox). An overlay registers one via OnInboundDIDComm to add
+// behavior — e.g. answering an agent-message with the recipient agent's brain. The core
+// itself only delivers + stores; it does not interpret message bodies.
+type InboundDIDCommHandler func(toAID, fromAID, msgType string, body json.RawMessage, jwmID string)
+
+// OnInboundDIDComm registers the overlay's inbound-message handler (server layer, at
+// startup). Nil leaves delivery-only behavior.
+func (s *CoreServer) OnInboundDIDComm(h InboundDIDCommHandler) { s.inboundDIDComm = h }
+
+// routeInboundDIDComm hands a decrypted, verified message to the registered overlay
+// handler (if any). The core stores every message in the inbox regardless; it does not
+// interpret bodies or auto-respond — that is the overlay's job.
 func (s *CoreServer) routeInboundDIDComm(toAID, fromAID string, jwm *didcomm.JWM) {
-	switch jwm.Type {
-	case didcomm.TypeAgentMessage, didcomm.TypeAgentTask:
-		go s.answerAgentMessage(toAID, fromAID, jwm)
-	default:
-		log.Printf("[didcomm] received %s %s for %s (stored in inbox)", jwm.Type, jwm.ID, toAID)
+	if s.inboundDIDComm != nil {
+		go s.inboundDIDComm(toAID, fromAID, jwm.Type, jwm.Body, jwm.ID)
+		return
 	}
+	log.Printf("[didcomm] received %s %s for %s (stored in inbox)", jwm.Type, jwm.ID, toAID)
 }
