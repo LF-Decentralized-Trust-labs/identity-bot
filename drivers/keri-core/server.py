@@ -139,7 +139,7 @@ if sys.platform == "win32":
 # keripy — hard requirement (no fallback)
 # ---------------------------------------------------------------------------
 
-from keri.core import coring, eventing
+from keri.core import coring, eventing, serdering
 from keri.core.coring import MtrDex
 from keri.core.eventing import TraitDex
 from keri.vdr import eventing as veventing
@@ -1124,7 +1124,106 @@ def credential_issue():
         return jsonify({"error": f"Credential issuance failed: {str(e)}"}), 500
 
 
-def _validate_kel_events(kel_events: list) -> dict:
+def _derive_aid_from_inception(event_dict: dict) -> str:
+    """Re-derive the AID a self-addressing inception event produces.
+
+    This is what binds a KEL to the identity that claims it. A self-addressing
+    AID (prefix 'E') IS the Blake3 SAID of its own inception event, computed
+    over the event with the identifier and SAID fields blanked. So an attacker
+    cannot produce an inception event containing THEIR keys that derives
+    SOMEBODY ELSE'S AID — the hash would have to collide.
+
+    Derivation goes through keripy's own incept/delcept rather than being
+    recomputed here, because the exact set of dummied fields and the
+    serialisation are the parts that must match the reference implementation
+    byte for byte.
+
+    Returns "" when the event is not a shape we can re-derive; the caller
+    treats that as "not proven" rather than "fine".
+    """
+    event_type = event_dict.get("t", "")
+    try:
+        if event_type == "icp":
+            return eventing.incept(
+                keys=event_dict.get("k", []),
+                ndigs=event_dict.get("n", []),
+                isith=event_dict.get("kt"),
+                nsith=event_dict.get("nt"),
+                toad=event_dict.get("bt"),
+                wits=event_dict.get("b", []),
+                cnfg=event_dict.get("c", []),
+                data=event_dict.get("a", []),
+                code=MtrDex.Blake3_256,
+            ).ked.get("i", "")
+        if event_type == "dip":
+            return eventing.delcept(
+                keys=event_dict.get("k", []),
+                delpre=event_dict.get("di", ""),
+                ndigs=event_dict.get("n", []),
+                isith=event_dict.get("kt"),
+                nsith=event_dict.get("nt"),
+                toad=event_dict.get("bt"),
+                wits=event_dict.get("b", []),
+                cnfg=event_dict.get("c", []),
+                data=event_dict.get("a", []),
+                code=MtrDex.Blake3_256,
+            ).ked.get("i", "")
+    except Exception:
+        # A malformed event cannot be re-derived. That is a refusal, not an
+        # error to swallow — the caller reports it as unproven.
+        return ""
+    return ""
+
+
+def _check_aid_binding(aid: str, first_event: dict) -> list:
+    """Check that a KEL's inception really belongs to the claimed AID.
+
+    Without this, validating a KEL proves only that somebody built a
+    self-consistent chain — not that it is the chain of the identity being
+    claimed. A wholly forged KEL, with the attacker's own keys and their own
+    valid signatures, would otherwise pass every other check in this function.
+
+    Returns a list of errors; empty means bound.
+    """
+    errors = []
+    if not aid:
+        return ["no AID given, so the KEL cannot be bound to an identity"]
+
+    declared = first_event.get("i", "")
+    if declared != aid:
+        errors.append(
+            f"inception declares identifier {declared!r} but {aid!r} was claimed"
+        )
+        return errors
+
+    if aid.startswith("E"):
+        # Self-addressing: the AID is the SAID of this very event, so it can be
+        # re-derived and must match.
+        derived = _derive_aid_from_inception(first_event)
+        if not derived:
+            errors.append(
+                "inception could not be re-derived, so the keys in it are not "
+                "proven to belong to this AID"
+            )
+        elif derived != aid:
+            errors.append(
+                f"inception re-derives to {derived!r}, not the claimed {aid!r} — "
+                "these keys do not belong to this identity"
+            )
+    elif aid.startswith(("B", "D")):
+        # Basic prefix: the identifier IS the public key, so the binding is
+        # direct and needs no derivation.
+        keys = first_event.get("k", [])
+        if not keys or keys[0] != aid:
+            errors.append(
+                f"basic identifier {aid!r} does not match its own inception key"
+            )
+    else:
+        errors.append(f"unrecognised identifier form {aid!r}, cannot bind keys to it")
+    return errors
+
+
+def _validate_kel_events(kel_events: list, aid: str = "") -> dict:
     """Validate a KEL (list of event record dicts) for hash chain integrity and signatures.
 
     Each event record is expected to have:
@@ -1152,6 +1251,36 @@ def _validate_kel_events(kel_events: list) -> dict:
             "validation_errors": ["KEL is empty"],
         }
 
+    # Bind the chain to the identity BEFORE trusting anything in it.
+    #
+    # Everything below checks that the events are consistent with each other:
+    # contiguous sequence numbers, an intact hash chain, signatures that verify
+    # against keys taken from the events themselves. All of that is satisfied
+    # by a wholly forged KEL, because the forger supplies both the keys and the
+    # signatures. What makes it somebody's KEL is that the inception derives
+    # their AID, and that is checked here.
+    try:
+        first_event = json.loads(kel_events[0].get("event_json", "{}"))
+    except (json.JSONDecodeError, TypeError) as e:
+        return {
+            "kel_verified": False,
+            "events_validated": 0,
+            "current_public_key": "",
+            "validation_errors": [f"first event could not be parsed: {e}"],
+        }
+
+    binding_errors = _check_aid_binding(aid, first_event)
+    if binding_errors:
+        # Refused outright rather than reported alongside a partial result. A
+        # KEL that is not this identity's has nothing useful to say about its
+        # current key, and returning one would be worse than returning none.
+        return {
+            "kel_verified": False,
+            "events_validated": 0,
+            "current_public_key": "",
+            "validation_errors": binding_errors,
+        }
+
     for i, record in enumerate(kel_events):
         try:
             event_dict = json.loads(record.get("event_json", "{}"))
@@ -1165,6 +1294,12 @@ def _validate_kel_events(kel_events: list) -> dict:
             sn = int(sn_str, 16) if len(sn_str) > 1 and sn_str.startswith("0") else int(sn_str)
         except (ValueError, TypeError):
             sn = i
+
+        # Every event must name the same identifier. Without this a genuine
+        # inception could have somebody else's later events spliced onto it.
+        event_aid = event_dict.get("i", "")
+        if event_aid and event_aid != aid:
+            errors.append(f"sn={i}: event belongs to {event_aid!r}, not {aid!r}")
 
         # Check sequence number is contiguous
         if sn != i:
@@ -1209,7 +1344,10 @@ def _validate_kel_events(kel_events: list) -> dict:
         if cesr_sig and signing_key_qb64:
             try:
                 # Re-serialize the event dict through keripy to get canonical raw bytes
-                serder = coring.Serder(ked=event_dict)
+                # SerderKERI, not coring.Serder: the latter does not exist in
+                # keri 1.1.17, so this raised on every event and signature
+                # checking has been failing closed rather than running.
+                serder = serdering.SerderKERI(sad=event_dict)
                 cigar = coring.Cigar(qb64=cesr_sig)
                 raw_key = _extract_raw_key(signing_key_qb64)
                 verfer = coring.Verfer(raw=raw_key, code=MtrDex.Ed25519)
@@ -1264,7 +1402,7 @@ def validate_kel():
         }), 200
 
     try:
-        result = _validate_kel_events(events)
+        result = _validate_kel_events(events, data.get("aid", ""))
         return jsonify(result), 200
     except Exception as e:
         return jsonify({"error": f"KEL validation failed: {str(e)}"}), 500
