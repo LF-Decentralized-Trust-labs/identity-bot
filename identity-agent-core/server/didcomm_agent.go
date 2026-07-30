@@ -5,17 +5,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"time"
 
 	"identity-agent-core/didcomm"
 )
 
-// sendDIDCommMessage packs an authcrypt envelope from a local AID to a registered peer
-// and delivers it over direct HTTPS. Shared by the /api/didcomm/send handler and the
-// agent auto-responder. Returns the message id and the peer's HTTP status.
-func (s *CoreServer) sendDIDCommMessage(fromAID, toAID, typ string, body json.RawMessage) (string, int, error) {
+// SendDIDCommMessage packs an authcrypt envelope from a local AID to a registered peer
+// and delivers it over direct HTTPS. Exported so an overlay (or the /api/didcomm/send
+// handler) can send messages — including an agent's reply — as the local AID. Returns
+// the message id and the peer's HTTP status.
+func (s *CoreServer) SendDIDCommMessage(fromAID, toAID, typ string, body json.RawMessage) (string, int, error) {
 	sender, err := s.keySetFor(fromAID)
 	if err != nil {
 		return "", 0, fmt.Errorf("sender keyset: %w", err)
@@ -24,7 +24,13 @@ func (s *CoreServer) sendDIDCommMessage(fromAID, toAID, typ string, body json.Ra
 	peer, ok := s.loadPeers()[toAID]
 	didcommMu.Unlock()
 	if !ok {
-		return "", 0, fmt.Errorf("no registered peer %s", toAID)
+		// Intra-org convenience: if the recipient is one of this IA's own provisioned
+		// agents, auto-establish the relationship. Cross-IA peers must be registered.
+		if p, aerr := s.ensureLocalPeer(toAID); aerr == nil {
+			peer = p
+		} else {
+			return "", 0, fmt.Errorf("no registered peer %s", toAID)
+		}
 	}
 	if peer.Endpoint == "" {
 		return "", 0, fmt.Errorf("peer %s has no endpoint", toAID)
@@ -54,49 +60,4 @@ func (s *CoreServer) sendDIDCommMessage(fromAID, toAID, typ string, body json.Ra
 	defer resp.Body.Close()
 	io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 	return jwm.ID, resp.StatusCode, nil
-}
-
-// answerAgentMessage runs when a provisioned agent receives an agent-message (a
-// question) over DIDComm. It runs the recipient agent's brain to produce an answer and
-// replies with an agent-result — one AI agent answering another, IA-to-IA. Fire-and-
-// forget (called in a goroutine); failures are logged, not surfaced to the sender's
-// HTTP call (the sender already got its 202 for the inbound question).
-func (s *CoreServer) answerAgentMessage(toAID, fromAID string, jwm *didcomm.JWM) {
-	var q struct {
-		Question string `json:"question"`
-		Text     string `json:"text"`
-		Prompt   string `json:"prompt"`
-	}
-	_ = json.Unmarshal(jwm.Body, &q)
-	question := firstNonEmpty(q.Question, q.Text, q.Prompt)
-	if question == "" {
-		log.Printf("[didcomm-agent] %s received an agent-message with no question", toAID)
-		return
-	}
-	answer, model, err := s.runAgentBrain(toAID, question)
-	if err != nil {
-		log.Printf("[didcomm-agent] %s could not answer: %v", toAID, err)
-		answer = fmt.Sprintf("(could not reach my brain: %v)", err)
-	}
-	reply, _ := json.Marshal(map[string]any{
-		"answer":      answer,
-		"in_reply_to": jwm.ID,
-		"answered_by": toAID,
-		"model":       model,
-	})
-	msgID, status, err := s.sendDIDCommMessage(toAID, fromAID, didcomm.TypeAgentResult, reply)
-	if err != nil {
-		log.Printf("[didcomm-agent] %s failed to send agent-result: %v", toAID, err)
-		return
-	}
-	log.Printf("[didcomm-agent] %s answered %s (%s → agent-result %s, peer %d)", toAID, fromAID, jwm.ID, msgID, status)
-}
-
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
 }
