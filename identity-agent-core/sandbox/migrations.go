@@ -204,6 +204,13 @@ CREATE INDEX IF NOT EXISTS idx_invocation_capability ON invocation_log(capabilit
 CREATE INDEX IF NOT EXISTS idx_invocation_ts ON invocation_log(ts);
 `,
         },
+        {
+                Version:     4,
+                Description: "Pluggable executors: per-capability executor config",
+                SQL: `
+ALTER TABLE capability_registry ADD COLUMN executor_config_json TEXT;
+`,
+        },
 }
 
 func ensureMigrationsTable(db *sql.DB) error {

@@ -47,12 +47,16 @@ type CapabilityRecord struct {
 	Name               string          `json:"name"`
 	Description        string          `json:"description"`
 	Domain             string          `json:"domain"`
-	ExecutorType       string          `json:"executor_type"` // internal_api | external_api | ai_agent | host_control
+	ExecutorType       string          `json:"executor_type"` // built-in, or a type a deployment registered
 	InputSchema        json.RawMessage `json:"input_schema,omitempty"`
 	Impact             string          `json:"impact"` // read | mutating
 	RequiredCredSchema string          `json:"required_cred_schema,omitempty"`
 	RequiredCredIssuer string          `json:"required_cred_issuer,omitempty"`
 	Egress             *EgressSpec     `json:"egress,omitempty"`
+	// ExecutorConfig is the executor's own configuration, opaque to the engine.
+	// A registered Executor is the only thing that interprets it, so a new kind of
+	// capability needs no schema change here.
+	ExecutorConfig     json.RawMessage `json:"executor_config,omitempty"`
 	Provider           string          `json:"provider"` // "registry-native" | plug-in id | agent AID
 	Enabled            bool            `json:"enabled"`
 }
@@ -92,17 +96,17 @@ func (s *SandboxStore) UpsertCapabilityRecord(r CapabilityRecord) error {
 	_, err := s.db.Exec(`
 		INSERT INTO capability_registry (id, said, name, description, domain, executor_type,
 			input_schema, impact, required_cred_schema, required_cred_issuer, egress_json,
-			provider, enabled, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+			executor_config_json, provider, enabled, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 		ON CONFLICT(id) DO UPDATE SET said=excluded.said, name=excluded.name,
 			description=excluded.description, domain=excluded.domain,
 			executor_type=excluded.executor_type, input_schema=excluded.input_schema,
 			impact=excluded.impact, required_cred_schema=excluded.required_cred_schema,
 			required_cred_issuer=excluded.required_cred_issuer, egress_json=excluded.egress_json,
-			provider=excluded.provider, enabled=excluded.enabled, updated_at=CURRENT_TIMESTAMP`,
+			executor_config_json=excluded.executor_config_json, provider=excluded.provider, enabled=excluded.enabled, updated_at=CURRENT_TIMESTAMP`,
 		r.ID, r.SAID, r.Name, r.Description, r.Domain, r.ExecutorType,
 		string(r.InputSchema), r.Impact, r.RequiredCredSchema, r.RequiredCredIssuer,
-		string(egressJSON), r.Provider, boolToInt(r.Enabled))
+		string(egressJSON), string(r.ExecutorConfig), r.Provider, boolToInt(r.Enabled))
 	return err
 }
 
@@ -110,7 +114,7 @@ func (s *SandboxStore) UpsertCapabilityRecord(r CapabilityRecord) error {
 func (s *SandboxStore) GetCapabilityRecord(id string) (*CapabilityRecord, error) {
 	row := s.db.QueryRow(`SELECT id, said, name, description, domain, executor_type,
 		input_schema, impact, required_cred_schema, required_cred_issuer, egress_json,
-		provider, enabled FROM capability_registry WHERE id = ?`, id)
+		executor_config_json, provider, enabled FROM capability_registry WHERE id = ?`, id)
 	return scanCapabilityRecord(row)
 }
 
@@ -118,7 +122,7 @@ func (s *SandboxStore) GetCapabilityRecord(id string) (*CapabilityRecord, error)
 func (s *SandboxStore) ListCapabilityRecords() ([]CapabilityRecord, error) {
 	rows, err := s.db.Query(`SELECT id, said, name, description, domain, executor_type,
 		input_schema, impact, required_cred_schema, required_cred_issuer, egress_json,
-		provider, enabled FROM capability_registry WHERE enabled = 1 ORDER BY id`)
+		executor_config_json, provider, enabled FROM capability_registry WHERE enabled = 1 ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -141,7 +145,7 @@ func (s *SandboxStore) ListCapabilityRecords() ([]CapabilityRecord, error) {
 func (s *SandboxStore) ListAllCapabilityRecords() ([]CapabilityRecord, error) {
 	rows, err := s.db.Query(`SELECT id, said, name, description, domain, executor_type,
 		input_schema, impact, required_cred_schema, required_cred_issuer, egress_json,
-		provider, enabled FROM capability_registry ORDER BY id`)
+		executor_config_json, provider, enabled FROM capability_registry ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -187,10 +191,11 @@ type rowScanner interface{ Scan(dest ...any) error }
 func scanCapabilityRecord(row rowScanner) (*CapabilityRecord, error) {
 	var r CapabilityRecord
 	var inputSchema, egressJSON string
+	var execConfig sql.NullString
 	var enabled int
 	err := row.Scan(&r.ID, &r.SAID, &r.Name, &r.Description, &r.Domain, &r.ExecutorType,
 		&inputSchema, &r.Impact, &r.RequiredCredSchema, &r.RequiredCredIssuer, &egressJSON,
-		&r.Provider, &enabled)
+		&execConfig, &r.Provider, &enabled)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -205,6 +210,9 @@ func scanCapabilityRecord(row rowScanner) (*CapabilityRecord, error) {
 		if json.Unmarshal([]byte(egressJSON), &eg) == nil {
 			r.Egress = &eg
 		}
+	}
+	if execConfig.Valid && execConfig.String != "" {
+		r.ExecutorConfig = json.RawMessage(execConfig.String)
 	}
 	r.Enabled = enabled != 0
 	return &r, nil
