@@ -1,6 +1,8 @@
 package server
 
 import (
+	"net/http"
+
 	"identity-agent-core/asset"
 	"identity-agent-core/sandbox"
 )
@@ -9,6 +11,19 @@ import (
 // AI agent as a governed KERI identity. These are the seams an agent-workforce product
 // (orchestrator, access policy) builds on; the product logic itself lives outside the
 // core (an overlay), wired via MountExtraRoutes + SetAuthorizer.
+
+// ResolveEndpointCaller resolves who is calling an endpoint (bearer token or
+// signed-request envelope), enriching an envelope-proven agent with its lineage +
+// capability ceiling. Returns an error only when a present envelope is invalid.
+// Exported so an overlay handler can authenticate a caller the same way the core does.
+func (s *CoreServer) ResolveEndpointCaller(r *http.Request, method string, body []byte) (sandbox.CallerContext, error) {
+	caller := s.resolveCaller(r)
+	if err := s.verifyRequestEnvelope(r, method, body, &caller); err != nil {
+		return caller, err
+	}
+	s.enrichCallerFromIdentity(&caller)
+	return caller, nil
+}
 
 // ResolveAgentCaller returns the governed caller context for a provisioned agent — its
 // delegated AID, delegation lineage to the owner root, and credential-proven capability
