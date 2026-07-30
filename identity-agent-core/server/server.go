@@ -615,6 +615,7 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		s.mountWitnessRoutes(r)
 		s.mountEndpointRoutes(r)
 		s.mountProviderRoutes(r)
+		s.mountSigningRequestRoutes(r)
 		s.mountUpdateRoutes(r)
 
 		// Overlay-registered routes (MountExtraRoutes) mount last, under /api.
