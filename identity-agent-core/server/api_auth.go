@@ -203,6 +203,9 @@ func (s *CoreServer) isOwner(r *http.Request) bool {
 	return s.verifyOwnerSignature(r) == nil
 }
 
+// IsOwner is the exported owner check for overlays (owner-only management routes).
+func (s *CoreServer) IsOwner(r *http.Request) bool { return s.isOwner(r) }
+
 // --- replay window ---
 
 // signedRequestWindow is how far a signed request's timestamp may be from now.

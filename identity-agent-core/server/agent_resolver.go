@@ -1,6 +1,7 @@
 package server
 
 import (
+	"identity-agent-core/asset"
 	"identity-agent-core/sandbox"
 )
 
@@ -37,6 +38,21 @@ func (s *CoreServer) ResolveAgentCaller(aid string) (sandbox.CallerContext, bool
 		}, &cc)
 	}
 	return cc, true
+}
+
+// AgentConfigByAID returns a provisioned agent's stored operational config (role,
+// system prompt, brain, exposure) by its delegated AID, or nil. Exported so an overlay
+// (e.g. the agent-brain runner) can read how an agent is meant to operate.
+func (s *CoreServer) AgentConfigByAID(aid string) *asset.AgentConfig {
+	if s.assetHandler == nil || aid == "" {
+		return nil
+	}
+	for _, a := range s.assetHandler.Store.ListAssets() {
+		if a.AssetType == "ai_agent" && a.PairwiseAID == aid {
+			return a.AgentConfig
+		}
+	}
+	return nil
 }
 
 // OwnerRootAID returns the owner's root AID (the delegator every provisioned agent
