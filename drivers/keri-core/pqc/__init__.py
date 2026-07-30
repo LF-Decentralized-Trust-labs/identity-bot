@@ -1,4 +1,4 @@
-"""hybrid PQC hybrid PQC cipher suite helpers (keripy reference engine)."""
+"""Hybrid post-quantum cipher-suite helpers (keripy reference engine)."""
 
 from .cesr import (
     CESR_MLDSA65_VERKEY,

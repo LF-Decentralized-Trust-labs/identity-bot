@@ -20,7 +20,7 @@ Finally, the world already has OpenID Connect, SIOPv2, and OpenID4VP deployed at
 
 ### The "Ask" — a universal signed interaction envelope
 
-Every RP-initiated interaction is an **Ask**: a signed, typed request that the user reviews and grants, producing a signed assertion in return. The Ask (challenge side) is versioned `"ASK1"` and carries an integer action discriminator `t` (Ask registry). The signed assertion uses a string `t` ("login-assertion") as its type discriminator. Clarification: integer `t` belongs to the challenge / Ask envelope registry (generalizes to present=2 etc.); string `t` is the assertion type per the frozen SEAM-8 §4. See also `login/types.go` (ChallengeBundle.T int, Assertion.T string) and SEAM-8.
+Every RP-initiated interaction is an **Ask**: a signed, typed request that the user reviews and grants, producing a signed assertion in return. The Ask (challenge side) is versioned `"ASK1"` and carries an integer action discriminator `t` (Ask registry). The signed assertion uses a string `t` ("login-assertion") as its type discriminator. Clarification: integer `t` belongs to the challenge / Ask envelope registry (generalizes to present=2 etc.); string `t` is the assertion type. See also `login/types.go` (ChallengeBundle.T int, Assertion.T string).
 
 | `t` | Action | Meaning |
 |---|---|---|

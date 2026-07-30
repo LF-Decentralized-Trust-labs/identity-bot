@@ -8,7 +8,7 @@ import (
 
 const SupportedManifestVersion = 1
 
-// Manifest is the signed release manifest (SEAM-20 §3).
+// Manifest is the signed release manifest.
 type Manifest struct {
 	ManifestVersion int                       `json:"manifest_version"`
 	PublishedAt     string                    `json:"published_at"`
@@ -60,7 +60,8 @@ type NextSigningKey struct {
 	ActivatesAt string `json:"activates_at"`
 }
 
-// KeyTransition is the signed key-rotation endorsement object (SEAM-20 OQ-5).
+// KeyTransition is the signed key-rotation endorsement object that lets a
+// release-signing key be replaced without trusting the new key on its own.
 type KeyTransition struct {
 	OldKeyID     string `json:"old_key_id"`
 	NewKeyID     string `json:"new_key_id"`

@@ -49,7 +49,7 @@ CREATE TABLE share_actions (
 | `show_id`         | Show ID           | ❌       | Coming soon                         |
 | `request_payment` | Request Payment   | ❌       | Coming soon                         |
 | `share_file`      | Share a File      | ❌       | Coming soon                         |
-| `credential_request`| Share / request credential (SEAM-7 bundle) | ❌ | Coming soon |
+| `credential_request`| Share / request a verifiable credential | ❌ | Coming soon |
 
 ### REST API
 

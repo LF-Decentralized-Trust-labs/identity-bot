@@ -12,7 +12,7 @@ import (
 	"github.com/zeebo/blake3"
 )
 
-// Verification errors (SEAM-20 UM-* rules).
+// Verification errors.
 var (
 	ErrUnknownManifestVersion = errors.New("unknown_manifest_version")
 	ErrSignatureInvalid       = errors.New("signature_invalid")
@@ -132,7 +132,7 @@ func (ta *TrustAnchor) learnNextSigningKey(m *Manifest) error {
 	return nil
 }
 
-// VerifyKeyTransition validates a signed key-transition endorsement (OQ-5).
+// VerifyKeyTransition validates a signed key-transition endorsement.
 func VerifyKeyTransition(raw []byte, ta *TrustAnchor) (*KeyTransition, error) {
 	var kt KeyTransition
 	if err := jsonUnmarshal(raw, &kt); err != nil {

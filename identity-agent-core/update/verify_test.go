@@ -11,7 +11,7 @@ import (
 	"github.com/zeebo/blake3"
 )
 
-// Golden JCS vector — byte-pinned at build per SEAM-20 OQ-4.
+// Golden JCS vector — byte-pinned at build.
 const goldenJCSInput = `{"b":2,"a":1,"nested":{"z":true,"y":null}}`
 const goldenJCSOutput = `{"a":1,"b":2,"nested":{"y":null,"z":true}}`
 

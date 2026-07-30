@@ -101,7 +101,7 @@ func NewService(cfg Config) (*Service, error) {
 		attestation: att,
 		settings: Settings{
 			Channel:           "stable",
-			AutoApplyCritical: true, // OQ-1: ON by default
+			AutoApplyCritical: true, // on by default
 		},
 		installed: copyStringMap(cfg.Installed),
 	}
