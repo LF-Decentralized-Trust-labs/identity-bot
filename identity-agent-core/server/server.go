@@ -697,21 +697,34 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		}
 
 		r.Get("/*", func(w http.ResponseWriter, r *http.Request) {
-			urlPath := r.URL.Path
+			// The prefix this agent is being served under. Empty at the root,
+			// set when a relay has put the UI on a subpath — see
+			// web_base_href.go for why both halves of this are needed.
+			prefix := webPathPrefix(r)
+			urlPath := stripPrefix(r.URL.Path, prefix)
 			filePath := filepath.Join(absWebDir, urlPath)
 			_, statErr := os.Stat(filePath)
 
 			// SPA fallback to index.html for unknown (client-side-routed) paths.
 			if os.IsNotExist(statErr) {
 				setCache(w, urlPath, true)
-				http.ServeFile(w, r, filepath.Join(absWebDir, "index.html"))
+				serveShell(w, filepath.Join(absWebDir, "index.html"), prefix)
 				return
 			}
 
 			isShell := urlPath == "/" || urlPath == "/index.html" ||
 				strings.HasSuffix(urlPath, "/index.html")
 			setCache(w, urlPath, isShell)
-			fileServer.ServeHTTP(w, r)
+			if isShell {
+				serveShell(w, filepath.Join(absWebDir, "index.html"), prefix)
+				return
+			}
+			// Serve the file the stripped path points at, not the one the
+			// original URL did, or a forwarded prefix reaches the file server
+			// and misses.
+			r2 := r.Clone(r.Context())
+			r2.URL.Path = urlPath
+			fileServer.ServeHTTP(w, r2)
 		})
 	} else {
 		r.Get("/*", func(w http.ResponseWriter, r *http.Request) {
