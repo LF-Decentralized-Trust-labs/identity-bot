@@ -52,7 +52,20 @@ type pairingBeginResponse struct {
 type pairingCompleteRequest struct {
 	// DipEvent is the delegated inception the controller issued over the key
 	// material from begin.
+	//
+	// An ORGANISATION sends none. A delegation cannot be transferred, only
+	// destroyed, so a delegated organisation could never be sold without
+	// killing its identity and every relationship it ever had. An organisation
+	// instead incepts its own identity and names its owner in that event — see
+	// FoundAsOrganisation.
 	DipEvent map[string]interface{} `json:"dip_event"`
+	// FoundAsOrganisation asks this instance to found an organisation rather
+	// than become somebody's delegated agent.
+	//
+	// The organisation gets its own key, so it can hold relationships and keep
+	// its own address current without reaching for a person every time. What
+	// the owner controls is the identity itself.
+	FoundAsOrganisation bool `json:"found_as_organisation,omitempty"`
 	// DelegatorIxn is the controller's interaction event anchoring the
 	// delegation in its own KEL — what makes the delegation verifiable by a
 	// third party rather than merely asserted here.
@@ -186,28 +199,67 @@ func (s *CoreServer) handlePairingComplete(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if err := validateDelegation(req, pairingState.offered.PublicKey); err != nil {
-		writeError(w, http.StatusBadRequest, "Delegation refused", err.Error())
-		return
-	}
-
-	delegatedAID, _ := req.DipEvent["i"].(string)
-	eventJSON, _ := json.Marshal(req.DipEvent)
 	now := time.Now().UTC().Format(time.RFC3339)
 
+	// Two ways to be adopted, and which one is right depends on whether the
+	// thing being adopted can ever change hands.
+	//
+	// A PERSON'S AGENT is delegated. Its delegator is named inside its own
+	// inception, which is exactly right for a relationship that is permanent by
+	// nature: your computer does not stop being yours.
+	//
+	// An ORGANISATION is not. A delegation cannot be transferred, only
+	// destroyed, so a delegated company could never be sold without killing its
+	// identity and every credential and relationship it ever had. It incepts
+	// its own identity and names its owner in that event instead, so ownership
+	// changes by rotation and the company survives its owner.
+	var (
+		identityAID string
+		eventType   string
+		eventBody   map[string]interface{}
+	)
+
+	if req.FoundAsOrganisation {
+		if req.OwnerAID == "" {
+			writeError(w, http.StatusBadRequest, "An organisation needs an owner",
+				"an organisation has no mind and cannot be its own owner; name the identity it answers to")
+			return
+		}
+		if s.KeriDriver == nil {
+			writeError(w, http.StatusServiceUnavailable, "No KERI driver",
+				"founding an organisation needs the local KERI engine")
+			return
+		}
+		result, ierr := s.KeriDriver.CreateOwnedInception(
+			pairingState.offered.PublicKey, pairingState.offered.NextPublicKey, "", req.OwnerAID)
+		if ierr != nil {
+			writeError(w, http.StatusInternalServerError, "Could not found the organisation", ierr.Error())
+			return
+		}
+		identityAID, eventType, eventBody = result.AID, "icp", result.InceptionEvent
+	} else {
+		if err := validateDelegation(req, pairingState.offered.PublicKey); err != nil {
+			writeError(w, http.StatusBadRequest, "Delegation refused", err.Error())
+			return
+		}
+		identityAID, _ = req.DipEvent["i"].(string)
+		eventType, eventBody = "dip", req.DipEvent
+	}
+
+	eventJSON, _ := json.Marshal(eventBody)
 	if err := s.DataStore.SaveEvent(store.EventRecord{
-		AID:            delegatedAID,
+		AID:            identityAID,
 		SequenceNumber: 0,
-		EventType:      "dip",
+		EventType:      eventType,
 		EventJSON:      string(eventJSON),
 		PublicKey:      pairingState.offered.PublicKey,
 		Timestamp:      now,
 	}); err != nil {
-		writeError(w, http.StatusInternalServerError, "Could not persist the delegation", err.Error())
+		writeError(w, http.StatusInternalServerError, "Could not persist the inception", err.Error())
 		return
 	}
 	if err := s.DataStore.SaveIdentity(store.IdentityState{
-		AID:        delegatedAID,
+		AID:        identityAID,
 		PublicKey:  pairingState.offered.PublicKey,
 		Created:    now,
 		EventCount: 1,
@@ -248,14 +300,22 @@ func (s *CoreServer) handlePairingComplete(w http.ResponseWriter, r *http.Reques
 	pairingState.seed = nil
 
 	log.Printf("[pairing] adopted: delegated AID %s under delegator %s, owner %s",
-		delegatedAID, req.DelegatorAID, req.OwnerAID)
+		identityAID, req.DelegatorAID, req.OwnerAID)
 
-	writeJSONResponse(w, map[string]interface{}{
-		"ok":            true,
-		"delegated_aid": delegatedAID,
-		"delegator_aid": req.DelegatorAID,
-		"owner_aid":     req.OwnerAID,
-	})
+	// The identity is named as what it is. An organisation's is not delegated,
+	// and reporting it under "delegated_aid" would be a caller's first and
+	// hardest-to-shake wrong impression of what it just created.
+	response := map[string]interface{}{
+		"ok":        true,
+		"owner_aid": req.OwnerAID,
+	}
+	if req.FoundAsOrganisation {
+		response["organisation_aid"] = identityAID
+	} else {
+		response["delegated_aid"] = identityAID
+		response["delegator_aid"] = req.DelegatorAID
+	}
+	writeJSONResponse(w, response)
 }
 
 // validateDelegation checks the delegation is over this instance's key and

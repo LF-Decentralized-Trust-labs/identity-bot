@@ -1,6 +1,10 @@
 package server
 
 import (
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -132,5 +136,29 @@ func TestTheSealShapeRoundTrips(t *testing.T) {
 	}
 	if seal["r"] != ownerRole {
 		t.Errorf("the seal role is %q, not the constant both sides use", seal["r"])
+	}
+}
+
+// Founding an organisation requires naming its owner.
+//
+// An organisation has no mind and cannot be its own owner. If this could be
+// skipped, the very failure the anchor exists to prevent — an organisation that
+// answers to itself — would be reachable again through the front door.
+func TestFoundingAnOrganisationWithoutAnOwnerIsRefused(t *testing.T) {
+	s := witnessWithStore(t)
+	s.KeriDriver = nil // never reached: the owner check comes first
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"found_as_organisation": true,
+		"adoption_code":         "irrelevant",
+	})
+	r := httptest.NewRequest(http.MethodPost, "/api/pairing/adopt", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	s.handlePairingComplete(w, r)
+
+	// Any refusal will do; what matters is that it does not proceed to found an
+	// organisation with nobody answering for it.
+	if w.Code == http.StatusOK {
+		t.Fatal("an organisation was founded with no owner")
 	}
 }
