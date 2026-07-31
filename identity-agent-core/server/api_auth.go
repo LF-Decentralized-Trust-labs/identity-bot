@@ -110,6 +110,13 @@ var publicRoutes = map[string]string{
 	// what a stranger with a valid token can do is put themselves in a queue.
 	"GET /api/employees/invites/{token}":         "the invited person's agent reads what they were invited to",
 	"POST /api/employees/invites/{token}/redeem": "the invited person's agent accepts, becoming a pending member",
+
+	// A machine enrolling itself with the key it generated. It is not the owner
+	// and never will be — that is the point of it holding its own key — so it
+	// cannot be owner-gated. The enrolment token authorises it: single-use,
+	// time-bounded, and it names in advance what may enrol. ISSUING a token
+	// stays owner-only, which is where the decision actually is.
+	"POST /api/enrol": "a machine presents the key it generated and the token it was given",
 	// Agent-to-agent messaging. Unreachable until now: the route was registered
 	// as public and never listed here, so the router refused every peer with 403
 	// before the handler ran and no message from another agent ever arrived.

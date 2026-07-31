@@ -88,7 +88,18 @@ func (s *CoreServer) mountAssetRoutes(r chi.Router) {
 		r.Get("/{id}/members", s.assetHandler.HandleListMembers)
 		r.Delete("/{id}/members/{aid}", s.assetHandler.HandleRemoveMember)
 	})
-	// Public invite routes (no auth — login SDK calls these)
+	// Public invite routes — declared in publicRoutes, which is what actually
+	// makes them reachable. The login SDK calls these from a relying party's
+	// browser.
 	r.Get("/invites/{token}", s.assetHandler.HandleGetInviteInfo)
 	r.Post("/invites/{token}/redeem", s.assetHandler.HandleRedeemInvite)
+
+	// Enrolling a machine that brought its own key. Issuing a token is the
+	// owner's; spending it is the machine's, so only the last is public.
+	r.Route("/enrolments", func(r chi.Router) {
+		r.Get("/", s.assetHandler.HandleListEnrolments)
+		r.Post("/", s.assetHandler.HandleCreateEnrolment)
+		r.Delete("/{token}", s.assetHandler.HandleRevokeEnrolment)
+	})
+	r.Post("/enrol", s.assetHandler.HandleEnrol)
 }
