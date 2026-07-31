@@ -36,11 +36,20 @@ type EnrollmentPolicy struct {
 }
 
 type Asset struct {
-	ID              string           `json:"id"`
-	DisplayName     string           `json:"display_name"`
-	AssetType       string           `json:"asset_type"` // "domain" | "application"
-	Origin          string           `json:"origin"`
-	PairwiseAID     string           `json:"pairwise_aid"`
+	ID          string `json:"id"`
+	DisplayName string `json:"display_name"`
+	AssetType   string `json:"asset_type"` // "domain" | "application"
+	Origin      string `json:"origin"`
+	PairwiseAID string `json:"pairwise_aid"`
+	// PublicKey is the signing key of an asset that BROUGHT ITS OWN — a machine
+	// that generated a keypair and enrolled with the public half.
+	//
+	// Empty for every asset the agent minted itself, and correctly so: those
+	// keys are recoverable from SigningIndex and the owner's seed, so storing a
+	// copy would add a second place for them to drift. An enrolled asset's key
+	// is nowhere in that tree, so if it is not recorded here nothing can ever
+	// verify anything the machine says.
+	PublicKey       string           `json:"public_key,omitempty"`
 	DelegationModel string           `json:"delegation_model"` // "delegated" | "standalone"
 	DelegatorAID    string           `json:"delegator_aid,omitempty"`
 	Policy          EnrollmentPolicy `json:"policy"`
@@ -57,8 +66,8 @@ type Asset struct {
 	// identity and capability ceiling: its role, system prompt, which LLM brain it
 	// connects to, and how it is exposed. Nil for non-agent assets.
 	AgentConfig *AgentConfig `json:"agent_config,omitempty"`
-	CreatedAt    time.Time    `json:"created_at"`
-	UpdatedAt    time.Time    `json:"updated_at"`
+	CreatedAt   time.Time    `json:"created_at"`
+	UpdatedAt   time.Time    `json:"updated_at"`
 }
 
 // AgentConfig captures what an ai_agent is and how it operates. The identity + grant
@@ -139,7 +148,7 @@ type EmployeeInvite struct {
 	// IsSigner marks the organisation-founding invite (t=4): redeeming it makes the
 	// individual an ACTIVE super-admin immediately (they're a founding signer,
 	// there's no one above them to approve), and requires a vouch signature.
-	IsSigner bool `json:"is_signer,omitempty"`
+	IsSigner  bool      `json:"is_signer,omitempty"`
 	UseCount  int       `json:"use_count"`
 	CreatedAt time.Time `json:"created_at"`
 	Revoked   bool      `json:"revoked"`

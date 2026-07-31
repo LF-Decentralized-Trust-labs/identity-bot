@@ -22,6 +22,10 @@ import (
 //     relying party's browser, which is nobody's owner.
 //   - GET /api/employees/invites/{token} and its redeem, called by an invited
 //     person's agent, which is not the org's owner either.
+//   - GET /api/didcomm/did, which publishes the public keys another agent needs
+//     in order to encrypt to us. Its own handler already assumed a non-owner
+//     would call it — it refuses to MINT for one — so two agents could never
+//     establish a relationship without somebody hand-copying keys.
 //
 // A comment at the mount site is not enforcement, and each of these had one.
 
@@ -35,6 +39,7 @@ func TestTheRoutesThatWereSilentlyUnreachableAreDeclared(t *testing.T) {
 		"POST /api/invites/{token}/redeem":           "the login SDK's invite flow",
 		"POST /api/assets/{id}/requests":             "asking an owner for access",
 		"GET /api/employees/invites/{token}":         "employee onboarding",
+		"GET /api/didcomm/did":                       "two agents establishing a relationship at all",
 		"POST /api/employees/invites/{token}/redeem": "employee onboarding",
 	} {
 		if _, ok := publicRoutes[route]; !ok {

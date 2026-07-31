@@ -130,8 +130,12 @@ func (h *Handler) HandleEnrol(w http.ResponseWriter, r *http.Request) {
 		AssetType:   enrolment.AssetType,
 		// Taken from the token, not from the request. A machine does not get to
 		// tell the owner where it lives.
-		Origin:          enrolment.Origin,
-		PairwiseAID:     resp.AID,
+		Origin:      enrolment.Origin,
+		PairwiseAID: resp.AID,
+		// Recorded so this machine's later requests can be verified. Without it
+		// the enrolment produces an identity nothing can check a signature
+		// against, which is most of the point of having enrolled.
+		PublicKey:       body.PublicKey,
 		DelegationModel: "delegated",
 		DelegatorAID:    resp.DelegatorAID,
 		// No SigningIndex. That field records where an asset's key sits in the

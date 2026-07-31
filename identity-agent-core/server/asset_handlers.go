@@ -102,4 +102,9 @@ func (s *CoreServer) mountAssetRoutes(r chi.Router) {
 		r.Delete("/{token}", s.assetHandler.HandleRevokeEnrolment)
 	})
 	r.Post("/enrol", s.assetHandler.HandleEnrol)
+
+	// An enrolled machine asking this agent to tell somebody something. Signed
+	// by the machine's own key, which is the only thing that makes it safe to
+	// be reachable without being the owner.
+	r.Post("/notify", s.handleAssetNotify)
 }

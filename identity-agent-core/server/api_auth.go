@@ -117,6 +117,23 @@ var publicRoutes = map[string]string{
 	// time-bounded, and it names in advance what may enrol. ISSUING a token
 	// stays owner-only, which is where the decision actually is.
 	"POST /api/enrol": "a machine presents the key it generated and the token it was given",
+
+	// A DID document is public key material — that is the whole idea of one.
+	// Not being reachable meant two agents could never establish a relationship
+	// without somebody hand-copying keys between them, which is why every
+	// cross-machine DIDComm peer had to be registered by an owner.
+	//
+	// The handler already assumed a non-owner would call it: it returns 404
+	// rather than minting when the caller is not the owner and no keyset exists.
+	// That check was unreachable, and it is exactly the right one — a stranger
+	// can read a key that exists and cannot cause one to be generated.
+	"GET /api/didcomm/did": "an agent reads the public keys it needs to encrypt to us",
+	// A machine this agent owns asks it to deliver a message. Not owner-gated,
+	// because the machine is not the owner — it signs with the key it enrolled
+	// with, and that signature carries the same replay protection the owner's
+	// does. It cannot say who it is: the sender on the delivered message comes
+	// from the verified signature, never from the body.
+	"POST /api/notify": "a machine this agent owns asks it to tell somebody something",
 	// Agent-to-agent messaging. Unreachable until now: the route was registered
 	// as public and never listed here, so the router refused every peer with 403
 	// before the handler ran and no message from another agent ever arrived.
