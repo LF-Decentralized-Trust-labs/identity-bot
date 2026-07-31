@@ -1,5 +1,8 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:http/http.dart' as http;
+
+import 'owner_signing_client.dart';
 import '../config/agent_config.dart';
 
 class HealthResponse {
@@ -579,9 +582,28 @@ class CoreService {
   final String baseUrl;
   final http.Client _client;
 
-  CoreService({String? baseUrl})
+  /// Builds a client for an agent.
+  ///
+  /// [ownerSeed] is what lets this talk to an agent running on hardware you
+  /// rent. There, you are remote by definition, so every owner endpoint answers
+  /// "sign this request with the owner key" — and without a seed to sign with,
+  /// a hosted agent is correctly locked and unusable by the person who owns it.
+  ///
+  /// Left out, requests go unsigned. That is right for an agent on the machine
+  /// you are sitting at, which recognises a local request as its owner's, and
+  /// it keeps every existing caller working unchanged.
+  ///
+  /// Signing is applied at the transport rather than per request, so a call
+  /// added tomorrow is signed without anybody remembering to sign it.
+  CoreService({String? baseUrl, Future<Uint8List?> Function()? ownerSeed, String? ownerAid})
       : baseUrl = baseUrl ?? AgentConfig.coreBaseUrl,
-        _client = http.Client();
+        _client = ownerSeed == null
+            ? http.Client()
+            : OwnerSigningClient(
+                agentOrigin: baseUrl ?? AgentConfig.coreBaseUrl,
+                ownerSeed: ownerSeed,
+                ownerAid: ownerAid,
+              );
 
   Future<HealthResponse> getHealth() async {
     final response = await _client.get(
