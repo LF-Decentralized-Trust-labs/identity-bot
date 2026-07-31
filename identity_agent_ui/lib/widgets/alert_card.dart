@@ -2,7 +2,27 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../theme/mobile_theme.dart';
 
-enum AlertCardType { connectionRequest, pendingRequest, credentialIncoming }
+/// What kind of thing this card is showing.
+///
+/// Every switch on this enum below is exhaustive, with no wildcard arm. That is
+/// deliberate: the arms used to end in `_ =>`, so adding a case here compiled
+/// clean and silently rendered as "Pending Request" in four places at once.
+/// Exhaustive switches turn that into a compile error, which is where it
+/// belongs.
+enum AlertCardType {
+  connectionRequest,
+  pendingRequest,
+  credentialIncoming,
+
+  /// Something another agent said. Not a request for approval — there may be
+  /// nothing to approve — so it carries no accept or deny.
+  notification,
+
+  /// A notification the sender marked critical: a deadline, or something about
+  /// to stop working. Separate from [notification] because "for your
+  /// information" and "this ends on Friday" should not look the same.
+  notificationCritical,
+}
 
 class AlertCard extends StatelessWidget {
   final String displayName;
@@ -45,9 +65,11 @@ class AlertCard extends StatelessWidget {
       } catch (_) {}
     }
     final Color avatarColor = switch (type) {
-      AlertCardType.connectionRequest  => MobileColors.primary,
-      AlertCardType.credentialIncoming => MobileColors.success,
-      _                                => MobileColors.warning,
+      AlertCardType.connectionRequest     => MobileColors.primary,
+      AlertCardType.credentialIncoming    => MobileColors.success,
+      AlertCardType.pendingRequest        => MobileColors.warning,
+      AlertCardType.notification          => MobileColors.primary,
+      AlertCardType.notificationCritical  => MobileColors.error,
     };
     return CircleAvatar(
       radius: 20,
@@ -82,23 +104,29 @@ class AlertCard extends StatelessWidget {
               children: [
                 Icon(
                   switch (type) {
-                    AlertCardType.connectionRequest  => Icons.person_add,
-                    AlertCardType.credentialIncoming => Icons.verified_outlined,
-                    _                                => Icons.hourglass_top,
+                    AlertCardType.connectionRequest     => Icons.person_add,
+                    AlertCardType.credentialIncoming    => Icons.verified_outlined,
+                    AlertCardType.pendingRequest        => Icons.hourglass_top,
+                    AlertCardType.notification          => Icons.notifications_outlined,
+                    AlertCardType.notificationCritical  => Icons.warning_amber_rounded,
                   },
                   color: switch (type) {
-                    AlertCardType.connectionRequest  => MobileColors.primary,
-                    AlertCardType.credentialIncoming => MobileColors.success,
-                    _                                => MobileColors.warning,
+                    AlertCardType.connectionRequest     => MobileColors.primary,
+                    AlertCardType.credentialIncoming    => MobileColors.success,
+                    AlertCardType.pendingRequest        => MobileColors.warning,
+                    AlertCardType.notification          => MobileColors.primary,
+                    AlertCardType.notificationCritical  => MobileColors.error,
                   },
                   size: 16,
                 ),
                 const SizedBox(width: 6),
                 Text(
                   switch (type) {
-                    AlertCardType.connectionRequest  => 'Connection Request',
-                    AlertCardType.credentialIncoming => 'Incoming Credential',
-                    _                                => 'Pending Request',
+                    AlertCardType.connectionRequest     => 'Connection Request',
+                    AlertCardType.credentialIncoming    => 'Incoming Credential',
+                    AlertCardType.pendingRequest        => 'Pending Request',
+                    AlertCardType.notification          => 'Notification',
+                    AlertCardType.notificationCritical  => 'Needs Attention',
                   },
                   style: const TextStyle(
                     fontSize: 12,

@@ -87,6 +87,7 @@ class _DesktopDashboardScreenState extends State<DesktopDashboardScreen> {
   List<ContactResponse> _alerts = [];
   List<PendingRequestResponse> _pendingRequests = [];
   List<CredentialRecord> _pendingCredentials = [];
+  List<NotificationRecord> _notifications = [];
 
   // Automated background tasks (from backend)
   List<TaskRecord> _backgroundTasks = [];
@@ -228,6 +229,7 @@ class _DesktopDashboardScreenState extends State<DesktopDashboardScreen> {
           _alerts = result.alerts;
           _pendingRequests = result.pendingRequests;
           _pendingCredentials = result.pendingCredentials;
+          _notifications = result.notifications;
         });
       }
     } catch (_) {}
@@ -516,7 +518,7 @@ class _DesktopDashboardScreenState extends State<DesktopDashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final totalAlerts = _alerts.length + _pendingRequests.length + _pendingCredentials.length;
+    final totalAlerts = _alerts.length + _pendingRequests.length + _pendingCredentials.length + _notifications.length;
 
     return Scaffold(
       body: SingleChildScrollView(
@@ -911,10 +913,14 @@ class _DesktopDashboardScreenState extends State<DesktopDashboardScreen> {
                       fontSize: 11, fontWeight: FontWeight.w700)),
             )
           : null,
-      child: _alerts.isNotEmpty || _pendingRequests.isNotEmpty || _pendingCredentials.isNotEmpty
+      child: _alerts.isNotEmpty || _pendingRequests.isNotEmpty || _pendingCredentials.isNotEmpty || _notifications.isNotEmpty
           ? Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // First. The others wait on the user and keep until dealt
+                // with; a notification may be the only warning before something
+                // stops.
+                ..._notifications.take(3).map((n) => _notificationItem(n)),
                 ..._alerts.take(3).map((a) => _alertItem(a)),
                 ..._pendingRequests.take(2).map((r) => _pendingItem(r)),
                 ..._pendingCredentials.take(3).map((c) => _credentialAlertItem(c)),
@@ -1183,6 +1189,46 @@ class _DesktopDashboardScreenState extends State<DesktopDashboardScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _notificationItem(NotificationRecord n) {
+    final accent = n.isCritical ? AppColors.error : AppColors.primary;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceLight,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: accent.withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(n.isCritical ? Icons.warning_amber_rounded : Icons.notifications_outlined,
+                  size: 14, color: accent),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(n.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        color: AppColors.textPrimary, fontSize: 12, fontWeight: FontWeight.w600)),
+              ),
+            ],
+          ),
+          if (n.body.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(n.body,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: AppColors.textMuted, fontSize: 11)),
+            ),
+        ],
       ),
     );
   }

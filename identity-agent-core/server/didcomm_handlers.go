@@ -49,7 +49,6 @@ type inboxEntry struct {
 
 func (s *CoreServer) didcommKeysPath() string  { return filepath.Join(s.DataDir, "didcomm_keys.json") }
 func (s *CoreServer) didcommPeersPath() string { return filepath.Join(s.DataDir, "didcomm_peers.json") }
-func (s *CoreServer) didcommInboxPath() string { return filepath.Join(s.DataDir, "didcomm_inbox.json") }
 
 func (s *CoreServer) loadDIDCommKeys() map[string]json.RawMessage {
 	m := map[string]json.RawMessage{}
@@ -59,9 +58,35 @@ func (s *CoreServer) loadDIDCommKeys() map[string]json.RawMessage {
 	return m
 }
 
+// writeFileAtomic replaces a file in one step, or leaves the old one alone.
+//
+// These three files were each written with a bare os.WriteFile: truncate, then
+// write. A process that stopped in between left a half-written file, and every
+// reader here discards the unmarshal error and carries on with an empty map. So
+// an interrupted write did not fail loudly — it silently emptied the peers list,
+// the inbox, or the file holding this agent's DIDComm private keys.
+//
+// Writing beside the target and renaming means a reader sees either the old
+// file or the new one. Losing the newest change is recoverable; a truncated key
+// file is not.
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, perm); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
 func (s *CoreServer) saveDIDCommKeys(m map[string]json.RawMessage) error {
-	b, _ := json.MarshalIndent(m, "", "  ")
-	return os.WriteFile(s.didcommKeysPath(), b, 0600)
+	b, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return err
+	}
+	return writeFileAtomic(s.didcommKeysPath(), b, 0600)
 }
 
 // keySetFor returns the DIDComm keyset for aid, minting + persisting one on first use.
@@ -104,23 +129,38 @@ func (s *CoreServer) loadPeers() map[string]peerRecord {
 }
 
 func (s *CoreServer) savePeers(m map[string]peerRecord) error {
-	b, _ := json.MarshalIndent(m, "", "  ")
-	return os.WriteFile(s.didcommPeersPath(), b, 0600)
-}
-
-func (s *CoreServer) appendInbox(e inboxEntry) {
-	didcommMu.Lock()
-	defer didcommMu.Unlock()
-	var list []inboxEntry
-	if b, err := os.ReadFile(s.didcommInboxPath()); err == nil {
-		_ = json.Unmarshal(b, &list)
+	b, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return err
 	}
-	list = append(list, e)
-	b, _ := json.MarshalIndent(list, "", "  ")
-	_ = os.WriteFile(s.didcommInboxPath(), b, 0600)
+	return writeFileAtomic(s.didcommPeersPath(), b, 0600)
 }
 
 // --- replay: in-process seen-ID cache (id -> expiry) ---
+
+// maxEnvelopeLifetime bounds how far ahead a sender may declare its envelope
+// valid.
+//
+// Freshness was entirely the sender's to decide: the receiver parsed
+// expires_time and checked only that it had not passed. A peer could declare an
+// envelope valid until 2099, and two things followed. Its id had to be
+// remembered until then, so the replay cache could be filled with entries that
+// never evict; and because that cache is per-process, the envelope became
+// replayable in full after any restart, for as long as the sender chose.
+//
+// An hour is far more than the ten minutes our own sender uses, so it constrains
+// nobody honest.
+const maxEnvelopeLifetime = time.Hour
+
+// maxSeenEntries caps the replay cache.
+//
+// The sweep below walks every entry on every call, so an unbounded map is not
+// merely memory: cost per message grows with the number of entries a peer has
+// planted, and the agent degrades in a way that does not recover until it
+// restarts — which is also the event that empties the cache and makes
+// everything in it replayable again.
+const maxSeenEntries = 50000
+
 var didcommSeen = struct {
 	sync.Mutex
 	m map[string]time.Time
@@ -137,6 +177,14 @@ func seenBefore(id string, exp time.Time) bool {
 	}
 	if _, ok := didcommSeen.m[id]; ok {
 		return true
+	}
+	// Full after the sweep means live entries alone have filled it. Refusing to
+	// record is the safe direction: the message is still delivered, and the
+	// worst case is that a duplicate of it is accepted later. Evicting a live
+	// entry instead would make a chosen message replayable on demand, which is
+	// the attack this cache exists to stop.
+	if len(didcommSeen.m) >= maxSeenEntries {
+		return false
 	}
 	didcommSeen.m[id] = exp
 	return false
@@ -195,8 +243,18 @@ func (s *CoreServer) handleGetDIDCommDID(w http.ResponseWriter, r *http.Request)
 		jsonError(w, "aid is required", http.StatusBadRequest)
 		return
 	}
-	if !s.hasKeySet(aid) {
-		if !s.isOwner(r) {
+	if !s.hasKeySet(aid) && !s.isOwner(r) {
+		// A stranger cannot make this agent generate keys for an arbitrary
+		// identifier — that is unbounded work on demand. But refusing outright
+		// broke the case this endpoint exists for: an agent that has never sent
+		// a DIDComm message has no keyset, so nobody could ever encrypt the
+		// FIRST message to it. Every newly created agent is in that state, and
+		// the first message is exactly the one that has to get through.
+		//
+		// So one exception, bounded to one keyset: our OWN identity. It is going
+		// to exist the moment we send anything, there is exactly one of it, and
+		// generating it cannot be repeated for a second identifier.
+		if identity, err := s.DataStore.GetIdentity(); err != nil || identity == nil || identity.AID != aid {
 			jsonError(w, "no didcomm identity for that aid", http.StatusNotFound)
 			return
 		}
@@ -300,12 +358,23 @@ func (s *CoreServer) handleDIDCommInbound(w http.ResponseWriter, r *http.Request
 	peer, known := s.loadPeers()[skid]
 	didcommMu.Unlock()
 	if !known {
-		if p, aerr := s.ensureLocalPeer(skid); aerr == nil {
-			peer = p
-		} else {
-			jsonError(w, "unknown sender "+skid+" — not a registered peer", http.StatusForbidden)
-			return
-		}
+		// The peers file is the ONLY authority on this path, and registering a
+		// peer is an owner action.
+		//
+		// This used to fall through to ensureLocalPeer, which registers one of
+		// our own provisioned agents on demand. On the owner's send path that is
+		// convenience; here it was a stranger's. Pairwise AIDs are published in
+		// OOBI URLs, so anyone who read one could make an unauthenticated POST
+		// mint a post-quantum keyset and write two files — before a single byte
+		// was authenticated. The envelope would still fail to decrypt, so it was
+		// never a way in; it was a way to make this agent do expensive work on
+		// demand, and it contradicted the rule the neighbouring handler states
+		// plainly: never mint for an anonymous caller.
+		//
+		// A local agent that needs to reach us is registered when the owner
+		// first sends to it, which is the same ceremony as any other peer.
+		jsonError(w, "sender is not a registered peer", http.StatusForbidden)
+		return
 	}
 	// Resolve the recipient keyset from kid.
 	if len(env.Recipients) == 0 {
@@ -333,16 +402,26 @@ func (s *CoreServer) handleDIDCommInbound(w http.ResponseWriter, r *http.Request
 		jsonError(w, "envelope_expired", http.StatusForbidden)
 		return
 	}
+	// A sender does not get to decide how long we remember it for. See
+	// maxEnvelopeLifetime.
+	if exp.After(time.Now().Add(maxEnvelopeLifetime)) {
+		jsonError(w, "envelope_lifetime_too_long", http.StatusForbidden)
+		return
+	}
 	if seenBefore(jwm.ID, exp) {
 		jsonError(w, "replay_detected", http.StatusConflict)
 		return
 	}
 	// Store the received message.
-	s.appendInbox(inboxEntry{
-		ReceivedAt: time.Now().UTC().Format(time.RFC3339),
-		FromAID:    skid, ToAID: kid, Type: jwm.Type, MessageID: jwm.ID,
-		Body: jwm.Body, Mode: env.Mode, Verified: true,
-	})
+	//
+	// One table, not two. This used to append to didcomm_inbox.json, a flat file
+	// with the same fields as a notification — from, to, type, body, verified —
+	// but no id, no read state and no pruning. Both were inboxes; keeping them
+	// separate meant the next person had to learn which held what.
+	//
+	// skid and kid are the AUTHENTICATED header values, not anything read out of
+	// the message. A sender that could name itself could name somebody else.
+	s.storeInboundAsNotification(skid, kid, jwm, true)
 	// The handler layer routes on type; the AI-agent handler picks up agent-* messages.
 	s.routeInboundDIDComm(kid, skid, jwm)
 	w.WriteHeader(http.StatusAccepted)
@@ -355,17 +434,29 @@ func (s *CoreServer) handleGetDIDCommInbox(w http.ResponseWriter, r *http.Reques
 		jsonError(w, "inbox is owner only", http.StatusForbidden)
 		return
 	}
-	var list []inboxEntry
-	if b, err := os.ReadFile(s.didcommInboxPath()); err == nil {
-		_ = json.Unmarshal(b, &list)
+	// Reads the notification table now, and renders the same shape it always
+	// did. The messages this returns are the same messages; only where they are
+	// kept has changed, and a client that has not been updated should not have
+	// to care.
+	stored, err := s.DataStore.GetNotifications("", 0)
+	if err != nil {
+		jsonError(w, "failed to read inbox", http.StatusInternalServerError)
+		return
 	}
-	if list == nil {
-		list = []inboxEntry{}
+	list := []inboxEntry{}
+	for _, n := range stored {
+		list = append(list, inboxEntry{
+			ReceivedAt: n.ReceivedAt,
+			FromAID:    n.FromAID,
+			ToAID:      n.ToAID,
+			Type:       n.Kind,
+			MessageID:  n.ID,
+			Body:       json.RawMessage(n.Payload),
+			Mode:       "authcrypt",
+			Verified:   n.Verified,
+		})
 	}
-	// newest first
-	for i, j := 0, len(list)-1; i < j; i, j = i+1, j-1 {
-		list[i], list[j] = list[j], list[i]
-	}
+	// Already newest first from the store.
 	jsonResponse(w, map[string]any{"messages": list})
 }
 

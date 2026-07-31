@@ -78,7 +78,73 @@ var publicRoutes = map[string]string{
 	// --- agent-to-agent protocol: another Identity Agent is the caller ---
 	// These are how a peer reaches us at all. They are authenticated by what
 	// they carry (a signed event, an encrypted archive), not by who connects.
-	"POST /api/exchange":                                    "a peer posts an introduction we consented to receive",
+	"POST /api/exchange": "a peer posts an introduction we consented to receive",
+
+	// --- joining something the owner published: the login SDK is the caller ---
+	// Mounted as public since they were written, and never declared public here,
+	// so the router refused every one with 403 before the handler ran. The login
+	// SDK calls the first two from a relying party's browser, which is nobody's
+	// owner, so its invite flow has never worked.
+	//
+	// Safe to reach because the token IS the credential: it is unguessable, the
+	// record it returns contains only what its holder already knows, and an
+	// invalid or revoked token discloses nothing. Gating them on being the owner
+	// is the same deadlock the browser-login routes above describe — the person
+	// joining is not the person who published.
+	"GET /api/invites/{token}":         "somebody holding an invite reads what they were invited to",
+	"POST /api/invites/{token}/redeem": "somebody holding an invite accepts it",
+	// Asking is public; granting is not. This only queues a request for the
+	// owner to approve or refuse, exactly as a contact introduction does — and
+	// like that route, it is unauthenticated write surface with no rate limit
+	// yet, so a stranger can fill an approval queue.
+	"POST /api/assets/{id}/requests": "a stranger asks the owner for access to something they published",
+
+	// The same omission a third time, and the reason to stop finding these one
+	// at a time. Mounted under "Public: the accepting employee's agent looks up
+	// + redeems here", never declared, so an employee's agent was refused and
+	// onboarding could not complete.
+	//
+	// The token gates both, the invite carries a use limit, and redeeming only
+	// creates a PENDING employee — the owner still has to approve it, and that
+	// approval is owner-only and additionally refused to browser sessions. So
+	// what a stranger with a valid token can do is put themselves in a queue.
+	"GET /api/employees/invites/{token}":         "the invited person's agent reads what they were invited to",
+	"POST /api/employees/invites/{token}/redeem": "the invited person's agent accepts, becoming a pending member",
+
+	// A machine enrolling itself with the key it generated. It is not the owner
+	// and never will be — that is the point of it holding its own key — so it
+	// cannot be owner-gated. The enrolment token authorises it: single-use,
+	// time-bounded, and it names in advance what may enrol. ISSUING a token
+	// stays owner-only, which is where the decision actually is.
+	"POST /api/enrol": "a machine presents the key it generated and the token it was given",
+
+	// A DID document is public key material — that is the whole idea of one.
+	// Not being reachable meant two agents could never establish a relationship
+	// without somebody hand-copying keys between them, which is why every
+	// cross-machine DIDComm peer had to be registered by an owner.
+	//
+	// The handler already assumed a non-owner would call it: it returns 404
+	// rather than minting when the caller is not the owner and no keyset exists.
+	// That check was unreachable, and it is exactly the right one — a stranger
+	// can read a key that exists and cannot cause one to be generated.
+	"GET /api/didcomm/did": "an agent reads the public keys it needs to encrypt to us",
+	// A machine this agent owns asks it to deliver a message. Not owner-gated,
+	// because the machine is not the owner — it signs with the key it enrolled
+	// with, and that signature carries the same replay protection the owner's
+	// does. It cannot say who it is: the sender on the delivered message comes
+	// from the verified signature, never from the body.
+	"POST /api/notify": "a machine this agent owns asks it to tell somebody something",
+	// Agent-to-agent messaging. Unreachable until now: the route was registered
+	// as public and never listed here, so the router refused every peer with 403
+	// before the handler ran and no message from another agent ever arrived.
+	//
+	// Safe to reach because the envelope carries its own proof and the handler
+	// checks it before doing anything: an unregistered sender is refused, the
+	// recipient key must be one of ours, and UnpackAuthcrypt verifies the
+	// signature, the key agreement and the body hash against the sender's known
+	// DID. Expiry and replay are checked after that. A stranger who is not
+	// already a peer gets no further than the first of those.
+	"POST /didcomm":                                         "an agent we know posts an encrypted envelope, authenticated by what it carries",
 	"POST /api/witness/request":                             "witnessing protocol — a controller asks us to witness",
 	"POST /api/witness/accept":                              "witnessing protocol — a receipt comes back",
 	"POST /api/receipt/submit":                              "a witness submits a receipt for an event",

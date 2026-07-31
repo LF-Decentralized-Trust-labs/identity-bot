@@ -44,6 +44,7 @@ class MobileDashboardState extends State<MobileDashboard> with SingleTickerProvi
   List<ContactResponse> _alertContacts = [];
   List<PendingRequestResponse> _pendingRequests = [];
   List<CredentialRecord> _pendingCredentials = [];
+  List<NotificationRecord> _notifications = [];
   int _alertCount = 0;
   bool _loading = true;
   List<TaskRecord> _backgroundTasks = [];
@@ -128,6 +129,7 @@ class MobileDashboardState extends State<MobileDashboard> with SingleTickerProvi
           _alertContacts = alerts.alerts;
           _pendingRequests = alerts.pendingRequests;
           _pendingCredentials = alerts.pendingCredentials;
+          _notifications = alerts.notifications;
           _alertCount = alerts.totalCount;
         });
       }
@@ -167,6 +169,26 @@ class MobileDashboardState extends State<MobileDashboard> with SingleTickerProvi
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Failed to reject: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _onDismissNotification(String id) async {
+    try {
+      await _coreService.setNotificationStatus(id, 'dismissed');
+      await _loadAlerts();
+      if (mounted) {
+        ConfirmationToast.show(context,
+          message: 'Dismissed',
+          icon: Icons.close,
+          color: MobileColors.textMuted,
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to dismiss: $e')),
         );
       }
     }
@@ -439,6 +461,23 @@ class MobileDashboardState extends State<MobileDashboard> with SingleTickerProvi
         onTap: () => _showCredentialDetail(cred),
       ));
     }
+
+    // Listed first. The others are requests waiting on the user, which keep
+    // until they are dealt with; a notification may be the only warning before
+    // something stops, so burying it under three approvals gets it missed.
+    final notificationCards = <Widget>[];
+    for (final n in _notifications) {
+      notificationCards.add(AlertCard(
+        displayName: n.title,
+        aid: n.fromAid,
+        type: n.isCritical
+            ? AlertCardType.notificationCritical
+            : AlertCardType.notification,
+        subtitle: n.body,
+        onDismiss: () => _onDismissNotification(n.id),
+      ));
+    }
+    items.insertAll(0, notificationCards);
 
     if (items.isEmpty) {
       return Center(
