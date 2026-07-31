@@ -373,8 +373,28 @@ func (s *CoreServer) handleDIDCommInbound(w http.ResponseWriter, r *http.Request
 		//
 		// A local agent that needs to reach us is registered when the owner
 		// first sends to it, which is the same ceremony as any other peer.
-		jsonError(w, "sender is not a registered peer", http.StatusForbidden)
-		return
+		//
+		// One exception, and it is not a weakening: a sender the owner has
+		// ALREADY ACCEPTED as a contact. The relationship exists and the address
+		// is on file; only the messaging keyset was never fetched, which is why
+		// a first message from somebody you know was refused. Resolving that
+		// finishes a step the owner authorised rather than trusting the caller.
+		// A stranger still gets nothing, and nothing is fetched on their say-so.
+		resolved, rerr := s.resolveKnownContactAsPeer(skid)
+		if rerr != nil {
+			log.Printf("[identity-agent-core] could not reach an accepted contact's agent: %v", rerr)
+		}
+		if !resolved {
+			jsonError(w, "sender is not a registered peer", http.StatusForbidden)
+			return
+		}
+		didcommMu.Lock()
+		peer, known = s.loadPeers()[skid]
+		didcommMu.Unlock()
+		if !known {
+			jsonError(w, "sender is not a registered peer", http.StatusForbidden)
+			return
+		}
 	}
 	// Resolve the recipient keyset from kid.
 	if len(env.Recipients) == 0 {
