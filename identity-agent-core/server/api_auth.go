@@ -55,6 +55,16 @@ var publicRoutes = map[string]string{
 	"POST /public/_register":        "a pairwise signer registers its key so counterparties can resolve it",
 	"GET /public/credential/{said}": "a credential the user chose to publish at a shareable link",
 
+	// --- reaching your own agent from a browser ---
+	// Nobody is authenticated yet, which is the entire problem these solve. The
+	// flow's security is not in gating these: it is that granting requires the
+	// owner key, and that collecting requires a secret the browser never
+	// displayed. Gating the start of a login behind being logged in would be
+	// the deadlock this exists to break.
+	"POST /api/session/challenge": "starts a browser login; the caller cannot be authenticated yet, by definition",
+	"POST /api/session/claim":     "collects a session the owner already granted, and needs the browser's own secret to do it",
+	"POST /api/session/end":       "signing out must work with the session itself, not the device that started it",
+
 	// --- the sign-in handshake: the relying party and the browser drive these ---
 	"GET /i/{token}":                                "the scanned pointer — the QR resolves to a signed challenge",
 	"POST /api/login/challenge":                     "a site mints a challenge for its own sign-in page",
@@ -164,6 +174,19 @@ func (s *CoreServer) authorize(routes chi.Routes) func(http.Handler) http.Handle
 					next.ServeHTTP(w, r)
 					return
 				}
+				// A browser session stands in for the owner on everything
+				// except the routes that change the identity itself. Those go
+				// back to the device holding the key — a convenience should not
+				// be able to give the identity away.
+				if s.hasBrowserSession(r) {
+					if reason, forbidden := requiresTheKeyItself(r.Method, pattern); forbidden {
+						denyAuthorization(w, "a browser session cannot do this: "+reason+
+							". Use the device that holds this identity's key")
+						return
+					}
+					next.ServeHTTP(w, r)
+					return
+				}
 				denyAuthorization(w, "this endpoint is for the owner of this agent; sign the request with the owner key or call it locally")
 			}
 		})
@@ -234,4 +257,45 @@ func rememberSignature(sig string, now time.Time) (alreadyUsed bool) {
 	}
 	seenSignatures[sig] = now
 	return false
+}
+
+// sessionForbidden names what a browser session may NOT do, and why.
+//
+// The list is the point of having sessions at all. A session is a convenience
+// carried by software that holds no key, granted once and then usable for
+// hours by whoever has the browser. What it must not be able to do is change
+// who this identity IS — its keys, who may sign for it, who witnesses it, or
+// where its root of trust lives. Those need the device holding the key, every
+// time, because that is the only proof that survives a stolen session.
+//
+// Deliberately a list of what is forbidden rather than a list of what is
+// allowed. An allow-list would mean a route added tomorrow is unreachable from
+// a browser until somebody remembers to add it, and the pressure to fix that
+// quickly is pressure to add things without thinking. A deny-list means a new
+// route is reachable — and the ones that matter are already named here.
+//
+// Keyed by "METHOD /chi/pattern", the same way publicRoutes is.
+var sessionForbidden = map[string]string{
+	// --- the root of trust ---
+	"POST /api/keystore/root-seed":         "installing a root seed decides what this identity is",
+	"POST /api/recovery/root-aid-rotation": "rotating the root AID replaces the identity's controlling key",
+
+	// --- who may act for this identity ---
+	"POST /api/signer/invites":                "inviting a signer decides who may bring this organisation into existence",
+	"POST /api/signer/invites/{token}/redeem": "redeeming a signer invite makes somebody an owner",
+	"POST /api/employees/{aid}/approve":       "approving a member decides who may act as this organisation",
+	"POST /api/employees/{aid}/revoke":        "revoking a member decides who may act as this organisation",
+
+	// --- answering for the key ---
+	"POST /api/signing-requests/{id}/fulfil": "these exist precisely because only the key-holding device can answer them",
+
+	// --- destruction ---
+	"POST /api/reset": "resetting destroys the identity, and a session should never be enough for that",
+}
+
+// requiresTheKeyItself reports whether a route is one a browser session must
+// not perform, and the reason to tell the person.
+func requiresTheKeyItself(method, pattern string) (string, bool) {
+	reason, forbidden := sessionForbidden[method+" "+pattern]
+	return reason, forbidden
 }

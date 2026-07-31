@@ -47,7 +47,10 @@ type CoreServer struct {
 	DataStore store.Store
 	// Providers is the registry of operators this agent can draw services from.
 	// Loaded once at startup; the owner may add to it at runtime.
-	Providers       *provider.Registry
+	Providers *provider.Registry
+	// BrowserSessions lets somebody reach this agent from a browser, having
+	// proved ownership once on the device that holds the key.
+	BrowserSessions *browserSessions
 	AIMemory        *store.AIMemoryStore
 	KeriDriver      *drivers.KeriDriver
 	TunnelManager   *tunnel.Manager
@@ -151,6 +154,7 @@ func New(cfg Config) (*CoreServer, error) {
 		// Loaded eagerly: an agent that cannot name an operator cannot become
 		// reachable, so failing here is better found at startup than at first use.
 		Providers:       provider.Load(cfg.DataDir),
+		BrowserSessions: newBrowserSessions(),
 		AIMemory:        aiMemory,
 		EndpointService: endpointSvc,
 		EventHub:        eventHub,
@@ -613,6 +617,7 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		s.mountSignerRoutes(r)
 		s.mountVerificationRoutes(r)
 		s.mountWitnessRoutes(r)
+		s.mountBrowserSessionRoutes(r)
 		s.mountEndpointRoutes(r)
 		s.mountProviderRoutes(r)
 		s.mountSigningRequestRoutes(r)
