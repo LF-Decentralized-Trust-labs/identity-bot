@@ -243,8 +243,18 @@ func (s *CoreServer) handleGetDIDCommDID(w http.ResponseWriter, r *http.Request)
 		jsonError(w, "aid is required", http.StatusBadRequest)
 		return
 	}
-	if !s.hasKeySet(aid) {
-		if !s.isOwner(r) {
+	if !s.hasKeySet(aid) && !s.isOwner(r) {
+		// A stranger cannot make this agent generate keys for an arbitrary
+		// identifier — that is unbounded work on demand. But refusing outright
+		// broke the case this endpoint exists for: an agent that has never sent
+		// a DIDComm message has no keyset, so nobody could ever encrypt the
+		// FIRST message to it. Every new customer is in that state, and they are
+		// exactly the people who need to be reachable.
+		//
+		// So one exception, bounded to one keyset: our OWN identity. It is going
+		// to exist the moment we send anything, there is exactly one of it, and
+		// generating it cannot be repeated for a second identifier.
+		if identity, err := s.DataStore.GetIdentity(); err != nil || identity == nil || identity.AID != aid {
 			jsonError(w, "no didcomm identity for that aid", http.StatusNotFound)
 			return
 		}

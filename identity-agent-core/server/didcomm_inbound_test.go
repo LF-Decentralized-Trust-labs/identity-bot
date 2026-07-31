@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"identity-agent-core/store"
 )
 
 // Reaching this agent from another one.
@@ -190,4 +192,56 @@ func dataDirSnapshot(t *testing.T, dir string) string {
 		b.WriteString(" ")
 	}
 	return b.String()
+}
+
+// The first message anybody sends to a fresh agent.
+//
+// A DIDComm keyset is minted lazily, so an agent that has never SENT anything
+// has none — and the endpoint that publishes it refused to mint for a
+// non-owner, which is right in general and wrong for exactly one case. Every
+// new customer is in that state, and they are precisely the people who need to
+// be reachable: somebody who just bought hosting and has never written to
+// anyone is who a payment warning is for.
+func TestAFreshAgentCanStillBeWrittenToFirst(t *testing.T) {
+	s := serverWithIdentity(t, "EOURS")
+
+	r := s.buildRouter("")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, remote("GET", "/api/didcomm/did?aid=EOURS", ""))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("a stranger could not read our own published keys: %d %s", w.Code, w.Body.String())
+	}
+}
+
+// The bound on that exception. A stranger naming any other identifier must not
+// make this agent generate a keyset — that is unbounded work on demand, which
+// is the same hole that was closed on the inbound route.
+func TestAStrangerStillCannotMakeUsGenerateKeysForAnythingElse(t *testing.T) {
+	s := serverWithIdentity(t, "EOURS")
+
+	r := s.buildRouter("")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, remote("GET", "/api/didcomm/did?aid=ESOMETHING-ELSE", ""))
+
+	if w.Code == http.StatusOK {
+		t.Fatal("a stranger made this agent mint a keyset for an identifier of their choosing")
+	}
+}
+
+// serverWithIdentity is an agent that knows who it is, which newAuthTestServer
+// does not build — it exists to test the authorisation gate and needs no store.
+func serverWithIdentity(t *testing.T, aid string) *CoreServer {
+	t.Helper()
+	dir := t.TempDir()
+	ds, err := store.NewSQLiteStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ds.SaveIdentity(store.IdentityState{
+		AID: aid, PublicKey: "DPUB", Created: "2026-07-31T00:00:00Z",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return &CoreServer{DataDir: dir, DataStore: ds}
 }
