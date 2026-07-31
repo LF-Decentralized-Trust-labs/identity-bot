@@ -17,9 +17,14 @@ import (
 
 // invokeExternalAPI executes a registry-native external_api capability: a declarative
 // mapping from validated args to one outbound HTTP call. Egress goes through
-// MakeTrackedRequest, so the same policy check, CredentialVault injection, and proxy
-// logging that govern sandbox traffic govern this call — the caller never sees the
-// provider credential.
+// MakeTrackedRequest: policy check, CredentialVault injection, proxy log. The caller
+// never sees the provider credential.
+//
+// A sandboxed app reaching the same service through the proxy is authenticated the
+// same way, from the same vault, matched on the same domains — so which side makes
+// the call does not change what the service sees. That was not true until the proxy
+// gained credential injection; this comment previously claimed a parity that did not
+// exist.
 func (m *Manager) invokeExternalAPI(ctx context.Context, rec *CapabilityRecord, args []byte) (*InvokeResult, error) {
 	if rec.Egress == nil || rec.Egress.BaseURL == "" {
 		return nil, fmt.Errorf("capability %q has no egress mapping", rec.ID)

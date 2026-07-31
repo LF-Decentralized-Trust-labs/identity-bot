@@ -37,6 +37,20 @@ type ProxyRequestCallback func(instanceID string, req *http.Request, resp *http.
 
 type PolicyCheckFunc func(instanceID, appID, domain, method, urlStr string) (action string, rule string)
 
+// CredentialInjectFunc adds any stored credential matching a request's destination
+// to that request, reporting whether it applied one.
+//
+// Sandboxed apps reach the network through this proxy and are given no secrets of
+// their own, which is the point: an app that never holds a credential cannot leak
+// one, and revoking access is a vault edit rather than a hunt through containers.
+// Until this existed the proxy forwarded their traffic unauthenticated, so the only
+// way for a sandboxed app to call an authenticated service was to be handed a key —
+// exactly what the vault exists to avoid.
+//
+// It runs after the policy check, so a domain the app may not reach is refused
+// before any credential is considered.
+type CredentialInjectFunc func(req *http.Request) bool
+
 type ProxyManager struct {
         listenAddr     string
         dataDir        string
@@ -47,6 +61,7 @@ type ProxyManager struct {
         listener       net.Listener
         routes         map[string]*ProxyRoute
         policyCheck    PolicyCheckFunc
+        injectCreds    CredentialInjectFunc
         requestCb      ProxyRequestCallback
         pidFile        string
         stopCh         chan struct{}
@@ -67,6 +82,7 @@ type ProxyManagerConfig struct {
         DataDir        string
         Store          *SandboxStore
         PolicyCheck    PolicyCheckFunc
+        InjectCreds    CredentialInjectFunc
         RequestCb      ProxyRequestCallback
         DNSListenAddr  string
         DNSUpstream    string
@@ -100,6 +116,7 @@ func NewProxyManager(cfg ProxyManagerConfig) (*ProxyManager, error) {
                 store:          cfg.Store,
                 routes:         make(map[string]*ProxyRoute),
                 policyCheck:    cfg.PolicyCheck,
+                injectCreds:    cfg.InjectCreds,
                 requestCb:      cfg.RequestCb,
                 pidFile:        filepath.Join(cfg.DataDir, ".proxy.pid"),
                 stopCh:         make(chan struct{}),
@@ -257,6 +274,29 @@ func (pm *ProxyManager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
         pm.handleHTTP(w, r)
 }
 
+// applyCredentials injects a stored credential for this request's destination, if
+// one is configured, and traces the fact without ever tracing the value.
+//
+// Called after headers are copied from the caller so an app cannot pre-set the
+// header to something of its own choosing — the vault only fills a header that is
+// absent, so a copied-in Authorization would win. Deleting it first would be worse:
+// an app legitimately carrying its own end-user token would have it silently
+// replaced by the org's. Leaving the caller's header intact and injecting only into
+// the gap keeps both cases correct.
+func (pm *ProxyManager) applyCredentials(outReq *http.Request, appID, instanceID string) {
+        if pm.injectCreds == nil {
+                return
+        }
+        if !pm.injectCreds(outReq) {
+                return
+        }
+        if pm.tracer != nil && pm.tracer.IsEnabled() {
+                pm.tracer.Emit("proxy", "credential_injected", "egress", appID, instanceID,
+                        fmt.Sprintf("Injected stored credential for %s", outReq.URL.Hostname()),
+                        map[string]interface{}{"host": outReq.URL.Hostname()})
+        }
+}
+
 func (pm *ProxyManager) handleHTTP(w http.ResponseWriter, r *http.Request) {
         startTime := time.Now()
 
@@ -326,6 +366,7 @@ func (pm *ProxyManager) handleHTTP(w http.ResponseWriter, r *http.Request) {
         copyHeaders(outReq.Header, r.Header)
         outReq.Header.Del("Proxy-Connection")
         outReq.Header.Del("Proxy-Authorization")
+        pm.applyCredentials(outReq, appID, instanceID)
 
         if pm.tracer != nil && pm.tracer.IsEnabled() {
                 pm.tracer.Emit("proxy", "upstream_send", "egress", appID, instanceID,
@@ -598,6 +639,7 @@ func (pm *ProxyManager) serveMITMRequests(clientConn net.Conn, host, domain stri
                         continue
                 }
                 copyHeaders(outReq.Header, req.Header)
+                pm.applyCredentials(outReq, appID, instanceID)
 
                 if pm.tracer != nil && pm.tracer.IsEnabled() {
                         pm.tracer.Emit("proxy", "upstream_send", "egress", appID, instanceID,

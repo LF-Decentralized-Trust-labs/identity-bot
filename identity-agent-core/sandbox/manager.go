@@ -73,6 +73,12 @@ func NewManager(cfg ManagerConfig) (*Manager, error) {
                 PolicyCheck: func(instanceID, appID, domain, method, urlStr string) (string, string) {
                         return policy.CheckDomain(instanceID, appID, domain, method, urlStr)
                 },
+                // Sandboxed apps hold no secrets of their own; the proxy adds the
+                // stored credential for whatever they are allowed to reach. Same
+                // vault and same domain matching MakeTrackedRequest uses, so an
+                // engine-made call and a container-made call to the same service
+                // authenticate identically.
+                InjectCreds: credentials.InjectCredentials,
                 DNSListenAddr: "127.0.0.1:0",
                 Tracer:        tracer,
         })
