@@ -230,8 +230,10 @@ func (s *CoreServer) handleLLMProxy(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("[llm-proxy] %s %s -> %s", r.Method, r.URL.Path, upstreamURL)
 
-	// MakeTrackedRequest injects the API key via the credential vault and records
-	// the call in the proxy log and trace stream alongside container-originated traffic.
+	// MakeTrackedRequest injects the API key via the credential vault and records the
+	// call in the proxy log and trace stream. Container-originated traffic is now
+	// injected too, by the proxy itself, from the same vault — so a model called
+	// through here and one called from inside a sandboxed app authenticate alike.
 	// No client-level timeout — streaming LLM responses can take many minutes.
 	resp, err := s.SandboxManager.MakeTrackedRequest(r.Context(), upReq)
 	if err != nil {
