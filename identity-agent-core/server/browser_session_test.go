@@ -1,8 +1,11 @@
 package server
 
 import (
+	"net/http"
 	"testing"
 	"time"
+
+	"github.com/go-chi/chi/v5"
 )
 
 func newSessionsForTest() *browserSessions { return newBrowserSessions() }
@@ -187,7 +190,7 @@ func TestAnUnknownCodeIsRefused(t *testing.T) {
 func TestASessionCannotChangeTheIdentityItself(t *testing.T) {
 	for _, route := range []struct{ method, pattern string }{
 		{"POST", "/api/keystore/root-seed"},
-		{"POST", "/api/identity/rotate"},
+		{"POST", "/api/recovery/root-aid-rotation"},
 		{"POST", "/api/signer/invites"},
 		{"POST", "/api/signing-requests/{id}/fulfil"},
 		{"POST", "/api/reset"},
@@ -213,6 +216,71 @@ func TestASessionCanDoOrdinaryThings(t *testing.T) {
 		if _, forbidden := requiresTheKeyItself(route.method, route.pattern); forbidden {
 			t.Errorf("%s %s is blocked, which would make a session useless",
 				route.method, route.pattern)
+		}
+	}
+}
+
+// Every route a browser session is forbidden must be a route that EXISTS.
+//
+// This is the test that should have existed from the start. A deny-list keyed
+// by route pattern fails silently in the worst possible direction: an entry
+// naming a route that was never registered, or was later renamed, protects
+// nothing while continuing to look like protection. Nothing errors, no request
+// is refused, and the list still reads as though the operation is covered.
+//
+// It caught three immediately. /api/identity/rotate was never a route at all;
+// the real ones are /api/recovery/root-aid-rotation and
+// /api/employees/{aid}/approve|revoke. Root-AID rotation was therefore
+// reachable from a browser session, which is exactly what the list exists to
+// prevent.
+//
+// Some routes genuinely exist only in some configurations — the signer and
+// employee routes mount only where an organisation overlay is present. Those
+// are named below rather than silently tolerated, because "absent because it
+// is conditional" and "absent because somebody renamed it" look identical from
+// here, and only one of them is fine.
+var conditionallyMounted = map[string]string{
+	"POST /api/signer/invites":                "mounts only with an asset handler, i.e. on an organisation agent",
+	"POST /api/signer/invites/{token}/redeem": "mounts only with an asset handler, i.e. on an organisation agent",
+	"POST /api/employees/{aid}/approve":       "mounts unless an overlay has taken the employee routes",
+	"POST /api/employees/{aid}/revoke":        "mounts unless an overlay has taken the employee routes",
+}
+
+func TestEveryForbiddenRouteIsARealRoute(t *testing.T) {
+	s := newAuthTestServer(t)
+	r := s.buildRouter("")
+
+	registered := map[string]bool{}
+	if err := chi.Walk(r, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+		registered[method+" "+route] = true
+		return nil
+	}); err != nil {
+		t.Fatalf("walk: %v", err)
+	}
+	if len(registered) < 100 {
+		t.Fatalf("only %d routes walked — the router did not build", len(registered))
+	}
+
+	for key := range sessionForbidden {
+		if registered[key] {
+			continue
+		}
+		if _, known := conditionallyMounted[key]; known {
+			continue
+		}
+		t.Errorf("sessionForbidden names %q, which is not a registered route and is not "+
+			"listed as conditionally mounted. A browser session is therefore NOT blocked "+
+			"from whatever that was meant to cover — the entry looks like protection and "+
+			"is none.", key)
+	}
+
+	// The other direction: an entry excused as conditional that has since become
+	// unconditional is an excuse nobody needs any more, and leaving it means the
+	// next genuine rot hides behind it.
+	for key := range conditionallyMounted {
+		if _, forbidden := sessionForbidden[key]; !forbidden {
+			t.Errorf("%q is excused as conditionally mounted but is no longer in "+
+				"sessionForbidden — remove the excuse", key)
 		}
 	}
 }

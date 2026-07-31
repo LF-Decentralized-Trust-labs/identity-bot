@@ -277,14 +277,14 @@ func rememberSignature(sig string, now time.Time) (alreadyUsed bool) {
 // Keyed by "METHOD /chi/pattern", the same way publicRoutes is.
 var sessionForbidden = map[string]string{
 	// --- the root of trust ---
-	"POST /api/keystore/root-seed": "installing a root seed decides what this identity is",
-	"POST /api/identity/rotate":    "rotating keys decides who controls this identity from now on",
-	"POST /api/recovery/root-aid":  "root-AID recovery replaces the identity's controlling key",
+	"POST /api/keystore/root-seed":         "installing a root seed decides what this identity is",
+	"POST /api/recovery/root-aid-rotation": "rotating the root AID replaces the identity's controlling key",
 
 	// --- who may act for this identity ---
 	"POST /api/signer/invites":                "inviting a signer decides who may bring this organisation into existence",
 	"POST /api/signer/invites/{token}/redeem": "redeeming a signer invite makes somebody an owner",
-	"POST /api/employees/{aid}/role":          "changing a role changes what somebody may do as this organisation",
+	"POST /api/employees/{aid}/approve":       "approving a member decides who may act as this organisation",
+	"POST /api/employees/{aid}/revoke":        "revoking a member decides who may act as this organisation",
 
 	// --- answering for the key ---
 	"POST /api/signing-requests/{id}/fulfil": "these exist precisely because only the key-holding device can answer them",
