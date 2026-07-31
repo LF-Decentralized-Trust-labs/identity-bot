@@ -49,6 +49,7 @@ func (s *CoreServer) sandboxRoutes(r chi.Router) {
 	r.Post("/mcp/agents", s.handleProvisionAgent)
 	r.Get("/mcp/agents", s.handleListAgents)
 	r.Patch("/mcp/agents/{id}", s.handleUpdateAgentConfig)
+	r.Put("/mcp/agents/{id}/capabilities", s.handleSetAgentCapabilities)
 	r.Post("/mcp/tokens", s.handleMintMCPToken)
 	r.Get("/mcp/tokens", s.handleListMCPTokens)
 	r.Delete("/mcp/tokens/{name}", s.handleRevokeMCPToken)
