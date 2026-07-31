@@ -14,17 +14,18 @@ import (
 	"identity-agent-core/login"
 )
 
-// A machine this agent owns asking it to tell somebody something.
+// A device this agent owns asking it to tell somebody something.
 //
-// The machine cannot deliver the message itself, and should not. Sending
+// The device cannot deliver the message itself, and should not. Sending
 // requires a post-quantum envelope, a keyset, and a standing relationship with
-// the recipient — all of which this agent already has and the machine would
-// have to acquire. More importantly the message would arrive from an unfamiliar
-// machine rather than from the organisation the person actually deals with, and
-// a warning about their account from an identifier they have never seen is
-// exactly the kind of thing they should distrust.
+// the recipient — all of which this agent already has and the device would have
+// to acquire separately.
 //
-// So the machine says what needs saying, and the organisation says it.
+// The stronger reason is whose name is on the message. A device is a component;
+// the relationship the recipient has is with the identity that owns it. A
+// message from an identifier somebody has never seen is one they are right to
+// distrust, and a message from the identity they already know is one they can
+// evaluate. So the device says what needs saying, and its owner says it.
 
 // Headers a machine signs with. Deliberately parallel to the owner's, and
 // deliberately distinct: an asset is not the owner, and a signature that could
@@ -128,8 +129,8 @@ func (s *CoreServer) handleAssetNotify(w http.ResponseWriter, r *http.Request) {
 		// point a message anywhere.
 		ToAID string `json:"to_aid"`
 		// ToAgentURL is where that identifier can be reached, for the case this
-		// agent has no standing relationship with them — which is the ordinary
-		// case for somebody who bought hosting and has never messaged us.
+		// agent has no standing relationship with them. That is the ordinary
+		// case whenever the first message in a relationship travels outward.
 		ToAgentURL string `json:"to_agent_url"`
 		Kind       string `json:"kind"`
 		Severity   string `json:"severity"`
@@ -165,8 +166,8 @@ func (s *CoreServer) handleAssetNotify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Sent from this agent's own identity, so it arrives from the organisation
-	// the recipient actually deals with rather than from a machine in a rack.
+	// Sent from this agent's own identity, so it arrives from the party the
+	// recipient has a relationship with rather than from one of its components.
 	identity, err := s.DataStore.GetIdentity()
 	if err != nil || identity == nil {
 		writeError(w, http.StatusConflict, "No identity",
@@ -203,10 +204,10 @@ func (s *CoreServer) handleAssetNotify(w http.ResponseWriter, r *http.Request) {
 // rememberPeerAt fetches an agent's public DIDComm keys and records it as a
 // peer, so a message can be encrypted to it.
 //
-// Needed because the recipient is somebody who bought hosting and has never
-// messaged us — there is no prior relationship, and without one there is
-// nothing to encrypt to. Peers are otherwise registered by an owner by hand,
-// which cannot be the answer for somebody a machine needs to warn tonight.
+// Needed because the recipient may have no prior relationship with us, and
+// without one there is nothing to encrypt to. Peers are otherwise registered by
+// an owner by hand, which cannot be the answer when a device needs to reach
+// somebody unattended.
 //
 // Only PUBLIC key material crosses this call, and it comes from the agent that
 // owns the identifier rather than from the machine that asked us to send. A

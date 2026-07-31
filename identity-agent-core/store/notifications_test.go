@@ -40,8 +40,8 @@ func eachStore(t *testing.T, run func(t *testing.T, s notificationStore)) {
 func sample(id string) Notification {
 	return Notification{
 		ID: id, FromAID: "EHOST", ToAID: "EOWNER",
-		Kind: "subscription", Severity: NotificationWarning,
-		Title: "Your instance stops on 14 August", Body: "A payment failed.",
+		Kind: "maintenance", Severity: NotificationWarning,
+		Title: "This device restarts on Friday", Body: "It will be unavailable briefly.",
 		Verified: true,
 	}
 }
@@ -55,7 +55,7 @@ func TestANotificationIsStoredAndReadBack(t *testing.T) {
 		if err != nil || got == nil {
 			t.Fatalf("not found: %v %v", got, err)
 		}
-		if got.Title != "Your instance stops on 14 August" || got.FromAID != "EHOST" {
+		if got.Title != "This device restarts on Friday" || got.FromAID != "EHOST" {
 			t.Errorf("came back different: %+v", got)
 		}
 		if !got.Verified {
@@ -188,7 +188,7 @@ func TestARedeliveryCannotRewriteWhatWasSaidOrReopenIt(t *testing.T) {
 		}
 
 		got, _ := s.GetNotification("n1")
-		if got.Title != "Your instance stops on 14 August" {
+		if got.Title != "This device restarts on Friday" {
 			t.Errorf("a redelivery rewrote the text: %q", got.Title)
 		}
 		if got.Status != NotificationRead {

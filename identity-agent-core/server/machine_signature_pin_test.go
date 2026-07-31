@@ -11,29 +11,30 @@ import (
 
 // The other end of this signature is not written in this repository.
 //
-// A machine that enrols with its own key has to sign requests, and it cannot
-// import this module to do so — pulling a tunnelling client and an SMB library
-// into a sealed image would defeat the point of measuring what runs in it. So
-// it reimplements the encoding, and two implementations of one format drift.
+// A device that enrols with its own key has to sign requests, and may not be
+// able to import this module to do so — a constrained or independently
+// audited build has good reason not to pull in this module's whole dependency
+// tree. So it reimplements the encoding, and two implementations of one format
+// drift.
 //
-// The symptom of drift is not an error. It is that nothing the machine says is
+// The symptom of drift is not an error. It is that nothing the device says is
 // believed any more, silently, and the messages that stop arriving are the ones
 // somebody was relying on.
 //
 // So the vector below is checked in both places. It was produced here, and the
-// machine's own tests check the same bytes. Either side changing the
-// construction breaks a test rather than a customer.
+// device's own tests check the same bytes. Either side changing the
+// construction breaks a test rather than a delivery.
 
 const (
 	pinnedMachineVerkey = "DAOhB7_zzhC-HXDdGOdLwJln5NYwm6UNXx3chmQSVTG4"
-	pinnedMachineDigest = "EECyjWt6_CZmUe8VvRe5in80_uEt0ruMVnWNiauIP4tA"
-	pinnedMachineSig    = "0BDF0T59HFRU7yGgzQvgDVY6ezsXhYyxYpxdbp2hXSrc7IGZddHPe1y-CFJmHJeQIKDJtcGqsOV3gwvdE4qr43cJ"
+	pinnedMachineDigest = "EOEkWjb63gKHKaTfy9B1HQslVMaHuuRvGYopr5Ypedab"
+	pinnedMachineSig    = "0BChEnnG7YVPaezreoItibLLZMo7xxX_nzXD3Y9GiO5GUsFZML6WIMlLY7_WjVZE_fEcZ75DY0Svj_G8BNydUG0B"
 
 	pinnedMachineStamp = "2026-07-31T12:00:00Z"
 	pinnedMachinePath  = "/api/notify"
 )
 
-var pinnedMachineBody = []byte(`{"to_aid":"ECUSTOMER","title":"Your instance stops on 14 August"}`)
+var pinnedMachineBody = []byte(`{"to_aid":"EPERSON","title":"This device restarts on Friday"}`)
 
 // Seed 0,1,2…31, so the vector is reproducible from nothing but this file.
 func pinnedMachineSeed() []byte {

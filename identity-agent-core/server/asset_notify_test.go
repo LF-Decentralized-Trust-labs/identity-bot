@@ -14,12 +14,12 @@ import (
 	"identity-agent-core/login"
 )
 
-// The machine's side of asking the organisation to send something.
+// A device asking the identity that owns it to send something.
 //
-// The signature is the whole gate. Without it this endpoint would let anything
-// that could reach the port send a message that arrives looking like it came
-// from the organisation — which is worse than not having the endpoint, because
-// the organisation's name is the thing that makes the message credible.
+// The signature is the whole gate. Without it, anything that could reach the
+// port could send a message that arrives under the owner's name — which is
+// worse than not having the endpoint at all, because that name is the thing
+// that makes the message worth reading.
 
 // notifyTestServer is an agent with an asset store, which newAuthTestServer
 // does not build — it exists to test the authorisation gate and needs nothing
@@ -45,7 +45,7 @@ func enrolledMachine(t *testing.T, s *CoreServer, aid string) ed25519.PrivateKey
 
 	if err := s.assetHandler.Store.UpsertAsset(asset.Asset{
 		ID:              "asset-1",
-		DisplayName:     "black box one",
+		DisplayName:     "a device this agent owns",
 		AssetType:       "host",
 		PairwiseAID:     aid,
 		PublicKey:       iacrypto.VerkeyQB64(key.Public().(ed25519.PublicKey)),
@@ -74,8 +74,8 @@ func signedNotify(t *testing.T, key ed25519.PrivateKey, aid string, body []byte)
 func notifyBody(t *testing.T) []byte {
 	t.Helper()
 	b, _ := json.Marshal(map[string]string{
-		"to_aid": "ECUSTOMER", "kind": "subscription", "severity": "warning",
-		"title": "Your instance stops on 14 August",
+		"to_aid": "EPERSON", "kind": "maintenance", "severity": "warning",
+		"title": "This device restarts on Friday",
 	})
 	return b
 }
@@ -136,7 +136,7 @@ func TestASignatureDoesNotCoverADifferentMessage(t *testing.T) {
 
 	r := signedNotify(t, key, "EMACHINE", notifyBody(t))
 	tampered, _ := json.Marshal(map[string]string{
-		"to_aid": "ECUSTOMER", "title": "Your account has been deleted",
+		"to_aid": "EPERSON", "title": "Something else entirely",
 	})
 	r.Body = http.NoBody
 	r = func() *http.Request {
@@ -228,7 +228,7 @@ func TestTheMachineAndTheAgentSignTheSameBytes(t *testing.T) {
 	copy(seed, "a machine's key, fixed for the test")
 	key := ed25519.NewKeyFromSeed(seed)
 
-	body := []byte(`{"to_aid":"ECUSTOMER"}`)
+	body := []byte(`{"to_aid":"EPERSON"}`)
 	stamp := "2026-07-31T12:00:00Z"
 
 	sig, err := SignOwnerRequest(http.MethodPost, "/api/notify", stamp, body, key.Seed())

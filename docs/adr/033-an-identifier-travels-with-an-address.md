@@ -29,9 +29,10 @@ circumstance. An OOBI carries both, so anywhere an OOBI is exchanged the
 question never arises. It arises the moment one party holds only an identifier
 and needs to send something the other party did not ask for.
 
-That case is now real. A host that runs somebody's agent has to be able to warn
-them before it stops — a conversation the owner did not initiate and cannot be
-expected to poll for. It held the owner's AID and had no way to reach them.
+That case is now real. A device enrolled to an owner may need to raise something
+unprompted — a deadline, a state change, a condition the owner did not ask about
+and cannot be expected to poll for. It holds the owner's AID and, until now, had
+no way to reach them.
 
 The resolution path exists in the core and is not wired into any send path:
 

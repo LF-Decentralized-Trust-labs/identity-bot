@@ -106,7 +106,7 @@ func enrol(t *testing.T, h *Handler, token, pub, next string) *httptest.Response
 func TestTheIdentityIsMintedOverTheMachinesOwnKey(t *testing.T) {
 	keri := newFakeKeri(t)
 	h := newEnrolHandler(t, keri)
-	token := issueToken(t, h, "black box one", "host", "https://box.example")
+	token := issueToken(t, h, "a device this agent owns", "host", "https://device.example")
 
 	w := enrol(t, h, token.Token, "DMACHINE-PUB", "DMACHINE-NEXT")
 	if w.Code != http.StatusCreated {
@@ -125,7 +125,7 @@ func TestTheIdentityIsMintedOverTheMachinesOwnKey(t *testing.T) {
 func TestTheEnrolledAssetIsDelegatedAndRecorded(t *testing.T) {
 	keri := newFakeKeri(t)
 	h := newEnrolHandler(t, keri)
-	token := issueToken(t, h, "black box one", "host", "https://box.example")
+	token := issueToken(t, h, "a device this agent owns", "host", "https://device.example")
 
 	w := enrol(t, h, token.Token, "DMACHINE-PUB", "DMACHINE-NEXT")
 	var out struct {
@@ -162,7 +162,7 @@ func TestAnUnanchorableDelegationIsNotIssued(t *testing.T) {
 	h.PersistDelegationAnchor = func(string, map[string]interface{}) error {
 		return errAnchorFailed
 	}
-	token := issueToken(t, h, "black box one", "host", "")
+	token := issueToken(t, h, "a device this agent owns", "host", "")
 
 	w := enrol(t, h, token.Token, "DMACHINE-PUB", "DMACHINE-NEXT")
 	if w.Code == http.StatusCreated {
@@ -195,7 +195,7 @@ func TestEnrollingWithoutAValidTokenIsRefused(t *testing.T) {
 func TestATokenWorksOnce(t *testing.T) {
 	keri := newFakeKeri(t)
 	h := newEnrolHandler(t, keri)
-	token := issueToken(t, h, "black box one", "host", "")
+	token := issueToken(t, h, "a device this agent owns", "host", "")
 
 	if w := enrol(t, h, token.Token, "DPUB", "DNEXT"); w.Code != http.StatusCreated {
 		t.Fatalf("first use failed: %d %s", w.Code, w.Body.String())
@@ -230,7 +230,7 @@ func TestAnExpiredTokenIsRefused(t *testing.T) {
 func TestARevokedTokenIsRefused(t *testing.T) {
 	keri := newFakeKeri(t)
 	h := newEnrolHandler(t, keri)
-	token := issueToken(t, h, "black box one", "host", "")
+	token := issueToken(t, h, "a device this agent owns", "host", "")
 
 	if err := h.Store.RevokeEnrolment(token.Token); err != nil {
 		t.Fatal(err)
@@ -246,7 +246,7 @@ func TestARevokedTokenIsRefused(t *testing.T) {
 func TestAMachineCannotNameItselfOrClaimAnAddress(t *testing.T) {
 	keri := newFakeKeri(t)
 	h := newEnrolHandler(t, keri)
-	token := issueToken(t, h, "black box one", "host", "https://box.example")
+	token := issueToken(t, h, "a device this agent owns", "host", "https://device.example")
 
 	body, _ := json.Marshal(map[string]string{
 		"token": token.Token, "public_key": "DPUB", "next_public_key": "DNEXT",
@@ -262,10 +262,10 @@ func TestAMachineCannotNameItselfOrClaimAnAddress(t *testing.T) {
 	}
 	json.Unmarshal(w.Body.Bytes(), &out)
 
-	if out.Asset.DisplayName != "black box one" {
+	if out.Asset.DisplayName != "a device this agent owns" {
 		t.Errorf("the machine renamed itself to %q", out.Asset.DisplayName)
 	}
-	if out.Asset.Origin != "https://box.example" {
+	if out.Asset.Origin != "https://device.example" {
 		t.Errorf("the machine claimed the address %q", out.Asset.Origin)
 	}
 	if out.Asset.AssetType != "host" {

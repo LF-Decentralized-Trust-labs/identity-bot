@@ -248,8 +248,8 @@ func (s *CoreServer) handleGetDIDCommDID(w http.ResponseWriter, r *http.Request)
 		// identifier — that is unbounded work on demand. But refusing outright
 		// broke the case this endpoint exists for: an agent that has never sent
 		// a DIDComm message has no keyset, so nobody could ever encrypt the
-		// FIRST message to it. Every new customer is in that state, and they are
-		// exactly the people who need to be reachable.
+		// FIRST message to it. Every newly created agent is in that state, and
+		// the first message is exactly the one that has to get through.
 		//
 		// So one exception, bounded to one keyset: our OWN identity. It is going
 		// to exist the moment we send anything, there is exactly one of it, and
