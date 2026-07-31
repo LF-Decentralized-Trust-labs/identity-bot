@@ -786,6 +786,19 @@ type InceptionRequest struct {
 	// CesrSignature: optional — the controller's CESR '0B...' signature over the
 	// inception event body, produced by Dart local signing + /api/cesr/encode.
 	CesrSignature string `json:"cesr_signature,omitempty"`
+	// OwnerAID names who this identity answers to, and is written into the
+	// inception event itself.
+	//
+	// An organisation must supply it. An organisation has no mind, so it cannot
+	// be its own owner: if the software running one held the only key to it,
+	// there would be nobody it ultimately answers to. Putting the owner in the
+	// event rather than in a record written afterwards means it cannot be
+	// rewritten by whoever can write the file, and can be verified by anybody
+	// who can read the log.
+	//
+	// A person's own agent leaves it empty. Its identity is delegated, so its
+	// delegator is already named in the event.
+	OwnerAID string `json:"owner_aid,omitempty"`
 }
 
 type InceptionResponse struct {
@@ -964,7 +977,15 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := s.KeriDriver.CreateInception(req.PublicKey, req.NextPublicKey)
+	var (
+		result *drivers.DriverInceptionResponse
+		err    error
+	)
+	if req.OwnerAID != "" {
+		result, err = s.KeriDriver.CreateOwnedInception(req.PublicKey, req.NextPublicKey, "", req.OwnerAID)
+	} else {
+		result, err = s.KeriDriver.CreateInception(req.PublicKey, req.NextPublicKey)
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to create inception event", err.Error())
 		return
