@@ -259,6 +259,58 @@ type SigningRequest struct {
         ExpiresAt       string `json:"expires_at,omitempty"`
 }
 
+// Notification is something another agent told this one.
+//
+// It is the counterpart to SigningRequest: that queue exists because only the
+// device holding the keys can act, this one exists because only the person can.
+// Both are things waiting to be looked at; neither can be resolved by the core
+// on its own.
+//
+// The core does not interpret Kind or Payload. A notification carries whatever
+// the sender needed to say, and a core that understood the contents would have
+// to be taught every sender's vocabulary — which is how a general mechanism
+// becomes a list of special cases.
+type Notification struct {
+	ID string `json:"id"`
+	// FromAID and ToAID are the AUTHENTICATED envelope headers, never a field
+	// from inside the message. A sender that could name itself could name
+	// somebody else.
+	FromAID string `json:"from_aid"`
+	ToAID   string `json:"to_aid"`
+	// Kind groups notifications in the sender's own vocabulary.
+	Kind string `json:"kind"`
+	// Severity is info, warning or critical — how loudly to say it. The sender
+	// decides, because only the sender knows whether this is a receipt or a
+	// deadline.
+	Severity string `json:"severity"`
+	// Title is the one line a person sees. Body is the rest.
+	Title string `json:"title"`
+	Body  string `json:"body,omitempty"`
+	// Payload is the original message, verbatim, for anything that wants more
+	// than the text.
+	Payload string `json:"payload,omitempty"`
+	// Status is unread, read or dismissed.
+	Status string `json:"status"`
+	// Verified records whether the envelope's signature checked out. Always
+	// true for anything the inbound path stored, which refuses everything else;
+	// recorded rather than assumed so an unverified row looks unverified.
+	Verified   bool   `json:"verified"`
+	ReceivedAt string `json:"received_at"`
+	ReadAt     string `json:"read_at,omitempty"`
+	ExpiresAt  string `json:"expires_at,omitempty"`
+}
+
+// Notification severities and statuses.
+const (
+	NotificationInfo     = "info"
+	NotificationWarning  = "warning"
+	NotificationCritical = "critical"
+
+	NotificationUnread    = "unread"
+	NotificationRead      = "read"
+	NotificationDismissed = "dismissed"
+)
+
 type ContactKELRecord struct {
         AID              string                   `json:"aid"`
         // KEL events as received from the contact's OOBI endpoint.
@@ -371,6 +423,12 @@ type Store interface {
         SaveSigningRequest(req SigningRequest) error
         GetSigningRequest(id string) (*SigningRequest, error)
         GetPendingSigningRequests() ([]SigningRequest, error)
+        SaveNotification(n Notification) error
+        GetNotification(id string) (*Notification, error)
+        // GetNotifications returns the newest first. An empty status means every
+        // status, so a client can show a history rather than only what is waiting.
+        GetNotifications(status string, limit int) ([]Notification, error)
+        SetNotificationStatus(id, status string) error
         GetEndpointRecords(cid string) ([]EndpointRecord, error)
         // AllocateNextRelationshipIndex returns a strictly increasing, never-reused index
         // for the given namespace ("contacts" or "login"). It is a persisted high-water mark

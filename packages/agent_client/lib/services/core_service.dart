@@ -345,26 +345,85 @@ class ContactsListResponse {
   }
 }
 
+/// Something another agent told this one.
+///
+/// Distinct from the other three things on the alerts screen, which are all
+/// requests for the user's approval. A notification is not asking for anything
+/// — it is telling them something, possibly something with a deadline.
+class NotificationRecord {
+  final String id;
+  final String fromAid;
+  final String kind;
+
+  /// info | warning | critical. Decided by the sender, because only the sender
+  /// knows whether this is a receipt or a deadline.
+  final String severity;
+  final String title;
+  final String body;
+
+  /// unread | read | dismissed.
+  final String status;
+  final String receivedAt;
+
+  const NotificationRecord({
+    required this.id,
+    this.fromAid = '',
+    this.kind = '',
+    this.severity = 'info',
+    this.title = '',
+    this.body = '',
+    this.status = 'unread',
+    this.receivedAt = '',
+  });
+
+  bool get isUnread => status == 'unread';
+  bool get isCritical => severity == 'critical';
+
+  factory NotificationRecord.fromJson(Map<String, dynamic> json) {
+    return NotificationRecord(
+      id: json['id'] ?? '',
+      fromAid: json['from_aid'] ?? '',
+      kind: json['kind'] ?? '',
+      severity: json['severity'] ?? 'info',
+      title: json['title'] ?? '',
+      body: json['body'] ?? '',
+      status: json['status'] ?? 'unread',
+      receivedAt: json['received_at'] ?? '',
+    );
+  }
+}
+
 class AlertsResponse {
   final List<ContactResponse> alerts;
   final List<PendingRequestResponse> pendingRequests;
   final List<CredentialRecord> pendingCredentials;
+
+  /// Unread notifications. Defaulted rather than required, so an older backend
+  /// that does not send the key still constructs.
+  final List<NotificationRecord> notifications;
+
+  /// The contacts count, not a total — kept with its original meaning because
+  /// changing it would silently alter every caller that passes it on. Callers
+  /// wanting a total use [totalCount].
   final int count;
 
   AlertsResponse({
     required this.alerts,
     this.pendingRequests = const [],
     this.pendingCredentials = const [],
+    this.notifications = const [],
     required this.count,
   });
 
-  int get totalCount => alerts.length + pendingRequests.length + pendingCredentials.length;
+  int get totalCount =>
+      alerts.length + pendingRequests.length + pendingCredentials.length + notifications.length;
 
   factory AlertsResponse.fromJson(Map<String, dynamic> json) {
     return AlertsResponse(
       alerts: (json['alerts'] as List<dynamic>?)?.map((c) => ContactResponse.fromJson(c)).toList() ?? [],
       pendingRequests: (json['pending_requests'] as List<dynamic>?)?.map((p) => PendingRequestResponse.fromJson(p)).toList() ?? [],
       pendingCredentials: (json['pending_credentials'] as List<dynamic>?)?.map((c) => CredentialRecord.fromJson(c as Map<String, dynamic>)).toList() ?? [],
+      notifications: (json['notifications'] as List<dynamic>?)?.map((n) => NotificationRecord.fromJson(n as Map<String, dynamic>)).toList() ?? [],
       count: json['count'] ?? 0,
     );
   }
@@ -772,6 +831,21 @@ class CoreService {
       return AlertsResponse.fromJson(jsonDecode(response.body));
     } else {
       throw Exception('Alerts request failed: ${response.statusCode}');
+    }
+  }
+
+  /// Marks a notification read or dismissed.
+  ///
+  /// Read and dismissed are separate on purpose: having seen something urgent
+  /// is not the same as having dealt with it.
+  Future<void> setNotificationStatus(String id, String status) async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/api/notifications/status'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'id': id, 'status': status}),
+    );
+    if (response.statusCode != 200) {
+      throw Exception('Failed to update notification: ${response.statusCode}');
     }
   }
 

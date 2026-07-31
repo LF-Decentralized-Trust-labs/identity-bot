@@ -559,6 +559,10 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		r.Post("/contacts/{aid}/accept", s.handleAcceptContact)
 		r.Post("/contacts/{aid}/reject", s.handleRejectContact)
 		r.Get("/alerts", s.handleGetAlerts)
+		// Notifications: what another agent has told this one. Separate from
+		// /alerts, which is a read-only view — these can be marked read.
+		r.Get("/notifications", s.handleGetNotifications)
+		r.Post("/notifications/status", s.handleSetNotificationStatus)
 		r.Post("/exchange", s.handleExchange)
 
 		r.Get("/tasks", s.handleGetTasks)
@@ -3740,6 +3744,17 @@ func (s *CoreServer) handleGetAlerts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	// Notifications are added as a NEW top-level key rather than folded into
+	// any existing one. Every client decodes this response leniently and ignores
+	// what it does not recognise, so an added key reaches updated clients and is
+	// invisible to the rest. Renaming an existing key would be the dangerous
+	// move: it degrades to an empty list silently rather than failing.
+	//
+	// "count" keeps its old meaning — the contacts count, not a total. No client
+	// reads it (each computes its own sum), but one constructs AlertsResponse
+	// with it as a required argument, so removing it breaks a build for nothing.
+	notifications := s.unreadNotifications()
+
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"alerts":              contacts,
 		"count":               len(contacts),
@@ -3747,6 +3762,8 @@ func (s *CoreServer) handleGetAlerts(w http.ResponseWriter, r *http.Request) {
 		"pending_count":       len(pendingReqs),
 		"pending_credentials": pendingCreds,
 		"pending_cred_count":  len(pendingCreds),
+		"notifications":       notifications,
+		"notification_count":  len(notifications),
 	})
 }
 

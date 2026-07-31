@@ -12,6 +12,11 @@ const (
 	TypeContactRequest     = "contact-request"
 	TypeDirectMessage      = "direct-message"
 	TypeAck                = "ack"
+	// TypeNotification is something an agent needs to tell a person: a warning,
+	// a deadline, a state change they did not ask about. Distinct from
+	// direct-message, which is one person writing to another — this is a system
+	// speaking, and a client presents the two differently.
+	TypeNotification = "notification"
 
 	// AI-agent namespace.
 	TypeAgentMessage = "agent-message"
@@ -27,6 +32,7 @@ var knownTypes = map[string]bool{
 	TypeContactRequest:     true,
 	TypeDirectMessage:      true,
 	TypeAck:                true,
+	TypeNotification:       true,
 	TypeAgentMessage:       true,
 	TypeAgentTask:          true,
 	TypeAgentResult:        true,

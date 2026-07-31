@@ -49,7 +49,6 @@ type inboxEntry struct {
 
 func (s *CoreServer) didcommKeysPath() string  { return filepath.Join(s.DataDir, "didcomm_keys.json") }
 func (s *CoreServer) didcommPeersPath() string { return filepath.Join(s.DataDir, "didcomm_peers.json") }
-func (s *CoreServer) didcommInboxPath() string { return filepath.Join(s.DataDir, "didcomm_inbox.json") }
 
 func (s *CoreServer) loadDIDCommKeys() map[string]json.RawMessage {
 	m := map[string]json.RawMessage{}
@@ -135,33 +134,6 @@ func (s *CoreServer) savePeers(m map[string]peerRecord) error {
 		return err
 	}
 	return writeFileAtomic(s.didcommPeersPath(), b, 0600)
-}
-
-// maxInboxEntries bounds the stored inbox.
-//
-// It had no bound at all, and the whole file is rewritten on every append — so
-// a peer sending steadily made each message cost more to store than the last,
-// and nothing ever pruned. Keeping the newest is the right end to keep: an
-// undelivered warning matters now, and a message old enough to fall off the end
-// has either been acted on or been superseded.
-const maxInboxEntries = 500
-
-func (s *CoreServer) appendInbox(e inboxEntry) {
-	didcommMu.Lock()
-	defer didcommMu.Unlock()
-	var list []inboxEntry
-	if b, err := os.ReadFile(s.didcommInboxPath()); err == nil {
-		_ = json.Unmarshal(b, &list)
-	}
-	list = append(list, e)
-	if len(list) > maxInboxEntries {
-		list = list[len(list)-maxInboxEntries:]
-	}
-	b, err := json.MarshalIndent(list, "", "  ")
-	if err != nil {
-		return
-	}
-	_ = writeFileAtomic(s.didcommInboxPath(), b, 0600)
 }
 
 // --- replay: in-process seen-ID cache (id -> expiry) ---
@@ -431,11 +403,15 @@ func (s *CoreServer) handleDIDCommInbound(w http.ResponseWriter, r *http.Request
 		return
 	}
 	// Store the received message.
-	s.appendInbox(inboxEntry{
-		ReceivedAt: time.Now().UTC().Format(time.RFC3339),
-		FromAID:    skid, ToAID: kid, Type: jwm.Type, MessageID: jwm.ID,
-		Body: jwm.Body, Mode: env.Mode, Verified: true,
-	})
+	//
+	// One table, not two. This used to append to didcomm_inbox.json, a flat file
+	// with the same fields as a notification — from, to, type, body, verified —
+	// but no id, no read state and no pruning. Both were inboxes; keeping them
+	// separate meant the next person had to learn which held what.
+	//
+	// skid and kid are the AUTHENTICATED header values, not anything read out of
+	// the message. A sender that could name itself could name somebody else.
+	s.storeInboundAsNotification(skid, kid, jwm, true)
 	// The handler layer routes on type; the AI-agent handler picks up agent-* messages.
 	s.routeInboundDIDComm(kid, skid, jwm)
 	w.WriteHeader(http.StatusAccepted)
@@ -448,17 +424,29 @@ func (s *CoreServer) handleGetDIDCommInbox(w http.ResponseWriter, r *http.Reques
 		jsonError(w, "inbox is owner only", http.StatusForbidden)
 		return
 	}
-	var list []inboxEntry
-	if b, err := os.ReadFile(s.didcommInboxPath()); err == nil {
-		_ = json.Unmarshal(b, &list)
+	// Reads the notification table now, and renders the same shape it always
+	// did. The messages this returns are the same messages; only where they are
+	// kept has changed, and a client that has not been updated should not have
+	// to care.
+	stored, err := s.DataStore.GetNotifications("", 0)
+	if err != nil {
+		jsonError(w, "failed to read inbox", http.StatusInternalServerError)
+		return
 	}
-	if list == nil {
-		list = []inboxEntry{}
+	list := []inboxEntry{}
+	for _, n := range stored {
+		list = append(list, inboxEntry{
+			ReceivedAt: n.ReceivedAt,
+			FromAID:    n.FromAID,
+			ToAID:      n.ToAID,
+			Type:       n.Kind,
+			MessageID:  n.ID,
+			Body:       json.RawMessage(n.Payload),
+			Mode:       "authcrypt",
+			Verified:   n.Verified,
+		})
 	}
-	// newest first
-	for i, j := 0, len(list)-1; i < j; i, j = i+1, j-1 {
-		list[i], list[j] = list[j], list[i]
-	}
+	// Already newest first from the store.
 	jsonResponse(w, map[string]any{"messages": list})
 }
 

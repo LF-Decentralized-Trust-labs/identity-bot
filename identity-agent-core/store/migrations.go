@@ -590,6 +590,46 @@ CREATE TABLE IF NOT EXISTS signing_requests (
 -- first, so that is what is indexed.
 CREATE INDEX IF NOT EXISTS idx_signing_pending ON signing_requests(status, created_at);
 `},
+	{
+		Version:     25,
+		Description: "Notifications: things another agent told this one, waiting to be read",
+		SQL: `
+CREATE TABLE IF NOT EXISTS notifications (
+    id           TEXT PRIMARY KEY,
+    -- Who said it, and which of our identifiers they said it to. Both are the
+    -- authenticated envelope headers, never a field from inside the message: a
+    -- sender that could name itself could impersonate anyone.
+    from_aid     TEXT NOT NULL DEFAULT '',
+    to_aid       TEXT NOT NULL DEFAULT '',
+    -- What sort of thing this is, in the sender's vocabulary. The core does not
+    -- interpret it; it exists so a client can group and filter.
+    kind         TEXT NOT NULL DEFAULT '',
+    -- info | warning | critical. How loudly to say it, decided by the sender
+    -- because only the sender knows whether this is a receipt or a deadline.
+    severity     TEXT NOT NULL DEFAULT 'info',
+    title        TEXT NOT NULL DEFAULT '',
+    body         TEXT NOT NULL DEFAULT '',
+    -- The original message, verbatim, for anything that wants more than the
+    -- text. Opaque here on purpose: a core that parsed it would have to know
+    -- what every sender means.
+    payload      TEXT NOT NULL DEFAULT '',
+    -- unread | read | dismissed. Three states rather than a boolean, because
+    -- "I have seen this" and "stop showing me this" are different intentions
+    -- and collapsing them loses the one that matters.
+    status       TEXT NOT NULL DEFAULT 'unread',
+    -- Whether the envelope's signature verified. Always 1 for anything stored
+    -- through the inbound path, which refuses everything else; recorded rather
+    -- than assumed so an unverified row is visibly unverified.
+    verified     INTEGER NOT NULL DEFAULT 0,
+    received_at  TEXT NOT NULL DEFAULT '',
+    read_at      TEXT NOT NULL DEFAULT '',
+    expires_at   TEXT NOT NULL DEFAULT ''
+);
+-- Two questions get asked: "what is waiting for me", newest first, and "show me
+-- everything from this agent".
+CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(status, received_at);
+CREATE INDEX IF NOT EXISTS idx_notifications_from ON notifications(from_aid);
+`},
 }
 
 // ApplyIdentityMigrations creates the migrations table and applies any pending migrations.
