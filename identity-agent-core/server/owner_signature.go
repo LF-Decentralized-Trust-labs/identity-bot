@@ -75,6 +75,26 @@ func (s *CoreServer) ownerAuthority() (*OwnerAuthority, error) {
 	if err != nil || identity == nil || identity.PublicKey == "" {
 		return nil, fmt.Errorf("no owner authority is sealed and this agent has no identity yet")
 	}
+
+	// An organisation names its owner in the event that created it, so the log
+	// answers this before the fallback does. Checked here rather than only at
+	// founding because it is the difference between an identity that answers to
+	// somebody and one that answers to itself — and the fallback below cannot
+	// tell those apart.
+	if owner, aerr := s.ownerFromOwnIdentity(identity.AID); aerr == nil && owner != "" {
+		key, kerr := s.publicKeyOf(owner)
+		if kerr != nil {
+			// Refused rather than falling through. Falling back here would mean
+			// an organisation whose owner cannot be resolved quietly starts
+			// answering to itself, which is the failure this whole design
+			// exists to remove.
+			return nil, fmt.Errorf(
+				"this identity names %s as its owner but that identity cannot be resolved: %w",
+				owner, kerr)
+		}
+		return &OwnerAuthority{AID: owner, PublicKey: key}, nil
+	}
+
 	return &OwnerAuthority{AID: identity.AID, PublicKey: identity.PublicKey}, nil
 }
 

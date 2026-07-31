@@ -263,6 +263,7 @@ def create_inception_event(
     next_public_key: str,
     witnesses: list | None = None,
     toad: int | None = None,
+    anchors: list | None = None,
 ) -> dict:
     """Build the inception event, optionally designating witnesses.
 
@@ -292,11 +293,21 @@ def create_inception_event(
     else:
         bt = 0
 
+    # Anchors go in the event's own `a` field, which means they are part of
+    # what the identifier is derived from: a self-addressing AID is the digest
+    # of this event, so an anchor cannot be added, removed or altered later
+    # without producing a different identifier.
+    #
+    # That is the whole reason to put ownership here rather than in a record
+    # beside the database. A file saying who owns an organisation can be
+    # rewritten by anyone who can write the file, silently, and cannot be read
+    # by anybody who is not on that machine. This can be neither.
     serder = eventing.incept(
         keys=[verfer.qb64],
         ndigs=[diger.qb64],
         wits=wits,
         toad=bt,
+        data=list(anchors or []),
         code=MtrDex.Blake3_256,
     )
 
@@ -403,6 +414,7 @@ def inception():
             next_public_key,
             witnesses=data.get("witnesses"),
             toad=data.get("toad"),
+            anchors=data.get("anchors"),
         )
 
         name = data.get("name", result["aid"])
