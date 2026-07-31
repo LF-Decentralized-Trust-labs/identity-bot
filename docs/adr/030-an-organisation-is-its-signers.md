@@ -1,7 +1,19 @@
 # ADR-030: An Organisation Is Its Signers
 
-**Status:** Accepted
+**Status:** Superseded in part by ADR-032 (2026-07-31)
 **Date:** 2026-07-29
+
+> **Read ADR-032 first.** This ADR is right that an organisation must answer to
+> people, and its account of why an unowned organisation is a defect still
+> stands. What it gets wrong is the mechanism. It says an organisation's
+> identity IS its owners' key set and cannot exist until they sign; an
+> organisation built that way cannot act without them, so it can neither hold a
+> relationship nor keep its own address current on its own.
+>
+> ADR-032 replaces that: the organisation has its own key, and names its owner
+> in the same event that creates it. Everything below about seal-before-roster
+> ordering, refusing an owner with no key material, and next-key digests on
+> multi-signature inception remains correct and implemented.
 
 ## Context
 

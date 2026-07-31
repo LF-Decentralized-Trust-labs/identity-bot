@@ -39,6 +39,15 @@ type DriverInceptionRequest struct {
 	// duplicity on its behalf, so a second conflicting version of its history
 	// has nothing to contradict it.
 	Witnesses []string `json:"witnesses,omitempty"`
+	// Anchors are seals written into the event's own `a` field, and therefore
+	// into what the identifier is derived from. An organisation names its owner
+	// here: a self-addressing identifier is the digest of this event, so
+	// ownership cannot be added, removed or altered later without producing a
+	// different identity.
+	//
+	// A person's agent does not use this. Its identity is delegated, so its
+	// delegator is already named in the event.
+	Anchors []map[string]interface{} `json:"anchors,omitempty"`
 	// Toad is the threshold of accountable duplicity. Left at zero the driver
 	// picks a simple majority, which is enough that a minority of unavailable
 	// or dishonest witnesses can neither stall nor forge.
@@ -666,7 +675,33 @@ func (d *KeriDriver) GetStatus() (*DriverStatus, error) {
 }
 
 func (d *KeriDriver) CreateInception(publicKey, nextPublicKey string) (*DriverInceptionResponse, error) {
-	return d.postInception(publicKey, nextPublicKey, "")
+	return d.postInception(publicKey, nextPublicKey, "", nil)
+}
+
+// CreateOwnedInception creates an identity that names its owner in the event
+// that creates it.
+//
+// This is how an organisation comes into being. An organisation has no mind, so
+// it cannot be its own owner; some person brought it into being and answers for
+// it. Putting that in the inception event rather than in a record beside the
+// database means it cannot be rewritten by whoever can write the file, and can
+// be read by anybody who can read the log.
+//
+// The owner is a per-relationship identifier rather than a delegator, on
+// purpose. A delegation cannot be transferred, only destroyed, so a delegated
+// organisation could never be sold without killing its identity and every
+// relationship it ever had. Anchored, ownership changes by rotation and the
+// organisation survives its owner.
+func (d *KeriDriver) CreateOwnedInception(publicKey, nextPublicKey, name, ownerAID string) (*DriverInceptionResponse, error) {
+	if ownerAID == "" {
+		// Refused rather than defaulted. An organisation with no owner answers
+		// to nobody, and the whole point of this path is that there is no such
+		// moment to fall into.
+		return nil, fmt.Errorf("an organisation must name an owner in its inception event")
+	}
+	return d.postInception(publicKey, nextPublicKey, name, []map[string]interface{}{
+		{"i": ownerAID, "r": "owner"},
+	})
 }
 
 func (d *KeriDriver) CreateHybridInception(synthetic bool, name string) (*DriverHybridInceptionResponse, error) {
@@ -683,7 +718,7 @@ func (d *KeriDriver) CreateHybridInception(synthetic bool, name string) (*Driver
 }
 
 func (d *KeriDriver) CreateInceptionNamed(publicKey, nextPublicKey, name string) (*DriverInceptionResponse, error) {
-	return d.postInception(publicKey, nextPublicKey, name)
+	return d.postInception(publicKey, nextPublicKey, name, nil)
 }
 
 func (d *KeriDriver) CreateDelegatedInception(publicKey, nextPublicKey, name, delegatorName string) (*DriverDelegatedInceptionResponse, error) {
@@ -704,11 +739,13 @@ func (d *KeriDriver) CreateDelegatedInception(publicKey, nextPublicKey, name, de
 	return &result, nil
 }
 
-func (d *KeriDriver) postInception(publicKey, nextPublicKey, name string) (*DriverInceptionResponse, error) {
+func (d *KeriDriver) postInception(publicKey, nextPublicKey, name string,
+	anchors []map[string]interface{}) (*DriverInceptionResponse, error) {
 	reqBody := DriverInceptionRequest{
 		PublicKey:     publicKey,
 		NextPublicKey: nextPublicKey,
 		Name:          name,
+		Anchors:       anchors,
 	}
 
 	body, err := d.doPost("/inception", reqBody, http.StatusCreated)
