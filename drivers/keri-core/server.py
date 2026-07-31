@@ -367,6 +367,13 @@ def hybrid_inception():
             "public_key": result["public_key"],
             "next_key_digest": result["next_key_digest"],
             "kel": [result["inception_event"]],
+            # Read back off the event rather than from the request. Inception
+            # computes a threshold when the caller does not supply one, so the
+            # requested value and the real one differ exactly when nobody asked
+            # — and storing the requested one would leave the identity holding a
+            # threshold its own event does not agree with.
+            "witnesses": _wits_of_event(result["inception_event"])[0],
+            "toad": _wits_of_event(result["inception_event"])[1],
             "sequence_number": 0,
             "last_said": result.get("said", ""),
             "cipher_suite": result.get("cipher_suite", "IA-HYBRID-1"),
@@ -404,6 +411,11 @@ def inception():
             "public_key": result["public_key"],
             "next_key_digest": result["next_key_digest"],
             "kel": [result["inception_event"]],
+            # Kept so a rotation can amend the set rather than being handed it.
+            # A caller supplying the current witnesses would be a caller able to
+            # get them wrong.
+            "witnesses": list(data.get("witnesses") or []),
+            "toad": data.get("toad") or 0,
             "sequence_number": 0,
             # last_said tracks the SAID of the most recent event (used as 'dig' in next event)
             "last_said": result.get("said", ""),
@@ -445,17 +457,51 @@ def rotation():
         sn = identity["sequence_number"] + 1
         prev_said = identity.get("last_said", "")
 
+        # Witness changes travel in a rotation event, as br (removed) and ba
+        # (added) against the set the identity already has. Until now this call
+        # passed none of them, so there was no way to add or remove a witness on
+        # a live identity at all — the set an identity was born with was the set
+        # it died with.
+        current_wits = list(identity.get("witnesses") or [])
+        cuts = [w for w in (data.get("witness_cuts") or []) if w in current_wits]
+        adds = [w for w in (data.get("witness_adds") or []) if w not in current_wits]
+
+        # What the set will be once this event applies.
+        next_wits = [w for w in current_wits if w not in cuts] + adds
+
+        # A threshold has to move with the set it counts. Left alone, removing
+        # witnesses eventually makes it unreachable and the identity can no
+        # longer finalise anything; a majority keeps duplicity detectable while
+        # tolerating the largest number of absent or dishonest witnesses.
+        if data.get("toad") is not None:
+            bt = int(data["toad"])
+        elif cuts or adds:
+            bt = (len(next_wits) // 2) + 1 if next_wits else 0
+        else:
+            bt = identity.get("toad") or 0
+
+        if next_wits and bt > len(next_wits):
+            return jsonify({"error":
+                f"threshold {bt} exceeds the {len(next_wits)} witnesses that would remain, "
+                "which would leave the identity unable to finalise any event"}), 400
+
         serder = eventing.rotate(
             pre=identity["aid"],
             keys=[new_verfer.qb64],
             dig=prev_said,
             ndigs=[new_diger.qb64],
             sn=sn,
+            wits=current_wits,
+            cuts=cuts,
+            adds=adds,
+            toad=bt if (cuts or adds or next_wits) else None,
             data=seal_data,
         )
 
         identity["public_key"] = new_verfer.qb64
         identity["next_key_digest"] = new_diger.qb64
+        identity["witnesses"] = next_wits
+        identity["toad"] = bt
         identity["sequence_number"] = sn
         identity["last_said"] = serder.said
         identity["kel"].append(serder.ked)
@@ -1221,6 +1267,56 @@ def _check_aid_binding(aid: str, first_event: dict) -> list:
     else:
         errors.append(f"unrecognised identifier form {aid!r}, cannot bind keys to it")
     return errors
+
+
+def _wits_of_event(event: dict) -> tuple:
+    """The witness set and threshold an establishment event declares.
+
+    Read off the event rather than taken from whatever was requested, because
+    the two differ precisely when the caller left the threshold out and it was
+    computed for them.
+    """
+    wits = list(event.get("b", []) or [])
+    raw = event.get("bt", "0")
+    try:
+        toad = int(raw, 16) if isinstance(raw, str) else int(raw)
+    except (ValueError, TypeError):
+        toad = 0
+    return wits, toad
+
+
+def _witnesses_from_kel(kel: list) -> tuple:
+    """Read the current witness set and threshold out of a key event log.
+
+    The set is not a field somebody keeps up to date; it is whatever the events
+    say it is. Inception names it outright in 'b'; each rotation amends it with
+    'br' (removed) and 'ba' (added). Replaying that is the only way to know
+    where an identity stands, and it means a reload does not have to be told
+    something it can work out.
+
+    Returns (witnesses, toad).
+    """
+    wits: list = []
+    toad = 0
+    for event in kel or []:
+        etype = event.get("t", "")
+        if etype in ("icp", "dip"):
+            wits = list(event.get("b", []) or [])
+        elif etype in ("rot", "drt"):
+            for removed in event.get("br", []) or []:
+                if removed in wits:
+                    wits.remove(removed)
+            for added in event.get("ba", []) or []:
+                if added not in wits:
+                    wits.append(added)
+        # An interaction event never touches the witness set.
+        if etype in ("icp", "dip", "rot", "drt"):
+            raw_toad = event.get("bt", "0")
+            try:
+                toad = int(raw_toad, 16) if isinstance(raw_toad, str) else int(raw_toad)
+            except (ValueError, TypeError):
+                toad = 0
+    return wits, toad
 
 
 def _validate_kel_events(kel_events: list, aid: str = "") -> dict:
@@ -2047,11 +2143,17 @@ def reload_identity():
     if not aid or not public_key or not next_key_digest:
         return jsonify({"error": "aid, public_key, and next_key_digest are required"}), 400
 
+    # Derived rather than accepted: the events are the source of truth, and a
+    # caller that had to pass the witness set could pass a stale one.
+    reloaded_wits, reloaded_toad = _witnesses_from_kel(kel)
+
     _identities[aid] = {
         "aid":            aid,
         "public_key":     public_key,
         "next_key_digest": next_key_digest,
         "kel":            kel,
+        "witnesses":      reloaded_wits,
+        "toad":           reloaded_toad,
         "sequence_number": sequence_number,
         "last_said":      last_said,
     }
