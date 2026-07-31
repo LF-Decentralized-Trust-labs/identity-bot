@@ -78,7 +78,18 @@ var publicRoutes = map[string]string{
 	// --- agent-to-agent protocol: another Identity Agent is the caller ---
 	// These are how a peer reaches us at all. They are authenticated by what
 	// they carry (a signed event, an encrypted archive), not by who connects.
-	"POST /api/exchange":                                    "a peer posts an introduction we consented to receive",
+	"POST /api/exchange": "a peer posts an introduction we consented to receive",
+	// Agent-to-agent messaging. Unreachable until now: the route was registered
+	// as public and never listed here, so the router refused every peer with 403
+	// before the handler ran and no message from another agent ever arrived.
+	//
+	// Safe to reach because the envelope carries its own proof and the handler
+	// checks it before doing anything: an unregistered sender is refused, the
+	// recipient key must be one of ours, and UnpackAuthcrypt verifies the
+	// signature, the key agreement and the body hash against the sender's known
+	// DID. Expiry and replay are checked after that. A stranger who is not
+	// already a peer gets no further than the first of those.
+	"POST /didcomm":                                         "an agent we know posts an encrypted envelope, authenticated by what it carries",
 	"POST /api/witness/request":                             "witnessing protocol — a controller asks us to witness",
 	"POST /api/witness/accept":                              "witnessing protocol — a receipt comes back",
 	"POST /api/receipt/submit":                              "a witness submits a receipt for an event",

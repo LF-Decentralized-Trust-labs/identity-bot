@@ -394,7 +394,7 @@ func (s *CoreServer) Start() error {
 			provider := s.TunnelManager.Provider()
 			if provider != nil && provider.Listener() != nil {
 				go func() {
-					if err := http.Serve(provider.Listener(), s.router); err != nil {
+					if err := s.httpServer().Serve(provider.Listener()); err != nil {
 						log.Printf("[identity-agent-core] Tunnel server stopped: %v", err)
 					}
 				}()
@@ -403,7 +403,7 @@ func (s *CoreServer) Start() error {
 	}()
 
 	go func() {
-		if err := http.Serve(s.listener, s.router); err != nil {
+		if err := s.httpServer().Serve(s.listener); err != nil {
 			log.Printf("[identity-agent-core] Server stopped: %v", err)
 		}
 	}()
