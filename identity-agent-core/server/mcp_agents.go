@@ -216,6 +216,103 @@ func (s *CoreServer) handleUpdateAgentConfig(w http.ResponseWriter, r *http.Requ
 	})
 }
 
+// handleSetAgentCapabilities replaces an agent's capability ceiling.
+//
+// The ceiling is recorded in three places at provisioning — the asset record, the
+// capability-grant ACDC the owner issues to the agent, and the scopes on the
+// agent's token — and all three must move together. A ceiling widened in one place
+// and not the others is worse than one that was never widened: the agent either
+// holds authority nothing recorded, or is refused work it was told it could do,
+// and which of those happens depends on which check runs first.
+//
+// The grant is re-issued rather than amended because an ACDC is a statement made at
+// a point in time. Editing one in place would make the audit trail claim the owner
+// granted something they had not yet decided to grant.
+func (s *CoreServer) handleSetAgentCapabilities(w http.ResponseWriter, r *http.Request) {
+	if !s.isOwner(r) {
+		jsonError(w, "changing an agent's capabilities is for the owner", http.StatusForbidden)
+		return
+	}
+	if s.assetHandler == nil {
+		jsonError(w, "asset handler not initialized", http.StatusServiceUnavailable)
+		return
+	}
+	id := chi.URLParam(r, "id")
+	var req struct {
+		Capabilities        []string               `json:"capabilities"`
+		ResourceConstraints map[string]interface{} `json:"resource_constraints,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if req.Capabilities == nil {
+		// An absent list is almost certainly a mistake; an explicitly empty one is a
+		// legitimate way to strip an agent of everything without revoking it.
+		jsonError(w, "capabilities is required (send [] to remove every capability)", http.StatusBadRequest)
+		return
+	}
+
+	before, ok := s.assetHandler.Store.GetAsset(id)
+	if !ok {
+		jsonError(w, "agent not found", http.StatusNotFound)
+		return
+	}
+
+	updated, err := s.assetHandler.SetAgentCapabilities(id, req.Capabilities)
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Re-issue the grant so the credential says what the record says. Non-fatal for
+	// the same reason it is at provisioning: on a driverless build the stored ceiling
+	// still governs, and refusing the whole change would leave the record un-updated
+	// on exactly the builds that cannot verify credentials anyway.
+	grantSAID, err := s.issueCapabilityGrant(updated.PairwiseAID, updated.DelegatorAID,
+		updated.Capabilities, req.ResourceConstraints)
+	if err != nil {
+		log.Printf("[mcp] agent %s ceiling updated without re-issuing its grant (%v) — the stored ceiling governs",
+			updated.PairwiseAID, err)
+	}
+
+	// The token carries its own copy of the scopes, consulted on every call.
+	mcpTokensMu.Lock()
+	toks := s.loadMCPTokens()
+	touched := 0
+	for i := range toks {
+		if toks[i].AssetID == updated.ID {
+			toks[i].Scopes = updated.Capabilities
+			if grantSAID != "" {
+				toks[i].GrantSAID = grantSAID
+			}
+			touched++
+		}
+	}
+	saveErr := s.saveMCPTokens(toks)
+	mcpTokensMu.Unlock()
+	if saveErr != nil {
+		// The record and grant already moved, so say plainly that the token did not.
+		jsonError(w, "ceiling and grant updated, but the agent token still carries the old scopes: "+saveErr.Error(),
+			http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("[mcp] agent %s ceiling: %v -> %v (%d token(s) updated)",
+		updated.PairwiseAID, before.Capabilities, updated.Capabilities, touched)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"asset_id":       updated.ID,
+		"agent_aid":      updated.PairwiseAID,
+		"previous":       before.Capabilities,
+		"capabilities":   updated.Capabilities,
+		"tokens_updated": touched,
+		"grant_said":     grantSAID,
+		"grant_issued":   grantSAID != "",
+	})
+}
+
 // ensureRegistry returns the issuer's TEL registry SAID, incepting one (backerless,
 // anchored in the issuer KEL) on first use and persisting it. One registry per issuer.
 func (s *CoreServer) ensureRegistry(issuerRootAID string) (string, error) {
