@@ -10,9 +10,9 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
-	"strconv"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"time"
 )
 
@@ -39,6 +39,21 @@ type DriverInceptionRequest struct {
 	// duplicity on its behalf, so a second conflicting version of its history
 	// has nothing to contradict it.
 	Witnesses []string `json:"witnesses,omitempty"`
+	// Keys and NextKeys carry a full key set for an identity controlled by more
+	// than one. Empty means the single PublicKey/NextPublicKey above, which is
+	// every existing caller.
+	Keys     []string `json:"keys,omitempty"`
+	NextKeys []string `json:"next_keys,omitempty"`
+	// Isith and Nsith are the signing thresholds — how many of those keys must
+	// sign now, and how many of the next set must sign to rotate.
+	//
+	// Empty means the field is not sent. keripy defaults both to 1 and writes
+	// kt:"1" either way, so sending "1" produces an identical event and an
+	// identical identifier — checked, not assumed. These exist for the case that
+	// genuinely differs: a threshold above one, over more than one key, which is
+	// what a rotation to m-of-n needs.
+	Isith string `json:"isith,omitempty"`
+	Nsith string `json:"nsith,omitempty"`
 	// Anchors are seals written into the event's own `a` field, and therefore
 	// into what the identifier is derived from. An organisation names its owner
 	// here: a self-addressing identifier is the digest of this event, so
@@ -60,8 +75,8 @@ type DriverInceptionResponse struct {
 	// RawBytesB64: base64 of the serialized inception event body.
 	// The controller signs these bytes with its Ed25519 key, then calls /cesr-encode.
 	RawBytesB64   string `json:"raw_bytes_b64"`
-	PublicKey      string `json:"public_key"`
-	NextKeyDigest  string `json:"next_key_digest"`
+	PublicKey     string `json:"public_key"`
+	NextKeyDigest string `json:"next_key_digest"`
 }
 
 type DriverHybridInceptionRequest struct {
@@ -102,17 +117,37 @@ type DriverRotationRequest struct {
 	NewPublicKey     string        `json:"new_public_key"`
 	NewNextPublicKey string        `json:"new_next_public_key"`
 	Data             []interface{} `json:"data,omitempty"`
+	// Keys, NextKeys, Isith and Nsith change WHO CONTROLS the identity, not
+	// merely which key it uses. This is how an organisation owned by one person
+	// becomes one owned by several: the key set grows and the threshold rises in
+	// a single event, and the identifier does not change.
+	//
+	// It is also the only place a threshold can be introduced. Founding needs to
+	// anticipate nothing — an identity created by one person is already
+	// one-of-one — so the growth happens here or nowhere.
+	Keys     []string `json:"keys,omitempty"`
+	NextKeys []string `json:"next_keys,omitempty"`
+	Isith    string   `json:"isith,omitempty"`
+	Nsith    string   `json:"nsith,omitempty"`
 }
 
 type DriverRotationResponse struct {
-	AID              string                 `json:"aid"`
-	NewPublicKey     string                 `json:"new_public_key"`
-	NewNextKeyDigest string                 `json:"new_next_key_digest"`
-	RotationEvent    map[string]interface{} `json:"rotation_event"`
-	Said             string                 `json:"said"`
+	AID              string `json:"aid"`
+	NewPublicKey     string `json:"new_public_key"`
+	NewNextKeyDigest string `json:"new_next_key_digest"`
+	// Keys and NextKeyDigests are the whole set the identity is now controlled
+	// by, and Isith/Nsith the thresholds over them. Reported back because after
+	// a rotation to several keys, "the public key" is one of them and a caller
+	// that stored only that would build its next rotation from a set of one.
+	Keys           []string               `json:"keys,omitempty"`
+	NextKeyDigests []string               `json:"next_key_digests,omitempty"`
+	Isith          string                 `json:"isith,omitempty"`
+	Nsith          string                 `json:"nsith,omitempty"`
+	RotationEvent  map[string]interface{} `json:"rotation_event"`
+	Said           string                 `json:"said"`
 	// RawBytesB64: sign with the PRE-ROTATED key (mnemonic index 1), then /cesr-encode.
 	RawBytesB64    string `json:"raw_bytes_b64"`
-	SequenceNumber   int                    `json:"sequence_number"`
+	SequenceNumber int    `json:"sequence_number"`
 }
 
 type DriverInteractRequest struct {
@@ -121,8 +156,8 @@ type DriverInteractRequest struct {
 }
 
 type DriverInteractResponse struct {
-	AID            string                 `json:"aid"`
-	IxnEvent       map[string]interface{} `json:"ixn_event"`
+	AID      string                 `json:"aid"`
+	IxnEvent map[string]interface{} `json:"ixn_event"`
 	// RawBytesB64: sign with the CURRENT signing key, then call /cesr-encode.
 	RawBytesB64    string `json:"raw_bytes_b64"`
 	Said           string `json:"said"`
@@ -203,11 +238,11 @@ type DriverResolveOobiRequest struct {
 }
 
 type DriverResolveOobiResponse struct {
-	Endpoints        []string                 `json:"endpoints"`
-	OobiURL          string                   `json:"oobi_url"`
-	CID              string                   `json:"cid"`
-	EID              string                   `json:"eid"`
-	Role             string                   `json:"role"`
+	Endpoints []string `json:"endpoints"`
+	OobiURL   string   `json:"oobi_url"`
+	CID       string   `json:"cid"`
+	EID       string   `json:"eid"`
+	Role      string   `json:"role"`
 	// Phase 3: KEL validation fields returned when resolve-oobi fetches and validates the KEL.
 	KEL              []map[string]interface{} `json:"kel,omitempty"`
 	KelVerified      bool                     `json:"kel_verified"`
@@ -265,10 +300,10 @@ type DriverIssueCredentialRequest struct {
 }
 
 type DriverIssueCredentialResponse struct {
-	AID            string                 `json:"aid"`
-	AcdcSaid       string                 `json:"acdc_said"`
-	AcdcJsonB64    string                 `json:"acdc_json_b64"`
-	AcdcBody       map[string]interface{} `json:"acdc_body"`
+	AID         string                 `json:"aid"`
+	AcdcSaid    string                 `json:"acdc_said"`
+	AcdcJsonB64 string                 `json:"acdc_json_b64"`
+	AcdcBody    map[string]interface{} `json:"acdc_body"`
 	// IxnRawBytesB64: sign with the CURRENT signing key then call /cesr-encode.
 	IxnRawBytesB64 string                 `json:"ixn_raw_bytes_b64"`
 	IxnSaid        string                 `json:"ixn_said"`
@@ -311,7 +346,7 @@ type DriverPresentCredentialResponse struct {
 	PresentationJsonB64 string                 `json:"presentation_json_b64"`
 	PresentationBody    map[string]interface{} `json:"presentation_body"`
 	// PresSaidB64: base64 of pres_said.encode(); sign these bytes with holder's key.
-	PresSaidB64         string                 `json:"pres_said_b64"`
+	PresSaidB64 string `json:"pres_said_b64"`
 }
 
 type DriverSubmitReceiptRequest struct {
@@ -361,10 +396,10 @@ type DriverVerifyCredentialRequest struct {
 }
 
 type DriverVerifyCredentialResponse struct {
-	Verified  bool                   `json:"verified"`
-	Checks    map[string]interface{} `json:"checks"`
-	Errors    []string               `json:"errors"`
-	AcdcSaid  string                 `json:"acdc_said"`
+	Verified bool                   `json:"verified"`
+	Checks   map[string]interface{} `json:"checks"`
+	Errors   []string               `json:"errors"`
+	AcdcSaid string                 `json:"acdc_said"`
 }
 
 type DriverCesrEncodeRequest struct {
@@ -699,6 +734,20 @@ func (d *KeriDriver) CreateOwnedInception(publicKey, nextPublicKey, name, ownerA
 		// moment to fall into.
 		return nil, fmt.Errorf("an organisation must name an owner in its inception event")
 	}
+	// No threshold is declared here, and that was worth checking rather than
+	// assuming.
+	//
+	// An organisation founded by one person IS one-of-one, but keripy already
+	// writes kt:"1" whether a threshold is passed or not — the event, and
+	// therefore the identifier, is byte-identical either way. Passing "1"
+	// explicitly would be a parameter that reads as meaningful and changes
+	// nothing, which is worse than its absence.
+	//
+	// It also does not gate growth. An organisation founded this way rotates to
+	// two-of-two, or two-of-three, exactly as one that declared a threshold
+	// would: verified against keripy 1.1.17 rather than reasoned about. So there
+	// is nothing to get right at founding for the sake of later — the work is
+	// entirely in the rotation.
 	return d.postInception(publicKey, nextPublicKey, name, []map[string]interface{}{
 		{"i": ownerAID, "r": "owner"},
 	})
@@ -741,12 +790,18 @@ func (d *KeriDriver) CreateDelegatedInception(publicKey, nextPublicKey, name, de
 
 func (d *KeriDriver) postInception(publicKey, nextPublicKey, name string,
 	anchors []map[string]interface{}) (*DriverInceptionResponse, error) {
-	reqBody := DriverInceptionRequest{
+	return d.postInceptionRequest(DriverInceptionRequest{
 		PublicKey:     publicKey,
 		NextPublicKey: nextPublicKey,
 		Name:          name,
 		Anchors:       anchors,
-	}
+	})
+}
+
+// postInceptionRequest is the whole-request form, for callers that need a
+// threshold or a key set. Kept separate from postInception so the ordinary
+// single-key path cannot accidentally acquire either.
+func (d *KeriDriver) postInceptionRequest(reqBody DriverInceptionRequest) (*DriverInceptionResponse, error) {
 
 	body, err := d.doPost("/inception", reqBody, http.StatusCreated)
 	if err != nil {
@@ -765,14 +820,55 @@ func (d *KeriDriver) RotateAid(name, newPublicKey, newNextPublicKey string) (*Dr
 	return d.RotateAidWithAnchor(name, newPublicKey, newNextPublicKey, nil)
 }
 
+// RotateToMultisig changes who controls an identity: a new key set and a new
+// threshold, in one event, keeping the identifier.
+//
+// This is how an organisation founded by one person comes to be owned by
+// several. The keys are the OWNERS' — each generated on that owner's own
+// device, with only the public half ever crossing the wire — so what this sends
+// is a set of public keys and a number, never key material.
+//
+// anchorData rides along because the same event is where the owner seals go:
+// the set of owners and the keys that enforce it change together, which is the
+// only way they cannot disagree.
+func (d *KeriDriver) RotateToMultisig(name string, keys, nextKeyDigests []string,
+	isith, nsith string, anchorData []interface{}) (*DriverRotationResponse, error) {
+	if len(keys) == 0 {
+		return nil, fmt.Errorf("a rotation must name the keys that will control the identity")
+	}
+	if len(nextKeyDigests) == 0 {
+		// An identity that commits to no next keys cannot rotate again. That is
+		// a one-way door and never what somebody adding an owner intended.
+		return nil, fmt.Errorf(
+			"a rotation must commit to next keys, or the identity can never rotate again")
+	}
+	if isith == "" {
+		return nil, fmt.Errorf("a rotation that changes the key set must say how many must sign")
+	}
+
+	return d.postRotation(DriverRotationRequest{
+		Name:     name,
+		Keys:     keys,
+		NextKeys: nextKeyDigests,
+		Isith:    isith,
+		Nsith:    nsith,
+		Data:     anchorData,
+		// The single-key fields stay empty. The driver falls back to them only
+		// when no set is given, and giving both would leave two answers to the
+		// same question.
+	})
+}
+
 func (d *KeriDriver) RotateAidWithAnchor(name, newPublicKey, newNextPublicKey string, anchorData []interface{}) (*DriverRotationResponse, error) {
-	reqBody := DriverRotationRequest{
+	return d.postRotation(DriverRotationRequest{
 		Name:             name,
 		NewPublicKey:     newPublicKey,
 		NewNextPublicKey: newNextPublicKey,
 		Data:             anchorData,
-	}
+	})
+}
 
+func (d *KeriDriver) postRotation(reqBody DriverRotationRequest) (*DriverRotationResponse, error) {
 	body, err := d.doPost("/rotation", reqBody, http.StatusOK)
 	if err != nil {
 		return nil, err
