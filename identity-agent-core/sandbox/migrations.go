@@ -211,6 +211,33 @@ CREATE INDEX IF NOT EXISTS idx_invocation_ts ON invocation_log(ts);
 ALTER TABLE capability_registry ADD COLUMN executor_config_json TEXT;
 `,
         },
+        {
+                Version: 5,
+                Description: "Invocation log: why an action happened, why it was refused, " +
+                        "what it cost, what it produced, and a chain link",
+                // Every column here is nullable and additive, so existing rows keep
+                // their meaning. That meaning is narrower than it looks: a NULL
+                // work_item means "written before this was recorded", which is a
+                // different fact from "this call had no work item", and a reader must
+                // not present it as the latter.
+                //
+                // cost is three columns rather than one JSON blob because it is the
+                // field most likely to be summed and grouped, and a unit buried inside
+                // a blob cannot stop someone adding USD to tokens.
+                SQL: `
+ALTER TABLE invocation_log ADD COLUMN work_item TEXT;
+ALTER TABLE invocation_log ADD COLUMN reason TEXT;
+ALTER TABLE invocation_log ADD COLUMN status_reason TEXT;
+ALTER TABLE invocation_log ADD COLUMN cost_amount REAL;
+ALTER TABLE invocation_log ADD COLUMN cost_unit TEXT;
+ALTER TABLE invocation_log ADD COLUMN cost_basis TEXT;
+ALTER TABLE invocation_log ADD COLUMN outcome TEXT;
+ALTER TABLE invocation_log ADD COLUMN args_preview TEXT;
+ALTER TABLE invocation_log ADD COLUMN result_hash TEXT;
+ALTER TABLE invocation_log ADD COLUMN prev_hash TEXT;
+CREATE INDEX IF NOT EXISTS idx_invocation_log_work_item ON invocation_log(work_item);
+`,
+        },
 }
 
 func ensureMigrationsTable(db *sql.DB) error {

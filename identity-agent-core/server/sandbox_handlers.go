@@ -43,6 +43,7 @@ func (s *CoreServer) sandboxRoutes(r chi.Router) {
 	r.Put("/apps/{id}/settings", s.handleUpdateAppSettings)
 	r.Get("/apps/{id}/install-progress", s.handleInstallProgress)
 	r.Get("/apps/{id}/display", s.handleAppDisplay)
+	s.auditRoutes(r)
 	r.Get("/capabilities", s.handleListCapabilities)
 	r.Post("/capabilities/{id}/invoke", s.handleInvokeCapability)
 	r.Post("/mcp", s.handleMCP)
@@ -58,7 +59,6 @@ func (s *CoreServer) sandboxRoutes(r chi.Router) {
 	r.Get("/didcomm/peers", s.handleListDIDCommPeers)
 	r.Post("/didcomm/send", s.handleSendDIDCommMessage)
 	r.Get("/didcomm/inbox", s.handleGetDIDCommInbox)
-	r.Get("/activity/invocations", s.handleListInvocationEvents)
 	r.Post("/vault/credentials", s.handleSetVaultCredential)
 	r.Get("/vault/credentials", s.handleListVaultCredentials)
 	r.Delete("/vault/credentials/{service}", s.handleDeleteVaultCredential)
@@ -108,6 +108,7 @@ func (s *CoreServer) handleInvokeCapability(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	s.enrichCallerFromIdentity(&caller)
+	applyCallerWhy(r, &caller)
 
 	res, err := s.SandboxManager.InvokeCapability(r.Context(), caller, id, body)
 	if err != nil {

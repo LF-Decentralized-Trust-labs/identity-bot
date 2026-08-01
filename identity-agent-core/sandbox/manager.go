@@ -31,6 +31,9 @@ type InstallProgressInfo struct {
 
 type Manager struct {
         store               *SandboxStore
+        // auditMu serialises audit writes. The invocation log is a hash chain, so two
+        // concurrent writers reading the same predecessor would fork it silently.
+        auditMu             sync.Mutex
         policy              *PolicyEngine
         eventBus            *EventBus
         credentials         *CredentialVault

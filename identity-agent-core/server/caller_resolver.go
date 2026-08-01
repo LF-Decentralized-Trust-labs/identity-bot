@@ -3,6 +3,7 @@ package server
 import (
 	"net"
 	"net/http"
+	"strings"
 
 	"identity-agent-core/sandbox"
 )
@@ -35,4 +36,43 @@ func (s *CoreServer) resolveCaller(r *http.Request) sandbox.CallerContext {
 		return s.CallerResolver.Resolve(r)
 	}
 	return tokenAwareResolver{s: s}.Resolve(r)
+}
+
+// Header names carrying the "why" of a governed call. They ride outside the request
+// body deliberately: the body is the capability's own arguments, its schema commonly
+// forbids unknown properties, and the args hash must commit to exactly what the
+// capability was asked to do — not to bookkeeping wrapped around it.
+const (
+	HeaderWorkItem = "X-Work-Item"
+	HeaderReason   = "X-Reason"
+)
+
+// maxWhyLen bounds what a caller can write into the audit log through these headers.
+// They are recorded verbatim and never authorize anything, so the only real risk they
+// carry is unbounded growth of the record.
+const maxWhyLen = 512
+
+// applyCallerWhy copies the optional why-headers onto a resolved caller context. These
+// are caller-supplied and never consulted for authorization — a caller can misstate its
+// work item exactly as it can misstate a commit message. The fields that decide what is
+// permitted (CallerAID, GrantSAID, DelegationChain) are proven elsewhere.
+func applyCallerWhy(r *http.Request, cc *sandbox.CallerContext) {
+	cc.WorkItem = clampWhy(r.Header.Get(HeaderWorkItem))
+	cc.Reason = clampWhy(r.Header.Get(HeaderReason))
+}
+
+func clampWhy(v string) string {
+	v = strings.TrimSpace(v)
+	// Header values are written straight into the log; a newline would let a caller
+	// forge what looks like a separate entry for anything reading it as text.
+	v = strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\r' {
+			return ' '
+		}
+		return r
+	}, v)
+	if len(v) > maxWhyLen {
+		return v[:maxWhyLen]
+	}
+	return v
 }

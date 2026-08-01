@@ -272,31 +272,6 @@ func (s *CoreServer) handleRevokeMCPToken(w http.ResponseWriter, r *http.Request
 	jsonResponse(w, map[string]any{"revoked": name})
 }
 
-// handleListInvocationEvents is the Activity read: the signed invocation log, newest
-// first — who did what, when, under whose authority. Local owner only for now; the
-// governed read for other callers arrives with ACDC resolution.
-func (s *CoreServer) handleListInvocationEvents(w http.ResponseWriter, r *http.Request) {
-	if !s.isOwner(r) {
-		jsonError(w, "activity is local-owner only", http.StatusForbidden)
-		return
-	}
-	if s.SandboxManager == nil {
-		jsonError(w, "sandbox not initialized", http.StatusServiceUnavailable)
-		return
-	}
-	q := r.URL.Query()
-	events, err := s.SandboxManager.Store().QueryInvocationEvents(sandbox.InvocationEventFilter{
-		CapabilityID:  q.Get("capability_id"),
-		CorrelationID: q.Get("correlation_id"),
-		CallerAID:     q.Get("caller_aid"),
-	})
-	if err != nil {
-		jsonError(w, "query failed", http.StatusInternalServerError)
-		return
-	}
-	jsonResponse(w, map[string]any{"events": events})
-}
-
 // applyGrantScopes derives an agent's capability ceiling from its verified
 // capability-grant credential — credential-proven authority. On success
 // cc.Scopes becomes the credential's capabilities and cc.GrantSAID records the

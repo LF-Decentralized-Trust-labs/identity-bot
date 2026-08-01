@@ -47,6 +47,7 @@ func (s *CoreServer) handleMCP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	caller := s.resolveCaller(r)
+	applyCallerWhy(r, &caller)
 
 	// Verify an optional signed-request envelope (per-request signature +
 	// anti-replay). Absent → no-op; present-but-invalid → reject the request.
