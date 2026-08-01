@@ -41,7 +41,7 @@ func TestAuditRefusesTokenBearingLoopbackCaller(t *testing.T) {
 				h[header] = "some-agent-token"
 			}
 			w := httptest.NewRecorder()
-			if s.requireOwner(w, auditRequest("/api/audit/invocations", "127.0.0.1:54321", h)) {
+			if s.requireOwner(w, auditRequest("/api/activity/invocations", "127.0.0.1:54321", h)) {
 				t.Fatal("a token-bearing loopback caller was treated as the owner")
 			}
 			if w.Code != http.StatusForbidden {
@@ -54,7 +54,7 @@ func TestAuditRefusesTokenBearingLoopbackCaller(t *testing.T) {
 func TestAuditAllowsOwnerOnLoopbackWithoutToken(t *testing.T) {
 	s := auditTestServer(t)
 	w := httptest.NewRecorder()
-	if !s.requireOwner(w, auditRequest("/api/audit/invocations", "127.0.0.1:54321", nil)) {
+	if !s.requireOwner(w, auditRequest("/api/activity/invocations", "127.0.0.1:54321", nil)) {
 		t.Fatalf("the local owner should be allowed, got %d", w.Code)
 	}
 }
@@ -63,7 +63,7 @@ func TestAuditRefusesRemoteCaller(t *testing.T) {
 	s := auditTestServer(t)
 	for _, remote := range []string{"203.0.113.7:443", "10.0.0.5:8080"} {
 		w := httptest.NewRecorder()
-		if s.requireOwner(w, auditRequest("/api/audit/invocations", remote, nil)) {
+		if s.requireOwner(w, auditRequest("/api/activity/invocations", remote, nil)) {
 			t.Fatalf("remote caller %s was treated as the owner", remote)
 		}
 		if w.Code != http.StatusForbidden {
@@ -82,7 +82,7 @@ func TestAuditRefusesForwardedLoopbackCaller(t *testing.T) {
 		{"X-Real-IP": "203.0.113.7"},
 	} {
 		w := httptest.NewRecorder()
-		if s.requireOwner(w, auditRequest("/api/audit/invocations", "127.0.0.1:54321", h)) {
+		if s.requireOwner(w, auditRequest("/api/activity/invocations", "127.0.0.1:54321", h)) {
 			t.Fatalf("a forwarded request was treated as the owner (headers %v)", h)
 		}
 	}
@@ -94,10 +94,10 @@ func TestAuditEndpointsAllGuarded(t *testing.T) {
 	s := auditTestServer(t)
 	s.SandboxManager = nil // the gate must run before anything touches the store
 	targets := []string{
-		"/api/audit/invocations",
-		"/api/audit/invocations/1",
-		"/api/audit/summary",
-		"/api/audit/chain",
+		"/api/activity/invocations",
+		"/api/activity/invocations/1",
+		"/api/activity/summary",
+		"/api/activity/chain",
 	}
 	handlers := []func(http.ResponseWriter, *http.Request){
 		s.handleListInvocations, s.handleGetInvocation,

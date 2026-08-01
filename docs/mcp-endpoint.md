@@ -86,3 +86,6 @@ not.
 | Capability catalog (owner view) | `GET /api/capability-registry` |
 | Tokens (owner only) | `POST/GET /api/mcp/tokens`, `DELETE /api/mcp/tokens/{name}` |
 | Signed invocation log (owner view) | `GET /api/activity/invocations` |
+| One invocation, with its authority line resolved | `GET /api/activity/invocations/{id}` |
+| Activity totals — counts by status and executor, cost grouped by unit | `GET /api/activity/summary` |
+| Verify the log has not been tampered with | `GET /api/activity/chain` |

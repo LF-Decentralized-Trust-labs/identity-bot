@@ -27,11 +27,14 @@ import (
 // wrong instrument here — this is not a capability to be granted, it is the owner's
 // view of their own agent. A remote caller gets 403 whatever it holds.
 
+// The path is /api/activity, not /api/audit: the endpoint was already specified
+// under that name in docs/mcp-endpoint.md, and a client has been written against it.
+// A second name for the same thing is how two half-built consoles happen.
 func (s *CoreServer) auditRoutes(r chi.Router) {
-	r.Get("/audit/invocations", s.handleListInvocations)
-	r.Get("/audit/invocations/{id}", s.handleGetInvocation)
-	r.Get("/audit/summary", s.handleAuditSummary)
-	r.Get("/audit/chain", s.handleVerifyAuditChain)
+	r.Get("/activity/invocations", s.handleListInvocations)
+	r.Get("/activity/invocations/{id}", s.handleGetInvocation)
+	r.Get("/activity/summary", s.handleAuditSummary)
+	r.Get("/activity/chain", s.handleVerifyAuditChain)
 }
 
 // requireOwner is the single gate for every audit read. Written once rather than
@@ -105,8 +108,8 @@ func (s *CoreServer) handleListInvocations(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	writeJSON(w, map[string]any{
-		"invocations": events,
-		"count":       len(events),
+		"events": events,
+		"count":  len(events),
 		// Say plainly that a page is a page. A reader who assumes a truncated list is
 		// the whole log draws confident conclusions from a fraction of it.
 		"truncated": len(events) >= f.EffectiveLimit(),
@@ -135,8 +138,8 @@ func (s *CoreServer) handleGetInvocation(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, map[string]any{
-		"invocation": ev,
-		"authority":  s.describeAuthority(ev),
+		"event":     ev,
+		"authority": s.describeAuthority(ev),
 	})
 }
 
