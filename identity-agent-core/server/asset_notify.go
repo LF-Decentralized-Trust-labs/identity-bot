@@ -185,10 +185,26 @@ func (s *CoreServer) handleAssetNotify(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if _, _, err := s.SendDIDCommMessage(identity.AID, req.ToAID, didcomm.TypeNotification, raw); err != nil {
-		// The machine is told plainly, because it is the only party that knows
+	// The status code is returned SEPARATELY from the error, and both have to be
+	// checked. A recipient that refuses the envelope — because it does not know
+	// us, because the signature failed, because it is a replay — answers 4xx and
+	// produces no error at all, so a caller that reads only err reports every
+	// rejection as a successful delivery.
+	//
+	// That is the worst available outcome here. The device stops retrying, the
+	// operator sees a clean log, and the person who needed the message never
+	// hears. A warning that silently fails is indistinguishable from one that
+	// was never needed.
+	_, status, err := s.SendDIDCommMessage(identity.AID, req.ToAID, didcomm.TypeNotification, raw)
+	if err != nil {
+		// The device is told plainly, because it is the only party that knows
 		// this needed saying and it has to decide whether to try again.
 		writeError(w, http.StatusBadGateway, "The message was not delivered", err.Error())
+		return
+	}
+	if status < 200 || status > 299 {
+		writeError(w, http.StatusBadGateway, "The recipient refused the message",
+			fmt.Sprintf("their agent answered %d — it may not know this identity yet", status))
 		return
 	}
 
