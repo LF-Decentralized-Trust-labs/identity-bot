@@ -125,10 +125,14 @@ type DriverRotationRequest struct {
 	// It is also the only place a threshold can be introduced. Founding needs to
 	// anticipate nothing — an identity created by one person is already
 	// one-of-one — so the growth happens here or nowhere.
-	Keys     []string `json:"keys,omitempty"`
-	NextKeys []string `json:"next_keys,omitempty"`
-	Isith    string   `json:"isith,omitempty"`
-	Nsith    string   `json:"nsith,omitempty"`
+	Keys []string `json:"keys,omitempty"`
+	// NextKeyDigests are DIGESTS of the successor keys, not the keys. What a
+	// rotation commits to is the digest; publishing the successors themselves
+	// would defeat pre-rotation entirely, since the point is that nobody knows
+	// them until they are used.
+	NextKeyDigests []string `json:"next_key_digests,omitempty"`
+	Isith          string   `json:"isith,omitempty"`
+	Nsith          string   `json:"nsith,omitempty"`
 }
 
 type DriverRotationResponse struct {
@@ -847,12 +851,12 @@ func (d *KeriDriver) RotateToMultisig(name string, keys, nextKeyDigests []string
 	}
 
 	return d.postRotation(DriverRotationRequest{
-		Name:     name,
-		Keys:     keys,
-		NextKeys: nextKeyDigests,
-		Isith:    isith,
-		Nsith:    nsith,
-		Data:     anchorData,
+		Name:           name,
+		Keys:           keys,
+		NextKeyDigests: nextKeyDigests,
+		Isith:          isith,
+		Nsith:          nsith,
+		Data:           anchorData,
 		// The single-key fields stay empty. The driver falls back to them only
 		// when no set is given, and giving both would leave two answers to the
 		// same question.

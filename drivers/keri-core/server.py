@@ -482,7 +482,26 @@ def rotation():
 
     if not name:
         return jsonify({"error": "name is required"}), 400
-    if not new_public_key or not new_next_public_key:
+    # A rotation names its new keys one of two ways: a single key, which is the
+    # ordinary case, or a whole SET, which is how an identity comes to be
+    # controlled by several people. Requiring the single form even when a set is
+    # given would make the second impossible.
+    key_set = [k for k in (data.get("keys") or []) if k and str(k).strip()]
+    # DIGESTS, not keys — what a rotation commits to is the digest of each
+    # successor, never the successor itself. Named for what it holds, because
+    # the two are both opaque strings and mistaking one for the other produces
+    # an identity nobody can ever rotate.
+    next_digest_set = [d for d in (data.get("next_key_digests") or []) if d and str(d).strip()]
+    if key_set or next_digest_set:
+        if not key_set or not next_digest_set:
+            return jsonify({"error":
+                "a rotation to a key set needs both keys and next_key_digests — one "
+                "without the other leaves an identity that can never rotate again"}), 400
+        # The first key of the set answers "the" public key for everything
+        # downstream that reports one. The next-key field is left alone: it holds
+        # a public key, and these are digests.
+        new_public_key = new_public_key or key_set[0]
+    elif not new_public_key or not new_next_public_key:
         return jsonify({"error": "new_public_key and new_next_public_key are required"}), 400
 
     identity = _identities.get(name)
@@ -490,11 +509,23 @@ def rotation():
         return jsonify({"error": f"No identity found with name: {name}"}), 404
 
     try:
-        new_pub_bytes = _extract_raw_key(new_public_key)
-        new_next_bytes = _extract_raw_key(new_next_public_key)
+        new_verfer = coring.Verfer(raw=_extract_raw_key(new_public_key), code=MtrDex.Ed25519)
 
-        new_verfer = coring.Verfer(raw=new_pub_bytes, code=MtrDex.Ed25519)
-        new_diger = coring.Diger(raw=new_next_bytes, code=MtrDex.Blake3_256)
+        # The successor is given either as a KEY, which is digested here, or as
+        # a DIGEST already, which is what a rotation to a key set sends — each
+        # owner commits the digest of their own successor and never publishes
+        # the key itself. Digesting a digest would commit to something no
+        # future rotation could ever produce.
+        new_diger = None
+        if new_next_public_key:
+            new_diger = coring.Diger(raw=_extract_raw_key(new_next_public_key),
+                                     code=MtrDex.Blake3_256)
+        elif next_digest_set:
+            new_diger = coring.Diger(qb64=next_digest_set[0])
+        else:
+            return jsonify({"error":
+                "a rotation must commit to a successor, or the identity can never "
+                "rotate again"}), 400
 
         sn = identity["sequence_number"] + 1
         prev_said = identity.get("last_said", "")
@@ -536,8 +567,8 @@ def rotation():
         # founded by one person is already one-of-one — keripy writes kt:"1"
         # whether or not anybody asked — so nothing about founding needs to
         # anticipate this. The growth happens here or nowhere.
-        rotate_keys = [k.strip() for k in (data.get("keys") or []) if k and k.strip()]
-        rotate_ndigs = [d.strip() for d in (data.get("next_keys") or []) if d and d.strip()]
+        rotate_keys = list(key_set)
+        rotate_ndigs = list(next_digest_set)
         isith = data.get("isith")
         nsith = data.get("nsith")
 
