@@ -111,9 +111,8 @@ and permanently.
   of whether a file was overwritten.
 - **An organisation can be sold**, because ownership was never built into its
   identity.
-- **The organisation can act alone for ordinary work.** It holds its own key.
-  What its owner controls is the identity itself: rotating keys, changing who
-  owns it, and the decisions that decide what the organisation is.
+- **The organisation can act alone for ordinary work** — see the amendment
+  below, which says what that means concretely.
 - Provisioning must carry the intended owner. An organisation cannot be created
   without one, so the request that creates it has to say who.
 
@@ -129,3 +128,113 @@ The parts of ADR-030 that were implemented and remain correct: recording the
 owner before writing any roster, refusing an owner record with no key material,
 and carrying next-key digests on multi-signature inception so such an identity
 can rotate at all.
+
+---
+
+# Amendment — 2026-07-31, later the same day
+
+The decision above is right about *why* an organisation is not delegated. It was
+wrong about the shape, and the error was over-correction: rejecting delegation
+for the organisation, it also threw out a delegation the design depended on.
+
+## The correction: two identifiers, not one
+
+**The organisation's root identity is multi-signature over its owners.** One
+owner at founding, so one-of-one. Owners are added by rotation, so it becomes
+m-of-n. It is not delegated, so it can be sold — that reasoning stands
+unchanged.
+
+**The root delegates an operating identity**, which is a single key living on
+the always-on machine. That identity does the day-to-day work: holding
+relationships, issuing credentials, hiring, serving discovery. It is
+replaceable, and replacing it is a root decision.
+
+This is the same shape used everywhere else in the system. A person's root key
+lives on their phone and a delegated key lives on their computer; the computer
+is replaceable and the person is not. An organisation is that arrangement with
+the root being multi-signature over several people instead of one.
+
+## Why one identifier could not work
+
+With a single identifier there is no way to have both properties at once.
+Ordinary work anchors events in the organisation's key log — so if the
+organisation's only key is m-of-n, issuing a credential needs a quorum of
+humans. Either the owners sign everything, which makes an organisation
+unusable, or they sign nothing, which makes ownership decorative.
+
+Splitting the identifier is what resolves it. The threshold guards the root; the
+operating key does the work; and the root's involvement is bounded to the events
+that decide what the organisation *is*.
+
+## What the owners must sign
+
+| Action | Threshold |
+|---|---|
+| Bring the organisation into existence | yes |
+| Add or remove an owner; change the threshold | yes |
+| Rotate the root key | yes |
+| Revoke or replace the operating identity | yes |
+| Hire, scope or revoke a member | no |
+| Issue or revoke a credential | no |
+| Anything a member does within their scope | no |
+
+This replaces the phrase "the decisions that decide what the organisation is",
+which was too vague to implement and therefore decided nothing.
+
+## Why this scales
+
+The owners sign a fixed number of times: once to found, once per operating
+identity, once per ownership change. Everything else is delegated *by the
+operating identity*, so an organisation adding its fiftieth department or its
+ten-thousandth member never convenes its owners.
+
+The alternative — hanging every machine and department directly off the root —
+costs a quorum per addition, because a delegator anchors each delegation it
+issues. One operating identity that parents everything below it is what keeps
+the owners' involvement constant rather than proportional to the size of the
+organisation.
+
+Two things make this hold in practice, and both are already true: credentials
+are issued into a transaction event log registry created once per issuer, so the
+key log grows with structure rather than with activity; and the delegation chain
+stays shallow, because a verifier walks every link.
+
+The trade, stated plainly: the operating identity becomes a single point of
+compromise for everything beneath it, and only the owners can revoke it. That is
+what is bought by not requiring them to sign day-to-day work. It is mitigated by
+that key living on attested hardware and by revocation being an owner action —
+not eliminated.
+
+## Binding the owners' terms at rotation
+
+An organisation may want more than the table above — that a particular
+capability, appointment or account also requires the owners. Because a rotation
+event carries arbitrary data, the terms can be written into the rotation that
+establishes them: anchored in the log, signed by the threshold that agreed them,
+and changeable only by another rotation the threshold signs.
+
+That gives three real properties. The terms cannot be altered without the
+owners. Anyone can verify what they are and when they changed. And the machine
+cannot quietly rewrite them, which is exactly the failure that put ownership in
+the log in the first place.
+
+One limit worth stating rather than discovering: a key event log proves who
+signed and what was agreed. It does not execute policy. For the identity-plane
+actions in the table the enforcement *is* cryptographic — the machine does not
+hold enough keys to perform them. For anything else, the terms are tamper-proof
+and their enforcement is the gateway reading them. Not built yet; recorded here
+so the mechanism is not reinvented.
+
+## What this supersedes
+
+- **This ADR's own consequence** that the organisation "holds its own key" as a
+  single identity. It holds an operating key, delegated from a multi-signature
+  root.
+- **ADR-030's** claim that an organisation cannot act without the threshold. The
+  root cannot; the operating identity can, and must.
+
+The two-identifier model itself is not new. It was written down, withdrawn in
+the belief that it conflicted with transferability, and is reinstated here
+because it does not: what must never be delegated is the organisation. An
+operating identity delegated *by* the organisation is a different thing, and
+revoking it is already an owner's decision.
