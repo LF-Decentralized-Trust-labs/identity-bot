@@ -10,6 +10,7 @@ enum DesktopRoute {
 
   // Identity
   identityProfile,
+  identityOwners,
 
   // Top-level
   contacts,
@@ -178,6 +179,7 @@ class _DesktopSidebarState extends State<DesktopSidebar> {
 
                 // ── My Profile ─────────────────────────────────────────────
                 _NavItem(icon: Icons.person_outline, label: 'My Profile', route: DesktopRoute.identityProfile, current: widget.currentRoute, onTap: _select),
+                _NavItem(icon: Icons.verified_user_outlined, label: 'Owners', route: DesktopRoute.identityOwners, current: widget.currentRoute, onTap: _select),
                 _sectionDivider(),
 
                 // ── Core items ─────────────────────────────────────────────

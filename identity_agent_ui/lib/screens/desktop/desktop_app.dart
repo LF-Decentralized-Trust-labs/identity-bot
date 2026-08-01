@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import '../../theme/app_theme.dart';
+import '../../services/core_service.dart';
 import '../../services/keri_service.dart';
 import '../../services/preferences_service.dart';
 import 'desktop_dashboard_screen.dart';
 import '../../screens/contacts_screen.dart';
+import '../../screens/owners_screen.dart';
 import '../../screens/profile_screen.dart';
 import '../../screens/settings_screen.dart';
 import '../../screens/sandbox_registry_screen.dart';
@@ -65,6 +67,9 @@ class _DesktopAppState extends State<DesktopApp> {
 
       case DesktopRoute.identityProfile:
         return ProfileScreen(keriService: keri, serverUrl: url);
+
+      case DesktopRoute.identityOwners:
+        return OwnersScreen(coreService: CoreService(baseUrl: url));
 
       // ── Contacts / Apps ────────────────────────────────────────────────────
       case DesktopRoute.contacts:
