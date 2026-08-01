@@ -619,6 +619,7 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 			s.mountEmployeeRoutes(r)
 		}
 		s.mountSignerRoutes(r)
+		s.mountOwnerCeremonyRoutes(r)
 		s.mountVerificationRoutes(r)
 		s.mountWitnessRoutes(r)
 		s.mountBrowserSessionRoutes(r)
