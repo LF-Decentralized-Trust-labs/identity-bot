@@ -98,6 +98,12 @@ var pairingState struct {
 	offered *pairingBeginResponse
 	// seed is the private half, kept only in memory between the two calls.
 	seed []byte
+	// derivationIndex is WHERE that seed came from, and unlike the seed it is
+	// written down. The seed is deliberately forgotten; the index has to
+	// survive, or the identity can never rotate — a rotation carries the key
+	// the previous event committed to, and that key exists only as a derivation
+	// nobody could repeat.
+	derivationIndex int
 }
 
 // handlePairingBegin generates this instance's delegated key material and hands
@@ -157,6 +163,11 @@ func (s *CoreServer) handlePairingBegin(w http.ResponseWriter, r *http.Request) 
 
 	pairingState.offered = offer
 	pairingState.seed = seed
+	// Kept so the identity can record WHERE its key came from. Without it the
+	// identity could never rotate: a rotation must carry the key the previous
+	// event committed to, and that key is only findable by deriving it again
+	// from this index.
+	pairingState.derivationIndex = idx
 	writeJSONResponse(w, offer)
 }
 
@@ -263,6 +274,11 @@ func (s *CoreServer) handlePairingComplete(w http.ResponseWriter, r *http.Reques
 		PublicKey:  pairingState.offered.PublicKey,
 		Created:    now,
 		EventCount: 1,
+		// Where this key came from, so it can be found again. Generation 0 is
+		// inception: the current key is at key-index 0 and the successor this
+		// event commits to is at 1.
+		DerivationIndex: pairingState.derivationIndex,
+		KeyGeneration:   0,
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "Could not persist the identity", err.Error())
 		return

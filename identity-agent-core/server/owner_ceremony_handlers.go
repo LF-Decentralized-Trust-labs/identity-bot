@@ -145,19 +145,31 @@ func (s *CoreServer) handleStartCeremony(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if req.OrgPublicKey == "" || req.OrgNextPublicKey == "" {
-		writeError(w, http.StatusBadRequest, "The organisation's own keys are missing",
-			"a rotation must carry the key the previous event committed to, and its "+
-				"successor. Both come from the device holding this organisation's seed; "+
-				"only the public halves are sent.")
-		return
+	// The organisation's own rotation keys. Supplied by the caller when the seed
+	// lives on their device; derived here when it lives on this one, which is
+	// the case for an organisation running on hardware it does not own.
+	//
+	// Derived rather than remembered: only the DIGEST of the committed key is in
+	// the log, so the key itself has to be produced again from the index the
+	// identity recorded. Verified against that digest before anybody is invited,
+	// because discovering the derivation is wrong after collecting everybody's
+	// signatures would waste the one thing a ceremony spends — people's time and
+	// their willingness to do it again.
+	orgPublic, orgNext := req.OrgPublicKey, req.OrgNextPublicKey
+	if orgPublic == "" || orgNext == "" {
+		keys, kerr := s.ownRotationKeys()
+		if kerr != nil {
+			writeError(w, http.StatusConflict, "This organisation cannot rotate its own key", kerr.Error())
+			return
+		}
+		orgPublic, orgNext = keys.Current, keys.Next
 	}
 
 	c := &OwnerCeremony{
 		ID:               genInviteToken(),
 		Threshold:        threshold,
-		OrgPublicKey:     req.OrgPublicKey,
-		OrgNextPublicKey: req.OrgNextPublicKey,
+		OrgPublicKey:     orgPublic,
+		OrgNextPublicKey: orgNext,
 		Status:           ceremonyCollecting,
 		StartedAt:        time.Now().UTC(),
 	}
@@ -308,6 +320,16 @@ func (s *CoreServer) completeCeremonyIfReady(c *OwnerCeremony) {
 		fmt.Sprintf("%d", c.Threshold), fmt.Sprintf("%d", c.Threshold), seals)
 	if err != nil {
 		_ = s.finishCeremony(ceremonyFailed, "the rotation failed: "+err.Error(), "")
+		return
+	}
+	// Recorded only now that the rotation was accepted. Advancing first and
+	// failing would leave the identity believing it had moved on while its log
+	// said otherwise, and every later rotation would derive a key its own events
+	// do not commit to.
+	if aerr := s.advanceKeyGeneration(resp.NewPublicKey, resp.NewNextKeyDigest); aerr != nil {
+		_ = s.finishCeremony(ceremonyFailed,
+			"the ownership changed but this agent could not record where its keys moved to, "+
+				"so it will not be able to rotate again: "+aerr.Error(), resp.Said)
 		return
 	}
 	_ = s.finishCeremony(ceremonyApplied, "", resp.Said)
