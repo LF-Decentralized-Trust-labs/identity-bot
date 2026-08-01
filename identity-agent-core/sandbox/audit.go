@@ -388,7 +388,51 @@ type InvocationEventFilter struct {
 	CapabilityID  string
 	CorrelationID string
 	CallerAID     string
-	Limit         int
+	// WorkItem narrows to one piece of work, which is how a reader asks the question
+	// they usually actually have: not "what did this caller do" but "what was done
+	// for this task, by whoever did it".
+	WorkItem string
+	// ResultStatus is ok | denied | error. Anything else matches nothing rather than
+	// being ignored, so a typo shows up as an empty result instead of silently
+	// widening the query back to everything.
+	ResultStatus string
+	ExecutorType string
+	// Since and Until bound the window, RFC3339. Compared as strings because the
+	// column stores RFC3339Nano UTC, which sorts lexically in the same order it sorts
+	// chronologically — true only because every timestamp is written in that one form.
+	Since string
+	Until string
+	Limit int
+}
+
+const (
+	defaultEventLimit = 100
+	maxEventLimit     = 500
+)
+
+// EffectiveLimit is the limit that will actually be applied. Exported so a caller can
+// tell whether a full page means "this is everything" or "there is more".
+func (f InvocationEventFilter) EffectiveLimit() int {
+	if f.Limit <= 0 || f.Limit > maxEventLimit {
+		return defaultEventLimit
+	}
+	return f.Limit
+}
+
+// InvocationSummary is the log aggregated into the few numbers a console leads with.
+type InvocationSummary struct {
+	Total      int64            `json:"total"`
+	ByStatus   map[string]int64 `json:"by_status"`
+	ByExecutor map[string]int64 `json:"by_executor"`
+	// CostByUnit is keyed by unit and never summed across units — adding USD to
+	// tokens produces a number that means nothing.
+	CostByUnit map[string]float64 `json:"cost_by_unit"`
+	// Costed counts how many invocations carried a cost at all. Without it, a total
+	// of zero reads as "this was free" when it may mean "nothing reported a cost".
+	Costed        int64  `json:"costed"`
+	TotalDuration int64  `json:"total_duration_ms"`
+	FirstEvent    string `json:"first_event,omitempty"`
+	LastEvent     string `json:"last_event,omitempty"`
 }
 
 // QueryInvocationEvents reads the audit log, newest first (the Activity-view read).
@@ -407,13 +451,28 @@ func (s *SandboxStore) QueryInvocationEvents(f InvocationEventFilter) ([]Invocat
 		q += " AND caller_aid = ?"
 		args = append(args, f.CallerAID)
 	}
-	q += " ORDER BY id DESC"
-	limit := f.Limit
-	if limit <= 0 || limit > 500 {
-		limit = 100
+	if f.WorkItem != "" {
+		q += " AND work_item = ?"
+		args = append(args, f.WorkItem)
 	}
-	q += " LIMIT ?"
-	args = append(args, limit)
+	if f.ResultStatus != "" {
+		q += " AND result_status = ?"
+		args = append(args, f.ResultStatus)
+	}
+	if f.ExecutorType != "" {
+		q += " AND executor_type = ?"
+		args = append(args, f.ExecutorType)
+	}
+	if f.Since != "" {
+		q += " AND ts >= ?"
+		args = append(args, f.Since)
+	}
+	if f.Until != "" {
+		q += " AND ts <= ?"
+		args = append(args, f.Until)
+	}
+	q += " ORDER BY id DESC LIMIT ?"
+	args = append(args, f.EffectiveLimit())
 
 	rows, err := s.db.Query(q, args...)
 	if err != nil {
@@ -434,4 +493,105 @@ func (s *SandboxStore) QueryInvocationEvents(f InvocationEventFilter) ([]Invocat
 		}
 	}
 	return out, rows.Err()
+}
+
+// GetInvocationEvent returns one event by row id.
+func (s *SandboxStore) GetInvocationEvent(id int64) (InvocationEvent, error) {
+	var stored string
+	err := s.db.QueryRow(`SELECT event_json FROM invocation_log WHERE id = ?`, id).Scan(&stored)
+	if err == sql.ErrNoRows {
+		return InvocationEvent{}, fmt.Errorf("no invocation event with id %d", id)
+	}
+	if err != nil {
+		return InvocationEvent{}, err
+	}
+	var ev InvocationEvent
+	if err := json.Unmarshal([]byte(stored), &ev); err != nil {
+		return InvocationEvent{}, fmt.Errorf("event %d is not readable: %w", id, err)
+	}
+	ev.ID = id
+	return ev, nil
+}
+
+// SummariseInvocations aggregates the log, optionally from a starting timestamp.
+//
+// Costs are grouped by unit and never totalled across units: a single number combining
+// dollars, tokens and request counts would be arithmetically valid and completely
+// meaningless. Rows with no cost are excluded from the totals and counted separately,
+// because "nothing reported a cost" and "this was free" are different facts and only
+// one of them is good news.
+func (s *SandboxStore) SummariseInvocations(since string) (InvocationSummary, error) {
+	out := InvocationSummary{
+		ByStatus:   map[string]int64{},
+		ByExecutor: map[string]int64{},
+		CostByUnit: map[string]float64{},
+	}
+	where := ""
+	var args []any
+	if since != "" {
+		where = " WHERE ts >= ?"
+		args = append(args, since)
+	}
+
+	err := s.db.QueryRow(
+		`SELECT COUNT(*), COALESCE(SUM(duration_ms),0), COALESCE(MIN(ts),''), COALESCE(MAX(ts),'')
+		 FROM invocation_log`+where, args...).
+		Scan(&out.Total, &out.TotalDuration, &out.FirstEvent, &out.LastEvent)
+	if err != nil {
+		return out, err
+	}
+
+	if err := s.tally(`SELECT result_status, COUNT(*) FROM invocation_log`+where+
+		` GROUP BY result_status`, args, out.ByStatus); err != nil {
+		return out, err
+	}
+	if err := s.tally(`SELECT COALESCE(executor_type,'unknown'), COUNT(*) FROM invocation_log`+where+
+		` GROUP BY executor_type`, args, out.ByExecutor); err != nil {
+		return out, err
+	}
+
+	costWhere := " WHERE cost_amount IS NOT NULL AND cost_unit IS NOT NULL AND cost_unit != ''"
+	costArgs := args
+	if since != "" {
+		costWhere += " AND ts >= ?"
+	} else {
+		costArgs = nil
+	}
+	rows, err := s.db.Query(`SELECT cost_unit, SUM(cost_amount), COUNT(*) FROM invocation_log`+
+		costWhere+` GROUP BY cost_unit`, costArgs...)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var unit string
+		var amount float64
+		var n int64
+		if err := rows.Scan(&unit, &amount, &n); err != nil {
+			return out, err
+		}
+		out.CostByUnit[unit] = amount
+		out.Costed += n
+	}
+	return out, rows.Err()
+}
+
+func (s *SandboxStore) tally(query string, args []any, into map[string]int64) error {
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var k string
+		var n int64
+		if err := rows.Scan(&k, &n); err != nil {
+			return err
+		}
+		if k == "" {
+			k = "unknown"
+		}
+		into[k] = n
+	}
+	return rows.Err()
 }
