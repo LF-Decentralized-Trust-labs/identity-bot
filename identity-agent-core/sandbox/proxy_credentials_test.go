@@ -30,12 +30,24 @@ func newTestProxy(t *testing.T, inject CredentialInjectFunc) *ProxyManager {
 	return &ProxyManager{injectCreds: inject}
 }
 
+// grantedRoute is a caller that has proved who it is and been granted a
+// credential — the precondition every injection now requires. The tests below
+// were written to check host matching, so they supply it and go on checking that.
+func grantedRoute() (*ProxyRoute, callerIdentification) {
+	return &ProxyRoute{
+		InstanceID: "inst-1", AppID: "app-1",
+		ProxyToken:         "test-token",
+		CredentialServices: []string{"svc"},
+	}, callerProven
+}
+
 func TestApplyCredentialsInjectsForMatchingHost(t *testing.T) {
 	calls := 0
 	pm := newTestProxy(t, injector("api.example.com", "Authorization", "Bearer secret", &calls))
 
 	req := httptest.NewRequest(http.MethodGet, "https://api.example.com/zones", nil)
-	pm.applyCredentials(req, "app-1", "inst-1")
+	route, how := grantedRoute()
+	pm.applyCredentialsFor(req, "app-1", "inst-1", route, how)
 
 	if got := req.Header.Get("Authorization"); got != "Bearer secret" {
 		t.Errorf("Authorization = %q, want the injected credential", got)
@@ -49,7 +61,8 @@ func TestApplyCredentialsLeavesOtherHostsAlone(t *testing.T) {
 	pm := newTestProxy(t, injector("api.example.com", "Authorization", "Bearer secret", nil))
 
 	req := httptest.NewRequest(http.MethodGet, "https://evil.example.net/collect", nil)
-	pm.applyCredentials(req, "app-1", "inst-1")
+	route, how := grantedRoute()
+	pm.applyCredentialsFor(req, "app-1", "inst-1", route, how)
 
 	if got := req.Header.Get("Authorization"); got != "" {
 		t.Errorf("credential leaked to a non-matching host: %q", got)
@@ -65,7 +78,8 @@ func TestApplyCredentialsDoesNotOverwriteCallerHeader(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "https://api.example.com/me", nil)
 	req.Header.Set("Authorization", "Bearer end-user-token")
-	pm.applyCredentials(req, "app-1", "inst-1")
+	route, how := grantedRoute()
+	pm.applyCredentialsFor(req, "app-1", "inst-1", route, how)
 
 	if got := req.Header.Get("Authorization"); got != "Bearer end-user-token" {
 		t.Errorf("Authorization = %q, want the caller's own token preserved", got)
@@ -77,7 +91,8 @@ func TestApplyCredentialsIsInertWhenUnwired(t *testing.T) {
 	pm := newTestProxy(t, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "https://api.example.com/zones", nil)
-	pm.applyCredentials(req, "app-1", "inst-1")
+	route, how := grantedRoute()
+	pm.applyCredentialsFor(req, "app-1", "inst-1", route, how)
 
 	if len(req.Header) != 0 {
 		t.Errorf("headers were modified with no injector configured: %v", req.Header)
@@ -90,7 +105,8 @@ func TestApplyCredentialsToleratesNoMatch(t *testing.T) {
 	pm := newTestProxy(t, func(*http.Request) bool { return false })
 
 	req := httptest.NewRequest(http.MethodGet, "https://api.example.com/zones", nil)
-	pm.applyCredentials(req, "app-1", "inst-1") // must not panic
+	route, how := grantedRoute()
+	pm.applyCredentialsFor(req, "app-1", "inst-1", route, how) // must not panic
 
 	if len(req.Header) != 0 {
 		t.Errorf("headers modified despite the injector declining: %v", req.Header)
@@ -106,7 +122,8 @@ func TestBothForwardPathsCallApplyCredentials(t *testing.T) {
 			calls := 0
 			pm := newTestProxy(t, injector("api.example.com", "X-Key", "k", &calls))
 			req := httptest.NewRequest(http.MethodGet, scheme+"://api.example.com/x", nil)
-			pm.applyCredentials(req, "", "")
+			route, how := grantedRoute()
+			pm.applyCredentialsFor(req, "", "", route, how)
 			if calls != 1 {
 				t.Fatalf("injector called %d times for %s, want 1", calls, scheme)
 			}
