@@ -59,7 +59,6 @@ func (s *CoreServer) sandboxRoutes(r chi.Router) {
 	r.Get("/didcomm/peers", s.handleListDIDCommPeers)
 	r.Post("/didcomm/send", s.handleSendDIDCommMessage)
 	r.Get("/didcomm/inbox", s.handleGetDIDCommInbox)
-	r.Get("/activity/invocations", s.handleListInvocationEvents)
 	r.Post("/vault/credentials", s.handleSetVaultCredential)
 	r.Get("/vault/credentials", s.handleListVaultCredentials)
 	r.Delete("/vault/credentials/{service}", s.handleDeleteVaultCredential)

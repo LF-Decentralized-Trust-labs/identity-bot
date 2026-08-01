@@ -27,9 +27,13 @@ import (
 // wrong instrument here — this is not a capability to be granted, it is the owner's
 // view of their own agent. A remote caller gets 403 whatever it holds.
 
-// The path is /api/activity, not /api/audit: the endpoint was already specified
-// under that name in docs/mcp-endpoint.md, and a client has been written against it.
-// A second name for the same thing is how two half-built consoles happen.
+// The path is /api/activity, and the list endpoint REPLACES an earlier handler that
+// served the same route. That one gated on isOwner alone — the hole described above,
+// which would have let any AI agent on this machine read every other caller's
+// activity. It also offered three filters, no bound on the result set, and no way to
+// tell a full page from the whole log. Replacing it rather than registering beside it
+// is deliberate: two handlers on one path leaves the hole open at whichever one the
+// router happens to resolve to.
 func (s *CoreServer) auditRoutes(r chi.Router) {
 	r.Get("/activity/invocations", s.handleListInvocations)
 	r.Get("/activity/invocations/{id}", s.handleGetInvocation)
