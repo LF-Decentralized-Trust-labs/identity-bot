@@ -108,6 +108,7 @@ func (s *CoreServer) handleInvokeCapability(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	s.enrichCallerFromIdentity(&caller)
+	applyCallerWhy(r, &caller)
 
 	res, err := s.SandboxManager.InvokeCapability(r.Context(), caller, id, body)
 	if err != nil {

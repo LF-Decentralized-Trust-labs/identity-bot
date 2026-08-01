@@ -108,6 +108,20 @@ type CallerContext struct {
 	// ParentEventID links this invocation to the orchestration's dispatch event, so a
 	// full multi-agent workflow is one parent→children trace. Empty for a direct call.
 	ParentEventID string
+	// WorkItem is the identifier of the piece of work this call serves — a task ref, a
+	// ticket, an orchestrator work-item id. GrantSAID already answers "why was this
+	// ALLOWED"; WorkItem answers the different question "what was it FOR". Without it a
+	// log can say an AI agent wrote code but not what it was trying to accomplish, which
+	// is the difference between a list of events and an account of what happened.
+	//
+	// Caller-supplied and therefore NOT a governance input: it is never consulted when
+	// authorizing, only recorded. A caller can lie about its work item exactly as it can
+	// lie in a commit message, and the cost of that is the same — the authority fields
+	// beside it (CallerAID, GrantSAID, DelegationChain) are the ones the gateway proves.
+	WorkItem string
+	// Reason is one line of plain language for a human reading the log later. Same
+	// caller-supplied, non-governing status as WorkItem.
+	Reason string
 }
 
 // InvokeResult is a capability's response, routed back through the endpoint.
@@ -149,14 +163,16 @@ func (m *Manager) InvokeCapability(ctx context.Context, caller CallerContext, ca
 	}
 	auth := m.authz()
 	if err := auth.AuthorizeIngress(ctx, caller, capDef); err != nil {
-		m.recordInvocation(caller, capabilityID, executorType, body, "denied", start)
+		m.recordInvocationDetail(caller, capabilityID, executorType, body, "denied", start,
+			EventDetail{StatusReason: "ingress: " + err.Error()})
 		return nil, err
 	}
 	// Per-capability resource constraints from the caller's grant (e.g. a zone
 	// allowlist) are enforced against the request arguments here, where the body
 	// is available.
 	if err := enforceResourceConstraints(caller.ResourceConstraints, capabilityID, body); err != nil {
-		m.recordInvocation(caller, capabilityID, executorType, body, "denied", start)
+		m.recordInvocationDetail(caller, capabilityID, executorType, body, "denied", start,
+			EventDetail{StatusReason: "resource constraint: " + err.Error()})
 		return nil, fmt.Errorf("%w: %s", ErrDenied, err.Error())
 	}
 	// One screen = one driver: host_control invocations serialize per capability
@@ -184,15 +200,24 @@ func (m *Manager) InvokeCapability(ctx context.Context, caller CallerContext, ca
 		res, err = inv.Invoke(ctx, provider.ID, capabilityID, body)
 	}
 	if err != nil {
-		m.recordInvocation(caller, capabilityID, executorType, body, "error", start)
+		m.recordInvocationDetail(caller, capabilityID, executorType, body, "error", start,
+			EventDetail{StatusReason: "executor: " + err.Error()})
 		return nil, err
 	}
 	out := auth.FilterEgress(ctx, caller, capDef, res)
 	status := "ok"
-	if out != nil && out.Status >= 400 {
-		status = "error"
+	detail := EventDetail{}
+	if out != nil {
+		// ResultHash is taken from the FILTERED body — the bytes the caller actually
+		// received. Hashing the pre-filter result would commit to something no party
+		// ever saw, and would put egress-stripped data back into the record by proxy.
+		detail.ResultBody = out.Body
+		if out.Status >= 400 {
+			status = "error"
+			detail.StatusReason = fmt.Sprintf("capability returned HTTP %d", out.Status)
+		}
 	}
-	eventID := m.recordInvocation(caller, capabilityID, executorType, body, status, start)
+	eventID := m.recordInvocationDetail(caller, capabilityID, executorType, body, status, start, detail)
 	if out != nil {
 		out.AuditEventID = eventID
 	}
