@@ -2409,14 +2409,32 @@ func (s *CoreServer) handleGenerateMultisigEvent(w http.ResponseWriter, r *http.
 		req.EventType = "inception"
 	}
 
+	// This builds inceptions. Anything else is refused here rather than passed
+	// down, so the answer is a 400 that says where rotation lives instead of a
+	// 500 from the driver.
+	//
+	// It matters because of what the driver used to do with the other cases: it
+	// returned a digest of {type, aids, threshold, keys} under the field names
+	// "said" and "pre", in the same response shape as a real inception. A caller
+	// could not tell an event from an object we made up. Rotation was never
+	// missing — RotateToMultisig builds a genuine rot event and the ownership
+	// ceremony uses it — so this was a second path under the name that reads
+	// like the primary API.
+	if req.EventType != "inception" {
+		writeError(w, http.StatusBadRequest, "This builds inception events only",
+			"a rotation is built by the ownership ceremony, which carries the current key "+
+				"set and the next-key digests a rotation must have; asking for one here "+
+				"used to return a digest of an invented object that no verifier would accept")
+		return
+	}
+
 	// An inception with no next keys produces an identity that can never
 	// rotate. For an owned identity that is a dead end rather than a
 	// limitation: a compromised signer could never be replaced, and
 	// transferring ownership is itself a rotation. Refused rather than quietly
-	// produced, because the
-	// consequence only becomes visible on the day somebody needs to rotate and
-	// finds they cannot.
-	if req.EventType == "inception" && len(req.NextKeys) == 0 {
+	// produced, because the consequence only becomes visible on the day
+	// somebody needs to rotate and finds they cannot.
+	if len(req.NextKeys) == 0 {
 		writeError(w, http.StatusBadRequest, "next_keys required for a multisig inception",
 			"without them this identity could never rotate its keys or change hands")
 		return
