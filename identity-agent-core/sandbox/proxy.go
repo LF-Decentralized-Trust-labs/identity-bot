@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -868,17 +869,21 @@ func (pm *ProxyManager) identifyCaller(r *http.Request) (*ProxyRoute, callerIden
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
 
-	if token := bearerFromProxyAuth(r.Header.Get("Proxy-Authorization")); token != "" {
+	if presented := tokensFromProxyAuth(r.Header.Get("Proxy-Authorization")); len(presented) > 0 {
 		for _, route := range pm.routes {
-			// Constant time: this is a secret being compared.
-			if route.ProxyToken != "" &&
-				subtle.ConstantTimeCompare([]byte(route.ProxyToken), []byte(token)) == 1 {
-				return route, callerProven
+			if route.ProxyToken == "" {
+				continue
+			}
+			for _, tok := range presented {
+				// Constant time: this is a secret being compared.
+				if subtle.ConstantTimeCompare([]byte(route.ProxyToken), []byte(tok)) == 1 {
+					return route, callerProven
+				}
 			}
 		}
-		// A token was presented and matched nothing. Do not fall through
-		// to guessing by address — a caller that tried to identify itself
-		// and failed is a caller we should not silently misidentify.
+		// Something was presented and matched nothing. Do not fall through to
+		// guessing by address — a caller that tried to identify itself and failed
+		// is a caller we should not silently misidentify.
 		return nil, callerUnknown
 	}
 
@@ -896,13 +901,55 @@ func (pm *ProxyManager) identifyCaller(r *http.Request) (*ProxyRoute, callerIden
 	return nil, callerUnknown
 }
 
-// bearerFromProxyAuth extracts the token from a Proxy-Authorization header.
-func bearerFromProxyAuth(h string) string {
-	const prefix = "Bearer "
-	if len(h) > len(prefix) && strings.EqualFold(h[:len(prefix)], prefix) {
-		return strings.TrimSpace(h[len(prefix):])
+// tokensFromProxyAuth extracts every value a Proxy-Authorization header might be
+// carrying a caller token in.
+//
+// Basic is not optional here, it is the common case. The whole point of this
+// transport is tools that know nothing about this system and are reached only by
+// setting HTTPS_PROXY — and what they send is what a proxy URL produces. Given
+// `http://<token>@host:port`, curl and git emit:
+//
+//	Proxy-Authorization: Basic base64("<token>:")
+//
+// never Bearer. An earlier version accepted Bearer alone, which meant the exact
+// callers this was designed for could not authenticate at all, and would have
+// silently fallen back to being unidentified — and therefore to receiving no
+// credential, with nothing obviously wrong.
+//
+// Both halves of a Basic pair are returned because which one carries the token
+// is a matter of how the URL was written: a token as username leaves the
+// password empty, and some tooling insists on a non-empty username instead. Both
+// are compared in constant time against real tokens, so accepting either costs
+// nothing and removes a configuration foot-gun.
+func tokensFromProxyAuth(h string) []string {
+	h = strings.TrimSpace(h)
+	if h == "" {
+		return nil
 	}
-	return ""
+	if scheme, rest, ok := strings.Cut(h, " "); ok {
+		rest = strings.TrimSpace(rest)
+		switch {
+		case strings.EqualFold(scheme, "Bearer"):
+			if rest != "" {
+				return []string{rest}
+			}
+		case strings.EqualFold(scheme, "Basic"):
+			raw, err := base64.StdEncoding.DecodeString(rest)
+			if err != nil {
+				return nil
+			}
+			user, pass, _ := strings.Cut(string(raw), ":")
+			var out []string
+			if user != "" {
+				out = append(out, user)
+			}
+			if pass != "" {
+				out = append(out, pass)
+			}
+			return out
+		}
+	}
+	return nil
 }
 
 func (pm *ProxyManager) logProxyRequest(route *ProxyRoute, req *http.Request, resp *http.Response, startTime time.Time, action, rule string) {
