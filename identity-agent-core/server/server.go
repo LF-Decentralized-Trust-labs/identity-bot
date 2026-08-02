@@ -794,12 +794,11 @@ type InceptionRequest struct {
 	// OwnerAID names who this identity answers to, and is written into the
 	// inception event itself.
 	//
-	// An organisation must supply it. An organisation has no mind, so it cannot
-	// be its own owner: if the software running one held the only key to it,
-	// there would be nobody it ultimately answers to. Putting the owner in the
-	// event rather than in a record written afterwards means it cannot be
-	// rewritten by whoever can write the file, and can be verified by anybody
-	// who can read the log.
+	// An identity founded as its own root must supply it. If the software
+	// running such an identity held the only key to it, there would be nobody
+	// it ultimately answers to. Putting the owner in the event rather than in a
+	// record written afterwards means it cannot be rewritten by whoever can
+	// write the file, and can be verified by anybody who can read the log.
 	//
 	// A person's own agent leaves it empty. Its identity is delegated, so its
 	// delegator is already named in the event.
@@ -2411,9 +2410,10 @@ func (s *CoreServer) handleGenerateMultisigEvent(w http.ResponseWriter, r *http.
 	}
 
 	// An inception with no next keys produces an identity that can never
-	// rotate. For an organisation that is a dead end rather than a limitation:
-	// a compromised signer could never be replaced, and transferring ownership
-	// is itself a rotation. Refused rather than quietly produced, because the
+	// rotate. For an owned identity that is a dead end rather than a
+	// limitation: a compromised signer could never be replaced, and
+	// transferring ownership is itself a rotation. Refused rather than quietly
+	// produced, because the
 	// consequence only becomes visible on the day somebody needs to rotate and
 	// finds they cannot.
 	if req.EventType == "inception" && len(req.NextKeys) == 0 {

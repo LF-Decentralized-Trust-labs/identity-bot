@@ -89,7 +89,7 @@ func (s *CoreServer) ownerAuthority() (*OwnerAuthority, error) {
 		key, kerr := s.publicKeyOf(owner)
 		if kerr != nil {
 			// Refused rather than falling through. Falling back here would mean
-			// an organisation whose owner cannot be resolved quietly starts
+			// an identity whose owner cannot be resolved quietly starts
 			// answering to itself, which is the failure this whole design
 			// exists to remove.
 			return nil, fmt.Errorf(

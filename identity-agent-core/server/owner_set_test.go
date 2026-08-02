@@ -121,3 +121,46 @@ func TestAFreshIdentityReadsItsFounder(t *testing.T) {
 		t.Errorf("owners are %v", owners)
 	}
 }
+
+// Several owners from the very start.
+//
+// An identity created for a child answers to whoever holds guardianship, and
+// that is frequently two people rather than one; anything created jointly is the
+// same shape. Reading only the first seal dropped the rest silently, and the
+// identity went on believing it answered to a smaller set than its own inception
+// event said — with nothing to indicate the difference.
+func TestAnIdentityCanBeCreatedAlreadyOwnedBySeveral(t *testing.T) {
+	owners, err := ownersFromKEL([]map[string]interface{}{
+		{"t": "icp", "i": "ECHILD", "a": []interface{}{
+			map[string]interface{}{"i": "EGUARDIAN-ONE", "r": "owner"},
+			map[string]interface{}{"i": "EGUARDIAN-TWO", "r": "owner"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(owners) != 2 {
+		t.Fatalf("read %d of 2 owners named at inception: %v", len(owners), owners)
+	}
+	if owners[0] != "EGUARDIAN-ONE" || owners[1] != "EGUARDIAN-TWO" {
+		t.Errorf("owners are %v", owners)
+	}
+}
+
+// And such an identity can still change hands — a guardianship that ends is a
+// rotation like any other.
+func TestAJointlyOwnedIdentityCanStillRotate(t *testing.T) {
+	owners, err := ownersFromKEL([]map[string]interface{}{
+		{"t": "icp", "i": "ECHILD", "a": []interface{}{
+			map[string]interface{}{"i": "EGUARDIAN-ONE", "r": "owner"},
+			map[string]interface{}{"i": "EGUARDIAN-TWO", "r": "owner"},
+		}},
+		rotWithOwners("ETHEMSELVES"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(owners) != 1 || owners[0] != "ETHEMSELVES" {
+		t.Errorf("owners are %v — guardianship should have ended", owners)
+	}
+}

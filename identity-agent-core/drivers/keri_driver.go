@@ -55,7 +55,7 @@ type DriverInceptionRequest struct {
 	Isith string `json:"isith,omitempty"`
 	Nsith string `json:"nsith,omitempty"`
 	// Anchors are seals written into the event's own `a` field, and therefore
-	// into what the identifier is derived from. An organisation names its owner
+	// into what the identifier is derived from. An identity names its owner
 	// here: a self-addressing identifier is the digest of this event, so
 	// ownership cannot be added, removed or altered later without producing a
 	// different identity.
@@ -273,7 +273,7 @@ type DriverMultisigRequest struct {
 	CurrentKeys []string `json:"current_keys"`
 	// NextKeys are what the identity commits to rotating to. Without them the
 	// inception commits to no successor and the identity can never rotate —
-	// which for an organisation means a compromised signer can never be
+	// which for an owned identity means a compromised signer can never be
 	// replaced and ownership can never be transferred, since transferring is a
 	// rotation.
 	NextKeys  []string `json:"next_keys,omitempty"`
@@ -720,23 +720,23 @@ func (d *KeriDriver) CreateInception(publicKey, nextPublicKey string) (*DriverIn
 // CreateOwnedInception creates an identity that names its owner in the event
 // that creates it.
 //
-// This is how an organisation comes into being. An organisation has no mind, so
-// it cannot be its own owner; some person brought it into being and answers for
-// it. Putting that in the inception event rather than in a record beside the
-// database means it cannot be rewritten by whoever can write the file, and can
-// be read by anybody who can read the log.
+// This is how an identity that answers to somebody else comes into being. Some
+// party brought it into existence and answers for it, and that fact has to be
+// true in a way anyone can check. Putting it in the inception event rather than
+// in a record beside the database means it cannot be rewritten by whoever can
+// write the file, and can be read by anybody who can read the log.
 //
 // The owner is a per-relationship identifier rather than a delegator, on
 // purpose. A delegation cannot be transferred, only destroyed, so a delegated
-// organisation could never be sold without killing its identity and every
-// relationship it ever had. Anchored, ownership changes by rotation and the
-// organisation survives its owner.
+// identity could never be handed on without killing it and every relationship
+// it ever had. Anchored, ownership changes by rotation and the identity
+// outlives the arrangement it was created under.
 func (d *KeriDriver) CreateOwnedInception(publicKey, nextPublicKey, name, ownerAID string) (*DriverInceptionResponse, error) {
 	if ownerAID == "" {
-		// Refused rather than defaulted. An organisation with no owner answers
-		// to nobody, and the whole point of this path is that there is no such
+		// Refused rather than defaulted. An identity with no owner answers to
+		// nobody, and the whole point of this path is that there is no such
 		// moment to fall into.
-		return nil, fmt.Errorf("an organisation must name an owner in its inception event")
+		return nil, fmt.Errorf("an owned identity must name its owner in its inception event")
 	}
 	// No threshold is declared here, and that was worth checking rather than
 	// assuming.

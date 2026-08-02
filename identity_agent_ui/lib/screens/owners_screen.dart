@@ -12,9 +12,9 @@ import '../theme/app_theme.dart';
 /// gets their own code, scans it from their own device, and their agent sends
 /// back a public key — no key material ever crosses the screen or the wire.
 ///
-/// Nothing here is specific to one kind of identity. An organisation taking on
-/// a co-owner and a person spreading control of their own identity so recovery
-/// does not rest on a single key are the same operation.
+/// Nothing here is specific to one kind of identity. A guardianship passing to
+/// somebody else and a person spreading control of their own identity so
+/// recovery does not rest on a single key are the same operation.
 ///
 /// The screen's one job is to make the waiting legible. An ownership change
 /// takes as long as the slowest person's phone, and during that time it must be

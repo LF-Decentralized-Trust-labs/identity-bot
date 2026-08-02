@@ -149,8 +149,8 @@ func TestFoundingAnOrganisationWithoutAnOwnerIsRefused(t *testing.T) {
 	s.KeriDriver = nil // never reached: the owner check comes first
 
 	body, _ := json.Marshal(map[string]interface{}{
-		"found_as_organisation": true,
-		"adoption_code":         "irrelevant",
+		"found_as_root": true,
+		"adoption_code": "irrelevant",
 	})
 	r := httptest.NewRequest(http.MethodPost, "/api/pairing/adopt", bytes.NewReader(body))
 	w := httptest.NewRecorder()

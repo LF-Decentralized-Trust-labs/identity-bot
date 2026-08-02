@@ -303,9 +303,9 @@ def create_inception_event(
     # without producing a different identifier.
     #
     # That is the whole reason to put ownership here rather than in a record
-    # beside the database. A file saying who owns an organisation can be
-    # rewritten by anyone who can write the file, silently, and cannot be read
-    # by anybody who is not on that machine. This can be neither.
+    # beside the database. A file saying who owns an identity can be rewritten
+    # by anyone who can write the file, silently, and cannot be read by anybody
+    # who is not on that machine. This can be neither.
     # A signing threshold, for an identity controlled by more than one key.
     #
     # An identity may be controlled by more than one key, and at founding there
@@ -2028,7 +2028,7 @@ def generate_multisig_event():
             # Next-key digests, not an empty list.
             #
             # An inception with no ndigs commits to no successor keys, so the
-            # identity it creates can never be rotated. For an organisation's
+            # identity it creates can never be rotated. For a root
             # root that is not a limitation, it is a dead end: a signer whose
             # key is compromised could never be replaced, and transferring
             # ownership — which is a rotation, replacing one signer's key with
