@@ -10,6 +10,32 @@ ADR-014 established that the BIP39 mnemonic is stored via `SecureKeyStore` (`flu
 
 A review of the actual implementation found that `SecureKeyStore` configures no access-control policy at all — `loadMnemonic()` is a plain read that returns the mnemonic to any caller in the app process, gated only by the device being unlocked. There is no requirement that a live authentication event (biometric, passcode) occur at the moment of access. This means an automated or supply-chain-compromised code path within the app can read the mnemonic silently, with no user-visible event.
 
+> **Amended 2026-08-02 — a fact in this paragraph was wrong, and the decision stands anyway.**
+>
+> `keripy` 1.1.17 **does** support NIST P-256. It defines `ECDSA_256r1_Seed` (`Q`),
+> `ECDSA_256r1_Sig` (`0I`) and both verkey codes (`1AAI`, `1AAJ`), with working sign and verify
+> paths. The sentence below names only Ed25519 and secp256k1, which understated what the
+> library can do and made the constraint look like a hard protocol limit when it is not.
+>
+> Two things changed as a result, and neither reverses this ADR.
+>
+> First, the real constraint is narrower and lives elsewhere: of the implementations shipped
+> here, only the Python driver speaks P-256. The Rust CESR stack has no P-256 code point, so a
+> P-256 verkey fails to *parse* rather than to verify — a framing-layer error rather than a
+> clean rejection. P-256 *indexed* signature codes are also a `keripy` extension absent from the
+> published CESR specification, so a P-256 key in a multi-signature group would produce
+> signatures a conformant third party rejects.
+>
+> Second, and more decisive: ECDSA requires a fresh secret number per signature, and one that
+> repeats — or is merely biased — discloses the private key. That failure has occurred in
+> shipped secure hardware on this exact curve, and a biased nonce produces signatures that
+> verify perfectly, so nothing in the system would report it. EdDSA derives its nonce
+> deterministically and has none to leak.
+>
+> The choice to have hardware **wrap** the signing key rather than **hold** it therefore rests
+> on a stronger argument than the one originally given: not that the curve cannot be used, but
+> that using it would trade a failure mode we can reason about for one we could not detect.
+
 Separately, this was found to be a curve/hardware mismatch, not a configuration gap: the KERI signing key is Ed25519 (with `secp256k1` also supported by `keripy`'s derivation codes — see `keri/core/coring.py`'s `MtrDex`). None of the platform secure-key facilities available to this project (Apple Secure Enclave, Android StrongBox/TEE, Windows TPM 2.0 via CNG) can generate or hold either of those curves as a true non-extractable hardware-resident key — all three standardize on NIST P-256 (secp256r1) for hardware-backed key generation and signing. This is not a project oversight; it reflects Ed25519's own design goals (deterministic signing to eliminate the ECDSA weak-nonce key-recovery class of bugs, and avoidance of NIST-curve parameter-generation trust concerns) predating and diverging from what consumer secure-element vendors chose to implement in silicon. Switching the KERI root key itself to a hardware-native curve is tracked separately as a rejected-for-now alternative (see "Alternatives Considered").
 
 ## Decision
