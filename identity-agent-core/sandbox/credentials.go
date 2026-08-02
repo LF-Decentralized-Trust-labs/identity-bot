@@ -227,7 +227,42 @@ func (cv *CredentialVault) effectiveEntriesLocked() []CredentialEntry {
 	return out
 }
 
+// InjectCredentialsScoped is InjectCredentials narrowed to a set of services.
+//
+// The unscoped form answers "is there a credential for this destination", which
+// is only half the question. It cannot answer "may this caller use it", because
+// nothing about an HTTP request says who is asking. Callers that can establish
+// identity should use this form and pass what that caller was granted.
+//
+// An empty services list injects NOTHING. Treating empty as "no restriction"
+// would mean a caller receives every stored credential precisely when nobody
+// remembered to restrict it — the wrong default for the component whose entire
+// job is holding secrets.
+func (cv *CredentialVault) InjectCredentialsScoped(req *http.Request, services []string) bool {
+	if len(services) == 0 {
+		return false
+	}
+	allowed := make(map[string]bool, len(services))
+	for _, s := range services {
+		allowed[strings.ToLower(strings.TrimSpace(s))] = true
+	}
+	return cv.injectMatching(req, func(entry CredentialEntry) bool {
+		return allowed[strings.ToLower(entry.Service)]
+	})
+}
+
+// InjectCredentials matches on destination host alone. Prefer the scoped form
+// wherever the caller's identity can be established: host matching answers "is
+// this credential for that destination" and cannot answer "should this caller be
+// reaching it with this credential".
 func (cv *CredentialVault) InjectCredentials(req *http.Request) bool {
+	return cv.injectMatching(req, func(CredentialEntry) bool { return true })
+}
+
+// injectMatching is the one place a stored credential is written onto a request.
+// eligible narrows which entries may be considered at all; host matching then
+// decides which of those applies.
+func (cv *CredentialVault) injectMatching(req *http.Request, eligible func(CredentialEntry) bool) bool {
 	cv.mu.Lock()
 	defer cv.mu.Unlock()
 	cv.ensureLoadedLocked()
@@ -242,6 +277,9 @@ func (cv *CredentialVault) InjectCredentials(req *http.Request) bool {
 
 	entries := cv.effectiveEntriesLocked()
 	for _, entry := range entries {
+		if !eligible(entry) {
+			continue
+		}
 		for _, pattern := range entry.MatchDomains {
 			if MatchDomain(pattern, domain) {
 				injectedHeaders := make([]string, 0, len(entry.Headers))
@@ -261,13 +299,6 @@ func (cv *CredentialVault) InjectCredentials(req *http.Request) bool {
 			}
 		}
 	}
-
-	if cv.tracer != nil && cv.tracer.IsEnabled() {
-		cv.tracer.Emit("credentials", "no_match", "egress", "", "",
-			fmt.Sprintf("No credentials matched for %s", domain),
-			map[string]interface{}{"domain": domain, "services_checked": len(entries)})
-	}
-
 	return false
 }
 
