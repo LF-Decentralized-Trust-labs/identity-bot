@@ -195,7 +195,7 @@ func (s *CoreServer) handleRedeemSignerInvite(w http.ResponseWriter, r *http.Req
 		if complete {
 			// The last acceptance is what applies it. Nobody has to remember to
 			// come back and press a button, and there is no window in which
-			// every owner has agreed and the organisation has not changed.
+			// every owner has agreed and nothing has changed.
 			s.completeCeremonyIfReady(ceremony)
 		}
 		scanWriteJSON(w, map[string]interface{}{
