@@ -1,8 +1,10 @@
 package sandbox
 
 import (
+	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -180,5 +182,78 @@ func TestATokenAloneGrantsNothing(t *testing.T) {
 	pm.applyCredentialsFor(out, "app", "inst-1", route, how)
 	if out.Header.Get("Authorization") != "" || calls != 0 {
 		t.Fatal("a token with no grant must yield no credential")
+	}
+}
+
+func TestAcceptsTheHeaderCurlAndGitActuallySend(t *testing.T) {
+	// Captured from a real curl run against a listening socket, with the proxy
+	// URL http://mytoken:@127.0.0.1:PORT — which is exactly how a workspace is
+	// pointed at the gateway:
+	//
+	//	Proxy-Authorization: Basic bXl0b2tlbjo=      ("mytoken:")
+	//
+	// Not Bearer. An earlier version accepted Bearer only, so the callers this
+	// transport exists for could not authenticate — and the failure was silent,
+	// because an unidentified caller simply gets no credential.
+	const captured = "Basic bXl0b2tlbjo="
+
+	pm := provenProxy(injector("api.example.com", "Authorization", "Bearer secret", nil),
+		ProxyRoute{InstanceID: "inst-1", ProxyToken: "mytoken",
+			CallerAID: "EAgent", CredentialServices: []string{"svc"}})
+
+	r := httptest.NewRequest(http.MethodGet, "https://api.example.com/x", nil)
+	r.Header.Set("Proxy-Authorization", captured)
+	route, how := pm.identifyCaller(r)
+	if how != callerProven || route == nil {
+		t.Fatalf("the header curl actually sends must authenticate; got %v", how)
+	}
+
+	out := httptest.NewRequest(http.MethodGet, "https://api.example.com/x", nil)
+	pm.applyCredentialsFor(out, "app", "inst-1", route, how)
+	if out.Header.Get("Authorization") == "" {
+		t.Fatal("a proven, granted caller should have received its credential")
+	}
+}
+
+func TestTheTokenMayBeInEitherHalfOfABasicPair(t *testing.T) {
+	// Which half carries the token depends on how the proxy URL was written: a
+	// token as username leaves the password empty, and some tooling insists on a
+	// non-empty username. Both are compared in constant time, so accepting either
+	// costs nothing and removes a configuration foot-gun.
+	pm := provenProxy(nil, ProxyRoute{InstanceID: "i", ProxyToken: "tok"})
+	for _, pair := range []string{"tok:", "x:tok", "tok:ignored"} {
+		enc := base64.StdEncoding.EncodeToString([]byte(pair))
+		r := httptest.NewRequest(http.MethodGet, "https://x/", nil)
+		r.Header.Set("Proxy-Authorization", "Basic "+enc)
+		if _, how := pm.identifyCaller(r); how != callerProven {
+			t.Errorf("%q should authenticate, got %v", pair, how)
+		}
+	}
+}
+
+func TestMalformedProxyAuthIsRefusedNotGuessedAt(t *testing.T) {
+	pm := provenProxy(nil, ProxyRoute{InstanceID: "i", ProxyToken: "tok", TargetHost: "10.0.0.5"})
+	for _, h := range []string{
+		"Basic !!!not-base64!!!",
+		"Basic " + base64.StdEncoding.EncodeToString([]byte("wrong:")),
+		"Bearer wrong",
+		"Negotiate something",
+	} {
+		r := httptest.NewRequest(http.MethodGet, "https://x/", nil)
+		r.RemoteAddr = "10.0.0.5:1234" // would otherwise match by address
+		r.Header.Set("Proxy-Authorization", h)
+		route, how := pm.identifyCaller(r)
+		if how == callerProven {
+			t.Errorf("%q must not authenticate", h)
+		}
+		// A malformed or unknown scheme carries no claim at all, so falling back
+		// to address matching is right. A well-formed but WRONG token is a failed
+		// claim, and must not be quietly re-identified as somebody else.
+		if strings.HasPrefix(h, "Basic "+base64.StdEncoding.EncodeToString([]byte("wrong:"))) ||
+			h == "Bearer wrong" {
+			if route != nil {
+				t.Errorf("%q presented a claim and failed it; must not fall back", h)
+			}
+		}
 	}
 }
