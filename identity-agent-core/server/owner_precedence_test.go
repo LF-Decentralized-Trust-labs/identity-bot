@@ -26,7 +26,7 @@ import (
 func TestTheAnchoredOwnerBeatsASealedFile(t *testing.T) {
 	s := serverWithIdentity(t, "EORG")
 
-	// An organisation whose inception names its real owner.
+	// An identity whose inception names its real owner.
 	keri := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"aid": "EORG",
