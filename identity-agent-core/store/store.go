@@ -1,34 +1,53 @@
 package store
 
 import (
-        "encoding/json"
-        "fmt"
-        "log"
-        "os"
-        "path/filepath"
-        "sync"
-        "time"
+	"encoding/json"
+	"fmt"
+	"log"
+	"os"
+	"path/filepath"
+	"sync"
+	"time"
 )
 
 type EventRecord struct {
-        AID            string `json:"aid"`
-        SequenceNumber int    `json:"sequence_number"`
-        EventType      string `json:"event_type"`
-        EventJSON      string `json:"event_json"`
-        PublicKey      string `json:"public_key"`
-        NextKeyDigest  string `json:"next_key_digest"`
-        Timestamp      string `json:"timestamp"`
-        // CesrSignature: CESR '0B...' (88-char) signature over the event body.
-        // Produced by Dart local signing + /api/cesr/encode. Empty for legacy records.
-        CesrSignature  string `json:"cesr_signature,omitempty"`
+	AID            string `json:"aid"`
+	SequenceNumber int    `json:"sequence_number"`
+	EventType      string `json:"event_type"`
+	EventJSON      string `json:"event_json"`
+	PublicKey      string `json:"public_key"`
+	NextKeyDigest  string `json:"next_key_digest"`
+	Timestamp      string `json:"timestamp"`
+	// CesrSignature: CESR '0B...' (88-char) signature over the event body.
+	// Produced by Dart local signing + /api/cesr/encode. Empty for legacy records.
+	CesrSignature string `json:"cesr_signature,omitempty"`
 }
 
 type IdentityState struct {
-        AID           string `json:"aid"`
-        PublicKey     string `json:"public_key"`
-        NextKeyDigest string `json:"next_key_digest"`
-        Created       string `json:"created"`
-        EventCount    int    `json:"event_count"`
+	AID           string `json:"aid"`
+	PublicKey     string `json:"public_key"`
+	NextKeyDigest string `json:"next_key_digest"`
+	Created       string `json:"created"`
+	EventCount    int    `json:"event_count"`
+	// DerivationIndex and KeyGeneration are how this identity's keys are
+	// found again.
+	//
+	// Without them an identity created from a derived seed cannot ROTATE.
+	// A rotation must carry the key the previous event committed to, and
+	// that key is derived from the root seed at a particular index — so an
+	// agent that recorded the resulting AID and forgot where the key came
+	// from has an identity it can never change the keys of.
+	//
+	// DerivationIndex is the branch; KeyGeneration is how far along it the
+	// identity currently is. Inception is generation 0, meaning the current
+	// key is at key-index 0 and the committed successor at 1. Each rotation
+	// advances both by one.
+	//
+	// Zero on an identity whose keys were not derived this way — one created
+	// from a key the controller minted elsewhere — which is why the two are
+	// read together with the seed rather than trusted alone.
+	DerivationIndex int `json:"derivation_index,omitempty"`
+	KeyGeneration   int `json:"key_generation,omitempty"`
 }
 
 // ContactRecord stores a resolved contact in the Identity Agent.
@@ -36,113 +55,114 @@ type IdentityState struct {
 // Two-axis contact model:
 //   - ContactSource (provenance): "keri" | "imported" | "manual"
 //   - ContactCategory (user-facing label): "transactional" | "general" | "trusted" | "professional"
+//
 // Relationship AIDs are standalone icp (never dip for ordinary relationships).
 // The Root AID never appears in OOBI/QR/bundle/DIDComm for relationships; a per-contact
 // RelationshipAID (our local standalone P-AID) is used for outbound identity with this contact.
 // A private salted-hash binding (at issuer) anchors the contact's Root to its relationship P-AID.
 type ContactRecord struct {
-        AID             string `json:"aid"`
-        Alias           string `json:"alias"`
-        PublicKey       string `json:"public_key"`
-        OobiURL         string `json:"oobi_url"`
-        Verified        bool   `json:"verified"`
-        DiscoveredAt    string `json:"discovered_at"`
-        Status          string `json:"status"`
-        ContactSource   string `json:"contact_source"`   // keri | imported | manual
-        ContactCategory string `json:"contact_category"` // transactional | general | trusted | professional
-        RelationshipAID     string `json:"relationship_aid,omitempty"`     // our per-contact standalone icp P-AID for this contact (Root never disclosed for relationships) -- the handle/reference
-        RelationshipIndex   int    `json:"relationship_index,omitempty"`   // stable monotonic HD index for BIP32/SLIP-0010 derivation from root seed (allocated via never-reused counter, survives deletes)
-        RelationshipSeedB64 string `json:"relationship_seed_b64,omitempty"` // deprecated for secrets; kept for schema compat only. Private seeds live in secureenclave storage (AID is the key). Never write raw seeds here.
-        IsWitness           bool   `json:"is_witness"`     // KERI witness role — auto-managed
-        JCard               *JCard `json:"jcard,omitempty"`
-        Photo               string `json:"photo,omitempty"`
+	AID                 string `json:"aid"`
+	Alias               string `json:"alias"`
+	PublicKey           string `json:"public_key"`
+	OobiURL             string `json:"oobi_url"`
+	Verified            bool   `json:"verified"`
+	DiscoveredAt        string `json:"discovered_at"`
+	Status              string `json:"status"`
+	ContactSource       string `json:"contact_source"`                  // keri | imported | manual
+	ContactCategory     string `json:"contact_category"`                // transactional | general | trusted | professional
+	RelationshipAID     string `json:"relationship_aid,omitempty"`      // our per-contact standalone icp P-AID for this contact (Root never disclosed for relationships) -- the handle/reference
+	RelationshipIndex   int    `json:"relationship_index,omitempty"`    // stable monotonic HD index for BIP32/SLIP-0010 derivation from root seed (allocated via never-reused counter, survives deletes)
+	RelationshipSeedB64 string `json:"relationship_seed_b64,omitempty"` // deprecated for secrets; kept for schema compat only. Private seeds live in secureenclave storage (AID is the key). Never write raw seeds here.
+	IsWitness           bool   `json:"is_witness"`                      // KERI witness role — auto-managed
+	JCard               *JCard `json:"jcard,omitempty"`
+	Photo               string `json:"photo,omitempty"`
 }
 
 // TaskRecord represents an automated background task tracked by the Identity Agent.
 // Tasks are always automated — they show system operation status, not user actions.
 // Status: "pending" | "in_progress" | "completed" | "failed"
 type TaskRecord struct {
-        ID         string `json:"id"`
-        Type       string `json:"type"`        // e.g. "witness_request_sent", "kel_sync"
-        Status     string `json:"status"`
-        ContactAID string `json:"contact_aid"` // related contact AID, if applicable
-        Progress   int    `json:"progress"`    // 0–100
-        Detail     string `json:"detail"`      // human-readable status message
-        CreatedAt  string `json:"created_at"`
-        UpdatedAt  string `json:"updated_at"`
+	ID         string `json:"id"`
+	Type       string `json:"type"` // e.g. "witness_request_sent", "kel_sync"
+	Status     string `json:"status"`
+	ContactAID string `json:"contact_aid"` // related contact AID, if applicable
+	Progress   int    `json:"progress"`    // 0–100
+	Detail     string `json:"detail"`      // human-readable status message
+	CreatedAt  string `json:"created_at"`
+	UpdatedAt  string `json:"updated_at"`
 }
 
 type JCard struct {
-        FullName     string `json:"fn"`
-        FamilyName   string `json:"family_name,omitempty"`
-        GivenName    string `json:"given_name,omitempty"`
-        Org          string `json:"org,omitempty"`
-        Title        string `json:"title,omitempty"`
-        Email        string `json:"email,omitempty"`
-        Tel          string `json:"tel,omitempty"`
-        Note         string `json:"note,omitempty"`
-        UID          string `json:"uid,omitempty"`
-        XKeriAID     string `json:"x-keri-aid"`
-        XKeriOOBI    string `json:"x-keri-oobi,omitempty"`
-        XKeriRole    string `json:"x-keri-role"`
+	FullName   string `json:"fn"`
+	FamilyName string `json:"family_name,omitempty"`
+	GivenName  string `json:"given_name,omitempty"`
+	Org        string `json:"org,omitempty"`
+	Title      string `json:"title,omitempty"`
+	Email      string `json:"email,omitempty"`
+	Tel        string `json:"tel,omitempty"`
+	Note       string `json:"note,omitempty"`
+	UID        string `json:"uid,omitempty"`
+	XKeriAID   string `json:"x-keri-aid"`
+	XKeriOOBI  string `json:"x-keri-oobi,omitempty"`
+	XKeriRole  string `json:"x-keri-role"`
 }
 
 type SettingsData struct {
-        TunnelProvider        string `json:"tunnel_provider"`
-        NgrokAuthToken        string `json:"ngrok_auth_token,omitempty"`
-        CloudflareTunnelToken string `json:"cloudflare_tunnel_token,omitempty"`
-        TunnelDomain          string `json:"tunnel_domain,omitempty"`
-        TunnelExtension       string `json:"tunnel_extension,omitempty"`
+	TunnelProvider        string `json:"tunnel_provider"`
+	NgrokAuthToken        string `json:"ngrok_auth_token,omitempty"`
+	CloudflareTunnelToken string `json:"cloudflare_tunnel_token,omitempty"`
+	TunnelDomain          string `json:"tunnel_domain,omitempty"`
+	TunnelExtension       string `json:"tunnel_extension,omitempty"`
 }
 
 type PendingRequest struct {
-        AID         string `json:"aid"`
-        Alias       string `json:"alias"`
-        PublicKey   string `json:"public_key"`
-        OobiURL     string `json:"oobi_url"`
-        ReceivedAt  string `json:"received_at"`
-        ExpiresAt   string `json:"expires_at"`
-        ErrorReason string `json:"error_reason,omitempty"`
-        JCard       *JCard `json:"jcard,omitempty"`
+	AID         string `json:"aid"`
+	Alias       string `json:"alias"`
+	PublicKey   string `json:"public_key"`
+	OobiURL     string `json:"oobi_url"`
+	ReceivedAt  string `json:"received_at"`
+	ExpiresAt   string `json:"expires_at"`
+	ErrorReason string `json:"error_reason,omitempty"`
+	JCard       *JCard `json:"jcard,omitempty"`
 }
 
 type ProfileData struct {
-        FullName   string `json:"fn"`
-        FamilyName string `json:"family_name,omitempty"`
-        GivenName  string `json:"given_name,omitempty"`
-        Org        string `json:"org,omitempty"`
-        Title      string `json:"title,omitempty"`
-        Email      string `json:"email,omitempty"`
-        Tel        string `json:"tel,omitempty"`
-        Note       string `json:"note,omitempty"`
-        Photo      string `json:"photo,omitempty"`
-        UID        string `json:"uid,omitempty"`
+	FullName   string `json:"fn"`
+	FamilyName string `json:"family_name,omitempty"`
+	GivenName  string `json:"given_name,omitempty"`
+	Org        string `json:"org,omitempty"`
+	Title      string `json:"title,omitempty"`
+	Email      string `json:"email,omitempty"`
+	Tel        string `json:"tel,omitempty"`
+	Note       string `json:"note,omitempty"`
+	Photo      string `json:"photo,omitempty"`
+	UID        string `json:"uid,omitempty"`
 
-        // Organization-specific fields (entity_type = "organization").
-        // Identity Agent Protocol-level per ADR-020. Jurisdiction is free-text for now (formal spec TBD).
-        EntityType   string `json:"entity_type,omitempty"`   // "individual" | "organization"
-        OrgName      string `json:"org_name,omitempty"`
-        OrgType      string `json:"org_type,omitempty"`      // e.g. "school", "business", "healthcare"
-        Jurisdiction string `json:"jurisdiction,omitempty"`  // free-text for now
+	// Organization-specific fields (entity_type = "organization").
+	// Identity Agent Protocol-level per ADR-020. Jurisdiction is free-text for now (formal spec TBD).
+	EntityType   string `json:"entity_type,omitempty"` // "individual" | "organization"
+	OrgName      string `json:"org_name,omitempty"`
+	OrgType      string `json:"org_type,omitempty"`     // e.g. "school", "business", "healthcare"
+	Jurisdiction string `json:"jurisdiction,omitempty"` // free-text for now
 }
 
 func (p *ProfileData) ToJCard(aid string, oobiURL string) *JCard {
-        if p == nil {
-                return nil
-        }
-        return &JCard{
-                FullName:   p.FullName,
-                FamilyName: p.FamilyName,
-                GivenName:  p.GivenName,
-                Org:        p.Org,
-                Title:      p.Title,
-                Email:      p.Email,
-                Tel:        p.Tel,
-                Note:       p.Note,
-                UID:        p.UID,
-                XKeriAID:   aid,
-                XKeriOOBI:  oobiURL,
-        }
+	if p == nil {
+		return nil
+	}
+	return &JCard{
+		FullName:   p.FullName,
+		FamilyName: p.FamilyName,
+		GivenName:  p.GivenName,
+		Org:        p.Org,
+		Title:      p.Title,
+		Email:      p.Email,
+		Tel:        p.Tel,
+		Note:       p.Note,
+		UID:        p.UID,
+		XKeriAID:   aid,
+		XKeriOOBI:  oobiURL,
+	}
 }
 
 // CredentialRecord stores a credential held or issued by this agent.
@@ -150,21 +170,21 @@ func (p *ProfileData) ToJCard(aid string, oobiURL string) *JCard {
 // For non-ACDC formats, raw_json holds the original bytes and acdc_json holds the thin ACDC wrapper
 // anchored to the holder's KEL via an IXN event.
 type CredentialRecord struct {
-	SAID          string `json:"said"`
-	IssuerAID     string `json:"issuer_aid"`
-	HolderAID     string `json:"holder_aid"`
-	SchemaSAID    string `json:"schema_said"`
-	AcdcJson      string `json:"acdc_json"`
-	IxnSAID       string `json:"ixn_said"`
-	CesrSignature string `json:"cesr_signature,omitempty"`
-	IssuedAt      string `json:"issued_at"`
-	Status        string `json:"status"`
-	Format        string `json:"format"`
+	SAID           string `json:"said"`
+	IssuerAID      string `json:"issuer_aid"`
+	HolderAID      string `json:"holder_aid"`
+	SchemaSAID     string `json:"schema_said"`
+	AcdcJson       string `json:"acdc_json"`
+	IxnSAID        string `json:"ixn_said"`
+	CesrSignature  string `json:"cesr_signature,omitempty"`
+	IssuedAt       string `json:"issued_at"`
+	Status         string `json:"status"`
+	Format         string `json:"format"`
 	CredentialType string `json:"credential_type"`
-	IssuerName    string `json:"issuer_name"`
-	IssuerLogoURL string `json:"issuer_logo_url"`
-	ExpiryDate    string `json:"expiry_date"`
-	RawJson       string `json:"raw_json,omitempty"`
+	IssuerName     string `json:"issuer_name"`
+	IssuerLogoURL  string `json:"issuer_logo_url"`
+	ExpiryDate     string `json:"expiry_date"`
+	RawJson        string `json:"raw_json,omitempty"`
 	// RegistrySAID + IssSAID link a credential to its TEL registry and issuance
 	// event, enabling cryptographic revocation (a `rev` event referencing IssSAID).
 	// Empty for legacy (non-registry) credentials.
@@ -210,23 +230,23 @@ type PresentationRecord struct {
 // whose stored address has stopped working has somewhere stable to ask, instead
 // of being stranded by an infrastructure change neither party made.
 type EndpointRecord struct {
-        SAID string `json:"said"`
-        // CID is the controller the statement is about.
-        CID string `json:"cid"`
-        // EID is the endpoint provider. Often the controller itself.
-        EID  string `json:"eid,omitempty"`
-        Role string `json:"role,omitempty"`
-        // Scheme and URL are set on /loc/scheme records. An empty URL is
-        // meaningful: it nullifies the location, which is how an identity says
-        // "not here any more" rather than leaving a dead address published.
-        Scheme string `json:"scheme,omitempty"`
-        URL    string `json:"url,omitempty"`
-        // Route is /end/role/add, /end/role/cut or /loc/scheme.
-        Route      string                 `json:"route"`
-        Record     map[string]interface{} `json:"record"`
-        Signature  string                 `json:"signature,omitempty"`
-        Stamp      string                 `json:"stamp,omitempty"`
-        ReceivedAt string                 `json:"received_at,omitempty"`
+	SAID string `json:"said"`
+	// CID is the controller the statement is about.
+	CID string `json:"cid"`
+	// EID is the endpoint provider. Often the controller itself.
+	EID  string `json:"eid,omitempty"`
+	Role string `json:"role,omitempty"`
+	// Scheme and URL are set on /loc/scheme records. An empty URL is
+	// meaningful: it nullifies the location, which is how an identity says
+	// "not here any more" rather than leaving a dead address published.
+	Scheme string `json:"scheme,omitempty"`
+	URL    string `json:"url,omitempty"`
+	// Route is /end/role/add, /end/role/cut or /loc/scheme.
+	Route      string                 `json:"route"`
+	Record     map[string]interface{} `json:"record"`
+	Signature  string                 `json:"signature,omitempty"`
+	Stamp      string                 `json:"stamp,omitempty"`
+	ReceivedAt string                 `json:"received_at,omitempty"`
 }
 
 // SigningRequest is something only the device holding the keys can sign,
@@ -237,26 +257,26 @@ type EndpointRecord struct {
 // enough plain language for a person to know what they are agreeing to; never
 // anything that would let this agent produce the signature on its own.
 type SigningRequest struct {
-        ID   string `json:"id"`
-        AID  string `json:"aid"`
-        // Kind tells whoever queued the request what to do with the signature
-        // once it arrives, so this queue does not have to know.
-        Kind string `json:"kind"`
-        // Summary is the one line a person sees. Detail explains why their
-        // phone has to do this rather than their computer.
-        Summary string `json:"summary"`
-        Detail  string `json:"detail,omitempty"`
-        // PayloadB64 is exactly what gets signed. Stored rather than
-        // reconstructed, so what was shown and what was signed cannot drift.
-        PayloadB64 string `json:"payload_b64"`
-        // Presentation is how this reaches the person: consent, notify or
-        // automatic. See the constants in the server package.
-        Presentation string `json:"presentation"`
-        Status          string `json:"status"`
-        Signature       string `json:"signature,omitempty"`
-        CreatedAt       string `json:"created_at"`
-        ResolvedAt      string `json:"resolved_at,omitempty"`
-        ExpiresAt       string `json:"expires_at,omitempty"`
+	ID  string `json:"id"`
+	AID string `json:"aid"`
+	// Kind tells whoever queued the request what to do with the signature
+	// once it arrives, so this queue does not have to know.
+	Kind string `json:"kind"`
+	// Summary is the one line a person sees. Detail explains why their
+	// phone has to do this rather than their computer.
+	Summary string `json:"summary"`
+	Detail  string `json:"detail,omitempty"`
+	// PayloadB64 is exactly what gets signed. Stored rather than
+	// reconstructed, so what was shown and what was signed cannot drift.
+	PayloadB64 string `json:"payload_b64"`
+	// Presentation is how this reaches the person: consent, notify or
+	// automatic. See the constants in the server package.
+	Presentation string `json:"presentation"`
+	Status       string `json:"status"`
+	Signature    string `json:"signature,omitempty"`
+	CreatedAt    string `json:"created_at"`
+	ResolvedAt   string `json:"resolved_at,omitempty"`
+	ExpiresAt    string `json:"expires_at,omitempty"`
 }
 
 // Notification is something another agent told this one.
@@ -312,15 +332,15 @@ const (
 )
 
 type ContactKELRecord struct {
-        AID              string                   `json:"aid"`
-        // KEL events as received from the contact's OOBI endpoint.
-        KEL              []map[string]interface{} `json:"kel"`
-        KelVerified      bool                     `json:"kel_verified"`
-        // CurrentPublicKey: the CESR Ed25519 key active after the last validated event.
-        CurrentPublicKey string                   `json:"current_public_key"`
-        EventsValidated  int                      `json:"events_validated"`
-        ValidationErrors []string                 `json:"validation_errors,omitempty"`
-        ValidatedAt      string                   `json:"validated_at"`
+	AID string `json:"aid"`
+	// KEL events as received from the contact's OOBI endpoint.
+	KEL         []map[string]interface{} `json:"kel"`
+	KelVerified bool                     `json:"kel_verified"`
+	// CurrentPublicKey: the CESR Ed25519 key active after the last validated event.
+	CurrentPublicKey string   `json:"current_public_key"`
+	EventsValidated  int      `json:"events_validated"`
+	ValidationErrors []string `json:"validation_errors,omitempty"`
+	ValidatedAt      string   `json:"validated_at"`
 }
 
 // ShareAction defines a user-facing engagement action shown in the Share menu.
@@ -331,7 +351,7 @@ type ShareAction struct {
 	ActionKey string `json:"action_key"` // used as ?action= param in OOBI URLs
 	Name      string `json:"name"`
 	Subtitle  string `json:"subtitle"`
-	Icon      string `json:"icon"`       // Material Icons name string
+	Icon      string `json:"icon"` // Material Icons name string
 	IsEnabled bool   `json:"is_enabled"`
 	SortOrder int    `json:"sort_order"`
 	UpdatedAt string `json:"updated_at"`
@@ -348,750 +368,750 @@ type WitnessReceiptRecord struct {
 
 // KerlEntry is a Key Event Receipt Log entry: one event plus all its receipts.
 type KerlEntry struct {
-	EventSAID     string                `json:"event_said"`
-	Receipts      []WitnessReceiptRecord `json:"receipts"`
-	ReceiptCount  int                   `json:"receipt_count"`
-	ThresholdMet  bool                  `json:"threshold_met"`
+	EventSAID    string                 `json:"event_said"`
+	Receipts     []WitnessReceiptRecord `json:"receipts"`
+	ReceiptCount int                    `json:"receipt_count"`
+	ThresholdMet bool                   `json:"threshold_met"`
 }
 
 // ── Guardianship ────────────────────────────────────────────────────────────
 
 type GuardianshipRecord struct {
-        ID                  string             `json:"id"`
-        Type                string             `json:"type"`                // minor_child|elderly|disability|temporary
-        GuardianAID         string             `json:"guardian_aid"`
-        DependentAID        string             `json:"dependent_aid"`
-        DependentName       string             `json:"dependent_name"`
-        DelegatedAIDPrefix  string             `json:"delegated_aid_prefix"`
-        Status              string             `json:"status"`              // active|expired|revoked|emancipated
-        HostingType         string             `json:"hosting_type"`        // cloud|device
-        HostingURL          string             `json:"hosting_url"`
-        CreatedAt           string             `json:"created_at"`
-        UpdatedAt           string             `json:"updated_at"`
-        EmancipationTrigger *EmancipationTrigger `json:"emancipation_trigger,omitempty"`
-        CoGuardians         []string           `json:"co_guardians"`
-        MultisigThreshold   int                `json:"multisig_threshold"`
-        Metadata            map[string]string  `json:"metadata"`
-        CredentialSAID      string             `json:"credential_said"` // SAID of the guardianship ACDC proving this relationship
+	ID                  string               `json:"id"`
+	Type                string               `json:"type"` // minor_child|elderly|disability|temporary
+	GuardianAID         string               `json:"guardian_aid"`
+	DependentAID        string               `json:"dependent_aid"`
+	DependentName       string               `json:"dependent_name"`
+	DelegatedAIDPrefix  string               `json:"delegated_aid_prefix"`
+	Status              string               `json:"status"`       // active|expired|revoked|emancipated
+	HostingType         string               `json:"hosting_type"` // cloud|device
+	HostingURL          string               `json:"hosting_url"`
+	CreatedAt           string               `json:"created_at"`
+	UpdatedAt           string               `json:"updated_at"`
+	EmancipationTrigger *EmancipationTrigger `json:"emancipation_trigger,omitempty"`
+	CoGuardians         []string             `json:"co_guardians"`
+	MultisigThreshold   int                  `json:"multisig_threshold"`
+	Metadata            map[string]string    `json:"metadata"`
+	CredentialSAID      string               `json:"credential_said"` // SAID of the guardianship ACDC proving this relationship
 }
 
 type EmancipationTrigger struct {
-        Type  string `json:"type"`  // age|date|manual
-        Value string `json:"value"` // date string or empty for manual
+	Type  string `json:"type"`  // age|date|manual
+	Value string `json:"value"` // date string or empty for manual
 }
 
 // ── Service Providers ───────────────────────────────────────────────────────
 
 type ServiceProviderRecord struct {
-        ID              string            `json:"id"`
-        ProviderName    string            `json:"provider_name"`
-        ProviderAID     string            `json:"provider_aid"`
-        Category        string            `json:"category"`         // infrastructure|witness|cloud_hsm|tunneling
-        DisplayName     string            `json:"display_name"`
-        EndpointURL     string            `json:"endpoint_url"`
-        Status          string            `json:"status"`           // available|connected|disconnected|error
-        Health          string            `json:"health"`           // healthy|degraded|unreachable|unknown
-        HealthCheckedAt string            `json:"health_checked_at"`
-        CompanyHQ       string            `json:"company_hq"`
-        ServerRegion    string            `json:"server_region"`
-        IdentityLevel   int               `json:"identity_level"`
-        GrapeScore      int               `json:"grape_score"`
-        Capabilities    []string          `json:"capabilities"`
-        TermsURL        string            `json:"terms_url"`
-        TermsAcceptedAt string            `json:"terms_accepted_at"`
-        TermsVersion    string            `json:"terms_version"`
-        ConnectedAt     string            `json:"connected_at"`
-        Configuration   map[string]string `json:"configuration"`
-        IsDefault       bool              `json:"is_default"`
-        Source          string            `json:"source"`           // builtin|directory|manual
-        CreatedAt       string            `json:"created_at"`
-        UpdatedAt       string            `json:"updated_at"`
+	ID              string            `json:"id"`
+	ProviderName    string            `json:"provider_name"`
+	ProviderAID     string            `json:"provider_aid"`
+	Category        string            `json:"category"` // infrastructure|witness|cloud_hsm|tunneling
+	DisplayName     string            `json:"display_name"`
+	EndpointURL     string            `json:"endpoint_url"`
+	Status          string            `json:"status"` // available|connected|disconnected|error
+	Health          string            `json:"health"` // healthy|degraded|unreachable|unknown
+	HealthCheckedAt string            `json:"health_checked_at"`
+	CompanyHQ       string            `json:"company_hq"`
+	ServerRegion    string            `json:"server_region"`
+	IdentityLevel   int               `json:"identity_level"`
+	GrapeScore      int               `json:"grape_score"`
+	Capabilities    []string          `json:"capabilities"`
+	TermsURL        string            `json:"terms_url"`
+	TermsAcceptedAt string            `json:"terms_accepted_at"`
+	TermsVersion    string            `json:"terms_version"`
+	ConnectedAt     string            `json:"connected_at"`
+	Configuration   map[string]string `json:"configuration"`
+	IsDefault       bool              `json:"is_default"`
+	Source          string            `json:"source"` // builtin|directory|manual
+	CreatedAt       string            `json:"created_at"`
+	UpdatedAt       string            `json:"updated_at"`
 }
 
 type Store interface {
-        SaveEvent(record EventRecord) error
-        GetEvents(aid string) ([]EventRecord, error)
-        GetIdentity() (*IdentityState, error)
-        SaveIdentity(state IdentityState) error
-        SaveContact(contact ContactRecord) error
-        GetContacts() ([]ContactRecord, error)
-        GetContact(aid string) (*ContactRecord, error)
-        DeleteContact(aid string) error
-        GetContactsByStatus(status string) ([]ContactRecord, error)
-        SaveContactKEL(record ContactKELRecord) error
-        SaveEndpointRecord(record EndpointRecord) error
-        SaveSigningRequest(req SigningRequest) error
-        GetSigningRequest(id string) (*SigningRequest, error)
-        GetPendingSigningRequests() ([]SigningRequest, error)
-        SaveNotification(n Notification) error
-        GetNotification(id string) (*Notification, error)
-        // GetNotifications returns the newest first. An empty status means every
-        // status, so a client can show a history rather than only what is waiting.
-        GetNotifications(status string, limit int) ([]Notification, error)
-        SetNotificationStatus(id, status string) error
-        GetEndpointRecords(cid string) ([]EndpointRecord, error)
-        // AllocateNextRelationshipIndex returns a strictly increasing, never-reused index
-        // for the given namespace ("contacts" or "login"). It is a persisted high-water mark
-        // that survives row deletions (unlike MAX over live rows).
-        AllocateNextRelationshipIndex(namespace string) (int, error)
-        GetContactKEL(aid string) (*ContactKELRecord, error)
-        SaveCredential(record CredentialRecord) error
-        GetCredential(said string) (*CredentialRecord, error)
-        GetCredentials() ([]CredentialRecord, error)
-        GetCredentialsFiltered(role, status string) ([]CredentialRecord, error)
-        UpdateCredentialStatus(said, status string) error
-        DeleteCredential(said string) error
-        SaveRegistry(r CredentialRegistry) error
-        GetRegistryByIssuer(issuerAID string) (*CredentialRegistry, error)
-        SaveCredentialSchema(record CredentialSchemaRecord) error
-        GetCredentialSchemas() ([]CredentialSchemaRecord, error)
-        GetCredentialSchema(said string) (*CredentialSchemaRecord, error)
-        SavePresentation(record PresentationRecord) error
-        GetPresentation(said string) (*PresentationRecord, error)
-        GetPresentations() ([]PresentationRecord, error)
-        SaveWitnessReceipt(record WitnessReceiptRecord) error
-        GetWitnessReceipts(eventSAID string) ([]WitnessReceiptRecord, error)
-        GetSettings() (*SettingsData, error)
-        SaveSettings(settings SettingsData) error
-        SavePendingRequest(req PendingRequest) error
-        GetPendingRequests() ([]PendingRequest, error)
-        DeletePendingRequest(aid string) error
-        GetProfile() (*ProfileData, error)
-        SaveProfile(profile ProfileData) error
-        SaveTask(task TaskRecord) error
-        GetTasks() ([]TaskRecord, error)
-        GetTask(id string) (*TaskRecord, error)
-        DeleteTask(id string) error
-        GetShareActions() ([]ShareAction, error)
-        GetShareAction(id string) (*ShareAction, error)
-        UpsertShareAction(action ShareAction) error
-        DeleteShareAction(id string) error
-        SaveGuardianship(record GuardianshipRecord) error
-        GetGuardianships() ([]GuardianshipRecord, error)
-        GetGuardianship(id string) (*GuardianshipRecord, error)
-        GetGuardianshipByDependentAID(dependentAID string) (*GuardianshipRecord, error)
-        DeleteGuardianship(id string) error
-        SaveServiceProvider(record ServiceProviderRecord) error
-        GetServiceProviders() ([]ServiceProviderRecord, error)
-        GetServiceProvider(id string) (*ServiceProviderRecord, error)
-        GetServiceProvidersByCategory(category string) ([]ServiceProviderRecord, error)
-        GetServiceProvidersByStatus(status string) ([]ServiceProviderRecord, error)
-        DeleteServiceProvider(id string) error
-        ResetAll() error
-        Close() error
+	SaveEvent(record EventRecord) error
+	GetEvents(aid string) ([]EventRecord, error)
+	GetIdentity() (*IdentityState, error)
+	SaveIdentity(state IdentityState) error
+	SaveContact(contact ContactRecord) error
+	GetContacts() ([]ContactRecord, error)
+	GetContact(aid string) (*ContactRecord, error)
+	DeleteContact(aid string) error
+	GetContactsByStatus(status string) ([]ContactRecord, error)
+	SaveContactKEL(record ContactKELRecord) error
+	SaveEndpointRecord(record EndpointRecord) error
+	SaveSigningRequest(req SigningRequest) error
+	GetSigningRequest(id string) (*SigningRequest, error)
+	GetPendingSigningRequests() ([]SigningRequest, error)
+	SaveNotification(n Notification) error
+	GetNotification(id string) (*Notification, error)
+	// GetNotifications returns the newest first. An empty status means every
+	// status, so a client can show a history rather than only what is waiting.
+	GetNotifications(status string, limit int) ([]Notification, error)
+	SetNotificationStatus(id, status string) error
+	GetEndpointRecords(cid string) ([]EndpointRecord, error)
+	// AllocateNextRelationshipIndex returns a strictly increasing, never-reused index
+	// for the given namespace ("contacts" or "login"). It is a persisted high-water mark
+	// that survives row deletions (unlike MAX over live rows).
+	AllocateNextRelationshipIndex(namespace string) (int, error)
+	GetContactKEL(aid string) (*ContactKELRecord, error)
+	SaveCredential(record CredentialRecord) error
+	GetCredential(said string) (*CredentialRecord, error)
+	GetCredentials() ([]CredentialRecord, error)
+	GetCredentialsFiltered(role, status string) ([]CredentialRecord, error)
+	UpdateCredentialStatus(said, status string) error
+	DeleteCredential(said string) error
+	SaveRegistry(r CredentialRegistry) error
+	GetRegistryByIssuer(issuerAID string) (*CredentialRegistry, error)
+	SaveCredentialSchema(record CredentialSchemaRecord) error
+	GetCredentialSchemas() ([]CredentialSchemaRecord, error)
+	GetCredentialSchema(said string) (*CredentialSchemaRecord, error)
+	SavePresentation(record PresentationRecord) error
+	GetPresentation(said string) (*PresentationRecord, error)
+	GetPresentations() ([]PresentationRecord, error)
+	SaveWitnessReceipt(record WitnessReceiptRecord) error
+	GetWitnessReceipts(eventSAID string) ([]WitnessReceiptRecord, error)
+	GetSettings() (*SettingsData, error)
+	SaveSettings(settings SettingsData) error
+	SavePendingRequest(req PendingRequest) error
+	GetPendingRequests() ([]PendingRequest, error)
+	DeletePendingRequest(aid string) error
+	GetProfile() (*ProfileData, error)
+	SaveProfile(profile ProfileData) error
+	SaveTask(task TaskRecord) error
+	GetTasks() ([]TaskRecord, error)
+	GetTask(id string) (*TaskRecord, error)
+	DeleteTask(id string) error
+	GetShareActions() ([]ShareAction, error)
+	GetShareAction(id string) (*ShareAction, error)
+	UpsertShareAction(action ShareAction) error
+	DeleteShareAction(id string) error
+	SaveGuardianship(record GuardianshipRecord) error
+	GetGuardianships() ([]GuardianshipRecord, error)
+	GetGuardianship(id string) (*GuardianshipRecord, error)
+	GetGuardianshipByDependentAID(dependentAID string) (*GuardianshipRecord, error)
+	DeleteGuardianship(id string) error
+	SaveServiceProvider(record ServiceProviderRecord) error
+	GetServiceProviders() ([]ServiceProviderRecord, error)
+	GetServiceProvider(id string) (*ServiceProviderRecord, error)
+	GetServiceProvidersByCategory(category string) ([]ServiceProviderRecord, error)
+	GetServiceProvidersByStatus(status string) ([]ServiceProviderRecord, error)
+	DeleteServiceProvider(id string) error
+	ResetAll() error
+	Close() error
 }
 
 type FileStore struct {
-        dir      string
-        mu       sync.RWMutex
-        counters map[string]int // persisted high-water marks for relationship indices
+	dir      string
+	mu       sync.RWMutex
+	counters map[string]int // persisted high-water marks for relationship indices
 }
 
 func NewFileStore(dir string) (*FileStore, error) {
-        if err := os.MkdirAll(dir, 0755); err != nil {
-                return nil, fmt.Errorf("failed to create store directory: %w", err)
-        }
-        fs := &FileStore{dir: dir, counters: map[string]int{}}
-        if err := fs.loadCounters(); err != nil {
-                return nil, err
-        }
-        log.Printf("[store] Initialized file store at: %s", dir)
-        return fs, nil
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create store directory: %w", err)
+	}
+	fs := &FileStore{dir: dir, counters: map[string]int{}}
+	if err := fs.loadCounters(); err != nil {
+		return nil, err
+	}
+	log.Printf("[store] Initialized file store at: %s", dir)
+	return fs, nil
 }
 
 func (s *FileStore) loadCounters() error {
-        path := filepath.Join(s.dir, "counters.json")
-        b, err := os.ReadFile(path)
-        if os.IsNotExist(err) {
-                s.counters = map[string]int{"contacts": 1, "login": 1000001}
-                return nil
-        }
-        if err != nil {
-                return err
-        }
-        if err := json.Unmarshal(b, &s.counters); err != nil {
-                return err
-        }
-        if s.counters == nil {
-                s.counters = map[string]int{}
-        }
-        if _, ok := s.counters["contacts"]; !ok {
-                s.counters["contacts"] = 1
-        }
-        if _, ok := s.counters["login"]; !ok {
-                s.counters["login"] = 1000001
-        }
-        return nil
+	path := filepath.Join(s.dir, "counters.json")
+	b, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		s.counters = map[string]int{"contacts": 1, "login": 1000001}
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(b, &s.counters); err != nil {
+		return err
+	}
+	if s.counters == nil {
+		s.counters = map[string]int{}
+	}
+	if _, ok := s.counters["contacts"]; !ok {
+		s.counters["contacts"] = 1
+	}
+	if _, ok := s.counters["login"]; !ok {
+		s.counters["login"] = 1000001
+	}
+	return nil
 }
 
 func (s *FileStore) saveCountersLocked() error {
-        path := filepath.Join(s.dir, "counters.json")
-        b, err := json.MarshalIndent(s.counters, "", "  ")
-        if err != nil {
-                return err
-        }
-        tmp := path + ".tmp"
-        if err := os.WriteFile(tmp, b, 0600); err != nil {
-                return err
-        }
-        return os.Rename(tmp, path)
+	path := filepath.Join(s.dir, "counters.json")
+	b, err := json.MarshalIndent(s.counters, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, b, 0600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 func (s *FileStore) SaveEvent(record EventRecord) error {
-        s.mu.Lock()
-        defer s.mu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-        events, err := s.loadEvents()
-        if err != nil {
-                events = []EventRecord{}
-        }
+	events, err := s.loadEvents()
+	if err != nil {
+		events = []EventRecord{}
+	}
 
-        events = append(events, record)
+	events = append(events, record)
 
-        return s.writeJSON(filepath.Join(s.dir, "kel.json"), events)
+	return s.writeJSON(filepath.Join(s.dir, "kel.json"), events)
 }
 
 func (s *FileStore) GetEvents(aid string) ([]EventRecord, error) {
-        s.mu.RLock()
-        defer s.mu.RUnlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
-        events, err := s.loadEvents()
-        if err != nil {
-                return nil, err
-        }
+	events, err := s.loadEvents()
+	if err != nil {
+		return nil, err
+	}
 
-        var filtered []EventRecord
-        for _, e := range events {
-                if e.AID == aid {
-                        filtered = append(filtered, e)
-                }
-        }
-        return filtered, nil
+	var filtered []EventRecord
+	for _, e := range events {
+		if e.AID == aid {
+			filtered = append(filtered, e)
+		}
+	}
+	return filtered, nil
 }
 
 func (s *FileStore) GetIdentity() (*IdentityState, error) {
-        s.mu.RLock()
-        defer s.mu.RUnlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
-        path := filepath.Join(s.dir, "identity.json")
-        data, err := os.ReadFile(path)
-        if err != nil {
-                if os.IsNotExist(err) {
-                        return nil, nil
-                }
-                return nil, fmt.Errorf("failed to read identity: %w", err)
-        }
+	path := filepath.Join(s.dir, "identity.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to read identity: %w", err)
+	}
 
-        var state IdentityState
-        if err := json.Unmarshal(data, &state); err != nil {
-                return nil, fmt.Errorf("failed to parse identity: %w", err)
-        }
-        return &state, nil
+	var state IdentityState
+	if err := json.Unmarshal(data, &state); err != nil {
+		return nil, fmt.Errorf("failed to parse identity: %w", err)
+	}
+	return &state, nil
 }
 
 func (s *FileStore) SaveIdentity(state IdentityState) error {
-        s.mu.Lock()
-        defer s.mu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-        return s.writeJSON(filepath.Join(s.dir, "identity.json"), state)
+	return s.writeJSON(filepath.Join(s.dir, "identity.json"), state)
 }
 
 func (s *FileStore) SaveContact(contact ContactRecord) error {
-        s.mu.Lock()
-        defer s.mu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-        contacts, err := s.loadContacts()
-        if err != nil {
-                contacts = []ContactRecord{}
-        }
+	contacts, err := s.loadContacts()
+	if err != nil {
+		contacts = []ContactRecord{}
+	}
 
-        updated := false
-        for i, c := range contacts {
-                if c.AID == contact.AID {
-                        contacts[i] = contact
-                        updated = true
-                        break
-                }
-        }
-        if !updated {
-                contacts = append(contacts, contact)
-        }
+	updated := false
+	for i, c := range contacts {
+		if c.AID == contact.AID {
+			contacts[i] = contact
+			updated = true
+			break
+		}
+	}
+	if !updated {
+		contacts = append(contacts, contact)
+	}
 
-        return s.writeJSON(filepath.Join(s.dir, "contacts.json"), contacts)
+	return s.writeJSON(filepath.Join(s.dir, "contacts.json"), contacts)
 }
 
 func (s *FileStore) GetContacts() ([]ContactRecord, error) {
-        s.mu.RLock()
-        defer s.mu.RUnlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
-        return s.loadContacts()
+	return s.loadContacts()
 }
 
 func (s *FileStore) GetContact(aid string) (*ContactRecord, error) {
-        s.mu.RLock()
-        defer s.mu.RUnlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
-        contacts, err := s.loadContacts()
-        if err != nil {
-                return nil, err
-        }
+	contacts, err := s.loadContacts()
+	if err != nil {
+		return nil, err
+	}
 
-        for _, c := range contacts {
-                if c.AID == aid {
-                        return &c, nil
-                }
-        }
-        return nil, nil
+	for _, c := range contacts {
+		if c.AID == aid {
+			return &c, nil
+		}
+	}
+	return nil, nil
 }
 
 func (s *FileStore) DeleteContact(aid string) error {
-        s.mu.Lock()
-        defer s.mu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-        contacts, err := s.loadContacts()
-        if err != nil {
-                return err
-        }
+	contacts, err := s.loadContacts()
+	if err != nil {
+		return err
+	}
 
-        var filtered []ContactRecord
-        for _, c := range contacts {
-                if c.AID != aid {
-                        filtered = append(filtered, c)
-                }
-        }
+	var filtered []ContactRecord
+	for _, c := range contacts {
+		if c.AID != aid {
+			filtered = append(filtered, c)
+		}
+	}
 
-        return s.writeJSON(filepath.Join(s.dir, "contacts.json"), filtered)
+	return s.writeJSON(filepath.Join(s.dir, "contacts.json"), filtered)
 }
 
 func (s *FileStore) GetContactsByStatus(status string) ([]ContactRecord, error) {
-        s.mu.RLock()
-        defer s.mu.RUnlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
-        contacts, err := s.loadContacts()
-        if err != nil {
-                return nil, err
-        }
+	contacts, err := s.loadContacts()
+	if err != nil {
+		return nil, err
+	}
 
-        var filtered []ContactRecord
-        for _, c := range contacts {
-                if c.Status == status {
-                        filtered = append(filtered, c)
-                }
-        }
-        return filtered, nil
+	var filtered []ContactRecord
+	for _, c := range contacts {
+		if c.Status == status {
+			filtered = append(filtered, c)
+		}
+	}
+	return filtered, nil
 }
 
 func (s *FileStore) GetSettings() (*SettingsData, error) {
-        s.mu.RLock()
-        defer s.mu.RUnlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
-        path := filepath.Join(s.dir, "settings.json")
-        data, err := os.ReadFile(path)
-        if err != nil {
-                if os.IsNotExist(err) {
-                        return nil, nil
-                }
-                return nil, fmt.Errorf("failed to read settings: %w", err)
-        }
+	path := filepath.Join(s.dir, "settings.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to read settings: %w", err)
+	}
 
-        var settings SettingsData
-        if err := json.Unmarshal(data, &settings); err != nil {
-                return nil, fmt.Errorf("failed to parse settings: %w", err)
-        }
-        return &settings, nil
+	var settings SettingsData
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return nil, fmt.Errorf("failed to parse settings: %w", err)
+	}
+	return &settings, nil
 }
 
 func (s *FileStore) SaveSettings(settings SettingsData) error {
-        s.mu.Lock()
-        defer s.mu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-        return s.writeJSON(filepath.Join(s.dir, "settings.json"), settings)
+	return s.writeJSON(filepath.Join(s.dir, "settings.json"), settings)
 }
 
 func (s *FileStore) Close() error {
-        return nil
+	return nil
 }
 
 func (s *FileStore) AllocateNextRelationshipIndex(namespace string) (int, error) {
-        s.mu.Lock()
-        defer s.mu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-        if s.counters == nil {
-                s.counters = map[string]int{}
-        }
-        idx := s.counters[namespace]
-        if idx == 0 {
-                if namespace == "login" {
-                        idx = 1000001
-                } else {
-                        idx = 1
-                }
-        }
-        s.counters[namespace] = idx + 1
-        if err := s.saveCountersLocked(); err != nil {
-                return 0, err
-        }
-        return idx, nil
+	if s.counters == nil {
+		s.counters = map[string]int{}
+	}
+	idx := s.counters[namespace]
+	if idx == 0 {
+		if namespace == "login" {
+			idx = 1000001
+		} else {
+			idx = 1
+		}
+	}
+	s.counters[namespace] = idx + 1
+	if err := s.saveCountersLocked(); err != nil {
+		return 0, err
+	}
+	return idx, nil
 }
 
 func (s *FileStore) loadContacts() ([]ContactRecord, error) {
-        path := filepath.Join(s.dir, "contacts.json")
-        data, err := os.ReadFile(path)
-        if err != nil {
-                if os.IsNotExist(err) {
-                        return []ContactRecord{}, nil
-                }
-                return nil, fmt.Errorf("failed to read contacts: %w", err)
-        }
+	path := filepath.Join(s.dir, "contacts.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []ContactRecord{}, nil
+		}
+		return nil, fmt.Errorf("failed to read contacts: %w", err)
+	}
 
-        var contacts []ContactRecord
-        if err := json.Unmarshal(data, &contacts); err != nil {
-                return nil, fmt.Errorf("failed to parse contacts: %w", err)
-        }
-        return contacts, nil
+	var contacts []ContactRecord
+	if err := json.Unmarshal(data, &contacts); err != nil {
+		return nil, fmt.Errorf("failed to parse contacts: %w", err)
+	}
+	return contacts, nil
 }
 
 func (s *FileStore) loadEvents() ([]EventRecord, error) {
-        path := filepath.Join(s.dir, "kel.json")
-        data, err := os.ReadFile(path)
-        if err != nil {
-                if os.IsNotExist(err) {
-                        return []EventRecord{}, nil
-                }
-                return nil, fmt.Errorf("failed to read KEL: %w", err)
-        }
+	path := filepath.Join(s.dir, "kel.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []EventRecord{}, nil
+		}
+		return nil, fmt.Errorf("failed to read KEL: %w", err)
+	}
 
-        var events []EventRecord
-        if err := json.Unmarshal(data, &events); err != nil {
-                return nil, fmt.Errorf("failed to parse KEL: %w", err)
-        }
-        return events, nil
+	var events []EventRecord
+	if err := json.Unmarshal(data, &events); err != nil {
+		return nil, fmt.Errorf("failed to parse KEL: %w", err)
+	}
+	return events, nil
 }
 
 func (s *FileStore) SavePendingRequest(req PendingRequest) error {
-        s.mu.Lock()
-        defer s.mu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-        requests, err := s.loadPendingRequests()
-        if err != nil {
-                requests = []PendingRequest{}
-        }
+	requests, err := s.loadPendingRequests()
+	if err != nil {
+		requests = []PendingRequest{}
+	}
 
-        updated := false
-        for i, r := range requests {
-                if r.AID == req.AID {
-                        requests[i] = req
-                        updated = true
-                        break
-                }
-        }
-        if !updated {
-                requests = append(requests, req)
-        }
+	updated := false
+	for i, r := range requests {
+		if r.AID == req.AID {
+			requests[i] = req
+			updated = true
+			break
+		}
+	}
+	if !updated {
+		requests = append(requests, req)
+	}
 
-        return s.writeJSON(filepath.Join(s.dir, "pending_requests.json"), requests)
+	return s.writeJSON(filepath.Join(s.dir, "pending_requests.json"), requests)
 }
 
 func (s *FileStore) GetPendingRequests() ([]PendingRequest, error) {
-        s.mu.Lock()
-        defer s.mu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-        requests, err := s.loadPendingRequests()
-        if err != nil {
-                return nil, err
-        }
+	requests, err := s.loadPendingRequests()
+	if err != nil {
+		return nil, err
+	}
 
-        now := time.Now()
-        var active []PendingRequest
-        var expired []string
-        for _, r := range requests {
-                expiry, err := time.Parse(time.RFC3339, r.ExpiresAt)
-                if err != nil || now.Before(expiry) {
-                        active = append(active, r)
-                } else {
-                        expired = append(expired, r.AID)
-                }
-        }
+	now := time.Now()
+	var active []PendingRequest
+	var expired []string
+	for _, r := range requests {
+		expiry, err := time.Parse(time.RFC3339, r.ExpiresAt)
+		if err != nil || now.Before(expiry) {
+			active = append(active, r)
+		} else {
+			expired = append(expired, r.AID)
+		}
+	}
 
-        if len(expired) > 0 {
-                s.writeJSON(filepath.Join(s.dir, "pending_requests.json"), active)
-                log.Printf("[store] Auto-deleted %d expired pending requests", len(expired))
-        }
+	if len(expired) > 0 {
+		s.writeJSON(filepath.Join(s.dir, "pending_requests.json"), active)
+		log.Printf("[store] Auto-deleted %d expired pending requests", len(expired))
+	}
 
-        if active == nil {
-                active = []PendingRequest{}
-        }
-        return active, nil
+	if active == nil {
+		active = []PendingRequest{}
+	}
+	return active, nil
 }
 
 func (s *FileStore) DeletePendingRequest(aid string) error {
-        s.mu.Lock()
-        defer s.mu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-        requests, err := s.loadPendingRequests()
-        if err != nil {
-                return err
-        }
+	requests, err := s.loadPendingRequests()
+	if err != nil {
+		return err
+	}
 
-        var filtered []PendingRequest
-        for _, r := range requests {
-                if r.AID != aid {
-                        filtered = append(filtered, r)
-                }
-        }
+	var filtered []PendingRequest
+	for _, r := range requests {
+		if r.AID != aid {
+			filtered = append(filtered, r)
+		}
+	}
 
-        return s.writeJSON(filepath.Join(s.dir, "pending_requests.json"), filtered)
+	return s.writeJSON(filepath.Join(s.dir, "pending_requests.json"), filtered)
 }
 
 func (s *FileStore) loadPendingRequests() ([]PendingRequest, error) {
-        path := filepath.Join(s.dir, "pending_requests.json")
-        data, err := os.ReadFile(path)
-        if err != nil {
-                if os.IsNotExist(err) {
-                        return []PendingRequest{}, nil
-                }
-                return nil, fmt.Errorf("failed to read pending requests: %w", err)
-        }
+	path := filepath.Join(s.dir, "pending_requests.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []PendingRequest{}, nil
+		}
+		return nil, fmt.Errorf("failed to read pending requests: %w", err)
+	}
 
-        var requests []PendingRequest
-        if err := json.Unmarshal(data, &requests); err != nil {
-                return nil, fmt.Errorf("failed to parse pending requests: %w", err)
-        }
-        return requests, nil
+	var requests []PendingRequest
+	if err := json.Unmarshal(data, &requests); err != nil {
+		return nil, fmt.Errorf("failed to parse pending requests: %w", err)
+	}
+	return requests, nil
 }
 
 func (s *FileStore) GetProfile() (*ProfileData, error) {
-        s.mu.RLock()
-        defer s.mu.RUnlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
-        path := filepath.Join(s.dir, "profile.json")
-        data, err := os.ReadFile(path)
-        if err != nil {
-                if os.IsNotExist(err) {
-                        return nil, nil
-                }
-                return nil, fmt.Errorf("failed to read profile: %w", err)
-        }
+	path := filepath.Join(s.dir, "profile.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to read profile: %w", err)
+	}
 
-        var profile ProfileData
-        if err := json.Unmarshal(data, &profile); err != nil {
-                return nil, fmt.Errorf("failed to parse profile: %w", err)
-        }
-        return &profile, nil
+	var profile ProfileData
+	if err := json.Unmarshal(data, &profile); err != nil {
+		return nil, fmt.Errorf("failed to parse profile: %w", err)
+	}
+	return &profile, nil
 }
 
 func (s *FileStore) SaveProfile(profile ProfileData) error {
-        s.mu.Lock()
-        defer s.mu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-        return s.writeJSON(filepath.Join(s.dir, "profile.json"), profile)
+	return s.writeJSON(filepath.Join(s.dir, "profile.json"), profile)
 }
 
 func (s *FileStore) SavePresentation(record PresentationRecord) error {
-        s.mu.Lock()
-        defer s.mu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-        pres, err := s.loadPresentations()
-        if err != nil {
-                pres = map[string]PresentationRecord{}
-        }
-        pres[record.SAID] = record
-        return s.writeJSON(filepath.Join(s.dir, "presentations.json"), pres)
+	pres, err := s.loadPresentations()
+	if err != nil {
+		pres = map[string]PresentationRecord{}
+	}
+	pres[record.SAID] = record
+	return s.writeJSON(filepath.Join(s.dir, "presentations.json"), pres)
 }
 
 func (s *FileStore) GetPresentation(said string) (*PresentationRecord, error) {
-        s.mu.RLock()
-        defer s.mu.RUnlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
-        pres, err := s.loadPresentations()
-        if err != nil {
-                return nil, err
-        }
-        r, ok := pres[said]
-        if !ok {
-                return nil, nil
-        }
-        return &r, nil
+	pres, err := s.loadPresentations()
+	if err != nil {
+		return nil, err
+	}
+	r, ok := pres[said]
+	if !ok {
+		return nil, nil
+	}
+	return &r, nil
 }
 
 func (s *FileStore) GetPresentations() ([]PresentationRecord, error) {
-        s.mu.RLock()
-        defer s.mu.RUnlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
-        pres, err := s.loadPresentations()
-        if err != nil {
-                return nil, err
-        }
-        list := make([]PresentationRecord, 0, len(pres))
-        for _, p := range pres {
-                list = append(list, p)
-        }
-        return list, nil
+	pres, err := s.loadPresentations()
+	if err != nil {
+		return nil, err
+	}
+	list := make([]PresentationRecord, 0, len(pres))
+	for _, p := range pres {
+		list = append(list, p)
+	}
+	return list, nil
 }
 
 func (s *FileStore) loadPresentations() (map[string]PresentationRecord, error) {
-        path := filepath.Join(s.dir, "presentations.json")
-        data, err := os.ReadFile(path)
-        if err != nil {
-                if os.IsNotExist(err) {
-                        return map[string]PresentationRecord{}, nil
-                }
-                return nil, fmt.Errorf("failed to read presentations: %w", err)
-        }
-        var pres map[string]PresentationRecord
-        if err := json.Unmarshal(data, &pres); err != nil {
-                return nil, fmt.Errorf("failed to parse presentations: %w", err)
-        }
-        return pres, nil
+	path := filepath.Join(s.dir, "presentations.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]PresentationRecord{}, nil
+		}
+		return nil, fmt.Errorf("failed to read presentations: %w", err)
+	}
+	var pres map[string]PresentationRecord
+	if err := json.Unmarshal(data, &pres); err != nil {
+		return nil, fmt.Errorf("failed to parse presentations: %w", err)
+	}
+	return pres, nil
 }
 
 func (s *FileStore) SaveCredential(record CredentialRecord) error {
-        s.mu.Lock()
-        defer s.mu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-        creds, err := s.loadCredentials()
-        if err != nil {
-                creds = map[string]CredentialRecord{}
-        }
-        creds[record.SAID] = record
-        return s.writeJSON(filepath.Join(s.dir, "credentials.json"), creds)
+	creds, err := s.loadCredentials()
+	if err != nil {
+		creds = map[string]CredentialRecord{}
+	}
+	creds[record.SAID] = record
+	return s.writeJSON(filepath.Join(s.dir, "credentials.json"), creds)
 }
 
 func (s *FileStore) GetCredential(said string) (*CredentialRecord, error) {
-        s.mu.RLock()
-        defer s.mu.RUnlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
-        creds, err := s.loadCredentials()
-        if err != nil {
-                return nil, err
-        }
-        r, ok := creds[said]
-        if !ok {
-                return nil, nil
-        }
-        return &r, nil
+	creds, err := s.loadCredentials()
+	if err != nil {
+		return nil, err
+	}
+	r, ok := creds[said]
+	if !ok {
+		return nil, nil
+	}
+	return &r, nil
 }
 
 func (s *FileStore) GetCredentials() ([]CredentialRecord, error) {
-        s.mu.RLock()
-        defer s.mu.RUnlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
-        creds, err := s.loadCredentials()
-        if err != nil {
-                return nil, err
-        }
-        list := make([]CredentialRecord, 0, len(creds))
-        for _, c := range creds {
-                list = append(list, c)
-        }
-        return list, nil
+	creds, err := s.loadCredentials()
+	if err != nil {
+		return nil, err
+	}
+	list := make([]CredentialRecord, 0, len(creds))
+	for _, c := range creds {
+		list = append(list, c)
+	}
+	return list, nil
 }
 
 func (s *FileStore) loadCredentials() (map[string]CredentialRecord, error) {
-        path := filepath.Join(s.dir, "credentials.json")
-        data, err := os.ReadFile(path)
-        if err != nil {
-                if os.IsNotExist(err) {
-                        return map[string]CredentialRecord{}, nil
-                }
-                return nil, fmt.Errorf("failed to read credentials: %w", err)
-        }
-        var creds map[string]CredentialRecord
-        if err := json.Unmarshal(data, &creds); err != nil {
-                return nil, fmt.Errorf("failed to parse credentials: %w", err)
-        }
-        return creds, nil
+	path := filepath.Join(s.dir, "credentials.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]CredentialRecord{}, nil
+		}
+		return nil, fmt.Errorf("failed to read credentials: %w", err)
+	}
+	var creds map[string]CredentialRecord
+	if err := json.Unmarshal(data, &creds); err != nil {
+		return nil, fmt.Errorf("failed to parse credentials: %w", err)
+	}
+	return creds, nil
 }
 
 func (s *FileStore) GetCredentialsFiltered(role, status string) ([]CredentialRecord, error) {
-        // FileStore is only used in tests/mobile fallback; full filtering not needed.
-        return s.GetCredentials()
+	// FileStore is only used in tests/mobile fallback; full filtering not needed.
+	return s.GetCredentials()
 }
 
 func (s *FileStore) UpdateCredentialStatus(said, status string) error {
-        s.mu.Lock()
-        defer s.mu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-        creds, err := s.loadCredentials()
-        if err != nil {
-                return err
-        }
-        if c, ok := creds[said]; ok {
-                c.Status = status
-                creds[said] = c
-                return s.writeJSON(filepath.Join(s.dir, "credentials.json"), creds)
-        }
-        return nil
+	creds, err := s.loadCredentials()
+	if err != nil {
+		return err
+	}
+	if c, ok := creds[said]; ok {
+		c.Status = status
+		creds[said] = c
+		return s.writeJSON(filepath.Join(s.dir, "credentials.json"), creds)
+	}
+	return nil
 }
 
 func (s *FileStore) DeleteCredential(said string) error {
-        s.mu.Lock()
-        defer s.mu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-        creds, err := s.loadCredentials()
-        if err != nil {
-                return err
-        }
-        delete(creds, said)
-        return s.writeJSON(filepath.Join(s.dir, "credentials.json"), creds)
+	creds, err := s.loadCredentials()
+	if err != nil {
+		return err
+	}
+	delete(creds, said)
+	return s.writeJSON(filepath.Join(s.dir, "credentials.json"), creds)
 }
 
 func (s *FileStore) SaveCredentialSchema(record CredentialSchemaRecord) error {
-        s.mu.Lock()
-        defer s.mu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-        schemas, err := s.loadCredentialSchemas()
-        if err != nil {
-                schemas = map[string]CredentialSchemaRecord{}
-        }
-        schemas[record.SAID] = record
-        return s.writeJSON(filepath.Join(s.dir, "credential_schemas.json"), schemas)
+	schemas, err := s.loadCredentialSchemas()
+	if err != nil {
+		schemas = map[string]CredentialSchemaRecord{}
+	}
+	schemas[record.SAID] = record
+	return s.writeJSON(filepath.Join(s.dir, "credential_schemas.json"), schemas)
 }
 
 func (s *FileStore) GetCredentialSchemas() ([]CredentialSchemaRecord, error) {
-        s.mu.RLock()
-        defer s.mu.RUnlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
-        schemas, err := s.loadCredentialSchemas()
-        if err != nil {
-                return nil, err
-        }
-        list := make([]CredentialSchemaRecord, 0, len(schemas))
-        for _, sc := range schemas {
-                list = append(list, sc)
-        }
-        return list, nil
+	schemas, err := s.loadCredentialSchemas()
+	if err != nil {
+		return nil, err
+	}
+	list := make([]CredentialSchemaRecord, 0, len(schemas))
+	for _, sc := range schemas {
+		list = append(list, sc)
+	}
+	return list, nil
 }
 
 func (s *FileStore) GetCredentialSchema(said string) (*CredentialSchemaRecord, error) {
-        s.mu.RLock()
-        defer s.mu.RUnlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
-        schemas, err := s.loadCredentialSchemas()
-        if err != nil {
-                return nil, err
-        }
-        r, ok := schemas[said]
-        if !ok {
-                return nil, nil
-        }
-        return &r, nil
+	schemas, err := s.loadCredentialSchemas()
+	if err != nil {
+		return nil, err
+	}
+	r, ok := schemas[said]
+	if !ok {
+		return nil, nil
+	}
+	return &r, nil
 }
 
 func (s *FileStore) loadCredentialSchemas() (map[string]CredentialSchemaRecord, error) {
-        path := filepath.Join(s.dir, "credential_schemas.json")
-        data, err := os.ReadFile(path)
-        if err != nil {
-                if os.IsNotExist(err) {
-                        return map[string]CredentialSchemaRecord{}, nil
-                }
-                return nil, fmt.Errorf("failed to read credential schemas: %w", err)
-        }
-        var schemas map[string]CredentialSchemaRecord
-        if err := json.Unmarshal(data, &schemas); err != nil {
-                return nil, fmt.Errorf("failed to parse credential schemas: %w", err)
-        }
-        return schemas, nil
+	path := filepath.Join(s.dir, "credential_schemas.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]CredentialSchemaRecord{}, nil
+		}
+		return nil, fmt.Errorf("failed to read credential schemas: %w", err)
+	}
+	var schemas map[string]CredentialSchemaRecord
+	if err := json.Unmarshal(data, &schemas); err != nil {
+		return nil, fmt.Errorf("failed to parse credential schemas: %w", err)
+	}
+	return schemas, nil
 }
 
 func (s *FileStore) SaveContactKEL(record ContactKELRecord) error {
@@ -1186,74 +1206,74 @@ func (s *FileStore) loadWitnessReceipts() (map[string][]WitnessReceiptRecord, er
 // ── Guardianship (FileStore stubs — SQLiteStore is the active implementation) ─
 
 func (s *FileStore) SaveGuardianship(record GuardianshipRecord) error {
-        return fmt.Errorf("guardianship not supported by FileStore — use SQLiteStore")
+	return fmt.Errorf("guardianship not supported by FileStore — use SQLiteStore")
 }
 
 func (s *FileStore) GetGuardianships() ([]GuardianshipRecord, error) {
-        return []GuardianshipRecord{}, nil
+	return []GuardianshipRecord{}, nil
 }
 
 func (s *FileStore) GetGuardianship(id string) (*GuardianshipRecord, error) {
-        return nil, nil
+	return nil, nil
 }
 
 func (s *FileStore) GetGuardianshipByDependentAID(dependentAID string) (*GuardianshipRecord, error) {
-        return nil, nil
+	return nil, nil
 }
 
 func (s *FileStore) DeleteGuardianship(id string) error {
-        return fmt.Errorf("guardianship not supported by FileStore — use SQLiteStore")
+	return fmt.Errorf("guardianship not supported by FileStore — use SQLiteStore")
 }
 
 // ── Service Provider (FileStore stubs — SQLiteStore is the active implementation) ─
 
 func (s *FileStore) SaveServiceProvider(record ServiceProviderRecord) error {
-        return fmt.Errorf("service providers not supported by FileStore — use SQLiteStore")
+	return fmt.Errorf("service providers not supported by FileStore — use SQLiteStore")
 }
 
 func (s *FileStore) GetServiceProviders() ([]ServiceProviderRecord, error) {
-        return []ServiceProviderRecord{}, nil
+	return []ServiceProviderRecord{}, nil
 }
 
 func (s *FileStore) GetServiceProvider(id string) (*ServiceProviderRecord, error) {
-        return nil, nil
+	return nil, nil
 }
 
 func (s *FileStore) GetServiceProvidersByCategory(category string) ([]ServiceProviderRecord, error) {
-        return []ServiceProviderRecord{}, nil
+	return []ServiceProviderRecord{}, nil
 }
 
 func (s *FileStore) GetServiceProvidersByStatus(status string) ([]ServiceProviderRecord, error) {
-        return []ServiceProviderRecord{}, nil
+	return []ServiceProviderRecord{}, nil
 }
 
 func (s *FileStore) DeleteServiceProvider(id string) error {
-        return fmt.Errorf("service providers not supported by FileStore — use SQLiteStore")
+	return fmt.Errorf("service providers not supported by FileStore — use SQLiteStore")
 }
 
 func (s *FileStore) ResetAll() error {
-        s.mu.Lock()
-        defer s.mu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-        files := []string{"identity.json", "kel.json", "contacts.json", "settings.json", "pending_requests.json", "profile.json", "endpoint.json", "contact_kels.json", "credentials.json", "credential_schemas.json", "presentations.json", "witness_receipts.json", "service_credentials.enc"}
-        for _, f := range files {
-                path := filepath.Join(s.dir, f)
-                if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-                        return fmt.Errorf("failed to remove %s: %w", f, err)
-                }
-        }
-        return nil
+	files := []string{"identity.json", "kel.json", "contacts.json", "settings.json", "pending_requests.json", "profile.json", "endpoint.json", "contact_kels.json", "credentials.json", "credential_schemas.json", "presentations.json", "witness_receipts.json", "service_credentials.enc"}
+	for _, f := range files {
+		path := filepath.Join(s.dir, f)
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("failed to remove %s: %w", f, err)
+		}
+	}
+	return nil
 }
 
 func (s *FileStore) writeJSON(path string, v interface{}) error {
-        data, err := json.MarshalIndent(v, "", "  ")
-        if err != nil {
-                return fmt.Errorf("failed to marshal data: %w", err)
-        }
-        if err := os.WriteFile(path, data, 0644); err != nil {
-                return fmt.Errorf("failed to write file: %w", err)
-        }
-        return nil
+	data, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal data: %w", err)
+	}
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return fmt.Errorf("failed to write file: %w", err)
+	}
+	return nil
 }
 
 // SaveEndpointRecord stores a controller's statement of where it currently is.

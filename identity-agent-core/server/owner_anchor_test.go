@@ -21,7 +21,7 @@ func inception(seals ...map[string]interface{}) []map[string]interface{} {
 	return []map[string]interface{}{event}
 }
 
-// The ordinary case: an organisation names its owner where anybody can read it.
+// The ordinary case: an identity names its owner where anybody can read it.
 func TestTheOwnerIsReadFromTheInception(t *testing.T) {
 	owner, err := ownerFromKEL(inception(ownerAnchorSeal("EFounder")))
 	if err != nil {
@@ -83,7 +83,7 @@ func TestALaterEventCannotReplaceTheOwner(t *testing.T) {
 }
 
 // A seal claiming the owner role and naming nobody is malformed. Skipping it
-// would make a broken organisation look like an unowned one, and those need
+// would make a broken identity look like an unowned one, and those need
 // different answers.
 func TestAnOwnerSealNamingNobodyIsAnError(t *testing.T) {
 	_, err := ownerFromKEL(inception(map[string]interface{}{"r": "owner"}))
@@ -139,26 +139,27 @@ func TestTheSealShapeRoundTrips(t *testing.T) {
 	}
 }
 
-// Founding an organisation requires naming its owner.
+// Founding an identity as its own root requires naming its owner.
 //
-// An organisation has no mind and cannot be its own owner. If this could be
-// skipped, the very failure the anchor exists to prevent — an organisation that
+// Such an identity answers to somebody other than itself, and nothing else in
+// the event says who. If this could be skipped, the very failure the anchor
+// exists to prevent — an identity that
 // answers to itself — would be reachable again through the front door.
-func TestFoundingAnOrganisationWithoutAnOwnerIsRefused(t *testing.T) {
+func TestFoundingARootIdentityWithoutAnOwnerIsRefused(t *testing.T) {
 	s := witnessWithStore(t)
 	s.KeriDriver = nil // never reached: the owner check comes first
 
 	body, _ := json.Marshal(map[string]interface{}{
-		"found_as_organisation": true,
-		"adoption_code":         "irrelevant",
+		"found_as_root": true,
+		"adoption_code": "irrelevant",
 	})
 	r := httptest.NewRequest(http.MethodPost, "/api/pairing/adopt", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 	s.handlePairingComplete(w, r)
 
 	// Any refusal will do; what matters is that it does not proceed to found an
-	// organisation with nobody answering for it.
+	// identity with nobody answering for it.
 	if w.Code == http.StatusOK {
-		t.Fatal("an organisation was founded with no owner")
+		t.Fatal("an identity was founded as its own root with no owner")
 	}
 }

@@ -27,6 +27,11 @@ Separately, multi-signature inception passed `ndigs=[]`, committing to no succes
 
 ## Decision
 
+> **Superseded — see ADR-032 and its 2026-07-31 amendment.** The organisation's
+> ROOT is multi-signature over its owners, and that root delegates a single-key
+> operating identity which does the day-to-day work. The claim below, that the
+> organisation as a whole cannot act without the threshold, is what changed.
+
 **An organisation's identity is a multi-signature identity whose keys are its owners.** Not a record listing who owns it — the keys themselves.
 
 That makes the properties structural rather than enforced by a handler:

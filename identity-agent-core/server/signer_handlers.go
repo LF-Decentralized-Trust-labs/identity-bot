@@ -52,24 +52,42 @@ func (s *CoreServer) handleCreateSignerInvite(w http.ResponseWriter, r *http.Req
 	}
 
 	inv := asset.EmployeeInvite{
-		Token:     genInviteToken(),
-		Role:      "Super Admin",
+		Token:    genInviteToken(),
+		Role:     "Super Admin",
 		IsSigner: true,
-		MaxUses:   1, // a single founding signer
-		SiteAID:   orgAID,
-		SiteOOBI:  orgOOBI,
+		MaxUses:  1, // a single founding signer
+		SiteAID:  orgAID,
+		SiteOOBI: orgOOBI,
 	}
 	if err := s.assetHandler.Store.CreateEmployeeInvite(inv); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	pwAID, pwOOBI, seed, err := s.mintPairwise("signer")
-	if err != nil {
-		http.Error(w, "mint signer: "+err.Error(), http.StatusInternalServerError)
+	askToken, aerr := s.mintSignerAsk(orgName, orgAID, orgOOBI, inv.Token)
+	if aerr != nil {
+		http.Error(w, aerr.Error(), http.StatusInternalServerError)
 		return
 	}
-	_ = pwAID
+
+	scanWriteJSON(w, map[string]interface{}{
+		"invite": inv,
+		"token":  askToken,
+		"url":    fmt.Sprintf("%s/i/%s", publicURL, askToken),
+	})
+}
+
+// mintSignerAsk builds the signed offer a person scans, and returns the token
+// that resolves to it.
+//
+// Extracted so the founding-signer invite and the owner ceremony mint the same
+// thing. A second, parallel offer format would be one more thing to keep in
+// step, and the agent on the other side already knows how to read this one.
+func (s *CoreServer) mintSignerAsk(orgName, orgAID, orgOOBI, inviteToken string) (string, error) {
+	_, pwOOBI, seed, err := s.mintPairwise("signer")
+	if err != nil {
+		return "", fmt.Errorf("mint signer: %w", err)
+	}
 	ask, _ := json.Marshal(map[string]interface{}{
 		"v":            "ASK1",
 		"t":            4,
@@ -78,29 +96,26 @@ func (s *CoreServer) handleCreateSignerInvite(w http.ResponseWriter, r *http.Req
 		"org_oobi":     orgOOBI,
 		"site_aid":     orgAID,
 		"site_oobi":    orgOOBI,
-		"invite_token": inv.Token,
+		"invite_token": inviteToken,
 		"signer_oobi":  pwOOBI,
 	})
 	sig, serr := login.SignAsk(ask, seed)
 	if serr != nil {
-		http.Error(w, "sign ask: "+serr.Error(), http.StatusInternalServerError)
-		return
+		return "", fmt.Errorf("sign ask: %w", serr)
 	}
 	if signed, ierr := injectSig(ask, sig); ierr == nil {
 		ask = signed
 	}
+
 	tb := make([]byte, 16)
-	_, _ = rand.Read(tb)
+	if _, rerr := rand.Read(tb); rerr != nil {
+		return "", rerr
+	}
 	askToken := hex.EncodeToString(tb)
 	mintedAsks.Lock()
 	mintedAsks.m[askToken] = ask
 	mintedAsks.Unlock()
-
-	scanWriteJSON(w, map[string]interface{}{
-		"invite": inv,
-		"token":  askToken,
-		"url":    fmt.Sprintf("%s/i/%s", publicURL, askToken),
-	})
+	return askToken, nil
 }
 
 // handleRedeemSignerInvite is called by the signing individual's agent (t=4).
@@ -121,12 +136,13 @@ func (s *CoreServer) handleCreateSignerInvite(w http.ResponseWriter, r *http.Req
 func (s *CoreServer) handleRedeemSignerInvite(w http.ResponseWriter, r *http.Request) {
 	token := chi.URLParam(r, "token")
 	var body struct {
-		PairwiseAID  string `json:"pairwise_aid"`
-		Name         string `json:"name"`
-		OOBI         string `json:"oobi"`
-		PublicKey    string `json:"public_key"`
-		VouchSig     string `json:"vouch_sig"`
-		VouchPayload string `json:"vouch_payload"`
+		PairwiseAID   string `json:"pairwise_aid"`
+		Name          string `json:"name"`
+		OOBI          string `json:"oobi"`
+		PublicKey     string `json:"public_key"`
+		NextPublicKey string `json:"next_public_key"`
+		VouchSig      string `json:"vouch_sig"`
+		VouchPayload  string `json:"vouch_payload"`
 	}
 	json.NewDecoder(r.Body).Decode(&body)
 	if body.PairwiseAID == "" || body.VouchSig == "" {
@@ -161,10 +177,35 @@ func (s *CoreServer) handleRedeemSignerInvite(w http.ResponseWriter, r *http.Req
 		Status:       "active", // founding signer is active immediately
 		InviteToken:  token,
 		OOBI:         body.OOBI,
-		IsSigner:    true,
+		IsSigner:     true,
 		VouchSig:     body.VouchSig,
 		VouchPayload: body.VouchPayload,
 	}
+	// If this invite belongs to an ownership ceremony, the key just presented is
+	// one of several being collected — record it and, when the last person has
+	// accepted, rotate. The founding path below is for the FIRST owner, where
+	// there is nothing yet to rotate from.
+	if ceremony, complete, cerr := s.recordAcceptance(
+		token, body.PairwiseAID, body.PublicKey, body.NextPublicKey); cerr != nil {
+		http.Error(w, "could not record your acceptance: "+cerr.Error(), http.StatusInternalServerError)
+		return
+	} else if ceremony != nil {
+		_ = s.assetHandler.Store.IncrementEmployeeInviteUse(token)
+		_ = s.assetHandler.Store.UpsertEmployee(emp)
+		if complete {
+			// The last acceptance is what applies it. Nobody has to remember to
+			// come back and press a button, and there is no window in which
+			// every owner has agreed and nothing has changed.
+			s.completeCeremonyIfReady(ceremony)
+		}
+		scanWriteJSON(w, map[string]interface{}{
+			"status":      "accepted",
+			"owner":       body.PairwiseAID,
+			"outstanding": ceremony.Outstanding(),
+		})
+		return
+	}
+
 	// Seal the signer as this agent's owner BEFORE anything is written down.
 	//
 	// Ordering is the whole point. If the roster were written first and sealing

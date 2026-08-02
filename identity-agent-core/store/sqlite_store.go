@@ -111,8 +111,10 @@ func (s *SQLiteStore) GetEvents(aid string) ([]EventRecord, error) {
 func (s *SQLiteStore) GetIdentity() (*IdentityState, error) {
 	var state IdentityState
 	err := s.db.QueryRow(
-		`SELECT aid, public_key, next_key_digest, created, event_count FROM identity LIMIT 1`,
-	).Scan(&state.AID, &state.PublicKey, &state.NextKeyDigest, &state.Created, &state.EventCount)
+		`SELECT aid, public_key, next_key_digest, created, event_count,
+		        derivation_index, key_generation FROM identity ORDER BY rowid LIMIT 1`,
+	).Scan(&state.AID, &state.PublicKey, &state.NextKeyDigest, &state.Created, &state.EventCount,
+		&state.DerivationIndex, &state.KeyGeneration)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -124,15 +126,31 @@ func (s *SQLiteStore) GetIdentity() (*IdentityState, error) {
 
 func (s *SQLiteStore) SaveIdentity(state IdentityState) error {
 	_, err := s.db.Exec(`
-		INSERT INTO identity (aid, public_key, next_key_digest, created, event_count)
-		VALUES (?, ?, ?, ?, ?)
+		-- Pinned to one row, deliberately.
+		--
+		-- The table has no primary key, so ON CONFLICT(rowid) never fired and
+		-- every save INSERTED. GetIdentity reads LIMIT 1 and returns the oldest
+		-- row, so an agent went on reading its original identity for ever while
+		-- each update piled up behind it, unread. Rotation was the case that
+		-- exposed it: an identity that advanced its keys would keep reporting
+		-- the ones it started with, and derive every future rotation from the
+		-- wrong place.
+		--
+		-- An agent has exactly one identity, so rowid 1 is that identity and the
+		-- conflict clause now has something to conflict with.
+		INSERT INTO identity (rowid, aid, public_key, next_key_digest, created, event_count,
+		                      derivation_index, key_generation)
+		VALUES (1, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(rowid) DO UPDATE SET
 			aid = excluded.aid,
 			public_key = excluded.public_key,
 			next_key_digest = excluded.next_key_digest,
 			created = excluded.created,
-			event_count = excluded.event_count`,
+			event_count = excluded.event_count,
+			derivation_index = excluded.derivation_index,
+			key_generation = excluded.key_generation`,
 		state.AID, state.PublicKey, state.NextKeyDigest, state.Created, state.EventCount,
+		state.DerivationIndex, state.KeyGeneration,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to save identity: %w", err)
@@ -1388,7 +1406,6 @@ func (s *SQLiteStore) ResetAll() error {
 	log.Printf("[store] Reset all identity domain data")
 	return nil
 }
-
 
 // ── Endpoint records ─────────────────────────────────────────────────────────
 

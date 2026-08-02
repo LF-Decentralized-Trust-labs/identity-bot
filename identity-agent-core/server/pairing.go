@@ -53,19 +53,19 @@ type pairingCompleteRequest struct {
 	// DipEvent is the delegated inception the controller issued over the key
 	// material from begin.
 	//
-	// An ORGANISATION sends none. A delegation cannot be transferred, only
-	// destroyed, so a delegated organisation could never be sold without
-	// killing its identity and every relationship it ever had. An organisation
-	// instead incepts its own identity and names its owner in that event — see
-	// FoundAsOrganisation.
+	// An identity that must be able to change hands sends none. A delegation
+	// cannot be transferred, only destroyed, so a delegated identity could
+	// never be handed on without killing it and every relationship it ever had.
+	// Such an identity incepts its own root instead and names its owner in that
+	// event — see FoundAsRoot.
 	DipEvent map[string]interface{} `json:"dip_event"`
-	// FoundAsOrganisation asks this instance to found an organisation rather
-	// than become somebody's delegated agent.
+	// FoundAsRoot asks this instance to found an identity of its own, naming
+	// who owns it, rather than become somebody's delegated agent.
 	//
-	// The organisation gets its own key, so it can hold relationships and keep
-	// its own address current without reaching for a person every time. What
-	// the owner controls is the identity itself.
-	FoundAsOrganisation bool `json:"found_as_organisation,omitempty"`
+	// The identity gets its own key, so it can hold relationships and keep its
+	// own address current without reaching for a person every time. What the
+	// owner controls is the identity itself.
+	FoundAsRoot bool `json:"found_as_root,omitempty"`
 	// DelegatorIxn is the controller's interaction event anchoring the
 	// delegation in its own KEL — what makes the delegation verifiable by a
 	// third party rather than merely asserted here.
@@ -98,6 +98,12 @@ var pairingState struct {
 	offered *pairingBeginResponse
 	// seed is the private half, kept only in memory between the two calls.
 	seed []byte
+	// derivationIndex is WHERE that seed came from, and unlike the seed it is
+	// written down. The seed is deliberately forgotten; the index has to
+	// survive, or the identity can never rotate — a rotation carries the key
+	// the previous event committed to, and that key exists only as a derivation
+	// nobody could repeat.
+	derivationIndex int
 }
 
 // handlePairingBegin generates this instance's delegated key material and hands
@@ -157,6 +163,11 @@ func (s *CoreServer) handlePairingBegin(w http.ResponseWriter, r *http.Request) 
 
 	pairingState.offered = offer
 	pairingState.seed = seed
+	// Kept so the identity can record WHERE its key came from. Without it the
+	// identity could never rotate: a rotation must carry the key the previous
+	// event committed to, and that key is only findable by deriving it again
+	// from this index.
+	pairingState.derivationIndex = idx
 	writeJSONResponse(w, offer)
 }
 
@@ -208,32 +219,32 @@ func (s *CoreServer) handlePairingComplete(w http.ResponseWriter, r *http.Reques
 	// inception, which is exactly right for a relationship that is permanent by
 	// nature: your computer does not stop being yours.
 	//
-	// An ORGANISATION is not. A delegation cannot be transferred, only
-	// destroyed, so a delegated company could never be sold without killing its
-	// identity and every credential and relationship it ever had. It incepts
-	// its own identity and names its owner in that event instead, so ownership
-	// changes by rotation and the company survives its owner.
+	// AN IDENTITY THAT MUST BE ABLE TO CHANGE HANDS is not. A delegation cannot
+	// be transferred, only destroyed, so it could never be handed on without
+	// killing every credential and relationship it ever had. It incepts its own
+	// root and names its owner in that event instead, so ownership changes by
+	// rotation and the identity outlives the arrangement it was created under.
 	var (
 		identityAID string
 		eventType   string
 		eventBody   map[string]interface{}
 	)
 
-	if req.FoundAsOrganisation {
+	if req.FoundAsRoot {
 		if req.OwnerAID == "" {
-			writeError(w, http.StatusBadRequest, "An organisation needs an owner",
-				"an organisation has no mind and cannot be its own owner; name the identity it answers to")
+			writeError(w, http.StatusBadRequest, "This identity needs an owner",
+				"an identity founded as its own root must name who it answers to, or it answers to nobody")
 			return
 		}
 		if s.KeriDriver == nil {
 			writeError(w, http.StatusServiceUnavailable, "No KERI driver",
-				"founding an organisation needs the local KERI engine")
+				"founding an identity as its own root needs the local KERI engine")
 			return
 		}
 		result, ierr := s.KeriDriver.CreateOwnedInception(
 			pairingState.offered.PublicKey, pairingState.offered.NextPublicKey, "", req.OwnerAID)
 		if ierr != nil {
-			writeError(w, http.StatusInternalServerError, "Could not found the organisation", ierr.Error())
+			writeError(w, http.StatusInternalServerError, "Could not found the identity", ierr.Error())
 			return
 		}
 		identityAID, eventType, eventBody = result.AID, "icp", result.InceptionEvent
@@ -263,6 +274,11 @@ func (s *CoreServer) handlePairingComplete(w http.ResponseWriter, r *http.Reques
 		PublicKey:  pairingState.offered.PublicKey,
 		Created:    now,
 		EventCount: 1,
+		// Where this key came from, so it can be found again. Generation 0 is
+		// inception: the current key is at key-index 0 and the successor this
+		// event commits to is at 1.
+		DerivationIndex: pairingState.derivationIndex,
+		KeyGeneration:   0,
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "Could not persist the identity", err.Error())
 		return
@@ -299,18 +315,23 @@ func (s *CoreServer) handlePairingComplete(w http.ResponseWriter, r *http.Reques
 	// is re-derivable from this instance's own seed.
 	pairingState.seed = nil
 
-	log.Printf("[pairing] adopted: delegated AID %s under delegator %s, owner %s",
-		identityAID, req.DelegatorAID, req.OwnerAID)
+	if req.FoundAsRoot {
+		log.Printf("[pairing] adopted: AID %s founded as its own root, owner %s",
+			identityAID, req.OwnerAID)
+	} else {
+		log.Printf("[pairing] adopted: delegated AID %s under delegator %s, owner %s",
+			identityAID, req.DelegatorAID, req.OwnerAID)
+	}
 
-	// The identity is named as what it is. An organisation's is not delegated,
-	// and reporting it under "delegated_aid" would be a caller's first and
-	// hardest-to-shake wrong impression of what it just created.
+	// The identity is named as what it is. One founded as its own root is not
+	// delegated, and reporting it under "delegated_aid" would be a caller's
+	// first and hardest-to-shake wrong impression of what it just created.
 	response := map[string]interface{}{
 		"ok":        true,
 		"owner_aid": req.OwnerAID,
 	}
-	if req.FoundAsOrganisation {
-		response["organisation_aid"] = identityAID
+	if req.FoundAsRoot {
+		response["root_aid"] = identityAID
 	} else {
 		response["delegated_aid"] = identityAID
 		response["delegator_aid"] = req.DelegatorAID

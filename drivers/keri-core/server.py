@@ -264,6 +264,10 @@ def create_inception_event(
     witnesses: list | None = None,
     toad: int | None = None,
     anchors: list | None = None,
+    keys: list | None = None,
+    next_keys: list | None = None,
+    isith: str | None = None,
+    nsith: str | None = None,
 ) -> dict:
     """Build the inception event, optionally designating witnesses.
 
@@ -299,17 +303,39 @@ def create_inception_event(
     # without producing a different identifier.
     #
     # That is the whole reason to put ownership here rather than in a record
-    # beside the database. A file saying who owns an organisation can be
-    # rewritten by anyone who can write the file, silently, and cannot be read
-    # by anybody who is not on that machine. This can be neither.
-    serder = eventing.incept(
-        keys=[verfer.qb64],
-        ndigs=[diger.qb64],
-        wits=wits,
-        toad=bt,
-        data=list(anchors or []),
-        code=MtrDex.Blake3_256,
-    )
+    # beside the database. A file saying who owns an identity can be rewritten
+    # by anyone who can write the file, silently, and cannot be read by anybody
+    # who is not on that machine. This can be neither.
+    # A signing threshold, for an identity controlled by more than one key.
+    #
+    # An identity may be controlled by more than one key, and at founding there
+    # is usually exactly one — so this is a one-of-one multi-signature identity
+    # rather than a single-key one. The distinction matters because the two are different
+    # KERI identities: a one-of-one can rotate to two-of-three by adding keys and
+    # raising the threshold, and a single-key identity that never declared a
+    # threshold has to be re-founded to become one. Founding one-of-one is what
+    # makes the growth path a rotation rather than a restart.
+    #
+    # Omitted entirely when unset, so every existing caller produces byte-for-byte
+    # the same event it did before — keripy defaults both to 1, and passing "1"
+    # explicitly is NOT the same event as passing nothing.
+    key_list = [k.strip() for k in (keys or []) if k and k.strip()] or [verfer.qb64]
+    ndig_list = [d.strip() for d in (next_keys or []) if d and d.strip()] or [diger.qb64]
+
+    incept_args = {
+        "keys": key_list,
+        "ndigs": ndig_list,
+        "wits": wits,
+        "toad": bt,
+        "data": list(anchors or []),
+        "code": MtrDex.Blake3_256,
+    }
+    if isith is not None:
+        incept_args["isith"] = str(isith)
+    if nsith is not None:
+        incept_args["nsith"] = str(nsith)
+
+    serder = eventing.incept(**incept_args)
 
     return {
         "aid": serder.pre,
@@ -415,6 +441,10 @@ def inception():
             witnesses=data.get("witnesses"),
             toad=data.get("toad"),
             anchors=data.get("anchors"),
+            keys=data.get("keys"),
+            next_keys=data.get("next_keys"),
+            isith=data.get("isith"),
+            nsith=data.get("nsith"),
         )
 
         name = data.get("name", result["aid"])
@@ -452,7 +482,26 @@ def rotation():
 
     if not name:
         return jsonify({"error": "name is required"}), 400
-    if not new_public_key or not new_next_public_key:
+    # A rotation names its new keys one of two ways: a single key, which is the
+    # ordinary case, or a whole SET, which is how an identity comes to be
+    # controlled by several people. Requiring the single form even when a set is
+    # given would make the second impossible.
+    key_set = [k for k in (data.get("keys") or []) if k and str(k).strip()]
+    # DIGESTS, not keys — what a rotation commits to is the digest of each
+    # successor, never the successor itself. Named for what it holds, because
+    # the two are both opaque strings and mistaking one for the other produces
+    # an identity nobody can ever rotate.
+    next_digest_set = [d for d in (data.get("next_key_digests") or []) if d and str(d).strip()]
+    if key_set or next_digest_set:
+        if not key_set or not next_digest_set:
+            return jsonify({"error":
+                "a rotation to a key set needs both keys and next_key_digests — one "
+                "without the other leaves an identity that can never rotate again"}), 400
+        # The first key of the set answers "the" public key for everything
+        # downstream that reports one. The next-key field is left alone: it holds
+        # a public key, and these are digests.
+        new_public_key = new_public_key or key_set[0]
+    elif not new_public_key or not new_next_public_key:
         return jsonify({"error": "new_public_key and new_next_public_key are required"}), 400
 
     identity = _identities.get(name)
@@ -460,11 +509,23 @@ def rotation():
         return jsonify({"error": f"No identity found with name: {name}"}), 404
 
     try:
-        new_pub_bytes = _extract_raw_key(new_public_key)
-        new_next_bytes = _extract_raw_key(new_next_public_key)
+        new_verfer = coring.Verfer(raw=_extract_raw_key(new_public_key), code=MtrDex.Ed25519)
 
-        new_verfer = coring.Verfer(raw=new_pub_bytes, code=MtrDex.Ed25519)
-        new_diger = coring.Diger(raw=new_next_bytes, code=MtrDex.Blake3_256)
+        # The successor is given either as a KEY, which is digested here, or as
+        # a DIGEST already, which is what a rotation to a key set sends — each
+        # owner commits the digest of their own successor and never publishes
+        # the key itself. Digesting a digest would commit to something no
+        # future rotation could ever produce.
+        new_diger = None
+        if new_next_public_key:
+            new_diger = coring.Diger(raw=_extract_raw_key(new_next_public_key),
+                                     code=MtrDex.Blake3_256)
+        elif next_digest_set:
+            new_diger = coring.Diger(qb64=next_digest_set[0])
+        else:
+            return jsonify({"error":
+                "a rotation must commit to a successor, or the identity can never "
+                "rotate again"}), 400
 
         sn = identity["sequence_number"] + 1
         prev_said = identity.get("last_said", "")
@@ -497,21 +558,52 @@ def rotation():
                 f"threshold {bt} exceeds the {len(next_wits)} witnesses that would remain, "
                 "which would leave the identity unable to finalise any event"}), 400
 
-        serder = eventing.rotate(
-            pre=identity["aid"],
-            keys=[new_verfer.qb64],
-            dig=prev_said,
-            ndigs=[new_diger.qb64],
-            sn=sn,
-            wits=current_wits,
-            cuts=cuts,
-            adds=adds,
-            toad=bt if (cuts or adds or next_wits) else None,
-            data=seal_data,
-        )
+        # A rotation may change WHO CONTROLS the identity, not merely which key
+        # it uses. That is what turns an identity controlled by one party into
+        # one controlled by several: the key set grows and the threshold rises,
+        # in a single event, without the identifier changing.
+        #
+        # It is also the only place a threshold can be introduced. An identity
+        # founded by one person is already one-of-one — keripy writes kt:"1"
+        # whether or not anybody asked — so nothing about founding needs to
+        # anticipate this. The growth happens here or nowhere.
+        rotate_keys = list(key_set)
+        rotate_ndigs = list(next_digest_set)
+        isith = data.get("isith")
+        nsith = data.get("nsith")
 
-        identity["public_key"] = new_verfer.qb64
-        identity["next_key_digest"] = new_diger.qb64
+        rotate_args = {
+            "pre": identity["aid"],
+            "keys": rotate_keys or [new_verfer.qb64],
+            "dig": prev_said,
+            "ndigs": rotate_ndigs or [new_diger.qb64],
+            "sn": sn,
+            "wits": current_wits,
+            "cuts": cuts,
+            "adds": adds,
+            "toad": bt if (cuts or adds or next_wits) else None,
+            "data": seal_data,
+        }
+        if isith is not None:
+            rotate_args["isith"] = str(isith)
+        if nsith is not None:
+            rotate_args["nsith"] = str(nsith)
+
+        serder = eventing.rotate(**rotate_args)
+
+        # Recorded from the EVENT, not from the single key that was passed in.
+        # After a rotation to more than one key, "the public key" is the first of
+        # several and the stored state has to say so, or a later rotation builds
+        # its next event from a key set of one and silently drops the others.
+        current_keys = list(serder.ked.get("k") or [new_verfer.qb64])
+        current_ndigs = list(serder.ked.get("n") or [new_diger.qb64])
+
+        identity["public_key"] = current_keys[0]
+        identity["next_key_digest"] = current_ndigs[0] if current_ndigs else ""
+        identity["keys"] = current_keys
+        identity["next_key_digests"] = current_ndigs
+        identity["isith"] = serder.ked.get("kt")
+        identity["nsith"] = serder.ked.get("nt")
         identity["witnesses"] = next_wits
         identity["toad"] = bt
         identity["sequence_number"] = sn
@@ -520,8 +612,12 @@ def rotation():
 
         return jsonify({
             "aid": identity["aid"],
-            "new_public_key": new_verfer.qb64,
-            "new_next_key_digest": new_diger.qb64,
+            "new_public_key": current_keys[0],
+            "new_next_key_digest": current_ndigs[0] if current_ndigs else "",
+            "keys": current_keys,
+            "next_key_digests": current_ndigs,
+            "isith": serder.ked.get("kt"),
+            "nsith": serder.ked.get("nt"),
             "rotation_event": serder.ked,
             "said": serder.said,
             # raw_bytes_b64: sign these with the PRE-ROTATED key (index 1 from mnemonic)
@@ -1932,7 +2028,7 @@ def generate_multisig_event():
             # Next-key digests, not an empty list.
             #
             # An inception with no ndigs commits to no successor keys, so the
-            # identity it creates can never be rotated. For an organisation's
+            # identity it creates can never be rotated. For a root
             # root that is not a limitation, it is a dead end: a signer whose
             # key is compromised could never be replaced, and transferring
             # ownership — which is a rotation, replacing one signer's key with

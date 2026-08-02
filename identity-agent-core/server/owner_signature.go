@@ -13,6 +13,7 @@ import (
 
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/login"
+	"identity-agent-core/store"
 )
 
 // Proving you are the owner when you are not at the keyboard.
@@ -52,40 +53,43 @@ type OwnerAuthority struct {
 
 // ownerAuthority returns who may act as the owner.
 //
-// Sealed authority wins when present: on rented hardware the owner is a
-// different identity from the agent's own. With no sealed record — the ordinary
-// case of an agent running on its owner's machine — the agent's own identity is
-// the authority, so signing works there too with no extra setup.
+// The order is the security property. An identity that named its owner in its
+// own inception event has settled the question permanently, and nothing on disk
+// may disagree with it. Only where there is no such anchor does the sealed
+// record answer — which is the case it was written for, a box provisioned for
+// an owner before it had an identity at all. With neither, an agent running on
+// its owner's own machine is its own authority, so signing works there with no
+// setup.
 func (s *CoreServer) ownerAuthority() (*OwnerAuthority, error) {
-	path := filepath.Join(s.DataDir, ownerAuthorityFile)
-	if raw, err := os.ReadFile(path); err == nil {
-		var oa OwnerAuthority
-		if jerr := json.Unmarshal(raw, &oa); jerr != nil {
-			return nil, fmt.Errorf("owner authority record is unreadable: %w", jerr)
-		}
-		if oa.PublicKey == "" {
-			return nil, fmt.Errorf("owner authority record carries no public key")
-		}
-		return &oa, nil
+	// With no identity of its own, the sealed record is all there is — and that
+	// is precisely the state provisioning writes it in, on a box that has not
+	// been adopted yet.
+	var identity *store.IdentityState
+	if s.DataStore != nil {
+		identity, _ = s.DataStore.GetIdentity()
 	}
-	if s.DataStore == nil {
-		return nil, fmt.Errorf("no owner authority and no identity store")
-	}
-	identity, err := s.DataStore.GetIdentity()
-	if err != nil || identity == nil || identity.PublicKey == "" {
-		return nil, fmt.Errorf("no owner authority is sealed and this agent has no identity yet")
+	if identity == nil || identity.PublicKey == "" {
+		return s.sealedOwnerAuthority()
 	}
 
-	// An organisation names its owner in the event that created it, so the log
-	// answers this before the fallback does. Checked here rather than only at
-	// founding because it is the difference between an identity that answers to
-	// somebody and one that answers to itself — and the fallback below cannot
-	// tell those apart.
+	// THE LOG ANSWERS FIRST, and this ordering is the whole point.
+	//
+	// It used to read the file first and return, so an identity that named its
+	// owner in its own inception event could be overridden by whoever could
+	// write a file next to the database. That is exactly the failure the anchor
+	// was introduced to remove, and leaving the file in front of it meant the
+	// anchor decided nothing: a second signer could still silently replace the
+	// first by re-sealing.
+	//
+	// An identity that named an owner when it was created has settled the
+	// question permanently — the identifier IS the digest of that event, so the
+	// answer cannot be edited, only re-founded. Nothing on disk gets to disagree
+	// with it.
 	if owner, aerr := s.ownerFromOwnIdentity(identity.AID); aerr == nil && owner != "" {
 		key, kerr := s.publicKeyOf(owner)
 		if kerr != nil {
 			// Refused rather than falling through. Falling back here would mean
-			// an organisation whose owner cannot be resolved quietly starts
+			// an identity whose owner cannot be resolved quietly starts
 			// answering to itself, which is the failure this whole design
 			// exists to remove.
 			return nil, fmt.Errorf(
@@ -95,7 +99,34 @@ func (s *CoreServer) ownerAuthority() (*OwnerAuthority, error) {
 		return &OwnerAuthority{AID: owner, PublicKey: key}, nil
 	}
 
+	// No anchor. That is the ordinary case for a person's own agent, and for a
+	// box provisioned for an owner whose identity is delegated rather than
+	// anchored — which is what the sealed file was written for.
+	if sealed, serr := s.sealedOwnerAuthority(); serr == nil {
+		return sealed, nil
+	}
 	return &OwnerAuthority{AID: identity.AID, PublicKey: identity.PublicKey}, nil
+}
+
+// sealedOwnerAuthority reads the owner recorded at provisioning.
+//
+// Kept for the case it was written for: hardware the owner does not physically
+// hold, sealed before the box ever reaches the network, where there is no
+// identity yet to carry an anchor. It is no longer consulted for an identity
+// that names its own owner.
+func (s *CoreServer) sealedOwnerAuthority() (*OwnerAuthority, error) {
+	raw, err := os.ReadFile(filepath.Join(s.DataDir, ownerAuthorityFile))
+	if err != nil {
+		return nil, fmt.Errorf("no owner authority is sealed")
+	}
+	var oa OwnerAuthority
+	if jerr := json.Unmarshal(raw, &oa); jerr != nil {
+		return nil, fmt.Errorf("owner authority record is unreadable: %w", jerr)
+	}
+	if oa.PublicKey == "" {
+		return nil, fmt.Errorf("owner authority record carries no public key")
+	}
+	return &oa, nil
 }
 
 // SealOwnerAuthority fixes who may act as the owner. Provisioning calls this

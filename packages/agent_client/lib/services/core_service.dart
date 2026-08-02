@@ -1554,6 +1554,73 @@ class CoreService {
     throw Exception('Failed to create signer invite: ${response.statusCode}');
   }
 
+  /// Who this identity answers to, read from its own key event log rather than
+  /// from any record beside it — so it is the same answer anybody outside the
+  /// machine would get.
+  Future<IdentityOwners> getOwners() async {
+    final response = await _client.get(Uri.parse('$baseUrl/api/owners/'));
+    if (response.statusCode == 200) {
+      return IdentityOwners.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+    }
+    throw Exception('Failed to read owners: ${response.statusCode}');
+  }
+
+  /// The ceremony in progress, or null. Poll this while codes are on screen:
+  /// each acceptance lands here, and the last one applies the rotation.
+  Future<OwnerCeremony?> getOwnerCeremony() async {
+    final response = await _client.get(Uri.parse('$baseUrl/api/owners/ceremony'));
+    if (response.statusCode != 200) {
+      throw Exception('Failed to read the ceremony: ${response.statusCode}');
+    }
+    final body = jsonDecode(response.body) as Map<String, dynamic>;
+    final ceremony = body['ceremony'];
+    if (ceremony == null) return null;
+    return OwnerCeremony.fromJson(ceremony as Map<String, dynamic>);
+  }
+
+  /// Begin bringing owners in. Returns one invite per person, each with the URL
+  /// that becomes their QR code.
+  ///
+  /// Nothing changes until every one of them has scanned. threshold omitted
+  /// means all of them must sign afterwards.
+  Future<OwnerCeremony> startOwnerCeremony(List<String> invite, {int? threshold}) async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/api/owners/ceremony'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'invite': invite,
+        if (threshold != null) 'threshold': threshold,
+      }),
+    );
+    if (response.statusCode == 200 || response.statusCode == 201) {
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      return OwnerCeremony.fromJson(body['ceremony'] as Map<String, dynamic>);
+    }
+    throw Exception(_readError(response.body) ?? 'Failed to start the ceremony: ${response.statusCode}');
+  }
+
+  /// Abandon a ceremony that is not going to finish. Kept on record rather than
+  /// deleted, so somebody who already accepted can be shown what happened.
+  Future<void> abandonOwnerCeremony() async {
+    final response = await _client.delete(Uri.parse('$baseUrl/api/owners/ceremony'));
+    if (response.statusCode != 200) {
+      throw Exception('Failed to abandon the ceremony: ${response.statusCode}');
+    }
+  }
+
+  String? _readError(String body) {
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map<String, dynamic>) {
+        final detail = decoded['details'] ?? decoded['detail'];
+        final error = decoded['error'];
+        if (detail != null) return '$error — $detail';
+        if (error != null) return '$error';
+      }
+    } catch (_) {}
+    return null;
+  }
+
   /// The org roster. Each entry: {pairwise_aid, name, role, status, ...}.
   Future<List<Map<String, dynamic>>> listEmployees() async {
     final response = await _client.get(Uri.parse('$baseUrl/api/employees/'));
@@ -2455,4 +2522,102 @@ class AssetMember {
     joinedAt: json['joined_at'] as String? ?? '',
     inviteToken: json['invite_token'] as String? ?? '',
   );
+}
+
+/// Who an identity answers to, as its own key event log says.
+class IdentityOwners {
+  final String aid;
+  final List<String> owners;
+
+  const IdentityOwners({required this.aid, this.owners = const []});
+
+  factory IdentityOwners.fromJson(Map<String, dynamic> json) => IdentityOwners(
+        aid: json['aid'] ?? '',
+        owners: ((json['owners'] as List<dynamic>?) ?? const [])
+            .map((o) => o.toString())
+            .toList(),
+      );
+}
+
+/// One attempt to change who controls an identity.
+///
+/// The identity keeps working throughout. Nothing changes until every
+/// invited owner has accepted — a half-applied ownership change would leave
+/// some people believing they own something they do not.
+class OwnerCeremony {
+  final String id;
+  final int threshold;
+  final List<CeremonyInvitee> invited;
+
+  /// collecting · applied · failed · abandoned
+  final String status;
+
+  /// Why it failed, in words somebody can act on. A ceremony that failed and
+  /// does not say why leaves everyone unsure whether control actually
+  /// changed.
+  final String detail;
+
+  /// The rotation that made it real, so this and the key log can be reconciled.
+  final String rotationSaid;
+
+  const OwnerCeremony({
+    required this.id,
+    this.threshold = 0,
+    this.invited = const [],
+    this.status = '',
+    this.detail = '',
+    this.rotationSaid = '',
+  });
+
+  bool get isCollecting => status == 'collecting';
+  bool get isApplied => status == 'applied';
+  bool get hasFailed => status == 'failed';
+
+  /// Who has not scanned yet.
+  List<CeremonyInvitee> get outstanding =>
+      invited.where((i) => !i.accepted).toList();
+
+  factory OwnerCeremony.fromJson(Map<String, dynamic> json) => OwnerCeremony(
+        id: json['id'] ?? '',
+        threshold: json['threshold'] ?? 0,
+        invited: ((json['invited'] as List<dynamic>?) ?? const [])
+            .map((i) => CeremonyInvitee.fromJson(i as Map<String, dynamic>))
+            .toList(),
+        status: json['status'] ?? '',
+        detail: json['detail'] ?? '',
+        rotationSaid: json['rotation_said'] ?? '',
+      );
+}
+
+/// One person being brought in as an owner.
+class CeremonyInvitee {
+  final String name;
+
+  /// What becomes their QR code. One each — a shared code could be scanned
+  /// twice by the same person and leave a place at the table unfilled.
+  final String inviteUrl;
+
+  /// Filled in when they accept, from their own device. No key material ever
+  /// crosses the wire; these are public halves.
+  final String pairwiseAid;
+  final String publicKey;
+  final String acceptedAt;
+
+  const CeremonyInvitee({
+    this.name = '',
+    this.inviteUrl = '',
+    this.pairwiseAid = '',
+    this.publicKey = '',
+    this.acceptedAt = '',
+  });
+
+  bool get accepted => pairwiseAid.isNotEmpty && publicKey.isNotEmpty;
+
+  factory CeremonyInvitee.fromJson(Map<String, dynamic> json) => CeremonyInvitee(
+        name: json['name'] ?? '',
+        inviteUrl: json['invite_url'] ?? '',
+        pairwiseAid: json['pairwise_aid'] ?? '',
+        publicKey: json['public_key'] ?? '',
+        acceptedAt: json['accepted_at'] ?? '',
+      );
 }

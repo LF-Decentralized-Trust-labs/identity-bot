@@ -630,6 +630,28 @@ CREATE TABLE IF NOT EXISTS notifications (
 CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(status, received_at);
 CREATE INDEX IF NOT EXISTS idx_notifications_from ON notifications(from_aid);
 `},
+	{
+		Version:     26,
+		Description: "Record where an identity's keys were derived from, so it can rotate at all",
+		SQL: `
+-- Without these an identity created from a derived seed cannot ROTATE. A
+-- rotation must carry the key the previous event committed to, and that key
+-- comes from the root seed at a particular index — so an agent that recorded
+-- the AID and forgot the index has an identity whose keys it can never change.
+--
+-- derivation_index is the branch; key_generation is how far along it the
+-- identity is. Inception is generation 0: current key at key-index 0, committed
+-- successor at 1. Each rotation advances both by one.
+ALTER TABLE identity ADD COLUMN derivation_index INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE identity ADD COLUMN key_generation INTEGER NOT NULL DEFAULT 0;
+
+-- Collapse the table to its oldest row, which is the one every read has been
+-- returning. The table has no primary key, so every SaveIdentity inserted
+-- instead of updating and the later rows were never read by anything. Keeping
+-- them would mean the row writes now pin to is not the row reads returned.
+DELETE FROM identity WHERE rowid NOT IN (SELECT MIN(rowid) FROM identity);
+UPDATE identity SET rowid = 1 WHERE rowid = (SELECT MIN(rowid) FROM identity);
+`},
 }
 
 // ApplyIdentityMigrations creates the migrations table and applies any pending migrations.
