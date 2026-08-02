@@ -18,9 +18,9 @@ import (
 // used it, cleared the seed from memory and recorded the resulting identifier,
 // but never recorded WHERE the key came from. So the identity existed, worked,
 // and could never rotate: the one key a rotation had to include was a
-// derivation nobody could repeat. An organisation founded that way could not
-// take on a co-owner, change hands, or replace a compromised key — permanently,
-// and with no error until somebody tried.
+// derivation nobody could repeat. An identity founded that way could not take
+// on a co-owner, change hands, or replace a compromised key — permanently, and
+// with no error until somebody tried.
 
 // rotationKeys are the two public halves a rotation needs.
 type rotationKeys struct {

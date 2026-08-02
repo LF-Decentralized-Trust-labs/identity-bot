@@ -4,21 +4,26 @@ import (
 	"fmt"
 )
 
-// Who owns an organisation NOW, rather than who founded it.
+// Who an identity answers to NOW, rather than who it answered to at inception.
 //
-// The inception event names one owner and cannot name more: an organisation is
-// founded by somebody, singular, and there is no moment at which it exists
-// unowned. That much is settled and is what makes the identifier itself carry
-// its ownership.
+// An identity that has an owner names exactly one in the event that creates it,
+// and cannot name more: something is brought into being by somebody, singular,
+// and there is no moment at which it exists unowned. That much is settled, and
+// it is what makes the identifier itself carry its ownership.
 //
-// But a company outliving the arrangement it was founded under is the ordinary
-// life of a company. Owners are added, they leave, they are bought out. So the
-// set changes, and it changes by ROTATION — an event in the same log, appended
-// in order, visible to anyone reading it.
+// But the arrangement an identity was created under is not the arrangement it
+// keeps. Parties are added, they leave, they are bought out, or control is
+// deliberately spread so that no one person holds it alone. So the set changes,
+// and it changes by ROTATION — an event in the same log, appended in order,
+// visible to anyone reading it.
 //
-// The rule that keeps this from reintroducing the problem the anchor solved:
+// Nothing here is specific to any kind of identity. An organisation taking on a
+// co-owner and a person spreading control of their own identity across several
+// keys are the same operation, and this reads both.
 //
-//	an organisation founded WITHOUT an owner can never acquire one.
+// The rule that keeps it from reintroducing the problem the anchor solved:
+//
+//	an identity founded WITHOUT an owner can never acquire one.
 //
 // A later event may reorganise a set that exists. It may not conjure one where
 // there was none, because that is precisely the silent claim of ownership the
@@ -37,8 +42,8 @@ func ownersFromKEL(kel []map[string]interface{}) ([]string, error) {
 	}
 	if founder == "" {
 		// Unowned at inception. Nothing later can change that, and this is also
-		// the ordinary answer for a person's own agent, whose identity is
-		// delegated and needs no separate anchor.
+		// the ordinary answer for an identity that needs no separate anchor
+		// because its inception already names a delegator.
 		return nil, nil
 	}
 
@@ -62,10 +67,10 @@ func ownersFromKEL(kel []map[string]interface{}) ([]string, error) {
 // ownerSetFromEvent reads an owner anchor out of one event.
 //
 // found distinguishes "this event changed the owners" from "this event set them
-// to nobody", which are different statements and must not collapse. An
-// organisation cannot rotate itself to having no owners — that would be an
-// organisation answering to itself, which is the state this whole mechanism
-// exists to make unreachable.
+// to nobody", which are different statements and must not collapse. An identity
+// cannot rotate itself to having no owners — that would leave it answering only
+// to itself, which is the state this whole mechanism exists to make
+// unreachable.
 func ownerSetFromEvent(event map[string]interface{}) (owners []string, found bool, err error) {
 	seals, ok := event["a"].([]interface{})
 	if !ok {

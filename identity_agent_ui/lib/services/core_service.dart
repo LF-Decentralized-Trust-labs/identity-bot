@@ -741,13 +741,13 @@ class CoreService {
     }
   }
 
-  /// Who owns this organisation, read from its own key event log rather than
+  /// Who this identity answers to, read from its own key event log rather than
   /// from any record beside it — so it is the same answer anybody outside the
   /// machine would get.
-  Future<OrgOwners> getOwners() async {
+  Future<IdentityOwners> getOwners() async {
     final response = await _client.get(Uri.parse('$baseUrl/api/owners/'));
     if (response.statusCode == 200) {
-      return OrgOwners.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+      return IdentityOwners.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
     }
     throw Exception('Failed to read owners: ${response.statusCode}');
   }
@@ -1836,14 +1836,14 @@ class ServiceProvidersListResponse {
   }
 }
 
-/// Who owns an organisation, as its own key event log says.
-class OrgOwners {
+/// Who an identity answers to, as its own key event log says.
+class IdentityOwners {
   final String aid;
   final List<String> owners;
 
-  const OrgOwners({required this.aid, this.owners = const []});
+  const IdentityOwners({required this.aid, this.owners = const []});
 
-  factory OrgOwners.fromJson(Map<String, dynamic> json) => OrgOwners(
+  factory IdentityOwners.fromJson(Map<String, dynamic> json) => IdentityOwners(
         aid: json['aid'] ?? '',
         owners: ((json['owners'] as List<dynamic>?) ?? const [])
             .map((o) => o.toString())
@@ -1851,9 +1851,9 @@ class OrgOwners {
       );
 }
 
-/// One attempt to change who owns an organisation.
+/// One attempt to change who controls an identity.
 ///
-/// The organisation keeps working throughout. Nothing changes until every
+/// The identity keeps working throughout. Nothing changes until every
 /// invited owner has accepted — a half-applied ownership change would leave
 /// some people believing they own something they do not.
 class OwnerCeremony {
@@ -1865,7 +1865,7 @@ class OwnerCeremony {
   final String status;
 
   /// Why it failed, in words somebody can act on. A ceremony that failed and
-  /// does not say why leaves an organisation unsure whether its ownership
+  /// does not say why leaves everyone unsure whether control actually
   /// changed.
   final String detail;
 

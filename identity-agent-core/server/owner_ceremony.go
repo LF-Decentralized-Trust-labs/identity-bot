@@ -9,20 +9,25 @@ import (
 	"time"
 )
 
-// Adding an owner to an organisation.
+// Spreading control of an identity across more than one party.
 //
-// The organisation exists and is working throughout. What changes is who
-// controls it: its key set grows, its threshold rises, and its owner seals are
-// rewritten — in one rotation, keeping the identifier. An organisation that
-// changed identifier when it took on a partner would lose every relationship it
-// had, which is the thing the whole ownership design exists to prevent.
+// The identity exists and works throughout. What changes is who controls it:
+// the key set grows, the threshold rises, and the owner seals are rewritten —
+// in one rotation, keeping the identifier. An identity that changed identifier
+// when control moved would lose every relationship it had, which is the thing
+// the whole ownership design exists to prevent.
 //
-// It is deliberately NOT part of founding. One person creates an organisation
-// and it works immediately; taking on co-owners is a separate, later, unhurried
-// step. A ceremony that had to complete before the organisation could do
-// anything would make founding wait on everybody's diary.
+// The obvious case is an organisation taking on a co-owner. It is not the only
+// one: a person spreading control of their own identity so that recovery does
+// not depend on a single key is the same operation, and so is handing an
+// identity over entirely. Nothing here knows which it is doing.
 //
-// NO KEY MATERIAL CROSSES THE WIRE. Each incoming owner's agent derives a key
+// It is deliberately NOT part of founding. One party creates an identity and it
+// works immediately; bringing others in is a separate, later, unhurried step. A
+// ceremony that had to complete first would make founding wait on everybody's
+// diary.
+//
+// NO KEY MATERIAL CROSSES THE WIRE. Each incoming party's agent derives a key
 // on their own device and sends the public half. What this collects is a list of
 // public keys and a number.
 
@@ -34,7 +39,7 @@ const (
 	ceremonyAbandoned  = "abandoned"
 )
 
-// OwnerCeremony is one attempt to change who owns an organisation.
+// OwnerCeremony is one attempt to change who controls an identity.
 type OwnerCeremony struct {
 	ID string `json:"id"`
 	// Threshold is how many of the resulting owners must sign afterwards.
@@ -49,14 +54,14 @@ type OwnerCeremony struct {
 	// the pre-rotated key and its successor.
 	OrgPublicKey     string `json:"org_public_key,omitempty"`
 	OrgNextPublicKey string `json:"org_next_public_key,omitempty"`
-	// Invited is one entry per person being brought in, in the order the
-	// organisation named them, so a half-finished ceremony can say who is still
-	// missing rather than only how many.
+	// Invited is one entry per party being brought in, in the order they were
+	// named, so a half-finished ceremony can say who is still missing rather
+	// than only how many.
 	Invited []CeremonyInvitee `json:"invited"`
 	Status  string            `json:"status"`
 	// Detail explains a failure in words somebody can act on. A ceremony that
-	// failed and does not say why leaves an organisation unsure whether its
-	// ownership changed.
+	// failed and does not say why leaves everyone unsure whether control
+	// actually changed.
 	Detail    string    `json:"detail,omitempty"`
 	StartedAt time.Time `json:"started_at"`
 	AppliedAt time.Time `json:"applied_at,omitempty"`
@@ -65,7 +70,7 @@ type OwnerCeremony struct {
 	RotationSAID string `json:"rotation_said,omitempty"`
 }
 
-// CeremonyInvitee is one person being made an owner.
+// CeremonyInvitee is one party being made an owner.
 type CeremonyInvitee struct {
 	Name string `json:"name"`
 	// Token is the invite they redeem, and InviteURL is what becomes their QR
@@ -77,8 +82,8 @@ type CeremonyInvitee struct {
 	// Filled in when they accept, from their own device. Both halves are
 	// public: the key they will sign with, and the one they commit to rotating
 	// into. A key set that commits to no successors can never rotate again, so
-	// an organisation that took on owners without collecting these would have
-	// made its last ownership change without knowing it.
+	// an identity that took on owners without collecting these would have made
+	// its last ownership change without knowing it.
 	PairwiseAID   string    `json:"pairwise_aid,omitempty"`
 	PublicKey     string    `json:"public_key,omitempty"`
 	NextPublicKey string    `json:"next_public_key,omitempty"`
@@ -160,7 +165,7 @@ func (s *CoreServer) saveCeremony(c *OwnerCeremony) error {
 //
 // Returns the ceremony when this acceptance completed it, so the caller knows
 // to rotate. Returns nil when the token belongs to no ceremony, which is the
-// ordinary case for a founding-signer invite and is not an error.
+// ordinary case for an invite that is not part of one and is not an error.
 func (s *CoreServer) recordAcceptance(token, pairwiseAID, publicKey, nextPublicKey string) (*OwnerCeremony, bool, error) {
 	ceremonyMu.Lock()
 	defer ceremonyMu.Unlock()

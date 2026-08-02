@@ -6,11 +6,15 @@ import 'package:qr_flutter/qr_flutter.dart';
 import '../services/core_service.dart';
 import '../theme/app_theme.dart';
 
-/// Who owns this organisation, and bringing somebody else in.
+/// Who this identity answers to, and bringing somebody else in.
 ///
 /// The whole ceremony happens with everybody in the room. Each incoming owner
 /// gets their own code, scans it from their own device, and their agent sends
 /// back a public key — no key material ever crosses the screen or the wire.
+///
+/// Nothing here is specific to one kind of identity. An organisation taking on
+/// a co-owner and a person spreading control of their own identity so recovery
+/// does not rest on a single key are the same operation.
 ///
 /// The screen's one job is to make the waiting legible. An ownership change
 /// takes as long as the slowest person's phone, and during that time it must be
@@ -26,7 +30,7 @@ class OwnersScreen extends StatefulWidget {
 }
 
 class _OwnersScreenState extends State<OwnersScreen> {
-  OrgOwners? _owners;
+  IdentityOwners? _owners;
   OwnerCeremony? _ceremony;
   String _error = '';
   bool _loading = true;
@@ -142,8 +146,8 @@ class _OwnersScreenState extends State<OwnersScreen> {
     return _card(
       title: 'Owners',
       subtitle: owners.length == 1
-          ? 'One person owns this organisation.'
-          : '${owners.length} people own this organisation.',
+          ? 'One party controls this identity.'
+          : '${owners.length} parties control this identity.',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -163,7 +167,7 @@ class _OwnersScreenState extends State<OwnersScreen> {
             ),
           const SizedBox(height: 4),
           const Text(
-            'Read from this organisation’s own key event log, so it is the same '
+            'Read from this identity’s own key event log, so it is the same '
             'answer anybody outside this machine would get.',
             style: TextStyle(color: AppColors.textMuted, fontSize: 11, height: 1.4),
           ),
@@ -175,7 +179,7 @@ class _OwnersScreenState extends State<OwnersScreen> {
   Widget _startCard() => _card(
         title: 'Bring somebody in',
         subtitle:
-            'The organisation keeps working throughout. Nothing changes until everybody '
+            'The identity keeps working throughout. Nothing changes until everybody '
             'invited has scanned their code.',
         child: _InviteForm(busy: _busy, onStart: _start),
       );
@@ -215,7 +219,7 @@ class _OwnersScreenState extends State<OwnersScreen> {
             : ceremony.detail,
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           const Text(
-            'Ownership is unchanged. Everybody who scanned will need to scan again.',
+            'Control is unchanged. Everybody who scanned will need to scan again.',
             style: TextStyle(color: AppColors.textSecondary, fontSize: 12, height: 1.4),
           ),
           const SizedBox(height: 12),

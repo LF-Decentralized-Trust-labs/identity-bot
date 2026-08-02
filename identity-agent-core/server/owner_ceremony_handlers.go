@@ -25,7 +25,7 @@ func (s *CoreServer) mountOwnerCeremonyRoutes(r chi.Router) {
 	})
 }
 
-// handleListOwners reports who owns this organisation, read from its own log.
+// handleListOwners reports who this identity answers to, read from its own log.
 func (s *CoreServer) handleListOwners(w http.ResponseWriter, r *http.Request) {
 	identity, err := s.DataStore.GetIdentity()
 	if err != nil || identity == nil {
@@ -64,7 +64,7 @@ func (s *CoreServer) handleGetCeremony(w http.ResponseWriter, r *http.Request) {
 // handleStartCeremony begins bringing new owners in.
 //
 // It mints one invite per person, each carrying the same signed offer the
-// founding-signer flow already uses — so what the organisation renders is the
+// founding-signer flow already uses — so what the agent renders is the
 // QR code that machinery already produces, and an incoming owner's agent
 // follows a path it already knows how to walk.
 func (s *CoreServer) handleStartCeremony(w http.ResponseWriter, r *http.Request) {
@@ -76,10 +76,10 @@ func (s *CoreServer) handleStartCeremony(w http.ResponseWriter, r *http.Request)
 		// Threshold is how many owners must sign afterwards. Omitted means
 		// everybody, which is the safe reading of an unstated intention.
 		Threshold int `json:"threshold"`
-		// The organisation's own rotation keys, from the device that holds its
-		// seed. Required, because a rotation must carry a key the previous event
-		// committed to — the organisation cannot be rotated by anybody who
-		// cannot produce it.
+		// The identity's own rotation keys, from the device that holds its seed.
+		// Required, because a rotation must carry a key the previous event
+		// committed to — an identity cannot be rotated by anybody who cannot
+		// produce it.
 		OrgPublicKey     string `json:"org_public_key"`
 		OrgNextPublicKey string `json:"org_next_public_key"`
 	}
@@ -103,7 +103,7 @@ func (s *CoreServer) handleStartCeremony(w http.ResponseWriter, r *http.Request)
 	identity, err := s.DataStore.GetIdentity()
 	if err != nil || identity == nil {
 		writeError(w, http.StatusConflict, "No identity",
-			"an organisation must exist before its ownership can change")
+			"an identity must exist before who controls it can change")
 		return
 	}
 	existing, err := s.ownersOfOwnIdentity(identity.AID)
@@ -117,7 +117,7 @@ func (s *CoreServer) handleStartCeremony(w http.ResponseWriter, r *http.Request)
 		// ceremony that appeared to work here would be promising the
 		// impossible.
 		writeError(w, http.StatusConflict, "This identity has no owners",
-			"only an organisation founded with an owner can change who owns it")
+			"only an identity founded with an owner can change who owns it")
 		return
 	}
 
@@ -145,9 +145,9 @@ func (s *CoreServer) handleStartCeremony(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// The organisation's own rotation keys. Supplied by the caller when the seed
+	// The identity's own rotation keys. Supplied by the caller when the seed
 	// lives on their device; derived here when it lives on this one, which is
-	// the case for an organisation running on hardware it does not own.
+	// the case for an identity running on hardware it does not own.
 	//
 	// Derived rather than remembered: only the DIGEST of the committed key is in
 	// the log, so the key itself has to be produced again from the index the
@@ -159,7 +159,7 @@ func (s *CoreServer) handleStartCeremony(w http.ResponseWriter, r *http.Request)
 	if orgPublic == "" || orgNext == "" {
 		keys, kerr := s.ownRotationKeys()
 		if kerr != nil {
-			writeError(w, http.StatusConflict, "This organisation cannot rotate its own key", kerr.Error())
+			writeError(w, http.StatusConflict, "This identity cannot rotate its own key", kerr.Error())
 			return
 		}
 		orgPublic, orgNext = keys.Current, keys.Next
@@ -212,7 +212,7 @@ func (s *CoreServer) handleAbandonCeremony(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	c.Status = ceremonyAbandoned
-	c.Detail = "abandoned by the organisation before it completed"
+	c.Detail = "abandoned before it completed"
 	if err := s.saveCeremony(c); err != nil {
 		writeError(w, http.StatusInternalServerError, "Could not record it", err.Error())
 		return
@@ -261,12 +261,12 @@ func (s *CoreServer) mintOwnerInvite(r *http.Request, name string) (token, url s
 	return inv.Token, fmt.Sprintf("%s/i/%s", publicURL, askToken), nil
 }
 
-// completeCeremonyIfReady rotates the organisation once everybody has accepted.
+// completeCeremonyIfReady rotates the identity once everybody has accepted.
 //
 // Called from the redemption path, so the last person to scan their code is the
 // one whose acceptance completes it. Nobody has to remember to come back and
 // press a button, and there is no window in which every owner has agreed and
-// the organisation has not changed.
+// nothing has changed.
 func (s *CoreServer) completeCeremonyIfReady(c *OwnerCeremony) {
 	identity, err := s.DataStore.GetIdentity()
 	if err != nil || identity == nil {
@@ -293,7 +293,7 @@ func (s *CoreServer) completeCeremonyIfReady(c *OwnerCeremony) {
 	}
 	// The keys the identity will be controlled by afterwards.
 	//
-	// The organisation's own PRE-ROTATED key leads, because a rotation has to
+	// The identity's own PRE-ROTATED key leads, because a rotation has to
 	// carry a key the previous event committed to — without it no verifier would
 	// accept the event, whatever else it said. The incoming owners' keys join
 	// it, which is what a verifier does accept: the prior commitment is
