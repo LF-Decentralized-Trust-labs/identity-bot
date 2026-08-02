@@ -35,28 +35,59 @@ type ProxyRoute struct {
 	TargetHost string
 	TargetPort int
 
-	// ProxyToken authenticates this caller on the proxy, presented as
-	// Proxy-Authorization: Bearer <token>.
+	// ProxyToken is a CONNECTION HANDLE, not an authority.
 	//
-	// Source-address matching cannot tell two callers apart when they share
-	// an egress address — which is the normal case for guests behind
-	// user-mode networking, where every guest's traffic leaves through the
-	// one hypervisor process. Without a token, several callers are one
-	// caller as far as this proxy can see, and a credential scoped to one of
-	// them is available to all of them.
+	// It answers one question — "which registered caller is on the other end of
+	// this connection" — and nothing else. It grants nothing by existing, and it
+	// is not the caller's identity: it is a lookup key for the identity below.
 	//
-	// Empty means this route can only ever be matched by address, and
-	// therefore never receives an injected credential — see identifyCaller.
+	// It has to be a bearer value rather than a signature or a credential
+	// presentation because of what travels this path. The forward proxy carries
+	// traffic from tools that know nothing about this system — git, curl, package
+	// managers — reached only by setting HTTPS_PROXY. Such a tool cannot sign a
+	// request or present a credential; the single thing it will reliably send is
+	// a proxy-auth header. The capability-invocation path has no such constraint
+	// and does not use this: a caller there presents a delegated AID, a verified
+	// capability-grant credential, and optionally a signed request envelope.
+	//
+	// So the weaker mechanism is confined to the weaker transport, and it is
+	// bound to the stronger identity by CallerAID and GrantSAID below rather than
+	// standing in for one.
+	//
+	// Why it is needed at all: source-address matching cannot tell two callers
+	// apart when they share an egress address, which is the normal case for
+	// guests behind user-mode networking — every guest's traffic leaves through
+	// one hypervisor process. Without a handle, several callers are one caller as
+	// far as this proxy can see.
+	//
+	// Empty means this route can only ever be matched by address, and therefore
+	// never receives an injected credential — see identifyCaller.
 	ProxyToken string
+
+	// CallerAID is the delegated AID this connection belongs to, and GrantSAID
+	// the capability-grant credential that authority was derived from — the same
+	// two values the capability-invocation path records.
+	//
+	// They are carried here so that a request arriving over this transport is
+	// attributed to the same identity as one arriving over the other, rather than
+	// to a token that means nothing outside this process. A token is how the
+	// connection is recognised; these are who it is.
+	CallerAID string
+	GrantSAID string
 
 	// CredentialServices names the stored credentials this caller may have
 	// injected. Empty means none.
 	//
-	// Deliberately not "all": a caller that has not been granted a
-	// credential should not receive one because nobody thought to restrict
-	// it. The vault already matches by destination host; this narrows the
-	// other half of the question — WHO is asking — which host matching
-	// cannot answer at all.
+	// Deliberately not "all": a caller that has not been granted a credential
+	// should not receive one because nobody thought to restrict it. The vault
+	// already matches by destination host; this narrows the other half of the
+	// question — WHO is asking — which host matching cannot answer at all.
+	//
+	// Set by whoever registers the route. It SHOULD be derived from the caller's
+	// verified capability grant rather than configured beside it, so that one
+	// credential decision does not live in two places and drift. That derivation
+	// is not built yet; until it is, a route is only as narrow as its registrar
+	// made it.
 	CredentialServices []string
 }
 
@@ -373,6 +404,20 @@ func (pm *ProxyManager) applyCredentialsFor(outReq *http.Request, appID, instanc
 	}
 	if !pm.injectCredsScoped(outReq, route.CredentialServices) {
 		return
+	}
+	// Record WHO, not just that something happened. Attributing a credential use
+	// to a proxy token would name a value that means nothing outside this
+	// process; the delegated AID and the grant it came from are the same
+	// identifiers the capability path records, so one reader can follow a caller
+	// across both transports.
+	if pm.tracer != nil && pm.tracer.IsEnabled() && route.CallerAID != "" {
+		pm.tracer.Emit("proxy", "credential_caller", "egress", appID, instanceID,
+			fmt.Sprintf("Credential used by %s for %s", route.CallerAID, outReq.URL.Hostname()),
+			map[string]interface{}{
+				"caller_aid": route.CallerAID,
+				"grant_said": route.GrantSAID,
+				"host":       outReq.URL.Hostname(),
+			})
 	}
 	if pm.tracer != nil && pm.tracer.IsEnabled() {
 		pm.tracer.Emit("proxy", "credential_injected", "egress", appID, instanceID,

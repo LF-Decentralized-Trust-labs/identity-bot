@@ -139,3 +139,46 @@ func TestEmptyServiceListInjectsNothing(t *testing.T) {
 		t.Fatal("an empty service list must inject nothing")
 	}
 }
+
+func TestTheTokenIsAHandleAndTheAIDIsTheIdentity(t *testing.T) {
+	// The token recognises a connection; it is not who the caller is. A route
+	// carries the same delegated AID and grant the capability path records, so a
+	// reader can follow one caller across both transports rather than seeing an
+	// opaque value on one side and an identity on the other.
+	pm := provenProxy(injector("api.example.com", "Authorization", "Bearer secret", nil),
+		ProxyRoute{
+			InstanceID: "inst-1", ProxyToken: "tok-1",
+			CallerAID: "EAgentDelegatedAID", GrantSAID: "EGrantSAID",
+			CredentialServices: []string{"svc"},
+		})
+
+	r := httptest.NewRequest(http.MethodGet, "https://api.example.com/x", nil)
+	r.Header.Set("Proxy-Authorization", "Bearer tok-1")
+	route, how := pm.identifyCaller(r)
+	if how != callerProven {
+		t.Fatalf("a matching token should prove the connection, got %v", how)
+	}
+	if route.CallerAID != "EAgentDelegatedAID" || route.GrantSAID != "EGrantSAID" {
+		t.Fatalf("the route must carry the delegated identity, got %+v", route)
+	}
+}
+
+func TestATokenAloneGrantsNothing(t *testing.T) {
+	// Presenting a valid token is recognition, not authority. Without a grant the
+	// caller gets nothing — which is what stops the token being mistaken for a
+	// credential in its own right.
+	calls := 0
+	pm := provenProxy(injector("api.example.com", "Authorization", "Bearer secret", &calls),
+		ProxyRoute{InstanceID: "inst-1", ProxyToken: "tok-1",
+			CallerAID: "EAgentDelegatedAID"}) // recognised, granted nothing
+
+	r := httptest.NewRequest(http.MethodGet, "https://api.example.com/x", nil)
+	r.Header.Set("Proxy-Authorization", "Bearer tok-1")
+	route, how := pm.identifyCaller(r)
+
+	out := httptest.NewRequest(http.MethodGet, "https://api.example.com/x", nil)
+	pm.applyCredentialsFor(out, "app", "inst-1", route, how)
+	if out.Header.Get("Authorization") != "" || calls != 0 {
+		t.Fatal("a token with no grant must yield no credential")
+	}
+}
