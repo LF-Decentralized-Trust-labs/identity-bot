@@ -6,11 +6,11 @@ import (
 
 // Collecting owners before changing anything.
 //
-// The ceremony exists so that taking on co-owners is a separate, unhurried step
-// from founding: one person creates an organisation, it works immediately, and
-// partners join later. Nothing changes until everybody invited has accepted,
-// because a half-applied ownership change is worse than none — some people
-// believing they own something they do not.
+// The ceremony exists so that bringing others in is a separate, unhurried step
+// from founding: one party creates an identity, it works immediately, and others
+// join later. Nothing changes until everybody invited has accepted, because a
+// half-applied ownership change is worse than none — some people believing they
+// control something they do not.
 
 func ceremonyServer(t *testing.T) *CoreServer {
 	t.Helper()
@@ -20,7 +20,7 @@ func ceremonyServer(t *testing.T) *CoreServer {
 func collecting(names ...string) *OwnerCeremony {
 	c := &OwnerCeremony{
 		ID: "ceremony-1", Threshold: len(names) + 1, Status: ceremonyCollecting,
-		OrgPublicKey: "DORG-PRE-ROTATED", OrgNextPublicKey: "DORG-NEXT",
+		OwnPublicKey: "DOWN-PRE-ROTATED", OwnNextPublicKey: "DOWN-NEXT",
 	}
 	for i, n := range names {
 		c.Invited = append(c.Invited, CeremonyInvitee{
@@ -83,7 +83,7 @@ func TestScanningTwiceDoesNotReplaceTheKeyAlreadyGiven(t *testing.T) {
 }
 
 // An invite that belongs to no ceremony is the ordinary founding-signer case.
-// It must fall through rather than error, or founding an organisation breaks.
+// It must fall through rather than error, or founding breaks.
 func TestATokenFromNoCeremonyFallsThrough(t *testing.T) {
 	s := ceremonyServer(t)
 
@@ -98,8 +98,8 @@ func TestATokenFromNoCeremonyFallsThrough(t *testing.T) {
 
 // Somebody who accepted has committed both halves: the key they will sign with
 // and the one they will rotate into. Without the second, the resulting key set
-// commits to no successors and the organisation could never change ownership
-// again — its last change made without anybody realising.
+// commits to no successors and the identity could never change ownership again
+// — its last change made without anybody realising.
 func TestAnOwnerWhoCommitsNoSuccessorHasNotAccepted(t *testing.T) {
 	partial := CeremonyInvitee{Name: "Ada", PairwiseAID: "EADA", PublicKey: "DADA"}
 	if partial.Accepted() {
@@ -112,9 +112,9 @@ func TestAnOwnerWhoCommitsNoSuccessorHasNotAccepted(t *testing.T) {
 	}
 }
 
-// A ceremony that failed and does not say why leaves an organisation unsure
-// whether its ownership changed, which is the worst of the three states it
-// could be in.
+// A ceremony that failed and does not say why leaves everyone unsure whether
+// control actually changed, which is the worst of the three states it could be
+// in.
 func TestAFailedCeremonyRecordsWhy(t *testing.T) {
 	s := ceremonyServer(t)
 	ceremonyMu.Lock()

@@ -18,8 +18,8 @@ func rotWithOwners(owners ...string) map[string]interface{} {
 	return map[string]interface{}{"t": "rot", "a": seals}
 }
 
-// A company outliving the arrangement it was founded under is the ordinary life
-// of a company, so the set has to be able to change.
+// An identity outliving the arrangement it was created under is ordinary, so the
+// set has to be able to change.
 func TestOwnersCanBeAddedByRotation(t *testing.T) {
 	owners, err := ownersFromKEL([]map[string]interface{}{
 		icpWithOwner("EFOUNDER"),
@@ -49,9 +49,9 @@ func TestAnOwnerCanBeRemovedByRotation(t *testing.T) {
 	}
 }
 
-// THE RULE THAT KEEPS THIS SAFE. An organisation founded without an owner can
-// never acquire one, because that is exactly the silent claim of ownership the
-// anchor exists to make impossible. Founded unowned means unowned forever.
+// THE RULE THAT KEEPS THIS SAFE. An identity founded without an owner can never
+// acquire one, because that is exactly the silent claim of ownership the anchor
+// exists to make impossible. Founded unowned means unowned forever.
 func TestAnUnownedIdentityCannotAcquireAnOwnerLater(t *testing.T) {
 	owners, err := ownersFromKEL([]map[string]interface{}{
 		icpWithOwner(""),
@@ -65,16 +65,16 @@ func TestAnUnownedIdentityCannotAcquireAnOwnerLater(t *testing.T) {
 	}
 }
 
-// An organisation answering to nobody is the state this whole mechanism exists
-// to make unreachable, so it must not be reachable by rotating to an empty set
+// An identity answering to nobody is the state this whole mechanism exists to
+// make unreachable, so it must not be reachable by rotating to an empty set
 // either.
-func TestAnOrganisationCannotRotateItselfToHavingNoOwners(t *testing.T) {
+func TestAnIdentityCannotRotateItselfToHavingNoOwners(t *testing.T) {
 	_, err := ownersFromKEL([]map[string]interface{}{
 		icpWithOwner("EFOUNDER"),
 		{"t": "rot", "a": []interface{}{map[string]interface{}{"r": "owner"}}},
 	})
 	if err == nil {
-		t.Fatal("an organisation rotated itself to having no owner")
+		t.Fatal("an identity rotated itself to having no owner")
 	}
 }
 
@@ -112,7 +112,7 @@ func TestAnOwnerNamedTwiceCountsOnce(t *testing.T) {
 
 // The founder is still the founder, and an identity with no rotations reads the
 // same as it always did.
-func TestAFreshOrganisationReadsItsFounder(t *testing.T) {
+func TestAFreshIdentityReadsItsFounder(t *testing.T) {
 	owners, err := ownersFromKEL([]map[string]interface{}{icpWithOwner("EFOUNDER")})
 	if err != nil {
 		t.Fatal(err)

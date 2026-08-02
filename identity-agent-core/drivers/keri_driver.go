@@ -118,9 +118,9 @@ type DriverRotationRequest struct {
 	NewNextPublicKey string        `json:"new_next_public_key"`
 	Data             []interface{} `json:"data,omitempty"`
 	// Keys, NextKeys, Isith and Nsith change WHO CONTROLS the identity, not
-	// merely which key it uses. This is how an organisation owned by one person
-	// becomes one owned by several: the key set grows and the threshold rises in
-	// a single event, and the identifier does not change.
+	// merely which key it uses. This is how an identity controlled by one party
+	// comes to be controlled by several: the key set grows and the threshold rises
+	// in a single event, and the identifier does not change.
 	//
 	// It is also the only place a threshold can be introduced. Founding needs to
 	// anticipate nothing — an identity created by one person is already
@@ -741,13 +741,13 @@ func (d *KeriDriver) CreateOwnedInception(publicKey, nextPublicKey, name, ownerA
 	// No threshold is declared here, and that was worth checking rather than
 	// assuming.
 	//
-	// An organisation founded by one person IS one-of-one, but keripy already
-	// writes kt:"1" whether a threshold is passed or not — the event, and
-	// therefore the identifier, is byte-identical either way. Passing "1"
+	// An identity founded by one party IS one-of-one, but keripy already writes
+	// kt:"1" whether a threshold is passed or not — the event, and therefore the
+	// identifier, is byte-identical either way. Passing "1"
 	// explicitly would be a parameter that reads as meaningful and changes
 	// nothing, which is worse than its absence.
 	//
-	// It also does not gate growth. An organisation founded this way rotates to
+	// It also does not gate growth. An identity founded this way rotates to
 	// two-of-two, or two-of-three, exactly as one that declared a threshold
 	// would: verified against keripy 1.1.17 rather than reasoned about. So there
 	// is nothing to get right at founding for the sake of later — the work is
@@ -827,7 +827,7 @@ func (d *KeriDriver) RotateAid(name, newPublicKey, newNextPublicKey string) (*Dr
 // RotateToMultisig changes who controls an identity: a new key set and a new
 // threshold, in one event, keeping the identifier.
 //
-// This is how an organisation founded by one person comes to be owned by
+// This is how an identity created by one party comes to be controlled by
 // several. The keys are the OWNERS' — each generated on that owner's own
 // device, with only the public half ever crossing the wire — so what this sends
 // is a set of public keys and a number, never key material.

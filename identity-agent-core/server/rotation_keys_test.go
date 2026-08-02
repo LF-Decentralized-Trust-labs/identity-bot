@@ -15,7 +15,7 @@ import (
 // recorded the resulting identifier — but never recorded WHERE the key came
 // from. The identity existed, worked, and could never rotate, because the one
 // key a rotation must include was a derivation nobody could repeat. There was
-// no error until somebody tried, and by then the organisation was founded.
+// no error until somebody tried, and by then the identity was founded.
 
 // foundLikePairingDoes creates an identity the way pairing does: keys derived
 // from the root seed at an index, the successor's digest committed, and the

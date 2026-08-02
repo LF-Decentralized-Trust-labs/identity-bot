@@ -308,9 +308,9 @@ def create_inception_event(
     # by anybody who is not on that machine. This can be neither.
     # A signing threshold, for an identity controlled by more than one key.
     #
-    # An organisation is controlled by its owners, and at founding there is
-    # exactly one — so this is a one-of-one multi-signature identity rather than
-    # a single-key one. The distinction matters because the two are different
+    # An identity may be controlled by more than one key, and at founding there
+    # is usually exactly one — so this is a one-of-one multi-signature identity
+    # rather than a single-key one. The distinction matters because the two are different
     # KERI identities: a one-of-one can rotate to two-of-three by adding keys and
     # raising the threshold, and a single-key identity that never declared a
     # threshold has to be re-founded to become one. Founding one-of-one is what
@@ -559,9 +559,9 @@ def rotation():
                 "which would leave the identity unable to finalise any event"}), 400
 
         # A rotation may change WHO CONTROLS the identity, not merely which key
-        # it uses. That is what turns an organisation owned by one person into
-        # one owned by several: the key set grows and the threshold rises, in a
-        # single event, without the identifier changing.
+        # it uses. That is what turns an identity controlled by one party into
+        # one controlled by several: the key set grows and the threshold rises,
+        # in a single event, without the identifier changing.
         #
         # It is also the only place a threshold can be introduced. An identity
         # founded by one person is already one-of-one — keripy writes kt:"1"

@@ -17,10 +17,10 @@ import (
 // when control moved would lose every relationship it had, which is the thing
 // the whole ownership design exists to prevent.
 //
-// The obvious case is an organisation taking on a co-owner. It is not the only
-// one: a person spreading control of their own identity so that recovery does
-// not depend on a single key is the same operation, and so is handing an
-// identity over entirely. Nothing here knows which it is doing.
+// The obvious case is a group taking joint control of something one of them
+// created. It is not the only one: spreading control of your own identity so
+// that recovery does not depend on a single key is the same operation, and so is
+// handing an identity over entirely. Nothing here knows which it is doing.
 //
 // It is deliberately NOT part of founding. One party creates an identity and it
 // works immediately; bringing others in is a separate, later, unhurried step. A
@@ -44,16 +44,16 @@ type OwnerCeremony struct {
 	ID string `json:"id"`
 	// Threshold is how many of the resulting owners must sign afterwards.
 	Threshold int `json:"threshold"`
-	// OrgPublicKey and OrgNextPublicKey are the organisation's own rotation
-	// keys, supplied by whoever starts the ceremony.
+	// OwnPublicKey and OwnNextPublicKey are the identity's own rotation keys,
+	// supplied by whoever starts the ceremony.
 	//
 	// They are not derived here, because this agent does not hold the seed they
 	// come from — every rotation in this system is driven by the device that
 	// does, which sends only public halves. A rotation must also include a key
 	// the previous event committed to, so these are not free choices: they are
 	// the pre-rotated key and its successor.
-	OrgPublicKey     string `json:"org_public_key,omitempty"`
-	OrgNextPublicKey string `json:"org_next_public_key,omitempty"`
+	OwnPublicKey     string `json:"org_public_key,omitempty"`
+	OwnNextPublicKey string `json:"org_next_public_key,omitempty"`
 	// Invited is one entry per party being brought in, in the order they were
 	// named, so a half-finished ceremony can say who is still missing rather
 	// than only how many.

@@ -137,6 +137,18 @@ The decision above is right about *why* an organisation is not delegated. It was
 wrong about the shape, and the error was over-correction: rejecting delegation
 for the organisation, it also threw out a delegation the design depended on.
 
+## A note on scope
+
+This record is about organisations, because that is the case that forced the
+decision. **The mechanism it describes is not.**
+
+An identity being controlled by several keys with a threshold, and that set
+changing by rotation, is a general capability. Spreading control of a personal
+identity so that recovery does not rest on a single key is the same operation as
+an organisation taking on a co-owner: the same seals, the same rotation, the same
+ceremony. Nothing in the implementation distinguishes them, and nothing should be
+built twice on the assumption that it does.
+
 ## The correction: two identifiers, not one
 
 **The organisation's root identity is multi-signature over its owners.** One

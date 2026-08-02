@@ -80,8 +80,8 @@ func (s *CoreServer) handleStartCeremony(w http.ResponseWriter, r *http.Request)
 		// Required, because a rotation must carry a key the previous event
 		// committed to — an identity cannot be rotated by anybody who cannot
 		// produce it.
-		OrgPublicKey     string `json:"org_public_key"`
-		OrgNextPublicKey string `json:"org_next_public_key"`
+		OwnPublicKey     string `json:"own_public_key"`
+		OwnNextPublicKey string `json:"own_next_public_key"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "Bad request", err.Error())
@@ -155,21 +155,21 @@ func (s *CoreServer) handleStartCeremony(w http.ResponseWriter, r *http.Request)
 	// because discovering the derivation is wrong after collecting everybody's
 	// signatures would waste the one thing a ceremony spends — people's time and
 	// their willingness to do it again.
-	orgPublic, orgNext := req.OrgPublicKey, req.OrgNextPublicKey
-	if orgPublic == "" || orgNext == "" {
+	ownPublic, ownNext := req.OwnPublicKey, req.OwnNextPublicKey
+	if ownPublic == "" || ownNext == "" {
 		keys, kerr := s.ownRotationKeys()
 		if kerr != nil {
 			writeError(w, http.StatusConflict, "This identity cannot rotate its own key", kerr.Error())
 			return
 		}
-		orgPublic, orgNext = keys.Current, keys.Next
+		ownPublic, ownNext = keys.Current, keys.Next
 	}
 
 	c := &OwnerCeremony{
 		ID:               genInviteToken(),
 		Threshold:        threshold,
-		OrgPublicKey:     orgPublic,
-		OrgNextPublicKey: orgNext,
+		OwnPublicKey:     ownPublic,
+		OwnNextPublicKey: ownNext,
 		Status:           ceremonyCollecting,
 		StartedAt:        time.Now().UTC(),
 	}
@@ -299,8 +299,8 @@ func (s *CoreServer) completeCeremonyIfReady(c *OwnerCeremony) {
 	// it, which is what a verifier does accept: the prior commitment is
 	// satisfied and new keys ride along. Checked against a real Kevery rather
 	// than assumed.
-	keys := []string{c.OrgPublicKey}
-	nextKeys := []string{c.OrgNextPublicKey}
+	keys := []string{c.OwnPublicKey}
+	nextKeys := []string{c.OwnNextPublicKey}
 	for _, invitee := range c.Invited {
 		seals = append(seals, ownerAnchorSeal(invitee.PairwiseAID))
 		keys = append(keys, invitee.PublicKey)
