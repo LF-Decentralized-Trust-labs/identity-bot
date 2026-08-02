@@ -6,7 +6,8 @@ edition = "2021"
 [workspace]
 
 [dependencies]
-risc0-zkvm = { version = "^3.0.6", default-features = false, features = ['std'] }
+# risc0-zkvm: 'std' enables the SHA-256 hardware accelerator precompile
+# which runs SHA-256 ~10x faster inside the zkVM than a pure software impl
+risc0-zkvm = { version = "^3.0.6", default-features = false, features = ["std"] }
 serde = { version = "1.0", default-features = false, features = ["derive"] }
-ed25519-dalek = { version = "2.1", default-features = false, features = ["alloc", "fast"] }
 sha2 = { version = "0.10", default-features = false }
