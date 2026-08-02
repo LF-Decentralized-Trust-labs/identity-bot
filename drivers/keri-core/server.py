@@ -2047,22 +2047,35 @@ def generate_multisig_event():
                 code=MtrDex.Blake3_256,
             )
         else:
-            event_data = {
-                "type": event_type,
-                "aids": aids,
-                "threshold": threshold,
-                "keys": key_qb64s,
-            }
-            event_json = json.dumps(event_data, separators=(",", ":")).encode()
-            serder_diger = coring.Diger(ser=event_json, code=MtrDex.Blake3_256)
-
+            # Refused, because the alternative was worse than an error.
+            #
+            # This branch used to build {type, aids, threshold, keys}, digest
+            # it, and return the digest under the field names "said" and "pre".
+            # That is not a KERI event: no t, no s, no p, no kt, no n, no nt —
+            # nothing that makes an event verifiable, orderable, or attachable
+            # to a log. And it came back in exactly the shape the inception
+            # branch returns, so a caller had no way to tell a real event from a
+            # digest of a JSON object we invented.
+            #
+            # Rotation is not missing from the system; it is somewhere else.
+            # KeriDriver.RotateToMultisig calls /rotate, which builds a genuine
+            # rot event, and that is what the ownership ceremony uses. So this
+            # branch was a second path under the name that reads like the
+            # primary API, quietly producing something that could never be
+            # anchored anywhere.
+            #
+            # Nothing calls it: every caller in this repository and in the org
+            # and individual applications either passes "inception" or leaves
+            # event_type unset, which the Go handler defaults to "inception".
             return jsonify({
-                "raw_bytes_b64": base64.b64encode(event_json).decode(),
-                "said": serder_diger.qb64,
-                "pre": serder_diger.qb64,
-                "event_type": event_type,
-                "size": len(event_json),
-            }), 200
+                "error": (
+                    f"this endpoint builds inception events only, and was asked for "
+                    f"'{event_type}'. A rotation is built by /rotate — use it through "
+                    f"the ownership ceremony, which carries the current key set and the "
+                    f"next-key digests a rotation must have. It used to return a digest "
+                    f"of an invented JSON object here, which no verifier would accept."
+                ),
+            }), 400
 
         event_bytes = json.dumps(serder.ked, separators=(",", ":")).encode()
 
