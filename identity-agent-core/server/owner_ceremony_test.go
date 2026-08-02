@@ -202,3 +202,17 @@ func TestAnOwnerWithNoSuccessorCannotBeCommitted(t *testing.T) {
 		t.Error("a key set with a missing successor was committed anyway")
 	}
 }
+
+// The invited owner has to be able to accept.
+//
+// The ceremony mints a signer invitation per incoming owner and shows it as a QR
+// code. Whoever scans it is not the current owner — they are the one being added
+// — so requiring the owner's signature on their acceptance asked them to already
+// be what they were being invited to become. Every ceremony sat at "collecting"
+// for ever, the invitee's agent got a 403, and nothing said why.
+func TestAnInvitedOwnerCanAcceptWithoutAlreadyBeingTheOwner(t *testing.T) {
+	if classify("POST", "/api/signer/invites/{token}/redeem") != accessPublic {
+		t.Fatal("an invited owner cannot accept their own invitation without the " +
+			"current owner's signature, so no ceremony can ever complete")
+	}
+}

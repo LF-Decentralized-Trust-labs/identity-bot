@@ -111,6 +111,23 @@ var publicRoutes = map[string]string{
 	"GET /api/employees/invites/{token}":         "the invited person's agent reads what they were invited to",
 	"POST /api/employees/invites/{token}/redeem": "the invited person's agent accepts, becoming a pending member",
 
+	// The same argument, for the invitation that brings in an OWNER.
+	//
+	// The ownership ceremony mints one of these per incoming owner and shows it
+	// as a QR code. The person who scans it is by definition NOT the current
+	// owner — they are the one being added — so gating their acceptance behind
+	// the owner's signature asked them to already be what they were being
+	// invited to become. Every ceremony therefore sat at "collecting" forever,
+	// with the invited owner's agent receiving 403 and nothing explaining why.
+	//
+	// What a stranger holding a valid token can do is bounded the same way as
+	// above: the token is single-use, it was minted by the owner for one named
+	// person, and the acceptance it records only goes into a ceremony that does
+	// not apply until EVERY invitee has accepted. It cannot displace the owner
+	// the identity named at inception either — the log answers before any file
+	// does, so re-sealing changes nothing.
+	"POST /api/signer/invites/{token}/redeem": "an invited owner's agent accepts, committing the keys they will sign with",
+
 	// A machine enrolling itself with the key it generated. It is not the owner
 	// and never will be — that is the point of it holding its own key — so it
 	// cannot be owner-gated. The enrolment token authorises it: single-use,
