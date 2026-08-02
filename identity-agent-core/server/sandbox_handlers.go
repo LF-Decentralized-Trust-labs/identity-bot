@@ -44,6 +44,7 @@ func (s *CoreServer) sandboxRoutes(r chi.Router) {
 	r.Get("/apps/{id}/install-progress", s.handleInstallProgress)
 	r.Get("/apps/{id}/display", s.handleAppDisplay)
 	s.auditRoutes(r)
+	s.proxyCARoutes(r)
 	r.Get("/capabilities", s.handleListCapabilities)
 	r.Post("/capabilities/{id}/invoke", s.handleInvokeCapability)
 	r.Post("/mcp", s.handleMCP)

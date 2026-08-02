@@ -89,3 +89,4 @@ not.
 | One invocation, with its authority line resolved | `GET /api/activity/invocations/{id}` |
 | Activity totals — counts by status and executor, cost grouped by unit | `GET /api/activity/summary` |
 | Verify the log has not been tampered with | `GET /api/activity/chain` |
+| The forward proxy's certificate authority, for a caller that must trust it | `GET /api/proxy/ca.crt` |
