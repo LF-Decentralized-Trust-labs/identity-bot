@@ -87,13 +87,37 @@ func (s *CoreServer) ownerAuthority() (*OwnerAuthority, error) {
 	// with it.
 	if owner, aerr := s.ownerFromOwnIdentity(identity.AID); aerr == nil && owner != "" {
 		key, kerr := s.publicKeyOf(owner)
+
+		// The key handed over when this identity was founded, for the owner the
+		// log names — and only for that owner.
+		//
+		// publicKeyOf looks in contacts, and at the moment an identity is
+		// founded its owner is not one: nothing in the pairing flow adds them.
+		// So every identity founded that way came up naming an owner whose key
+		// could not be resolved, and refused every owner-signed request from
+		// then on — administrable by nobody, permanently — while that owner's
+		// public key sat in owner_authority.json where pairing had written it
+		// seconds earlier. It only shows up by founding an identity through the
+		// real flow and then trying to use it, because every test of this code
+		// seeds the owner into contacts first.
+		//
+		// This does not reopen the hole the ordering closed. That hole was a
+		// file naming a DIFFERENT owner and winning. The AIDs must match here,
+		// so the log still decides WHO the owner is and the file only supplies
+		// key material for the owner the log already named. Somebody re-sealing
+		// under their own AID still changes nothing, which is the property that
+		// mattered.
 		if kerr != nil {
-			// Refused rather than falling through. Falling back here would mean
-			// an identity whose owner cannot be resolved quietly starts
-			// answering to itself, which is the failure this whole design
-			// exists to remove.
+			if sealed, serr := s.sealedOwnerAuthority(); serr == nil && sealed.AID == owner {
+				return &OwnerAuthority{AID: owner, PublicKey: sealed.PublicKey}, nil
+			}
+			// Refused rather than falling through. Falling back to this agent's
+			// own identity would mean an identity whose owner cannot be resolved
+			// quietly starts answering to itself, which is the failure this
+			// whole design exists to remove.
 			return nil, fmt.Errorf(
-				"this identity names %s as its owner but that identity cannot be resolved: %w",
+				"this identity names %s as its owner but that identity cannot be resolved, "+
+					"and no key for it was sealed at founding: %w",
 				owner, kerr)
 		}
 		return &OwnerAuthority{AID: owner, PublicKey: key}, nil

@@ -70,6 +70,86 @@ func TestTheAnchoredOwnerBeatsASealedFile(t *testing.T) {
 	}
 }
 
+// The case every identity founded through pairing is actually in, and the one
+// that was missing.
+//
+// publicKeyOf resolves an owner out of contacts, and at the moment an identity
+// is founded its owner is not one — nothing in the pairing flow adds them. So an
+// identity came up naming an owner whose key could not be resolved and refused
+// every owner-signed request from then on, administrable by nobody, while that
+// owner's public key sat in owner_authority.json where pairing had written it
+// seconds earlier.
+//
+// It survived every test above because each of them puts the owner in contacts
+// first, which is the one thing founding does not do.
+func TestTheOwnerNamedAtFoundingCanActWithoutBeingAContact(t *testing.T) {
+	s := serverWithIdentity(t, "ETHING")
+
+	keri := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"aid": "ETHING",
+			"kel": []map[string]interface{}{{
+				"t": "icp", "i": "ETHING",
+				"a": []interface{}{map[string]interface{}{"i": "EFOUNDER", "r": "owner"}},
+			}},
+		})
+	}))
+	defer keri.Close()
+	driver := drivers.NewKeriDriver()
+	driver.BaseURL = keri.URL
+	s.KeriDriver = driver
+
+	// Exactly what pairing does: the owner's key, sealed, and no contact.
+	if err := s.SealOwnerAuthority(OwnerAuthority{
+		AID:       "EFOUNDER",
+		PublicKey: "DAOhB7_zzhC-HXDdGOdLwJln5NYwm6UNXx3chmQSVTG4",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	authority, err := s.ownerAuthority()
+	if err != nil {
+		t.Fatalf("the owner named at founding could not act on the identity they founded: %v", err)
+	}
+	if authority.AID != "EFOUNDER" {
+		t.Fatalf("authority is %q, not the owner the inception named", authority.AID)
+	}
+}
+
+// The file may supply the KEY for the owner the log names. It may not supply a
+// different OWNER — that is the hole the ordering was introduced to close, and
+// falling back must not quietly reopen it.
+func TestASealedRecordForADifferentOwnerIsStillRefused(t *testing.T) {
+	s := serverWithIdentity(t, "ETHING")
+
+	keri := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"aid": "ETHING",
+			"kel": []map[string]interface{}{{
+				"t": "icp", "i": "ETHING",
+				"a": []interface{}{map[string]interface{}{"i": "EFOUNDER", "r": "owner"}},
+			}},
+		})
+	}))
+	defer keri.Close()
+	driver := drivers.NewKeriDriver()
+	driver.BaseURL = keri.URL
+	s.KeriDriver = driver
+
+	// Somebody re-seals under their own AID, the way a second signer would.
+	if err := s.SealOwnerAuthority(OwnerAuthority{
+		AID:       "EIMPOSTER",
+		PublicKey: "DEC4FUUdUvgDKk07vt2cJUOaSGVLBGnbeGGjHvJTMUgo",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	authority, err := s.ownerAuthority()
+	if err == nil {
+		t.Fatalf("a sealed record for a different identity became the authority: %q", authority.AID)
+	}
+}
+
 // An identity with no anchor still resolves through the sealed record. This is
 // the case the file was written for — hardware the owner does not hold, sealed
 // before the box ever reached the network — and removing it would lock an owner
