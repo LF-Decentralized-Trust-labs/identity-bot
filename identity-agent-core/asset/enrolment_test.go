@@ -2,9 +2,13 @@ package asset
 
 import (
 	"bytes"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -18,12 +22,15 @@ import (
 // owner's seed. That is invisible in the response and only observable in the
 // request, so the fake captures it.
 type fakeKeri struct {
-	server        *httptest.Server
-	gotPublicKey  string
-	gotNextKey    string
-	gotDelegator  string
-	gotName       string
-	anchorsIssued int
+	server       *httptest.Server
+	gotPublicKey string
+	gotNextKey   string
+	gotDelegator string
+	gotName      string
+	// Atomic because the race test drives this concurrently on purpose; a
+	// plain int here would report a data race in the fake and mask the thing
+	// under test.
+	anchorsIssued atomic.Int64
 }
 
 func newFakeKeri(t *testing.T) *fakeKeri {
@@ -70,7 +77,7 @@ func newEnrolHandler(t *testing.T, keri *fakeKeri) *Handler {
 		KeriDriver: driver,
 		RootAID:    func() string { return "EORG-ROOT" },
 		PersistDelegationAnchor: func(rootAID string, ixn map[string]interface{}) error {
-			keri.anchorsIssued++
+			keri.anchorsIssued.Add(1)
 			return nil
 		},
 	}
@@ -87,11 +94,53 @@ func issueToken(t *testing.T, h *Handler, name, kind, origin string) Enrolment {
 	return e
 }
 
-func enrol(t *testing.T, h *Handler, token, pub, next string) *httptest.ResponseRecorder {
+// testMachine is a machine that holds its own key, which is the whole premise
+// of this flow: the private half is generated where the machine is and never
+// reaches the agent. Placeholder key strings cannot express that, because a
+// machine that cannot sign cannot prove it holds anything.
+type testMachine struct {
+	pub  string
+	next string
+	priv ed25519.PrivateKey
+}
+
+func newTestMachine(t *testing.T) *testMachine {
 	t.Helper()
-	body, _ := json.Marshal(map[string]string{
-		"token": token, "public_key": pub, "next_public_key": next,
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generating a machine key: %v", err)
+	}
+	nextPub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generating the next key: %v", err)
+	}
+	return &testMachine{
+		pub:  base64.RawURLEncoding.EncodeToString(pub),
+		next: base64.RawURLEncoding.EncodeToString(nextPub),
+		priv: priv,
+	}
+}
+
+// sign produces the proof of possession for a token, exactly as a real machine
+// would. It goes through the exported payload builder rather than spelling the
+// canonical string a second time — two independent spellings would drift, and
+// would present as an unexplainable signature mismatch.
+func (m *testMachine) sign(token string) string {
+	return base64.RawURLEncoding.EncodeToString(
+		ed25519.Sign(m.priv, []byte(EnrolProofPayload(token, m.pub, m.next))))
+}
+
+func enrol(t *testing.T, h *Handler, token string, m *testMachine) *httptest.ResponseRecorder {
+	t.Helper()
+	return enrolRaw(t, h, map[string]string{
+		"token": token, "public_key": m.pub, "next_public_key": m.next,
+		"signature": m.sign(token),
 	})
+}
+
+func enrolRaw(t *testing.T, h *Handler, fields map[string]string) *httptest.ResponseRecorder {
+	t.Helper()
+	body, _ := json.Marshal(fields)
 	r := httptest.NewRequest(http.MethodPost, "/api/enrol", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 	h.HandleEnrol(w, r)
@@ -108,12 +157,13 @@ func TestTheIdentityIsMintedOverTheMachinesOwnKey(t *testing.T) {
 	h := newEnrolHandler(t, keri)
 	token := issueToken(t, h, "a device this agent owns", "host", "https://device.example")
 
-	w := enrol(t, h, token.Token, "DMACHINE-PUB", "DMACHINE-NEXT")
+	m := newTestMachine(t)
+	w := enrol(t, h, token.Token, m)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("enrolment failed: %d %s", w.Code, w.Body.String())
 	}
 
-	if keri.gotPublicKey != "DMACHINE-PUB" || keri.gotNextKey != "DMACHINE-NEXT" {
+	if keri.gotPublicKey != m.pub || keri.gotNextKey != m.next {
 		t.Errorf("the delegation was issued over %q/%q, not the machine's key",
 			keri.gotPublicKey, keri.gotNextKey)
 	}
@@ -127,7 +177,8 @@ func TestTheEnrolledAssetIsDelegatedAndRecorded(t *testing.T) {
 	h := newEnrolHandler(t, keri)
 	token := issueToken(t, h, "a device this agent owns", "host", "https://device.example")
 
-	w := enrol(t, h, token.Token, "DMACHINE-PUB", "DMACHINE-NEXT")
+	m := newTestMachine(t)
+	w := enrol(t, h, token.Token, m)
 	var out struct {
 		Asset Asset `json:"asset"`
 	}
@@ -164,7 +215,8 @@ func TestAnUnanchorableDelegationIsNotIssued(t *testing.T) {
 	}
 	token := issueToken(t, h, "a device this agent owns", "host", "")
 
-	w := enrol(t, h, token.Token, "DMACHINE-PUB", "DMACHINE-NEXT")
+	m := newTestMachine(t)
+	w := enrol(t, h, token.Token, m)
 	if w.Code == http.StatusCreated {
 		t.Fatal("an asset was created whose delegation was never anchored")
 	}
@@ -179,10 +231,10 @@ func TestEnrollingWithoutAValidTokenIsRefused(t *testing.T) {
 	keri := newFakeKeri(t)
 	h := newEnrolHandler(t, keri)
 
-	if w := enrol(t, h, "", "DPUB", "DNEXT"); w.Code != http.StatusBadRequest {
+	if w := enrol(t, h, "", newTestMachine(t)); w.Code != http.StatusBadRequest {
 		t.Errorf("no token: %d", w.Code)
 	}
-	if w := enrol(t, h, "not-a-real-token", "DPUB", "DNEXT"); w.Code != http.StatusForbidden {
+	if w := enrol(t, h, "not-a-real-token", newTestMachine(t)); w.Code != http.StatusForbidden {
 		t.Errorf("invented token: %d", w.Code)
 	}
 	if len(h.Store.ListAssets()) != 0 {
@@ -197,10 +249,10 @@ func TestATokenWorksOnce(t *testing.T) {
 	h := newEnrolHandler(t, keri)
 	token := issueToken(t, h, "a device this agent owns", "host", "")
 
-	if w := enrol(t, h, token.Token, "DPUB", "DNEXT"); w.Code != http.StatusCreated {
+	if w := enrol(t, h, token.Token, newTestMachine(t)); w.Code != http.StatusCreated {
 		t.Fatalf("first use failed: %d %s", w.Code, w.Body.String())
 	}
-	w := enrol(t, h, token.Token, "DOTHER-PUB", "DOTHER-NEXT")
+	w := enrol(t, h, token.Token, newTestMachine(t))
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("a token was used twice: %d", w.Code)
 	}
@@ -222,7 +274,7 @@ func TestAnExpiredTokenIsRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if w := enrol(t, h, e.Token, "DPUB", "DNEXT"); w.Code != http.StatusForbidden {
+	if w := enrol(t, h, e.Token, newTestMachine(t)); w.Code != http.StatusForbidden {
 		t.Errorf("an expired token was accepted: %d", w.Code)
 	}
 }
@@ -235,7 +287,7 @@ func TestARevokedTokenIsRefused(t *testing.T) {
 	if err := h.Store.RevokeEnrolment(token.Token); err != nil {
 		t.Fatal(err)
 	}
-	if w := enrol(t, h, token.Token, "DPUB", "DNEXT"); w.Code != http.StatusForbidden {
+	if w := enrol(t, h, token.Token, newTestMachine(t)); w.Code != http.StatusForbidden {
 		t.Errorf("a revoked token was accepted: %d", w.Code)
 	}
 }
@@ -248,14 +300,14 @@ func TestAMachineCannotNameItselfOrClaimAnAddress(t *testing.T) {
 	h := newEnrolHandler(t, keri)
 	token := issueToken(t, h, "a device this agent owns", "host", "https://device.example")
 
-	body, _ := json.Marshal(map[string]string{
-		"token": token.Token, "public_key": "DPUB", "next_public_key": "DNEXT",
+	m := newTestMachine(t)
+	w := enrolRaw(t, h, map[string]string{
+		"token": token.Token, "public_key": m.pub, "next_public_key": m.next,
+		"signature": m.sign(token.Token),
+		// All three supplied by the machine, and all three must be ignored.
 		"display_name": "something else", "origin": "https://elsewhere.example",
 		"asset_type": "domain",
 	})
-	r := httptest.NewRequest(http.MethodPost, "/api/enrol", bytes.NewReader(body))
-	w := httptest.NewRecorder()
-	h.HandleEnrol(w, r)
 
 	var out struct {
 		Asset Asset `json:"asset"`

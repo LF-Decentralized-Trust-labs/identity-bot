@@ -23,12 +23,12 @@ import (
 
 // Report field offsets, ABI 1.x.
 const (
-	offPolicy       = 0x08 // uint64, little-endian
-	offPlatformInfo = 0x40 // uint64
-	offSignerInfo   = 0x48 // uint32
-	offReportData   = 0x50 // 64 bytes
-	offMeasurement  = 0x90 // 48 bytes
-	offHostData     = 0xC0 // 32 bytes
+	offPolicy       = 0x08  // uint64, little-endian
+	offPlatformInfo = 0x40  // uint64
+	offSignerInfo   = 0x48  // uint32
+	offReportData   = 0x50  // 64 bytes
+	offMeasurement  = 0x90  // 48 bytes
+	offHostData     = 0xC0  // 32 bytes
 	offReportedTCB  = 0x180 // uint64
 	offChipID       = 0x1A0 // 64 bytes
 	offSignature    = 0x2A0 // to the end of the report
