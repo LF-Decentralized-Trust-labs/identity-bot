@@ -60,7 +60,7 @@ func verifyEnrolProof(token, publicKey, nextPublicKey, signature string) error {
 	}
 	payload := EnrolProofPayload(token, publicKey, nextPublicKey)
 
-	// CESR-qualified first, since that is what our own tooling emits.
+	// CESR-qualified first, since that is what this project's own tooling emits.
 	if ok, verr := login.VerifyString(payload, strings.TrimSpace(signature), pub); verr == nil {
 		if ok {
 			return nil
@@ -69,9 +69,9 @@ func verifyEnrolProof(token, publicKey, nextPublicKey, signature string) error {
 	}
 
 	// Otherwise a bare 64-byte signature in whichever encoding the enrolling
-	// machine reached for. A daemon written in Go, a shell script and our own
-	// SDK do not naturally agree on an alphabet, and refusing over that would be
-	// a protocol detail masquerading as a security check.
+	// machine reached for. A daemon written in Go, a shell script and an SDK do
+	// not naturally agree on an alphabet, and refusing over that would be a
+	// protocol detail masquerading as a security check.
 	raw, err := decodeEnrolSig(signature)
 	if err != nil {
 		return fmt.Errorf("signature: %w", err)

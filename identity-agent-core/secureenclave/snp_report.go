@@ -58,10 +58,11 @@ type ParsedReport struct {
 	Raw []byte
 
 	// ChipID identifies the physical processor. This is the field that answers
-	// "which machine", and it is the whole reason the enrolment ceremony exists:
-	// a report proves a genuine AMD part ran a given image, never that the part
-	// is ours. Recording this value at a moment of physical assurance is what
-	// converts "some EPYC" into "our EPYC".
+	// "which machine", and it is the whole reason an enrolment ceremony exists:
+	// a report proves a genuine AMD part ran a given image, never WHICH genuine
+	// part an operator meant. Recording this value at a moment of physical
+	// assurance is what turns "some processor of this make" into "the processor
+	// that was enrolled".
 	ChipID []byte
 
 	// Measurement is the launch measurement of the image that was started.
