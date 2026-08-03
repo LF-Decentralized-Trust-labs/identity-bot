@@ -2,8 +2,25 @@
 
 package server
 
-import "os"
+import (
+	"os"
 
+	"identity-agent-core/secureenclave"
+)
+
+// detectEnclave reports what is actually protecting keys on this host.
+//
+// A TPM device node tells you a chip is installed and the kernel driver is
+// loaded. It does not tell you that anything is protected by it — those are
+// different questions, and this function used to answer the second by checking
+// the first. On Linux no seed wrapper exists yet, so the root seed is stored
+// unwrapped while /dev/tpm0 is present on most server hardware, and the status
+// endpoint asserted hardware_backed on every one of them.
+//
+// That direction of error is the dangerous one. An absent security indicator
+// prompts someone to go and check; a false one is relied upon. So the claim is
+// now made by the code that would do the wrapping, and the TPM fields still
+// report the hardware honestly — present, enabled, and not yet used.
 func detectEnclave() EnclaveStatusResponse {
 	present := false
 	enabled := false
@@ -18,31 +35,31 @@ func detectEnclave() EnclaveStatusResponse {
 		enabled = true
 	}
 
-	if present && enabled {
+	if secureenclave.SeedWrapAvailable() {
 		return EnclaveStatusResponse{
 			HardwareBacked: true,
-			BackingType:    "tpm2",
+			BackingType:    secureenclave.SeedWrapScheme(),
 			BackingLabel:   "Linux TPM 2.0",
 			TpmPresent:     &present,
 			TpmEnabled:     &enabled,
 		}
 	}
 
-	if present && !enabled {
-		return EnclaveStatusResponse{
-			HardwareBacked: false,
-			BackingType:    "libsecret",
-			BackingLabel:   "Linux Secret Service (TPM present but not enabled)",
-			TpmPresent:     &present,
-			TpmEnabled:     &enabled,
-		}
+	// No wrapper. Say so, and say why — the distinction between "you have no
+	// TPM" and "you have one we do not use yet" is the difference between
+	// buying hardware and waiting for us.
+	label := "Linux Secret Service (software)"
+	switch {
+	case present && enabled:
+		label = "software — a TPM 2.0 is present and enabled, but no key is wrapped by it yet"
+	case present:
+		label = "software — a TPM 2.0 is present but not enabled"
 	}
 
-	hardwareBacked := false
 	return EnclaveStatusResponse{
-		HardwareBacked: hardwareBacked,
+		HardwareBacked: false,
 		BackingType:    "libsecret",
-		BackingLabel:   "Linux Secret Service (software)",
+		BackingLabel:   label,
 		TpmPresent:     &present,
 		TpmEnabled:     &enabled,
 	}
