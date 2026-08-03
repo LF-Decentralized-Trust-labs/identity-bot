@@ -1,8 +1,12 @@
 import 'dart:convert';
+import 'dart:math';
 import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 
+import 'package:crypto/crypto.dart';
+
 import 'owner_signing_client.dart';
+import 'browser_session_client.dart';
 import '../config/agent_config.dart';
 
 class HealthResponse {
@@ -641,6 +645,11 @@ class CoreService {
   final String baseUrl;
   final http.Client _client;
 
+  /// Carries a browser session, when there is one. Null on a client that signs
+  /// with the owner key instead — a caller holding the key has no use for a
+  /// session, and giving it one would mean two ways to prove the same thing.
+  final BrowserSessionClient? _session;
+
   /// Builds a client for an agent.
   ///
   /// [ownerSeed] is what lets this talk to an agent running on hardware you
@@ -654,15 +663,32 @@ class CoreService {
   ///
   /// Signing is applied at the transport rather than per request, so a call
   /// added tomorrow is signed without anybody remembering to sign it.
-  CoreService({String? baseUrl, Future<Uint8List?> Function()? ownerSeed, String? ownerAid})
-      : baseUrl = baseUrl ?? AgentConfig.coreBaseUrl,
-        _client = ownerSeed == null
-            ? http.Client()
-            : OwnerSigningClient(
-                agentOrigin: baseUrl ?? AgentConfig.coreBaseUrl,
-                ownerSeed: ownerSeed,
-                ownerAid: ownerAid,
-              );
+  /// A key beats a session. Where the caller can sign it signs; only a client
+  /// that cannot — a browser — carries a session instead. Wiring both would
+  /// leave two answers to "who is this" and the agent choosing between them.
+  ///
+  /// A factory, because the session client and the request client must be the
+  /// SAME object: adopting a token has to change the client that actually sends
+  /// requests, and an initialiser list cannot build one field from another.
+  factory CoreService({
+    String? baseUrl,
+    Future<Uint8List?> Function()? ownerSeed,
+    String? ownerAid,
+  }) {
+    final origin = baseUrl ?? AgentConfig.coreBaseUrl;
+    if (ownerSeed == null) {
+      final session = BrowserSessionClient(agentOrigin: origin);
+      return CoreService._(origin, session, session);
+    }
+    return CoreService._(
+      origin,
+      OwnerSigningClient(
+          agentOrigin: origin, ownerSeed: ownerSeed, ownerAid: ownerAid),
+      null,
+    );
+  }
+
+  CoreService._(this.baseUrl, this._client, this._session);
 
   Future<HealthResponse> getHealth() async {
     final response = await _client.get(
@@ -1821,9 +1847,151 @@ class CoreService {
         : 'Scan execute failed: ${response.statusCode}');
   }
 
+  // ── Signing in from a browser ────────────────────────────────────────────
+  //
+  // A browser holds no key, so it cannot prove ownership the way an app does.
+  // The agent's answer is a three-step handshake: the browser asks for a
+  // challenge while keeping a secret only it knows, a device that DOES hold the
+  // key grants the displayed code, and the browser exchanges its secret for a
+  // session.
+  //
+  // The secret is why the code can be read aloud. Anyone who can see the screen
+  // learns the code; without a secret the browser never displays, seeing it
+  // would be enough to collect the session the owner just granted — and the
+  // owner would have authorised a stranger while watching their own screen.
+
+  /// Step one, from the browser: ask for a code to display.
+  ///
+  /// Returns the challenge and the secret to keep. Hold the secret and pass it
+  /// back to [claimBrowserLogin]; it never reaches the agent, only its digest.
+  Future<BrowserLogin> startBrowserLogin() async {
+    final secret = _randomSecret();
+    final claimHash = sha256.convert(utf8.encode(secret)).toString();
+
+    final response = await _client.post(
+      Uri.parse('$baseUrl/api/session/challenge'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'claim_hash': claimHash}),
+    );
+    if (response.statusCode != 200) {
+      throw Exception(_sessionError(response, 'Could not start a login'));
+    }
+    final json = jsonDecode(response.body) as Map<String, dynamic>;
+    return BrowserLogin(
+      challengeId: json['challenge_id']?.toString() ?? '',
+      code: json['code']?.toString() ?? '',
+      expiresAt: DateTime.tryParse(json['expires_at']?.toString() ?? ''),
+      claimSecret: secret,
+    );
+  }
+
+  /// Step two, from the device holding the key: approve a displayed code.
+  ///
+  /// Owner-only, and that is what makes the handshake mean anything — this
+  /// request carries the owner's signature exactly as any other does.
+  Future<void> grantBrowserLogin(String code) async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/api/session/grant'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'code': code.trim().toUpperCase()}),
+    );
+    if (response.statusCode != 200) {
+      throw Exception(_sessionError(response, 'Could not approve the login'));
+    }
+  }
+
+  /// Step three, from the browser: collect the session once granted.
+  ///
+  /// Returns null while the owner has not approved yet — the agent says so
+  /// distinctly rather than as a failure, so a caller can keep waiting without
+  /// treating every poll as a rejection. On success the session is adopted for
+  /// every later call automatically.
+  Future<String?> claimBrowserLogin(BrowserLogin login) async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/api/session/claim'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'challenge_id': login.challengeId,
+        'claim_secret': login.claimSecret,
+      }),
+    );
+    if (response.statusCode == 202) return null; // granted:false — still waiting
+    if (response.statusCode != 200) {
+      throw Exception(_sessionError(response, 'Could not collect the session'));
+    }
+    final json = jsonDecode(response.body) as Map<String, dynamic>;
+    final token = json['token']?.toString();
+    if (token == null || token.isEmpty) {
+      throw Exception('The agent granted a session without a token');
+    }
+    _session?.adopt(token);
+    return token;
+  }
+
+  /// Whether this client is carrying a browser session.
+  bool get hasBrowserSession => _session?.hasSession ?? false;
+
+  /// Adopt a session obtained elsewhere — after a page reload, say.
+  void adoptBrowserSession(String token) => _session?.adopt(token);
+
+  /// Sign out. Reachable with the session itself rather than owner-only,
+  /// because ending your own session should not require the device that
+  /// started it — that is exactly when you most want to.
+  Future<void> endBrowserSession() async {
+    if (_session?.hasSession != true) return;
+    try {
+      await _client.post(Uri.parse('$baseUrl/api/session/end'),
+          headers: {'Content-Type': 'application/json'});
+    } finally {
+      // Dropped locally whatever the agent said. A client still presenting a
+      // token it believes in, against an agent that has forgotten it, is worse
+      // than being signed out.
+      _session?.discard();
+    }
+  }
+
+  static String _randomSecret() {
+    final rnd = Random.secure();
+    return base64Url
+        .encode(List<int>.generate(32, (_) => rnd.nextInt(256)))
+        .replaceAll('=', '');
+  }
+
+  String _sessionError(http.Response response, String fallback) {
+    try {
+      final json = jsonDecode(response.body) as Map<String, dynamic>;
+      final d = json['details'] ?? json['detail'] ?? json['error'];
+      if (d != null && d.toString().isNotEmpty) return d.toString();
+    } catch (_) {}
+    return '$fallback (${response.statusCode})';
+  }
+
   void dispose() {
     _client.close();
   }
+}
+
+/// A login in progress: what to show, and the secret to keep while showing it.
+class BrowserLogin {
+  const BrowserLogin({
+    required this.challengeId,
+    required this.code,
+    required this.claimSecret,
+    this.expiresAt,
+  });
+
+  /// Identifies this login to the agent.
+  final String challengeId;
+
+  /// What the person reads off this screen and into the one holding the key.
+  final String code;
+
+  /// Held here and never sent — only its digest reached the agent, so an agent
+  /// whose memory has been read cannot collect its own pending logins.
+  final String claimSecret;
+
+  /// When the code stops being worth reading.
+  final DateTime? expiresAt;
 }
 
 // ── Guardianship models ─────────────────────────────────────────────────────
