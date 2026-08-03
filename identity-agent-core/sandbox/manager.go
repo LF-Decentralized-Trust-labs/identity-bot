@@ -748,6 +748,75 @@ func (m *Manager) ListServiceCredentials() []string {
         return m.credentials.ListServices()
 }
 
+// RegisterEgressCaller lets something the Manager did not start send its traffic
+// through this gateway, identified and credential-scoped like anything else.
+//
+// Until now the gateway could only govern callers it launched itself — sandboxed
+// apps, whose routes it registers as it starts them. Anything else the owner
+// runs is ungoverned by construction, not by choice: there is no way to tell the
+// proxy who it is. That is a gap in what an Identity Agent can govern, and it
+// shows up the moment work happens anywhere but inside a sandboxed app.
+//
+// The route carries the caller's delegated AID and the capability grant its
+// authority derives from, so a request arriving this way is attributed to the
+// same identity as one arriving at the invoke endpoint. The token in the route
+// is a connection handle, not an authority: it says which registered caller is
+// on the other end, and the grant says what that caller may reach.
+//
+// Deliberately narrow. It would have been fewer lines to expose the ProxyManager
+// and let callers do as they like with it; this names the one thing an external
+// caller needs so that the rest of the proxy stays internal.
+func (m *Manager) RegisterEgressCaller(route ProxyRoute) error {
+	if m.proxy == nil {
+		return fmt.Errorf("the forward proxy is not running")
+	}
+	if strings.TrimSpace(route.InstanceID) == "" {
+		return fmt.Errorf("a caller needs an id to be registered under")
+	}
+	if strings.TrimSpace(route.ProxyToken) == "" {
+		// Without a token the route can only ever be matched by source address,
+		// which never yields a credential — so registering one would look like it
+		// worked and quietly do nothing.
+		return fmt.Errorf("an external caller must have a proxy token; without one it " +
+			"cannot be identified and would receive no credentials")
+	}
+	m.proxy.AddRoute(route)
+	return nil
+}
+
+// UnregisterEgressCaller ends a caller's access.
+//
+// Safe to call for one that was never registered: access is revoked far more
+// often in cleanup paths than in happy ones, and a revocation that errors
+// because it was already done is a revocation people start skipping.
+func (m *Manager) UnregisterEgressCaller(id string) {
+	if m.proxy != nil {
+		m.proxy.RemoveRoute(id)
+	}
+}
+
+// ProxyCACertPEM is the certificate authority a caller must trust to send HTTPS
+// through this gateway, because the proxy terminates TLS in order to govern what
+// leaves and therefore presents its own certificate.
+//
+// Public by construction — the private key stays here and is returned by nothing.
+func (m *Manager) ProxyCACertPEM() ([]byte, error) {
+	if m.proxy == nil || m.proxy.CertManager() == nil {
+		return nil, fmt.Errorf("the forward proxy is not running, so it has no certificate authority")
+	}
+	return m.proxy.CertManager().CACertPEM()
+}
+
+// ProxyAddr is where the forward proxy is listening, so a caller can be told
+// where to send its traffic. A wildcard bind is reported as-is: how to reach this
+// host from somewhere else is not something this can know.
+func (m *Manager) ProxyAddr() string {
+	if m.proxy == nil {
+		return ""
+	}
+	return m.proxy.ListenAddr()
+}
+
 func (m *Manager) HealthCheck() map[string]interface{} {
         containerEngine := CheckContainerEngine()
 
