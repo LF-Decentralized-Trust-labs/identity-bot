@@ -3,6 +3,7 @@
 package secureenclave
 
 import (
+	"encoding/binary"
 	"fmt"
 	"os"
 	"unsafe"
@@ -79,6 +80,20 @@ func getSNPReport(reportData []byte) ([]byte, error) {
 	}
 	if arg.FWErr != 0 {
 		return nil, fmt.Errorf("SNP firmware refused the report request: 0x%x", arg.FWErr)
+	}
+
+	// The response header's first four bytes are STATUS. A non-zero status means
+	// no report was written — and the buffer we allocated is zeroed, so copying
+	// it anyway yields 1184 zero bytes that are the right length and carry every
+	// field a caller expects to read. Nothing downstream distinguishes that from
+	// a real report by shape; it has to be caught here.
+	if status := binary.LittleEndian.Uint32(resp.Data[0:4]); status != 0 {
+		return nil, fmt.Errorf("SNP_GET_REPORT returned status 0x%x — no report was produced", status)
+	}
+	// REPORT_SIZE follows it. A short report is a truncated one, and reading past
+	// what the firmware wrote returns whatever the buffer held.
+	if size := binary.LittleEndian.Uint32(resp.Data[4:8]); size < ReportSize {
+		return nil, fmt.Errorf("SNP_GET_REPORT wrote %d bytes, want at least %d", size, ReportSize)
 	}
 
 	report := make([]byte, ReportSize)
