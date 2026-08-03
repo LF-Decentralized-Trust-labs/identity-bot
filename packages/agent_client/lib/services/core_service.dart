@@ -1847,6 +1847,78 @@ class CoreService {
         : 'Scan execute failed: ${response.statusCode}');
   }
 
+  // ── Bringing an organisation into being on rented hardware ───────────────
+  //
+  // A freshly provisioned instance belongs to nobody. It has generated no
+  // identity and named no owner, and the two routes used here are the only
+  // ones reachable in that state — deliberately, because it is the only moment
+  // they are for.
+  //
+  // The founder's device does the naming. It mints an identifier for this
+  // relationship specifically, hands over only the public half, and the
+  // instance writes that identifier into the event that creates the
+  // organisation. Ownership is therefore part of the key log from the first
+  // moment: append-only, public, and verifiable by anyone, rather than a row in
+  // a table on hardware somebody else runs.
+  //
+  // NO KEY REACHES THE INSTANCE. It generates its own; the founder keeps
+  // theirs. That is what makes renting hardware survivable — the operator ends
+  // up holding an agent that can act for itself and cannot act as its owner.
+
+  /// Brings an organisation into being on this instance, owned by [ownerAid].
+  ///
+  /// Call this on a CoreService pointed at the INSTANCE, not at your own agent.
+  ///
+  /// [adoptionCode] is the one-time code the instance published when it was
+  /// provisioned. Without it, whoever reaches an unclaimed instance first takes
+  /// it.
+  ///
+  /// Returns the organisation's new identifier.
+  Future<String> adoptAsOrganisation({
+    required String adoptionCode,
+    required String ownerAid,
+    required String ownerPublicKey,
+  }) async {
+    // Step one: ask the instance for the key material it generated. This is
+    // also what proves it is unclaimed — an instance that already has an
+    // identity refuses here.
+    final begun = await _client.post(
+      Uri.parse('$baseUrl/api/pairing/begin'),
+      headers: {'Content-Type': 'application/json'},
+      body: '{}',
+    );
+    if (begun.statusCode != 200) {
+      throw Exception(_sessionError(begun, 'This agent is not offering to be set up'));
+    }
+
+    // Step two: name the owner. found_as_root asks for an organisation with its
+    // own key rather than a delegated agent — a delegation cannot be
+    // transferred, only destroyed, so an organisation built that way could
+    // never change hands without losing everything it had ever signed.
+    final done = await _client.post(
+      Uri.parse('$baseUrl/api/pairing/complete'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'found_as_root': true,
+        'adoption_code': adoptionCode,
+        'owner_aid': ownerAid,
+        'owner_public_key': ownerPublicKey,
+        // Named as the delegator too, for the audit line the instance logs.
+        // Nothing is delegated here; the field is how it records who set it up.
+        'delegator_aid': ownerAid,
+      }),
+    );
+    if (done.statusCode != 200) {
+      throw Exception(_sessionError(done, 'Could not create the organisation'));
+    }
+    final json = jsonDecode(done.body) as Map<String, dynamic>;
+    final aid = json['root_aid']?.toString() ?? json['organisation_aid']?.toString();
+    if (aid == null || aid.isEmpty) {
+      throw Exception('The instance reported no identifier for the organisation');
+    }
+    return aid;
+  }
+
   // ── Signing in from a browser ────────────────────────────────────────────
   //
   // A browser holds no key, so it cannot prove ownership the way an app does.

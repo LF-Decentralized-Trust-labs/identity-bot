@@ -62,6 +62,13 @@ class BrowserSessionClient extends http.BaseClient {
   }
 
   bool _isOwnAgent(Uri url) {
+    // An empty origin means same-origin, which is exactly the web case: the app
+    // was served BY the agent, so AgentConfig gives it no base URL and every
+    // request is relative. Treating that as "not my agent" would attach the
+    // session to nothing and leave the browser permanently signed out while
+    // holding a perfectly good token.
+    if (agentOrigin.isEmpty) return !url.hasAuthority;
+
     final own = Uri.tryParse(agentOrigin);
     if (own == null || own.host.isEmpty) return false;
     return url.scheme == own.scheme &&
