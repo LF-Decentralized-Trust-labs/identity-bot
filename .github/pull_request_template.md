@@ -2,14 +2,17 @@
      Good: "Open the enrolment route at the path it is actually mounted at"
      Weak: "fix: routing bug"
      Someone scanning a list of pull requests should be able to tell from the title
-     and the first two sections below whether this one concerns them.
+     and the Summary below whether this one concerns them.
 
      The comments in this template disappear when the page renders — write your text
      underneath each heading, and delete any optional line you do not use. -->
 
-<!-- Optional one-line summary, no heading: the change and its consequence, in one
-     sentence, for someone who reads nothing else. Skip it when the title already
-     says the same thing. Italics render it as a standfirst above the sections. -->
+## Summary
+
+<!-- One sentence: what this does and why it matters, for someone who reads nothing
+     else on this page. Carry the consequence; don't just restate the title.
+
+     This is the change at a glance. The section below is the detail. -->
 
 ## What This Is
 
