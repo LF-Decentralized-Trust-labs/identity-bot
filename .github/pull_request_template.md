@@ -20,6 +20,24 @@
      title. Write it so a developer who has never seen this subsystem understands it
      on one read — no jargon, no assumed context. -->
 
+## Affected
+
+<!-- Where this lands. One line each; delete any line that does not apply.
+
+     - Subsystem — the named runtime part, with its package: the credential vault
+       (`CredentialVault`, `identity-agent-core/sandbox`), the forward proxy, the
+       attestation runner, the KERI driver.
+     - User-facing — the navigation items in docs/adr/018-desktop-navigation-structure.md
+       (Credentials → API Keys, Apps → Marketplace, Settings → Security, History …),
+       or "none" when no screen changes. Say where the change is *felt*, not only
+       where a screen changed.
+     - Developer-facing — the exported symbols, HTTP routes or SDK surface a caller
+       would notice, and say plainly what stays unchanged.
+
+     Reviewers triage on this. Trace it rather than guessing: a fix at a shared
+     chokepoint reaches every caller of it, and that is usually wider than the
+     directory the diff sits in. -->
+
 ## Why
 
 <!-- One or two plain sentences: what was wrong, or what this makes possible. -->
