@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 
@@ -275,31 +276,74 @@ func (cv *CredentialVault) injectMatching(req *http.Request, eligible func(Crede
 		domain = domain[:idx]
 	}
 
-	entries := cv.effectiveEntriesLocked()
-	for _, entry := range entries {
+	// Collect every candidate before choosing, rather than taking the first.
+	//
+	// Two credentials can legitimately serve one host — two accounts on the same
+	// service is an ordinary thing to want. What is not ordinary is picking
+	// between them by iteration order, which is what happened before: the request
+	// went out authenticated as whichever entry happened to be first, the log said
+	// it had injected something, and the only symptom was a 404 on a repository
+	// the other account could see. Silently acting as the wrong identity is worse
+	// than not acting at all.
+	type candidate struct {
+		entry   CredentialEntry
+		pattern string
+	}
+	var matches []candidate
+	for _, entry := range cv.effectiveEntriesLocked() {
 		if !eligible(entry) {
 			continue
 		}
 		for _, pattern := range entry.MatchDomains {
 			if MatchDomain(pattern, domain) {
-				injectedHeaders := make([]string, 0, len(entry.Headers))
-				for key, value := range entry.Headers {
-					if req.Header.Get(key) == "" {
-						req.Header.Set(key, value)
-						injectedHeaders = append(injectedHeaders, key)
-					}
-				}
-				log.Printf("[credentials] Injected %s credentials for domain %s", entry.Service, domain)
-				if cv.tracer != nil && cv.tracer.IsEnabled() {
-					cv.tracer.Emit("credentials", "inject", "egress", "", "",
-						fmt.Sprintf("Injected %s credentials for %s", entry.Service, domain),
-						map[string]interface{}{"service": entry.Service, "domain": domain, "pattern": pattern, "headers_injected": injectedHeaders})
-				}
-				return true
+				matches = append(matches, candidate{entry, pattern})
+				break
 			}
 		}
 	}
-	return false
+
+	switch len(matches) {
+	case 0:
+		return false
+	case 1:
+		// The unambiguous case, which is nearly all of them.
+	default:
+		// Refuse. The caller narrows by naming which service it means; there is no
+		// correct guess to make here, and a wrong guess authenticates as somebody
+		// else. Named loudly because the fix is a one-line change to the caller.
+		names := make([]string, 0, len(matches))
+		for _, m := range matches {
+			names = append(names, m.entry.Service)
+		}
+		sort.Strings(names)
+		log.Printf("[credentials] REFUSING to inject for %s: %d stored credentials match it (%s). "+
+			"Nothing was sent. Narrow the request to one service — acting as an arbitrary "+
+			"one of them would authenticate as the wrong account.",
+			domain, len(matches), strings.Join(names, ", "))
+		if cv.tracer != nil && cv.tracer.IsEnabled() {
+			cv.tracer.Emit("credentials", "ambiguous", "egress", "", "",
+				fmt.Sprintf("Refused to inject for %s: %d credentials match", domain, len(matches)),
+				map[string]interface{}{"domain": domain, "candidates": names})
+		}
+		return false
+	}
+
+	m := matches[0]
+	injectedHeaders := make([]string, 0, len(m.entry.Headers))
+	for key, value := range m.entry.Headers {
+		if req.Header.Get(key) == "" {
+			req.Header.Set(key, value)
+			injectedHeaders = append(injectedHeaders, key)
+		}
+	}
+	log.Printf("[credentials] Injected %s credentials for domain %s", m.entry.Service, domain)
+	if cv.tracer != nil && cv.tracer.IsEnabled() {
+		cv.tracer.Emit("credentials", "inject", "egress", "", "",
+			fmt.Sprintf("Injected %s credentials for %s", m.entry.Service, domain),
+			map[string]interface{}{"service": m.entry.Service, "domain": domain,
+				"pattern": m.pattern, "headers_injected": injectedHeaders})
+	}
+	return true
 }
 
 func (cv *CredentialVault) SetCredential(service string, domains []string, headers map[string]string) error {
