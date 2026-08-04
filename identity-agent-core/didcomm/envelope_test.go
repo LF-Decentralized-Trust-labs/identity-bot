@@ -57,11 +57,40 @@ func TestAuthcryptTamperCiphertext(t *testing.T) {
 	aliceDID, _ := alice.DID()
 	bobDID, _ := bob.DID()
 	env, _ := PackAuthcrypt(alice, bobDID, mkJWM(t, "EAlice", "EBob", TypeDirectMessage, map[string]string{"x": "y"}))
-	// flip a byte in the ciphertext
-	env.Ciphertext = "A" + env.Ciphertext[1:]
+	before := env.Ciphertext
+	env.Ciphertext = tamper(t, env.Ciphertext)
+	if env.Ciphertext == before {
+		t.Fatal("the ciphertext was not modified, so nothing was tested")
+	}
 	if _, err := UnpackAuthcrypt(bob, aliceDID, env); err == nil {
 		t.Fatal("tampered ciphertext must fail")
 	}
+}
+
+// tamper changes exactly one character of a base64url string, and is guaranteed
+// to change it.
+//
+// The obvious spelling — overwrite the first character with a fixed one — does
+// nothing when the character is already that one. The ciphertext here is random
+// per run, so that happened roughly one run in sixty-four, and the test then
+// decrypted an untouched envelope and failed for having succeeded. A test that
+// fails at random teaches people to re-run it.
+func tamper(t *testing.T, s string) string {
+	t.Helper()
+	if s == "" {
+		t.Fatal("nothing to tamper with")
+	}
+	// Pick a replacement from the same alphabet that differs from what is there,
+	// so the result stays decodable and the failure under test is integrity,
+	// not a malformed encoding.
+	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+	for i := 0; i < len(alphabet); i++ {
+		if alphabet[i] != s[0] {
+			return string(alphabet[i]) + s[1:]
+		}
+	}
+	t.Fatalf("could not find a replacement character for %q", s[0])
+	return ""
 }
 
 func TestAuthcryptWrongRecipient(t *testing.T) {
@@ -100,7 +129,11 @@ func TestSignedRoundTripAndTamper(t *testing.T) {
 	if _, err := UnpackSigned(aliceDID, env); err != nil {
 		t.Fatalf("signed verify: %v", err)
 	}
-	env.EdSig = "AAAA" + env.EdSig[4:]
+	beforeSig := env.EdSig
+	env.EdSig = tamper(t, env.EdSig)
+	if env.EdSig == beforeSig {
+		t.Fatal("the signature was not modified, so nothing was tested")
+	}
 	if _, err := UnpackSigned(aliceDID, env); err == nil {
 		t.Fatal("tampered signature must fail")
 	}
