@@ -48,6 +48,33 @@ type SeedWrapper interface {
 // exists). Tests may override.
 var platformSeedWrapper = newPlatformSeedWrapper
 
+// SeedWrapAvailable reports whether this platform can actually wrap the root
+// seed under a hardware-held key, right now, in this process.
+//
+// It exists so that anything telling a user their keys are hardware-protected
+// has to ask the code that would do the protecting, rather than inferring it
+// from a device node being present. Those are different questions: a TPM chip
+// can be installed and usable while nothing whatsoever is wrapped by it, which
+// is exactly the state a platform is in before its wrapper is written.
+//
+// A false security indicator is worse than an absent one, because it is the one
+// somebody relies on.
+func SeedWrapAvailable() bool {
+	w := platformSeedWrapper()
+	return w != nil && w.Available()
+}
+
+// SeedWrapScheme names the wrap format in use, or "none" when the seed is
+// stored unwrapped. Returned alongside the boolean so a caller can say WHY
+// rather than only that.
+func SeedWrapScheme() string {
+	w := platformSeedWrapper()
+	if w == nil || !w.Available() {
+		return seedWrapNone
+	}
+	return w.Scheme()
+}
+
 const seedWrapNone = "none"
 
 // seedEnvelope is the self-describing on-disk form of root_seed.key. A legacy
