@@ -432,3 +432,33 @@ func TestNoHandlerUsesLoopbackAsTheOwnerTest(t *testing.T) {
 		}
 	}
 }
+
+// A publicRoutes entry only opens a route if its key is the exact pattern chi
+// matches, because classify does a string lookup and otherwise falls through to
+// owner-only. So an entry with the wrong path is worse than no entry: in review
+// it reads as the route having been deliberately opened, while the route
+// answers 403 to the party it exists for, logs nothing, and appears to work
+// only from loopback — where the caller is treated as the owner and so never
+// finds out.
+//
+// These are the routes whose whole purpose is to be reachable by somebody who
+// is not the owner. Each is spelled here as its full mounted path.
+func TestRoutesForNonOwnersAreOpenAtTheirRealPaths(t *testing.T) {
+	for _, tc := range []struct{ method, pattern, who string }{
+		{"POST", "/api/assets/enrol", "a machine enrolling with the key it generated"},
+	} {
+		if got := classify(tc.method, tc.pattern); got != accessPublic {
+			t.Errorf("%s %s classified %q, so %s is refused before the handler runs",
+				tc.method, tc.pattern, got, tc.who)
+		}
+	}
+}
+
+// And the mistake itself: the path that is NOT mounted must not be classified
+// public, or the entry has simply been duplicated rather than corrected.
+func TestTheUnmountedEnrolPathIsNotOpen(t *testing.T) {
+	if got := classify("POST", "/api/enrol"); got == accessPublic {
+		t.Error("/api/enrol is classified public, but nothing is mounted there — " +
+			"the stale entry was left behind")
+	}
+}

@@ -49,7 +49,22 @@ type Asset struct {
 	// copy would add a second place for them to drift. An enrolled asset's key
 	// is nowhere in that tree, so if it is not recorded here nothing can ever
 	// verify anything the machine says.
-	PublicKey       string           `json:"public_key,omitempty"`
+	PublicKey string `json:"public_key,omitempty"`
+	// MachineIDKind and MachineIDValue record WHICH PHYSICAL MACHINE enrolled,
+	// captured at the one moment a person could vouch for it.
+	//
+	// Attestation proves what a machine is, never whose it is — the
+	// manufacturer's key service answers to anybody, so a machine an attacker
+	// owns attests as well as ours. Pinning to the value recorded here is what
+	// turns "some machine of this make" into "the machine we enrolled".
+	//
+	// Empty when the machine could not be identified, with MachineIDWhy saying
+	// so. Absent is a legitimate state — a machine without the hardware still
+	// enrols — and it must stay distinguishable from identified, which is why
+	// nothing here is ever filled in with a placeholder.
+	MachineIDKind   string           `json:"machine_id_kind,omitempty"`
+	MachineIDValue  string           `json:"machine_id_value,omitempty"`
+	MachineIDWhy    string           `json:"machine_id_why,omitempty"`
 	DelegationModel string           `json:"delegation_model"` // "delegated" | "standalone"
 	DelegatorAID    string           `json:"delegator_aid,omitempty"`
 	Policy          EnrollmentPolicy `json:"policy"`

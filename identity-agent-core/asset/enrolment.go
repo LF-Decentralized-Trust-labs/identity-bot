@@ -151,6 +151,76 @@ func (s *Store) ListEnrolments() []Enrolment {
 // One call rather than check-then-mark, so two machines racing on the same
 // token cannot both pass the check before either records it. That is the
 // difference between a single-use token and a token that is usually used once.
+// ClaimEnrolment marks a token used and returns what it authorised, in one
+// operation under the write lock.
+//
+// The alternative — read it, check it, mint an identity, then mark it used —
+// leaves the whole minting step between the check and the record. Two requests
+// arriving together both pass the check, and both then get a delegated identity
+// anchored in the owner's KEL; the loser is refused only after its identity
+// already exists and can never be un-anchored. Minting is a round trip to the
+// KERI engine, so that window is wide enough to lose by accident, not just by
+// attack.
+//
+// Claiming first inverts the failure: a machine that loses the race is told so
+// before anything is created. If the work afterwards fails, ReleaseEnrolment
+// hands the token back — a token wrongly spent is a machine that cannot retry,
+// which is recoverable by issuing another, whereas an identity wrongly minted
+// is not recoverable at all.
+func (s *Store) ClaimEnrolment(token string, now time.Time) (Enrolment, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	all := s.loadEnrolments()
+	e, ok := all[token]
+	if !ok {
+		return Enrolment{}, fmt.Errorf("no such enrolment token")
+	}
+	if spent, why := e.Spent(now); spent {
+		return Enrolment{}, fmt.Errorf("%s", why)
+	}
+	e.UsedAt = now
+	all[token] = e
+	if err := s.saveLocked(s.enrolmentsPath(), all); err != nil {
+		return Enrolment{}, err
+	}
+	return e, nil
+}
+
+// RecordEnrolmentAsset attaches the asset a claimed token produced.
+func (s *Store) RecordEnrolmentAsset(token, assetID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	all := s.loadEnrolments()
+	e, ok := all[token]
+	if !ok {
+		return fmt.Errorf("no such enrolment token")
+	}
+	e.AssetID = assetID
+	all[token] = e
+	return s.saveLocked(s.enrolmentsPath(), all)
+}
+
+// ReleaseEnrolment un-claims a token whose enrolment did not complete, so the
+// machine it was issued for can try again.
+func (s *Store) ReleaseEnrolment(token string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	all := s.loadEnrolments()
+	e, ok := all[token]
+	if !ok {
+		return fmt.Errorf("no such enrolment token")
+	}
+	// Only release a claim that produced nothing. Once an asset is recorded the
+	// token did its job, and handing it back would authorise a second identity.
+	if e.AssetID != "" {
+		return fmt.Errorf("this token already produced an identity and cannot be released")
+	}
+	e.UsedAt = time.Time{}
+	all[token] = e
+	return s.saveLocked(s.enrolmentsPath(), all)
+}
+
 func (s *Store) SpendEnrolment(token, assetID string, now time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
