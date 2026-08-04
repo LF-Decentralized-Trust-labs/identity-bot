@@ -129,7 +129,11 @@ func TestSignedRoundTripAndTamper(t *testing.T) {
 	if _, err := UnpackSigned(aliceDID, env); err != nil {
 		t.Fatalf("signed verify: %v", err)
 	}
-	env.EdSig = "AAAA" + env.EdSig[4:]
+	beforeSig := env.EdSig
+	env.EdSig = tamper(t, env.EdSig)
+	if env.EdSig == beforeSig {
+		t.Fatal("the signature was not modified, so nothing was tested")
+	}
 	if _, err := UnpackSigned(aliceDID, env); err == nil {
 		t.Fatal("tampered signature must fail")
 	}
