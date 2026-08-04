@@ -700,9 +700,20 @@ class CoreService {
     }
   }
 
+  /// Creates this agent's identity.
+  ///
+  /// [ownerAid] names who the identity answers to, and is written into the
+  /// event that creates it. Supply it for anything that answers to somebody
+  /// else — an organisation answers to its founders — because an identity
+  /// founded without an owner can never acquire one afterwards. The remedy for
+  /// getting this wrong is to found it again, so it is worth getting right.
+  ///
+  /// Left out for a person's own agent, whose identity is delegated and whose
+  /// delegator is already named in its event.
   Future<InceptionResponse> createInception({
     required String publicKey,
     required String nextPublicKey,
+    String? ownerAid,
   }) async {
     final response = await _client.post(
       Uri.parse('$baseUrl/api/inception'),
@@ -710,6 +721,7 @@ class CoreService {
       body: jsonEncode({
         'public_key': publicKey,
         'next_public_key': nextPublicKey,
+        if (ownerAid != null && ownerAid.isNotEmpty) 'owner_aid': ownerAid,
       }),
     );
 
