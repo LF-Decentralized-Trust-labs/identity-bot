@@ -114,3 +114,4 @@ func TestAMalformedOwnerKeyIsNotSealed(t *testing.T) {
 		t.Fatalf("a refused seal left the agent broken: %v", err)
 	}
 }
+

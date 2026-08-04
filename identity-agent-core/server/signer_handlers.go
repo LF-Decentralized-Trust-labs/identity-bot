@@ -5,7 +5,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
+	"strings"
 
 	"identity-agent-core/asset"
 	"identity-agent-core/login"
@@ -35,14 +37,22 @@ func (s *CoreServer) handleCreateSignerInvite(w http.ResponseWriter, r *http.Req
 	if publicURL == "" {
 		publicURL = s.getPublicURL(r)
 	}
+	// Mintable BEFORE the identity exists, which is the point.
+	//
+	// This used to refuse until the identity had been created, so the founding
+	// signer could only ever be collected AFTERWARDS — and an owner can only be
+	// anchored AT inception. The result was an organisation incepted owning
+	// itself, with its real owner recorded in a file beside the database: the
+	// precise arrangement the anchor was introduced to replace.
+	//
+	// So the invitation now names what the organisation WILL be rather than what
+	// it is. Whoever scans it is agreeing to become the owner of an organisation
+	// about to be created, which is a clearer and stronger commitment than
+	// vouching for one that already exists without them.
 	orgAID, orgOOBI, orgName := "", "", ""
 	if id, _ := s.DataStore.GetIdentity(); id != nil {
 		orgAID = id.AID
 		orgOOBI = fmt.Sprintf("%s/public/oobi/%s", publicURL, id.AID)
-	}
-	if orgAID == "" {
-		http.Error(w, "the organisation's identity must exist before it can be signed for (create keys first)", http.StatusBadRequest)
-		return
 	}
 	if prof, _ := s.DataStore.GetProfile(); prof != nil {
 		orgName = prof.OrgName
@@ -61,6 +71,16 @@ func (s *CoreServer) handleCreateSignerInvite(w http.ResponseWriter, r *http.Req
 	}
 	if err := s.assetHandler.Store.CreateEmployeeInvite(inv); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// A name is required even when the identity is not, because the person
+	// scanning has to be told what they are agreeing to own. An invitation
+	// carrying neither an identifier nor a name says nothing at all.
+	if orgAID == "" && strings.TrimSpace(orgName) == "" {
+		http.Error(w,
+			"name the organisation before inviting its owner — an invitation with no identifier and no name tells the person scanning nothing about what they would be taking on",
+			http.StatusBadRequest)
 		return
 	}
 
@@ -143,6 +163,16 @@ func (s *CoreServer) handleRedeemSignerInvite(w http.ResponseWriter, r *http.Req
 		NextPublicKey string `json:"next_public_key"`
 		VouchSig      string `json:"vouch_sig"`
 		VouchPayload  string `json:"vouch_payload"`
+		// BackupSealPublicKeyB64 is the X25519 key this organisation will seal
+		// its archives to, so it can write backups it cannot itself read.
+		//
+		// Collected here because this is the moment the owner is present and
+		// nowhere else is. An organisation holds its own signing seed and the
+		// founder never sees it — there is no phrase to write down — so a
+		// sealed archive only the owner can open is the ONLY way an
+		// organisation survives losing the machine it runs on. Asking for it
+		// later means a window where the answer is "it does not survive".
+		BackupSealPublicKeyB64 string `json:"backup_seal_public_key_b64,omitempty"`
 	}
 	json.NewDecoder(r.Body).Decode(&body)
 	if body.PairwiseAID == "" || body.VouchSig == "" {
@@ -219,6 +249,21 @@ func (s *CoreServer) handleRedeemSignerInvite(w http.ResponseWriter, r *http.Req
 	}); err != nil {
 		http.Error(w, "could not seal the owner: "+err.Error(), http.StatusInternalServerError)
 		return
+	}
+
+	// Record where this organisation's archives get sealed to, in the same act.
+	//
+	// Not fatal, and deliberately so: the owner is sealed at this point and
+	// refusing now would leave an organisation with no owner at all, which is
+	// worse than one that cannot back up yet. Logged loudly instead, because an
+	// organisation that cannot back up is a real problem — its signing seed
+	// exists in exactly one place and the founder has no copy of it.
+	if body.BackupSealPublicKeyB64 != "" {
+		if err := s.recordBackupSealKeys([]string{body.BackupSealPublicKeyB64}); err != nil {
+			log.Printf("[signer] WARNING: the owner was sealed but their recovery key was refused (%v) — this organisation cannot write a backup anybody can open", err)
+		}
+	} else {
+		log.Printf("[signer] WARNING: the owner gave no recovery key — this organisation's seed exists in one place only, and losing this machine would end it")
 	}
 
 	if err := s.assetHandler.Store.UpsertEmployee(emp); err != nil {
