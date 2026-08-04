@@ -64,7 +64,14 @@ func TestPairingDisclosesNothingBeyondThePairwiseOffer(t *testing.T) {
 	// The offer carries what somebody pairing needs and nothing more: where the
 	// box is, and proof they are the one who provisioned it. Anything beyond
 	// this list is a disclosure by an endpoint that answers without authorisation.
-	allowed := map[string]bool{"aid": true, "oobi": true, "adoption_code": true, "attestation": true, "attestation_binding": true}
+	// adoption_code is NOT on this list, and its absence is the point.
+	//
+	// It used to be. This test exists to prove the offer discloses nothing it
+	// should not, and the secret that gated adoption was sitting on its
+	// allow-list -- so the test passed while the endpoint handed ownership of a
+	// paid-for box to whoever asked first. A guard that blesses the thing it
+	// guards against is worse than no guard, because it reads like coverage.
+	allowed := map[string]bool{"aid": true, "oobi": true, "attestation": true, "attestation_binding": true}
 	for field := range body {
 		if !allowed[field] {
 			t.Errorf("the offer discloses %q, which nothing pairing needs", field)
@@ -75,25 +82,71 @@ func TestPairingDisclosesNothingBeyondThePairwiseOffer(t *testing.T) {
 	}
 }
 
-// An offer without a code cannot be adopted — adoption compares what it is
-// given against the offer, and an empty expectation refuses everything. So the
-// two have to be built together, and this is the test that says so.
-func TestEveryMintedOfferCarriesAnAdoptionCode(t *testing.T) {
+// The offer must never carry a claim token.
+//
+// The inverse of the test that used to be here, which asserted every offer
+// carried one. That was true, and it was the defect: this response is served to
+// anyone who asks, so a token inside it is a token published to the world. The
+// instance is now told what to expect by whoever provisioned it, before it is
+// reachable, and mints nothing itself.
+func TestTheOfferNeverCarriesAClaimToken(t *testing.T) {
 	offer, err := newPairingOffer("EPAIRWISE", "https://box.example/public/oobi/EPAIRWISE")
 	if err != nil {
 		t.Fatalf("mint offer: %v", err)
 	}
-	if offer.AdoptionCode == "" {
-		t.Fatal("the offer carries no adoption code, so this instance could never be adopted")
+	raw, err := json.Marshal(offer)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
 	}
+	// Checked on the serialised form rather than the struct, because what
+	// matters is what goes over the wire -- a field added back under any name
+	// would show up here.
+	for _, forbidden := range []string{"adoption_code", "claim_token", "token", "secret"} {
+		if strings.Contains(string(raw), forbidden) {
+			t.Errorf("the published offer contains %q: %s", forbidden, raw)
+		}
+	}
+}
 
-	resetPairingOfferForTest()
-	pairingOnce.Lock()
-	pairingOnce.offer = offer
-	pairingOnce.Unlock()
+// An instance that has not been told what to expect refuses every claim.
+//
+// Refusing is the safe direction. A box nobody can claim is recoverable; a box
+// anybody can claim is not.
+func TestAnInstanceNobodyToldRefusesEveryClaim(t *testing.T) {
+	resetExpectedClaimForTest()
+	if _, _, told := expectedAdoption(); told {
+		t.Fatal("a fresh instance already believes it knows which claim to accept")
+	}
+}
 
-	if expectedAdoptionCode() != offer.AdoptionCode {
-		t.Fatal("the code an adoption is checked against is not the code that was offered")
+// The first thing to tell it wins.
+//
+// The provisioner sets this during bring-up, while the box is reachable only
+// from the host that started it. A caller arriving later over a public address
+// must not be able to point the box at a claim of their own.
+func TestOnlyTheFirstClaimExpectationIsAccepted(t *testing.T) {
+	resetExpectedClaimForTest()
+	if err := SetExpectedClaim("TOKEN-FROM-THE-PROVISIONER", "EBuyer"); err != nil {
+		t.Fatalf("first write refused: %v", err)
+	}
+	if err := SetExpectedClaim("TOKEN-FROM-AN-ATTACKER", "EAttacker"); err == nil {
+		t.Fatal("a second caller redirected the box to their own claim")
+	}
+	token, owner, told := expectedAdoption()
+	if !told || token != "TOKEN-FROM-THE-PROVISIONER" || owner != "EBuyer" {
+		t.Fatalf("the expectation moved: %q / %q", token, owner)
+	}
+}
+
+// Half an expectation is not an expectation.
+func TestAClaimExpectationNeedsBothHalves(t *testing.T) {
+	for _, tc := range []struct{ token, owner string }{
+		{"", "EBuyer"}, {"TOKEN", ""}, {"", ""},
+	} {
+		resetExpectedClaimForTest()
+		if err := SetExpectedClaim(tc.token, tc.owner); err == nil {
+			t.Errorf("accepted token=%q owner=%q, which cannot gate anything", tc.token, tc.owner)
+		}
 	}
 }
 
@@ -168,4 +221,12 @@ func TestAttestationIsBoundToTheAdvertisedAID(t *testing.T) {
 		t.Errorf("the report is bound to %q but the offer advertises %q — it proves nothing about this instance",
 			offer.AttestationBinding, offer.AID)
 	}
+}
+
+// resetExpectedClaimForTest clears what an instance was told, so each test
+// starts from a box nobody has spoken to.
+func resetExpectedClaimForTest() {
+	expectedClaim.Lock()
+	defer expectedClaim.Unlock()
+	expectedClaim.token, expectedClaim.ownerAID, expectedClaim.set = "", "", false
 }

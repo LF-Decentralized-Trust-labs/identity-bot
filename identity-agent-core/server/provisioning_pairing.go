@@ -1,12 +1,12 @@
 package server
 
 import (
-	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 
 	"identity-agent-core/secureenclave"
@@ -37,20 +37,20 @@ type pairingOffer struct {
 	// AttestationBinding names what the report's REPORT_DATA is bound to, so a
 	// verifier can recompute it rather than trust the pairing.
 	AttestationBinding string `json:"attestation_binding,omitempty"`
-	// AdoptionCode is generated here, by the instance, and must be presented to
-	// complete an adoption.
+	// There is deliberately no adoption code in this struct.
 	//
-	// The box URL alone cannot be the only thing standing between a stranger
-	// and an unadopted instance. It travels through a browser, a page, a link
-	// and possibly a screenshot, and whoever reaches an unadopted box first
-	// wins it. The code never appears in the URL: the provisioning service
-	// reads it once, hands it to whoever provisioned, and nobody who merely
-	// learns the address can use it.
+	// There used to be, and it was the whole defect. The comment above it said
+	// the provisioning service "reads it once" and that nobody who merely
+	// learns the address can use it -- but nothing implemented reading it once,
+	// and this response is served to anyone who asks. So the secret that gated
+	// adoption was handed to whoever reached the box first, which on a public
+	// address is a stranger.
 	//
-	// The two answer different questions, and an instance needs both: the
-	// attestation says what this box is, the code says it is yours. Proving
-	// the hardware is sealed is no use if a stranger has already claimed it.
-	AdoptionCode string `json:"adoption_code,omitempty"`
+	// The instance is now TOLD which token to expect, before it is reachable,
+	// by whoever provisioned it (see expectedClaim / handleProvisioningExpect).
+	// It never mints one and never publishes one. What stays here is what a
+	// caller genuinely needs and what discloses nothing: the pairwise AID it is
+	// about to publish anyway, and an attestation of what this box is.
 }
 
 var pairingOnce struct {
@@ -120,19 +120,8 @@ func (s *CoreServer) handleProvisioningPairing(w http.ResponseWriter, r *http.Re
 }
 
 // newPairingOffer builds the offer an instance publishes.
-//
-// It exists as its own function so the code and the offer cannot come apart.
-// They were separate once: the code was minted nowhere, every offer carried an
-// empty one, and adoption compares what it is given against exactly that — so
-// the gate did not stand open, it stood shut, and no instance could be adopted
-// at all. Building the two together is what stops that recurring, and it is
-// what the test below holds in place.
 func newPairingOffer(aid, oobi string) (*pairingOffer, error) {
-	code, err := newAdoptionCode()
-	if err != nil {
-		return nil, err
-	}
-	return &pairingOffer{AID: aid, OOBI: oobi, AdoptionCode: code}, nil
+	return &pairingOffer{AID: aid, OOBI: oobi}, nil
 }
 
 func writePairingOffer(w http.ResponseWriter, offer *pairingOffer) {
@@ -140,24 +129,45 @@ func writePairingOffer(w http.ResponseWriter, offer *pairingOffer) {
 	_ = json.NewEncoder(w).Encode(offer)
 }
 
-// newAdoptionCode mints the one-time code that gates adoption.
-func newAdoptionCode() (string, error) {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return "", fmt.Errorf("no source of randomness for an adoption code: %w", err)
-	}
-	return base64.RawURLEncoding.EncodeToString(b), nil
+// expectedClaim is what this instance has been told to expect, and by whom.
+//
+// Set once, by whoever provisioned this box, over the private window before the
+// box is routable from anywhere else. Never minted here and never served.
+var expectedClaim struct {
+	sync.Mutex
+	token    string
+	ownerAID string
+	set      bool
 }
 
-// expectedAdoptionCode returns the code this instance is waiting for, if it has
-// offered itself for pairing at all.
-func expectedAdoptionCode() string {
-	pairingOnce.Lock()
-	defer pairingOnce.Unlock()
-	if pairingOnce.offer == nil {
-		return ""
+// SetExpectedClaim tells this instance which claim it will accept.
+//
+// First write wins, deliberately. The provisioner sets this during bring-up,
+// while the box is reachable only from the host that started it; a later caller
+// arriving over a public address must not be able to redirect the box to a
+// claim of their own.
+func SetExpectedClaim(token, ownerAID string) error {
+	if token == "" || ownerAID == "" {
+		return fmt.Errorf("a claim expectation needs both a token and the AID it will be presented by")
 	}
-	return pairingOnce.offer.AdoptionCode
+	expectedClaim.Lock()
+	defer expectedClaim.Unlock()
+	if expectedClaim.set {
+		return fmt.Errorf("this instance has already been told what to expect")
+	}
+	expectedClaim.token, expectedClaim.ownerAID, expectedClaim.set = token, ownerAID, true
+	return nil
+}
+
+// expectedAdoption returns the claim this instance will accept.
+//
+// An empty token means nobody has told it, and adoption must refuse rather than
+// fall back to something guessable. Refusing is the safe direction: an instance
+// nobody can claim is recoverable, an instance anybody can claim is not.
+func expectedAdoption() (token, ownerAID string, told bool) {
+	expectedClaim.Lock()
+	defer expectedClaim.Unlock()
+	return expectedClaim.token, expectedClaim.ownerAID, expectedClaim.set
 }
 
 // resetPairingOfferForTest lets tests start from a clean slate; the offer is
@@ -166,4 +176,55 @@ func resetPairingOfferForTest() {
 	pairingOnce.Lock()
 	defer pairingOnce.Unlock()
 	pairingOnce.offer = nil
+}
+
+// handleProvisioningExpect tells this instance which claim it will accept.
+//
+// Called by whoever provisioned the box, during bring-up, over the window in
+// which the box is reachable only from the host that started it — before it is
+// published anywhere. That window is the protection, together with first-write-
+// wins below: a caller arriving later, over a public address, cannot redirect
+// the box to a claim of their own.
+//
+// It carries no authentication because there is nobody to authenticate yet. An
+// instance at this point has no identity, no owner and no sealed key, so there
+// is no signature it could check and nothing it could check one against. Saying
+// that plainly is better than inventing a credential that would have to be
+// shipped in the image and would therefore be identical in every instance.
+//
+// THE RESIDUAL, stated rather than glossed: an attacker who could reach the box
+// inside the bring-up window, before the provisioner does, could set the
+// expectation themselves. On the intended deployment that window is host-local
+// and the provisioner is the only thing that can route to it. On a deployment
+// that publishes the box before setting the expectation, it is not — so
+// publishing must come after this call, and that ordering is the provisioner's
+// to keep.
+func (s *CoreServer) handleProvisioningExpect(w http.ResponseWriter, r *http.Request) {
+	if s.DataStore != nil {
+		if identity, err := s.DataStore.GetIdentity(); err == nil && identity != nil {
+			writeError(w, http.StatusConflict, "Already paired",
+				"this instance has an identity; what it would accept no longer matters")
+			return
+		}
+	}
+
+	var body struct {
+		ClaimToken string `json:"claim_token"`
+		OwnerAID   string `json:"owner_aid"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+	if err := SetExpectedClaim(body.ClaimToken, body.OwnerAID); err != nil {
+		// Both failures are the caller's, and they are different: one is a
+		// malformed request, the other is arriving second.
+		if strings.Contains(err.Error(), "already been told") {
+			writeError(w, http.StatusConflict, "Already told", err.Error())
+			return
+		}
+		writeError(w, http.StatusBadRequest, "Incomplete claim expectation", err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
 }
