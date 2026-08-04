@@ -1,46 +1,46 @@
 package tunnel
 
 import (
-        "context"
-        "log"
-        "net"
+	"context"
+	"log"
+	"net"
 )
 
 type NoneProvider struct{}
 
 func NewNoneProvider() *NoneProvider {
-        return &NoneProvider{}
+	return &NoneProvider{}
 }
 
 func (p *NoneProvider) Start(ctx context.Context, localPort int) error {
-        log.Println("[tunnel] Provider: none — no tunnel will be created")
-        return nil
+	log.Println("[tunnel] Provider: none — no tunnel will be created")
+	return nil
 }
 
 func (p *NoneProvider) Stop() error {
-        return nil
+	return nil
 }
 
 func (p *NoneProvider) Disconnect() error {
-        return p.Stop()
+	return p.Stop()
 }
 
 func (p *NoneProvider) URL() string {
-        return ""
+	return ""
 }
 
 func (p *NoneProvider) Listener() net.Listener {
-        return nil
+	return nil
 }
 
 func (p *NoneProvider) Status() Status {
-        return Status{
-                Provider: ProviderNone,
-                Active:   false,
-                Mode:     "disabled",
-        }
+	return Status{
+		Provider: ProviderNone,
+		Active:   false,
+		Mode:     "disabled",
+	}
 }
 
 func (p *NoneProvider) Type() ProviderType {
-        return ProviderNone
+	return ProviderNone
 }
