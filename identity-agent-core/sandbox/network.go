@@ -202,10 +202,17 @@ func (ni *NetworkIsolation) ContainerCreateConfig(manifest *AppManifest, proxyUR
 
         binds := []string{}
         if certDir != "" {
-                binds = append(binds, fmt.Sprintf("%s:/usr/local/share/ca-certificates/sandbox:ro", certDir))
-
+                // Mount the certificate as a named FILE, never the directory it sits
+                // in. A directory bind exposes whatever else is in that directory, and
+                // the obvious thing to hand a parameter called certDir is the CA's own
+                // data directory — which holds ca.key next to ca.crt. Every published
+                // failure of this pattern is the same one: a sandboxed workload that
+                // could read the CA private key could forge any certificate the host
+                // trusts. Naming one file makes that impossible to reach by accident.
                 nssDir := certDir + "/nss"
-                binds = append(binds, fmt.Sprintf("%s:/home/kasm-user/.pki/nssdb:rw", nssDir))
+                binds = append(binds,
+                        fmt.Sprintf("%s/%s:/usr/local/share/ca-certificates/sandbox/%s:ro", nssDir, caCertFileName, caCertFileName),
+                        fmt.Sprintf("%s:/home/kasm-user/.pki/nssdb:rw", nssDir))
         }
 
         if manifest.Container != nil {

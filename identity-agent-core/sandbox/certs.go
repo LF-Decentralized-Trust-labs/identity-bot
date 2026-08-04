@@ -100,7 +100,12 @@ func (cm *CertManager) createCA(certPath, keyPath string) error {
 		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
 		BasicConstraintsValid: true,
 		IsCA:                  true,
-		MaxPathLen:            1,
+		// This CA issues leaf certificates and nothing else, so it has no reason
+		// to be able to issue an intermediate. MaxPathLenZero is what actually
+		// says zero here — a bare MaxPathLen of 0 is Go's "unset", and would
+		// leave the chain depth unbounded.
+		MaxPathLen:     0,
+		MaxPathLenZero: true,
 	}
 
 	caCertDER, err := x509.CreateCertificate(rand.Reader, caCertTemplate, caCertTemplate, &caKey.PublicKey, caKey)
@@ -203,6 +208,11 @@ func (cm *CertManager) GenerateHostCert(host string) (*tls.Certificate, error) {
 	return cert, nil
 }
 
+// caCertFileName is the name the exported CA certificate is written under.
+// Anything that hands the certificate to a workload names this file, so that a
+// directory holding the CA private key can never be mounted by mistake.
+const caCertFileName = "identity-agent-ca.crt"
+
 func (cm *CertManager) ExportNSSDir(instanceDir string) (string, error) {
 	nssDir := filepath.Join(instanceDir, "nss")
 	if err := os.MkdirAll(nssDir, 0755); err != nil {
@@ -214,7 +224,7 @@ func (cm *CertManager) ExportNSSDir(instanceDir string) (string, error) {
 		return "", fmt.Errorf("failed to read CA cert: %w", err)
 	}
 
-	certDest := filepath.Join(nssDir, "identity-agent-ca.crt")
+	certDest := filepath.Join(nssDir, caCertFileName)
 	if err := os.WriteFile(certDest, caCertPEM, 0644); err != nil {
 		return "", fmt.Errorf("failed to write CA cert to NSS dir: %w", err)
 	}
