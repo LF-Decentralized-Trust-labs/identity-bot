@@ -181,6 +181,7 @@ var publicRoutes = map[string]string{
 	// provisioned instance has no identity and no owner, so it cannot be
 	// owner-gated; it discloses a pairwise AID that is about to be published as
 	// an OOBI anyway, nothing else, and it stops answering once paired.
+	"POST /api/provisioning/expect": "whoever provisioned a box says which claim it will accept, before it has an owner to authenticate",
 	"GET /api/provisioning/pairing": "a newly provisioned instance offers itself for pairing, before any owner exists",
 	// The adoption ceremony itself. Same reasoning and the same window: an
 	// instance with no owner cannot gate these on being the owner. Both refuse

@@ -570,6 +570,7 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		// it has an identity or an owner. See provisioning_pairing.go for why
 		// this one endpoint is reachable without authorisation.
 		r.Get("/provisioning/pairing", s.handleProvisioningPairing)
+		r.Post("/provisioning/expect", s.handleProvisioningExpect)
 		// Adoption: the box generates its own delegated key, the controller
 		// issues the delegation over it. See pairing.go for why the box never
 		// receives a key.

@@ -94,32 +94,3 @@ func TestPairingEndpointsAreReachableBeforeAnOwnerExists(t *testing.T) {
 		}
 	}
 }
-
-// The box URL travels through a browser, a page, a link and possibly a
-// screenshot. It cannot be the only thing between a stranger and an unadopted
-// instance, so adoption needs a code the address does not carry.
-func TestAdoptionCodeIsUnguessableAndUnique(t *testing.T) {
-	seen := map[string]bool{}
-	for i := 0; i < 8; i++ {
-		code, err := newAdoptionCode()
-		if err != nil {
-			t.Fatalf("mint: %v", err)
-		}
-		if len(code) < 40 {
-			t.Errorf("code is only %d characters — that is guessable", len(code))
-		}
-		if seen[code] {
-			t.Fatal("two instances minted the same adoption code")
-		}
-		seen[code] = true
-	}
-}
-
-// An instance that never published an offer has no code, and must not be
-// adoptable by presenting an empty one.
-func TestNoOfferMeansNoCode(t *testing.T) {
-	resetPairingOfferForTest()
-	if got := expectedAdoptionCode(); got != "" {
-		t.Errorf("an instance with no offer reported a code: %q", got)
-	}
-}

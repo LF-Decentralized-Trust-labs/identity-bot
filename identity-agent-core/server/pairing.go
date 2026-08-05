@@ -198,15 +198,42 @@ func (s *CoreServer) handlePairingComplete(w http.ResponseWriter, r *http.Reques
 	// Check the code before anything else is considered. An instance that
 	// validated a delegation first would leak whether the delegation was
 	// well-formed to somebody with no standing to ask.
-	expected := expectedAdoptionCode()
-	if expected == "" {
+	expected, expectedOwner, told := expectedAdoption()
+	if !told {
+		// Nobody told this box what to expect, so it cannot tell a real claim
+		// from a stranger's. Refusing is the safe direction: a box nobody can
+		// claim is recoverable, a box anybody can claim is not.
 		writeError(w, http.StatusConflict, "Not offered for pairing",
-			"this instance has not published a pairing offer, so there is no adoption to complete")
+			"this instance has not been told which claim to accept, so there is no adoption to complete")
 		return
 	}
 	if subtle.ConstantTimeCompare([]byte(expected), []byte(req.AdoptionCode)) != 1 {
 		writeError(w, http.StatusForbidden, "Wrong adoption code",
-			"this instance was provisioned for somebody, and adopting it needs the code issued with that provisioning")
+			"this instance was set up for somebody, and adopting it needs the token issued at that time")
+		return
+	}
+	// The token says the claimant holds the secret. This says they are the
+	// party it was issued to. Without it a leaked token would let anybody
+	// install themselves as owner, which is most of what the token exists to
+	// prevent.
+	if subtle.ConstantTimeCompare([]byte(expectedOwner), []byte(req.OwnerAID)) != 1 {
+		writeError(w, http.StatusForbidden, "Wrong owner",
+			"this instance was set up to answer to a different identity than the one claiming it")
+		return
+	}
+	// Checked here, before anything is minted, because the alternative is
+	// unrecoverable: the identity is founded and persisted first, and if
+	// sealing the owner then fails the box refuses every further attempt while
+	// naming an owner whose key it cannot resolve. Administrable by nobody,
+	// permanently, with no remedy but founding it again.
+	if req.OwnerPublicKey == "" {
+		writeError(w, http.StatusBadRequest, "This identity needs its owner's key",
+			"owner_public_key is required: without it the owner is named but cannot sign, and nothing later can repair that")
+		return
+	}
+	if _, err := login.DecodeVerkey(req.OwnerPublicKey); err != nil {
+		writeError(w, http.StatusBadRequest, "That owner key cannot be read",
+			"owner_public_key must be a key this instance can verify signatures with: "+err.Error())
 		return
 	}
 
