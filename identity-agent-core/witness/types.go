@@ -19,7 +19,7 @@ const (
 
 const (
 	BackendDesktop  = "desktop"
-	BackendHosted   = "hosted" // black-box / attestation-backed rented infra
+	BackendHosted   = "hosted" // black box: attestation-backed, run for the owner
 	BackendMobile   = "mobile"
 	BackendCommercial = "commercial"
 )
