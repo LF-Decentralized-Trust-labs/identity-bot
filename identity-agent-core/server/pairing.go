@@ -25,24 +25,24 @@ import (
 // adopt it, and the way they do it decides everything about what renting
 // hardware means.
 //
-// The wrong way is the obvious one: hand the box your root seed and let it act
+// The wrong way is the obvious one: hand the instance your root seed and let it act
 // as you. It works, it is one HTTP call, and it means your root key now lives
 // on hardware somebody else owns. There is no recovering from that — not by
 // unpairing, not by deleting the instance.
 //
-// So the box never receives a key. It generates its own, hands out only the
+// So the instance never receives a key. It generates its own, hands out only the
 // public half, and the controller issues a KERI delegated inception (`dip`)
-// naming that key, anchored in the controller's own KEL. The box ends up able
+// naming that key, anchored in the controller's own KEL. The instance ends up able
 // to sign for itself and independently revocable; the root never moves.
 //
 // Two calls, both reachable before an owner exists because that is the only
 // moment they are for, and both refused the instant one succeeds.
 
 type pairingBeginResponse struct {
-	// PairwiseAID is the identity the box published for discovery, echoed so a
-	// controller can confirm it is adopting the box it resolved.
+	// PairwiseAID is the identity the instance published for discovery, echoed
+	// so a controller can confirm it is adopting the one it resolved.
 	PairwiseAID string `json:"pairwise_aid"`
-	// PublicKey and NextPublicKey are the box's own delegated key material.
+	// PublicKey and NextPublicKey are the instance's own delegated key material.
 	// Public halves only — the private keys never leave the instance, which is
 	// the entire point of the ceremony.
 	PublicKey     string `json:"public_key"`
@@ -73,7 +73,7 @@ type pairingCompleteRequest struct {
 	// DelegatorAID is the controller's root AID.
 	DelegatorAID string `json:"delegator_aid"`
 	// AdoptionCode is the one-time code this instance issued with its pairing
-	// offer. Without it, whoever reaches an unadopted box first takes it.
+	// offer. Without it, whoever reaches an unclaimed instance first takes it.
 	AdoptionCode string `json:"adoption_code"`
 	// OwnerAID and OwnerPublicKey become the owner authority: whose signature
 	// this instance will accept as its owner's from now on.
@@ -118,7 +118,7 @@ func (s *CoreServer) handlePairingBegin(w http.ResponseWriter, r *http.Request) 
 
 	// Offer the same material twice rather than generating fresh keys on a
 	// retry: a controller that retried would otherwise issue a delegation over
-	// a key the box had already replaced, and the box would refuse its own
+	// a key the instance had already replaced, and it would refuse its own
 	// adoption.
 	if pairingState.offered != nil {
 		writeJSONResponse(w, pairingState.offered)
@@ -174,7 +174,7 @@ func (s *CoreServer) handlePairingBegin(w http.ResponseWriter, r *http.Request) 
 // handlePairingComplete accepts the delegation and seals the owner.
 //
 // This is the moment an instance stops being nobody's, so every check here is
-// about one question: is this delegation actually over the key this box just
+// about one question: is this delegation actually over the key this instance just
 // generated, from the party claiming to have issued it?
 func (s *CoreServer) handlePairingComplete(w http.ResponseWriter, r *http.Request) {
 	if err := s.refuseIfAlreadyPaired(w); err != nil {
@@ -365,7 +365,7 @@ func validateDelegation(req pairingCompleteRequest, offeredPublicKey string) err
 
 	// The check that matters: the delegation must be over the key this instance
 	// generated. Without it a controller could delegate to a key it holds and
-	// hand the box a delegation the box cannot sign with — or worse, one
+	// hand the instance a delegation it cannot sign with — or worse, one
 	// somebody else can.
 	keys, _ := req.DipEvent["k"].([]interface{})
 	if len(keys) == 0 {
@@ -416,23 +416,23 @@ func resetPairingStateForTest() {
 	pairingState.seed = nil
 }
 
-// --- the controller side: adopting a box ---
+// --- the controller side: adopting an instance ---
 
 // handlePairingAdopt runs the whole ceremony from the owner's agent.
 //
 // One call from the owner's side, because every step in between is a place a
 // user could be asked to do something they cannot check. The controller fetches
-// the box's key material, issues the delegation over it, anchors it in its own
-// KEL, and hands the box back the result. The box's private key never leaves
-// the box; the root key never leaves here.
+// the instance's key material, issues the delegation over it, anchors it in its
+// own KEL, and hands back the result. The instance's private key never leaves
+// the instance; the root key never leaves here.
 //
 // Owner-only: adopting hardware on somebody's behalf is exactly the authority
 // the owner check exists to protect.
 func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		BoxURL string `json:"box_url"`
-		// AdoptionCode comes from whoever provisioned the box — through the
-		// deep link or QR the provisioning page produced. The box will not be
+		// AdoptionCode comes from whatever set the instance up — through the
+		// deep link or QR that setup produced. The instance will not be
 		// adopted without it.
 		AdoptionCode string `json:"adoption_code"`
 	}
@@ -456,10 +456,10 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 	base := strings.TrimRight(req.BoxURL, "/")
 	client := &http.Client{Timeout: 30 * time.Second}
 
-	// 1. Ask the box for the key it generated for itself.
+	// 1. Ask the instance for the key it generated for itself.
 	offer, err := boxPairingBegin(client, base)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "The box did not offer key material", err.Error())
+		writeError(w, http.StatusBadGateway, "The instance did not offer key material", err.Error())
 		return
 	}
 
@@ -474,19 +474,19 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// 3. Hand it back, along with who owns the box from now on: us, and the
+	// 3. Hand it back, along with who owns the instance from now on: us, and the
 	// public key it should seal its backups to.
 	//
 	// Derived here rather than by the app, because the seed this comes from is
-	// already on this device and sending only the public half means the box can
+	// already on this device and sending only the public half means the instance can
 	// write archives forever and open none of them. An app that computed it
 	// would need the seed in a second place to do so.
 	sealKeys, err := s.ownerBackupSealPublicKeys()
 	if err != nil {
-		// Adopting a box that cannot back up would be handing somebody a
+		// Adopting an instance that cannot back up would be handing somebody a
 		// machine that quietly accumulates data it can never restore.
 		writeError(w, http.StatusInternalServerError, "Could not derive the recovery key",
-			"the box would have been adopted with no way to back up: "+err.Error())
+			"the instance would have been adopted with no way to back up: "+err.Error())
 		return
 	}
 
@@ -500,11 +500,11 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 		BackupSealPublicKeysB64: sealKeys,
 	})
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "The box refused the delegation", err.Error())
+		writeError(w, http.StatusBadGateway, "The instance refused the delegation", err.Error())
 		return
 	}
 
-	log.Printf("[pairing] adopted box at %s: delegated AID %s under root %s", base, dip.AID, root.AID)
+	log.Printf("[pairing] adopted the instance at %s: delegated AID %s under root %s", base, dip.AID, root.AID)
 	writeJSONResponse(w, map[string]interface{}{
 		"ok": true, "box_url": base,
 		"delegated_aid": dip.AID, "delegator_aid": root.AID,
@@ -527,7 +527,7 @@ func boxPairingBegin(client *http.Client, base string) (*pairingBeginResponse, e
 		return nil, err
 	}
 	if offer.PublicKey == "" {
-		return nil, fmt.Errorf("the box offered no key")
+		return nil, fmt.Errorf("the instance offered no key")
 	}
 	return &offer, nil
 }

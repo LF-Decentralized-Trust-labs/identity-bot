@@ -152,8 +152,8 @@ func TestASealedRecordForADifferentOwnerIsStillRefused(t *testing.T) {
 
 // An identity with no anchor still resolves through the sealed record. This is
 // the case the file was written for — hardware the owner does not hold, sealed
-// before the box ever reached the network — and removing it would lock an owner
-// out of their own box.
+// before the instance ever reached the network — and removing it would lock an
+// owner out of their own agent.
 func TestAnUnanchoredIdentityStillUsesTheSealedRecord(t *testing.T) {
 	s := serverWithIdentity(t, "EPERSONAL")
 	if err := s.SealOwnerAuthority(OwnerAuthority{
@@ -165,14 +165,14 @@ func TestAnUnanchoredIdentityStillUsesTheSealedRecord(t *testing.T) {
 
 	authority, err := s.ownerAuthority()
 	if err != nil {
-		t.Fatalf("a sealed owner could not act on their own box: %v", err)
+		t.Fatalf("a sealed owner could not act on their own agent: %v", err)
 	}
 	if authority.AID != "EOWNER" {
 		t.Errorf("authority is %q, not the sealed owner", authority.AID)
 	}
 }
 
-// A box with no identity yet is exactly the state provisioning seals it in.
+// An instance with no identity yet is exactly the state setup seals it in.
 func TestABoxWithNoIdentityUsesTheSealedRecord(t *testing.T) {
 	s := newAuthTestServer(t)
 	if err := s.SealOwnerAuthority(OwnerAuthority{
@@ -184,7 +184,7 @@ func TestABoxWithNoIdentityUsesTheSealedRecord(t *testing.T) {
 
 	authority, err := s.ownerAuthority()
 	if err != nil {
-		t.Fatalf("a provisioned box could not resolve its sealed owner: %v", err)
+		t.Fatalf("a newly set-up instance could not resolve its sealed owner: %v", err)
 	}
 	if authority.AID != "EOWNER" {
 		t.Errorf("authority is %q", authority.AID)

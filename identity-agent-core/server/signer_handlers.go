@@ -148,7 +148,8 @@ func (s *CoreServer) mintSignerAsk(orgName, orgAID, orgOOBI, inviteToken string)
 // beside it as evidence — a string in a table with no cryptographic force.
 // Nothing consulted it before acting, so ownerAuthority() fell through to its
 // default of "this agent's own identity is the authority" and the organisation
-// owned itself. On rented hardware that meant the box held the only key that
+// owned itself. On a machine its owner does not control, that meant the
+// instance held the only key that
 // mattered and nobody outside it could prove otherwise.
 //
 // Sealing here closes that by making the signer's key the one this agent

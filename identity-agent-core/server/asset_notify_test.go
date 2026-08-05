@@ -102,7 +102,7 @@ func TestASignatureFromTheWrongKeyIsRefused(t *testing.T) {
 	enrolledMachine(t, s, "EMACHINE")
 
 	otherSeed := make([]byte, ed25519.SeedSize)
-	copy(otherSeed, "somebody else entirely, not the box")
+	copy(otherSeed, "somebody else entirely, not this agent")
 	other := ed25519.NewKeyFromSeed(otherSeed)
 
 	body := notifyBody(t)

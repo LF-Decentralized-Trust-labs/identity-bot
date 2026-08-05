@@ -541,12 +541,12 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		// it has an identity or an owner. See provisioning_pairing.go for why
 		// this one endpoint is reachable without authorisation.
 		r.Get("/provisioning/pairing", s.handleProvisioningPairing)
-		// Adoption: the box generates its own delegated key, the controller
-		// issues the delegation over it. See pairing.go for why the box never
+		// Adoption: the instance generates its own delegated key, the controller
+		// issues the delegation over it. See pairing.go for why it never
 		// receives a key.
 		r.Post("/pairing/begin", s.handlePairingBegin)
 		r.Post("/pairing/complete", s.handlePairingComplete)
-		// The owner's side: adopt a box. Owner-only by default.
+		// The owner's side: adopt an instance. Owner-only by default.
 		r.Post("/pairing/adopt", s.handlePairingAdopt)
 
 		r.Get("/contacts", s.handleGetContacts)

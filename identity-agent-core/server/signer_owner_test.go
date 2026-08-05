@@ -15,7 +15,7 @@ import (
 // and file a signature beside it as evidence. Nothing consulted that before
 // acting, so ownerAuthority() fell through to its default — the agent's own
 // identity — and the organisation answered to nobody but itself. On rented
-// hardware that means the box holds the only key that matters.
+// hardware that means the instance holds the only key that matters.
 //
 // The fallback is the reason this was invisible rather than broken: everything
 // kept working, signed by the wrong party.

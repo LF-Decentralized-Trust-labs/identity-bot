@@ -306,7 +306,7 @@ func denyAuthorization(w http.ResponseWriter, detail string) {
 // claim proved differently. On a machine you are sitting at, a request that
 // originates on that machine is you. On hardware you rent — where you are
 // remote by definition and the local test can never be true — you prove it by
-// signing the request with the owner key sealed into the box at provisioning.
+// signing the request with the owner key sealed into the instance when it was set up.
 func (s *CoreServer) isOwner(r *http.Request) bool {
 	if isLocalOwnerRequest(r) {
 		return true

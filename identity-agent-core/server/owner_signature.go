@@ -22,10 +22,10 @@ import (
 // machine and arrive unforwarded. That is true and sufficient on a laptop. It
 // is never true on hardware the owner rents — where they reach the agent over
 // the network — and the escape hatch was itself gated the same way: minting a
-// token required a local call, on a box nobody can ever be local to. The one
+// token required a local call, on a machine nobody can ever be local to. The one
 // door to the room was locked from inside the room.
 //
-// So the owner signs the request. The owner's AID is sealed into the box when
+// So the owner signs the request. The owner's AID is sealed into the instance when
 // it is provisioned, the agent verifies each request against that key, and
 // locality stops being a security boundary — it stays only as a convenience for
 // the machine you are sitting at.
@@ -56,13 +56,13 @@ type OwnerAuthority struct {
 // The order is the security property. An identity that named its owner in its
 // own inception event has settled the question permanently, and nothing on disk
 // may disagree with it. Only where there is no such anchor does the sealed
-// record answer — which is the case it was written for, a box provisioned for
+// record answer — which is the case it was written for, an instance set up for
 // an owner before it had an identity at all. With neither, an agent running on
 // its owner's own machine is its own authority, so signing works there with no
 // setup.
 func (s *CoreServer) ownerAuthority() (*OwnerAuthority, error) {
 	// With no identity of its own, the sealed record is all there is — and that
-	// is precisely the state provisioning writes it in, on a box that has not
+	// is precisely the state setup writes it in, on an instance that has not
 	// been adopted yet.
 	var identity *store.IdentityState
 	if s.DataStore != nil {
@@ -124,7 +124,7 @@ func (s *CoreServer) ownerAuthority() (*OwnerAuthority, error) {
 	}
 
 	// No anchor. That is the ordinary case for a person's own agent, and for a
-	// box provisioned for an owner whose identity is delegated rather than
+	// instance set up for an owner whose identity is delegated rather than
 	// anchored — which is what the sealed file was written for.
 	if sealed, serr := s.sealedOwnerAuthority(); serr == nil {
 		return sealed, nil
@@ -135,7 +135,7 @@ func (s *CoreServer) ownerAuthority() (*OwnerAuthority, error) {
 // sealedOwnerAuthority reads the owner recorded at provisioning.
 //
 // Kept for the case it was written for: hardware the owner does not physically
-// hold, sealed before the box ever reaches the network, where there is no
+// hold, sealed before the instance ever reaches the network, where there is no
 // identity yet to carry an anchor. It is no longer consulted for an identity
 // that names its own owner.
 func (s *CoreServer) sealedOwnerAuthority() (*OwnerAuthority, error) {
@@ -154,7 +154,7 @@ func (s *CoreServer) sealedOwnerAuthority() (*OwnerAuthority, error) {
 }
 
 // SealOwnerAuthority fixes who may act as the owner. Provisioning calls this
-// before the box ever reaches the network, which is what makes remote ownership
+// before the instance ever reaches the network, which is what makes remote ownership
 // possible without a bootstrap token.
 func (s *CoreServer) SealOwnerAuthority(oa OwnerAuthority) error {
 	if oa.AID == "" || oa.PublicKey == "" {

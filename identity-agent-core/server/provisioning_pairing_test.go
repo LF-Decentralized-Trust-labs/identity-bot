@@ -62,7 +62,7 @@ func TestPairingDisclosesNothingBeyondThePairwiseOffer(t *testing.T) {
 		t.Fatalf("not JSON: %v", err)
 	}
 	// The offer carries what somebody pairing needs and nothing more: where the
-	// box is, and proof they are the one who provisioned it. Anything beyond
+	// instance is, and proof they are the one it was set up for. Anything beyond
 	// this list is a disclosure by an endpoint that answers without authorisation.
 	allowed := map[string]bool{"aid": true, "oobi": true, "adoption_code": true, "attestation": true, "attestation_binding": true}
 	for field := range body {
@@ -97,7 +97,7 @@ func TestEveryMintedOfferCarriesAnAdoptionCode(t *testing.T) {
 	}
 }
 
-// A provisioning retry must describe the same box. Minting a second AID would
+// A setup retry must describe the same instance. Minting a second AID would
 // hand the user an OOBI for something other than what was reported ready.
 func TestPairingMintsOnce(t *testing.T) {
 	resetPairingOfferForTest()

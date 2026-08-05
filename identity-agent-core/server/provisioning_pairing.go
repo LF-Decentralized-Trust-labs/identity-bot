@@ -30,7 +30,7 @@ type pairingOffer struct {
 	OOBI string `json:"oobi"`
 	// Attestation is the guest's SEV-SNP report, base64, present only when this
 	// instance is running in a sealed VM that can produce one. Absent is a real
-	// answer — it means nobody can verify what this box is — and a caller that
+	// answer — it means nobody can verify what this instance is — and a caller that
 	// requires sealed infrastructure must treat absence as a failure rather
 	// than as an older version being lenient.
 	Attestation string `json:"attestation,omitempty"`
@@ -83,7 +83,7 @@ func (s *CoreServer) handleProvisioningPairing(w http.ResponseWriter, r *http.Re
 	defer pairingOnce.Unlock()
 
 	// Mint once. A second call must return the same AID, or a provisioning
-	// retry would hand the user a different box than the one it described.
+	// retry would hand the user a different instance than the one it described.
 	if pairingOnce.offer != nil {
 		writePairingOffer(w, pairingOnce.offer)
 		return
@@ -111,7 +111,7 @@ func (s *CoreServer) handleProvisioningPairing(w http.ResponseWriter, r *http.Re
 			offer.AttestationBinding = "blake3-256(IA-SNP-BIND-V1\\n" + aid + ")"
 		} else {
 			// Being in a sealed VM and failing to prove it is worth saying out
-			// loud: it is the case where the box is fine but nobody can tell.
+			// loud: it is the case where the instance is fine but nobody can tell.
 			log.Printf("[provisioning] SNP guest present but no report available: %v", rerr)
 		}
 	}
