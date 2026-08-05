@@ -65,9 +65,13 @@ type CoreServer struct {
 	listener        net.Listener
 	router          chi.Router
 	flutterWebDir   string
-	loginHandler    *login.Handler
-	assetHandler    *asset.Handler
-	inboundDIDComm  InboundDIDCommHandler // overlay hook for inbound DIDComm messages; nil = deliver-only
+
+	// See Config.RequireOwnerAtInception.
+	requireOwnerAtInception bool
+
+	loginHandler   *login.Handler
+	assetHandler   *asset.Handler
+	inboundDIDComm InboundDIDCommHandler // overlay hook for inbound DIDComm messages; nil = deliver-only
 
 	// Overlay-registered extra routes, mounted under /api by buildRouter. See
 	// MountExtraRoutes / extension.go — inert unless an overlay registers.
@@ -97,6 +101,21 @@ type Config struct {
 	Port             int
 	EnableKeriDriver bool
 	FlutterWebDir    string
+
+	// RequireOwnerAtInception refuses to found an identity that names no owner.
+	//
+	// Off by default, because a person's own agent is the common case and a
+	// person's identity answers to nobody. Turned on by an agent that exists to
+	// serve somebody else -- an organisation, or an identity held for a
+	// dependent -- where founding without an owner produces something that can
+	// never be given one afterwards.
+	//
+	// This is a server-side rule on purpose. The refusal already exists in the
+	// organisation app's onboarding, but a rule that lives only in a client is a
+	// convention: anything else that can reach /api/inception can found an
+	// unowned identity, and on a hosted instance that is the difference between
+	// a property you can attest to and one you hope the client honoured.
+	RequireOwnerAtInception bool
 }
 
 func DefaultConfig() Config {
@@ -120,11 +139,20 @@ func DefaultConfig() Config {
 		enableKeri = false
 	}
 
+	// Off unless asked for. An agent that needs it sets it in code (the
+	// organisation backend does); the variable exists so a deployment can turn
+	// it on without a rebuild.
+	requireOwner := false
+	if v := os.Getenv("REQUIRE_OWNER_AT_INCEPTION"); v == "true" || v == "1" {
+		requireOwner = true
+	}
+
 	return Config{
-		DataDir:          dataDir,
-		Port:             port,
-		EnableKeriDriver: enableKeri,
-		FlutterWebDir:    webDir,
+		DataDir:                 dataDir,
+		Port:                    port,
+		EnableKeriDriver:        enableKeri,
+		FlutterWebDir:           webDir,
+		RequireOwnerAtInception: requireOwner,
 	}
 }
 
@@ -286,6 +314,7 @@ func New(cfg Config) (*CoreServer, error) {
 	// (MountExtraRoutes) after New() returns but before serving. Building here
 	// would consume an empty extraRoutes slice, silently dropping overlay routes.
 	s.flutterWebDir = cfg.FlutterWebDir
+	s.requireOwnerAtInception = cfg.RequireOwnerAtInception
 
 	return s, nil
 }
@@ -978,6 +1007,18 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 
 	if req.PublicKey == "" || req.NextPublicKey == "" {
 		writeError(w, http.StatusBadRequest, "Missing required fields", "public_key and next_public_key are required")
+		return
+	}
+
+	// Checked here rather than trusted to the caller. An owner can only be
+	// written into the event that founds the identity; there is no later event
+	// that can add one. So an agent configured to serve somebody else refuses
+	// the request outright instead of producing an identity that is permanently
+	// unownable and looks perfectly healthy.
+	if s.requireOwnerAtInception && req.OwnerAID == "" {
+		writeError(w, http.StatusBadRequest, "This agent will not found an identity that names no owner",
+			"owner_aid is required. An owner is written into the founding event and cannot be added afterwards, "+
+				"so an identity founded without one could never be given one.")
 		return
 	}
 
