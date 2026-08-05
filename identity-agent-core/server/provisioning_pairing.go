@@ -83,8 +83,12 @@ func (s *CoreServer) handleProvisioningPairing(w http.ResponseWriter, r *http.Re
 
 	// Mint once. A second call must return the same AID, or a provisioning
 	// retry would hand the user a different box than the one it described.
+	//
+	// "Once" now means once per AGENT, not once per process: an offer published
+	// before a restart is read back from disk at startup, so this is the same
+	// address it has always published.
 	if pairingOnce.offer != nil {
-		writePairingOffer(w, pairingOnce.offer)
+		writePairingOffer(w, s.withAttestation(pairingOnce.offer))
 		return
 	}
 
@@ -99,23 +103,126 @@ func (s *CoreServer) handleProvisioningPairing(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// Bind the attestation to the AID we just minted. A report that only says
-	// "some sealed guest ran the right image" is satisfied by any instance
-	// anywhere, including the provider's own; bound to this AID it says "the
-	// guest that minted THIS identity ran the right image", which is the claim
-	// somebody pairing actually needs.
-	if secureenclave.SNPAvailable() {
-		if report, rerr := secureenclave.GetSNPReport(aid); rerr == nil {
-			offer.Attestation = base64.StdEncoding.EncodeToString(report.Raw)
-			offer.AttestationBinding = "blake3-256(IA-SNP-BIND-V1\\n" + aid + ")"
-		} else {
-			// Being in a sealed VM and failing to prove it is worth saying out
-			// loud: it is the case where the box is fine but nobody can tell.
-			log.Printf("[provisioning] SNP guest present but no report available: %v", rerr)
+	// Written down before it is served, so this agent cannot hand out an address
+	// it will not remember. The other order leaves exactly the hole this closes:
+	// somebody holding an address that stops resolving at the next restart.
+	//
+	// The key and the key event log are read back from the registries
+	// mintPairwise has just populated, because those two are what make the AID
+	// resolvable — remembering which AID was published without them would leave
+	// an address that is remembered and still cannot be reached.
+	stored := storedPairingOffer{AID: aid}
+	if pub, ok := getPairwiseKey(aid); ok {
+		stored.PublicKey = pub
+	}
+	if kel, ok := getPairwiseKEL(aid); ok {
+		stored.KEL = kel
+	}
+	if serr := savePairingOffer(s.DataDir, stored); serr != nil {
+		// Loud, and still served. Refusing to pair because the note could not be
+		// written would strand an agent that is otherwise working perfectly; the
+		// failure it causes is a restart away, and this is the only warning
+		// anybody will get before then.
+		log.Printf("[provisioning] WARNING: could not record the pairing identity, so a restart will publish a different one and this address will stop resolving: %v", serr)
+	}
+
+	pairingOnce.offer = offer
+	writePairingOffer(w, s.withAttestation(pairingOnce.offer))
+}
+
+// withAttestation returns the offer with a fresh proof of what this agent is
+// running, where the hardware can produce one.
+//
+// Attached when the offer is SERVED rather than when it is minted, and that is
+// not a refactor for its own sake: an offer restored from disk after a restart
+// was minted by a process that is gone, so an attestation captured at mint time
+// would either be missing or would be a report from a previous boot. A verifier
+// asking now should be answered now.
+//
+// The report is bound to the AID. One that only says "some sealed machine ran
+// the right image" is satisfied by any machine anywhere, including the
+// provider's own; bound to this AID it says "the machine that minted THIS
+// identity ran the right image", which is the claim somebody pairing actually
+// needs.
+//
+// The original is not modified — callers hold a pointer to the remembered offer,
+// and a per-request field does not belong in it.
+func (s *CoreServer) withAttestation(offer *pairingOffer) *pairingOffer {
+	if offer == nil {
+		return nil
+	}
+	out := *offer
+	if !secureenclave.SNPAvailable() {
+		return &out
+	}
+	report, rerr := secureenclave.GetSNPReport(out.AID)
+	if rerr != nil {
+		// Being on sealed hardware and failing to prove it is worth saying out
+		// loud: it is the case where the agent is fine but nobody can tell.
+		log.Printf("[provisioning] SNP guest present but no report available: %v", rerr)
+		return &out
+	}
+	out.Attestation = base64.StdEncoding.EncodeToString(report.Raw)
+	out.AttestationBinding = "blake3-256(IA-SNP-BIND-V1\\n" + out.AID + ")"
+	return &out
+}
+
+// restorePairingOffer puts back the identity this agent published before it was
+// last stopped.
+//
+// Without this an agent that restarts mints a second pairwise AID and offers
+// that instead, so the address somebody was given to come and claim it with
+// silently stops resolving. Called from Start, after the endpoint service knows
+// the agent's current public URL, because the OOBI is composed from it.
+//
+// Every failure here is reported and none of them stop the agent. An agent that
+// cannot restore its published identity is degraded in a specific, describable
+// way; one that refuses to start is unreachable in every way at once.
+func (s *CoreServer) restorePairingOffer() {
+	// A paired agent has an owner and no longer offers itself, so there is
+	// nothing to put back.
+	if s.DataStore != nil {
+		if identity, err := s.DataStore.GetIdentity(); err == nil && identity != nil {
+			return
 		}
 	}
+
+	stored, found, err := loadPairingOffer(s.DataDir)
+	if err != nil {
+		log.Printf("[provisioning] WARNING: %v — this agent will publish a NEW pairing identity, and any address already handed out will stop resolving", err)
+		return
+	}
+	if !found {
+		return
+	}
+
+	// The two registries that make the AID resolvable. Both are in memory, so
+	// both are empty after a restart: without them the agent remembers which
+	// identity it published and still cannot serve it, which to anybody holding
+	// the address looks the same as it being gone.
+	if stored.PublicKey != "" {
+		registerPairwiseKey(stored.AID, stored.PublicKey)
+	}
+	if len(stored.KEL) > 0 {
+		registerPairwiseKEL(stored.AID, stored.KEL)
+	} else {
+		log.Printf("[provisioning] WARNING: the recorded pairing identity %s has no key event log, so its OOBI will not resolve", stored.AID)
+	}
+
+	// Composed from where this agent is reachable NOW. Storing the address
+	// instead of rebuilding it would pin the agent to wherever it happened to be
+	// when it first started, which is the same class of bug one layer along.
+	oobi := fmt.Sprintf("%s/public/oobi/%s", s.EndpointService.CurrentURL(), stored.AID)
+	offer, oerr := newPairingOffer(stored.AID, oobi)
+	if oerr != nil {
+		log.Printf("[provisioning] WARNING: could not rebuild the published pairing offer: %v", oerr)
+		return
+	}
+
+	pairingOnce.Lock()
 	pairingOnce.offer = offer
-	writePairingOffer(w, pairingOnce.offer)
+	pairingOnce.Unlock()
+	log.Printf("[provisioning] still offering the pairing identity published before this start (%s)", stored.AID)
 }
 
 // newPairingOffer builds the offer an instance publishes.
@@ -169,8 +276,11 @@ func expectedAdoption() (token, ownerAID string, told bool) {
 	return expectedClaim.token, expectedClaim.ownerAID, expectedClaim.set
 }
 
-// resetPairingOfferForTest lets tests start from a clean slate; the offer is
-// process-wide by design, since an instance offers itself exactly once.
+// resetPairingOfferForTest lets tests start from a clean slate.
+//
+// It clears only the in-memory copy, which is what a restart does — the record
+// on disk is what makes the offer survive one. A test that wants an agent with
+// no history should use a fresh data directory as well.
 func resetPairingOfferForTest() {
 	pairingOnce.Lock()
 	defer pairingOnce.Unlock()
