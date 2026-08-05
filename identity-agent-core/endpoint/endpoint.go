@@ -171,6 +171,7 @@ func (es *EndpointService) Refresh() {
 func (es *EndpointService) resolve() (string, string) {
 	es.mu.RLock()
 	override := es.overrideURL
+	observed := es.observedURL
 	tm := es.tunnelManager
 	rm := es.relayManager
 	port := es.localPort
@@ -178,6 +179,23 @@ func (es *EndpointService) resolve() (string, string) {
 
 	if override != "" {
 		return override, "override"
+	}
+
+	// Where a trusted proxy said this agent is actually being reached.
+	//
+	// Above a relay or a tunnel because those are paths this agent knows it set
+	// up, while this is the path a request actually arrived by — and when the
+	// two disagree, the one somebody really used is the one that resolves. Below
+	// an explicit override, which is a person stating the answer outright.
+	//
+	// SetObservedURL is the only way this is ever set, it is refused unless the
+	// deployment opts in, and it takes the first trusted answer and then stops
+	// looking. All of which was already true and guarded a value nothing read:
+	// it was written in SetObservedURL and never consulted here, so an agent
+	// behind a proxy learned its real address and then published a local one
+	// anyway. The safety reasoning was sound and simply had no consumer.
+	if observed != "" {
+		return observed, "observed:proxy"
 	}
 
 	// URL() is empty unless the relay is genuinely connected, so an
