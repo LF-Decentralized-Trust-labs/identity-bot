@@ -369,6 +369,14 @@ func (s *CoreServer) Start() error {
 	s.EndpointService.SetTunnelManager(s.TunnelManager)
 	s.EndpointService.Refresh()
 
+	// Put back the pairing identity this agent published before it was last
+	// stopped, so an agent that restarts before anybody has claimed it keeps
+	// offering the address they were given rather than minting a new one.
+	//
+	// After the endpoint refresh above, because the OOBI is composed from where
+	// this agent is currently reachable.
+	s.restorePairingOffer()
+
 	if s.UpdateService != nil {
 		healthURL := fmt.Sprintf("http://127.0.0.1:%d/api/health", s.Port)
 		s.UpdateService.SetHealthCheck(func() error {

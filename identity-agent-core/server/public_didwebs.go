@@ -41,6 +41,19 @@ func getPairwiseKEL(aid string) ([]map[string]interface{}, bool) {
 	return k, ok
 }
 
+func registerPairwiseKey(aid, publicKeyB64 string) {
+	pairwiseKeys.Lock()
+	pairwiseKeys.m[aid] = publicKeyB64
+	pairwiseKeys.Unlock()
+}
+
+func getPairwiseKey(aid string) (string, bool) {
+	pairwiseKeys.Lock()
+	defer pairwiseKeys.Unlock()
+	k, ok := pairwiseKeys.m[aid]
+	return k, ok
+}
+
 func (s *CoreServer) mountPublicDidWebsRoutes(r chi.Router) {
 	r.Get("/public/{aid}/did.json", s.handlePublicDidJSON)
 	r.Post("/public/_register", s.handleRegisterPairwise)
