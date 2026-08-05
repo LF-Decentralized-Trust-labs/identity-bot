@@ -154,6 +154,42 @@ func TestAnUnreadableRecordIsAnErrorRatherThanSilence(t *testing.T) {
 	}
 }
 
+// Nothing is left beside the record.
+//
+// The record is written to a temporary name, flushed, and renamed into place. A
+// leftover temporary file is the sign that sequence went wrong somewhere, and it
+// is the kind of debris that later reads as a second, older record.
+func TestSavingLeavesNoDebrisBesideTheRecord(t *testing.T) {
+	dir := t.TempDir()
+	if err := savePairingOffer(dir, storedPairingOffer{AID: "EAID", PublicKey: "cHVia2V5"}); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".tmp") {
+			t.Errorf("left a temporary file behind: %s", e.Name())
+		}
+	}
+	if len(entries) != 1 {
+		t.Errorf("wrote %d files, want exactly the record", len(entries))
+	}
+}
+
+// A record that cannot be written must say so, because the caller logs it as the
+// only warning anybody gets before the next restart loses the identity.
+func TestAnUnwritableRecordIsReported(t *testing.T) {
+	if err := savePairingOffer("", storedPairingOffer{AID: "EAID"}); err == nil {
+		t.Error("saving with nowhere to save to reported success")
+	}
+	dir := t.TempDir()
+	if err := savePairingOffer(dir, storedPairingOffer{}); err == nil {
+		t.Error("a record with no AID was accepted, and it names nothing")
+	}
+}
+
 // The remembered offer is shared, so attaching a per-request proof to it would
 // mutate what every later caller is handed.
 func TestAttachingAProofDoesNotModifyTheRememberedOffer(t *testing.T) {

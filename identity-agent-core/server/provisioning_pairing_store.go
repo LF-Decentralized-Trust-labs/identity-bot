@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 )
@@ -76,17 +77,57 @@ func savePairingOffer(dataDir string, offer storedPairingOffer) error {
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return err
 	}
-	// Written beside and renamed, so an agent interrupted mid-write comes back
-	// with the previous file rather than a truncated one. A half-written file
-	// here reads as "never published anything", which is the state this exists
-	// to prevent.
+	// Written beside, flushed to the disk, and only then renamed into place.
+	//
+	// The flush is the part that is easy to leave out and is the whole point
+	// here. Write-and-rename is atomic against a half-written file, and atomic
+	// against nothing at all if the machine stops before the data leaves its
+	// cache: the rename lands in the page cache too, so an agent that is killed
+	// rather than shut down comes back to a file that was never there.
+	//
+	// That is not a rare case for this particular record. It is written by an
+	// agent nobody has claimed yet, during the handover window, and the ordinary
+	// way that window ends is somebody stopping the agent — which on most
+	// deployments is a signal, not a shutdown. Measured directly: the record was
+	// written, the process was killed, and the agent came back with no record and
+	// minted a second identity, silently replacing the address a person was
+	// holding.
+	//
+	// The directory is flushed as well as the file. A rename is a directory
+	// change, so without it the file's contents can be durable while the name
+	// pointing at them is not.
 	tmp := pairingOfferPath(dataDir) + ".tmp"
-	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(raw); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return fmt.Errorf("the pairing identity could not be flushed to disk, so it would not survive this agent stopping: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tmp)
 		return err
 	}
 	if err := os.Rename(tmp, pairingOfferPath(dataDir)); err != nil {
 		os.Remove(tmp)
 		return err
+	}
+	if dir, derr := os.Open(dataDir); derr == nil {
+		// Reported but not fatal: the contents are already durable, so the worst
+		// case is losing the record rather than corrupting it, and refusing to
+		// pair over it would be a worse trade.
+		if serr := dir.Sync(); serr != nil {
+			log.Printf("[provisioning] WARNING: could not flush the directory holding the pairing identity, "+
+				"so it may not survive this agent stopping: %v", serr)
+		}
+		dir.Close()
 	}
 	return nil
 }
