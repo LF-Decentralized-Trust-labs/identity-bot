@@ -498,6 +498,10 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RequestID)
+	// Before anything else looks at the request: note where it arrived, if a
+	// proxy in front said so and this agent has been told to believe it.
+	// Otherwise the agent publishes an address only it can reach.
+	r.Use(s.learnAddressFromProxy)
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins: []string{"*"},
 		AllowedMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
