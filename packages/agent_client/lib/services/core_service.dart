@@ -1897,6 +1897,48 @@ class CoreService {
   /// it.
   ///
   /// Returns the organisation's new identifier.
+  /// Tells THIS agent to go and adopt another one.
+  ///
+  /// The owner's side of claiming. This agent already holds the root key, so it
+  /// runs the ceremony itself: it asks the other agent for the key it generated
+  /// for itself, issues a delegation over that key, anchors it in its own log,
+  /// and hands the result back. The root key never leaves this device, and the
+  /// other agent never sees it.
+  ///
+  /// [adoptionCode] is the one-time code issued when that agent was set up. It
+  /// is what proves the agent was set up for this person rather than found by
+  /// them, so it is required rather than optional — an adoption without one is
+  /// a stranger claiming a machine.
+  ///
+  /// Owner-only, and signed as such. A browser cannot do this and should not be
+  /// asked to: it holds no key, and the whole point is that the claim is made
+  /// by something that does.
+  Future<Map<String, dynamic>> adoptAgent({
+    required Uri boxUrl,
+    required String adoptionCode,
+  }) async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/api/pairing/adopt'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'box_url': boxUrl.toString(),
+        'adoption_code': adoptionCode,
+      }),
+    );
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    }
+    // The agent's refusals are already written for a person; this only strips
+    // the JSON wrapper so a screen does not have to.
+    try {
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      final detail = (body['details'] ?? body['detail'] ?? body['error'] ?? '').toString();
+      throw Exception(detail.isNotEmpty ? detail : 'Adoption failed (${response.statusCode})');
+    } on FormatException {
+      throw Exception('Adoption failed (${response.statusCode})');
+    }
+  }
+
   Future<String> adoptAsOrganisation({
     required String adoptionCode,
     required String ownerAid,
