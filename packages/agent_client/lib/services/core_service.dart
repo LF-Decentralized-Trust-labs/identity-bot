@@ -721,9 +721,20 @@ class CoreService {
 
     if (response.statusCode == 200) {
       return IdentityResponse.fromJson(jsonDecode(response.body));
-    } else {
-      throw Exception('Identity request failed: ${response.statusCode}');
     }
+    // A refusal is not the same answer as "there is nothing here yet", and
+    // callers were unable to tell them apart.
+    //
+    // A fresh agent you are entitled to set up answers 200 with initialized
+    // false. An agent that exists and is not yours answers 403. Both arrived as
+    // the same exception, and every caller treated it as the first — so somebody
+    // opening an agent that was not theirs was shown "Create my identity", and
+    // the button then failed with a refusal they had been given no reason to
+    // expect.
+    if (response.statusCode == 401 || response.statusCode == 403) {
+      throw const AgentNotYoursException();
+    }
+    throw Exception('Identity request failed: ${response.statusCode}');
   }
 
   /// Creates this agent's identity.
@@ -2872,4 +2883,19 @@ class CeremonyInvitee {
         publicKey: json['public_key'] ?? '',
         acceptedAt: json['accepted_at'] ?? '',
       );
+}
+
+/// This agent exists, and you are not the one who may set it up.
+///
+/// Thrown when the agent refuses a request that only its owner may make. It is
+/// a distinct type rather than a status code because the right thing to show
+/// somebody is completely different: an agent nobody has claimed is waiting to
+/// be claimed by whoever it was set up for, and telling them to create an
+/// identity here is both wrong and a dead end.
+class AgentNotYoursException implements Exception {
+  const AgentNotYoursException();
+
+  @override
+  String toString() =>
+      'This agent will only answer to the person it was set up for.';
 }
