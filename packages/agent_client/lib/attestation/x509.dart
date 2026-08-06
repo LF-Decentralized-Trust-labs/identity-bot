@@ -100,8 +100,32 @@ class X509Certificate {
   bool isValidAt(DateTime t) => !t.isBefore(notBefore) && !t.isAfter(notAfter);
 
   static X509Certificate parse(Uint8List der) {
+    // A certificate is DER, and DER has exactly one encoding of anything.
+    //
+    // Indefinite-length form is BER and forbidden in DER; the parser accepts
+    // it. Refused at the outermost layer, where an attacker-chosen certificate
+    // arrives. Nested encodings inside the body are covered differently and
+    // more strongly: the signature is verified over the exact bytes, so any
+    // re-encoding within the body changes what was signed and fails.
+    if (der.length < 2)
+      throw CertificateException('too short to be a certificate');
+    if (der[1] == 0x80) {
+      throw CertificateException(
+          'the certificate uses indefinite-length encoding, which DER forbids');
+    }
+
     final top = _need<ASN1Sequence>(
         _parseOne(der), 'a certificate is a SEQUENCE of three elements');
+
+    // Trailing bytes after a complete certificate are not part of it, and
+    // accepting them means two different inputs are treated as one certificate.
+    final encodedLength = top.encodedBytes?.length ?? 0;
+    if (encodedLength != der.length) {
+      throw CertificateException(
+        'the certificate is $encodedLength bytes but ${der.length} were supplied; '
+        'trailing bytes are not part of it',
+      );
+    }
     final elements = top.elements ?? const <ASN1Object>[];
     if (elements.length < 3) {
       throw CertificateException(
@@ -332,39 +356,86 @@ class X509Certificate {
         if (ext is! ASN1Sequence) continue;
         final parts = ext.elements ?? const <ASN1Object>[];
         if (parts.length < 2) continue;
-        final oid = parts.first;
+        // Decoded by position, not by "the last element".
+        //
+        // Extension ::= SEQUENCE { extnID OID, critical BOOLEAN DEFAULT FALSE,
+        //                          extnValue OCTET STRING }
+        //
+        // Taking the last element looks equivalent and is not: nothing stops a
+        // crafted extension carrying further elements after extnValue, and the
+        // reader would then take one of those as the value. Two or three
+        // elements, in that order, or it is not an extension this will read.
+        if (parts.length < 2 || parts.length > 3) continue;
+        final oid = parts[0];
         if (oid is! ASN1ObjectIdentifier) continue;
         final name = oid.objectIdentifierAsString;
         if (name == null) continue;
-        // The value is the last element; a critical flag may sit between.
-        final payload = parts.last.valueBytes;
+
+        if (parts.length == 3 && parts[1] is! ASN1Boolean) continue;
+        final value = parts[parts.length - 1];
+        // extnValue is an OCTET STRING. Anything else here is not an encoding
+        // ambiguity to work around, it is a different structure.
+        if (value is! ASN1OctetString) continue;
+        final payload = value.valueBytes;
         if (payload != null) out[name] = Uint8List.fromList(payload);
       }
     }
     return out;
   }
 
+  /// BasicConstraints ::= SEQUENCE { cA BOOLEAN DEFAULT FALSE,
+  ///                                  pathLenConstraint INTEGER OPTIONAL }
+  ///
+  /// Read by position. Taking "the first BOOLEAN found" is nearly equivalent
+  /// and fails on exactly the input that matters: a crafted extension with a
+  /// non-conforming first element and a BOOLEAN after it would have its cA read
+  /// from a field that is not cA.
   static bool _basicConstraintsCa(Map<String, Uint8List> extensions) {
     final raw = extensions[_oidBasicConstraints];
     if (raw == null) return false; // absent means not a CA
     final seq = _parseOne(raw);
     if (seq is! ASN1Sequence) return false;
-    for (final e in seq.elements ?? const <ASN1Object>[]) {
-      if (e is ASN1Boolean) return e.boolValue ?? false;
-    }
-    return false; // cA defaults to FALSE
+    final parts = seq.elements ?? const <ASN1Object>[];
+    if (parts.isEmpty) return false; // cA defaults to FALSE
+    final ca = parts.first;
+    if (ca is! ASN1Boolean) return false; // cA omitted, so FALSE
+    return ca.boolValue ?? false;
   }
 
+  /// Whether keyUsage permits signing certificates.
+  ///
+  /// Absent means unconstrained, so true. But once the extension is PRESENT and
+  /// cannot be read, the answer is false: something is asserting a restriction
+  /// this code cannot evaluate, and the safe reading of an unreadable
+  /// restriction is that it forbids.
   static bool _keyCertSign(Map<String, Uint8List> extensions) {
     final raw = extensions[_oidKeyUsage];
-    if (raw == null) return true; // absent constrains nothing
-    final bits = _parseOne(raw);
-    if (bits is! ASN1BitString) return true;
-    final v = bits.valueBytes;
-    if (v == null || v.length < 2) return false;
+    if (raw == null) return true;
+    final ASN1Object bits;
+    try {
+      bits = _parseOne(raw);
+    } catch (_) {
+      return false;
+    }
+    if (bits is! ASN1BitString) return false;
+
+    final Uint8List content;
+    try {
+      // The same unused-bit validation every other BIT STRING gets. keyUsage
+      // legitimately carries unused bits, so they are tolerated here — but the
+      // count must still be a count, and the content must exist.
+      final v = bits.valueBytes;
+      if (v == null || v.isEmpty || v[0] > 7) return false;
+      content = Uint8List.fromList(v.sublist(1));
+    } catch (_) {
+      return false;
+    }
+
     // keyCertSign is bit 5, counting from the most significant bit of the
-    // first content octet.
-    return (v[1] & (1 << 2)) != 0;
+    // first content octet. An encoding too short to contain it does not assert
+    // it.
+    if (content.isEmpty) return false;
+    return (content[0] & (1 << 2)) != 0;
   }
 
   static DateTime _time(ASN1Object o) {

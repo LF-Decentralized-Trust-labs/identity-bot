@@ -113,6 +113,57 @@ void main() {
     });
   });
 
+  group('inputs shaped to slip past the reader', () {
+    // Two inputs that differ must not be read as one certificate.
+    test('trailing bytes after a complete certificate are refused', () {
+      final withTail = Uint8List.fromList([...arkDer, 0x00, 0x01, 0x02]);
+      expect(() => X509Certificate.parse(withTail),
+          throwsA(isA<CertificateException>()));
+    });
+
+    // Indefinite-length is BER, which DER forbids; the underlying parser
+    // accepts it, so it is refused here.
+    test('indefinite-length encoding is refused', () {
+      final indefinite = Uint8List.fromList([0x30, 0x80, 0x00, 0x00]);
+      expect(() => X509Certificate.parse(indefinite),
+          throwsA(isA<CertificateException>()));
+    });
+
+    test('an empty or truncated input is refused, not read as zeroes', () {
+      expect(() => X509Certificate.parse(Uint8List(0)),
+          throwsA(isA<CertificateException>()));
+      expect(() => X509Certificate.parse(Uint8List(1)),
+          throwsA(isA<CertificateException>()));
+      // Front of a real certificate, cut short.
+      expect(() => X509Certificate.parse(arkDer.sublist(0, 50)),
+          throwsA(isA<CertificateException>()));
+    });
+
+    // Every byte of a certificate is attacker-chosen. Nothing may escape as an
+    // unexpected exception type, because a caller that catches only the
+    // expected one would get no verdict at all.
+    test('no input produces anything but a refusal', () {
+      final inputs = <Uint8List>[
+        Uint8List.fromList([0x30, 0xFF]),
+        Uint8List.fromList([0x05, 0x00]),
+        Uint8List.fromList(List.filled(64, 0xFF)),
+        Uint8List.fromList([0x30, 0x82, 0xFF, 0xFF, 0x30, 0x00]),
+        ...List.generate(
+            8, (i) => Uint8List.fromList(arkDer.sublist(0, 100 + i * 100))),
+      ];
+      for (var i = 0; i < inputs.length; i++) {
+        try {
+          X509Certificate.parse(inputs[i]);
+        } on CertificateException {
+          // The only acceptable outcome besides parsing.
+        } catch (e) {
+          fail(
+              'input $i escaped as ${e.runtimeType} rather than a refusal: $e');
+        }
+      }
+    });
+  });
+
   group('the chain walk', () {
     // The fingerprint the client pins, recomputed here from the certificate
     // itself. If AmdRoots.genoa were ever mistyped, this fails.
