@@ -87,7 +87,9 @@ class AttestationVerifier {
     required Uint8List reportBytes,
     required List<Uint8List> chain,
     required String boundTo,
+    DateTime? at,
   }) {
+    final now = at ?? DateTime.now().toUtc();
     if (expectedMeasurements.isEmpty) {
       throw AttestationException(
         AttestationFailure.measurementMismatch,
@@ -130,7 +132,7 @@ class AttestationVerifier {
       );
     }
 
-    final leaf = _verifyChainToPinnedRoot(chain);
+    final leaf = _verifyChainToPinnedRoot(chain, now);
 
     final key = leaf.ecPublicKey;
     if (key == null) {
@@ -148,27 +150,65 @@ class AttestationVerifier {
     }
   }
 
+  /// The most certificates a legitimate chain has, with room to spare. An
+  /// unbounded list is work an unauthenticated party gets to ask for.
+  static const int _maxChainLength = 10;
+
   /// Walks the supplied chain and returns the leaf, or throws.
-  X509Certificate _verifyChainToPinnedRoot(List<Uint8List> chain) {
+  X509Certificate _verifyChainToPinnedRoot(List<Uint8List> chain, DateTime at) {
     if (chain.isEmpty) {
       throw AttestationException(
         AttestationFailure.chainBroken,
         'no certificates were supplied, so nothing vouches for the report',
       );
     }
+    if (chain.length > _maxChainLength) {
+      throw AttestationException(
+        AttestationFailure.chainBroken,
+        'the chain has ${chain.length} certificates; no legitimate chain is that long',
+      );
+    }
+
     final certs = <X509Certificate>[];
     for (var i = 0; i < chain.length; i++) {
       try {
         certs.add(X509Certificate.parse(chain[i]));
-      } on FormatException catch (e) {
+      } catch (e) {
+        // Deliberately every throw, not just the expected type. These bytes are
+        // attacker-supplied, and an unexpected exception escaping here would
+        // leave the caller with no verdict at all rather than a refusal.
         throw AttestationException(
           AttestationFailure.chainBroken,
-          'certificate $i could not be read: ${e.message}',
+          'certificate $i could not be read: $e',
         );
       }
     }
 
-    // Each certificate must be signed by the next one up.
+    for (var i = 0; i < certs.length; i++) {
+      if (!certs[i].isValidAt(at)) {
+        throw AttestationException(
+          AttestationFailure.chainBroken,
+          '"${certs[i].subject}" is not valid at $at',
+        );
+      }
+    }
+
+    // Every certificate that signs another must be permitted to. Pinning the
+    // root says nothing about this: without it, a certificate issued only to
+    // identify a machine could be presented as an authority over others.
+    for (var i = 1; i < certs.length; i++) {
+      if (!certs[i].isCertificateAuthority || !certs[i].maySignCertificates) {
+        throw AttestationException(
+          AttestationFailure.chainBroken,
+          '"${certs[i].subject}" is used here to vouch for another certificate '
+          'but is not permitted to sign certificates',
+        );
+      }
+    }
+
+    // Each certificate must be signed by the next one up. Signature linkage
+    // rather than name matching: a name says who a certificate claims to come
+    // from, a signature shows it.
     for (var i = 0; i < certs.length - 1; i++) {
       if (!_signedBy(certs[i], certs[i + 1])) {
         throw AttestationException(
@@ -178,7 +218,7 @@ class AttestationVerifier {
       }
     }
 
-    // The last one must be a root we already trust, and must vouch for itself.
+    // The last must be a root we already trust, and must vouch for itself.
     // Checking the fingerprint alone would accept a self-signed certificate
     // whose signature is nonsense; checking only the self-signature would
     // accept any root at all.
@@ -202,7 +242,9 @@ class AttestationVerifier {
   static bool _signedBy(X509Certificate child, X509Certificate issuer) {
     try {
       return child.isSignedBy(issuer);
-    } on FormatException {
+    } catch (_) {
+      // Any refusal or failure is "did not verify". Nothing about
+      // attacker-supplied bytes should reach the caller as an exception.
       return false;
     }
   }

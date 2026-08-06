@@ -3,18 +3,29 @@ import 'dart:typed_data';
 import 'package:pointycastle/asn1.dart';
 import 'package:pointycastle/export.dart';
 
+/// Raised when a certificate cannot be read, or reads as something this code
+/// will not accept. Distinct from [FormatException] so a caller can tell a
+/// refusal here from an unrelated parse failure elsewhere.
+class CertificateException implements Exception {
+  CertificateException(this.message);
+  final String message;
+  @override
+  String toString() => 'CertificateException: $message';
+}
+
 /// Just enough X.509 to walk one certificate chain.
 ///
-/// This is deliberately not a general certificate library, and it should not
-/// grow into one. It reads the four things a chain walk needs — what was
-/// signed, the signature, the algorithm, and the key — and refuses anything it
-/// does not recognise instead of guessing. A parser that copes with everything
-/// is a parser that accepts things it should not, which in this position is the
+/// This is deliberately not a general certificate library and should not grow
+/// into one. It reads what a chain walk needs and refuses anything it does not
+/// recognise instead of guessing. A parser that copes with everything is a
+/// parser that accepts things it should not, which in this position is the
 /// whole failure.
 ///
-/// Nothing here validates names, dates, basic constraints or revocation. The
-/// caller pins the root by fingerprint, so the chain is one known shape rather
-/// than an open-ended search through a trust store.
+/// The root is pinned by fingerprint, so the chain is one known shape rather
+/// than a search through a trust store. That removes a great deal of X.509 —
+/// no path building, no name constraints, no policy processing — but it does
+/// NOT remove the structural checks below, because pinning the root says
+/// nothing about what the certificates beneath it are permitted to do.
 class X509Certificate {
   X509Certificate._({
     required this.der,
@@ -23,81 +34,139 @@ class X509Certificate {
     required this.signatureAlgorithm,
     required this.subject,
     required this.issuer,
+    required this.subjectDer,
+    required this.issuerDer,
+    required this.notBefore,
+    required this.notAfter,
+    required this.isCertificateAuthority,
+    required this.maySignCertificates,
     required this.rsaPublicKey,
     required this.ecPublicKey,
   });
 
-  /// AMD signs every certificate in the chain with RSASSA-PSS.
   static const String oidRsaPss = '1.2.840.113549.1.1.10';
   static const String oidRsaEncryption = '1.2.840.113549.1.1.1';
   static const String oidEcPublicKey = '1.2.840.10045.2.1';
+  static const String _oidBasicConstraints = '2.5.29.19';
+  static const String _oidKeyUsage = '2.5.29.15';
 
-  /// SHA-384 digest length. AMD's certificates specify a salt this size.
+  /// SHA-384 digest length; the salt the issued certificates specify.
   static const int _saltLength = 48;
 
   final Uint8List der;
 
-  /// The exact encoded bytes the signature covers.
+  /// The exact wire bytes the signature covers.
   ///
-  /// Re-encoding the parsed structure instead would be the classic mistake: a
-  /// signature covers the bytes that were signed, not a structure that means
-  /// the same thing. Any difference in how a length or a string is encoded and
-  /// every signature fails.
+  /// Taken from the parser rather than re-encoded. Re-encoding would be the
+  /// classic mistake: a signature covers the bytes that were signed, not a
+  /// structure that means the same thing, and any difference in how a length
+  /// or a string was encoded breaks every signature.
+  ///
+  /// Verified against pointycastle 4.0.0, whose parser builds each object from
+  /// `Uint8List.view(bytes.buffer, offset, length)` — a view over the input,
+  /// not a re-serialisation. If that library is upgraded, re-check it.
   final Uint8List tbsBytes;
 
   final Uint8List signature;
   final String signatureAlgorithm;
+
+  /// Common names, for diagnostics only. Never compared to decide anything.
   final String subject;
   final String issuer;
+
+  /// The encoded distinguished names. Comparisons use these, because two
+  /// different names can share a common name.
+  final Uint8List subjectDer;
+  final Uint8List issuerDer;
+
+  final DateTime notBefore;
+  final DateTime notAfter;
+
+  /// From basicConstraints. False when the extension is absent, which is what
+  /// the specification means by its default.
+  final bool isCertificateAuthority;
+
+  /// From keyUsage's keyCertSign bit. True when keyUsage is absent, since an
+  /// absent keyUsage constrains nothing.
+  final bool maySignCertificates;
 
   /// Exactly one of these is non-null.
   final RSAPublicKey? rsaPublicKey;
   final ECPublicKey? ecPublicKey;
 
-  bool get isSelfIssued => subject == issuer;
+  /// Compared over encoded names, not common names.
+  bool get isSelfIssued => _bytesEqual(subjectDer, issuerDer);
+
+  bool isValidAt(DateTime t) => !t.isBefore(notBefore) && !t.isAfter(notAfter);
 
   static X509Certificate parse(Uint8List der) {
-    final top = ASN1Parser(der).nextObject();
-    if (top is! ASN1Sequence || (top.elements?.length ?? 0) < 3) {
-      throw const FormatException(
-          'not a certificate: expected a SEQUENCE of three elements');
+    final top = _need<ASN1Sequence>(
+        _parseOne(der), 'a certificate is a SEQUENCE of three elements');
+    final elements = top.elements ?? const <ASN1Object>[];
+    if (elements.length < 3) {
+      throw CertificateException(
+          'a certificate has three elements; this has ${elements.length}');
     }
-    final tbs = top.elements![0];
-    final algSeq = top.elements![1];
-    final sigBits = top.elements![2];
 
-    if (tbs is! ASN1Sequence) {
-      throw const FormatException('certificate body is not a SEQUENCE');
-    }
-    if (sigBits is! ASN1BitString) {
-      throw const FormatException('certificate signature is not a BIT STRING');
-    }
+    final tbs = _need<ASN1Sequence>(elements[0], 'the certificate body');
+    final outerAlg =
+        _need<ASN1Sequence>(elements[1], 'the signature algorithm');
+    final sigBits = _need<ASN1BitString>(elements[2], 'the signature');
 
     final tbsElements = tbs.elements ?? const <ASN1Object>[];
     // v3: [0] version, serial, algorithm, issuer, validity, subject, key, ...
     if (tbsElements.length < 7) {
-      throw FormatException(
-        'certificate body has ${tbsElements.length} fields; a v3 certificate has at '
-        'least 7. Only v3 is handled, because that is what is actually issued.',
+      throw CertificateException(
+        'the certificate body has ${tbsElements.length} fields; a v3 certificate '
+        'has at least 7, and only v3 is accepted',
       );
     }
 
-    final rsa = _rsaKeyOrNull(tbsElements[6]);
-    final ec = rsa == null ? _ecKeyOrNull(tbsElements[6]) : null;
-    if (rsa == null && ec == null) {
-      throw const FormatException(
-        'the certificate holds a key that is neither RSA nor an EC key on a curve '
-        'this understands',
+    // The algorithm is stated twice: once inside the signed body and once
+    // outside it. Only the inner one is protected by the signature, so if they
+    // disagree, the unsigned copy is describing the signature. Comparing the
+    // encoded bytes closes that without needing to interpret the parameters.
+    final innerAlg = _need<ASN1Sequence>(
+        tbsElements[2], 'the signature algorithm inside the body');
+    if (!_bytesEqual(_encoded(outerAlg), _encoded(innerAlg))) {
+      throw CertificateException(
+        'the certificate states one signature algorithm inside the signed body '
+        'and a different one outside it, so the unsigned copy is describing the '
+        'signature',
       );
     }
+
+    final spki = tbsElements[6];
+    final rsa = _rsaKeyOrNull(spki);
+    final ec = rsa == null ? _ecKeyOrNull(spki) : null;
+    if (rsa == null && ec == null) {
+      throw CertificateException(
+        'the certificate holds a key that is neither RSA nor an EC key on a '
+        'curve this accepts',
+      );
+    }
+
+    final validity = _need<ASN1Sequence>(tbsElements[4], 'the validity period');
+    final validityElements = validity.elements ?? const <ASN1Object>[];
+    if (validityElements.length < 2) {
+      throw CertificateException('the validity period is missing a bound');
+    }
+
+    final extensions = _extensions(tbsElements);
 
     return X509Certificate._(
       der: der,
-      tbsBytes: Uint8List.fromList(tbs.encodedBytes!),
+      tbsBytes: _encoded(tbs),
       signature: _bitStringContent(sigBits),
-      signatureAlgorithm: _algorithmOid(algSeq),
-      subject: _name(tbsElements[5]),
-      issuer: _name(tbsElements[3]),
+      signatureAlgorithm: _algorithmOid(outerAlg),
+      subject: _commonName(tbsElements[5]),
+      issuer: _commonName(tbsElements[3]),
+      subjectDer: _encoded(tbsElements[5]),
+      issuerDer: _encoded(tbsElements[3]),
+      notBefore: _time(validityElements[0]),
+      notAfter: _time(validityElements[1]),
+      isCertificateAuthority: _basicConstraintsCa(extensions),
+      maySignCertificates: _keyCertSign(extensions),
       rsaPublicKey: rsa,
       ecPublicKey: ec,
     );
@@ -105,34 +174,32 @@ class X509Certificate {
 
   /// True when [issuerCert] signed this certificate.
   ///
-  /// Only RSASSA-PSS with SHA-384 is accepted, because that is what AMD issues
-  /// and because quietly supporting more algorithms here means quietly
-  /// accepting a certificate signed with a weaker one.
+  /// Only RSASSA-PSS with SHA-384 is accepted, because that is what is issued
+  /// and because quietly accepting more algorithms means quietly accepting a
+  /// certificate signed with a weaker one.
   bool isSignedBy(X509Certificate issuerCert) {
     if (signatureAlgorithm != oidRsaPss) {
-      throw FormatException(
-        'certificate "$subject" is signed with $signatureAlgorithm; only RSASSA-PSS '
-        'is accepted here',
+      throw CertificateException(
+        'certificate "$subject" is signed with $signatureAlgorithm; only '
+        'RSASSA-PSS is accepted',
       );
     }
     final key = issuerCert.rsaPublicKey;
     if (key == null) {
-      throw FormatException(
+      throw CertificateException(
           'issuer "${issuerCert.subject}" does not hold an RSA key');
     }
 
     // SHA-384 for both the content digest and the mask, with a 48-byte salt.
-    // These are not defaults: they are what the issued certificates specify,
-    // and a mismatch rejects every genuine certificate.
+    // These are stated by the certificates, not defaults.
     //
     // It must be ParametersWithSaltConfiguration and NOT ParametersWithSalt,
-    // and the difference is silent and total. Supplying a salt marks it as
-    // known, and verification then compares against the salt you supplied
-    // instead of recovering the real one from the signature — so every genuine
+    // and the difference is silent and total. Supplying salt BYTES marks the
+    // salt as known, and verification then compares against what was supplied
+    // instead of recovering the real salt from the signature — so every genuine
     // signature fails and the symptom is identical to a forged one. Only the
-    // configuration form, which supplies a length rather than bytes, recovers
-    // the salt. The random source is required by the constructor and is never
-    // consulted when verifying.
+    // configuration form, which takes a length, recovers it. The random source
+    // is required by the constructor and is never consulted when verifying.
     final signer = PSSSigner(RSAEngine(), SHA384Digest(), SHA384Digest())
       ..init(
           false,
@@ -144,29 +211,69 @@ class X509Certificate {
     try {
       return signer.verifySignature(tbsBytes, PSSSignature(signature));
     } catch (_) {
-      // A malformed signature is a failed verification, not a crash: the input
-      // is attacker-supplied by construction.
+      // Any failure verifying attacker-supplied bytes is a failed verification,
+      // never an error to propagate.
       return false;
     }
   }
 
+  // ---- parsing helpers -----------------------------------------------------
+
+  /// Every entry point runs on attacker-supplied bytes, so any throw from the
+  /// ASN.1 library — not only [FormatException] — becomes a refusal.
+  static ASN1Object _parseOne(Uint8List der) {
+    if (der.isEmpty) throw CertificateException('empty certificate');
+    try {
+      return ASN1Parser(der).nextObject();
+    } on CertificateException {
+      rethrow;
+    } catch (e) {
+      throw CertificateException('could not be read as ASN.1: $e');
+    }
+  }
+
+  static T _need<T extends ASN1Object>(ASN1Object o, String what) {
+    if (o is! T) throw CertificateException('$what is not a $T');
+    return o;
+  }
+
+  static Uint8List _encoded(ASN1Object o) {
+    final b = o.encodedBytes;
+    if (b == null) {
+      throw CertificateException('an element carries no encoded bytes');
+    }
+    return Uint8List.fromList(b);
+  }
+
   static Uint8List _bitStringContent(ASN1BitString bits) {
-    // The first content octet counts unused trailing bits and is not part of
-    // the value. Including it shifts every byte and nothing verifies.
-    final v = bits.valueBytes!;
+    final v = bits.valueBytes;
+    if (v == null || v.isEmpty) {
+      throw CertificateException('a BIT STRING has no content');
+    }
+    // The first content octet counts unused trailing bits. Everything read
+    // here is a whole number of bytes, so anything but zero is malformed
+    // rather than something to round away.
+    if (v[0] != 0) {
+      throw CertificateException(
+          'a BIT STRING declares ${v[0]} unused bits where a whole number of '
+          'bytes was expected');
+    }
     return Uint8List.fromList(v.sublist(1));
   }
 
   static String _algorithmOid(ASN1Object alg) {
-    if (alg is! ASN1Sequence || alg.elements == null || alg.elements!.isEmpty) {
-      throw const FormatException('algorithm identifier is not a SEQUENCE');
+    final seq = _need<ASN1Sequence>(alg, 'an algorithm identifier');
+    final elements = seq.elements ?? const <ASN1Object>[];
+    if (elements.isEmpty) {
+      throw CertificateException('an algorithm identifier is empty');
     }
-    final oid = alg.elements!.first;
-    if (oid is! ASN1ObjectIdentifier) {
-      throw const FormatException(
-          'algorithm identifier does not begin with an OID');
+    final oid =
+        _need<ASN1ObjectIdentifier>(elements.first, 'an algorithm identifier');
+    final s = oid.objectIdentifierAsString;
+    if (s == null) {
+      throw CertificateException('an algorithm identifier has no OID value');
     }
-    return oid.objectIdentifierAsString!;
+    return s;
   }
 
   static RSAPublicKey? _rsaKeyOrNull(ASN1Object spki) {
@@ -175,38 +282,101 @@ class X509Certificate {
 
     final bits = spki.elements![1];
     if (bits is! ASN1BitString) return null;
-    final inner = ASN1Parser(_bitStringContent(bits)).nextObject();
+    final inner = _parseOne(_bitStringContent(bits));
     if (inner is! ASN1Sequence || (inner.elements?.length ?? 0) < 2)
       return null;
 
     final modulus = inner.elements![0];
     final exponent = inner.elements![1];
     if (modulus is! ASN1Integer || exponent is! ASN1Integer) return null;
-    return RSAPublicKey(modulus.integer!, exponent.integer!);
+    final m = modulus.integer;
+    final e = exponent.integer;
+    if (m == null || e == null) return null;
+    return RSAPublicKey(m, e);
   }
 
   static ECPublicKey? _ecKeyOrNull(ASN1Object spki) {
     if (spki is! ASN1Sequence || (spki.elements?.length ?? 0) < 2) return null;
-    final alg = spki.elements![0];
-    if (_algorithmOid(alg) != oidEcPublicKey) return null;
+    if (_algorithmOid(spki.elements![0]) != oidEcPublicKey) return null;
 
     final bits = spki.elements![1];
     if (bits is! ASN1BitString) return null;
     final point = _bitStringContent(bits);
 
-    // Only the uncompressed form, which is what is issued. A compressed point
-    // would need decompression, and silently mis-reading one yields a key that
-    // rejects every genuine signature.
-    if (point.isEmpty || point[0] != 0x04) return null;
+    // Uncompressed form only, which is what is issued. Mis-reading a
+    // compressed point yields a key that rejects every genuine signature.
+    if (point.length != 1 + 96 || point[0] != 0x04) return null;
     final curve = ECCurve_secp384r1();
-    if (point.length != 1 + 96) return null;
-    return ECPublicKey(curve.curve.decodePoint(point), curve);
+    try {
+      return ECPublicKey(curve.curve.decodePoint(point), curve);
+    } catch (_) {
+      // A point that is not on the curve is not a key.
+      return null;
+    }
   }
 
-  /// A readable name, used to order the chain and to say which certificate
-  /// failed. Only the common name is read; nothing here depends on it being
-  /// unique or meaningful.
-  static String _name(ASN1Object name) {
+  /// The extensions, keyed by OID. Absent for a certificate that has none.
+  static Map<String, Uint8List> _extensions(List<ASN1Object> tbsElements) {
+    final out = <String, Uint8List>{};
+    for (var i = 7; i < tbsElements.length; i++) {
+      final tagged = tbsElements[i];
+      // Extensions are [3] EXPLICIT; anything else here is a field this code
+      // does not need.
+      if ((tagged.tag ?? 0) != 0xA3) continue;
+      final value = tagged.valueBytes;
+      if (value == null || value.isEmpty) continue;
+
+      final seq = _parseOne(Uint8List.fromList(value));
+      if (seq is! ASN1Sequence) continue;
+      for (final ext in seq.elements ?? const <ASN1Object>[]) {
+        if (ext is! ASN1Sequence) continue;
+        final parts = ext.elements ?? const <ASN1Object>[];
+        if (parts.length < 2) continue;
+        final oid = parts.first;
+        if (oid is! ASN1ObjectIdentifier) continue;
+        final name = oid.objectIdentifierAsString;
+        if (name == null) continue;
+        // The value is the last element; a critical flag may sit between.
+        final payload = parts.last.valueBytes;
+        if (payload != null) out[name] = Uint8List.fromList(payload);
+      }
+    }
+    return out;
+  }
+
+  static bool _basicConstraintsCa(Map<String, Uint8List> extensions) {
+    final raw = extensions[_oidBasicConstraints];
+    if (raw == null) return false; // absent means not a CA
+    final seq = _parseOne(raw);
+    if (seq is! ASN1Sequence) return false;
+    for (final e in seq.elements ?? const <ASN1Object>[]) {
+      if (e is ASN1Boolean) return e.boolValue ?? false;
+    }
+    return false; // cA defaults to FALSE
+  }
+
+  static bool _keyCertSign(Map<String, Uint8List> extensions) {
+    final raw = extensions[_oidKeyUsage];
+    if (raw == null) return true; // absent constrains nothing
+    final bits = _parseOne(raw);
+    if (bits is! ASN1BitString) return true;
+    final v = bits.valueBytes;
+    if (v == null || v.length < 2) return false;
+    // keyCertSign is bit 5, counting from the most significant bit of the
+    // first content octet.
+    return (v[1] & (1 << 2)) != 0;
+  }
+
+  static DateTime _time(ASN1Object o) {
+    if (o is ASN1UtcTime && o.time != null) return o.time!.toUtc();
+    if (o is ASN1GeneralizedTime && o.dateTimeValue != null) {
+      return o.dateTimeValue!.toUtc();
+    }
+    throw CertificateException('a validity bound is not a time this can read');
+  }
+
+  /// The common name, for messages only.
+  static String _commonName(ASN1Object name) {
     const oidCommonName = '2.5.4.3';
     if (name is! ASN1Sequence) return '';
     for (final rdn in name.elements ?? const <ASN1Object>[]) {
@@ -216,11 +386,20 @@ class X509Certificate {
         final oid = pair.elements![0];
         if (oid is ASN1ObjectIdentifier &&
             oid.objectIdentifierAsString == oidCommonName) {
-          final value = pair.elements![1];
-          return String.fromCharCodes(value.valueBytes ?? const <int>[]);
+          return String.fromCharCodes(
+              pair.elements![1].valueBytes ?? const <int>[]);
         }
       }
     }
     return '';
+  }
+
+  static bool _bytesEqual(Uint8List a, Uint8List b) {
+    if (a.length != b.length) return false;
+    var diff = 0;
+    for (var i = 0; i < a.length; i++) {
+      diff |= a[i] ^ b[i];
+    }
+    return diff == 0;
   }
 }
