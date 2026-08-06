@@ -21,7 +21,7 @@ func TestAnOrdinaryMachineClaimsNoSealedHardware(t *testing.T) {
 	if secureenclaveSNPAvailableForTest() {
 		t.Skip("this machine has SNP; the assertion is about ones that do not")
 	}
-	if got := sealedHardwareStatus("EAID"); got != nil {
+	if got := sealedHardwareStatus("EAID", nil); got != nil {
 		t.Fatalf("a machine with no sealed hardware claimed some: %+v", got)
 	}
 }
@@ -52,5 +52,7 @@ func TestTheReportIsBoundToSomethingAVerifierHolds(t *testing.T) {
 }
 
 // Indirection so the two tests above can run on any machine.
-func secureenclaveSNPAvailableForTest() bool                      { return sealedHardwareStatus("x") != nil }
-func sealedHardwareStatusForBinding(b string) *SealedHardwareInfo { return sealedHardwareStatus(b) }
+func secureenclaveSNPAvailableForTest() bool { return sealedHardwareStatus("x", nil) != nil }
+func sealedHardwareStatusForBinding(b string) *SealedHardwareInfo {
+	return sealedHardwareStatus(b, nil)
+}

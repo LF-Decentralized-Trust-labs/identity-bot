@@ -1,10 +1,12 @@
 package server
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"identity-agent-core/secureenclave"
 	"identity-agent-core/update"
@@ -72,6 +74,16 @@ type SealedHardwareInfo struct {
 	// It moves when AMD ships an update, and it is part of the measurement's
 	// meaning.
 	ReportedTCB uint64 `json:"reported_tcb"`
+
+	// CertificateChain is what lets a reader check the report's signature: the
+	// certificate for this processor, then the intermediate, then the root,
+	// each base64 DER.
+	//
+	// Served alongside the report so verification needs nothing but this
+	// response and a root the reader already trusts. A reader that fetched the
+	// certificate itself would tell its issuer — and anyone watching that
+	// reader's network — which machine it is talking to.
+	CertificateChain []string `json:"certificate_chain,omitempty"`
 
 	// Report is the whole thing, base64, exactly as the hardware produced it.
 	// Included so a verifier can check the signature itself rather than trust
@@ -170,7 +182,7 @@ func (s *CoreServer) handleSecurityEnclave(w http.ResponseWriter, r *http.Reques
 			Message:          c.Message,
 		}
 	}
-	result.SealedHardware = sealedHardwareStatus(s.attestationBinding())
+	result.SealedHardware = sealedHardwareStatus(s.attestationBinding(), s.snpCertificates)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
@@ -208,7 +220,7 @@ func (s *CoreServer) attestationBinding() string {
 // is exactly the case somebody needs to see — it is the difference between "not
 // sealed" and "sealed but cannot prove it", and those call for different
 // reactions.
-func sealedHardwareStatus(binding string) *SealedHardwareInfo {
+func sealedHardwareStatus(binding string, certs *snpCertificateChain) *SealedHardwareInfo {
 	if !secureenclave.SNPAvailable() {
 		return nil
 	}
@@ -237,6 +249,28 @@ func sealedHardwareStatus(binding string) *SealedHardwareInfo {
 	info.DebugAllowed = parsed.DebugAllowed()
 	info.SignerUnsigned = parsed.Unsigned()
 	info.ReportedTCB = parsed.ReportedTCB
+
+	// The certificates that make the report checkable. Their absence is
+	// reported rather than treated as a failure: the report is still the
+	// machine's own account of itself, and saying so plainly is more useful
+	// than withholding it.
+	if certs != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		chain, cerr := certs.forReport(ctx, parsed.ChipID, parsed.ReportedTCB)
+		if cerr != nil {
+			info.ChainNote = "this machine could not obtain the certificates that vouch " +
+				"for its report, so the report cannot yet be checked against the " +
+				"manufacturer: " + cerr.Error()
+			return info
+		}
+		for _, der := range chain {
+			info.CertificateChain = append(info.CertificateChain, base64.StdEncoding.EncodeToString(der))
+		}
+		info.ChainNote = "the certificates that vouch for this report are included. " +
+			"Check the report's signature against them, and check them against the " +
+			"manufacturer root you already trust — do not take this machine's word for it."
+	}
 	return info
 }
 

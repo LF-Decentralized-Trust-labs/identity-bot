@@ -91,9 +91,14 @@ type CoreServer struct {
 	UpdateService     *update.Service
 	AttestationRunner *secureenclave.Runner
 	TrustGate         *secureenclave.TrustGate
-	CallerResolver    CallerResolver // resolves endpoint caller identity/scopes; nil = loopback default (delegated-identity injects the real one)
-	mu                sync.Mutex
-	running           bool
+
+	// snpCertificates obtains the certificates that let somebody else check
+	// this machine's attestation report. Nil where the machine has no sealed
+	// hardware, which is the ordinary case.
+	snpCertificates *snpCertificateChain
+	CallerResolver  CallerResolver // resolves endpoint caller identity/scopes; nil = loopback default (delegated-identity injects the real one)
+	mu              sync.Mutex
+	running         bool
 }
 
 type Config struct {
@@ -308,6 +313,12 @@ func New(cfg Config) (*CoreServer, error) {
 		s.TrustGate = secureenclave.NewTrustGate(s.AttestationRunner, s.UpdateService.Attestation())
 	} else {
 		s.TrustGate = secureenclave.NewTrustGate(s.AttestationRunner, nil)
+	}
+
+	// Only where there is sealed hardware to attest. Elsewhere there is no
+	// report, so there is nothing for a certificate to vouch for.
+	if secureenclave.SNPAvailable() {
+		s.snpCertificates = newSNPCertificateChain(os.Getenv("SNP_PRODUCT"), cfg.DataDir)
 	}
 
 	// Defer router construction to Start() so overlays can register routes
