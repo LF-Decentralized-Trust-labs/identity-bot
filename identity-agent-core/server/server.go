@@ -402,6 +402,20 @@ func (s *CoreServer) Start() error {
 		s.transportIdentity = id
 	}
 
+	// This machine's own identity, where it has made one.
+	//
+	// Read back rather than remade: it is what the owner signed and what
+	// counterparties encrypt to, so a machine that produced a fresh one after a
+	// restart would be a different machine wearing the same address. A file
+	// that will not parse is reported rather than replaced, for the same reason.
+	if box, err := s.loadBoxIdentity(); err != nil {
+		log.Printf("[identity-agent-core] WARNING: this machine has an identity it cannot read (%v) "+
+			"— it will not answer as itself until that is resolved, and it must not be given a new one", err)
+	} else if box != nil {
+		s.boxIdentity = box
+		log.Printf("[identity-agent-core] this machine's identity: %s", box.AID)
+	}
+
 	// Update endpoint service with actual port (may differ from configured)
 	s.EndpointService.SetPort(s.Port)
 
