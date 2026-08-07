@@ -47,6 +47,11 @@ export SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-1700000000}
 FIXED_FS_UUID=${FIXED_FS_UUID:-c0ffee00-0000-4000-8000-000000000001}
 FIXED_HASH_SEED=${FIXED_HASH_SEED:-c0ffee00-0000-4000-8000-000000000002}
 FIXED_VERITY_SALT=${FIXED_VERITY_SALT:-c0ffee0000000000000000000000000000000000000000000000000000000003}
+# The verity superblock carries a UUID that veritysetup also randomises per run.
+# It does NOT enter the root hash — the measurement reproduced without pinning
+# it — but the image file did not, and a reader who compares the file rather
+# than the hash would see a difference with no explanation.
+FIXED_VERITY_UUID=${FIXED_VERITY_UUID:-c0ffee00-0000-4000-8000-000000000004}
 # Not /tmp: debootstrap creates device nodes in the root it builds, a tmpfs is commonly
 # mounted `nodev`, and the resulting error names a permissions problem that is
 # not there. WORKROOT overrides it.
@@ -839,7 +844,7 @@ if [[ "$VERITY" == "1" ]]; then
   # the reader cannot reproduce costs more than it protects.
   say "Hashing every block of the system image"
   VERITY_OUT=$(veritysetup format "$RAW" "$RAW" --hash-offset="$DATA_BYTES" \
-                 --salt="$FIXED_VERITY_SALT" 2>&1) || {
+                 --salt="$FIXED_VERITY_SALT" --uuid="$FIXED_VERITY_UUID" 2>&1) || {
     echo "$VERITY_OUT" >&2
     fail "could not build the verity hash tree"
   }
