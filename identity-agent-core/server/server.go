@@ -96,9 +96,16 @@ type CoreServer struct {
 	// this machine's attestation report. Nil where the machine has no sealed
 	// hardware, which is the ordinary case.
 	snpCertificates *snpCertificateChain
-	CallerResolver  CallerResolver // resolves endpoint caller identity/scopes; nil = loopback default (delegated-identity injects the real one)
-	mu              sync.Mutex
-	running         bool
+
+	// The public attestation endpoint is open by necessity, so it caches its
+	// answer and bounds how often one caller may ask.
+	attestationMu      sync.Mutex
+	attestationCached  *publicAttestation
+	attestationExpires time.Time
+	attestationLimiter *attestationRateLimiter
+	CallerResolver     CallerResolver // resolves endpoint caller identity/scopes; nil = loopback default (delegated-identity injects the real one)
+	mu                 sync.Mutex
+	running            bool
 }
 
 type Config struct {
@@ -320,6 +327,7 @@ func New(cfg Config) (*CoreServer, error) {
 	if secureenclave.SNPAvailable() {
 		s.snpCertificates = newSNPCertificateChain(os.Getenv("SNP_PRODUCT"), cfg.DataDir)
 	}
+	s.attestationLimiter = newAttestationRateLimiter(60)
 
 	// Defer router construction to Start() so overlays can register routes
 	// (MountExtraRoutes) after New() returns but before serving. Building here
@@ -548,6 +556,7 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		r.Get("/info", s.handleInfo)
 		r.Get("/identity", s.handleIdentity)
 		r.Get("/security/enclave", s.handleSecurityEnclave)
+		r.Get("/attestation", s.handlePublicAttestation)
 
 		r.Post("/keystore/root-seed", s.handleSetRootSeed)
 		r.Get("/keystore/root-seed", s.handleRootSeedStatus)

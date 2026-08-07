@@ -55,6 +55,15 @@ var publicRoutes = map[string]string{
 	"POST /public/_register":        "a pairwise signer registers its key so counterparties can resolve it",
 	"GET /public/credential/{said}": "a credential the user chose to publish at a shareable link",
 
+	// --- proving what machine this agent runs on ---
+	// A client verifies a machine in order to decide whether to trust it, so it
+	// is not the owner yet and holds no owner key. Gating this would mean that
+	// by the time you could ask, you had already trusted the thing you wanted
+	// to check. It carries no tenant data: the measurement is the same for
+	// every instance of an image, the chip names the machine rather than any
+	// tenant, and REPORT_DATA is one-way.
+	"GET /api/attestation": "hardware attestation — the evidence a stranger needs to verify this machine",
+
 	// --- reaching your own agent from a browser ---
 	// Nobody is authenticated yet, which is the entire problem these solve. The
 	// flow's security is not in gating these: it is that granting requires the
