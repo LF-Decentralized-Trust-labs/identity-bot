@@ -94,7 +94,9 @@ func TestARequestGoesOutSealedAndComesBack(t *testing.T) {
 	didcommMu.Lock()
 	peers := caller.loadPeers()
 	p := peers[responderAID]
-	p.Endpoint = front.URL
+	// The "/didcomm" suffix is what rememberPeerAt stores. Building it by hand
+	// without one is what let a broken URL through unnoticed.
+	p.Endpoint = front.URL + "/didcomm"
 	peers[responderAID] = p
 	_ = caller.savePeers(peers)
 	didcommMu.Unlock()
@@ -143,7 +145,9 @@ func TestAnAnswerFromSomebodyElseIsRefused(t *testing.T) {
 	didcommMu.Lock()
 	peers := caller.loadPeers()
 	p := peers[responderAID]
-	p.Endpoint = front.URL
+	// The "/didcomm" suffix is what rememberPeerAt stores. Building it by hand
+	// without one is what let a broken URL through unnoticed.
+	p.Endpoint = front.URL + "/didcomm"
 	peers[responderAID] = p
 	_ = caller.savePeers(peers)
 	didcommMu.Unlock()
@@ -172,4 +176,21 @@ func requestWithBody(r *http.Request, body []byte) *http.Request {
 	out := httptest.NewRequest(r.Method, r.URL.String(), strings.NewReader(string(body)))
 	out.Header = r.Header.Clone()
 	return out
+}
+
+// A peer record stores the DIDComm inbox, not the agent's base address. Getting
+// this wrong sends every sealed request to a path no agent serves, and the
+// round-trip test above did not catch it because it built its own peer record.
+func TestTheSealedURLIsBuiltFromTheAgentNotItsInbox(t *testing.T) {
+	for _, c := range []struct{ endpoint, want string }{
+		{"https://agent.example/didcomm", "https://agent.example"},
+		{"https://agent.example/didcomm/", "https://agent.example"},
+		{"http://127.0.0.1:5050/didcomm", "http://127.0.0.1:5050"},
+		{"https://host/base/didcomm", "https://host/base"},
+	} {
+		if got := agentBaseFromInbox(c.endpoint); got != c.want {
+			t.Errorf("%s gave %s, want %s — a sealed request would go somewhere no agent serves",
+				c.endpoint, got, c.want)
+		}
+	}
 }

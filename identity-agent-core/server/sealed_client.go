@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"identity-agent-core/didcomm"
@@ -27,6 +28,23 @@ import (
 //
 // What this hides: the request, the response, and which endpoint was called.
 // What it does not: that a request happened, roughly its size, and when.
+
+// agentBaseFromInbox recovers an agent's base address from the endpoint stored
+// in a peer record.
+//
+// What is stored is the peer's DIDComm inbox — the address plus "/didcomm" —
+// because messaging is what the record was created for. The sealed transport
+// lives at a different path on the same agent, so appending to the inbox
+// address rather than to the base produced ".../didcomm/api/sealed", which no
+// agent serves.
+//
+// That was not caught by the round-trip test, because the test built its peer
+// record by hand with a bare address, and so exercised a shape the code that
+// creates peer records never produces. The test now builds the endpoint the way
+// rememberPeerAt does.
+func agentBaseFromInbox(endpoint string) string {
+	return strings.TrimSuffix(strings.TrimRight(endpoint, "/"), "/didcomm")
+}
 
 // SealedResult is what came back, once opened.
 type SealedResult struct {
@@ -88,7 +106,7 @@ func (s *CoreServer) SealedRequest(ctx context.Context, fromAID, toAID, method, 
 		return nil, err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		peer.Endpoint+sealedTransportPath, bytes.NewReader(raw))
+		agentBaseFromInbox(peer.Endpoint)+sealedTransportPath, bytes.NewReader(raw))
 	if err != nil {
 		return nil, err
 	}
