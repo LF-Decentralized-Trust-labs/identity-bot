@@ -19,12 +19,13 @@
 package didcomm
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/cloudflare/circl/kem/mlkem/mlkem768"
 	"github.com/cloudflare/circl/sign/mldsa/mldsa65"
@@ -79,18 +80,30 @@ type DID struct {
 	KelSig string `json:"kel_sig,omitempty"`
 }
 
-// SigningInput is the exact text a KERI key signs to vouch for these keys.
+// SigningInput is the exact bytes a KERI key signs to vouch for these keys.
 //
-// Every field except the signature itself, in a fixed order, one per line, with
-// a version label first. Built by hand rather than from JSON marshalling
-// because two implementations must agree on the bytes exactly, and JSON gives
-// them several ways to disagree — key order, spacing, escaping — none of which
-// show up until a signature fails somewhere else.
-func (d *DID) SigningInput() string {
-	return strings.Join([]string{
-		"IA-DIDCOMM-KEYS-V1",
-		d.AID, d.Ed, d.Dsa, d.X25519, d.MlKem, d.Suite,
-	}, "\n")
+// Every field except the signature itself, in a fixed order, each preceded by
+// its length, after a version label. Built by hand rather than from JSON
+// marshalling because two implementations must agree on these bytes exactly,
+// and JSON gives them several ways to disagree — key order, spacing, escaping —
+// none of which show up until a signature fails somewhere else.
+//
+// Length-prefixed rather than separated by a delimiter, which is the same
+// argument one level down. A delimiter only separates fields that cannot
+// contain it, and while the four keys are base64url and never can, AID and
+// Suite are strings with no enforced character set. One newline inside either
+// of them shifts what every following field appears to be, so two different
+// key sets could produce identical signing input and a signature over one would
+// verify over the other. Lengths cannot be confused for content, so there is
+// nothing to smuggle.
+func (d *DID) SigningInput() []byte {
+	var b bytes.Buffer
+	b.WriteString("IA-DIDCOMM-KEYS-V1")
+	for _, f := range []string{d.AID, d.Ed, d.Dsa, d.X25519, d.MlKem, d.Suite} {
+		_ = binary.Write(&b, binary.BigEndian, uint32(len(f)))
+		b.WriteString(f)
+	}
+	return b.Bytes()
 }
 
 const CipherSuite = "IA-HYBRID-1"
