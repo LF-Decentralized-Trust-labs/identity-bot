@@ -196,6 +196,23 @@ func (s *CoreServer) handleSecurityEnclave(w http.ResponseWriter, r *http.Reques
 // does. Either way it is a value a verifier already holds, which is what makes
 // the binding checkable rather than decorative.
 func (s *CoreServer) attestationBinding() string {
+	// The key this agent is reached over, where it has one.
+	//
+	// Preferred over any identifier, and not only because it is more useful. A
+	// report bound to an identifier is a public oracle: anyone holding a list of
+	// candidate identifiers can ask "is it this one?" of every instance, at one
+	// query each. Saying that is safe because "you would have to know the
+	// identifier already" is weaker than it sounds, since identifiers leak
+	// through other channels and the list only grows.
+	//
+	// A transport fingerprint confirms nothing new, because it is already
+	// visible to anyone who connects. It is also the thing a client actually
+	// needs bound: it proves the sealed machine holds the key on THIS
+	// connection, which is what stops a genuine report being replayed onto a
+	// connection somebody else terminates.
+	if s.transportIdentity != nil && s.transportIdentity.FingerprintB64 != "" {
+		return s.transportIdentity.FingerprintB64
+	}
 	if s.DataStore != nil {
 		if id, err := s.DataStore.GetIdentity(); err == nil && id != nil && id.AID != "" {
 			return id.AID

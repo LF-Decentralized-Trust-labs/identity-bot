@@ -100,6 +100,10 @@ type CoreServer struct {
 	// volumeRecovery is injected by tests. Nil means the real one.
 	volumeRecovery volumeRecoveryRunner
 
+	// transportIdentity is the key this agent is reached over, where it holds
+	// one itself rather than being fronted by something that terminates for it.
+	transportIdentity *TransportIdentity
+
 	// The public attestation endpoint is open by necessity, so it caches its
 	// answer and bounds how often one caller may ask.
 	attestationMu      sync.Mutex
@@ -373,6 +377,22 @@ func (s *CoreServer) Start() error {
 	}
 	if s.listener == nil {
 		return fmt.Errorf("failed to bind on ports %d–%d: %w", requestedPort, requestedPort+9, bindErr)
+	}
+
+	// The key this agent is reached over. Loaded before anything publishes an
+	// address, because its fingerprint is what an attestation binds to and what
+	// a client checks against the connection it is on.
+	//
+	// A failure is loud but not fatal: an agent that cannot hold its own key
+	// still works behind something that terminates for it, which is what every
+	// agent does today. Refusing to start would turn a downgrade into an
+	// outage.
+	if id, err := LoadOrCreateTransportIdentity(s.DataDir); err != nil {
+		log.Printf("[identity-agent-core] WARNING: no transport key of this agent's own (%v) — "+
+			"traffic is protected only by whatever terminates in front of it, which on rented "+
+			"hardware is the machine's operator", err)
+	} else {
+		s.transportIdentity = id
 	}
 
 	// Update endpoint service with actual port (may differ from configured)
