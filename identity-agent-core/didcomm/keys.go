@@ -80,6 +80,40 @@ type DID struct {
 	KelSig string `json:"kel_sig,omitempty"`
 }
 
+// MatchesAnchoredKeys reports whether these are the keys an identifier
+// committed to at inception.
+//
+// This is the join between the two halves of an agent's identity, which until
+// now did not touch: the identifier and its key event log on one side, the
+// encryption keys used to reach it on the other. The keys were fetched from
+// whoever answered and compared to nothing, so the answer was as trustworthy as
+// the connection that carried it. Compared against the anchor, they are as
+// trustworthy as the identifier — which cannot be forged without forging the
+// identifier, because it is derived from the event the keys are inside.
+//
+// Takes raw bytes rather than the encoded form so that the caller has already
+// had to decode them under a declared type, which is where a key of one kind
+// gets caught being offered as a key of another.
+func (d *DID) MatchesAnchoredKeys(x25519, mlkem768 []byte) error {
+	got, err := b64.DecodeString(d.X25519)
+	if err != nil {
+		return fmt.Errorf("the agreement key offered is not valid base64url: %w", err)
+	}
+	if !bytes.Equal(got, x25519) {
+		return fmt.Errorf("the agreement key offered for %s is not the one that identifier "+
+			"committed to", d.AID)
+	}
+	got, err = b64.DecodeString(d.MlKem)
+	if err != nil {
+		return fmt.Errorf("the encapsulation key offered is not valid base64url: %w", err)
+	}
+	if !bytes.Equal(got, mlkem768) {
+		return fmt.Errorf("the encapsulation key offered for %s is not the one that identifier "+
+			"committed to", d.AID)
+	}
+	return nil
+}
+
 // SigningInput is the exact bytes a KERI key signs to vouch for these keys.
 //
 // Every field except the signature itself, in a fixed order, each preceded by
