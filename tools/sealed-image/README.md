@@ -46,9 +46,26 @@ agent binary included, produce the same measurement. That was demonstrated
 rather than assumed. A build without it succeeds, boots and attests, and proves
 nothing about the software inside. Always pass it.
 
-`WEB_BUNDLE` must be a `flutter build web --pwa-strategy=none` output: the
-script rejects a bundle carrying a service worker, because one would cache
-itself and keep serving an old app after the image is replaced.
+`WEB_BUNDLE` is optional and **defaults to none**. A hosted instance reached
+through a proxy that terminates TLS cannot protect a browser: the application
+itself arrives from the machine it is meant to be protecting the user against,
+and a browser has no way to check that what it downloaded is genuine. That is
+not something better encryption fixes — an attacker does not need to break the
+encryption, they can serve an application that does not use it. So the default
+build serves no browser front end, and instances are reached through an
+installed application that holds its own keys.
+
+It remains a parameter because an agent on hardware you control, reached
+directly, has no such proxy and no such problem. If you do pass it, it must be a
+`flutter build web --pwa-strategy=none` output: the script rejects a bundle
+carrying a service worker, because one would cache itself and keep serving an
+old app after the image is replaced.
+
+This is not a runtime setting. The bundle is inside the measured image, so an
+image with a browser front end and one without have different measurements —
+which means whether a given instance serves one is a fact anybody can verify,
+rather than a setting nobody can audit. Changing it later is a rebuild and a new
+measurement, not a toggle.
 
 To reproduce a specific published image you need the same values for all of the
 above — the agent binary built from the stated commit, the same web bundle, the

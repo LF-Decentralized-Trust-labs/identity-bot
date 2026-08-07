@@ -372,7 +372,6 @@ Environment=GOMEMLIMIT=40MiB
 Environment=GOGC=50
 Environment=KERI_DRIVER_EXTERNAL=1
 Environment=KERI_DRIVER_PORT=9999
-Environment=FLUTTER_WEB_DIR=/usr/share/identity-agent/web
 # This instance is only ever reached through the proxy in front of it, so the
 # proxy is the only party that knows the name, the scheme and the path prefix a
 # person actually used. Without this the agent guesses from a local interface
@@ -394,6 +393,30 @@ PrivateTmp=yes
 [Install]
 WantedBy=multi-user.target
 UNIT
+# The browser front end, only where one was actually installed.
+#
+# Set unconditionally, this named a directory that a default build never
+# creates: the image declared a front end it did not have. Worse in the other
+# direction — an instance reached through a proxy that terminates TLS cannot
+# protect a browser at all, because the application itself arrives from the
+# machine it is meant to be protecting the user against, and a browser cannot
+# check that what it downloaded is genuine. So the default is no browser front
+# end, and turning it on is a deliberate act by whoever builds the image.
+#
+# Note this is NOT a runtime setting. The bundle is inside the measured image,
+# so an image with a browser front end and one without have different launch
+# measurements. Turning it on or off later is a rebuild, a new measurement, and
+# the same owner-approval step as any other change to the software — which also
+# means whether a given instance serves a browser front end is a fact anybody
+# can verify from its measurement, rather than a setting nobody can audit.
+if [[ -n "$WEB_SRC" ]]; then
+  sed -i 's|^ExecStart=|Environment=FLUTTER_WEB_DIR=/usr/share/identity-agent/web\nExecStart=|' \
+    "$WORK/root/etc/systemd/system/identity-agent.service"
+  echo "  browser front end: INCLUDED (this image serves one)"
+else
+  echo "  browser front end: none (set WEB_BUNDLE= to include one)"
+fi
+
 ln -sf /etc/systemd/system/identity-agent.service \
   "$WORK/root/etc/systemd/system/multi-user.target.wants/identity-agent.service"
 
