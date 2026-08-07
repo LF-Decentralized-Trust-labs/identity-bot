@@ -118,8 +118,15 @@ provisioning are not needed to reproduce an image, and would not help you check
 one. What you need to verify the claim is here; what describes somebody's
 operation is not, and its absence takes nothing away from the check.
 
-**Reproducibility across build environments has not been demonstrated.** The
-build fixes the inputs that are known to vary within one environment: every
+**Two builds in one environment produce byte-identical output — demonstrated,
+not assumed.** Two runs of this script from identical inputs produced two
+2,164,400,128-byte images that `cmp` reports as identical, with the same root
+hash `bdbe4a2af751a064f9dc0728c35e2987df80aa9ab338b6732c34a7f18b31f87c`. Getting
+there took three rounds of building twice and comparing; each round found
+something the build had left to vary, and each is fixed.
+
+**Reproducibility across *different* build environments has not been
+demonstrated.** The build fixes the inputs known to vary within one: every
 timestamp comes from `SOURCE_DATE_EPOCH`, the initramfs is repacked with sorted
 entries and no embedded name or time, and the filesystem is built with a fixed
 UUID and a fixed directory hash seed rather than the random ones the tools
