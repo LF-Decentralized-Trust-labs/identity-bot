@@ -95,6 +95,25 @@ func (c *snpCertificateChain) forReport(ctx context.Context, chipID []byte, repo
 		return cached, nil
 	}
 
+	// Handed down at launch, where the host provides it.
+	//
+	// Preferred over asking the manufacturer, and not merely as an optimisation:
+	// asking requires working name resolution and a reachable third party, and
+	// it puts that third party in the path of a customer's verification. The
+	// host already holds these certificates because it checks every instance
+	// against them.
+	//
+	// Nothing here is trusted. These are published, not believed: the client
+	// checks them against a root it pinned itself and requires the report's
+	// signature to verify under the leaf, so a substituted chain fails there.
+	if handed := readHandedDownChain(); len(handed) > 0 {
+		c.mu.Lock()
+		c.chain = handed
+		c.mu.Unlock()
+		c.writeCache(key, handed)
+		return handed, nil
+	}
+
 	leaf, err := c.fetch(ctx, fmt.Sprintf("%s/%s/%s?blSPL=%d&teeSPL=%d&snpSPL=%d&ucodeSPL=%d",
 		amdKDSBaseForTest, c.Product, hex.EncodeToString(chipID), bl, tee, snp, ucode))
 	if err != nil {
@@ -191,6 +210,36 @@ func (c *snpCertificateChain) writeCache(key string, chain [][]byte) {
 	}
 	_ = os.Rename(tmp, path)
 }
+
+// readHandedDownChain reads certificates the host passed in at launch.
+//
+// Delivered through the firmware configuration channel, which adds no device to
+// the guest — the device topology is checked against a fixed list, so anything
+// that added one would trip the check that exists to notice added devices.
+//
+// Absence is ordinary, not an error: a host that hands nothing down leaves the
+// agent to say its report cannot yet be checked, which is true and useful.
+func readHandedDownChain() [][]byte {
+	raw, err := os.ReadFile(handedDownChainPath)
+	if err != nil || len(raw) == 0 {
+		return nil
+	}
+	var out [][]byte
+	for block, rest := pem.Decode(raw); block != nil; block, rest = pem.Decode(rest) {
+		out = append(out, block.Bytes)
+	}
+	// A leaf, an intermediate and a root. Fewer means whatever arrived is not a
+	// chain, and publishing a partial one would produce a verification failure
+	// that reads like tampering.
+	if len(out) < 3 {
+		return nil
+	}
+	return out
+}
+
+// Where the firmware configuration channel surfaces what the host passed under
+// the name the launch used.
+var handedDownChainPath = "/sys/firmware/qemu_fw_cfg/by_name/opt/attestation/chain.pem/raw"
 
 // decodeTCBParts splits the reported firmware level into the four fields the
 // certificate is indexed by.

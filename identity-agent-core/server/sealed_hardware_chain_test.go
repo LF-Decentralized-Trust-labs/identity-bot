@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -135,5 +136,75 @@ func TestAnUnwritableCacheDoesNotFailTheAttestation(t *testing.T) {
 
 	if _, err := c.forReport(context.Background(), make([]byte, 64), 1); err != nil {
 		t.Fatalf("an unwritable cache failed the attestation: %v", err)
+	}
+}
+
+// Certificates handed down at launch are used in preference to asking the
+// manufacturer, because asking needs working name resolution and a reachable
+// third party — and puts that third party in the path of a customer's
+// verification.
+func TestCertificatesHandedDownAtLaunchAreUsedWithoutAsking(t *testing.T) {
+	hits := 0
+	srv := certServiceStub(t, &hits)
+	defer srv.Close()
+
+	dir := t.TempDir()
+	chain := filepath.Join(dir, "chain.pem")
+	var buf []byte
+	for _, name := range []string{"leaf", "intermediate", "root"} {
+		buf = append(buf, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: []byte(name)})...)
+	}
+	if err := os.WriteFile(chain, buf, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	orig := handedDownChainPath
+	handedDownChainPath = chain
+	defer func() { handedDownChainPath = orig }()
+
+	c := newSNPCertificateChain("Genoa", t.TempDir())
+	c.HTTPClient = srv.Client()
+	base := amdKDSBaseForTest
+	amdKDSBaseForTest = srv.URL
+	defer func() { amdKDSBaseForTest = base }()
+
+	got, err := c.forReport(context.Background(), make([]byte, 64), 1)
+	if err != nil {
+		t.Fatalf("a handed-down chain was not used: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("got %d certificates, want 3", len(got))
+	}
+	if hits != 0 {
+		t.Fatalf("the manufacturer was asked %d times despite the chain being handed down", hits)
+	}
+}
+
+// Absence is ordinary. A host that hands nothing down leaves the agent to say
+// its report cannot yet be checked, which is true and more useful than failing.
+func TestNothingHandedDownIsNotAnError(t *testing.T) {
+	orig := handedDownChainPath
+	handedDownChainPath = filepath.Join(t.TempDir(), "absent.pem")
+	defer func() { handedDownChainPath = orig }()
+
+	if got := readHandedDownChain(); got != nil {
+		t.Fatalf("an absent file produced %d certificates", len(got))
+	}
+}
+
+// A partial chain is refused rather than published. Serving one would produce a
+// verification failure at the client that reads like tampering.
+func TestAPartialHandedDownChainIsRefused(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "chain.pem")
+	buf := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: []byte("leaf-only")})
+	if err := os.WriteFile(p, buf, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	orig := handedDownChainPath
+	handedDownChainPath = p
+	defer func() { handedDownChainPath = orig }()
+
+	if got := readHandedDownChain(); got != nil {
+		t.Fatalf("a one-certificate chain was accepted as complete: %d", len(got))
 	}
 }
