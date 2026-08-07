@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"identity-agent-core/backup"
+	"identity-agent-core/didcomm"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/login"
 	"identity-agent-core/store"
@@ -72,6 +73,23 @@ type pairingCompleteRequest struct {
 	DelegatorIxn map[string]interface{} `json:"delegator_ixn,omitempty"`
 	// DelegatorAID is the controller's root AID.
 	DelegatorAID string `json:"delegator_aid"`
+	// OwnerDID is the owner device's encryption keys, so this instance can
+	// reach it without asking anybody for them later.
+	//
+	// Carried here rather than fetched afterwards, because afterwards means
+	// over the network, from whoever answers, checked against nothing. That
+	// fetch is the one step a party sitting between the two can answer with its
+	// own keys — and then read everything encrypted to what it supplied. This
+	// exchange is already proven: it takes an adoption code issued to this
+	// owner and a key this instance was told to expect, so keys arriving inside
+	// it are as trustworthy as the adoption itself.
+	//
+	// Optional, so an older client still adopts successfully. What it loses is
+	// the encrypted transport, which needs a relationship that exists in both
+	// directions.
+	OwnerDID *didcomm.DID `json:"owner_did,omitempty"`
+	// OwnerAgentEndpoint is where that owner's agent is reached.
+	OwnerAgentEndpoint string `json:"owner_agent_endpoint,omitempty"`
 	// AdoptionCode is the one-time code this instance issued with its pairing
 	// offer. Without it, whoever reaches an unadopted box first takes it.
 	AdoptionCode string `json:"adoption_code"`
@@ -371,9 +389,35 @@ func (s *CoreServer) handlePairingComplete(w http.ResponseWriter, r *http.Reques
 	// The identity is named as what it is. One founded as its own root is not
 	// delegated, and reporting it under "delegated_aid" would be a caller's
 	// first and hardest-to-shake wrong impression of what it just created.
+	// Both halves of the relationship, established here in the one exchange
+	// that has already proved who both parties are.
+	//
+	// Nothing did this before. Adoption produced an owner and an instance that
+	// had never exchanged encryption keys, so the first time either wanted to
+	// reach the other privately it had to go and ask — over the network, from
+	// whoever answered. The encrypted transport then refused, correctly, for
+	// exactly the pair it exists to serve.
+	//
+	// A failure here does not undo the adoption, for the same reason as the
+	// recovery keys above: the instance is legitimately adopted by this point,
+	// and refusing now would leave it delegated and ownerless, which is worse
+	// than adopted without a private channel yet.
 	response := map[string]interface{}{
 		"ok":        true,
 		"owner_aid": req.OwnerAID,
+	}
+	if req.OwnerDID != nil && req.OwnerDID.AID != "" {
+		if err := s.rememberPeerFromAdoption(req.OwnerDID, req.OwnerAgentEndpoint); err != nil {
+			log.Printf("[pairing] WARNING: adopted, but this instance cannot reach its owner "+
+				"privately (%v) — sealed requests between them will be refused until that is fixed", err)
+		}
+	}
+	// This instance's own keys, so the owner can complete the other direction
+	// without a fetch of its own.
+	if ks, err := s.keySetFor(identityAID); err == nil {
+		if did, err := ks.DID(); err == nil {
+			response["agent_did"] = did
+		}
 	}
 	if req.FoundAsRoot {
 		response["root_aid"] = identityAID

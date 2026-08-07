@@ -330,3 +330,23 @@ func (k *KeySet) PublicMaterial() (ed, dsa, x25519, mlkem768 []byte, err error) 
 	}
 	return append([]byte(nil), k.EdPub...), dsa, append([]byte(nil), k.XPub[:]...), mlkem768, nil
 }
+
+// ParseDIDForCheck reports whether a DID's four keys can actually be used,
+// without exposing the parsed form.
+//
+// Somewhere has to establish that a set of keys is usable, and the natural
+// moment is when they arrive rather than when they are first needed — by then
+// the failure surfaces in the middle of whatever the caller was doing and looks
+// like that failing instead.
+func ParseDIDForCheck(d *DID) (string, error) {
+	if d == nil {
+		return "", fmt.Errorf("no keys were supplied")
+	}
+	if _, err := d.parse(); err != nil {
+		return "", err
+	}
+	if d.Suite != CipherSuite {
+		return "", fmt.Errorf("these keys declare cipher suite %q, which this agent does not speak", d.Suite)
+	}
+	return d.AID, nil
+}
