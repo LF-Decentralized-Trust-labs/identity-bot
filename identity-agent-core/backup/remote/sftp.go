@@ -16,8 +16,8 @@ import (
 )
 
 type sftpBackend struct {
-	host     string
-	basePath string
+	host      string
+	basePath  string
 	sshConfig *ssh.ClientConfig
 }
 

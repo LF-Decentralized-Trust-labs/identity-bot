@@ -112,8 +112,8 @@ type LoginPreviewResponse struct {
 	// that lists only the fields is telling the user less than the truth.
 	RequestedCredentials []CredentialRequestPreview `json:"requested_credentials,omitempty"`
 	RequestedScore       *RequestedScore            `json:"requested_score,omitempty"`
-	Expiry               string            `json:"expiry"`
-	PairwiseAID          string            `json:"pairwise_aid,omitempty"`
+	Expiry               string                     `json:"expiry"`
+	PairwiseAID          string                     `json:"pairwise_aid,omitempty"`
 	// Set when the login uses a controller-anchored membership relationship
 	// (verified delegation) — lets consent UI say "sign in as a member" vs.
 	// "use your account with this site".

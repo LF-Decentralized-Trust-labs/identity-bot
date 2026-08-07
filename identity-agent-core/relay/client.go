@@ -23,9 +23,9 @@ type Client struct {
 
 func NewClient(baseURL string, token string, signer Signer) *Client {
 	return &Client{
-		BaseURL: baseURL,
-		Token:   token,
-		Signer:  signer,
+		BaseURL:    baseURL,
+		Token:      token,
+		Signer:     signer,
 		HTTPClient: &http.Client{Timeout: 30 * time.Second},
 	}
 }

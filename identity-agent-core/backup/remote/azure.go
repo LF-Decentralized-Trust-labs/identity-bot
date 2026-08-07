@@ -12,15 +12,14 @@ import (
 	"net/url"
 	"strings"
 	"time"
-
 )
 
 type azureBackend struct {
-	account  string
+	account   string
 	container string
-	prefix   string
-	key      string
-	client   *http.Client
+	prefix    string
+	key       string
+	client    *http.Client
 }
 
 func NewAzureBackend(dest DestinationConfig, creds CredentialSecrets) (Backend, error) {

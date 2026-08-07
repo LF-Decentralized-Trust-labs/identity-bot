@@ -12,9 +12,9 @@ func TestBuildDidJSONSEAM17(t *testing.T) {
 	_, priv, _ := ed25519.GenerateKey(nil)
 	pub := priv.Public().(ed25519.PublicKey)
 	in := PublishInput{
-		AID: "EPairwiseAID00000000000000000000000001",
-		Host: "k7f2pq9r.relay.grapeid.org",
-		PublicKeyB64: base64.StdEncoding.EncodeToString(pub),
+		AID:            "EPairwiseAID00000000000000000000000001",
+		Host:           "k7f2pq9r.relay.grapeid.org",
+		PublicKeyB64:   base64.StdEncoding.EncodeToString(pub),
 		SequenceNumber: 0,
 	}
 	raw, err := BuildDidJSON(in)
@@ -38,7 +38,7 @@ func TestBuildDidJSONSEAM17(t *testing.T) {
 
 func TestBuildCesrStreamFailOpenHeader(t *testing.T) {
 	raw, complete, hdr := BuildCesrStream(PublishInput{
-		KELEvents: []map[string]interface{}{{"t": "icp"}},
+		KELEvents:       []map[string]interface{}{{"t": "icp"}},
 		WitnessReceipts: 2, WitnessThreshold: 5,
 	})
 	if complete {

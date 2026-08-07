@@ -1,23 +1,23 @@
 package sandbox
 
 import (
-        "database/sql"
-        "fmt"
-        "log"
+	"database/sql"
+	"fmt"
+	"log"
 )
 
 type migration struct {
-        Version     int
-        Description string
-        SQL         string
-        PreCheck    func(db *sql.DB) bool
+	Version     int
+	Description string
+	SQL         string
+	PreCheck    func(db *sql.DB) bool
 }
 
 var migrations = []migration{
-        {
-                Version:     1,
-                Description: "Initial sandbox schema",
-                SQL: `
+	{
+		Version:     1,
+		Description: "Initial sandbox schema",
+		SQL: `
 CREATE TABLE IF NOT EXISTS apps (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -129,40 +129,40 @@ CREATE INDEX IF NOT EXISTS idx_events_instance ON events(instance_id);
 CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);
 CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
 `,
-        },
-        {
-                Version:     2,
-                Description: "Rename docker_image columns to container_image",
-                PreCheck: func(db *sql.DB) bool {
-                        rows, err := db.Query("PRAGMA table_info(apps)")
-                        if err != nil {
-                                return true
-                        }
-                        defer rows.Close()
-                        for rows.Next() {
-                                var cid int
-                                var name, ctype string
-                                var notnull int
-                                var dfltValue sql.NullString
-                                var pk int
-                                if err := rows.Scan(&cid, &name, &ctype, &notnull, &dfltValue, &pk); err != nil {
-                                        continue
-                                }
-                                if name == "docker_image" {
-                                        return true
-                                }
-                        }
-                        return false
-                },
-                SQL: `
+	},
+	{
+		Version:     2,
+		Description: "Rename docker_image columns to container_image",
+		PreCheck: func(db *sql.DB) bool {
+			rows, err := db.Query("PRAGMA table_info(apps)")
+			if err != nil {
+				return true
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var cid int
+				var name, ctype string
+				var notnull int
+				var dfltValue sql.NullString
+				var pk int
+				if err := rows.Scan(&cid, &name, &ctype, &notnull, &dfltValue, &pk); err != nil {
+					continue
+				}
+				if name == "docker_image" {
+					return true
+				}
+			}
+			return false
+		},
+		SQL: `
 ALTER TABLE apps RENAME COLUMN docker_image TO container_image;
 ALTER TABLE apps RENAME COLUMN docker_image_size_bytes TO container_image_size_bytes;
 `,
-        },
-        {
-                Version:     3,
-                Description: "Capability registry (registry-native records) + signed invocation log",
-                SQL: `
+	},
+	{
+		Version:     3,
+		Description: "Capability registry (registry-native records) + signed invocation log",
+		SQL: `
 CREATE TABLE IF NOT EXISTS capability_registry (
     id TEXT PRIMARY KEY,
     said TEXT,
@@ -203,28 +203,28 @@ CREATE INDEX IF NOT EXISTS idx_invocation_correlation ON invocation_log(correlat
 CREATE INDEX IF NOT EXISTS idx_invocation_capability ON invocation_log(capability_id);
 CREATE INDEX IF NOT EXISTS idx_invocation_ts ON invocation_log(ts);
 `,
-        },
-        {
-                Version:     4,
-                Description: "Pluggable executors: per-capability executor config",
-                SQL: `
+	},
+	{
+		Version:     4,
+		Description: "Pluggable executors: per-capability executor config",
+		SQL: `
 ALTER TABLE capability_registry ADD COLUMN executor_config_json TEXT;
 `,
-        },
-        {
-                Version: 5,
-                Description: "Invocation log: why an action happened, why it was refused, " +
-                        "what it cost, what it produced, and a chain link",
-                // Every column here is nullable and additive, so existing rows keep
-                // their meaning. That meaning is narrower than it looks: a NULL
-                // work_item means "written before this was recorded", which is a
-                // different fact from "this call had no work item", and a reader must
-                // not present it as the latter.
-                //
-                // cost is three columns rather than one JSON blob because it is the
-                // field most likely to be summed and grouped, and a unit buried inside
-                // a blob cannot stop someone adding USD to tokens.
-                SQL: `
+	},
+	{
+		Version: 5,
+		Description: "Invocation log: why an action happened, why it was refused, " +
+			"what it cost, what it produced, and a chain link",
+		// Every column here is nullable and additive, so existing rows keep
+		// their meaning. That meaning is narrower than it looks: a NULL
+		// work_item means "written before this was recorded", which is a
+		// different fact from "this call had no work item", and a reader must
+		// not present it as the latter.
+		//
+		// cost is three columns rather than one JSON blob because it is the
+		// field most likely to be summed and grouped, and a unit buried inside
+		// a blob cannot stop someone adding USD to tokens.
+		SQL: `
 ALTER TABLE invocation_log ADD COLUMN work_item TEXT;
 ALTER TABLE invocation_log ADD COLUMN reason TEXT;
 ALTER TABLE invocation_log ADD COLUMN status_reason TEXT;
@@ -237,73 +237,73 @@ ALTER TABLE invocation_log ADD COLUMN result_hash TEXT;
 ALTER TABLE invocation_log ADD COLUMN prev_hash TEXT;
 CREATE INDEX IF NOT EXISTS idx_invocation_log_work_item ON invocation_log(work_item);
 `,
-        },
+	},
 }
 
 func ensureMigrationsTable(db *sql.DB) error {
-        _, err := db.Exec(`
+	_, err := db.Exec(`
                 CREATE TABLE IF NOT EXISTS schema_migrations (
                         version INTEGER PRIMARY KEY,
                         description TEXT NOT NULL,
                         applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
         `)
-        return err
+	return err
 }
 
 func currentVersion(db *sql.DB) (int, error) {
-        var version int
-        err := db.QueryRow("SELECT COALESCE(MAX(version), 0) FROM schema_migrations").Scan(&version)
-        if err != nil {
-                return 0, err
-        }
-        return version, nil
+	var version int
+	err := db.QueryRow("SELECT COALESCE(MAX(version), 0) FROM schema_migrations").Scan(&version)
+	if err != nil {
+		return 0, err
+	}
+	return version, nil
 }
 
 func ApplyMigrations(db *sql.DB) error {
-        if err := ensureMigrationsTable(db); err != nil {
-                return fmt.Errorf("failed to create migrations table: %w", err)
-        }
+	if err := ensureMigrationsTable(db); err != nil {
+		return fmt.Errorf("failed to create migrations table: %w", err)
+	}
 
-        current, err := currentVersion(db)
-        if err != nil {
-                return fmt.Errorf("failed to get current schema version: %w", err)
-        }
+	current, err := currentVersion(db)
+	if err != nil {
+		return fmt.Errorf("failed to get current schema version: %w", err)
+	}
 
-        for _, m := range migrations {
-                if m.Version <= current {
-                        continue
-                }
+	for _, m := range migrations {
+		if m.Version <= current {
+			continue
+		}
 
-                if m.PreCheck != nil && !m.PreCheck(db) {
-                        log.Printf("[sandbox] Skipping migration %d (pre-check: columns already renamed): %s", m.Version, m.Description)
-                        db.Exec("INSERT INTO schema_migrations (version, description) VALUES (?, ?)", m.Version, m.Description)
-                        continue
-                }
+		if m.PreCheck != nil && !m.PreCheck(db) {
+			log.Printf("[sandbox] Skipping migration %d (pre-check: columns already renamed): %s", m.Version, m.Description)
+			db.Exec("INSERT INTO schema_migrations (version, description) VALUES (?, ?)", m.Version, m.Description)
+			continue
+		}
 
-                log.Printf("[sandbox] Applying migration %d: %s", m.Version, m.Description)
+		log.Printf("[sandbox] Applying migration %d: %s", m.Version, m.Description)
 
-                tx, err := db.Begin()
-                if err != nil {
-                        return fmt.Errorf("failed to begin transaction for migration %d: %w", m.Version, err)
-                }
+		tx, err := db.Begin()
+		if err != nil {
+			return fmt.Errorf("failed to begin transaction for migration %d: %w", m.Version, err)
+		}
 
-                if _, err := tx.Exec(m.SQL); err != nil {
-                        tx.Rollback()
-                        return fmt.Errorf("failed to apply migration %d: %w", m.Version, err)
-                }
+		if _, err := tx.Exec(m.SQL); err != nil {
+			tx.Rollback()
+			return fmt.Errorf("failed to apply migration %d: %w", m.Version, err)
+		}
 
-                if _, err := tx.Exec("INSERT INTO schema_migrations (version, description) VALUES (?, ?)", m.Version, m.Description); err != nil {
-                        tx.Rollback()
-                        return fmt.Errorf("failed to record migration %d: %w", m.Version, err)
-                }
+		if _, err := tx.Exec("INSERT INTO schema_migrations (version, description) VALUES (?, ?)", m.Version, m.Description); err != nil {
+			tx.Rollback()
+			return fmt.Errorf("failed to record migration %d: %w", m.Version, err)
+		}
 
-                if err := tx.Commit(); err != nil {
-                        return fmt.Errorf("failed to commit migration %d: %w", m.Version, err)
-                }
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("failed to commit migration %d: %w", m.Version, err)
+		}
 
-                log.Printf("[sandbox] Migration %d applied successfully", m.Version)
-        }
+		log.Printf("[sandbox] Migration %d applied successfully", m.Version)
+	}
 
-        return nil
+	return nil
 }

@@ -17,9 +17,9 @@ const (
 type AssuranceBand string
 
 const (
-	BandRed    AssuranceBand = "red"
-	BandAmber  AssuranceBand = "amber"
-	BandGreen  AssuranceBand = "green"
+	BandRed   AssuranceBand = "red"
+	BandAmber AssuranceBand = "amber"
+	BandGreen AssuranceBand = "green"
 )
 
 // AuthProviderGate queries an AuthProvider for the current assurance band/score.

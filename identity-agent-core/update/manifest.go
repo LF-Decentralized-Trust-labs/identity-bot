@@ -33,12 +33,12 @@ type ComponentEntry struct {
 }
 
 type Artifact struct {
-	Platform  string `json:"platform"`
-	URL       string `json:"url"`
+	Platform   string `json:"platform"`
+	URL        string `json:"url"`
 	Blake3_256 string `json:"blake3_256"`
-	SHA256    string `json:"sha256"`
-	SizeBytes int64  `json:"size_bytes"`
-	DiffURL   string `json:"diff_url,omitempty"`
+	SHA256     string `json:"sha256"`
+	SizeBytes  int64  `json:"size_bytes"`
+	DiffURL    string `json:"diff_url,omitempty"`
 }
 
 type CompatRule struct {
@@ -55,8 +55,8 @@ type ChangelogEntry struct {
 }
 
 type NextSigningKey struct {
-	KeyID      string `json:"key_id"`
-	PublicKey  string `json:"public_key"`
+	KeyID       string `json:"key_id"`
+	PublicKey   string `json:"public_key"`
 	ActivatesAt string `json:"activates_at"`
 }
 
