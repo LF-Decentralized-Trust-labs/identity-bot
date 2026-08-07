@@ -24,6 +24,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/cloudflare/circl/kem/mlkem/mlkem768"
 	"github.com/cloudflare/circl/sign/mldsa/mldsa65"
@@ -58,6 +59,38 @@ type DID struct {
 	X25519 string `json:"x25519"`       // base64url
 	MlKem  string `json:"mlkem768"`     // base64url
 	Suite  string `json:"cipher_suite"` // IA-HYBRID-1 (informational; canonical byte-freeze pending)
+
+	// KelSig is a signature over SigningInput below, made with the AID's
+	// current KERI signing key.
+	//
+	// Without it these keys are whatever the server that answered chose to
+	// return. That server is reached over the network, so anything terminating
+	// that connection can substitute its own keys and read everything
+	// subsequently encrypted to this AID — which is the whole of the
+	// protection, defeated at the step that sets it up. The receiving side
+	// checks this against the signing key it already validated from the AID's
+	// key event log, so the keys are only as trustworthy as the KEL rather than
+	// as the connection.
+	//
+	// Optional on the wire, because an agent that predates this does not send
+	// one and ordinary messaging with it still works. What it gates is the
+	// sealed transport, which makes a promise that an unverified key cannot
+	// keep.
+	KelSig string `json:"kel_sig,omitempty"`
+}
+
+// SigningInput is the exact text a KERI key signs to vouch for these keys.
+//
+// Every field except the signature itself, in a fixed order, one per line, with
+// a version label first. Built by hand rather than from JSON marshalling
+// because two implementations must agree on the bytes exactly, and JSON gives
+// them several ways to disagree — key order, spacing, escaping — none of which
+// show up until a signature fails somewhere else.
+func (d *DID) SigningInput() string {
+	return strings.Join([]string{
+		"IA-DIDCOMM-KEYS-V1",
+		d.AID, d.Ed, d.Dsa, d.X25519, d.MlKem, d.Suite,
+	}, "\n")
 }
 
 const CipherSuite = "IA-HYBRID-1"
