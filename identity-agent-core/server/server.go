@@ -102,6 +102,9 @@ type CoreServer struct {
 
 	// transportIdentity is the key this agent is reached over, where it holds
 	// one itself rather than being fronted by something that terminates for it.
+	// boxIdentity is this machine's own identity where it made one, which is
+	// what its attestation vouches for.
+	boxIdentity       *boxIdentity
 	transportIdentity *TransportIdentity
 
 	// The public attestation endpoint is open by necessity, so it caches its

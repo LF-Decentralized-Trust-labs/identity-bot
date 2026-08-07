@@ -110,7 +110,7 @@ func TestTheBindingSchemeIsPublishedButNeverTheValue(t *testing.T) {
 		"EPlFRfTkHsTDBcvSkIrd90_fUFi3lYHXw-3uZulr19VN", // an identity
 		"3q2+7w==", // a transport fingerprint
 	} {
-		got := bindingScheme(binding)
+		got := bindingScheme(binding, "")
 		if got == "" {
 			t.Fatalf("no scheme was published for %q, so nothing could recompute the binding", binding)
 		}
@@ -119,7 +119,7 @@ func TestTheBindingSchemeIsPublishedButNeverTheValue(t *testing.T) {
 		}
 	}
 	// And it still says enough to be recomputed.
-	scheme := bindingScheme("anything")
+	scheme := bindingScheme("anything", "")
 	for _, needed := range []string{"blake3-256", "IA-SNP-BIND-V1"} {
 		if !strings.Contains(scheme, needed) {
 			t.Errorf("the scheme omits %q, so a verifier could not reproduce the binding", needed)
@@ -136,7 +136,7 @@ func TestNoIdentifierAppearsAnywhereInThePublicAttestation(t *testing.T) {
 		Platform:    "sev-snp",
 		Measurement: "aa",
 		ChipID:      "bb",
-		BoundTo:     bindingScheme(identity),
+		BoundTo:     bindingScheme(identity, ""),
 		Note:        "checked",
 	}
 	body, err := json.Marshal(out)

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"identity-agent-core/iacrypto"
 	"identity-agent-core/secureenclave"
 	"identity-agent-core/update"
 )
@@ -182,7 +183,7 @@ func (s *CoreServer) handleSecurityEnclave(w http.ResponseWriter, r *http.Reques
 			Message:          c.Message,
 		}
 	}
-	result.SealedHardware = sealedHardwareStatus(s.attestationBinding(), s.snpCertificates)
+	result.SealedHardware = sealedHardwareStatus(s.attestationBinding(), s.bindingOver(), s.snpCertificates)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
@@ -210,6 +211,22 @@ func (s *CoreServer) attestationBinding() string {
 	// needs bound: it proves the sealed machine holds the key on THIS
 	// connection, which is what stops a genuine report being replayed onto a
 	// connection somebody else terminates.
+	// The machine's own encryption keys, where it has an identity of its own.
+	//
+	// Preferred over the transport fingerprint now, because the fingerprint
+	// cannot be checked by the party that needs to check it: a proxy in front
+	// of this machine terminates the connection by design, so the certificate a
+	// client sees is the proxy's and the two can never match. Binding the keys
+	// instead says the private half of these keys is inside this sealed
+	// machine, which a proxy cannot produce and does not need to be able to
+	// terminate anything for the client to rely on.
+	if s.boxIdentity != nil {
+		if x, kem, err := iacrypto.AnchoredAgreementKeys(s.boxIdentity.InceptionEvent); err == nil {
+			if binding, err := iacrypto.BoxKeyBinding(x, kem); err == nil {
+				return binding
+			}
+		}
+	}
 	if s.transportIdentity != nil && s.transportIdentity.FingerprintB64 != "" {
 		return s.transportIdentity.FingerprintB64
 	}
@@ -242,14 +259,32 @@ func (s *CoreServer) attestationBinding() string {
 // Named separately so the distinction is visible: the construction is public
 // and must be, or nothing could check it; the value is the thing being bound
 // and is not ours to publish.
-func bindingScheme(binding string) string {
+func bindingScheme(binding, over string) string {
 	if binding == "" {
 		return ""
 	}
-	return "blake3-256(IA-SNP-BIND-V1\n<the fingerprint of the certificate on this connection>)"
+	if over == "" {
+		over = "<the fingerprint of the certificate on this connection>"
+	}
+	return "blake3-256(IA-SNP-BIND-V1\n" + over + ")"
 }
 
-func sealedHardwareStatus(binding string, certs *snpCertificateChain) *SealedHardwareInfo {
+// bindingOver names what this agent bound, in the same terms a verifier would
+// use to recompute it — and never the value itself.
+//
+// Said the wrong thing once already: the description was fixed text naming the
+// transport certificate, so when the binding became something else the field
+// described a construction the report did not use. A verifier following it
+// would compute a value that could not match and read the mismatch as tampering.
+func (s *CoreServer) bindingOver() string {
+	if s.boxIdentity != nil {
+		return "blake3-256(IA-BOX-KEYS-V1 || the agreement and encapsulation keys " +
+			"this identifier commits to at inception)"
+	}
+	return ""
+}
+
+func sealedHardwareStatus(binding, over string, certs *snpCertificateChain) *SealedHardwareInfo {
 	if !secureenclave.SNPAvailable() {
 		return nil
 	}
@@ -267,7 +302,7 @@ func sealedHardwareStatus(binding string, certs *snpCertificateChain) *SealedHar
 		// the binding is over — the certificate on the connection it is using —
 		// so it recomputes and compares. Being told would only help somebody
 		// who does not have it.
-		BoundTo:       bindingScheme(binding),
+		BoundTo:       bindingScheme(binding, over),
 		ChainVerified: false,
 		ChainNote: "the report's signature has not been checked against AMD's key " +
 			"distribution service, so this attests what the machine says about itself. " +

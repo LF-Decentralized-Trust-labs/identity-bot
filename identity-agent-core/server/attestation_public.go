@@ -115,7 +115,7 @@ func (s *CoreServer) cachedAttestation() *publicAttestation {
 		return s.attestationCached
 	}
 
-	sh := sealedHardwareStatus(s.attestationBinding(), s.snpCertificates)
+	sh := sealedHardwareStatus(s.attestationBinding(), s.bindingOver(), s.snpCertificates)
 	if sh == nil {
 		s.attestationCached = nil
 		s.attestationExpires = time.Now().Add(ttl)
