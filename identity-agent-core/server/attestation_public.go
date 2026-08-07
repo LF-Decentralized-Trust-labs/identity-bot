@@ -28,8 +28,12 @@ import (
 //     can rebuild the image and check it.
 //   - The chip identifier names the physical processor, which every tenant on
 //     that machine shares. It says which machine answered, never which tenant.
-//   - REPORT_DATA is one-way. It reveals no identifier; it only lets somebody
-//     who ALREADY HOLDS an identifier confirm this agent is bound to it.
+//   - REPORT_DATA is one-way, and nothing beside it gives the pre-image away.
+//     That second clause is not a detail: this response once described the
+//     binding as blake3-256(...<the value>...), which handed over on an open
+//     endpoint exactly what the one-way function was protecting. The scheme is
+//     published; the value is not. A verifier already holds what the binding is
+//     over and recomputes it.
 //
 // That last one is a confirmation oracle, and calling it harmless because "you
 // would have to know the identifier already" is weaker than it sounds — an

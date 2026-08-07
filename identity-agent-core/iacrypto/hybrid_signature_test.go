@@ -16,7 +16,7 @@ type c2Golden struct {
 		CompositeWireLen int    `json:"composite_wire_len"`
 		NegativeVectors  struct {
 			HybridSigClassicalCorrupt string `json:"hybrid_sig_classical_corrupt"`
-			HybridSigPqcCorrupt       string `json:"hybrid_sig_pqc_corrupt"`
+			HybridSigPqcCorrupt      string `json:"hybrid_sig_pqc_corrupt"`
 		} `json:"negative_vectors"`
 	} `json:"hybrid_signature"`
 	HybridInception struct {

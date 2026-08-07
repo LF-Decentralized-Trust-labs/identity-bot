@@ -9,9 +9,9 @@ import (
 
 // Adapter bridges OIDC/SIOPv2/OIDC4VP to the native login substrate.
 type Adapter struct {
-	Login      *login.Handler
-	IssuerHost string
-	TokenTTL   time.Duration
+	Login       *login.Handler
+	IssuerHost  string
+	TokenTTL    time.Duration
 }
 
 // NewAdapter creates an OIDC adapter with relay-hosted issuer host (OWD-4).
@@ -38,8 +38,8 @@ func (a *Adapter) DiscoveryForPairwise(pairwiseAID string) DiscoveryDocument {
 
 // AuthorizationResponse holds OIDC authorization response artifacts.
 type AuthorizationResponse struct {
-	IDToken   string
-	VPToken   *VPToken
+	IDToken  string
+	VPToken  *VPToken
 	Assertion *login.Assertion
 }
 

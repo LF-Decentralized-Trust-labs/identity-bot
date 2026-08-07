@@ -11,12 +11,12 @@ import (
 
 // PublishInput is the live keystate used to derive did:webs artifacts.
 type PublishInput struct {
-	AID              string
-	Host             string
-	PublicKeyB64     string
-	SequenceNumber   int
-	KELEvents        []map[string]interface{}
-	WitnessReceipts  int
+	AID            string
+	Host           string
+	PublicKeyB64   string
+	SequenceNumber int
+	KELEvents      []map[string]interface{}
+	WitnessReceipts int
 	WitnessThreshold int
 }
 
@@ -44,8 +44,8 @@ func BuildDidJSON(in PublishInput) ([]byte, error) {
 				"publicKeyMultibase": multibase,
 			},
 		},
-		"authentication":  []string{keyID},
-		"assertionMethod": []string{keyID},
+		"authentication":   []string{keyID},
+		"assertionMethod":  []string{keyID},
 		"service": []map[string]interface{}{
 			{
 				"id": fmt.Sprintf("%s#oobi", did), "type": "KERI-OOBI",

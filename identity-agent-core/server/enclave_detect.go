@@ -237,13 +237,37 @@ func (s *CoreServer) attestationBinding() string {
 // is exactly the case somebody needs to see — it is the difference between "not
 // sealed" and "sealed but cannot prove it", and those call for different
 // reactions.
+// bindingScheme says how REPORT_DATA was computed without saying what over.
+//
+// Named separately so the distinction is visible: the construction is public
+// and must be, or nothing could check it; the value is the thing being bound
+// and is not ours to publish.
+func bindingScheme(binding string) string {
+	if binding == "" {
+		return ""
+	}
+	return "blake3-256(IA-SNP-BIND-V1\n<the fingerprint of the certificate on this connection>)"
+}
+
 func sealedHardwareStatus(binding string, certs *snpCertificateChain) *SealedHardwareInfo {
 	if !secureenclave.SNPAvailable() {
 		return nil
 	}
 	info := &SealedHardwareInfo{
-		Platform:      "sev-snp",
-		BoundTo:       "blake3-256(IA-SNP-BIND-V1\n" + binding + ")",
+		Platform: "sev-snp",
+		// The SCHEME, never the value.
+		//
+		// This said blake3-256(IA-SNP-BIND-V1\n<the value>) — with the value
+		// itself in it. REPORT_DATA is one-way, so the report gives nothing
+		// away; this field handed over the pre-image beside it, on an endpoint
+		// open to anyone. Where the binding was an identity rather than a
+		// transport key, that published the tenant's identifier.
+		//
+		// A verifier does not need to be told the value. It already holds what
+		// the binding is over — the certificate on the connection it is using —
+		// so it recomputes and compares. Being told would only help somebody
+		// who does not have it.
+		BoundTo:       bindingScheme(binding),
 		ChainVerified: false,
 		ChainNote: "the report's signature has not been checked against AMD's key " +
 			"distribution service, so this attests what the machine says about itself. " +

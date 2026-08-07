@@ -18,9 +18,9 @@ const (
 )
 
 const (
-	BackendDesktop    = "desktop"
-	BackendHosted     = "hosted" // black box: attestation-backed, run for the owner
-	BackendMobile     = "mobile"
+	BackendDesktop  = "desktop"
+	BackendHosted   = "hosted" // black box: attestation-backed, run for the owner
+	BackendMobile   = "mobile"
 	BackendCommercial = "commercial"
 )
 
@@ -31,10 +31,10 @@ const (
 )
 
 const (
-	FinalizePending   = "pending"
-	FinalizePartial   = "partial"
-	FinalizeFinalized = "finalized"
-	FinalizeTimeout   = "timeout"
+	FinalizePending    = "pending"
+	FinalizePartial    = "partial"
+	FinalizeFinalized  = "finalized"
+	FinalizeTimeout    = "timeout"
 )
 
 const (
@@ -67,11 +67,11 @@ type ContactMeta struct {
 
 // KelEvent is a stored KEL replica entry (D2).
 type KelEvent struct {
-	SignerAID   string
-	SequenceNum int
-	EventJSON   string
-	EventSAID   string
-	StoredAt    string
+	SignerAID    string
+	SequenceNum  int
+	EventJSON    string
+	EventSAID    string
+	StoredAt     string
 }
 
 // IssuedReceipt is a CESR receipt this agent issued as witness.
@@ -87,26 +87,26 @@ type IssuedReceipt struct {
 
 // FinalizationState tracks broadcast receipt collection (D4).
 type FinalizationState struct {
-	EventSAID    string
-	SignerAID    string
-	SequenceNum  int
-	State        string
-	ReceiptCount int
-	Threshold    int
-	StartedAt    string
-	UpdatedAt    string
+	EventSAID     string
+	SignerAID     string
+	SequenceNum   int
+	State         string
+	ReceiptCount  int
+	Threshold     int
+	StartedAt     string
+	UpdatedAt     string
 }
 
 // StatusResponse is the status-interface shape for the Witnesses tab.
 type StatusResponse struct {
-	ActiveCount       int               `json:"active_count"`
-	Threshold         int               `json:"threshold"`
-	MaxWitnesses      int               `json:"max_witnesses"`
-	OutgoingCapacity  int               `json:"outgoing_capacity"`
-	OutgoingUsed      int               `json:"outgoing_used"`
-	BackendType       string            `json:"backend_type"`
-	WitnessCapacityOK bool              `json:"witness_capacity_available"`
-	YourWitnesses     []WitnessEntry    `json:"your_witnesses"`
+	ActiveCount       int              `json:"active_count"`
+	Threshold         int              `json:"threshold"`
+	MaxWitnesses      int              `json:"max_witnesses"`
+	OutgoingCapacity  int              `json:"outgoing_capacity"`
+	OutgoingUsed      int              `json:"outgoing_used"`
+	BackendType       string           `json:"backend_type"`
+	WitnessCapacityOK bool             `json:"witness_capacity_available"`
+	YourWitnesses     []WitnessEntry   `json:"your_witnesses"`
 	WitnessingFor     []WitnessingEntry `json:"witnessing_for"`
 }
 

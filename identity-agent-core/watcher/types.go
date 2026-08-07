@@ -64,9 +64,9 @@ type KelCheckRequest struct {
 
 // KelCheckResponse is the watcher /public/kel-check response.
 type KelCheckResponse struct {
-	Match        bool    `json:"match"`
-	OurDigest    *string `json:"our_digest"`
-	OurFirstSeen *string `json:"our_first_seen_at"`
+	Match         bool    `json:"match"`
+	OurDigest     *string `json:"our_digest"`
+	OurFirstSeen  *string `json:"our_first_seen_at"`
 }
 
 // SourceOutcome tracks one layer in a verification pass.
@@ -88,14 +88,14 @@ type VerifyKelInput struct {
 
 // VerifyKelResult is returned to callers after L1+L2 evaluation.
 type VerifyKelResult struct {
-	OK             bool
-	Blocked        bool
-	Reason         string
-	AID            string
-	SequenceNum    int
-	Digest         string
-	OverallOutcome string
-	SourcesQueried []SourceOutcome
-	DuplicityAlert *DuplicityAlert
-	FirstContact   bool
+	OK              bool
+	Blocked         bool
+	Reason          string
+	AID             string
+	SequenceNum     int
+	Digest          string
+	OverallOutcome  string
+	SourcesQueried  []SourceOutcome
+	DuplicityAlert  *DuplicityAlert
+	FirstContact    bool
 }

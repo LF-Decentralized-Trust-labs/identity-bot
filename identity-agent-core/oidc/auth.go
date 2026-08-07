@@ -12,16 +12,16 @@ import (
 
 // AuthRequest is a parsed OIDC/SIOPv2 authorization request mapped to login-contract fields.
 type AuthRequest struct {
-	ClientID             string
-	RedirectURI          string
-	Scope                string
-	Nonce                string
-	ResponseType         string
-	ResponseMode         string
-	State                string
-	ClaimsParam          string
-	VPFormat             string
-	PresentationDefJSON  string
+	ClientID            string
+	RedirectURI         string
+	Scope               string
+	Nonce               string
+	ResponseType        string
+	ResponseMode        string
+	State               string
+	ClaimsParam         string
+	VPFormat            string
+	PresentationDefJSON string
 	RequestedDisclosures []string
 	RequestedCredentials []login.RequestedCredential
 	RequestScore         *login.RequestedScore

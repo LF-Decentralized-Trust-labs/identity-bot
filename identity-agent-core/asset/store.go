@@ -26,19 +26,19 @@ type Store struct {
 
 func NewStore(dataDir string) (*Store, error) {
 	s := &Store{
-		dataDir:        dataDir,
-		assetsPath:     filepath.Join(dataDir, "assets.json"),
-		invitesPath:    filepath.Join(dataDir, "asset_invites.json"),
-		membersPath:    filepath.Join(dataDir, "asset_members.json"),
-		requestsPath:   filepath.Join(dataDir, "asset_requests.json"),
+		dataDir:      dataDir,
+		assetsPath:   filepath.Join(dataDir, "assets.json"),
+		invitesPath:  filepath.Join(dataDir, "asset_invites.json"),
+		membersPath:  filepath.Join(dataDir, "asset_members.json"),
+		requestsPath: filepath.Join(dataDir, "asset_requests.json"),
 		empInvitesPath: filepath.Join(dataDir, "employee_invites.json"),
 		employeesPath:  filepath.Join(dataDir, "employees.json"),
-		assets:         map[string]Asset{},
-		invites:        map[string]AssetInvite{},
-		members:        []AssetMember{},
-		requests:       []AssetAccessRequest{},
-		empInvites:     map[string]EmployeeInvite{},
-		employees:      map[string]Employee{},
+		assets:       map[string]Asset{},
+		invites:      map[string]AssetInvite{},
+		members:      []AssetMember{},
+		requests:     []AssetAccessRequest{},
+		empInvites:   map[string]EmployeeInvite{},
+		employees:    map[string]Employee{},
 	}
 	if err := s.load(); err != nil {
 		return nil, err

@@ -24,10 +24,10 @@ type Poller struct {
 	onManifest  func([]byte)
 	onError     func(error)
 
-	mu      sync.Mutex
-	running bool
-	cancel  context.CancelFunc
-	pushCh  chan struct{}
+	mu       sync.Mutex
+	running  bool
+	cancel   context.CancelFunc
+	pushCh   chan struct{}
 }
 
 func NewPoller(manifestURL string) *Poller {

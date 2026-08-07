@@ -3,11 +3,11 @@ package oidc
 // Pinned EUDI ARF profile versions (OWD-2). Bump only via ADR + contract change.
 const (
 	EUDIARFProfileVersion = "2.2.0"
-	OpenID4VPProfile      = "openid4vp_1_0"
-	SIOPv2Profile         = "siopv2_openid_connect_self_issued_v2"
-	SDJWTVcProfile        = "sd_jwt_vc_draft_08"
-	DIDWebsSpecVersion    = "seam-17-v1"
-	AdapterVersion        = "ia-oidc-adapter-v1"
+	OpenID4VPProfile        = "openid4vp_1_0"
+	SIOPv2Profile           = "siopv2_openid_connect_self_issued_v2"
+	SDJWTVcProfile          = "sd_jwt_vc_draft_08"
+	DIDWebsSpecVersion      = "seam-17-v1"
+	AdapterVersion          = "ia-oidc-adapter-v1"
 )
 
 // RequiredDiscoveryFields lists discovery keys a conforming RP must observe.

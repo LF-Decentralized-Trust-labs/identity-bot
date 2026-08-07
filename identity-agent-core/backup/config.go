@@ -72,14 +72,14 @@ type HistoryEntry struct {
 
 // StatusResponse is returned by GET /api/backup/status.
 type StatusResponse struct {
-	Enabled             bool           `json:"enabled"`
-	LastBackupAt        string         `json:"last_backup_at,omitempty"`
-	Health              string         `json:"health"` // green | yellow | red
-	Destinations        []Destination  `json:"destinations"`
-	RedundancyWarning   string         `json:"redundancy_warning,omitempty"`
-	AntiDeadlockWarning string         `json:"anti_deadlock_warning,omitempty"`
-	History             []HistoryEntry `json:"history"`
-	ConsecutiveFailures int            `json:"consecutive_failures"`
+	Enabled              bool             `json:"enabled"`
+	LastBackupAt         string           `json:"last_backup_at,omitempty"`
+	Health               string           `json:"health"` // green | yellow | red
+	Destinations         []Destination    `json:"destinations"`
+	RedundancyWarning    string           `json:"redundancy_warning,omitempty"`
+	AntiDeadlockWarning  string           `json:"anti_deadlock_warning,omitempty"`
+	History              []HistoryEntry   `json:"history"`
+	ConsecutiveFailures  int              `json:"consecutive_failures"`
 }
 
 // ConfigStore persists backup config, history, and delta state.

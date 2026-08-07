@@ -32,18 +32,18 @@ type EventPoster func(ctx context.Context, witnessURL string, body []byte) (map[
 
 // Service is the IA-side witness engine.
 type Service struct {
-	Store       Store
-	Contacts    ContactStore
-	Driver      *drivers.KeriDriver
-	HTTPClient  *http.Client
-	PostEvent   EventPoster
-	OurAID      func() string
-	OurOOBI     func() string
-	BackendType string
-	OnEvent     func(eventType string, payload map[string]interface{})
+	Store        Store
+	Contacts     ContactStore
+	Driver       *drivers.KeriDriver
+	HTTPClient   *http.Client
+	PostEvent    EventPoster
+	OurAID       func() string
+	OurOOBI      func() string
+	BackendType  string
+	OnEvent      func(eventType string, payload map[string]interface{})
 
-	mu         sync.Mutex
-	finalizeWg map[string]chan struct{}
+	mu          sync.Mutex
+	finalizeWg  map[string]chan struct{}
 }
 
 func NewService(st Store, contacts ContactStore, driver *drivers.KeriDriver, backendType string) *Service {
@@ -103,10 +103,10 @@ func (s *Service) OOBIExtensions() map[string]interface{} {
 	outgoing, _ := s.Store.CountWitnessingFor()
 	capOK := outgoing < MaxOutgoingWitnessing
 	return map[string]interface{}{
-		"backend_type":               s.BackendType,
+		"backend_type":              s.BackendType,
 		"witness_capacity_available": capOK,
-		"witness_outgoing_count":     outgoing,
-		"witness_outgoing_max":       MaxOutgoingWitnessing,
+		"witness_outgoing_count":    outgoing,
+		"witness_outgoing_max":      MaxOutgoingWitnessing,
 	}
 }
 
@@ -241,9 +241,9 @@ func (s *Service) BroadcastEvent(ctx context.Context, signerAID string, event ma
 }
 
 type witnessTarget struct {
-	AID        string
-	URL        string
-	Commercial bool
+	AID         string
+	URL         string
+	Commercial  bool
 }
 
 func (s *Service) enrolledWitnesses(kind AidKind, aid string) ([]witnessTarget, error) {
@@ -537,7 +537,6 @@ func strconvAtoi(v string, def int) (int, error) {
 	}
 	return n, nil
 }
-
 // PublishEndpointRecord sends a signed endpoint reply to an AID's witnesses.
 //
 // This is what makes a relay address disposable. An OOBI handed to somebody

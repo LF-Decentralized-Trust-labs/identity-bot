@@ -32,11 +32,11 @@ func TestDeltaRoundtrip(t *testing.T) {
 	}
 
 	fullResult, err := collector.CreateArchive(opts, ExportRequest{
-		Mnemonic:             testMnemonic,
-		SnapshotType:         SnapshotFull,
-		Bundle:               full1,
-		ExternalPointers:     ptrs,
-		DeltaStateDigestQB64: ds.ChainDigestQB64,
+		Mnemonic:               testMnemonic,
+		SnapshotType:           SnapshotFull,
+		Bundle:                 full1,
+		ExternalPointers:       ptrs,
+		DeltaStateDigestQB64:   ds.ChainDigestQB64,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -84,11 +84,11 @@ func TestDeltaRoundtrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	deltaResult, err := collector.CreateArchive(opts, ExportRequest{
-		Mnemonic:             testMnemonic,
-		SnapshotType:         SnapshotDelta,
-		Bundle:               deltaBundle,
-		ExternalPointers:     ptrs2,
-		DeltaStateDigestQB64: pending.ChainDigestQB64,
+		Mnemonic:               testMnemonic,
+		SnapshotType:           SnapshotDelta,
+		Bundle:                 deltaBundle,
+		ExternalPointers:       ptrs2,
+		DeltaStateDigestQB64:   pending.ChainDigestQB64,
 	})
 	if err != nil {
 		t.Fatal(err)

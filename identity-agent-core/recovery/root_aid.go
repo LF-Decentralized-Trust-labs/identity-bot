@@ -23,9 +23,9 @@ var RootAIDRotationEnabled = false
 
 // RootAIDRotationRequest is the break-glass root-AID rotation payload.
 type RootAIDRotationRequest struct {
-	RecoverySessionID    string `json:"recovery_session_id"`
-	NewRootPublicKey     string `json:"new_root_public_key"`
-	NewRootNextPublicKey string `json:"new_root_next_public_key"`
+	RecoverySessionID    string   `json:"recovery_session_id"`
+	NewRootPublicKey     string   `json:"new_root_public_key"`
+	NewRootNextPublicKey string   `json:"new_root_next_public_key"`
 	// PreRotationPublicKey reveals the old root's pre-committed next key in the
 	// authorization rotation (signed by that pre-rotated key, not the compromised current key).
 	PreRotationPublicKey     string `json:"pre_rotation_public_key"`
@@ -34,7 +34,7 @@ type RootAIDRotationRequest struct {
 	// raw bytes, produced by signing with the pre-rotated key then /cesr-encode.
 	AuthorizationCesrSignature string `json:"authorization_cesr_signature"`
 	// BackAnchorCesrSignature optionally signs the secondary new→old IXN back-reference.
-	BackAnchorCesrSignature string   `json:"back_anchor_cesr_signature,omitempty"`
+	BackAnchorCesrSignature string `json:"back_anchor_cesr_signature,omitempty"`
 	WitnessThreshold        int      `json:"witness_threshold,omitempty"`
 	CarryForwardAIDs        []string `json:"carry_forward_aids,omitempty"`
 	UseHybridInception      bool     `json:"use_hybrid_inception,omitempty"`
@@ -281,15 +281,15 @@ func (s *RootAIDRotationService) RotateRootAID(
 	}
 
 	entry := RootAIDMapEntry{
-		OldRootAID:                 oldRootAID,
-		NewRootAID:                 newRootAID,
-		NewInceptionSAID:           newInceptionSAID,
-		AuthorizationEventSAID:     rot.RotationSAID,
-		AuthorizationCesrSignature: req.AuthorizationCesrSignature,
-		BackAnchorEventSAID:        saidOrEmpty(backIxn),
-		PriorKelTailSAID:           priorTailSAID,
-		RotatedAt:                  rotatedAt,
-		RecoverySessionID:          req.RecoverySessionID,
+		OldRootAID:                   oldRootAID,
+		NewRootAID:                   newRootAID,
+		NewInceptionSAID:             newInceptionSAID,
+		AuthorizationEventSAID:       rot.RotationSAID,
+		AuthorizationCesrSignature:   req.AuthorizationCesrSignature,
+		BackAnchorEventSAID:          saidOrEmpty(backIxn),
+		PriorKelTailSAID:             priorTailSAID,
+		RotatedAt:                    rotatedAt,
+		RecoverySessionID:            req.RecoverySessionID,
 	}
 	if err := appendRootAIDMapEntry(s.DataDir, entry); err != nil {
 		return nil, err

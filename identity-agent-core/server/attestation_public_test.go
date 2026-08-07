@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -90,5 +91,59 @@ func TestAnOrdinaryMachineSaysSoRatherThanFailing(t *testing.T) {
 	}
 	if body := rec.Body.String(); !strings.Contains(body, "not_sealed_hardware") {
 		t.Fatalf("the answer does not say why: %s", body)
+	}
+}
+
+// The response says HOW the report was bound, never WHAT it was bound to.
+//
+// This field once carried the construction with the value inside it, on an
+// endpoint open to anyone — which handed over precisely what the one-way
+// function was there to protect, and did it beside a comment asserting that
+// nothing identifying was disclosed. Where the binding was an identity rather
+// than a transport key, that published the tenant's identifier to any caller.
+//
+// A verifier does not need the value: it holds what the binding is over and
+// recomputes. Only somebody who does NOT hold it gains anything from being
+// told.
+func TestTheBindingSchemeIsPublishedButNeverTheValue(t *testing.T) {
+	for _, binding := range []string{
+		"EPlFRfTkHsTDBcvSkIrd90_fUFi3lYHXw-3uZulr19VN", // an identity
+		"3q2+7w==", // a transport fingerprint
+	} {
+		got := bindingScheme(binding)
+		if got == "" {
+			t.Fatalf("no scheme was published for %q, so nothing could recompute the binding", binding)
+		}
+		if strings.Contains(got, binding) {
+			t.Errorf("the value %q appears in what is published: %s", binding, got)
+		}
+	}
+	// And it still says enough to be recomputed.
+	scheme := bindingScheme("anything")
+	for _, needed := range []string{"blake3-256", "IA-SNP-BIND-V1"} {
+		if !strings.Contains(scheme, needed) {
+			t.Errorf("the scheme omits %q, so a verifier could not reproduce the binding", needed)
+		}
+	}
+}
+
+// Nothing identifying in the whole response. The check above covers the field
+// that was wrong; this covers the response, because the next such field would
+// be added somewhere else.
+func TestNoIdentifierAppearsAnywhereInThePublicAttestation(t *testing.T) {
+	const identity = "EPlFRfTkHsTDBcvSkIrd90_fUFi3lYHXw-3uZulr19VN"
+	out := &publicAttestation{
+		Platform:    "sev-snp",
+		Measurement: "aa",
+		ChipID:      "bb",
+		BoundTo:     bindingScheme(identity),
+		Note:        "checked",
+	}
+	body, err := json.Marshal(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), identity) {
+		t.Fatalf("an identifier reached an endpoint open to anyone:\n%s", body)
 	}
 }

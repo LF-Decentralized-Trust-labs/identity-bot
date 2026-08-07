@@ -91,9 +91,9 @@ func (cm *CertManager) createCA(certPath, keyPath string) error {
 	caCertTemplate := &x509.Certificate{
 		SerialNumber: serialNumber,
 		Subject: pkix.Name{
-			Organization: []string{"Identity Agent"},
-			CommonName:   "Identity Agent Sandbox CA",
-			Country:      []string{"US"},
+			Organization:  []string{"Identity Agent"},
+			CommonName:    "Identity Agent Sandbox CA",
+			Country:       []string{"US"},
 		},
 		NotBefore:             time.Now().Add(-1 * time.Hour),
 		NotAfter:              time.Now().Add(10 * 365 * 24 * time.Hour),

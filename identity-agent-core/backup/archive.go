@@ -25,10 +25,10 @@ type ExportRequest struct {
 
 // ExportResult describes a completed export.
 type ExportResult struct {
-	Bytes        []byte
-	Manifest     Manifest
-	Size         int
-	Tiers        []string
+	Bytes       []byte
+	Manifest    Manifest
+	Size        int
+	Tiers       []string
 	SnapshotType string
 }
 
@@ -411,7 +411,6 @@ func randomBytes(n int) ([]byte, error) {
 	}
 	return b, nil
 }
-
 // combineWithPassphrase joins the secret a slot yielded with the passphrase, to
 // produce the key that opens an AND archive's second layer.
 //

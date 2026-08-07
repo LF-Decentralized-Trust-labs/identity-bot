@@ -16,8 +16,8 @@ type memNotifyStore struct {
 	tasks       []store.TaskRecord
 }
 
-func (m *memNotifyStore) GetIdentity() (*store.IdentityState, error)  { return m.identity, nil }
-func (m *memNotifyStore) GetContacts() ([]store.ContactRecord, error) { return m.contacts, nil }
+func (m *memNotifyStore) GetIdentity() (*store.IdentityState, error) { return m.identity, nil }
+func (m *memNotifyStore) GetContacts() ([]store.ContactRecord, error)  { return m.contacts, nil }
 func (m *memNotifyStore) GetCredentials() ([]store.CredentialRecord, error) {
 	return m.credentials, nil
 }
@@ -44,11 +44,11 @@ func (m *memNotifyStore) SaveTask(t store.TaskRecord) error {
 }
 
 type mockKeriDriver struct {
-	inception  *KeriInceptionResult
-	rot        *KeriRotationResult
-	ixn        *KeriInteractResult
-	authAnchor []interface{}
-	backAnchor []interface{}
+	inception    *KeriInceptionResult
+	rot          *KeriRotationResult
+	ixn          *KeriInteractResult
+	authAnchor   []interface{}
+	backAnchor   []interface{}
 }
 
 func (m *mockKeriDriver) CreateInception(_, _ string) (*KeriInceptionResult, error) {
@@ -212,7 +212,7 @@ func TestRotateRootAIDFlow(t *testing.T) {
 			},
 			ixn: &KeriInteractResult{
 				AID: newRoot, Said: "EixnSAID0123456789ABCDEFGHIJKLMNOP",
-				IxnEvent:       map[string]interface{}{"t": "ixn", "d": "EixnSAID0123456789ABCDEFGHIJKLMNOP", "i": newRoot, "s": "1"},
+				IxnEvent: map[string]interface{}{"t": "ixn", "d": "EixnSAID0123456789ABCDEFGHIJKLMNOP", "i": newRoot, "s": "1"},
 				SequenceNumber: 1,
 			},
 		}

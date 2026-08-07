@@ -23,10 +23,10 @@ type DeltaState struct {
 }
 
 var tier1SectionNames = map[string]bool{
-	"identity_state":      true,
-	"kel_events":          true,
-	"sqlite_identity_db":  true,
-	"login_relationships": true,
+	"identity_state":       true,
+	"kel_events":           true,
+	"sqlite_identity_db":   true,
+	"login_relationships":  true,
 }
 
 func isTier2Or3Section(name string) bool {

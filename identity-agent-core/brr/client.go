@@ -44,8 +44,8 @@ func (c *Client) Enroll(registryPrefix string) error {
 		IssuerPubKeyB64: base64.StdEncoding.EncodeToString(c.IssuerPub),
 	}
 	canonical, _ := json.Marshal(map[string]string{
-		"registry_prefix":       body.RegistryPrefix,
-		"issuer_aid":            body.IssuerAID,
+		"registry_prefix": body.RegistryPrefix,
+		"issuer_aid":      body.IssuerAID,
 		"issuer_public_key_b64": body.IssuerPubKeyB64,
 	})
 	body.Signature = base64.RawURLEncoding.EncodeToString(ed25519.Sign(c.IssuerPriv, canonical))
@@ -94,9 +94,9 @@ func (c *Client) PushBlindedEvent(registryPrefix, blindedID, eventType string, s
 }
 
 type bulkProofResponse struct {
-	Proof        BulkProof `json:"proof"`
-	BRRSignature string    `json:"brr_signature"`
-	SignedBy     string    `json:"signed_by"`
+	Proof         BulkProof `json:"proof"`
+	BRRSignature  string    `json:"brr_signature"`
+	SignedBy      string    `json:"signed_by"`
 }
 
 // FetchBulkProof retrieves a herd-privacy subtree for local verification (C9 path).

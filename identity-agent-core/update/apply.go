@@ -22,11 +22,11 @@ type Applier struct {
 
 // ApplyResult describes the outcome of an apply attempt.
 type ApplyResult struct {
-	Component  string `json:"component"`
-	Version    string `json:"version"`
-	Applied    bool   `json:"applied"`
-	RolledBack bool   `json:"rolled_back"`
-	Message    string `json:"message,omitempty"`
+	Component   string `json:"component"`
+	Version     string `json:"version"`
+	Applied     bool   `json:"applied"`
+	RolledBack  bool   `json:"rolled_back"`
+	Message     string `json:"message,omitempty"`
 }
 
 func NewApplier(stagingDir, healthCheckURL, platform string) *Applier {

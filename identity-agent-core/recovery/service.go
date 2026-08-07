@@ -40,17 +40,17 @@ const (
 
 // Session is a recovery workflow instance.
 type Session struct {
-	ID              string                 `json:"id"`
-	State           SessionState           `json:"state"`
-	IdentityAID     string                 `json:"identity_aid,omitempty"`
-	StartedAt       string                 `json:"started_at"`
-	CompleteAfter   string                 `json:"complete_after"`
-	CancelWindow    string                 `json:"cancel_window"`
-	AssuranceBand   AssuranceBand          `json:"assurance_band"`
-	RotationDone    bool                   `json:"rotation_done"`
-	PairwiseChecks  []PairwiseVerification `json:"pairwise_checks,omitempty"`
-	ManifestSummary map[string]interface{} `json:"manifest_summary,omitempty"`
-	Error           string                 `json:"error,omitempty"`
+	ID              string                   `json:"id"`
+	State           SessionState             `json:"state"`
+	IdentityAID     string                   `json:"identity_aid,omitempty"`
+	StartedAt       string                   `json:"started_at"`
+	CompleteAfter   string                   `json:"complete_after"`
+	CancelWindow    string                   `json:"cancel_window"`
+	AssuranceBand   AssuranceBand            `json:"assurance_band"`
+	RotationDone    bool                     `json:"rotation_done"`
+	PairwiseChecks  []PairwiseVerification   `json:"pairwise_checks,omitempty"`
+	ManifestSummary map[string]interface{}   `json:"manifest_summary,omitempty"`
+	Error           string                   `json:"error,omitempty"`
 }
 
 // VerifyRequest opens and validates an archive without persisting state.
@@ -95,12 +95,12 @@ type RetrieveResponse struct {
 
 // Service orchestrates recovery restore, verify, delay, and rotation gates.
 type Service struct {
-	DataDir       string
-	Store         store.Store
-	BackupService *backup.Service
-	CancelGate    *CancelWindowGate
-	Rotation      *RotationTracker
-	AuthProvider  AuthProviderGate
+	DataDir        string
+	Store          store.Store
+	BackupService  *backup.Service
+	CancelGate     *CancelWindowGate
+	Rotation       *RotationTracker
+	AuthProvider   AuthProviderGate
 
 	mu       sync.Mutex
 	sessions map[string]*sessionRecord

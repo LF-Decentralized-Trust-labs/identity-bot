@@ -34,28 +34,28 @@ type StatusResponse struct {
 type Service struct {
 	mu sync.RWMutex
 
-	dataDir     string
-	manifestURL string
-	trust       *TrustAnchor
-	poller      *Poller
-	applier     *Applier
-	attestation *Attestation
-	settings    Settings
-	installed   map[string]string
-	cachedRaw   []byte
-	cached      *Manifest
-	lastChecked time.Time
-	lastError   string
-	healthCheck func() error
+	dataDir      string
+	manifestURL  string
+	trust        *TrustAnchor
+	poller       *Poller
+	applier      *Applier
+	attestation  *Attestation
+	settings     Settings
+	installed    map[string]string
+	cachedRaw    []byte
+	cached       *Manifest
+	lastChecked  time.Time
+	lastError    string
+	healthCheck  func() error
 }
 
 type Config struct {
-	DataDir        string
-	ManifestURL    string
-	TrustAnchor    *TrustAnchor
-	HealthCheckURL string
-	BinaryPath     string
-	Installed      map[string]string
+	DataDir         string
+	ManifestURL     string
+	TrustAnchor     *TrustAnchor
+	HealthCheckURL  string
+	BinaryPath      string
+	Installed       map[string]string
 }
 
 func DefaultConfig(dataDir string) Config {

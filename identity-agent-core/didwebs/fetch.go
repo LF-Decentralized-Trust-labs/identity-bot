@@ -15,9 +15,9 @@ const headerKeystateSeq = "X-Keri-Keystate-Seq"
 const headerCesrComplete = "X-Keri-Cesr-Complete"
 
 type fetchResult struct {
-	body         []byte
-	status       int
-	keystateSeq  int
+	body       []byte
+	status     int
+	keystateSeq int
 	cesrComplete bool
 }
 
