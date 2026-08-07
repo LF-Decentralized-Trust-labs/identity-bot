@@ -597,6 +597,9 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 
 	// An ordinary request, carried where nothing in the middle can read it.
 	r.Post("/api/sealed", s.handleSealedTransport)
+	// The sending half, for this device's own app. Owner-only by default: it is
+	// under /api and named in neither the public nor the scoped list.
+	r.Post("/api/sealed/send", s.handleSealedSend)
 
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/health", s.handleHealth)
