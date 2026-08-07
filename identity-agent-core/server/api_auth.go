@@ -55,6 +55,15 @@ var publicRoutes = map[string]string{
 	"POST /public/_register":        "a pairwise signer registers its key so counterparties can resolve it",
 	"GET /public/credential/{said}": "a credential the user chose to publish at a shareable link",
 
+	// --- carrying a request nothing in the middle can read ---
+	// Open in the same sense the message endpoint is open: what arrives is an
+	// envelope, and it is refused unless it comes from a sender this agent
+	// already has a relationship with and opens under a key only this agent
+	// holds. The request inside is then replayed through the ordinary router,
+	// where it meets whatever authorisation it would have met directly — so
+	// this carries requests, it does not exempt them.
+	"POST /api/sealed": "a request carried inside an envelope only this agent can open",
+
 	// --- proving what machine this agent runs on ---
 	// A client verifies a machine in order to decide whether to trust it, so it
 	// is not the owner yet and holds no owner key. Gating this would mean that

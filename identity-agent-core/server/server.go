@@ -574,6 +574,9 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 	// Public inbound DIDComm endpoint — encrypted IA-to-IA envelopes land here.
 	r.Post("/didcomm", s.handleDIDCommInbound)
 
+	// An ordinary request, carried where nothing in the middle can read it.
+	r.Post("/api/sealed", s.handleSealedTransport)
+
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/health", s.handleHealth)
 		r.Get("/info", s.handleInfo)
