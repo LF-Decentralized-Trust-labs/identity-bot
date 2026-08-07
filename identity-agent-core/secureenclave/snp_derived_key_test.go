@@ -66,3 +66,43 @@ func TestAnEmptyPurposeDoesNotCollide(t *testing.T) {
 		t.Fatal("an unnamed purpose collides with a named one")
 	}
 }
+
+// The purpose strings are an interface contract, not names.
+//
+// Every volume ever encrypted was encrypted with a key derived from one of
+// these. Rename one in a refactor, correct its capitalisation, or "tidy" the
+// version suffix, and every volume derived from it becomes unopenable — and the
+// failure looks exactly like a measurement mismatch, so the first guess will be
+// the wrong one.
+//
+// This test exists to fail loudly at the moment somebody changes one, rather
+// than quietly in production months later. If a purpose genuinely must change,
+// the old one has to keep working for volumes already sealed under it, which
+// means adding a new purpose rather than editing this list.
+func TestThePurposeStringsHaveNotChanged(t *testing.T) {
+	firmware := bytes.Repeat([]byte{0x5A}, DerivedKeySize)
+
+	// Recorded outputs. Regenerating these to make the test pass is the exact
+	// mistake this guards against.
+	for purpose, want := range map[string]string{
+		"tenant-data-volume-v1": "50405d287148970673a2bd43aa7ede67f258282b8a5da193f59256cb52b470e7",
+	} {
+		got := hexOf(deriveForPurpose(firmware, purpose))
+		if got != want {
+			t.Errorf("the key derived for %q changed.\n got: %s\nwant: %s\n\n"+
+				"If this was a rename or a tidy-up, revert it: every volume sealed under "+
+				"the old purpose becomes unopenable, and the failure looks like a "+
+				"measurement mismatch rather than like this. If the change is genuinely "+
+				"needed, add a new purpose and keep this one working.", purpose, got, want)
+		}
+	}
+}
+
+func hexOf(b []byte) string {
+	const digits = "0123456789abcdef"
+	out := make([]byte, 0, len(b)*2)
+	for _, x := range b {
+		out = append(out, digits[x>>4], digits[x&0x0f])
+	}
+	return string(out)
+}

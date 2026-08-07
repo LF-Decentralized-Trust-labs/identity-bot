@@ -20,6 +20,16 @@ func main() {
 		return
 	}
 
+	// Giving the owner a way back into their own volume. Separate from
+	// preparing it, because it happens later — at adoption, once there is an
+	// owner to seal anything to.
+	if len(os.Args) > 1 && os.Args[1] == "add-owner-recovery" {
+		if err := addOwnerRecoveryCommand(os.Args[2:]); err != nil {
+			log.Fatalf("[identity-agent-core] %v", err)
+		}
+		return
+	}
+
 	cfg := server.DefaultConfig()
 
 	srv, err := server.New(cfg)
