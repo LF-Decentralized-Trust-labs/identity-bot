@@ -268,7 +268,7 @@ func (s *CoreServer) rememberPeerAt(aid, agentURL string) error {
 	peers := s.loadPeers()
 	peers[aid] = peerRecord{
 		AID: aid, DID: did,
-		Endpoint: base + "/didcomm",
+		Endpoint: canonicalPeerEndpoint(base),
 		AddedAt:  time.Now().UTC(),
 	}
 	return s.savePeers(peers)

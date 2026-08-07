@@ -29,21 +29,35 @@ import (
 // What this hides: the request, the response, and which endpoint was called.
 // What it does not: that a request happened, roughly its size, and when.
 
-// agentBaseFromInbox recovers an agent's base address from the endpoint stored
-// in a peer record.
+// A peer record stores one address, and two different paths are derived from
+// it: the DIDComm inbox for messages, and the sealed transport for requests.
 //
-// What is stored is the peer's DIDComm inbox — the address plus "/didcomm" —
-// because messaging is what the record was created for. The sealed transport
-// lives at a different path on the same agent, so appending to the inbox
-// address rather than to the base produced ".../didcomm/api/sealed", which no
-// agent serves.
+// What is stored is the inbox — the agent's address with "/didcomm" on the end
+// — because messaging is what the record was created for. So the sealed path
+// has to be taken from the base, and appending to the inbox instead produced
+// ".../didcomm/api/sealed", which no agent serves.
 //
-// That was not caught by the round-trip test, because the test built its peer
-// record by hand with a bare address, and so exercised a shape the code that
-// creates peer records never produces. The test now builds the endpoint the way
-// rememberPeerAt does.
+// The two helpers below are the only places that decide this, and
+// canonicalPeerEndpoint is applied on the way in, so the shape is established
+// once at the boundary rather than assumed at each use. Three writers set this
+// field and two of them appended "/didcomm" by hand; the third stored whatever
+// an owner posted. An invariant depended on in two directions and enforced in
+// neither is one that holds until somebody registers a peer the ordinary way.
+
+// canonicalPeerEndpoint puts an address into the one shape the readers expect,
+// accepting either an agent base or an inbox that already has the suffix.
+func canonicalPeerEndpoint(addr string) string {
+	base := strings.TrimSuffix(strings.TrimRight(strings.TrimSpace(addr), "/"), "/didcomm")
+	if base == "" {
+		return ""
+	}
+	return base + "/didcomm"
+}
+
+// agentBaseFromInbox recovers the agent's own address, which is what paths
+// other than the inbox hang off.
 func agentBaseFromInbox(endpoint string) string {
-	return strings.TrimSuffix(strings.TrimRight(endpoint, "/"), "/didcomm")
+	return strings.TrimSuffix(strings.TrimRight(strings.TrimSpace(endpoint), "/"), "/didcomm")
 }
 
 // SealedResult is what came back, once opened.

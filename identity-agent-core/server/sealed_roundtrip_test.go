@@ -194,3 +194,33 @@ func TestTheSealedURLIsBuiltFromTheAgentNotItsInbox(t *testing.T) {
 		}
 	}
 }
+
+// One address is stored and two paths are derived from it, so the stored shape
+// has to be the same whichever writer set it. Three writers set it and the one
+// that took an owner-supplied value stored it verbatim, so an owner who
+// registered a peer by its plain address broke messaging, and one who included
+// the suffix broke sealed requests. Neither failure names its cause.
+func TestAPeerAddressIsStoredInOneShapeWhicheverWayItArrives(t *testing.T) {
+	const want = "https://agent.example/didcomm"
+	for _, given := range []string{
+		"https://agent.example",
+		"https://agent.example/",
+		"https://agent.example/didcomm",
+		"https://agent.example/didcomm/",
+		"  https://agent.example/didcomm  ",
+	} {
+		if got := canonicalPeerEndpoint(given); got != want {
+			t.Errorf("%q stored as %q, want %q", given, got, want)
+		}
+	}
+	if canonicalPeerEndpoint("") != "" {
+		t.Error("an empty address must stay empty rather than becoming a bare /didcomm")
+	}
+	// The two derivations must agree with each other, whatever went in.
+	for _, given := range []string{"https://a.example", "https://a.example/didcomm"} {
+		stored := canonicalPeerEndpoint(given)
+		if base := agentBaseFromInbox(stored); base != "https://a.example" {
+			t.Errorf("%q -> stored %q -> base %q, want https://a.example", given, stored, base)
+		}
+	}
+}

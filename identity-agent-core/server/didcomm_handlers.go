@@ -207,7 +207,7 @@ func (s *CoreServer) ensureLocalPeer(aid string) (peerRecord, error) {
 	}
 	rec := peerRecord{
 		AID: aid, DID: *did,
-		Endpoint: fmt.Sprintf("http://127.0.0.1:%d/didcomm", s.Port),
+		Endpoint: canonicalPeerEndpoint(fmt.Sprintf("http://127.0.0.1:%d", s.Port)),
 		AddedAt:  time.Now().UTC(),
 	}
 	didcommMu.Lock()
@@ -290,7 +290,7 @@ func (s *CoreServer) handleRegisterDIDCommPeer(w http.ResponseWriter, r *http.Re
 	}
 	didcommMu.Lock()
 	peers := s.loadPeers()
-	peers[req.DID.AID] = peerRecord{AID: req.DID.AID, DID: req.DID, Endpoint: req.Endpoint, AddedAt: time.Now().UTC()}
+	peers[req.DID.AID] = peerRecord{AID: req.DID.AID, DID: req.DID, Endpoint: canonicalPeerEndpoint(req.Endpoint), AddedAt: time.Now().UTC()}
 	err := s.savePeers(peers)
 	didcommMu.Unlock()
 	if err != nil {
