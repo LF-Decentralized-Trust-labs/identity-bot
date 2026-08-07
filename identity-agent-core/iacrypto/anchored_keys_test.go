@@ -109,3 +109,33 @@ func TestDecodeRejectsTheWrongCode(t *testing.T) {
 		t.Error("round trip changed the bytes")
 	}
 }
+
+// The same event must read the same whether it came off the wire or was just
+// built in this process. They are different Go types, and handling only the
+// first works everywhere except on the event you made yourself.
+func TestAnEventReadsTheSameBuiltOrDecoded(t *testing.T) {
+	m := SyntheticHybridKeyMaterial(31)
+	built, err := BuildHybridDelegatedInception(m, "EOWNER")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	inMemoryX, inMemoryKem, err := AnchoredAgreementKeys(built.InceptionEvent)
+	if err != nil {
+		t.Fatalf("the event this process just built did not yield its keys: %v", err)
+	}
+
+	raw, _ := json.Marshal(built.InceptionEvent)
+	var decoded map[string]interface{}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	wireX, wireKem, err := AnchoredAgreementKeys(decoded)
+	if err != nil {
+		t.Fatalf("the same event off the wire did not yield its keys: %v", err)
+	}
+
+	if !bytes.Equal(inMemoryX, wireX) || !bytes.Equal(inMemoryKem, wireKem) {
+		t.Fatal("one event read two different ways gave two different answers")
+	}
+}

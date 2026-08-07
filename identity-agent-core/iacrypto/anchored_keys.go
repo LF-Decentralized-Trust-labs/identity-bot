@@ -60,16 +60,12 @@ func DecodeLargeFixed(code, qb64 string, expectedLen int) ([]byte, error) {
 // weaker version of this, it is unusable, and returning a partial answer would
 // let a caller proceed with half the protection it asked for.
 func AnchoredAgreementKeys(event map[string]interface{}) (x25519, mlkem768 []byte, err error) {
-	anchors, ok := event["a"].([]interface{})
-	if !ok || len(anchors) == 0 {
+	anchors := anchorList(event["a"])
+	if len(anchors) == 0 {
 		return nil, nil, ErrNotAnchored
 	}
 
-	for _, entry := range anchors {
-		seal, ok := entry.(map[string]interface{})
-		if !ok {
-			continue
-		}
+	for _, seal := range anchors {
 		if suite, _ := seal["ia"].(string); suite != CipherSuiteIAHybrid1 {
 			// Some other kind of seal. An anchor list is general and carries
 			// whatever an identifier needed to commit to; ours is the one
@@ -77,15 +73,11 @@ func AnchoredAgreementKeys(event map[string]interface{}) (x25519, mlkem768 []byt
 			continue
 		}
 
-		ka, ok := seal["ka"].([]interface{})
-		if !ok || len(ka) != 2 {
+		ka := keyList(seal["ka"])
+		if len(ka) != 2 {
 			return nil, nil, fmt.Errorf("the encryption-key anchor should hold exactly two keys, found %d", len(ka))
 		}
-		first, ok1 := ka[0].(string)
-		second, ok2 := ka[1].(string)
-		if !ok1 || !ok2 {
-			return nil, nil, fmt.Errorf("the encryption-key anchor holds something that is not a key")
-		}
+		first, second := ka[0], ka[1]
 
 		x, err := DecodeLargeFixed(CESRX25519Pubkey, first, X25519PubkeyBytes)
 		if err != nil {
@@ -98,4 +90,54 @@ func AnchoredAgreementKeys(event map[string]interface{}) (x25519, mlkem768 []byt
 		return x, k, nil
 	}
 	return nil, nil, ErrNotAnchored
+}
+
+// anchorList normalises the anchor field to one shape.
+//
+// An event reaches a verifier two ways and they do not produce the same Go
+// type: decoded from JSON off the wire, the anchors are []interface{} holding
+// map[string]interface{}; built in memory, they are []map[string]interface{}.
+// A reader that handles only the first works on everything that arrived over a
+// network and fails on the event this process just built — which is the harder
+// failure to notice, because the code that builds an event is usually the code
+// most confident it is correct.
+//
+// Anything else returns nothing, and the caller reports it as unanchored.
+func anchorList(v interface{}) []map[string]interface{} {
+	switch anchors := v.(type) {
+	case []map[string]interface{}:
+		return anchors
+	case []interface{}:
+		out := make([]map[string]interface{}, 0, len(anchors))
+		for _, entry := range anchors {
+			if seal, ok := entry.(map[string]interface{}); ok {
+				out = append(out, seal)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+// keyList normalises the anchored key list, which is []string in memory and
+// []interface{} once it has been through JSON — the same split as anchorList,
+// one level down.
+func keyList(v interface{}) []string {
+	switch keys := v.(type) {
+	case []string:
+		return keys
+	case []interface{}:
+		out := make([]string, 0, len(keys))
+		for _, k := range keys {
+			s, ok := k.(string)
+			if !ok {
+				return nil
+			}
+			out = append(out, s)
+		}
+		return out
+	default:
+		return nil
+	}
 }

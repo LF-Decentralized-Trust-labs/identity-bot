@@ -52,8 +52,10 @@ type HybridInceptionResult struct {
 	RawBytesB64    string                 `json:"raw_bytes_b64"`
 	CipherSuite    string                 `json:"cipher_suite"`
 	CESR           cesrKeys               `json:"cesr"`
-	PublicKey      string                 `json:"public_key"`
-	NextKeyDigest  string                 `json:"next_key_digest"`
+	// Delegator is the identity this one acts under, empty when it acts alone.
+	Delegator     string `json:"delegator,omitempty"`
+	PublicKey     string `json:"public_key"`
+	NextKeyDigest string `json:"next_key_digest"`
 }
 
 func ed25519VerferQB64(raw32 []byte) (string, error) {
@@ -122,7 +124,7 @@ func wireFromCESR(cesr cesrKeys) icpWire {
 }
 
 func wireToInceptionMap(w icpWire) map[string]interface{} {
-	return map[string]interface{}{
+	m := map[string]interface{}{
 		"v": w.V, "t": w.T, "d": w.D, "i": w.I, "s": w.S, "kt": w.Kt,
 		"k": w.K, "nt": w.Nt, "n": w.N, "bt": w.Bt,
 		"b": w.B, "c": w.C, "a": []map[string]interface{}{{
@@ -130,16 +132,50 @@ func wireToInceptionMap(w icpWire) map[string]interface{} {
 			"ka": w.A[0].Ka,
 		}},
 	}
+	if w.Di != "" {
+		m["di"] = w.Di
+	}
+	return m
 }
 
 // BuildHybridInception constructs keri 1.1.17 conformant hybrid icp (SerderKERI makify).
 func BuildHybridInception(m HybridKeyMaterial) (*HybridInceptionResult, error) {
+	return buildHybrid(m, "")
+}
+
+// BuildHybridDelegatedInception is the same event for an identity that acts
+// under another one's authority, naming its delegator.
+//
+// This is what a sealed machine gets. It generates these keys inside the
+// enclave and they never leave it, so it holds the private half it needs in
+// order to decrypt — while the owner's root seed stays where it is and never
+// reaches the hardware. The owner's authority arrives as a signature over this
+// event rather than as key material, which is the whole reason the machine can
+// have an identity at all without being given the owner's.
+//
+// The encryption keys are anchored in THIS event, so the machine's own
+// identifier commits to them: substituting them means substituting the
+// identifier, which the delegation no longer covers.
+func BuildHybridDelegatedInception(m HybridKeyMaterial, delegatorAID string) (*HybridInceptionResult, error) {
+	if delegatorAID == "" {
+		return nil, fmt.Errorf("a delegated inception must name its delegator, or nothing establishes who this identity acts for")
+	}
+	return buildHybrid(m, delegatorAID)
+}
+
+func buildHybrid(m HybridKeyMaterial, delegatorAID string) (*HybridInceptionResult, error) {
 	cesr, err := materialToCESR(m)
 	if err != nil {
 		return nil, err
 	}
 
-	final, raw, err := makifyICPWire(wireFromCESR(cesr))
+	wire := wireFromCESR(cesr)
+	if delegatorAID != "" {
+		wire.T = "dip"
+		wire.Di = delegatorAID
+	}
+
+	final, raw, err := makifyICPWire(wire)
 	if err != nil {
 		return nil, err
 	}
@@ -148,6 +184,7 @@ func BuildHybridInception(m HybridKeyMaterial) (*HybridInceptionResult, error) {
 		AID:            final.I,
 		SAID:           final.D,
 		InceptionEvent: wireToInceptionMap(final),
+		Delegator:      final.Di,
 		RawBytesB64:    base64.StdEncoding.EncodeToString(raw),
 		CipherSuite:    CipherSuiteIAHybrid1,
 		CESR:           cesr,

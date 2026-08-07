@@ -307,3 +307,26 @@ func UnmarshalKeySet(data []byte) (*KeySet, error) {
 	ks.KemPub = kemPriv.(*mlkem768.PrivateKey).Public().(*mlkem768.PublicKey)
 	return ks, nil
 }
+
+// PublicMaterial returns the raw public halves of this keyset, in the form an
+// inception event commits to.
+//
+// The point of handing these to the event is that the identity's encryption
+// keys and its messaging keys stop being two different things that have to be
+// reconciled. The event commits to these exact bytes, so an identifier vouches
+// for the keys that are actually used to reach it — rather than for a separate
+// set that then has to be fetched from somebody and believed.
+func (k *KeySet) PublicMaterial() (ed, dsa, x25519, mlkem768 []byte, err error) {
+	if k.EdPub == nil || k.DsaPub == nil || k.KemPub == nil {
+		return nil, nil, nil, nil, fmt.Errorf("this keyset is incomplete")
+	}
+	dsa, err = k.DsaPub.MarshalBinary()
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("could not encode the signing key: %w", err)
+	}
+	mlkem768, err = k.KemPub.MarshalBinary()
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("could not encode the encapsulation key: %w", err)
+	}
+	return append([]byte(nil), k.EdPub...), dsa, append([]byte(nil), k.XPub[:]...), mlkem768, nil
+}
