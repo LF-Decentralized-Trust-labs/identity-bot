@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	IABMagic     = "IAB1"
+	IABMagic      = "IAB1"
 	FormatVersion = 1
 )
 
@@ -47,7 +47,7 @@ const (
 type SlotPolicy string
 
 const (
-	PolicyOR SlotPolicy = "or"
+	PolicyOR  SlotPolicy = "or"
 	PolicyAND SlotPolicy = "and"
 )
 
@@ -61,21 +61,21 @@ type Argon2Params struct {
 
 // SectionMeta describes one logical section inside the encrypted payload.
 type SectionMeta struct {
-	Name            string `json:"name"`
+	Name             string `json:"name"`
 	DigestBlake3QB64 string `json:"digest_blake3_qb64"`
-	SizePlaintext   int    `json:"size_plaintext"`
+	SizePlaintext    int    `json:"size_plaintext"`
 }
 
 // KeySlot describes one wrapped BEK copy.
 type KeySlot struct {
-	Type           KeySlotType `json:"type"`
-	Policy         SlotPolicy  `json:"policy,omitempty"`
-	WrappedBEKB64  string      `json:"wrapped_bek_b64"`
-	NonceB64       string      `json:"nonce_b64"`
-	Argon2SaltB64  string      `json:"argon2_salt_b64,omitempty"`
-	GuardianGroup  string      `json:"guardian_group_aid,omitempty"`
-	ThresholdM     int         `json:"threshold_m,omitempty"`
-	ThresholdN     int         `json:"threshold_n,omitempty"`
+	Type          KeySlotType `json:"type"`
+	Policy        SlotPolicy  `json:"policy,omitempty"`
+	WrappedBEKB64 string      `json:"wrapped_bek_b64"`
+	NonceB64      string      `json:"nonce_b64"`
+	Argon2SaltB64 string      `json:"argon2_salt_b64,omitempty"`
+	GuardianGroup string      `json:"guardian_group_aid,omitempty"`
+	ThresholdM    int         `json:"threshold_m,omitempty"`
+	ThresholdN    int         `json:"threshold_n,omitempty"`
 	// EphemeralPubB64 is the throwaway public key of a sealed slot. There is
 	// deliberately no field naming the recipient: an archive sealed to several
 	// owners would otherwise publish who owns the identity to anyone holding a
@@ -94,18 +94,18 @@ type ExternalDataPointer struct {
 
 // Manifest is the cleartext header of every .iab archive.
 type Manifest struct {
-	FormatVersion      int                   `json:"format_version"`
-	CreatedAt          string                `json:"created_at"`
-	IdentityAID        string                `json:"identity_aid,omitempty"`
-	Tiers              []string              `json:"tiers"`
-	SnapshotType       string                `json:"snapshot_type"` // full | delta
-	Sections           []SectionMeta         `json:"sections"`
-	KeySlots           []KeySlot             `json:"key_slots"`
-	SlotPolicy         SlotPolicy            `json:"slot_policy"`
-	Argon2Params       *Argon2Params         `json:"argon2_params,omitempty"`
-	DeltaStateDigestQB64 string              `json:"delta_state_digest_blake3_qb64,omitempty"`
-	ExternalPointers   []ExternalDataPointer `json:"external_pointers,omitempty"`
-	PayloadNonceB64    string                `json:"payload_nonce_b64"`
+	FormatVersion        int                   `json:"format_version"`
+	CreatedAt            string                `json:"created_at"`
+	IdentityAID          string                `json:"identity_aid,omitempty"`
+	Tiers                []string              `json:"tiers"`
+	SnapshotType         string                `json:"snapshot_type"` // full | delta
+	Sections             []SectionMeta         `json:"sections"`
+	KeySlots             []KeySlot             `json:"key_slots"`
+	SlotPolicy           SlotPolicy            `json:"slot_policy"`
+	Argon2Params         *Argon2Params         `json:"argon2_params,omitempty"`
+	DeltaStateDigestQB64 string                `json:"delta_state_digest_blake3_qb64,omitempty"`
+	ExternalPointers     []ExternalDataPointer `json:"external_pointers,omitempty"`
+	PayloadNonceB64      string                `json:"payload_nonce_b64"`
 
 	// AndWrappedBEKB64 and AndNonceB64 are the second layer, present only under
 	// AND. There, the slots do not hold the payload key at all — they hold an

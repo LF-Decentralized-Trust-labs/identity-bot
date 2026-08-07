@@ -49,13 +49,13 @@ func toRemoteCredentials(creds RemoteCredentialSecrets) remote.CredentialSecrets
 
 // Service orchestrates backup export, push, and status.
 type Service struct {
-	DataDir          string
-	Store            store.Store
-	ConfigStore      *ConfigStore
-	CredentialStore  *CredentialStore
-	Pusher           *PairedPusher
-	Scheduler        *Scheduler
-	failures         int
+	DataDir         string
+	Store           store.Store
+	ConfigStore     *ConfigStore
+	CredentialStore *CredentialStore
+	Pusher          *PairedPusher
+	Scheduler       *Scheduler
+	failures        int
 }
 
 func NewService(dataDir string, st store.Store) *Service {

@@ -5,8 +5,11 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"os/exec"
 	"strings"
+
+	"golang.org/x/crypto/curve25519"
 
 	"identity-agent-core/backup"
 	"identity-agent-core/secureenclave"
@@ -48,8 +51,30 @@ type ownerRecoverySlot struct {
 	// Owners holds one sealed copy per owner, any of which recovers alone. An
 	// organisation has an owner per signer, and requiring several to agree
 	// would mean losing the data when one is unreachable.
+	//
+	// Padded — see recoveryPadTo. The number of entries here is deliberately
+	// not the number of owners.
 	Owners []sealedForOwner `json:"owners"`
 }
+
+// recoveryPadTo is the block the entry count is rounded up to.
+//
+// Naming no owner still left their number in plain sight, and for an
+// organisation that number is its count of signers, published on every copy of
+// its volume — including one an operator has taken away. That is a fact about
+// how a company is run, readable by counting, and nobody consented to it.
+//
+// So the list is rounded up to a multiple of this and filled with entries
+// sealed to keys that exist for one instruction and are never written down.
+// Eight because it covers a sole trader and a normal board with one shape, and
+// because the cost is bytes in a header.
+//
+// This bounds the leak rather than removing it: nine owners still shows as
+// sixteen entries, so a very large organisation is distinguishable from a small
+// one. Removing it entirely would mean a fixed count that either truncates
+// somebody or wastes space on everybody, and truncating an owner means the one
+// person who could recover the volume cannot.
+const recoveryPadTo = 8
 
 type sealedForOwner struct {
 	// No owner is named. An organisation's list of owners is not something to
@@ -99,6 +124,10 @@ func addOwnerRecovery(device string, sealPublicKeysB64 []string, currentKey []by
 		})
 	}
 
+	if err := padOwners(&slot); err != nil {
+		return err
+	}
+
 	// The slot is added using the key that already opens the volume, which is
 	// the only key this instance has. Adding it before sealing would leave a
 	// volume with a slot nobody can reach if the sealing then failed.
@@ -117,6 +146,66 @@ func addOwnerRecovery(device string, sealPublicKeysB64 []string, currentKey []by
 		_ = removeKeySlot(device, currentKey, secret)
 		return fmt.Errorf("could not record how to use the recovery slot, so it was removed "+
 			"rather than left looking usable: %w", err)
+	}
+	return nil
+}
+
+// padOwners brings the entry count up to a multiple of recoveryPadTo and
+// shuffles the result, so neither the number of entries nor their order says
+// anything about the owners.
+//
+// A padding entry is made the same way a real one is: a fresh X25519 keypair
+// stands in for an owner, a random secret is sealed to it, and the private half
+// is discarded before the function returns. That makes it a genuine sealed
+// entry whose recipient does not exist — indistinguishable from a real one by
+// anybody, including us, because the only thing that distinguishes them is a
+// key nobody holds. Writing random bytes instead would have been cheaper and
+// would have failed: sealed output is not uniform, and an entry that is uniform
+// stands out from the ones that are not.
+func padOwners(slot *ownerRecoverySlot) error {
+	realCount := len(slot.Owners)
+	target := ((realCount + recoveryPadTo - 1) / recoveryPadTo) * recoveryPadTo
+
+	for len(slot.Owners) < target {
+		decoyPriv := make([]byte, backup.X25519KeyLen)
+		if _, err := rand.Read(decoyPriv); err != nil {
+			return fmt.Errorf("could not generate a padding key: %w", err)
+		}
+		decoyPub, err := curve25519.X25519(decoyPriv, curve25519.Basepoint)
+		zero(decoyPriv)
+		if err != nil {
+			return fmt.Errorf("could not derive a padding key: %w", err)
+		}
+
+		filler := make([]byte, backup.BEKLen)
+		if _, err := rand.Read(filler); err != nil {
+			return fmt.Errorf("could not generate a padding secret: %w", err)
+		}
+		epk, wrapped, nonce, err := backup.SealBEK(decoyPub, filler)
+		zero(filler)
+		if err != nil {
+			return fmt.Errorf("could not seal a padding entry: %w", err)
+		}
+		slot.Owners = append(slot.Owners, sealedForOwner{
+			EphemeralPublicKeyB64: base64.StdEncoding.EncodeToString(epk),
+			WrappedSecretB64:      base64.StdEncoding.EncodeToString(wrapped),
+			NonceB64:              base64.StdEncoding.EncodeToString(nonce),
+		})
+	}
+
+	// Otherwise the real entries are the first ones, and padding that can be
+	// identified by position is not padding.
+	//
+	// Fisher-Yates over crypto/rand rather than math/rand.Shuffle: the order is
+	// the thing being hidden, so it cannot come from a generator whose output
+	// is predictable from its seed.
+	for i := len(slot.Owners) - 1; i > 0; i-- {
+		j, err := rand.Int(rand.Reader, big.NewInt(int64(i+1)))
+		if err != nil {
+			return fmt.Errorf("could not shuffle the recovery entries: %w", err)
+		}
+		k := j.Int64()
+		slot.Owners[i], slot.Owners[k] = slot.Owners[k], slot.Owners[i]
 	}
 	return nil
 }

@@ -56,9 +56,9 @@ type CapabilityRecord struct {
 	// ExecutorConfig is the executor's own configuration, opaque to the engine.
 	// A registered Executor is the only thing that interprets it, so a new kind of
 	// capability needs no schema change here.
-	ExecutorConfig     json.RawMessage `json:"executor_config,omitempty"`
-	Provider           string          `json:"provider"` // "registry-native" | plug-in id | agent AID
-	Enabled            bool            `json:"enabled"`
+	ExecutorConfig json.RawMessage `json:"executor_config,omitempty"`
+	Provider       string          `json:"provider"` // "registry-native" | plug-in id | agent AID
+	Enabled        bool            `json:"enabled"`
 }
 
 // asProvidedCapability projects a registry record into the manifest capability shape so

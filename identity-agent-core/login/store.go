@@ -77,7 +77,7 @@ func (s *RelationshipStore) AllocateNextRelationshipIndex() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.highWater++
-	_ = s.saveHighWaterLocked()  // best effort
+	_ = s.saveHighWaterLocked() // best effort
 	return s.highWater
 }
 

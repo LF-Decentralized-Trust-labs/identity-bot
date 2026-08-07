@@ -27,8 +27,8 @@ type Conversation struct {
 	SourceApp string `json:"source_app"` // "openwebui", "openclaw", etc.
 	Title     string `json:"title"`
 	Model     string `json:"model,omitempty"`
-	CreatedAt int64  `json:"created_at"`  // Unix timestamp
-	UpdatedAt int64  `json:"updated_at"`  // Unix timestamp
+	CreatedAt int64  `json:"created_at"` // Unix timestamp
+	UpdatedAt int64  `json:"updated_at"` // Unix timestamp
 	Archived  bool   `json:"archived"`
 }
 
@@ -36,7 +36,7 @@ type Conversation struct {
 type Message struct {
 	ID             string `json:"id"`
 	ConversationID string `json:"conversation_id"`
-	Role           string `json:"role"`    // "user", "assistant", "system"
+	Role           string `json:"role"` // "user", "assistant", "system"
 	Content        string `json:"content"`
 	Model          string `json:"model,omitempty"`
 	Timestamp      int64  `json:"timestamp"` // Unix timestamp

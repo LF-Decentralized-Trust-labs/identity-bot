@@ -11,15 +11,15 @@ import (
 
 type goldenVector struct {
 	HybridInception struct {
-		Seed                   int    `json:"seed"`
-		AID                    string `json:"aid"`
-		SAID                   string `json:"said"`
-		RawBytesB64            string `json:"raw_bytes_b64"`
-		RawBytesB64Len         int    `json:"raw_bytes_b64_len"`
-		CipherSuite            string `json:"cipher_suite"`
-		SigningKeysInK         int    `json:"signing_keys_in_k"`
-		KeyAgreementInAnchor   int    `json:"key_agreement_in_anchor"`
-		PreRotationDigestsInN  int    `json:"pre_rotation_digests_in_n"`
+		Seed                  int    `json:"seed"`
+		AID                   string `json:"aid"`
+		SAID                  string `json:"said"`
+		RawBytesB64           string `json:"raw_bytes_b64"`
+		RawBytesB64Len        int    `json:"raw_bytes_b64_len"`
+		CipherSuite           string `json:"cipher_suite"`
+		SigningKeysInK        int    `json:"signing_keys_in_k"`
+		KeyAgreementInAnchor  int    `json:"key_agreement_in_anchor"`
+		PreRotationDigestsInN int    `json:"pre_rotation_digests_in_n"`
 	} `json:"hybrid_inception"`
 }
 

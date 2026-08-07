@@ -51,11 +51,11 @@ func (s *SDK) Verify(ctx context.Context, req VerifyRequest) (*VerificationResul
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	result := &VerificationResult{
-		Outcome:          OutcomeUnverified,
-		VerificationPath: "none",
-		LastVerified:     now,
+		Outcome:            OutcomeUnverified,
+		VerificationPath:   "none",
+		LastVerified:       now,
 		ContactCorrelation: nil,
-		BandStyle:        "generic",
+		BandStyle:          "generic",
 	}
 
 	switch kind {
