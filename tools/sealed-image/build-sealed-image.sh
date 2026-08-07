@@ -8,7 +8,7 @@
 # Produces a qcow2 containing a minimal Debian, one agent binary (the OSS core
 # for an individual image, the org backend for an organisation one),
 # and a systemd unit that starts the agent on :5050 with its first-boot pairing
-# offer reachable. Run on the host, as root, after setup-host.sh.
+# offer reachable. Run as root on a machine with the tools listed in README.md.
 set -euo pipefail
 
 say()  { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
@@ -34,8 +34,19 @@ OUT=${OUT:-./base.qcow2}
 VERITY=${VERITY:-0}
 SIZE=${SIZE:-2G}
 SUITE=${SUITE:-bookworm}
-# Not /tmp — see build-shared-runtime.sh for the whole story. Short version:
-# debootstrap creates device nodes in the root it builds, a tmpfs is commonly
+# Every timestamp this build writes down. Fixed rather than "now", because a
+# clock is an input that changes the output bytes, and one that changes on its
+# own is the hardest kind to notice. Exported, so it reaches the tools that
+# honour it rather than only the code in this file.
+export SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-1700000000}
+# Fixed identifiers for the system filesystem. They are arbitrary and they are
+# meant to be: what matters is that every build writes the SAME arbitrary value
+# rather than a fresh random one, because a random one alone makes two identical
+# builds produce different root hashes. Do not "improve" these to something
+# generated — that reintroduces exactly the problem they exist to remove.
+FIXED_FS_UUID=${FIXED_FS_UUID:-c0ffee00-0000-4000-8000-000000000001}
+FIXED_HASH_SEED=${FIXED_HASH_SEED:-c0ffee00-0000-4000-8000-000000000002}
+# Not /tmp: debootstrap creates device nodes in the root it builds, a tmpfs is commonly
 # mounted `nodev`, and the resulting error names a permissions problem that is
 # not there. WORKROOT overrides it.
 WORKROOT=${WORKROOT:-/var/tmp}
@@ -52,8 +63,8 @@ WORK=$(mktemp -d "$WORKROOT/sealed-image.XXXXXX")
 # breaks every other user on the machine: no scp into it, no editor swap files,
 # no build caches, and anything with a hardcoded path fails with a permission
 # error that points nowhere near a base-image build that finished an hour ago.
-# This script is meant to run on provisioning hosts, so it does not get to leave
-# them worse than it found them.
+# This script runs on a shared machine, so it does not get to leave it worse
+# than it found it.
 #
 # Restoring is the right shape of fix even once the cause is known: a build
 # should be responsible for the state it leaves behind, whichever of its tools
@@ -105,9 +116,19 @@ if [[ -n "$WEB_BUNDLE" ]]; then
   echo "  web bundle accepted: sha256 $WEB_DIGEST"
 fi
 
-for t in debootstrap virt-make-fs qemu-img; do
-  command -v "$t" >/dev/null || fail "missing $t (apt-get install debootstrap libguestfs-tools qemu-utils)"
+# Checked here rather than where each is first used, because the ones that come
+# late come after ten minutes of bootstrapping, and a build that fails at the
+# end for a missing package is a build nobody runs twice.
+for t in debootstrap file cpio gzip truncate; do
+  command -v "$t" >/dev/null || fail "missing $t (apt-get install debootstrap file cpio gzip coreutils)"
 done
+if [[ "$VERITY" == "1" ]]; then
+  for t in mke2fs veritysetup; do
+    command -v "$t" >/dev/null || fail "missing $t (apt-get install e2fsprogs cryptsetup-bin)"
+  done
+else
+  command -v virt-make-fs >/dev/null || fail "missing virt-make-fs (apt-get install libguestfs-tools)"
+fi
 
 mknod "$WORK/probe-dev" c 1 3 2>/dev/null ||
   fail "$WORKROOT cannot hold device nodes (probably mounted nodev: $(findmnt -no FSTYPE,OPTIONS --target "$WORKROOT" 2>/dev/null)) — debootstrap needs them. Set WORKROOT= to a directory on an ordinary filesystem."
@@ -339,8 +360,8 @@ Environment=PORT=5050
 # Measured on the host: the Go agent idles at 60MB without these and 29MB with
 # them, and stayed healthy through inception, profile writes and a full
 # adoption. Most of the difference was heap the collector had no reason to
-# return — which is the right default for a laptop and the wrong one for a
-# machine running hundreds of these.
+# return — which is the right default for a laptop and the wrong one where many
+# of these run side by side.
 Environment=GOMEMLIMIT=40MiB
 Environment=GOGC=50
 Environment=KERI_DRIVER_EXTERNAL=1
@@ -663,9 +684,9 @@ install -m 0444 "$kernel" "$(dirname "$OUT")/${IMAGE_STEM}-vmlinuz"
 # the initrd and the command line. A customer can only conclude anything from a
 # measurement if they can rebuild the image themselves and get the same number —
 # otherwise the measurement identifies an image they cannot inspect, and every
-# claim resting on it reduces to trusting whoever built it. Four independent
-# reviewers called a non-reproducible build fatal to the whole attestation story,
-# and they were right: it is the hinge the rest hangs on.
+# claim resting on it reduces to trusting whoever built it. A non-reproducible
+# build is fatal to the whole attestation story — it is the hinge the rest
+# hangs on.
 #
 # WHAT WAS ACTUALLY WRONG. Measured on two real builds of the same image, whose
 # kernels were byte-identical and whose initrds were not:
@@ -695,7 +716,7 @@ install -m 0444 "$kernel" "$(dirname "$OUT")/${IMAGE_STEM}-vmlinuz"
 # set it cannot silently reintroduce the problem.
 if [[ -n "$initrd" ]]; then
   say "Normalising the initramfs so the measurement can be reproduced"
-  REPRO_EPOCH="${SOURCE_DATE_EPOCH:-1700000000}"
+  REPRO_EPOCH="$SOURCE_DATE_EPOCH"
   REPRO_DIR="$WORK/initrd-repro"
   rm -rf "$REPRO_DIR" && mkdir -p "$REPRO_DIR"
 
@@ -738,11 +759,11 @@ install -d -m 0700 "$(dirname "$OUT")"
 #
 # buried in twenty lines of libguestfs advice about enabling trace debugging —
 # after the build has already spent ten minutes bootstrapping. Say it up front
-# and say what to do, because the fix is to stop the daemon and its guests, not
-# to debug libguestfs.
+# and say what to do, because the fix is to stop whatever holds the file, not to
+# debug libguestfs.
 if [[ -e "$OUT" ]] && command -v fuser >/dev/null && fuser "$OUT" >/dev/null 2>&1; then
-  fail "$OUT is open by another process (most likely the daemon that launches instances, or a guest still running).
-     Stop the daemon and its instances first, or build to a different OUT= and swap it in."
+  fail "$OUT is open by another process (most likely a guest still running from it).
+     Stop it first, or build to a different OUT= and swap the result in."
 fi
 if [[ "$VERITY" == "1" ]]; then
   # A raw filesystem with its hash tree appended, rather than a partitioned
@@ -755,10 +776,53 @@ if [[ "$VERITY" == "1" ]]; then
   #
   # The hash tree lives in the same file, past the data, so an instance is one
   # artifact rather than two that can drift apart.
+  # The same reasoning as the initramfs above, applied to the thing the root
+  # hash actually describes. mke2fs writes a random filesystem UUID and a random
+  # directory hash seed on every run, and every file keeps whatever mtime it
+  # happened to get during bootstrap. All three change the bytes, so all three
+  # change the root hash, so two builds of identical inputs disagree and the
+  # reader concludes the published measurement does not describe the source.
+  #
+  # mke2fs -d rather than virt-make-fs, because it is the only one of the two
+  # that exposes the knobs: -U and -E hash_seed take the UUIDs below, both
+  # derived from nothing and fixed forever.
+  # Two builds of this image were compared file by file. Of 4,499 files, five
+  # differed, and every one was a record of the build rather than part of the
+  # system: three logs, one cache, and one identifier. They are removed here
+  # rather than tolerated, because a difference that is only noise is still a
+  # different root hash, and a reader comparing hashes cannot tell the two
+  # apart.
+  say "Removing what the build wrote about itself"
+  rm -f "$WORK/root"/var/log/bootstrap.log \
+        "$WORK/root"/var/log/alternatives.log \
+        "$WORK/root"/var/log/dpkg.log \
+        "$WORK/root"/var/cache/ldconfig/aux-cache \
+        "$WORK/root"/var/lib/systemd/random-seed
+
+  # /var/lib/dbus/machine-id is not noise. debootstrap writes a random one into
+  # the image, so it is fixed at build time and therefore SHARED by every
+  # instance launched from that image — a stable identifier common to machines
+  # that are supposed to be indistinguishable. Pointing it at /etc/machine-id,
+  # which is deliberately empty so systemd generates one on first boot, gives
+  # each instance its own and removes the difference between builds at the same
+  # time. Both matter; only one of them shows up as a hash mismatch.
+  rm -f "$WORK/root"/var/lib/dbus/machine-id
+  ln -sf /etc/machine-id "$WORK/root"/var/lib/dbus/machine-id
+
+  say "Normalising timestamps so the system image can be reproduced"
+  find "$WORK/root" -exec touch -h -d "@$SOURCE_DATE_EPOCH" {} +
+
   say "Building the verified system image"
   RAW="${OUT%.qcow2}.img"
   rm -f "$RAW"
-  virt-make-fs --format=raw --size="$SIZE" --type=ext4 "$WORK/root" "$RAW"
+  truncate -s "$SIZE" "$RAW"
+  # -O ^has_journal: a journal records the history of writes to a filesystem
+  # that is mounted read-only and verified block by block. It cannot be written
+  # to, and its presence alone perturbs the bytes.
+  mke2fs -q -t ext4 -d "$WORK/root" \
+    -U "$FIXED_FS_UUID" -E hash_seed="$FIXED_HASH_SEED" \
+    -O ^has_journal -I 256 -m 0 "$RAW" ||
+    fail "could not build the system filesystem"
 
   # Where the data ends and the hash tree begins. Written down and passed on the
   # command line, because a reader that guesses this reads hash blocks as data
@@ -808,17 +872,21 @@ The image content hash above identifies the file. It is NOT the launch
 measurement — that covers the firmware, the guest's initial memory and the
 launch configuration, and only the hardware can compute it.
 
-To get it, boot one instance and read the measurement out of the report the
-guest publishes:
+To get the measurement, boot one instance from this image on SEV-SNP hardware
+and read it out of the report the guest publishes:
 
-  <your launcher> --base-image $OUT --allow-unattested ... &
-  curl -s localhost:8090/provision/agents -d '{"v":"PROV1","purpose":"full",
-       "keys":"local","idempotency_key":"'"$(uuidgen)"'"}'
-  # then, against the instance the poll reports:
-  curl -s <instance>/api/provisioning/pairing | jq -r .attestation \\
+  curl -s <instance>/api/attestation | jq -r .report \\
     | base64 -d | xxd -s 0x90 -l 48 -p
 
-Pin that value as the expected measurement, drop -allow-unattested, and from
-then on any instance that launches anything else is destroyed rather than
-handed to a user.
+That endpoint stays available for the life of the instance, so it answers
+whether the instance is new or has been in use for a year.
+
+Reproducing that number yourself additionally requires the kernel command line
+the instance was booted with, because the measurement covers it. Publish it
+alongside the measurement; with VERITY=1 it must carry the root hash written
+beside this image.
+
+Pin the value as the expected measurement. From then on an instance that
+launches anything else fails the comparison, and what to do about that is a
+decision for whoever operates the hardware.
 NEXT
