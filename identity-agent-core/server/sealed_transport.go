@@ -54,8 +54,8 @@ type sealedResponse struct {
 }
 
 const (
-	sealedRequestType  = "https://identity.agent/sealed-request/v1"
-	sealedResponseType = "https://identity.agent/sealed-response/v1"
+	sealedRequestType  = didcomm.TypeSealedRequest
+	sealedResponseType = didcomm.TypeSealedResponse
 	// sealedMaxBody bounds what one envelope may carry. An encrypted tunnel is
 	// still an unauthenticated entry point until the envelope opens, so the
 	// work done before that point has to be bounded.
