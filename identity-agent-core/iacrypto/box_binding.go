@@ -77,3 +77,33 @@ func BoxKeyBindingForEvent(event map[string]interface{}) (string, error) {
 	}
 	return BoxKeyBinding(x, kem)
 }
+
+// PairingOfferBinding is what a machine's hardware vouches for while it is
+// being adopted.
+//
+// Adoption is earlier than everything else: the machine has no identity yet,
+// so it has no anchored encryption keys to bind. What it does have, and what
+// the owner is about to sign a delegation over, is the signing key material it
+// just generated. That is the substitution that matters at this step — swap
+// those keys and the delegation the owner issues covers somebody else's
+// machine, permanently, in a log third parties read and find correct.
+//
+// So the report covers exactly the two keys being offered, and the owner
+// recomputes this from what arrived before signing anything.
+func PairingOfferBinding(publicKey, nextPublicKey string) (string, error) {
+	if publicKey == "" || nextPublicKey == "" {
+		return "", fmt.Errorf("an offer must carry both a key and its successor")
+	}
+	h := blake3.New()
+	_, _ = h.Write([]byte("IA-BOX-OFFER-V1"))
+	for _, k := range []string{publicKey, nextPublicKey} {
+		var n [4]byte
+		n[0] = byte(len(k) >> 24)
+		n[1] = byte(len(k) >> 16)
+		n[2] = byte(len(k) >> 8)
+		n[3] = byte(len(k))
+		_, _ = h.Write(n[:])
+		_, _ = h.Write([]byte(k))
+	}
+	return base64.RawURLEncoding.EncodeToString(h.Sum(nil)), nil
+}

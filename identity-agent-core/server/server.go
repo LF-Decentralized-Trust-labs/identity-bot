@@ -102,6 +102,10 @@ type CoreServer struct {
 
 	// transportIdentity is the key this agent is reached over, where it holds
 	// one itself rather than being fronted by something that terminates for it.
+	// AcceptedMeasurements is the software this owner will adopt a sealed box
+	// for. Empty means no policy, which is refused rather than read as "any" —
+	// see acceptableMeasurement.
+	AcceptedMeasurements [][]byte
 	// boxIdentity is this machine's own identity where it made one, which is
 	// what its attestation vouches for.
 	boxIdentity       *boxIdentity

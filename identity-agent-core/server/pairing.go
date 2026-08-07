@@ -13,10 +13,13 @@ import (
 	"sync"
 	"time"
 
+	"encoding/base64"
 	"identity-agent-core/backup"
+
 	"identity-agent-core/didcomm"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/login"
+	"identity-agent-core/secureenclave"
 	"identity-agent-core/store"
 )
 
@@ -48,6 +51,20 @@ type pairingBeginResponse struct {
 	// the entire point of the ceremony.
 	PublicKey     string `json:"public_key"`
 	NextPublicKey string `json:"next_public_key"`
+	// Attestation is this machine's hardware vouching for the two keys above.
+	//
+	// Without it a controller fetches key material and signs a delegation over
+	// it having established nothing about where it came from. Anyone able to
+	// answer this request — the machine's operator, or anything terminating the
+	// connection — could substitute their own keys, and the delegation the
+	// owner then issues covers their machine instead. It would verify. Third
+	// parties checking the chain afterwards would find it correct, and pointing
+	// somewhere nobody chose.
+	//
+	// Empty where the machine is not sealed hardware, which is an honest answer
+	// and not a failure — a laptop has no such statement to make. The adopting
+	// side decides what to do about that; it must not decide silently.
+	Attestation string `json:"attestation,omitempty"`
 }
 
 type pairingCompleteRequest struct {
@@ -172,6 +189,15 @@ func (s *CoreServer) handlePairingBegin(w http.ResponseWriter, r *http.Request) 
 	offer := &pairingBeginResponse{
 		PublicKey:     iacrypto.VerkeyQB64(pub),
 		NextPublicKey: iacrypto.VerkeyQB64(nextPub),
+	}
+	// Ask the hardware to vouch for exactly these keys, so the controller can
+	// establish that the offer came from a sealed machine before it signs
+	// anything over it. Silence here means no such hardware, which the
+	// controller is left to judge.
+	if binding, berr := iacrypto.PairingOfferBinding(offer.PublicKey, offer.NextPublicKey); berr == nil {
+		if report, rerr := secureenclave.GetSNPReport(binding); rerr == nil && report != nil {
+			offer.Attestation = base64.StdEncoding.EncodeToString(report.Raw)
+		}
 	}
 	pairingOnce.Lock()
 	if pairingOnce.offer != nil {
@@ -524,6 +550,15 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 		// deep link or QR the provisioning page produced. The box will not be
 		// adopted without it.
 		AdoptionCode string `json:"adoption_code"`
+		// AllowUnattested adopts a machine that cannot prove what it is.
+		//
+		// Off by default, so the safe direction is the one that happens when
+		// nobody thought about it. A machine with no attestation may be
+		// perfectly legitimate — a laptop has no such hardware — but it may
+		// equally be a sealed machine whose report was stripped by something in
+		// between, and those two look identical from here. Saying which one
+		// this is has to be a deliberate act.
+		AllowUnattested bool `json:"allow_unattested,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.BoxURL == "" {
 		writeError(w, http.StatusBadRequest, "Missing box_url",
@@ -552,7 +587,20 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// 2. Issue the delegation over exactly that key, anchored in our own KEL.
+	// 2. Establish what the box is BEFORE vouching for it.
+	//
+	// The order is the entire point. Issuing the delegation is this owner
+	// saying, in a log other parties read, that these keys are their machine.
+	// If the keys were substituted on the way here, that statement is still
+	// cryptographically perfect — it just names somebody else's machine, and
+	// everyone who checks it afterwards will agree it is correct. Checking
+	// afterwards establishes nothing, because by then the statement exists.
+	if err := checkOfferBeforeDelegating(offer, req.AllowUnattested, s.acceptableMeasurement); err != nil {
+		writeError(w, http.StatusForbidden, "This box was not adopted", err.Error())
+		return
+	}
+
+	// 3. Issue the delegation over exactly that key, anchored in our own KEL.
 	name := "box-" + shortAID(offer.PairwiseAID)
 	// The driver knows an identity by the name it was incepted under, and
 	// CreateInception sends none — so the root is registered under its own AID.
@@ -563,7 +611,7 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// 3. Hand it back, along with who owns the box from now on: us, and the
+	// 4. Hand it back, along with who owns the box from now on: us, and the
 	// public key it should seal its backups to.
 	//
 	// Derived here rather than by the app, because the seed this comes from is
