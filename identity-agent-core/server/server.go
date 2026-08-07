@@ -97,6 +97,9 @@ type CoreServer struct {
 	// hardware, which is the ordinary case.
 	snpCertificates *snpCertificateChain
 
+	// volumeRecovery is injected by tests. Nil means the real one.
+	volumeRecovery volumeRecoveryRunner
+
 	// The public attestation endpoint is open by necessity, so it caches its
 	// answer and bounds how often one caller may ask.
 	attestationMu      sync.Mutex

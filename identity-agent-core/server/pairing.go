@@ -334,6 +334,24 @@ func (s *CoreServer) handlePairingComplete(w http.ResponseWriter, r *http.Reques
 		if err := s.recordBackupSealKeys(req.BackupSealPublicKeysB64); err != nil {
 			log.Printf("[pairing] WARNING: adopted, but the recovery keys were refused (%v) — this instance cannot back up until they are set", err)
 		}
+		// The same keys give the owner a way back into the encrypted volume,
+		// and this is the first moment there is an owner to give it to.
+		//
+		// Until now the volume opened only with a key derived from this
+		// software's measurement — which is what keeps the machine's operator
+		// out, and also what would lose the data the next time that measurement
+		// moves. It moves whenever the image is rebuilt, and the key moves with
+		// the processor's firmware level, so an ordinary security patch would
+		// otherwise strand everything here permanently.
+		//
+		// Same treatment as above and for the same reason: a failure is loud
+		// but does not undo an adoption that is already valid. An instance that
+		// is adopted and has no way back in is a problem to fix; an instance
+		// that is delegated and ownerless is worse.
+		if err := s.addVolumeRecovery(req.BackupSealPublicKeysB64); err != nil {
+			log.Printf("[pairing] WARNING: adopted, but this instance's encrypted volume has no "+
+				"owner recovery (%v) — its data would not survive an image or firmware update", err)
+		}
 	} else {
 		log.Printf("[pairing] WARNING: adopted with no recovery key — this instance can only back up by being handed a seed phrase, which is what having a recovery key avoids")
 	}

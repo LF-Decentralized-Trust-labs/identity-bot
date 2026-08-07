@@ -212,3 +212,17 @@ func addOwnerRecoveryCommand(args []string) error {
 
 	return addOwnerRecovery(device, args[1:], key)
 }
+
+// addOwnerRecoveryCommandFor is addOwnerRecoveryCommand with the volume key
+// supplied rather than derived, so the idempotence can be exercised off a
+// processor that can derive one.
+func addOwnerRecoveryCommandFor(device string, sealPublicKeysB64 []string, currentKey []byte) error {
+	already, err := hasOwnerRecovery(device)
+	if err != nil {
+		return err
+	}
+	if already {
+		return nil
+	}
+	return addOwnerRecovery(device, sealPublicKeysB64, currentKey)
+}
