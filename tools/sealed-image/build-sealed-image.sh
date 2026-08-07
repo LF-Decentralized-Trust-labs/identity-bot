@@ -46,6 +46,7 @@ export SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-1700000000}
 # generated — that reintroduces exactly the problem they exist to remove.
 FIXED_FS_UUID=${FIXED_FS_UUID:-c0ffee00-0000-4000-8000-000000000001}
 FIXED_HASH_SEED=${FIXED_HASH_SEED:-c0ffee00-0000-4000-8000-000000000002}
+FIXED_VERITY_SALT=${FIXED_VERITY_SALT:-c0ffee0000000000000000000000000000000000000000000000000000000003}
 # Not /tmp: debootstrap creates device nodes in the root it builds, a tmpfs is commonly
 # mounted `nodev`, and the resulting error names a permissions problem that is
 # not there. WORKROOT overrides it.
@@ -828,8 +829,17 @@ if [[ "$VERITY" == "1" ]]; then
   # command line, because a reader that guesses this reads hash blocks as data
   # and fails in a way that looks like corruption.
   DATA_BYTES=$(stat -c%s "$RAW")
+  # --salt, because veritysetup generates a random one per run and mixes it into
+  # every hash, so two identical filesystems still get different root hashes.
+  # Found by building twice: the 2GiB filesystem compared byte-identical and the
+  # images first differed 17 bytes past the end of it, inside the verity
+  # superblock. A verity salt defends against precomputed hash tables for an
+  # attacker who can choose file contents; here the contents are fixed at build
+  # time and published, so there is nothing to precompute against, and a value
+  # the reader cannot reproduce costs more than it protects.
   say "Hashing every block of the system image"
-  VERITY_OUT=$(veritysetup format "$RAW" "$RAW" --hash-offset="$DATA_BYTES" 2>&1) || {
+  VERITY_OUT=$(veritysetup format "$RAW" "$RAW" --hash-offset="$DATA_BYTES" \
+                 --salt="$FIXED_VERITY_SALT" 2>&1) || {
     echo "$VERITY_OUT" >&2
     fail "could not build the verity hash tree"
   }
