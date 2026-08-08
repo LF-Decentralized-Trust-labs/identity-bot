@@ -658,12 +658,11 @@ class _ContactsScreenState extends State<ContactsScreen> {
           value: resolved.oobiUrl,
           isSelectable: true,
         ),
-        ConsentDetailItem(
-          label: 'KEL Events',
-          value: '${resolved.eventCount} event${resolved.eventCount != 1 ? 's' : ''} ${resolved.kelVerified ? '(verified)' : '(unverified)'}',
-          isMonospace: true,
-          isSelectable: false,
-        ),
+        // No "KEL Events" line and no verified/unverified label. A count of
+        // key events tells somebody nothing they can act on, and the label was
+        // a verdict on a person dressed as a technical fact — which it is not,
+        // and which it did not always establish.
+
         if (resolved.created.isNotEmpty)
           ConsentDetailItem(
             label: 'Created',
@@ -672,8 +671,12 @@ class _ContactsScreenState extends State<ContactsScreen> {
           ),
       ],
       confirmLabel: 'ADD CONTACT',
+      // Kept, because a failed check is worth saying out loud — but said in
+      // terms of what it means rather than what it is called. The absence of a
+      // warning no longer implies a check happened; that is what the identity
+      // level is for.
       warningMessage: !resolved.kelVerified
-          ? 'Key Event Log could not be verified. Proceed with caution.'
+          ? 'We could not confirm this identity is consistent with its own history. Proceed with caution.'
           : null,
       showTrustToggle: true,
     );

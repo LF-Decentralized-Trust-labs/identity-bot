@@ -3289,8 +3289,14 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	contactStatus := "verified"
-	if s.KeriDriver != nil && len(oobiData.KEL) > 0 && !kelVerified {
+	// "verified" is no longer asserted where nothing was checked. What a person
+	// is shown comes from the identity level, and this field records only what
+	// this agent actually established.
+	contactStatus := "unchecked"
+	switch {
+	case kelVerified:
+		contactStatus = "verified"
+	case s.KeriDriver != nil && len(oobiData.KEL) > 0:
 		contactStatus = "unverified"
 	}
 
@@ -3304,7 +3310,7 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
 		Alias:           alias,
 		PublicKey:       currentPublicKey,
 		OobiURL:         req.OobiURL,
-		Verified:        kelVerified || s.KeriDriver == nil,
+		Verified:        kelVerified,
 		DiscoveredAt:    time.Now().UTC().Format(time.RFC3339),
 		Status:          contactStatus,
 		ContactSource:   "keri",
@@ -3490,7 +3496,14 @@ func (s *CoreServer) handleExchange(w http.ResponseWriter, r *http.Request) {
 				"this agent has no record of that identity, so it cannot check who sent this")
 			return
 		}
-		if verr := verifyExchangeSignature(raw, req.Sig, existing.PublicKey); verr != nil {
+		// Checked now, not when they were first met. Their log may have grown
+		// since, and the key it ends with is the one to authenticate against.
+		check := s.contactKeyForUse(req.SenderAID)
+		if check.State == kelFailed {
+			writeError(w, http.StatusForbidden, "Their key history does not check out", check.Reason)
+			return
+		}
+		if verr := verifyExchangeSignature(raw, req.Sig, check.Key); verr != nil {
 			writeError(w, http.StatusForbidden, "Unsigned or unverifiable acceptance", verr.Error())
 			return
 		}
@@ -3526,7 +3539,12 @@ func (s *CoreServer) handleExchange(w http.ResponseWriter, r *http.Request) {
 	// against the key it recorded, before any status moves. That branch used to
 	// upgrade a contact to accepted on nothing but a claimed identifier.
 	if existing != nil {
-		if verr := verifyExchangeSignature(raw, req.Sig, existing.PublicKey); verr != nil {
+		check := s.contactKeyForUse(req.SenderAID)
+		if check.State == kelFailed {
+			writeError(w, http.StatusForbidden, "Their key history does not check out", check.Reason)
+			return
+		}
+		if verr := verifyExchangeSignature(raw, req.Sig, check.Key); verr != nil {
 			writeError(w, http.StatusForbidden, "Unsigned or unverifiable introduction", verr.Error())
 			return
 		}
