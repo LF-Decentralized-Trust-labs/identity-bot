@@ -101,13 +101,43 @@ func (s *CoreServer) handleSealedTransport(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// Freshness and replay, which this did not check at all.
+	//
+	// The sending side sets a two-minute expiry and says in a comment why: a
+	// long window is a long window in which a captured envelope can be
+	// replayed. It then went unread here, so the window was in fact forever —
+	// anyone who kept a copy of a sealed request could send it again, and a
+	// request that transfers something or changes something would happen again
+	// with it.
+	//
+	// Checked in the same order and against the same limits as an ordinary
+	// message, because a sealed request is not a weaker thing than a message.
+	exp, terr := time.Parse(time.RFC3339, jwm.ExpiresTime)
+	if terr != nil {
+		writeSealedError(w, http.StatusBadRequest, "this request does not say when it expires")
+		return
+	}
+	now := time.Now().UTC()
+	if !now.Before(exp) {
+		writeSealedError(w, http.StatusForbidden, "this request has expired")
+		return
+	}
+	if exp.After(now.Add(maxEnvelopeLifetime)) {
+		writeSealedError(w, http.StatusForbidden, "this request claims to be valid for too long")
+		return
+	}
+	if seenBefore(jwm.ID, exp) {
+		writeSealedError(w, http.StatusConflict, "this request has already been carried out")
+		return
+	}
+
 	var inner sealedRequest
 	if err := json.Unmarshal(jwm.Body, &inner); err != nil {
 		writeSealedError(w, http.StatusBadRequest, "the request inside could not be read")
 		return
 	}
 
-	rec, err := s.replaySealed(r, inner)
+	rec, err := s.replaySealed(r, inner, senderDID.AID)
 	if err != nil {
 		writeSealedError(w, http.StatusBadRequest, err.Error())
 		return
@@ -152,7 +182,7 @@ func (s *CoreServer) handleSealedTransport(w http.ResponseWriter, r *http.Reques
 // Through the router rather than a switch of its own, so that an endpoint
 // cannot be reachable through one door and not the other — which is how a
 // forgotten authorisation check becomes a way in.
-func (s *CoreServer) replaySealed(outer *http.Request, inner sealedRequest) (*httptest.ResponseRecorder, error) {
+func (s *CoreServer) replaySealed(outer *http.Request, inner sealedRequest, senderAID string) (*httptest.ResponseRecorder, error) {
 	if inner.Path == "" || inner.Path[0] != '/' {
 		return nil, fmt.Errorf("the request inside names no path")
 	}
@@ -181,12 +211,30 @@ func (s *CoreServer) replaySealed(outer *http.Request, inner sealedRequest) (*ht
 		switch http.CanonicalHeaderKey(k) {
 		case "Authorization", "Cookie", "Host", "Connection", "Content-Length":
 			continue
+		case headerSealedFrom:
+			// Set below from the envelope, which is the only thing that
+			// establishes who sent this. A caller-supplied copy would let them
+			// name themselves.
+			continue
 		}
 		req.Header.Set(k, v)
 	}
-	// The caller's real address, for anything that rate limits. Taken from the
-	// outer connection, because the inside is written by the caller.
-	req.RemoteAddr = outer.RemoteAddr
+	// A sealed request is NEVER a local request, whatever address it arrived on.
+	//
+	// This took the outer connection's address, which is right for rate limiting
+	// and catastrophic for authorisation. An agent on rented hardware is reached
+	// through a tunnel client that connects to it over loopback — so the outer
+	// address is 127.0.0.1 — and ownership here is "loopback, and no forwarding
+	// headers". The sender writes the inner headers, so they simply omit the
+	// forwarding ones, and every registered peer's request would be served as
+	// the owner. The deployment that made it exploitable is the one this
+	// transport was built for.
+	//
+	// So the inner request is marked as what it is: something that arrived from
+	// somewhere else. Rate limiting keeps a usable address in a header, which is
+	// not what ownership is decided on.
+	req.RemoteAddr = sealedRemoteAddr
+	req.Header.Set(headerSealedFrom, senderAID)
 
 	rec := httptest.NewRecorder()
 	s.router.ServeHTTP(rec, req)
@@ -239,6 +287,17 @@ func (s *CoreServer) sealedParties(env *didcomm.Envelope) (*didcomm.DID, *didcom
 
 // sealedTransportPath is where envelopes arrive.
 const sealedTransportPath = "/api/sealed"
+
+// sealedRemoteAddr is the address a replayed request appears to come from.
+//
+// Deliberately not loopback and deliberately not routable: it exists to be
+// unmistakably "not local" to anything deciding authority, while still being a
+// parseable address for anything that only wants to log or count.
+const sealedRemoteAddr = "192.0.2.1:0"
+
+// headerSealedFrom names the peer whose envelope carried a request, set from
+// the envelope and stripped from anything the caller sent.
+const headerSealedFrom = "X-IA-Sealed-From"
 
 func writeSealedError(w http.ResponseWriter, status int, detail string) {
 	w.Header().Set("Content-Type", "application/json")

@@ -74,6 +74,7 @@ func TestASealedRequestCannotCarryAnother(t *testing.T) {
 	_, err := s.replaySealed(
 		httptest.NewRequest(http.MethodPost, "/", nil),
 		sealedRequest{Method: "POST", Path: sealedTransportPath},
+		"EPEER",
 	)
 	if err == nil {
 		t.Fatal("a sealed request was allowed to carry another")
@@ -84,7 +85,7 @@ func TestARequestWithNoPathIsRefused(t *testing.T) {
 	s := &CoreServer{DataDir: t.TempDir()}
 	for _, path := range []string{"", "api/health", "http://elsewhere/x"} {
 		if _, err := s.replaySealed(httptest.NewRequest(http.MethodPost, "/", nil),
-			sealedRequest{Method: "GET", Path: path}); err == nil {
+			sealedRequest{Method: "GET", Path: path}, "EPEER"); err == nil {
 			t.Errorf("path %q was accepted", path)
 		}
 	}
@@ -106,7 +107,7 @@ func TestTheCarriedRequestMeetsTheOrdinaryRouter(t *testing.T) {
 	s.router = mux
 
 	rec, err := s.replaySealed(httptest.NewRequest(http.MethodPost, "/", nil),
-		sealedRequest{Method: "GET", Path: "/api/probe"})
+		sealedRequest{Method: "GET", Path: "/api/probe"}, "EPEER")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +139,7 @@ func TestCredentialsInsideTheEnvelopeAreDropped(t *testing.T) {
 			"Cookie":        "session=theirs",
 			"X-Ordinary":    "kept",
 		},
-	}); err != nil {
+	}, "EPEER"); err != nil {
 		t.Fatal(err)
 	}
 	if got.Get("Authorization") != "" {
@@ -171,7 +172,7 @@ func TestTheBodyIsCarriedByteForByte(t *testing.T) {
 		Method:  "POST",
 		Path:    "/api/probe",
 		BodyB64: base64.StdEncoding.EncodeToString(want),
-	}); err != nil {
+	}, "EPEER"); err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(got, want) {

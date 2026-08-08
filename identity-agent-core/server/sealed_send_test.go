@@ -131,3 +131,58 @@ func TestTheDoorCannotCarryItself(t *testing.T) {
 		}
 	}
 }
+
+// A sealed request is never a local request, whatever address it arrived on.
+//
+// This is the shape of the escalation: an agent on rented hardware is reached
+// through a tunnel client that connects over loopback, so the OUTER address is
+// 127.0.0.1. Ownership is "loopback and no forwarding headers", and the sender
+// writes the inner headers — so they simply omit the forwarding ones and every
+// registered peer's request would be served as the owner. The deployment that
+// made it exploitable is the one this transport exists for.
+func TestASealedRequestIsNeverTreatedAsLocal(t *testing.T) {
+	s := &CoreServer{DataDir: t.TempDir()}
+	var sawOwner bool
+	mux := chi.NewRouter()
+	mux.Get("/api/probe", func(w http.ResponseWriter, r *http.Request) {
+		sawOwner = isLocalOwnerRequest(r)
+		w.WriteHeader(http.StatusOK)
+	})
+	s.router = mux
+
+	// The outer connection arrives on loopback, exactly as it does behind a tunnel.
+	outer := httptest.NewRequest(http.MethodPost, sealedTransportPath, nil)
+	outer.RemoteAddr = "127.0.0.1:41000"
+
+	if _, err := s.replaySealed(outer, sealedRequest{
+		Method: "GET", Path: "/api/probe",
+		// No forwarding headers, because the sender chooses not to send any.
+	}, "EPEER"); err != nil {
+		t.Fatal(err)
+	}
+	if sawOwner {
+		t.Fatal("a peer's sealed request was served as the owner")
+	}
+}
+
+// And the sender must not be able to name themselves.
+func TestAPeerCannotAssertWhoSentTheRequest(t *testing.T) {
+	s := &CoreServer{DataDir: t.TempDir()}
+	var saw string
+	mux := chi.NewRouter()
+	mux.Get("/api/probe", func(w http.ResponseWriter, r *http.Request) {
+		saw = r.Header.Get(headerSealedFrom)
+		w.WriteHeader(http.StatusOK)
+	})
+	s.router = mux
+
+	if _, err := s.replaySealed(httptest.NewRequest(http.MethodPost, "/", nil), sealedRequest{
+		Method: "GET", Path: "/api/probe",
+		Header: map[string]string{headerSealedFrom: "ESOMEBODY-IMPORTANT"},
+	}, "EREAL-SENDER"); err != nil {
+		t.Fatal(err)
+	}
+	if saw != "EREAL-SENDER" {
+		t.Errorf("the request claims to be from %q — the sender named themselves", saw)
+	}
+}
