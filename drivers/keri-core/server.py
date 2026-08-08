@@ -1445,6 +1445,9 @@ def _validate_kel_events(kel_events: list, aid: str = "") -> dict:
     """
     errors = []
     current_key_qb64 = None
+    # The successor digests the most recent accepted event committed to. A
+    # rotation is checked against this, never against its own contents.
+    next_digests = []
     events_validated = 0
 
     if not kel_events:
@@ -1526,6 +1529,11 @@ def _validate_kel_events(kel_events: list, aid: str = "") -> dict:
             except Exception as e:
                 errors.append(f"sn={i}: hash chain check failed: {e}")
 
+        # What THIS event commits to as its successor, read after the checks
+        # below so a rotation is compared against the previous event's promise
+        # rather than its own.
+        this_next = event_dict.get("n", []) or []
+
         # Determine signing key for this event type
         if event_type == "icp":
             # Inception: signed with the inception key (first key in 'k' list)
@@ -1539,6 +1547,41 @@ def _validate_kel_events(kel_events: list, aid: str = "") -> dict:
             # Rotation: signed with the newly revealed pre-rotated key (first key in 'k' list)
             keys_list = event_dict.get("k", [])
             signing_key_qb64 = keys_list[0] if keys_list else record.get("public_key", "")
+
+            # Pre-rotation, which was not being checked at all.
+            #
+            # KERI's central protection is that each event commits IN ADVANCE to
+            # a digest of the key that may replace it. A rotation is legitimate
+            # only if the key it reveals is the key the previous event already
+            # promised. Without this check a rotation can name any key, so
+            # anybody able to append an event can take the identity — and the
+            # commitment that makes KERI worth using is decorative.
+            #
+            # The digest is computed by keripy, not reimplemented here: the
+            # comparison has to be against the exact bytes and derivation code
+            # the protocol specifies, and a hand-rolled version that is close
+            # but not identical fails open on exactly the events that matter.
+            _prior_next = (next_digests or [])
+            if not _prior_next:
+                errors.append(
+                    f"sn={i} ({event_type}): the previous event committed to no "
+                    f"successor key, so this rotation replaces a key nobody promised"
+                )
+            elif signing_key_qb64:
+                try:
+                    revealed = coring.Diger(
+                        ser=coring.Verfer(
+                            raw=_extract_raw_key(signing_key_qb64), code=MtrDex.Ed25519
+                        ).qb64b
+                    ).qb64
+                    if revealed not in _prior_next:
+                        errors.append(
+                            f"sn={i} ({event_type}): the key this rotation reveals is not "
+                            f"the one the previous event committed to"
+                        )
+                except Exception as e:
+                    errors.append(f"sn={i} ({event_type}): pre-rotation check failed: {e}")
+
             current_key_qb64 = signing_key_qb64
         else:
             signing_key_qb64 = current_key_qb64
@@ -1561,9 +1604,28 @@ def _validate_kel_events(kel_events: list, aid: str = "") -> dict:
                     events_validated += 1
             except Exception as e:
                 errors.append(f"sn={i} ({event_type}): signature check error: {e}")
+        elif not signing_key_qb64:
+            errors.append(
+                f"sn={i} ({event_type}): no key to check a signature against"
+            )
         else:
-            # No signature present — structural-only check passed
-            events_validated += 1
+            # An unsigned event used to count as validated, and the log still
+            # reported itself verified. That is the whole of the protection
+            # gone: append an unsigned rotation to somebody's genuine history
+            # and the key it names becomes their current key, because the
+            # current key is simply whatever the last accepted event says.
+            #
+            # Structure is not authenticity. An event nobody signed is an event
+            # anybody could have written.
+            errors.append(
+                f"sn={i} ({event_type}): event is unsigned, so nothing shows it "
+                f"came from the controller of {aid}"
+            )
+
+        # Carry this event's promise forward. An interaction changes no keys, so
+        # it leaves the standing commitment alone rather than clearing it.
+        if event_type in ("icp", "dip", "rot", "drt"):
+            next_digests = this_next
 
     return {
         "kel_verified": len(errors) == 0,
