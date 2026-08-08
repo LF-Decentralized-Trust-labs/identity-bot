@@ -41,6 +41,12 @@ type loginAsk struct{}
 
 func (loginAsk) Action() string { return "login" }
 
+// AskAuth: login establishes the asker itself, and more strictly than the base
+// layer could. verifyChallengeSig checks the challenge against the key the
+// site's own address publishes, and where the challenge claims an anchor,
+// verifyDelegationAnchor requires a delegated inception naming it.
+func (loginAsk) AskAuth() askAuth { return authSelfVerifying }
+
 func (loginAsk) Preview(s *CoreServer, ctx AskContext) (GenericPreview, error) {
 	if s.loginHandler == nil {
 		return GenericPreview{}, fmt.Errorf("login handler unavailable")
