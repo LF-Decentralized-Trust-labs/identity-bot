@@ -35,6 +35,32 @@ import (
 // again. Deriving and then checking the result against the public key the
 // identity actually published means a wrong index fails here, loudly, rather
 // than producing a signature nobody can verify.
+// identitySigningSeed recovers the seed for this agent's current signing key.
+//
+// Re-derived rather than stored: an identity records the branch its key came
+// from and how far along it, precisely so it can be found again. The result is
+// checked against the public key the identity actually published, so a wrong
+// index fails here rather than producing signatures nobody can verify.
+func (s *CoreServer) identitySigningSeed() ([]byte, error) {
+	identity, err := s.DataStore.GetIdentity()
+	if err != nil || identity == nil {
+		return nil, fmt.Errorf("this agent has no identity to sign as")
+	}
+	rootSeed, err := ensureRootSeed(s.DataDir)
+	if err != nil {
+		return nil, fmt.Errorf("no key material to sign with: %w", err)
+	}
+	seed, err := backup.DerivePairwiseSeed(rootSeed, identity.DerivationIndex, identity.KeyGeneration)
+	if err != nil {
+		return nil, fmt.Errorf("could not derive this identity's signing key: %w", err)
+	}
+	derived := iacrypto.VerkeyQB64(ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey))
+	if identity.PublicKey != "" && derived != identity.PublicKey {
+		return nil, fmt.Errorf("the derived key is not the one this identity published, so it was not used")
+	}
+	return seed, nil
+}
+
 func (s *CoreServer) signExchange(body any) (string, error) {
 	identity, err := s.DataStore.GetIdentity()
 	if err != nil || identity == nil {

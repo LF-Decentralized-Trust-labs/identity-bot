@@ -350,3 +350,7 @@ func ParseDIDForCheck(d *DID) (string, error) {
 	}
 	return d.AID, nil
 }
+
+// EncodeKeyForTest exposes the key encoding so a test in another package can
+// build a DID whose keys match an inception event.
+func EncodeKeyForTest(raw []byte) string { return b64.EncodeToString(raw) }

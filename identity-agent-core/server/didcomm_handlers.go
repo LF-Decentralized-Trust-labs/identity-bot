@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"identity-agent-core/didcomm"
+	"identity-agent-core/login"
 )
 
 // DIDComm wiring — the encrypted, mutually-authenticated IA-to-IA transport.
@@ -268,6 +269,27 @@ func (s *CoreServer) handleGetDIDCommDID(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		jsonError(w, "did error: "+err.Error(), http.StatusInternalServerError)
 		return
+	}
+
+	// Vouch for these keys with the identity's own signing key.
+	//
+	// Without this the keys are whatever this endpoint returned, and whoever
+	// answers it decides what a counterparty encrypts to. A signature ties them
+	// to the identifier instead: the receiving side checks it against the key
+	// that identifier's own history ends with, so substituting keys means
+	// substituting the identity.
+	//
+	// Best effort at this layer. An agent that cannot sign — because the key
+	// lives on a device that is not this one — still publishes its keys, and
+	// the receiving side decides what an unvouched-for set is worth. Refusing
+	// here would take an agent off the air for a reason its counterparties
+	// cannot see.
+	if seed, serr := s.identitySigningSeed(); serr == nil {
+		if sig, kerr := login.SignString(string(did.SigningInput()), seed); kerr == nil {
+			did.KelSig = sig
+		} else {
+			log.Printf("[didcomm] could not vouch for this agent's keys: %v", kerr)
+		}
 	}
 	jsonResponse(w, did)
 }

@@ -6,7 +6,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"crypto/ed25519"
 	"identity-agent-core/didcomm"
+	"identity-agent-core/iacrypto"
+	"identity-agent-core/login"
 	"identity-agent-core/store"
 )
 
@@ -36,6 +39,20 @@ func TestAnAcceptedContactCanReachUsFirst(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A real agent vouches for its own encryption keys with the signing key its
+	// identity publishes, and keys that are not tied to an identifier are now
+	// refused. So the stand-in has to do what a real one does.
+	theirSeed := make([]byte, ed25519.SeedSize)
+	for i := range theirSeed {
+		theirSeed[i] = byte(i + 3)
+	}
+	theirVerkey := iacrypto.VerkeyQB64(ed25519.NewKeyFromSeed(theirSeed).Public().(ed25519.PublicKey))
+	sig, serr := login.SignString(string(did.SigningInput()), theirSeed)
+	if serr != nil {
+		t.Fatal(serr)
+	}
+	did.KelSig = sig
+
 	theirAgent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/didcomm/did" || r.URL.Query().Get("aid") != "EKNOWN" {
 			http.NotFound(w, r)
@@ -47,8 +64,9 @@ func TestAnAcceptedContactCanReachUsFirst(t *testing.T) {
 
 	if err := s.DataStore.SaveContact(store.ContactRecord{
 		AID: "EKNOWN", Alias: "somebody we accepted",
-		OobiURL: theirAgent.URL + "/public/oobi/EKNOWN?role=controller",
-		Status:  "accepted",
+		OobiURL:   theirAgent.URL + "/public/oobi/EKNOWN?role=controller",
+		Status:    "accepted",
+		PublicKey: theirVerkey,
 	}); err != nil {
 		t.Fatal(err)
 	}
