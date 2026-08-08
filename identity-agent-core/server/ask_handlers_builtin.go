@@ -242,6 +242,13 @@ func (s *CoreServer) sendIntroduction(remoteBase string, actionCode int) {
 	if photo != "" {
 		payload["sender_photo"] = photo
 	}
+	// Signed, or the other side has nothing to check us against and will
+	// rightly refuse.
+	if sig, serr := s.signExchange(payload); serr == nil {
+		payload["sig"] = sig
+	} else {
+		log.Printf("[exchange] could not sign the introduction (%v) — the other agent will refuse it", serr)
+	}
 	body, _ := json.Marshal(payload)
 	client := &http.Client{Timeout: 15 * time.Second}
 	if resp, perr := client.Post(remoteBase+"/api/exchange", "application/json", bytes.NewReader(body)); perr == nil {

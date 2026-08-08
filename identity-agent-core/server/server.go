@@ -3403,6 +3403,11 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
 		if photo != "" {
 			payload["sender_photo"] = photo
 		}
+		if sig, serr := s.signExchange(payload); serr == nil {
+			payload["sig"] = sig
+		} else {
+			log.Printf("[exchange] could not sign the introduction (%v) — the other agent will refuse it", serr)
+		}
 		body, _ := json.Marshal(payload)
 
 		exnClient := &http.Client{Timeout: 15 * time.Second}
@@ -3458,8 +3463,14 @@ func (s *CoreServer) handleExchange(w http.ResponseWriter, r *http.Request) {
 		SenderPublicKey string       `json:"sender_public_key"`
 		SenderJCard     *store.JCard `json:"sender_jcard,omitempty"`
 		SenderPhoto     string       `json:"sender_photo,omitempty"`
+		Sig             string       `json:"sig,omitempty"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	raw, rerr := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if rerr != nil {
+		writeError(w, http.StatusBadRequest, "Could not read the request", rerr.Error())
+		return
+	}
+	if err := json.Unmarshal(raw, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
 		return
 	}
@@ -3470,7 +3481,20 @@ func (s *CoreServer) handleExchange(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		existing, _ := s.DataStore.GetContact(req.SenderAID)
-		if existing != nil && (existing.Status == "pending_outbound" || existing.Status == "pending_inbound") {
+		// Signed by the key we recorded when we resolved them. An acceptance
+		// moves a contact to the status that later authorises fetching their
+		// encryption keys, so taking the sender's word for who they are is
+		// enough on its own to have somebody else's keys installed.
+		if existing == nil {
+			writeError(w, http.StatusForbidden, "Unknown sender",
+				"this agent has no record of that identity, so it cannot check who sent this")
+			return
+		}
+		if verr := verifyExchangeSignature(raw, req.Sig, existing.PublicKey); verr != nil {
+			writeError(w, http.StatusForbidden, "Unsigned or unverifiable acceptance", verr.Error())
+			return
+		}
+		if existing.Status == "pending_outbound" || existing.Status == "pending_inbound" {
 			existing.Status = "accepted"
 			s.DataStore.SaveContact(*existing)
 			log.Printf("[identity-agent-core] EXCHANGE: Acceptance received — contact %s upgraded to accepted", req.SenderAID)
@@ -3498,7 +3522,14 @@ func (s *CoreServer) handleExchange(w http.ResponseWriter, r *http.Request) {
 	}
 
 	existing, _ := s.DataStore.GetContact(req.SenderAID)
+	// Where this agent already knows the sender it checks the introduction
+	// against the key it recorded, before any status moves. That branch used to
+	// upgrade a contact to accepted on nothing but a claimed identifier.
 	if existing != nil {
+		if verr := verifyExchangeSignature(raw, req.Sig, existing.PublicKey); verr != nil {
+			writeError(w, http.StatusForbidden, "Unsigned or unverifiable introduction", verr.Error())
+			return
+		}
 		if existing.Status == "accepted" {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]string{"status": "already_accepted", "aid": req.SenderAID})
@@ -3527,6 +3558,7 @@ func (s *CoreServer) handleExchange(w http.ResponseWriter, r *http.Request) {
 	oobiResp, err := client.Get(req.SenderOOBI)
 	oobiReachable := false
 	kelPresent := false
+	oobiPublicKey := ""
 	var oobiErrorMsg string
 
 	if err != nil {
@@ -3536,11 +3568,13 @@ func (s *CoreServer) handleExchange(w http.ResponseWriter, r *http.Request) {
 		defer oobiResp.Body.Close()
 		if oobiResp.StatusCode == http.StatusOK {
 			var oobiBody struct {
-				AID string      `json:"aid"`
-				KEL interface{} `json:"kel"`
+				AID       string      `json:"aid"`
+				PublicKey string      `json:"public_key"`
+				KEL       interface{} `json:"kel"`
 			}
 			if err := json.NewDecoder(oobiResp.Body).Decode(&oobiBody); err == nil {
 				oobiReachable = true
+				oobiPublicKey = oobiBody.PublicKey
 				if events, ok := oobiBody.KEL.([]interface{}); ok && len(events) > 0 {
 					kelPresent = true
 					log.Printf("[identity-agent-core] EXCHANGE: OOBI resolved — AID=%s, KEL events=%d", oobiBody.AID, len(events))
@@ -3552,6 +3586,16 @@ func (s *CoreServer) handleExchange(w http.ResponseWriter, r *http.Request) {
 			oobiErrorMsg = fmt.Sprintf("OOBI returned status %d", oobiResp.StatusCode)
 			log.Printf("[identity-agent-core] EXCHANGE: OOBI returned non-200: %d", oobiResp.StatusCode)
 		}
+	}
+
+	// A sender this agent has never seen: the key comes from the address they
+	// published, which is the same address everything else about them is taken
+	// from. Weaker than a key already on file — it establishes that whoever
+	// controls that address signed this, and the KEL check that follows is what
+	// establishes the address belongs to the identifier.
+	if verr := verifyExchangeSignature(raw, req.Sig, oobiPublicKey); verr != nil {
+		writeError(w, http.StatusForbidden, "Unsigned or unverifiable introduction", verr.Error())
+		return
 	}
 
 	alias := req.SenderAlias
@@ -3749,6 +3793,11 @@ func (s *CoreServer) handleAcceptContact(w http.ResponseWriter, r *http.Request)
 		payload := map[string]string{
 			"type":       "acceptance",
 			"sender_aid": ourIdentity.AID,
+		}
+		if sig, serr := s.signExchange(payload); serr == nil {
+			payload["sig"] = sig
+		} else {
+			log.Printf("[exchange] could not sign the acceptance (%v) — the other agent will refuse it", serr)
 		}
 		body, _ := json.Marshal(payload)
 
