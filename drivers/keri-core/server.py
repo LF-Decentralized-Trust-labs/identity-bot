@@ -1427,6 +1427,58 @@ def _witnesses_from_kel(kel: list) -> tuple:
     return wits, toad
 
 
+def _canonical_field_order(ilk: str) -> list:
+    """The order KERI serialises an event's fields in, for this event type.
+
+    A KERI event is ordered: the version string comes first and states the
+    length of what follows. Read from the library rather than written down here,
+    so a change in the protocol cannot leave a copy of the order behind.
+    """
+    fields = serdering.SerderKERI.Fields
+    proto = list(fields.keys())[0]
+    kind = list(fields[proto].keys())[0]
+    dom = fields[proto][kind].get(ilk)
+    return list(dom.alls.keys()) if dom is not None else []
+
+
+def _canonical_raw(record: dict, event_dict: dict) -> tuple:
+    """The event exactly as KERI serialised it: (raw, error).
+
+    Everything that checks an event needs these bytes — a signature covers them,
+    and the event's own identifier is a digest of them. They are not what we
+    store: an event that has been through any JSON encoder here comes back with
+    its keys in alphabetical order, which puts the version string last and makes
+    its stated length wrong. keripy refuses that outright, which is why
+    signature checking has been erroring rather than running.
+
+    Preferred from the record when it kept them. Otherwise rebuilt by putting
+    the fields back in the order the protocol defines, which recovers every
+    event written before they were kept — no migration, and no window where
+    existing identities cannot be checked.
+    """
+    stored = record.get("raw_bytes_b64") or ""
+    if stored:
+        try:
+            return base64.b64decode(stored), ""
+        except Exception as e:
+            return None, f"the canonical bytes kept for this event are not valid base64: {e}"
+
+    ilk = event_dict.get("t", "")
+    order = _canonical_field_order(ilk)
+    if not order:
+        return None, f"there is no known field order for a {ilk!r} event"
+    missing = [k for k in event_dict if k not in order]
+    if missing:
+        # A field the protocol does not define cannot be placed, and guessing
+        # where it goes would produce bytes that are confidently wrong.
+        return None, f"the event carries fields the protocol does not define: {missing}"
+    ordered = {k: event_dict[k] for k in order if k in event_dict}
+    try:
+        return serdering.SerderKERI(sad=ordered).raw, ""
+    except Exception as e:
+        return None, f"the event could not be serialised as KERI: {e}"
+
+
 def _validate_kel_events(kel_events: list, aid: str = "") -> dict:
     """Validate a KEL (list of event record dicts) for hash chain integrity and signatures.
 
@@ -1539,6 +1591,35 @@ def _validate_kel_events(kel_events: list, aid: str = "") -> dict:
             except Exception as e:
                 errors.append(f"sn={i}: hash chain check failed: {e}")
 
+        # Does this event's identifier belong to this event?
+        #
+        # A SAID is a digest of the event it sits inside, and until now nothing
+        # recomputed it — the chain check compares each event's `p` to the
+        # previous event's `d`, which is a different question and one a forger
+        # writing the whole log answers for itself.
+        #
+        # It matters most for what sits on top. A witness receipt is a signature
+        # over this identifier, so without this the receipt attests to a digest
+        # nobody checked, and one taken from a real event could be attached to a
+        # fabricated one claiming the same `d`.
+        claimed_said = event_dict.get("d", "")
+        canonical_bytes, canon_err = _canonical_raw(record, event_dict)
+        if canonical_bytes is None:
+            errors.append(f"sn={i} ({event_type}): {canon_err}")
+        elif not claimed_said:
+            errors.append(f"sn={i} ({event_type}): the event states no identifier of its own")
+        else:
+            try:
+                recomputed = serdering.SerderKERI(raw=canonical_bytes).said
+            except Exception as e:
+                recomputed = None
+                errors.append(f"sn={i} ({event_type}): the event's own bytes are not a valid KERI event: {e}")
+            if recomputed is not None and recomputed != claimed_said:
+                errors.append(
+                    f"sn={i} ({event_type}): the event claims the identifier {claimed_said} "
+                    f"but its contents digest to {recomputed}, so it has been altered"
+                )
+
         # Who is designated to witness, as of this event.
         #
         # Read before the receipts are counted, so an event that changes the
@@ -1631,15 +1712,17 @@ def _validate_kel_events(kel_events: list, aid: str = "") -> dict:
         cesr_sig = record.get("cesr_signature", "")
         if cesr_sig and signing_key_qb64:
             try:
-                # Re-serialize the event dict through keripy to get canonical raw bytes
-                # SerderKERI, not coring.Serder: the latter does not exist in
-                # keri 1.1.17, so this raised on every event and signature
-                # checking has been failing closed rather than running.
-                serder = serdering.SerderKERI(sad=event_dict)
+                # The bytes a signature actually covers, which are not the bytes
+                # we store. Passing the stored form straight to keripy raised on
+                # every event, so signature checking was failing closed rather
+                # than running — an error message where a verification should be.
+                canonical, raw_err = _canonical_raw(record, event_dict)
+                if canonical is None:
+                    raise ValueError(raw_err)
                 cigar = coring.Cigar(qb64=cesr_sig)
                 raw_key = _extract_raw_key(signing_key_qb64)
                 verfer = coring.Verfer(raw=raw_key, code=MtrDex.Ed25519)
-                if not verfer.verify(sig=cigar.raw, ser=serder.raw):
+                if not verfer.verify(sig=cigar.raw, ser=canonical):
                     errors.append(f"sn={i} ({event_type}): signature verification FAILED")
                 else:
                     events_validated += 1

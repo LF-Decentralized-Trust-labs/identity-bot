@@ -1164,6 +1164,7 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 		PublicKey:      result.PublicKey,
 		NextKeyDigest:  result.NextKeyDigest,
 		Timestamp:      now,
+		RawBytesB64:    result.RawBytesB64,
 		CesrSignature:  req.CesrSignature,
 	}
 	if err := s.DataStore.SaveEvent(eventRecord); err != nil {
@@ -1345,6 +1346,7 @@ func (s *CoreServer) handleRotation(w http.ResponseWriter, r *http.Request) {
 		PublicKey:      result.NewPublicKey,
 		NextKeyDigest:  result.NewNextKeyDigest,
 		Timestamp:      now,
+		RawBytesB64:    result.RawBytesB64,
 		CesrSignature:  req.CesrSignature,
 	}
 	if err := s.DataStore.SaveEvent(eventRecord); err != nil {
@@ -1403,6 +1405,7 @@ func (s *CoreServer) handleInteract(w http.ResponseWriter, r *http.Request) {
 		EventJSON:      string(eventJSON),
 		Timestamp:      now,
 		CesrSignature:  req.CesrSignature,
+		RawBytesB64:    result.RawBytesB64,
 	}
 	if err := s.DataStore.SaveEvent(eventRecord); err != nil {
 		log.Printf("[identity-agent-core] Warning: failed to persist IXN event: %v", err)
@@ -1688,6 +1691,7 @@ func (s *CoreServer) handleIssueCredential(w http.ResponseWriter, r *http.Reques
 		NextKeyDigest:  identity.NextKeyDigest,
 		Timestamp:      time.Now().UTC().Format(time.RFC3339),
 		CesrSignature:  req.CesrSignature,
+		RawBytesB64:    result.IxnRawBytesB64,
 	}
 	if err := s.DataStore.SaveEvent(kelRecord); err != nil {
 		log.Printf("[identity-agent-core] CREDENTIAL: Failed to persist IXN event for credential %s: %v", result.AcdcSaid, err)
