@@ -354,3 +354,30 @@ func ParseDIDForCheck(d *DID) (string, error) {
 // EncodeKeyForTest exposes the key encoding so a test in another package can
 // build a DID whose keys match an inception event.
 func EncodeKeyForTest(raw []byte) string { return b64.EncodeToString(raw) }
+
+// MatchesAnchoredSigningKeys checks the signature half of a DID against what an
+// identifier committed to.
+//
+// The companion to MatchesAnchoredKeys. Kept separate because the two halves
+// can be committed at different times: an identifier founded before signing
+// keys were anchored has the agreement pair and not these, and that is a
+// weaker position rather than a broken one.
+func (d *DID) MatchesAnchoredSigningKeys(ed25519Pub, mldsa65Pub []byte) error {
+	got, err := b64.DecodeString(d.Ed)
+	if err != nil {
+		return fmt.Errorf("the signing key offered is not valid base64url: %w", err)
+	}
+	if !bytes.Equal(got, ed25519Pub) {
+		return fmt.Errorf("the signing key offered for %s is not the one that identifier "+
+			"committed to", d.AID)
+	}
+	got, err = b64.DecodeString(d.Dsa)
+	if err != nil {
+		return fmt.Errorf("the post-quantum signing key offered is not valid base64url: %w", err)
+	}
+	if !bytes.Equal(got, mldsa65Pub) {
+		return fmt.Errorf("the post-quantum signing key offered for %s is not the one that "+
+			"identifier committed to", d.AID)
+	}
+	return nil
+}

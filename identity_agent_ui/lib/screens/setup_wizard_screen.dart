@@ -168,6 +168,16 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
       debugPrint('[SetupWizard] KeriService type: $serviceType');
       debugPrint('[SetupWizard] Bridge available: $bridgeAvailable, error: $bridgeError');
 
+      // The seed goes across BEFORE the identity is founded, not after.
+      //
+      // Founding derives the messaging keys other agents encrypt to this
+      // identity with, and writes them into the event the identifier is derived
+      // from — so they must come from the recovery phrase, or the phrase
+      // restores an identity that can prove who it is and can never be sent
+      // anything. The core has nothing to derive them from until this call, and
+      // it refuses to found an identity on keys it cannot reproduce.
+      await RootSeedHandoff.register(_mnemonic, baseUrl: _coreBaseUrl);
+
       // Race inceptAid against a 15-second timeout so we can surface diagnostics
       final stopwatch = Stopwatch()..start();
       final result = await widget.keriService.inceptAid(
@@ -188,11 +198,6 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
 
       setState(() => _processingStep = 3);
       await SecureKeyStore.saveMnemonic(_mnemonic);
-
-      // Hand the mnemonic-derived BIP39 seed to the local core: HD-derived keys
-      // (pairwise contacts, logins, assets, audit, credential vault) then share
-      // the identity's single root of trust — the phrase alone recovers all.
-      await RootSeedHandoff.register(_mnemonic, baseUrl: _coreBaseUrl);
 
       // Profile is saved in _submitProfile() after the user fills it in
       setState(() => _processingStep = 4);

@@ -57,7 +57,7 @@ func fakeInceptionDriver(t *testing.T, aid string, seen *map[string]interface{})
 // at its word.
 func TestAFoundedIdentityCommitsToTheKeysItPublishes(t *testing.T) {
 	const aid = "EFoundedHere"
-	s := witnessWithStore(t)
+	s := witnessWithSeed(t, 1)
 	var sent map[string]interface{}
 	s.KeriDriver = fakeInceptionDriver(t, aid, &sent)
 
@@ -97,7 +97,7 @@ func TestAFoundedIdentityCommitsToTheKeysItPublishes(t *testing.T) {
 // a counterparty runs.
 func TestAFoundedIdentityPassesThePeerKeyCheckAsAnchored(t *testing.T) {
 	const aid = "EFoundedHere2"
-	s := witnessWithStore(t)
+	s := witnessWithSeed(t, 1)
 	var sent map[string]interface{}
 	s.KeriDriver = fakeInceptionDriver(t, aid, &sent)
 
@@ -127,7 +127,7 @@ func TestAFoundedIdentityPassesThePeerKeyCheckAsAnchored(t *testing.T) {
 // otherwise the anchor is decoration.
 func TestSubstitutedKeysAreRefusedAgainstAnAnchoredIdentity(t *testing.T) {
 	const aid = "EFoundedHere3"
-	s := witnessWithStore(t)
+	s := witnessWithSeed(t, 1)
 	var sent map[string]interface{}
 	s.KeriDriver = fakeInceptionDriver(t, aid, &sent)
 
@@ -138,7 +138,7 @@ func TestSubstitutedKeysAreRefusedAgainstAnAnchoredIdentity(t *testing.T) {
 	}
 
 	// Somebody else's keys, offered under this identifier.
-	other := witnessWithStore(t)
+	other := witnessWithSeed(t, 9)
 	other.KeriDriver = fakeInceptionDriver(t, "EImpostor", nil)
 	if w := inceptionRequest(t, other, map[string]any{
 		"public_key": "Dpub", "next_public_key": "Dnext",
@@ -164,7 +164,7 @@ func TestSubstitutedKeysAreRefusedAgainstAnAnchoredIdentity(t *testing.T) {
 // withdraw the commitment.
 func TestTheMessagingKeysSurviveTheFoundingRequest(t *testing.T) {
 	const aid = "EFoundedHere4"
-	s := witnessWithStore(t)
+	s := witnessWithSeed(t, 1)
 	s.KeriDriver = fakeInceptionDriver(t, aid, nil)
 
 	if w := inceptionRequest(t, s, map[string]any{

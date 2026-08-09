@@ -21,7 +21,6 @@ import (
 	"identity-agent-core/asset"
 	"identity-agent-core/avatar"
 	"identity-agent-core/backup"
-	"identity-agent-core/didcomm"
 	"identity-agent-core/drivers"
 	"identity-agent-core/endpoint"
 	"identity-agent-core/iacrypto"
@@ -1120,9 +1119,12 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 	// Minted before the identity exists because the identifier depends on it.
 	// The keyset carries the AID only as a label, so it is generated unlabelled
 	// and filed under the identifier once the identifier is known.
-	messagingKeys, err := didcomm.GenerateKeySet("")
+	// Derived from the agent's root seed, never drawn at random: the recovery
+	// phrase has to be able to bring these back, or restoring an identity
+	// produces one that can prove who it is and can never be sent anything.
+	messagingKeys, keyIndex, err := s.deriveMessagingKeys("")
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Could not create this identity's messaging keys", err.Error())
+		writeError(w, http.StatusInternalServerError, "Could not derive this identity's messaging keys", err.Error())
 		return
 	}
 	kemPub, err := messagingKeys.KemPub.MarshalBinary()
@@ -1130,7 +1132,13 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "Could not encode this identity's messaging keys", err.Error())
 		return
 	}
-	keyAnchor, err := iacrypto.AgreementKeyAnchor(messagingKeys.XPub[:], kemPub)
+	dsaPub, err := messagingKeys.DsaPub.MarshalBinary()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Could not encode this identity's messaging keys", err.Error())
+		return
+	}
+	keyAnchor, err := iacrypto.KeySetAnchor(
+		messagingKeys.XPub[:], kemPub, messagingKeys.EdPub, dsaPub)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Could not commit to this identity's messaging keys", err.Error())
 		return
@@ -1152,6 +1160,12 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError,
 			"The identity's messaging keys could not be saved", err.Error())
 		return
+	}
+	// Now that the identifier exists, record which identity the branch belongs
+	// to. Restoring needs the branch; knowing whose it is makes a mismatch
+	// visible instead of quietly producing the wrong keys.
+	if err := s.recordMessagingKeyIndex(result.AID, keyIndex); err != nil {
+		log.Printf("[identity-agent-core] INCEPTION: %v", err)
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)

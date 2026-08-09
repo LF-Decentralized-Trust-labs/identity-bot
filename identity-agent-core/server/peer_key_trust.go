@@ -62,6 +62,25 @@ func checkPeerKeys(did *didcomm.DID, kelEvents []map[string]interface{}, current
 				return peerKeysUntied, fmt.Errorf("the keys offered for %s are not the ones that "+
 					"identifier commits to: %w", did.AID, merr)
 			}
+			// The signing keys too, where the identifier commits to them.
+			//
+			// Confidentiality and authenticity are separate halves of the same
+			// keyset, and checking only the first accepts a set whose signing
+			// keys belong to somebody else. Absent means the identifier predates
+			// committing to them, which is weaker rather than wrong, so it does
+			// not refuse — but a set that IS committed to and does not match is
+			// refused, because that is substitution rather than age.
+			ed, dsa, serr := iacrypto.AnchoredSigningKeys(kelEvents[0])
+			switch {
+			case serr == nil:
+				if merr := did.MatchesAnchoredSigningKeys(ed, dsa); merr != nil {
+					return peerKeysUntied, fmt.Errorf("the signing keys offered for %s are not "+
+						"the ones that identifier commits to: %w", did.AID, merr)
+				}
+			case !isNotAnchored(serr):
+				return peerKeysUntied, fmt.Errorf("this identifier's committed signing keys "+
+					"are unusable: %w", serr)
+			}
 			return peerKeysAnchored, nil
 		case !isNotAnchored(err):
 			// An anchor that exists and will not parse is a different thing

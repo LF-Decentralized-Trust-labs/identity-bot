@@ -135,6 +135,28 @@ func KeyFromNonTransferableAID(aid string) ([]byte, error) {
 	return raw[1:], nil
 }
 
+// KeyFromVerkeyQB64 recovers the raw Ed25519 key from a CESR verfer (code "D").
+//
+// The inverse of VerkeyQB64. Separate from DecodeLargeFixed because the two
+// encodings differ in more than the code: a 1-character code pads by one byte
+// and replaces one leading character, where the 4-character provisional codes
+// are a straight prefix. Decoding one with the other's rules yields bytes that
+// are wrong rather than an error, which is the failure worth designing out.
+func KeyFromVerkeyQB64(qb64 string) ([]byte, error) {
+	const code = "D"
+	if len(qb64) != 44 || qb64[:1] != code {
+		return nil, fmt.Errorf("%q is not a CESR Ed25519 verifying key", qb64)
+	}
+	raw, err := base64.RawURLEncoding.DecodeString("A" + qb64[1:])
+	if err != nil {
+		return nil, fmt.Errorf("verifying key is not valid base64url: %w", err)
+	}
+	if len(raw) != 33 {
+		return nil, fmt.Errorf("expected 32 key bytes, got %d", len(raw)-1)
+	}
+	return raw[1:], nil
+}
+
 // VerkeyQB64 encodes a raw Ed25519 public key as a CESR qb64 verfer (code "D"). Use this for
 // keys passed to the KERI driver's inception endpoints: the driver's _extract_raw_key reads a
 // leading "B"/"D" as a CESR code, so a raw base64 key that happens to start with B/D is

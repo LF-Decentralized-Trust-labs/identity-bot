@@ -20,19 +20,30 @@ import (
 // the identifier. There is nothing to intercept, because there is nothing to
 // fetch.
 
-// AgreementKeyAnchor builds the seal an inception event carries so that the
-// identifier commits to the keys people will encrypt to it with.
+// KeySetAnchor builds the seal an inception event carries so that the
+// identifier commits to the keys an identity is reached and authenticated on.
 //
 // This is the half that had never been written. The reader below has always
 // been able to find these keys; nothing put them there, so every identifier in
 // existence answered "not anchored" and every counterparty had to fetch the
 // keys from the agent and take its word for them.
 //
-// The order matters and is not alphabetical: the classical key first, the
-// post-quantum key second, matching what the reader expects positionally. Both
-// carry their own type code, so a reader that checks the code — as ours does —
-// catches a swapped pair rather than decoding one as the other.
-func AgreementKeyAnchor(x25519, mlkem768 []byte) (map[string]interface{}, error) {
+// All four, not the agreement pair alone. Committing only the keys used to
+// encrypt leaves the keys used to SIGN uncommitted, which means a counterparty
+// can be handed a set where the confidentiality half belongs to the identifier
+// and the authenticity half belongs to somebody else. Nothing in the envelope
+// as it stands can be forged that way, because sender authentication rests on
+// the agreement key — but "safe given how it is used today" is a property of
+// the current caller rather than of the commitment, and the cost of committing
+// all four is nothing while an identity is being founded and a migration
+// afterwards.
+//
+// Two lists rather than one, because they answer different questions: `ka` is
+// what to encrypt to, `sa` is what verifies a signature. Order within each is
+// fixed — classical first, post-quantum second — and each key carries its own
+// type code, so a reader that checks the code catches a swapped pair rather
+// than decoding one as the other.
+func KeySetAnchor(x25519, mlkem768, ed25519Pub, mldsa65Pub []byte) (map[string]interface{}, error) {
 	x, err := EncodeLargeFixed(CESRX25519Pubkey, x25519, X25519PubkeyBytes)
 	if err != nil {
 		return nil, fmt.Errorf("agreement key: %w", err)
@@ -41,10 +52,48 @@ func AgreementKeyAnchor(x25519, mlkem768 []byte) (map[string]interface{}, error)
 	if err != nil {
 		return nil, fmt.Errorf("encapsulation key: %w", err)
 	}
+	ed := VerkeyQB64(ed25519Pub)
+	if ed == "" || len(ed25519Pub) != Ed25519PubkeyBytes {
+		return nil, fmt.Errorf("expected a %d-byte signing key, got %d", Ed25519PubkeyBytes, len(ed25519Pub))
+	}
+	dsa, err := EncodeLargeFixed(CESRMLDSA65Verkey, mldsa65Pub, MLDSA65VerkeyBytes)
+	if err != nil {
+		return nil, fmt.Errorf("post-quantum signing key: %w", err)
+	}
 	return map[string]interface{}{
 		"ia": CipherSuiteIAHybrid1,
 		"ka": []string{x, k},
+		"sa": []string{ed, dsa},
 	}, nil
+}
+
+// AnchoredSigningKeys returns the signature keys an inception event commits to.
+//
+// ErrNotAnchored when the seal predates them, which is distinct from a seal
+// that has them and will not parse.
+func AnchoredSigningKeys(event map[string]interface{}) (ed25519Pub, mldsa65Pub []byte, err error) {
+	for _, seal := range anchorList(event["a"]) {
+		if suite, _ := seal["ia"].(string); suite != CipherSuiteIAHybrid1 {
+			continue
+		}
+		sa := keyList(seal["sa"])
+		if len(sa) == 0 {
+			return nil, nil, ErrNotAnchored
+		}
+		if len(sa) != 2 {
+			return nil, nil, fmt.Errorf("the signing-key anchor should hold exactly two keys, found %d", len(sa))
+		}
+		ed, derr := KeyFromVerkeyQB64(sa[0])
+		if derr != nil {
+			return nil, nil, fmt.Errorf("the anchored signing key is unusable: %w", derr)
+		}
+		dsa, derr := DecodeLargeFixed(CESRMLDSA65Verkey, sa[1], MLDSA65VerkeyBytes)
+		if derr != nil {
+			return nil, nil, fmt.Errorf("the anchored post-quantum signing key is unusable: %w", derr)
+		}
+		return ed, dsa, nil
+	}
+	return nil, nil, ErrNotAnchored
 }
 
 // ErrNotAnchored means the event carries no key-agreement anchor.
