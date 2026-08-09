@@ -702,6 +702,7 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		r.Delete("/share-actions/{id}", s.handleDeleteShareAction)
 
 		r.Post("/store/identity", s.handleStoreIdentity)
+		r.Post("/messaging-keys/prepare", s.handlePrepareMessagingKeys)
 		r.Post("/store/event", s.handleStoreEvent)
 		r.Post("/events/signature", s.handleAttachEventSignature)
 		r.Post("/store/receipt", s.handleStoreReceipt)
@@ -1279,6 +1280,16 @@ func (s *CoreServer) handleStoreIdentity(w http.ResponseWriter, r *http.Request)
 
 	log.Printf("[identity-agent-core] STORE: Identity saved - AID: %s", req.AID)
 
+	// The keys people encrypt to it with, derived from the same root seed as
+	// everything else. Without this an identity founded elsewhere has messaging
+	// keys minted at random on first use, which the recovery phrase cannot
+	// reproduce — so restoring it produces an identity that can prove who it is
+	// and can never be sent anything.
+	if err := s.fileMessagingKeysFor(req.AID); err != nil {
+		log.Printf("[identity-agent-core] STORE: could not derive messaging keys for %s: %v",
+			req.AID, err)
+	}
+
 	// Same guarantee on the mobile path, where inception happens in the Rust
 	// bridge and only the result is persisted here.
 	if _, aerr := s.ensureAvatar(); aerr != nil {
@@ -1312,6 +1323,9 @@ func (s *CoreServer) handleStoreEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf("[identity-agent-core] STORE: Event saved - AID: %s type: %s sn: %d", req.AID, req.EventType, req.SequenceNumber)
+	if req.EventType == "icp" || req.EventType == "dip" {
+		warnIfIdentityCommitsToNothing(req.AID, req.EventJSON)
+	}
 	s.broadcastWitnessEvent(req.AID, req.EventJSON)
 
 	w.Header().Set("Content-Type", "application/json")
