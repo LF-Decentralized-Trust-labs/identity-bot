@@ -54,7 +54,7 @@ def main(path):
 
     for c in doc["cases"]:
         cid, kind = c["id"], c["kind"]
-        if kind in ("inception", "rotation", "interaction", "property"):
+        if kind in ("inception", "rotation", "interaction", "delegation", "property"):
             if "raw_b64" in c.get("expect", {}):
                 failures += [f"{cid}: {p}" for p in check_serialisation(cid, c["expect"])]
                 checked += 1

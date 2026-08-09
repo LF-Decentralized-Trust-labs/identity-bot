@@ -20,14 +20,15 @@
     {
       "id": "icp/single-key/no-witnesses",
       "kind": "inception",
-      "why": "The simplest identity there is. If this one disagrees, nothing else can agree.",
+      "why": "The simplest identity there is. If this one disagrees, nothing else can agree. Single-key inception uses basic derivation: the identifier is the key itself (D\u2026), not a digest \u2014 an implementation that always digests produces identities nobody recognises.",
       "input": {
         "keys": [
           "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd"
         ],
         "next_digests": [
           "EEXekUYwyf4Blv1U_WFML7YliBR9GJXfl3osKtIevKQN"
-        ]
+        ],
+        "derivation": "basic"
       },
       "expect": {
         "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDEyYl8iLCJ0IjoiaWNwIiwiZCI6IkVOQTk5d0lMek1UZWhQVHZjcGVNbHJkLTZOd2tBZmw4TFZSRzZYNkh5Qk9TIiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIl0sIm50IjoiMSIsIm4iOlsiRUVYZWtVWXd5ZjRCbHYxVV9XRk1MN1lsaUJSOUdKWGZsM29zS3RJZXZLUU4iXSwiYnQiOiIwIiwiYiI6W10sImMiOltdLCJhIjpbXX0=",
@@ -55,9 +56,311 @@
       }
     },
     {
+      "id": "icp/2-keys/1-of-2",
+      "kind": "inception",
+      "why": "Multi-key inception uses self-addressing derivation: the identifier is a digest of the event (E\u2026), equal to the SAID. An implementation that uses basic derivation here, or that formats the threshold as a number rather than the string '1', produces an identity no peer will recognise.",
+      "input": {
+        "keys": [
+          "DA5TVyCZr5WjY07n37mbo05KDdddFeVo1WzmJ_TZYhrY",
+          "DH7R22OU_C7d-2kD2XYnfkkl7vmed-40fNBBo6TIgJ8X"
+        ],
+        "next_digests": [
+          "EAq-VmvsZt7JGhbUJISwxxW1FAu80Y_epHpbAdjytO9t",
+          "EN5I-dX2lzCM_V7ymnn1LwZztF3u3PBjQrSklCDr8ldO"
+        ],
+        "isith": "1",
+        "nsith": "1",
+        "derivation": "self-addressing"
+      },
+      "expect": {
+        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDE4OV8iLCJ0IjoiaWNwIiwiZCI6IkVISU02QTNSaDBOM0FXWF9DNG9ycm0tYW50dDRKaXJ1MWRzY1hELThKN1RpIiwiaSI6IkVISU02QTNSaDBOM0FXWF9DNG9ycm0tYW50dDRKaXJ1MWRzY1hELThKN1RpIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRBNVRWeUNacjVXalkwN24zN21ibzA1S0RkZGRGZVZvMVd6bUpfVFpZaHJZIiwiREg3UjIyT1VfQzdkLTJrRDJYWW5ma2tsN3ZtZWQtNDBmTkJCbzZUSWdKOFgiXSwibnQiOiIxIiwibiI6WyJFQXEtVm12c1p0N0pHaGJVSklTd3h4VzFGQXU4MFlfZXBIcGJBZGp5dE85dCIsIkVONUktZFgybHpDTV9WN3ltbm4xTHdaenRGM3UzUEJqUXJTa2xDRHI4bGRPIl0sImJ0IjoiMCIsImIiOltdLCJjIjpbXSwiYSI6W119",
+        "said": "EHIM6A3Rh0N3AWX_C4orrm-antt4Jiru1dscXD-8J7Ti",
+        "aid": "EHIM6A3Rh0N3AWX_C4orrm-antt4Jiru1dscXD-8J7Ti",
+        "event_readable": {
+          "v": "KERI10JSON000189_",
+          "t": "icp",
+          "d": "EHIM6A3Rh0N3AWX_C4orrm-antt4Jiru1dscXD-8J7Ti",
+          "i": "EHIM6A3Rh0N3AWX_C4orrm-antt4Jiru1dscXD-8J7Ti",
+          "s": "0",
+          "kt": "1",
+          "k": [
+            "DA5TVyCZr5WjY07n37mbo05KDdddFeVo1WzmJ_TZYhrY",
+            "DH7R22OU_C7d-2kD2XYnfkkl7vmed-40fNBBo6TIgJ8X"
+          ],
+          "nt": "1",
+          "n": [
+            "EAq-VmvsZt7JGhbUJISwxxW1FAu80Y_epHpbAdjytO9t",
+            "EN5I-dX2lzCM_V7ymnn1LwZztF3u3PBjQrSklCDr8ldO"
+          ],
+          "bt": "0",
+          "b": [],
+          "c": [],
+          "a": []
+        }
+      }
+    },
+    {
+      "id": "icp/3-keys/2-of-3",
+      "kind": "inception",
+      "why": "Multi-key inception uses self-addressing derivation: the identifier is a digest of the event (E\u2026), equal to the SAID. An implementation that uses basic derivation here, or that formats the threshold as a number rather than the string '2', produces an identity no peer will recognise.",
+      "input": {
+        "keys": [
+          "DLCVixzySB7IcBFIQvv0Cm-QlA_v2R8wrG9ROq3hMCDG",
+          "DPeYFmwHmiOF0XGknfhu4fh3Hj2lFGc7zXDgOUYUvZTL",
+          "DJnGPaZbjWN8L1T6nNT1HcIwZAmEvI424-Awham2d9pP"
+        ],
+        "next_digests": [
+          "EAK2UJGM_xZdghrQjUAQP3RbPFdtYVp-EX2tALDpOnQ-",
+          "EPfxBCc-nujO3XTycX5zCq7aJwfU1A6YCzG3ohXOHSEy",
+          "EOU9fNtyY6uNZV9JVowUYVH9AvAQLC8qvSUJzkuKUyjs"
+        ],
+        "isith": "2",
+        "nsith": "2",
+        "derivation": "self-addressing"
+      },
+      "expect": {
+        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDFlN18iLCJ0IjoiaWNwIiwiZCI6IkVQUzlTVmlGcjVOYUlXQ0s5TTUwVWFpU0pxekRQYjl4OGlmWXJ3cU50WU9SIiwiaSI6IkVQUzlTVmlGcjVOYUlXQ0s5TTUwVWFpU0pxekRQYjl4OGlmWXJ3cU50WU9SIiwicyI6IjAiLCJrdCI6IjIiLCJrIjpbIkRMQ1ZpeHp5U0I3SWNCRklRdnYwQ20tUWxBX3YyUjh3ckc5Uk9xM2hNQ0RHIiwiRFBlWUZtd0htaU9GMFhHa25maHU0ZmgzSGoybEZHYzd6WERnT1VZVXZaVEwiLCJESm5HUGFaYmpXTjhMMVQ2bk5UMUhjSXdaQW1Fdkk0MjQtQXdoYW0yZDlwUCJdLCJudCI6IjIiLCJuIjpbIkVBSzJVSkdNX3haZGdoclFqVUFRUDNSYlBGZHRZVnAtRVgydEFMRHBPblEtIiwiRVBmeEJDYy1udWpPM1hUeWNYNXpDcTdhSndmVTFBNllDekczb2hYT0hTRXkiLCJFT1U5Zk50eVk2dU5aVjlKVm93VVlWSDlBdkFRTEM4cXZTVUp6a3VLVXlqcyJdLCJidCI6IjAiLCJiIjpbXSwiYyI6W10sImEiOltdfQ==",
+        "said": "EPS9SViFr5NaIWCK9M50UaiSJqzDPb9x8ifYrwqNtYOR",
+        "aid": "EPS9SViFr5NaIWCK9M50UaiSJqzDPb9x8ifYrwqNtYOR",
+        "event_readable": {
+          "v": "KERI10JSON0001e7_",
+          "t": "icp",
+          "d": "EPS9SViFr5NaIWCK9M50UaiSJqzDPb9x8ifYrwqNtYOR",
+          "i": "EPS9SViFr5NaIWCK9M50UaiSJqzDPb9x8ifYrwqNtYOR",
+          "s": "0",
+          "kt": "2",
+          "k": [
+            "DLCVixzySB7IcBFIQvv0Cm-QlA_v2R8wrG9ROq3hMCDG",
+            "DPeYFmwHmiOF0XGknfhu4fh3Hj2lFGc7zXDgOUYUvZTL",
+            "DJnGPaZbjWN8L1T6nNT1HcIwZAmEvI424-Awham2d9pP"
+          ],
+          "nt": "2",
+          "n": [
+            "EAK2UJGM_xZdghrQjUAQP3RbPFdtYVp-EX2tALDpOnQ-",
+            "EPfxBCc-nujO3XTycX5zCq7aJwfU1A6YCzG3ohXOHSEy",
+            "EOU9fNtyY6uNZV9JVowUYVH9AvAQLC8qvSUJzkuKUyjs"
+          ],
+          "bt": "0",
+          "b": [],
+          "c": [],
+          "a": []
+        }
+      }
+    },
+    {
+      "id": "icp/5-keys/3-of-5",
+      "kind": "inception",
+      "why": "Multi-key inception uses self-addressing derivation: the identifier is a digest of the event (E\u2026), equal to the SAID. An implementation that uses basic derivation here, or that formats the threshold as a number rather than the string '3', produces an identity no peer will recognise.",
+      "input": {
+        "keys": [
+          "DMkQE76xbj2DY50hXAd33fFm-5vjuOBKLb4CJCymPUSU",
+          "DOmJ13XLONcU2CG9v3oZYNnSAeBhCw6_SwzOQfjiNgmf",
+          "DD6W4C8zLTRAc1E06vuNAg0jXErPHssPxW2jrrtEVu_H",
+          "DMkz2SV23tkJ2ZEDeBmkeufTw7DdQ7nUz1mLous0aq-t",
+          "DBzSzKeA54LF2tuo6qlAsjCe1HjIW8_pCa0dgFh1Lva0"
+        ],
+        "next_digests": [
+          "EKkqqjxwejwbxaEjN5e6wfZWvSQ3v3gEUe9bCCA7Z1Q2",
+          "ELaAqNaz3ux7sSXmUHqdAIbHXMJxdzLlWydKRINKr1pg",
+          "ELb1yp0KUyP0wtYtVqDFH8ZdQ1LYq71Dg-n_tvp7lxJj",
+          "EBbSbhb264fEbt58c-7T5kkV3QlQq9iCe8FDILTM7tca",
+          "EM_5PhoVR3DpAoG-pIsbAizM5PHzdeIo8a1vWjEsnugX"
+        ],
+        "isith": "3",
+        "nsith": "3",
+        "derivation": "self-addressing"
+      },
+      "expect": {
+        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDJhM18iLCJ0IjoiaWNwIiwiZCI6IkVQcFc3b3ZwaldsN3JXSGdGQlBLYmVrYXJCMEIzZTJhT0VneW1kU1JJZ0c4IiwiaSI6IkVQcFc3b3ZwaldsN3JXSGdGQlBLYmVrYXJCMEIzZTJhT0VneW1kU1JJZ0c4IiwicyI6IjAiLCJrdCI6IjMiLCJrIjpbIkRNa1FFNzZ4YmoyRFk1MGhYQWQzM2ZGbS01dmp1T0JLTGI0Q0pDeW1QVVNVIiwiRE9tSjEzWExPTmNVMkNHOXYzb1pZTm5TQWVCaEN3Nl9Td3pPUWZqaU5nbWYiLCJERDZXNEM4ekxUUkFjMUUwNnZ1TkFnMGpYRXJQSHNzUHhXMmpycnRFVnVfSCIsIkRNa3oyU1YyM3RrSjJaRURlQm1rZXVmVHc3RGRRN25VejFtTG91czBhcS10IiwiREJ6U3pLZUE1NExGMnR1bzZxbEFzakNlMUhqSVc4X3BDYTBkZ0ZoMUx2YTAiXSwibnQiOiIzIiwibiI6WyJFS2txcWp4d2Vqd2J4YUVqTjVlNndmWld2U1EzdjNnRVVlOWJDQ0E3WjFRMiIsIkVMYUFxTmF6M3V4N3NTWG1VSHFkQUliSFhNSnhkekxsV3lkS1JJTktyMXBnIiwiRUxiMXlwMEtVeVAwd3RZdFZxREZIOFpkUTFMWXE3MURnLW5fdHZwN2x4SmoiLCJFQmJTYmhiMjY0ZkVidDU4Yy03VDVra1YzUWxRcTlpQ2U4RkRJTFRNN3RjYSIsIkVNXzVQaG9WUjNEcEFvRy1wSXNiQWl6TTVQSHpkZUlvOGExdldqRXNudWdYIl0sImJ0IjoiMCIsImIiOltdLCJjIjpbXSwiYSI6W119",
+        "said": "EPpW7ovpjWl7rWHgFBPKbekarB0B3e2aOEgymdSRIgG8",
+        "aid": "EPpW7ovpjWl7rWHgFBPKbekarB0B3e2aOEgymdSRIgG8",
+        "event_readable": {
+          "v": "KERI10JSON0002a3_",
+          "t": "icp",
+          "d": "EPpW7ovpjWl7rWHgFBPKbekarB0B3e2aOEgymdSRIgG8",
+          "i": "EPpW7ovpjWl7rWHgFBPKbekarB0B3e2aOEgymdSRIgG8",
+          "s": "0",
+          "kt": "3",
+          "k": [
+            "DMkQE76xbj2DY50hXAd33fFm-5vjuOBKLb4CJCymPUSU",
+            "DOmJ13XLONcU2CG9v3oZYNnSAeBhCw6_SwzOQfjiNgmf",
+            "DD6W4C8zLTRAc1E06vuNAg0jXErPHssPxW2jrrtEVu_H",
+            "DMkz2SV23tkJ2ZEDeBmkeufTw7DdQ7nUz1mLous0aq-t",
+            "DBzSzKeA54LF2tuo6qlAsjCe1HjIW8_pCa0dgFh1Lva0"
+          ],
+          "nt": "3",
+          "n": [
+            "EKkqqjxwejwbxaEjN5e6wfZWvSQ3v3gEUe9bCCA7Z1Q2",
+            "ELaAqNaz3ux7sSXmUHqdAIbHXMJxdzLlWydKRINKr1pg",
+            "ELb1yp0KUyP0wtYtVqDFH8ZdQ1LYq71Dg-n_tvp7lxJj",
+            "EBbSbhb264fEbt58c-7T5kkV3QlQq9iCe8FDILTM7tca",
+            "EM_5PhoVR3DpAoG-pIsbAizM5PHzdeIo8a1vWjEsnugX"
+          ],
+          "bt": "0",
+          "b": [],
+          "c": [],
+          "a": []
+        }
+      }
+    },
+    {
+      "id": "icp/three-keys/fractional-1-over-2-each",
+      "kind": "inception",
+      "why": "Fractional thresholds are serialised as a list of strings, not a single integer. An implementation that only knows integer thresholds will either refuse a valid event or produce a different identity.",
+      "input": {
+        "keys": [
+          "DOWnuexXNElr9hpztsPHcgpf9CJM3xIpn1u0Q-P-7B8L",
+          "DLGI7zIie8QgqhcP8nCcbRiyIykWQAYagDL2ecq3WBCb",
+          "DDlNjDFOe-b4ia9CopnX3mdFYaEOpoeQ_qnu5trD-n_3"
+        ],
+        "next_digests": [
+          "EEeYH2DVIzeJIYpkc28AcFZVMm1hARCKxTKP6rvAE9Ua",
+          "EPGDCITLHzn4cxbQ8o3YzHoECfDMqcrYX6dVCP_1CCvL",
+          "EC2Jta9Dg12PMn-rcFX667oCjWFQkyGP5Wp8HWC6f4er"
+        ],
+        "isith": [
+          "1/2",
+          "1/2",
+          "1/2"
+        ],
+        "nsith": [
+          "1/2",
+          "1/2",
+          "1/2"
+        ],
+        "derivation": "self-addressing"
+      },
+      "expect": {
+        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDIwN18iLCJ0IjoiaWNwIiwiZCI6IkVEVERzREhDcDlvWnQ1UDAtNlZQa0JUSi1Lck15UTFwdkZsTDNoQlRJb21QIiwiaSI6IkVEVERzREhDcDlvWnQ1UDAtNlZQa0JUSi1Lck15UTFwdkZsTDNoQlRJb21QIiwicyI6IjAiLCJrdCI6WyIxLzIiLCIxLzIiLCIxLzIiXSwiayI6WyJET1dudWV4WE5FbHI5aHB6dHNQSGNncGY5Q0pNM3hJcG4xdTBRLVAtN0I4TCIsIkRMR0k3eklpZThRZ3FoY1A4bkNjYlJpeUl5a1dRQVlhZ0RMMmVjcTNXQkNiIiwiRERsTmpERk9lLWI0aWE5Q29wblgzbWRGWWFFT3BvZVFfcW51NXRyRC1uXzMiXSwibnQiOlsiMS8yIiwiMS8yIiwiMS8yIl0sIm4iOlsiRUVlWUgyRFZJemVKSVlwa2MyOEFjRlpWTW0xaEFSQ0t4VEtQNnJ2QUU5VWEiLCJFUEdEQ0lUTEh6bjRjeGJROG8zWXpIb0VDZkRNcWNyWVg2ZFZDUF8xQ0N2TCIsIkVDMkp0YTlEZzEyUE1uLXJjRlg2NjdvQ2pXRlFreUdQNVdwOEhXQzZmNGVyIl0sImJ0IjoiMCIsImIiOltdLCJjIjpbXSwiYSI6W119",
+        "said": "EDTDsDHCp9oZt5P0-6VPkBTJ-KrMyQ1pvFlL3hBTIomP",
+        "aid": "EDTDsDHCp9oZt5P0-6VPkBTJ-KrMyQ1pvFlL3hBTIomP",
+        "event_readable": {
+          "v": "KERI10JSON000207_",
+          "t": "icp",
+          "d": "EDTDsDHCp9oZt5P0-6VPkBTJ-KrMyQ1pvFlL3hBTIomP",
+          "i": "EDTDsDHCp9oZt5P0-6VPkBTJ-KrMyQ1pvFlL3hBTIomP",
+          "s": "0",
+          "kt": [
+            "1/2",
+            "1/2",
+            "1/2"
+          ],
+          "k": [
+            "DOWnuexXNElr9hpztsPHcgpf9CJM3xIpn1u0Q-P-7B8L",
+            "DLGI7zIie8QgqhcP8nCcbRiyIykWQAYagDL2ecq3WBCb",
+            "DDlNjDFOe-b4ia9CopnX3mdFYaEOpoeQ_qnu5trD-n_3"
+          ],
+          "nt": [
+            "1/2",
+            "1/2",
+            "1/2"
+          ],
+          "n": [
+            "EEeYH2DVIzeJIYpkc28AcFZVMm1hARCKxTKP6rvAE9Ua",
+            "EPGDCITLHzn4cxbQ8o3YzHoECfDMqcrYX6dVCP_1CCvL",
+            "EC2Jta9Dg12PMn-rcFX667oCjWFQkyGP5Wp8HWC6f4er"
+          ],
+          "bt": "0",
+          "b": [],
+          "c": [],
+          "a": []
+        }
+      }
+    },
+    {
+      "id": "icp/one-witness/toad-1",
+      "kind": "inception",
+      "why": "A single witness is part of the identifier. An implementation that omits witnesses, or that uses transferable keys as witnesses, disagrees with every peer.",
+      "input": {
+        "keys": [
+          "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd"
+        ],
+        "next_digests": [
+          "EEXekUYwyf4Blv1U_WFML7YliBR9GJXfl3osKtIevKQN"
+        ],
+        "witnesses": [
+          "BLVmUkPP1sXCJSyPoWZw7o8zIIEstE4Y33c-wOgP_YNV"
+        ],
+        "toad": 1
+      },
+      "expect": {
+        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDE1OV8iLCJ0IjoiaWNwIiwiZCI6IkVFdlhJZ3RzWmtyMURXZkVXdEVHZlcyTDFSYTdYTEFfUC1STDlaSE12Z3M5IiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIl0sIm50IjoiMSIsIm4iOlsiRUVYZWtVWXd5ZjRCbHYxVV9XRk1MN1lsaUJSOUdKWGZsM29zS3RJZXZLUU4iXSwiYnQiOiIxIiwiYiI6WyJCTFZtVWtQUDFzWENKU3lQb1dadzdvOHpJSUVzdEU0WTMzYy13T2dQX1lOViJdLCJjIjpbXSwiYSI6W119",
+        "said": "EEvXIgtsZkr1DWfEWtEGfW2L1Ra7XLA_P-RL9ZHMvgs9",
+        "aid": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+        "event_readable": {
+          "v": "KERI10JSON000159_",
+          "t": "icp",
+          "d": "EEvXIgtsZkr1DWfEWtEGfW2L1Ra7XLA_P-RL9ZHMvgs9",
+          "i": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+          "s": "0",
+          "kt": "1",
+          "k": [
+            "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd"
+          ],
+          "nt": "1",
+          "n": [
+            "EEXekUYwyf4Blv1U_WFML7YliBR9GJXfl3osKtIevKQN"
+          ],
+          "bt": "1",
+          "b": [
+            "BLVmUkPP1sXCJSyPoWZw7o8zIIEstE4Y33c-wOgP_YNV"
+          ],
+          "c": [],
+          "a": []
+        }
+      }
+    },
+    {
+      "id": "icp/three-witnesses/toad-1",
+      "kind": "inception",
+      "why": "Witnesses and the threshold of acceptable duplicity (toad) are part of the identifier. Different toad values are different identities even with the same witness list.",
+      "input": {
+        "keys": [
+          "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd"
+        ],
+        "next_digests": [
+          "EEXekUYwyf4Blv1U_WFML7YliBR9GJXfl3osKtIevKQN"
+        ],
+        "witnesses": [
+          "BMhTrQ8M0rYZrqks7sT9VqJNZJnVhM55JX5Fz9gTm2Cn",
+          "BO4x-DyIpxIZpvz5vuDam8ImIFiPWhWmFFVTUE35ZJ5c",
+          "BEdF0Zxm7JF5-iUJcFZAnvFpZ7ahp0v9j3r9Uo9ZYwYV"
+        ],
+        "toad": 1
+      },
+      "expect": {
+        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDFiN18iLCJ0IjoiaWNwIiwiZCI6IkVFYkp0WTF2Q0s2QUFacFBoY2pVQ1dhZVRWNTZfU1d5R2tXQnBoMHNJVW1SIiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIl0sIm50IjoiMSIsIm4iOlsiRUVYZWtVWXd5ZjRCbHYxVV9XRk1MN1lsaUJSOUdKWGZsM29zS3RJZXZLUU4iXSwiYnQiOiIxIiwiYiI6WyJCTWhUclE4TTByWVpycWtzN3NUOVZxSk5aSm5WaE01NUpYNUZ6OWdUbTJDbiIsIkJPNHgtRHlJcHhJWnB2ejV2dURhbThJbUlGaVBXaFdtRkZWVFVFMzVaSjVjIiwiQkVkRjBaeG03SkY1LWlVSmNGWkFudkZwWjdhaHAwdjlqM3I5VW85Wll3WVYiXSwiYyI6W10sImEiOltdfQ==",
+        "said": "EEbJtY1vCK6AAZpPhcjUCWaeTV56_SWyGkWBph0sIUmR",
+        "aid": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+        "event_readable": {
+          "v": "KERI10JSON0001b7_",
+          "t": "icp",
+          "d": "EEbJtY1vCK6AAZpPhcjUCWaeTV56_SWyGkWBph0sIUmR",
+          "i": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+          "s": "0",
+          "kt": "1",
+          "k": [
+            "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd"
+          ],
+          "nt": "1",
+          "n": [
+            "EEXekUYwyf4Blv1U_WFML7YliBR9GJXfl3osKtIevKQN"
+          ],
+          "bt": "1",
+          "b": [
+            "BMhTrQ8M0rYZrqks7sT9VqJNZJnVhM55JX5Fz9gTm2Cn",
+            "BO4x-DyIpxIZpvz5vuDam8ImIFiPWhWmFFVTUE35ZJ5c",
+            "BEdF0Zxm7JF5-iUJcFZAnvFpZ7ahp0v9j3r9Uo9ZYwYV"
+          ],
+          "c": [],
+          "a": []
+        }
+      }
+    },
+    {
       "id": "icp/three-witnesses/toad-2",
       "kind": "inception",
-      "why": "Witnesses and the threshold are part of the identifier, so an implementation that formats them differently produces a different identity.",
+      "why": "Witnesses and the threshold of acceptable duplicity (toad) are part of the identifier. Different toad values are different identities even with the same witness list.",
       "input": {
         "keys": [
           "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd"
@@ -102,47 +405,149 @@
       }
     },
     {
-      "id": "icp/three-keys/2-of-3",
+      "id": "icp/three-witnesses/toad-3",
       "kind": "inception",
-      "why": "Thresholds are serialised in the event, and 2 is not the same as '2' \u2014 this catches an implementation that guesses the encoding.",
+      "why": "Witnesses and the threshold of acceptable duplicity (toad) are part of the identifier. Different toad values are different identities even with the same witness list.",
       "input": {
         "keys": [
-          "DIsjfXiOjqrvVQxtElgj-kXx_V_CmyyIvfhxEZRx_BMS",
-          "DAFOTZIsWWo4Ct_J7tci6DWCLxI2dhaT5Lq7YeGvuwTx",
-          "DMhtAa2LL7aUsi_2Djydnn7ZDbVgR3K3RFDUCRO5qcuv"
+          "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd"
         ],
         "next_digests": [
-          "EIlpvU1dhmqIyLNVBAJajl9COv2KPZujSb6xR1syx2er",
-          "EDTl-aaxCV0khDljphM9jzfwSedoYjoDq-KQtOQ8050f",
-          "EEP4pwLYeo3mqut8q31zXCs1urPeQ9lANFrlDvazzZ2K"
+          "EEXekUYwyf4Blv1U_WFML7YliBR9GJXfl3osKtIevKQN"
         ],
-        "isith": "2",
-        "nsith": "2"
+        "witnesses": [
+          "BMhTrQ8M0rYZrqks7sT9VqJNZJnVhM55JX5Fz9gTm2Cn",
+          "BO4x-DyIpxIZpvz5vuDam8ImIFiPWhWmFFVTUE35ZJ5c",
+          "BEdF0Zxm7JF5-iUJcFZAnvFpZ7ahp0v9j3r9Uo9ZYwYV"
+        ],
+        "toad": 3
       },
       "expect": {
-        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDFlN18iLCJ0IjoiaWNwIiwiZCI6IkVBZ2ZsQ2c4N2gwZ2l2YkpEb2lVbWxNNzFFOVFzUFBSbHFjWWxySHhYdm1nIiwiaSI6IkVBZ2ZsQ2c4N2gwZ2l2YkpEb2lVbWxNNzFFOVFzUFBSbHFjWWxySHhYdm1nIiwicyI6IjAiLCJrdCI6IjIiLCJrIjpbIkRJc2pmWGlPanFydlZReHRFbGdqLWtYeF9WX0NteXlJdmZoeEVaUnhfQk1TIiwiREFGT1RaSXNXV280Q3RfSjd0Y2k2RFdDTHhJMmRoYVQ1THE3WWVHdnV3VHgiLCJETWh0QWEyTEw3YVVzaV8yRGp5ZG5uN1pEYlZnUjNLM1JGRFVDUk81cWN1diJdLCJudCI6IjIiLCJuIjpbIkVJbHB2VTFkaG1xSXlMTlZCQUphamw5Q092MktQWnVqU2I2eFIxc3l4MmVyIiwiRURUbC1hYXhDVjBraERsanBoTTlqemZ3U2Vkb1lqb0RxLUtRdE9RODA1MGYiLCJFRVA0cHdMWWVvM21xdXQ4cTMxelhDczF1clBlUTlsQU5GcmxEdmF6eloySyJdLCJidCI6IjAiLCJiIjpbXSwiYyI6W10sImEiOltdfQ==",
-        "said": "EAgflCg87h0givbJDoiUmlM71E9QsPPRlqcYlrHxXvmg",
-        "aid": "EAgflCg87h0givbJDoiUmlM71E9QsPPRlqcYlrHxXvmg",
+        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDFiN18iLCJ0IjoiaWNwIiwiZCI6IkVQRHJDS1FGWTFxWkxtaWxhajh2WDQ1NXpFRkN6eHF1VUF4SGtabUQ0TkVzIiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIl0sIm50IjoiMSIsIm4iOlsiRUVYZWtVWXd5ZjRCbHYxVV9XRk1MN1lsaUJSOUdKWGZsM29zS3RJZXZLUU4iXSwiYnQiOiIzIiwiYiI6WyJCTWhUclE4TTByWVpycWtzN3NUOVZxSk5aSm5WaE01NUpYNUZ6OWdUbTJDbiIsIkJPNHgtRHlJcHhJWnB2ejV2dURhbThJbUlGaVBXaFdtRkZWVFVFMzVaSjVjIiwiQkVkRjBaeG03SkY1LWlVSmNGWkFudkZwWjdhaHAwdjlqM3I5VW85Wll3WVYiXSwiYyI6W10sImEiOltdfQ==",
+        "said": "EPDrCKQFY1qZLmilaj8vX455zEFCzxquUAxHkZmD4NEs",
+        "aid": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
         "event_readable": {
-          "v": "KERI10JSON0001e7_",
+          "v": "KERI10JSON0001b7_",
           "t": "icp",
-          "d": "EAgflCg87h0givbJDoiUmlM71E9QsPPRlqcYlrHxXvmg",
-          "i": "EAgflCg87h0givbJDoiUmlM71E9QsPPRlqcYlrHxXvmg",
+          "d": "EPDrCKQFY1qZLmilaj8vX455zEFCzxquUAxHkZmD4NEs",
+          "i": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
           "s": "0",
-          "kt": "2",
+          "kt": "1",
           "k": [
-            "DIsjfXiOjqrvVQxtElgj-kXx_V_CmyyIvfhxEZRx_BMS",
-            "DAFOTZIsWWo4Ct_J7tci6DWCLxI2dhaT5Lq7YeGvuwTx",
-            "DMhtAa2LL7aUsi_2Djydnn7ZDbVgR3K3RFDUCRO5qcuv"
+            "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd"
           ],
-          "nt": "2",
+          "nt": "1",
           "n": [
-            "EIlpvU1dhmqIyLNVBAJajl9COv2KPZujSb6xR1syx2er",
-            "EDTl-aaxCV0khDljphM9jzfwSedoYjoDq-KQtOQ8050f",
-            "EEP4pwLYeo3mqut8q31zXCs1urPeQ9lANFrlDvazzZ2K"
+            "EEXekUYwyf4Blv1U_WFML7YliBR9GJXfl3osKtIevKQN"
           ],
-          "bt": "0",
-          "b": [],
+          "bt": "3",
+          "b": [
+            "BMhTrQ8M0rYZrqks7sT9VqJNZJnVhM55JX5Fz9gTm2Cn",
+            "BO4x-DyIpxIZpvz5vuDam8ImIFiPWhWmFFVTUE35ZJ5c",
+            "BEdF0Zxm7JF5-iUJcFZAnvFpZ7ahp0v9j3r9Uo9ZYwYV"
+          ],
+          "c": [],
+          "a": []
+        }
+      }
+    },
+    {
+      "id": "icp/five-witnesses/toad-3",
+      "kind": "inception",
+      "why": "Larger witness sets still enter the digest. An implementation that truncates the list or reorders it produces a different identity.",
+      "input": {
+        "keys": [
+          "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd"
+        ],
+        "next_digests": [
+          "EEXekUYwyf4Blv1U_WFML7YliBR9GJXfl3osKtIevKQN"
+        ],
+        "witnesses": [
+          "BDmKGEJvNxec60Wk7ksgEkeQufrxVMgDe3woxzkfn4sU",
+          "BPmz0kdRoadSyHb78AXeZCo7wMITHZa8E6aUhPCk33JQ",
+          "BLziZx9aMLT9BYAlbDzGuiXEwA8zhUZGMP4djiMRypso",
+          "BN227OZkHAtiVK59sqfVRdhJBUt6Yz2HOoqfEHJctXTa",
+          "BHKqSBgapPgeAZPYoyADR90TknGSjVRfGEi3q4V8Ro20"
+        ],
+        "toad": 3
+      },
+      "expect": {
+        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDIxNV8iLCJ0IjoiaWNwIiwiZCI6IkVNeUNIOG1yMWxiVmtCLTI2Q2xvM2N1WGZkR0JMTFVuRkNCbHRCRlRmN3AxIiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIl0sIm50IjoiMSIsIm4iOlsiRUVYZWtVWXd5ZjRCbHYxVV9XRk1MN1lsaUJSOUdKWGZsM29zS3RJZXZLUU4iXSwiYnQiOiIzIiwiYiI6WyJCRG1LR0VKdk54ZWM2MFdrN2tzZ0VrZVF1ZnJ4Vk1nRGUzd294emtmbjRzVSIsIkJQbXowa2RSb2FkU3lIYjc4QVhlWkNvN3dNSVRIWmE4RTZhVWhQQ2szM0pRIiwiQkx6aVp4OWFNTFQ5QllBbGJEekd1aVhFd0E4emhVWkdNUDRkamlNUnlwc28iLCJCTjIyN09aa0hBdGlWSzU5c3FmVlJkaEpCVXQ2WXoySE9vcWZFSEpjdFhUYSIsIkJIS3FTQmdhcFBnZUFaUFlveUFEUjkwVGtuR1NqVlJmR0VpM3E0VjhSbzIwIl0sImMiOltdLCJhIjpbXX0=",
+        "said": "EMyCH8mr1lbVkB-26Clo3cuXfdGBLLUnFCBltBFTf7p1",
+        "aid": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+        "event_readable": {
+          "v": "KERI10JSON000215_",
+          "t": "icp",
+          "d": "EMyCH8mr1lbVkB-26Clo3cuXfdGBLLUnFCBltBFTf7p1",
+          "i": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+          "s": "0",
+          "kt": "1",
+          "k": [
+            "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd"
+          ],
+          "nt": "1",
+          "n": [
+            "EEXekUYwyf4Blv1U_WFML7YliBR9GJXfl3osKtIevKQN"
+          ],
+          "bt": "3",
+          "b": [
+            "BDmKGEJvNxec60Wk7ksgEkeQufrxVMgDe3woxzkfn4sU",
+            "BPmz0kdRoadSyHb78AXeZCo7wMITHZa8E6aUhPCk33JQ",
+            "BLziZx9aMLT9BYAlbDzGuiXEwA8zhUZGMP4djiMRypso",
+            "BN227OZkHAtiVK59sqfVRdhJBUt6Yz2HOoqfEHJctXTa",
+            "BHKqSBgapPgeAZPYoyADR90TknGSjVRfGEi3q4V8Ro20"
+          ],
+          "c": [],
+          "a": []
+        }
+      }
+    },
+    {
+      "id": "icp/five-witnesses/toad-5",
+      "kind": "inception",
+      "why": "Larger witness sets still enter the digest. An implementation that truncates the list or reorders it produces a different identity.",
+      "input": {
+        "keys": [
+          "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd"
+        ],
+        "next_digests": [
+          "EEXekUYwyf4Blv1U_WFML7YliBR9GJXfl3osKtIevKQN"
+        ],
+        "witnesses": [
+          "BDmKGEJvNxec60Wk7ksgEkeQufrxVMgDe3woxzkfn4sU",
+          "BPmz0kdRoadSyHb78AXeZCo7wMITHZa8E6aUhPCk33JQ",
+          "BLziZx9aMLT9BYAlbDzGuiXEwA8zhUZGMP4djiMRypso",
+          "BN227OZkHAtiVK59sqfVRdhJBUt6Yz2HOoqfEHJctXTa",
+          "BHKqSBgapPgeAZPYoyADR90TknGSjVRfGEi3q4V8Ro20"
+        ],
+        "toad": 5
+      },
+      "expect": {
+        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDIxNV8iLCJ0IjoiaWNwIiwiZCI6IkVCUzYtZW5IcXpZaW9uOE11cVB2Q2g5QlNoaHVTRlgxakJqNW12SjEzeXhyIiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIl0sIm50IjoiMSIsIm4iOlsiRUVYZWtVWXd5ZjRCbHYxVV9XRk1MN1lsaUJSOUdKWGZsM29zS3RJZXZLUU4iXSwiYnQiOiI1IiwiYiI6WyJCRG1LR0VKdk54ZWM2MFdrN2tzZ0VrZVF1ZnJ4Vk1nRGUzd294emtmbjRzVSIsIkJQbXowa2RSb2FkU3lIYjc4QVhlWkNvN3dNSVRIWmE4RTZhVWhQQ2szM0pRIiwiQkx6aVp4OWFNTFQ5QllBbGJEekd1aVhFd0E4emhVWkdNUDRkamlNUnlwc28iLCJCTjIyN09aa0hBdGlWSzU5c3FmVlJkaEpCVXQ2WXoySE9vcWZFSEpjdFhUYSIsIkJIS3FTQmdhcFBnZUFaUFlveUFEUjkwVGtuR1NqVlJmR0VpM3E0VjhSbzIwIl0sImMiOltdLCJhIjpbXX0=",
+        "said": "EBS6-enHqzYion8MuqPvCh9BShhuSFX1jBj5mvJ13yxr",
+        "aid": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+        "event_readable": {
+          "v": "KERI10JSON000215_",
+          "t": "icp",
+          "d": "EBS6-enHqzYion8MuqPvCh9BShhuSFX1jBj5mvJ13yxr",
+          "i": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+          "s": "0",
+          "kt": "1",
+          "k": [
+            "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd"
+          ],
+          "nt": "1",
+          "n": [
+            "EEXekUYwyf4Blv1U_WFML7YliBR9GJXfl3osKtIevKQN"
+          ],
+          "bt": "5",
+          "b": [
+            "BDmKGEJvNxec60Wk7ksgEkeQufrxVMgDe3woxzkfn4sU",
+            "BPmz0kdRoadSyHb78AXeZCo7wMITHZa8E6aUhPCk33JQ",
+            "BLziZx9aMLT9BYAlbDzGuiXEwA8zhUZGMP4djiMRypso",
+            "BN227OZkHAtiVK59sqfVRdhJBUt6Yz2HOoqfEHJctXTa",
+            "BHKqSBgapPgeAZPYoyADR90TknGSjVRfGEi3q4V8Ro20"
+          ],
           "c": [],
           "a": []
         }
@@ -197,6 +602,164 @@
       }
     },
     {
+      "id": "icp/with-several-seals",
+      "kind": "inception",
+      "why": "Several seals are ordered: swapping them changes the identifier. An implementation that sorts seals, or collapses them, is not interoperable.",
+      "input": {
+        "keys": [
+          "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd"
+        ],
+        "next_digests": [
+          "EEXekUYwyf4Blv1U_WFML7YliBR9GJXfl3osKtIevKQN"
+        ],
+        "data": [
+          {
+            "i": "EOwner0000000000000000000000000000000000000x",
+            "r": "owner"
+          },
+          {
+            "i": "EOther000000000000000000000000000000000000x",
+            "s": "0",
+            "d": "EDigest000000000000000000000000000000000000x"
+          }
+        ]
+      },
+      "expect": {
+        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDFkYV8iLCJ0IjoiaWNwIiwiZCI6IkVCQjlwTjNWRWFzcTBNN2ltTl92cjhZc090TjRpZjBILXVfczFLSW9jcGZaIiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIl0sIm50IjoiMSIsIm4iOlsiRUVYZWtVWXd5ZjRCbHYxVV9XRk1MN1lsaUJSOUdKWGZsM29zS3RJZXZLUU4iXSwiYnQiOiIwIiwiYiI6W10sImMiOltdLCJhIjpbeyJpIjoiRU93bmVyMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMHgiLCJyIjoib3duZXIifSx7ImkiOiJFT3RoZXIwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDB4IiwicyI6IjAiLCJkIjoiRURpZ2VzdDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMHgifV19",
+        "said": "EBB9pN3VEasq0M7imN_vr8YsOtN4if0H-u_s1KIocpfZ",
+        "aid": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+        "event_readable": {
+          "v": "KERI10JSON0001da_",
+          "t": "icp",
+          "d": "EBB9pN3VEasq0M7imN_vr8YsOtN4if0H-u_s1KIocpfZ",
+          "i": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+          "s": "0",
+          "kt": "1",
+          "k": [
+            "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd"
+          ],
+          "nt": "1",
+          "n": [
+            "EEXekUYwyf4Blv1U_WFML7YliBR9GJXfl3osKtIevKQN"
+          ],
+          "bt": "0",
+          "b": [],
+          "c": [],
+          "a": [
+            {
+              "i": "EOwner0000000000000000000000000000000000000x",
+              "r": "owner"
+            },
+            {
+              "i": "EOther000000000000000000000000000000000000x",
+              "s": "0",
+              "d": "EDigest000000000000000000000000000000000000x"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "icp/seal-field-order/i-s-d",
+      "kind": "inception",
+      "why": "Seal field order is part of the signed bytes. Alphabetical sorting of seal keys produces a different identifier than the order the event was written in.",
+      "input": {
+        "keys": [
+          "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd"
+        ],
+        "next_digests": [
+          "EEXekUYwyf4Blv1U_WFML7YliBR9GJXfl3osKtIevKQN"
+        ],
+        "data": [
+          {
+            "i": "ECredential000000000000000000000000000000x",
+            "s": "0",
+            "d": "EDigest000000000000000000000000000000000000x"
+          }
+        ]
+      },
+      "expect": {
+        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDE5OF8iLCJ0IjoiaWNwIiwiZCI6IkVQUS1wc0Rla2pHbl9LX0lUdU5zUkgwelVPVTljcUZnM0pNU2hPTm1jWWlvIiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIl0sIm50IjoiMSIsIm4iOlsiRUVYZWtVWXd5ZjRCbHYxVV9XRk1MN1lsaUJSOUdKWGZsM29zS3RJZXZLUU4iXSwiYnQiOiIwIiwiYiI6W10sImMiOltdLCJhIjpbeyJpIjoiRUNyZWRlbnRpYWwwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDB4IiwicyI6IjAiLCJkIjoiRURpZ2VzdDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMHgifV19",
+        "said": "EPQ-psDekjGn_K_ITuNsRH0zUOU9cqFg3JMShONmcYio",
+        "aid": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+        "event_readable": {
+          "v": "KERI10JSON000198_",
+          "t": "icp",
+          "d": "EPQ-psDekjGn_K_ITuNsRH0zUOU9cqFg3JMShONmcYio",
+          "i": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+          "s": "0",
+          "kt": "1",
+          "k": [
+            "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd"
+          ],
+          "nt": "1",
+          "n": [
+            "EEXekUYwyf4Blv1U_WFML7YliBR9GJXfl3osKtIevKQN"
+          ],
+          "bt": "0",
+          "b": [],
+          "c": [],
+          "a": [
+            {
+              "i": "ECredential000000000000000000000000000000x",
+              "s": "0",
+              "d": "EDigest000000000000000000000000000000000000x"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "icp/seal-field-order/d-i-s",
+      "kind": "inception",
+      "why": "A seal written d-then-i-then-s is a different event from one written i-s-d. An implementation that puts seals through a hash map silently changes every anchored identity.",
+      "input": {
+        "keys": [
+          "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd"
+        ],
+        "next_digests": [
+          "EEXekUYwyf4Blv1U_WFML7YliBR9GJXfl3osKtIevKQN"
+        ],
+        "data": [
+          {
+            "d": "EDigest000000000000000000000000000000000000x",
+            "i": "ECredential000000000000000000000000000000x",
+            "s": "0"
+          }
+        ]
+      },
+      "expect": {
+        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDE5OF8iLCJ0IjoiaWNwIiwiZCI6IkVKVXQ1U2U4Z1pnbzdGTnMyemdxcjA4ekNkVlF3MXBwcWYwcjlyMVhQMk1pIiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIl0sIm50IjoiMSIsIm4iOlsiRUVYZWtVWXd5ZjRCbHYxVV9XRk1MN1lsaUJSOUdKWGZsM29zS3RJZXZLUU4iXSwiYnQiOiIwIiwiYiI6W10sImMiOltdLCJhIjpbeyJkIjoiRURpZ2VzdDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMHgiLCJpIjoiRUNyZWRlbnRpYWwwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDB4IiwicyI6IjAifV19",
+        "said": "EJUt5Se8gZgo7FNs2zgqr08zCdVQw1ppqf0r9r1XP2Mi",
+        "aid": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+        "event_readable": {
+          "v": "KERI10JSON000198_",
+          "t": "icp",
+          "d": "EJUt5Se8gZgo7FNs2zgqr08zCdVQw1ppqf0r9r1XP2Mi",
+          "i": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+          "s": "0",
+          "kt": "1",
+          "k": [
+            "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd"
+          ],
+          "nt": "1",
+          "n": [
+            "EEXekUYwyf4Blv1U_WFML7YliBR9GJXfl3osKtIevKQN"
+          ],
+          "bt": "0",
+          "b": [],
+          "c": [],
+          "a": [
+            {
+              "d": "EDigest000000000000000000000000000000000000x",
+              "i": "ECredential000000000000000000000000000000x",
+              "s": "0"
+            }
+          ]
+        }
+      }
+    },
+    {
       "id": "rot/simple/sn-1",
       "kind": "rotation",
       "why": "A rotation must carry the key the previous event committed to, and must chain to that event by digest. Both are places an implementation can quietly differ.",
@@ -209,7 +772,8 @@
         "sn": 1,
         "next_digests": [
           "EKoe-PQlxxoXwxHMG7OtB-XrkdoN0X9_L4o-vQDpDK-P"
-        ]
+        ],
+        "prior_event_raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDEyYl8iLCJ0IjoiaWNwIiwiZCI6IkVOQTk5d0lMek1UZWhQVHZjcGVNbHJkLTZOd2tBZmw4TFZSRzZYNkh5Qk9TIiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIl0sIm50IjoiMSIsIm4iOlsiRUVYZWtVWXd5ZjRCbHYxVV9XRk1MN1lsaUJSOUdKWGZsM29zS3RJZXZLUU4iXSwiYnQiOiIwIiwiYiI6W10sImMiOltdLCJhIjpbXX0="
       },
       "expect": {
         "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDE2MF8iLCJ0Ijoicm90IiwiZCI6IkVLTjJSRUk1OVR4Rm1TVDRZUWhYa2VhRTBpZVFybGVKTERhMmEzY2xWZVZQIiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6IjEiLCJwIjoiRU5BOTl3SUx6TVRlaFBUdmNwZU1scmQtNk53a0FmbDhMVlJHNlg2SHlCT1MiLCJrdCI6IjEiLCJrIjpbIkRDM3dRU1h3QVZyN1I4NkZPdS1IY2dsUC1VbU1GTXNibmhLWFBDa24yZy1tIl0sIm50IjoiMSIsIm4iOlsiRUtvZS1QUWx4eG9Yd3hITUc3T3RCLVhya2RvTjBYOV9MNG8tdlFEcERLLVAiXSwiYnQiOiIwIiwiYnIiOltdLCJiYSI6W10sImEiOltdfQ==",
@@ -238,6 +802,427 @@
       }
     },
     {
+      "id": "rot/threshold-change/2-of-3-to-3-of-3",
+      "kind": "rotation",
+      "why": "Changing the threshold is itself a commitment recorded in the event. An implementation that leaves the old threshold in place, or encodes the new one as a number rather than a string, disagrees with every peer about who may sign next.",
+      "input": {
+        "prefix": "EAgflCg87h0givbJDoiUmlM71E9QsPPRlqcYlrHxXvmg",
+        "keys": [
+          "DBkgTIw7qFugWc0YrJAXvQKhjaXRDGj7d5o0vkPvBneR",
+          "DOL-Kjm3MmZCgn1tgtSXYizWwpf-eCcOqkNrAfCGtvPL",
+          "DFtkicnH_Q3PUFRefBZIhu9ASR7AbH8bEjBBeX6BF1Ne"
+        ],
+        "prior_said": "EAgflCg87h0givbJDoiUmlM71E9QsPPRlqcYlrHxXvmg",
+        "sn": 1,
+        "next_digests": [
+          "EFQFzi11-cRq9LVp9KPkp3jj-PYhhTH9zdnrcaLjfoRO",
+          "EDUxc7jfdq2AvgXNSpq5jYFtURDsy0Tkqm1rAx7hwR6a",
+          "EDVuXFCg2P6xr9UqII22JQdZ-h2oFIByikx3ArqTWIQQ"
+        ],
+        "isith": "3",
+        "nsith": "2",
+        "prior_event_raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDFlN18iLCJ0IjoiaWNwIiwiZCI6IkVBZ2ZsQ2c4N2gwZ2l2YkpEb2lVbWxNNzFFOVFzUFBSbHFjWWxySHhYdm1nIiwiaSI6IkVBZ2ZsQ2c4N2gwZ2l2YkpEb2lVbWxNNzFFOVFzUFBSbHFjWWxySHhYdm1nIiwicyI6IjAiLCJrdCI6IjIiLCJrIjpbIkRJc2pmWGlPanFydlZReHRFbGdqLWtYeF9WX0NteXlJdmZoeEVaUnhfQk1TIiwiREFGT1RaSXNXV280Q3RfSjd0Y2k2RFdDTHhJMmRoYVQ1THE3WWVHdnV3VHgiLCJETWh0QWEyTEw3YVVzaV8yRGp5ZG5uN1pEYlZnUjNLM1JGRFVDUk81cWN1diJdLCJudCI6IjIiLCJuIjpbIkVJbHB2VTFkaG1xSXlMTlZCQUphamw5Q092MktQWnVqU2I2eFIxc3l4MmVyIiwiRURUbC1hYXhDVjBraERsanBoTTlqemZ3U2Vkb1lqb0RxLUtRdE9RODA1MGYiLCJFRVA0cHdMWWVvM21xdXQ4cTMxelhDczF1clBlUTlsQU5GcmxEdmF6eloySyJdLCJidCI6IjAiLCJiIjpbXSwiYyI6W10sImEiOltdfQ=="
+      },
+      "expect": {
+        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDIxY18iLCJ0Ijoicm90IiwiZCI6IkVJZXJUTTBFT05lSVFsSmRaZWhVZVg2V1NMZUVXajJTWi10bDdCVmFRbkJfIiwiaSI6IkVBZ2ZsQ2c4N2gwZ2l2YkpEb2lVbWxNNzFFOVFzUFBSbHFjWWxySHhYdm1nIiwicyI6IjEiLCJwIjoiRUFnZmxDZzg3aDBnaXZiSkRvaVVtbE03MUU5UXNQUFJscWNZbHJIeFh2bWciLCJrdCI6IjMiLCJrIjpbIkRCa2dUSXc3cUZ1Z1djMFlySkFYdlFLaGphWFJER2o3ZDVvMHZrUHZCbmVSIiwiRE9MLUtqbTNNbVpDZ24xdGd0U1hZaXpXd3BmLWVDY09xa05yQWZDR3R2UEwiLCJERnRraWNuSF9RM1BVRlJlZkJaSWh1OUFTUjdBYkg4YkVqQkJlWDZCRjFOZSJdLCJudCI6IjIiLCJuIjpbIkVGUUZ6aTExLWNScTlMVnA5S1BrcDNqai1QWWhoVEg5emRucmNhTGpmb1JPIiwiRURVeGM3amZkcTJBdmdYTlNwcTVqWUZ0VVJEc3kwVGtxbTFyQXg3aHdSNmEiLCJFRFZ1WEZDZzJQNnhyOVVxSUkyMkpRZFotaDJvRklCeWlreDNBcnFUV0lRUSJdLCJidCI6IjAiLCJiciI6W10sImJhIjpbXSwiYSI6W119",
+        "said": "EIerTM0EONeIQlJdZehUeX6WSLeEWj2SZ-tl7BVaQnB_",
+        "aid": "EAgflCg87h0givbJDoiUmlM71E9QsPPRlqcYlrHxXvmg",
+        "event_readable": {
+          "v": "KERI10JSON00021c_",
+          "t": "rot",
+          "d": "EIerTM0EONeIQlJdZehUeX6WSLeEWj2SZ-tl7BVaQnB_",
+          "i": "EAgflCg87h0givbJDoiUmlM71E9QsPPRlqcYlrHxXvmg",
+          "s": "1",
+          "p": "EAgflCg87h0givbJDoiUmlM71E9QsPPRlqcYlrHxXvmg",
+          "kt": "3",
+          "k": [
+            "DBkgTIw7qFugWc0YrJAXvQKhjaXRDGj7d5o0vkPvBneR",
+            "DOL-Kjm3MmZCgn1tgtSXYizWwpf-eCcOqkNrAfCGtvPL",
+            "DFtkicnH_Q3PUFRefBZIhu9ASR7AbH8bEjBBeX6BF1Ne"
+          ],
+          "nt": "2",
+          "n": [
+            "EFQFzi11-cRq9LVp9KPkp3jj-PYhhTH9zdnrcaLjfoRO",
+            "EDUxc7jfdq2AvgXNSpq5jYFtURDsy0Tkqm1rAx7hwR6a",
+            "EDVuXFCg2P6xr9UqII22JQdZ-h2oFIByikx3ArqTWIQQ"
+          ],
+          "bt": "0",
+          "br": [],
+          "ba": [],
+          "a": []
+        }
+      }
+    },
+    {
+      "id": "rot/witness-adds/one",
+      "kind": "rotation",
+      "why": "Adding a witness is recorded as ba (backers add). An implementation that rewrites the full witness list instead of emitting the delta, or that omits the new toad, produces a rotation no peer will accept.",
+      "input": {
+        "prefix": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+        "keys": [
+          "DC3wQSXwAVr7R86FOu-HcglP-UmMFMsbnhKXPCkn2g-m"
+        ],
+        "prior_said": "EOvabDPyXxEayBdARscogUrHA6nfSLl-IKvfmI8N6ZIo",
+        "sn": 1,
+        "next_digests": [
+          "EKoe-PQlxxoXwxHMG7OtB-XrkdoN0X9_L4o-vQDpDK-P"
+        ],
+        "prior_witnesses": [
+          "BMhTrQ8M0rYZrqks7sT9VqJNZJnVhM55JX5Fz9gTm2Cn",
+          "BO4x-DyIpxIZpvz5vuDam8ImIFiPWhWmFFVTUE35ZJ5c"
+        ],
+        "adds": [
+          "BEdF0Zxm7JF5-iUJcFZAnvFpZ7ahp0v9j3r9Uo9ZYwYV"
+        ],
+        "toad": 2,
+        "prior_event_raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDE4OF8iLCJ0IjoiaWNwIiwiZCI6IkVPdmFiRFB5WHhFYXlCZEFSc2NvZ1VySEE2bmZTTGwtSUt2Zm1JOE42WklvIiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIl0sIm50IjoiMSIsIm4iOlsiRUVYZWtVWXd5ZjRCbHYxVV9XRk1MN1lsaUJSOUdKWGZsM29zS3RJZXZLUU4iXSwiYnQiOiIxIiwiYiI6WyJCTWhUclE4TTByWVpycWtzN3NUOVZxSk5aSm5WaE01NUpYNUZ6OWdUbTJDbiIsIkJPNHgtRHlJcHhJWnB2ejV2dURhbThJbUlGaVBXaFdtRkZWVFVFMzVaSjVjIl0sImMiOltdLCJhIjpbXX0="
+      },
+      "expect": {
+        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDE4ZV8iLCJ0Ijoicm90IiwiZCI6IkVDRGN3b3FoVE9uQW5MT20yVFg4b0pOeGRQY3NjWjd4N3BPUS1UeEoxM2VTIiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6IjEiLCJwIjoiRU92YWJEUHlYeEVheUJkQVJzY29nVXJIQTZuZlNMbC1JS3ZmbUk4TjZaSW8iLCJrdCI6IjEiLCJrIjpbIkRDM3dRU1h3QVZyN1I4NkZPdS1IY2dsUC1VbU1GTXNibmhLWFBDa24yZy1tIl0sIm50IjoiMSIsIm4iOlsiRUtvZS1QUWx4eG9Yd3hITUc3T3RCLVhya2RvTjBYOV9MNG8tdlFEcERLLVAiXSwiYnQiOiIyIiwiYnIiOltdLCJiYSI6WyJCRWRGMFp4bTdKRjUtaVVKY0ZaQW52RnBaN2FocDB2OWozcjlVbzlaWXdZViJdLCJhIjpbXX0=",
+        "said": "ECDcwoqhTOnAnLOm2TX8oJNxdPcscZ7x7pOQ-TxJ13eS",
+        "aid": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+        "event_readable": {
+          "v": "KERI10JSON00018e_",
+          "t": "rot",
+          "d": "ECDcwoqhTOnAnLOm2TX8oJNxdPcscZ7x7pOQ-TxJ13eS",
+          "i": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+          "s": "1",
+          "p": "EOvabDPyXxEayBdARscogUrHA6nfSLl-IKvfmI8N6ZIo",
+          "kt": "1",
+          "k": [
+            "DC3wQSXwAVr7R86FOu-HcglP-UmMFMsbnhKXPCkn2g-m"
+          ],
+          "nt": "1",
+          "n": [
+            "EKoe-PQlxxoXwxHMG7OtB-XrkdoN0X9_L4o-vQDpDK-P"
+          ],
+          "bt": "2",
+          "br": [],
+          "ba": [
+            "BEdF0Zxm7JF5-iUJcFZAnvFpZ7ahp0v9j3r9Uo9ZYwYV"
+          ],
+          "a": []
+        }
+      }
+    },
+    {
+      "id": "rot/witness-cuts/one",
+      "kind": "rotation",
+      "why": "Removing a witness is recorded as br (backers remove). An implementation that drops a witness without emitting br has not said what it thinks it said.",
+      "input": {
+        "prefix": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+        "keys": [
+          "DC3wQSXwAVr7R86FOu-HcglP-UmMFMsbnhKXPCkn2g-m"
+        ],
+        "prior_said": "EOvabDPyXxEayBdARscogUrHA6nfSLl-IKvfmI8N6ZIo",
+        "sn": 1,
+        "next_digests": [
+          "EKoe-PQlxxoXwxHMG7OtB-XrkdoN0X9_L4o-vQDpDK-P"
+        ],
+        "prior_witnesses": [
+          "BMhTrQ8M0rYZrqks7sT9VqJNZJnVhM55JX5Fz9gTm2Cn",
+          "BO4x-DyIpxIZpvz5vuDam8ImIFiPWhWmFFVTUE35ZJ5c"
+        ],
+        "cuts": [
+          "BO4x-DyIpxIZpvz5vuDam8ImIFiPWhWmFFVTUE35ZJ5c"
+        ],
+        "toad": 1,
+        "prior_event_raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDE4OF8iLCJ0IjoiaWNwIiwiZCI6IkVPdmFiRFB5WHhFYXlCZEFSc2NvZ1VySEE2bmZTTGwtSUt2Zm1JOE42WklvIiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIl0sIm50IjoiMSIsIm4iOlsiRUVYZWtVWXd5ZjRCbHYxVV9XRk1MN1lsaUJSOUdKWGZsM29zS3RJZXZLUU4iXSwiYnQiOiIxIiwiYiI6WyJCTWhUclE4TTByWVpycWtzN3NUOVZxSk5aSm5WaE01NUpYNUZ6OWdUbTJDbiIsIkJPNHgtRHlJcHhJWnB2ejV2dURhbThJbUlGaVBXaFdtRkZWVFVFMzVaSjVjIl0sImMiOltdLCJhIjpbXX0="
+      },
+      "expect": {
+        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDE4ZV8iLCJ0Ijoicm90IiwiZCI6IkVEVFJOYVpLYUo5UHhlUFBTQXJtYWJ5bWRnVlBDa1ZTQ3B4d3FUYmpwelI5IiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6IjEiLCJwIjoiRU92YWJEUHlYeEVheUJkQVJzY29nVXJIQTZuZlNMbC1JS3ZmbUk4TjZaSW8iLCJrdCI6IjEiLCJrIjpbIkRDM3dRU1h3QVZyN1I4NkZPdS1IY2dsUC1VbU1GTXNibmhLWFBDa24yZy1tIl0sIm50IjoiMSIsIm4iOlsiRUtvZS1QUWx4eG9Yd3hITUc3T3RCLVhya2RvTjBYOV9MNG8tdlFEcERLLVAiXSwiYnQiOiIxIiwiYnIiOlsiQk80eC1EeUlweElacHZ6NXZ1RGFtOEltSUZpUFdoV21GRlZUVUUzNVpKNWMiXSwiYmEiOltdLCJhIjpbXX0=",
+        "said": "EDTRNaZKaJ9PxePPSArmabymdgVPCkVSCpxwqTbjpzR9",
+        "aid": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+        "event_readable": {
+          "v": "KERI10JSON00018e_",
+          "t": "rot",
+          "d": "EDTRNaZKaJ9PxePPSArmabymdgVPCkVSCpxwqTbjpzR9",
+          "i": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+          "s": "1",
+          "p": "EOvabDPyXxEayBdARscogUrHA6nfSLl-IKvfmI8N6ZIo",
+          "kt": "1",
+          "k": [
+            "DC3wQSXwAVr7R86FOu-HcglP-UmMFMsbnhKXPCkn2g-m"
+          ],
+          "nt": "1",
+          "n": [
+            "EKoe-PQlxxoXwxHMG7OtB-XrkdoN0X9_L4o-vQDpDK-P"
+          ],
+          "bt": "1",
+          "br": [
+            "BO4x-DyIpxIZpvz5vuDam8ImIFiPWhWmFFVTUE35ZJ5c"
+          ],
+          "ba": [],
+          "a": []
+        }
+      }
+    },
+    {
+      "id": "rot/witness-cuts-and-adds/one-each",
+      "kind": "rotation",
+      "why": "Cuts and adds in the same rotation are ordered fields of one event. Swapping them, or applying them in the wrong order to reconstruct the witness set, yields a different next state.",
+      "input": {
+        "prefix": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+        "keys": [
+          "DC3wQSXwAVr7R86FOu-HcglP-UmMFMsbnhKXPCkn2g-m"
+        ],
+        "prior_said": "EOvabDPyXxEayBdARscogUrHA6nfSLl-IKvfmI8N6ZIo",
+        "sn": 1,
+        "next_digests": [
+          "EKoe-PQlxxoXwxHMG7OtB-XrkdoN0X9_L4o-vQDpDK-P"
+        ],
+        "prior_witnesses": [
+          "BMhTrQ8M0rYZrqks7sT9VqJNZJnVhM55JX5Fz9gTm2Cn",
+          "BO4x-DyIpxIZpvz5vuDam8ImIFiPWhWmFFVTUE35ZJ5c"
+        ],
+        "cuts": [
+          "BMhTrQ8M0rYZrqks7sT9VqJNZJnVhM55JX5Fz9gTm2Cn"
+        ],
+        "adds": [
+          "BEdF0Zxm7JF5-iUJcFZAnvFpZ7ahp0v9j3r9Uo9ZYwYV"
+        ],
+        "toad": 1,
+        "prior_event_raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDE4OF8iLCJ0IjoiaWNwIiwiZCI6IkVPdmFiRFB5WHhFYXlCZEFSc2NvZ1VySEE2bmZTTGwtSUt2Zm1JOE42WklvIiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIl0sIm50IjoiMSIsIm4iOlsiRUVYZWtVWXd5ZjRCbHYxVV9XRk1MN1lsaUJSOUdKWGZsM29zS3RJZXZLUU4iXSwiYnQiOiIxIiwiYiI6WyJCTWhUclE4TTByWVpycWtzN3NUOVZxSk5aSm5WaE01NUpYNUZ6OWdUbTJDbiIsIkJPNHgtRHlJcHhJWnB2ejV2dURhbThJbUlGaVBXaFdtRkZWVFVFMzVaSjVjIl0sImMiOltdLCJhIjpbXX0="
+      },
+      "expect": {
+        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDFiY18iLCJ0Ijoicm90IiwiZCI6IkVMRHFja1ltd1k0cy1tb3FET2dDbVRNUGdxYVFXajkzNFFFWmV5bE1UeG93IiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6IjEiLCJwIjoiRU92YWJEUHlYeEVheUJkQVJzY29nVXJIQTZuZlNMbC1JS3ZmbUk4TjZaSW8iLCJrdCI6IjEiLCJrIjpbIkRDM3dRU1h3QVZyN1I4NkZPdS1IY2dsUC1VbU1GTXNibmhLWFBDa24yZy1tIl0sIm50IjoiMSIsIm4iOlsiRUtvZS1QUWx4eG9Yd3hITUc3T3RCLVhya2RvTjBYOV9MNG8tdlFEcERLLVAiXSwiYnQiOiIxIiwiYnIiOlsiQk1oVHJROE0wcllacnFrczdzVDlWcUpOWkpuVmhNNTVKWDVGejlnVG0yQ24iXSwiYmEiOlsiQkVkRjBaeG03SkY1LWlVSmNGWkFudkZwWjdhaHAwdjlqM3I5VW85Wll3WVYiXSwiYSI6W119",
+        "said": "ELDqckYmwY4s-moqDOgCmTMPgqaQWj934QEZeylMTxow",
+        "aid": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+        "event_readable": {
+          "v": "KERI10JSON0001bc_",
+          "t": "rot",
+          "d": "ELDqckYmwY4s-moqDOgCmTMPgqaQWj934QEZeylMTxow",
+          "i": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+          "s": "1",
+          "p": "EOvabDPyXxEayBdARscogUrHA6nfSLl-IKvfmI8N6ZIo",
+          "kt": "1",
+          "k": [
+            "DC3wQSXwAVr7R86FOu-HcglP-UmMFMsbnhKXPCkn2g-m"
+          ],
+          "nt": "1",
+          "n": [
+            "EKoe-PQlxxoXwxHMG7OtB-XrkdoN0X9_L4o-vQDpDK-P"
+          ],
+          "bt": "1",
+          "br": [
+            "BMhTrQ8M0rYZrqks7sT9VqJNZJnVhM55JX5Fz9gTm2Cn"
+          ],
+          "ba": [
+            "BEdF0Zxm7JF5-iUJcFZAnvFpZ7ahp0v9j3r9Uo9ZYwYV"
+          ],
+          "a": []
+        }
+      }
+    },
+    {
+      "id": "rot/with-anchor-seal",
+      "kind": "rotation",
+      "why": "A rotation can anchor data the same way an interaction can. Dropping the seal, or serialising it differently, changes the event digest and breaks the chain for anyone verifying against the real history.",
+      "input": {
+        "prefix": "DMdgEnRE6mHFoDlg-5Mr5UgNFbLSl78il2OMYc21mInN",
+        "keys": [
+          "DBsghOFK-Xmw1cYZcrAHhGu2hZWKC8zeSVTvau7Taz-D"
+        ],
+        "prior_said": "EIPHBtdTUV4UtHcUuhY5kj0p-UgKMbLKQFRgq1CFmM9d",
+        "sn": 1,
+        "next_digests": [
+          "EDAr01GNS7_HX1sLOwyA-e9dg0ii8kHa8Tp4ujaj1XaE"
+        ],
+        "data": [
+          {
+            "i": "EOwner0000000000000000000000000000000000000x",
+            "r": "owner"
+          }
+        ],
+        "prior_event_raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDEyYl8iLCJ0IjoiaWNwIiwiZCI6IkVJUEhCdGRUVVY0VXRIY1V1aFk1a2owcC1VZ0tNYkxLUUZSZ3ExQ0ZtTTlkIiwiaSI6IkRNZGdFblJFNm1IRm9EbGctNU1yNVVnTkZiTFNsNzhpbDJPTVljMjFtSW5OIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRNZGdFblJFNm1IRm9EbGctNU1yNVVnTkZiTFNsNzhpbDJPTVljMjFtSW5OIl0sIm50IjoiMSIsIm4iOlsiRUdhSlI1SnBXa0J6TTBZLXhGS1dvWVVCRjFXM09IYzM1Z3ZCZmhpQ3dpYXgiXSwiYnQiOiIwIiwiYiI6W10sImMiOltdLCJhIjpbXX0="
+      },
+      "expect": {
+        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDFhMF8iLCJ0Ijoicm90IiwiZCI6IkVDUGZ4OGpVejZjbFZOUkN6WF8zLTQ3ZlJxeVh5N0xsWWpfc09MOUhvSGlIIiwiaSI6IkRNZGdFblJFNm1IRm9EbGctNU1yNVVnTkZiTFNsNzhpbDJPTVljMjFtSW5OIiwicyI6IjEiLCJwIjoiRUlQSEJ0ZFRVVjRVdEhjVXVoWTVrajBwLVVnS01iTEtRRlJncTFDRm1NOWQiLCJrdCI6IjEiLCJrIjpbIkRCc2doT0ZLLVhtdzFjWVpjckFIaEd1MmhaV0tDOHplU1ZUdmF1N1Rhei1EIl0sIm50IjoiMSIsIm4iOlsiRURBcjAxR05TN19IWDFzTE93eUEtZTlkZzBpaThrSGE4VHA0dWphajFYYUUiXSwiYnQiOiIwIiwiYnIiOltdLCJiYSI6W10sImEiOlt7ImkiOiJFT3duZXIwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAweCIsInIiOiJvd25lciJ9XX0=",
+        "said": "ECPfx8jUz6clVNRCzX_3-47fRqyXy7LlYj_sOL9HoHiH",
+        "aid": "DMdgEnRE6mHFoDlg-5Mr5UgNFbLSl78il2OMYc21mInN",
+        "event_readable": {
+          "v": "KERI10JSON0001a0_",
+          "t": "rot",
+          "d": "ECPfx8jUz6clVNRCzX_3-47fRqyXy7LlYj_sOL9HoHiH",
+          "i": "DMdgEnRE6mHFoDlg-5Mr5UgNFbLSl78il2OMYc21mInN",
+          "s": "1",
+          "p": "EIPHBtdTUV4UtHcUuhY5kj0p-UgKMbLKQFRgq1CFmM9d",
+          "kt": "1",
+          "k": [
+            "DBsghOFK-Xmw1cYZcrAHhGu2hZWKC8zeSVTvau7Taz-D"
+          ],
+          "nt": "1",
+          "n": [
+            "EDAr01GNS7_HX1sLOwyA-e9dg0ii8kHa8Tp4ujaj1XaE"
+          ],
+          "bt": "0",
+          "br": [],
+          "ba": [],
+          "a": [
+            {
+              "i": "EOwner0000000000000000000000000000000000000x",
+              "r": "owner"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "rot/chain/sn-1",
+      "kind": "rotation",
+      "why": "Each rotation digests the previous event. An implementation that always points at the inception, or that mis-encodes the sequence number as it grows past single digits (sn=1), cannot be followed by anyone else.",
+      "input": {
+        "prefix": "DCr8s2yGsOGWZAWKKQU6VAv3UkAWxyBsnztwoDkcmZ9F",
+        "keys": [
+          "DHApcYAADPhNWX_Yqk5DmLaT7W9qnkcm-O22d0eo2LlN"
+        ],
+        "prior_said": "EIRZp6LQXdCOf5YFP30joOIVS8D4qffcesyzAK7mXLfQ",
+        "sn": 1,
+        "next_digests": [
+          "EPUj6dCRuMFnW3OhaURnKf8szJqnMpgAmfBKRiQiGO99"
+        ],
+        "prior_event_raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDEyYl8iLCJ0IjoiaWNwIiwiZCI6IkVJUlpwNkxRWGRDT2Y1WUZQMzBqb09JVlM4RDRxZmZjZXN5ekFLN21YTGZRIiwiaSI6IkRDcjhzMnlHc09HV1pBV0tLUVU2VkF2M1VrQVd4eUJzbnp0d29Ea2NtWjlGIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRDcjhzMnlHc09HV1pBV0tLUVU2VkF2M1VrQVd4eUJzbnp0d29Ea2NtWjlGIl0sIm50IjoiMSIsIm4iOlsiRVB6dEppekRqYVZjM25pcF91S2dCN0tMc3gteE5RS09vSW5jbzFpZ0NxVjAiXSwiYnQiOiIwIiwiYiI6W10sImMiOltdLCJhIjpbXX0=",
+        "inception_raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDEyYl8iLCJ0IjoiaWNwIiwiZCI6IkVJUlpwNkxRWGRDT2Y1WUZQMzBqb09JVlM4RDRxZmZjZXN5ekFLN21YTGZRIiwiaSI6IkRDcjhzMnlHc09HV1pBV0tLUVU2VkF2M1VrQVd4eUJzbnp0d29Ea2NtWjlGIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRDcjhzMnlHc09HV1pBV0tLUVU2VkF2M1VrQVd4eUJzbnp0d29Ea2NtWjlGIl0sIm50IjoiMSIsIm4iOlsiRVB6dEppekRqYVZjM25pcF91S2dCN0tMc3gteE5RS09vSW5jbzFpZ0NxVjAiXSwiYnQiOiIwIiwiYiI6W10sImMiOltdLCJhIjpbXX0="
+      },
+      "expect": {
+        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDE2MF8iLCJ0Ijoicm90IiwiZCI6IkVOc2REcEVZSFQ4WjJuUDIxVVFMSlhfcG9yc2hPSXR2b1FwYUFLYXc5b3VNIiwiaSI6IkRDcjhzMnlHc09HV1pBV0tLUVU2VkF2M1VrQVd4eUJzbnp0d29Ea2NtWjlGIiwicyI6IjEiLCJwIjoiRUlSWnA2TFFYZENPZjVZRlAzMGpvT0lWUzhENHFmZmNlc3l6QUs3bVhMZlEiLCJrdCI6IjEiLCJrIjpbIkRIQXBjWUFBRFBoTldYX1lxazVEbUxhVDdXOXFua2NtLU8yMmQwZW8yTGxOIl0sIm50IjoiMSIsIm4iOlsiRVBVajZkQ1J1TUZuVzNPaGFVUm5LZjhzekpxbk1wZ0FtZkJLUmlRaUdPOTkiXSwiYnQiOiIwIiwiYnIiOltdLCJiYSI6W10sImEiOltdfQ==",
+        "said": "ENsdDpEYHT8Z2nP21UQLJX_porshOItvoQpaAKaw9ouM",
+        "aid": "DCr8s2yGsOGWZAWKKQU6VAv3UkAWxyBsnztwoDkcmZ9F",
+        "event_readable": {
+          "v": "KERI10JSON000160_",
+          "t": "rot",
+          "d": "ENsdDpEYHT8Z2nP21UQLJX_porshOItvoQpaAKaw9ouM",
+          "i": "DCr8s2yGsOGWZAWKKQU6VAv3UkAWxyBsnztwoDkcmZ9F",
+          "s": "1",
+          "p": "EIRZp6LQXdCOf5YFP30joOIVS8D4qffcesyzAK7mXLfQ",
+          "kt": "1",
+          "k": [
+            "DHApcYAADPhNWX_Yqk5DmLaT7W9qnkcm-O22d0eo2LlN"
+          ],
+          "nt": "1",
+          "n": [
+            "EPUj6dCRuMFnW3OhaURnKf8szJqnMpgAmfBKRiQiGO99"
+          ],
+          "bt": "0",
+          "br": [],
+          "ba": [],
+          "a": []
+        }
+      }
+    },
+    {
+      "id": "rot/chain/sn-2",
+      "kind": "rotation",
+      "why": "Each rotation digests the previous event. An implementation that always points at the inception, or that mis-encodes the sequence number as it grows past single digits (sn=2), cannot be followed by anyone else.",
+      "input": {
+        "prefix": "DCr8s2yGsOGWZAWKKQU6VAv3UkAWxyBsnztwoDkcmZ9F",
+        "keys": [
+          "DN9HG7o6t-2I0wqQC_oHvFnEy-LqfARafXA_6F8H0LVO"
+        ],
+        "prior_said": "ENsdDpEYHT8Z2nP21UQLJX_porshOItvoQpaAKaw9ouM",
+        "sn": 2,
+        "next_digests": [
+          "EORLA2mDlLyv41-EfNGu7wGGw8kOewxgvpE4n12ilPJ3"
+        ],
+        "prior_event_raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDE2MF8iLCJ0Ijoicm90IiwiZCI6IkVOc2REcEVZSFQ4WjJuUDIxVVFMSlhfcG9yc2hPSXR2b1FwYUFLYXc5b3VNIiwiaSI6IkRDcjhzMnlHc09HV1pBV0tLUVU2VkF2M1VrQVd4eUJzbnp0d29Ea2NtWjlGIiwicyI6IjEiLCJwIjoiRUlSWnA2TFFYZENPZjVZRlAzMGpvT0lWUzhENHFmZmNlc3l6QUs3bVhMZlEiLCJrdCI6IjEiLCJrIjpbIkRIQXBjWUFBRFBoTldYX1lxazVEbUxhVDdXOXFua2NtLU8yMmQwZW8yTGxOIl0sIm50IjoiMSIsIm4iOlsiRVBVajZkQ1J1TUZuVzNPaGFVUm5LZjhzekpxbk1wZ0FtZkJLUmlRaUdPOTkiXSwiYnQiOiIwIiwiYnIiOltdLCJiYSI6W10sImEiOltdfQ==",
+        "inception_raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDEyYl8iLCJ0IjoiaWNwIiwiZCI6IkVJUlpwNkxRWGRDT2Y1WUZQMzBqb09JVlM4RDRxZmZjZXN5ekFLN21YTGZRIiwiaSI6IkRDcjhzMnlHc09HV1pBV0tLUVU2VkF2M1VrQVd4eUJzbnp0d29Ea2NtWjlGIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRDcjhzMnlHc09HV1pBV0tLUVU2VkF2M1VrQVd4eUJzbnp0d29Ea2NtWjlGIl0sIm50IjoiMSIsIm4iOlsiRVB6dEppekRqYVZjM25pcF91S2dCN0tMc3gteE5RS09vSW5jbzFpZ0NxVjAiXSwiYnQiOiIwIiwiYiI6W10sImMiOltdLCJhIjpbXX0="
+      },
+      "expect": {
+        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDE2MF8iLCJ0Ijoicm90IiwiZCI6IkVPYmJWRzUwajJyWnlJSFQ3bUJrOGYyelZ2NlRwRzhjMVpuTUZKR0lQT1BJIiwiaSI6IkRDcjhzMnlHc09HV1pBV0tLUVU2VkF2M1VrQVd4eUJzbnp0d29Ea2NtWjlGIiwicyI6IjIiLCJwIjoiRU5zZERwRVlIVDhaMm5QMjFVUUxKWF9wb3JzaE9JdHZvUXBhQUthdzlvdU0iLCJrdCI6IjEiLCJrIjpbIkROOUhHN282dC0ySTB3cVFDX29IdkZuRXktTHFmQVJhZlhBXzZGOEgwTFZPIl0sIm50IjoiMSIsIm4iOlsiRU9STEEybURsTHl2NDEtRWZOR3U3d0dHdzhrT2V3eGd2cEU0bjEyaWxQSjMiXSwiYnQiOiIwIiwiYnIiOltdLCJiYSI6W10sImEiOltdfQ==",
+        "said": "EObbVG50j2rZyIHT7mBk8f2zVv6TpG8c1ZnMFJGIPOPI",
+        "aid": "DCr8s2yGsOGWZAWKKQU6VAv3UkAWxyBsnztwoDkcmZ9F",
+        "event_readable": {
+          "v": "KERI10JSON000160_",
+          "t": "rot",
+          "d": "EObbVG50j2rZyIHT7mBk8f2zVv6TpG8c1ZnMFJGIPOPI",
+          "i": "DCr8s2yGsOGWZAWKKQU6VAv3UkAWxyBsnztwoDkcmZ9F",
+          "s": "2",
+          "p": "ENsdDpEYHT8Z2nP21UQLJX_porshOItvoQpaAKaw9ouM",
+          "kt": "1",
+          "k": [
+            "DN9HG7o6t-2I0wqQC_oHvFnEy-LqfARafXA_6F8H0LVO"
+          ],
+          "nt": "1",
+          "n": [
+            "EORLA2mDlLyv41-EfNGu7wGGw8kOewxgvpE4n12ilPJ3"
+          ],
+          "bt": "0",
+          "br": [],
+          "ba": [],
+          "a": []
+        }
+      }
+    },
+    {
+      "id": "rot/chain/sn-3",
+      "kind": "rotation",
+      "why": "Each rotation digests the previous event. An implementation that always points at the inception, or that mis-encodes the sequence number as it grows past single digits (sn=3), cannot be followed by anyone else.",
+      "input": {
+        "prefix": "DCr8s2yGsOGWZAWKKQU6VAv3UkAWxyBsnztwoDkcmZ9F",
+        "keys": [
+          "DNq2zqgTiNglU8meR95eTLUXANUkUMMMrTAWsLam5Uae"
+        ],
+        "prior_said": "EObbVG50j2rZyIHT7mBk8f2zVv6TpG8c1ZnMFJGIPOPI",
+        "sn": 3,
+        "next_digests": [
+          "EI53Eax6D9lF5-BqmITLwKz3RobBvbe33Y93pDhJLaD9"
+        ],
+        "prior_event_raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDE2MF8iLCJ0Ijoicm90IiwiZCI6IkVPYmJWRzUwajJyWnlJSFQ3bUJrOGYyelZ2NlRwRzhjMVpuTUZKR0lQT1BJIiwiaSI6IkRDcjhzMnlHc09HV1pBV0tLUVU2VkF2M1VrQVd4eUJzbnp0d29Ea2NtWjlGIiwicyI6IjIiLCJwIjoiRU5zZERwRVlIVDhaMm5QMjFVUUxKWF9wb3JzaE9JdHZvUXBhQUthdzlvdU0iLCJrdCI6IjEiLCJrIjpbIkROOUhHN282dC0ySTB3cVFDX29IdkZuRXktTHFmQVJhZlhBXzZGOEgwTFZPIl0sIm50IjoiMSIsIm4iOlsiRU9STEEybURsTHl2NDEtRWZOR3U3d0dHdzhrT2V3eGd2cEU0bjEyaWxQSjMiXSwiYnQiOiIwIiwiYnIiOltdLCJiYSI6W10sImEiOltdfQ==",
+        "inception_raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDEyYl8iLCJ0IjoiaWNwIiwiZCI6IkVJUlpwNkxRWGRDT2Y1WUZQMzBqb09JVlM4RDRxZmZjZXN5ekFLN21YTGZRIiwiaSI6IkRDcjhzMnlHc09HV1pBV0tLUVU2VkF2M1VrQVd4eUJzbnp0d29Ea2NtWjlGIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRDcjhzMnlHc09HV1pBV0tLUVU2VkF2M1VrQVd4eUJzbnp0d29Ea2NtWjlGIl0sIm50IjoiMSIsIm4iOlsiRVB6dEppekRqYVZjM25pcF91S2dCN0tMc3gteE5RS09vSW5jbzFpZ0NxVjAiXSwiYnQiOiIwIiwiYiI6W10sImMiOltdLCJhIjpbXX0="
+      },
+      "expect": {
+        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDE2MF8iLCJ0Ijoicm90IiwiZCI6IkVJMDJjUURMZkNNVHBhQUlIa3VOY2xYUFZoMFY4LUE1YmJWWmNwRzlPX0V3IiwiaSI6IkRDcjhzMnlHc09HV1pBV0tLUVU2VkF2M1VrQVd4eUJzbnp0d29Ea2NtWjlGIiwicyI6IjMiLCJwIjoiRU9iYlZHNTBqMnJaeUlIVDdtQms4ZjJ6VnY2VHBHOGMxWm5NRkpHSVBPUEkiLCJrdCI6IjEiLCJrIjpbIkROcTJ6cWdUaU5nbFU4bWVSOTVlVExVWEFOVWtVTU1NclRBV3NMYW01VWFlIl0sIm50IjoiMSIsIm4iOlsiRUk1M0VheDZEOWxGNS1CcW1JVEx3S3ozUm9iQnZiZTMzWTkzcERoSkxhRDkiXSwiYnQiOiIwIiwiYnIiOltdLCJiYSI6W10sImEiOltdfQ==",
+        "said": "EI02cQDLfCMTpaAIHkuNclXPVh0V8-A5bbVZcpG9O_Ew",
+        "aid": "DCr8s2yGsOGWZAWKKQU6VAv3UkAWxyBsnztwoDkcmZ9F",
+        "event_readable": {
+          "v": "KERI10JSON000160_",
+          "t": "rot",
+          "d": "EI02cQDLfCMTpaAIHkuNclXPVh0V8-A5bbVZcpG9O_Ew",
+          "i": "DCr8s2yGsOGWZAWKKQU6VAv3UkAWxyBsnztwoDkcmZ9F",
+          "s": "3",
+          "p": "EObbVG50j2rZyIHT7mBk8f2zVv6TpG8c1ZnMFJGIPOPI",
+          "kt": "1",
+          "k": [
+            "DNq2zqgTiNglU8meR95eTLUXANUkUMMMrTAWsLam5Uae"
+          ],
+          "nt": "1",
+          "n": [
+            "EI53Eax6D9lF5-BqmITLwKz3RobBvbe33Y93pDhJLaD9"
+          ],
+          "bt": "0",
+          "br": [],
+          "ba": [],
+          "a": []
+        }
+      }
+    },
+    {
+      "id": "ixn/no-seals",
+      "kind": "interaction",
+      "why": "An interaction with an empty seal list is still a real event with a real digest. An implementation that omits the 'a' field entirely, rather than emitting an empty array, produces bytes no peer will verify.",
+      "input": {
+        "prefix": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+        "prior_said": "ENA99wILzMTehPTvcpeMlrd-6NwkAfl8LVRG6X6HyBOS",
+        "sn": 1,
+        "data": [],
+        "prior_event_raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDEyYl8iLCJ0IjoiaWNwIiwiZCI6IkVOQTk5d0lMek1UZWhQVHZjcGVNbHJkLTZOd2tBZmw4TFZSRzZYNkh5Qk9TIiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIl0sIm50IjoiMSIsIm4iOlsiRUVYZWtVWXd5ZjRCbHYxVV9XRk1MN1lsaUJSOUdKWGZsM29zS3RJZXZLUU4iXSwiYnQiOiIwIiwiYiI6W10sImMiOltdLCJhIjpbXX0="
+      },
+      "expect": {
+        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDBjYl8iLCJ0IjoiaXhuIiwiZCI6IkVKeDVQQUVFRjdpdkJVV2hHNVBvMUloUXlOZzFVbm9EcGg3VTlLQ0lSZkt3IiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6IjEiLCJwIjoiRU5BOTl3SUx6TVRlaFBUdmNwZU1scmQtNk53a0FmbDhMVlJHNlg2SHlCT1MiLCJhIjpbXX0=",
+        "said": "EJx5PAEEF7ivBUWhG5Po1IhQyNg1UnoDph7U9KCIRfKw",
+        "aid": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+        "event_readable": {
+          "v": "KERI10JSON0000cb_",
+          "t": "ixn",
+          "d": "EJx5PAEEF7ivBUWhG5Po1IhQyNg1UnoDph7U9KCIRfKw",
+          "i": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+          "s": "1",
+          "p": "ENA99wILzMTehPTvcpeMlrd-6NwkAfl8LVRG6X6HyBOS",
+          "a": []
+        }
+      }
+    },
+    {
       "id": "ixn/one-seal",
       "kind": "interaction",
       "why": "Interaction events are how a credential is anchored into a key history, so their serialisation decides whether an issuance can be verified elsewhere.",
@@ -251,7 +1236,8 @@
             "s": "0",
             "d": "EDigest000000000000000000000000000000000000x"
           }
-        ]
+        ],
+        "prior_event_raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDEyYl8iLCJ0IjoiaWNwIiwiZCI6IkVOQTk5d0lMek1UZWhQVHZjcGVNbHJkLTZOd2tBZmw4TFZSRzZYNkh5Qk9TIiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIl0sIm50IjoiMSIsIm4iOlsiRUVYZWtVWXd5ZjRCbHYxVV9XRk1MN1lsaUJSOUdKWGZsM29zS3RJZXZLUU4iXSwiYnQiOiIwIiwiYiI6W10sImMiOltdLCJhIjpbXX0="
       },
       "expect": {
         "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDEzOF8iLCJ0IjoiaXhuIiwiZCI6IkVBQnExd3FVWlV2d2J6STFyWVNaZVlHNnEwaDAzdmtDNi1feDBReU5uM0UwIiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6IjEiLCJwIjoiRU5BOTl3SUx6TVRlaFBUdmNwZU1scmQtNk53a0FmbDhMVlJHNlg2SHlCT1MiLCJhIjpbeyJpIjoiRUNyZWRlbnRpYWwwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDB4IiwicyI6IjAiLCJkIjoiRURpZ2VzdDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMHgifV19",
@@ -275,16 +1261,536 @@
       }
     },
     {
-      "id": "property/aid-is-said-of-inception",
+      "id": "ixn/several-seals",
+      "kind": "interaction",
+      "why": "Multiple seals are ordered. Sorting them, or hashing them as a set, changes the event digest and makes the anchor unverifiable.",
+      "input": {
+        "prefix": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+        "prior_said": "ENA99wILzMTehPTvcpeMlrd-6NwkAfl8LVRG6X6HyBOS",
+        "sn": 1,
+        "data": [
+          {
+            "i": "ECredential000000000000000000000000000000x",
+            "s": "0",
+            "d": "EDigest000000000000000000000000000000000000x"
+          },
+          {
+            "i": "EOtherCred0000000000000000000000000000000x",
+            "s": "0",
+            "d": "EOtherDig000000000000000000000000000000000x"
+          }
+        ],
+        "prior_event_raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDEyYl8iLCJ0IjoiaWNwIiwiZCI6IkVOQTk5d0lMek1UZWhQVHZjcGVNbHJkLTZOd2tBZmw4TFZSRzZYNkh5Qk9TIiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIl0sIm50IjoiMSIsIm4iOlsiRUVYZWtVWXd5ZjRCbHYxVV9XRk1MN1lsaUJSOUdKWGZsM29zS3RJZXZLUU4iXSwiYnQiOiIwIiwiYiI6W10sImMiOltdLCJhIjpbXX0="
+      },
+      "expect": {
+        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDFhNV8iLCJ0IjoiaXhuIiwiZCI6IkVIX1hrNFdIRGRoZkZuVHV2b3FtenNCOGU5WHJkRG9LcGdZS2hzUzlMUjBpIiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6IjEiLCJwIjoiRU5BOTl3SUx6TVRlaFBUdmNwZU1scmQtNk53a0FmbDhMVlJHNlg2SHlCT1MiLCJhIjpbeyJpIjoiRUNyZWRlbnRpYWwwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDB4IiwicyI6IjAiLCJkIjoiRURpZ2VzdDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMHgifSx7ImkiOiJFT3RoZXJDcmVkMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMHgiLCJzIjoiMCIsImQiOiJFT3RoZXJEaWcwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDB4In1dfQ==",
+        "said": "EH_Xk4WHDdhfFnTuvoqmzsB8e9XrdDoKpgYKhsS9LR0i",
+        "aid": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+        "event_readable": {
+          "v": "KERI10JSON0001a5_",
+          "t": "ixn",
+          "d": "EH_Xk4WHDdhfFnTuvoqmzsB8e9XrdDoKpgYKhsS9LR0i",
+          "i": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+          "s": "1",
+          "p": "ENA99wILzMTehPTvcpeMlrd-6NwkAfl8LVRG6X6HyBOS",
+          "a": [
+            {
+              "i": "ECredential000000000000000000000000000000x",
+              "s": "0",
+              "d": "EDigest000000000000000000000000000000000000x"
+            },
+            {
+              "i": "EOtherCred0000000000000000000000000000000x",
+              "s": "0",
+              "d": "EOtherDig000000000000000000000000000000000x"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "ixn/seal-field-order/d-i-s",
+      "kind": "interaction",
+      "why": "Seal field order is part of the signed bytes on interaction events too. A hash-map serialiser turns a valid anchor into a different event.",
+      "input": {
+        "prefix": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+        "prior_said": "ENA99wILzMTehPTvcpeMlrd-6NwkAfl8LVRG6X6HyBOS",
+        "sn": 1,
+        "data": [
+          {
+            "d": "EDigest000000000000000000000000000000000000x",
+            "i": "ECredential000000000000000000000000000000x",
+            "s": "0"
+          }
+        ],
+        "prior_event_raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDEyYl8iLCJ0IjoiaWNwIiwiZCI6IkVOQTk5d0lMek1UZWhQVHZjcGVNbHJkLTZOd2tBZmw4TFZSRzZYNkh5Qk9TIiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIl0sIm50IjoiMSIsIm4iOlsiRUVYZWtVWXd5ZjRCbHYxVV9XRk1MN1lsaUJSOUdKWGZsM29zS3RJZXZLUU4iXSwiYnQiOiIwIiwiYiI6W10sImMiOltdLCJhIjpbXX0="
+      },
+      "expect": {
+        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDEzOF8iLCJ0IjoiaXhuIiwiZCI6IkVFR1VTV2hNbDVxSzI0WjVxWGE3cHFfRXlwaDF1azJKV3JHYjBiM0hIY2xGIiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6IjEiLCJwIjoiRU5BOTl3SUx6TVRlaFBUdmNwZU1scmQtNk53a0FmbDhMVlJHNlg2SHlCT1MiLCJhIjpbeyJkIjoiRURpZ2VzdDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMHgiLCJpIjoiRUNyZWRlbnRpYWwwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDB4IiwicyI6IjAifV19",
+        "said": "EEGUSWhMl5qK24Z5qXa7pq_Eyph1uk2JWrGb0b3HHclF",
+        "aid": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+        "event_readable": {
+          "v": "KERI10JSON000138_",
+          "t": "ixn",
+          "d": "EEGUSWhMl5qK24Z5qXa7pq_Eyph1uk2JWrGb0b3HHclF",
+          "i": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+          "s": "1",
+          "p": "ENA99wILzMTehPTvcpeMlrd-6NwkAfl8LVRG6X6HyBOS",
+          "a": [
+            {
+              "d": "EDigest000000000000000000000000000000000000x",
+              "i": "ECredential000000000000000000000000000000x",
+              "s": "0"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "ixn/sequence-number/10",
+      "kind": "interaction",
+      "why": "Sequence numbers are lowercase hex strings without a 0x prefix. sn=10 serialises as 'a'. An implementation that uses decimal, uppercase, or padded hex produces an event nobody else can chain from.",
+      "input": {
+        "prefix": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+        "prior_said": "ENA99wILzMTehPTvcpeMlrd-6NwkAfl8LVRG6X6HyBOS",
+        "sn": 10,
+        "data": [
+          {
+            "i": "ECredential000000000000000000000000000000x",
+            "s": "0",
+            "d": "EDigest000000000000000000000000000000000000x"
+          }
+        ],
+        "prior_event_raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDEyYl8iLCJ0IjoiaWNwIiwiZCI6IkVOQTk5d0lMek1UZWhQVHZjcGVNbHJkLTZOd2tBZmw4TFZSRzZYNkh5Qk9TIiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIl0sIm50IjoiMSIsIm4iOlsiRUVYZWtVWXd5ZjRCbHYxVV9XRk1MN1lsaUJSOUdKWGZsM29zS3RJZXZLUU4iXSwiYnQiOiIwIiwiYiI6W10sImMiOltdLCJhIjpbXX0="
+      },
+      "expect": {
+        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDEzOF8iLCJ0IjoiaXhuIiwiZCI6IkVKTlhHVklOOFVCN2RTSGVHWGRHTkRJd21RbDZOVnRDUFgtamNFa0dIQVNEIiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6ImEiLCJwIjoiRU5BOTl3SUx6TVRlaFBUdmNwZU1scmQtNk53a0FmbDhMVlJHNlg2SHlCT1MiLCJhIjpbeyJpIjoiRUNyZWRlbnRpYWwwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDB4IiwicyI6IjAiLCJkIjoiRURpZ2VzdDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMHgifV19",
+        "said": "EJNXGVIN8UB7dSHeGXdGNDIwmQl6NVtCPX-jcEkGHASD",
+        "aid": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+        "event_readable": {
+          "v": "KERI10JSON000138_",
+          "t": "ixn",
+          "d": "EJNXGVIN8UB7dSHeGXdGNDIwmQl6NVtCPX-jcEkGHASD",
+          "i": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+          "s": "a",
+          "p": "ENA99wILzMTehPTvcpeMlrd-6NwkAfl8LVRG6X6HyBOS",
+          "a": [
+            {
+              "i": "ECredential000000000000000000000000000000x",
+              "s": "0",
+              "d": "EDigest000000000000000000000000000000000000x"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "ixn/sequence-number/16",
+      "kind": "interaction",
+      "why": "Sequence numbers are lowercase hex strings without a 0x prefix. sn=16 serialises as '10'. An implementation that uses decimal, uppercase, or padded hex produces an event nobody else can chain from.",
+      "input": {
+        "prefix": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+        "prior_said": "ENA99wILzMTehPTvcpeMlrd-6NwkAfl8LVRG6X6HyBOS",
+        "sn": 16,
+        "data": [
+          {
+            "i": "ECredential000000000000000000000000000000x",
+            "s": "0",
+            "d": "EDigest000000000000000000000000000000000000x"
+          }
+        ],
+        "prior_event_raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDEyYl8iLCJ0IjoiaWNwIiwiZCI6IkVOQTk5d0lMek1UZWhQVHZjcGVNbHJkLTZOd2tBZmw4TFZSRzZYNkh5Qk9TIiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIl0sIm50IjoiMSIsIm4iOlsiRUVYZWtVWXd5ZjRCbHYxVV9XRk1MN1lsaUJSOUdKWGZsM29zS3RJZXZLUU4iXSwiYnQiOiIwIiwiYiI6W10sImMiOltdLCJhIjpbXX0="
+      },
+      "expect": {
+        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDEzOV8iLCJ0IjoiaXhuIiwiZCI6IkVFdGFLeFZMSDZHZ1htNklseTE3a19GZG5fZHdiTUM4NmV2eEJZNGZIZ2M1IiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6IjEwIiwicCI6IkVOQTk5d0lMek1UZWhQVHZjcGVNbHJkLTZOd2tBZmw4TFZSRzZYNkh5Qk9TIiwiYSI6W3siaSI6IkVDcmVkZW50aWFsMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAweCIsInMiOiIwIiwiZCI6IkVEaWdlc3QwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDB4In1dfQ==",
+        "said": "EEtaKxVLH6GgXm6Ily17k_Fdn_dwbMC86evxBY4fHgc5",
+        "aid": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+        "event_readable": {
+          "v": "KERI10JSON000139_",
+          "t": "ixn",
+          "d": "EEtaKxVLH6GgXm6Ily17k_Fdn_dwbMC86evxBY4fHgc5",
+          "i": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+          "s": "10",
+          "p": "ENA99wILzMTehPTvcpeMlrd-6NwkAfl8LVRG6X6HyBOS",
+          "a": [
+            {
+              "i": "ECredential000000000000000000000000000000x",
+              "s": "0",
+              "d": "EDigest000000000000000000000000000000000000x"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "ixn/sequence-number/255",
+      "kind": "interaction",
+      "why": "Sequence numbers are lowercase hex strings without a 0x prefix. sn=255 serialises as 'ff'. An implementation that uses decimal, uppercase, or padded hex produces an event nobody else can chain from.",
+      "input": {
+        "prefix": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+        "prior_said": "ENA99wILzMTehPTvcpeMlrd-6NwkAfl8LVRG6X6HyBOS",
+        "sn": 255,
+        "data": [
+          {
+            "i": "ECredential000000000000000000000000000000x",
+            "s": "0",
+            "d": "EDigest000000000000000000000000000000000000x"
+          }
+        ],
+        "prior_event_raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDEyYl8iLCJ0IjoiaWNwIiwiZCI6IkVOQTk5d0lMek1UZWhQVHZjcGVNbHJkLTZOd2tBZmw4TFZSRzZYNkh5Qk9TIiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIl0sIm50IjoiMSIsIm4iOlsiRUVYZWtVWXd5ZjRCbHYxVV9XRk1MN1lsaUJSOUdKWGZsM29zS3RJZXZLUU4iXSwiYnQiOiIwIiwiYiI6W10sImMiOltdLCJhIjpbXX0="
+      },
+      "expect": {
+        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDEzOV8iLCJ0IjoiaXhuIiwiZCI6IkVFNk5XbkFLZzRPeE5ndjVkOEJpaWpYMlhhYVFDOG9NMUREaGpqM1JhVU1XIiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6ImZmIiwicCI6IkVOQTk5d0lMek1UZWhQVHZjcGVNbHJkLTZOd2tBZmw4TFZSRzZYNkh5Qk9TIiwiYSI6W3siaSI6IkVDcmVkZW50aWFsMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAweCIsInMiOiIwIiwiZCI6IkVEaWdlc3QwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDB4In1dfQ==",
+        "said": "EE6NWnAKg4OxNgv5d8BiijX2XaaQC8oM1DDhjj3RaUMW",
+        "aid": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+        "event_readable": {
+          "v": "KERI10JSON000139_",
+          "t": "ixn",
+          "d": "EE6NWnAKg4OxNgv5d8BiijX2XaaQC8oM1DDhjj3RaUMW",
+          "i": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+          "s": "ff",
+          "p": "ENA99wILzMTehPTvcpeMlrd-6NwkAfl8LVRG6X6HyBOS",
+          "a": [
+            {
+              "i": "ECredential000000000000000000000000000000x",
+              "s": "0",
+              "d": "EDigest000000000000000000000000000000000000x"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "ixn/sequence-number/256",
+      "kind": "interaction",
+      "why": "Sequence numbers are lowercase hex strings without a 0x prefix. sn=256 serialises as '100'. An implementation that uses decimal, uppercase, or padded hex produces an event nobody else can chain from.",
+      "input": {
+        "prefix": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+        "prior_said": "ENA99wILzMTehPTvcpeMlrd-6NwkAfl8LVRG6X6HyBOS",
+        "sn": 256,
+        "data": [
+          {
+            "i": "ECredential000000000000000000000000000000x",
+            "s": "0",
+            "d": "EDigest000000000000000000000000000000000000x"
+          }
+        ],
+        "prior_event_raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDEyYl8iLCJ0IjoiaWNwIiwiZCI6IkVOQTk5d0lMek1UZWhQVHZjcGVNbHJkLTZOd2tBZmw4TFZSRzZYNkh5Qk9TIiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIl0sIm50IjoiMSIsIm4iOlsiRUVYZWtVWXd5ZjRCbHYxVV9XRk1MN1lsaUJSOUdKWGZsM29zS3RJZXZLUU4iXSwiYnQiOiIwIiwiYiI6W10sImMiOltdLCJhIjpbXX0="
+      },
+      "expect": {
+        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDEzYV8iLCJ0IjoiaXhuIiwiZCI6IkVNWmpIaHdOa2sxLXo1akowNGxlbnlGZ3BDX25IQzZWM1k4WXFkY21wV3BNIiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6IjEwMCIsInAiOiJFTkE5OXdJTHpNVGVoUFR2Y3BlTWxyZC02TndrQWZsOExWUkc2WDZIeUJPUyIsImEiOlt7ImkiOiJFQ3JlZGVudGlhbDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMHgiLCJzIjoiMCIsImQiOiJFRGlnZXN0MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAweCJ9XX0=",
+        "said": "EMZjHhwNkk1-z5jJ04lenyFgpC_nHC6V3Y8YqdcmpWpM",
+        "aid": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+        "event_readable": {
+          "v": "KERI10JSON00013a_",
+          "t": "ixn",
+          "d": "EMZjHhwNkk1-z5jJ04lenyFgpC_nHC6V3Y8YqdcmpWpM",
+          "i": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+          "s": "100",
+          "p": "ENA99wILzMTehPTvcpeMlrd-6NwkAfl8LVRG6X6HyBOS",
+          "a": [
+            {
+              "i": "ECredential000000000000000000000000000000x",
+              "s": "0",
+              "d": "EDigest000000000000000000000000000000000000x"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "del/delegator-inception",
+      "kind": "inception",
+      "why": "The delegator is an ordinary identifier. Recorded so a chain that includes a delegated identifier has the root event the rest of the chain points at.",
+      "input": {
+        "keys": [
+          "DDwTQ5qt7ZALf84a9z8pKH7J-dv6WVusPzBS627INFAw"
+        ],
+        "next_digests": [
+          "EIQCBYeFD-O-cTNU5FxIkiWtSlozBuOzEaEd9ndEde4r"
+        ]
+      },
+      "expect": {
+        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDEyYl8iLCJ0IjoiaWNwIiwiZCI6IkVQdEZ0U3piUlhxWk5Xa1RYMWU5RjFOZmxCSjhIUU01ZFlDYVBZU292Z1VrIiwiaSI6IkREd1RRNXF0N1pBTGY4NGE5ejhwS0g3Si1kdjZXVnVzUHpCUzYyN0lORkF3IiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkREd1RRNXF0N1pBTGY4NGE5ejhwS0g3Si1kdjZXVnVzUHpCUzYyN0lORkF3Il0sIm50IjoiMSIsIm4iOlsiRUlRQ0JZZUZELU8tY1ROVTVGeElraVd0U2xvekJ1T3pFYUVkOW5kRWRlNHIiXSwiYnQiOiIwIiwiYiI6W10sImMiOltdLCJhIjpbXX0=",
+        "said": "EPtFtSzbRXqZNWkTX1e9F1NflBJ8HQM5dYCaPYSovgUk",
+        "aid": "DDwTQ5qt7ZALf84a9z8pKH7J-dv6WVusPzBS627INFAw",
+        "event_readable": {
+          "v": "KERI10JSON00012b_",
+          "t": "icp",
+          "d": "EPtFtSzbRXqZNWkTX1e9F1NflBJ8HQM5dYCaPYSovgUk",
+          "i": "DDwTQ5qt7ZALf84a9z8pKH7J-dv6WVusPzBS627INFAw",
+          "s": "0",
+          "kt": "1",
+          "k": [
+            "DDwTQ5qt7ZALf84a9z8pKH7J-dv6WVusPzBS627INFAw"
+          ],
+          "nt": "1",
+          "n": [
+            "EIQCBYeFD-O-cTNU5FxIkiWtSlozBuOzEaEd9ndEde4r"
+          ],
+          "bt": "0",
+          "b": [],
+          "c": [],
+          "a": []
+        }
+      }
+    },
+    {
+      "id": "del/delegated-inception/dip",
+      "kind": "delegation",
+      "why": "A delegated inception (dip) names its delegator in di and uses self-addressing derivation. An implementation that emits an ordinary icp, or that omits di, has not created a delegated identifier.",
+      "input": {
+        "keys": [
+          "DIhF3vq9I9ESHeDusRRv9OICVEnXrZUbvyWOZdnhxXOJ"
+        ],
+        "next_digests": [
+          "EN2x2XGyNGz5_awXKfijVMNO3HTKSyEw188EZW9sBFiR"
+        ],
+        "delegator": "DDwTQ5qt7ZALf84a9z8pKH7J-dv6WVusPzBS627INFAw",
+        "delegator_raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDEyYl8iLCJ0IjoiaWNwIiwiZCI6IkVQdEZ0U3piUlhxWk5Xa1RYMWU5RjFOZmxCSjhIUU01ZFlDYVBZU292Z1VrIiwiaSI6IkREd1RRNXF0N1pBTGY4NGE5ejhwS0g3Si1kdjZXVnVzUHpCUzYyN0lORkF3IiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkREd1RRNXF0N1pBTGY4NGE5ejhwS0g3Si1kdjZXVnVzUHpCUzYyN0lORkF3Il0sIm50IjoiMSIsIm4iOlsiRUlRQ0JZZUZELU8tY1ROVTVGeElraVd0U2xvekJ1T3pFYUVkOW5kRWRlNHIiXSwiYnQiOiIwIiwiYiI6W10sImMiOltdLCJhIjpbXX0="
+      },
+      "expect": {
+        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDE1Zl8iLCJ0IjoiZGlwIiwiZCI6IkVNTHpVbERaZUp4SWw5RWJQOGZzQk5lazVOLUZTYzV4dGFXck1sY1RzSS1JIiwiaSI6IkVNTHpVbERaZUp4SWw5RWJQOGZzQk5lazVOLUZTYzV4dGFXck1sY1RzSS1JIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRJaEYzdnE5STlFU0hlRHVzUlJ2OU9JQ1ZFblhyWlVidnlXT1pkbmh4WE9KIl0sIm50IjoiMSIsIm4iOlsiRU4yeDJYR3lOR3o1X2F3WEtmaWpWTU5PM0hUS1N5RXcxODhFWlc5c0JGaVIiXSwiYnQiOiIwIiwiYiI6W10sImMiOltdLCJhIjpbXSwiZGkiOiJERHdUUTVxdDdaQUxmODRhOXo4cEtIN0otZHY2V1Z1c1B6QlM2MjdJTkZBdyJ9",
+        "said": "EMLzUlDZeJxIl9EbP8fsBNek5N-FSc5xtaWrMlcTsI-I",
+        "aid": "EMLzUlDZeJxIl9EbP8fsBNek5N-FSc5xtaWrMlcTsI-I",
+        "event_readable": {
+          "v": "KERI10JSON00015f_",
+          "t": "dip",
+          "d": "EMLzUlDZeJxIl9EbP8fsBNek5N-FSc5xtaWrMlcTsI-I",
+          "i": "EMLzUlDZeJxIl9EbP8fsBNek5N-FSc5xtaWrMlcTsI-I",
+          "s": "0",
+          "kt": "1",
+          "k": [
+            "DIhF3vq9I9ESHeDusRRv9OICVEnXrZUbvyWOZdnhxXOJ"
+          ],
+          "nt": "1",
+          "n": [
+            "EN2x2XGyNGz5_awXKfijVMNO3HTKSyEw188EZW9sBFiR"
+          ],
+          "bt": "0",
+          "b": [],
+          "c": [],
+          "a": [],
+          "di": "DDwTQ5qt7ZALf84a9z8pKH7J-dv6WVusPzBS627INFAw"
+        }
+      }
+    },
+    {
+      "id": "del/delegator-anchors-dip",
+      "kind": "interaction",
+      "why": "Delegation is only complete when the delegator anchors the dip. The seal must carry the delegated identifier, its sequence number, and its SAID \u2014 any other shape is not a delegation anchor.",
+      "input": {
+        "prefix": "DDwTQ5qt7ZALf84a9z8pKH7J-dv6WVusPzBS627INFAw",
+        "prior_said": "EPtFtSzbRXqZNWkTX1e9F1NflBJ8HQM5dYCaPYSovgUk",
+        "sn": 1,
+        "data": [
+          {
+            "i": "EMLzUlDZeJxIl9EbP8fsBNek5N-FSc5xtaWrMlcTsI-I",
+            "s": "0",
+            "d": "EMLzUlDZeJxIl9EbP8fsBNek5N-FSc5xtaWrMlcTsI-I"
+          }
+        ],
+        "delegated_aid": "EMLzUlDZeJxIl9EbP8fsBNek5N-FSc5xtaWrMlcTsI-I",
+        "delegated_said": "EMLzUlDZeJxIl9EbP8fsBNek5N-FSc5xtaWrMlcTsI-I",
+        "prior_event_raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDEyYl8iLCJ0IjoiaWNwIiwiZCI6IkVQdEZ0U3piUlhxWk5Xa1RYMWU5RjFOZmxCSjhIUU01ZFlDYVBZU292Z1VrIiwiaSI6IkREd1RRNXF0N1pBTGY4NGE5ejhwS0g3Si1kdjZXVnVzUHpCUzYyN0lORkF3IiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkREd1RRNXF0N1pBTGY4NGE5ejhwS0g3Si1kdjZXVnVzUHpCUzYyN0lORkF3Il0sIm50IjoiMSIsIm4iOlsiRUlRQ0JZZUZELU8tY1ROVTVGeElraVd0U2xvekJ1T3pFYUVkOW5kRWRlNHIiXSwiYnQiOiIwIiwiYiI6W10sImMiOltdLCJhIjpbXX0=",
+        "dip_raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDE1Zl8iLCJ0IjoiZGlwIiwiZCI6IkVNTHpVbERaZUp4SWw5RWJQOGZzQk5lazVOLUZTYzV4dGFXck1sY1RzSS1JIiwiaSI6IkVNTHpVbERaZUp4SWw5RWJQOGZzQk5lazVOLUZTYzV4dGFXck1sY1RzSS1JIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRJaEYzdnE5STlFU0hlRHVzUlJ2OU9JQ1ZFblhyWlVidnlXT1pkbmh4WE9KIl0sIm50IjoiMSIsIm4iOlsiRU4yeDJYR3lOR3o1X2F3WEtmaWpWTU5PM0hUS1N5RXcxODhFWlc5c0JGaVIiXSwiYnQiOiIwIiwiYiI6W10sImMiOltdLCJhIjpbXSwiZGkiOiJERHdUUTVxdDdaQUxmODRhOXo4cEtIN0otZHY2V1Z1c1B6QlM2MjdJTkZBdyJ9"
+      },
+      "expect": {
+        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDEzYV8iLCJ0IjoiaXhuIiwiZCI6IkVNb2xBN1hZZkNwc0U2Vm5yX2ZEdUFSQ2tsbGprYWhSbjF1aF9tOGwzdzJMIiwiaSI6IkREd1RRNXF0N1pBTGY4NGE5ejhwS0g3Si1kdjZXVnVzUHpCUzYyN0lORkF3IiwicyI6IjEiLCJwIjoiRVB0RnRTemJSWHFaTldrVFgxZTlGMU5mbEJKOEhRTTVkWUNhUFlTb3ZnVWsiLCJhIjpbeyJpIjoiRU1MelVsRFplSnhJbDlFYlA4ZnNCTmVrNU4tRlNjNXh0YVdyTWxjVHNJLUkiLCJzIjoiMCIsImQiOiJFTUx6VWxEWmVKeElsOUViUDhmc0JOZWs1Ti1GU2M1eHRhV3JNbGNUc0ktSSJ9XX0=",
+        "said": "EMolA7XYfCpsE6Vnr_fDuARCklljkahRn1uh_m8l3w2L",
+        "aid": "DDwTQ5qt7ZALf84a9z8pKH7J-dv6WVusPzBS627INFAw",
+        "event_readable": {
+          "v": "KERI10JSON00013a_",
+          "t": "ixn",
+          "d": "EMolA7XYfCpsE6Vnr_fDuARCklljkahRn1uh_m8l3w2L",
+          "i": "DDwTQ5qt7ZALf84a9z8pKH7J-dv6WVusPzBS627INFAw",
+          "s": "1",
+          "p": "EPtFtSzbRXqZNWkTX1e9F1NflBJ8HQM5dYCaPYSovgUk",
+          "a": [
+            {
+              "i": "EMLzUlDZeJxIl9EbP8fsBNek5N-FSc5xtaWrMlcTsI-I",
+              "s": "0",
+              "d": "EMLzUlDZeJxIl9EbP8fsBNek5N-FSc5xtaWrMlcTsI-I"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "del/delegated-rotation/drt",
+      "kind": "delegation",
+      "why": "A delegated rotation (drt) is not an ordinary rot: the ilk differs, and acceptance still depends on the delegator's authority. Emitting rot here produces an event no peer treating this as delegated will accept.",
+      "input": {
+        "prefix": "EMLzUlDZeJxIl9EbP8fsBNek5N-FSc5xtaWrMlcTsI-I",
+        "keys": [
+          "DGrnAMz14aKH81FEtvaxC4wAC6X_gnsFFwn5XQW3foDZ"
+        ],
+        "prior_said": "EMLzUlDZeJxIl9EbP8fsBNek5N-FSc5xtaWrMlcTsI-I",
+        "sn": 1,
+        "next_digests": [
+          "EGc2GqjeY9H6sT5L4vvHB8-DAHiO5IgHHVAVgx8u5nzM"
+        ],
+        "prior_event_raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDE1Zl8iLCJ0IjoiZGlwIiwiZCI6IkVNTHpVbERaZUp4SWw5RWJQOGZzQk5lazVOLUZTYzV4dGFXck1sY1RzSS1JIiwiaSI6IkVNTHpVbERaZUp4SWw5RWJQOGZzQk5lazVOLUZTYzV4dGFXck1sY1RzSS1JIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRJaEYzdnE5STlFU0hlRHVzUlJ2OU9JQ1ZFblhyWlVidnlXT1pkbmh4WE9KIl0sIm50IjoiMSIsIm4iOlsiRU4yeDJYR3lOR3o1X2F3WEtmaWpWTU5PM0hUS1N5RXcxODhFWlc5c0JGaVIiXSwiYnQiOiIwIiwiYiI6W10sImMiOltdLCJhIjpbXSwiZGkiOiJERHdUUTVxdDdaQUxmODRhOXo4cEtIN0otZHY2V1Z1c1B6QlM2MjdJTkZBdyJ9",
+        "delegator": "DDwTQ5qt7ZALf84a9z8pKH7J-dv6WVusPzBS627INFAw"
+      },
+      "expect": {
+        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDE2MF8iLCJ0IjoiZHJ0IiwiZCI6IkVCcm1jY3Qxc2FLeTBJa3Q2UmI1RzdLQWRxaEhKTnJEOHhDQ3JEcEdHdWtQIiwiaSI6IkVNTHpVbERaZUp4SWw5RWJQOGZzQk5lazVOLUZTYzV4dGFXck1sY1RzSS1JIiwicyI6IjEiLCJwIjoiRU1MelVsRFplSnhJbDlFYlA4ZnNCTmVrNU4tRlNjNXh0YVdyTWxjVHNJLUkiLCJrdCI6IjEiLCJrIjpbIkRHcm5BTXoxNGFLSDgxRkV0dmF4QzR3QUM2WF9nbnNGRnduNVhRVzNmb0RaIl0sIm50IjoiMSIsIm4iOlsiRUdjMkdxamVZOUg2c1Q1TDR2dkhCOC1EQUhpTzVJZ0hIVkFWZ3g4dTVuek0iXSwiYnQiOiIwIiwiYnIiOltdLCJiYSI6W10sImEiOltdfQ==",
+        "said": "EBrmcct1saKy0Ikt6Rb5G7KAdqhHJNrD8xCCrDpGGukP",
+        "aid": "EMLzUlDZeJxIl9EbP8fsBNek5N-FSc5xtaWrMlcTsI-I",
+        "event_readable": {
+          "v": "KERI10JSON000160_",
+          "t": "drt",
+          "d": "EBrmcct1saKy0Ikt6Rb5G7KAdqhHJNrD8xCCrDpGGukP",
+          "i": "EMLzUlDZeJxIl9EbP8fsBNek5N-FSc5xtaWrMlcTsI-I",
+          "s": "1",
+          "p": "EMLzUlDZeJxIl9EbP8fsBNek5N-FSc5xtaWrMlcTsI-I",
+          "kt": "1",
+          "k": [
+            "DGrnAMz14aKH81FEtvaxC4wAC6X_gnsFFwn5XQW3foDZ"
+          ],
+          "nt": "1",
+          "n": [
+            "EGc2GqjeY9H6sT5L4vvHB8-DAHiO5IgHHVAVgx8u5nzM"
+          ],
+          "bt": "0",
+          "br": [],
+          "ba": [],
+          "a": []
+        }
+      }
+    },
+    {
+      "id": "property/single-key-aid-is-the-key",
       "kind": "property",
-      "why": "A self-certifying identifier IS the digest of the event that created it. An implementation where these differ has not made an identity.",
-      "assert": "aid_equals_said",
+      "why": "Single-key inception uses basic derivation: the identifier is the public key (D\u2026), not the event digest. An implementation that always sets aid = said breaks every single-key identity that already exists.",
+      "assert": "aid_equals_key_not_said",
       "input": {
         "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDEyYl8iLCJ0IjoiaWNwIiwiZCI6IkVOQTk5d0lMek1UZWhQVHZjcGVNbHJkLTZOd2tBZmw4TFZSRzZYNkh5Qk9TIiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIl0sIm50IjoiMSIsIm4iOlsiRUVYZWtVWXd5ZjRCbHYxVV9XRk1MN1lsaUJSOUdKWGZsM29zS3RJZXZLUU4iXSwiYnQiOiIwIiwiYiI6W10sImMiOltdLCJhIjpbXX0="
       },
       "expect": {
         "aid": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
-        "said": "ENA99wILzMTehPTvcpeMlrd-6NwkAfl8LVRG6X6HyBOS"
+        "said": "ENA99wILzMTehPTvcpeMlrd-6NwkAfl8LVRG6X6HyBOS",
+        "key": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd"
+      }
+    },
+    {
+      "id": "property/multi-key-aid-is-said",
+      "kind": "property",
+      "why": "Multi-key inception uses self-addressing derivation: the identifier IS the digest of the event. An implementation where these differ has not made a multi-key identity.",
+      "assert": "aid_equals_said",
+      "input": {
+        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDE4OV8iLCJ0IjoiaWNwIiwiZCI6IkVNNHpIay00QVFCYXlmNTQ4czZVbWkxYzNVM2RLaF85YmZmdHJDdVRST0Y5IiwiaSI6IkVNNHpIay00QVFCYXlmNTQ4czZVbWkxYzNVM2RLaF85YmZmdHJDdVRST0Y5IiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRHUHRUV2hUSFYxNDdINDRkVGo0NjFXdXB6cGhEbm9iZGQzWnJrUWd6ck1wIiwiRElCQXIxYXl4SXVxQS16YmZ3SGdDRHN2MkxGN0NReXB4SktQazk0LWdHTTciXSwibnQiOiIxIiwibiI6WyJFSFZyU3pWLVExR2ZoaEdQUzIyTTBYYVZLM0prbjJ5VWFxU2U3UFlqclc2cCIsIkVLNW5KN25oNWQza25KMjVWZFROdzMzR0M1c2tNOU1qRDBXVVRkSEJpSXZ5Il0sImJ0IjoiMCIsImIiOltdLCJjIjpbXSwiYSI6W119"
+      },
+      "expect": {
+        "aid": "EM4zHk-4AQBayf548s6Umi1c3U3dKh_9bfftrCuTROF9",
+        "said": "EM4zHk-4AQBayf548s6Umi1c3U3dKh_9bfftrCuTROF9"
+      }
+    },
+    {
+      "id": "property/aid-is-said-of-inception",
+      "kind": "property",
+      "why": "Kept for continuity with the first vector file. For this multi-key style event the aid equals the said; for single-key basic derivation it does not \u2014 see property/single-key-aid-is-the-key.",
+      "assert": "aid_equals_said",
+      "input": {
+        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDE4OV8iLCJ0IjoiaWNwIiwiZCI6IkVNNHpIay00QVFCYXlmNTQ4czZVbWkxYzNVM2RLaF85YmZmdHJDdVRST0Y5IiwiaSI6IkVNNHpIay00QVFCYXlmNTQ4czZVbWkxYzNVM2RLaF85YmZmdHJDdVRST0Y5IiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRHUHRUV2hUSFYxNDdINDRkVGo0NjFXdXB6cGhEbm9iZGQzWnJrUWd6ck1wIiwiRElCQXIxYXl4SXVxQS16YmZ3SGdDRHN2MkxGN0NReXB4SktQazk0LWdHTTciXSwibnQiOiIxIiwibiI6WyJFSFZyU3pWLVExR2ZoaEdQUzIyTTBYYVZLM0prbjJ5VWFxU2U3UFlqclc2cCIsIkVLNW5KN25oNWQza25KMjVWZFROdzMzR0M1c2tNOU1qRDBXVVRkSEJpSXZ5Il0sImJ0IjoiMCIsImIiOltdLCJjIjpbXSwiYSI6W119"
+      },
+      "expect": {
+        "aid": "EM4zHk-4AQBayf548s6Umi1c3U3dKh_9bfftrCuTROF9",
+        "said": "EM4zHk-4AQBayf548s6Umi1c3U3dKh_9bfftrCuTROF9"
+      }
+    },
+    {
+      "id": "reject/said-does-not-match-contents",
+      "kind": "reject",
+      "why": "An event whose contents do not digest to the identifier it claims must be refused. Accepting it would let a forged event borrow a real identity, which is what the digest exists to prevent.",
+      "input": {
+        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDEyYl8iLCJ0IjoiaWNwIiwiZCI6IkVOQTk5d0lMek1UZWhQVHZjcGVNbHJkLTZOd2tBZmw4TFZSRzZYNkh5Qk9TIiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6IjAiLCJrdCI6IjIiLCJrIjpbIkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIl0sIm50IjoiMSIsIm4iOlsiRUVYZWtVWXd5ZjRCbHYxVV9XRk1MN1lsaUJSOUdKWGZsM29zS3RJZXZLUU4iXSwiYnQiOiIwIiwiYiI6W10sImMiOltdLCJhIjpbXX0=",
+        "because": "the contents do not digest to the claimed identifier",
+        "claimed_said": "ENA99wILzMTehPTvcpeMlrd-6NwkAfl8LVRG6X6HyBOS"
+      },
+      "expect": {
+        "refused": true,
+        "because": "the contents do not digest to the claimed identifier"
+      }
+    },
+    {
+      "id": "reject/rotation-key-not-precommitted",
+      "kind": "reject",
+      "why": "A rotation must present a key the previous establishment event committed to via its next-key digests. Accepting any other key lets an attacker take over the identifier without holding the committed material.",
+      "input": {
+        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDE2MF8iLCJ0Ijoicm90IiwiZCI6IkVMRlVpWW16SVFOMjFYZG5FcWVLZW42Rm9pUWhUYk5POVU4enl3R3p5aGNsIiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6IjEiLCJwIjoiRU5BOTl3SUx6TVRlaFBUdmNwZU1scmQtNk53a0FmbDhMVlJHNlg2SHlCT1MiLCJrdCI6IjEiLCJrIjpbIkRBMTFVSFZPQ0FDbDBqZnU5WUpnTlhacm16NWFGWWFLbEFxeWlaV0hpT093Il0sIm50IjoiMSIsIm4iOlsiRUtvZS1QUWx4eG9Yd3hITUc3T3RCLVhya2RvTjBYOV9MNG8tdlFEcERLLVAiXSwiYnQiOiIwIiwiYnIiOltdLCJiYSI6W10sImEiOltdfQ==",
+        "because": "the rotation key was not committed to by the prior event's next digests",
+        "prior_event_raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDEyYl8iLCJ0IjoiaWNwIiwiZCI6IkVOQTk5d0lMek1UZWhQVHZjcGVNbHJkLTZOd2tBZmw4TFZSRzZYNkh5Qk9TIiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIl0sIm50IjoiMSIsIm4iOlsiRUVYZWtVWXd5ZjRCbHYxVV9XRk1MN1lsaUJSOUdKWGZsM29zS3RJZXZLUU4iXSwiYnQiOiIwIiwiYiI6W10sImMiOltdLCJhIjpbXX0=",
+        "prior_next_digests": [
+          "EEXekUYwyf4Blv1U_WFML7YliBR9GJXfl3osKtIevKQN"
+        ],
+        "presented_keys": [
+          "DA11UHVOCACl0jfu9YJgNXZrmz5aFYaKlAqyiZWHiOOw"
+        ]
+      },
+      "expect": {
+        "refused": true,
+        "because": "the rotation key was not committed to by the prior event's next digests"
+      }
+    },
+    {
+      "id": "reject/sequence-number-skips",
+      "kind": "reject",
+      "why": "Sequence numbers must be contiguous. Accepting a skip lets an attacker insert a hidden event later, or drop one, without the gap being obvious.",
+      "input": {
+        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDBjYl8iLCJ0IjoiaXhuIiwiZCI6IkVFSmMxWXpGWnpqT19pVUhqc1JxbWtwWlZOSXBfRHhMamxidWo1WGtBMndFIiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6IjIiLCJwIjoiRU5BOTl3SUx6TVRlaFBUdmNwZU1scmQtNk53a0FmbDhMVlJHNlg2SHlCT1MiLCJhIjpbXX0=",
+        "because": "sequence number 2 does not follow the prior event at sn 0",
+        "prior_event_raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDEyYl8iLCJ0IjoiaWNwIiwiZCI6IkVOQTk5d0lMek1UZWhQVHZjcGVNbHJkLTZOd2tBZmw4TFZSRzZYNkh5Qk9TIiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIl0sIm50IjoiMSIsIm4iOlsiRUVYZWtVWXd5ZjRCbHYxVV9XRk1MN1lsaUJSOUdKWGZsM29zS3RJZXZLUU4iXSwiYnQiOiIwIiwiYiI6W10sImMiOltdLCJhIjpbXX0=",
+        "prior_sn": 0,
+        "presented_sn": 2
+      },
+      "expect": {
+        "refused": true,
+        "because": "sequence number 2 does not follow the prior event at sn 0"
+      }
+    },
+    {
+      "id": "reject/prior-digest-mismatch",
+      "kind": "reject",
+      "why": "Every non-inception event digests its predecessor. Accepting a wrong prior digest attaches the event to a history it does not belong to.",
+      "input": {
+        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDBjYl8iLCJ0IjoiaXhuIiwiZCI6IkVKTWQ2WDY4T1RPaGRSbDVPVTRGalNIMUNTampQbVFBNVI5LUM2emtJMkVfIiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6IjEiLCJwIjoiRUdSVVBZTEUwY1JhMVEzSzBfNC12bm5Ndl82eFJpR0lQUlNtb3NPNVRCX00iLCJhIjpbXX0=",
+        "because": "the prior-event digest does not match the SAID of the previous event",
+        "prior_event_raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDEyYl8iLCJ0IjoiaWNwIiwiZCI6IkVOQTk5d0lMek1UZWhQVHZjcGVNbHJkLTZOd2tBZmw4TFZSRzZYNkh5Qk9TIiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIl0sIm50IjoiMSIsIm4iOlsiRUVYZWtVWXd5ZjRCbHYxVV9XRk1MN1lsaUJSOUdKWGZsM29zS3RJZXZLUU4iXSwiYnQiOiIwIiwiYiI6W10sImMiOltdLCJhIjpbXX0=",
+        "presented_prior_said": "EGRUPYLE0cRa1Q3K0_4-vnnMv_6xRiGIPRSmosO5TB_M",
+        "actual_prior_said": "ENA99wILzMTehPTvcpeMlrd-6NwkAfl8LVRG6X6HyBOS"
+      },
+      "expect": {
+        "refused": true,
+        "because": "the prior-event digest does not match the SAID of the previous event"
+      }
+    },
+    {
+      "id": "reject/threshold-exceeds-key-count",
+      "kind": "reject",
+      "why": "A signing threshold larger than the number of keys can never be met. Accepting it creates an identifier that can never produce a valid signature set, which is not a usable identity.",
+      "input": {
+        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDE4OV8iLCJ0IjoiaWNwIiwiZCI6IkVDY1B5TXRHbmFxUUdQM1p0SjJPQnJkVVV0dkdyaFpjaFR6Tmt6YXBFLUJ0IiwiaSI6IkVDY1B5TXRHbmFxUUdQM1p0SjJPQnJkVVV0dkdyaFpjaFR6Tmt6YXBFLUJ0IiwicyI6IjAiLCJrdCI6IjMiLCJrIjpbIkRFSUZyNkZhZkZ2aGo4Ml9VUW5HaEgwUGdkcFJmR25wRFJLR0tvNnAtY0t4IiwiREg2bE56N2U3RU5lU3BwcTV2aUdtZGJpUkpTS294QWRUV011a0ZkRjNrNmgiXSwibnQiOiIxIiwibiI6WyJFUDE4Ny1vVU1vU1QxZzlfT05uQ2MyM3NsVWd2LW9LS21JNDhObEtuTWpERyIsIkVDNEJfRkZUY242R1M4STJPV0Nxb0tnZHJ2YkNhYmt2eW5jbXBpNURUM1oxIl0sImJ0IjoiMCIsImIiOltdLCJjIjpbXSwiYSI6W119",
+        "because": "the signing threshold is larger than the number of keys supplied",
+        "claimed_said": "ECcPyMtGnaqQGP3ZtJ2OBrdUUtvGrhZchTzNkzapE-Bt"
+      },
+      "expect": {
+        "refused": true,
+        "because": "the signing threshold is larger than the number of keys supplied"
+      }
+    },
+    {
+      "id": "reject/undefined-field",
+      "kind": "reject",
+      "why": "An event carrying a field the KERI schema does not define must be refused. Accepting unknown fields lets two implementations disagree about what was signed while appearing to share an identifier.",
+      "input": {
+        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDE4OV8iLCJ0IjoiaWNwIiwiZCI6IkVDY1B5TXRHbmFxUUdQM1p0SjJPQnJkVVV0dkdyaFpjaFR6Tmt6YXBFLUJ0IiwiaSI6IkVDY1B5TXRHbmFxUUdQM1p0SjJPQnJkVVV0dkdyaFpjaFR6Tmt6YXBFLUJ0IiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRFSUZyNkZhZkZ2aGo4Ml9VUW5HaEgwUGdkcFJmR25wRFJLR0tvNnAtY0t4IiwiREg2bE56N2U3RU5lU3BwcTV2aUdtZGJpUkpTS294QWRUV011a0ZkRjNrNmgiXSwibnQiOiIxIiwibiI6WyJFUDE4Ny1vVU1vU1QxZzlfT05uQ2MyM3NsVWd2LW9LS21JNDhObEtuTWpERyIsIkVDNEJfRkZUY242R1M4STJPV0Nxb0tnZHJ2YkNhYmt2eW5jbXBpNURUM1oxIl0sImJ0IjoiMCIsImIiOltdLCJjIjpbXSwiYSI6W10sIm5vdF9hX2tlcmlfZmllbGQiOiJ4In0=",
+        "because": "the event carries a field the schema does not define",
+        "claimed_said": "ECcPyMtGnaqQGP3ZtJ2OBrdUUtvGrhZchTzNkzapE-Bt"
+      },
+      "expect": {
+        "refused": true,
+        "because": "the event carries a field the schema does not define"
       }
     },
     {
@@ -293,6 +1799,7 @@
       "why": "An event whose contents do not digest to the identifier it claims must be refused. Accepting it would let a forged event borrow a real identity, which is what the digest exists to prevent.",
       "input": {
         "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDEyYl8iLCJ0IjoiaWNwIiwiZCI6IkVOQTk5d0lMek1UZWhQVHZjcGVNbHJkLTZOd2tBZmw4TFZSRzZYNkh5Qk9TIiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6IjAiLCJrdCI6IjIiLCJrIjpbIkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIl0sIm50IjoiMSIsIm4iOlsiRUVYZWtVWXd5ZjRCbHYxVV9XRk1MN1lsaUJSOUdKWGZsM29zS3RJZXZLUU4iXSwiYnQiOiIwIiwiYiI6W10sImMiOltdLCJhIjpbXX0=",
+        "because": "the contents do not digest to the claimed identifier",
         "claimed_said": "ENA99wILzMTehPTvcpeMlrd-6NwkAfl8LVRG6X6HyBOS"
       },
       "expect": {

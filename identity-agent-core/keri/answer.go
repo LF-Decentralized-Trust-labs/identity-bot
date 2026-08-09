@@ -36,6 +36,9 @@ func Answer(c Case) ([]byte, error) {
 			return nil, fmt.Errorf("case input is not an interaction: %w", err)
 		}
 		return BuildInteraction(in)
+	case "delegation":
+		// dip / drt — same seam as inception/rotation, not filled in yet.
+		return nil, ErrNotImplemented
 	case "constants", "property", "reject":
 		// Asserted directly by their own tests rather than by producing bytes.
 		return nil, ErrNotImplemented
@@ -55,9 +58,12 @@ type InceptionInput struct {
 	NextDigests []string                 `json:"next_digests"`
 	Witnesses   []string                 `json:"witnesses"`
 	Toad        int                      `json:"toad"`
-	Isith       string                   `json:"isith"`
-	Nsith       string                   `json:"nsith"`
-	Data        []map[string]interface{} `json:"data"`
+	// Thresholds are either a string ("2") or a list of weight strings
+	// (["1/2","1/2","1/2"]). Kept as raw JSON so both forms the reference
+	// produces can round-trip without the harness inventing a type.
+	Isith json.RawMessage            `json:"isith"`
+	Nsith json.RawMessage            `json:"nsith"`
+	Data  []map[string]interface{}   `json:"data"`
 }
 
 // RotationInput is what changing an identity's keys is given.
@@ -67,8 +73,8 @@ type RotationInput struct {
 	PriorSAID   string                   `json:"prior_said"`
 	SN          int                      `json:"sn"`
 	NextDigests []string                 `json:"next_digests"`
-	Isith       string                   `json:"isith"`
-	Nsith       string                   `json:"nsith"`
+	Isith       json.RawMessage          `json:"isith"`
+	Nsith       json.RawMessage          `json:"nsith"`
 	Data        []map[string]interface{} `json:"data"`
 }
 
