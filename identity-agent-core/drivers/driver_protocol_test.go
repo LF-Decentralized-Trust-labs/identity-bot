@@ -1,8 +1,11 @@
 package drivers
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The failure this exists to prevent, and which comparing script paths cannot
@@ -49,5 +52,33 @@ func TestANewerDriverIsAccepted(t *testing.T) {
 func TestNoDriverAtAllIsRefused(t *testing.T) {
 	if err := checkDriverProtocol(nil); err == nil {
 		t.Fatal("a missing driver passed the check")
+	}
+}
+
+// Adoption enforces the contract too. An agent that adopts a running driver is
+// in exactly the position this check exists for: it did not start that process
+// and cannot tell from the outside what it is capable of.
+func TestAdoptingATooOldDriverIsRefused(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/status" {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"status":"active","keri_library":"keripy","script_path":"/opt/old/server.py"}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	t.Setenv("KERI_DRIVER_EXTERNAL", "1")
+	t.Setenv("KERI_DRIVER_PYTHON", "/nonexistent/python-should-never-be-invoked")
+	t.Setenv("KERI_DRIVER_SCRIPT", "/nonexistent/server.py")
+
+	d := &KeriDriver{BaseURL: srv.URL, client: &http.Client{Timeout: 2 * time.Second}, managed: true}
+	err := d.Start()
+	if err == nil {
+		t.Fatal("adopted a driver that cannot do what this agent will ask of it")
+	}
+	if !strings.Contains(err.Error(), "/opt/old/server.py") {
+		t.Errorf("the refusal does not name the driver that answered: %v", err)
 	}
 }
