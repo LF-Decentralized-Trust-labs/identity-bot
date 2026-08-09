@@ -256,7 +256,7 @@ func (s *Service) BroadcastEvent(ctx context.Context, signerAID string, event ma
 
 	body, _ := json.Marshal(map[string]interface{}{"aid": signerAID, "event": event})
 	for _, w := range witnesses {
-		url := witnessEventURL(w.URL)
+		url := witnessEventURL(w)
 		go s.postWithRetry(ctx, url, body, said, w.AID)
 	}
 	go s.finalizeLoop(said, threshold)
@@ -533,20 +533,37 @@ func (s *Service) ServeTELStub(issuerAID string) map[string]interface{} {
 // the event path because these are replies rather than key events, and a
 // witness should be free to treat them differently — not least by serving them
 // back to somebody asking where this identity currently is.
-func witnessEndpointURL(oobi string) string {
+// Two kinds of witness answer on two different paths.
+//
+// A contact witnessing for somebody is an Identity Agent, and everything an
+// Identity Agent serves sits under /api. A commercial witness is a service
+// built for the one job and serves the witness protocol at the root. Posting an
+// agent's path to a service — which is what happened until now — reaches a
+// route that does not exist, so every event sent to the bootstrap pool was
+// answered 404 and no receipt ever came back. Nothing reported it, because a
+// witness that does not answer is indistinguishable from one that is down, and
+// the broadcast is deliberately tolerant of that.
+func witnessBase(oobi string) string {
 	base := oobi
 	if idx := strings.Index(oobi, "/public/oobi/"); idx != -1 {
 		base = oobi[:idx]
 	}
-	return strings.TrimRight(base, "/") + "/api/witness/endpoint"
+	return strings.TrimRight(base, "/")
 }
 
-func witnessEventURL(oobi string) string {
-	base := oobi
-	if idx := strings.Index(oobi, "/public/oobi/"); idx != -1 {
-		base = oobi[:idx]
+func witnessPathPrefix(commercial bool) string {
+	if commercial {
+		return ""
 	}
-	return strings.TrimRight(base, "/") + "/api/witness/event"
+	return "/api"
+}
+
+func witnessEndpointURL(t witnessTarget) string {
+	return witnessBase(t.URL) + witnessPathPrefix(t.Commercial) + "/witness/endpoint"
+}
+
+func witnessEventURL(t witnessTarget) string {
+	return witnessBase(t.URL) + witnessPathPrefix(t.Commercial) + "/witness/event"
 }
 
 func strconvAtoi(v string, def int) (int, error) {
@@ -610,7 +627,7 @@ func (s *Service) PublishEndpointRecord(ctx context.Context, signerAID string, r
 		wg.Add(1)
 		go func(target witnessTarget) {
 			defer wg.Done()
-			if _, perr := s.PostEvent(ctx, witnessEndpointURL(target.URL), body); perr != nil {
+			if _, perr := s.PostEvent(ctx, witnessEndpointURL(target), body); perr != nil {
 				log.Printf("[witness] endpoint record to %s failed: %v", target.AID, perr)
 				return
 			}
