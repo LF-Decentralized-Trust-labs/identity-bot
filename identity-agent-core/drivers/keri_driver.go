@@ -28,7 +28,16 @@ type DriverStatus struct {
 	// somebody else's — a silent no-op that reads as a failed change.
 	KeriVersion string `json:"keri_version"`
 	ScriptPath  string `json:"script_path"`
-	Uptime      string `json:"uptime"`
+	// DriverProtocol is what the driver can be relied on to do.
+	//
+	// Zero means a driver old enough not to report one, which is exactly the
+	// case worth catching: such a driver silently discards anchors it does not
+	// understand, so the event comes back well-formed and committing to
+	// nothing. Comparing script paths cannot see that — the agent may be
+	// running precisely the file it was configured with, and that file may
+	// simply be older than the agent needs.
+	DriverProtocol int    `json:"driver_protocol"`
+	Uptime         string `json:"uptime"`
 }
 
 type DriverInceptionRequest struct {
@@ -514,6 +523,32 @@ func NewKeriDriverAt(baseURL string) *KeriDriver {
 	}
 }
 
+// requiredDriverProtocol is the driver contract this agent depends on.
+//
+// Raise it alongside the driver whenever the agent starts relying on something
+// new, so that an old driver is refused at startup rather than discovered later
+// from the shape of what it returned.
+//
+// 1: anchors written into inception events; witness receipts counted during
+//
+//	key-log validation; events verified against canonical bytes.
+const requiredDriverProtocol = 1
+
+// checkDriverProtocol refuses a driver that cannot do what this agent will ask.
+func checkDriverProtocol(status *DriverStatus) error {
+	if status == nil {
+		return fmt.Errorf("the KERI driver did not say what it is")
+	}
+	if status.DriverProtocol < requiredDriverProtocol {
+		return fmt.Errorf(
+			"the KERI driver at %s speaks contract %d and this agent needs %d — "+
+				"an older driver silently ignores what it does not understand, so an "+
+				"identity founded against it would commit to nothing and look correct",
+			orUnknown(status.ScriptPath), status.DriverProtocol, requiredDriverProtocol)
+	}
+	return nil
+}
+
 func (d *KeriDriver) Start() error {
 	log.Printf("[keri-driver] Starting managed Python KERI driver...")
 
@@ -537,7 +572,11 @@ func (d *KeriDriver) Start() error {
 		deadline := time.Now().Add(driverReadyTimeout())
 		for time.Now().Before(deadline) {
 			if status, err := d.GetStatus(); err == nil && status.Status == "active" {
-				log.Printf("[keri-driver] Adopted external driver (library: %s)", status.KeriLibrary)
+				if perr := checkDriverProtocol(status); perr != nil {
+					return perr
+				}
+				log.Printf("[keri-driver] Adopted external driver (library: %s, contract %d)",
+					status.KeriLibrary, status.DriverProtocol)
 				return nil
 			}
 			time.Sleep(500 * time.Millisecond)
@@ -570,6 +609,9 @@ func (d *KeriDriver) Start() error {
 					"changes to the configured script are NOT in effect",
 					status.ScriptPath, want)
 			}
+		}
+		if perr := checkDriverProtocol(status); perr != nil {
+			return perr
 		}
 		d.managed = false
 		return nil

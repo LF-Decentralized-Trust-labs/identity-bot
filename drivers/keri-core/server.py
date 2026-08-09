@@ -367,6 +367,24 @@ def status():
         # that reads as a failed change.
         "keri_version": _keri_version(),
         "script_path": os.path.abspath(__file__),
+        # What this driver can be relied on to do, as a number the agent checks
+        # rather than a path it compares.
+        #
+        # Comparing script paths only catches adopting SOMEBODY ELSE'S driver.
+        # It says nothing about the case that actually cost time: an agent
+        # configured to run exactly the file it was pointed at, where that file
+        # was simply older than the agent needed. Anchors handed to it were
+        # dropped, the event came back without them, every test passed, and the
+        # change was inert everywhere it mattered.
+        #
+        # So the contract carries a version. Raise it whenever this driver gains
+        # something an agent may depend on, and the agent refuses a driver that
+        # cannot do what it is about to ask for, instead of finding out from the
+        # shape of the answer.
+        #
+        # 1: anchors written into inception events; witness receipts counted
+        #    during key-log validation; events verified against canonical bytes.
+        "driver_protocol": 1,
         "uptime": f"{uptime:.0f}s",
         "endpoints": [
             "GET /status",
