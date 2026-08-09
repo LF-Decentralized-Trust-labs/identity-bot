@@ -62,6 +62,36 @@ type Envelope struct {
 
 const algAuthcrypt = "ECDH-1PU+X25519-ML-KEM-768"
 
+// withNormalisedBody returns a copy of jwm whose Body is byte-for-byte what will
+// actually travel.
+//
+// json.Marshal does not transmit a json.RawMessage verbatim: it compacts away
+// insignificant whitespace and escapes <, > and & as <, >, &. So
+// hashing the body the caller handed us hashes bytes that are then altered in
+// flight, and the receiver — which can only ever see the post-marshal form —
+// recomputes a different hash and rejects the message.
+//
+// It fails on exactly the bodies real clients send. A hand-written compact body
+// survives; anything from a serialiser that spaces its output (Python's
+// json.dumps, Ruby, most pretty-printers) or that contains an angle bracket does
+// not, and the sender is told only "body_hash_mismatch" or "signature_invalid".
+// Normalising here means the hash is over the transmitted bytes by construction,
+// so no caller has to know what our encoder does to their JSON.
+func withNormalisedBody(jwm *JWM) (*JWM, error) {
+	if len(jwm.Body) == 0 {
+		return jwm, nil
+	}
+	// Marshalling the RawMessage alone applies the same compaction and escaping
+	// the encoder will apply when it marshals the enclosing JWM.
+	norm, err := json.Marshal(jwm.Body)
+	if err != nil {
+		return nil, fmt.Errorf("body is not valid JSON: %w", err)
+	}
+	out := *jwm
+	out.Body = json.RawMessage(norm)
+	return &out, nil
+}
+
 // signInput binds the signature to the exact transmitted JWM bytes + the body hash.
 func signInput(canonicalJWM []byte, bodyHash string) []byte {
 	out := make([]byte, 0, len(canonicalJWM)+len(bodyHash))
@@ -75,6 +105,10 @@ func PackAuthcrypt(sender *KeySet, rcpt *DID, jwm *JWM) (*Envelope, error) {
 	pd, err := rcpt.parse()
 	if err != nil {
 		return nil, fmt.Errorf("recipient DID: %w", err)
+	}
+	jwm, err = withNormalisedBody(jwm)
+	if err != nil {
+		return nil, err
 	}
 	canonical, err := json.Marshal(jwm)
 	if err != nil {
@@ -158,6 +192,10 @@ func UnpackAuthcrypt(rcpt *KeySet, senderDID *DID, env *Envelope) (*JWM, error) 
 // PackSigned produces a signed-plaintext envelope (no encryption) — for public
 // announcements / OOBI broadcasts where authenticity, not confidentiality, is needed.
 func PackSigned(sender *KeySet, jwm *JWM) (*Envelope, error) {
+	jwm, err := withNormalisedBody(jwm)
+	if err != nil {
+		return nil, err
+	}
 	canonical, err := json.Marshal(jwm)
 	if err != nil {
 		return nil, err
