@@ -188,6 +188,18 @@ func (s *CoreServer) tryFirstContact(w http.ResponseWriter, r *http.Request,
 		return true
 	}
 
+	// Keep the history that was checked, so approving this request does not
+	// have to go and ask for it again — and so the keys the owner ends up
+	// agreeing to are the ones that were actually verified here, rather than
+	// whatever a later fetch happens to return.
+	if err := s.DataStore.SaveContactKEL(store.ContactKELRecord{
+		AID: claimedAID, KEL: env.SenderKEL, KelVerified: true,
+		EventsValidated: len(env.SenderKEL),
+		ValidatedAt:     time.Now().UTC().Format(time.RFC3339),
+	}); err != nil {
+		log.Printf("[first-contact] could not keep the key history for %s: %v", claimedAID, err)
+	}
+
 	if err := s.recordConnectionRequest(claimedAID, jwm); err != nil {
 		log.Printf("[first-contact] could not record a request from %s: %v", claimedAID, err)
 		jsonError(w, "could not record the request", http.StatusInternalServerError)
