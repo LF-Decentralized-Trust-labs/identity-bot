@@ -3760,6 +3760,19 @@ func (s *CoreServer) handleAcceptContact(w http.ResponseWriter, r *http.Request)
 	log.Printf("[identity-agent-core] CONTACT-ACCEPT: Upgrading contact %s (%s) to accepted, category=%s", contact.Alias, aid, acceptReq.ContactCategory)
 
 	contact.Status = "accepted"
+
+	// Register the peer from the history that was already verified.
+	//
+	// Approving a request that arrived carrying its own proof should not send
+	// this agent back out to ask for the keys again: the owner is agreeing to
+	// what was checked in front of them, and a second fetch could return
+	// something else. Where no such history was kept — a contact added by
+	// address rather than one that introduced itself — this does nothing and
+	// the ordinary path still applies.
+	if err := s.registerPeerFromVerifiedHistory(aid, contact.OobiURL); err != nil {
+		log.Printf("[identity-agent-core] CONTACT-ACCEPT: could not establish %s as a peer from the "+
+			"history it presented: %v", aid, err)
+	}
 	contact.ContactCategory = acceptReq.ContactCategory
 	if err := s.DataStore.SaveContact(*contact); err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to update contact", err.Error())

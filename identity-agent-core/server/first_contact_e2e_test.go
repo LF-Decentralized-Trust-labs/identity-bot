@@ -10,6 +10,7 @@ import (
 	"identity-agent-core/didcomm"
 	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
+	"identity-agent-core/store"
 )
 
 // A driver that accepts a key history as sound. The validation itself is
@@ -178,5 +179,56 @@ func TestAStrangerCannotDeliverACredential(t *testing.T) {
 	}
 	if creds, _ := receiver.DataStore.GetCredentials(); len(creds) != 0 {
 		t.Fatal("a credential from a stranger was stored")
+	}
+}
+
+// Approving a request uses the history that was checked when it arrived, rather
+// than asking again — the owner agrees to what they were shown.
+func TestApprovingAStrangerEstablishesThemFromWhatWasVerified(t *testing.T) {
+	const strangerAID = "EApprovedStranger"
+	s := witnessWithSeed(t, 1)
+	s.KeriDriver = acceptingKELDriver(t)
+
+	strangerKeys, _ := didcomm.GenerateKeySet(strangerAID)
+	kel := inceptionCommittingTo(t, strangerAID, strangerKeys)
+	if err := s.DataStore.SaveContactKEL(store.ContactKELRecord{
+		AID: strangerAID, KEL: kel, KelVerified: true, EventsValidated: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.registerPeerFromVerifiedHistory(strangerAID,
+		"http://stranger.example/public/oobi/"+strangerAID); err != nil {
+		t.Fatalf("approving did not establish the peer: %v", err)
+	}
+
+	peer, known := s.loadPeers()[strangerAID]
+	if !known {
+		t.Fatal("an approved stranger was not established as a peer")
+	}
+	// The keys recorded must be the ones the history committed to.
+	want, _ := strangerKeys.DID()
+	if peer.DID.X25519 != want.X25519 || peer.DID.Ed != want.Ed {
+		t.Fatal("the peer was recorded with keys other than the ones that were verified")
+	}
+	if peer.Endpoint != "http://stranger.example/didcomm" {
+		t.Fatalf("peer endpoint is %q", peer.Endpoint)
+	}
+}
+
+// Knowing who somebody is does not tell you where they are.
+func TestAnApprovedStrangerWithNoAddressIsNotEstablished(t *testing.T) {
+	const strangerAID = "ENoAddress"
+	s := witnessWithSeed(t, 1)
+	strangerKeys, _ := didcomm.GenerateKeySet(strangerAID)
+	_ = s.DataStore.SaveContactKEL(store.ContactKELRecord{
+		AID: strangerAID, KEL: inceptionCommittingTo(t, strangerAID, strangerKeys),
+		KelVerified: true, EventsValidated: 1,
+	})
+	if err := s.registerPeerFromVerifiedHistory(strangerAID, ""); err == nil {
+		t.Fatal("a peer was recorded with no address to reach it at")
+	}
+	if _, known := s.loadPeers()[strangerAID]; known {
+		t.Fatal("a peer was recorded despite having no address")
 	}
 }

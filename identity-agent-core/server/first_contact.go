@@ -293,3 +293,64 @@ func (s *CoreServer) ownKELForIntroduction(aid string) []map[string]interface{} 
 	}
 	return out
 }
+
+// registerPeerFromVerifiedHistory turns an approved introduction into a peer,
+// using the key history that was checked when the request arrived.
+//
+// The alternative — fetching the keys again at approval — would mean the owner
+// agrees to one thing and the agent records another, since nothing guarantees a
+// second fetch returns what the first did. Here the keys the owner saw are the
+// keys that get used.
+//
+// Does nothing when no verified history is on file, which is the case for a
+// contact the owner added by address rather than one that introduced itself.
+func (s *CoreServer) registerPeerFromVerifiedHistory(aid, oobiURL string) error {
+	if s.DataStore == nil || aid == "" {
+		return nil
+	}
+	rec, err := s.DataStore.GetContactKEL(aid)
+	if err != nil || rec == nil || !rec.KelVerified || len(rec.KEL) == 0 {
+		return nil
+	}
+
+	var kel []map[string]interface{}
+	raw, merr := json.Marshal(rec.KEL)
+	if merr != nil || json.Unmarshal(raw, &kel) != nil {
+		return fmt.Errorf("the stored key history for %s cannot be read", aid)
+	}
+
+	x, kem, err := iacrypto.AnchoredAgreementKeys(kel[0])
+	if err != nil {
+		return fmt.Errorf("%s does not commit to messaging keys: %w", aid, err)
+	}
+	ed, dsa, err := iacrypto.AnchoredSigningKeys(kel[0])
+	if err != nil {
+		return fmt.Errorf("%s does not commit to signing keys: %w", aid, err)
+	}
+	did, err := didcomm.DIDFromRawKeys(aid, ed, dsa, x, kem)
+	if err != nil {
+		return err
+	}
+
+	endpoint := ""
+	if oobiURL != "" {
+		if base, berr := agentBaseFromOOBI(oobiURL); berr == nil {
+			endpoint = base + "/didcomm"
+		}
+	}
+	if endpoint == "" {
+		// Knowing who somebody is does not tell you where they are. Without an
+		// address there is nothing to record, and inventing one would point
+		// this agent's replies somewhere nobody chose.
+		return fmt.Errorf("%s proved who it is but gave no address to reply to", aid)
+	}
+
+	didcommMu.Lock()
+	defer didcommMu.Unlock()
+	peers := s.loadPeers()
+	if _, exists := peers[aid]; exists {
+		return nil
+	}
+	peers[aid] = peerRecord{AID: aid, DID: *did, Endpoint: endpoint, AddedAt: time.Now().UTC()}
+	return s.savePeers(peers)
+}
