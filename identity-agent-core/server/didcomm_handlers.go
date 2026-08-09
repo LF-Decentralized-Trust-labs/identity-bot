@@ -522,6 +522,19 @@ func (s *CoreServer) OnInboundDIDComm(h InboundDIDCommHandler) { s.inboundDIDCom
 // handler (if any). The core stores every message in the inbox regardless; it does not
 // interpret bodies or auto-respond — that is the overlay's job.
 func (s *CoreServer) routeInboundDIDComm(toAID, fromAID string, jwm *didcomm.JWM) {
+	// An action registered for this type performs it. The envelope has already
+	// established who sent it, that it is fresh, and that it has not been seen
+	// before, so what arrives here is authenticated in a way a plaintext POST to
+	// a REST endpoint never was.
+	if s.dispatchInbound(InboundMessage{
+		ToAID: toAID, FromAID: fromAID, Type: jwm.Type, Body: jwm.Body, MessageID: jwm.ID,
+	}) {
+		return
+	}
+
+	// Nothing registered: the behaviour that existed before. An overlay may add
+	// its own handling, and otherwise the message is already stored and this
+	// says so.
 	if s.inboundDIDComm != nil {
 		go s.inboundDIDComm(toAID, fromAID, jwm.Type, jwm.Body, jwm.ID)
 		return

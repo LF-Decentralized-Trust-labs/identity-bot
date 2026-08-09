@@ -1910,44 +1910,30 @@ func (s *CoreServer) handleRejectCredential(w http.ResponseWriter, r *http.Reque
 
 // deliverCredentialToContact pushes an issued credential directly to a known contact's agent.
 // Called as a goroutine — failures are logged but do not affect the issue response.
+// deliverCredentialToContact hands a credential to its holder.
+//
+// Now inside an envelope. It used to POST plain JSON to the holder's REST
+// endpoint, naming the issuer in the body — an endpoint that is owner-only, so a
+// remote issuer was refused before the handler ran, by a caller that logged the
+// status without reading it. Every cross-agent delivery had been failing
+// silently, and the fix is not to open that endpoint but to send the thing the
+// way anything between two agents should be sent.
 func (s *CoreServer) deliverCredentialToContact(contact *store.ContactRecord, cred store.CredentialRecord) {
-	baseURL := oobiBase(contact.OobiURL)
-	if baseURL == "" {
+	if contact == nil || contact.AID == "" {
 		return
 	}
-	deliverURL := fmt.Sprintf("%s/api/credentials/deliver", baseURL)
-	payload := map[string]interface{}{
-		"said":            cred.SAID,
-		"acdc_json":       cred.AcdcJson,
-		"format":          cred.Format,
-		"credential_type": cred.CredentialType,
-		"issuer_aid":      cred.IssuerAID,
-		"issuer_name":     cred.IssuerName,
-		"schema_said":     cred.SchemaSAID,
+	from := cred.IssuerAID
+	if from == "" {
+		if identity, err := s.DataStore.GetIdentity(); err == nil && identity != nil {
+			from = identity.AID
+		}
 	}
-	body, _ := json.Marshal(payload)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, "POST", deliverURL, bytes.NewReader(body))
-	if err != nil {
-		log.Printf("[identity-agent-core] CREDENTIAL DELIVER: build request failed for %s: %v", deliverURL, err)
+	if err := s.SendCredential(from, contact.AID, cred); err != nil {
+		log.Printf("[credential] %s was not delivered to %s: %v", cred.SAID, contact.AID, err)
 		return
 	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		log.Printf("[identity-agent-core] CREDENTIAL DELIVER: push failed to %s: %v", deliverURL, err)
-		return
-	}
-	defer resp.Body.Close()
-	log.Printf("[identity-agent-core] CREDENTIAL DELIVER: pushed %s to %s (HTTP %d)", cred.SAID, deliverURL, resp.StatusCode)
+	log.Printf("[credential] delivered %s to %s", cred.SAID, contact.AID)
 }
-
-// handleListBuiltinSchemas returns all schemas bundled into the Identity Agent binary.
-// These are served to any KERI verifier that needs to resolve a schema SAID.
 func (s *CoreServer) handleListBuiltinSchemas(w http.ResponseWriter, r *http.Request) {
 	list := schemas.List()
 	w.Header().Set("Content-Type", "application/json")
