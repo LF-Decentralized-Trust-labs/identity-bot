@@ -434,6 +434,17 @@ func (s *CoreServer) handleDIDCommInbound(w http.ResponseWriter, r *http.Request
 			log.Printf("[identity-agent-core] could not reach an accepted contact's agent: %v", rerr)
 		}
 		if !resolved {
+			// A stranger who brought their own proof.
+			//
+			// Not a weakening of the rule above: nothing is fetched, nothing is
+			// minted, and nothing is stored. The sender presents its key
+			// history, this agent checks that the history digests to the
+			// identifier being claimed and takes the messaging keys out of it,
+			// and the ONLY thing that can then happen is a request appearing in
+			// front of the owner. Proving your name is not being agreed to.
+			if handled := s.tryFirstContact(w, r, skid, &env); handled {
+				return
+			}
 			jsonError(w, "sender is not a registered peer", http.StatusForbidden)
 			return
 		}

@@ -74,6 +74,16 @@ func (h *EventHub) Run() {
 }
 
 func (h *EventHub) Broadcast(event AgentEvent) {
+	// Nobody listening is not a failure.
+	//
+	// Every caller here treats broadcasting as incidental to the work it just
+	// did — a credential was stored, a request was recorded — and none of them
+	// check. So an agent assembled without a hub, which is every test and any
+	// embedding that does not want a websocket, would crash inside whatever it
+	// had just successfully done. The event is the notification, not the work.
+	if h == nil || h.broadcast == nil {
+		return
+	}
 	if event.Timestamp == "" {
 		event.Timestamp = time.Now().UTC().Format(time.RFC3339)
 	}

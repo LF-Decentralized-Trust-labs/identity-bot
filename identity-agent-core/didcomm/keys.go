@@ -381,3 +381,29 @@ func (d *DID) MatchesAnchoredSigningKeys(ed25519Pub, mldsa65Pub []byte) error {
 	}
 	return nil
 }
+
+// DIDFromRawKeys builds a peer DID from key material recovered elsewhere —
+// notably from an identifier's own inception event.
+//
+// Takes raw bytes rather than a keyset because the caller has public halves
+// only, read out of a key history, and never sees a private key at all.
+func DIDFromRawKeys(aid string, ed25519Pub, mldsa65Pub, x25519, mlkem768 []byte) (*DID, error) {
+	if aid == "" {
+		return nil, fmt.Errorf("a DID needs the identifier the keys belong to")
+	}
+	if len(ed25519Pub) != ed25519.PublicKeySize {
+		return nil, fmt.Errorf("expected a %d-byte signing key, got %d",
+			ed25519.PublicKeySize, len(ed25519Pub))
+	}
+	if len(x25519) != 32 {
+		return nil, fmt.Errorf("expected a 32-byte agreement key, got %d", len(x25519))
+	}
+	return &DID{
+		AID:    aid,
+		Ed:     b64.EncodeToString(ed25519Pub),
+		Dsa:    b64.EncodeToString(mldsa65Pub),
+		X25519: b64.EncodeToString(x25519),
+		MlKem:  b64.EncodeToString(mlkem768),
+		Suite:  CipherSuite,
+	}, nil
+}

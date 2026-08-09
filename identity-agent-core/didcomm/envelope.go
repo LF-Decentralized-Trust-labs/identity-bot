@@ -53,6 +53,21 @@ type Envelope struct {
 	Protected  ProtectedHeader `json:"protected"`
 	Recipients []recipient     `json:"recipients"`
 	IV         string          `json:"iv"`
+	// SenderKEL lets an agent that has never written here prove who it is
+	// without this agent fetching anything.
+	//
+	// An envelope from an unknown sender cannot be opened, because opening it
+	// needs that sender's keys. Looking them up would mean taking an address
+	// from an unauthenticated message and going where it says, which hands a
+	// stranger the power to point this agent at anything. Carrying the key
+	// history instead costs a few kilobytes and proves the same thing better:
+	// an identifier is the digest of its own inception event, and that event
+	// commits to the messaging keys, so the claim is checked by arithmetic
+	// rather than believed.
+	//
+	// Only consulted when the sender is unknown, and only ever enough to place
+	// a request in front of the owner.
+	SenderKEL []map[string]interface{} `json:"sender_kel,omitempty"`
 	// Sig* carry the signature for the `signed` (plaintext) mode, where there is no
 	// ciphertext to embed it in. Empty for authcrypt/anoncrypt.
 	EdSig  string `json:"ed_sig,omitempty"`
