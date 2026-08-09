@@ -360,6 +360,10 @@ type DriverRegistryInceptResponse struct {
 	IxnSaid        string                 `json:"ixn_said"`
 	IxnEvent       map[string]interface{} `json:"ixn_event"`
 	SequenceNumber int                    `json:"sequence_number"`
+	// IxnRawBytesB64 is the anchoring event as KERI serialised it. Returned by
+	// the driver all along and read by nobody, so the event was stored without
+	// the only bytes its signature and its own digest can be checked against.
+	IxnRawBytesB64 string `json:"ixn_raw_bytes_b64"`
 }
 
 // DriverRevokeCredentialResponse is the result of revoking a registry-backed credential.
@@ -369,6 +373,11 @@ type DriverRevokeCredentialResponse struct {
 	IxnSaid        string                 `json:"ixn_said"`
 	IxnEvent       map[string]interface{} `json:"ixn_event"`
 	SequenceNumber int                    `json:"sequence_number"`
+	// IxnRawBytesB64 is the anchoring event as KERI serialised it. The driver
+	// has always returned this; nothing read it, so the event was stored
+	// without the only bytes its signature and its own digest can be checked
+	// against.
+	IxnRawBytesB64 string `json:"ixn_raw_bytes_b64"`
 }
 
 type DriverPresentCredentialRequest struct {

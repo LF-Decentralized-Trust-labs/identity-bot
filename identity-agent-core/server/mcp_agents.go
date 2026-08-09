@@ -350,6 +350,7 @@ func (s *CoreServer) ensureRegistry(issuerRootAID string) (string, error) {
 		PublicKey:      identity.PublicKey,
 		NextKeyDigest:  identity.NextKeyDigest,
 		Timestamp:      now,
+		RawBytesB64:    resp.IxnRawBytesB64,
 	}); err != nil {
 		log.Printf("[mcp] failed to persist registry anchor for %s: %v", resp.RegistrySaid, err)
 	}
@@ -416,6 +417,7 @@ func (s *CoreServer) issueCapabilityGrant(agentAID, issuerRootAID string, capabi
 		PublicKey:      identity.PublicKey,
 		NextKeyDigest:  identity.NextKeyDigest,
 		Timestamp:      now,
+		RawBytesB64:    result.IxnRawBytesB64,
 	}); err != nil {
 		log.Printf("[mcp] failed to persist grant IXN event for %s: %v", result.AcdcSaid, err)
 	}
