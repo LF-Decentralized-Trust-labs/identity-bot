@@ -630,7 +630,6 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		r.Get("/credentials", s.handleGetCredentials)
 		r.Get("/credentials/{said}", s.handleGetCredential)
 		r.Post("/credentials/receive", s.handleReceiveCredential)
-		r.Post("/credentials/deliver", s.handleDeliverCredential)
 		r.Post("/credentials/{said}/accept", s.handleAcceptCredential)
 		r.Post("/credentials/{said}/reject", s.handleRejectCredential)
 		r.Post("/credentials/{said}/revoke", s.handleRevokeCredential)
@@ -1866,72 +1865,6 @@ func (s *CoreServer) handleDeleteCredential(w http.ResponseWriter, r *http.Reque
 	}
 	log.Printf("[identity-agent-core] CREDENTIAL: Deleted %s", said)
 	w.WriteHeader(http.StatusNoContent)
-}
-
-// handleDeliverCredential receives a credential pushed by another Identity Agent.
-// The credential is saved with status "pending_inbound" and a WebSocket event is broadcast.
-func (s *CoreServer) handleDeliverCredential(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Said           string `json:"said"`
-		AcdcJson       string `json:"acdc_json"`
-		Format         string `json:"format"`
-		CredentialType string `json:"credential_type"`
-		IssuerAID      string `json:"issuer_aid"`
-		IssuerName     string `json:"issuer_name"`
-		SchemaSAID     string `json:"schema_said"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
-		return
-	}
-	if req.Said == "" || req.AcdcJson == "" {
-		writeError(w, http.StatusBadRequest, "Missing required fields", "said and acdc_json are required")
-		return
-	}
-
-	holderAID := ""
-	if identity, err := s.DataStore.GetIdentity(); err == nil && identity != nil {
-		holderAID = identity.AID
-	}
-	// Server-side format detection (do not trust caller-supplied format).
-	req.Format = detectCredentialFormat(req.AcdcJson, "")
-
-	record := store.CredentialRecord{
-		SAID:           req.Said,
-		IssuerAID:      req.IssuerAID,
-		HolderAID:      holderAID,
-		SchemaSAID:     req.SchemaSAID,
-		AcdcJson:       req.AcdcJson,
-		IssuedAt:       time.Now().UTC().Format(time.RFC3339),
-		Status:         "pending_inbound",
-		Format:         req.Format,
-		CredentialType: req.CredentialType,
-		IssuerName:     req.IssuerName,
-	}
-	if err := s.DataStore.SaveCredential(record); err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to save credential", err.Error())
-		return
-	}
-	s.notifyBackupEvent(backup.EventCredential)
-
-	s.EventHub.Broadcast(AgentEvent{
-		Type: "credential_received",
-		Payload: map[string]interface{}{
-			"said":            req.Said,
-			"credential_type": req.CredentialType,
-			"issuer_aid":      req.IssuerAID,
-			"issuer_name":     req.IssuerName,
-		},
-	})
-
-	log.Printf("[identity-agent-core] CREDENTIAL: Received pending credential %s from %s", req.Said, req.IssuerAID)
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"said":   req.Said,
-		"status": "pending_inbound",
-	})
 }
 
 // handleAcceptCredential moves a pending_inbound credential to accepted (status=received).
