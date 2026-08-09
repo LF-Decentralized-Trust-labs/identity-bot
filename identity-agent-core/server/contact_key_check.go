@@ -60,6 +60,21 @@ type kelCheckResult struct {
 	Key       string
 	Reason    string
 	CheckedAt time.Time
+	// Witnessed reports whether every event in the log carried receipts from
+	// the threshold of witnesses the identity designated.
+	//
+	// Carried separately from State because it answers a different question.
+	// State says the log is sound and signed by its controller; this says
+	// somebody other than the controller stood behind it, which is the only
+	// thing that makes a SECOND, conflicting log detectable. A caller reading a
+	// current key can proceed without it; a caller about to accept a change to
+	// what an identity commits to cannot, because the whole risk there is being
+	// shown an old or forked history by whoever served it.
+	Witnessed bool
+	// WitnessThreshold is how many receipts the identity asked for. Zero means
+	// it designated nobody, so it can never be witnessed — which is a different
+	// situation from falling short, and the two must not be conflated.
+	WitnessThreshold int
 }
 
 // contactKeyForUse re-checks a contact's key history and returns the key that
@@ -150,7 +165,10 @@ func (s *CoreServer) checkContactKEL(aid string) kelCheckResult {
 		AID: aid, KEL: events, KelVerified: true, CurrentPublicKey: key,
 		EventsValidated: val.EventsValidated, ValidatedAt: now.Format(time.RFC3339),
 	})
-	return kelCheckResult{State: kelVerifiedNow, Key: key, CheckedAt: now}
+	return kelCheckResult{
+		State: kelVerifiedNow, Key: key, CheckedAt: now,
+		Witnessed: val.Witnessed, WitnessThreshold: val.WitnessThreshold,
+	}
 }
 
 func fetchKELFromOOBI(oobiURL string) ([]map[string]interface{}, error) {

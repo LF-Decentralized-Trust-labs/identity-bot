@@ -1449,6 +1449,16 @@ def _validate_kel_events(kel_events: list, aid: str = "") -> dict:
     # rotation is checked against this, never against its own contents.
     next_digests = []
     events_validated = 0
+    # Who this identity has asked to witness for it, and how many of them must
+    # have signed before an event counts as witnessed. Both are carried forward:
+    # an inception designates them, a rotation may add or remove them, and an
+    # interaction leaves them alone.
+    witnesses = []
+    toad = 0
+    # Per-event witnessing, reported rather than judged. What a missing receipt
+    # means depends on what the caller is about to do with the event, and that
+    # decision does not belong here.
+    witness_report = []
 
     if not kel_events:
         return {
@@ -1528,6 +1538,37 @@ def _validate_kel_events(kel_events: list, aid: str = "") -> dict:
                     )
             except Exception as e:
                 errors.append(f"sn={i}: hash chain check failed: {e}")
+
+        # Who is designated to witness, as of this event.
+        #
+        # Read before the receipts are counted, so an event that changes the
+        # witness set is judged by the set it establishes. A rotation carries
+        # adds and cuts rather than the whole list, because the list is the
+        # standing arrangement and an event states the change to it.
+        if event_type in ("icp", "dip"):
+            witnesses = list(event_dict.get("b", []) or [])
+            toad = _toad_of(event_dict, len(witnesses))
+        elif event_type in ("rot", "drt"):
+            cuts = list(event_dict.get("br", []) or [])
+            adds = list(event_dict.get("ba", []) or [])
+            witnesses = [w for w in witnesses if w not in cuts] + \
+                        [w for w in adds if w not in witnesses]
+            toad = _toad_of(event_dict, len(witnesses), toad)
+
+        verified_receipts, receipt_errors = _count_valid_receipts(
+            record, event_dict.get("d", ""), witnesses
+        )
+        errors.extend(f"sn={i} ({event_type}): {e}" for e in receipt_errors)
+        witness_report.append({
+            "sequence_number": i,
+            "witnesses": len(witnesses),
+            "threshold": toad,
+            "receipts_verified": verified_receipts,
+            # An identity that designated nobody cannot be witnessed, which is
+            # not the same as one that was witnessed and fell short. Both are
+            # reported as unwitnessed; the counts tell them apart.
+            "witnessed": toad > 0 and verified_receipts >= toad,
+        })
 
         # What THIS event commits to as its successor, read after the checks
         # below so a rotation is compared against the previous event's promise
@@ -1632,7 +1673,90 @@ def _validate_kel_events(kel_events: list, aid: str = "") -> dict:
         "events_validated": events_validated,
         "current_public_key": current_key_qb64 or "",
         "validation_errors": errors,
+        # Witnessing is reported separately from verification on purpose.
+        #
+        # A log can be perfectly well-formed and correctly signed by its
+        # controller and still be one of two conflicting histories, because
+        # nothing in the log itself can rule that out — only the witnesses who
+        # refused to sign the other one can. So kel_verified continues to mean
+        # "this is internally sound and signed", and these say whether anybody
+        # else stood behind it, which is the question a caller must answer for
+        # itself before relying on the log being the only one.
+        "witnesses": list(witnesses),
+        "witness_threshold": toad,
+        "witnessed": bool(witness_report) and all(e["witnessed"] for e in witness_report),
+        "witness_detail": witness_report,
     }
+
+
+def _toad_of(event_dict: dict, witness_count: int, previous: int = 0) -> int:
+    """Read the threshold of accountable duplicity an event declares.
+
+    Absent means unchanged on a rotation and none at inception — an event that
+    does not mention the threshold is not silently setting it to zero.
+    """
+    raw = event_dict.get("bt", None)
+    if raw is None or raw == "":
+        return previous
+    try:
+        value = int(raw, 16) if isinstance(raw, str) else int(raw)
+    except (ValueError, TypeError):
+        return previous
+    # A threshold above the number of witnesses can never be met, which would
+    # make the identity permanently unwitnessable. Reported as-is rather than
+    # clamped: quietly lowering somebody's stated threshold is exactly the kind
+    # of helpfulness that removes a protection they asked for.
+    return max(0, value)
+
+
+def _count_valid_receipts(record: dict, event_said: str, witnesses: list) -> tuple:
+    """Count receipts on an event that were signed by its designated witnesses.
+
+    A witness is named by a non-transferable identifier, which IS its verifying
+    key. So checking a receipt needs nothing but the identifier already written
+    into the key event — no lookup, and therefore nothing in the middle of one
+    that could answer wrongly.
+
+    Returns (valid_count, errors). A receipt that does not verify is an error
+    rather than merely uncounted: a well-formed log carrying a bad receipt is a
+    sign of tampering, and silently ignoring it would hide the one signal that
+    something is wrong.
+    """
+    receipts = record.get("witness_receipts") or []
+    if not receipts:
+        return 0, []
+
+    errors = []
+    seen = set()
+    valid = 0
+    for entry in receipts:
+        if not isinstance(entry, dict):
+            errors.append("a witness receipt is not an object")
+            continue
+        witness_aid = entry.get("witness_aid", "")
+        sig = entry.get("cesr_signature", "")
+        if not witness_aid or not sig:
+            errors.append("a witness receipt names no witness or carries no signature")
+            continue
+        if witness_aid not in witnesses:
+            # Not an error. Anybody may sign anything; what makes a receipt
+            # count is that the controller designated that witness, and a
+            # receipt from somebody else is simply not part of the threshold.
+            continue
+        if witness_aid in seen:
+            # One witness, one vote. Without this, a single witness could meet
+            # any threshold by sending its receipt repeatedly.
+            errors.append(f"witness {witness_aid} receipted this event more than once")
+            continue
+        if not event_said:
+            errors.append("the event has no identifier for a receipt to cover")
+            continue
+        if not _verify_receipt_sig(sig, event_said, witness_aid):
+            errors.append(f"the receipt from witness {witness_aid} does not verify")
+            continue
+        seen.add(witness_aid)
+        valid += 1
+    return valid, errors
 
 
 @app.route("/validate-kel", methods=["POST"])

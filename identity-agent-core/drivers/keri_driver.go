@@ -266,6 +266,29 @@ type DriverValidateKELResponse struct {
 	CurrentPublicKey string   `json:"current_public_key"`
 	EventsValidated  int      `json:"events_validated"`
 	ValidationErrors []string `json:"validation_errors,omitempty"`
+
+	// Whether anybody stood behind this log, reported separately from whether
+	// it verifies.
+	//
+	// A log can be internally sound and correctly signed by its controller and
+	// still be one of two conflicting histories — nothing inside a log can rule
+	// that out, only the witnesses who declined to sign the other one. So a
+	// caller about to rely on this being the ONLY history has to ask this
+	// question too, and a caller merely reading an identity's current key does
+	// not.
+	Witnessed        bool                   `json:"witnessed"`
+	Witnesses        []string               `json:"witnesses,omitempty"`
+	WitnessThreshold int                    `json:"witness_threshold"`
+	WitnessDetail    []DriverWitnessedEvent `json:"witness_detail,omitempty"`
+}
+
+// DriverWitnessedEvent is the witnessing position of one event in a log.
+type DriverWitnessedEvent struct {
+	SequenceNumber   int  `json:"sequence_number"`
+	Witnesses        int  `json:"witnesses"`
+	Threshold        int  `json:"threshold"`
+	ReceiptsVerified int  `json:"receipts_verified"`
+	Witnessed        bool `json:"witnessed"`
 }
 
 type DriverMultisigRequest struct {
