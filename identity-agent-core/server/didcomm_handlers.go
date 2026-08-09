@@ -113,6 +113,33 @@ func (s *CoreServer) keySetFor(aid string) (*didcomm.KeySet, error) {
 	return ks, nil
 }
 
+// storeKeySetFor files an already-minted keyset under aid.
+//
+// Separate from keySetFor because the order is reversed at inception: the keys
+// have to exist before the identifier does, since the identifier is derived
+// from an event that commits to them. Refuses to overwrite, because the only
+// way to reach that case is a second identity claiming an identifier that
+// already has keys, and silently replacing them would strand every message
+// anyone had already encrypted to the first set.
+func (s *CoreServer) storeKeySetFor(aid string, ks *didcomm.KeySet) error {
+	if aid == "" {
+		return fmt.Errorf("a keyset must be filed under an identifier")
+	}
+	didcommMu.Lock()
+	defer didcommMu.Unlock()
+	keys := s.loadDIDCommKeys()
+	if _, exists := keys[aid]; exists {
+		return fmt.Errorf("%s already has messaging keys, which will not be replaced", aid)
+	}
+	ks.AID = aid
+	blob, err := ks.Marshal()
+	if err != nil {
+		return err
+	}
+	keys[aid] = blob
+	return s.saveDIDCommKeys(keys)
+}
+
 // hasKeySet reports whether a keyset already exists for aid (no minting).
 func (s *CoreServer) hasKeySet(aid string) bool {
 	didcommMu.Lock()

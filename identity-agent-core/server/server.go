@@ -21,6 +21,7 @@ import (
 	"identity-agent-core/asset"
 	"identity-agent-core/avatar"
 	"identity-agent-core/backup"
+	"identity-agent-core/didcomm"
 	"identity-agent-core/drivers"
 	"identity-agent-core/endpoint"
 	"identity-agent-core/iacrypto"
@@ -1105,17 +1106,50 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var (
-		result *drivers.DriverInceptionResponse
-		err    error
-	)
-	if req.OwnerAID != "" {
-		result, err = s.KeriDriver.CreateOwnedInception(req.PublicKey, req.NextPublicKey, "", req.OwnerAID)
-	} else {
-		result, err = s.KeriDriver.CreateInception(req.PublicKey, req.NextPublicKey)
+	// The identity commits to the keys people will encrypt to it with, in the
+	// event it is derived from.
+	//
+	// Without this, "which keys belong to this identifier?" is a question only
+	// the agent can answer, so a counterparty has to ask the agent and believe
+	// the reply — and anything in the middle can answer instead. Anchored, the
+	// answer is inside the identifier: changing the keys changes the event,
+	// which changes the identifier, so there is nothing to intercept because
+	// there is nothing to fetch.
+	//
+	// Minted before the identity exists because the identifier depends on it.
+	// The keyset carries the AID only as a label, so it is generated unlabelled
+	// and filed under the identifier once the identifier is known.
+	messagingKeys, err := didcomm.GenerateKeySet("")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Could not create this identity's messaging keys", err.Error())
+		return
 	}
+	kemPub, err := messagingKeys.KemPub.MarshalBinary()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Could not encode this identity's messaging keys", err.Error())
+		return
+	}
+	keyAnchor, err := iacrypto.AgreementKeyAnchor(messagingKeys.XPub[:], kemPub)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Could not commit to this identity's messaging keys", err.Error())
+		return
+	}
+
+	result, err := s.KeriDriver.CreateInceptionAnchored(
+		req.PublicKey, req.NextPublicKey, "", req.OwnerAID,
+		[]map[string]interface{}{keyAnchor})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to create inception event", err.Error())
+		return
+	}
+
+	// Filed before anything else is persisted. An identifier that commits to
+	// keys the agent then failed to keep is worse than one with no keys at all:
+	// it advertises a keyset nobody holds the private half of, permanently, and
+	// no later event can take the commitment back.
+	if err := s.storeKeySetFor(result.AID, messagingKeys); err != nil {
+		writeError(w, http.StatusInternalServerError,
+			"The identity's messaging keys could not be saved", err.Error())
 		return
 	}
 

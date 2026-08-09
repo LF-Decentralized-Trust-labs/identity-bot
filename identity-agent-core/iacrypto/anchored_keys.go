@@ -20,6 +20,33 @@ import (
 // the identifier. There is nothing to intercept, because there is nothing to
 // fetch.
 
+// AgreementKeyAnchor builds the seal an inception event carries so that the
+// identifier commits to the keys people will encrypt to it with.
+//
+// This is the half that had never been written. The reader below has always
+// been able to find these keys; nothing put them there, so every identifier in
+// existence answered "not anchored" and every counterparty had to fetch the
+// keys from the agent and take its word for them.
+//
+// The order matters and is not alphabetical: the classical key first, the
+// post-quantum key second, matching what the reader expects positionally. Both
+// carry their own type code, so a reader that checks the code — as ours does —
+// catches a swapped pair rather than decoding one as the other.
+func AgreementKeyAnchor(x25519, mlkem768 []byte) (map[string]interface{}, error) {
+	x, err := EncodeLargeFixed(CESRX25519Pubkey, x25519, X25519PubkeyBytes)
+	if err != nil {
+		return nil, fmt.Errorf("agreement key: %w", err)
+	}
+	k, err := EncodeLargeFixed(CESRMLKEM768Encap, mlkem768, MLKEM768EncapBytes)
+	if err != nil {
+		return nil, fmt.Errorf("encapsulation key: %w", err)
+	}
+	return map[string]interface{}{
+		"ia": CipherSuiteIAHybrid1,
+		"ka": []string{x, k},
+	}, nil
+}
+
 // ErrNotAnchored means the event carries no key-agreement anchor.
 //
 // Distinguished from a malformed one because the two have different causes: an

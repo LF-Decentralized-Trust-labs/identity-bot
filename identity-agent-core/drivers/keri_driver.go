@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -474,6 +475,22 @@ func NewKeriDriver() *KeriDriver {
 	}
 }
 
+// NewKeriDriverAt returns a driver that talks to an already-running driver at
+// baseURL and never starts or stops one.
+//
+// The zero KeriDriver is not usable — its HTTP client is nil, so the first
+// request panics rather than failing — which meant the only way to exercise a
+// caller was against a real Python driver. That is a heavy dependency for
+// testing what a caller does with a response, and it is why the request-shaping
+// code below went unexercised.
+func NewKeriDriverAt(baseURL string) *KeriDriver {
+	return &KeriDriver{
+		BaseURL: strings.TrimRight(baseURL, "/"),
+		client:  &http.Client{Timeout: 30 * time.Second},
+		managed: false,
+	}
+}
+
 func (d *KeriDriver) Start() error {
 	log.Printf("[keri-driver] Starting managed Python KERI driver...")
 
@@ -755,6 +772,27 @@ func (d *KeriDriver) CreateOwnedInception(publicKey, nextPublicKey, name, ownerA
 	return d.postInception(publicKey, nextPublicKey, name, []map[string]interface{}{
 		{"i": ownerAID, "r": "owner"},
 	})
+}
+
+// CreateInceptionAnchored founds an identity that carries extra seals in the
+// event it is derived from.
+//
+// Both kinds of seal go in the same list, so they cannot be passed separately:
+// an identity may name an owner and commit to its encryption keys, and the
+// caller builds whichever of those apply. Passing an owner AID adds the owner
+// seal; passing none omits it, which is the unowned case rather than an error
+// here — the handler decides whether an owner is required.
+func (d *KeriDriver) CreateInceptionAnchored(publicKey, nextPublicKey, name, ownerAID string,
+	extra []map[string]interface{}) (*DriverInceptionResponse, error) {
+	anchors := make([]map[string]interface{}, 0, len(extra)+1)
+	if ownerAID != "" {
+		anchors = append(anchors, map[string]interface{}{"i": ownerAID, "r": "owner"})
+	}
+	anchors = append(anchors, extra...)
+	if len(anchors) == 0 {
+		anchors = nil
+	}
+	return d.postInception(publicKey, nextPublicKey, name, anchors)
 }
 
 func (d *KeriDriver) CreateHybridInception(synthetic bool, name string) (*DriverHybridInceptionResponse, error) {
