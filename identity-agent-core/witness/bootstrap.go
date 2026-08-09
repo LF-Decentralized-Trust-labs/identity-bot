@@ -53,7 +53,7 @@ type BootstrapWitness struct {
 // services, same key material, correctly encoded.
 func BootstrapPool() []BootstrapWitness {
 	return []BootstrapWitness{
-		{AID: "BMtfjviEMpF2xWVW0CRPKoVPX1mOMzNurvUjD-0RN_Jl", URL: "https://grapeid-witness1.fly.dev", Operator: "grapeid.org"},
+		{AID: "BMtfjviEMpF2xWVW0CRPKoVPX1mOMzNurvUjD-0RN_Jl", URL: "https://witness1.grapeid.org", Operator: "grapeid.org"},
 		{AID: "BKDtywULdbP7aLdch9RBSjENGeBDD9pqdI6d88ObtAZ_", URL: "https://witness2.grapeid.org", Operator: "grapeid.org"},
 		{AID: "BGRMfwvUxMstt06Oexf6-u2OZ7yHuCr66V73siKVuDhT", URL: "https://witness3.grapeid.org", Operator: "grapeid.org"},
 	}
