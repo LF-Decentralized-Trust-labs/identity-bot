@@ -70,11 +70,34 @@ func (s *SQLiteStore) DB() *sql.DB {
 // ── Events / KEL ─────────────────────────────────────────────────────────────
 
 func (s *SQLiteStore) SaveEvent(record EventRecord) error {
+	// The signature and the canonical bytes are written, and were not.
+	//
+	// Both columns existed and neither was in the statement, so a signature
+	// handed to this store was accepted and silently dropped — which is why
+	// every identity kept here had an unsigned inception, and why no
+	// counterparty could ever verify one. A key history containing an unsigned
+	// event is refused, so such an identity works alone and can convince nobody.
+	//
+	// Written by upsert rather than insert, because a signature necessarily
+	// arrives AFTER the event it covers: there are no bytes to sign until the
+	// event exists. A plain insert made attaching one impossible.
 	_, err := s.db.Exec(`
-		INSERT INTO kel (aid, seq_num, event_type, event_json, public_key, next_key_digest, timestamp)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO kel (aid, seq_num, event_type, event_json, public_key,
+		                 next_key_digest, timestamp, cesr_signature, raw_bytes_b64)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(aid, seq_num) DO UPDATE SET
+		    event_json     = excluded.event_json,
+		    public_key     = excluded.public_key,
+		    next_key_digest = excluded.next_key_digest,
+		    timestamp      = excluded.timestamp,
+		    -- An existing signature or set of bytes is never replaced by an
+		    -- empty one. A later write that simply does not carry them must not
+		    -- erase what an earlier one established.
+		    cesr_signature = CASE WHEN excluded.cesr_signature != '' THEN excluded.cesr_signature ELSE kel.cesr_signature END,
+		    raw_bytes_b64  = CASE WHEN excluded.raw_bytes_b64 != '' THEN excluded.raw_bytes_b64 ELSE kel.raw_bytes_b64 END`,
 		record.AID, record.SequenceNumber, record.EventType, record.EventJSON,
 		record.PublicKey, record.NextKeyDigest, record.Timestamp,
+		record.CesrSignature, record.RawBytesB64,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to save KEL event: %w", err)
@@ -84,7 +107,8 @@ func (s *SQLiteStore) SaveEvent(record EventRecord) error {
 
 func (s *SQLiteStore) GetEvents(aid string) ([]EventRecord, error) {
 	rows, err := s.db.Query(
-		`SELECT aid, seq_num, event_type, event_json, public_key, next_key_digest, timestamp
+		`SELECT aid, seq_num, event_type, event_json, public_key, next_key_digest,
+		        timestamp, cesr_signature, raw_bytes_b64
 		 FROM kel WHERE aid = ? ORDER BY seq_num ASC`, aid)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query KEL: %w", err)
@@ -95,7 +119,8 @@ func (s *SQLiteStore) GetEvents(aid string) ([]EventRecord, error) {
 	for rows.Next() {
 		var e EventRecord
 		if err := rows.Scan(&e.AID, &e.SequenceNumber, &e.EventType, &e.EventJSON,
-			&e.PublicKey, &e.NextKeyDigest, &e.Timestamp); err != nil {
+			&e.PublicKey, &e.NextKeyDigest, &e.Timestamp,
+			&e.CesrSignature, &e.RawBytesB64); err != nil {
 			return nil, fmt.Errorf("failed to scan KEL row: %w", err)
 		}
 		events = append(events, e)

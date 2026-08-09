@@ -705,6 +705,7 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 
 		r.Post("/store/identity", s.handleStoreIdentity)
 		r.Post("/store/event", s.handleStoreEvent)
+		r.Post("/events/signature", s.handleAttachEventSignature)
 		r.Post("/store/receipt", s.handleStoreReceipt)
 		r.Get("/store/receipts", s.handleGetStoreReceipts)
 		r.Post("/store/credential", s.handleStoreCredential)

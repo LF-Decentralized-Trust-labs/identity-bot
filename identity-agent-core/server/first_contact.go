@@ -113,12 +113,16 @@ func (s *CoreServer) identifyStranger(claimedAID string, kel []map[string]interf
 	// The identifier has to be derived from the history presented, not merely
 	// mentioned by it. ValidateKEL binds the two — an inception whose digest is
 	// not the identifier is refused — so reaching here means the claim holds.
-	x, kem, err := iacrypto.AnchoredAgreementKeys(kel[0])
+	icp, err := eventFromKELEntry(kel[0])
+	if err != nil {
+		return nil, err
+	}
+	x, kem, err := iacrypto.AnchoredAgreementKeys(icp)
 	if err != nil {
 		return nil, fmt.Errorf("%s does not commit to any messaging keys, so there is nothing "+
 			"here that ties it to the message it sent: %w", claimedAID, err)
 	}
-	ed, dsa, err := iacrypto.AnchoredSigningKeys(kel[0])
+	ed, dsa, err := iacrypto.AnchoredSigningKeys(icp)
 	if err != nil {
 		return nil, fmt.Errorf("%s does not commit to the keys that sign for it: %w", claimedAID, err)
 	}
@@ -319,11 +323,15 @@ func (s *CoreServer) registerPeerFromVerifiedHistory(aid, oobiURL string) error 
 		return fmt.Errorf("the stored key history for %s cannot be read", aid)
 	}
 
-	x, kem, err := iacrypto.AnchoredAgreementKeys(kel[0])
+	icp, err := eventFromKELEntry(kel[0])
+	if err != nil {
+		return err
+	}
+	x, kem, err := iacrypto.AnchoredAgreementKeys(icp)
 	if err != nil {
 		return fmt.Errorf("%s does not commit to messaging keys: %w", aid, err)
 	}
-	ed, dsa, err := iacrypto.AnchoredSigningKeys(kel[0])
+	ed, dsa, err := iacrypto.AnchoredSigningKeys(icp)
 	if err != nil {
 		return fmt.Errorf("%s does not commit to signing keys: %w", aid, err)
 	}
@@ -353,4 +361,29 @@ func (s *CoreServer) registerPeerFromVerifiedHistory(aid, oobiURL string) error 
 	}
 	peers[aid] = peerRecord{AID: aid, DID: *did, Endpoint: endpoint, AddedAt: time.Now().UTC()}
 	return s.savePeers(peers)
+}
+
+// eventFromKELEntry unwraps the event out of a key-history entry.
+//
+// A history travels as records — the event as a JSON string alongside its
+// signature and the bytes it was serialised as — while everything that reads an
+// event wants the event itself. Passing the record where the event belongs
+// finds none of the fields it is looking for and reports the identifier as
+// committing to nothing, which is indistinguishable from an identifier that
+// genuinely commits to nothing.
+//
+// Accepts either shape, because a history built in memory is already the event.
+func eventFromKELEntry(entry map[string]interface{}) (map[string]interface{}, error) {
+	if entry == nil {
+		return nil, fmt.Errorf("the key history has no first event")
+	}
+	raw, wrapped := entry["event_json"].(string)
+	if !wrapped {
+		return entry, nil
+	}
+	var ev map[string]interface{}
+	if err := json.Unmarshal([]byte(raw), &ev); err != nil {
+		return nil, fmt.Errorf("the first event in the history is not readable: %w", err)
+	}
+	return ev, nil
 }

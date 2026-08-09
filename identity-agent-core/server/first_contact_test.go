@@ -118,3 +118,38 @@ func TestAProvenStrangerIsNotAccepted(t *testing.T) {
 		t.Fatal("a stranger was registered as a peer before the owner agreed to anything")
 	}
 }
+
+// A key history travels as records — the event as a string alongside its
+// signature — while everything that reads an event wants the event. Passing the
+// record where the event belongs finds none of the fields it looks for and
+// reports an identifier as committing to nothing, which looks exactly like an
+// identifier that genuinely commits to nothing.
+func TestTheEventIsUnwrappedFromItsRecord(t *testing.T) {
+	ev, err := eventFromKELEntry(map[string]interface{}{
+		"event_json": `{"t":"icp","a":[{"ia":"IA-HYBRID-1"}]}`,
+		"public_key": "Dkey",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ev["t"] != "icp" {
+		t.Fatalf("the event was not unwrapped: %v", ev)
+	}
+	if _, ok := ev["a"]; !ok {
+		t.Fatal("the unwrapped event has no anchor field")
+	}
+}
+
+// A history built in memory is already the event, and must still be read.
+func TestAnUnwrappedEventIsAcceptedAsIs(t *testing.T) {
+	ev, err := eventFromKELEntry(map[string]interface{}{"t": "icp"})
+	if err != nil || ev["t"] != "icp" {
+		t.Fatalf("a bare event was not accepted: %v %v", ev, err)
+	}
+}
+
+func TestAnUnreadableEventIsRefused(t *testing.T) {
+	if _, err := eventFromKELEntry(map[string]interface{}{"event_json": "{not json"}); err == nil {
+		t.Fatal("an unreadable event was accepted")
+	}
+}

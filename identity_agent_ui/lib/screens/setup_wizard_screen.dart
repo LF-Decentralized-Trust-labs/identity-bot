@@ -196,6 +196,31 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
       );
       debugPrint('[SetupWizard] inceptAid completed in ${stopwatch.elapsedMilliseconds}ms, AID: ${result.aid}');
 
+      // Send the signature back, or the identity is founded unsigned.
+      //
+      // The order is forced: founding produces the event, and only then are
+      // there bytes to sign. That signature was computed here and then dropped,
+      // so the inception was stored with nothing showing who wrote it. Such an
+      // identity works perfectly alone and can never convince anybody else — a
+      // key history containing an unsigned event is refused, so it can never
+      // become a contact, be established as a peer, or have a credential
+      // accepted from it.
+      if (result.cesrSignature.isNotEmpty) {
+        final signed = await CoreService(baseUrl: _coreBaseUrl)
+            .attachEventSignature(
+          aid: result.aid,
+          sequenceNumber: 0,
+          cesrSignature: result.cesrSignature,
+        );
+        if (!signed) {
+          debugPrint('[SetupWizard] WARNING: the inception signature was not accepted; '
+              'this identity cannot be verified by anyone else');
+        }
+      } else {
+        debugPrint('[SetupWizard] WARNING: no signature was produced for the inception; '
+            'this identity cannot be verified by anyone else');
+      }
+
       setState(() => _processingStep = 3);
       await SecureKeyStore.saveMnemonic(_mnemonic);
 
