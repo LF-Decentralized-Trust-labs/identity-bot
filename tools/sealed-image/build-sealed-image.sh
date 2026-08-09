@@ -136,8 +136,17 @@ else
   command -v virt-make-fs >/dev/null || fail "missing virt-make-fs (apt-get install libguestfs-tools)"
 fi
 
+# Two different causes produce the same symptom, and naming only one sends
+# somebody looking in the wrong place. A tmpfs mounted nodev cannot hold device
+# nodes at all; a container without CAP_MKNOD cannot create them anywhere, on
+# any filesystem. The mount options are printed so the reader can tell which
+# they are looking at — if nodev is absent, it is the capability.
 mknod "$WORK/probe-dev" c 1 3 2>/dev/null ||
-  fail "$WORKROOT cannot hold device nodes (probably mounted nodev: $(findmnt -no FSTYPE,OPTIONS --target "$WORKROOT" 2>/dev/null)) — debootstrap needs them. Set WORKROOT= to a directory on an ordinary filesystem."
+  fail "cannot create device nodes under $WORKROOT, and debootstrap needs them.
+     Mounted: $(findmnt -no FSTYPE,OPTIONS --target "$WORKROOT" 2>/dev/null)
+     If those options include nodev, point WORKROOT= at an ordinary filesystem.
+     If they do not, this process lacks CAP_MKNOD — in a container, run it with
+     privileges that include that capability rather than changing WORKROOT."
 rm -f "$WORK/probe-dev"
 
 say "Bootstrapping a minimal $SUITE root"
