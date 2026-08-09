@@ -24,7 +24,7 @@ func credentialBody(t *testing.T, said string) json.RawMessage {
 // The issuer is whoever the envelope says sent it, never what the body claims.
 // The old path took the issuer from a field an attacker could write.
 func TestTheIssuerComesFromTheEnvelopeNotTheBody(t *testing.T) {
-	s := newExchangeTestServer(t)
+	s := agentWithDerivedIdentity(t)
 	_ = s.DataStore.SaveContact(store.ContactRecord{AID: "EREALISSUER", Status: "accepted"})
 
 	// A body that tries to name a different issuer — the field does not exist,
@@ -52,7 +52,7 @@ func TestTheIssuerComesFromTheEnvelopeNotTheBody(t *testing.T) {
 // Being able to open an envelope to us means a relationship exists. It does not
 // mean anyone agreed to receive things from them.
 func TestACredentialFromSomebodyWhoIsNotAContactIsRefused(t *testing.T) {
-	s := newExchangeTestServer(t)
+	s := agentWithDerivedIdentity(t)
 	err := (credentialIssuance{}).Perform(s, InboundMessage{
 		ToAID: "EOURS", FromAID: "ESTRANGER", Body: credentialBody(t, "ECRED2"),
 	})
@@ -70,7 +70,7 @@ func TestACredentialFromSomebodyWhoIsNotAContactIsRefused(t *testing.T) {
 // A credential missing what makes it a credential is refused rather than stored
 // as an empty record somebody later has to explain.
 func TestAnIncompleteCredentialIsRefused(t *testing.T) {
-	s := newExchangeTestServer(t)
+	s := agentWithDerivedIdentity(t)
 	_ = s.DataStore.SaveContact(store.ContactRecord{AID: "EISSUER", Status: "accepted"})
 
 	for _, body := range []string{`{"acdc_json":"{}"}`, `{"said":"ECRED3"}`, `not json`} {

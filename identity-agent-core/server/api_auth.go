@@ -96,7 +96,6 @@ var publicRoutes = map[string]string{
 	// --- agent-to-agent protocol: another Identity Agent is the caller ---
 	// These are how a peer reaches us at all. They are authenticated by what
 	// they carry (a signed event, an encrypted archive), not by who connects.
-	"POST /api/exchange": "a peer posts an introduction we consented to receive",
 
 	// --- joining something the owner published: the login SDK is the caller ---
 	// Mounted as public since they were written, and never declared public here,

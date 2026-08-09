@@ -10,7 +10,7 @@ import (
 // check with, and an address that publishes no history gives nothing to check —
 // neither of which is the same as checking and finding it sound.
 func TestNothingCheckedIsNotReportedAsVerified(t *testing.T) {
-	s := newExchangeTestServer(t) // no KeriDriver, i.e. a phone
+	s := agentWithDerivedIdentity(t) // no KeriDriver, i.e. a phone
 	_ = s.DataStore.SaveContact(store.ContactRecord{
 		AID: "ETHEIRS", PublicKey: "DGwUXQpxNXKlbEwLLL0zAFTMlWlBEyAKWpEfLGxWEIYd",
 		OobiURL: "https://example.invalid/oobi",
@@ -36,7 +36,7 @@ func TestNothingCheckedIsNotReportedAsVerified(t *testing.T) {
 // Somebody this agent has never resolved cannot be checked and must not be
 // treated as though they had been.
 func TestAStrangerIsUnchecked(t *testing.T) {
-	s := newExchangeTestServer(t)
+	s := agentWithDerivedIdentity(t)
 	got := s.contactKeyForUse("ENOBODY")
 	if got.State != kelUnchecked {
 		t.Fatalf("a stranger reported %q", got.State)

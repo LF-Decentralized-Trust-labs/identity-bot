@@ -12,7 +12,7 @@ import (
 // The plaintext version took an identifier from the body, which is what let
 // anybody move anybody's contact.
 func TestAnAcceptanceInAnEnvelopeNeedsNoIdentifierInTheBody(t *testing.T) {
-	s := newExchangeTestServer(t)
+	s := agentWithDerivedIdentity(t)
 	_ = s.DataStore.SaveContact(store.ContactRecord{AID: "ETHEIRS", Status: "pending_outbound"})
 
 	body, _ := json.Marshal(contactExchange{Kind: "acceptance"})
@@ -27,7 +27,7 @@ func TestAnAcceptanceInAnEnvelopeNeedsNoIdentifierInTheBody(t *testing.T) {
 
 // An acceptance for a relationship this agent never started has nothing to move.
 func TestAnAcceptanceForARelationshipWeNeverStartedIsRefused(t *testing.T) {
-	s := newExchangeTestServer(t)
+	s := agentWithDerivedIdentity(t)
 	body, _ := json.Marshal(contactExchange{Kind: "acceptance"})
 	err := (contactAck{}).Perform(s, InboundMessage{FromAID: "ENOBODY", Body: body})
 	if err == nil {
@@ -41,7 +41,7 @@ func TestAnAcceptanceForARelationshipWeNeverStartedIsRefused(t *testing.T) {
 // Arriving twice, or after the relationship is settled, is ordinary and must not
 // be reported as a failure.
 func TestARepeatedAcceptanceIsNotAnError(t *testing.T) {
-	s := newExchangeTestServer(t)
+	s := agentWithDerivedIdentity(t)
 	_ = s.DataStore.SaveContact(store.ContactRecord{AID: "ETHEIRS", Status: "accepted"})
 	body, _ := json.Marshal(contactExchange{Kind: "acceptance"})
 	if err := (contactAck{}).Perform(s, InboundMessage{FromAID: "ETHEIRS", Body: body}); err != nil {
@@ -53,7 +53,7 @@ func TestARepeatedAcceptanceIsNotAnError(t *testing.T) {
 // envelope proves somebody holds this identity's encryption keys; it says
 // nothing about what that identity claims to be.
 func TestAnIntroductionThatCannotBeEstablishedIsRefused(t *testing.T) {
-	s := newExchangeTestServer(t)
+	s := agentWithDerivedIdentity(t)
 	body, _ := json.Marshal(contactExchange{
 		Kind: "introduction", SenderOOBI: "https://example.invalid/oobi",
 	})
@@ -65,7 +65,7 @@ func TestAnIntroductionThatCannotBeEstablishedIsRefused(t *testing.T) {
 // An introduction that says nothing about where to find the sender cannot
 // establish them, so it is refused rather than recorded on their say-so.
 func TestAnIntroductionWithNoAddressIsRefused(t *testing.T) {
-	s := newExchangeTestServer(t)
+	s := agentWithDerivedIdentity(t)
 	body, _ := json.Marshal(contactExchange{Kind: "introduction"})
 	err := (contactRequest{}).Perform(s, InboundMessage{FromAID: "ETHEIRS", Body: body})
 	if err == nil {

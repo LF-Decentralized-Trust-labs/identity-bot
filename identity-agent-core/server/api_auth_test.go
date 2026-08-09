@@ -105,7 +105,9 @@ func TestCounterpartyRoutesStayPublic(t *testing.T) {
 		{"GET", "/oobi/{aid}"},
 		{"GET", "/{aid}/did.json"},
 		{"GET", "/i/{token}"},
-		{"POST", "/api/exchange"},
+		// The counterparty route a stranger uses is now the envelope itself,
+		// which is where an introduction arrives with its own proof.
+		{"POST", "/didcomm"},
 		{"POST", "/api/login/callback"},
 		{"GET", "/api/health"},
 		{"GET", "/*"},
