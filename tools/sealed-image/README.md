@@ -142,8 +142,36 @@ hash `bdbe4a2af751a064f9dc0728c35e2987df80aa9ab338b6732c34a7f18b31f87c`. Getting
 there took three rounds of building twice and comparing; each round found
 something the build had left to vary, and each is fixed.
 
-**Reproducibility across *different* build environments has not been
-demonstrated.** The build fixes the inputs known to vary within one: every
+**Across different build environments: the contents reproduce exactly, the
+filesystem container does not — quite.** Measured on 2026-08-08 by building the
+same image on Ubuntu 26.04 and on Debian bookworm, with different `debootstrap`,
+`mke2fs` and `veritysetup` versions:
+
+| | Result |
+|---|---|
+| The 4,494 files in the image | **byte-identical** |
+| Filesystem features and timestamps | identical, once pinned |
+| Free-block count in the superblock | differs by **one block** in 524,288 |
+
+That last one is block accounting inside `mke2fs`, with identical contents and
+identical features. It changes the root hash, so **the measurement is only
+comparable between builders running the same major version of e2fsprogs**.
+
+Which means there are two levels of check, and the weaker-sounding one is
+arguably the more useful:
+
+- **Same toolchain** — rebuild and compare the root hash. Exact, and what an
+  operator pinning a measurement should do.
+- **Any toolchain** — rebuild, mount both images, and compare the files. This
+  answers the question that actually matters, *is the software the same*, and it
+  does not require matching our build machine.
+
+Getting even this far took four rounds of building twice and diffing. Every
+difference found was the build recording something about the machine that ran
+it: log files, an ldconfig cache, a random machine-id, a verity salt, a verity
+UUID, an apt URL scheme, and two `mke2fs` defaults. None was about the software.
+
+**The remaining gap is worth stating plainly rather than smoothing over.** The build fixes the inputs known to vary within one: every
 timestamp comes from `SOURCE_DATE_EPOCH`, the initramfs is repacked with sorted
 entries and no embedded name or time, and the filesystem is built with a fixed
 UUID and a fixed directory hash seed rather than the random ones the tools

@@ -129,7 +129,7 @@ for t in debootstrap file cpio gzip truncate; do
   command -v "$t" >/dev/null || fail "missing $t (apt-get install debootstrap file cpio gzip coreutils)"
 done
 if [[ "$VERITY" == "1" ]]; then
-  for t in mke2fs veritysetup; do
+  for t in mke2fs veritysetup debugfs; do
     command -v "$t" >/dev/null || fail "missing $t (apt-get install e2fsprogs cryptsetup-bin)"
   done
 else
@@ -153,6 +153,19 @@ say "Bootstrapping a minimal $SUITE root"
 debootstrap --variant=minbase \
   --include=systemd,systemd-sysv,ca-certificates,dbus,linux-image-amd64,initramfs-tools,cryptsetup-bin,dmsetup,e2fsprogs \
   "$SUITE" "$WORK/root" >/dev/null
+
+# Write the package sources rather than keeping whatever debootstrap left.
+#
+# Found by building the same image on two distributions and comparing: of 4,494
+# files, exactly one differed, and the difference was http versus https on this
+# single line. Debian's debootstrap and Ubuntu's disagree about the default, so
+# the image recorded which machine had built it — the one thing an image whose
+# whole purpose is to be identical everywhere must not do.
+#
+# It should be written down anyway. The sources an image carries are a decision
+# about where it will get updates from, and a decision is something you state
+# rather than inherit from whichever tool happened to run.
+printf 'deb https://deb.debian.org/debian %s main\n' "$SUITE" > "$WORK/root/etc/apt/sources.list"
 
 # The KERI runtime is NOT in this image. It is one read-only, digest-pinned
 # mount shared by every instance on the host — identical in all of them, never
@@ -857,10 +870,38 @@ if [[ "$VERITY" == "1" ]]; then
   # -O ^has_journal: a journal records the history of writes to a filesystem
   # that is mounted read-only and verified block by block. It cannot be written
   # to, and its presence alone perturbs the bytes.
+  # Turn OFF the features that newer versions of mke2fs turn on and older ones
+  # do not, so the filesystem depends on what we asked for rather than on which
+  # distribution the builder was running.
+  #
+  # Found by building the same image on two distributions and comparing: the
+  # newer e2fsprogs adds orphan_file and metadata_csum_seed, which change the
+  # metadata size and therefore the free-block count — so two filesystems with
+  # byte-identical contents described themselves differently.
+  #
+  # Disabled rather than listed. Naming the features we want ADDS to the
+  # defaults rather than replacing them, so an explicit list still inherits
+  # whatever a future version decides to switch on; only ^feature removes
+  # anything. That also means this list will need extending when a new default
+  # appears, which is the honest cost of a tool whose output depends on its
+  # version.
+  #
+  # has_journal is off for a different reason: a journal records the history of
+  # writes to a filesystem that is mounted read-only and verified block by
+  # block. It cannot be written to, and its presence alone perturbs the bytes.
   mke2fs -q -t ext4 -d "$WORK/root" \
     -U "$FIXED_FS_UUID" -E hash_seed="$FIXED_HASH_SEED" \
-    -O ^has_journal -I 256 -m 0 "$RAW" ||
+    -O ^has_journal,^orphan_file,^metadata_csum_seed \
+    -I 256 -m 0 "$RAW" ||
     fail "could not build the system filesystem"
+
+  # And the timestamps the filesystem records about itself. Newer versions
+  # honour SOURCE_DATE_EPOCH here and older ones stamp the real clock, so the
+  # image otherwise records when it was built — which is the same class of
+  # problem as recording where.
+  for field in mkfs_time lastcheck mtime; do
+    debugfs -w -R "ssv $field @$SOURCE_DATE_EPOCH" "$RAW" >/dev/null 2>&1 || true
+  done
 
   # Where the data ends and the hash tree begins. Written down and passed on the
   # command line, because a reader that guesses this reads hash blocks as data
