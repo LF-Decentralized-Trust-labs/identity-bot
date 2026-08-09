@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"identity-agent-core/drivers"
+	"identity-agent-core/iacrypto"
+	"identity-agent-core/login"
 	"identity-agent-core/store"
 )
 
@@ -320,17 +322,66 @@ func (s *Service) enrolledWitnesses(kind AidKind, aid string) ([]witnessTarget, 
 }
 
 func (s *Service) postWithRetry(ctx context.Context, url string, body []byte, eventSAID, witnessAID string) {
-	_, err := s.PostEvent(ctx, url, body)
+	resp, err := s.PostEvent(ctx, url, body)
 	if err != nil {
 		time.Sleep(BroadcastRetryDelay)
-		_, err = s.PostEvent(ctx, url, body)
+		resp, err = s.PostEvent(ctx, url, body)
 	}
 	if err != nil {
 		log.Printf("[witness] broadcast to %s failed: %v", witnessAID, err)
 		s.incrementOffline(witnessAID)
 		return
 	}
-	s.onReceipt(eventSAID, witnessAID, "")
+
+	// The reply is read, not assumed.
+	//
+	// What stood here threw the response away and counted a receipt because the
+	// POST returned 2xx. So the threshold was met by HTTP status: a witness that
+	// accepted the event and signed nothing, or signed something else, or was
+	// not the witness we addressed, counted exactly the same as one that
+	// witnessed properly. The signature was then stored as an empty string,
+	// which is what the counting was supposedly built on.
+	//
+	// A receipt that does not check out is worse than a witness being down,
+	// because being down is visible in the count and a bad receipt is not.
+	sig, wit, verr := receiptFromResponse(resp, eventSAID)
+	if verr != nil {
+		log.Printf("[witness] %s answered but its receipt does not check out: %v", witnessAID, verr)
+		return
+	}
+	if wit != witnessAID {
+		// The witness we asked is the witness the identity designated. One that
+		// answers under another name may be perfectly honest and is still not
+		// the one this threshold is counting.
+		log.Printf("[witness] asked %s for a receipt and %s answered; not counted", witnessAID, wit)
+		return
+	}
+	s.onReceipt(eventSAID, witnessAID, sig)
+}
+
+// receiptFromResponse pulls a verified receipt out of a witness's reply.
+//
+// A witness is named by a non-transferable identifier, so the identifier IS the
+// key this checks against — there is nothing to fetch and nothing that could
+// answer the fetch wrongly.
+func receiptFromResponse(resp map[string]interface{}, eventSAID string) (sig, witnessAID string, err error) {
+	if resp == nil {
+		return "", "", fmt.Errorf("the witness returned nothing to check")
+	}
+	sig, _ = resp["cesr_signature"].(string)
+	witnessAID, _ = resp["witness_aid"].(string)
+	if sig == "" || witnessAID == "" {
+		return "", "", fmt.Errorf("the reply carries no signed receipt")
+	}
+	pub, derr := iacrypto.KeyFromNonTransferableAID(witnessAID)
+	if derr != nil {
+		return "", "", fmt.Errorf("the witness is not named by a key anyone can check against: %w", derr)
+	}
+	ok, verr := login.VerifyString(eventSAID, sig, pub)
+	if verr != nil || !ok {
+		return "", "", fmt.Errorf("the signature does not cover this event")
+	}
+	return sig, witnessAID, nil
 }
 
 func (s *Service) onReceipt(eventSAID, witnessAID, cesrSig string) {
