@@ -249,6 +249,7 @@ func New(cfg Config) (*CoreServer, error) {
 	wsvc.OnEvent = func(eventType string, payload map[string]interface{}) {
 		s.EventHub.Broadcast(AgentEvent{Type: eventType, Payload: payload})
 	}
+	wsvc.SignReceipt = s.signWitnessReceipt
 	s.WitnessService = wsvc
 	go witness.StartHeartbeatLoop(wsvc, ctx.Done())
 

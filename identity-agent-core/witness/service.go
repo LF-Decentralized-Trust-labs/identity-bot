@@ -42,6 +42,15 @@ type Service struct {
 	BackendType string
 	OnEvent     func(eventType string, payload map[string]interface{})
 
+	// SignReceipt signs a key event's SAID as this witness, returning the
+	// witness's own identifier alongside the signature.
+	//
+	// Supplied by the host rather than done here because the key belongs to the
+	// agent, not to this package. Unset means this agent cannot witness, and
+	// ReceiveEvent refuses rather than issuing something that looks like a
+	// receipt and proves nothing.
+	SignReceipt func(said string) (witnessAID, cesrSig string, err error)
+
 	mu         sync.Mutex
 	finalizeWg map[string]chan struct{}
 }
@@ -148,16 +157,30 @@ func (s *Service) ReceiveEvent(signerAID string, event map[string]interface{}) (
 		return nil, err
 	}
 
-	witnessAID := ""
-	if s.OurAID != nil {
-		witnessAID = s.OurAID()
+	// Signed with a key, or not issued at all.
+	//
+	// What stood here derived the "signature" by hashing the receipt itself:
+	// public data in, public data out, no key involved. Anybody holding the
+	// event could produce the same value, so it distinguished a genuine witness
+	// from an impostor not at all, while looking exactly like protection to
+	// every reader downstream.
+	//
+	// Refusing is the right failure. A witness that cannot sign has nothing to
+	// say, and saying it anyway is what made this dangerous rather than merely
+	// incomplete — the controller believed its event was witnessed and it was
+	// not.
+	if s.SignReceipt == nil {
+		return nil, fmt.Errorf("this agent has no witnessing key, so it cannot receipt anything")
+	}
+	witnessAID, sig, serr := s.SignReceipt(said)
+	if serr != nil {
+		return nil, fmt.Errorf("could not sign a receipt: %w", serr)
 	}
 	receipt := map[string]interface{}{
 		"v": "KERI10JSON", "t": "rct", "d": said, "i": witnessAID,
 		"aid": signerAID, "seq": seq, "dt": now,
 	}
 	receiptJSON, _ := json.Marshal(receipt)
-	sig := "0B" + fmt.Sprintf("%x", receiptJSON)[:32] // dev stub; production uses driver CESR encode
 
 	_ = s.Store.SaveIssuedReceipt(IssuedReceipt{
 		SignerAID: signerAID, EventSAID: said, SequenceNum: seq,
