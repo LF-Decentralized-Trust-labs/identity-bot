@@ -1,0 +1,304 @@
+{
+  "vector_version": 1,
+  "oracle": "keripy 1.1.17",
+  "what_this_is": "Fixed answers every conformant KERI implementation must reproduce byte for byte. Generated from keripy, which the KERI implementations table lists at 100% spec compliance. Regenerate rather than edit: a hand-edited expectation is a belief, not a reference.",
+  "how_to_use": "Run every implementation against every case. raw_b64 is the authoritative serialisation \u2014 the readable event is for humans and its key order is not the order that was signed.",
+  "cases": [
+    {
+      "id": "cesr/codes",
+      "kind": "constants",
+      "why": "CESR codes are normative. An implementation that emits a different prefix is producing values no other implementation can read.",
+      "input": {},
+      "expect": {
+        "blake3_256": "E",
+        "ed25519_pubkey": "D",
+        "ed25519_pubkey_nontransferable": "B",
+        "ed25519_seed": "A",
+        "ed25519_sig": "0B"
+      }
+    },
+    {
+      "id": "icp/single-key/no-witnesses",
+      "kind": "inception",
+      "why": "The simplest identity there is. If this one disagrees, nothing else can agree.",
+      "input": {
+        "keys": [
+          "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd"
+        ],
+        "next_digests": [
+          "EEXekUYwyf4Blv1U_WFML7YliBR9GJXfl3osKtIevKQN"
+        ]
+      },
+      "expect": {
+        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDEyYl8iLCJ0IjoiaWNwIiwiZCI6IkVOQTk5d0lMek1UZWhQVHZjcGVNbHJkLTZOd2tBZmw4TFZSRzZYNkh5Qk9TIiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIl0sIm50IjoiMSIsIm4iOlsiRUVYZWtVWXd5ZjRCbHYxVV9XRk1MN1lsaUJSOUdKWGZsM29zS3RJZXZLUU4iXSwiYnQiOiIwIiwiYiI6W10sImMiOltdLCJhIjpbXX0=",
+        "said": "ENA99wILzMTehPTvcpeMlrd-6NwkAfl8LVRG6X6HyBOS",
+        "aid": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+        "event_readable": {
+          "v": "KERI10JSON00012b_",
+          "t": "icp",
+          "d": "ENA99wILzMTehPTvcpeMlrd-6NwkAfl8LVRG6X6HyBOS",
+          "i": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+          "s": "0",
+          "kt": "1",
+          "k": [
+            "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd"
+          ],
+          "nt": "1",
+          "n": [
+            "EEXekUYwyf4Blv1U_WFML7YliBR9GJXfl3osKtIevKQN"
+          ],
+          "bt": "0",
+          "b": [],
+          "c": [],
+          "a": []
+        }
+      }
+    },
+    {
+      "id": "icp/three-witnesses/toad-2",
+      "kind": "inception",
+      "why": "Witnesses and the threshold are part of the identifier, so an implementation that formats them differently produces a different identity.",
+      "input": {
+        "keys": [
+          "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd"
+        ],
+        "next_digests": [
+          "EEXekUYwyf4Blv1U_WFML7YliBR9GJXfl3osKtIevKQN"
+        ],
+        "witnesses": [
+          "BMhTrQ8M0rYZrqks7sT9VqJNZJnVhM55JX5Fz9gTm2Cn",
+          "BO4x-DyIpxIZpvz5vuDam8ImIFiPWhWmFFVTUE35ZJ5c",
+          "BEdF0Zxm7JF5-iUJcFZAnvFpZ7ahp0v9j3r9Uo9ZYwYV"
+        ],
+        "toad": 2
+      },
+      "expect": {
+        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDFiN18iLCJ0IjoiaWNwIiwiZCI6IkVLcmZ0UWhoaTNudjRSTzNpWUtUekpQS0RwYUxIR3poeEtrMzlxNWZMUFJlIiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIl0sIm50IjoiMSIsIm4iOlsiRUVYZWtVWXd5ZjRCbHYxVV9XRk1MN1lsaUJSOUdKWGZsM29zS3RJZXZLUU4iXSwiYnQiOiIyIiwiYiI6WyJCTWhUclE4TTByWVpycWtzN3NUOVZxSk5aSm5WaE01NUpYNUZ6OWdUbTJDbiIsIkJPNHgtRHlJcHhJWnB2ejV2dURhbThJbUlGaVBXaFdtRkZWVFVFMzVaSjVjIiwiQkVkRjBaeG03SkY1LWlVSmNGWkFudkZwWjdhaHAwdjlqM3I5VW85Wll3WVYiXSwiYyI6W10sImEiOltdfQ==",
+        "said": "EKrftQhhi3nv4RO3iYKTzJPKDpaLHGzhxKk39q5fLPRe",
+        "aid": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+        "event_readable": {
+          "v": "KERI10JSON0001b7_",
+          "t": "icp",
+          "d": "EKrftQhhi3nv4RO3iYKTzJPKDpaLHGzhxKk39q5fLPRe",
+          "i": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+          "s": "0",
+          "kt": "1",
+          "k": [
+            "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd"
+          ],
+          "nt": "1",
+          "n": [
+            "EEXekUYwyf4Blv1U_WFML7YliBR9GJXfl3osKtIevKQN"
+          ],
+          "bt": "2",
+          "b": [
+            "BMhTrQ8M0rYZrqks7sT9VqJNZJnVhM55JX5Fz9gTm2Cn",
+            "BO4x-DyIpxIZpvz5vuDam8ImIFiPWhWmFFVTUE35ZJ5c",
+            "BEdF0Zxm7JF5-iUJcFZAnvFpZ7ahp0v9j3r9Uo9ZYwYV"
+          ],
+          "c": [],
+          "a": []
+        }
+      }
+    },
+    {
+      "id": "icp/three-keys/2-of-3",
+      "kind": "inception",
+      "why": "Thresholds are serialised in the event, and 2 is not the same as '2' \u2014 this catches an implementation that guesses the encoding.",
+      "input": {
+        "keys": [
+          "DIsjfXiOjqrvVQxtElgj-kXx_V_CmyyIvfhxEZRx_BMS",
+          "DAFOTZIsWWo4Ct_J7tci6DWCLxI2dhaT5Lq7YeGvuwTx",
+          "DMhtAa2LL7aUsi_2Djydnn7ZDbVgR3K3RFDUCRO5qcuv"
+        ],
+        "next_digests": [
+          "EIlpvU1dhmqIyLNVBAJajl9COv2KPZujSb6xR1syx2er",
+          "EDTl-aaxCV0khDljphM9jzfwSedoYjoDq-KQtOQ8050f",
+          "EEP4pwLYeo3mqut8q31zXCs1urPeQ9lANFrlDvazzZ2K"
+        ],
+        "isith": "2",
+        "nsith": "2"
+      },
+      "expect": {
+        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDFlN18iLCJ0IjoiaWNwIiwiZCI6IkVBZ2ZsQ2c4N2gwZ2l2YkpEb2lVbWxNNzFFOVFzUFBSbHFjWWxySHhYdm1nIiwiaSI6IkVBZ2ZsQ2c4N2gwZ2l2YkpEb2lVbWxNNzFFOVFzUFBSbHFjWWxySHhYdm1nIiwicyI6IjAiLCJrdCI6IjIiLCJrIjpbIkRJc2pmWGlPanFydlZReHRFbGdqLWtYeF9WX0NteXlJdmZoeEVaUnhfQk1TIiwiREFGT1RaSXNXV280Q3RfSjd0Y2k2RFdDTHhJMmRoYVQ1THE3WWVHdnV3VHgiLCJETWh0QWEyTEw3YVVzaV8yRGp5ZG5uN1pEYlZnUjNLM1JGRFVDUk81cWN1diJdLCJudCI6IjIiLCJuIjpbIkVJbHB2VTFkaG1xSXlMTlZCQUphamw5Q092MktQWnVqU2I2eFIxc3l4MmVyIiwiRURUbC1hYXhDVjBraERsanBoTTlqemZ3U2Vkb1lqb0RxLUtRdE9RODA1MGYiLCJFRVA0cHdMWWVvM21xdXQ4cTMxelhDczF1clBlUTlsQU5GcmxEdmF6eloySyJdLCJidCI6IjAiLCJiIjpbXSwiYyI6W10sImEiOltdfQ==",
+        "said": "EAgflCg87h0givbJDoiUmlM71E9QsPPRlqcYlrHxXvmg",
+        "aid": "EAgflCg87h0givbJDoiUmlM71E9QsPPRlqcYlrHxXvmg",
+        "event_readable": {
+          "v": "KERI10JSON0001e7_",
+          "t": "icp",
+          "d": "EAgflCg87h0givbJDoiUmlM71E9QsPPRlqcYlrHxXvmg",
+          "i": "EAgflCg87h0givbJDoiUmlM71E9QsPPRlqcYlrHxXvmg",
+          "s": "0",
+          "kt": "2",
+          "k": [
+            "DIsjfXiOjqrvVQxtElgj-kXx_V_CmyyIvfhxEZRx_BMS",
+            "DAFOTZIsWWo4Ct_J7tci6DWCLxI2dhaT5Lq7YeGvuwTx",
+            "DMhtAa2LL7aUsi_2Djydnn7ZDbVgR3K3RFDUCRO5qcuv"
+          ],
+          "nt": "2",
+          "n": [
+            "EIlpvU1dhmqIyLNVBAJajl9COv2KPZujSb6xR1syx2er",
+            "EDTl-aaxCV0khDljphM9jzfwSedoYjoDq-KQtOQ8050f",
+            "EEP4pwLYeo3mqut8q31zXCs1urPeQ9lANFrlDvazzZ2K"
+          ],
+          "bt": "0",
+          "b": [],
+          "c": [],
+          "a": []
+        }
+      }
+    },
+    {
+      "id": "icp/with-anchor-seal",
+      "kind": "inception",
+      "why": "An anchored seal changes the identifier, which is the whole point of anchoring. An implementation that drops or reorders seals produces a different identity.",
+      "input": {
+        "keys": [
+          "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd"
+        ],
+        "next_digests": [
+          "EEXekUYwyf4Blv1U_WFML7YliBR9GJXfl3osKtIevKQN"
+        ],
+        "data": [
+          {
+            "i": "EOwner0000000000000000000000000000000000000x",
+            "r": "owner"
+          }
+        ]
+      },
+      "expect": {
+        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDE2Yl8iLCJ0IjoiaWNwIiwiZCI6IkVFVlpiLVBKM3RfNURycWZEdFZEYmVZYXMzcDJyS3hHRkRGS21OWkw5X1phIiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIl0sIm50IjoiMSIsIm4iOlsiRUVYZWtVWXd5ZjRCbHYxVV9XRk1MN1lsaUJSOUdKWGZsM29zS3RJZXZLUU4iXSwiYnQiOiIwIiwiYiI6W10sImMiOltdLCJhIjpbeyJpIjoiRU93bmVyMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMHgiLCJyIjoib3duZXIifV19",
+        "said": "EEVZb-PJ3t_5DrqfDtVDbeYas3p2rKxGFDFKmNZL9_Za",
+        "aid": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+        "event_readable": {
+          "v": "KERI10JSON00016b_",
+          "t": "icp",
+          "d": "EEVZb-PJ3t_5DrqfDtVDbeYas3p2rKxGFDFKmNZL9_Za",
+          "i": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+          "s": "0",
+          "kt": "1",
+          "k": [
+            "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd"
+          ],
+          "nt": "1",
+          "n": [
+            "EEXekUYwyf4Blv1U_WFML7YliBR9GJXfl3osKtIevKQN"
+          ],
+          "bt": "0",
+          "b": [],
+          "c": [],
+          "a": [
+            {
+              "i": "EOwner0000000000000000000000000000000000000x",
+              "r": "owner"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "rot/simple/sn-1",
+      "kind": "rotation",
+      "why": "A rotation must carry the key the previous event committed to, and must chain to that event by digest. Both are places an implementation can quietly differ.",
+      "input": {
+        "prefix": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+        "keys": [
+          "DC3wQSXwAVr7R86FOu-HcglP-UmMFMsbnhKXPCkn2g-m"
+        ],
+        "prior_said": "ENA99wILzMTehPTvcpeMlrd-6NwkAfl8LVRG6X6HyBOS",
+        "sn": 1,
+        "next_digests": [
+          "EKoe-PQlxxoXwxHMG7OtB-XrkdoN0X9_L4o-vQDpDK-P"
+        ]
+      },
+      "expect": {
+        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDE2MF8iLCJ0Ijoicm90IiwiZCI6IkVLTjJSRUk1OVR4Rm1TVDRZUWhYa2VhRTBpZVFybGVKTERhMmEzY2xWZVZQIiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6IjEiLCJwIjoiRU5BOTl3SUx6TVRlaFBUdmNwZU1scmQtNk53a0FmbDhMVlJHNlg2SHlCT1MiLCJrdCI6IjEiLCJrIjpbIkRDM3dRU1h3QVZyN1I4NkZPdS1IY2dsUC1VbU1GTXNibmhLWFBDa24yZy1tIl0sIm50IjoiMSIsIm4iOlsiRUtvZS1QUWx4eG9Yd3hITUc3T3RCLVhya2RvTjBYOV9MNG8tdlFEcERLLVAiXSwiYnQiOiIwIiwiYnIiOltdLCJiYSI6W10sImEiOltdfQ==",
+        "said": "EKN2REI59TxFmST4YQhXkeaE0ieQrleJLDa2a3clVeVP",
+        "aid": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+        "event_readable": {
+          "v": "KERI10JSON000160_",
+          "t": "rot",
+          "d": "EKN2REI59TxFmST4YQhXkeaE0ieQrleJLDa2a3clVeVP",
+          "i": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+          "s": "1",
+          "p": "ENA99wILzMTehPTvcpeMlrd-6NwkAfl8LVRG6X6HyBOS",
+          "kt": "1",
+          "k": [
+            "DC3wQSXwAVr7R86FOu-HcglP-UmMFMsbnhKXPCkn2g-m"
+          ],
+          "nt": "1",
+          "n": [
+            "EKoe-PQlxxoXwxHMG7OtB-XrkdoN0X9_L4o-vQDpDK-P"
+          ],
+          "bt": "0",
+          "br": [],
+          "ba": [],
+          "a": []
+        }
+      }
+    },
+    {
+      "id": "ixn/one-seal",
+      "kind": "interaction",
+      "why": "Interaction events are how a credential is anchored into a key history, so their serialisation decides whether an issuance can be verified elsewhere.",
+      "input": {
+        "prefix": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+        "prior_said": "ENA99wILzMTehPTvcpeMlrd-6NwkAfl8LVRG6X6HyBOS",
+        "sn": 1,
+        "data": [
+          {
+            "i": "ECredential000000000000000000000000000000x",
+            "s": "0",
+            "d": "EDigest000000000000000000000000000000000000x"
+          }
+        ]
+      },
+      "expect": {
+        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDEzOF8iLCJ0IjoiaXhuIiwiZCI6IkVBQnExd3FVWlV2d2J6STFyWVNaZVlHNnEwaDAzdmtDNi1feDBReU5uM0UwIiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6IjEiLCJwIjoiRU5BOTl3SUx6TVRlaFBUdmNwZU1scmQtNk53a0FmbDhMVlJHNlg2SHlCT1MiLCJhIjpbeyJpIjoiRUNyZWRlbnRpYWwwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDB4IiwicyI6IjAiLCJkIjoiRURpZ2VzdDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMHgifV19",
+        "said": "EABq1wqUZUvwbzI1rYSZeYG6q0h03vkC6-_x0QyNn3E0",
+        "aid": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+        "event_readable": {
+          "v": "KERI10JSON000138_",
+          "t": "ixn",
+          "d": "EABq1wqUZUvwbzI1rYSZeYG6q0h03vkC6-_x0QyNn3E0",
+          "i": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+          "s": "1",
+          "p": "ENA99wILzMTehPTvcpeMlrd-6NwkAfl8LVRG6X6HyBOS",
+          "a": [
+            {
+              "i": "ECredential000000000000000000000000000000x",
+              "s": "0",
+              "d": "EDigest000000000000000000000000000000000000x"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "property/aid-is-said-of-inception",
+      "kind": "property",
+      "why": "A self-certifying identifier IS the digest of the event that created it. An implementation where these differ has not made an identity.",
+      "assert": "aid_equals_said",
+      "input": {
+        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDEyYl8iLCJ0IjoiaWNwIiwiZCI6IkVOQTk5d0lMek1UZWhQVHZjcGVNbHJkLTZOd2tBZmw4TFZSRzZYNkh5Qk9TIiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIl0sIm50IjoiMSIsIm4iOlsiRUVYZWtVWXd5ZjRCbHYxVV9XRk1MN1lsaUJSOUdKWGZsM29zS3RJZXZLUU4iXSwiYnQiOiIwIiwiYiI6W10sImMiOltdLCJhIjpbXX0="
+      },
+      "expect": {
+        "aid": "DK8Go-MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQd",
+        "said": "ENA99wILzMTehPTvcpeMlrd-6NwkAfl8LVRG6X6HyBOS"
+      }
+    },
+    {
+      "id": "property/tampered-event-is-refused",
+      "kind": "reject",
+      "why": "An event whose contents do not digest to the identifier it claims must be refused. Accepting it would let a forged event borrow a real identity, which is what the digest exists to prevent.",
+      "input": {
+        "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDEyYl8iLCJ0IjoiaWNwIiwiZCI6IkVOQTk5d0lMek1UZWhQVHZjcGVNbHJkLTZOd2tBZmw4TFZSRzZYNkh5Qk9TIiwiaSI6IkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIiwicyI6IjAiLCJrdCI6IjIiLCJrIjpbIkRLOEdvLU1wRnhUazgxYkJuSnNWelJsUjdHNW1ZcXAzdmdkVWZ5aVRnelFkIl0sIm50IjoiMSIsIm4iOlsiRUVYZWtVWXd5ZjRCbHYxVV9XRk1MN1lsaUJSOUdKWGZsM29zS3RJZXZLUU4iXSwiYnQiOiIwIiwiYiI6W10sImMiOltdLCJhIjpbXX0=",
+        "claimed_said": "ENA99wILzMTehPTvcpeMlrd-6NwkAfl8LVRG6X6HyBOS"
+      },
+      "expect": {
+        "refused": true,
+        "because": "the contents do not digest to the claimed identifier"
+      }
+    }
+  ]
+}
