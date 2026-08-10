@@ -25,7 +25,8 @@
         },
         {
           "capability": "watcher",
-          "url": "https://watcher.grapeid.org"
+          "url": "https://watcher1.grapeid.org",
+          "aid": "BMtfjviEMpF2xWVW0CRPKoVPX1mOMzNurvUjD-0RN_Jl"
         }
       ]
     }

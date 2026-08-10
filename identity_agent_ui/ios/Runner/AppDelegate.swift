@@ -25,6 +25,19 @@ import Mobilecore
 
         do {
           var error: NSError?
+          // This app serves an individual. There is no open-source app for an
+          // organization and there is not going to be, so this is settled at
+          // build time rather than asked — the screen that used to ask was
+          // orphaned when the two apps were split.
+          //
+          // It decides who may witness and watch for this agent: peers are of
+          // the same kind, and an agent that has not been told enrols none.
+          var declareError: NSError?
+          MobilecoreDeclareEntityType("individual", &declareError)
+          if let declareError = declareError {
+            NSLog("[mobilecore] could not declare entity type: %@",
+                  declareError.localizedDescription)
+          }
           MobilecoreStartServer(dataDir, Int(port), &error)
           if let error = error {
             result(FlutterError(code: "START_FAILED", message: error.localizedDescription, details: nil))

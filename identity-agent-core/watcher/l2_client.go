@@ -11,7 +11,16 @@ import (
 	"time"
 )
 
-const DefaultL2DigestURL = "https://watcher.grapeid.org/public/kel-digest"
+// DefaultL2DigestURL is the standing watcher this agent asks when it has no
+// peers of its own.
+//
+// Numbered, like the witnesses. There is one operator today and there are
+// expected to be more, and an unnumbered name would have to be re-pointed to
+// add a second rather than simply joined by one. It also previously named a
+// host with no DNS at all, so every L2 query failed and was recorded as the
+// service being unavailable — which reads as an outage rather than as a
+// mistake in a constant.
+const DefaultL2DigestURL = "https://watcher1.grapeid.org/public/kel-digest"
 
 // L2Client queries commercial watcher /public/kel-digest endpoints.
 type L2Client struct {

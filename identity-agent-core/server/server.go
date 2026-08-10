@@ -4543,14 +4543,19 @@ func (s *CoreServer) ourEntityType() string {
 func (s *CoreServer) checkEntityTypeDeclared() {
 	declared := s.DeclaredEntityType
 	if declared == "" {
-		// Not necessarily wrong. An app that serves both kinds — the reference
-		// agent asks during onboarding — declares nothing on purpose and the
-		// profile answers. Said once so that an app which DOES know, and has
-		// forgotten to say, is not left wondering why no peer ever enrols.
+		// Every app knows which kind it serves — an organization cannot be
+		// founded in an app built for individuals, and there is no app that
+		// offers the choice. So this is a misconfigured build rather than a
+		// supported mode, and it is said plainly: the symptom otherwise is that
+		// no peer witness or watcher ever enrols, which looks like nothing
+		// happening rather than like a fault.
+		//
+		// The profile is still consulted so an agent already onboarded keeps
+		// working, but it is a fallback and not the intended source.
 		log.Printf("[identity-agent-core] this build did not declare whether it serves an " +
-			"individual or an organization, so the profile decides. Until onboarding sets " +
-			"one, no peer witness or watcher will be enrolled. An app that knows should " +
-			"set EntityType on the config, or IDENTITY_AGENT_ENTITY_TYPE.")
+			"individual or an organization. Falling back to the profile, which is empty " +
+			"until onboarding finishes — until then no peer witness or watcher will be " +
+			"enrolled. Set EntityType on the config, or IDENTITY_AGENT_ENTITY_TYPE.")
 		return
 	}
 	if declared != "individual" && declared != "organization" {

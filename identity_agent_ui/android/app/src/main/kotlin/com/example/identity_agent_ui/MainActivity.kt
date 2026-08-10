@@ -17,6 +17,13 @@ class MainActivity: FlutterActivity() {
                         val dataDir = call.argument<String>("dataDir")
                             ?: filesDir.resolve("identity_agent_data").absolutePath
                         val port = call.argument<Int>("port") ?: 8642
+                        // This app serves an individual. There is no
+                        // open-source app for an organization and there is not
+                        // going to be, so this is settled at build time rather
+                        // than asked. It decides who may witness and watch for
+                        // this agent: peers are of the same kind, and an agent
+                        // that has not been told enrols none.
+                        mobilecore.Mobilecore.declareEntityType("individual")
                         mobilecore.Mobilecore.startServer(dataDir, port.toLong())
                         result.success(mapOf("status" to "started", "port" to port))
                     } catch (e: Exception) {
