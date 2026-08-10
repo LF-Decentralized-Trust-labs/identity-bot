@@ -46,6 +46,14 @@ type KeriEngine interface {
 	Interact(name string, data []interface{}) (*DriverInteractResponse, error)
 	GetKel(name string) (*DriverKelResponse, error)
 	ValidateKEL(aid string, events []map[string]interface{}) (*DriverValidateKELResponse, error)
+	// ValidateKELBytes checks a log from the bytes it was published as.
+	//
+	// Preferred over ValidateKEL wherever the caller has them. Two checks are
+	// impossible without canonical bytes — that the inception derives the
+	// identifier, and that the events are signed — and those are the two that
+	// distinguish a real log from a forged one. ValidateKEL remains for callers
+	// that only ever had the parsed form.
+	ValidateKELBytes(in ValidateKELInput) (*DriverValidateKELResponse, error)
 
 	// Signing and verification.
 	SignPayload(name, dataB64 string) (*DriverSignResponse, error)

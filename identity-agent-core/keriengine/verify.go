@@ -309,3 +309,13 @@ func (e *Engine) GenerateMultisigEvent(aids []string, threshold int, currentKeys
 			"inception events, which is what a group needs before it has a log to extend", eventType)
 	}
 }
+
+// ValidateKELBytes checks a log from the bytes it was published as.
+//
+// Delegates to the one implementation both engines share. Validation is
+// arithmetic over bytes the caller already holds — it reaches out to nothing
+// and keeps no state — so a copy of it here could only diverge from the other,
+// on the check that decides whether a stranger is who they claim to be.
+func (e *Engine) ValidateKELBytes(in drivers.ValidateKELInput) (*drivers.DriverValidateKELResponse, error) {
+	return drivers.ValidateKELFromBytes(in)
+}
