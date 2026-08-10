@@ -361,6 +361,16 @@ type ContactKELRecord struct {
 	EventsValidated  int      `json:"events_validated"`
 	ValidationErrors []string `json:"validation_errors,omitempty"`
 	ValidatedAt      string   `json:"validated_at"`
+	// Witnessed reports whether this contact's log reached the number of
+	// witness receipts it asked for.
+	//
+	// Kept separate from KelVerified because they answer different questions. A
+	// verified log is one self-consistent history signed by the keys it
+	// declares — which somebody who invented the history can also produce. A
+	// witnessed one has been seen by parties it named in advance, and that is
+	// what would make a second, equally well-formed history detectable as the
+	// forgery.
+	Witnessed bool `json:"witnessed"`
 }
 
 // ShareAction defines a user-facing engagement action shown in the Share menu.

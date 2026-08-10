@@ -396,6 +396,15 @@ func (s *Service) enrolledWitnesses(kind AidKind, aid string) ([]witnessTarget, 
 	return out, nil
 }
 
+// postWithRetry submits an event to one witness and records the receipt it
+// returns.
+//
+// What is recorded is the receipt, not the fact that the request succeeded.
+// Those were the same thing until now: a witness answering HTTP 200 counted
+// towards the threshold and the reply was discarded, so "finalized" meant that
+// some number of servers had responded — not that anybody had attested to
+// anything. A witness returning 200 and no receipt finalised an event just as
+// well as one that signed it.
 func (s *Service) postWithRetry(ctx context.Context, url string, body []byte, eventSAID, witnessAID string) {
 	resp, err := s.PostEvent(ctx, url, body)
 	if err != nil {

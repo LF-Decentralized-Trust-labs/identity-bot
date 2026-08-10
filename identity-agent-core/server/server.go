@@ -2929,11 +2929,18 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The receipts this identity has collected travel with its log.
+	//
+	// Without them a counterparty can check that the log is sound and cannot
+	// check that anybody else ever saw it — and the second is what makes a
+	// forged history detectable, since a forger can produce a perfectly signed
+	// log of their own but not other people's receipts over it.
 	resp := map[string]interface{}{
 		"aid":         identity.AID,
 		"public_key":  identity.PublicKey,
 		"alias":       alias,
 		"kel":         events,
+		"receipts":    s.receiptsForEvents(events),
 		"event_count": identity.EventCount,
 		"created":     identity.Created,
 	}
@@ -3156,15 +3163,17 @@ func (s *CoreServer) handleResolveOobiContact(w http.ResponseWriter, r *http.Req
 	}
 
 	var oobiData struct {
-		AID        string                   `json:"aid"`
-		PublicKey  string                   `json:"public_key"`
-		Alias      string                   `json:"alias"`
-		KEL        []map[string]interface{} `json:"kel"`
-		EventCount int                      `json:"event_count"`
-		Created    string                   `json:"created"`
-		JCard      *store.JCard             `json:"jcard,omitempty"`
-		Photo      string                   `json:"photo,omitempty"`
-		Watchers   []string                 `json:"watchers"`
+		AID       string                   `json:"aid"`
+		PublicKey string                   `json:"public_key"`
+		Alias     string                   `json:"alias"`
+		KEL       []map[string]interface{} `json:"kel"`
+		// Receipts published alongside the log: who else attested to it.
+		Receipts   map[string][]map[string]interface{} `json:"receipts"`
+		EventCount int                                 `json:"event_count"`
+		Created    string                              `json:"created"`
+		JCard      *store.JCard                        `json:"jcard,omitempty"`
+		Photo      string                              `json:"photo,omitempty"`
+		Watchers   []string                            `json:"watchers"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&oobiData); err != nil {
 		writeError(w, http.StatusBadGateway, "Invalid OOBI response", fmt.Sprintf("Could not parse response: %v", err))
@@ -3188,12 +3197,14 @@ func (s *CoreServer) handleResolveOobiContact(w http.ResponseWriter, r *http.Req
 	// each other consistently, which a forged log does too — because whoever
 	// forged it wrote every one of those fields.
 	kelVerified := false
+	witnessed := false
 	currentPublicKey := oobiData.PublicKey
 	var validationErrors []string
 	if s.KeriDriver != nil && kelCount > 0 {
 		var valResult *drivers.DriverValidateKELResponse
 		var err error
 		if in, ok := drivers.ValidateKELInputFromRecords(oobiData.AID, oobiData.KEL); ok {
+			in.Receipts = drivers.WitnessReceiptsFromWire(oobiData.Receipts)
 			valResult, err = s.KeriDriver.ValidateKELBytes(in)
 		} else {
 			// The log came without the bytes it was published as — an older
@@ -3209,18 +3220,20 @@ func (s *CoreServer) handleResolveOobiContact(w http.ResponseWriter, r *http.Req
 			validationErrors = []string{err.Error()}
 		} else {
 			kelVerified = valResult.KelVerified
+			witnessed = valResult.Witnessed
 			if valResult.CurrentPublicKey != "" {
 				currentPublicKey = valResult.CurrentPublicKey
 			}
 			validationErrors = valResult.ValidationErrors
-			log.Printf("[identity-agent-core] OOBI-RESOLVE: KEL validated=%v events=%d for %s",
-				kelVerified, valResult.EventsValidated, oobiData.AID)
+			log.Printf("[identity-agent-core] OOBI-RESOLVE: KEL validated=%v witnessed=%v events=%d for %s",
+				kelVerified, witnessed, valResult.EventsValidated, oobiData.AID)
 		}
 
 		kelRecord := store.ContactKELRecord{
 			AID:              oobiData.AID,
 			KEL:              oobiData.KEL,
 			KelVerified:      kelVerified,
+			Witnessed:        witnessed,
 			CurrentPublicKey: currentPublicKey,
 			EventsValidated:  kelCount,
 			ValidationErrors: validationErrors,
@@ -4320,4 +4333,39 @@ func (s *CoreServer) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 		"tasks": tasks,
 		"count": len(tasks),
 	})
+}
+
+// receiptsForEvents gathers the witness receipts held for a set of events,
+// keyed by the event they cover.
+//
+// Published with an identity's log so a counterparty can see who else attested
+// to it. Nothing here is secret: a receipt is a public statement by a witness
+// that is already named in the log it is attached to.
+func (s *CoreServer) receiptsForEvents(events []store.EventRecord) map[string][]store.WitnessReceiptRecord {
+	out := map[string][]store.WitnessReceiptRecord{}
+	if s.DataStore == nil {
+		return out
+	}
+	for _, ev := range events {
+		said := saidOfEventRecord(ev)
+		if said == "" {
+			continue
+		}
+		receipts, err := s.DataStore.GetWitnessReceipts(said)
+		if err != nil || len(receipts) == 0 {
+			continue
+		}
+		out[said] = receipts
+	}
+	return out
+}
+
+// saidOfEventRecord reads an event's identifier out of a stored record.
+func saidOfEventRecord(ev store.EventRecord) string {
+	var ked map[string]interface{}
+	if err := json.Unmarshal([]byte(ev.EventJSON), &ked); err != nil {
+		return ""
+	}
+	said, _ := ked["d"].(string)
+	return said
 }

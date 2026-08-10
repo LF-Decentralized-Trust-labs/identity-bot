@@ -42,6 +42,34 @@ type ValidateKELInput struct {
 	// supplied for that event, which is reported rather than treated as a
 	// failure. A log fetched from a stranger often arrives without them.
 	CesrSignatures []string
+	// Receipts are the witness receipts held for these events, keyed by the
+	// event's identifier.
+	//
+	// Optional. Their absence means the log is unwitnessed as far as this
+	// caller can see, which is reported separately from whether the log itself
+	// is sound — the two answer different questions and a log can be perfectly
+	// valid and uncorroborated.
+	Receipts map[string][]WitnessReceipt
+}
+
+// WitnessReceipt is one witness's statement that it saw an event.
+type WitnessReceipt struct {
+	WitnessAID    string
+	CesrSignature string
+}
+
+// EventWitnessing is how well corroborated one event is.
+type EventWitnessing struct {
+	SequenceNumber int      `json:"sequence_number"`
+	EventSAID      string   `json:"event_said"`
+	Designated     []string `json:"designated"`
+	Threshold      int      `json:"threshold"`
+	// Verified counts receipts from DESIGNATED witnesses whose signature
+	// checked out. A receipt from anybody else is not counted, whether or not
+	// it verifies: a threshold that could be met by uninvited witnesses is not
+	// a threshold, since anyone can generate a key and sign.
+	Verified int  `json:"verified"`
+	Met      bool `json:"met"`
 }
 
 // ValidateKELFromBytes checks a key log and reports what it established.
@@ -125,6 +153,15 @@ func ValidateKELFromBytes(in ValidateKELInput) (*DriverValidateKELResponse, erro
 					"the identity it claims to extend", i))
 		}
 	}
+
+	// How well corroborated the log is, which is a different question from
+	// whether it is sound. A log with one history, correctly signed, is valid;
+	// whether anybody else saw it is what decides that a SECOND correctly
+	// signed history could be recognised as the forgery. Reported alongside
+	// rather than folded in, so a caller cannot mistake one for the other.
+	witnessing, allMet := witnessingReport(in)
+	out.Witnessing = witnessing
+	out.Witnessed = allMet
 
 	out.EventsValidated = len(in.RawEvents)
 	out.CurrentPublicKey = current
@@ -226,6 +263,30 @@ func (d *KeriDriver) ValidateKELBytes(in ValidateKELInput) (*DriverValidateKELRe
 // That is not an error and must not be treated as one; it means only the
 // structure can be examined, and the caller has to say so rather than reporting
 // a verification it did not perform.
+// WitnessReceiptsFromWire reads the receipts published alongside a key log.
+//
+// Shaped as the wire carries them: event identifier to the receipts covering
+// that event. Nothing here is trusted — every receipt is checked against the
+// witness that claims to have issued it, and against the designated set, when
+// the log is validated. This only reads them.
+func WitnessReceiptsFromWire(raw map[string][]map[string]interface{}) map[string][]WitnessReceipt {
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make(map[string][]WitnessReceipt, len(raw))
+	for said, list := range raw {
+		for _, r := range list {
+			aid, _ := r["witness_aid"].(string)
+			sig, _ := r["cesr_signature"].(string)
+			if aid == "" || sig == "" {
+				continue
+			}
+			out[said] = append(out[said], WitnessReceipt{WitnessAID: aid, CesrSignature: sig})
+		}
+	}
+	return out
+}
+
 func ValidateKELInputFromRecords(aid string, records []map[string]interface{}) (ValidateKELInput, bool) {
 	in := ValidateKELInput{AID: aid}
 	if len(records) == 0 {
@@ -245,4 +306,119 @@ func ValidateKELInputFromRecords(aid string, records []map[string]interface{}) (
 		in.CesrSignatures = append(in.CesrSignatures, sig)
 	}
 	return in, true
+}
+
+// VerifyReceipt checks a witness receipt against the witness that issued it.
+//
+// The witness identifier IS the verifying key, because witness identifiers are
+// non-transferable. So this needs nothing fetched and nothing trusted: either
+// the holder of that key signed this event's digest, or it did not. A
+// transferable witness would mean resolving its key log and working out which
+// key was in force at the time, for every receipt and every verifier.
+func VerifyReceipt(witnessAID, eventSAID, cesrSig string) error {
+	if witnessAID == "" || eventSAID == "" || cesrSig == "" {
+		return fmt.Errorf("a receipt needs a witness, an event and a signature")
+	}
+	if len(witnessAID) != 44 || witnessAID[0] != 'B' {
+		return fmt.Errorf("%q is not a non-transferable witness identifier, so its receipts "+
+			"cannot be checked without resolving a key log first", witnessAID)
+	}
+	raw, err := keri.MatterRaw(keri.CodeEd25519Sig, cesrSig, 64)
+	if err != nil {
+		return fmt.Errorf("the receipt signature does not decode: %w", err)
+	}
+	if err := keri.VerifySignature(witnessAID, []byte(eventSAID), raw); err != nil {
+		return fmt.Errorf("the receipt was not signed by %s, so that witness did not issue it",
+			witnessAID)
+	}
+	return nil
+}
+
+// witnessingReport works out, for each event, who was designated to witness it
+// and how many of those actually did.
+//
+// The designated set is carried forward through the log rather than read off
+// any single event. An inception names the set; a rotation amends it by cutting
+// and adding; everything else leaves it alone. Reading only the inception would
+// report a set the identity has since changed, and reading only the latest
+// event would report nothing for the events before it.
+func witnessingReport(in ValidateKELInput) ([]EventWitnessing, bool) {
+	var (
+		designated []string
+		threshold  int
+		report     []EventWitnessing
+	)
+	allMet := true
+
+	for _, raw := range in.RawEvents {
+		ev, err := keri.ParseEvent(raw)
+		if err != nil {
+			continue
+		}
+		switch ev.Ilk {
+		case "icp", "dip":
+			designated = append([]string(nil), ev.Witnesses...)
+		case "rot", "drt":
+			designated = amendWitnesses(designated, ev.WitnessCut, ev.WitnessAdd)
+		}
+		if ev.HasTOAD {
+			threshold = int(ev.TOAD)
+		}
+
+		row := EventWitnessing{
+			SequenceNumber: int(ev.SN),
+			EventSAID:      ev.SAID,
+			Designated:     append([]string(nil), designated...),
+			Threshold:      threshold,
+		}
+
+		// Count each designated witness at most once. Without that one witness
+		// meets any threshold by sending its receipt repeatedly, which is how a
+		// single party becomes a quorum.
+		counted := map[string]bool{}
+		for _, r := range in.Receipts[ev.SAID] {
+			if !contains(designated, r.WitnessAID) || counted[r.WitnessAID] {
+				continue
+			}
+			if err := VerifyReceipt(r.WitnessAID, ev.SAID, r.CesrSignature); err != nil {
+				continue
+			}
+			counted[r.WitnessAID] = true
+			row.Verified++
+		}
+		// A threshold of zero is met by definition — an identity that asked for
+		// no witnesses is not failing to reach them.
+		row.Met = row.Verified >= threshold
+		if !row.Met {
+			allMet = false
+		}
+		report = append(report, row)
+	}
+	return report, allMet
+}
+
+// amendWitnesses applies a rotation's cuts and adds to the designated set.
+func amendWitnesses(current, cuts, adds []string) []string {
+	out := make([]string, 0, len(current)+len(adds))
+	for _, w := range current {
+		if contains(cuts, w) {
+			continue
+		}
+		out = append(out, w)
+	}
+	for _, w := range adds {
+		if !contains(out, w) {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+func contains(list []string, v string) bool {
+	for _, s := range list {
+		if s == v {
+			return true
+		}
+	}
+	return false
 }
