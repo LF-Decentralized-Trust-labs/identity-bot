@@ -72,7 +72,11 @@ type DriverInceptionRequest struct {
 	//
 	// A person's agent does not use this. Its identity is delegated, so its
 	// delegator is already named in the event.
-	Anchors []map[string]interface{} `json:"anchors,omitempty"`
+	// Raw JSON, not maps. A seal's field order is part of it, and marshalling a
+	// Go map sorts the keys — so a seal written {"i","s","d"} would leave here
+	// as {"d","i","s"}, which another implementation refuses. Measured, not
+	// assumed.
+	Anchors []json.RawMessage `json:"anchors,omitempty"`
 	// Toad is the threshold of accountable duplicity. Left at zero the driver
 	// picks a simple majority, which is enough that a minority of unavailable
 	// or dishonest witnesses can neither stall nor forge.
@@ -863,8 +867,21 @@ func (d *KeriDriver) CreateOwnedInception(publicKey, nextPublicKey, name, ownerA
 	// would: verified against keripy 1.1.17 rather than reasoned about. So there
 	// is nothing to get right at founding for the sake of later — the work is
 	// entirely in the rotation.
-	return d.postInception(publicKey, nextPublicKey, name, []map[string]interface{}{
-		{"i": ownerAID, "r": "owner"},
+	// An event seal naming the owner's inception. Every identity here is
+	// self-addressing, so the identifier IS that event's digest and the seal
+	// resolves to a real event.
+	//
+	// This used to be {"i": ownerAID, "r": "owner"}, which is not a shape KERI
+	// defines. A strict reader parses this field as one of a closed set of
+	// seals, and an independent implementation could not parse an inception
+	// carrying the old form at all — so an owned identity's whole log was
+	// unreadable to anything outside this project.
+	if !strings.HasPrefix(ownerAID, "E") {
+		return nil, fmt.Errorf("%q is not a self-addressing identifier, so an owner seal "+
+			"naming it would point at no event", ownerAID)
+	}
+	return d.postInception(publicKey, nextPublicKey, name, []json.RawMessage{
+		json.RawMessage(fmt.Sprintf(`{"i":%q,"s":"0","d":%q}`, ownerAID, ownerAID)),
 	})
 }
 
@@ -925,7 +942,7 @@ func (d *KeriDriver) CreateDelegatedInception(publicKey, nextPublicKey, name, de
 }
 
 func (d *KeriDriver) postInception(publicKey, nextPublicKey, name string,
-	anchors []map[string]interface{}) (*DriverInceptionResponse, error) {
+	anchors []json.RawMessage) (*DriverInceptionResponse, error) {
 	return d.postInceptionRequest(DriverInceptionRequest{
 		PublicKey:     publicKey,
 		NextPublicKey: nextPublicKey,

@@ -95,20 +95,29 @@ func ownerSetFromEvent(event map[string]interface{}) (owners []string, found boo
 		return nil, false, nil
 	}
 
+	// Only an establishment event can name owners.
+	//
+	// An interaction anchors event seals of exactly the same shape — a registry,
+	// a credential issuance, a delegation approval. Without this, issuing a
+	// credential would read as reassigning the organisation to the credential.
+	if !establishment(event) {
+		return nil, false, nil
+	}
+
 	seen := map[string]bool{}
 	for _, raw := range seals {
 		seal, ok := raw.(map[string]interface{})
 		if !ok {
 			continue
 		}
-		if role, _ := seal["r"].(string); role != ownerRole {
+		aid, isOwner, err := ownerFromSeal(seal)
+		if err != nil {
+			return nil, false, err
+		}
+		if !isOwner {
 			continue
 		}
 		found = true
-		aid, _ := seal["i"].(string)
-		if aid == "" {
-			return nil, false, fmt.Errorf("an owner seal names no identity")
-		}
 		// A set, not a list. The same owner twice would otherwise count twice
 		// towards any threshold, which is how one person becomes a quorum.
 		if seen[aid] {

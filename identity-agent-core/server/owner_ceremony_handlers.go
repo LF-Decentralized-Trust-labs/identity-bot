@@ -289,7 +289,13 @@ func (s *CoreServer) completeCeremonyIfReady(c *OwnerCeremony) {
 	// two cannot disagree about who owns this.
 	seals := make([]interface{}, 0, len(existing)+len(c.Invited))
 	for _, aid := range existing {
-		seals = append(seals, ownerAnchorSeal(aid))
+		seal, err := ownerAnchorSeal(aid)
+		if err != nil {
+			_ = s.finishCeremony(ceremonyFailed,
+				"an existing owner cannot be anchored: "+err.Error(), "")
+			return
+		}
+		seals = append(seals, seal)
 	}
 	// The keys the identity will be controlled by afterwards.
 	//
@@ -302,7 +308,13 @@ func (s *CoreServer) completeCeremonyIfReady(c *OwnerCeremony) {
 	keys := []string{c.OwnPublicKey}
 	nextKeys := []string{c.OwnNextPublicKey}
 	for _, invitee := range c.Invited {
-		seals = append(seals, ownerAnchorSeal(invitee.PairwiseAID))
+		inviteeSeal, err := ownerAnchorSeal(invitee.PairwiseAID)
+		if err != nil {
+			_ = s.finishCeremony(ceremonyFailed,
+				"an incoming owner cannot be anchored: "+err.Error(), "")
+			return
+		}
+		seals = append(seals, inviteeSeal)
 		keys = append(keys, invitee.PublicKey)
 		nextKeys = append(nextKeys, invitee.NextPublicKey)
 	}

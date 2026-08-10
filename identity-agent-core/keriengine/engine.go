@@ -3,6 +3,7 @@ package keriengine
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"identity-agent-core/drivers"
@@ -101,25 +102,28 @@ func (e *Engine) CreateOwnedInception(publicKey, nextPublicKey, name, ownerAID s
 		return nil, fmt.Errorf("an owned identity needs an owner; without one this is an " +
 			"ordinary inception and should be created as one")
 	}
-	// The owner is anchored as {"i": <owner>, "r": "owner"} — byte-for-byte what
-	// the Python driver produces, so an identity founded here and one founded
-	// there have the same identifier.
+	// An event seal naming the owner's inception event.
 	//
-	// That shape is NOT a KERI seal, and this is a known problem rather than an
-	// oversight. The specification defines a closed set of seal shapes; a strict
-	// reader parses this field as one of them and fails on anything else. An
-	// independent implementation (keriox) cannot parse an inception carrying
-	// this anchor at all — not "does not validate it", cannot read the event.
-	// So an owned identity's inception is unreadable to such a reader, and
-	// because it is the inception, the entire log is.
+	// Every identity here is self-addressing, so the identifier IS the digest of
+	// its inception — which is what lets the seal name that event using only the
+	// identifier, and what makes it resolvable by someone who has the owner's
+	// log and nothing else.
 	//
-	// It is reproduced here anyway, deliberately. Two things already read this
-	// field back and match on "r" — see ownerRole in the server package — so
-	// changing the shape changes the identifier of every owned identity AND
-	// breaks the code that reads ownership. That is a decision about a published
-	// format with existing consumers, not a detail for an engine to settle on
-	// its own while porting.
-	anchor := json.RawMessage(`{"i":` + quote(ownerAID) + `,"r":"owner"}`)
+	// This was {"i": <owner>, "r": "owner"} until it was measured against an
+	// independent implementation, which could not PARSE an inception carrying
+	// it. Not "failed to validate" — the event was unreadable, so an owned
+	// identity's entire log was unreadable to anything that did not already
+	// share our private convention. KERI defines a closed set of seal shapes and
+	// that was not one of them.
+	//
+	// The role label is gone; position replaces it. An owner seal is an event
+	// seal in an establishment event — see the reader in the server package for
+	// why that is unambiguous and what would break it.
+	if !strings.HasPrefix(ownerAID, "E") {
+		return nil, fmt.Errorf("%q is not a self-addressing identifier, so an owner seal "+
+			"naming it would point at no event", ownerAID)
+	}
+	anchor := json.RawMessage(fmt.Sprintf(`{"i":%q,"s":"0","d":%q}`, ownerAID, ownerAID))
 	return e.incept(publicKey, nextPublicKey, name, []json.RawMessage{anchor})
 }
 
