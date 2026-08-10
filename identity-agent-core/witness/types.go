@@ -53,8 +53,20 @@ const (
 
 // ContactMeta is per-contact witness pool metadata (D1/D3).
 type ContactMeta struct {
-	ContactAID      string
-	BackendType     string
+	ContactAID string
+	// BackendType is what this contact runs on, taken from what it publishes.
+	//
+	// It decides whether the contact can witness at all: witnessing means being
+	// reachable when somebody else's event needs receipting, and a phone is
+	// not. A phone paired to a computer is, because the computer answers — so
+	// what matters is whether there is an always-on backend, not what the
+	// person carries. Where that backend is hosted makes no difference.
+	BackendType string
+	// WitnessKey is the non-transferable key this contact signs receipts with,
+	// as published in its OOBI. Empty when it publishes none, in which case it
+	// can be asked to witness but can never be designated — what an event names
+	// is the key, not the contact.
+	WitnessKey      string
 	WitnessStatus   string
 	OfflineCount    int
 	IsMutual        bool

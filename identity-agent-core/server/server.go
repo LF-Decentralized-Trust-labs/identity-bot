@@ -3168,12 +3168,17 @@ func (s *CoreServer) handleResolveOobiContact(w http.ResponseWriter, r *http.Req
 		Alias     string                   `json:"alias"`
 		KEL       []map[string]interface{} `json:"kel"`
 		// Receipts published alongside the log: who else attested to it.
-		Receipts   map[string][]map[string]interface{} `json:"receipts"`
-		EventCount int                                 `json:"event_count"`
-		Created    string                              `json:"created"`
-		JCard      *store.JCard                        `json:"jcard,omitempty"`
-		Photo      string                              `json:"photo,omitempty"`
-		Watchers   []string                            `json:"watchers"`
+		Receipts map[string][]map[string]interface{} `json:"receipts"`
+		// What this contact can do for others: the backend it runs on decides
+		// whether it can witness at all, and the witness key is what an event
+		// would have to name to designate it.
+		BackendType string       `json:"backend_type"`
+		WitnessKey  string       `json:"witness_key"`
+		EventCount  int          `json:"event_count"`
+		Created     string       `json:"created"`
+		JCard       *store.JCard `json:"jcard,omitempty"`
+		Photo       string       `json:"photo,omitempty"`
+		Watchers    []string     `json:"watchers"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&oobiData); err != nil {
 		writeError(w, http.StatusBadGateway, "Invalid OOBI response", fmt.Sprintf("Could not parse response: %v", err))
@@ -3187,6 +3192,13 @@ func (s *CoreServer) handleResolveOobiContact(w http.ResponseWriter, r *http.Req
 
 	kelCount := len(oobiData.KEL)
 	log.Printf("[identity-agent-core] OOBI-RESOLVE: Success — AID=%s, alias=%s, KEL events=%d", oobiData.AID, oobiData.Alias, kelCount)
+
+	// Remember what this contact published about itself. Neither field can be
+	// worked out later, and both decide something: whether it can be asked to
+	// witness, and what an event would name to designate it.
+	if s.WitnessService != nil {
+		s.WitnessService.RecordContactCapability(oobiData.AID, oobiData.BackendType, oobiData.WitnessKey)
+	}
 
 	// Check the key log this stranger just handed us.
 	//
@@ -3592,6 +3604,7 @@ func (s *CoreServer) handleAcceptContact(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	s.onContactAccepted(aid)
 	log.Printf("[identity-agent-core] CONTACT: Accepted %s (AID: %s) — status=accepted, category=%s", contact.Alias, aid, contact.ContactCategory)
 
 	go func() {
@@ -4368,4 +4381,28 @@ func saidOfEventRecord(ev store.EventRecord) string {
 	}
 	said, _ := ked["d"].(string)
 	return said
+}
+
+// onContactAccepted runs the things that should happen when a relationship
+// becomes real.
+//
+// Today that is one thing: consider whether this contact can witness. The
+// design is that people are witnessed by the people they already know, and
+// accepting a contact is the moment that pool can grow — but nothing looked
+// until now, so witness requests went out only when an existing witness dropped
+// offline. An identity could accumulate contacts for months and stay on its
+// bootstrap witnesses the whole time.
+//
+// Runs in the background and cannot fail the acceptance. Failing to enrol a
+// witness is a smaller thing than failing to add a contact, and the sweep that
+// runs when a witness drops will find them again.
+func (s *CoreServer) onContactAccepted(aid string) {
+	if s.WitnessService == nil || aid == "" {
+		return
+	}
+	ctx := s.AppCtx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	go s.WitnessService.ConsiderContactAsWitness(ctx, aid)
 }

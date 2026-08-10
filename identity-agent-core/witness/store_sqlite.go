@@ -33,12 +33,14 @@ func (s *SQLiteStore) SetConfig(key, value string) error {
 func (s *SQLiteStore) GetContactMeta(aid string) (*ContactMeta, error) {
 	row := s.db.QueryRow(`
 		SELECT contact_aid, backend_type, witness_status, offline_count, is_mutual, is_commercial,
-		       COALESCE(witnessing_for, 0), enrolled_at, last_receipt_at, last_health_check
+		       COALESCE(witnessing_for, 0), enrolled_at, last_receipt_at, last_health_check,
+		       COALESCE(witness_key, '')
 		FROM witness_contact_meta WHERE contact_aid = ?`, aid)
 	var m ContactMeta
 	var mutual, commercial, witnessingFor int
 	err := row.Scan(&m.ContactAID, &m.BackendType, &m.WitnessStatus, &m.OfflineCount,
-		&mutual, &commercial, &witnessingFor, &m.EnrolledAt, &m.LastReceiptAt, &m.LastHealthCheck)
+		&mutual, &commercial, &witnessingFor, &m.EnrolledAt, &m.LastReceiptAt, &m.LastHealthCheck,
+		&m.WitnessKey)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -65,10 +67,11 @@ func (s *SQLiteStore) SaveContactMeta(m ContactMeta) error {
 	_, err := s.db.Exec(`
 		INSERT INTO witness_contact_meta (
 			contact_aid, backend_type, witness_status, offline_count, is_mutual, is_commercial,
-			witnessing_for, enrolled_at, last_receipt_at, last_health_check
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			witnessing_for, enrolled_at, last_receipt_at, last_health_check, witness_key
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(contact_aid) DO UPDATE SET
 			backend_type = excluded.backend_type,
+			witness_key = excluded.witness_key,
 			witness_status = excluded.witness_status,
 			offline_count = excluded.offline_count,
 			is_mutual = excluded.is_mutual,
@@ -79,6 +82,7 @@ func (s *SQLiteStore) SaveContactMeta(m ContactMeta) error {
 			last_health_check = excluded.last_health_check`,
 		m.ContactAID, m.BackendType, m.WitnessStatus, m.OfflineCount,
 		mutual, commercial, witnessingFor, m.EnrolledAt, m.LastReceiptAt, m.LastHealthCheck,
+		m.WitnessKey,
 	)
 	return err
 }
@@ -86,7 +90,8 @@ func (s *SQLiteStore) SaveContactMeta(m ContactMeta) error {
 func (s *SQLiteStore) ListContactMeta() ([]ContactMeta, error) {
 	rows, err := s.db.Query(`
 		SELECT contact_aid, backend_type, witness_status, offline_count, is_mutual, is_commercial,
-		       COALESCE(witnessing_for, 0), enrolled_at, last_receipt_at, last_health_check
+		       COALESCE(witnessing_for, 0), enrolled_at, last_receipt_at, last_health_check,
+		       COALESCE(witness_key, '')
 		FROM witness_contact_meta ORDER BY contact_aid`)
 	if err != nil {
 		return nil, err
@@ -97,7 +102,8 @@ func (s *SQLiteStore) ListContactMeta() ([]ContactMeta, error) {
 		var m ContactMeta
 		var mutual, commercial, witnessingFor int
 		if err := rows.Scan(&m.ContactAID, &m.BackendType, &m.WitnessStatus, &m.OfflineCount,
-			&mutual, &commercial, &witnessingFor, &m.EnrolledAt, &m.LastReceiptAt, &m.LastHealthCheck); err != nil {
+			&mutual, &commercial, &witnessingFor, &m.EnrolledAt, &m.LastReceiptAt, &m.LastHealthCheck,
+			&m.WitnessKey); err != nil {
 			return nil, err
 		}
 		m.IsMutual = mutual != 0

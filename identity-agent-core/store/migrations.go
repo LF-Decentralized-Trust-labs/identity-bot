@@ -704,6 +704,16 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_kel_aid_seq_unique ON kel(aid, seq_num);
 ALTER TABLE witness_kel_events ADD COLUMN raw_bytes_b64 TEXT NOT NULL DEFAULT '';
 ALTER TABLE witness_kel_events ADD COLUMN cesr_signature TEXT NOT NULL DEFAULT '';
 `},
+	{
+		Version:     28,
+		Description: "Remember the key a contact signs receipts with, so it can be designated",
+		SQL: `
+-- What an event names when it designates a witness is the witness KEY, not the
+-- contact. Without somewhere to keep a contact's published key, a contact can be
+-- asked to witness and can never be written into an inception event — so the
+-- peer-to-peer model could never actually replace the bootstrap witnesses.
+ALTER TABLE witness_contact_meta ADD COLUMN witness_key TEXT NOT NULL DEFAULT '';
+`},
 }
 
 // ApplyIdentityMigrations creates the migrations table and applies any pending migrations.

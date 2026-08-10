@@ -54,22 +54,31 @@ type BootstrapWitness struct {
 // BootstrapPool is what a freshly incepted identity uses until its own contacts
 // can take over.
 //
-// Three services with three distinct identities. Each host serves both a
-// witness and a watcher role under one identifier, so the real count of
-// independent operators is three rather than six — worth knowing, because a
-// threshold above three would have nothing to draw on.
+// One service today. That is a smaller pool than anyone would design, and it is
+// what actually exists: a second and third operator are expected, and the moment
+// they publish a witness key they belong here.
 //
-// The identifiers are non-transferable, which is what lets a receipt be checked
-// by anyone holding only the key event that names the witness: the identifier
-// IS the verifying key, so there is nothing to look up. They previously carried
-// a prefix claiming to be a digest while actually being the key, which no KERI
-// implementation could parse. The keys themselves are unchanged — same
-// services, same key material, correctly encoded.
+// Being a single operator at the start is not a flaw in the arrangement, it is
+// the shape of the problem. An identity has to be witnessed at the moment its
+// keys are established, and that is precisely the moment it knows nobody — which
+// stays true no matter how large the network grows, because every new person
+// still arrives with no contacts. Peers displace this as they accumulate;
+// `withBootstrap` appends rather than prefers, so the pool shrinks out of use on
+// its own.
+//
+// The identifier here is the WITNESS KEY, not the service's contact identifier.
+// A witness is named in a permanent event and its receipts have to be checkable
+// forever, which only a non-transferable identifier allows. Verified against the
+// running service on 2026-08-10: a receipt it issued verifies against this key
+// with nothing fetched.
 func BootstrapPool() []BootstrapWitness {
 	return []BootstrapWitness{
-		{AID: "BMtfjviEMpF2xWVW0CRPKoVPX1mOMzNurvUjD-0RN_Jl", URL: "https://witness1.grapeid.org", Operator: "grapeid.org"},
-		{AID: "BErokYIbJDqV1Ewr3QMHKWokln2aIVRGwTZ3E502pz_v", URL: "https://witness2.grapeid.org", Operator: "grapeid.org"},
-		{AID: "BDYkziwUKiadQAQa4uX3ssib9g5REqzo6aejWmi10X00", URL: "https://witness3.grapeid.org", Operator: "grapeid.org"},
+		{
+			AID:        "BMtfjviEMpF2xWVW0CRPKoVPX1mOMzNurvUjD-0RN_Jl",
+			WitnessKey: "BMtfjviEMpF2xWVW0CRPKoVPX1mOMzNurvUjD-0RN_Jl",
+			URL:        "https://witness1.grapeid.org",
+			Operator:   "grapeid.org",
+		},
 	}
 }
 
@@ -106,7 +115,7 @@ func withBootstrap(contactWitnesses []witnessTarget, want int) []witnessTarget {
 		if have[b.AID] {
 			continue
 		}
-		out = append(out, witnessTarget{AID: b.AID, URL: b.URL, Commercial: true})
+		out = append(out, witnessTarget{AID: b.AID, WitnessKey: b.WitnessKey, URL: b.URL, Commercial: true})
 	}
 	return out
 }
@@ -144,7 +153,7 @@ func oneBootstrapFor(aid string) (witnessTarget, bool) {
 		h *= 16777619
 	}
 	b := pool[int(h%uint32(len(pool)))]
-	return witnessTarget{AID: b.AID, URL: b.URL, Commercial: true}, true
+	return witnessTarget{AID: b.AID, WitnessKey: b.WitnessKey, URL: b.URL, Commercial: true}, true
 }
 
 // DesignatableWitnesses returns the witnesses that can actually be written into
