@@ -4,13 +4,39 @@ import "time"
 
 // Witness protocol constants.
 const (
-	MaxWitnessSetSize       = 9
-	TargetContactWitnesses  = 7
-	DefaultThreshold        = 5 // majority of 9
-	MaxOutgoingWitnessing   = 15
-	HeartbeatInterval       = 15 * time.Minute
-	HeartbeatTimeout        = 5 * time.Second
-	OfflineFailureThreshold = 4
+	MaxWitnessSetSize      = 9
+	TargetContactWitnesses = 7
+	DefaultThreshold       = 5 // majority of 9
+	MaxOutgoingWitnessing  = 15
+	HeartbeatInterval      = 15 * time.Minute
+	HeartbeatTimeout       = 5 * time.Second
+
+	// OfflineTolerance is how long a witness may be unreachable before this
+	// agent stops relying on it.
+	//
+	// Generous on purpose, and it used to be an hour. Dropping a witness early
+	// buys nothing: during an outage its receipts do not arrive whether or not
+	// we have written it off, so the threshold is already short either way. All
+	// dropping decides is when to go looking for a REPLACEMENT — and replacing
+	// means a rotation, which changes the identity's keys.
+	//
+	// It costs something, too. While the key log still designates a witness,
+	// dropping it locally leaves this agent disagreeing with its own published
+	// record of who watches it, and only a rotation reconciles that. So a
+	// witness that reboots, moves house or loses power for a day should be
+	// waited for, not replaced.
+	//
+	// The question this answers is "am I confident it is not coming back",
+	// which is days, not minutes.
+	OfflineTolerance = 72 * time.Hour
+
+	// OfflineFailureThreshold is that tolerance in consecutive failed checks.
+	//
+	// Derived rather than written down, so the two cannot drift apart: changing
+	// the heartbeat interval used to silently change how long a witness was
+	// given, because the count was a bare number that read as if it meant
+	// something on its own.
+	OfflineFailureThreshold = int(OfflineTolerance / HeartbeatInterval)
 	FinalizeWaitDuration    = 60 * time.Second
 	SelfHealMaxPerHour      = 3
 	SelfHealCooldown        = 24 * time.Hour

@@ -587,6 +587,15 @@ func (s *Service) RecordHeartbeatResult(contactAID string, ok bool) {
 		meta.OfflineCount = 0
 		if meta.WitnessStatus == StatusOffline {
 			meta.WitnessStatus = StatusOnline
+			// Back, so resume relying on it.
+			//
+			// Dropping was never a removal: the key log went on designating this
+			// witness throughout, so resuming costs nothing and clears the
+			// disagreement between what this agent does and what its own log
+			// says. Without this, dropping was automatic and permanent while
+			// restoring needed a fresh enrolment exchange — so one bad night
+			// cost a witness for good.
+			s.resumeWitness(contactAID)
 		}
 	} else {
 		meta.OfflineCount++

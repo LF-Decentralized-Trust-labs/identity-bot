@@ -225,3 +225,25 @@ func (s *Service) DesignationDrift(designated []string) (staleInLog []string, us
 	}
 	return staleInLog, usedButNotDesignated
 }
+
+// resumeWitness starts relying again on a witness that has come back.
+//
+// Only where the identity never stopped designating it. A witness that was cut
+// by a rotation is gone for good and has to be enrolled afresh — the log says
+// so, and the log is what verifiers read.
+func (s *Service) resumeWitness(contactAID string) {
+	c, _ := s.Contacts.GetContact(contactAID)
+	if c == nil || c.IsWitness {
+		return
+	}
+	c.IsWitness = true
+	if err := s.Contacts.SaveContact(*c); err != nil {
+		log.Printf("[witness] %s is answering again but could not be resumed: %v", contactAID, err)
+		return
+	}
+	log.Printf("[witness] %s is answering again and is being relied on once more; the key log "+
+		"designated it throughout", contactAID)
+	if s.OnEvent != nil {
+		s.OnEvent("witness_resumed", map[string]interface{}{"contact_aid": contactAID})
+	}
+}
