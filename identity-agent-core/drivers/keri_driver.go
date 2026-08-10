@@ -1508,3 +1508,24 @@ func (d *KeriDriver) EndpointLocation(req *DriverEndpointLocationRequest) (*Driv
 	}
 	return &result, nil
 }
+
+// Rotate rotates the keys, and refuses to change the witness set.
+//
+// The Python driver's rotation endpoint takes a prefix, keys, a prior digest, a
+// sequence number, next-key digests and anchor data — and nothing about
+// witnesses. So a witness change cannot be expressed through it, and asking for
+// one is refused rather than quietly dropped: an identity whose witnesses
+// appeared to change but did not would keep collecting receipts from a witness
+// it believed it had removed, and never collect any from the one it believed it
+// had added.
+//
+// The in-process engine can do this. A deployment that needs to amend a witness
+// set should be running it.
+func (d *KeriDriver) Rotate(req RotationRequest) (*DriverRotationResponse, error) {
+	if len(req.CutWitnesses) > 0 || len(req.AddWitnesses) > 0 || req.Toad > 0 {
+		return nil, fmt.Errorf("this driver cannot change an identity's witnesses: its " +
+			"rotation endpoint carries no witness fields, so the change would be silently " +
+			"lost. Run the in-process engine for a deployment that amends witness sets")
+	}
+	return d.RotateAidWithAnchor(req.Name, req.NewPublicKey, req.NewNextPublicKey, req.AnchorData)
+}

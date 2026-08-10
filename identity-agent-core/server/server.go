@@ -321,10 +321,21 @@ func New(cfg Config) (*CoreServer, error) {
 	// in this package took its "not available" branch, and a phone could not
 	// perform a KERI operation through the core.
 	//
-	// Where the driver IS enabled, it stays the default, because it is what
-	// desktop has been running. KERI_ENGINE=go selects the Go engine there too.
+	// The Go engine is the default everywhere, including desktop. The Python
+	// driver runs only when asked for by name.
+	//
+	// It used to be the other way round while the Go engine was being proven.
+	// It has since been proven — against the conformance vectors, against an
+	// independent implementation, and against a live witness service — and
+	// leaving a subprocess as the default meant every desktop agent still
+	// required a Python runtime to establish an identity.
+	//
+	// KERI_ENGINE=python still selects the driver, because three operations
+	// have no Go implementation yet: resolving an OOBI, publishing an endpoint
+	// location, and building a credential presentation. A deployment that needs
+	// those runs the driver until they are ported.
 	switch {
-	case cfg.EnableKeriDriver && os.Getenv("KERI_ENGINE") != "go":
+	case cfg.EnableKeriDriver && os.Getenv("KERI_ENGINE") == "python":
 		driver := drivers.NewKeriDriver()
 		if err := driver.Start(); err != nil {
 			cancel()

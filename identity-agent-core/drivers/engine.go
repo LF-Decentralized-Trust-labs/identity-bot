@@ -38,6 +38,15 @@ type KeriEngine interface {
 	// RotateAidWithAnchor rotates and anchors data in the same event, so that
 	// what the rotation records cannot be separated from the rotation itself.
 	RotateAidWithAnchor(name, newPublicKey, newNextPublicKey string, anchorData []interface{}) (*DriverRotationResponse, error)
+	// Rotate is the full form, and the only one that can change who witnesses
+	// an identity.
+	//
+	// A witness set is established at inception and can afterwards be amended
+	// only by a rotation. Without this an identity can never drop a witness it
+	// has stopped using, nor add one it has since found — its published witness
+	// list is fixed for life while the agent's own view of who witnesses for it
+	// drifts away from it.
+	Rotate(req RotationRequest) (*DriverRotationResponse, error)
 	// CreateHybridInception founds an identity holding both classical and
 	// post-quantum keys.
 	CreateHybridInception(synthetic bool, name string) (*DriverHybridInceptionResponse, error)
@@ -122,4 +131,27 @@ type InceptionRequest struct {
 	// Toad is how many of those must receipt an event for it to be considered
 	// witnessed. Zero lets the implementation derive a majority.
 	Toad int
+}
+
+// RotationRequest is everything a rotation can change.
+type RotationRequest struct {
+	Name string
+	// NewPublicKey must be the key the identity previously committed to.
+	NewPublicKey     string
+	NewNextPublicKey string
+	// CutWitnesses and AddWitnesses amend the designated set.
+	//
+	// Given as changes rather than as a new list on purpose: an event carries
+	// the cuts and adds themselves, so anyone reading the log sees what changed
+	// rather than having to diff two sets and infer it. Both are
+	// non-transferable witness keys, as at inception.
+	CutWitnesses []string
+	AddWitnesses []string
+	// Toad is the threshold after the change. Zero derives a majority of
+	// whatever the set becomes, which is what a caller almost always wants —
+	// stating one is for the case where it should not simply follow the count.
+	Toad int
+	// AnchorData is recorded in the same event as the key change, so the two
+	// cannot be separated by anyone relaying the log.
+	AnchorData []interface{}
 }

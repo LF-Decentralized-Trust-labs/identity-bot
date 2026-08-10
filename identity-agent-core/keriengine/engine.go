@@ -27,7 +27,12 @@ type Engine struct {
 	// has to be able to hand it somewhere durable or the identity it just
 	// created is unusable.
 	secrets keri.SecretStore
+	// http is how OOBIs are fetched. Replaceable so a test needs no network.
+	http HTTPClient
 }
+
+// SetHTTPClient replaces how this engine fetches introductions.
+func (e *Engine) SetHTTPClient(c HTTPClient) { e.http = c }
 
 // New returns an engine with no identities, which is the state a cold start
 // leaves it in. Identities arrive by being created or by being reloaded.
@@ -362,6 +367,16 @@ func (e *Engine) RotateAid(name, newPublicKey, newNextPublicKey string) (*driver
 // itself is covered by the same digest and the same signature, so a reader
 // either has both or has neither.
 func (e *Engine) RotateAidWithAnchor(name, newPublicKey, newNextPublicKey string, anchorData []interface{}) (*drivers.DriverRotationResponse, error) {
+	return e.Rotate(drivers.RotationRequest{
+		Name: name, NewPublicKey: newPublicKey, NewNextPublicKey: newNextPublicKey,
+		AnchorData: anchorData,
+	})
+}
+
+// Rotate rotates the keys and, where asked, amends who witnesses the identity.
+func (e *Engine) Rotate(req drivers.RotationRequest) (*drivers.DriverRotationResponse, error) {
+	name, newPublicKey, newNextPublicKey, anchorData :=
+		req.Name, req.NewPublicKey, req.NewNextPublicKey, req.AnchorData
 	id, err := e.state.get(name)
 	if err != nil {
 		return nil, err
@@ -397,15 +412,29 @@ func (e *Engine) RotateAidWithAnchor(name, newPublicKey, newNextPublicKey string
 	if err != nil {
 		return nil, err
 	}
-	raw, err := keri.BuildRotation(keri.RotationInput{
+	// A witness being added must be nameable, for the same reason it must be at
+	// inception: what the event carries is the key its receipts verify against.
+	for i, w := range req.AddWitnesses {
+		if len(w) != 44 || w[0] != 'B' {
+			return nil, fmt.Errorf("witness %d being added is %q, which is not a "+
+				"non-transferable identifier; its receipts could not be checked", i, w)
+		}
+	}
+	rotIn := keri.RotationInput{
 		Prefix:         id.AID,
 		Keys:           []string{newPub},
 		PriorSAID:      id.LastSAID,
 		SN:             id.SN + 1,
 		NextDigests:    []string{newNextDigest},
 		PriorWitnesses: id.Witnesses,
+		Cuts:           req.CutWitnesses,
+		Adds:           req.AddWitnesses,
 		Data:           anchors,
-	})
+	}
+	if req.Toad > 0 {
+		rotIn.Toad = &req.Toad
+	}
+	raw, err := keri.BuildRotation(rotIn)
 	if err != nil {
 		return nil, fmt.Errorf("building the rotation event: %w", err)
 	}
@@ -428,6 +457,11 @@ func (e *Engine) RotateAidWithAnchor(name, newPublicKey, newNextPublicKey string
 	id.SN = int(ev.SN)
 	id.LastSAID = ev.SAID
 	id.KEL = append(id.KEL, next)
+	// The witness set now in force, read back off the event rather than
+	// recomputed here. The event is what everyone else will read, so anything
+	// this engine believes that the event does not say is simply wrong.
+	id.Witnesses = witnessesAfter(id.Witnesses, ev)
+	id.Toad = witnessThreshold(ev)
 	e.state.mu.Unlock()
 
 	return &drivers.DriverRotationResponse{
@@ -728,4 +762,29 @@ func (e *Engine) ReloadIdentity(req *drivers.DriverReloadIdentityRequest) (*driv
 		KelEvents:      len(entries),
 		Status:         status,
 	}, nil
+}
+
+// witnessesAfter applies a rotation's cuts and adds to the set that preceded it.
+//
+// Taken from the event rather than from the request, so that what this engine
+// believes about an identity cannot drift from what the identity has published.
+// A rotation that says nothing about witnesses leaves the set alone.
+func witnessesAfter(prior []string, ev *keri.Event) []string {
+	if ev == nil || (len(ev.WitnessCut) == 0 && len(ev.WitnessAdd) == 0) {
+		return prior
+	}
+	cut := map[string]bool{}
+	for _, w := range ev.WitnessCut {
+		cut[w] = true
+	}
+	out := make([]string, 0, len(prior)+len(ev.WitnessAdd))
+	for _, w := range prior {
+		if !cut[w] {
+			out = append(out, w)
+		}
+	}
+	for _, w := range ev.WitnessAdd {
+		out = append(out, w)
+	}
+	return out
 }

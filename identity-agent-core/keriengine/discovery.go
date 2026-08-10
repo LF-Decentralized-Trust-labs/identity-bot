@@ -2,51 +2,79 @@ package keriengine
 
 import (
 	"fmt"
+	"time"
 
 	"identity-agent-core/drivers"
+
+	keri "github.com/grapeid/keri-go"
 )
 
-// Discovery and presentation: the three operations this engine does not answer.
+// Discovery and presentation.
 //
-// They are not KERI event construction. Resolving an OOBI means fetching a
-// document over the network and deciding whether to trust what comes back;
-// publishing an endpoint means producing a signed reply message; presenting a
-// credential means building a disclosure for a particular verifier. The KERI
-// library underneath this engine builds and verifies events, and none of these
-// three is one.
+// These three are not KERI event construction, which is why they were the last
+// to be built here: resolving an introduction means fetching a document over
+// the network and deciding what it establishes, publishing an endpoint means
+// producing a reply message rather than a key event, and presenting a
+// credential means building a disclosure bound to one holder.
 //
-// They refuse rather than approximate. A resolver that returned nothing would
-// look to a caller exactly like an identity with no endpoints, and a
-// presentation built wrongly would be rejected by the verifier it was built
-// for, with the failure surfacing far from its cause.
-//
-// So an engine that cannot do these says so, and a deployment that needs them
-// keeps an implementation that can — which is what the interface these sit
-// behind is for.
+// All three are answered now, so nothing an agent does routes to a subprocess.
+// Each lives in its own file: resolve_oobi.go, the reply below, and
+// presentation.go.
 
 // SupportsDiscovery reports whether this engine can resolve OOBIs, publish
 // endpoints and build presentations.
 //
-// A caller holding the interface can ask before routing work here, rather than
-// discovering the answer from a failed call.
-func (e *Engine) SupportsDiscovery() bool { return false }
+// Kept, and now true. A caller that asked before routing work here gets the
+// same answer it would get by trying.
+func (e *Engine) SupportsDiscovery() bool { return true }
 
-func (e *Engine) ResolveOobi(url string) (*drivers.DriverResolveOobiResponse, error) {
-	return nil, fmt.Errorf("this engine does not resolve OOBIs. Resolving %q means fetching a "+
-		"key log over the network and deciding whether to trust it, which is a different job "+
-		"from building and verifying events. Route this to an implementation that performs "+
-		"discovery", url)
-}
-
+// EndpointLocation states where an identity can currently be reached.
+//
+// A reply message rather than a key event, deliberately. Where an agent is
+// reachable changes for reasons that have nothing to do with its key state — a
+// relay is left, an allocation expires, a machine moves — and putting that in
+// the key log would grow a record every verifier replays forever with entries
+// that are stale almost immediately. A reply stands alone and is superseded by
+// a later one.
+//
+// Returned unsigned, like every other event this engine builds. The controller
+// signs the bytes; this holds no keys.
 func (e *Engine) EndpointLocation(req *drivers.DriverEndpointLocationRequest) (*drivers.DriverEndpointResponse, error) {
-	return nil, fmt.Errorf("this engine does not publish endpoint locations. Announcing where an " +
-		"identity can be reached means producing a signed reply message, and this engine holds " +
-		"no keys to sign one with. Route this to an implementation that performs discovery")
+	if req == nil || req.EID == "" {
+		return nil, fmt.Errorf("a location statement must name the endpoint it is about")
+	}
+	scheme := req.Scheme
+	if scheme == "" {
+		scheme = "https"
+	}
+	// An empty URL is meaningful rather than missing: it withdraws the address,
+	// which is how an identity says "not here any more" instead of leaving one
+	// published that no longer answers.
+	raw, err := keri.EndpointLocation(req.EID, scheme, req.URL, replyTimestamp())
+	if err != nil {
+		return nil, fmt.Errorf("building the location statement: %w", err)
+	}
+	reply, err := keri.VerifyReply(raw)
+	if err != nil {
+		return nil, fmt.Errorf("the statement this engine built does not verify: %w", err)
+	}
+	body, err := eventMap(raw)
+	if err != nil {
+		return nil, err
+	}
+	return &drivers.DriverEndpointResponse{
+		EID:         req.EID,
+		URL:         req.URL,
+		Scheme:      scheme,
+		Route:       reply.Route,
+		RpyEvent:    body,
+		RawBytesB64: b64(raw),
+		SAID:        reply.SAID,
+	}, nil
 }
 
-func (e *Engine) PresentCredential(acdcSaid, holderAid, issuerAid, schemaSaid string) (*drivers.DriverPresentCredentialResponse, error) {
-	return nil, fmt.Errorf("this engine does not build credential presentations. Presenting %s "+
-		"means producing a disclosure for a particular verifier and signing it as the holder, "+
-		"and this engine holds no keys. Route this to an implementation that performs "+
-		"presentation", acdcSaid)
+// replyTimestamp is when a statement was made, which is what lets a recipient
+// tell a newer one from an older one.
+func replyTimestamp() string {
+	return time.Now().UTC().Format("2006-01-02T15:04:05.000000-07:00")
 }

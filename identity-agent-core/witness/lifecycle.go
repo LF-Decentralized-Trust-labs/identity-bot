@@ -156,3 +156,72 @@ func (s *Service) ContactMetaFor(aid string) (*ContactMeta, error) {
 	}
 	return s.Store.GetContactMeta(aid)
 }
+
+// noteDesignationDrift records that this agent has stopped using a witness its
+// key log still designates.
+//
+// The two can only be brought back together by a rotation, which changes the
+// identity's keys and is therefore not something to do silently on a witness
+// going quiet. So the drift is recorded and surfaced, and whoever controls the
+// identity decides when to rotate.
+//
+// Left visible rather than resolved automatically because the alternative is
+// worse in both directions: rotating on every flaky witness would churn the key
+// log, and doing nothing at all would leave the agent quietly disagreeing with
+// its own published record of who watches it.
+func (s *Service) noteDesignationDrift(contactAID, witnessKey string) {
+	log.Printf("[witness] no longer using %s, but the key log still designates %s. "+
+		"The designated set can only be amended by a rotation, so until one happens a "+
+		"verifier will expect receipts from it that will not come.", contactAID, witnessKey)
+	if s.OnEvent != nil {
+		s.OnEvent("witness_designation_drift", map[string]interface{}{
+			"contact_aid": contactAID,
+			"witness_key": witnessKey,
+			"remedy":      "rotate to cut this witness from the designated set",
+		})
+	}
+}
+
+// DesignationDrift reports witnesses this agent's key log designates that it is
+// no longer relying on, and the reverse.
+//
+// The list a rotation would need to reconcile. Returned rather than acted on:
+// changing the designated set means rotating the identity's keys, which is the
+// controller's decision and not a maintenance task.
+func (s *Service) DesignationDrift(designated []string) (staleInLog []string, usedButNotDesignated []string) {
+	if s == nil || s.Contacts == nil {
+		return nil, nil
+	}
+	using := map[string]bool{}
+	contacts, err := s.Contacts.GetContacts()
+	if err != nil {
+		return nil, nil
+	}
+	for _, c := range contacts {
+		if !c.IsWitness {
+			continue
+		}
+		if meta, _ := s.Store.GetContactMeta(c.AID); meta != nil && meta.WitnessKey != "" {
+			using[meta.WitnessKey] = true
+		}
+	}
+	for _, b := range BootstrapPool() {
+		if b.WitnessKey != "" {
+			using[b.WitnessKey] = true
+		}
+	}
+
+	inLog := map[string]bool{}
+	for _, w := range designated {
+		inLog[w] = true
+		if !using[w] {
+			staleInLog = append(staleInLog, w)
+		}
+	}
+	for w := range using {
+		if !inLog[w] {
+			usedButNotDesignated = append(usedButNotDesignated, w)
+		}
+	}
+	return staleInLog, usedButNotDesignated
+}

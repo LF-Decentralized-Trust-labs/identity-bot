@@ -598,6 +598,18 @@ func (s *Service) RecordHeartbeatResult(contactAID string, ok bool) {
 	_ = s.Store.SaveContactMeta(*meta)
 }
 
+// dropWitness stops relying on a witness that is no longer answering.
+//
+// This changes what THIS agent does; it does not change what the identity has
+// published. The designated set lives in the key log and can only be amended by
+// a rotation, so until one happens the log still names this witness and a
+// verifier still expects receipts from it — receipts that will not come, so the
+// threshold cannot be met.
+//
+// Reported for exactly that reason. Falling silently out of step with one's own
+// published log is the failure worth avoiding: the agent believes it has three
+// witnesses, the log says four, and nobody notices until a verification fails
+// for a reason nothing explains.
 func (s *Service) dropWitness(contactAID string) {
 	c, _ := s.Contacts.GetContact(contactAID)
 	if c == nil {
@@ -605,6 +617,9 @@ func (s *Service) dropWitness(contactAID string) {
 	}
 	c.IsWitness = false
 	_ = s.Contacts.SaveContact(*c)
+	if meta, _ := s.Store.GetContactMeta(contactAID); meta != nil && meta.WitnessKey != "" {
+		s.noteDesignationDrift(contactAID, meta.WitnessKey)
+	}
 	if s.OnEvent != nil {
 		s.OnEvent("witness_dropped_health", map[string]interface{}{"contact_aid": contactAID})
 	}

@@ -476,21 +476,74 @@ func TestAGroupThatCouldNeverActIsRefused(t *testing.T) {
 	}
 }
 
-// The three discovery operations refuse rather than returning something empty,
-// which a caller cannot tell from a real answer.
-func TestTheUnsupportedOperationsRefuseRatherThanReturnNothing(t *testing.T) {
+// The three operations that used to be answered only by a subprocess. Nothing
+// an agent does should now need one.
+func TestTheEngineAnswersDiscoveryAndPresentationItself(t *testing.T) {
 	e := New()
-	if e.SupportsDiscovery() {
-		t.Fatal("the engine claims to support discovery")
+	if !e.SupportsDiscovery() {
+		t.Fatal("the engine says it cannot do what it can")
 	}
-	if _, err := e.ResolveOobi("http://example.test/oobi"); err == nil {
-		t.Fatal("ResolveOobi returned an answer it cannot produce")
+
+	// Publishing where an identity is reachable.
+	loc, err := e.EndpointLocation(&drivers.DriverEndpointLocationRequest{
+		EID: "BEndpointProvider", URL: "https://agent.example", Scheme: "https",
+	})
+	if err != nil {
+		t.Fatalf("could not state an endpoint location: %v", err)
 	}
-	if _, err := e.EndpointLocation(&drivers.DriverEndpointLocationRequest{EID: "E1"}); err == nil {
-		t.Fatal("EndpointLocation returned an answer it cannot produce")
+	if loc.SAID == "" || loc.RawBytesB64 == "" || loc.Route == "" {
+		t.Fatalf("the location statement is incomplete: %+v", loc)
 	}
-	if _, err := e.PresentCredential("Ecred", "Eholder", "Eissuer", "Eschema"); err == nil {
-		t.Fatal("PresentCredential returned an answer it cannot produce")
+	raw, err := base64.StdEncoding.DecodeString(loc.RawBytesB64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := keri.VerifyReply(raw); err != nil {
+		t.Fatalf("the location statement does not verify against its own identifier: %v", err)
+	}
+
+	// Presenting a credential.
+	pres, err := e.PresentCredential("EacdcSaid", "Eholder", "Eissuer", "")
+	if err != nil {
+		t.Fatalf("could not build a presentation: %v", err)
+	}
+	if pres.PresentationSaid == "" || pres.PresSaidB64 == "" {
+		t.Fatalf("the presentation is incomplete: %+v", pres)
+	}
+	// The bytes the holder signs are the identifier itself, which is what ties
+	// the proof to this presentation rather than to the credential.
+	signed, err := base64.StdEncoding.DecodeString(pres.PresSaidB64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(signed) != pres.PresentationSaid {
+		t.Fatalf("the bytes to sign are %q, not the presentation identifier", string(signed))
+	}
+}
+
+// A presentation must be reproducible: the same credential and holder produce
+// the same identifier, or a verifier cannot check one against another.
+func TestAPresentationIsReproducible(t *testing.T) {
+	a, err := New().PresentCredential("EacdcSaid", "Eholder", "Eissuer", "Eschema")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := New().PresentCredential("EacdcSaid", "Eholder", "Eissuer", "Eschema")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.PresentationSaid != b.PresentationSaid {
+		t.Fatalf("the same presentation computed two identifiers: %s and %s",
+			a.PresentationSaid, b.PresentationSaid)
+	}
+	// And a different holder is a different presentation, or one holder's proof
+	// would serve for another.
+	c, err := New().PresentCredential("EacdcSaid", "EsomebodyElse", "Eissuer", "Eschema")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.PresentationSaid == a.PresentationSaid {
+		t.Fatal("two different holders produced the same presentation identifier")
 	}
 }
 
