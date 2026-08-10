@@ -245,6 +245,13 @@ func New(cfg Config) (*CoreServer, error) {
 		}
 		return fmt.Sprintf("http://127.0.0.1:%d/public/oobi/%s", cfg.Port, id.AID)
 	}
+	// What kind of entity this agent belongs to, which decides which peers may
+	// witness for it. Read live rather than captured, because the profile is
+	// set during onboarding and this service is built before that happens.
+	wsvc.DataDir = cfg.DataDir
+	wsvc.OurEntityType = func() witness.EntityType {
+		return witness.NormaliseEntityType(s.ourEntityType())
+	}
 	wsvc.OnEvent = func(eventType string, payload map[string]interface{}) {
 		s.EventHub.Broadcast(AgentEvent{Type: eventType, Payload: payload})
 	}
@@ -2962,11 +2969,15 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
 	// forged history detectable, since a forger can produce a perfectly signed
 	// log of their own but not other people's receipts over it.
 	resp := map[string]interface{}{
-		"aid":         identity.AID,
-		"public_key":  identity.PublicKey,
-		"alias":       alias,
-		"kel":         events,
-		"receipts":    s.receiptsForEvents(events),
+		"aid":        identity.AID,
+		"public_key": identity.PublicKey,
+		"alias":      alias,
+		"kel":        events,
+		"receipts":   s.receiptsForEvents(events),
+		// Whether this agent belongs to a person or an organization. Published
+		// because a peer has to know before it can decide whether the two of us
+		// may witness for each other — the two kinds are kept apart.
+		"entity_type": s.ourEntityType(),
 		"event_count": identity.EventCount,
 		"created":     identity.Created,
 	}
@@ -3200,6 +3211,7 @@ func (s *CoreServer) handleResolveOobiContact(w http.ResponseWriter, r *http.Req
 		// would have to name to designate it.
 		BackendType string       `json:"backend_type"`
 		WitnessKey  string       `json:"witness_key"`
+		EntityType  string       `json:"entity_type"`
 		EventCount  int          `json:"event_count"`
 		Created     string       `json:"created"`
 		JCard       *store.JCard `json:"jcard,omitempty"`
@@ -3223,7 +3235,7 @@ func (s *CoreServer) handleResolveOobiContact(w http.ResponseWriter, r *http.Req
 	// worked out later, and both decide something: whether it can be asked to
 	// witness, and what an event would name to designate it.
 	if s.WitnessService != nil {
-		s.WitnessService.RecordContactCapability(oobiData.AID, oobiData.BackendType, oobiData.WitnessKey)
+		s.WitnessService.RecordContactCapability(oobiData.AID, oobiData.BackendType, oobiData.WitnessKey, oobiData.EntityType)
 	}
 
 	// Check the key log this stranger just handed us.
@@ -3358,6 +3370,7 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
 		// What this contact can do for others — see the other resolve path.
 		BackendType string `json:"backend_type"`
 		WitnessKey  string `json:"witness_key"`
+		EntityType  string `json:"entity_type"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&oobiData); err != nil {
 		writeError(w, http.StatusBadGateway, "Invalid OOBI response", fmt.Sprintf("Could not parse response: %v", err))
@@ -3370,7 +3383,7 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if s.WitnessService != nil {
-		s.WitnessService.RecordContactCapability(oobiData.AID, oobiData.BackendType, oobiData.WitnessKey)
+		s.WitnessService.RecordContactCapability(oobiData.AID, oobiData.BackendType, oobiData.WitnessKey, oobiData.EntityType)
 	}
 
 	// Check the key log, from the bytes it was published as where they came
@@ -4438,4 +4451,22 @@ func (s *CoreServer) onContactAccepted(aid string) {
 		ctx = context.Background()
 	}
 	go s.WitnessService.ConsiderContactAsWitness(ctx, aid)
+}
+
+// ourEntityType reports whether this agent belongs to a person or an
+// organization.
+//
+// Read from the profile rather than inferred. An agent that has not been told
+// enrols no peer witnesses at all, which is the safe direction: the cost of
+// getting it wrong is an individual's root identifier written permanently into
+// somebody else's public key log.
+func (s *CoreServer) ourEntityType() string {
+	if s.DataStore == nil {
+		return ""
+	}
+	profile, err := s.DataStore.GetProfile()
+	if err != nil || profile == nil {
+		return ""
+	}
+	return profile.EntityType
 }

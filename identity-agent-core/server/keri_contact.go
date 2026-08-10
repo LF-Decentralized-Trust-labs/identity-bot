@@ -63,12 +63,13 @@ func (s *CoreServer) EnsureKeriContact(oobiURL string) (*store.ContactRecord, bo
 		// here because neither can be worked out later.
 		BackendType string `json:"backend_type"`
 		WitnessKey  string `json:"witness_key"`
+		EntityType  string `json:"entity_type"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&oobiData); err != nil {
 		return nil, false, fmt.Errorf("invalid oobi response: %w", err)
 	}
 	if s.WitnessService != nil {
-		s.WitnessService.RecordContactCapability(oobiData.AID, oobiData.BackendType, oobiData.WitnessKey)
+		s.WitnessService.RecordContactCapability(oobiData.AID, oobiData.BackendType, oobiData.WitnessKey, oobiData.EntityType)
 	}
 	if oobiData.AID == "" {
 		return nil, false, fmt.Errorf("oobi response did not contain an AID")

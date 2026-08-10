@@ -53,6 +53,10 @@ type Service struct {
 	// ReceiveEvent refuses rather than issuing something that looks like a
 	// receipt and proves nothing.
 	SignReceipt func(said string) (witnessAID, cesrSig string, err error)
+	// OurEntityType reports whether this agent belongs to a person or an
+	// organization. A peer may only witness for its own kind, so an agent that
+	// cannot answer this enrols no peer witnesses at all.
+	OurEntityType func() EntityType
 
 	mu         sync.Mutex
 	finalizeWg map[string]chan struct{}
@@ -375,6 +379,14 @@ func (s *Service) enrolledWitnesses(kind AidKind, aid string) ([]witnessTarget, 
 		meta, _ := s.Store.GetContactMeta(c.AID)
 		commercial := meta != nil && meta.IsCommercial
 		if !ContactWitnessAllowedForAID(kind, commercial) {
+			continue
+		}
+		// Peers of the same kind only. An organization witnessing an individual
+		// would write that organization permanently into the individual's
+		// founding event, which is public and cannot be amended away — see
+		// PeerWitnessAllowedAcross. A dedicated witness service is not a peer
+		// and is not subject to this.
+		if !commercial && !s.peerWitnessAllowed(meta) {
 			continue
 		}
 		if meta != nil && meta.WitnessStatus == StatusOffline {

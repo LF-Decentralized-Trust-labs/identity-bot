@@ -58,6 +58,12 @@ func (s *Service) ConsiderContactAsWitness(ctx context.Context, contactAID strin
 	if !IsBackendEligible(meta.BackendType) {
 		return
 	}
+	// Peers witness only for their own kind. An organization writing itself
+	// into an individual's founding event publishes a connection that person
+	// never chose and cannot remove, because an inception cannot be amended.
+	if !s.peerWitnessAllowed(meta) {
+		return
+	}
 
 	if err := s.SendWitnessRequest(ctx, contactAID); err != nil {
 		log.Printf("[witness] could not ask %s to witness: %v", contactAID, err)
@@ -70,15 +76,16 @@ func (s *Service) ConsiderContactAsWitness(ctx context.Context, contactAID strin
 
 // RecordContactCapability stores what a contact published about itself.
 //
-// Called when a contact's OOBI is resolved. Both fields decide something later
-// and neither can be worked out afterwards: the backend type decides whether
-// the contact can be asked to witness at all, and the witness key is what an
-// event would have to name to designate it.
-func (s *Service) RecordContactCapability(contactAID, backendType, witnessKey string) {
+// Called when a contact's OOBI is resolved. Each field decides something later
+// and none can be worked out afterwards: the backend type decides whether the
+// contact can be asked to witness at all, the witness key is what an event
+// would have to name to designate it, and the entity type decides whether the
+// two of us may witness for each other.
+func (s *Service) RecordContactCapability(contactAID, backendType, witnessKey, entityType string) {
 	if s == nil || contactAID == "" || s.Store == nil {
 		return
 	}
-	if backendType == "" && witnessKey == "" {
+	if backendType == "" && witnessKey == "" && entityType == "" {
 		return
 	}
 	meta, _ := s.Store.GetContactMeta(contactAID)
@@ -90,6 +97,11 @@ func (s *Service) RecordContactCapability(contactAID, backendType, witnessKey st
 	}
 	if witnessKey != "" {
 		meta.WitnessKey = witnessKey
+	}
+	// Which kind of entity this contact is decides whether it may witness for
+	// us at all, and it cannot be worked out later from anything else.
+	if entityType != "" {
+		meta.EntityType = entityType
 	}
 	_ = s.Store.SaveContactMeta(*meta)
 }
@@ -115,4 +127,23 @@ func (s *Service) WitnessesForNewIdentity(kind AidKind, aid string) (keys []stri
 		return nil, 0
 	}
 	return DesignatableWitnesses(candidates)
+}
+
+// peerWitnessAllowed reports whether a contact may act as a peer witness for
+// this agent, on the entity-kind boundary alone.
+//
+// Commercial witnesses do not come through here: they are not peers, and
+// excluding them would leave a new individual identity with nobody at all.
+func (s *Service) peerWitnessAllowed(meta *ContactMeta) bool {
+	if s.OurEntityType == nil {
+		// This agent does not know what it is, so it cannot know whether a
+		// contact is the same kind. Refused rather than assumed: allowing it
+		// wrongly publishes somebody's root identifier permanently, and
+		// refusing it wrongly costs one witness until the profile is set.
+		return false
+	}
+	if meta == nil {
+		return false
+	}
+	return PeerWitnessAllowedAcross(s.OurEntityType(), NormaliseEntityType(meta.EntityType))
 }

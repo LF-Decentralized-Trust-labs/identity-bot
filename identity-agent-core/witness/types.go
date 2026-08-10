@@ -66,7 +66,13 @@ type ContactMeta struct {
 	// as published in its OOBI. Empty when it publishes none, in which case it
 	// can be asked to witness but can never be designated — what an event names
 	// is the key, not the contact.
-	WitnessKey      string
+	WitnessKey string
+	// EntityType is whether this contact is a person or an organization.
+	//
+	// It decides whether they may witness for us at all: the two kinds are kept
+	// apart, because a witness list is public and permanent and an individual's
+	// root identifier is meant to stay unexposed. See PeerWitnessAllowedAcross.
+	EntityType      string
 	WitnessStatus   string
 	OfflineCount    int
 	IsMutual        bool

@@ -69,3 +69,68 @@ func ContactWitnessAllowedForAID(kind AidKind, isCommercial bool) bool {
 	}
 	return kind == AidKindRoot
 }
+
+// EntityType is what kind of thing an Identity Agent belongs to.
+type EntityType string
+
+const (
+	EntityIndividual   EntityType = "individual"
+	EntityOrganization EntityType = "organization"
+	// EntityUnknown is a contact that has not said. It is not a third kind of
+	// entity; it is the absence of an answer, and it is treated as such.
+	EntityUnknown EntityType = ""
+)
+
+// NormaliseEntityType maps what a contact publishes onto the two kinds.
+//
+// Anything unrecognised becomes unknown rather than being guessed at. Guessing
+// here would decide, on no evidence, whether somebody's root identifier gets
+// published in a stranger's key log.
+func NormaliseEntityType(v string) EntityType {
+	switch EntityType(v) {
+	case EntityIndividual:
+		return EntityIndividual
+	case EntityOrganization:
+		return EntityOrganization
+	default:
+		return EntityUnknown
+	}
+}
+
+// PeerWitnessAllowedAcross reports whether one entity may witness for another.
+//
+// An individual is witnessed by individuals and an organization by
+// organizations. Never across, and this is a boundary rather than a preference.
+//
+// The two kinds treat their root identifier in opposite ways. An organization
+// publishes its root AID — being findable is the point of it. An individual's
+// root AID is kept as unexposed as possible, because everything that names it
+// becomes a way to correlate them. A witness list is named in the inception
+// event, so it is public and permanent and cannot be amended away.
+//
+// So an organization witnessing an individual writes that organization
+// permanently into the individual's founding event, where anyone who resolves
+// the org's witness key can read it — an employer, a clinic, a shelter, a place
+// of worship. The person never chose to publish that and cannot unpublish it.
+// The reverse leaks the same fact in the other direction: an individual
+// witnessing an organization ties that person to it just as publicly.
+//
+// The asymmetry is the whole reason. Mixing costs the organization nothing and
+// costs the individual something they cannot take back, so the two are kept
+// apart rather than balanced against each other.
+//
+// COMMERCIAL WITNESSES ARE NOT PEERS and are not governed by this. A dedicated
+// witness service serves a large population, so naming one says almost nothing
+// about who its subject is — the same reason pairwise AIDs may use them and may
+// not use contacts. Without that exemption a newly created individual identity
+// could be witnessed by nobody at all, since it has no contacts yet.
+func PeerWitnessAllowedAcross(ours, theirs EntityType) bool {
+	if ours == EntityUnknown || theirs == EntityUnknown {
+		// Refused rather than assumed. The cost of wrongly allowing it is a
+		// permanent disclosure in somebody's founding event; the cost of
+		// wrongly refusing is one fewer witness, recoverable the moment the
+		// contact says what it is.
+		return false
+	}
+	return ours == theirs
+}
