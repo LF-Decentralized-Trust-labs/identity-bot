@@ -91,6 +91,11 @@ func TestGoAndPythonAgreeOnInception(t *testing.T) {
 	fromGo, err := keri.BuildInception(keri.InceptionInput{
 		Keys:        []string{currentPub},
 		NextDigests: []string{nextDigest},
+		// The driver passes code=Blake3_256 on every inception, so every
+		// identity this application has created is self-addressing regardless
+		// of key count. keri-go infers basic derivation for one key unless
+		// told otherwise, so it must be told.
+		Derivation: "self-addressing",
 	})
 	if err != nil {
 		t.Fatalf("keri-go could not incept: %v", err)
