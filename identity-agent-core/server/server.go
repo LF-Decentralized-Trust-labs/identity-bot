@@ -1229,14 +1229,31 @@ func (s *CoreServer) handleHybridInception(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// Synthetic material is a counting pattern: right for conformance vectors,
+	// useless for an identity. Real material is generated in-process, and the
+	// post-quantum halves are genuine keypairs rather than random bytes of the
+	// right length — which is what the other implementations of this path
+	// produced, and which yields an identity whose post-quantum key can never
+	// be used.
+	material := iacrypto.SyntheticHybridKeyMaterial(0)
 	if !req.Synthetic {
-		writeError(w, http.StatusNotImplemented,
-			"Non-synthetic hybrid inception not yet wired",
-			"Use synthetic=true for C1 harness vectors; production keygen routes through keripy driver or Rust bridge")
-		return
+		generated, secrets, err := iacrypto.GenerateHybridKeyMaterial()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "Failed to generate hybrid key material", err.Error())
+			return
+		}
+		material = generated
+		// The secrets are deliberately NOT returned. The response is an
+		// inception event, which is published; a private key that travelled
+		// beside it would eventually be logged, cached or forwarded by
+		// something that had no idea what it was holding. Persisting them
+		// belongs with the keystore, and until that is wired a caller cannot
+		// use this identity to sign — which is a smaller problem than handing
+		// out keys.
+		_ = secrets
 	}
 
-	result, err := iacrypto.BuildHybridInception(iacrypto.SyntheticHybridKeyMaterial(0))
+	result, err := iacrypto.BuildHybridInception(material)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to create hybrid inception event", err.Error())
 		return
