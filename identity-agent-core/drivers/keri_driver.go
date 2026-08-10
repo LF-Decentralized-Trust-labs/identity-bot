@@ -218,10 +218,18 @@ type DriverSignForNameResponse struct {
 }
 
 type DriverKelResponse struct {
-	AID            string                   `json:"aid"`
-	KEL            []map[string]interface{} `json:"kel"`
-	SequenceNumber int                      `json:"sequence_number"`
-	EventCount     int                      `json:"event_count"`
+	AID string                   `json:"aid"`
+	KEL []map[string]interface{} `json:"kel"`
+	// RawEventsB64[i] is the canonical serialisation of KEL[i].
+	//
+	// The parsed form cannot be re-serialised by a caller: field order is part
+	// of the event and the identifier is a digest over those exact bytes, so a
+	// language that marshals a map in its own order produces something that
+	// verifies as nothing. Anything checking signatures or recomputing
+	// identifiers must use these bytes.
+	RawEventsB64   []string `json:"raw_events_b64"`
+	SequenceNumber int      `json:"sequence_number"`
+	EventCount     int      `json:"event_count"`
 }
 
 type DriverVerifyRequest struct {

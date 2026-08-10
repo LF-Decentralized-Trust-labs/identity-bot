@@ -2,7 +2,6 @@ package drivers
 
 import (
 	"encoding/base64"
-	"encoding/json"
 	"os"
 	"testing"
 
@@ -142,33 +141,39 @@ func TestGoValidatesAKeyLogPythonProduced(t *testing.T) {
 	if err != nil {
 		t.Fatalf("could not read back the key log: %v", err)
 	}
-	if len(kel.KEL) == 0 {
-		t.Fatal("the driver returned an empty key log, so nothing was checked")
+	if len(kel.RawEventsB64) == 0 {
+		t.Fatal("the driver returned no canonical bytes; without them the parsed form " +
+			"cannot be re-serialised without reordering fields, and nothing can be checked")
+	}
+	if len(kel.RawEventsB64) != len(kel.KEL) {
+		t.Fatalf("the driver returned %d events but %d canonical forms; a log with a hole "+
+			"in it reads as a shorter history rather than as a failure",
+			len(kel.KEL), len(kel.RawEventsB64))
 	}
 
-	// The KEL comes back as decoded objects. Re-serialising with a Go map would
-	// reorder the fields and change the identifier, so each event is marshalled
-	// through the ordered form keri-go understands.
-	var messages [][]byte
-	for i, event := range kel.KEL {
-		raw, err := json.Marshal(event)
+	messages := make([][]byte, 0, len(kel.RawEventsB64))
+	for i, enc := range kel.RawEventsB64 {
+		raw, err := base64.StdEncoding.DecodeString(enc)
 		if err != nil {
-			t.Fatalf("event %d could not be re-serialised: %v", i, err)
+			t.Fatalf("event %d is not base64: %v", i, err)
 		}
 		messages = append(messages, raw)
 	}
 
-	err = keri.ValidateKEL(messages)
-	if err == nil {
-		return
+	if err := keri.ValidateKEL(messages); err != nil {
+		t.Fatalf("keri-go refuses a key log the Python driver produced, which would strand "+
+			"every identity this application has already created: %v", err)
 	}
-	// A field-order difference is expected here and is NOT a disagreement about
-	// the protocol — it is an artefact of the driver returning parsed objects
-	// rather than bytes. Say which it is rather than reporting a failure that
-	// sends someone hunting for a bug that is not there.
-	t.Logf("keri-go refused the re-serialised log: %v", err)
-	t.Log("if this is a field-order complaint it is an artefact of the driver " +
-		"returning parsed JSON rather than canonical bytes; the driver needs a " +
-		"raw-bytes accessor before this comparison means anything")
-	t.Skip("inconclusive without canonical bytes from the driver")
+
+	// And it must agree about WHO the log establishes, not merely that it is
+	// well formed — an implementation that read the events but derived a
+	// different identifier would be worse than one that refused them.
+	first, err := keri.ParseEvent(messages[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Identifier != kel.AID {
+		t.Errorf("the driver calls this identity %s, keri-go reads it as %s",
+			kel.AID, first.Identifier)
+	}
 }
