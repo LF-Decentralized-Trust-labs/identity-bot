@@ -554,3 +554,66 @@ func TestARotationCarriesItsAnchorInTheSameEvent(t *testing.T) {
 		t.Fatalf("the rotation is at sequence %d, not 1", got.SequenceNumber)
 	}
 }
+
+// An identity founded with witnesses must actually name them, and require a
+// threshold of them. Designation happens only at inception (or by a later
+// rotation), so if it does not land here it does not land at all.
+func TestAnIdentityIsFoundedNamingItsWitnesses(t *testing.T) {
+	e := New()
+	pub, next, _ := keys(t)
+
+	w1, err := keri.GenerateSigner(false) // non-transferable, as a witness must be
+	if err != nil {
+		t.Fatal(err)
+	}
+	w2, err := keri.GenerateSigner(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	k1, _ := w1.PublicKey()
+	k2, _ := w2.PublicKey()
+
+	got, err := e.Incept(drivers.InceptionRequest{
+		PublicKey: pub, NextPublicKey: next, Name: "alice",
+		Witnesses: []string{k1, k2}, Toad: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	raw, err := base64.StdEncoding.DecodeString(got.RawBytesB64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev, err := keri.ParseEvent(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ev.Witnesses) != 2 || ev.Witnesses[0] != k1 || ev.Witnesses[1] != k2 {
+		t.Fatalf("the inception does not name its witnesses: %v", ev.Witnesses)
+	}
+	if !ev.HasTOAD || ev.TOAD != 2 {
+		t.Fatalf("the inception does not require its witnesses: toad=%d present=%v",
+			ev.TOAD, ev.HasTOAD)
+	}
+	// The identifier is a digest of the whole event, so the witnesses are part
+	// of what this identity IS and cannot be swapped later.
+	if err := keri.ValidateEvent(raw); err != nil {
+		t.Fatalf("the witnessed inception is not a valid event: %v", err)
+	}
+}
+
+// A transferable identifier cannot be designated: its receipts would need a key
+// log resolved before they could be checked, and an inception is permanent.
+func TestATransferableWitnessCannotBeDesignated(t *testing.T) {
+	e := New()
+	pub, next, _ := keys(t)
+	transferable, _, _ := keys(t)
+
+	if _, err := e.Incept(drivers.InceptionRequest{
+		PublicKey: pub, NextPublicKey: next, Name: "alice",
+		Witnesses: []string{transferable},
+	}); err == nil {
+		t.Fatal("a transferable identifier was written into an inception as a witness")
+	}
+}

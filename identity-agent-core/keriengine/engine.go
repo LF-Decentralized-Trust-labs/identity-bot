@@ -127,7 +127,26 @@ func (e *Engine) CreateOwnedInception(publicKey, nextPublicKey, name, ownerAID s
 	return e.incept(publicKey, nextPublicKey, name, []json.RawMessage{anchor})
 }
 
+// Incept founds an identity, optionally designating witnesses for it.
+func (e *Engine) Incept(req drivers.InceptionRequest) (*drivers.DriverInceptionResponse, error) {
+	var anchors []json.RawMessage
+	if req.OwnerAID != "" {
+		if !strings.HasPrefix(req.OwnerAID, "E") {
+			return nil, fmt.Errorf("%q is not a self-addressing identifier, so an owner seal "+
+				"naming it would point at no event", req.OwnerAID)
+		}
+		anchors = []json.RawMessage{
+			json.RawMessage(fmt.Sprintf(`{"i":%q,"s":"0","d":%q}`, req.OwnerAID, req.OwnerAID)),
+		}
+	}
+	return e.inceptWith(req.PublicKey, req.NextPublicKey, req.Name, anchors, req.Witnesses, req.Toad)
+}
+
 func (e *Engine) incept(publicKey, nextPublicKey, name string, data []json.RawMessage) (*drivers.DriverInceptionResponse, error) {
+	return e.inceptWith(publicKey, nextPublicKey, name, data, nil, 0)
+}
+
+func (e *Engine) inceptWith(publicKey, nextPublicKey, name string, data []json.RawMessage, witnesses []string, toad int) (*drivers.DriverInceptionResponse, error) {
 	pub, err := normaliseKey(publicKey, true)
 	if err != nil {
 		return nil, fmt.Errorf("the signing key: %w", err)
@@ -150,16 +169,33 @@ func (e *Engine) incept(publicKey, nextPublicKey, name string, data []json.RawMe
 		return nil, fmt.Errorf("committing to the next key: %w", err)
 	}
 
-	raw, err := keri.BuildInception(keri.InceptionInput{
+	// A witness a caller cannot name properly is refused rather than written
+	// in. An inception event is permanent, so an unverifiable observer in it is
+	// a mistake with no way back.
+	for i, w := range witnesses {
+		if len(w) != 44 || w[0] != 'B' {
+			return nil, fmt.Errorf("witness %d is %q, which is not a non-transferable "+
+				"identifier; its receipts could not be checked without resolving a key log", i, w)
+		}
+	}
+	in := keri.InceptionInput{
 		Keys:        []string{pub},
 		NextDigests: []string{nextDigest},
 		Data:        data,
+		Witnesses:   witnesses,
 		// Self-addressing: the identifier is a digest over the whole inception
 		// event, so it commits to the witnesses and thresholds as well as the
 		// key. A basic identifier is only the key, and an identity created that
 		// way could not be reproduced from its own event.
 		Derivation: "self-addressing",
-	})
+	}
+	// A stated threshold is passed through; otherwise the builder derives the
+	// default, and writing a guess at that default would be writing the
+	// caller's arithmetic rather than the protocol's.
+	if toad > 0 {
+		in.Toad = &toad
+	}
+	raw, err := keri.BuildInception(in)
 	if err != nil {
 		return nil, fmt.Errorf("building the inception event: %w", err)
 	}

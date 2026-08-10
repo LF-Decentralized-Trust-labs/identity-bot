@@ -58,9 +58,17 @@ func (s *CoreServer) EnsureKeriContact(oobiURL string) (*store.ContactRecord, bo
 		KEL       []map[string]interface{} `json:"kel"`
 		JCard     *store.JCard             `json:"jcard,omitempty"`
 		Photo     string                   `json:"photo,omitempty"`
+		// The backend this contact runs decides whether it can witness at all,
+		// and the witness key is what an event names to designate it. Recorded
+		// here because neither can be worked out later.
+		BackendType string `json:"backend_type"`
+		WitnessKey  string `json:"witness_key"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&oobiData); err != nil {
 		return nil, false, fmt.Errorf("invalid oobi response: %w", err)
+	}
+	if s.WitnessService != nil {
+		s.WitnessService.RecordContactCapability(oobiData.AID, oobiData.BackendType, oobiData.WitnessKey)
 	}
 	if oobiData.AID == "" {
 		return nil, false, fmt.Errorf("oobi response did not contain an AID")

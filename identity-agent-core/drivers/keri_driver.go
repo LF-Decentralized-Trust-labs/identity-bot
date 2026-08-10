@@ -828,6 +828,27 @@ func (d *KeriDriver) GetStatus() (*DriverStatus, error) {
 	return &status, nil
 }
 
+// Incept founds an identity, optionally designating witnesses for it.
+func (d *KeriDriver) Incept(req InceptionRequest) (*DriverInceptionResponse, error) {
+	body := DriverInceptionRequest{
+		PublicKey:     req.PublicKey,
+		NextPublicKey: req.NextPublicKey,
+		Name:          req.Name,
+		Witnesses:     req.Witnesses,
+		Toad:          req.Toad,
+	}
+	if req.OwnerAID != "" {
+		if !strings.HasPrefix(req.OwnerAID, "E") {
+			return nil, fmt.Errorf("%q is not a self-addressing identifier, so an owner seal "+
+				"naming it would point at no event", req.OwnerAID)
+		}
+		body.Anchors = []json.RawMessage{
+			json.RawMessage(fmt.Sprintf(`{"i":%q,"s":"0","d":%q}`, req.OwnerAID, req.OwnerAID)),
+		}
+	}
+	return d.postInceptionRequest(body)
+}
+
 func (d *KeriDriver) CreateInception(publicKey, nextPublicKey string) (*DriverInceptionResponse, error) {
 	return d.postInception(publicKey, nextPublicKey, "", nil)
 }

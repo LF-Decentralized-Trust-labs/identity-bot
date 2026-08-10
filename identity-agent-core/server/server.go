@@ -1178,9 +1178,35 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := s.KeriDriver.CreateInceptionAnchored(
-		req.PublicKey, req.NextPublicKey, "", req.OwnerAID,
-		[]map[string]interface{}{keyAnchor})
+	// Designate witnesses in the event that founds the identity.
+	//
+	// The only moment this can be done without a rotation, and the moment it
+	// matters most: an identity founded with no observer has nothing to
+	// contradict a second, equally well-formed history invented later.
+	//
+	// What goes in are witness KEYS, each confirmed against the service
+	// answering at that address before it is written into an event that cannot
+	// be amended.
+	var (
+		witnesses []string
+		toad      int
+	)
+	if s.WitnessService != nil {
+		witnesses, toad = s.WitnessService.WitnessesForNewIdentity(witness.AidKindRoot, "")
+		if len(witnesses) == 0 {
+			log.Printf("[identity-agent-core] INCEPTION: no designatable witnesses, so this " +
+				"identity is founded unwitnessed")
+		}
+	}
+
+	result, err := s.KeriDriver.Incept(drivers.InceptionRequest{
+		PublicKey:     req.PublicKey,
+		NextPublicKey: req.NextPublicKey,
+		OwnerAID:      req.OwnerAID,
+		AnchorData:    []map[string]interface{}{keyAnchor},
+		Witnesses:     witnesses,
+		Toad:          toad,
+	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to create inception event", err.Error())
 		return
@@ -3329,6 +3355,9 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
 		KEL       []map[string]interface{} `json:"kel"`
 		JCard     *store.JCard             `json:"jcard,omitempty"`
 		Photo     string                   `json:"photo,omitempty"`
+		// What this contact can do for others — see the other resolve path.
+		BackendType string `json:"backend_type"`
+		WitnessKey  string `json:"witness_key"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&oobiData); err != nil {
 		writeError(w, http.StatusBadGateway, "Invalid OOBI response", fmt.Sprintf("Could not parse response: %v", err))
@@ -3338,6 +3367,10 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
 	if oobiData.AID == "" {
 		writeError(w, http.StatusBadGateway, "Invalid OOBI response", "Response did not contain an AID")
 		return
+	}
+
+	if s.WitnessService != nil {
+		s.WitnessService.RecordContactCapability(oobiData.AID, oobiData.BackendType, oobiData.WitnessKey)
 	}
 
 	// Check the key log, from the bytes it was published as where they came

@@ -93,3 +93,26 @@ func (s *Service) RecordContactCapability(contactAID, backendType, witnessKey st
 	}
 	_ = s.Store.SaveContactMeta(*meta)
 }
+
+// WitnessesForNewIdentity returns the witnesses to designate in an inception
+// event, and how many of them must receipt for it to count as witnessed.
+//
+// Called at the one moment designation is possible without a rotation. What
+// comes back is witness KEYS: an event names the key its receipts verify
+// against, so a witness this agent knows only as a contact cannot be named
+// until that contact publishes one.
+//
+// An empty result is a real answer. An identity with no designated witnesses is
+// correctly reported as unwitnessed, and that is a smaller problem than one
+// that names observers whose receipts nobody can check — in an event that can
+// never be amended.
+func (s *Service) WitnessesForNewIdentity(kind AidKind, aid string) (keys []string, toad int) {
+	if s == nil {
+		return nil, 0
+	}
+	candidates, err := s.enrolledWitnesses(kind, aid)
+	if err != nil {
+		return nil, 0
+	}
+	return DesignatableWitnesses(candidates)
+}

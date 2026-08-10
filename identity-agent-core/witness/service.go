@@ -380,7 +380,17 @@ func (s *Service) enrolledWitnesses(kind AidKind, aid string) ([]witnessTarget, 
 		if meta != nil && meta.WitnessStatus == StatusOffline {
 			continue
 		}
-		out = append(out, witnessTarget{AID: c.AID, URL: c.OobiURL, Commercial: commercial})
+		// The contact's own witness key travels with it, because that — not the
+		// contact identifier — is what an event names when it designates. A
+		// contact whose key this agent has not learned can still be sent events
+		// to witness; it just cannot be written into one.
+		witnessKey := ""
+		if meta != nil {
+			witnessKey = meta.WitnessKey
+		}
+		out = append(out, witnessTarget{
+			AID: c.AID, URL: c.OobiURL, WitnessKey: witnessKey, Commercial: commercial,
+		})
 	}
 	// Top up from the bootstrap pool while there are too few contacts to reach
 	// a threshold worth having. Appended rather than preferred, so somebody

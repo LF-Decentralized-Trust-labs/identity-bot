@@ -25,6 +25,11 @@ package drivers
 // the specification, which is the arrangement being dismantled.
 type KeriEngine interface {
 	// Identity creation and key rotation.
+	//
+	// Incept is the full form and the only one that can designate witnesses.
+	// The others are conveniences over it, kept because most callers want
+	// neither witnesses nor an owner and should not have to say so.
+	Incept(req InceptionRequest) (*DriverInceptionResponse, error)
 	CreateInception(publicKey, nextPublicKey string) (*DriverInceptionResponse, error)
 	CreateInceptionNamed(publicKey, nextPublicKey, name string) (*DriverInceptionResponse, error)
 	CreateOwnedInception(publicKey, nextPublicKey, name, ownerAID string) (*DriverInceptionResponse, error)
@@ -94,3 +99,27 @@ type KeriEngine interface {
 // means a call site somewhere is about to lose an implementation without anyone
 // noticing.
 var _ KeriEngine = (*KeriDriver)(nil)
+
+// InceptionRequest is everything an identity can be founded with.
+//
+// Witnesses matter here in a way they do not anywhere else: they are written
+// into the inception event, so they are part of what the identifier IS. They
+// cannot be added to an existing identity's founding afterwards, only amended
+// by a later rotation — and an identity founded with none has no observer for
+// the one event that establishes its keys.
+type InceptionRequest struct {
+	PublicKey     string
+	NextPublicKey string
+	// Name is what the engine files the identity under. Empty means the
+	// identifier itself.
+	Name string
+	// OwnerAID names who this identity answers to, anchored in the event.
+	OwnerAID string
+	// Witnesses are NON-TRANSFERABLE witness keys, not contact identifiers.
+	// What the event names has to be the key its receipts verify against, or
+	// checking one means resolving a key log first, forever.
+	Witnesses []string
+	// Toad is how many of those must receipt an event for it to be considered
+	// witnessed. Zero lets the implementation derive a majority.
+	Toad int
+}
