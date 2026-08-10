@@ -36,7 +36,7 @@ type EventPoster func(ctx context.Context, witnessURL string, body []byte) (map[
 type Service struct {
 	Store       Store
 	Contacts    ContactStore
-	Driver      *drivers.KeriDriver
+	Driver      drivers.KeriEngine
 	HTTPClient  *http.Client
 	PostEvent   EventPoster
 	OurAID      func() string
@@ -57,7 +57,7 @@ type Service struct {
 	finalizeWg map[string]chan struct{}
 }
 
-func NewService(st Store, contacts ContactStore, driver *drivers.KeriDriver, backendType string) *Service {
+func NewService(st Store, contacts ContactStore, driver drivers.KeriEngine, backendType string) *Service {
 	if backendType == "" {
 		backendType = BackendDesktop
 	}

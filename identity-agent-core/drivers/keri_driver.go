@@ -188,6 +188,18 @@ type DriverReloadIdentityRequest struct {
 	SequenceNumber int                      `json:"sequence_number"`
 	LastSAID       string                   `json:"last_said"`
 	KEL            []map[string]interface{} `json:"kel"`
+	// RawEventsB64[i] is the canonical serialisation of KEL[i], where the
+	// stored record has one.
+	//
+	// KEL alone is not enough to restore a log that can be verified: it is
+	// marshalled from a map, so its field order is sorted rather than original,
+	// and an event rebuilt from it hashes to a different digest than the one it
+	// carries. An engine handed only that can continue the log but can never
+	// check the history it was handed.
+	//
+	// Empty entries are expected for events stored before the canonical bytes
+	// were kept.
+	RawEventsB64 []string `json:"raw_events_b64,omitempty"`
 }
 
 type DriverReloadIdentityResponse struct {

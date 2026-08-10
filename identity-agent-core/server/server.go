@@ -23,6 +23,7 @@ import (
 	"identity-agent-core/drivers"
 	"identity-agent-core/endpoint"
 	"identity-agent-core/iacrypto"
+	"identity-agent-core/keriengine"
 	"identity-agent-core/linkverifier"
 	"identity-agent-core/login"
 	"identity-agent-core/oidc"
@@ -51,7 +52,7 @@ type CoreServer struct {
 	// proved ownership once on the device that holds the key.
 	BrowserSessions *browserSessions
 	AIMemory        *store.AIMemoryStore
-	KeriDriver      *drivers.KeriDriver
+	KeriDriver      drivers.KeriEngine
 	TunnelManager   *tunnel.Manager
 	EndpointService *endpoint.EndpointService
 	SandboxManager  *sandbox.Manager
@@ -251,17 +252,41 @@ func New(cfg Config) (*CoreServer, error) {
 	s.WitnessService = wsvc
 	go witness.StartHeartbeatLoop(wsvc, ctx.Done())
 
-	if cfg.EnableKeriDriver {
-		s.KeriDriver = drivers.NewKeriDriver()
-		if err := s.KeriDriver.Start(); err != nil {
+	// Choose a KERI engine.
+	//
+	// Two implementations satisfy the same interface. The Python driver is a
+	// subprocess: it needs a Python runtime, and on a phone it cannot run at
+	// all. The Go engine runs in-process and therefore runs everywhere.
+	//
+	// Where the driver is not enabled — which is every mobile build — the Go
+	// engine is used. That is a change in what those builds can do rather than
+	// a change of implementation: with no engine at all, every KERI call site
+	// in this package took its "not available" branch, and a phone could not
+	// perform a KERI operation through the core.
+	//
+	// Where the driver IS enabled, it stays the default, because it is what
+	// desktop has been running. KERI_ENGINE=go selects the Go engine there too.
+	switch {
+	case cfg.EnableKeriDriver && os.Getenv("KERI_ENGINE") != "go":
+		driver := drivers.NewKeriDriver()
+		if err := driver.Start(); err != nil {
 			cancel()
 			dataStore.Close()
 			return nil, fmt.Errorf("failed to start KERI driver: %w", err)
 		}
-		// If an identity already exists in the DB, seed the driver's in-memory
-		// state so IssueCredential and Interact work without a fresh inception.
-		s.reloadIdentityIntoDriver()
+		s.KeriDriver = driver
+	default:
+		s.KeriDriver = keriengine.New()
+		if err := s.KeriDriver.Start(); err != nil {
+			cancel()
+			dataStore.Close()
+			return nil, fmt.Errorf("failed to start the KERI engine: %w", err)
+		}
 	}
+	// Seed the engine from what was persisted, so issuing and anchoring work
+	// after a restart without a fresh inception. Both implementations start
+	// empty, so both need this.
+	s.reloadIdentityIntoDriver()
 
 	if s.WitnessService != nil {
 		s.WitnessService.Driver = s.KeriDriver
@@ -472,9 +497,13 @@ func (s *CoreServer) Start() error {
 	log.Printf("[identity-agent-core] Server listening on %s", addr)
 	log.Printf("[identity-agent-core] Endpoint URL: %s (source: %s)", s.EndpointService.CurrentURL(), s.EndpointService.Source())
 	if s.KeriDriver != nil {
-		log.Printf("[identity-agent-core] KERI driver: %s", s.KeriDriver.BaseURL)
+		if st, err := s.KeriDriver.GetStatus(); err == nil {
+			log.Printf("[identity-agent-core] KERI engine: %s (%s)", st.Driver, st.KeriLibrary)
+		} else {
+			log.Printf("[identity-agent-core] KERI engine: present, status unavailable: %v", err)
+		}
 	} else {
-		log.Printf("[identity-agent-core] KERI driver: disabled (mobile mode — use Rust bridge)")
+		log.Printf("[identity-agent-core] KERI engine: none configured — KERI operations will be refused")
 	}
 
 	go func() {
@@ -1002,11 +1031,16 @@ func (s *CoreServer) handleInfo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if s.KeriDriver != nil {
-		driverInfo.URL = s.KeriDriver.BaseURL
 		status, err := s.KeriDriver.GetStatus()
 		if err == nil {
 			driverInfo.Status = status.Status
 			driverInfo.Library = status.KeriLibrary
+			// An in-process engine has no address. Reporting one would invite a
+			// reader to go looking for a service that is not there.
+			driverInfo.URL = status.ScriptPath
+			if driverInfo.URL == "" {
+				driverInfo.URL = "in-process"
+			}
 		} else {
 			driverInfo.Status = "unknown"
 			driverInfo.Library = "unknown"
@@ -1175,6 +1209,7 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 		SequenceNumber: 0,
 		EventType:      "icp",
 		EventJSON:      string(eventJSON),
+		RawBytesB64:    result.RawBytesB64,
 		PublicKey:      result.PublicKey,
 		NextKeyDigest:  result.NextKeyDigest,
 		Timestamp:      now,
@@ -1387,6 +1422,7 @@ func (s *CoreServer) handleRotation(w http.ResponseWriter, r *http.Request) {
 		SequenceNumber: result.SequenceNumber,
 		EventType:      "rot",
 		EventJSON:      string(eventJSON),
+		RawBytesB64:    result.RawBytesB64,
 		PublicKey:      result.NewPublicKey,
 		NextKeyDigest:  result.NewNextKeyDigest,
 		Timestamp:      now,
@@ -1447,6 +1483,7 @@ func (s *CoreServer) handleInteract(w http.ResponseWriter, r *http.Request) {
 		SequenceNumber: result.SequenceNumber,
 		EventType:      "ixn",
 		EventJSON:      string(eventJSON),
+		RawBytesB64:    result.RawBytesB64,
 		Timestamp:      now,
 		CesrSignature:  req.CesrSignature,
 		RawBytesB64:    result.RawBytesB64,
@@ -1731,6 +1768,7 @@ func (s *CoreServer) handleIssueCredential(w http.ResponseWriter, r *http.Reques
 		SequenceNumber: result.SequenceNumber,
 		EventType:      "ixn",
 		EventJSON:      string(ixnEventJSON),
+		RawBytesB64:    result.IxnRawBytesB64,
 		PublicKey:      identity.PublicKey, // may need rel pub if separate, but reuse root pub state for now
 		NextKeyDigest:  identity.NextKeyDigest,
 		Timestamp:      time.Now().UTC().Format(time.RFC3339),
@@ -4018,6 +4056,10 @@ func (s *CoreServer) reloadIdentityIntoDriver() {
 
 	// Parse each stored event_json into a KED dict and track the last SAID
 	kel := make([]map[string]interface{}, 0, len(events))
+	// Carried alongside the parsed events so an engine can verify the history
+	// rather than only continue it. Entries are empty for events stored before
+	// the canonical bytes were kept.
+	rawEvents := make([]string, 0, len(events))
 	lastSAID := ""
 	lastSN := 0
 	for _, ev := range events {
@@ -4027,6 +4069,7 @@ func (s *CoreServer) reloadIdentityIntoDriver() {
 			continue
 		}
 		kel = append(kel, ked)
+		rawEvents = append(rawEvents, ev.RawBytesB64)
 		if d, ok := ked["d"].(string); ok && d != "" {
 			lastSAID = d
 		}
@@ -4042,6 +4085,7 @@ func (s *CoreServer) reloadIdentityIntoDriver() {
 		SequenceNumber: lastSN,
 		LastSAID:       lastSAID,
 		KEL:            kel,
+		RawEventsB64:   rawEvents,
 	}
 
 	result, err := s.KeriDriver.ReloadIdentity(req)

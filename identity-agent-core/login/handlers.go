@@ -37,7 +37,7 @@ func loadRelationshipSeed(h *Handler, rel *SiteRelationship) ([]byte, error) {
 type Handler struct {
 	Store          *RelationshipStore
 	Pending        *PendingStore
-	KeriDriver     *drivers.KeriDriver
+	KeriDriver     drivers.KeriEngine
 	DevRelay       string
 	HTTPClient     *http.Client
 	TrustGate      *secureenclave.TrustGate
@@ -79,7 +79,7 @@ func isCredentialUsable(status string) bool {
 	}
 }
 
-func NewHandler(dataDir string, keri *drivers.KeriDriver) (*Handler, error) {
+func NewHandler(dataDir string, keri drivers.KeriEngine) (*Handler, error) {
 	store, err := NewRelationshipStore(dataDir)
 	if err != nil {
 		return nil, err

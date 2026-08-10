@@ -16,7 +16,7 @@ import (
 
 type Handler struct {
 	Store      *Store
-	KeriDriver *drivers.KeriDriver
+	KeriDriver drivers.KeriEngine
 	dataDir    string
 
 	// RootAID returns the AID of the agent's root identity (the delegator for per-asset
@@ -42,7 +42,7 @@ type Handler struct {
 	PersistDelegationAnchor func(rootAID string, delegatorIxn map[string]interface{}) error
 }
 
-func NewHandler(dataDir string, keri *drivers.KeriDriver) (*Handler, error) {
+func NewHandler(dataDir string, keri drivers.KeriEngine) (*Handler, error) {
 	st, err := NewStore(dataDir)
 	if err != nil {
 		return nil, err

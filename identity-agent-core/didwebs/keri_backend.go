@@ -8,7 +8,7 @@ import (
 
 // KeriDriverBackend adapts the Python KERI driver for local KEL replay.
 type KeriDriverBackend struct {
-	Driver *drivers.KeriDriver
+	Driver drivers.KeriEngine
 }
 
 func (b *KeriDriverBackend) ValidateKEL(ctx context.Context, aid string, events []map[string]interface{}) (bool, string, []string, error) {
