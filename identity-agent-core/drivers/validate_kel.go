@@ -213,3 +213,36 @@ func DecodeRawEvents(rawB64 []string) ([][]byte, error) {
 func (d *KeriDriver) ValidateKELBytes(in ValidateKELInput) (*DriverValidateKELResponse, error) {
 	return ValidateKELFromBytes(in)
 }
+
+// ValidateKELInputFromRecords builds validation input out of the record shape
+// the agent publishes in an OOBI and keeps in its store.
+//
+// A published key log travels as event records rather than bare events: each
+// carries the event, the canonical bytes it was published as, and the
+// controller's signature over them. This pulls out the two that can be checked.
+//
+// ok is false when the canonical bytes are not all there — a log published by
+// an older agent, or by somebody else's implementation that does not send them.
+// That is not an error and must not be treated as one; it means only the
+// structure can be examined, and the caller has to say so rather than reporting
+// a verification it did not perform.
+func ValidateKELInputFromRecords(aid string, records []map[string]interface{}) (ValidateKELInput, bool) {
+	in := ValidateKELInput{AID: aid}
+	if len(records) == 0 {
+		return in, false
+	}
+	for _, rec := range records {
+		rawB64, _ := rec["raw_bytes_b64"].(string)
+		if rawB64 == "" {
+			return ValidateKELInput{AID: aid}, false
+		}
+		raw, err := base64.StdEncoding.DecodeString(rawB64)
+		if err != nil {
+			return ValidateKELInput{AID: aid}, false
+		}
+		sig, _ := rec["cesr_signature"].(string)
+		in.RawEvents = append(in.RawEvents, raw)
+		in.CesrSignatures = append(in.CesrSignatures, sig)
+	}
+	return in, true
+}

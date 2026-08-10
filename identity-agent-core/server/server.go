@@ -3179,12 +3179,31 @@ func (s *CoreServer) handleResolveOobiContact(w http.ResponseWriter, r *http.Req
 	kelCount := len(oobiData.KEL)
 	log.Printf("[identity-agent-core] OOBI-RESOLVE: Success — AID=%s, alias=%s, KEL events=%d", oobiData.AID, oobiData.Alias, kelCount)
 
-	// Validate the KEL via the Python driver (desktop only — driver is nil on mobile).
+	// Check the key log this stranger just handed us.
+	//
+	// Preferring the canonical bytes is the whole of it. From the parsed events
+	// alone, neither of the two questions that matter can be answered: whether
+	// the inception actually derives the identifier being claimed, and whether
+	// anything in the log was signed. What remains is that the fields refer to
+	// each other consistently, which a forged log does too — because whoever
+	// forged it wrote every one of those fields.
 	kelVerified := false
 	currentPublicKey := oobiData.PublicKey
 	var validationErrors []string
 	if s.KeriDriver != nil && kelCount > 0 {
-		valResult, err := s.KeriDriver.ValidateKEL(oobiData.AID, oobiData.KEL)
+		var valResult *drivers.DriverValidateKELResponse
+		var err error
+		if in, ok := drivers.ValidateKELInputFromRecords(oobiData.AID, oobiData.KEL); ok {
+			valResult, err = s.KeriDriver.ValidateKELBytes(in)
+		} else {
+			// The log came without the bytes it was published as — an older
+			// agent, or another implementation that does not send them. Only
+			// the structure can be looked at, and the result says so rather
+			// than reading as a verification that happened.
+			log.Printf("[identity-agent-core] OOBI-RESOLVE: %s published no canonical bytes; "+
+				"its log can be read but its signatures cannot be checked", oobiData.AID)
+			valResult, err = s.KeriDriver.ValidateKEL(oobiData.AID, oobiData.KEL)
+		}
 		if err != nil {
 			log.Printf("[identity-agent-core] OOBI-RESOLVE: KEL validation error for %s: %v", oobiData.AID, err)
 			validationErrors = []string{err.Error()}
@@ -3296,11 +3315,20 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate KEL (desktop only).
+	// Check the key log, from the bytes it was published as where they came
+	// with it. See the note on the other resolve path: the parsed events alone
+	// cannot show that the inception derives this identifier, nor that anything
+	// was signed, and a forged log satisfies everything that remains.
 	kelVerified := false
 	currentPublicKey := oobiData.PublicKey
 	if s.KeriDriver != nil && len(oobiData.KEL) > 0 {
-		valResult, err := s.KeriDriver.ValidateKEL(oobiData.AID, oobiData.KEL)
+		var valResult *drivers.DriverValidateKELResponse
+		var err error
+		if in, ok := drivers.ValidateKELInputFromRecords(oobiData.AID, oobiData.KEL); ok {
+			valResult, err = s.KeriDriver.ValidateKELBytes(in)
+		} else {
+			valResult, err = s.KeriDriver.ValidateKEL(oobiData.AID, oobiData.KEL)
+		}
 		if err != nil {
 			log.Printf("[identity-agent-core] CONTACT: KEL validation error for %s: %v", oobiData.AID, err)
 		} else {

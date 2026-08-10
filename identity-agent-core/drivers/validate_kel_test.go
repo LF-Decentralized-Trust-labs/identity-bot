@@ -1,6 +1,7 @@
 package drivers
 
 import (
+	"encoding/base64"
 	"strings"
 	"testing"
 
@@ -185,5 +186,74 @@ func TestAnEmptyLogIsNotAVerdict(t *testing.T) {
 func TestEventsWithoutCanonicalBytesAreRefusedRatherThanGuessed(t *testing.T) {
 	if _, err := DecodeRawEvents([]string{""}); err == nil {
 		t.Fatal("an event with no canonical bytes was accepted for verification")
+	}
+}
+
+// recordsFor packages a log the way the agent publishes one in an OOBI: event
+// records carrying the canonical bytes and the controller's signature.
+func recordsFor(raws [][]byte, sigs []string) []map[string]interface{} {
+	out := make([]map[string]interface{}, 0, len(raws))
+	for i, raw := range raws {
+		rec := map[string]interface{}{
+			"sequence_number": i,
+			"event_json":      string(raw),
+			"raw_bytes_b64":   base64.StdEncoding.EncodeToString(raw),
+		}
+		if i < len(sigs) {
+			rec["cesr_signature"] = sigs[i]
+		}
+		out = append(out, rec)
+	}
+	return out
+}
+
+// A published log verifies through the record shape an OOBI actually carries.
+func TestAPublishedLogVerifiesFromItsRecords(t *testing.T) {
+	aid, raws, sigs := signedLog(t)
+	in, ok := ValidateKELInputFromRecords(aid, recordsFor(raws, sigs))
+	if !ok {
+		t.Fatal("records carrying canonical bytes were not recognised as verifiable")
+	}
+	got, err := ValidateKELFromBytes(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.KelVerified {
+		t.Fatalf("a genuine published log did not verify: %v", got.ValidationErrors)
+	}
+}
+
+// The case this whole path exists for. Somebody hands over a log that holds
+// together perfectly — chain, sequence, signatures, all self-consistent —
+// claiming it belongs to an identity it does not. Parsed-event validation
+// accepts that, because every field it compares was written by the forger.
+func TestAForgedLogPresentedAsSomebodyElsesIsRefused(t *testing.T) {
+	victim, _, _ := signedLog(t)
+	_, forgedRaws, forgedSigs := signedLog(t)
+
+	in, ok := ValidateKELInputFromRecords(victim, recordsFor(forgedRaws, forgedSigs))
+	if !ok {
+		t.Fatal("the records were not recognised as verifiable")
+	}
+	got, err := ValidateKELFromBytes(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.KelVerified {
+		t.Fatal("a well-formed log was accepted as belonging to an identity that did not " +
+			"publish it — impersonation would succeed")
+	}
+}
+
+// A log published without canonical bytes — an older agent, or another
+// implementation — must be reported as unverifiable rather than silently
+// validated by a weaker route that looks the same to the caller.
+func TestRecordsWithoutCanonicalBytesAreNotTreatedAsVerifiable(t *testing.T) {
+	aid, raws, sigs := signedLog(t)
+	records := recordsFor(raws, sigs)
+	delete(records[1], "raw_bytes_b64")
+
+	if _, ok := ValidateKELInputFromRecords(aid, records); ok {
+		t.Fatal("a log missing canonical bytes was offered up as verifiable")
 	}
 }

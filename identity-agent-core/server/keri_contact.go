@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"identity-agent-core/backup"
+	"identity-agent-core/drivers"
 	"identity-agent-core/secureenclave"
 	"identity-agent-core/store"
 )
@@ -70,11 +71,19 @@ func (s *CoreServer) EnsureKeriContact(oobiURL string) (*store.ContactRecord, bo
 		return existing, false, nil
 	}
 
-	// Validate the KEL (desktop driver only).
+	// Check the key log, from the bytes it was published as where they came with
+	// it. Parsed events cannot show that the inception derives this identifier
+	// or that anything was signed, and a forged log satisfies what is left.
 	kelVerified := false
 	currentPublicKey := oobiData.PublicKey
 	if s.KeriDriver != nil && len(oobiData.KEL) > 0 {
-		if valResult, verr := s.KeriDriver.ValidateKEL(oobiData.AID, oobiData.KEL); verr != nil {
+		validate := func() (*drivers.DriverValidateKELResponse, error) {
+			if in, ok := drivers.ValidateKELInputFromRecords(oobiData.AID, oobiData.KEL); ok {
+				return s.KeriDriver.ValidateKELBytes(in)
+			}
+			return s.KeriDriver.ValidateKEL(oobiData.AID, oobiData.KEL)
+		}
+		if valResult, verr := validate(); verr != nil {
 			log.Printf("[identity-agent-core] EnsureKeriContact: KEL validation error for %s: %v", oobiData.AID, verr)
 		} else {
 			kelVerified = valResult.KelVerified
