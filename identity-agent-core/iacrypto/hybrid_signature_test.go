@@ -87,8 +87,8 @@ func TestC2HybridSignatureGolden(t *testing.T) {
 		t.Fatal("pqc-corrupt vector should reject")
 	}
 	single := copyMap(inc.InceptionEvent)
-	keys, ok := inc.InceptionEvent["k"].([]string)
-	if !ok {
+	keys := stringSlice(inc.InceptionEvent["k"])
+	if len(keys) == 0 {
 		t.Fatalf("unexpected k type: %T", inc.InceptionEvent["k"])
 	}
 	single["k"] = []string{keys[0]}

@@ -70,7 +70,7 @@ func TestCrossEngineByteIdentitySeed0(t *testing.T) {
 	if ked["ka"] != nil {
 		t.Fatal("top-level ka must not be present (KERI-conformant)")
 	}
-	k, _ := ked["k"].([]string)
+	k := stringSlice(ked["k"])
 	if len(k) != golden.HybridInception.SigningKeysInK {
 		t.Fatalf("k len: %d", len(k))
 	}
@@ -104,8 +104,8 @@ func TestSyntheticHybridInceptionStructure(t *testing.T) {
 	if res.AID == "" || res.SAID == "" {
 		t.Fatal("expected non-empty aid and said")
 	}
-	k, ok := res.InceptionEvent["k"].([]string)
-	if !ok || len(k) != 2 {
+	k := stringSlice(res.InceptionEvent["k"])
+	if len(k) != 2 {
 		t.Fatalf("ked k: %v", res.InceptionEvent["k"])
 	}
 	if k[0][0:1] != "D" {
@@ -114,4 +114,27 @@ func TestSyntheticHybridInceptionStructure(t *testing.T) {
 	if k[1][0:4] != iacrypto.CESRMLDSA65Verkey {
 		t.Fatalf("ML-DSA key prefix: %s", k[1][:4])
 	}
+}
+
+// stringSlice reads a string array from a decoded event field, which may be
+// []string or []interface{} depending on whether the event was built in memory
+// or round-tripped through JSON. Production code already tolerates both — see
+// SigningKeyCount — so a test that insists on one is asserting an implementation
+// detail rather than a property of the event.
+func stringSlice(v interface{}) []string {
+	switch t := v.(type) {
+	case []string:
+		return t
+	case []interface{}:
+		out := make([]string, 0, len(t))
+		for _, e := range t {
+			s, ok := e.(string)
+			if !ok {
+				return nil
+			}
+			out = append(out, s)
+		}
+		return out
+	}
+	return nil
 }
