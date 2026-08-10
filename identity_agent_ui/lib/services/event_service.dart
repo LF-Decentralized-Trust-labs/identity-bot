@@ -78,10 +78,21 @@ class EventService {
   }
 
   Uri _buildWebSocketUri() {
-    if (_baseUrl.isEmpty && kIsWeb) {
-      final pageUri = Uri.base;
-      final wsScheme = pageUri.scheme == 'https' ? 'wss' : 'ws';
-      return Uri.parse('$wsScheme://${pageUri.host}:${pageUri.port}/api/ws/events');
+    // On the web the base is a PATH, not a URL — empty when the agent is served
+    // at the root of a hostname, and `/{prefix}` when it is served under one.
+    // A socket needs an absolute ws:// or wss:// URL either way, so the page's
+    // own origin supplies the scheme, host and port, and the base supplies the
+    // prefix.
+    //
+    // Both halves matter. Without the origin this is a relative URI and the
+    // connection is refused for having no scheme; without the prefix it
+    // connects to the wrong place on a host that serves several agents under
+    // one hostname.
+    if (kIsWeb) {
+      final page = Uri.base;
+      final scheme = page.scheme == 'https' ? 'wss' : 'ws';
+      final authority = page.hasPort ? '${page.host}:${page.port}' : page.host;
+      return Uri.parse('$scheme://$authority$_baseUrl/api/ws/events');
     }
 
     final wsUrl = _baseUrl
