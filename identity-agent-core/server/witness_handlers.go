@@ -24,6 +24,7 @@ func (s *CoreServer) mountWitnessRoutes(r chi.Router) {
 	r.Post("/witness/endpoint", s.handleWitnessEndpointRecord)
 	r.Get("/witness/endpoint/{controller_aid}", s.handleWitnessEndpointLookup)
 	r.Get("/witness/tel/{issuer_aid}", s.handleWitnessTELStub)
+	s.withdrawalRoutes(r)
 }
 
 func (s *CoreServer) handleWitnessEvent(w http.ResponseWriter, r *http.Request) {
