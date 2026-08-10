@@ -25,7 +25,7 @@ require (
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
 	github.com/geoffgarside/ber v1.1.0 // indirect
 	github.com/go-stack/stack v1.8.1 // indirect
-	github.com/grapeid/keri-go v0.1.1
+	github.com/grapeid/keri-go v0.1.2
 	github.com/inconshreveable/log15 v3.0.0-testing.5+incompatible // indirect
 	github.com/inconshreveable/log15/v3 v3.0.0-testing.5 // indirect
 	github.com/jpillora/backoff v1.0.0 // indirect
