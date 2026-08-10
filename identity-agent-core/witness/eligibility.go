@@ -97,7 +97,8 @@ func NormaliseEntityType(v string) EntityType {
 	}
 }
 
-// PeerWitnessAllowedAcross reports whether one entity may witness for another.
+// PeerAllowedAcross reports whether one entity may act as a peer for another —
+// as a witness, and equally as a watcher.
 //
 // An individual is witnessed by individuals and an organization by
 // organizations. Never across, and this is a boundary rather than a preference.
@@ -119,12 +120,28 @@ func NormaliseEntityType(v string) EntityType {
 // costs the individual something they cannot take back, so the two are kept
 // apart rather than balanced against each other.
 //
-// COMMERCIAL WITNESSES ARE NOT PEERS and are not governed by this. A dedicated
-// witness service serves a large population, so naming one says almost nothing
-// about who its subject is — the same reason pairwise AIDs may use them and may
-// not use contacts. Without that exemption a newly created individual identity
-// could be witnessed by nobody at all, since it has no contacts yet.
-func PeerWitnessAllowedAcross(ours, theirs EntityType) bool {
+// The same rule governs WATCHING, for reasons that rhyme rather than repeat. A
+// watcher is not named in any key event, so it carries none of the permanence —
+// but a watcher learns which identities its subject is checking on, an
+// organization accumulates that across everybody it serves, and the watchers an
+// agent publishes as hints disclose who has seen its log. An organization
+// watching for individuals therefore builds a picture of many people's
+// activity, and an individual watching for an organization is drawn into
+// business it has no standing in.
+//
+// SERVICE PROVIDERS ARE NOT PEERS and are not governed by this. A registered
+// witness or watcher serves a large population, so naming one says almost
+// nothing about who its subject is — the same reason pairwise AIDs may use them
+// and may not use contacts. Without that exemption a newly created individual
+// identity could be witnessed by nobody at all, since it has no contacts yet.
+//
+// It also resolves the case that looks like it needs a special rule: an
+// individual who wants an organization to watch for them. The answer is that
+// such an organization registers as a watcher service. That is not a loophole,
+// it is the point — registering converts a private arrangement into a declared
+// one that serves a population, which is exactly the property that makes naming
+// it safe.
+func PeerAllowedAcross(ours, theirs EntityType) bool {
 	if ours == EntityUnknown || theirs == EntityUnknown {
 		// Refused rather than assumed. The cost of wrongly allowing it is a
 		// permanent disclosure in somebody's founding event; the cost of

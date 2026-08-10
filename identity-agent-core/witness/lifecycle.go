@@ -145,5 +145,14 @@ func (s *Service) peerWitnessAllowed(meta *ContactMeta) bool {
 	if meta == nil {
 		return false
 	}
-	return PeerWitnessAllowedAcross(s.OurEntityType(), NormaliseEntityType(meta.EntityType))
+	return PeerAllowedAcross(s.OurEntityType(), NormaliseEntityType(meta.EntityType))
+}
+
+// ContactMetaFor exposes what this agent recorded about a contact, so other
+// parts of the agent can apply the same boundary without a second store.
+func (s *Service) ContactMetaFor(aid string) (*ContactMeta, error) {
+	if s == nil || s.Store == nil {
+		return nil, nil
+	}
+	return s.Store.GetContactMeta(aid)
 }

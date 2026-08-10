@@ -11,6 +11,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -60,11 +61,13 @@ type CoreServer struct {
 	StartTime       time.Time
 	Port            int
 	DataDir         string
-	AppCtx          context.Context
-	cancel          context.CancelFunc
-	listener        net.Listener
-	router          chi.Router
-	flutterWebDir   string
+	// DeclaredEntityType is what the build said it serves — see Config.
+	DeclaredEntityType string
+	AppCtx             context.Context
+	cancel             context.CancelFunc
+	listener           net.Listener
+	router             chi.Router
+	flutterWebDir      string
 
 	// See Config.RequireOwnerAtInception.
 	requireOwnerAtInception bool
@@ -126,7 +129,22 @@ type Config struct {
 	DataDir          string
 	Port             int
 	EnableKeriDriver bool
-	FlutterWebDir    string
+	// EntityType declares whether this build serves a person or an
+	// organization: "individual" or "organization".
+	//
+	// Declared by the implementation rather than discovered, because the
+	// implementation is the only thing that knows. This core is shared: the
+	// same binary runs inside an app for people and an app for organizations,
+	// and it cannot tell which one it is inside. The app can, absolutely — you
+	// cannot found an organization in an app built for individuals — so the app
+	// says so, here.
+	//
+	// It matters because peer witnesses and watchers are restricted to the same
+	// kind. An agent that does not know what it is enrols no peers at all,
+	// which is safe and useless, so a build that leaves this empty is
+	// misconfigured and says so at startup.
+	EntityType    string
+	FlutterWebDir string
 
 	// RequireOwnerAtInception refuses to found an identity that names no owner.
 	//
@@ -177,6 +195,7 @@ func DefaultConfig() Config {
 		DataDir:                 dataDir,
 		Port:                    port,
 		EnableKeriDriver:        enableKeri,
+		EntityType:              os.Getenv("IDENTITY_AGENT_ENTITY_TYPE"),
 		FlutterWebDir:           webDir,
 		RequireOwnerAtInception: requireOwner,
 	}
@@ -207,17 +226,19 @@ func New(cfg Config) (*CoreServer, error) {
 		DataStore: dataStore,
 		// Loaded eagerly: an agent that cannot name an operator cannot become
 		// reachable, so failing here is better found at startup than at first use.
-		Providers:       provider.Load(cfg.DataDir),
-		BrowserSessions: newBrowserSessions(),
-		AIMemory:        aiMemory,
-		EndpointService: endpointSvc,
-		EventHub:        eventHub,
-		StartTime:       time.Now(),
-		Port:            cfg.Port,
-		DataDir:         cfg.DataDir,
-		AppCtx:          ctx,
-		cancel:          cancel,
+		Providers:          provider.Load(cfg.DataDir),
+		BrowserSessions:    newBrowserSessions(),
+		AIMemory:           aiMemory,
+		EndpointService:    endpointSvc,
+		EventHub:           eventHub,
+		StartTime:          time.Now(),
+		Port:               cfg.Port,
+		DataDir:            cfg.DataDir,
+		DeclaredEntityType: cfg.EntityType,
+		AppCtx:             ctx,
+		cancel:             cancel,
 	}
+	s.checkEntityTypeDeclared()
 
 	ws := watcher.NewService(watcher.NewSQLiteStore(dataStore.DB()))
 	ws.OnEvent = func(eventType string, payload map[string]interface{}) {
@@ -251,6 +272,19 @@ func New(cfg Config) (*CoreServer, error) {
 	wsvc.DataDir = cfg.DataDir
 	wsvc.OurEntityType = func() witness.EntityType {
 		return witness.NormaliseEntityType(s.ourEntityType())
+	}
+	wsvc.IsOfficialService = func(aidOrURL string) bool {
+		return s.Providers.IsOfficialService(provider.CapabilityWitness, aidOrURL)
+	}
+	// The same boundary governs watching. A registered watcher service is
+	// exempt; a contact is a peer and must be of the same kind.
+	ws.PeerAllowed = func(peerURL string) bool {
+		if s.Providers.IsOfficialService(provider.CapabilityWatcher, peerURL) {
+			return true
+		}
+		ours := witness.NormaliseEntityType(s.ourEntityType())
+		theirs := witness.NormaliseEntityType(s.entityTypeOfPeerURL(peerURL))
+		return witness.PeerAllowedAcross(ours, theirs)
 	}
 	wsvc.OnEvent = func(eventType string, payload map[string]interface{}) {
 		s.EventHub.Broadcast(AgentEvent{Type: eventType, Payload: payload})
@@ -4460,7 +4494,20 @@ func (s *CoreServer) onContactAccepted(aid string) {
 // enrols no peer witnesses at all, which is the safe direction: the cost of
 // getting it wrong is an individual's root identifier written permanently into
 // somebody else's public key log.
+// ourEntityType reports whether this agent belongs to a person or an
+// organization.
+//
+// What the BUILD declares wins. The implementation knows for certain — an app
+// for individuals cannot found an organization — whereas the profile is filled
+// in during onboarding and is empty until then, which would leave a fresh agent
+// unable to enrol any peer at the very moment it is establishing itself.
+//
+// The profile is used only when the build declared nothing, which is a
+// misconfigured build rather than a supported mode.
 func (s *CoreServer) ourEntityType() string {
+	if s.DeclaredEntityType != "" {
+		return s.DeclaredEntityType
+	}
 	if s.DataStore == nil {
 		return ""
 	}
@@ -4469,4 +4516,77 @@ func (s *CoreServer) ourEntityType() string {
 		return ""
 	}
 	return profile.EntityType
+}
+
+// checkEntityTypeDeclared complains at startup if this build did not say what
+// it is, or said something the profile contradicts.
+//
+// Loud rather than silent, because the symptom otherwise is that peer witnesses
+// and watchers quietly never enrol — an absence, which looks like nothing
+// happening rather than like a fault.
+func (s *CoreServer) checkEntityTypeDeclared() {
+	declared := s.DeclaredEntityType
+	if declared == "" {
+		log.Printf("[identity-agent-core] this build did not declare whether it serves an " +
+			"individual or an organization, so no peer witness or watcher will ever be " +
+			"enrolled. Set EntityType on the config, or IDENTITY_AGENT_ENTITY_TYPE.")
+		return
+	}
+	if declared != "individual" && declared != "organization" {
+		log.Printf("[identity-agent-core] this build declared entity type %q, which is neither "+
+			"individual nor organization; no peer witness or watcher will be enrolled", declared)
+		return
+	}
+	if s.DataStore == nil {
+		return
+	}
+	profile, err := s.DataStore.GetProfile()
+	if err != nil || profile == nil || profile.EntityType == "" {
+		return
+	}
+	if profile.EntityType != declared {
+		// Impossible if the apps are what they claim to be: an organization
+		// cannot be created in an app for individuals. Reported rather than
+		// reconciled, because whichever one is wrong, guessing would be worse.
+		log.Printf("[identity-agent-core] this build says it serves a %q but the profile says "+
+			"%q. One of them is wrong; the build is being used.", declared, profile.EntityType)
+	}
+}
+
+// entityTypeOfPeerURL finds what kind of entity is behind a peer URL, from the
+// contact it belongs to.
+//
+// Returns empty when no contact matches, which the boundary treats as unknown
+// and refuses. A peer this agent has no relationship with is not a peer.
+func (s *CoreServer) entityTypeOfPeerURL(peerURL string) string {
+	if s.WitnessService == nil || s.DataStore == nil || peerURL == "" {
+		return ""
+	}
+	contacts, err := s.DataStore.GetContacts()
+	if err != nil {
+		return ""
+	}
+	for _, c := range contacts {
+		if c.OobiURL == "" || !samePeerHost(c.OobiURL, peerURL) {
+			continue
+		}
+		if meta, _ := s.WitnessService.ContactMetaFor(c.AID); meta != nil {
+			return meta.EntityType
+		}
+	}
+	return ""
+}
+
+// samePeerHost compares two URLs by host, since a peer is reached at various
+// paths under one address.
+func samePeerHost(a, b string) bool {
+	ua, err := url.Parse(a)
+	if err != nil || ua.Host == "" {
+		return false
+	}
+	ub, err := url.Parse(b)
+	if err != nil || ub.Host == "" {
+		return false
+	}
+	return strings.EqualFold(ua.Host, ub.Host)
 }

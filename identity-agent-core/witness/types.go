@@ -71,7 +71,7 @@ type ContactMeta struct {
 	//
 	// It decides whether they may witness for us at all: the two kinds are kept
 	// apart, because a witness list is public and permanent and an individual's
-	// root identifier is meant to stay unexposed. See PeerWitnessAllowedAcross.
+	// root identifier is meant to stay unexposed. See PeerAllowedAcross.
 	EntityType      string
 	WitnessStatus   string
 	OfflineCount    int

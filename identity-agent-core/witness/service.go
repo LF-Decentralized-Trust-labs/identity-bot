@@ -57,6 +57,14 @@ type Service struct {
 	// organization. A peer may only witness for its own kind, so an agent that
 	// cannot answer this enrols no peer witnesses at all.
 	OurEntityType func() EntityType
+	// IsOfficialService reports whether a witness is a registered service
+	// provider rather than a peer.
+	//
+	// Service providers are exempt from the same-kind rule: one serves a large
+	// population, so naming it discloses almost nothing about its subject.
+	// Asked of the provider registry rather than read off a per-contact flag,
+	// so the exemption is a line in a shipped file that somebody can audit.
+	IsOfficialService func(aidOrURL string) bool
 
 	mu         sync.Mutex
 	finalizeWg map[string]chan struct{}
@@ -377,14 +385,21 @@ func (s *Service) enrolledWitnesses(kind AidKind, aid string) ([]witnessTarget, 
 			continue
 		}
 		meta, _ := s.Store.GetContactMeta(c.AID)
+		// A registered service provider counts as commercial whatever the
+		// contact record says, because the registry is the declaration and the
+		// flag is only a cache of one.
 		commercial := meta != nil && meta.IsCommercial
+		if !commercial && s.IsOfficialService != nil &&
+			(s.IsOfficialService(c.AID) || s.IsOfficialService(c.OobiURL)) {
+			commercial = true
+		}
 		if !ContactWitnessAllowedForAID(kind, commercial) {
 			continue
 		}
 		// Peers of the same kind only. An organization witnessing an individual
 		// would write that organization permanently into the individual's
 		// founding event, which is public and cannot be amended away — see
-		// PeerWitnessAllowedAcross. A dedicated witness service is not a peer
+		// PeerAllowedAcross. A dedicated witness service is not a peer
 		// and is not subject to this.
 		if !commercial && !s.peerWitnessAllowed(meta) {
 			continue

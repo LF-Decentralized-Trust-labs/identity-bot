@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -323,4 +324,53 @@ func (r *Registry) Count() int {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return len(r.providers)
+}
+
+// IsOfficialService reports whether an identifier or URL belongs to a
+// registered operator offering the given capability.
+//
+// This is what "service provider" means in this codebase: an operator listed in
+// the registry, offering a named capability at a named endpoint. It is a
+// declaration somebody made and shipped, not a property inferred from how a
+// peer happens to behave.
+//
+// It matters because service providers are exempt from the rule that keeps
+// individuals and organizations from witnessing or watching for one another. A
+// service serves a large population, so naming one discloses almost nothing
+// about its subject — which is exactly what a peer of the wrong kind would
+// disclose. Basing the exemption on the registry rather than on a flag stored
+// per contact means the exemption is auditable: it is a line in a file, not a
+// bit somebody set.
+func (r *Registry) IsOfficialService(c Capability, aidOrURL string) bool {
+	if r == nil || aidOrURL == "" {
+		return false
+	}
+	for _, p := range r.Offering(c) {
+		for _, e := range p.Endpoints {
+			if e.Capability != c {
+				continue
+			}
+			if e.AID != "" && e.AID == aidOrURL {
+				return true
+			}
+			if e.URL != "" && sameHost(e.URL, aidOrURL) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// sameHost compares two URLs by host, so a trailing path or slash does not
+// decide whether an operator is recognised.
+func sameHost(a, b string) bool {
+	ua, err := url.Parse(a)
+	if err != nil || ua.Host == "" {
+		return false
+	}
+	ub, err := url.Parse(b)
+	if err != nil || ub.Host == "" {
+		return false
+	}
+	return strings.EqualFold(ua.Host, ub.Host)
 }

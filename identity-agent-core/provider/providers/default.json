@@ -21,17 +21,7 @@
         {
           "capability": "witness",
           "url": "https://witness1.grapeid.org",
-          "aid": "EvRHjssG5WJjwq5c2AA8yOfY7VT3keG0XOtdRLz195P8"
-        },
-        {
-          "capability": "witness",
-          "url": "https://witness2.grapeid.org",
-          "aid": "EoO3LBQt1s_tot1yH1EFKMQ0Z4EMP2mp0jp3zw5u0Bn8"
-        },
-        {
-          "capability": "witness",
-          "url": "https://witness3.grapeid.org",
-          "aid": "EZEx_C9TEyy23To57F_r67Y5nvIe4KvrpXveyIpW4OFM"
+          "aid": "BMtfjviEMpF2xWVW0CRPKoVPX1mOMzNurvUjD-0RN_Jl"
         },
         {
           "capability": "watcher",

@@ -12,10 +12,13 @@ import (
 
 // Service is the watcher engine (L1 self-watch + L2/L3 clients).
 type Service struct {
-	Store   Store
-	L2      *L2Client
-	L3      *L3Client
-	OnEvent func(eventType string, payload map[string]interface{})
+	// PeerAllowed gates which peers this agent will cross-check with. See
+	// peer_boundary.go.
+	PeerAllowed PeerAllowed
+	Store       Store
+	L2          *L2Client
+	L3          *L3Client
+	OnEvent     func(eventType string, payload map[string]interface{})
 }
 
 func NewService(store Store) *Service {
@@ -281,6 +284,11 @@ func (s *Service) KelCheck(req KelCheckRequest) (*KelCheckResponse, error) {
 
 // CrossCheck queries a peer's /public/kel-check; L3 mismatch escalates only (never blocks alone).
 func (s *Service) CrossCheck(ctx context.Context, peerURL string, aid string, seq int, digest string) error {
+	// Refused before the request is made, so a peer of the wrong kind is not
+	// even told which identity is being asked about.
+	if err := s.checkPeerAllowed(peerURL); err != nil {
+		return err
+	}
 	resp, err := s.L3.CrossCheck(ctx, peerURL, KelCheckRequest{AID: aid, Seq: seq, Digest: digest})
 	if err != nil {
 		return err
