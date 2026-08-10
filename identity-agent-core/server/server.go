@@ -276,6 +276,22 @@ func New(cfg Config) (*CoreServer, error) {
 	wsvc.IsOfficialService = func(aidOrURL string) bool {
 		return s.Providers.IsOfficialService(provider.CapabilityWitness, aidOrURL)
 	}
+	// The bootstrap witnesses come from the provider registry, so there is one
+	// list of operators rather than one here and another in the witness engine.
+	witness.BootstrapWitnesses = witness.WitnessesFromRegistry(
+		func() []struct{ Operator, URL, AID string } {
+			var out []struct{ Operator, URL, AID string }
+			for _, p := range s.Providers.Offering(provider.CapabilityWitness) {
+				for _, e := range p.EndpointsFor(provider.CapabilityWitness) {
+					out = append(out, struct{ Operator, URL, AID string }{p.Operator, e.URL, e.AID})
+				}
+			}
+			return out
+		})
+
+	// Peers to cross-check with, drawn from contacts and registered services.
+	ws.PeerWatchers = s.peerWatchers
+
 	// The same boundary governs watching. A registered watcher service is
 	// exempt; a contact is a peer and must be of the same kind.
 	ws.PeerAllowed = func(peerURL string) bool {
@@ -4527,9 +4543,14 @@ func (s *CoreServer) ourEntityType() string {
 func (s *CoreServer) checkEntityTypeDeclared() {
 	declared := s.DeclaredEntityType
 	if declared == "" {
+		// Not necessarily wrong. An app that serves both kinds — the reference
+		// agent asks during onboarding — declares nothing on purpose and the
+		// profile answers. Said once so that an app which DOES know, and has
+		// forgotten to say, is not left wondering why no peer ever enrols.
 		log.Printf("[identity-agent-core] this build did not declare whether it serves an " +
-			"individual or an organization, so no peer witness or watcher will ever be " +
-			"enrolled. Set EntityType on the config, or IDENTITY_AGENT_ENTITY_TYPE.")
+			"individual or an organization, so the profile decides. Until onboarding sets " +
+			"one, no peer witness or watcher will be enrolled. An app that knows should " +
+			"set EntityType on the config, or IDENTITY_AGENT_ENTITY_TYPE.")
 		return
 	}
 	if declared != "individual" && declared != "organization" {

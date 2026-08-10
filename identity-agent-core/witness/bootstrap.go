@@ -51,35 +51,31 @@ type BootstrapWitness struct {
 	Operator string
 }
 
-// BootstrapPool is what a freshly incepted identity uses until its own contacts
-// can take over.
+// BootstrapWitnesses is what a freshly incepted identity uses until its own
+// contacts can take over.
 //
-// One service today. That is a smaller pool than anyone would design, and it is
-// what actually exists: a second and third operator are expected, and the moment
-// they publish a witness key they belong here.
+// Read from the provider registry rather than kept here. There was a hard-coded
+// list in this file as well, which meant two answers to "which services does
+// this agent use", and they had already drifted: this file named one operator
+// by the key it signs with while the registry named three by identifiers two of
+// which belonged to services that do not exist.
 //
-// Being a single operator at the start is not a flaw in the arrangement, it is
-// the shape of the problem. An identity has to be witnessed at the moment its
-// keys are established, and that is precisely the moment it knows nobody — which
-// stays true no matter how large the network grows, because every new person
-// still arrives with no contacts. Peers displace this as they accumulate;
-// `withBootstrap` appends rather than prefers, so the pool shrinks out of use on
-// its own.
+// The registry is the right home because these are not contacts. A peer witness
+// IS a contact and is marked as one on the contact record; a service witness is
+// an operator this agent has no relationship with at all, which is precisely
+// what the registry describes. Keeping each in the place that matches what it
+// is means neither can drift from the other, because there is no other.
 //
-// The identifier here is the WITNESS KEY, not the service's contact identifier.
-// A witness is named in a permanent event and its receipts have to be checkable
-// forever, which only a non-transferable identifier allows. Verified against the
-// running service on 2026-08-10: a receipt it issued verifies against this key
-// with nothing fetched.
+// Set by the implementation at startup; nil until then, and an agent with no
+// registry simply has no bootstrap witnesses, which it reports honestly.
+var BootstrapWitnesses func() []BootstrapWitness
+
+// BootstrapPool returns the service witnesses available to a new identity.
 func BootstrapPool() []BootstrapWitness {
-	return []BootstrapWitness{
-		{
-			AID:        "BMtfjviEMpF2xWVW0CRPKoVPX1mOMzNurvUjD-0RN_Jl",
-			WitnessKey: "BMtfjviEMpF2xWVW0CRPKoVPX1mOMzNurvUjD-0RN_Jl",
-			URL:        "https://witness1.grapeid.org",
-			Operator:   "grapeid.org",
-		},
+	if BootstrapWitnesses == nil {
+		return nil
 	}
+	return BootstrapWitnesses()
 }
 
 // withBootstrap tops a contact-derived witness list up to a workable size.
@@ -181,4 +177,32 @@ func DesignatableWitnesses(candidates []witnessTarget) (keys []string, toad int)
 	// A simple majority: enough that a minority of unavailable or dishonest
 	// witnesses can neither stall the identity nor corroborate a forgery.
 	return keys, len(keys)/2 + 1
+}
+
+// WitnessesFromRegistry adapts a provider registry's witness endpoints into the
+// bootstrap pool.
+//
+// offering is the registry's own listing for the witness capability, passed in
+// rather than imported so that this package does not depend on the registry's
+// type — the witness engine should not need to know how operators are catalogued.
+//
+// An endpoint with no witness key is skipped. What an event names is the key its
+// receipts verify against, so an entry without one could be reached and never
+// designated, and writing it into an inception would be permanent.
+func WitnessesFromRegistry(offering func() []struct{ Operator, URL, AID string }) func() []BootstrapWitness {
+	return func() []BootstrapWitness {
+		var out []BootstrapWitness
+		for _, e := range offering() {
+			if e.AID == "" {
+				continue
+			}
+			out = append(out, BootstrapWitness{
+				AID:        e.AID,
+				WitnessKey: e.AID,
+				URL:        e.URL,
+				Operator:   e.Operator,
+			})
+		}
+		return out
+	}
 }

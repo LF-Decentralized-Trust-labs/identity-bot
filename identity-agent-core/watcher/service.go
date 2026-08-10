@@ -17,8 +17,10 @@ type Service struct {
 	PeerAllowed PeerAllowed
 	Store       Store
 	L2          *L2Client
-	L3          *L3Client
-	OnEvent     func(eventType string, payload map[string]interface{})
+	// PeerWatchers supplies the peers to cross-check with. See peer_selection.go.
+	PeerWatchers PeerWatcherSource
+	L3           *L3Client
+	OnEvent      func(eventType string, payload map[string]interface{})
 }
 
 func NewService(store Store) *Service {
@@ -177,6 +179,14 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 		})
 	}
 
+	// L3 — the peers this agent already knows.
+	//
+	// The layer that makes duplicity a network property rather than one agent's
+	// opinion. L1 is this agent's own memory and L2 is a service, so without
+	// peers the whole pipeline rests on one operator agreeing with itself.
+	peerOutcomes, _, peersDisagreed := s.crossCheckPeers(ctx, in.AID, seq, digest)
+	result.SourcesQueried = append(result.SourcesQueried, peerOutcomes...)
+
 	// Blocking: repeat L1 mismatch, or first-contact L1+L2-standing conflict (≥2 sources).
 	shouldBlock := false
 	blockReason := ""
@@ -186,6 +196,13 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 	} else if firstContact && l2Outcome == "mismatch" {
 		shouldBlock = true
 		blockReason = "first-contact L1 vs L2-standing digest conflict"
+	} else if peersDisagreed > 0 && (l1Outcome == "mismatch" || l2Outcome == "mismatch") {
+		// A peer alone never blocks — a single peer can be wrong, offline or
+		// hostile, and one stranger's disagreement must not be able to freeze
+		// somebody out. Two independent sources disagreeing is a different
+		// claim, and that is the standard the rest of this pipeline holds to.
+		shouldBlock = true
+		blockReason = "peer and standing source both disagree with this history"
 	}
 
 	if shouldBlock {

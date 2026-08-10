@@ -2,12 +2,40 @@ package witness
 
 import (
 	"fmt"
+	"os"
 	"testing"
 )
 
 // The bootstrap pool exists to cover one gap: a new identity has no contacts,
 // and the moment it most needs witnessing — inception — is the moment it has
 // nobody to ask. These tests hold it to that job and no larger one.
+
+// The pool comes from the provider registry, which the agent wires at startup.
+// These tests supply their own rather than reaching for the shipped file, so
+// they test the behaviour and not how many operators happen to be live today.
+func TestMain(m *testing.M) {
+	BootstrapWitnesses = func() []BootstrapWitness {
+		return []BootstrapWitness{{
+			AID:        "BMtfjviEMpF2xWVW0CRPKoVPX1mOMzNurvUjD-0RN_Jl",
+			WitnessKey: "BMtfjviEMpF2xWVW0CRPKoVPX1mOMzNurvUjD-0RN_Jl",
+			URL:        "https://witness1.example",
+			Operator:   "example.org",
+		}}
+	}
+	os.Exit(m.Run())
+}
+
+// An agent with no registry has no bootstrap witnesses, and says so by
+// returning none rather than by carrying a list of its own.
+func TestWithNoRegistryThereAreNoBootstrapWitnesses(t *testing.T) {
+	saved := BootstrapWitnesses
+	BootstrapWitnesses = nil
+	defer func() { BootstrapWitnesses = saved }()
+
+	if got := BootstrapPool(); len(got) != 0 {
+		t.Fatalf("witnesses appeared from nowhere: %v", got)
+	}
+}
 
 func TestAFreshIdentityGetsWitnesses(t *testing.T) {
 	// Asks for more than the pool holds on purpose: what matters is that a new
