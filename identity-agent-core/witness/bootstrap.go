@@ -27,9 +27,23 @@ package witness
 
 // BootstrapWitness is a service an identity can rely on before it has contacts.
 type BootstrapWitness struct {
-	// AID is what gets written into the inception event. The URL is how to
-	// reach it; the AID is what it is, and it is the AID that the event names.
+	// AID identifies the service as a contact. The URL is how to reach it.
 	AID string
+	// WitnessKey is the non-transferable identifier this service signs receipts
+	// with, and it — not AID — is what an inception event designates.
+	//
+	// The distinction is not bookkeeping. A witness identifier has to BE its
+	// verifying key, or checking a receipt means first resolving that witness's
+	// key log and working out which key was in force when the receipt was
+	// issued, for every receipt and every verifier, forever. Designating a
+	// transferable AID produces receipts nobody can check cheaply, and a
+	// witness that rotates leaves its old receipts unverifiable.
+	//
+	// Empty until each service publishes one. A witness with no published
+	// witness key is NOT designated: writing it into an inception event would
+	// name an observer whose receipts can never be verified, and the identifier
+	// is permanent.
+	WitnessKey string
 	// URL is where events are submitted and receipts collected.
 	URL string
 	// Operator names who runs it, so somebody deciding whether to rely on it
@@ -131,4 +145,31 @@ func oneBootstrapFor(aid string) (witnessTarget, bool) {
 	}
 	b := pool[int(h%uint32(len(pool)))]
 	return witnessTarget{AID: b.AID, URL: b.URL, Commercial: true}, true
+}
+
+// DesignatableWitnesses returns the witnesses that can actually be written into
+// an inception event, with the threshold to require of them.
+//
+// Only witnesses whose non-transferable witness key is known are returned. That
+// filter is the whole function: a witness list is written into the inception
+// event and is therefore permanent and public, so designating somebody whose
+// receipts can never be verified is a mistake that cannot be taken back — the
+// identifier is a digest of the event that names them.
+//
+// Returning nothing is a valid answer and an honest one. An identity with no
+// witnesses is correctly reported as unwitnessed, which is a smaller problem
+// than one that appears witnessed by observers who cannot corroborate anything.
+func DesignatableWitnesses(candidates []witnessTarget) (keys []string, toad int) {
+	for _, c := range candidates {
+		if c.WitnessKey == "" {
+			continue
+		}
+		keys = append(keys, c.WitnessKey)
+	}
+	if len(keys) == 0 {
+		return nil, 0
+	}
+	// A simple majority: enough that a minority of unavailable or dishonest
+	// witnesses can neither stall the identity nor corroborate a forgery.
+	return keys, len(keys)/2 + 1
 }

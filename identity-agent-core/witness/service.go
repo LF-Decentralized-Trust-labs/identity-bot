@@ -114,7 +114,19 @@ func (s *Service) MaxWitnesses() int {
 func (s *Service) OOBIExtensions() map[string]interface{} {
 	outgoing, _ := s.Store.CountWitnessingFor()
 	capOK := outgoing < MaxOutgoingWitnessing
+	// The key this agent signs receipts with, so anybody who wants it to
+	// witness for them can name it in their inception event. Without publishing
+	// this an agent can be asked to witness and can never be DESIGNATED, since
+	// what an event names is the witness key and not the contact.
+	//
+	// Public by design: it is a verifying key, and it appears in the events of
+	// everybody this agent witnesses for.
+	witnessKey, _, err := s.WitnessKey()
+	if err != nil {
+		witnessKey = ""
+	}
 	return map[string]interface{}{
+		"witness_key":                witnessKey,
 		"backend_type":               s.BackendType,
 		"witness_capacity_available": capOK,
 		"witness_outgoing_count":     outgoing,
@@ -341,8 +353,12 @@ func (s *Service) BroadcastEvent(ctx context.Context, signerAID string, rawEvent
 }
 
 type witnessTarget struct {
-	AID        string
-	URL        string
+	AID string
+	URL string
+	// WitnessKey is the non-transferable identifier this witness signs receipts
+	// with. Empty when it has not published one, in which case it can be asked
+	// to witness but cannot be DESIGNATED — see DesignatableWitnesses.
+	WitnessKey string
 	Commercial bool
 }
 
