@@ -1,6 +1,6 @@
 module identity-agent-core
 
-go 1.26.3
+go 1.24.0
 
 require (
 	github.com/cloudflare/circl v1.6.3
