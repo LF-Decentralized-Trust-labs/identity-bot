@@ -3,6 +3,7 @@ package witness
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -122,12 +123,37 @@ func (s *Service) OOBIExtensions() map[string]interface{} {
 }
 
 // ReceiveEvent implements C2 — witness-side receipt of a key event.
-func (s *Service) ReceiveEvent(signerAID string, event map[string]interface{}) (map[string]interface{}, error) {
+//
+// Takes the event as published, plus the controller's signature over those
+// bytes. Both are required, and that is the point of this function rather than
+// an inconvenience in it.
+//
+// A receipt says: this witness saw this exact event, and the identity it claims
+// to come from authorised it. Neither half can be established from a parsed
+// event. The digest is over an exact byte sequence in an exact field order, so
+// a re-encoded event is a different event; and there is nothing to check
+// authorship against without a signature. Receipting on those terms produces
+// evidence that somebody sent a JSON object, which is not what a receipt is
+// read as meaning.
+func (s *Service) ReceiveEvent(signerAID string, rawEvent []byte, cesrSig string) (map[string]interface{}, error) {
+	if len(rawEvent) == 0 {
+		return nil, fmt.Errorf("missing_event_bytes")
+	}
+	var event map[string]interface{}
+	if err := json.Unmarshal(rawEvent, &event); err != nil {
+		return nil, fmt.Errorf("invalid event")
+	}
 	if signerAID == "" {
 		signerAID = eventAID(event)
 	}
 	if signerAID == "" {
 		return nil, fmt.Errorf("missing signer aid")
+	}
+	if cesrSig == "" {
+		// Refused rather than receipted unsigned. A witness that will attest to
+		// an unsigned event is a witness anyone can make say anything, and its
+		// receipts stop distinguishing a real history from an invented one.
+		return nil, fmt.Errorf("unsigned_event")
 	}
 	meta, _ := s.Store.GetContactMeta(signerAID)
 	if meta == nil || !meta.WitnessingFor {
@@ -145,16 +171,20 @@ func (s *Service) ReceiveEvent(signerAID string, event map[string]interface{}) (
 		return nil, fmt.Errorf("duplicate_sequence")
 	}
 
-	if err := s.verifyEventChain(signerAID, event, seq); err != nil {
+	if err := s.verifyEventChain(signerAID, rawEvent, cesrSig, seq); err != nil {
 		return nil, fmt.Errorf("rejected: %w", err)
 	}
 
 	now := NowRFC3339()
 	said := eventSAID(event)
-	evJSON, _ := json.Marshal(event)
+	// The published bytes are stored alongside the readable form. Storing only
+	// the readable form is what made every event a witness held unverifiable
+	// after the fact.
 	if err := s.Store.StoreKelEvent(KelEvent{
-		SignerAID: signerAID, SequenceNum: seq, EventJSON: string(evJSON),
+		SignerAID: signerAID, SequenceNum: seq, EventJSON: string(rawEvent),
 		EventSAID: said, StoredAt: now,
+		RawBytesB64:   base64.StdEncoding.EncodeToString(rawEvent),
+		CesrSignature: cesrSig,
 	}); err != nil {
 		return nil, err
 	}
@@ -203,22 +233,45 @@ func (s *Service) ReceiveEvent(signerAID string, event map[string]interface{}) (
 	}, nil
 }
 
-func (s *Service) verifyEventChain(signerAID string, event map[string]interface{}, seq int) error {
-	if s.Driver == nil {
-		if eventAID(event) == "" {
-			return fmt.Errorf("invalid event")
-		}
-		return nil
-	}
+// verifyEventChain checks that the new event extends a log this identity
+// actually published, and that this identity signed it.
+//
+// Runs over canonical bytes, which is what makes it a check at all. The
+// previous version compared parsed events, so it could confirm that the fields
+// referred to each other and nothing more — a forged log satisfies that, since
+// whoever forged it wrote every field.
+func (s *Service) verifyEventChain(signerAID string, rawEvent []byte, cesrSig string, seq int) error {
 	existing, _ := s.Store.GetKelEvents(signerAID)
-	events := eventsToMaps(existing)
-	events = append(events, event)
-	res, err := s.Driver.ValidateKEL(signerAID, events)
+
+	raws := make([][]byte, 0, len(existing)+1)
+	sigs := make([]string, 0, len(existing)+1)
+	for _, e := range existing {
+		if e.RawBytesB64 == "" {
+			// Stored before a witness kept the published bytes. The history
+			// cannot be verified, so it is not offered up as though it had
+			// been; the new event is checked on its own instead.
+			raws = raws[:0]
+			sigs = sigs[:0]
+			break
+		}
+		raw, err := base64.StdEncoding.DecodeString(e.RawBytesB64)
+		if err != nil {
+			return fmt.Errorf("stored_event_unreadable")
+		}
+		raws = append(raws, raw)
+		sigs = append(sigs, e.CesrSignature)
+	}
+	raws = append(raws, rawEvent)
+	sigs = append(sigs, cesrSig)
+
+	res, err := drivers.ValidateKELFromBytes(drivers.ValidateKELInput{
+		AID: signerAID, RawEvents: raws, CesrSignatures: sigs,
+	})
 	if err != nil {
 		return err
 	}
 	if !res.KelVerified {
-		return fmt.Errorf("kel_verify_failed")
+		return fmt.Errorf("kel_verify_failed: %s", strings.Join(res.ValidationErrors, "; "))
 	}
 	return nil
 }
@@ -236,7 +289,25 @@ func (s *Service) GetKelReplica(signerAID string) ([]map[string]interface{}, err
 }
 
 // BroadcastEvent implements C1 — POST to all enrolled witnesses.
-func (s *Service) BroadcastEvent(ctx context.Context, signerAID string, event map[string]interface{}) error {
+//
+// Sends the event as published, with the controller's signature over those
+// bytes. A witness cannot earn its receipt without both, so sending anything
+// less would be asking for an attestation nobody could make honestly.
+func (s *Service) BroadcastEvent(ctx context.Context, signerAID string, rawEvent []byte, cesrSig string) error {
+	if len(rawEvent) == 0 {
+		return fmt.Errorf("an event cannot be broadcast without the bytes it was published as")
+	}
+	var event map[string]interface{}
+	if err := json.Unmarshal(rawEvent, &event); err != nil {
+		return fmt.Errorf("the event to broadcast is not readable: %w", err)
+	}
+	if cesrSig == "" {
+		// Reported rather than sent. Every witness would refuse it, so sending
+		// it would turn one local fault into a round of remote refusals whose
+		// cause is much harder to see from here.
+		return fmt.Errorf("refusing to broadcast an unsigned event for %s: a witness cannot "+
+			"attest to an event it cannot verify", signerAID)
+	}
 	rootAID := signerAID
 	if id, _ := s.Contacts.GetIdentity(); id != nil {
 		rootAID = id.AID
@@ -256,7 +327,11 @@ func (s *Service) BroadcastEvent(ctx context.Context, signerAID string, event ma
 		StartedAt: now, UpdatedAt: now,
 	})
 
-	body, _ := json.Marshal(map[string]interface{}{"aid": signerAID, "event": event})
+	body, _ := json.Marshal(map[string]interface{}{
+		"aid":            signerAID,
+		"event_b64":      base64.StdEncoding.EncodeToString(rawEvent),
+		"cesr_signature": cesrSig,
+	})
 	for _, w := range witnesses {
 		url := witnessEventURL(w)
 		go s.postWithRetry(ctx, url, body, said, w.AID)

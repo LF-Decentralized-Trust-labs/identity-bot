@@ -1379,7 +1379,7 @@ func (s *CoreServer) handleStoreEvent(w http.ResponseWriter, r *http.Request) {
 	if req.EventType == "icp" || req.EventType == "dip" {
 		warnIfIdentityCommitsToNothing(req.AID, req.EventJSON)
 	}
-	s.broadcastWitnessEvent(req.AID, req.EventJSON)
+	s.broadcastWitnessEvent(req)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -1442,7 +1442,7 @@ func (s *CoreServer) handleRotation(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf("[identity-agent-core] ROTATION: Key rotated for AID: %s (sn: %d)", result.AID, result.SequenceNumber)
-	s.broadcastWitnessEvent(result.AID, string(eventJSON))
+	s.broadcastWitnessEvent(eventRecord)
 	s.notifyBackupEvent(backup.EventKeyRotation)
 
 	w.Header().Set("Content-Type", "application/json")
@@ -2955,15 +2955,33 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
-func (s *CoreServer) broadcastWitnessEvent(aid string, eventJSON string) {
-	if s.WitnessService == nil || eventJSON == "" {
+// broadcastWitnessEvent sends an event to this identity's witnesses.
+//
+// Takes the record rather than a JSON string, because a witness needs the bytes
+// the event was published as and the controller's signature over them, and the
+// record is where both live. Reconstructing them from the readable form is not
+// possible: re-encoding sorts the fields, producing a different digest.
+func (s *CoreServer) broadcastWitnessEvent(record store.EventRecord) {
+	if s.WitnessService == nil {
 		return
 	}
-	var ked map[string]interface{}
-	if err := json.Unmarshal([]byte(eventJSON), &ked); err != nil {
+	if record.RawBytesB64 == "" {
+		// Written before canonical bytes were kept, or by a path that has not
+		// been updated to keep them. Said out loud rather than passed silently:
+		// the event simply will not be witnessed, and a silent skip is
+		// indistinguishable from having no witnesses at all.
+		log.Printf("[witness] not broadcasting %s sn=%d: the event was stored without the "+
+			"bytes it was published as, so no witness could verify it",
+			record.AID, record.SequenceNumber)
 		return
 	}
-	s.triggerWitnessBroadcast(aid, ked)
+	raw, err := base64.StdEncoding.DecodeString(record.RawBytesB64)
+	if err != nil {
+		log.Printf("[witness] not broadcasting %s sn=%d: stored bytes unreadable: %v",
+			record.AID, record.SequenceNumber, err)
+		return
+	}
+	s.triggerWitnessBroadcast(record.AID, raw, record.CesrSignature)
 }
 
 func (s *CoreServer) handlePublicCredentialServe(w http.ResponseWriter, r *http.Request) {

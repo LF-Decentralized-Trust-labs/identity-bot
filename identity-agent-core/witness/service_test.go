@@ -87,7 +87,8 @@ func TestReceiveEventSequenceGap(t *testing.T) {
 	mc.contacts[signer] = store.ContactRecord{AID: signer, Status: "accepted"}
 	_ = s.Store.SaveContactMeta(ContactMeta{ContactAID: signer, WitnessingFor: true, BackendType: BackendDesktop})
 	_ = s.Store.StoreKelEvent(KelEvent{SignerAID: signer, SequenceNum: 0, EventJSON: `{"i":"` + signer + `","s":"0","t":"icp"}`, StoredAt: NowRFC3339()})
-	_, err := s.ReceiveEvent(signer, map[string]interface{}{"i": signer, "s": "2", "t": "rot"})
+	_, err := s.ReceiveEvent(signer,
+		[]byte(`{"i":"`+signer+`","s":"2","t":"rot"}`), "0Bsignature-placeholder")
 	if err == nil || err.Error() != "sequence_gap" {
 		t.Fatalf("err=%v want sequence_gap", err)
 	}
@@ -95,7 +96,8 @@ func TestReceiveEventSequenceGap(t *testing.T) {
 
 func TestReceiveEventUnknownSigner(t *testing.T) {
 	s, _ := testService(t)
-	_, err := s.ReceiveEvent("EUnknown", map[string]interface{}{"i": "EUnknown", "s": "0", "t": "icp"})
+	_, err := s.ReceiveEvent("EUnknown",
+		[]byte(`{"i":"EUnknown","s":"0","t":"icp"}`), "0Bsignature-placeholder")
 	if err == nil || err.Error() != "not_witnessing" {
 		t.Fatalf("err=%v", err)
 	}

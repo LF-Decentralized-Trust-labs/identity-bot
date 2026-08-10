@@ -687,6 +687,23 @@ DELETE FROM kel WHERE id NOT IN (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_kel_aid_seq_unique ON kel(aid, seq_num);
 `},
+	{
+		Version:     28,
+		Description: "Let a witness keep what it needs to verify an event, instead of receipting it unchecked",
+		SQL: `
+-- A witness receipt is meant to be third-party evidence that a named controller
+-- published a specific event. It could not be that: the event arrived parsed,
+-- with no controller signature anywhere on the wire, and was re-encoded before
+-- storage — which sorts the fields and destroys the byte sequence the digest and
+-- the signature are over. So the witness could not check who authorised what it
+-- was attesting to, and could not check later either.
+--
+-- raw_bytes_b64 is the event exactly as published; cesr_signature is the
+-- controller's signature over those bytes. Empty on rows written before this,
+-- which are readable and were never verifiable.
+ALTER TABLE witness_kel_events ADD COLUMN raw_bytes_b64 TEXT NOT NULL DEFAULT '';
+ALTER TABLE witness_kel_events ADD COLUMN cesr_signature TEXT NOT NULL DEFAULT '';
+`},
 }
 
 // ApplyIdentityMigrations creates the migrations table and applies any pending migrations.

@@ -72,6 +72,18 @@ type KelEvent struct {
 	EventJSON   string
 	EventSAID   string
 	StoredAt    string
+	// RawBytesB64 is the event exactly as the controller published it, and
+	// CesrSignature is the controller's signature over those bytes.
+	//
+	// EventJSON substitutes for neither. It is re-encoded from the parsed
+	// event, which sorts the fields, so it digests to something that is not the
+	// event's identifier and a signature checked against it verifies nothing.
+	// Without these a witness cannot establish that the controller authorised
+	// what it is attesting to — which is the whole of what its receipt is worth.
+	//
+	// Empty for events stored before a witness kept them.
+	RawBytesB64   string
+	CesrSignature string
 }
 
 // IssuedReceipt is a CESR receipt this agent issued as witness.

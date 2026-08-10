@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -26,21 +27,43 @@ func (s *CoreServer) mountWitnessRoutes(r chi.Router) {
 }
 
 func (s *CoreServer) handleWitnessEvent(w http.ResponseWriter, r *http.Request) {
+	// The event arrives as the bytes it was published as, with the controller's
+	// signature over them.
+	//
+	// It used to arrive as a parsed object and nothing else, which made a
+	// receipt unearnable: an identifier is a digest over an exact byte sequence
+	// in an exact field order, so a re-encoded event is a different event, and
+	// with no signature there was nothing to check authorship against. A
+	// witness could only attest that somebody sent it a JSON object.
 	var req struct {
-		AID   string                 `json:"aid"`
-		Event map[string]interface{} `json:"event"`
+		AID           string `json:"aid"`
+		EventB64      string `json:"event_b64"`
+		CesrSignature string `json:"cesr_signature"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid body", err.Error())
 		return
 	}
-	if req.Event == nil {
-		writeError(w, http.StatusBadRequest, "event required", "")
+	if req.EventB64 == "" {
+		writeError(w, http.StatusBadRequest, "event_bytes_required",
+			"send the event as the bytes it was published as; a witness cannot receipt "+
+				"an event it cannot verify")
 		return
 	}
-	result, err := s.WitnessService.ReceiveEvent(req.AID, req.Event)
+	rawEvent, err := base64.StdEncoding.DecodeString(req.EventB64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_event_bytes", err.Error())
+		return
+	}
+	result, err := s.WitnessService.ReceiveEvent(req.AID, rawEvent, req.CesrSignature)
 	if err != nil {
 		switch err.Error() {
+		case "unsigned_event":
+			writeError(w, http.StatusBadRequest, "unsigned_event",
+				"the event carried no controller signature; a witness that receipts unsigned "+
+					"events can be made to attest to anything")
+		case "missing_event_bytes":
+			writeError(w, http.StatusBadRequest, "missing_event_bytes", "no event was supplied")
 		case "not_witnessing":
 			writeError(w, http.StatusForbidden, "not_witnessing", "unknown signer or no active witness relationship")
 		case "sequence_gap":
@@ -154,15 +177,15 @@ func (s *CoreServer) handleWitnessAccept(w http.ResponseWriter, r *http.Request)
 	json.NewEncoder(w).Encode(map[string]string{"status": "received", "decision": req.Decision})
 }
 
-func (s *CoreServer) triggerWitnessBroadcast(signerAID string, event map[string]interface{}) {
-	if s.WitnessService == nil || event == nil {
+func (s *CoreServer) triggerWitnessBroadcast(signerAID string, rawEvent []byte, cesrSig string) {
+	if s.WitnessService == nil || len(rawEvent) == 0 {
 		return
 	}
 	ctx := s.AppCtx
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if err := s.WitnessService.BroadcastEvent(ctx, signerAID, event); err != nil {
+	if err := s.WitnessService.BroadcastEvent(ctx, signerAID, rawEvent, cesrSig); err != nil {
 		log.Printf("[witness] broadcast failed: %v", err)
 	}
 }

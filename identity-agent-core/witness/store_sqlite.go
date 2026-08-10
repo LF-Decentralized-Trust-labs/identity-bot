@@ -110,16 +110,17 @@ func (s *SQLiteStore) ListContactMeta() ([]ContactMeta, error) {
 
 func (s *SQLiteStore) StoreKelEvent(ev KelEvent) error {
 	_, err := s.db.Exec(`
-		INSERT INTO witness_kel_events (signer_aid, sequence_num, event_json, event_said, stored_at)
-		VALUES (?, ?, ?, ?, ?)
+		INSERT INTO witness_kel_events (signer_aid, sequence_num, event_json, event_said, stored_at, raw_bytes_b64, cesr_signature)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(signer_aid, sequence_num) DO NOTHING`,
-		ev.SignerAID, ev.SequenceNum, ev.EventJSON, ev.EventSAID, ev.StoredAt)
+		ev.SignerAID, ev.SequenceNum, ev.EventJSON, ev.EventSAID, ev.StoredAt,
+		ev.RawBytesB64, ev.CesrSignature)
 	return err
 }
 
 func (s *SQLiteStore) GetKelEvents(signerAID string) ([]KelEvent, error) {
 	rows, err := s.db.Query(`
-		SELECT signer_aid, sequence_num, event_json, event_said, stored_at
+		SELECT signer_aid, sequence_num, event_json, event_said, stored_at, raw_bytes_b64, cesr_signature
 		FROM witness_kel_events WHERE signer_aid = ? ORDER BY sequence_num`, signerAID)
 	if err != nil {
 		return nil, err
@@ -128,7 +129,8 @@ func (s *SQLiteStore) GetKelEvents(signerAID string) ([]KelEvent, error) {
 	var out []KelEvent
 	for rows.Next() {
 		var ev KelEvent
-		if err := rows.Scan(&ev.SignerAID, &ev.SequenceNum, &ev.EventJSON, &ev.EventSAID, &ev.StoredAt); err != nil {
+		if err := rows.Scan(&ev.SignerAID, &ev.SequenceNum, &ev.EventJSON, &ev.EventSAID, &ev.StoredAt,
+			&ev.RawBytesB64, &ev.CesrSignature); err != nil {
 			return nil, err
 		}
 		out = append(out, ev)

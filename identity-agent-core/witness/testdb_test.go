@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS witness_contact_meta (
     enrolled_at TEXT, last_receipt_at TEXT, last_health_check TEXT);
 CREATE TABLE IF NOT EXISTS witness_kel_events (
     signer_aid TEXT, sequence_num INTEGER, event_json TEXT, event_said TEXT, stored_at TEXT,
+    raw_bytes_b64 TEXT NOT NULL DEFAULT '', cesr_signature TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (signer_aid, sequence_num));
 CREATE TABLE IF NOT EXISTS witness_receipts_issued (
     id INTEGER PRIMARY KEY AUTOINCREMENT, signer_aid TEXT, event_said TEXT, sequence_num INTEGER,
