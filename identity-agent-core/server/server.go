@@ -607,6 +607,7 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		r.Get("/identity", s.handleIdentity)
 		r.Get("/security/enclave", s.handleSecurityEnclave)
 		r.Get("/attestation", s.handlePublicAttestation)
+		r.Get("/keri/selftest", s.handleKeriSelfTest)
 
 		r.Post("/keystore/root-seed", s.handleSetRootSeed)
 		r.Get("/keystore/root-seed", s.handleRootSeedStatus)
