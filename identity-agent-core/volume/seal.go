@@ -1,4 +1,4 @@
-package main
+package volume
 
 import (
 	"bytes"
@@ -11,8 +11,8 @@ import (
 	"identity-agent-core/secureenclave"
 )
 
-// Preparing the volume an agent's data lives on, so that the machine's operator
-// cannot read it.
+// seal prepares the volume an Identity Agent's data lives on, so that the
+// machine's operator cannot read it.
 //
 // Run before anything mounts that volume. It asks the processor for a key
 // derived from this software's measurement, and uses it to open the volume — or
@@ -31,7 +31,7 @@ import (
 // one, and saying so is better than implying otherwise.
 //
 //	identity-agent-core seal-volume /dev/vdb tenant-data
-func sealVolume(args []string) error {
+func seal(args []string) error {
 	if len(args) < 1 {
 		return fmt.Errorf("usage: identity-agent-core seal-volume <device> [mapper-name]")
 	}
