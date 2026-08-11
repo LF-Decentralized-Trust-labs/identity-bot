@@ -4,7 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import '../../theme/app_theme.dart';
 import '../../services/core_service.dart';
-import '../../config/agent_config.dart';
+import 'package:agent_client/config/agent_config.dart';
 
 // ignore_for_file: library_private_types_in_public_api
 

@@ -4,9 +4,9 @@ import '../../theme/app_theme.dart';
 import '../../services/core_service.dart';
 import '../../services/preferences_service.dart';
 import '../../services/secure_key_store.dart';
-import '../../services/setup_task_service.dart';
-import '../../services/identity_level_service.dart';
-import '../../config/agent_config.dart';
+import 'package:agent_client/services/setup_task_service.dart';
+import 'package:agent_client/services/identity_level_service.dart';
+import 'package:agent_client/config/agent_config.dart';
 
 class DeveloperToolsScreen extends StatefulWidget {
   final String? serverUrl;

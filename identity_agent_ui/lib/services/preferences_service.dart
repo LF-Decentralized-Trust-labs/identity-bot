@@ -1,6 +1,6 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'profile_scope.dart';
+import 'package:agent_client/services/profile_scope.dart';
 
 enum AgentMode {
   createNew,

@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../services/local_auth_service.dart';
+import 'package:agent_client/services/local_auth_service.dart';
 import '../services/pin_password_service.dart';
-import '../services/identity_level_service.dart';
+import 'package:agent_client/services/identity_level_service.dart';
 import '../theme/app_theme.dart';
 
 /// Full-screen lock overlay shown when the app resumes after being backgrounded.

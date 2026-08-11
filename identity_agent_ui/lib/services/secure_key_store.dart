@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
-import 'profile_scope.dart';
+import 'package:agent_client/services/profile_scope.dart';
 import 'hardware_key_wrapper.dart';
 
 /// Persists the BIP39 mnemonic to platform secure storage.

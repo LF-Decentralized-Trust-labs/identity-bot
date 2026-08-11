@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:identity_agent_ui/services/root_seed_handoff.dart';
+import 'package:agent_client/services/root_seed_handoff.dart';
 
 void main() {
   test('a local core is recognised', () {

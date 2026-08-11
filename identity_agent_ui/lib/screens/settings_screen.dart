@@ -3,8 +3,8 @@ import 'package:flutter/services.dart';
 import '../theme/app_theme.dart';
 import '../widgets/connected_services_section.dart';
 import '../services/core_service.dart';
-import '../services/keri_service.dart';
-import '../services/mobile_on_device_keri_service.dart';
+import 'package:agent_client/services/keri_service.dart';
+import 'package:agent_client/services/mobile_on_device_keri_service.dart';
 import '../services/preferences_service.dart';
 import '../main.dart';
 

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../services/identity_level_service.dart';
+import 'package:agent_client/services/identity_level_service.dart';
 import 'identity_badge_widget.dart';
 
 /// The default identity card badge — shows the NIST-based assurance tier.

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import '../../services/recovery_service.dart';
-import '../../services/root_seed_handoff.dart';
+import 'package:agent_client/services/recovery_service.dart';
+import 'package:agent_client/services/root_seed_handoff.dart';
 import '../../theme/app_theme.dart';
 
 enum RecoverySource { localFile, backupOnlyDevice, cloud }

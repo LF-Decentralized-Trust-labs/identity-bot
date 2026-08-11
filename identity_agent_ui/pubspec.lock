@@ -9,6 +9,13 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.0.0"
+  agent_client:
+    dependency: "direct main"
+    description:
+      path: "../packages/agent_client"
+      relative: true
+    source: path
+    version: "0.1.0"
   args:
     dependency: transitive
     description:

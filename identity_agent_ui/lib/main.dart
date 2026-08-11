@@ -10,18 +10,18 @@ import 'screens/mode_selection_screen.dart';
 import 'screens/connect_server_screen.dart';
 import 'screens/backup/backup_only_standby_screen.dart';
 import 'screens/recovery/recovery_onboarding_screen.dart';
-import 'services/recovery_service.dart';
+import 'package:agent_client/services/recovery_service.dart';
 import 'services/core_service.dart';
-import 'services/keri_service.dart';
-import 'services/desktop_on_device_keri_service.dart';
-import 'services/mobile_on_device_keri_service.dart';
-import 'services/mobile_remote_keri_service.dart';
+import 'package:agent_client/services/keri_service.dart';
+import 'package:agent_client/services/desktop_on_device_keri_service.dart';
+import 'package:agent_client/services/mobile_on_device_keri_service.dart';
+import 'package:agent_client/services/mobile_remote_keri_service.dart';
 import 'services/preferences_service.dart';
 import 'services/secure_key_store.dart';
 import 'services/backend_process_service.dart';
-import 'config/agent_config.dart';
-import 'bridge/keri_bridge_stub.dart'
-    if (dart.library.io) 'bridge/keri_bridge.dart';
+import 'package:agent_client/config/agent_config.dart';
+import 'package:agent_client/bridge/keri_bridge_stub.dart'
+    if (dart.library.io) 'package:agent_client/bridge/keri_bridge.dart';
 import 'screens/mobile/mobile_app.dart';
 import 'screens/hosting_choice_screen.dart';
 import 'screens/setup_checklist_screen.dart';

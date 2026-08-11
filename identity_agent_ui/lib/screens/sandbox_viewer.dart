@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import '../theme/app_theme.dart';
-import '../models/sandbox_app.dart';
+import 'package:agent_client/models/sandbox_app.dart';
 import '../widgets/sandbox_webview.dart';
 import '../widgets/sandbox_terminal.dart';
 

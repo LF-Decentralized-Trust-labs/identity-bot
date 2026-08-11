@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:identity_agent_ui/services/profile_scope.dart';
+import 'package:agent_client/services/profile_scope.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// The migration is the part worth testing hardest.
