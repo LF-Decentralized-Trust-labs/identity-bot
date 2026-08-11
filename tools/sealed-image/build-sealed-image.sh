@@ -337,7 +337,7 @@ Environment=GOGC=50
 # nothing can reach it with forwarding headers of its own choosing. An agent
 # somebody can reach directly must not set this.
 Environment=TRUST_FORWARDED_HEADERS=1
-Environment=AGENT_BUILD_NAME=__BUILD_NAME__
+Environment="AGENT_BUILD_NAME=__BUILD_NAME__"
 ExecStart=/usr/local/bin/identity-agent-core
 Restart=always
 RestartSec=2
@@ -373,14 +373,16 @@ UNIT
 # fact rather than a gap.
 if [[ -n "$BUILD_NAME" ]]; then
   # A name is written into a unit file, so a newline in it would forge further
-  # directives — and this value comes from whoever invokes the build.
+  # directives — and this value comes from whoever invokes the build. A double
+  # quote would end the quoted value early and do the same thing on one line.
   [[ "$BUILD_NAME" != *$'\n'* ]] || fail "BUILD_NAME must be a single line"
+  [[ "$BUILD_NAME" != *'"'* ]] || fail "BUILD_NAME must not contain a double quote"
   BUILD_NAME_ESC=${BUILD_NAME//&/\\&}
   sed -i "s|__BUILD_NAME__|${BUILD_NAME_ESC//|/\\|}|" \
     "$WORK/root/etc/systemd/system/identity-agent.service"
   echo "  build name: $BUILD_NAME"
 else
-  sed -i '/^Environment=AGENT_BUILD_NAME=__BUILD_NAME__$/d' \
+  sed -i '/^Environment="AGENT_BUILD_NAME=__BUILD_NAME__"$/d' \
     "$WORK/root/etc/systemd/system/identity-agent.service"
 fi
 # The browser front end, only where one was actually installed.
