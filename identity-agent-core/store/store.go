@@ -461,6 +461,14 @@ type ServiceProviderRecord struct {
 type Store interface {
 	SaveEvent(record EventRecord) error
 	GetEvents(aid string) ([]EventRecord, error)
+
+	// The machines this identity has adopted. An owner that cannot list them
+	// has not finished adopting one: the machine knows who owns it, and
+	// without these the owner knows nothing about the machine.
+	SaveAdoptedAgent(a AdoptedAgent) error
+	ListAdoptedAgents() ([]AdoptedAgent, error)
+	MarkAdoptedAgentSeen(aid string) error
+	ForgetAdoptedAgent(aid string) error
 	GetIdentity() (*IdentityState, error)
 	SaveIdentity(state IdentityState) error
 	SaveContact(contact ContactRecord) error

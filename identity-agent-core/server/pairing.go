@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -724,6 +725,38 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 			"between the two is not yet possible", base)
 	}
 
+	// 7. Remember it. An owner that cannot list the machines it owns has not
+	//    finished adopting one — the machine knows exactly who its owner is,
+	//    and until this the owner knew nothing about the machine once the
+	//    response scrolled past.
+	//
+	//    Whether it proved itself is recorded now rather than asked for later.
+	//    Asking the machine afterwards means trusting what it says about
+	//    itself, which is the thing the check at adoption existed to avoid.
+	agent := store.AdoptedAgent{
+		AID:          offer.PairwiseAID,
+		DelegatedAID: dip.AID,
+		URL:          base,
+		Kind:         "individual",
+		Sealed:       offer.Attestation != "",
+	}
+	if agent.AID == "" {
+		// A box that published no identifier of its own is still adopted; it
+		// is keyed by the delegation instead, so it is listed rather than lost.
+		agent.AID = dip.AID
+	}
+	if m := measurementOf(offer.Attestation); m != "" {
+		agent.Measurement = m
+	}
+	if err := s.DataStore.SaveAdoptedAgent(agent); err != nil {
+		// Not fatal: the delegation is issued and the box is adopted, and
+		// undoing that because a local list could not be written would be the
+		// worse trade. Said out loud because the visible symptom is a machine
+		// that works and does not appear in its owner's list.
+		log.Printf("[pairing] adopted %s but could not record it, so it will not be listed: %v",
+			base, err)
+	}
+
 	log.Printf("[pairing] adopted box at %s: delegated AID %s under root %s", base, dip.AID, root.AID)
 	writeJSONResponse(w, map[string]interface{}{
 		"ok": true, "box_url": base,
@@ -794,4 +827,24 @@ func didFromResult(raw interface{}) (*didcomm.DID, error) {
 		return nil, fmt.Errorf("the keys name no identity")
 	}
 	return &did, nil
+}
+
+// measurementOf reads what a box was running out of the report it offered.
+//
+// Best effort by design: a box adopted with allow_unattested has no report and
+// no measurement, which is a real state rather than a failure. The caller
+// records what it has.
+func measurementOf(attestationB64 string) string {
+	if attestationB64 == "" {
+		return ""
+	}
+	raw, err := base64.StdEncoding.DecodeString(attestationB64)
+	if err != nil {
+		return ""
+	}
+	report, err := secureenclave.ParseSNPReport(raw)
+	if err != nil {
+		return ""
+	}
+	return hex.EncodeToString(report.Measurement)
 }
