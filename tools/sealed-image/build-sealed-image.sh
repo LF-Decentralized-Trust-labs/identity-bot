@@ -93,6 +93,32 @@ trap 'rm -rf "$WORK"; restore_tmp' EXIT
 
 file "$AGENT_BINARY" | grep -q 'ELF 64-bit' || fail "AGENT_BINARY is not a Linux binary — build with GOOS=linux GOARCH=amd64"
 
+# Does this binary answer the subcommand the image is about to depend on?
+#
+# The unit written further down runs `identity-agent-core seal-volume` before
+# anything mounts the data volume. A binary that does not dispatch that
+# subcommand does not fail there in any way that says so: it ignores the
+# arguments, starts a full server against a read-only root, and exits — after
+# which the state mount fails on its dependency and the Identity Agent crash-loops
+# against a database it cannot open. The volume is simply never encrypted, and
+# nothing in the visible error mentions a volume.
+#
+# That happened, to a binary built from an overlay of this core that
+# implemented everything except the dispatch. This is the only place that sees
+# every binary going into an image, whatever built it, so this is where the
+# question gets asked. A correct binary refuses a device that does not exist,
+# quickly; a non-dispatching one tries to serve and gets killed by the timeout.
+#
+# -k matters and was learned the hard way. A binary that does not dispatch
+# starts a server, and a server does not stop for SIGTERM promptly enough to
+# be relied on — the first version of this check hung until it was killed by
+# hand. -k follows with SIGKILL, and the output goes to a file rather than
+# through a command substitution, which would wait on the pipe regardless of
+# what happened to the process holding it.
+probe="$WORK/seal-volume-probe"
+timeout -k 2 10 "$AGENT_BINARY" seal-volume /nonexistent-probe-device >"$probe" 2>&1 </dev/null || true
+grep -qi 'no volume at' "$probe" || fail "AGENT_BINARY does not answer 'seal-volume', so an image built from it would never encrypt its data volume — and would fail later, somewhere else, in a way that does not mention the volume. Whatever embeds this core must dispatch the volume commands (identity-agent-core/volume.Handle). It answered: $(head -c 200 "$probe")"
+
 # The web bundle is checked HERE, before anything expensive runs.
 #
 # Everything below this point bootstraps a root filesystem, which takes minutes.

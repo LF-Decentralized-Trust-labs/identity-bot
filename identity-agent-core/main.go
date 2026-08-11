@@ -7,24 +7,16 @@ import (
 	"syscall"
 
 	"identity-agent-core/server"
+	"identity-agent-core/volume"
 )
 
 func main() {
-	// Preparing the encrypted volume happens before the agent runs, and before
-	// anything mounts it — so it is a command this binary answers rather than
-	// a separate tool. One binary means one thing to measure.
-	if len(os.Args) > 1 && os.Args[1] == "seal-volume" {
-		if err := sealVolume(os.Args[2:]); err != nil {
-			log.Fatalf("[identity-agent-core] %v", err)
-		}
-		return
-	}
-
-	// Giving the owner a way back into their own volume. Separate from
-	// preparing it, because it happens later — at adoption, once there is an
-	// owner to seal anything to.
-	if len(os.Args) > 1 && os.Args[1] == "add-owner-recovery" {
-		if err := addOwnerRecoveryCommand(os.Args[2:]); err != nil {
+	// Volume commands run before the Identity Agent does, or instead of it. One
+	// dispatcher rather than a switch here, so that an overlay embedding this
+	// core wires up every one of them by wiring up one thing — see the note in
+	// the volume package for why.
+	if handled, err := volume.Handle(os.Args[1:]); handled {
+		if err != nil {
 			log.Fatalf("[identity-agent-core] %v", err)
 		}
 		return

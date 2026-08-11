@@ -13,6 +13,14 @@ import (
 // uses to add its side of an action without forking core: a membership-gate
 // resolver registry, a router-mount hook, and a couple of read/mint accessors.
 // The core ships no overlays; these are inert until something registers.
+//
+// These seams are opt-in: an overlay that registers nothing simply gets core
+// behaviour. There is one that is NOT optional and therefore does not live
+// here — identity-agent-core/volume.Handle, which an overlay must call before
+// starting its server. It sits outside this file because it runs before a
+// server exists, and an overlay that skips it produces an instance whose data
+// volume is never encrypted. Named here so this file remains a complete index
+// of what an overlay has to think about.
 
 // MembershipResolver decides whether a pairwise AID is admitted to an asset
 // whose EnrollmentPolicy.MembershipSource names this resolver. This is how an

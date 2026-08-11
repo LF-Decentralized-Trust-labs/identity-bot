@@ -1,4 +1,4 @@
-package main
+package volume
 
 import (
 	"encoding/base64"
@@ -74,7 +74,7 @@ func TestOwnerRecoveryAgainstARealVolume(t *testing.T) {
 	if err != nil || !present {
 		t.Fatalf("the recovery record was not found afterwards (%v, %v)", present, err)
 	}
-	if err := addOwnerRecoveryCommandFor(device, []string{base64.StdEncoding.EncodeToString(ownerPub)}, instanceKey); err != nil {
+	if err := addOwnerRecoveryFor(device, []string{base64.StdEncoding.EncodeToString(ownerPub)}, instanceKey); err != nil {
 		t.Fatalf("a second attempt was not a no-op: %v", err)
 	}
 
