@@ -153,20 +153,80 @@ func TestATamperedEventIsCaught(t *testing.T) {
 	}
 }
 
-// A log with no signatures is a normal thing to be handed by a stranger. It
-// must not fail, and it must not be reported as though authorship was proven.
-func TestAnUnsignedLogIsVerifiedStructurallyAndSaysSo(t *testing.T) {
+// A log with no signatures is a normal thing to be handed by a stranger: it is
+// well formed, and nobody has been shown to have authorised it. Those are two
+// different answers and it must give both.
+//
+// It must not fail — calling an honest stranger's log malformed would be false,
+// and would leave a caller unable to tell it from a corrupt one. It must also
+// not report itself as verified, because every trust gate in this agent reads
+// that one boolean before letting a log establish a key. Reporting the two as
+// one is how a document a forger wrote themselves gets treated as proven.
+func TestAnUnsignedLogIsSoundButNotVerified(t *testing.T) {
 	aid, raws, _ := signedLog(t)
 	got, err := ValidateKELFromBytes(ValidateKELInput{AID: aid, RawEvents: raws})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !got.KelVerified {
-		t.Fatalf("an intact unsigned log was rejected: %v", got.ValidationErrors)
+	if !got.LogSound {
+		t.Fatalf("an intact unsigned log was called malformed: %v", got.ValidationErrors)
+	}
+	if got.KelVerified {
+		t.Fatal("a log nobody signed reported that authorship was proven, which would let " +
+			"anyone establish a key state with a log they wrote themselves")
+	}
+	if got.EventsUnsigned != len(raws) {
+		t.Errorf("counted %d unsigned events, expected %d", got.EventsUnsigned, len(raws))
 	}
 	joined := strings.Join(got.ValidationErrors, " ")
 	if !strings.Contains(joined, "no signature") {
 		t.Errorf("nothing told the caller that authorship was unchecked: %v", got.ValidationErrors)
+	}
+}
+
+// The other side of the same coin: when the signatures are there, both answers
+// are yes. Without this, making KelVerified strict would be indistinguishable
+// from making it always false.
+func TestAFullySignedLogIsBothSoundAndVerified(t *testing.T) {
+	aid, raws, sigs := signedLog(t)
+	got, err := ValidateKELFromBytes(ValidateKELInput{
+		AID: aid, RawEvents: raws, CesrSignatures: sigs,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.LogSound || !got.KelVerified {
+		t.Fatalf("a correctly signed log did not verify: sound=%v verified=%v %v",
+			got.LogSound, got.KelVerified, got.ValidationErrors)
+	}
+	if got.EventsUnsigned != 0 {
+		t.Errorf("a fully signed log reported %d unsigned events", got.EventsUnsigned)
+	}
+}
+
+// A log where only some events are signed is not partly verified. Authorship
+// is claimed for the whole history or it is not established, since an
+// unauthorised event in the middle is exactly how a key state gets diverted.
+func TestOneUnsignedEventIsEnoughToLeaveTheLogUnverified(t *testing.T) {
+	aid, raws, sigs := signedLog(t)
+	if len(sigs) < 2 {
+		t.Skip("needs a log of more than one event")
+	}
+	partial := append([]string{}, sigs...)
+	partial[len(partial)-1] = ""
+
+	got, err := ValidateKELFromBytes(ValidateKELInput{
+		AID: aid, RawEvents: raws, CesrSignatures: partial,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.KelVerified {
+		t.Fatal("a log whose last event nobody signed reported as verified; that event is " +
+			"the one that says what the current key is")
+	}
+	if !got.LogSound {
+		t.Errorf("the log still holds together and should say so: %v", got.ValidationErrors)
 	}
 }
 

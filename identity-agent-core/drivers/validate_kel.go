@@ -180,16 +180,28 @@ func ValidateKELFromBytes(in ValidateKELInput) (*DriverValidateKELResponse, erro
 	out.EventsValidated = len(in.RawEvents)
 	out.CurrentPublicKey = current
 	out.ValidationErrors = problems
-	out.KelVerified = len(problems) == 0
+	out.EventsUnsigned = unsigned
 
-	// An unsigned log is reported for what it is. It is not a failure — a log
-	// fetched from a stranger routinely arrives without controller signatures —
-	// but a caller that reads "verified" and believes authorship was proven
-	// would be believing something this did not check.
-	if out.KelVerified && unsigned > 0 {
+	// Two questions, two answers, because conflating them is how an
+	// unauthenticated log gets treated as a proven one.
+	//
+	// The log holding together says the events parse and chain and the
+	// inception derives the identifier. Authorship being proven says somebody
+	// holding the declared key actually signed. An unsigned event fails the
+	// second without touching the first, and every trust gate in this agent
+	// reads KelVerified, so an unsigned log answering "verified" would let a
+	// stranger establish a key state by handing over a document they wrote.
+	//
+	// An unsigned log is not an error, which is why it is not recorded as one:
+	// a log fetched over an introduction routinely arrives this way, and
+	// calling it malformed would be false. It is simply not verified.
+	out.LogSound = len(problems) == 0
+	out.KelVerified = len(problems) == 0 && unsigned == 0
+
+	if out.LogSound && unsigned > 0 {
 		out.ValidationErrors = []string{fmt.Sprintf(
-			"the log holds together and its inception derives %s; %d of %d events carried no "+
-				"signature, so authorship was not checked for those",
+			"the log holds together and its inception derives %s, but %d of %d events carried "+
+				"no signature, so nobody has been shown to have authorised them",
 			first.Identifier, unsigned, len(in.RawEvents))}
 	}
 	return out, nil

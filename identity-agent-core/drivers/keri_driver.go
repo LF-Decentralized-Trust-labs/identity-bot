@@ -295,7 +295,31 @@ type DriverValidateKELRequest struct {
 }
 
 type DriverValidateKELResponse struct {
-	KelVerified      bool     `json:"kel_verified"`
+	// KelVerified means authorship was proven: every event was signed, and
+	// signed by the key the log itself puts in force at that point.
+	//
+	// It is what every trust gate in this agent reads before letting a log
+	// establish anything, so it answers the strict question. A log that is
+	// internally consistent but carries no signatures is not verified — it is
+	// an unauthenticated document that happens to be well formed, and treating
+	// the two alike would let anyone hand over a log they wrote themselves.
+	KelVerified bool `json:"kel_verified"`
+
+	// LogSound means the log holds together as a log: the events parse, they
+	// chain, and the inception derives the identifier.
+	//
+	// Separate from KelVerified because the two genuinely differ, and the case
+	// where they differ is routine rather than exotic — a log fetched from a
+	// stranger over an introduction usually arrives without controller
+	// signatures. Reporting that as unverified is correct; reporting it as
+	// malformed would be false, and would leave a caller unable to tell a
+	// stranger's honest log from a corrupt one.
+	LogSound bool `json:"log_sound"`
+
+	// EventsUnsigned is how many events carried no signature, which is the
+	// specific reason KelVerified and LogSound part company.
+	EventsUnsigned int `json:"events_unsigned,omitempty"`
+
 	CurrentPublicKey string   `json:"current_public_key"`
 	EventsValidated  int      `json:"events_validated"`
 	ValidationErrors []string `json:"validation_errors,omitempty"`

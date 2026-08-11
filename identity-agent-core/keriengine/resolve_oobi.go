@@ -84,6 +84,13 @@ func (e *Engine) ResolveOobi(oobiURL string) (*drivers.DriverResolveOobiResponse
 		PublicKey    string                   `json:"public_key"`
 		KEL          []map[string]interface{} `json:"kel"`
 		RawEventsB64 []string                 `json:"raw_events_b64"`
+		// CesrSignatures[i] is the controller's signature over RawEventsB64[i].
+		//
+		// What turns a readable log into an authenticated one. An introduction
+		// served without these describes a key state that nobody has been shown
+		// to have authorised, and a stranger's unsigned log is exactly the thing
+		// a forger can produce at will.
+		CesrSignatures []string `json:"cesr_signatures"`
 	}
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		return nil, fmt.Errorf("what %s served is not a readable introduction: %w", oobiURL, err)
@@ -108,6 +115,13 @@ func (e *Engine) ResolveOobi(oobiURL string) (*drivers.DriverResolveOobiResponse
 			in = drivers.ValidateKELInput{AID: doc.AID, RawEvents: raws}
 			ok = true
 		}
+	}
+	// Signatures served alongside the log are used whichever way the bytes were
+	// recovered, and only when there is one per event: a short list would line
+	// signatures up against the wrong events, and every one of them would fail
+	// to verify for a reason that has nothing to do with the log.
+	if ok && len(doc.CesrSignatures) == len(in.RawEvents) {
+		in.CesrSignatures = doc.CesrSignatures
 	}
 	if !ok {
 		// Served without the bytes it was published as, so its signatures

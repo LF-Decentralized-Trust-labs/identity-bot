@@ -41,7 +41,15 @@ func loadGolden(t *testing.T) goldenVector {
 	return g
 }
 
-func TestCrossEngineByteIdentitySeed0(t *testing.T) {
+// The recorded bytes are a tripwire, not a conformance check.
+//
+// The vector is this implementation's own output, so it proves the bytes have
+// not moved unnoticed — nothing more. It was previously named as though it
+// compared against another engine, which is worth being exact about: no other
+// engine implements this hybrid suite, so no such comparison exists to be run,
+// and a name implying one invites the reader to trust it for something it never
+// did. When the pre-rotation digest was wrong, this test agreed with it.
+func TestTheRecordedInceptionBytesHaveNotChanged(t *testing.T) {
 	golden := loadGolden(t)
 	mat := iacrypto.SyntheticHybridKeyMaterial(golden.HybridInception.Seed)
 	res, err := iacrypto.BuildHybridInception(mat)
@@ -55,7 +63,7 @@ func TestCrossEngineByteIdentitySeed0(t *testing.T) {
 		t.Fatalf("said: got %q want %q", res.SAID, golden.HybridInception.SAID)
 	}
 	if res.AID != res.SAID {
-		t.Fatalf("keri 1.1.17 inceptive icp: aid must equal said, got aid=%q said=%q", res.AID, res.SAID)
+		t.Fatalf("an inception identifier IS its own digest, so these must match: aid=%q said=%q", res.AID, res.SAID)
 	}
 	if len(res.RawBytesB64) != golden.HybridInception.RawBytesB64Len {
 		t.Fatalf("raw_bytes_b64 len: got %d want %d", len(res.RawBytesB64), golden.HybridInception.RawBytesB64Len)

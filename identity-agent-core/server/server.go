@@ -3028,12 +3028,36 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
 	// check that anybody else ever saw it — and the second is what makes a
 	// forged history detectable, since a forger can produce a perfectly signed
 	// log of their own but not other people's receipts over it.
+	// The bytes each event was published as, and the controller's signature
+	// over them, travel with the log.
+	//
+	// Without them an introduction can be read and cannot be verified. The
+	// parsed form in "kel" is not the event: a KERI event is ordered, its
+	// version string comes first and declares the length, and putting it
+	// through a map sorts the keys and moves that string to the end. Anyone
+	// re-serialising it gets different bytes, so the identifier does not
+	// re-derive and no signature over it checks out. A resolver handed only
+	// that has to take the sender's word for who the log belongs to, which is
+	// the one thing an introduction from a stranger must never require.
+	//
+	// Both were already being kept for exactly this purpose and simply were
+	// not served, so every resolved introduction was structurally sound and
+	// unauthenticated.
+	rawEvents := make([]string, len(events))
+	signatures := make([]string, len(events))
+	for i, ev := range events {
+		rawEvents[i] = ev.RawBytesB64
+		signatures[i] = ev.CesrSignature
+	}
+
 	resp := map[string]interface{}{
-		"aid":        identity.AID,
-		"public_key": identity.PublicKey,
-		"alias":      alias,
-		"kel":        events,
-		"receipts":   s.receiptsForEvents(events),
+		"aid":             identity.AID,
+		"public_key":      identity.PublicKey,
+		"alias":           alias,
+		"kel":             events,
+		"raw_events_b64":  rawEvents,
+		"cesr_signatures": signatures,
+		"receipts":        s.receiptsForEvents(events),
 		// Whether this agent belongs to a person or an organization. Published
 		// because a peer has to know before it can decide whether the two of us
 		// may witness for each other — the two kinds are kept apart.

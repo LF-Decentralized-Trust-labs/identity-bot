@@ -85,11 +85,30 @@ func materialToCESR(m HybridKeyMaterial) (cesrKeys, error) {
 	if err != nil {
 		return cesrKeys{}, err
 	}
-	nEd, err := Blake3QB64(m.NextEd25519SigningRaw)
+	// A pre-rotation commitment is the digest of the next key's qb64 TEXT, not
+	// of its raw bytes. The distinction is the whole mechanism: at rotation the
+	// controller publishes the key as qb64 and every verifier re-derives the
+	// digest from exactly those characters. Committing to the raw bytes
+	// produces a digest nobody can reproduce from what the rotation actually
+	// carries, so the rotation is refused and the identity is stranded holding
+	// keys it can prove it owns and cannot use.
+	//
+	// Both halves go through the library's own NextDigest so there is one
+	// definition of what a commitment is rather than a second one here that
+	// can drift away from the rotation path that has to satisfy it.
+	nextEd, err := ed25519VerferQB64(m.NextEd25519SigningRaw)
 	if err != nil {
 		return cesrKeys{}, err
 	}
-	nMldsa, err := Blake3QB64(m.NextMLDSA65SigningRaw)
+	nEd, err := keri.NextDigest(nextEd)
+	if err != nil {
+		return cesrKeys{}, err
+	}
+	nextMldsa, err := EncodeLargeFixed(CESRMLDSA65Verkey, m.NextMLDSA65SigningRaw, MLDSA65VerkeyBytes)
+	if err != nil {
+		return cesrKeys{}, err
+	}
+	nMldsa, err := keri.NextDigest(nextMldsa)
 	if err != nil {
 		return cesrKeys{}, err
 	}
@@ -103,7 +122,9 @@ func materialToCESR(m HybridKeyMaterial) (cesrKeys, error) {
 	}, nil
 }
 
-// BuildHybridInception constructs keri 1.1.17 conformant hybrid icp (SerderKERI makify).
+// BuildHybridInception builds an inception carrying both a classical and a
+// post-quantum signing key, so an identity founded today survives the arrival
+// of a machine that breaks Ed25519 without having to be founded again.
 func BuildHybridInception(m HybridKeyMaterial) (*HybridInceptionResult, error) {
 	return buildHybrid(m, "")
 }
