@@ -41,7 +41,15 @@ func loadGolden(t *testing.T) goldenVector {
 	return g
 }
 
-func TestCrossEngineByteIdentitySeed0(t *testing.T) {
+// The recorded bytes are a tripwire, not a conformance check.
+//
+// The vector is this implementation's own output, so it proves the bytes have
+// not moved unnoticed — nothing more. It was previously named as though it
+// compared against another engine, which is worth being exact about: no other
+// engine implements this hybrid suite, so no such comparison exists to be run,
+// and a name implying one invites the reader to trust it for something it never
+// did. When the pre-rotation digest was wrong, this test agreed with it.
+func TestTheRecordedInceptionBytesHaveNotChanged(t *testing.T) {
 	golden := loadGolden(t)
 	mat := iacrypto.SyntheticHybridKeyMaterial(golden.HybridInception.Seed)
 	res, err := iacrypto.BuildHybridInception(mat)
@@ -55,7 +63,7 @@ func TestCrossEngineByteIdentitySeed0(t *testing.T) {
 		t.Fatalf("said: got %q want %q", res.SAID, golden.HybridInception.SAID)
 	}
 	if res.AID != res.SAID {
-		t.Fatalf("keri 1.1.17 inceptive icp: aid must equal said, got aid=%q said=%q", res.AID, res.SAID)
+		t.Fatalf("an inception identifier IS its own digest, so these must match: aid=%q said=%q", res.AID, res.SAID)
 	}
 	if len(res.RawBytesB64) != golden.HybridInception.RawBytesB64Len {
 		t.Fatalf("raw_bytes_b64 len: got %d want %d", len(res.RawBytesB64), golden.HybridInception.RawBytesB64Len)
@@ -70,7 +78,7 @@ func TestCrossEngineByteIdentitySeed0(t *testing.T) {
 	if ked["ka"] != nil {
 		t.Fatal("top-level ka must not be present (KERI-conformant)")
 	}
-	k, _ := ked["k"].([]string)
+	k := stringSlice(ked["k"])
 	if len(k) != golden.HybridInception.SigningKeysInK {
 		t.Fatalf("k len: %d", len(k))
 	}
@@ -104,8 +112,8 @@ func TestSyntheticHybridInceptionStructure(t *testing.T) {
 	if res.AID == "" || res.SAID == "" {
 		t.Fatal("expected non-empty aid and said")
 	}
-	k, ok := res.InceptionEvent["k"].([]string)
-	if !ok || len(k) != 2 {
+	k := stringSlice(res.InceptionEvent["k"])
+	if len(k) != 2 {
 		t.Fatalf("ked k: %v", res.InceptionEvent["k"])
 	}
 	if k[0][0:1] != "D" {
@@ -114,4 +122,27 @@ func TestSyntheticHybridInceptionStructure(t *testing.T) {
 	if k[1][0:4] != iacrypto.CESRMLDSA65Verkey {
 		t.Fatalf("ML-DSA key prefix: %s", k[1][:4])
 	}
+}
+
+// stringSlice reads a string array from a decoded event field, which may be
+// []string or []interface{} depending on whether the event was built in memory
+// or round-tripped through JSON. Production code already tolerates both — see
+// SigningKeyCount — so a test that insists on one is asserting an implementation
+// detail rather than a property of the event.
+func stringSlice(v interface{}) []string {
+	switch t := v.(type) {
+	case []string:
+		return t
+	case []interface{}:
+		out := make([]string, 0, len(t))
+		for _, e := range t {
+			s, ok := e.(string)
+			if !ok {
+				return nil
+			}
+			out = append(out, s)
+		}
+		return out
+	}
+	return nil
 }

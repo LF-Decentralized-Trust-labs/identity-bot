@@ -33,12 +33,14 @@ func (s *SQLiteStore) SetConfig(key, value string) error {
 func (s *SQLiteStore) GetContactMeta(aid string) (*ContactMeta, error) {
 	row := s.db.QueryRow(`
 		SELECT contact_aid, backend_type, witness_status, offline_count, is_mutual, is_commercial,
-		       COALESCE(witnessing_for, 0), enrolled_at, last_receipt_at, last_health_check
+		       COALESCE(witnessing_for, 0), enrolled_at, last_receipt_at, last_health_check,
+		       COALESCE(witness_key, ''), COALESCE(entity_type, '')
 		FROM witness_contact_meta WHERE contact_aid = ?`, aid)
 	var m ContactMeta
 	var mutual, commercial, witnessingFor int
 	err := row.Scan(&m.ContactAID, &m.BackendType, &m.WitnessStatus, &m.OfflineCount,
-		&mutual, &commercial, &witnessingFor, &m.EnrolledAt, &m.LastReceiptAt, &m.LastHealthCheck)
+		&mutual, &commercial, &witnessingFor, &m.EnrolledAt, &m.LastReceiptAt, &m.LastHealthCheck,
+		&m.WitnessKey, &m.EntityType)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -65,10 +67,12 @@ func (s *SQLiteStore) SaveContactMeta(m ContactMeta) error {
 	_, err := s.db.Exec(`
 		INSERT INTO witness_contact_meta (
 			contact_aid, backend_type, witness_status, offline_count, is_mutual, is_commercial,
-			witnessing_for, enrolled_at, last_receipt_at, last_health_check
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			witnessing_for, enrolled_at, last_receipt_at, last_health_check, witness_key, entity_type
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(contact_aid) DO UPDATE SET
 			backend_type = excluded.backend_type,
+			witness_key = excluded.witness_key,
+			entity_type = excluded.entity_type,
 			witness_status = excluded.witness_status,
 			offline_count = excluded.offline_count,
 			is_mutual = excluded.is_mutual,
@@ -79,6 +83,7 @@ func (s *SQLiteStore) SaveContactMeta(m ContactMeta) error {
 			last_health_check = excluded.last_health_check`,
 		m.ContactAID, m.BackendType, m.WitnessStatus, m.OfflineCount,
 		mutual, commercial, witnessingFor, m.EnrolledAt, m.LastReceiptAt, m.LastHealthCheck,
+		m.WitnessKey, m.EntityType,
 	)
 	return err
 }
@@ -86,7 +91,8 @@ func (s *SQLiteStore) SaveContactMeta(m ContactMeta) error {
 func (s *SQLiteStore) ListContactMeta() ([]ContactMeta, error) {
 	rows, err := s.db.Query(`
 		SELECT contact_aid, backend_type, witness_status, offline_count, is_mutual, is_commercial,
-		       COALESCE(witnessing_for, 0), enrolled_at, last_receipt_at, last_health_check
+		       COALESCE(witnessing_for, 0), enrolled_at, last_receipt_at, last_health_check,
+		       COALESCE(witness_key, ''), COALESCE(entity_type, '')
 		FROM witness_contact_meta ORDER BY contact_aid`)
 	if err != nil {
 		return nil, err
@@ -97,7 +103,8 @@ func (s *SQLiteStore) ListContactMeta() ([]ContactMeta, error) {
 		var m ContactMeta
 		var mutual, commercial, witnessingFor int
 		if err := rows.Scan(&m.ContactAID, &m.BackendType, &m.WitnessStatus, &m.OfflineCount,
-			&mutual, &commercial, &witnessingFor, &m.EnrolledAt, &m.LastReceiptAt, &m.LastHealthCheck); err != nil {
+			&mutual, &commercial, &witnessingFor, &m.EnrolledAt, &m.LastReceiptAt, &m.LastHealthCheck,
+			&m.WitnessKey, &m.EntityType); err != nil {
 			return nil, err
 		}
 		m.IsMutual = mutual != 0
@@ -110,16 +117,17 @@ func (s *SQLiteStore) ListContactMeta() ([]ContactMeta, error) {
 
 func (s *SQLiteStore) StoreKelEvent(ev KelEvent) error {
 	_, err := s.db.Exec(`
-		INSERT INTO witness_kel_events (signer_aid, sequence_num, event_json, event_said, stored_at)
-		VALUES (?, ?, ?, ?, ?)
+		INSERT INTO witness_kel_events (signer_aid, sequence_num, event_json, event_said, stored_at, raw_bytes_b64, cesr_signature)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(signer_aid, sequence_num) DO NOTHING`,
-		ev.SignerAID, ev.SequenceNum, ev.EventJSON, ev.EventSAID, ev.StoredAt)
+		ev.SignerAID, ev.SequenceNum, ev.EventJSON, ev.EventSAID, ev.StoredAt,
+		ev.RawBytesB64, ev.CesrSignature)
 	return err
 }
 
 func (s *SQLiteStore) GetKelEvents(signerAID string) ([]KelEvent, error) {
 	rows, err := s.db.Query(`
-		SELECT signer_aid, sequence_num, event_json, event_said, stored_at
+		SELECT signer_aid, sequence_num, event_json, event_said, stored_at, raw_bytes_b64, cesr_signature
 		FROM witness_kel_events WHERE signer_aid = ? ORDER BY sequence_num`, signerAID)
 	if err != nil {
 		return nil, err
@@ -128,7 +136,8 @@ func (s *SQLiteStore) GetKelEvents(signerAID string) ([]KelEvent, error) {
 	var out []KelEvent
 	for rows.Next() {
 		var ev KelEvent
-		if err := rows.Scan(&ev.SignerAID, &ev.SequenceNum, &ev.EventJSON, &ev.EventSAID, &ev.StoredAt); err != nil {
+		if err := rows.Scan(&ev.SignerAID, &ev.SequenceNum, &ev.EventJSON, &ev.EventSAID, &ev.StoredAt,
+			&ev.RawBytesB64, &ev.CesrSignature); err != nil {
 			return nil, err
 		}
 		out = append(out, ev)

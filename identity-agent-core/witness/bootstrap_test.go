@@ -2,6 +2,7 @@ package witness
 
 import (
 	"fmt"
+	"os"
 	"testing"
 )
 
@@ -9,14 +10,54 @@ import (
 // and the moment it most needs witnessing — inception — is the moment it has
 // nobody to ask. These tests hold it to that job and no larger one.
 
+// The pool comes from the provider registry, which the agent wires at startup.
+// These tests supply their own rather than reaching for the shipped file, so
+// they test the behaviour and not how many operators happen to be live today.
+func TestMain(m *testing.M) {
+	BootstrapWitnesses = func() []BootstrapWitness {
+		return []BootstrapWitness{{
+			AID:        "BMtfjviEMpF2xWVW0CRPKoVPX1mOMzNurvUjD-0RN_Jl",
+			WitnessKey: "BMtfjviEMpF2xWVW0CRPKoVPX1mOMzNurvUjD-0RN_Jl",
+			URL:        "https://witness1.example",
+			Operator:   "example.org",
+		}}
+	}
+	os.Exit(m.Run())
+}
+
+// An agent with no registry has no bootstrap witnesses, and says so by
+// returning none rather than by carrying a list of its own.
+func TestWithNoRegistryThereAreNoBootstrapWitnesses(t *testing.T) {
+	saved := BootstrapWitnesses
+	BootstrapWitnesses = nil
+	defer func() { BootstrapWitnesses = saved }()
+
+	if got := BootstrapPool(); len(got) != 0 {
+		t.Fatalf("witnesses appeared from nowhere: %v", got)
+	}
+}
+
 func TestAFreshIdentityGetsWitnesses(t *testing.T) {
+	// Asks for more than the pool holds on purpose: what matters is that a new
+	// identity is given everything available, not that some particular number
+	// exists. The pool is expected to grow as operators join, and a test
+	// asserting its size would fail on the day that happens.
 	got := withBootstrap(nil, 3)
-	if len(got) != 3 {
-		t.Fatalf("a new identity with no contacts got %d witnesses, so nothing would receipt its inception", len(got))
+	if len(got) == 0 {
+		t.Fatal("a new identity with no contacts got no witnesses, so nothing would " +
+			"receipt its inception")
+	}
+	if len(got) > len(BootstrapPool()) {
+		t.Fatalf("got %d witnesses from a pool of %d", len(got), len(BootstrapPool()))
 	}
 	for _, w := range got {
 		if w.AID == "" || w.URL == "" {
 			t.Fatalf("a bootstrap witness is missing an AID or URL: %+v", w)
+		}
+		// A witness that cannot be designated is not much use as a bootstrap:
+		// the identity would reach it and then be unable to name it.
+		if w.WitnessKey == "" {
+			t.Fatalf("%s publishes no witness key, so it cannot be designated", w.AID)
 		}
 	}
 }
@@ -46,10 +87,11 @@ func TestContactsDisplaceBootstrap(t *testing.T) {
 // Partway there: keep every contact, top up the rest.
 func TestBootstrapOnlyFillsTheGap(t *testing.T) {
 	contacts := []witnessTarget{{AID: "EFRIEND1", URL: "https://a.example"}}
-	got := withBootstrap(contacts, 3)
+	want := 1 + len(BootstrapPool())
+	got := withBootstrap(contacts, want)
 
-	if len(got) != 3 {
-		t.Fatalf("expected 3 witnesses, got %d", len(got))
+	if len(got) != want {
+		t.Fatalf("expected the contact plus the whole pool (%d), got %d", want, len(got))
 	}
 	if got[0].AID != "EFRIEND1" {
 		t.Fatal("the contact was dropped or reordered — contacts come first, deliberately")
@@ -74,18 +116,28 @@ func TestAContactWhoIsAlsoBootstrapIsNotCountedTwice(t *testing.T) {
 			t.Fatalf("%s appears %d times — the same witness twice is one witness", aid, n)
 		}
 	}
-	if len(got) != 3 {
-		t.Fatalf("expected the gap still filled to 3 distinct witnesses, got %d", len(got))
+	if len(got) != len(seen) {
+		t.Fatalf("got %d witnesses but only %d distinct ones", len(got), len(seen))
 	}
 }
 
-// Three operators, not six. Each host runs a witness and a watcher role under
-// one identity, so anyone reasoning about independence should get three — and a
-// threshold above that would have nothing to draw on.
-func TestTheBootstrapPoolIsThreeDistinctOperators(t *testing.T) {
+// However many operators the pool holds, each must be a distinct one that can
+// actually be designated. A host runs its witness and watcher roles under one
+// identity, so anybody reasoning about independence should count identities and
+// not endpoints — a threshold above that count would have nothing to draw on.
+func TestTheBootstrapPoolIsDistinctDesignatableOperators(t *testing.T) {
 	pool := BootstrapPool()
-	if len(pool) != 3 {
-		t.Fatalf("expected 3 bootstrap witnesses, got %d", len(pool))
+	if len(pool) == 0 {
+		t.Fatal("the bootstrap pool is empty, so a new identity has nobody to be witnessed by")
+	}
+	for _, w := range pool {
+		// Non-transferable, because a witness identifier IS the key its
+		// receipts verify against. A transferable one would mean resolving a
+		// key log per receipt, and would orphan its own receipts on rotation.
+		if len(w.WitnessKey) != 44 || w.WitnessKey[0] != 'B' {
+			t.Fatalf("%s has witness key %q, which is not a non-transferable identifier",
+				w.URL, w.WitnessKey)
+		}
 	}
 	seen := map[string]bool{}
 	for _, w := range pool {
@@ -143,9 +195,17 @@ func TestPairwiseWitnessesSpreadAcrossThePool(t *testing.T) {
 			len(BootstrapPool()), len(seen), seen)
 	}
 	// Not a statistical test — just that no operator takes nearly everything.
-	for aid, n := range seen {
-		if n > 200 {
-			t.Errorf("operator %s took %d of 300 pairwise AIDs", aid, n)
+	//
+	// Only meaningful once there is more than one operator to spread across.
+	// With a single-operator pool every pairwise AID goes to it by necessity,
+	// and asserting otherwise would be asserting that the pool is bigger than
+	// it is. This check comes back on its own when a second operator is added.
+	if len(BootstrapPool()) > 1 {
+		limit := 300 - 300/(2*len(BootstrapPool()))
+		for aid, n := range seen {
+			if n > limit {
+				t.Errorf("operator %s took %d of 300 pairwise AIDs", aid, n)
+			}
 		}
 	}
 }

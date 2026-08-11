@@ -3,6 +3,7 @@ package witness
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -36,7 +37,7 @@ type EventPoster func(ctx context.Context, witnessURL string, body []byte) (map[
 type Service struct {
 	Store       Store
 	Contacts    ContactStore
-	Driver      *drivers.KeriDriver
+	Driver      drivers.KeriEngine
 	HTTPClient  *http.Client
 	PostEvent   EventPoster
 	OurAID      func() string
@@ -52,12 +53,36 @@ type Service struct {
 	// ReceiveEvent refuses rather than issuing something that looks like a
 	// receipt and proves nothing.
 	SignReceipt func(said string) (witnessAID, cesrSig string, err error)
+	// OurWitnessAID reports the identifier this agent witnesses under, without
+	// signing anything.
+	//
+	// Needed where the identifier is the answer rather than a by-product:
+	// publishing it so a peer can designate this agent, and naming it when
+	// standing down. Supplied by the host for the same reason SignReceipt is —
+	// the key belongs to the agent, not to this package.
+	OurWitnessAID func() (string, error)
+	// OurEntityType reports whether this agent belongs to a person or an
+	// organization. A peer may only witness for its own kind, so an agent that
+	// cannot answer this enrols no peer witnesses at all.
+	OurEntityType func() EntityType
+	// CheckIdentity asks a witness service which identity it is answering as,
+	// so a pinned identifier can be confirmed before it is designated. Nil uses
+	// a plain HTTP request; set in tests so they need no network.
+	CheckIdentity IdentityChecker
+	// IsOfficialService reports whether a witness is a registered service
+	// provider rather than a peer.
+	//
+	// Service providers are exempt from the same-kind rule: one serves a large
+	// population, so naming it discloses almost nothing about its subject.
+	// Asked of the provider registry rather than read off a per-contact flag,
+	// so the exemption is a line in a shipped file that somebody can audit.
+	IsOfficialService func(aidOrURL string) bool
 
 	mu         sync.Mutex
 	finalizeWg map[string]chan struct{}
 }
 
-func NewService(st Store, contacts ContactStore, driver *drivers.KeriDriver, backendType string) *Service {
+func NewService(st Store, contacts ContactStore, driver drivers.KeriEngine, backendType string) *Service {
 	if backendType == "" {
 		backendType = BackendDesktop
 	}
@@ -113,7 +138,19 @@ func (s *Service) MaxWitnesses() int {
 func (s *Service) OOBIExtensions() map[string]interface{} {
 	outgoing, _ := s.Store.CountWitnessingFor()
 	capOK := outgoing < MaxOutgoingWitnessing
+	// The key this agent signs receipts with, so anybody who wants it to
+	// witness for them can name it in their inception event. Without publishing
+	// this an agent can be asked to witness and can never be DESIGNATED, since
+	// what an event names is the witness key and not the contact.
+	//
+	// Public by design: it is a verifying key, and it appears in the events of
+	// everybody this agent witnesses for.
+	witnessKey, err := s.witnessAID()
+	if err != nil {
+		witnessKey = ""
+	}
 	return map[string]interface{}{
+		"witness_key":                witnessKey,
 		"backend_type":               s.BackendType,
 		"witness_capacity_available": capOK,
 		"witness_outgoing_count":     outgoing,
@@ -122,12 +159,37 @@ func (s *Service) OOBIExtensions() map[string]interface{} {
 }
 
 // ReceiveEvent implements C2 — witness-side receipt of a key event.
-func (s *Service) ReceiveEvent(signerAID string, event map[string]interface{}) (map[string]interface{}, error) {
+//
+// Takes the event as published, plus the controller's signature over those
+// bytes. Both are required, and that is the point of this function rather than
+// an inconvenience in it.
+//
+// A receipt says: this witness saw this exact event, and the identity it claims
+// to come from authorised it. Neither half can be established from a parsed
+// event. The digest is over an exact byte sequence in an exact field order, so
+// a re-encoded event is a different event; and there is nothing to check
+// authorship against without a signature. Receipting on those terms produces
+// evidence that somebody sent a JSON object, which is not what a receipt is
+// read as meaning.
+func (s *Service) ReceiveEvent(signerAID string, rawEvent []byte, cesrSig string) (map[string]interface{}, error) {
+	if len(rawEvent) == 0 {
+		return nil, fmt.Errorf("missing_event_bytes")
+	}
+	var event map[string]interface{}
+	if err := json.Unmarshal(rawEvent, &event); err != nil {
+		return nil, fmt.Errorf("invalid event")
+	}
 	if signerAID == "" {
 		signerAID = eventAID(event)
 	}
 	if signerAID == "" {
 		return nil, fmt.Errorf("missing signer aid")
+	}
+	if cesrSig == "" {
+		// Refused rather than receipted unsigned. A witness that will attest to
+		// an unsigned event is a witness anyone can make say anything, and its
+		// receipts stop distinguishing a real history from an invented one.
+		return nil, fmt.Errorf("unsigned_event")
 	}
 	meta, _ := s.Store.GetContactMeta(signerAID)
 	if meta == nil || !meta.WitnessingFor {
@@ -145,16 +207,20 @@ func (s *Service) ReceiveEvent(signerAID string, event map[string]interface{}) (
 		return nil, fmt.Errorf("duplicate_sequence")
 	}
 
-	if err := s.verifyEventChain(signerAID, event, seq); err != nil {
+	if err := s.verifyEventChain(signerAID, rawEvent, cesrSig, seq); err != nil {
 		return nil, fmt.Errorf("rejected: %w", err)
 	}
 
 	now := NowRFC3339()
 	said := eventSAID(event)
-	evJSON, _ := json.Marshal(event)
+	// The published bytes are stored alongside the readable form. Storing only
+	// the readable form is what made every event a witness held unverifiable
+	// after the fact.
 	if err := s.Store.StoreKelEvent(KelEvent{
-		SignerAID: signerAID, SequenceNum: seq, EventJSON: string(evJSON),
+		SignerAID: signerAID, SequenceNum: seq, EventJSON: string(rawEvent),
 		EventSAID: said, StoredAt: now,
+		RawBytesB64:   base64.StdEncoding.EncodeToString(rawEvent),
+		CesrSignature: cesrSig,
 	}); err != nil {
 		return nil, err
 	}
@@ -203,22 +269,45 @@ func (s *Service) ReceiveEvent(signerAID string, event map[string]interface{}) (
 	}, nil
 }
 
-func (s *Service) verifyEventChain(signerAID string, event map[string]interface{}, seq int) error {
-	if s.Driver == nil {
-		if eventAID(event) == "" {
-			return fmt.Errorf("invalid event")
-		}
-		return nil
-	}
+// verifyEventChain checks that the new event extends a log this identity
+// actually published, and that this identity signed it.
+//
+// Runs over canonical bytes, which is what makes it a check at all. The
+// previous version compared parsed events, so it could confirm that the fields
+// referred to each other and nothing more — a forged log satisfies that, since
+// whoever forged it wrote every field.
+func (s *Service) verifyEventChain(signerAID string, rawEvent []byte, cesrSig string, seq int) error {
 	existing, _ := s.Store.GetKelEvents(signerAID)
-	events := eventsToMaps(existing)
-	events = append(events, event)
-	res, err := s.Driver.ValidateKEL(signerAID, events)
+
+	raws := make([][]byte, 0, len(existing)+1)
+	sigs := make([]string, 0, len(existing)+1)
+	for _, e := range existing {
+		if e.RawBytesB64 == "" {
+			// Stored before a witness kept the published bytes. The history
+			// cannot be verified, so it is not offered up as though it had
+			// been; the new event is checked on its own instead.
+			raws = raws[:0]
+			sigs = sigs[:0]
+			break
+		}
+		raw, err := base64.StdEncoding.DecodeString(e.RawBytesB64)
+		if err != nil {
+			return fmt.Errorf("stored_event_unreadable")
+		}
+		raws = append(raws, raw)
+		sigs = append(sigs, e.CesrSignature)
+	}
+	raws = append(raws, rawEvent)
+	sigs = append(sigs, cesrSig)
+
+	res, err := drivers.ValidateKELFromBytes(drivers.ValidateKELInput{
+		AID: signerAID, RawEvents: raws, CesrSignatures: sigs,
+	})
 	if err != nil {
 		return err
 	}
 	if !res.KelVerified {
-		return fmt.Errorf("kel_verify_failed")
+		return fmt.Errorf("kel_verify_failed: %s", strings.Join(res.ValidationErrors, "; "))
 	}
 	return nil
 }
@@ -236,7 +325,25 @@ func (s *Service) GetKelReplica(signerAID string) ([]map[string]interface{}, err
 }
 
 // BroadcastEvent implements C1 — POST to all enrolled witnesses.
-func (s *Service) BroadcastEvent(ctx context.Context, signerAID string, event map[string]interface{}) error {
+//
+// Sends the event as published, with the controller's signature over those
+// bytes. A witness cannot earn its receipt without both, so sending anything
+// less would be asking for an attestation nobody could make honestly.
+func (s *Service) BroadcastEvent(ctx context.Context, signerAID string, rawEvent []byte, cesrSig string) error {
+	if len(rawEvent) == 0 {
+		return fmt.Errorf("an event cannot be broadcast without the bytes it was published as")
+	}
+	var event map[string]interface{}
+	if err := json.Unmarshal(rawEvent, &event); err != nil {
+		return fmt.Errorf("the event to broadcast is not readable: %w", err)
+	}
+	if cesrSig == "" {
+		// Reported rather than sent. Every witness would refuse it, so sending
+		// it would turn one local fault into a round of remote refusals whose
+		// cause is much harder to see from here.
+		return fmt.Errorf("refusing to broadcast an unsigned event for %s: a witness cannot "+
+			"attest to an event it cannot verify", signerAID)
+	}
 	rootAID := signerAID
 	if id, _ := s.Contacts.GetIdentity(); id != nil {
 		rootAID = id.AID
@@ -256,7 +363,11 @@ func (s *Service) BroadcastEvent(ctx context.Context, signerAID string, event ma
 		StartedAt: now, UpdatedAt: now,
 	})
 
-	body, _ := json.Marshal(map[string]interface{}{"aid": signerAID, "event": event})
+	body, _ := json.Marshal(map[string]interface{}{
+		"aid":            signerAID,
+		"event_b64":      base64.StdEncoding.EncodeToString(rawEvent),
+		"cesr_signature": cesrSig,
+	})
 	for _, w := range witnesses {
 		url := witnessEventURL(w)
 		go s.postWithRetry(ctx, url, body, said, w.AID)
@@ -266,8 +377,12 @@ func (s *Service) BroadcastEvent(ctx context.Context, signerAID string, event ma
 }
 
 type witnessTarget struct {
-	AID        string
-	URL        string
+	AID string
+	URL string
+	// WitnessKey is the non-transferable identifier this witness signs receipts
+	// with. Empty when it has not published one, in which case it can be asked
+	// to witness but cannot be DESIGNATED — see DesignatableWitnesses.
+	WitnessKey string
 	Commercial bool
 }
 
@@ -282,14 +397,39 @@ func (s *Service) enrolledWitnesses(kind AidKind, aid string) ([]witnessTarget, 
 			continue
 		}
 		meta, _ := s.Store.GetContactMeta(c.AID)
+		// A registered service provider counts as commercial whatever the
+		// contact record says, because the registry is the declaration and the
+		// flag is only a cache of one.
 		commercial := meta != nil && meta.IsCommercial
+		if !commercial && s.IsOfficialService != nil &&
+			(s.IsOfficialService(c.AID) || s.IsOfficialService(c.OobiURL)) {
+			commercial = true
+		}
 		if !ContactWitnessAllowedForAID(kind, commercial) {
+			continue
+		}
+		// Peers of the same kind only. An organization witnessing an individual
+		// would write that organization permanently into the individual's
+		// founding event, which is public and cannot be amended away — see
+		// PeerAllowedAcross. A dedicated witness service is not a peer
+		// and is not subject to this.
+		if !commercial && !s.peerWitnessAllowed(meta) {
 			continue
 		}
 		if meta != nil && meta.WitnessStatus == StatusOffline {
 			continue
 		}
-		out = append(out, witnessTarget{AID: c.AID, URL: c.OobiURL, Commercial: commercial})
+		// The contact's own witness key travels with it, because that — not the
+		// contact identifier — is what an event names when it designates. A
+		// contact whose key this agent has not learned can still be sent events
+		// to witness; it just cannot be written into one.
+		witnessKey := ""
+		if meta != nil {
+			witnessKey = meta.WitnessKey
+		}
+		out = append(out, witnessTarget{
+			AID: c.AID, URL: c.OobiURL, WitnessKey: witnessKey, Commercial: commercial,
+		})
 	}
 	// Top up from the bootstrap pool while there are too few contacts to reach
 	// a threshold worth having. Appended rather than preferred, so somebody
@@ -321,6 +461,15 @@ func (s *Service) enrolledWitnesses(kind AidKind, aid string) ([]witnessTarget, 
 	return out, nil
 }
 
+// postWithRetry submits an event to one witness and records the receipt it
+// returns.
+//
+// What is recorded is the receipt, not the fact that the request succeeded.
+// Those were the same thing until now: a witness answering HTTP 200 counted
+// towards the threshold and the reply was discarded, so "finalized" meant that
+// some number of servers had responded — not that anybody had attested to
+// anything. A witness returning 200 and no receipt finalised an event just as
+// well as one that signed it.
 func (s *Service) postWithRetry(ctx context.Context, url string, body []byte, eventSAID, witnessAID string) {
 	resp, err := s.PostEvent(ctx, url, body)
 	if err != nil {
@@ -450,6 +599,15 @@ func (s *Service) RecordHeartbeatResult(contactAID string, ok bool) {
 		meta.OfflineCount = 0
 		if meta.WitnessStatus == StatusOffline {
 			meta.WitnessStatus = StatusOnline
+			// Back, so resume relying on it.
+			//
+			// Dropping was never a removal: the key log went on designating this
+			// witness throughout, so resuming costs nothing and clears the
+			// disagreement between what this agent does and what its own log
+			// says. Without this, dropping was automatic and permanent while
+			// restoring needed a fresh enrolment exchange — so one bad night
+			// cost a witness for good.
+			s.resumeWitness(contactAID)
 		}
 	} else {
 		meta.OfflineCount++
@@ -461,6 +619,18 @@ func (s *Service) RecordHeartbeatResult(contactAID string, ok bool) {
 	_ = s.Store.SaveContactMeta(*meta)
 }
 
+// dropWitness stops relying on a witness that is no longer answering.
+//
+// This changes what THIS agent does; it does not change what the identity has
+// published. The designated set lives in the key log and can only be amended by
+// a rotation, so until one happens the log still names this witness and a
+// verifier still expects receipts from it — receipts that will not come, so the
+// threshold cannot be met.
+//
+// Reported for exactly that reason. Falling silently out of step with one's own
+// published log is the failure worth avoiding: the agent believes it has three
+// witnesses, the log says four, and nobody notices until a verification fails
+// for a reason nothing explains.
 func (s *Service) dropWitness(contactAID string) {
 	c, _ := s.Contacts.GetContact(contactAID)
 	if c == nil {
@@ -468,6 +638,9 @@ func (s *Service) dropWitness(contactAID string) {
 	}
 	c.IsWitness = false
 	_ = s.Contacts.SaveContact(*c)
+	if meta, _ := s.Store.GetContactMeta(contactAID); meta != nil && meta.WitnessKey != "" {
+		s.noteDesignationDrift(contactAID, meta.WitnessKey)
+	}
 	if s.OnEvent != nil {
 		s.OnEvent("witness_dropped_health", map[string]interface{}{"contact_aid": contactAID})
 	}

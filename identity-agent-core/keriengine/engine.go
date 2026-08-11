@@ -1,0 +1,800 @@
+package keriengine
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
+
+	"identity-agent-core/drivers"
+
+	keri "github.com/grapeid/keri-go"
+)
+
+// Engine performs KERI operations in-process.
+//
+// It satisfies the same interface as the Python driver, so the core cannot tell
+// which one it is holding — which is the point. The difference the core does
+// feel is that this one exists on mobile.
+type Engine struct {
+	state   *state
+	started time.Time
+	// secrets is where a hybrid identity's private material is written.
+	//
+	// Optional, and used for nothing else. Ordinary KERI identities keep their
+	// keys on the controller device and never present them here; a hybrid
+	// identity is the one case where the engine generates key material, and it
+	// has to be able to hand it somewhere durable or the identity it just
+	// created is unusable.
+	secrets keri.SecretStore
+	// http is how OOBIs are fetched. Replaceable so a test needs no network.
+	http HTTPClient
+}
+
+// SetHTTPClient replaces how this engine fetches introductions.
+func (e *Engine) SetHTTPClient(c HTTPClient) { e.http = c }
+
+// New returns an engine with no identities, which is the state a cold start
+// leaves it in. Identities arrive by being created or by being reloaded.
+//
+// An engine built this way refuses to create a real hybrid identity, because it
+// has nowhere to put the private half. Everything else works.
+func New() *Engine {
+	return &Engine{state: newState()}
+}
+
+// NewWithSecretStore returns an engine that can create hybrid identities,
+// writing their private material to the supplied store.
+func NewWithSecretStore(secrets keri.SecretStore) *Engine {
+	return &Engine{state: newState(), secrets: secrets}
+}
+
+// The engine is one of the implementations the core selects between.
+var _ drivers.KeriEngine = (*Engine)(nil)
+
+// Start records that the engine is running.
+//
+// Nothing is spawned and nothing can fail. The method exists because the
+// interface carries it, and the interface carries it because the other
+// implementation is a subprocess that genuinely has to be started — a core that
+// had to know which kind it held would defeat the substitution.
+func (e *Engine) Start() error {
+	e.started = time.Now()
+	return nil
+}
+
+// Stop releases nothing. See Start.
+func (e *Engine) Stop() {}
+
+func (e *Engine) GetStatus() (*drivers.DriverStatus, error) {
+	uptime := ""
+	if !e.started.IsZero() {
+		uptime = time.Since(e.started).Round(time.Second).String()
+	}
+	return &drivers.DriverStatus{
+		Status:      "active",
+		Driver:      "keri-go",
+		Version:     "1",
+		KeriLibrary: "github.com/grapeid/keri-go",
+		KeriVersion: keri.DefaultVersion.String(),
+		ScriptPath:  "",
+		Uptime:      uptime,
+	}, nil
+}
+
+// CreateInception founds an identity with a generated name.
+//
+// The identifier is used as the name. An identity that has no name of its own
+// still has to be findable later, and its identifier is the one label
+// guaranteed to be unique and to already be known to the caller.
+func (e *Engine) CreateInception(publicKey, nextPublicKey string) (*drivers.DriverInceptionResponse, error) {
+	return e.incept(publicKey, nextPublicKey, "", nil)
+}
+
+// CreateInceptionNamed founds an identity under a caller-chosen name.
+func (e *Engine) CreateInceptionNamed(publicKey, nextPublicKey, name string) (*drivers.DriverInceptionResponse, error) {
+	return e.incept(publicKey, nextPublicKey, name, nil)
+}
+
+// CreateOwnedInception founds an identity that records who owns it.
+//
+// The owner is written into the inception event as anchored data, so ownership
+// is established by the identity's own key log rather than by a record the
+// agent keeps about it. An agent's account of who owns an identity is something
+// the agent can be wrong about or lie about; the key log is neither.
+func (e *Engine) CreateOwnedInception(publicKey, nextPublicKey, name, ownerAID string) (*drivers.DriverInceptionResponse, error) {
+	if ownerAID == "" {
+		return nil, fmt.Errorf("an owned identity needs an owner; without one this is an " +
+			"ordinary inception and should be created as one")
+	}
+	// An event seal naming the owner's inception event.
+	//
+	// Every identity here is self-addressing, so the identifier IS the digest of
+	// its inception — which is what lets the seal name that event using only the
+	// identifier, and what makes it resolvable by someone who has the owner's
+	// log and nothing else.
+	//
+	// This was {"i": <owner>, "r": "owner"} until it was measured against an
+	// independent implementation, which could not PARSE an inception carrying
+	// it. Not "failed to validate" — the event was unreadable, so an owned
+	// identity's entire log was unreadable to anything that did not already
+	// share our private convention. KERI defines a closed set of seal shapes and
+	// that was not one of them.
+	//
+	// The role label is gone; position replaces it. An owner seal is an event
+	// seal in an establishment event — see the reader in the server package for
+	// why that is unambiguous and what would break it.
+	if !strings.HasPrefix(ownerAID, "E") {
+		return nil, fmt.Errorf("%q is not a self-addressing identifier, so an owner seal "+
+			"naming it would point at no event", ownerAID)
+	}
+	anchor := json.RawMessage(fmt.Sprintf(`{"i":%q,"s":"0","d":%q}`, ownerAID, ownerAID))
+	return e.incept(publicKey, nextPublicKey, name, []json.RawMessage{anchor})
+}
+
+// Incept founds an identity, optionally designating witnesses for it.
+func (e *Engine) Incept(req drivers.InceptionRequest) (*drivers.DriverInceptionResponse, error) {
+	var anchors []json.RawMessage
+	if req.OwnerAID != "" {
+		if !strings.HasPrefix(req.OwnerAID, "E") {
+			return nil, fmt.Errorf("%q is not a self-addressing identifier, so an owner seal "+
+				"naming it would point at no event", req.OwnerAID)
+		}
+		anchors = append(anchors, json.RawMessage(
+			fmt.Sprintf(`{"i":%q,"s":"0","d":%q}`, req.OwnerAID, req.OwnerAID)))
+	}
+	// Anything else the caller anchors — the messaging keys an identity commits
+	// to, most importantly. Dropping these silently would leave an identity
+	// whose identifier promises nothing about the keys people encrypt to it
+	// with, which is the whole reason they are anchored rather than served.
+	for i, a := range req.AnchorData {
+		raw, err := normaliseAnchor(a)
+		if err != nil {
+			return nil, fmt.Errorf("anchor %d: %w", i, err)
+		}
+		anchors = append(anchors, raw)
+	}
+	return e.inceptWith(req.PublicKey, req.NextPublicKey, req.Name, anchors, req.Witnesses, req.Toad)
+}
+
+func (e *Engine) incept(publicKey, nextPublicKey, name string, data []json.RawMessage) (*drivers.DriverInceptionResponse, error) {
+	return e.inceptWith(publicKey, nextPublicKey, name, data, nil, 0)
+}
+
+func (e *Engine) inceptWith(publicKey, nextPublicKey, name string, data []json.RawMessage, witnesses []string, toad int) (*drivers.DriverInceptionResponse, error) {
+	pub, err := normaliseKey(publicKey, true)
+	if err != nil {
+		return nil, fmt.Errorf("the signing key: %w", err)
+	}
+	nextPub, err := normaliseKey(nextPublicKey, true)
+	if err != nil {
+		return nil, fmt.Errorf("the next signing key: %w", err)
+	}
+	if pub == nextPub {
+		return nil, fmt.Errorf("the next key is the same as the current one; pre-rotation " +
+			"would commit to the key already in use, so a compromise of it would also " +
+			"carry the right to rotate")
+	}
+	// The commitment is a digest of the next key's qb64 TEXT, not of its raw
+	// bytes and not the key itself. Committing to anything else produces a
+	// rotation that every conformant implementation refuses, at the point where
+	// the identity most needs to rotate.
+	nextDigest, err := keri.NextDigest(nextPub)
+	if err != nil {
+		return nil, fmt.Errorf("committing to the next key: %w", err)
+	}
+
+	// A witness a caller cannot name properly is refused rather than written
+	// in. An inception event is permanent, so an unverifiable observer in it is
+	// a mistake with no way back.
+	for i, w := range witnesses {
+		if len(w) != 44 || w[0] != 'B' {
+			return nil, fmt.Errorf("witness %d is %q, which is not a non-transferable "+
+				"identifier; its receipts could not be checked without resolving a key log", i, w)
+		}
+	}
+	in := keri.InceptionInput{
+		Keys:        []string{pub},
+		NextDigests: []string{nextDigest},
+		Data:        data,
+		Witnesses:   witnesses,
+		// Self-addressing: the identifier is a digest over the whole inception
+		// event, so it commits to the witnesses and thresholds as well as the
+		// key. A basic identifier is only the key, and an identity created that
+		// way could not be reproduced from its own event.
+		Derivation: "self-addressing",
+	}
+	// A stated threshold is passed through; otherwise the builder derives the
+	// default, and writing a guess at that default would be writing the
+	// caller's arithmetic rather than the protocol's.
+	if toad > 0 {
+		in.Toad = &toad
+	}
+	raw, err := keri.BuildInception(in)
+	if err != nil {
+		return nil, fmt.Errorf("building the inception event: %w", err)
+	}
+	ev, err := keri.ParseEvent(raw)
+	if err != nil {
+		return nil, fmt.Errorf("the inception event this engine built does not parse: %w", err)
+	}
+	body, err := eventMap(raw)
+	if err != nil {
+		return nil, err
+	}
+
+	if name == "" {
+		name = ev.Identifier
+	}
+	first, err := entry(raw)
+	if err != nil {
+		return nil, err
+	}
+	e.state.put(&identity{
+		Name:            name,
+		AID:             ev.Identifier,
+		PublicKey:       pub,
+		NextKeyDigest:   nextDigest,
+		Witnesses:       ev.Witnesses,
+		Toad:            witnessThreshold(ev),
+		SN:              0,
+		LastSAID:        ev.SAID,
+		KEL:             []kelEntry{first},
+		Registries:      map[string]*registry{},
+		HistoryVerified: true,
+	})
+
+	return &drivers.DriverInceptionResponse{
+		AID:            ev.Identifier,
+		InceptionEvent: body,
+		RawBytesB64:    b64(raw),
+		PublicKey:      pub,
+		NextKeyDigest:  nextDigest,
+	}, nil
+}
+
+// CreateDelegatedInception founds an identity whose authority comes from
+// another, and anchors the approval in the delegator's own log.
+//
+// Both halves are produced together. A delegated inception without the
+// delegator's anchoring interaction is not a delegation at all — nothing has
+// approved it — and returning one alone would let a caller publish an identity
+// claiming an authority that was never granted.
+func (e *Engine) CreateDelegatedInception(publicKey, nextPublicKey, name, delegatorName string) (*drivers.DriverDelegatedInceptionResponse, error) {
+	delegator, err := e.state.get(delegatorName)
+	if err != nil {
+		return nil, fmt.Errorf("the delegator: %w", err)
+	}
+	pub, err := normaliseKey(publicKey, true)
+	if err != nil {
+		return nil, fmt.Errorf("the signing key: %w", err)
+	}
+	nextPub, err := normaliseKey(nextPublicKey, true)
+	if err != nil {
+		return nil, fmt.Errorf("the next signing key: %w", err)
+	}
+	nextDigest, err := keri.NextDigest(nextPub)
+	if err != nil {
+		return nil, err
+	}
+
+	dip, err := keri.BuildDelegatedInception(keri.DelegationInput{
+		Keys:        []string{pub},
+		NextDigests: []string{nextDigest},
+		Delegator:   delegator.AID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("building the delegated inception: %w", err)
+	}
+	dipEvent, err := keri.ParseEvent(dip)
+	if err != nil {
+		return nil, err
+	}
+
+	// The delegator anchors a seal naming the delegated event exactly: its
+	// identifier, its sequence number and its digest. A seal that named only
+	// the identifier would approve any event that identity ever produced.
+	seal, err := eventSeal(dipEvent.Identifier, fmt.Sprintf("%x", dipEvent.SN), dipEvent.SAID)
+	if err != nil {
+		return nil, err
+	}
+	ixn, err := keri.BuildInteraction(keri.InteractionInput{
+		Prefix:    delegator.AID,
+		PriorSAID: delegator.LastSAID,
+		SN:        delegator.SN + 1,
+		Data:      []json.RawMessage{seal},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("building the delegator's approval: %w", err)
+	}
+	ixnEvent, err := keri.ParseEvent(ixn)
+	if err != nil {
+		return nil, err
+	}
+
+	dipBody, err := eventMap(dip)
+	if err != nil {
+		return nil, err
+	}
+	ixnBody, err := eventMap(ixn)
+	if err != nil {
+		return nil, err
+	}
+
+	if name == "" {
+		name = dipEvent.Identifier
+	}
+	first, err := entry(dip)
+	if err != nil {
+		return nil, err
+	}
+	e.state.put(&identity{
+		Name:            name,
+		AID:             dipEvent.Identifier,
+		PublicKey:       pub,
+		NextKeyDigest:   nextDigest,
+		Witnesses:       dipEvent.Witnesses,
+		Toad:            witnessThreshold(dipEvent),
+		SN:              0,
+		LastSAID:        dipEvent.SAID,
+		KEL:             []kelEntry{first},
+		Registries:      map[string]*registry{},
+		HistoryVerified: true,
+	})
+
+	ixnEntry, err := entry(ixn)
+	if err != nil {
+		return nil, err
+	}
+	// The delegator's log only advances once its approval is recorded.
+	e.state.mu.Lock()
+	delegator.SN = int(ixnEvent.SN)
+	delegator.LastSAID = ixnEvent.SAID
+	delegator.KEL = append(delegator.KEL, ixnEntry)
+	e.state.mu.Unlock()
+
+	return &drivers.DriverDelegatedInceptionResponse{
+		AID:           dipEvent.Identifier,
+		DelegatorAID:  delegator.AID,
+		Said:          dipEvent.SAID,
+		DipEvent:      dipBody,
+		DelegatorIxn:  ixnBody,
+		RawBytesB64:   b64(dip),
+		PublicKey:     pub,
+		NextKeyDigest: nextDigest,
+	}, nil
+}
+
+// RotateAid replaces an identity's signing key with the one it committed to.
+func (e *Engine) RotateAid(name, newPublicKey, newNextPublicKey string) (*drivers.DriverRotationResponse, error) {
+	return e.RotateAidWithAnchor(name, newPublicKey, newNextPublicKey, nil)
+}
+
+// RotateAidWithAnchor rotates and anchors data in the same event.
+//
+// One event, not two. Data anchored by a following interaction could be
+// separated from the rotation by anyone relaying the log; data in the rotation
+// itself is covered by the same digest and the same signature, so a reader
+// either has both or has neither.
+func (e *Engine) RotateAidWithAnchor(name, newPublicKey, newNextPublicKey string, anchorData []interface{}) (*drivers.DriverRotationResponse, error) {
+	return e.Rotate(drivers.RotationRequest{
+		Name: name, NewPublicKey: newPublicKey, NewNextPublicKey: newNextPublicKey,
+		AnchorData: anchorData,
+	})
+}
+
+// Rotate rotates the keys and, where asked, amends who witnesses the identity.
+func (e *Engine) Rotate(req drivers.RotationRequest) (*drivers.DriverRotationResponse, error) {
+	name, newPublicKey, newNextPublicKey, anchorData :=
+		req.Name, req.NewPublicKey, req.NewNextPublicKey, req.AnchorData
+	id, err := e.state.get(name)
+	if err != nil {
+		return nil, err
+	}
+	newPub, err := normaliseKey(newPublicKey, true)
+	if err != nil {
+		return nil, fmt.Errorf("the new signing key: %w", err)
+	}
+	newNextPub, err := normaliseKey(newNextPublicKey, true)
+	if err != nil {
+		return nil, fmt.Errorf("the new next signing key: %w", err)
+	}
+
+	// The key being rotated to must be the one that was committed to. Checking
+	// here turns a rotation that every other implementation would reject —
+	// leaving the identity stranded with a published event nobody accepts —
+	// into an error before anything is published.
+	revealed, err := keri.NextDigest(newPub)
+	if err != nil {
+		return nil, err
+	}
+	if revealed != id.NextKeyDigest {
+		return nil, fmt.Errorf("this key was not the one committed to: the identity committed "+
+			"to %s and this key digests to %s. Rotating to it would produce an event no "+
+			"conformant implementation accepts", id.NextKeyDigest, revealed)
+	}
+	newNextDigest, err := keri.NextDigest(newNextPub)
+	if err != nil {
+		return nil, err
+	}
+
+	anchors, err := rawData(anchorData)
+	if err != nil {
+		return nil, err
+	}
+	// A witness being added must be nameable, for the same reason it must be at
+	// inception: what the event carries is the key its receipts verify against.
+	for i, w := range req.AddWitnesses {
+		if len(w) != 44 || w[0] != 'B' {
+			return nil, fmt.Errorf("witness %d being added is %q, which is not a "+
+				"non-transferable identifier; its receipts could not be checked", i, w)
+		}
+	}
+	rotIn := keri.RotationInput{
+		Prefix:         id.AID,
+		Keys:           []string{newPub},
+		PriorSAID:      id.LastSAID,
+		SN:             id.SN + 1,
+		NextDigests:    []string{newNextDigest},
+		PriorWitnesses: id.Witnesses,
+		Cuts:           req.CutWitnesses,
+		Adds:           req.AddWitnesses,
+		Data:           anchors,
+	}
+	if req.Toad > 0 {
+		rotIn.Toad = &req.Toad
+	}
+	raw, err := keri.BuildRotation(rotIn)
+	if err != nil {
+		return nil, fmt.Errorf("building the rotation event: %w", err)
+	}
+	ev, err := keri.ParseEvent(raw)
+	if err != nil {
+		return nil, err
+	}
+	body, err := eventMap(raw)
+	if err != nil {
+		return nil, err
+	}
+
+	next, err := entry(raw)
+	if err != nil {
+		return nil, err
+	}
+	e.state.mu.Lock()
+	id.PublicKey = newPub
+	id.NextKeyDigest = newNextDigest
+	id.SN = int(ev.SN)
+	id.LastSAID = ev.SAID
+	id.KEL = append(id.KEL, next)
+	// The witness set now in force, read back off the event rather than
+	// recomputed here. The event is what everyone else will read, so anything
+	// this engine believes that the event does not say is simply wrong.
+	id.Witnesses = witnessesAfter(id.Witnesses, ev)
+	id.Toad = witnessThreshold(ev)
+	e.state.mu.Unlock()
+
+	return &drivers.DriverRotationResponse{
+		AID:              id.AID,
+		NewPublicKey:     newPub,
+		NewNextKeyDigest: newNextDigest,
+		RotationEvent:    body,
+		RawBytesB64:      b64(raw),
+		Said:             ev.SAID,
+		SequenceNumber:   int(ev.SN),
+	}, nil
+}
+
+// RotateToMultisig rotates an identity from one signer to several.
+//
+// The next-key digests are supplied already digested, because the keys they
+// commit to belong to the other members and must not be revealed here.
+func (e *Engine) RotateToMultisig(name string, keys, nextKeyDigests []string, isith, nsith string, anchorData []interface{}) (*drivers.DriverRotationResponse, error) {
+	id, err := e.state.get(name)
+	if err != nil {
+		return nil, err
+	}
+	if len(keys) == 0 {
+		return nil, fmt.Errorf("a multisig rotation needs at least one key")
+	}
+	if len(nextKeyDigests) == 0 {
+		return nil, fmt.Errorf("a multisig rotation with no next-key commitments would leave " +
+			"the group unable to ever rotate again")
+	}
+	normalised := make([]string, 0, len(keys))
+	for i, k := range keys {
+		n, err := normaliseKey(k, true)
+		if err != nil {
+			return nil, fmt.Errorf("member key %d: %w", i, err)
+		}
+		normalised = append(normalised, n)
+	}
+	data, err := rawData(anchorData)
+	if err != nil {
+		return nil, err
+	}
+
+	in := keri.RotationInput{
+		Prefix:         id.AID,
+		Keys:           normalised,
+		PriorSAID:      id.LastSAID,
+		SN:             id.SN + 1,
+		NextDigests:    nextKeyDigests,
+		PriorWitnesses: id.Witnesses,
+		Data:           data,
+	}
+	// A threshold is only written when one was asked for; the builder derives
+	// the default otherwise, and a value written here would be the caller's
+	// guess at that default rather than the default itself.
+	if isith != "" {
+		in.Isith = thresholdJSON(isith)
+	}
+	if nsith != "" {
+		in.Nsith = thresholdJSON(nsith)
+	}
+
+	raw, err := keri.BuildRotation(in)
+	if err != nil {
+		return nil, fmt.Errorf("building the multisig rotation: %w", err)
+	}
+	ev, err := keri.ParseEvent(raw)
+	if err != nil {
+		return nil, err
+	}
+	body, err := eventMap(raw)
+	if err != nil {
+		return nil, err
+	}
+
+	next, err := entry(raw)
+	if err != nil {
+		return nil, err
+	}
+	e.state.mu.Lock()
+	id.PublicKey = normalised[0]
+	id.NextKeyDigest = nextKeyDigests[0]
+	id.SN = int(ev.SN)
+	id.LastSAID = ev.SAID
+	id.KEL = append(id.KEL, next)
+	e.state.mu.Unlock()
+
+	return &drivers.DriverRotationResponse{
+		AID:              id.AID,
+		NewPublicKey:     normalised[0],
+		NewNextKeyDigest: nextKeyDigests[0],
+		Keys:             normalised,
+		NextKeyDigests:   nextKeyDigests,
+		Isith:            isith,
+		Nsith:            nsith,
+		RotationEvent:    body,
+		RawBytesB64:      b64(raw),
+		Said:             ev.SAID,
+		SequenceNumber:   int(ev.SN),
+	}, nil
+}
+
+// Interact anchors data in an identity's key log.
+func (e *Engine) Interact(name string, data []interface{}) (*drivers.DriverInteractResponse, error) {
+	id, err := e.state.get(name)
+	if err != nil {
+		return nil, err
+	}
+	anchors, err := rawData(data)
+	if err != nil {
+		return nil, err
+	}
+	if len(anchors) == 0 {
+		return nil, fmt.Errorf("an interaction with nothing to anchor would extend the log " +
+			"without recording anything")
+	}
+	raw, err := keri.BuildInteraction(keri.InteractionInput{
+		Prefix:    id.AID,
+		PriorSAID: id.LastSAID,
+		SN:        id.SN + 1,
+		Data:      anchors,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("building the interaction event: %w", err)
+	}
+	ev, err := keri.ParseEvent(raw)
+	if err != nil {
+		return nil, err
+	}
+	body, err := eventMap(raw)
+	if err != nil {
+		return nil, err
+	}
+
+	next, err := entry(raw)
+	if err != nil {
+		return nil, err
+	}
+	e.state.mu.Lock()
+	id.SN = int(ev.SN)
+	id.LastSAID = ev.SAID
+	id.KEL = append(id.KEL, next)
+	e.state.mu.Unlock()
+
+	return &drivers.DriverInteractResponse{
+		AID:            id.AID,
+		IxnEvent:       body,
+		RawBytesB64:    b64(raw),
+		Said:           ev.SAID,
+		SequenceNumber: int(ev.SN),
+	}, nil
+}
+
+// GetKel returns an identity's key log, parsed and raw.
+//
+// Both forms, because they answer different questions and neither substitutes
+// for the other: the parsed events are readable, and only the raw bytes can be
+// verified against.
+func (e *Engine) GetKel(name string) (*drivers.DriverKelResponse, error) {
+	id, err := e.state.get(name)
+	if err != nil {
+		return nil, err
+	}
+	e.state.mu.RLock()
+	defer e.state.mu.RUnlock()
+
+	events := make([]map[string]interface{}, 0, len(id.KEL))
+	// An entry with no canonical bytes yields an empty string rather than a
+	// re-encoding of the parsed event. A re-encoding would be the right length
+	// and the wrong digest, and a caller checking a signature against it would
+	// get a confident, wrong answer; an empty string cannot be mistaken for an
+	// event.
+	rawB64 := make([]string, 0, len(id.KEL))
+	for _, ev := range id.KEL {
+		events = append(events, ev.Parsed)
+		if ev.Raw == nil {
+			rawB64 = append(rawB64, "")
+			continue
+		}
+		rawB64 = append(rawB64, b64(ev.Raw))
+	}
+	return &drivers.DriverKelResponse{
+		AID:            id.AID,
+		KEL:            events,
+		RawEventsB64:   rawB64,
+		SequenceNumber: id.SN,
+		EventCount:     len(id.KEL),
+	}, nil
+}
+
+// ReloadIdentity restores an identity the agent already has on record.
+//
+// The engine starts empty, so an agent that has been restarted hands back what
+// it persisted. Where the canonical bytes were kept, the whole log is validated
+// before it is accepted: it comes from the agent's own storage, and storage
+// that has been corrupted or edited should fail here rather than at the point
+// where the identity next publishes something.
+//
+// Where they were not kept — events stored before the raw form was recorded —
+// the identity is still restored, because refusing would strand a real identity
+// whose log is intact but unverifiable by this engine. What is NOT done is to
+// rebuild the bytes by re-encoding the parsed events: that produces a different
+// field order, hence a different digest, and would manufacture a log that looks
+// verified and is not. The identity is marked as having an unverified history
+// instead, and says so.
+func (e *Engine) ReloadIdentity(req *drivers.DriverReloadIdentityRequest) (*drivers.DriverReloadIdentityResponse, error) {
+	if req == nil || req.AID == "" {
+		return nil, fmt.Errorf("reloading an identity needs its identifier")
+	}
+	if len(req.KEL) == 0 {
+		return nil, fmt.Errorf("reloading %s with an empty key log would create an identity "+
+			"with no history, which would then fork the real one at its next event", req.AID)
+	}
+
+	entries := make([]kelEntry, 0, len(req.KEL))
+	for i, parsed := range req.KEL {
+		e := kelEntry{Parsed: parsed}
+		if i < len(req.RawEventsB64) && req.RawEventsB64[i] != "" {
+			raw, err := decodeB64(req.RawEventsB64[i])
+			if err != nil {
+				return nil, fmt.Errorf("event %d of %s has unreadable stored bytes: %w", i, req.AID, err)
+			}
+			// The stored bytes must be the event the stored record claims.
+			// Checking here catches a record whose two halves have drifted
+			// apart, which would otherwise surface as an unverifiable log much
+			// later.
+			ev, err := keri.ParseEvent(raw)
+			if err != nil {
+				return nil, fmt.Errorf("event %d of %s does not parse as a KERI event: %w", i, req.AID, err)
+			}
+			if d, ok := parsed["d"].(string); ok && d != "" && d != ev.SAID {
+				return nil, fmt.Errorf("event %d of %s is stored twice and the copies disagree: "+
+					"the parsed form says %s and the bytes digest to %s", i, req.AID, d, ev.SAID)
+			}
+			e.Raw = raw
+		}
+		entries = append(entries, e)
+	}
+
+	raws, complete := verifiable(entries)
+	if complete {
+		if err := keri.ValidateKEL(raws); err != nil {
+			return nil, fmt.Errorf("the stored key log for %s does not validate, so it is not "+
+				"the log this identity published: %w", req.AID, err)
+		}
+	}
+
+	// The tip is what the next event chains to. Taken from the raw form when
+	// there is one, and from the stored fields otherwise.
+	sn, lastSAID := req.SequenceNumber, req.LastSAID
+	var witnesses []string
+	toad := 0
+	if last := entries[len(entries)-1]; last.Raw != nil {
+		ev, err := keri.ParseEvent(last.Raw)
+		if err != nil {
+			return nil, err
+		}
+		sn, lastSAID = int(ev.SN), ev.SAID
+		witnesses, toad = ev.Witnesses, witnessThreshold(ev)
+	}
+	if lastSAID == "" {
+		return nil, fmt.Errorf("reloading %s needs the digest of its most recent event; "+
+			"without it the next event cannot name its predecessor", req.AID)
+	}
+
+	pub := req.PublicKey
+	if pub != "" {
+		var err error
+		if pub, err = normaliseKey(pub, true); err != nil {
+			return nil, fmt.Errorf("the stored signing key: %w", err)
+		}
+	}
+
+	e.state.put(&identity{
+		Name:            req.AID,
+		AID:             req.AID,
+		PublicKey:       pub,
+		NextKeyDigest:   req.NextKeyDigest,
+		Witnesses:       witnesses,
+		Toad:            toad,
+		SN:              sn,
+		LastSAID:        lastSAID,
+		KEL:             entries,
+		Registries:      map[string]*registry{},
+		HistoryVerified: complete,
+	})
+
+	status := "reloaded"
+	if !complete {
+		// Said plainly in the response rather than logged, because a caller
+		// that believes a log was verified when it was not is exactly the
+		// mistake this is here to prevent.
+		status = "reloaded; history not verified because the stored log predates " +
+			"canonical bytes being kept"
+	}
+	return &drivers.DriverReloadIdentityResponse{
+		AID:            req.AID,
+		SequenceNumber: sn,
+		KelEvents:      len(entries),
+		Status:         status,
+	}, nil
+}
+
+// witnessesAfter applies a rotation's cuts and adds to the set that preceded it.
+//
+// Taken from the event rather than from the request, so that what this engine
+// believes about an identity cannot drift from what the identity has published.
+// A rotation that says nothing about witnesses leaves the set alone.
+func witnessesAfter(prior []string, ev *keri.Event) []string {
+	if ev == nil || (len(ev.WitnessCut) == 0 && len(ev.WitnessAdd) == 0) {
+		return prior
+	}
+	cut := map[string]bool{}
+	for _, w := range ev.WitnessCut {
+		cut[w] = true
+	}
+	out := make([]string, 0, len(prior)+len(ev.WitnessAdd))
+	for _, w := range prior {
+		if !cut[w] {
+			out = append(out, w)
+		}
+	}
+	for _, w := range ev.WitnessAdd {
+		out = append(out, w)
+	}
+	return out
+}

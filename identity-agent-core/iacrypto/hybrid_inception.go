@@ -3,7 +3,9 @@ package iacrypto
 import (
 	"crypto/ed25519"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	keri "github.com/grapeid/keri-go"
 )
 
 // HybridKeyMaterial holds raw key bytes for hybrid inception (synthetic or caller-supplied).
@@ -83,11 +85,30 @@ func materialToCESR(m HybridKeyMaterial) (cesrKeys, error) {
 	if err != nil {
 		return cesrKeys{}, err
 	}
-	nEd, err := Blake3QB64(m.NextEd25519SigningRaw)
+	// A pre-rotation commitment is the digest of the next key's qb64 TEXT, not
+	// of its raw bytes. The distinction is the whole mechanism: at rotation the
+	// controller publishes the key as qb64 and every verifier re-derives the
+	// digest from exactly those characters. Committing to the raw bytes
+	// produces a digest nobody can reproduce from what the rotation actually
+	// carries, so the rotation is refused and the identity is stranded holding
+	// keys it can prove it owns and cannot use.
+	//
+	// Both halves go through the library's own NextDigest so there is one
+	// definition of what a commitment is rather than a second one here that
+	// can drift away from the rotation path that has to satisfy it.
+	nextEd, err := ed25519VerferQB64(m.NextEd25519SigningRaw)
 	if err != nil {
 		return cesrKeys{}, err
 	}
-	nMldsa, err := Blake3QB64(m.NextMLDSA65SigningRaw)
+	nEd, err := keri.NextDigest(nextEd)
+	if err != nil {
+		return cesrKeys{}, err
+	}
+	nextMldsa, err := EncodeLargeFixed(CESRMLDSA65Verkey, m.NextMLDSA65SigningRaw, MLDSA65VerkeyBytes)
+	if err != nil {
+		return cesrKeys{}, err
+	}
+	nMldsa, err := keri.NextDigest(nextMldsa)
 	if err != nil {
 		return cesrKeys{}, err
 	}
@@ -101,44 +122,9 @@ func materialToCESR(m HybridKeyMaterial) (cesrKeys, error) {
 	}, nil
 }
 
-func hybridAnchor(cesr cesrKeys) []anchorSeal {
-	return []anchorSeal{{
-		Ia: CipherSuiteIAHybrid1,
-		Ka: []string{cesr.X25519Agreement, cesr.MLKEM768Encap},
-	}}
-}
-
-func wireFromCESR(cesr cesrKeys) icpWire {
-	return icpWire{
-		T:  "icp",
-		S:  "0",
-		Kt: "1",
-		K:  []string{cesr.Ed25519Signing, cesr.MLDSA65Signing},
-		Nt: "1",
-		N:  []string{cesr.NextEd25519Digest, cesr.NextMLDSA65Digest},
-		Bt: "0",
-		B:  []interface{}{},
-		C:  []interface{}{},
-		A:  hybridAnchor(cesr),
-	}
-}
-
-func wireToInceptionMap(w icpWire) map[string]interface{} {
-	m := map[string]interface{}{
-		"v": w.V, "t": w.T, "d": w.D, "i": w.I, "s": w.S, "kt": w.Kt,
-		"k": w.K, "nt": w.Nt, "n": w.N, "bt": w.Bt,
-		"b": w.B, "c": w.C, "a": []map[string]interface{}{{
-			"ia": w.A[0].Ia,
-			"ka": w.A[0].Ka,
-		}},
-	}
-	if w.Di != "" {
-		m["di"] = w.Di
-	}
-	return m
-}
-
-// BuildHybridInception constructs keri 1.1.17 conformant hybrid icp (SerderKERI makify).
+// BuildHybridInception builds an inception carrying both a classical and a
+// post-quantum signing key, so an identity founded today survives the arrival
+// of a machine that breaks Ed25519 without having to be founded again.
 func BuildHybridInception(m HybridKeyMaterial) (*HybridInceptionResult, error) {
 	return buildHybrid(m, "")
 }
@@ -169,22 +155,57 @@ func buildHybrid(m HybridKeyMaterial, delegatorAID string) (*HybridInceptionResu
 		return nil, err
 	}
 
-	wire := wireFromCESR(cesr)
-	if delegatorAID != "" {
-		wire.T = "dip"
-		wire.Di = delegatorAID
-	}
-
-	final, raw, err := makifyICPWire(wire)
+	// Built with keri-go rather than this package's own serialiser, so there is
+	// one KERI implementation in this codebase instead of two. The two were
+	// compared byte-for-byte on this exact event before the swap — see
+	// kerigo_agreement_test.go, which stays as the guard against them drifting
+	// apart again.
+	anchor, err := json.Marshal(map[string]any{
+		"ia": CipherSuiteIAHybrid1,
+		"ka": []string{cesr.X25519Agreement, cesr.MLKEM768Encap},
+	})
 	if err != nil {
+		return nil, err
+	}
+	// A delegated inception is a different event type carrying the delegator,
+	// not an ordinary one with a field added — the identifier derives from the
+	// whole event, so the two are different identities.
+	var raw []byte
+	if delegatorAID != "" {
+		raw, err = keri.BuildDelegatedInception(keri.DelegationInput{
+			Keys:        []string{cesr.Ed25519Signing, cesr.MLDSA65Signing},
+			Isith:       json.RawMessage(`"1"`),
+			NextDigests: []string{cesr.NextEd25519Digest, cesr.NextMLDSA65Digest},
+			Nsith:       json.RawMessage(`"1"`),
+			Data:        []json.RawMessage{anchor},
+			Delegator:   delegatorAID,
+		})
+	} else {
+		raw, err = keri.BuildInception(keri.InceptionInput{
+			Keys:        []string{cesr.Ed25519Signing, cesr.MLDSA65Signing},
+			Isith:       json.RawMessage(`"1"`),
+			NextDigests: []string{cesr.NextEd25519Digest, cesr.NextMLDSA65Digest},
+			Nsith:       json.RawMessage(`"1"`),
+			Data:        []json.RawMessage{anchor},
+		})
+	}
+	if err != nil {
+		return nil, err
+	}
+	ev, err := keri.ParseEvent(raw)
+	if err != nil {
+		return nil, err
+	}
+	var event map[string]interface{}
+	if err := json.Unmarshal(raw, &event); err != nil {
 		return nil, err
 	}
 
 	return &HybridInceptionResult{
-		AID:            final.I,
-		SAID:           final.D,
-		InceptionEvent: wireToInceptionMap(final),
-		Delegator:      final.Di,
+		AID:            ev.Identifier,
+		SAID:           ev.SAID,
+		InceptionEvent: event,
+		Delegator:      delegatorAID,
 		RawBytesB64:    base64.StdEncoding.EncodeToString(raw),
 		CipherSuite:    CipherSuiteIAHybrid1,
 		CESR:           cesr,

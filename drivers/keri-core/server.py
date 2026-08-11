@@ -285,7 +285,13 @@ def create_inception_event(
     next_bytes = _extract_raw_key(next_public_key)
 
     verfer = coring.Verfer(raw=pub_bytes, code=MtrDex.Ed25519)
-    diger = coring.Diger(raw=next_bytes, code=MtrDex.Blake3_256)
+    # The pre-rotation commitment is a DIGEST OF the next key, taken over its
+    # qb64 text. Diger(raw=...) does not hash — it wraps bytes that already are
+    # a digest — so passing key bytes to it published the next public key with
+    # an E prefix instead of a commitment to it. keripy's own validator computes
+    # Diger(ser=verfer.qb64b) and refuses anything else, so identities built the
+    # old way could not rotate in any conformant implementation.
+    diger = coring.Diger(ser=coring.Verfer(raw=next_bytes, code=MtrDex.Ed25519).qb64b)
 
     wits = list(witnesses or [])
     # Threshold of accountable duplicity. Defaults to a simple majority, which
@@ -536,8 +542,9 @@ def rotation():
         # future rotation could ever produce.
         new_diger = None
         if new_next_public_key:
-            new_diger = coring.Diger(raw=_extract_raw_key(new_next_public_key),
-                                     code=MtrDex.Blake3_256)
+            new_diger = coring.Diger(ser=coring.Verfer(
+                raw=_extract_raw_key(new_next_public_key),
+                code=MtrDex.Ed25519).qb64b)
         elif next_digest_set:
             new_diger = coring.Diger(qb64=next_digest_set[0])
         else:
@@ -672,7 +679,7 @@ def delegated_inception():
         next_bytes = _extract_raw_key(next_public_key)
 
         verfer = coring.Verfer(raw=pub_bytes, code=MtrDex.Ed25519)
-        diger = coring.Diger(raw=next_bytes, code=MtrDex.Blake3_256)
+        diger = coring.Diger(ser=coring.Verfer(raw=next_bytes, code=MtrDex.Ed25519).qb64b)
 
         # dip event: delegated inception referencing the delegator prefix.
         # keripy 1.1.17: eventing.delcept() — verify the name in keri/core/eventing.py
@@ -981,9 +988,32 @@ def get_kel():
     if not identity:
         return jsonify({"error": f"No identity found with name: {name}"}), 404
 
+    # The canonical bytes of each event, alongside the parsed form.
+    #
+    # A KEL entry is stored parsed, and a parsed event cannot be re-serialised by
+    # a caller: field order is part of the event, the identifier is a digest over
+    # those exact bytes, and any language that marshals a mapping in its own order
+    # produces something that verifies as nothing. Rebuilding here with keripy's
+    # own Serder is the only reconstruction that is authoritative about the order.
+    raw_events = []
+    for event in identity["kel"]:
+        try:
+            raw_events.append(
+                base64.b64encode(serdering.SerderKERI(sad=event).raw).decode()
+            )
+        except Exception as exc:  # noqa: BLE001 — report, never silently omit
+            # Omitting an event would hand back a log with a hole in it, which
+            # reads as a shorter history rather than as a failure.
+            return jsonify({
+                "error": f"could not reserialise event {len(raw_events)}: {exc}"
+            }), 500
+
     return jsonify({
         "aid": identity["aid"],
         "kel": identity["kel"],
+        # raw_events[i] is the canonical serialisation of kel[i]. Anything
+        # verifying signatures or recomputing identifiers must use these.
+        "raw_events_b64": raw_events,
         "sequence_number": identity["sequence_number"],
         "event_count": len(identity["kel"]),
     }), 200
@@ -2324,7 +2354,8 @@ def generate_multisig_event():
             ndigs = []
             for key in next_keys:
                 raw = _extract_raw_key(key)
-                ndigs.append(coring.Diger(raw=raw, code=MtrDex.Blake3_256).qb64)
+                ndigs.append(coring.Diger(
+                    ser=coring.Verfer(raw=raw, code=MtrDex.Ed25519).qb64b).qb64)
 
             serder = eventing.incept(
                 keys=key_qb64s,

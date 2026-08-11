@@ -4,13 +4,39 @@ import "time"
 
 // Witness protocol constants.
 const (
-	MaxWitnessSetSize       = 9
-	TargetContactWitnesses  = 7
-	DefaultThreshold        = 5 // majority of 9
-	MaxOutgoingWitnessing   = 15
-	HeartbeatInterval       = 15 * time.Minute
-	HeartbeatTimeout        = 5 * time.Second
-	OfflineFailureThreshold = 4
+	MaxWitnessSetSize      = 9
+	TargetContactWitnesses = 7
+	DefaultThreshold       = 5 // majority of 9
+	MaxOutgoingWitnessing  = 15
+	HeartbeatInterval      = 15 * time.Minute
+	HeartbeatTimeout       = 5 * time.Second
+
+	// OfflineTolerance is how long a witness may be unreachable before this
+	// agent stops relying on it.
+	//
+	// Generous on purpose, and it used to be an hour. Dropping a witness early
+	// buys nothing: during an outage its receipts do not arrive whether or not
+	// we have written it off, so the threshold is already short either way. All
+	// dropping decides is when to go looking for a REPLACEMENT — and replacing
+	// means a rotation, which changes the identity's keys.
+	//
+	// It costs something, too. While the key log still designates a witness,
+	// dropping it locally leaves this agent disagreeing with its own published
+	// record of who watches it, and only a rotation reconciles that. So a
+	// witness that reboots, moves house or loses power for a day should be
+	// waited for, not replaced.
+	//
+	// The question this answers is "am I confident it is not coming back",
+	// which is days, not minutes.
+	OfflineTolerance = 72 * time.Hour
+
+	// OfflineFailureThreshold is that tolerance in consecutive failed checks.
+	//
+	// Derived rather than written down, so the two cannot drift apart: changing
+	// the heartbeat interval used to silently change how long a witness was
+	// given, because the count was a bare number that read as if it meant
+	// something on its own.
+	OfflineFailureThreshold = int(OfflineTolerance / HeartbeatInterval)
 	FinalizeWaitDuration    = 60 * time.Second
 	SelfHealMaxPerHour      = 3
 	SelfHealCooldown        = 24 * time.Hour
@@ -53,8 +79,26 @@ const (
 
 // ContactMeta is per-contact witness pool metadata (D1/D3).
 type ContactMeta struct {
-	ContactAID      string
-	BackendType     string
+	ContactAID string
+	// BackendType is what this contact runs on, taken from what it publishes.
+	//
+	// It decides whether the contact can witness at all: witnessing means being
+	// reachable when somebody else's event needs receipting, and a phone is
+	// not. A phone paired to a computer is, because the computer answers — so
+	// what matters is whether there is an always-on backend, not what the
+	// person carries. Where that backend is hosted makes no difference.
+	BackendType string
+	// WitnessKey is the non-transferable key this contact signs receipts with,
+	// as published in its OOBI. Empty when it publishes none, in which case it
+	// can be asked to witness but can never be designated — what an event names
+	// is the key, not the contact.
+	WitnessKey string
+	// EntityType is whether this contact is a person or an organization.
+	//
+	// It decides whether they may witness for us at all: the two kinds are kept
+	// apart, because a witness list is public and permanent and an individual's
+	// root identifier is meant to stay unexposed. See PeerAllowedAcross.
+	EntityType      string
 	WitnessStatus   string
 	OfflineCount    int
 	IsMutual        bool
@@ -72,6 +116,18 @@ type KelEvent struct {
 	EventJSON   string
 	EventSAID   string
 	StoredAt    string
+	// RawBytesB64 is the event exactly as the controller published it, and
+	// CesrSignature is the controller's signature over those bytes.
+	//
+	// EventJSON substitutes for neither. It is re-encoded from the parsed
+	// event, which sorts the fields, so it digests to something that is not the
+	// event's identifier and a signature checked against it verifies nothing.
+	// Without these a witness cannot establish that the controller authorised
+	// what it is attesting to — which is the whole of what its receipt is worth.
+	//
+	// Empty for events stored before a witness kept them.
+	RawBytesB64   string
+	CesrSignature string
 }
 
 // IssuedReceipt is a CESR receipt this agent issued as witness.

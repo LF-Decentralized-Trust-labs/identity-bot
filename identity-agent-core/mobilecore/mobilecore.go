@@ -6,6 +6,8 @@ import (
 	"log"
 	"sync"
 
+	keri "github.com/grapeid/keri-go"
+
 	"identity-agent-core/server"
 )
 
@@ -95,4 +97,24 @@ func GetPort() int {
 		return 0
 	}
 	return srv.Port
+}
+
+// RunKeriSelfTest runs the KERI conformance suite on this device and returns
+// the result as JSON.
+//
+// It exists because `go test` does not run on a phone, and a desktop result
+// does not transfer. The architecture is the same, but the runtime is not: a
+// different libc surface through cgo, a sandboxed filesystem, tighter memory.
+// An implementation can be byte-perfect on a developer machine and wrong on the
+// device it ships to, and nothing in a desktop run would say so.
+//
+// The vectors are embedded in the library, so this reads no files and writes
+// none, and is safe to call at any point in the app's life.
+//
+// The result reports what it did NOT check as well as what passed: a number of
+// the cases produce no bytes to compare and are verified by assertions in the
+// library's own test suite instead. Counting those as passes would let a run
+// claim more coverage than it has.
+func RunKeriSelfTest() (string, error) {
+	return keri.SelfTestJSON()
 }

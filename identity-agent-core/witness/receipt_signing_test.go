@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"identity-agent-core/store"
+
+	keri "github.com/grapeid/keri-go"
 )
 
 // Accepting an event is the path that issues a receipt, and until now nothing
@@ -13,15 +15,51 @@ import (
 // "signature" that involved no key survived here unnoticed.
 func acceptOneEvent(t *testing.T, s *Service) (map[string]interface{}, error) {
 	t.Helper()
-	signer := "ESignerAID0123456789ABCDEFGHIJKLMN"
+	// A real inception, signed by the key it declares.
+	//
+	// It has to be real now: a witness validates before it receipts, so a
+	// hand-written stand-in is refused for being what it is. That is the
+	// behaviour these tests exist to protect, so they build a genuine event
+	// rather than working around it.
+	signer, err := keri.GenerateSigner(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, err := keri.GenerateSigner(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub, _ := signer.PublicKey()
+	nextPub, _ := next.PublicKey()
+	digest, err := keri.NextDigest(nextPub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := keri.BuildInception(keri.InceptionInput{
+		Keys: []string{pub}, NextDigests: []string{digest}, Derivation: "self-addressing",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev, err := keri.ParseEvent(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sigRaw, err := signer.Sign(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cesrSig, err := keri.MatterQB64(keri.CodeEd25519Sig, sigRaw)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	mc := s.Contacts.(*memContacts)
-	mc.contacts[signer] = store.ContactRecord{AID: signer, Status: "accepted"}
+	mc.contacts[ev.Identifier] = store.ContactRecord{AID: ev.Identifier, Status: "accepted"}
 	_ = s.Store.SaveContactMeta(ContactMeta{
-		ContactAID: signer, WitnessingFor: true, BackendType: BackendDesktop,
+		ContactAID: ev.Identifier, WitnessingFor: true, BackendType: BackendDesktop,
 	})
-	return s.ReceiveEvent(signer, map[string]interface{}{
-		"i": signer, "s": "0", "t": "icp", "d": "EEventSAID0123456789ABCDEFGHIJKLMNOPQRSTUVW",
-	})
+	return s.ReceiveEvent(ev.Identifier, raw, cesrSig)
 }
 
 // A witness with no key says nothing, rather than saying something that cannot

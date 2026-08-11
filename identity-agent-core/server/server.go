@@ -11,6 +11,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,6 +24,7 @@ import (
 	"identity-agent-core/drivers"
 	"identity-agent-core/endpoint"
 	"identity-agent-core/iacrypto"
+	"identity-agent-core/keriengine"
 	"identity-agent-core/linkverifier"
 	"identity-agent-core/login"
 	"identity-agent-core/oidc"
@@ -51,7 +53,7 @@ type CoreServer struct {
 	// proved ownership once on the device that holds the key.
 	BrowserSessions *browserSessions
 	AIMemory        *store.AIMemoryStore
-	KeriDriver      *drivers.KeriDriver
+	KeriDriver      drivers.KeriEngine
 	TunnelManager   *tunnel.Manager
 	EndpointService *endpoint.EndpointService
 	SandboxManager  *sandbox.Manager
@@ -59,11 +61,13 @@ type CoreServer struct {
 	StartTime       time.Time
 	Port            int
 	DataDir         string
-	AppCtx          context.Context
-	cancel          context.CancelFunc
-	listener        net.Listener
-	router          chi.Router
-	flutterWebDir   string
+	// DeclaredEntityType is what the build said it serves — see Config.
+	DeclaredEntityType string
+	AppCtx             context.Context
+	cancel             context.CancelFunc
+	listener           net.Listener
+	router             chi.Router
+	flutterWebDir      string
 
 	// See Config.RequireOwnerAtInception.
 	requireOwnerAtInception bool
@@ -125,7 +129,22 @@ type Config struct {
 	DataDir          string
 	Port             int
 	EnableKeriDriver bool
-	FlutterWebDir    string
+	// EntityType declares whether this build serves a person or an
+	// organization: "individual" or "organization".
+	//
+	// Declared by the implementation rather than discovered, because the
+	// implementation is the only thing that knows. This core is shared: the
+	// same binary runs inside an app for people and an app for organizations,
+	// and it cannot tell which one it is inside. The app can, absolutely — you
+	// cannot found an organization in an app built for individuals — so the app
+	// says so, here.
+	//
+	// It matters because peer witnesses and watchers are restricted to the same
+	// kind. An agent that does not know what it is enrols no peers at all,
+	// which is safe and useless, so a build that leaves this empty is
+	// misconfigured and says so at startup.
+	EntityType    string
+	FlutterWebDir string
 
 	// RequireOwnerAtInception refuses to found an identity that names no owner.
 	//
@@ -176,6 +195,7 @@ func DefaultConfig() Config {
 		DataDir:                 dataDir,
 		Port:                    port,
 		EnableKeriDriver:        enableKeri,
+		EntityType:              os.Getenv("IDENTITY_AGENT_ENTITY_TYPE"),
 		FlutterWebDir:           webDir,
 		RequireOwnerAtInception: requireOwner,
 	}
@@ -206,17 +226,19 @@ func New(cfg Config) (*CoreServer, error) {
 		DataStore: dataStore,
 		// Loaded eagerly: an agent that cannot name an operator cannot become
 		// reachable, so failing here is better found at startup than at first use.
-		Providers:       provider.Load(cfg.DataDir),
-		BrowserSessions: newBrowserSessions(),
-		AIMemory:        aiMemory,
-		EndpointService: endpointSvc,
-		EventHub:        eventHub,
-		StartTime:       time.Now(),
-		Port:            cfg.Port,
-		DataDir:         cfg.DataDir,
-		AppCtx:          ctx,
-		cancel:          cancel,
+		Providers:          provider.Load(cfg.DataDir),
+		BrowserSessions:    newBrowserSessions(),
+		AIMemory:           aiMemory,
+		EndpointService:    endpointSvc,
+		EventHub:           eventHub,
+		StartTime:          time.Now(),
+		Port:               cfg.Port,
+		DataDir:            cfg.DataDir,
+		DeclaredEntityType: cfg.EntityType,
+		AppCtx:             ctx,
+		cancel:             cancel,
 	}
+	s.checkEntityTypeDeclared()
 
 	ws := watcher.NewService(watcher.NewSQLiteStore(dataStore.DB()))
 	ws.OnEvent = func(eventType string, payload map[string]interface{}) {
@@ -244,24 +266,99 @@ func New(cfg Config) (*CoreServer, error) {
 		}
 		return fmt.Sprintf("http://127.0.0.1:%d/public/oobi/%s", cfg.Port, id.AID)
 	}
+	// What kind of entity this agent belongs to, which decides which peers may
+	// witness for it. Read live rather than captured, because the profile is
+	// set during onboarding and this service is built before that happens.
+	wsvc.OurEntityType = func() witness.EntityType {
+		return witness.NormaliseEntityType(s.ourEntityType())
+	}
+	wsvc.IsOfficialService = func(aidOrURL string) bool {
+		return s.Providers.IsOfficialService(provider.CapabilityWitness, aidOrURL)
+	}
+	// The bootstrap witnesses come from the provider registry, so there is one
+	// list of operators rather than one here and another in the witness engine.
+	witness.BootstrapWitnesses = witness.WitnessesFromRegistry(
+		func() []struct{ Operator, URL, AID string } {
+			var out []struct{ Operator, URL, AID string }
+			for _, p := range s.Providers.Offering(provider.CapabilityWitness) {
+				for _, e := range p.EndpointsFor(provider.CapabilityWitness) {
+					out = append(out, struct{ Operator, URL, AID string }{p.Operator, e.URL, e.AID})
+				}
+			}
+			return out
+		})
+
+	// Peers to cross-check with, drawn from contacts and registered services.
+	ws.PeerWatchers = s.peerWatchers
+
+	// The same boundary governs watching. A registered watcher service is
+	// exempt; a contact is a peer and must be of the same kind.
+	ws.PeerAllowed = func(peerURL string) bool {
+		if s.Providers.IsOfficialService(provider.CapabilityWatcher, peerURL) {
+			return true
+		}
+		ours := witness.NormaliseEntityType(s.ourEntityType())
+		theirs := witness.NormaliseEntityType(s.entityTypeOfPeerURL(peerURL))
+		return witness.PeerAllowedAcross(ours, theirs)
+	}
 	wsvc.OnEvent = func(eventType string, payload map[string]interface{}) {
 		s.EventHub.Broadcast(AgentEvent{Type: eventType, Payload: payload})
 	}
 	wsvc.SignReceipt = s.signWitnessReceipt
+	wsvc.OurWitnessAID = func() (string, error) {
+		_, aid, err := s.witnessSigningKey()
+		return aid, err
+	}
 	s.WitnessService = wsvc
 	go witness.StartHeartbeatLoop(wsvc, ctx.Done())
 
-	if cfg.EnableKeriDriver {
-		s.KeriDriver = drivers.NewKeriDriver()
-		if err := s.KeriDriver.Start(); err != nil {
+	// Choose a KERI engine.
+	//
+	// Two implementations satisfy the same interface. The Python driver is a
+	// subprocess: it needs a Python runtime, and on a phone it cannot run at
+	// all. The Go engine runs in-process and therefore runs everywhere.
+	//
+	// Where the driver is not enabled — which is every mobile build — the Go
+	// engine is used. That is a change in what those builds can do rather than
+	// a change of implementation: with no engine at all, every KERI call site
+	// in this package took its "not available" branch, and a phone could not
+	// perform a KERI operation through the core.
+	//
+	// The Go engine is the default everywhere, including desktop. The Python
+	// driver runs only when asked for by name.
+	//
+	// It used to be the other way round while the Go engine was being proven.
+	// It has since been proven — against the conformance vectors, against an
+	// independent implementation, and against a live witness service — and
+	// leaving a subprocess as the default meant every desktop agent still
+	// required a Python runtime to establish an identity.
+	//
+	// KERI_ENGINE=python still selects the driver, and nothing needs it. The
+	// three operations that once had no Go implementation — resolving an
+	// introduction, publishing an endpoint location, and building a credential
+	// presentation — are all answered here now, so the escape hatch exists to
+	// compare the two implementations rather than to make up a shortfall.
+	switch {
+	case cfg.EnableKeriDriver && os.Getenv("KERI_ENGINE") == "python":
+		driver := drivers.NewKeriDriver()
+		if err := driver.Start(); err != nil {
 			cancel()
 			dataStore.Close()
 			return nil, fmt.Errorf("failed to start KERI driver: %w", err)
 		}
-		// If an identity already exists in the DB, seed the driver's in-memory
-		// state so IssueCredential and Interact work without a fresh inception.
-		s.reloadIdentityIntoDriver()
+		s.KeriDriver = driver
+	default:
+		s.KeriDriver = keriengine.New()
+		if err := s.KeriDriver.Start(); err != nil {
+			cancel()
+			dataStore.Close()
+			return nil, fmt.Errorf("failed to start the KERI engine: %w", err)
+		}
 	}
+	// Seed the engine from what was persisted, so issuing and anchoring work
+	// after a restart without a fresh inception. Both implementations start
+	// empty, so both need this.
+	s.reloadIdentityIntoDriver()
 
 	if s.WitnessService != nil {
 		s.WitnessService.Driver = s.KeriDriver
@@ -472,9 +569,13 @@ func (s *CoreServer) Start() error {
 	log.Printf("[identity-agent-core] Server listening on %s", addr)
 	log.Printf("[identity-agent-core] Endpoint URL: %s (source: %s)", s.EndpointService.CurrentURL(), s.EndpointService.Source())
 	if s.KeriDriver != nil {
-		log.Printf("[identity-agent-core] KERI driver: %s", s.KeriDriver.BaseURL)
+		if st, err := s.KeriDriver.GetStatus(); err == nil {
+			log.Printf("[identity-agent-core] KERI engine: %s (%s)", st.Driver, st.KeriLibrary)
+		} else {
+			log.Printf("[identity-agent-core] KERI engine: present, status unavailable: %v", err)
+		}
 	} else {
-		log.Printf("[identity-agent-core] KERI driver: disabled (mobile mode — use Rust bridge)")
+		log.Printf("[identity-agent-core] KERI engine: none configured — KERI operations will be refused")
 	}
 
 	go func() {
@@ -607,6 +708,7 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		r.Get("/identity", s.handleIdentity)
 		r.Get("/security/enclave", s.handleSecurityEnclave)
 		r.Get("/attestation", s.handlePublicAttestation)
+		r.Get("/keri/selftest", s.handleKeriSelfTest)
 
 		r.Post("/keystore/root-seed", s.handleSetRootSeed)
 		r.Get("/keystore/root-seed", s.handleRootSeedStatus)
@@ -1001,11 +1103,16 @@ func (s *CoreServer) handleInfo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if s.KeriDriver != nil {
-		driverInfo.URL = s.KeriDriver.BaseURL
 		status, err := s.KeriDriver.GetStatus()
 		if err == nil {
 			driverInfo.Status = status.Status
 			driverInfo.Library = status.KeriLibrary
+			// An in-process engine has no address. Reporting one would invite a
+			// reader to go looking for a service that is not there.
+			driverInfo.URL = status.ScriptPath
+			if driverInfo.URL == "" {
+				driverInfo.URL = "in-process"
+			}
 		} else {
 			driverInfo.Status = "unknown"
 			driverInfo.Library = "unknown"
@@ -1143,9 +1250,35 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := s.KeriDriver.CreateInceptionAnchored(
-		req.PublicKey, req.NextPublicKey, "", req.OwnerAID,
-		[]map[string]interface{}{keyAnchor})
+	// Designate witnesses in the event that founds the identity.
+	//
+	// The only moment this can be done without a rotation, and the moment it
+	// matters most: an identity founded with no observer has nothing to
+	// contradict a second, equally well-formed history invented later.
+	//
+	// What goes in are witness KEYS, each confirmed against the service
+	// answering at that address before it is written into an event that cannot
+	// be amended.
+	var (
+		witnesses []string
+		toad      int
+	)
+	if s.WitnessService != nil {
+		witnesses, toad = s.WitnessService.WitnessesForNewIdentity(witness.AidKindRoot, "")
+		if len(witnesses) == 0 {
+			log.Printf("[identity-agent-core] INCEPTION: no designatable witnesses, so this " +
+				"identity is founded unwitnessed")
+		}
+	}
+
+	result, err := s.KeriDriver.Incept(drivers.InceptionRequest{
+		PublicKey:     req.PublicKey,
+		NextPublicKey: req.NextPublicKey,
+		OwnerAID:      req.OwnerAID,
+		AnchorData:    []map[string]interface{}{keyAnchor},
+		Witnesses:     witnesses,
+		Toad:          toad,
+	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to create inception event", err.Error())
 		return
@@ -1228,14 +1361,31 @@ func (s *CoreServer) handleHybridInception(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// Synthetic material is a counting pattern: right for conformance vectors,
+	// useless for an identity. Real material is generated in-process, and the
+	// post-quantum halves are genuine keypairs rather than random bytes of the
+	// right length — which is what the other implementations of this path
+	// produced, and which yields an identity whose post-quantum key can never
+	// be used.
+	material := iacrypto.SyntheticHybridKeyMaterial(0)
 	if !req.Synthetic {
-		writeError(w, http.StatusNotImplemented,
-			"Non-synthetic hybrid inception not yet wired",
-			"Use synthetic=true for C1 harness vectors; production keygen routes through keripy driver or Rust bridge")
-		return
+		generated, secrets, err := iacrypto.GenerateHybridKeyMaterial()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "Failed to generate hybrid key material", err.Error())
+			return
+		}
+		material = generated
+		// The secrets are deliberately NOT returned. The response is an
+		// inception event, which is published; a private key that travelled
+		// beside it would eventually be logged, cached or forwarded by
+		// something that had no idea what it was holding. Persisting them
+		// belongs with the keystore, and until that is wired a caller cannot
+		// use this identity to sign — which is a smaller problem than handing
+		// out keys.
+		_ = secrets
 	}
 
-	result, err := iacrypto.BuildHybridInception(iacrypto.SyntheticHybridKeyMaterial(0))
+	result, err := iacrypto.BuildHybridInception(material)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to create hybrid inception event", err.Error())
 		return
@@ -1326,7 +1476,7 @@ func (s *CoreServer) handleStoreEvent(w http.ResponseWriter, r *http.Request) {
 	if req.EventType == "icp" || req.EventType == "dip" {
 		warnIfIdentityCommitsToNothing(req.AID, req.EventJSON)
 	}
-	s.broadcastWitnessEvent(req.AID, req.EventJSON)
+	s.broadcastWitnessEvent(req)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -1388,7 +1538,7 @@ func (s *CoreServer) handleRotation(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf("[identity-agent-core] ROTATION: Key rotated for AID: %s (sn: %d)", result.AID, result.SequenceNumber)
-	s.broadcastWitnessEvent(result.AID, string(eventJSON))
+	s.broadcastWitnessEvent(eventRecord)
 	s.notifyBackupEvent(backup.EventKeyRotation)
 
 	w.Header().Set("Content-Type", "application/json")
@@ -2873,11 +3023,46 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The receipts this identity has collected travel with its log.
+	//
+	// Without them a counterparty can check that the log is sound and cannot
+	// check that anybody else ever saw it — and the second is what makes a
+	// forged history detectable, since a forger can produce a perfectly signed
+	// log of their own but not other people's receipts over it.
+	// The bytes each event was published as, and the controller's signature
+	// over them, travel with the log.
+	//
+	// Without them an introduction can be read and cannot be verified. The
+	// parsed form in "kel" is not the event: a KERI event is ordered, its
+	// version string comes first and declares the length, and putting it
+	// through a map sorts the keys and moves that string to the end. Anyone
+	// re-serialising it gets different bytes, so the identifier does not
+	// re-derive and no signature over it checks out. A resolver handed only
+	// that has to take the sender's word for who the log belongs to, which is
+	// the one thing an introduction from a stranger must never require.
+	//
+	// Both were already being kept for exactly this purpose and simply were
+	// not served, so every resolved introduction was structurally sound and
+	// unauthenticated.
+	rawEvents := make([]string, len(events))
+	signatures := make([]string, len(events))
+	for i, ev := range events {
+		rawEvents[i] = ev.RawBytesB64
+		signatures[i] = ev.CesrSignature
+	}
+
 	resp := map[string]interface{}{
-		"aid":         identity.AID,
-		"public_key":  identity.PublicKey,
-		"alias":       alias,
-		"kel":         events,
+		"aid":             identity.AID,
+		"public_key":      identity.PublicKey,
+		"alias":           alias,
+		"kel":             events,
+		"raw_events_b64":  rawEvents,
+		"cesr_signatures": signatures,
+		"receipts":        s.receiptsForEvents(events),
+		// Whether this agent belongs to a person or an organization. Published
+		// because a peer has to know before it can decide whether the two of us
+		// may witness for each other — the two kinds are kept apart.
+		"entity_type": s.ourEntityType(),
 		"event_count": identity.EventCount,
 		"created":     identity.Created,
 	}
@@ -2899,15 +3084,33 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
-func (s *CoreServer) broadcastWitnessEvent(aid string, eventJSON string) {
-	if s.WitnessService == nil || eventJSON == "" {
+// broadcastWitnessEvent sends an event to this identity's witnesses.
+//
+// Takes the record rather than a JSON string, because a witness needs the bytes
+// the event was published as and the controller's signature over them, and the
+// record is where both live. Reconstructing them from the readable form is not
+// possible: re-encoding sorts the fields, producing a different digest.
+func (s *CoreServer) broadcastWitnessEvent(record store.EventRecord) {
+	if s.WitnessService == nil {
 		return
 	}
-	var ked map[string]interface{}
-	if err := json.Unmarshal([]byte(eventJSON), &ked); err != nil {
+	if record.RawBytesB64 == "" {
+		// Written before canonical bytes were kept, or by a path that has not
+		// been updated to keep them. Said out loud rather than passed silently:
+		// the event simply will not be witnessed, and a silent skip is
+		// indistinguishable from having no witnesses at all.
+		log.Printf("[witness] not broadcasting %s sn=%d: the event was stored without the "+
+			"bytes it was published as, so no witness could verify it",
+			record.AID, record.SequenceNumber)
 		return
 	}
-	s.triggerWitnessBroadcast(aid, ked)
+	raw, err := base64.StdEncoding.DecodeString(record.RawBytesB64)
+	if err != nil {
+		log.Printf("[witness] not broadcasting %s sn=%d: stored bytes unreadable: %v",
+			record.AID, record.SequenceNumber, err)
+		return
+	}
+	s.triggerWitnessBroadcast(record.AID, raw, record.CesrSignature)
 }
 
 func (s *CoreServer) handlePublicCredentialServe(w http.ResponseWriter, r *http.Request) {
@@ -3082,15 +3285,23 @@ func (s *CoreServer) handleResolveOobiContact(w http.ResponseWriter, r *http.Req
 	}
 
 	var oobiData struct {
-		AID        string                   `json:"aid"`
-		PublicKey  string                   `json:"public_key"`
-		Alias      string                   `json:"alias"`
-		KEL        []map[string]interface{} `json:"kel"`
-		EventCount int                      `json:"event_count"`
-		Created    string                   `json:"created"`
-		JCard      *store.JCard             `json:"jcard,omitempty"`
-		Photo      string                   `json:"photo,omitempty"`
-		Watchers   []string                 `json:"watchers"`
+		AID       string                   `json:"aid"`
+		PublicKey string                   `json:"public_key"`
+		Alias     string                   `json:"alias"`
+		KEL       []map[string]interface{} `json:"kel"`
+		// Receipts published alongside the log: who else attested to it.
+		Receipts map[string][]map[string]interface{} `json:"receipts"`
+		// What this contact can do for others: the backend it runs on decides
+		// whether it can witness at all, and the witness key is what an event
+		// would have to name to designate it.
+		BackendType string       `json:"backend_type"`
+		WitnessKey  string       `json:"witness_key"`
+		EntityType  string       `json:"entity_type"`
+		EventCount  int          `json:"event_count"`
+		Created     string       `json:"created"`
+		JCard       *store.JCard `json:"jcard,omitempty"`
+		Photo       string       `json:"photo,omitempty"`
+		Watchers    []string     `json:"watchers"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&oobiData); err != nil {
 		writeError(w, http.StatusBadGateway, "Invalid OOBI response", fmt.Sprintf("Could not parse response: %v", err))
@@ -3105,29 +3316,59 @@ func (s *CoreServer) handleResolveOobiContact(w http.ResponseWriter, r *http.Req
 	kelCount := len(oobiData.KEL)
 	log.Printf("[identity-agent-core] OOBI-RESOLVE: Success — AID=%s, alias=%s, KEL events=%d", oobiData.AID, oobiData.Alias, kelCount)
 
-	// Validate the KEL via the Python driver (desktop only — driver is nil on mobile).
+	// Remember what this contact published about itself. Neither field can be
+	// worked out later, and both decide something: whether it can be asked to
+	// witness, and what an event would name to designate it.
+	if s.WitnessService != nil {
+		s.WitnessService.RecordContactCapability(oobiData.AID, oobiData.BackendType, oobiData.WitnessKey, oobiData.EntityType)
+	}
+
+	// Check the key log this stranger just handed us.
+	//
+	// Preferring the canonical bytes is the whole of it. From the parsed events
+	// alone, neither of the two questions that matter can be answered: whether
+	// the inception actually derives the identifier being claimed, and whether
+	// anything in the log was signed. What remains is that the fields refer to
+	// each other consistently, which a forged log does too — because whoever
+	// forged it wrote every one of those fields.
 	kelVerified := false
+	witnessed := false
 	currentPublicKey := oobiData.PublicKey
 	var validationErrors []string
 	if s.KeriDriver != nil && kelCount > 0 {
-		valResult, err := s.KeriDriver.ValidateKEL(oobiData.AID, oobiData.KEL)
+		var valResult *drivers.DriverValidateKELResponse
+		var err error
+		if in, ok := drivers.ValidateKELInputFromRecords(oobiData.AID, oobiData.KEL); ok {
+			in.Receipts = drivers.WitnessReceiptsFromWire(oobiData.Receipts)
+			valResult, err = s.KeriDriver.ValidateKELBytes(in)
+		} else {
+			// The log came without the bytes it was published as — an older
+			// agent, or another implementation that does not send them. Only
+			// the structure can be looked at, and the result says so rather
+			// than reading as a verification that happened.
+			log.Printf("[identity-agent-core] OOBI-RESOLVE: %s published no canonical bytes; "+
+				"its log can be read but its signatures cannot be checked", oobiData.AID)
+			valResult, err = s.KeriDriver.ValidateKEL(oobiData.AID, oobiData.KEL)
+		}
 		if err != nil {
 			log.Printf("[identity-agent-core] OOBI-RESOLVE: KEL validation error for %s: %v", oobiData.AID, err)
 			validationErrors = []string{err.Error()}
 		} else {
 			kelVerified = valResult.KelVerified
+			witnessed = valResult.Witnessed
 			if valResult.CurrentPublicKey != "" {
 				currentPublicKey = valResult.CurrentPublicKey
 			}
 			validationErrors = valResult.ValidationErrors
-			log.Printf("[identity-agent-core] OOBI-RESOLVE: KEL validated=%v events=%d for %s",
-				kelVerified, valResult.EventsValidated, oobiData.AID)
+			log.Printf("[identity-agent-core] OOBI-RESOLVE: KEL validated=%v witnessed=%v events=%d for %s",
+				kelVerified, witnessed, valResult.EventsValidated, oobiData.AID)
 		}
 
 		kelRecord := store.ContactKELRecord{
 			AID:              oobiData.AID,
 			KEL:              oobiData.KEL,
 			KelVerified:      kelVerified,
+			Witnessed:        witnessed,
 			CurrentPublicKey: currentPublicKey,
 			EventsValidated:  kelCount,
 			ValidationErrors: validationErrors,
@@ -3211,6 +3452,10 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
 		KEL       []map[string]interface{} `json:"kel"`
 		JCard     *store.JCard             `json:"jcard,omitempty"`
 		Photo     string                   `json:"photo,omitempty"`
+		// What this contact can do for others — see the other resolve path.
+		BackendType string `json:"backend_type"`
+		WitnessKey  string `json:"witness_key"`
+		EntityType  string `json:"entity_type"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&oobiData); err != nil {
 		writeError(w, http.StatusBadGateway, "Invalid OOBI response", fmt.Sprintf("Could not parse response: %v", err))
@@ -3222,11 +3467,24 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate KEL (desktop only).
+	if s.WitnessService != nil {
+		s.WitnessService.RecordContactCapability(oobiData.AID, oobiData.BackendType, oobiData.WitnessKey, oobiData.EntityType)
+	}
+
+	// Check the key log, from the bytes it was published as where they came
+	// with it. See the note on the other resolve path: the parsed events alone
+	// cannot show that the inception derives this identifier, nor that anything
+	// was signed, and a forged log satisfies everything that remains.
 	kelVerified := false
 	currentPublicKey := oobiData.PublicKey
 	if s.KeriDriver != nil && len(oobiData.KEL) > 0 {
-		valResult, err := s.KeriDriver.ValidateKEL(oobiData.AID, oobiData.KEL)
+		var valResult *drivers.DriverValidateKELResponse
+		var err error
+		if in, ok := drivers.ValidateKELInputFromRecords(oobiData.AID, oobiData.KEL); ok {
+			valResult, err = s.KeriDriver.ValidateKELBytes(in)
+		} else {
+			valResult, err = s.KeriDriver.ValidateKEL(oobiData.AID, oobiData.KEL)
+		}
 		if err != nil {
 			log.Printf("[identity-agent-core] CONTACT: KEL validation error for %s: %v", oobiData.AID, err)
 		} else {
@@ -3477,6 +3735,7 @@ func (s *CoreServer) handleAcceptContact(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	s.onContactAccepted(aid)
 	log.Printf("[identity-agent-core] CONTACT: Accepted %s (AID: %s) — status=accepted, category=%s", contact.Alias, aid, contact.ContactCategory)
 
 	go func() {
@@ -4000,6 +4259,10 @@ func (s *CoreServer) reloadIdentityIntoDriver() {
 
 	// Parse each stored event_json into a KED dict and track the last SAID
 	kel := make([]map[string]interface{}, 0, len(events))
+	// Carried alongside the parsed events so an engine can verify the history
+	// rather than only continue it. Entries are empty for events stored before
+	// the canonical bytes were kept.
+	rawEvents := make([]string, 0, len(events))
 	lastSAID := ""
 	lastSN := 0
 	for _, ev := range events {
@@ -4009,6 +4272,7 @@ func (s *CoreServer) reloadIdentityIntoDriver() {
 			continue
 		}
 		kel = append(kel, ked)
+		rawEvents = append(rawEvents, ev.RawBytesB64)
 		if d, ok := ked["d"].(string); ok && d != "" {
 			lastSAID = d
 		}
@@ -4024,6 +4288,7 @@ func (s *CoreServer) reloadIdentityIntoDriver() {
 		SequenceNumber: lastSN,
 		LastSAID:       lastSAID,
 		KEL:            kel,
+		RawEventsB64:   rawEvents,
 	}
 
 	result, err := s.KeriDriver.ReloadIdentity(req)
@@ -4212,4 +4477,177 @@ func (s *CoreServer) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 		"tasks": tasks,
 		"count": len(tasks),
 	})
+}
+
+// receiptsForEvents gathers the witness receipts held for a set of events,
+// keyed by the event they cover.
+//
+// Published with an identity's log so a counterparty can see who else attested
+// to it. Nothing here is secret: a receipt is a public statement by a witness
+// that is already named in the log it is attached to.
+func (s *CoreServer) receiptsForEvents(events []store.EventRecord) map[string][]store.WitnessReceiptRecord {
+	out := map[string][]store.WitnessReceiptRecord{}
+	if s.DataStore == nil {
+		return out
+	}
+	for _, ev := range events {
+		said := saidOfEventRecord(ev)
+		if said == "" {
+			continue
+		}
+		receipts, err := s.DataStore.GetWitnessReceipts(said)
+		if err != nil || len(receipts) == 0 {
+			continue
+		}
+		out[said] = receipts
+	}
+	return out
+}
+
+// saidOfEventRecord reads an event's identifier out of a stored record.
+func saidOfEventRecord(ev store.EventRecord) string {
+	var ked map[string]interface{}
+	if err := json.Unmarshal([]byte(ev.EventJSON), &ked); err != nil {
+		return ""
+	}
+	said, _ := ked["d"].(string)
+	return said
+}
+
+// onContactAccepted runs the things that should happen when a relationship
+// becomes real.
+//
+// Today that is one thing: consider whether this contact can witness. The
+// design is that people are witnessed by the people they already know, and
+// accepting a contact is the moment that pool can grow — but nothing looked
+// until now, so witness requests went out only when an existing witness dropped
+// offline. An identity could accumulate contacts for months and stay on its
+// bootstrap witnesses the whole time.
+//
+// Runs in the background and cannot fail the acceptance. Failing to enrol a
+// witness is a smaller thing than failing to add a contact, and the sweep that
+// runs when a witness drops will find them again.
+func (s *CoreServer) onContactAccepted(aid string) {
+	if s.WitnessService == nil || aid == "" {
+		return
+	}
+	ctx := s.AppCtx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	go s.WitnessService.ConsiderContactAsWitness(ctx, aid)
+}
+
+// ourEntityType reports whether this agent belongs to a person or an
+// organization.
+//
+// Read from the profile rather than inferred. An agent that has not been told
+// enrols no peer witnesses at all, which is the safe direction: the cost of
+// getting it wrong is an individual's root identifier written permanently into
+// somebody else's public key log.
+// ourEntityType reports whether this agent belongs to a person or an
+// organization.
+//
+// What the BUILD declares wins. The implementation knows for certain — an app
+// for individuals cannot found an organization — whereas the profile is filled
+// in during onboarding and is empty until then, which would leave a fresh agent
+// unable to enrol any peer at the very moment it is establishing itself.
+//
+// The profile is used only when the build declared nothing, which is a
+// misconfigured build rather than a supported mode.
+func (s *CoreServer) ourEntityType() string {
+	if s.DeclaredEntityType != "" {
+		return s.DeclaredEntityType
+	}
+	if s.DataStore == nil {
+		return ""
+	}
+	profile, err := s.DataStore.GetProfile()
+	if err != nil || profile == nil {
+		return ""
+	}
+	return profile.EntityType
+}
+
+// checkEntityTypeDeclared complains at startup if this build did not say what
+// it is, or said something the profile contradicts.
+//
+// Loud rather than silent, because the symptom otherwise is that peer witnesses
+// and watchers quietly never enrol — an absence, which looks like nothing
+// happening rather than like a fault.
+func (s *CoreServer) checkEntityTypeDeclared() {
+	declared := s.DeclaredEntityType
+	if declared == "" {
+		// Every app knows which kind it serves — an organization cannot be
+		// founded in an app built for individuals, and there is no app that
+		// offers the choice. So this is a misconfigured build rather than a
+		// supported mode, and it is said plainly: the symptom otherwise is that
+		// no peer witness or watcher ever enrols, which looks like nothing
+		// happening rather than like a fault.
+		//
+		// The profile is still consulted so an agent already onboarded keeps
+		// working, but it is a fallback and not the intended source.
+		log.Printf("[identity-agent-core] this build did not declare whether it serves an " +
+			"individual or an organization. Falling back to the profile, which is empty " +
+			"until onboarding finishes — until then no peer witness or watcher will be " +
+			"enrolled. Set EntityType on the config, or IDENTITY_AGENT_ENTITY_TYPE.")
+		return
+	}
+	if declared != "individual" && declared != "organization" {
+		log.Printf("[identity-agent-core] this build declared entity type %q, which is neither "+
+			"individual nor organization; no peer witness or watcher will be enrolled", declared)
+		return
+	}
+	if s.DataStore == nil {
+		return
+	}
+	profile, err := s.DataStore.GetProfile()
+	if err != nil || profile == nil || profile.EntityType == "" {
+		return
+	}
+	if profile.EntityType != declared {
+		// Impossible if the apps are what they claim to be: an organization
+		// cannot be created in an app for individuals. Reported rather than
+		// reconciled, because whichever one is wrong, guessing would be worse.
+		log.Printf("[identity-agent-core] this build says it serves a %q but the profile says "+
+			"%q. One of them is wrong; the build is being used.", declared, profile.EntityType)
+	}
+}
+
+// entityTypeOfPeerURL finds what kind of entity is behind a peer URL, from the
+// contact it belongs to.
+//
+// Returns empty when no contact matches, which the boundary treats as unknown
+// and refuses. A peer this agent has no relationship with is not a peer.
+func (s *CoreServer) entityTypeOfPeerURL(peerURL string) string {
+	if s.WitnessService == nil || s.DataStore == nil || peerURL == "" {
+		return ""
+	}
+	contacts, err := s.DataStore.GetContacts()
+	if err != nil {
+		return ""
+	}
+	for _, c := range contacts {
+		if c.OobiURL == "" || !samePeerHost(c.OobiURL, peerURL) {
+			continue
+		}
+		if meta, _ := s.WitnessService.ContactMetaFor(c.AID); meta != nil {
+			return meta.EntityType
+		}
+	}
+	return ""
+}
+
+// samePeerHost compares two URLs by host, since a peer is reached at various
+// paths under one address.
+func samePeerHost(a, b string) bool {
+	ua, err := url.Parse(a)
+	if err != nil || ua.Host == "" {
+		return false
+	}
+	ub, err := url.Parse(b)
+	if err != nil || ub.Host == "" {
+		return false
+	}
+	return strings.EqualFold(ua.Host, ub.Host)
 }

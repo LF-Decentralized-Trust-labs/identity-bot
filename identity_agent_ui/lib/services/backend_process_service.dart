@@ -503,6 +503,16 @@ class BackendProcessService {
       // / Grape ID Org) keep separate state.
       env['AGENT_DATA_DIR'] = _resolveDataDir();
       debugPrint('[BackendProcess] AGENT_DATA_DIR: ${env['AGENT_DATA_DIR']}');
+      // This app serves an individual, and the backend it is starting cannot
+      // work that out for itself: the same Go core is used by the app for
+      // organizations, so it declares nothing and each consumer says which it
+      // is. Set here as well as on mobile, because the app runs on Linux,
+      // Windows and macOS too and the backend is a spawned process there rather
+      // than an embedded library.
+      //
+      // It decides who may witness and watch for this agent — peers are of the
+      // same kind — and an agent that has not been told enrols none.
+      env['IDENTITY_AGENT_ENTITY_TYPE'] = 'individual';
       env['KERI_DRIVER_PYTHON'] = pythonBin;
       if (keriScript != null) {
         env['KERI_DRIVER_SCRIPT'] = keriScript;

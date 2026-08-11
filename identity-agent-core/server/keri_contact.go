@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"identity-agent-core/backup"
+	"identity-agent-core/drivers"
 	"identity-agent-core/secureenclave"
 	"identity-agent-core/store"
 )
@@ -57,9 +58,18 @@ func (s *CoreServer) EnsureKeriContact(oobiURL string) (*store.ContactRecord, bo
 		KEL       []map[string]interface{} `json:"kel"`
 		JCard     *store.JCard             `json:"jcard,omitempty"`
 		Photo     string                   `json:"photo,omitempty"`
+		// The backend this contact runs decides whether it can witness at all,
+		// and the witness key is what an event names to designate it. Recorded
+		// here because neither can be worked out later.
+		BackendType string `json:"backend_type"`
+		WitnessKey  string `json:"witness_key"`
+		EntityType  string `json:"entity_type"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&oobiData); err != nil {
 		return nil, false, fmt.Errorf("invalid oobi response: %w", err)
+	}
+	if s.WitnessService != nil {
+		s.WitnessService.RecordContactCapability(oobiData.AID, oobiData.BackendType, oobiData.WitnessKey, oobiData.EntityType)
 	}
 	if oobiData.AID == "" {
 		return nil, false, fmt.Errorf("oobi response did not contain an AID")
@@ -70,11 +80,19 @@ func (s *CoreServer) EnsureKeriContact(oobiURL string) (*store.ContactRecord, bo
 		return existing, false, nil
 	}
 
-	// Validate the KEL (desktop driver only).
+	// Check the key log, from the bytes it was published as where they came with
+	// it. Parsed events cannot show that the inception derives this identifier
+	// or that anything was signed, and a forged log satisfies what is left.
 	kelVerified := false
 	currentPublicKey := oobiData.PublicKey
 	if s.KeriDriver != nil && len(oobiData.KEL) > 0 {
-		if valResult, verr := s.KeriDriver.ValidateKEL(oobiData.AID, oobiData.KEL); verr != nil {
+		validate := func() (*drivers.DriverValidateKELResponse, error) {
+			if in, ok := drivers.ValidateKELInputFromRecords(oobiData.AID, oobiData.KEL); ok {
+				return s.KeriDriver.ValidateKELBytes(in)
+			}
+			return s.KeriDriver.ValidateKEL(oobiData.AID, oobiData.KEL)
+		}
+		if valResult, verr := validate(); verr != nil {
 			log.Printf("[identity-agent-core] EnsureKeriContact: KEL validation error for %s: %v", oobiData.AID, verr)
 		} else {
 			kelVerified = valResult.KelVerified

@@ -13,12 +13,12 @@ import (
 // SDK is the shared Link Verification engine.
 type SDK struct {
 	resolver *didwebs.Resolver
-	driver   *drivers.KeriDriver
+	driver   drivers.KeriEngine
 	cache    *cache
 	cfg      Config
 }
 
-func New(driver *drivers.KeriDriver, cfg Config) *SDK {
+func New(driver drivers.KeriEngine, cfg Config) *SDK {
 	if cfg.EagerCap <= 0 {
 		cfg.EagerCap = 20
 	}

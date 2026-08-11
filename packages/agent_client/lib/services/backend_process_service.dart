@@ -15,6 +15,18 @@ class PortConflictInfo {
 }
 
 class BackendProcessService {
+  /// Whether the app starting this backend serves a person or an organization.
+  ///
+  /// Set by the app before [start]. This glue is shared by the app for
+  /// individuals and the app for organizations alike, so it must not assume
+  /// either — and the backend it starts cannot work it out for itself, since
+  /// the same Go core is used by both.
+  ///
+  /// It decides who may witness and watch for this agent: peers are of the same
+  /// kind, and an agent that has not been told enrols none. Left null the
+  /// backend falls back to the profile, which is empty until onboarding ends.
+  static String? entityType;
+
   static BackendProcessService? _instance;
   Process? _backendProcess;
   bool _isRunning = false;
@@ -503,6 +515,13 @@ class BackendProcessService {
       // / Grape ID Org) keep separate state.
       env['AGENT_DATA_DIR'] = _resolveDataDir();
       debugPrint('[BackendProcess] AGENT_DATA_DIR: ${env['AGENT_DATA_DIR']}');
+      if (entityType != null && entityType!.isNotEmpty) {
+        env['IDENTITY_AGENT_ENTITY_TYPE'] = entityType!;
+        debugPrint('[BackendProcess] entity type: $entityType');
+      } else {
+        debugPrint('[BackendProcess] no entity type declared — the backend will fall back '
+            'to the profile, and enrols no peer witness or watcher until one is set');
+      }
       env['KERI_DRIVER_PYTHON'] = pythonBin;
       if (keriScript != null) {
         env['KERI_DRIVER_SCRIPT'] = keriScript;

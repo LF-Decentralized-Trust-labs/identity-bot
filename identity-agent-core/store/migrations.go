@@ -687,6 +687,48 @@ DELETE FROM kel WHERE id NOT IN (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_kel_aid_seq_unique ON kel(aid, seq_num);
 `},
+	{
+		Version:     28,
+		Description: "Let a witness keep what it needs to verify an event, instead of receipting it unchecked",
+		SQL: `
+-- A witness receipt is meant to be third-party evidence that a named controller
+-- published a specific event. It could not be that: the event arrived parsed,
+-- with no controller signature anywhere on the wire, and was re-encoded before
+-- storage — which sorts the fields and destroys the byte sequence the digest and
+-- the signature are over. So the witness could not check who authorised what it
+-- was attesting to, and could not check later either.
+--
+-- raw_bytes_b64 is the event exactly as published; cesr_signature is the
+-- controller's signature over those bytes. Empty on rows written before this,
+-- which are readable and were never verifiable.
+ALTER TABLE witness_kel_events ADD COLUMN raw_bytes_b64 TEXT NOT NULL DEFAULT '';
+ALTER TABLE witness_kel_events ADD COLUMN cesr_signature TEXT NOT NULL DEFAULT '';
+`},
+	{
+		Version:     29,
+		Description: "Remember the key a contact signs receipts with, so it can be designated",
+		SQL: `
+-- What an event names when it designates a witness is the witness KEY, not the
+-- contact. Without somewhere to keep a contact's published key, a contact can be
+-- asked to witness and can never be written into an inception event — so the
+-- peer-to-peer model could never actually replace the bootstrap witnesses.
+ALTER TABLE witness_contact_meta ADD COLUMN witness_key TEXT NOT NULL DEFAULT '';
+`},
+	{
+		Version:     30,
+		Description: "Remember whether a contact is a person or an organization, so the two are not mixed as witnesses",
+		SQL: `
+-- A witness list is named in the inception event, so it is public and permanent.
+-- An organization publishes its root identifier by design; an individual's is
+-- meant to stay unexposed, because everything naming it is a way to correlate
+-- them. So an organization witnessing an individual writes that organization
+-- permanently into the individual's founding event, where anyone can read it.
+--
+-- Peers therefore witness only for their own kind, and that needs knowing which
+-- kind a contact is. Dedicated witness services are exempt: they serve a large
+-- population, so naming one discloses nothing about its subject.
+ALTER TABLE witness_contact_meta ADD COLUMN entity_type TEXT NOT NULL DEFAULT '';
+`},
 }
 
 // ApplyIdentityMigrations creates the migrations table and applies any pending migrations.

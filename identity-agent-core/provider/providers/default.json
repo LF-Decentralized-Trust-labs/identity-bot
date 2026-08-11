@@ -7,35 +7,36 @@
       "operator": "grapeid.org",
       "endpoints": [
         {
-          "capability": "relay",
-          "url": "https://relay.grapeid.org"
-        },
-        {
           "capability": "mailbox",
           "url": "https://mailbox.grapeid.org"
+        },
+        {
+          "capability": "relay",
+          "url": "https://relay.grapeid.org"
         },
         {
           "capability": "tunnel",
           "url": "https://grapeid.org"
         },
         {
+          "capability": "watcher",
+          "url": "https://watcher1.grapeid.org",
+          "aid": "BMtfjviEMpF2xWVW0CRPKoVPX1mOMzNurvUjD-0RN_Jl"
+        },
+        {
           "capability": "witness",
           "url": "https://witness1.grapeid.org",
-          "aid": "EvRHjssG5WJjwq5c2AA8yOfY7VT3keG0XOtdRLz195P8"
+          "aid": "BMtfjviEMpF2xWVW0CRPKoVPX1mOMzNurvUjD-0RN_Jl"
         },
         {
           "capability": "witness",
           "url": "https://witness2.grapeid.org",
-          "aid": "EoO3LBQt1s_tot1yH1EFKMQ0Z4EMP2mp0jp3zw5u0Bn8"
+          "aid": "BErokYIbJDqV1Ewr3QMHKWokln2aIVRGwTZ3E502pz_v"
         },
         {
           "capability": "witness",
           "url": "https://witness3.grapeid.org",
-          "aid": "EZEx_C9TEyy23To57F_r67Y5nvIe4KvrpXveyIpW4OFM"
-        },
-        {
-          "capability": "watcher",
-          "url": "https://watcher.grapeid.org"
+          "aid": "BDYkziwUKiadQAQa4uX3ssib9g5REqzo6aejWmi10X00"
         }
       ]
     }

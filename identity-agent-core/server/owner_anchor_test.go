@@ -9,6 +9,26 @@ import (
 	"testing"
 )
 
+// sealOf builds an owner seal and returns it the way a reader actually sees
+// one: parsed out of an event, rather than as the writer's raw JSON.
+//
+// Going through the real builder and a real round trip is deliberate. A test
+// that hand-wrote the map would keep passing if the writer changed shape, which
+// is exactly the failure — ownership unreadable — that these tests exist to
+// catch.
+func sealOf(t *testing.T, ownerAID string) map[string]interface{} {
+	t.Helper()
+	raw, err := ownerAnchorSeal(ownerAID)
+	if err != nil {
+		t.Fatalf("building an owner seal for %s: %v", ownerAID, err)
+	}
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		t.Fatalf("the owner seal is not readable JSON: %v", err)
+	}
+	return parsed
+}
+
 func inception(seals ...map[string]interface{}) []map[string]interface{} {
 	event := map[string]interface{}{"t": "icp", "s": "0", "i": "EOrg"}
 	if len(seals) > 0 {
@@ -23,7 +43,7 @@ func inception(seals ...map[string]interface{}) []map[string]interface{} {
 
 // The ordinary case: an identity names its owner where anybody can read it.
 func TestTheOwnerIsReadFromTheInception(t *testing.T) {
-	owner, err := ownerFromKEL(inception(ownerAnchorSeal("EFounder")))
+	owner, err := ownerFromKEL(inception(sealOf(t, "EFounder")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +72,7 @@ func TestALaterEventCannotIntroduceAnOwner(t *testing.T) {
 	kel := inception()
 	kel = append(kel, map[string]interface{}{
 		"t": "ixn", "s": "1", "i": "EOrg",
-		"a": []interface{}{ownerAnchorSeal("EOpportunist")},
+		"a": []interface{}{sealOf(t, "EOpportunist")},
 	})
 
 	owner, err := ownerFromKEL(kel)
@@ -67,10 +87,10 @@ func TestALaterEventCannotIntroduceAnOwner(t *testing.T) {
 // Nor may a later event replace one. Changing owners is a rotation ceremony
 // with its own rules, not a seal somebody appends.
 func TestALaterEventCannotReplaceTheOwner(t *testing.T) {
-	kel := inception(ownerAnchorSeal("EFounder"))
+	kel := inception(sealOf(t, "EFounder"))
 	kel = append(kel, map[string]interface{}{
 		"t": "ixn", "s": "1", "i": "EOrg",
-		"a": []interface{}{ownerAnchorSeal("EUsurper")},
+		"a": []interface{}{sealOf(t, "EUsurper")},
 	})
 
 	owner, err := ownerFromKEL(kel)
@@ -86,12 +106,12 @@ func TestALaterEventCannotReplaceTheOwner(t *testing.T) {
 // would make a broken identity look like an unowned one, and those need
 // different answers.
 func TestAnOwnerSealNamingNobodyIsAnError(t *testing.T) {
-	_, err := ownerFromKEL(inception(map[string]interface{}{"r": "owner"}))
+	_, err := ownerFromKEL(inception(map[string]interface{}{"i": "", "s": "0", "d": ""}))
 	if err == nil {
 		t.Fatal("a malformed owner seal passed as no owner at all")
 	}
-	if !strings.Contains(err.Error(), "owner") {
-		t.Errorf("the error should say what was wrong, got: %v", err)
+	if !strings.Contains(err.Error(), "malformed") {
+		t.Errorf("the error should distinguish a broken record from an absent one, got: %v", err)
 	}
 }
 
@@ -99,7 +119,7 @@ func TestAnOwnerSealNamingNobodyIsAnError(t *testing.T) {
 func TestUnrelatedSealsAreIgnored(t *testing.T) {
 	owner, err := ownerFromKEL(inception(
 		map[string]interface{}{"i": "ESomething", "r": "something-else"},
-		ownerAnchorSeal("EFounder"),
+		sealOf(t, "EFounder"),
 	))
 	if err != nil {
 		t.Fatal(err)
@@ -129,13 +149,43 @@ func TestALogNotStartingWithAnInceptionIsRefused(t *testing.T) {
 // Written in one place, read in one place. If these disagree, ownership becomes
 // unreadable in a way no single test would catch.
 func TestTheSealShapeRoundTrips(t *testing.T) {
-	seal := ownerAnchorSeal("EFounder")
+	seal := sealOf(t, "EFounder")
 	owner, err := ownerFromKEL(inception(seal))
 	if err != nil || owner != "EFounder" {
 		t.Fatalf("the seal this code writes is not the seal it reads: %v %q", err, owner)
 	}
-	if seal["r"] != ownerRole {
-		t.Errorf("the seal role is %q, not the constant both sides use", seal["r"])
+
+	// The shape is a KERI event seal and nothing else. An extra field, or a
+	// different set, is refused by strict readers — which is how the previous
+	// shape made owned identities unreadable — so it is pinned here rather than
+	// left to be noticed by another implementation later.
+	if len(seal) != 3 {
+		t.Fatalf("an owner seal has %d fields; a KERI event seal has exactly 3: %v",
+			len(seal), seal)
+	}
+	if seal["i"] != "EFounder" || seal["s"] != "0" || seal["d"] != "EFounder" {
+		t.Errorf("the seal does not name the owner's inception: %v", seal)
+	}
+
+	// The written form must be in the specified field order, which a Go map
+	// cannot express. Sorted order is refused by other implementations.
+	raw, err := ownerAnchorSeal("EFounder")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(raw); got != `{"i":"EFounder","s":"0","d":"EFounder"}` {
+		t.Errorf("the seal is written as %s, which is not the specified field order", got)
+	}
+}
+
+// An owner has to be an identity whose inception digest IS its identifier, or
+// the seal names an event that does not exist.
+func TestAnOwnerThatCannotBeSealedIsRefused(t *testing.T) {
+	if _, err := ownerAnchorSeal("DBasicPrefixNotSelfAddressing"); err == nil {
+		t.Error("an owner seal was built pointing at no event")
+	}
+	if _, err := ownerAnchorSeal(""); err == nil {
+		t.Error("an owner seal was built naming nobody")
 	}
 }
 

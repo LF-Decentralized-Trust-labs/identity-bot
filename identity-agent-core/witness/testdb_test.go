@@ -19,10 +19,12 @@ CREATE TABLE contacts (aid TEXT PRIMARY KEY, contact_source TEXT DEFAULT 'manual
 CREATE TABLE IF NOT EXISTS witness_contact_meta (
     contact_aid TEXT PRIMARY KEY, backend_type TEXT, witness_status TEXT DEFAULT 'online',
     offline_count INTEGER DEFAULT 0, is_mutual INTEGER DEFAULT 0, is_commercial INTEGER DEFAULT 0,
-    witnessing_for INTEGER DEFAULT 0,
+    witnessing_for INTEGER DEFAULT 0, witness_key TEXT NOT NULL DEFAULT '',
+    entity_type TEXT NOT NULL DEFAULT '',
     enrolled_at TEXT, last_receipt_at TEXT, last_health_check TEXT);
 CREATE TABLE IF NOT EXISTS witness_kel_events (
     signer_aid TEXT, sequence_num INTEGER, event_json TEXT, event_said TEXT, stored_at TEXT,
+    raw_bytes_b64 TEXT NOT NULL DEFAULT '', cesr_signature TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (signer_aid, sequence_num));
 CREATE TABLE IF NOT EXISTS witness_receipts_issued (
     id INTEGER PRIMARY KEY AUTOINCREMENT, signer_aid TEXT, event_said TEXT, sequence_num INTEGER,

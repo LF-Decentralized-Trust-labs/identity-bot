@@ -4,7 +4,7 @@ import "identity-agent-core/drivers"
 
 // KeriDriverAdapter adapts the production KERI driver to KeriDriverPort.
 type KeriDriverAdapter struct {
-	Driver *drivers.KeriDriver
+	Driver drivers.KeriEngine
 }
 
 func (a *KeriDriverAdapter) CreateInception(publicKey, nextPublicKey string) (*KeriInceptionResult, error) {

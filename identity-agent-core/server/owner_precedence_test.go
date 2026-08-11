@@ -32,7 +32,7 @@ func TestTheAnchoredOwnerBeatsASealedFile(t *testing.T) {
 			"aid": "EORG",
 			"kel": []map[string]interface{}{{
 				"t": "icp", "i": "EORG",
-				"a": []interface{}{map[string]interface{}{"i": "ETRUE-OWNER", "r": "owner"}},
+				"a": []interface{}{map[string]interface{}{"i": "ETRUE-OWNER", "s": "0", "d": "ETRUE-OWNER"}},
 			}},
 		})
 	}))
@@ -90,7 +90,7 @@ func TestTheOwnerNamedAtFoundingCanActWithoutBeingAContact(t *testing.T) {
 			"aid": "ETHING",
 			"kel": []map[string]interface{}{{
 				"t": "icp", "i": "ETHING",
-				"a": []interface{}{map[string]interface{}{"i": "EFOUNDER", "r": "owner"}},
+				"a": []interface{}{map[string]interface{}{"i": "EFOUNDER", "s": "0", "d": "EFOUNDER"}},
 			}},
 		})
 	}))
@@ -127,7 +127,7 @@ func TestASealedRecordForADifferentOwnerIsStillRefused(t *testing.T) {
 			"aid": "ETHING",
 			"kel": []map[string]interface{}{{
 				"t": "icp", "i": "ETHING",
-				"a": []interface{}{map[string]interface{}{"i": "EFOUNDER", "r": "owner"}},
+				"a": []interface{}{map[string]interface{}{"i": "EFOUNDER", "s": "0", "d": "EFOUNDER"}},
 			}},
 		})
 	}))

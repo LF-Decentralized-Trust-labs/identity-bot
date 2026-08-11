@@ -5,7 +5,7 @@ import "testing"
 func icpWithOwner(owner string) map[string]interface{} {
 	e := map[string]interface{}{"t": "icp", "i": "EORG"}
 	if owner != "" {
-		e["a"] = []interface{}{map[string]interface{}{"i": owner, "r": "owner"}}
+		e["a"] = []interface{}{map[string]interface{}{"i": owner, "s": "0", "d": owner}}
 	}
 	return e
 }
@@ -13,7 +13,7 @@ func icpWithOwner(owner string) map[string]interface{} {
 func rotWithOwners(owners ...string) map[string]interface{} {
 	seals := []interface{}{}
 	for _, o := range owners {
-		seals = append(seals, map[string]interface{}{"i": o, "r": "owner"})
+		seals = append(seals, map[string]interface{}{"i": o, "s": "0", "d": o})
 	}
 	return map[string]interface{}{"t": "rot", "a": seals}
 }
@@ -71,7 +71,7 @@ func TestAnUnownedIdentityCannotAcquireAnOwnerLater(t *testing.T) {
 func TestAnIdentityCannotRotateItselfToHavingNoOwners(t *testing.T) {
 	_, err := ownersFromKEL([]map[string]interface{}{
 		icpWithOwner("EFOUNDER"),
-		{"t": "rot", "a": []interface{}{map[string]interface{}{"r": "owner"}}},
+		{"t": "rot", "a": []interface{}{map[string]interface{}{"i": "", "s": "0", "d": ""}}},
 	})
 	if err == nil {
 		t.Fatal("an identity rotated itself to having no owner")
@@ -132,8 +132,8 @@ func TestAFreshIdentityReadsItsFounder(t *testing.T) {
 func TestAnIdentityCanBeCreatedAlreadyOwnedBySeveral(t *testing.T) {
 	owners, err := ownersFromKEL([]map[string]interface{}{
 		{"t": "icp", "i": "ECHILD", "a": []interface{}{
-			map[string]interface{}{"i": "EGUARDIAN-ONE", "r": "owner"},
-			map[string]interface{}{"i": "EGUARDIAN-TWO", "r": "owner"},
+			map[string]interface{}{"i": "EGUARDIAN-ONE", "s": "0", "d": "EGUARDIAN-ONE"},
+			map[string]interface{}{"i": "EGUARDIAN-TWO", "s": "0", "d": "EGUARDIAN-TWO"},
 		}},
 	})
 	if err != nil {
@@ -152,8 +152,8 @@ func TestAnIdentityCanBeCreatedAlreadyOwnedBySeveral(t *testing.T) {
 func TestAJointlyOwnedIdentityCanStillRotate(t *testing.T) {
 	owners, err := ownersFromKEL([]map[string]interface{}{
 		{"t": "icp", "i": "ECHILD", "a": []interface{}{
-			map[string]interface{}{"i": "EGUARDIAN-ONE", "r": "owner"},
-			map[string]interface{}{"i": "EGUARDIAN-TWO", "r": "owner"},
+			map[string]interface{}{"i": "EGUARDIAN-ONE", "s": "0", "d": "EGUARDIAN-ONE"},
+			map[string]interface{}{"i": "EGUARDIAN-TWO", "s": "0", "d": "EGUARDIAN-TWO"},
 		}},
 		rotWithOwners("ETHEMSELVES"),
 	})
@@ -162,5 +162,50 @@ func TestAJointlyOwnedIdentityCanStillRotate(t *testing.T) {
 	}
 	if len(owners) != 1 || owners[0] != "ETHEMSELVES" {
 		t.Errorf("owners are %v — guardianship should have ended", owners)
+	}
+}
+
+// An owner seal and a credential issuance's seal are now the SAME SHAPE.
+//
+// The role label that used to tell them apart is gone: it was not a KERI seal,
+// and an event carrying it could not be parsed by other implementations at all.
+// What replaces it is position — only an establishment event can name owners.
+//
+// This is the case that rule exists for. An interaction anchoring a registry, a
+// credential issuance or a delegation approval carries an event seal naming
+// some other identity at position zero, which is indistinguishable from an
+// owner seal by shape alone. Without the establishment-only rule, issuing a
+// credential would silently reassign the organisation to that credential.
+func TestAnInteractionsSealIsNotAnOwnerChange(t *testing.T) {
+	const issuance = "EACDC-CREDENTIAL-JUST-ISSUED"
+	owners, err := ownersFromKEL([]map[string]interface{}{
+		icpWithOwner("EFOUNDER"),
+		{"t": "ixn", "a": []interface{}{
+			map[string]interface{}{"i": issuance, "s": "0", "d": issuance},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(owners) != 1 || owners[0] != "EFOUNDER" {
+		t.Fatalf("issuing a credential reassigned the identity: owners are %v", owners)
+	}
+}
+
+// Break-glass recovery anchors a DIGEST seal in a rotation. A different shape
+// from an owner seal, so the two cannot be confused however the log is read —
+// which is what makes the establishment-only rule safe for rotations.
+func TestARecoveryAnchorInARotationIsNotAnOwnerChange(t *testing.T) {
+	owners, err := ownersFromKEL([]map[string]interface{}{
+		icpWithOwner("EFOUNDER"),
+		{"t": "rot", "a": []interface{}{
+			map[string]interface{}{"d": "ENEW-ROOT-INCEPTION-SAID"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(owners) != 1 || owners[0] != "EFOUNDER" {
+		t.Fatalf("a recovery authorisation changed the owners: %v", owners)
 	}
 }

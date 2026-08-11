@@ -1,6 +1,6 @@
 module identity-agent-core
 
-go 1.24.0
+go 1.25.0
 
 require (
 	github.com/cloudflare/circl v1.6.3
@@ -14,10 +14,12 @@ require (
 	github.com/pkg/sftp v1.13.10
 	github.com/zeebo/blake3 v0.2.4
 	golang.ngrok.com/ngrok v1.13.0
-	golang.org/x/crypto v0.41.0
-	golang.org/x/sys v0.37.0
+	golang.org/x/crypto v0.54.0
+	golang.org/x/sys v0.47.0
 	modernc.org/sqlite v1.46.1
 )
+
+require golang.org/x/tools v0.48.0 // indirect
 
 require (
 	github.com/armon/go-socks5 v0.0.0-20160902184237-e75332964ef5 // indirect
@@ -25,6 +27,7 @@ require (
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
 	github.com/geoffgarside/ber v1.1.0 // indirect
 	github.com/go-stack/stack v1.8.1 // indirect
+	github.com/grapeid/keri-go v0.1.5
 	github.com/inconshreveable/log15 v3.0.0-testing.5+incompatible // indirect
 	github.com/inconshreveable/log15/v3 v3.0.0-testing.5 // indirect
 	github.com/jpillora/backoff v1.0.0 // indirect
@@ -38,9 +41,9 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.ngrok.com/muxado/v2 v2.0.1 // indirect
 	golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546 // indirect
-	golang.org/x/net v0.42.0 // indirect
-	golang.org/x/sync v0.17.0 // indirect
-	golang.org/x/term v0.34.0 // indirect
+	golang.org/x/net v0.57.0 // indirect
+	golang.org/x/sync v0.22.0 // indirect
+	golang.org/x/term v0.45.0 // indirect
 	google.golang.org/protobuf v1.35.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect

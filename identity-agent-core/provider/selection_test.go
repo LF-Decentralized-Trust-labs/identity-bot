@@ -179,27 +179,59 @@ func TestALocalEntryReplacesAShippedOne(t *testing.T) {
 // An operator commonly runs several witnesses under distinct AIDs. Collapsing
 // them would hide that a witness set has fewer independent operators than
 // endpoints.
+//
+// Uses its own document rather than the shipped one. What is being tested is
+// that the registry keeps repeated endpoints for a capability; how many
+// witnesses happen to ship today is a separate question, and tying the two
+// together made this fail the moment the shipped list changed.
 func TestSeveralEndpointsForOneCapabilityAreKept(t *testing.T) {
+	r := &Registry{providers: map[string]*Provider{}}
+	r.ingest("test", []byte(`{
+      "version": 1,
+      "providers": [{"id":"two-witnesses.example","operator":"someone",
+        "endpoints":[
+          {"capability":"witness","url":"https://w1.example","aid":"BAAA1"},
+          {"capability":"witness","url":"https://w2.example","aid":"BAAA2"}
+        ]}]
+    }`))
+	p, ok := r.Get("two-witnesses.example")
+	if !ok {
+		t.Fatal("the operator was not ingested")
+	}
+	witnesses := p.EndpointsFor(CapabilityWitness)
+	if len(witnesses) != 2 {
+		t.Fatalf("expected both witness endpoints kept, got %d", len(witnesses))
+	}
+	seen := map[string]bool{}
+	for _, w := range witnesses {
+		if seen[w.AID] {
+			t.Errorf("duplicate witness AID %s would inflate a threshold without adding an observer", w.AID)
+		}
+		seen[w.AID] = true
+	}
+}
+
+// Every witness that ships must be designatable, and designatable means named
+// by the non-transferable key its receipts verify against. A witness list is
+// written into an inception event and cannot be amended, so shipping one that
+// could never be checked would be shipping a permanent mistake.
+func TestEveryShippedWitnessCanActuallyBeDesignated(t *testing.T) {
 	r := Load("")
 	p, ok := r.Get("grapeid.org")
 	if !ok {
 		t.Skip("shipped registry not present")
 	}
 	witnesses := p.EndpointsFor(CapabilityWitness)
-	if len(witnesses) < 2 {
-		t.Fatalf("expected several witness endpoints, got %d", len(witnesses))
+	if len(witnesses) == 0 {
+		t.Fatal("no witness ships, so a new identity has nobody to be witnessed by")
 	}
-	seen := map[string]bool{}
 	for _, w := range witnesses {
-		if w.AID == "" {
-			t.Errorf("witness %s has no AID — a KEL names witnesses by AID, so it cannot be designated", w.URL)
+		if len(w.AID) != 44 || w.AID[0] != 'B' {
+			t.Errorf("witness %s is named %q, which is not a non-transferable identifier; "+
+				"its receipts could not be checked without resolving a key log first",
+				w.URL, w.AID)
 		}
-		if seen[w.AID] {
-			t.Errorf("duplicate witness AID %s would inflate a threshold without adding an observer", w.AID)
-		}
-		seen[w.AID] = true
 	}
-	// One operator, so the count of independent operators is 1 regardless.
 	if len(p.Capabilities()) < 4 {
 		t.Errorf("expected the shipped operator to offer several capabilities, got %v", p.Capabilities())
 	}

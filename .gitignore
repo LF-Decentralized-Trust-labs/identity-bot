@@ -78,3 +78,11 @@ data/
 .venv-keri/
 .venv-keri312/
 drivers/keri-core/.venv/
+
+# Key material and an agent's own runtime state, wherever a test or a run
+# happens to drop it. A signing key committed to a public repository is
+# compromised the moment it is pushed, whatever it was for — and the path it
+# lands on depends on where a test pointed its data directory, so exclude the
+# shape rather than the one place it has appeared.
+*.key
+**/data/

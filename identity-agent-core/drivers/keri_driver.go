@@ -72,7 +72,11 @@ type DriverInceptionRequest struct {
 	//
 	// A person's agent does not use this. Its identity is delegated, so its
 	// delegator is already named in the event.
-	Anchors []map[string]interface{} `json:"anchors,omitempty"`
+	// Raw JSON, not maps. A seal's field order is part of it, and marshalling a
+	// Go map sorts the keys — so a seal written {"i","s","d"} would leave here
+	// as {"d","i","s"}, which another implementation refuses. Measured, not
+	// assumed.
+	Anchors []json.RawMessage `json:"anchors,omitempty"`
 	// Toad is the threshold of accountable duplicity. Left at zero the driver
 	// picks a simple majority, which is enough that a minority of unavailable
 	// or dishonest witnesses can neither stall nor forge.
@@ -188,6 +192,18 @@ type DriverReloadIdentityRequest struct {
 	SequenceNumber int                      `json:"sequence_number"`
 	LastSAID       string                   `json:"last_said"`
 	KEL            []map[string]interface{} `json:"kel"`
+	// RawEventsB64[i] is the canonical serialisation of KEL[i], where the
+	// stored record has one.
+	//
+	// KEL alone is not enough to restore a log that can be verified: it is
+	// marshalled from a map, so its field order is sorted rather than original,
+	// and an event rebuilt from it hashes to a different digest than the one it
+	// carries. An engine handed only that can continue the log but can never
+	// check the history it was handed.
+	//
+	// Empty entries are expected for events stored before the canonical bytes
+	// were kept.
+	RawEventsB64 []string `json:"raw_events_b64,omitempty"`
 }
 
 type DriverReloadIdentityResponse struct {
@@ -218,10 +234,18 @@ type DriverSignForNameResponse struct {
 }
 
 type DriverKelResponse struct {
-	AID            string                   `json:"aid"`
-	KEL            []map[string]interface{} `json:"kel"`
-	SequenceNumber int                      `json:"sequence_number"`
-	EventCount     int                      `json:"event_count"`
+	AID string                   `json:"aid"`
+	KEL []map[string]interface{} `json:"kel"`
+	// RawEventsB64[i] is the canonical serialisation of KEL[i].
+	//
+	// The parsed form cannot be re-serialised by a caller: field order is part
+	// of the event and the identifier is a digest over those exact bytes, so a
+	// language that marshals a map in its own order produces something that
+	// verifies as nothing. Anything checking signatures or recomputing
+	// identifiers must use these bytes.
+	RawEventsB64   []string `json:"raw_events_b64"`
+	SequenceNumber int      `json:"sequence_number"`
+	EventCount     int      `json:"event_count"`
 }
 
 type DriverVerifyRequest struct {
@@ -271,7 +295,31 @@ type DriverValidateKELRequest struct {
 }
 
 type DriverValidateKELResponse struct {
-	KelVerified      bool     `json:"kel_verified"`
+	// KelVerified means authorship was proven: every event was signed, and
+	// signed by the key the log itself puts in force at that point.
+	//
+	// It is what every trust gate in this agent reads before letting a log
+	// establish anything, so it answers the strict question. A log that is
+	// internally consistent but carries no signatures is not verified — it is
+	// an unauthenticated document that happens to be well formed, and treating
+	// the two alike would let anyone hand over a log they wrote themselves.
+	KelVerified bool `json:"kel_verified"`
+
+	// LogSound means the log holds together as a log: the events parse, they
+	// chain, and the inception derives the identifier.
+	//
+	// Separate from KelVerified because the two genuinely differ, and the case
+	// where they differ is routine rather than exotic — a log fetched from a
+	// stranger over an introduction usually arrives without controller
+	// signatures. Reporting that as unverified is correct; reporting it as
+	// malformed would be false, and would leave a caller unable to tell a
+	// stranger's honest log from a corrupt one.
+	LogSound bool `json:"log_sound"`
+
+	// EventsUnsigned is how many events carried no signature, which is the
+	// specific reason KelVerified and LogSound part company.
+	EventsUnsigned int `json:"events_unsigned,omitempty"`
+
 	CurrentPublicKey string   `json:"current_public_key"`
 	EventsValidated  int      `json:"events_validated"`
 	ValidationErrors []string `json:"validation_errors,omitempty"`
@@ -349,6 +397,14 @@ type DriverIssueCredentialResponse struct {
 	// IssSaid is the SAID of the TEL issuance (iss) event when the credential was
 	// issued into a registry. Persist it — revocation needs it as the prior event.
 	IssSaid string `json:"iss_said,omitempty"`
+	// IssRawBytesB64 is that issuance event as it was serialised.
+	//
+	// A verifier decides whether a credential is still valid by reading its
+	// transaction log, and a log can only be checked from the bytes each event
+	// was published as: the events are self-addressing and chain by digest, so
+	// a re-serialised copy derives a different identifier and chains to
+	// nothing. Without these the log exists and cannot be handed to anybody.
+	IssRawBytesB64 string `json:"iss_raw_bytes_b64,omitempty"`
 }
 
 // DriverRegistryInceptResponse is the result of incepting a credential registry (TEL).
@@ -378,6 +434,12 @@ type DriverRevokeCredentialResponse struct {
 	// without the only bytes its signature and its own digest can be checked
 	// against.
 	IxnRawBytesB64 string `json:"ixn_raw_bytes_b64"`
+	// RevRawBytesB64 is the revocation itself, as serialised.
+	//
+	// The event that has to reach a verifier for the revocation to have any
+	// effect. A revoked credential looks exactly like a live one until someone
+	// is handed this.
+	RevRawBytesB64 string `json:"rev_raw_bytes_b64,omitempty"`
 }
 
 type DriverPresentCredentialRequest struct {
@@ -436,7 +498,34 @@ type DriverVerifyCredentialRequest struct {
 	// CesrSignature: the holder's CESR '0B...' signature over pres_said bytes (driver field: pres_cesr_sig).
 	CesrSignature string `json:"pres_cesr_sig,omitempty"`
 	// HolderPublicKey: the holder's current Ed25519 public key (base64).
+	//
+	// Asserted by whoever is presenting, so on its own it establishes nothing:
+	// a presenter can generate a key, name it here, and sign with it. It is
+	// only worth anything once HolderKelEvents shows it is the key the subject
+	// identity actually has in force.
 	HolderPublicKey string `json:"holder_public_key,omitempty"`
+
+	// PresentationBody is the presentation the holder signed.
+	//
+	// Needed because the signature alone binds to nothing. Without the body a
+	// verifier sees a signature over some bytes and has no way to tell whether
+	// those bytes are a presentation of THIS credential by THIS subject, or a
+	// presentation of something else entirely — or not a presentation at all.
+	PresentationBody map[string]interface{} `json:"presentation_body,omitempty"`
+
+	// HolderKelEvents is the subject's key log, which is what turns the
+	// asserted holder key into an established one.
+	HolderKelEvents []map[string]interface{} `json:"holder_kel,omitempty"`
+
+	// RegistryEventsB64 is the credential's transaction log, in order, as the
+	// bytes each event was published as.
+	//
+	// Where revocation lives. A credential carries no indication that it was
+	// revoked — revocation is an event in this log — so a verifier that does
+	// not read it cannot tell a live credential from a withdrawn one, and the
+	// holder of a revoked credential has every reason not to mention it.
+	RegistryEventsB64 []string `json:"registry_events_b64,omitempty"`
+
 	// TrustedSchemaSaids: list of accepted schema SAIDs; empty = accept all.
 	TrustedSchemaSaids []string `json:"trusted_schema_saids,omitempty"`
 }
@@ -804,6 +893,32 @@ func (d *KeriDriver) GetStatus() (*DriverStatus, error) {
 	return &status, nil
 }
 
+// Incept founds an identity, optionally designating witnesses for it.
+func (d *KeriDriver) Incept(req InceptionRequest) (*DriverInceptionResponse, error) {
+	body := DriverInceptionRequest{
+		PublicKey:     req.PublicKey,
+		NextPublicKey: req.NextPublicKey,
+		Name:          req.Name,
+		Witnesses:     req.Witnesses,
+		Toad:          req.Toad,
+	}
+	if req.OwnerAID != "" {
+		seal, err := ownerEventSeal(req.OwnerAID)
+		if err != nil {
+			return nil, err
+		}
+		body.Anchors = append(body.Anchors, seal)
+	}
+	for _, a := range req.AnchorData {
+		raw, err := json.Marshal(a)
+		if err != nil {
+			return nil, fmt.Errorf("an anchor cannot be encoded: %w", err)
+		}
+		body.Anchors = append(body.Anchors, raw)
+	}
+	return d.postInceptionRequest(body)
+}
+
 func (d *KeriDriver) CreateInception(publicKey, nextPublicKey string) (*DriverInceptionResponse, error) {
 	return d.postInception(publicKey, nextPublicKey, "", nil)
 }
@@ -843,8 +958,21 @@ func (d *KeriDriver) CreateOwnedInception(publicKey, nextPublicKey, name, ownerA
 	// would: verified against keripy 1.1.17 rather than reasoned about. So there
 	// is nothing to get right at founding for the sake of later — the work is
 	// entirely in the rotation.
-	return d.postInception(publicKey, nextPublicKey, name, []map[string]interface{}{
-		{"i": ownerAID, "r": "owner"},
+	// An event seal naming the owner's inception. Every identity here is
+	// self-addressing, so the identifier IS that event's digest and the seal
+	// resolves to a real event.
+	//
+	// This used to be {"i": ownerAID, "r": "owner"}, which is not a shape KERI
+	// defines. A strict reader parses this field as one of a closed set of
+	// seals, and an independent implementation could not parse an inception
+	// carrying the old form at all — so an owned identity's whole log was
+	// unreadable to anything outside this project.
+	seal, err := ownerEventSeal(ownerAID)
+	if err != nil {
+		return nil, err
+	}
+	return d.postInception(publicKey, nextPublicKey, name, []json.RawMessage{
+		seal,
 	})
 }
 
@@ -858,15 +986,29 @@ func (d *KeriDriver) CreateOwnedInception(publicKey, nextPublicKey, name, ownerA
 // here — the handler decides whether an owner is required.
 func (d *KeriDriver) CreateInceptionAnchored(publicKey, nextPublicKey, name, ownerAID string,
 	extra []map[string]interface{}) (*DriverInceptionResponse, error) {
-	anchors := make([]map[string]interface{}, 0, len(extra)+1)
+	// Anchors travel as ordered JSON, not as maps. A seal's field order is part
+	// of it, and marshalling a map sorts the keys — so a seal written
+	// {"i","s","d"} would arrive as {"d","i","s"}, which a strict reader
+	// refuses. Measured against an independent implementation, not assumed.
+	var ordered []json.RawMessage
 	if ownerAID != "" {
-		anchors = append(anchors, map[string]interface{}{"i": ownerAID, "r": "owner"})
+		seal, err := ownerEventSeal(ownerAID)
+		if err != nil {
+			return nil, err
+		}
+		ordered = append(ordered, seal)
 	}
-	anchors = append(anchors, extra...)
-	if len(anchors) == 0 {
-		anchors = nil
+	for _, a := range extra {
+		raw, err := json.Marshal(a)
+		if err != nil {
+			return nil, fmt.Errorf("an anchor cannot be encoded: %w", err)
+		}
+		ordered = append(ordered, raw)
 	}
-	return d.postInception(publicKey, nextPublicKey, name, anchors)
+	if len(ordered) == 0 {
+		ordered = nil
+	}
+	return d.postInception(publicKey, nextPublicKey, name, ordered)
 }
 
 func (d *KeriDriver) CreateHybridInception(synthetic bool, name string) (*DriverHybridInceptionResponse, error) {
@@ -905,7 +1047,7 @@ func (d *KeriDriver) CreateDelegatedInception(publicKey, nextPublicKey, name, de
 }
 
 func (d *KeriDriver) postInception(publicKey, nextPublicKey, name string,
-	anchors []map[string]interface{}) (*DriverInceptionResponse, error) {
+	anchors []json.RawMessage) (*DriverInceptionResponse, error) {
 	return d.postInceptionRequest(DriverInceptionRequest{
 		PublicKey:     publicKey,
 		NextPublicKey: nextPublicKey,
@@ -1449,4 +1591,25 @@ func (d *KeriDriver) EndpointLocation(req *DriverEndpointLocationRequest) (*Driv
 		return nil, fmt.Errorf("failed to decode endpoint location response: %w", err)
 	}
 	return &result, nil
+}
+
+// Rotate rotates the keys, and refuses to change the witness set.
+//
+// The Python driver's rotation endpoint takes a prefix, keys, a prior digest, a
+// sequence number, next-key digests and anchor data — and nothing about
+// witnesses. So a witness change cannot be expressed through it, and asking for
+// one is refused rather than quietly dropped: an identity whose witnesses
+// appeared to change but did not would keep collecting receipts from a witness
+// it believed it had removed, and never collect any from the one it believed it
+// had added.
+//
+// The in-process engine can do this. A deployment that needs to amend a witness
+// set should be running it.
+func (d *KeriDriver) Rotate(req RotationRequest) (*DriverRotationResponse, error) {
+	if len(req.CutWitnesses) > 0 || len(req.AddWitnesses) > 0 || req.Toad > 0 {
+		return nil, fmt.Errorf("this driver cannot change an identity's witnesses: its " +
+			"rotation endpoint carries no witness fields, so the change would be silently " +
+			"lost. Run the in-process engine for a deployment that amends witness sets")
+	}
+	return d.RotateAidWithAnchor(req.Name, req.NewPublicKey, req.NewNextPublicKey, req.AnchorData)
 }

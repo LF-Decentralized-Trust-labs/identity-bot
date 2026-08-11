@@ -1,7 +1,9 @@
 package server
 
 import (
+	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // Reading who owns an organisation out of its own key event log.
@@ -21,8 +23,40 @@ import (
 // None of those are guarded against here. They stop being reachable, because
 // there is no earlier moment for an organisation to be unowned in.
 
-// ownerRole is the seal role naming who an identity answers to.
-const ownerRole = "owner"
+// How an owner is written into an event, and why it is a plain KERI seal.
+//
+// It used to be {"i": <owner>, "r": "owner"} — an identifier and a role. That
+// shape is not one KERI defines. The specification has a closed set of seals,
+// and a strict reader parses this field as one of them: measured against an
+// independent implementation (keriox), an inception carrying the old shape
+// could not be PARSED at all. Not "failed validation" — the event was
+// unreadable, so an owned organisation's entire log was unreadable to anything
+// that did not already agree with us about the shape. For a project whose value
+// is that anyone can verify ownership without our software, that was fatal.
+//
+// So an owner is now an event seal: {"i": <owner>, "s": "0", "d": <owner>},
+// naming the owner's inception event exactly. The repeated value is not a
+// shortcut — every identity here is self-addressing, so its identifier IS the
+// digest of its inception event, and the seal resolves.
+//
+// The role label is gone, and what replaces it is position. An owner seal is an
+// event seal in an ESTABLISHMENT event. That distinction does real work and is
+// checked rather than assumed:
+//
+//   - Interactions anchor event seals too — a registry, a credential issuance,
+//     a delegation approval. Reading those as owner changes would let issuing a
+//     credential silently reassign an organisation. Establishment-only excludes
+//     them.
+//   - Rotations already anchor something else: break-glass recovery anchors a
+//     DIGEST seal, {"d": ...}. A different shape, so it cannot be confused with
+//     an owner however it is read.
+//
+// Anything that later anchors an event seal in an establishment event for some
+// other purpose breaks this, and must be given a shape that cannot be mistaken
+// for an owner — or this scheme has to change.
+
+// ownerSealSN is the position an owner seal names: the owner's inception.
+const ownerSealSN = "0"
 
 // ownerFromKEL returns the owner named in an identity's inception event.
 //
@@ -55,26 +89,92 @@ func ownerFromKEL(kel []map[string]interface{}) (string, error) {
 		if !ok {
 			continue
 		}
-		if role, _ := seal["r"].(string); role != ownerRole {
-			continue
+		aid, isOwner, err := ownerFromSeal(seal)
+		if err != nil {
+			return "", err
 		}
-		aid, _ := seal["i"].(string)
-		if aid == "" {
-			// A seal claiming the owner role and naming nobody is malformed.
-			// Reported rather than skipped: silently ignoring it would let a
-			// broken organisation look like an unowned one, and those need
-			// different answers.
-			return "", fmt.Errorf("the inception event has an owner seal naming no identity")
+		if isOwner {
+			return aid, nil
 		}
-		return aid, nil
 	}
 	return "", nil
 }
 
 // ownerAnchorSeal builds the seal that names an owner, so the shape is written
 // in one place and read in one place.
-func ownerAnchorSeal(ownerAID string) map[string]interface{} {
-	return map[string]interface{}{"i": ownerAID, "r": ownerRole}
+//
+// Returned as raw JSON rather than a map, because a seal's field order is part
+// of it and marshalling a Go map sorts the keys. The same seal is accepted in
+// the specified order and refused in sorted order — measured, not assumed.
+func ownerAnchorSeal(ownerAID string) (json.RawMessage, error) {
+	if ownerAID == "" {
+		return nil, fmt.Errorf("an owner seal must name an owner")
+	}
+	// Every identity this agent creates is self-addressing, so the identifier is
+	// the digest of the inception event and the seal below resolves to a real
+	// event. An identifier of another kind would produce a seal whose digest
+	// refers to nothing, which reads as valid and cannot be resolved by anyone.
+	if !strings.HasPrefix(ownerAID, "E") {
+		return nil, fmt.Errorf("%q is not a self-addressing identifier, so its inception "+
+			"digest is not its identifier and an owner seal naming it would point at no "+
+			"event", ownerAID)
+	}
+	return json.RawMessage(fmt.Sprintf(`{"i":%q,"s":%q,"d":%q}`,
+		ownerAID, ownerSealSN, ownerAID)), nil
+}
+
+// ownerFromSeal returns the owner an anchored seal names, if it is one.
+//
+// Three outcomes, not two. A seal can name an owner, be something else
+// entirely, or be an owner seal that is broken — and the third must not
+// collapse into the second. An identity whose ownership record is corrupt and
+// one that was never owned need different answers: the first is a fault to
+// report, the second is the ordinary state of a person's own agent.
+func ownerFromSeal(seal map[string]interface{}) (owner string, isOwner bool, err error) {
+	// An owner seal is a KERI event seal: exactly these three fields, naming the
+	// owner's inception. Anything else — a digest seal from break-glass
+	// recovery, a seal with extra fields — is not this function's business.
+	if len(seal) != 3 {
+		return "", false, nil
+	}
+	iRaw, hasI := seal["i"]
+	sRaw, hasS := seal["s"]
+	dRaw, hasD := seal["d"]
+	if !hasI || !hasS || !hasD {
+		return "", false, nil
+	}
+	aid, _ := iRaw.(string)
+	sn, _ := sRaw.(string)
+	d, _ := dRaw.(string)
+
+	if aid == "" || d == "" {
+		// The shape of an owner seal with nothing in it. Reported rather than
+		// skipped: silently ignoring it would let a broken identity look like
+		// an unowned one.
+		return "", false, fmt.Errorf("an event seal names no identity or no event, so the " +
+			"ownership record is malformed rather than absent")
+	}
+	if sn != ownerSealSN {
+		// A seal naming a later event of some identity. Real, and not a
+		// statement about ownership.
+		return "", false, nil
+	}
+	// The seal names the owner's inception, whose digest IS its identifier
+	// because every identity here is self-addressing. Where the two disagree the
+	// seal refers to some other identity's event and is not an ownership claim.
+	if d != aid {
+		return "", false, nil
+	}
+	return aid, true, nil
+}
+
+// establishment reports whether an event can carry an owner seal.
+func establishment(event map[string]interface{}) bool {
+	switch t, _ := event["t"].(string); t {
+	case "icp", "dip", "rot", "drt":
+		return true
+	}
+	return false
 }
 
 // ownerFromOwnIdentity reads the owner this agent's own identity names.
