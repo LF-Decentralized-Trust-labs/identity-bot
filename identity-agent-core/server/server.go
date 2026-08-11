@@ -333,10 +333,11 @@ func New(cfg Config) (*CoreServer, error) {
 	// leaving a subprocess as the default meant every desktop agent still
 	// required a Python runtime to establish an identity.
 	//
-	// KERI_ENGINE=python still selects the driver, because three operations
-	// have no Go implementation yet: resolving an OOBI, publishing an endpoint
-	// location, and building a credential presentation. A deployment that needs
-	// those runs the driver until they are ported.
+	// KERI_ENGINE=python still selects the driver, and nothing needs it. The
+	// three operations that once had no Go implementation — resolving an
+	// introduction, publishing an endpoint location, and building a credential
+	// presentation — are all answered here now, so the escape hatch exists to
+	// compare the two implementations rather than to make up a shortfall.
 	switch {
 	case cfg.EnableKeriDriver && os.Getenv("KERI_ENGINE") == "python":
 		driver := drivers.NewKeriDriver()
