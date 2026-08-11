@@ -45,13 +45,29 @@ func startPeer(t *testing.T, name string) *peerAgent {
 	t.Cleanup(func() { dataStore.Close() })
 
 	svc := witness.NewService(witness.NewSQLiteStore(dataStore.DB()), dataStore, nil, witness.BackendDesktop)
-	svc.DataDir = dir
 	svc.OurEntityType = func() witness.EntityType { return witness.EntityIndividual }
 
-	key, _, err := svc.WitnessKey()
+	// The witnessing key belongs to the agent, not to the witness package, so
+	// the host supplies both signing and the identifier. Each agent gets its
+	// own, which is what makes them two observers rather than one.
+	signer, err := keri.GenerateSigner(false) // non-transferable, as a witness must be
 	if err != nil {
-		t.Fatalf("%s has no witness key: %v", name, err)
+		t.Fatal(err)
 	}
+	key, err := signer.PublicKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.OurWitnessAID = func() (string, error) { return key, nil }
+	svc.SignReceipt = func(said string) (string, string, error) {
+		raw, err := signer.Sign([]byte(said))
+		if err != nil {
+			return "", "", err
+		}
+		sig, err := keri.MatterQB64(keri.CodeEd25519Sig, raw)
+		return key, sig, err
+	}
+	_ = dir
 
 	// The route an agent actually serves, on the handler it actually uses.
 	core := &CoreServer{WitnessService: svc}
@@ -186,7 +202,7 @@ func TestTwoAgentsWitnessForEachOther(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !res.Witnessed {
-		t.Fatalf("bob's log was not witnessed by alice: %+v", res.Witnessing)
+		t.Fatalf("bob's log was not witnessed by alice: %+v", res.WitnessDetail)
 	}
 }
 

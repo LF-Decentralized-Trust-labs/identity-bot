@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"strings"
 )
 
 // Standing down as somebody's witness.
@@ -98,7 +97,7 @@ func (s *Service) RequestWithdrawal(ctx context.Context, controllerAID string, r
 		return fmt.Errorf("this agent does not witness for %s, so there is nothing to stand "+
 			"down from", controllerAID)
 	}
-	key, _, err := s.WitnessKey()
+	key, err := s.witnessAID()
 	if err != nil {
 		return fmt.Errorf("this agent cannot say which witness is standing down: %w", err)
 	}
@@ -194,7 +193,7 @@ func (s *Service) ReceiveWithdrawalConfirmation(c WithdrawalConfirmation, stillD
 	if c.ControllerAID == "" || c.WitnessKey == "" {
 		return fmt.Errorf("a confirmation must name the identity and the witness key it cut")
 	}
-	key, _, err := s.WitnessKey()
+	key, err := s.witnessAID()
 	if err != nil {
 		return err
 	}
@@ -245,15 +244,6 @@ func reasonText(r WithdrawalReason) string {
 	default:
 		return "no reason given"
 	}
-}
-
-// witnessBase is the address an agent serves its witness routes under, taken
-// from the OOBI it published.
-func witnessBase(oobi string) string {
-	if idx := strings.Index(oobi, "/public/oobi/"); idx != -1 {
-		return strings.TrimRight(oobi[:idx], "/")
-	}
-	return strings.TrimRight(oobi, "/")
 }
 
 func withdrawalURL(oobi string) string { return witnessBase(oobi) + "/api/witness/withdraw" }

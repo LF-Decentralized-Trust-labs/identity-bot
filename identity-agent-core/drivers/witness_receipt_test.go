@@ -160,10 +160,10 @@ func TestAWitnessedLogReportsItsThresholdMet(t *testing.T) {
 		t.Fatalf("the log did not verify: %v", got.ValidationErrors)
 	}
 	if !got.Witnessed {
-		t.Fatalf("a fully receipted log was not reported as witnessed: %+v", got.Witnessing)
+		t.Fatalf("a fully receipted log was not reported as witnessed: %+v", got.WitnessDetail)
 	}
-	if len(got.Witnessing) != 1 || got.Witnessing[0].Verified != 2 {
-		t.Fatalf("expected two verified receipts, got %+v", got.Witnessing)
+	if len(got.WitnessDetail) != 1 || got.WitnessDetail[0].ReceiptsVerified != 2 {
+		t.Fatalf("expected two verified receipts, got %+v", got.WitnessDetail)
 	}
 }
 
@@ -205,8 +205,8 @@ func TestAReceiptFromAnUndesignatedWitnessDoesNotCount(t *testing.T) {
 	if got.Witnessed {
 		t.Fatal("an outsider's receipt helped meet the threshold")
 	}
-	if got.Witnessing[0].Verified != 1 {
-		t.Fatalf("expected only the designated witness to count, got %+v", got.Witnessing)
+	if got.WitnessDetail[0].ReceiptsVerified != 1 {
+		t.Fatalf("expected only the designated witness to count, got %+v", got.WitnessDetail)
 	}
 }
 
@@ -224,7 +224,7 @@ func TestOneWitnessCannotMeetAThresholdTwice(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Witnessed || got.Witnessing[0].Verified != 1 {
-		t.Fatalf("one witness counted twice towards a threshold: %+v", got.Witnessing)
+	if got.Witnessed || got.WitnessDetail[0].ReceiptsVerified != 1 {
+		t.Fatalf("one witness counted twice towards a threshold: %+v", got.WitnessDetail)
 	}
 }

@@ -140,9 +140,19 @@ func (e *Engine) Incept(req drivers.InceptionRequest) (*drivers.DriverInceptionR
 			return nil, fmt.Errorf("%q is not a self-addressing identifier, so an owner seal "+
 				"naming it would point at no event", req.OwnerAID)
 		}
-		anchors = []json.RawMessage{
-			json.RawMessage(fmt.Sprintf(`{"i":%q,"s":"0","d":%q}`, req.OwnerAID, req.OwnerAID)),
+		anchors = append(anchors, json.RawMessage(
+			fmt.Sprintf(`{"i":%q,"s":"0","d":%q}`, req.OwnerAID, req.OwnerAID)))
+	}
+	// Anything else the caller anchors — the messaging keys an identity commits
+	// to, most importantly. Dropping these silently would leave an identity
+	// whose identifier promises nothing about the keys people encrypt to it
+	// with, which is the whole reason they are anchored rather than served.
+	for i, a := range req.AnchorData {
+		raw, err := normaliseAnchor(a)
+		if err != nil {
+			return nil, fmt.Errorf("anchor %d: %w", i, err)
 		}
+		anchors = append(anchors, raw)
 	}
 	return e.inceptWith(req.PublicKey, req.NextPublicKey, req.Name, anchors, req.Witnesses, req.Toad)
 }

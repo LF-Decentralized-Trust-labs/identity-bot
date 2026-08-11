@@ -53,6 +53,14 @@ type Service struct {
 	// ReceiveEvent refuses rather than issuing something that looks like a
 	// receipt and proves nothing.
 	SignReceipt func(said string) (witnessAID, cesrSig string, err error)
+	// OurWitnessAID reports the identifier this agent witnesses under, without
+	// signing anything.
+	//
+	// Needed where the identifier is the answer rather than a by-product:
+	// publishing it so a peer can designate this agent, and naming it when
+	// standing down. Supplied by the host for the same reason SignReceipt is —
+	// the key belongs to the agent, not to this package.
+	OurWitnessAID func() (string, error)
 	// OurEntityType reports whether this agent belongs to a person or an
 	// organization. A peer may only witness for its own kind, so an agent that
 	// cannot answer this enrols no peer witnesses at all.
@@ -137,7 +145,7 @@ func (s *Service) OOBIExtensions() map[string]interface{} {
 	//
 	// Public by design: it is a verifying key, and it appears in the events of
 	// everybody this agent witnesses for.
-	witnessKey, _, err := s.WitnessKey()
+	witnessKey, err := s.witnessAID()
 	if err != nil {
 		witnessKey = ""
 	}

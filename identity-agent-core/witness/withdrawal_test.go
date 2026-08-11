@@ -12,7 +12,7 @@ import (
 func withdrawing(t *testing.T) (*Service, *memContacts, *[]string) {
 	t.Helper()
 	s, mc := testService(t)
-	s.DataDir = t.TempDir()
+	s.OurWitnessAID = func() (string, error) { return testWitnessAID, nil }
 	var posted []string
 	s.PostEvent = func(ctx context.Context, url string, body []byte) (map[string]interface{}, error) {
 		posted = append(posted, url)
@@ -63,12 +63,9 @@ func TestStandingDownFromSomethingWeDoNotDoIsRefused(t *testing.T) {
 // assurance that cannot be checked is the same failure as stopping early.
 func TestAConfirmationWithoutTheRotationIsRefused(t *testing.T) {
 	s, _, _ := withdrawing(t)
-	key, _, err := s.WitnessKey()
-	if err != nil {
-		t.Fatal(err)
-	}
+	key := testWitnessAID
 
-	err = s.ReceiveWithdrawalConfirmation(WithdrawalConfirmation{
+	err := s.ReceiveWithdrawalConfirmation(WithdrawalConfirmation{
 		ControllerAID: "EController", WitnessKey: key,
 	}, nil)
 	if err == nil {
@@ -83,13 +80,10 @@ func TestAConfirmationWithoutTheRotationIsRefused(t *testing.T) {
 // however confidently it is presented.
 func TestAConfirmationThatDoesNotCutUsIsRefused(t *testing.T) {
 	s, _, _ := withdrawing(t)
-	key, _, err := s.WitnessKey()
-	if err != nil {
-		t.Fatal(err)
-	}
+	key := testWitnessAID
 
 	stillThere := func(rawB64, witnessKey string) (bool, error) { return true, nil }
-	err = s.ReceiveWithdrawalConfirmation(WithdrawalConfirmation{
+	err := s.ReceiveWithdrawalConfirmation(WithdrawalConfirmation{
 		ControllerAID: "EController", WitnessKey: key, RotationRawB64: "cm90YXRpb24=",
 	}, stillThere)
 	if err == nil {
@@ -119,10 +113,7 @@ func TestAConfirmationForAnotherWitnessIsRefused(t *testing.T) {
 // The ordinary case: proven, so it stops.
 func TestAProvenRemovalStopsTheWitnessing(t *testing.T) {
 	s, _, _ := withdrawing(t)
-	key, _, err := s.WitnessKey()
-	if err != nil {
-		t.Fatal(err)
-	}
+	key := testWitnessAID
 	cut := func(rawB64, witnessKey string) (bool, error) { return false, nil }
 
 	if err := s.ReceiveWithdrawalConfirmation(WithdrawalConfirmation{
@@ -167,3 +158,7 @@ func TestAWithdrawalMustNameTheWitnessKey(t *testing.T) {
 		t.Fatal("a withdrawal naming no witness key was accepted")
 	}
 }
+
+// testWitnessAID is a well-shaped non-transferable identifier. Withdrawal cares
+// which key is standing down, not what it can sign.
+const testWitnessAID = "BMtfjviEMpF2xWVW0CRPKoVPX1mOMzNurvUjD-0RN_Jl"

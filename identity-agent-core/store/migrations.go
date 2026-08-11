@@ -705,7 +705,7 @@ ALTER TABLE witness_kel_events ADD COLUMN raw_bytes_b64 TEXT NOT NULL DEFAULT ''
 ALTER TABLE witness_kel_events ADD COLUMN cesr_signature TEXT NOT NULL DEFAULT '';
 `},
 	{
-		Version:     28,
+		Version:     29,
 		Description: "Remember the key a contact signs receipts with, so it can be designated",
 		SQL: `
 -- What an event names when it designates a witness is the witness KEY, not the
@@ -715,7 +715,7 @@ ALTER TABLE witness_kel_events ADD COLUMN cesr_signature TEXT NOT NULL DEFAULT '
 ALTER TABLE witness_contact_meta ADD COLUMN witness_key TEXT NOT NULL DEFAULT '';
 `},
 	{
-		Version:     29,
+		Version:     30,
 		Description: "Remember whether a contact is a person or an organization, so the two are not mixed as witnesses",
 		SQL: `
 -- A witness list is named in the inception event, so it is public and permanent.

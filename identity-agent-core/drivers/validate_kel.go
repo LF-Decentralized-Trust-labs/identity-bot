@@ -160,8 +160,22 @@ func ValidateKELFromBytes(in ValidateKELInput) (*DriverValidateKELResponse, erro
 	// signed history could be recognised as the forgery. Reported alongside
 	// rather than folded in, so a caller cannot mistake one for the other.
 	witnessing, allMet := witnessingReport(in)
-	out.Witnessing = witnessing
 	out.Witnessed = allMet
+	for _, row := range witnessing {
+		out.WitnessDetail = append(out.WitnessDetail, DriverWitnessedEvent{
+			SequenceNumber:   row.SequenceNumber,
+			Witnesses:        len(row.Designated),
+			Threshold:        row.Threshold,
+			ReceiptsVerified: row.Verified,
+			Witnessed:        row.Met,
+		})
+	}
+	// The set in force at the end of the log, which is what a caller deciding
+	// whether to rely on this identity needs — not the set at any earlier point.
+	if n := len(witnessing); n > 0 {
+		out.Witnesses = witnessing[n-1].Designated
+		out.WitnessThreshold = witnessing[n-1].Threshold
+	}
 
 	out.EventsValidated = len(in.RawEvents)
 	out.CurrentPublicKey = current

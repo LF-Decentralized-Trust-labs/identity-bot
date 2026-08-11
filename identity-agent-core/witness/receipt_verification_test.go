@@ -26,6 +26,25 @@ import (
 func enrolled(t *testing.T) (s *Service, aid string, raw []byte, sig string) {
 	t.Helper()
 	s, mc := testService(t)
+	// The witnessing key belongs to the agent, so the host supplies it. Each
+	// test agent gets its own, which is what makes two of them two observers.
+	wsigner, err := keri.GenerateSigner(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wkey, err := wsigner.PublicKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.OurWitnessAID = func() (string, error) { return wkey, nil }
+	s.SignReceipt = func(said string) (string, string, error) {
+		raw, serr := wsigner.Sign([]byte(said))
+		if serr != nil {
+			return "", "", serr
+		}
+		sig, serr := keri.MatterQB64(keri.CodeEd25519Sig, raw)
+		return wkey, sig, serr
+	}
 
 	a, err := keri.GenerateSigner(true)
 	if err != nil {

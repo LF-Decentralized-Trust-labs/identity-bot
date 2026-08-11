@@ -124,6 +124,13 @@ type InceptionRequest struct {
 	Name string
 	// OwnerAID names who this identity answers to, anchored in the event.
 	OwnerAID string
+	// AnchorData is written into the inception event alongside the owner seal.
+	//
+	// The identifier is a digest of the whole event, so anything anchored here
+	// is part of what the identity IS and cannot be added or altered later. The
+	// messaging keys go here for exactly that reason: a counterparty reads them
+	// out of the identifier rather than asking the agent and believing it.
+	AnchorData []map[string]interface{}
 	// Witnesses are NON-TRANSFERABLE witness keys, not contact identifiers.
 	// What the event names has to be the key its receipts verify against, or
 	// checking one means resolving a key log first, forever.

@@ -94,11 +94,12 @@ func TestAWitnessCanBeRemovedAndAnotherAddedByRotation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	last := res.Witnessing[len(res.Witnessing)-1]
-	if len(last.Designated) != 2 {
-		t.Fatalf("after the change the designated set is %v", last.Designated)
+	last := res.WitnessDetail[len(res.WitnessDetail)-1]
+	if last.Witnesses != 2 {
+		t.Fatalf("after the change %d witnesses are designated, expected 2", last.Witnesses)
 	}
-	for _, w := range last.Designated {
+	// The set in force at the end of the log — w2 and w3, not w1.
+	for _, w := range res.Witnesses {
 		if w == w1 {
 			t.Fatal("the removed witness is still designated")
 		}

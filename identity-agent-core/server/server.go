@@ -269,7 +269,6 @@ func New(cfg Config) (*CoreServer, error) {
 	// What kind of entity this agent belongs to, which decides which peers may
 	// witness for it. Read live rather than captured, because the profile is
 	// set during onboarding and this service is built before that happens.
-	wsvc.DataDir = cfg.DataDir
 	wsvc.OurEntityType = func() witness.EntityType {
 		return witness.NormaliseEntityType(s.ourEntityType())
 	}
@@ -306,6 +305,10 @@ func New(cfg Config) (*CoreServer, error) {
 		s.EventHub.Broadcast(AgentEvent{Type: eventType, Payload: payload})
 	}
 	wsvc.SignReceipt = s.signWitnessReceipt
+	wsvc.OurWitnessAID = func() (string, error) {
+		_, aid, err := s.witnessSigningKey()
+		return aid, err
+	}
 	s.WitnessService = wsvc
 	go witness.StartHeartbeatLoop(wsvc, ctx.Done())
 
@@ -1303,7 +1306,6 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 		SequenceNumber: 0,
 		EventType:      "icp",
 		EventJSON:      string(eventJSON),
-		RawBytesB64:    result.RawBytesB64,
 		PublicKey:      result.PublicKey,
 		NextKeyDigest:  result.NextKeyDigest,
 		Timestamp:      now,
@@ -1516,7 +1518,6 @@ func (s *CoreServer) handleRotation(w http.ResponseWriter, r *http.Request) {
 		SequenceNumber: result.SequenceNumber,
 		EventType:      "rot",
 		EventJSON:      string(eventJSON),
-		RawBytesB64:    result.RawBytesB64,
 		PublicKey:      result.NewPublicKey,
 		NextKeyDigest:  result.NewNextKeyDigest,
 		Timestamp:      now,
@@ -1577,7 +1578,6 @@ func (s *CoreServer) handleInteract(w http.ResponseWriter, r *http.Request) {
 		SequenceNumber: result.SequenceNumber,
 		EventType:      "ixn",
 		EventJSON:      string(eventJSON),
-		RawBytesB64:    result.RawBytesB64,
 		Timestamp:      now,
 		CesrSignature:  req.CesrSignature,
 		RawBytesB64:    result.RawBytesB64,
@@ -1862,7 +1862,6 @@ func (s *CoreServer) handleIssueCredential(w http.ResponseWriter, r *http.Reques
 		SequenceNumber: result.SequenceNumber,
 		EventType:      "ixn",
 		EventJSON:      string(ixnEventJSON),
-		RawBytesB64:    result.IxnRawBytesB64,
 		PublicKey:      identity.PublicKey, // may need rel pub if separate, but reuse root pub state for now
 		NextKeyDigest:  identity.NextKeyDigest,
 		Timestamp:      time.Now().UTC().Format(time.RFC3339),

@@ -838,13 +838,18 @@ func (d *KeriDriver) Incept(req InceptionRequest) (*DriverInceptionResponse, err
 		Toad:          req.Toad,
 	}
 	if req.OwnerAID != "" {
-		if !strings.HasPrefix(req.OwnerAID, "E") {
-			return nil, fmt.Errorf("%q is not a self-addressing identifier, so an owner seal "+
-				"naming it would point at no event", req.OwnerAID)
+		seal, err := ownerEventSeal(req.OwnerAID)
+		if err != nil {
+			return nil, err
 		}
-		body.Anchors = []json.RawMessage{
-			json.RawMessage(fmt.Sprintf(`{"i":%q,"s":"0","d":%q}`, req.OwnerAID, req.OwnerAID)),
+		body.Anchors = append(body.Anchors, seal)
+	}
+	for _, a := range req.AnchorData {
+		raw, err := json.Marshal(a)
+		if err != nil {
+			return nil, fmt.Errorf("an anchor cannot be encoded: %w", err)
 		}
+		body.Anchors = append(body.Anchors, raw)
 	}
 	return d.postInceptionRequest(body)
 }
@@ -897,12 +902,12 @@ func (d *KeriDriver) CreateOwnedInception(publicKey, nextPublicKey, name, ownerA
 	// seals, and an independent implementation could not parse an inception
 	// carrying the old form at all — so an owned identity's whole log was
 	// unreadable to anything outside this project.
-	if !strings.HasPrefix(ownerAID, "E") {
-		return nil, fmt.Errorf("%q is not a self-addressing identifier, so an owner seal "+
-			"naming it would point at no event", ownerAID)
+	seal, err := ownerEventSeal(ownerAID)
+	if err != nil {
+		return nil, err
 	}
 	return d.postInception(publicKey, nextPublicKey, name, []json.RawMessage{
-		json.RawMessage(fmt.Sprintf(`{"i":%q,"s":"0","d":%q}`, ownerAID, ownerAID)),
+		seal,
 	})
 }
 
@@ -916,15 +921,29 @@ func (d *KeriDriver) CreateOwnedInception(publicKey, nextPublicKey, name, ownerA
 // here — the handler decides whether an owner is required.
 func (d *KeriDriver) CreateInceptionAnchored(publicKey, nextPublicKey, name, ownerAID string,
 	extra []map[string]interface{}) (*DriverInceptionResponse, error) {
-	anchors := make([]map[string]interface{}, 0, len(extra)+1)
+	// Anchors travel as ordered JSON, not as maps. A seal's field order is part
+	// of it, and marshalling a map sorts the keys — so a seal written
+	// {"i","s","d"} would arrive as {"d","i","s"}, which a strict reader
+	// refuses. Measured against an independent implementation, not assumed.
+	var ordered []json.RawMessage
 	if ownerAID != "" {
-		anchors = append(anchors, map[string]interface{}{"i": ownerAID, "r": "owner"})
+		seal, err := ownerEventSeal(ownerAID)
+		if err != nil {
+			return nil, err
+		}
+		ordered = append(ordered, seal)
 	}
-	anchors = append(anchors, extra...)
-	if len(anchors) == 0 {
-		anchors = nil
+	for _, a := range extra {
+		raw, err := json.Marshal(a)
+		if err != nil {
+			return nil, fmt.Errorf("an anchor cannot be encoded: %w", err)
+		}
+		ordered = append(ordered, raw)
 	}
-	return d.postInception(publicKey, nextPublicKey, name, anchors)
+	if len(ordered) == 0 {
+		ordered = nil
+	}
+	return d.postInception(publicKey, nextPublicKey, name, ordered)
 }
 
 func (d *KeriDriver) CreateHybridInception(synthetic bool, name string) (*DriverHybridInceptionResponse, error) {
