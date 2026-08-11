@@ -63,7 +63,20 @@ func seal(args []string) error {
 		// First boot. An unformatted volume is the only safe moment to do this:
 		// formatting one that already carries data destroys an identity, so the
 		// check above is what stands between a new instance and a wiped one.
+		// The key derivation is pinned rather than benchmarked.
+		//
+		// cryptsetup defaults to Argon2id and sizes it against the memory it
+		// finds free at the time. Two problems in a 256MB instance. It is not
+		// reproducible — the same image on a larger machine writes a higher
+		// cost into the header, and every later unlock has to afford it, so a
+		// volume can become unopenable by moving. And it is the wrong defence
+		// here: Argon2's memory hardness exists to make dictionary attacks on
+		// human-chosen passphrases expensive, and neither key on this volume is
+		// one. Both are 32 bytes of randomness — one derived from the launch
+		// measurement, one the recovery secret — so no dictionary exists to
+		// slow down, and the cost buys nothing while spending the whole guest.
 		if err := run(key, "cryptsetup", "luksFormat", "--type", "luks2",
+			"--pbkdf", pbkdfAlgorithm, "--pbkdf-memory", pbkdfMemoryKB,
 			"--batch-mode", "--key-file", "-", device); err != nil {
 			return fmt.Errorf("could not encrypt the volume: %w", err)
 		}
@@ -128,3 +141,20 @@ func zero(b []byte) {
 		b[i] = 0
 	}
 }
+
+// How the volume's keys are stretched.
+//
+// Both are 32 bytes of randomness rather than anything a person chose, so the
+// only job left for a key derivation function is to be present and consistent.
+// Pinned so that every instance writes the same cost into its header and any
+// instance can open a volume any other instance created.
+//
+// 32MB fits alongside a running agent in the smallest instance. The default
+// sized itself against free memory and, at adoption, took the whole guest with
+// it: the kernel's out-of-memory killer took cryptsetup mid-operation while it
+// was adding the owner's recovery slot, so the volume was left encrypted to the
+// launch measurement and to nothing else.
+const (
+	pbkdfAlgorithm = "argon2id"
+	pbkdfMemoryKB  = "32768"
+)

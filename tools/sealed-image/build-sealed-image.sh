@@ -290,6 +290,15 @@ FSTAB
 # A .mount unit's filename must be the escaped mount point, or systemd calls
 # it a bad unit file and everything depending on it never runs.
 
+install -D -m 0644 /dev/stdin "$WORK/root/etc/tmpfiles.d/cryptsetup-lock.conf" <<'TMPF'
+# cryptsetup's lock directory, created before the agent starts.
+#
+# ReadWritePaths refuses a path that does not exist, so without this the unit
+# fails to start rather than merely failing to lock — and a verified read-only
+# root cannot create it at boot.
+d /run/cryptsetup 0700 root root -
+TMPF
+
 cat > "$WORK/root/etc/systemd/system/identity-agent.service" <<'UNIT'
 [Unit]
 Description=Identity Agent (sealed instance)
@@ -322,6 +331,21 @@ RestartSec=2
 NoNewPrivileges=yes
 ProtectSystem=strict
 ReadWritePaths=/var/lib/identity-agent
+# cryptsetup takes a per-device lock under /run/cryptsetup, and ProtectSystem=strict
+# makes every path read-only except /dev, /proc and /sys — so without this the agent
+# can read the volume it is running on but cannot lock it, and every cryptsetup call
+# it makes fails with "Failed to acquire read lock on device".
+#
+# What that broke: adding the owner's recovery key slot at adoption. The volume
+# stayed encrypted to the launch measurement and to nothing else, so a firmware
+# update that moved the measurement would have locked the instance out of its own
+# disk for good — the exact loss the recovery slot exists to prevent. Adoption
+# still reported success, because this is not fatal to adoption.
+#
+# Not solved by skipping the lock. The read is only the first step; adding a key
+# slot and writing the header token are writes, and a write without the lock is
+# how two processes corrupt a LUKS header between them.
+ReadWritePaths=/run/cryptsetup
 PrivateTmp=yes
 
 [Install]

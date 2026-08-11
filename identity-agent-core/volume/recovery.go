@@ -1,6 +1,7 @@
 package volume
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -215,9 +216,23 @@ func padOwners(slot *ownerRecoverySlot) error {
 // Checked before adding one, because adding a second would consume a key slot
 // on every adoption attempt and leave secrets nobody holds.
 func hasOwnerRecovery(device string) (bool, error) {
-	out, err := exec.Command("cryptsetup", "luksDump", "--dump-json-metadata", device).Output()
+	// Stderr is captured, not discarded. cryptsetup says what went wrong there
+	// and reports only a number through the exit status, so Output() — which
+	// keeps stdout and drops stderr — turns every failure here into "exit
+	// status 5" and leaves whoever reads the log with a number to search for.
+	// This is the one command in the recovery path that was written that way,
+	// and it is the one that has been failing.
+	cmd := exec.Command("cryptsetup", "luksDump", "--dump-json-metadata", device)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
 	if err != nil {
-		return false, fmt.Errorf("could not read the volume's header: %w", err)
+		detail := strings.TrimSpace(stderr.String())
+		if detail == "" {
+			detail = "and said nothing about why"
+		}
+		return false, fmt.Errorf("could not read the volume's header at %s: %w: %s",
+			device, err, detail)
 	}
 	var meta struct {
 		Tokens map[string]struct {
@@ -236,7 +251,12 @@ func hasOwnerRecovery(device string) (bool, error) {
 }
 
 func addKeySlot(device string, existing, added []byte) error {
+	// Same pinned derivation as the format, for the same reasons — and here it
+	// is not a preference. Left to benchmark itself this is the call the
+	// out-of-memory killer stopped, which is how a volume ended up with no way
+	// back in while adoption reported success.
 	cmd := exec.Command("cryptsetup", "luksAddKey", "--batch-mode",
+		"--pbkdf", pbkdfAlgorithm, "--pbkdf-memory", pbkdfMemoryKB,
 		"--key-file", "-", "--keyfile-size", fmt.Sprint(len(existing)),
 		device, "/dev/stdin")
 	// Both keys go in on the same pipe: the one that proves we may add a slot,
