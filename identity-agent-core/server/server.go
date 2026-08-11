@@ -217,13 +217,28 @@ func New(cfg Config) (*CoreServer, error) {
 		return nil, fmt.Errorf("failed to initialize AI memory store: %w", err)
 	}
 
+	// The owner's measurement policy, read before anything can be adopted.
+	//
+	// A malformed value fails here rather than at adoption. Otherwise the first
+	// sign of a mistyped measurement is a box being refused, which reads as
+	// "that machine is running something else" and sends somebody to look at
+	// the wrong end of the problem.
+	accepted, err := acceptedMeasurementsFromEnv()
+	if err != nil {
+		cancel()
+		dataStore.Close()
+		aiMemory.Close()
+		return nil, err
+	}
+
 	endpointSvc := endpoint.New(dataStore, cfg.Port)
 
 	eventHub := NewEventHub()
 	go eventHub.Run()
 
 	s := &CoreServer{
-		DataStore: dataStore,
+		AcceptedMeasurements: accepted,
+		DataStore:            dataStore,
 		// Loaded eagerly: an agent that cannot name an operator cannot become
 		// reachable, so failing here is better found at startup than at first use.
 		Providers:          provider.Load(cfg.DataDir),
