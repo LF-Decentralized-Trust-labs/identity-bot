@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import '../config/agent_config.dart';
+import 'package:agent_client/config/agent_config.dart';
 
 class HealthResponse {
   final String status;

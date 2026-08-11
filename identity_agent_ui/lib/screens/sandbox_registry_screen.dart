@@ -4,8 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import '../theme/app_theme.dart';
-import '../config/agent_config.dart';
-import '../models/sandbox_app.dart';
+import 'package:agent_client/config/agent_config.dart';
+import 'package:agent_client/models/sandbox_app.dart';
 import 'sandbox_viewer.dart';
 
 class SandboxRegistryScreen extends StatefulWidget {

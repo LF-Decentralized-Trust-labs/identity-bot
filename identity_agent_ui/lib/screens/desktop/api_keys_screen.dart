@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../theme/app_theme.dart';
 import '../../services/core_service.dart';
-import '../../config/agent_config.dart';
+import 'package:agent_client/config/agent_config.dart';
 
 // ── Data model for a provider row ─────────────────────────────────────────────
 class _ApiProvider {

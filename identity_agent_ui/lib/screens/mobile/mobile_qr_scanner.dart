@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../theme/mobile_theme.dart';
-import '../../services/nfc_service.dart';
-import '../../config/agent_config.dart';
-import '../../services/scan_service.dart';
+import 'package:agent_client/services/nfc_service.dart';
+import 'package:agent_client/config/agent_config.dart';
+import 'package:agent_client/services/scan_service.dart';
 import '../../widgets/consent_modal.dart';
 import '../../theme/app_theme.dart';
 

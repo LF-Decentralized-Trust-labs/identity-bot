@@ -34,6 +34,16 @@ dependencies:
   flutter:
     sdk: flutter
 
+  # The backend glue this app used to carry its own copy of.
+  #
+  # The two were byte-identical across most of the client and had already
+  # diverged across the rest, with no dependency between them to keep them
+  # honest — so a fix applied to one silently left the other broken. That is not
+  # hypothetical: the wrong-API-path fix landed in the package while this app
+  # went on asking at the root of the hostname.
+  agent_client:
+    path: ../packages/agent_client
+
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.

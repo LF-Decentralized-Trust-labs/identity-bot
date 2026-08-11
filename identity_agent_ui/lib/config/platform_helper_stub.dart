@@ -1,1 +1,0 @@
-bool isMobilePlatform() => false;
