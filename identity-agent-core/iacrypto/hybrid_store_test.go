@@ -20,8 +20,8 @@ func fileStore(t *testing.T, dir string) *keri.FileKeyStore {
 	return s
 }
 
-// The whole loop, which is what T-406 was for: found an identity, persist it,
-// lose the process, recover it, and sign something that verifies.
+// The whole loop: found an identity, persist it, lose the process, recover it,
+// and sign something that verifies.
 //
 // Before this, a hybrid identity could be created and never used — its secrets
 // existed only in the memory of whatever created them.
