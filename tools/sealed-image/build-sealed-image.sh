@@ -361,6 +361,29 @@ Environment=GOGC=50
 Environment=TRUST_FORWARDED_HEADERS=1
 Environment="AGENT_BUILD_NAME=__BUILD_NAME__"
 Environment="IDENTITY_AGENT_ENTITY_TYPE=__ENTITY_TYPE__"
+# Plug-ins live on the encrypted state volume, not in this image.
+#
+# A sealed instance is meant to be the same thing as the computer in front of
+# you, so the owner installs whatever they want rather than choosing from a set
+# somebody baked in. That means the catalogue has to be WRITABLE and has to
+# SURVIVE, and this image is neither: the root filesystem is read-only and
+# every block of it is covered by the launch measurement, so anything written
+# there is either impossible or a different machine.
+#
+# The state volume is both, and it is encrypted, so what an owner installed is
+# not readable by whoever runs the hardware — which is the same protection
+# their data already gets.
+#
+# Deliberately no manifests ship inside the measurement. Baking in a curated
+# set would make the choice ours and put it beyond the owner's reach, and the
+# question of which plug-ins can be trusted is a separate mechanism rather than
+# something to settle by shipping a list.
+Environment=MANIFESTS_DIR=/var/lib/identity-agent/manifests
+# Created here rather than left to the agent, so an owner who has installed
+# nothing sees an empty catalogue instead of a failure to read one. The
+# directory cannot ship in the image: it lives on a volume that does not exist
+# until first boot.
+ExecStartPre=/bin/mkdir -p /var/lib/identity-agent/manifests
 ExecStart=/usr/local/bin/identity-agent-core
 Restart=always
 RestartSec=2
