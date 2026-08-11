@@ -559,6 +559,20 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 		// between, and those two look identical from here. Saying which one
 		// this is has to be a deliberate act.
 		AllowUnattested bool `json:"allow_unattested,omitempty"`
+		// AcceptedMeasurements is the software this owner will adopt, as hex,
+		// for this adoption only. It adds to any standing policy in
+		// AGENT_ACCEPTED_MEASUREMENTS rather than replacing it.
+		//
+		// This route is owner-only, so this is the owner stating their own
+		// policy — not the box vouching for itself. That distinction is the
+		// whole reason it is safe here and would not be on any route a box or a
+		// browser can reach.
+		//
+		// It does not make the measurement trustworthy. It records which value
+		// the owner decided to accept; where that value came from — a published
+		// list, a build they ran themselves — is the question this cannot
+		// answer and should not appear to.
+		AcceptedMeasurements []string `json:"accepted_measurements,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.BoxURL == "" {
 		writeError(w, http.StatusBadRequest, "Missing box_url",
@@ -595,7 +609,26 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 	// cryptographically perfect — it just names somebody else's machine, and
 	// everyone who checks it afterwards will agree it is correct. Checking
 	// afterwards establishes nothing, because by then the statement exists.
-	if err := checkOfferBeforeDelegating(offer, req.AllowUnattested, s.acceptableMeasurement); err != nil {
+	accept := s.acceptableMeasurement
+	if len(req.AcceptedMeasurements) > 0 {
+		extra, err := parseMeasurements(req.AcceptedMeasurements)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "Unreadable measurement", err.Error())
+			return
+		}
+		accept = func(m []byte) bool {
+			if s.acceptableMeasurement(m) {
+				return true
+			}
+			for _, a := range extra {
+				if bytes.Equal(a, m) {
+					return true
+				}
+			}
+			return false
+		}
+	}
+	if err := checkOfferBeforeDelegating(offer, req.AllowUnattested, accept); err != nil {
 		writeError(w, http.StatusForbidden, "This box was not adopted", err.Error())
 		return
 	}
@@ -627,6 +660,30 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// 5. And who we are to talk to, which is the half that was missing.
+	//
+	// The box needs the owner's encryption keys to open anything sealed to it
+	// and to seal a reply. Without them rememberPeerFromAdoption never runs,
+	// the box finishes adoption not knowing how to reach its owner, and every
+	// sealed request between the two is refused for want of a peer — after an
+	// adoption that reported success.
+	//
+	// Not fatal if it cannot be built. An agent whose DIDComm keys are not
+	// ready can still be adopted, and the alternative is refusing an otherwise
+	// complete adoption over the one part that can be repaired afterwards. It
+	// is logged rather than passed over, because "adopted, and the two cannot
+	// speak privately" is a state somebody has to be able to find.
+	var ownerDID *didcomm.DID
+	if ks, err := s.keySetFor(root.AID); err == nil {
+		if did, err := ks.DID(); err == nil {
+			ownerDID = did
+		} else {
+			log.Printf("[pairing] adopting %s without owner encryption keys: %v", base, err)
+		}
+	} else {
+		log.Printf("[pairing] adopting %s without owner encryption keys: %v", base, err)
+	}
+
 	result, err := boxPairingComplete(client, base, pairingCompleteRequest{
 		AdoptionCode:            req.AdoptionCode,
 		DipEvent:                dip.DipEvent,
@@ -635,10 +692,36 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 		OwnerAID:                root.AID,
 		OwnerPublicKey:          root.PublicKey,
 		BackupSealPublicKeysB64: sealKeys,
+		OwnerDID:                ownerDID,
+		OwnerAgentEndpoint:      s.getPublicURL(r),
 	})
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "The box refused the delegation", err.Error())
 		return
+	}
+
+	// 6. The owner's half of the same exchange.
+	//
+	// The box returned its own keys in the response, so the private channel can
+	// be completed here without fetching anything from anybody — which is the
+	// point, because a fetch over a connection somebody else terminates is the
+	// one step they could answer themselves. Both sides now hold keys that
+	// arrived inside an exchange each had already proved themselves in.
+	//
+	// Reported but not fatal, for the same reason as the outbound half: an
+	// adoption that has otherwise completed should not be undone by the part
+	// that can be repaired without redoing it.
+	if raw, ok := result["agent_did"]; ok {
+		if boxDID, err := didFromResult(raw); err != nil {
+			log.Printf("[pairing] adopted %s but could not read its keys, so sealed traffic to it "+
+				"will be refused until they are: %v", base, err)
+		} else if err := s.rememberPeerFromAdoption(boxDID, base); err != nil {
+			log.Printf("[pairing] adopted %s but did not record its keys, so sealed traffic to it "+
+				"will be refused until they are: %v", base, err)
+		}
+	} else {
+		log.Printf("[pairing] adopted %s and it returned no keys of its own, so sealed traffic "+
+			"between the two is not yet possible", base)
 	}
 
 	log.Printf("[pairing] adopted box at %s: delegated AID %s under root %s", base, dip.AID, root.AID)
@@ -690,4 +773,25 @@ func shortAID(aid string) string {
 		return aid[:8]
 	}
 	return aid
+}
+
+// didFromResult reads a DID out of a decoded JSON response.
+//
+// It arrives as a map rather than a typed value because the response is
+// whatever the box sent, so it round-trips through JSON to be read as the
+// thing it claims to be. A box that sent something else fails here, by name,
+// rather than at the first attempt to encrypt to it.
+func didFromResult(raw interface{}) (*didcomm.DID, error) {
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return nil, err
+	}
+	var did didcomm.DID
+	if err := json.Unmarshal(encoded, &did); err != nil {
+		return nil, fmt.Errorf("this is not a set of keys: %w", err)
+	}
+	if did.AID == "" {
+		return nil, fmt.Errorf("the keys name no identity")
+	}
+	return &did, nil
 }
