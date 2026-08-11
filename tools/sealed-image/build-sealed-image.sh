@@ -69,8 +69,8 @@ WORK=$(mktemp -d "$WORKROOT/sealed-image.XXXXXX")
 # breaks every other user on the machine: no scp into it, no editor swap files,
 # no build caches, and anything with a hardcoded path fails with a permission
 # error that points nowhere near a base-image build that finished an hour ago.
-# This script runs on a shared machine, so it does not get to leave it worse
-# than it found it.
+# The script cleans up after itself rather than assuming it owns the machine
+# it runs on.
 #
 # Restoring is the right shape of fix even once the cause is known: a build
 # should be responsible for the state it leaves behind, whichever of its tools
@@ -88,7 +88,7 @@ restore_tmp() {
 trap 'rm -rf "$WORK"; restore_tmp' EXIT
 
 [[ $EUID -eq 0 ]] || fail "run as root"
-[[ -n "$AGENT_BINARY" ]] || fail "set AGENT_BINARY to a linux/amd64 agent build: identity-agent-core for an individual image, org-backend for an organisation one. Both serve the same contract on :5050, so the image is identical apart from which one is inside it — which is the whole reason they must be separate images with separate measurements"
+[[ -n "$AGENT_BINARY" ]] || fail "set AGENT_BINARY to a linux/amd64 agent build. Whichever build goes in, it serves the same contract on :5050, so the image is identical apart from which binary is inside it — which is the whole reason each one needs its own image and its own measurement"
 [[ -x "$AGENT_BINARY" ]] || fail "AGENT_BINARY is not executable: $AGENT_BINARY"
 
 file "$AGENT_BINARY" | grep -q 'ELF 64-bit' || fail "AGENT_BINARY is not a Linux binary — build with GOOS=linux GOARCH=amd64"
@@ -388,8 +388,8 @@ Environment=PORT=5050
 # Measured on the host: the Go agent idles at 60MB without these and 29MB with
 # them, and stayed healthy through inception, profile writes and a full
 # adoption. Most of the difference was heap the collector had no reason to
-# return — which is the right default for a laptop and the wrong one where many
-# of these run side by side.
+# return — which is the right default on a machine with memory to spare and the
+# wrong one on a small guest.
 Environment=GOMEMLIMIT=40MiB
 Environment=GOGC=50
 Environment=KERI_DRIVER_EXTERNAL=1
@@ -445,7 +445,7 @@ ln -sf /etc/systemd/system/identity-agent.service \
 # The guest gets its address by DHCP from QEMU's user-mode network. Without
 # this a minimal Debian brings up no interface at all, so the agent starts,
 # listens on localhost inside the VM, and nothing outside can ever reach it —
-# which looks exactly like a slow boot from the provisioning side.
+# which is indistinguishable from a slow boot to whatever is waiting for it.
 install -D -m 0644 /dev/stdin "$WORK/root/etc/systemd/network/10-any.network" <<'NET'
 [Match]
 Name=en*
@@ -498,8 +498,8 @@ say "Pruning kernel modules"
 # asking modprobe for each module's dependencies rather than by guessing — and
 # delete the rest.
 KVER=$(basename "$(ls -d "$WORK/root/usr/lib/modules"/* | head -1)")
-# sev-guest is not a driver for hardware that might be here — it is the reason
-# this instance is worth renting. Without it /dev/sev-guest never appears, the
+# sev-guest is not an optional driver for hardware that might be present — it is
+# the reason this image exists. Without it /dev/sev-guest never appears, the
 # guest cannot produce an attestation report, and a box that is genuinely sealed
 # has no way to say so. Measured on 2026-07-29: a guest booted with SEV-SNP
 # active, its kernel log confirming "SNP guest platform device initialized", and
@@ -560,9 +560,9 @@ if [[ -s "$KEEP" ]]; then
 
   # The existing check above catches a prune that breaks booting. These catch a
   # prune that leaves a guest booting perfectly and unable to prove what it is —
-  # the failure that hides, because nothing about it looks broken. An instance
-  # that cannot attest is not a degraded black box; it is an ordinary VM
-  # somebody is being charged for as a sealed one.
+  # the failure that hides, because nothing about it looks broken. A guest that
+  # cannot attest is not a sealed machine with a missing feature; it is an
+  # ordinary virtual machine that cannot be told apart from one.
   #
   # Both are asserted because the first fix was incomplete in a way that looked
   # complete: sev-guest was restored, the image built, and the guest still could

@@ -171,14 +171,20 @@ difference found was the build recording something about the machine that ran
 it: log files, an ldconfig cache, a random machine-id, a verity salt, a verity
 UUID, an apt URL scheme, and two `mke2fs` defaults. None was about the software.
 
-**The remaining gap is worth stating plainly rather than smoothing over.** The build fixes the inputs known to vary within one: every
-timestamp comes from `SOURCE_DATE_EPOCH`, the initramfs is repacked with sorted
-entries and no embedded name or time, and the filesystem is built with a fixed
-UUID and a fixed directory hash seed rather than the random ones the tools
-generate per run. Whether a different distribution or toolchain version produces
-the same bytes is untested, and until somebody does it, a mismatch is as likely
-to mean a toolchain difference as a problem with the image. If you try it, the
-result is worth reporting either way.
+**The remaining gap is worth stating plainly rather than smoothing over.** The
+build fixes the inputs known to vary between runs: every timestamp comes from
+`SOURCE_DATE_EPOCH`, the initramfs is repacked with sorted entries and no
+embedded name or time, and the filesystem is built with a fixed UUID and a fixed
+directory hash seed rather than the random ones the tools generate per run.
+
+Across build environments the gap is narrower than untested and wider than
+solved, and the measurement above is what it rests on: the contents reproduce
+exactly, and the filesystem container does not, because `mke2fs` accounts free
+blocks differently between major versions. So a measurement is comparable
+between builders running the same major version of e2fsprogs and is not
+otherwise. A mismatch across versions is more likely to be that accounting
+difference than a problem with the image — but only more likely, which is why
+the version is worth recording alongside any measurement that gets published.
 
 ## The honest summary
 
