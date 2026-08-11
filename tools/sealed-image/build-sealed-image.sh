@@ -23,6 +23,19 @@ AGENT_BINARY=${AGENT_BINARY:-}
 # instance did before this existed. But an instance somebody reaches from a
 # browser needs it, and that is the whole point of a hosted agent.
 WEB_BUNDLE=${WEB_BUNDLE:-}
+# BUILD_NAME is what this software is CALLED, for the screens that have to tell
+# somebody what their agent is actually running.
+#
+# Optional, and it goes INSIDE the image, which is the whole point: the name is
+# covered by the measurement, so an instance cannot claim to be running
+# something it is not without producing a different measurement and failing the
+# comparison every client makes. A name supplied at launch would instead be a
+# label whoever operates the hardware could set to anything, which is precisely
+# the party a sealed instance exists to be safe from.
+#
+# Without it a person is shown ninety-six characters of hex and no way to know
+# what it is a measurement OF — a fact rather than a useful one.
+BUILD_NAME=${BUILD_NAME:-}
 OUT=${OUT:-./base.qcow2}
 # VERITY=1 builds a read-only system image whose every block is covered by a
 # hash on the measured command line. Opt-in while it is being proven; the
@@ -324,6 +337,7 @@ Environment=GOGC=50
 # nothing can reach it with forwarding headers of its own choosing. An agent
 # somebody can reach directly must not set this.
 Environment=TRUST_FORWARDED_HEADERS=1
+Environment=AGENT_BUILD_NAME=__BUILD_NAME__
 ExecStart=/usr/local/bin/identity-agent-core
 Restart=always
 RestartSec=2
@@ -351,6 +365,24 @@ PrivateTmp=yes
 [Install]
 WantedBy=multi-user.target
 UNIT
+# Substituted rather than interpolated, because the heredoc above is quoted so
+# that systemd's own $-syntax survives it intact.
+#
+# A build that names nothing drops the line entirely: an agent that does not
+# know what it is says so, and a screen showing an empty name would look like a
+# fact rather than a gap.
+if [[ -n "$BUILD_NAME" ]]; then
+  # A name is written into a unit file, so a newline in it would forge further
+  # directives — and this value comes from whoever invokes the build.
+  [[ "$BUILD_NAME" != *$'\n'* ]] || fail "BUILD_NAME must be a single line"
+  BUILD_NAME_ESC=${BUILD_NAME//&/\\&}
+  sed -i "s|__BUILD_NAME__|${BUILD_NAME_ESC//|/\\|}|" \
+    "$WORK/root/etc/systemd/system/identity-agent.service"
+  echo "  build name: $BUILD_NAME"
+else
+  sed -i '/^Environment=AGENT_BUILD_NAME=__BUILD_NAME__$/d' \
+    "$WORK/root/etc/systemd/system/identity-agent.service"
+fi
 # The browser front end, only where one was actually installed.
 #
 # Set unconditionally, this named a directory that a default build never
