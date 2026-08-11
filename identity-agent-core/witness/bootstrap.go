@@ -54,8 +54,8 @@ type BootstrapWitness struct {
 func BootstrapPool() []BootstrapWitness {
 	return []BootstrapWitness{
 		{AID: "BMtfjviEMpF2xWVW0CRPKoVPX1mOMzNurvUjD-0RN_Jl", URL: "https://witness1.grapeid.org", Operator: "grapeid.org"},
-		{AID: "BKDtywULdbP7aLdch9RBSjENGeBDD9pqdI6d88ObtAZ_", URL: "https://witness2.grapeid.org", Operator: "grapeid.org"},
-		{AID: "BGRMfwvUxMstt06Oexf6-u2OZ7yHuCr66V73siKVuDhT", URL: "https://witness3.grapeid.org", Operator: "grapeid.org"},
+		{AID: "BErokYIbJDqV1Ewr3QMHKWokln2aIVRGwTZ3E502pz_v", URL: "https://witness2.grapeid.org", Operator: "grapeid.org"},
+		{AID: "BDYkziwUKiadQAQa4uX3ssib9g5REqzo6aejWmi10X00", URL: "https://witness3.grapeid.org", Operator: "grapeid.org"},
 	}
 }
 
