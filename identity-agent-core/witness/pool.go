@@ -33,7 +33,7 @@ func (s *Service) SendWitnessRequest(ctx context.Context, contactAID string) err
 		return err
 	}
 	return s.Contacts.SaveTask(store.TaskRecord{
-		ID: fmt.Sprintf("witness-req-%s-%d", contactAID, time.Now().Unix()),
+		ID:   fmt.Sprintf("witness-req-%s-%d", contactAID, time.Now().Unix()),
 		Type: "witness_request_sent", Status: "pending", ContactAID: contactAID,
 		Detail: "Witness enrollment request sent", CreatedAt: NowRFC3339(), UpdatedAt: NowRFC3339(),
 	})

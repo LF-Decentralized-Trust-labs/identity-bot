@@ -10,12 +10,12 @@ import (
 // Tier-1 headless test (no server): proves the privacy + disclosure contract of
 // "Sign in with Identity Agent" using the in-process login engine.
 //
-//	- the RP receives a PAIRWISE AID, never a Root AID (the login contract)
-//	- the pairwise AID is stable per site, and unlinkable across sites
-//	- the signed Grant carries that pairwise AID as `i`
-//	- only the fields the site requested are disclosed
-//	- the relationship OOBI keeps the RP-hosted path (regression guard for the
-//	  relayBaseFromOOBI / approve-time 401 fix)
+//   - the RP receives a PAIRWISE AID, never a Root AID (the login contract)
+//   - the pairwise AID is stable per site, and unlinkable across sites
+//   - the signed Grant carries that pairwise AID as `i`
+//   - only the fields the site requested are disclosed
+//   - the relationship OOBI keeps the RP-hosted path (regression guard for the
+//     relayBaseFromOOBI / approve-time 401 fix)
 func TestLoginPairwiseAndDisclosures(t *testing.T) {
 	store, err := NewRelationshipStore(t.TempDir())
 	if err != nil {

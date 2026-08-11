@@ -110,11 +110,11 @@ func (a *Attestation) Genuineness() GenuinenessAxis {
 
 	if art.Blake3_256 == "" {
 		return GenuinenessAxis{
-			Status:             "unknown",
-			RunningBlake3_256:  runningBlake,
-			RunningSHA256:      runningSHA,
-			InstalledVersion:   installed,
-			Message:            "manifest artifact missing blake3_256 (trust gate field)",
+			Status:            "unknown",
+			RunningBlake3_256: runningBlake,
+			RunningSHA256:     runningSHA,
+			InstalledVersion:  installed,
+			Message:           "manifest artifact missing blake3_256 (trust gate field)",
 		}
 	}
 

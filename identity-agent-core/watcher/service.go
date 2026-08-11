@@ -12,10 +12,10 @@ import (
 
 // Service is the watcher engine (L1 self-watch + L2/L3 clients).
 type Service struct {
-	Store    Store
-	L2       *L2Client
-	L3       *L3Client
-	OnEvent  func(eventType string, payload map[string]interface{})
+	Store   Store
+	L2      *L2Client
+	L3      *L3Client
+	OnEvent func(eventType string, payload map[string]interface{})
 }
 
 func NewService(store Store) *Service {

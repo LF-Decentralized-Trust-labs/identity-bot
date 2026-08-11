@@ -9,7 +9,6 @@ import (
 	"path"
 	"strings"
 	"time"
-
 )
 
 type webdavBackend struct {
