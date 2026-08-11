@@ -782,6 +782,19 @@ class CoreService {
     }
   }
 
+  /// What this agent's trust rests on, as one document.
+  ///
+  /// The facts live in three places in the core because they answer three
+  /// different questions there. This is the one call a screen makes.
+  Future<AttestationLineageDto> attestationLineage() async {
+    final response = await _client.get(Uri.parse('$baseUrl/api/security/lineage'));
+    if (response.statusCode != 200) {
+      throw Exception('Could not read this agent\'s attestation: ${response.statusCode}');
+    }
+    return AttestationLineageDto.fromJson(
+        jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
   /// The machines this identity has adopted.
   ///
   /// An agent that has adopted nothing answers with an empty list, which is an
@@ -3046,4 +3059,75 @@ class AdoptedAgent {
     }
     return kind == 'organization' ? 'Organisation agent' : 'Agent';
   }
+}
+
+
+/// What an agent reports about its own foundations.
+///
+/// Every field that can be checked carries one of three answers — verified,
+/// unknown, absent — because "nobody could check" and "checked, and it is not
+/// there" are different facts and only one of them is a reason to stop.
+class AttestationLineageDto {
+  const AttestationLineageDto({
+    required this.deviceName,
+    required this.sealedHardware,
+    this.chipVendor = '',
+    this.chipId = '',
+    this.chainVerified = 'unknown',
+    this.reportSignatureVerified = 'unknown',
+    this.measurement = '',
+    this.buildName = '',
+    this.measurementMatchesExpected = 'unknown',
+    this.debugDisabled = 'unknown',
+    this.diskEncrypted = 'unknown',
+    this.ownerRecoveryPresent = 'unknown',
+    this.hardwareKeyProtection = 'unknown',
+    this.hardwareKeyName = '',
+    this.delegatedAid = '',
+    this.ownerAid = '',
+    this.checkedAt = '',
+  });
+
+  final String deviceName;
+  final bool sealedHardware;
+  final String chipVendor;
+  final String chipId;
+  final String chainVerified;
+  final String reportSignatureVerified;
+  final String measurement;
+  final String buildName;
+  final String measurementMatchesExpected;
+  final String debugDisabled;
+  final String diskEncrypted;
+  final String ownerRecoveryPresent;
+  final String hardwareKeyProtection;
+  final String hardwareKeyName;
+  final String delegatedAid;
+  final String ownerAid;
+  final String checkedAt;
+
+  static String _s(Map<String, dynamic> j, String k, [String d = '']) =>
+      (j[k] ?? d) as String;
+
+  factory AttestationLineageDto.fromJson(Map<String, dynamic> json) =>
+      AttestationLineageDto(
+        deviceName: _s(json, 'device_name', 'This computer'),
+        sealedHardware: (json['sealed_hardware'] ?? false) as bool,
+        chipVendor: _s(json, 'chip_vendor'),
+        chipId: _s(json, 'chip_id'),
+        chainVerified: _s(json, 'chain_verified', 'unknown'),
+        reportSignatureVerified: _s(json, 'report_signature_verified', 'unknown'),
+        measurement: _s(json, 'measurement'),
+        buildName: _s(json, 'build_name'),
+        measurementMatchesExpected:
+            _s(json, 'measurement_matches_expected', 'unknown'),
+        debugDisabled: _s(json, 'debug_disabled', 'unknown'),
+        diskEncrypted: _s(json, 'disk_encrypted', 'unknown'),
+        ownerRecoveryPresent: _s(json, 'owner_recovery_present', 'unknown'),
+        hardwareKeyProtection: _s(json, 'hardware_key_protection', 'unknown'),
+        hardwareKeyName: _s(json, 'hardware_key_name'),
+        delegatedAid: _s(json, 'delegated_aid'),
+        ownerAid: _s(json, 'owner_aid'),
+        checkedAt: _s(json, 'checked_at'),
+      );
 }

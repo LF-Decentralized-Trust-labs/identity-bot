@@ -728,6 +728,10 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		r.Get("/info", s.handleInfo)
 		r.Get("/identity", s.handleIdentity)
 		r.Get("/security/enclave", s.handleSecurityEnclave)
+		// Everything this agent's trust rests on, assembled into one answer for
+		// the screen that shows it. Owner-only: it carries what the owner knows
+		// and a stranger should not.
+		r.Get("/security/lineage", s.handleAttestationLineage)
 		r.Get("/attestation", s.handlePublicAttestation)
 		r.Get("/keri/selftest", s.handleKeriSelfTest)
 

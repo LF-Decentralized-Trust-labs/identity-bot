@@ -211,6 +211,14 @@ func padOwners(slot *ownerRecoverySlot) error {
 	return nil
 }
 
+// HasOwnerRecovery reports whether this volume carries an owner's way back in.
+//
+// Exported because the agent needs to tell its owner. A volume encrypted to a
+// launch measurement and nothing else is one firmware update from being
+// unopenable, and that is a fact its owner is entitled to see before it
+// happens rather than after.
+func HasOwnerRecovery(device string) (bool, error) { return hasOwnerRecovery(device) }
+
 // hasOwnerRecovery reports whether a way back in already exists.
 //
 // Checked before adding one, because adding a second would consume a key slot
