@@ -367,6 +367,24 @@ def status():
         # that reads as a failed change.
         "keri_version": _keri_version(),
         "script_path": os.path.abspath(__file__),
+        # What this driver can be relied on to do, as a number the agent checks
+        # rather than a path it compares.
+        #
+        # Comparing script paths only catches adopting SOMEBODY ELSE'S driver.
+        # It says nothing about the case that actually cost time: an agent
+        # configured to run exactly the file it was pointed at, where that file
+        # was simply older than the agent needed. Anchors handed to it were
+        # dropped, the event came back without them, every test passed, and the
+        # change was inert everywhere it mattered.
+        #
+        # So the contract carries a version. Raise it whenever this driver gains
+        # something an agent may depend on, and the agent refuses a driver that
+        # cannot do what it is about to ask for, instead of finding out from the
+        # shape of the answer.
+        #
+        # 1: anchors written into inception events; witness receipts counted
+        #    during key-log validation; events verified against canonical bytes.
+        "driver_protocol": 1,
         "uptime": f"{uptime:.0f}s",
         "endpoints": [
             "GET /status",
@@ -1427,6 +1445,58 @@ def _witnesses_from_kel(kel: list) -> tuple:
     return wits, toad
 
 
+def _canonical_field_order(ilk: str) -> list:
+    """The order KERI serialises an event's fields in, for this event type.
+
+    A KERI event is ordered: the version string comes first and states the
+    length of what follows. Read from the library rather than written down here,
+    so a change in the protocol cannot leave a copy of the order behind.
+    """
+    fields = serdering.SerderKERI.Fields
+    proto = list(fields.keys())[0]
+    kind = list(fields[proto].keys())[0]
+    dom = fields[proto][kind].get(ilk)
+    return list(dom.alls.keys()) if dom is not None else []
+
+
+def _canonical_raw(record: dict, event_dict: dict) -> tuple:
+    """The event exactly as KERI serialised it: (raw, error).
+
+    Everything that checks an event needs these bytes — a signature covers them,
+    and the event's own identifier is a digest of them. They are not what we
+    store: an event that has been through any JSON encoder here comes back with
+    its keys in alphabetical order, which puts the version string last and makes
+    its stated length wrong. keripy refuses that outright, which is why
+    signature checking has been erroring rather than running.
+
+    Preferred from the record when it kept them. Otherwise rebuilt by putting
+    the fields back in the order the protocol defines, which recovers every
+    event written before they were kept — no migration, and no window where
+    existing identities cannot be checked.
+    """
+    stored = record.get("raw_bytes_b64") or ""
+    if stored:
+        try:
+            return base64.b64decode(stored), ""
+        except Exception as e:
+            return None, f"the canonical bytes kept for this event are not valid base64: {e}"
+
+    ilk = event_dict.get("t", "")
+    order = _canonical_field_order(ilk)
+    if not order:
+        return None, f"there is no known field order for a {ilk!r} event"
+    missing = [k for k in event_dict if k not in order]
+    if missing:
+        # A field the protocol does not define cannot be placed, and guessing
+        # where it goes would produce bytes that are confidently wrong.
+        return None, f"the event carries fields the protocol does not define: {missing}"
+    ordered = {k: event_dict[k] for k in order if k in event_dict}
+    try:
+        return serdering.SerderKERI(sad=ordered).raw, ""
+    except Exception as e:
+        return None, f"the event could not be serialised as KERI: {e}"
+
+
 def _validate_kel_events(kel_events: list, aid: str = "") -> dict:
     """Validate a KEL (list of event record dicts) for hash chain integrity and signatures.
 
@@ -1445,7 +1515,20 @@ def _validate_kel_events(kel_events: list, aid: str = "") -> dict:
     """
     errors = []
     current_key_qb64 = None
+    # The successor digests the most recent accepted event committed to. A
+    # rotation is checked against this, never against its own contents.
+    next_digests = []
     events_validated = 0
+    # Who this identity has asked to witness for it, and how many of them must
+    # have signed before an event counts as witnessed. Both are carried forward:
+    # an inception designates them, a rotation may add or remove them, and an
+    # interaction leaves them alone.
+    witnesses = []
+    toad = 0
+    # Per-event witnessing, reported rather than judged. What a missing receipt
+    # means depends on what the caller is about to do with the event, and that
+    # decision does not belong here.
+    witness_report = []
 
     if not kel_events:
         return {
@@ -1526,6 +1609,71 @@ def _validate_kel_events(kel_events: list, aid: str = "") -> dict:
             except Exception as e:
                 errors.append(f"sn={i}: hash chain check failed: {e}")
 
+        # Does this event's identifier belong to this event?
+        #
+        # A SAID is a digest of the event it sits inside, and until now nothing
+        # recomputed it — the chain check compares each event's `p` to the
+        # previous event's `d`, which is a different question and one a forger
+        # writing the whole log answers for itself.
+        #
+        # It matters most for what sits on top. A witness receipt is a signature
+        # over this identifier, so without this the receipt attests to a digest
+        # nobody checked, and one taken from a real event could be attached to a
+        # fabricated one claiming the same `d`.
+        claimed_said = event_dict.get("d", "")
+        canonical_bytes, canon_err = _canonical_raw(record, event_dict)
+        if canonical_bytes is None:
+            errors.append(f"sn={i} ({event_type}): {canon_err}")
+        elif not claimed_said:
+            errors.append(f"sn={i} ({event_type}): the event states no identifier of its own")
+        else:
+            try:
+                recomputed = serdering.SerderKERI(raw=canonical_bytes).said
+            except Exception as e:
+                recomputed = None
+                errors.append(f"sn={i} ({event_type}): the event's own bytes are not a valid KERI event: {e}")
+            if recomputed is not None and recomputed != claimed_said:
+                errors.append(
+                    f"sn={i} ({event_type}): the event claims the identifier {claimed_said} "
+                    f"but its contents digest to {recomputed}, so it has been altered"
+                )
+
+        # Who is designated to witness, as of this event.
+        #
+        # Read before the receipts are counted, so an event that changes the
+        # witness set is judged by the set it establishes. A rotation carries
+        # adds and cuts rather than the whole list, because the list is the
+        # standing arrangement and an event states the change to it.
+        if event_type in ("icp", "dip"):
+            witnesses = list(event_dict.get("b", []) or [])
+            toad = _toad_of(event_dict, len(witnesses))
+        elif event_type in ("rot", "drt"):
+            cuts = list(event_dict.get("br", []) or [])
+            adds = list(event_dict.get("ba", []) or [])
+            witnesses = [w for w in witnesses if w not in cuts] + \
+                        [w for w in adds if w not in witnesses]
+            toad = _toad_of(event_dict, len(witnesses), toad)
+
+        verified_receipts, receipt_errors = _count_valid_receipts(
+            record, event_dict.get("d", ""), witnesses
+        )
+        errors.extend(f"sn={i} ({event_type}): {e}" for e in receipt_errors)
+        witness_report.append({
+            "sequence_number": i,
+            "witnesses": len(witnesses),
+            "threshold": toad,
+            "receipts_verified": verified_receipts,
+            # An identity that designated nobody cannot be witnessed, which is
+            # not the same as one that was witnessed and fell short. Both are
+            # reported as unwitnessed; the counts tell them apart.
+            "witnessed": toad > 0 and verified_receipts >= toad,
+        })
+
+        # What THIS event commits to as its successor, read after the checks
+        # below so a rotation is compared against the previous event's promise
+        # rather than its own.
+        this_next = event_dict.get("n", []) or []
+
         # Determine signing key for this event type
         if event_type == "icp":
             # Inception: signed with the inception key (first key in 'k' list)
@@ -1539,6 +1687,41 @@ def _validate_kel_events(kel_events: list, aid: str = "") -> dict:
             # Rotation: signed with the newly revealed pre-rotated key (first key in 'k' list)
             keys_list = event_dict.get("k", [])
             signing_key_qb64 = keys_list[0] if keys_list else record.get("public_key", "")
+
+            # Pre-rotation, which was not being checked at all.
+            #
+            # KERI's central protection is that each event commits IN ADVANCE to
+            # a digest of the key that may replace it. A rotation is legitimate
+            # only if the key it reveals is the key the previous event already
+            # promised. Without this check a rotation can name any key, so
+            # anybody able to append an event can take the identity — and the
+            # commitment that makes KERI worth using is decorative.
+            #
+            # The digest is computed by keripy, not reimplemented here: the
+            # comparison has to be against the exact bytes and derivation code
+            # the protocol specifies, and a hand-rolled version that is close
+            # but not identical fails open on exactly the events that matter.
+            _prior_next = (next_digests or [])
+            if not _prior_next:
+                errors.append(
+                    f"sn={i} ({event_type}): the previous event committed to no "
+                    f"successor key, so this rotation replaces a key nobody promised"
+                )
+            elif signing_key_qb64:
+                try:
+                    revealed = coring.Diger(
+                        ser=coring.Verfer(
+                            raw=_extract_raw_key(signing_key_qb64), code=MtrDex.Ed25519
+                        ).qb64b
+                    ).qb64
+                    if revealed not in _prior_next:
+                        errors.append(
+                            f"sn={i} ({event_type}): the key this rotation reveals is not "
+                            f"the one the previous event committed to"
+                        )
+                except Exception as e:
+                    errors.append(f"sn={i} ({event_type}): pre-rotation check failed: {e}")
+
             current_key_qb64 = signing_key_qb64
         else:
             signing_key_qb64 = current_key_qb64
@@ -1547,30 +1730,134 @@ def _validate_kel_events(kel_events: list, aid: str = "") -> dict:
         cesr_sig = record.get("cesr_signature", "")
         if cesr_sig and signing_key_qb64:
             try:
-                # Re-serialize the event dict through keripy to get canonical raw bytes
-                # SerderKERI, not coring.Serder: the latter does not exist in
-                # keri 1.1.17, so this raised on every event and signature
-                # checking has been failing closed rather than running.
-                serder = serdering.SerderKERI(sad=event_dict)
+                # The bytes a signature actually covers, which are not the bytes
+                # we store. Passing the stored form straight to keripy raised on
+                # every event, so signature checking was failing closed rather
+                # than running — an error message where a verification should be.
+                canonical, raw_err = _canonical_raw(record, event_dict)
+                if canonical is None:
+                    raise ValueError(raw_err)
                 cigar = coring.Cigar(qb64=cesr_sig)
                 raw_key = _extract_raw_key(signing_key_qb64)
                 verfer = coring.Verfer(raw=raw_key, code=MtrDex.Ed25519)
-                if not verfer.verify(sig=cigar.raw, ser=serder.raw):
+                if not verfer.verify(sig=cigar.raw, ser=canonical):
                     errors.append(f"sn={i} ({event_type}): signature verification FAILED")
                 else:
                     events_validated += 1
             except Exception as e:
                 errors.append(f"sn={i} ({event_type}): signature check error: {e}")
+        elif not signing_key_qb64:
+            errors.append(
+                f"sn={i} ({event_type}): no key to check a signature against"
+            )
         else:
-            # No signature present — structural-only check passed
-            events_validated += 1
+            # An unsigned event used to count as validated, and the log still
+            # reported itself verified. That is the whole of the protection
+            # gone: append an unsigned rotation to somebody's genuine history
+            # and the key it names becomes their current key, because the
+            # current key is simply whatever the last accepted event says.
+            #
+            # Structure is not authenticity. An event nobody signed is an event
+            # anybody could have written.
+            errors.append(
+                f"sn={i} ({event_type}): event is unsigned, so nothing shows it "
+                f"came from the controller of {aid}"
+            )
+
+        # Carry this event's promise forward. An interaction changes no keys, so
+        # it leaves the standing commitment alone rather than clearing it.
+        if event_type in ("icp", "dip", "rot", "drt"):
+            next_digests = this_next
 
     return {
         "kel_verified": len(errors) == 0,
         "events_validated": events_validated,
         "current_public_key": current_key_qb64 or "",
         "validation_errors": errors,
+        # Witnessing is reported separately from verification on purpose.
+        #
+        # A log can be perfectly well-formed and correctly signed by its
+        # controller and still be one of two conflicting histories, because
+        # nothing in the log itself can rule that out — only the witnesses who
+        # refused to sign the other one can. So kel_verified continues to mean
+        # "this is internally sound and signed", and these say whether anybody
+        # else stood behind it, which is the question a caller must answer for
+        # itself before relying on the log being the only one.
+        "witnesses": list(witnesses),
+        "witness_threshold": toad,
+        "witnessed": bool(witness_report) and all(e["witnessed"] for e in witness_report),
+        "witness_detail": witness_report,
     }
+
+
+def _toad_of(event_dict: dict, witness_count: int, previous: int = 0) -> int:
+    """Read the threshold of accountable duplicity an event declares.
+
+    Absent means unchanged on a rotation and none at inception — an event that
+    does not mention the threshold is not silently setting it to zero.
+    """
+    raw = event_dict.get("bt", None)
+    if raw is None or raw == "":
+        return previous
+    try:
+        value = int(raw, 16) if isinstance(raw, str) else int(raw)
+    except (ValueError, TypeError):
+        return previous
+    # A threshold above the number of witnesses can never be met, which would
+    # make the identity permanently unwitnessable. Reported as-is rather than
+    # clamped: quietly lowering somebody's stated threshold is exactly the kind
+    # of helpfulness that removes a protection they asked for.
+    return max(0, value)
+
+
+def _count_valid_receipts(record: dict, event_said: str, witnesses: list) -> tuple:
+    """Count receipts on an event that were signed by its designated witnesses.
+
+    A witness is named by a non-transferable identifier, which IS its verifying
+    key. So checking a receipt needs nothing but the identifier already written
+    into the key event — no lookup, and therefore nothing in the middle of one
+    that could answer wrongly.
+
+    Returns (valid_count, errors). A receipt that does not verify is an error
+    rather than merely uncounted: a well-formed log carrying a bad receipt is a
+    sign of tampering, and silently ignoring it would hide the one signal that
+    something is wrong.
+    """
+    receipts = record.get("witness_receipts") or []
+    if not receipts:
+        return 0, []
+
+    errors = []
+    seen = set()
+    valid = 0
+    for entry in receipts:
+        if not isinstance(entry, dict):
+            errors.append("a witness receipt is not an object")
+            continue
+        witness_aid = entry.get("witness_aid", "")
+        sig = entry.get("cesr_signature", "")
+        if not witness_aid or not sig:
+            errors.append("a witness receipt names no witness or carries no signature")
+            continue
+        if witness_aid not in witnesses:
+            # Not an error. Anybody may sign anything; what makes a receipt
+            # count is that the controller designated that witness, and a
+            # receipt from somebody else is simply not part of the threshold.
+            continue
+        if witness_aid in seen:
+            # One witness, one vote. Without this, a single witness could meet
+            # any threshold by sending its receipt repeatedly.
+            errors.append(f"witness {witness_aid} receipted this event more than once")
+            continue
+        if not event_said:
+            errors.append("the event has no identifier for a receipt to cover")
+            continue
+        if not _verify_receipt_sig(sig, event_said, witness_aid):
+            errors.append(f"the receipt from witness {witness_aid} does not verify")
+            continue
+        seen.add(witness_aid)
+        valid += 1
+    return valid, errors
 
 
 @app.route("/validate-kel", methods=["POST"])

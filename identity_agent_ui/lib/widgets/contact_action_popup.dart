@@ -168,23 +168,13 @@ class _ContactActionPopupState extends State<ContactActionPopup>
                         Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            if (widget.kelVerified != null) ...[
-                              Icon(
-                                widget.kelVerified! ? Icons.verified : Icons.warning_amber,
-                                size: 16,
-                                color: widget.kelVerified! ? MobileColors.success : MobileColors.warning,
-                              ),
-                              const SizedBox(width: 4),
-                              Text(
-                                widget.kelVerified! ? 'KEL Verified' : 'Unverified',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                  color: widget.kelVerified! ? MobileColors.success : MobileColors.warning,
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                            ],
+                            // A "KEL Verified" badge used to sit here. It named something nobody
+                            // outside this project knows, and it read as a verdict on a person
+                            // when it meant only that their key history was internally
+                            // consistent. It also appeared where nothing had been checked at
+                            // all — a phone has no engine to check with, and it said verified
+                            // anyway. What somebody sees now is the identity level, which this
+                            // feeds into as one input rather than standing in for.
                             Container(
                               width: 20,
                               height: 20,

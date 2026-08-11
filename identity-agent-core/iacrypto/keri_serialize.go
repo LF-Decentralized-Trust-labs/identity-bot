@@ -35,6 +35,14 @@ type icpWire struct {
 	B  []interface{} `json:"b"`
 	C  []interface{} `json:"c"`
 	A  []anchorSeal  `json:"a"`
+	// Di names the delegator, and exists only on a delegated inception.
+	//
+	// Last, and omitted when empty, because that is where this field sits in
+	// the event a delegated inception produces and because an ordinary
+	// inception has to keep serializing to exactly the bytes it did before —
+	// the identifier is derived from those bytes, so a field appearing in them
+	// would change every identifier already created.
+	Di string `json:"di,omitempty"`
 }
 
 var keriVersionRE = regexp.MustCompile(`KERI[0-9a-f][0-9a-f]JSON[0-9a-f]{6}_`)

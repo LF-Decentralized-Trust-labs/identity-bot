@@ -652,6 +652,41 @@ ALTER TABLE identity ADD COLUMN key_generation INTEGER NOT NULL DEFAULT 0;
 DELETE FROM identity WHERE rowid NOT IN (SELECT MIN(rowid) FROM identity);
 UPDATE identity SET rowid = 1 WHERE rowid = (SELECT MIN(rowid) FROM identity);
 `},
+	{
+		Version:     27,
+		Description: "Keep the bytes KERI serialised a key event as",
+		SQL: `
+-- event_json is not what KERI signed. A KERI event is ordered — the version
+-- string comes first and states the length — and an event that has been through
+-- any JSON encoder here comes back with its keys in alphabetical order, which
+-- puts the version string last and makes its stated length wrong.
+--
+-- So the bytes a signature covers, and the bytes an event's own digest is taken
+-- over, were produced at inception, handed out to be signed, and then dropped.
+-- Without them a signature cannot be checked against the event it covers, and
+-- the identifier an event claims for itself can be read but never verified.
+--
+-- Empty on events written before this. Those are rebuilt from the protocol's
+-- own field order, which works and depends on every field being one the schema
+-- defines — so the bytes are kept from here on rather than reconstructed.
+ALTER TABLE kel ADD COLUMN raw_bytes_b64 TEXT NOT NULL DEFAULT '';
+
+-- One row per event, which was never enforced.
+--
+-- Saving an event always INSERTed, so writing the same event twice left two
+-- rows. Reads return every row ordered by sequence number, so a duplicate makes
+-- a key history contain the same event twice — and a history whose sequence
+-- numbers do not increase by one fails its own chain check. The identity then
+-- appears corrupt to everybody including itself.
+--
+-- The newest row per event wins: a later write carries later information, and
+-- the case that produced duplicates is exactly a second write adding something
+-- the first lacked.
+DELETE FROM kel WHERE id NOT IN (
+    SELECT MAX(id) FROM kel GROUP BY aid, seq_num
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_kel_aid_seq_unique ON kel(aid, seq_num);
+`},
 }
 
 // ApplyIdentityMigrations creates the migrations table and applies any pending migrations.

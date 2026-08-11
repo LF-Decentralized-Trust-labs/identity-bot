@@ -40,15 +40,22 @@ type BootstrapWitness struct {
 // BootstrapPool is what a freshly incepted identity uses until its own contacts
 // can take over.
 //
-// Three services with three distinct identities. Verified live on 2026-07-29:
-// each host serves both a witness and a watcher role under one AID, so the real
-// count of independent operators is three rather than six — worth knowing,
-// because a threshold above three would have nothing to draw on.
+// Three services with three distinct identities. Each host serves both a
+// witness and a watcher role under one identifier, so the real count of
+// independent operators is three rather than six — worth knowing, because a
+// threshold above three would have nothing to draw on.
+//
+// The identifiers are non-transferable, which is what lets a receipt be checked
+// by anyone holding only the key event that names the witness: the identifier
+// IS the verifying key, so there is nothing to look up. They previously carried
+// a prefix claiming to be a digest while actually being the key, which no KERI
+// implementation could parse. The keys themselves are unchanged — same
+// services, same key material, correctly encoded.
 func BootstrapPool() []BootstrapWitness {
 	return []BootstrapWitness{
-		{AID: "EvRHjssG5WJjwq5c2AA8yOfY7VT3keG0XOtdRLz195P8", URL: "https://witness1.grapeid.org", Operator: "grapeid.org"},
-		{AID: "EoO3LBQt1s_tot1yH1EFKMQ0Z4EMP2mp0jp3zw5u0Bn8", URL: "https://witness2.grapeid.org", Operator: "grapeid.org"},
-		{AID: "EZEx_C9TEyy23To57F_r67Y5nvIe4KvrpXveyIpW4OFM", URL: "https://witness3.grapeid.org", Operator: "grapeid.org"},
+		{AID: "BMtfjviEMpF2xWVW0CRPKoVPX1mOMzNurvUjD-0RN_Jl", URL: "https://witness1.grapeid.org", Operator: "grapeid.org"},
+		{AID: "BErokYIbJDqV1Ewr3QMHKWokln2aIVRGwTZ3E502pz_v", URL: "https://witness2.grapeid.org", Operator: "grapeid.org"},
+		{AID: "BDYkziwUKiadQAQa4uX3ssib9g5REqzo6aejWmi10X00", URL: "https://witness3.grapeid.org", Operator: "grapeid.org"},
 	}
 }
 

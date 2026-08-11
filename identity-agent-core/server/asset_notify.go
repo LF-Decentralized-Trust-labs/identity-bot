@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -262,13 +263,35 @@ func (s *CoreServer) rememberPeerAt(aid, agentURL string) error {
 	if did.AID != aid {
 		return fmt.Errorf("%s answered with keys for %s, not %s", base, did.AID, aid)
 	}
+	if _, perr := didcomm.ParseDIDForCheck(&did); perr != nil {
+		return fmt.Errorf("the keys %s published cannot be used: %w", base, perr)
+	}
+
+	// And they must belong to that identifier, which is the check this whole
+	// path existed without. Matching the identifier it was asked about proves
+	// only that the answering server said the right word back.
+	//
+	// The history is re-checked here rather than read from an old record: the
+	// key these are vouched for by is the one that history currently ends with,
+	// and a rotation since we last looked would leave us checking against a key
+	// they have retired.
+	check := s.contactKeyForUse(aid)
+	if check.State == kelFailed {
+		return fmt.Errorf("the key history for %s does not check out (%s), so its keys are not "+
+			"usable either", aid, check.Reason)
+	}
+	trust, terr := checkPeerKeys(&did, s.storedKELEvents(aid), check.Key)
+	if terr != nil {
+		return fmt.Errorf("refusing keys for %s: %w", aid, terr)
+	}
+	log.Printf("[didcomm] keys for %s accepted — %s", aid, trust)
 
 	didcommMu.Lock()
 	defer didcommMu.Unlock()
 	peers := s.loadPeers()
 	peers[aid] = peerRecord{
 		AID: aid, DID: did,
-		Endpoint: base + "/didcomm",
+		Endpoint: canonicalPeerEndpoint(base),
 		AddedAt:  time.Now().UTC(),
 	}
 	return s.savePeers(peers)

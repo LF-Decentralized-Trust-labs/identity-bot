@@ -90,6 +90,73 @@ func EncodeLargeFixed(code string, raw []byte, expectedLen int) (string, error) 
 	return code + base64.RawURLEncoding.EncodeToString(raw), nil
 }
 
+// NonTransferableAIDQB64 encodes a raw Ed25519 public key as a CESR
+// non-transferable identifier (code "B").
+//
+// A non-transferable identifier IS its verifying key, so anyone holding the
+// identifier can check a signature made under it without fetching anything —
+// no key history, no address, no network. That is exactly what a witness needs
+// to be: the point of a receipt is that a third party can check it, and a
+// receipt whose key must first be looked up somewhere just moves the question
+// to whoever answers the lookup.
+//
+// The trade is that such an identifier cannot rotate — its key is fixed for
+// life. For a witness that is the correct trade, because a witness is a role
+// something performs rather than a party with a history, and replacing the key
+// means naming a different witness.
+func NonTransferableAIDQB64(pub []byte) string {
+	s, err := MatterFixedQB64("B", pub)
+	if err != nil {
+		return ""
+	}
+	return s
+}
+
+// KeyFromNonTransferableAID recovers the verifying key a non-transferable
+// identifier is made of.
+//
+// The inverse of NonTransferableAIDQB64, kept beside it so the two cannot drift.
+// This is the whole reason a witness is named this way: given the identifier
+// written in a key event, a verifier holds the key already and checks a receipt
+// without asking anybody anything.
+func KeyFromNonTransferableAID(aid string) ([]byte, error) {
+	const code = "B"
+	if len(aid) != 44 || aid[:1] != code {
+		return nil, fmt.Errorf("%q is not a non-transferable identifier", aid)
+	}
+	// One code character, so one leading pad character to realign to base64.
+	raw, err := base64.RawURLEncoding.DecodeString("A" + aid[1:])
+	if err != nil {
+		return nil, fmt.Errorf("identifier is not valid base64url: %w", err)
+	}
+	if len(raw) != 33 {
+		return nil, fmt.Errorf("expected 32 key bytes, got %d", len(raw)-1)
+	}
+	return raw[1:], nil
+}
+
+// KeyFromVerkeyQB64 recovers the raw Ed25519 key from a CESR verfer (code "D").
+//
+// The inverse of VerkeyQB64. Separate from DecodeLargeFixed because the two
+// encodings differ in more than the code: a 1-character code pads by one byte
+// and replaces one leading character, where the 4-character provisional codes
+// are a straight prefix. Decoding one with the other's rules yields bytes that
+// are wrong rather than an error, which is the failure worth designing out.
+func KeyFromVerkeyQB64(qb64 string) ([]byte, error) {
+	const code = "D"
+	if len(qb64) != 44 || qb64[:1] != code {
+		return nil, fmt.Errorf("%q is not a CESR Ed25519 verifying key", qb64)
+	}
+	raw, err := base64.RawURLEncoding.DecodeString("A" + qb64[1:])
+	if err != nil {
+		return nil, fmt.Errorf("verifying key is not valid base64url: %w", err)
+	}
+	if len(raw) != 33 {
+		return nil, fmt.Errorf("expected 32 key bytes, got %d", len(raw)-1)
+	}
+	return raw[1:], nil
+}
+
 // VerkeyQB64 encodes a raw Ed25519 public key as a CESR qb64 verfer (code "D"). Use this for
 // keys passed to the KERI driver's inception endpoints: the driver's _extract_raw_key reads a
 // leading "B"/"D" as a CESR code, so a raw base64 key that happens to start with B/D is

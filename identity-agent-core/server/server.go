@@ -1,7 +1,6 @@
 package server
 
 import (
-	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/tls"
@@ -91,9 +90,35 @@ type CoreServer struct {
 	UpdateService     *update.Service
 	AttestationRunner *secureenclave.Runner
 	TrustGate         *secureenclave.TrustGate
-	CallerResolver    CallerResolver // resolves endpoint caller identity/scopes; nil = loopback default (delegated-identity injects the real one)
-	mu                sync.Mutex
-	running           bool
+
+	// snpCertificates obtains the certificates that let somebody else check
+	// this machine's attestation report. Nil where the machine has no sealed
+	// hardware, which is the ordinary case.
+	snpCertificates *snpCertificateChain
+
+	// volumeRecovery is injected by tests. Nil means the real one.
+	volumeRecovery volumeRecoveryRunner
+
+	// transportIdentity is the key this agent is reached over, where it holds
+	// one itself rather than being fronted by something that terminates for it.
+	// AcceptedMeasurements is the software this owner will adopt a sealed box
+	// for. Empty means no policy, which is refused rather than read as "any" —
+	// see acceptableMeasurement.
+	AcceptedMeasurements [][]byte
+	// boxIdentity is this machine's own identity where it made one, which is
+	// what its attestation vouches for.
+	boxIdentity       *boxIdentity
+	transportIdentity *TransportIdentity
+
+	// The public attestation endpoint is open by necessity, so it caches its
+	// answer and bounds how often one caller may ask.
+	attestationMu      sync.Mutex
+	attestationCached  *publicAttestation
+	attestationExpires time.Time
+	attestationLimiter *attestationRateLimiter
+	CallerResolver     CallerResolver // resolves endpoint caller identity/scopes; nil = loopback default (delegated-identity injects the real one)
+	mu                 sync.Mutex
+	running            bool
 }
 
 type Config struct {
@@ -222,6 +247,7 @@ func New(cfg Config) (*CoreServer, error) {
 	wsvc.OnEvent = func(eventType string, payload map[string]interface{}) {
 		s.EventHub.Broadcast(AgentEvent{Type: eventType, Payload: payload})
 	}
+	wsvc.SignReceipt = s.signWitnessReceipt
 	s.WitnessService = wsvc
 	go witness.StartHeartbeatLoop(wsvc, ctx.Done())
 
@@ -310,6 +336,13 @@ func New(cfg Config) (*CoreServer, error) {
 		s.TrustGate = secureenclave.NewTrustGate(s.AttestationRunner, nil)
 	}
 
+	// Only where there is sealed hardware to attest. Elsewhere there is no
+	// report, so there is nothing for a certificate to vouch for.
+	if secureenclave.SNPAvailable() {
+		s.snpCertificates = newSNPCertificateChain(os.Getenv("SNP_PRODUCT"), cfg.DataDir)
+	}
+	s.attestationLimiter = newAttestationRateLimiter(60)
+
 	// Defer router construction to Start() so overlays can register routes
 	// (MountExtraRoutes) after New() returns but before serving. Building here
 	// would consume an empty extraRoutes slice, silently dropping overlay routes.
@@ -351,6 +384,36 @@ func (s *CoreServer) Start() error {
 	}
 	if s.listener == nil {
 		return fmt.Errorf("failed to bind on ports %d–%d: %w", requestedPort, requestedPort+9, bindErr)
+	}
+
+	// The key this agent is reached over. Loaded before anything publishes an
+	// address, because its fingerprint is what an attestation binds to and what
+	// a client checks against the connection it is on.
+	//
+	// A failure is loud but not fatal: an agent that cannot hold its own key
+	// still works behind something that terminates for it, which is what every
+	// agent does today. Refusing to start would turn a downgrade into an
+	// outage.
+	if id, err := LoadOrCreateTransportIdentity(s.DataDir); err != nil {
+		log.Printf("[identity-agent-core] WARNING: no transport key of this agent's own (%v) — "+
+			"traffic is protected only by whatever terminates in front of it, which on rented "+
+			"hardware is the machine's operator", err)
+	} else {
+		s.transportIdentity = id
+	}
+
+	// This machine's own identity, where it has made one.
+	//
+	// Read back rather than remade: it is what the owner signed and what
+	// counterparties encrypt to, so a machine that produced a fresh one after a
+	// restart would be a different machine wearing the same address. A file
+	// that will not parse is reported rather than replaced, for the same reason.
+	if box, err := s.loadBoxIdentity(); err != nil {
+		log.Printf("[identity-agent-core] WARNING: this machine has an identity it cannot read (%v) "+
+			"— it will not answer as itself until that is resolved, and it must not be given a new one", err)
+	} else if box != nil {
+		s.boxIdentity = box
+		log.Printf("[identity-agent-core] this machine's identity: %s", box.AID)
 	}
 
 	// Update endpoint service with actual port (may differ from configured)
@@ -532,11 +595,18 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 	// Public inbound DIDComm endpoint — encrypted IA-to-IA envelopes land here.
 	r.Post("/didcomm", s.handleDIDCommInbound)
 
+	// An ordinary request, carried where nothing in the middle can read it.
+	r.Post("/api/sealed", s.handleSealedTransport)
+	// The sending half, for this device's own app. Owner-only by default: it is
+	// under /api and named in neither the public nor the scoped list.
+	r.Post("/api/sealed/send", s.handleSealedSend)
+
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/health", s.handleHealth)
 		r.Get("/info", s.handleInfo)
 		r.Get("/identity", s.handleIdentity)
 		r.Get("/security/enclave", s.handleSecurityEnclave)
+		r.Get("/attestation", s.handlePublicAttestation)
 
 		r.Post("/keystore/root-seed", s.handleSetRootSeed)
 		r.Get("/keystore/root-seed", s.handleRootSeedStatus)
@@ -559,7 +629,6 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		r.Get("/credentials", s.handleGetCredentials)
 		r.Get("/credentials/{said}", s.handleGetCredential)
 		r.Post("/credentials/receive", s.handleReceiveCredential)
-		r.Post("/credentials/deliver", s.handleDeliverCredential)
 		r.Post("/credentials/{said}/accept", s.handleAcceptCredential)
 		r.Post("/credentials/{said}/reject", s.handleRejectCredential)
 		r.Post("/credentials/{said}/revoke", s.handleRevokeCredential)
@@ -605,7 +674,6 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		// /alerts, which is a read-only view — these can be marked read.
 		r.Get("/notifications", s.handleGetNotifications)
 		r.Post("/notifications/status", s.handleSetNotificationStatus)
-		r.Post("/exchange", s.handleExchange)
 
 		r.Get("/tasks", s.handleGetTasks)
 
@@ -634,7 +702,9 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		r.Delete("/share-actions/{id}", s.handleDeleteShareAction)
 
 		r.Post("/store/identity", s.handleStoreIdentity)
+		r.Post("/messaging-keys/prepare", s.handlePrepareMessagingKeys)
 		r.Post("/store/event", s.handleStoreEvent)
+		r.Post("/events/signature", s.handleAttachEventSignature)
 		r.Post("/store/receipt", s.handleStoreReceipt)
 		r.Get("/store/receipts", s.handleGetStoreReceipts)
 		r.Post("/store/credential", s.handleStoreCredential)
@@ -1035,18 +1105,66 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var (
-		result *drivers.DriverInceptionResponse
-		err    error
-	)
-	if req.OwnerAID != "" {
-		result, err = s.KeriDriver.CreateOwnedInception(req.PublicKey, req.NextPublicKey, "", req.OwnerAID)
-	} else {
-		result, err = s.KeriDriver.CreateInception(req.PublicKey, req.NextPublicKey)
+	// The identity commits to the keys people will encrypt to it with, in the
+	// event it is derived from.
+	//
+	// Without this, "which keys belong to this identifier?" is a question only
+	// the agent can answer, so a counterparty has to ask the agent and believe
+	// the reply — and anything in the middle can answer instead. Anchored, the
+	// answer is inside the identifier: changing the keys changes the event,
+	// which changes the identifier, so there is nothing to intercept because
+	// there is nothing to fetch.
+	//
+	// Minted before the identity exists because the identifier depends on it.
+	// The keyset carries the AID only as a label, so it is generated unlabelled
+	// and filed under the identifier once the identifier is known.
+	// Derived from the agent's root seed, never drawn at random: the recovery
+	// phrase has to be able to bring these back, or restoring an identity
+	// produces one that can prove who it is and can never be sent anything.
+	messagingKeys, keyIndex, err := s.deriveMessagingKeys("")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Could not derive this identity's messaging keys", err.Error())
+		return
 	}
+	kemPub, err := messagingKeys.KemPub.MarshalBinary()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Could not encode this identity's messaging keys", err.Error())
+		return
+	}
+	dsaPub, err := messagingKeys.DsaPub.MarshalBinary()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Could not encode this identity's messaging keys", err.Error())
+		return
+	}
+	keyAnchor, err := iacrypto.KeySetAnchor(
+		messagingKeys.XPub[:], kemPub, messagingKeys.EdPub, dsaPub)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Could not commit to this identity's messaging keys", err.Error())
+		return
+	}
+
+	result, err := s.KeriDriver.CreateInceptionAnchored(
+		req.PublicKey, req.NextPublicKey, "", req.OwnerAID,
+		[]map[string]interface{}{keyAnchor})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to create inception event", err.Error())
 		return
+	}
+
+	// Filed before anything else is persisted. An identifier that commits to
+	// keys the agent then failed to keep is worse than one with no keys at all:
+	// it advertises a keyset nobody holds the private half of, permanently, and
+	// no later event can take the commitment back.
+	if err := s.storeKeySetFor(result.AID, messagingKeys); err != nil {
+		writeError(w, http.StatusInternalServerError,
+			"The identity's messaging keys could not be saved", err.Error())
+		return
+	}
+	// Now that the identifier exists, record which identity the branch belongs
+	// to. Restoring needs the branch; knowing whose it is makes a mismatch
+	// visible instead of quietly producing the wrong keys.
+	if err := s.recordMessagingKeyIndex(result.AID, keyIndex); err != nil {
+		log.Printf("[identity-agent-core] INCEPTION: %v", err)
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -1059,6 +1177,7 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 		PublicKey:      result.PublicKey,
 		NextKeyDigest:  result.NextKeyDigest,
 		Timestamp:      now,
+		RawBytesB64:    result.RawBytesB64,
 		CesrSignature:  req.CesrSignature,
 	}
 	if err := s.DataStore.SaveEvent(eventRecord); err != nil {
@@ -1161,6 +1280,16 @@ func (s *CoreServer) handleStoreIdentity(w http.ResponseWriter, r *http.Request)
 
 	log.Printf("[identity-agent-core] STORE: Identity saved - AID: %s", req.AID)
 
+	// The keys people encrypt to it with, derived from the same root seed as
+	// everything else. Without this an identity founded elsewhere has messaging
+	// keys minted at random on first use, which the recovery phrase cannot
+	// reproduce — so restoring it produces an identity that can prove who it is
+	// and can never be sent anything.
+	if err := s.fileMessagingKeysFor(req.AID); err != nil {
+		log.Printf("[identity-agent-core] STORE: could not derive messaging keys for %s: %v",
+			req.AID, err)
+	}
+
 	// Same guarantee on the mobile path, where inception happens in the Rust
 	// bridge and only the result is persisted here.
 	if _, aerr := s.ensureAvatar(); aerr != nil {
@@ -1194,6 +1323,9 @@ func (s *CoreServer) handleStoreEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf("[identity-agent-core] STORE: Event saved - AID: %s type: %s sn: %d", req.AID, req.EventType, req.SequenceNumber)
+	if req.EventType == "icp" || req.EventType == "dip" {
+		warnIfIdentityCommitsToNothing(req.AID, req.EventJSON)
+	}
 	s.broadcastWitnessEvent(req.AID, req.EventJSON)
 
 	w.Header().Set("Content-Type", "application/json")
@@ -1240,6 +1372,7 @@ func (s *CoreServer) handleRotation(w http.ResponseWriter, r *http.Request) {
 		PublicKey:      result.NewPublicKey,
 		NextKeyDigest:  result.NewNextKeyDigest,
 		Timestamp:      now,
+		RawBytesB64:    result.RawBytesB64,
 		CesrSignature:  req.CesrSignature,
 	}
 	if err := s.DataStore.SaveEvent(eventRecord); err != nil {
@@ -1298,6 +1431,7 @@ func (s *CoreServer) handleInteract(w http.ResponseWriter, r *http.Request) {
 		EventJSON:      string(eventJSON),
 		Timestamp:      now,
 		CesrSignature:  req.CesrSignature,
+		RawBytesB64:    result.RawBytesB64,
 	}
 	if err := s.DataStore.SaveEvent(eventRecord); err != nil {
 		log.Printf("[identity-agent-core] Warning: failed to persist IXN event: %v", err)
@@ -1583,6 +1717,7 @@ func (s *CoreServer) handleIssueCredential(w http.ResponseWriter, r *http.Reques
 		NextKeyDigest:  identity.NextKeyDigest,
 		Timestamp:      time.Now().UTC().Format(time.RFC3339),
 		CesrSignature:  req.CesrSignature,
+		RawBytesB64:    result.IxnRawBytesB64,
 	}
 	if err := s.DataStore.SaveEvent(kelRecord); err != nil {
 		log.Printf("[identity-agent-core] CREDENTIAL: Failed to persist IXN event for credential %s: %v", result.AcdcSaid, err)
@@ -1745,72 +1880,6 @@ func (s *CoreServer) handleDeleteCredential(w http.ResponseWriter, r *http.Reque
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleDeliverCredential receives a credential pushed by another Identity Agent.
-// The credential is saved with status "pending_inbound" and a WebSocket event is broadcast.
-func (s *CoreServer) handleDeliverCredential(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Said           string `json:"said"`
-		AcdcJson       string `json:"acdc_json"`
-		Format         string `json:"format"`
-		CredentialType string `json:"credential_type"`
-		IssuerAID      string `json:"issuer_aid"`
-		IssuerName     string `json:"issuer_name"`
-		SchemaSAID     string `json:"schema_said"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
-		return
-	}
-	if req.Said == "" || req.AcdcJson == "" {
-		writeError(w, http.StatusBadRequest, "Missing required fields", "said and acdc_json are required")
-		return
-	}
-
-	holderAID := ""
-	if identity, err := s.DataStore.GetIdentity(); err == nil && identity != nil {
-		holderAID = identity.AID
-	}
-	// Server-side format detection (do not trust caller-supplied format).
-	req.Format = detectCredentialFormat(req.AcdcJson, "")
-
-	record := store.CredentialRecord{
-		SAID:           req.Said,
-		IssuerAID:      req.IssuerAID,
-		HolderAID:      holderAID,
-		SchemaSAID:     req.SchemaSAID,
-		AcdcJson:       req.AcdcJson,
-		IssuedAt:       time.Now().UTC().Format(time.RFC3339),
-		Status:         "pending_inbound",
-		Format:         req.Format,
-		CredentialType: req.CredentialType,
-		IssuerName:     req.IssuerName,
-	}
-	if err := s.DataStore.SaveCredential(record); err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to save credential", err.Error())
-		return
-	}
-	s.notifyBackupEvent(backup.EventCredential)
-
-	s.EventHub.Broadcast(AgentEvent{
-		Type: "credential_received",
-		Payload: map[string]interface{}{
-			"said":            req.Said,
-			"credential_type": req.CredentialType,
-			"issuer_aid":      req.IssuerAID,
-			"issuer_name":     req.IssuerName,
-		},
-	})
-
-	log.Printf("[identity-agent-core] CREDENTIAL: Received pending credential %s from %s", req.Said, req.IssuerAID)
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"said":   req.Said,
-		"status": "pending_inbound",
-	})
-}
-
 // handleAcceptCredential moves a pending_inbound credential to accepted (status=received).
 func (s *CoreServer) handleAcceptCredential(w http.ResponseWriter, r *http.Request) {
 	said := chi.URLParam(r, "said")
@@ -1840,44 +1909,30 @@ func (s *CoreServer) handleRejectCredential(w http.ResponseWriter, r *http.Reque
 
 // deliverCredentialToContact pushes an issued credential directly to a known contact's agent.
 // Called as a goroutine — failures are logged but do not affect the issue response.
+// deliverCredentialToContact hands a credential to its holder.
+//
+// Now inside an envelope. It used to POST plain JSON to the holder's REST
+// endpoint, naming the issuer in the body — an endpoint that is owner-only, so a
+// remote issuer was refused before the handler ran, by a caller that logged the
+// status without reading it. Every cross-agent delivery had been failing
+// silently, and the fix is not to open that endpoint but to send the thing the
+// way anything between two agents should be sent.
 func (s *CoreServer) deliverCredentialToContact(contact *store.ContactRecord, cred store.CredentialRecord) {
-	baseURL := oobiBase(contact.OobiURL)
-	if baseURL == "" {
+	if contact == nil || contact.AID == "" {
 		return
 	}
-	deliverURL := fmt.Sprintf("%s/api/credentials/deliver", baseURL)
-	payload := map[string]interface{}{
-		"said":            cred.SAID,
-		"acdc_json":       cred.AcdcJson,
-		"format":          cred.Format,
-		"credential_type": cred.CredentialType,
-		"issuer_aid":      cred.IssuerAID,
-		"issuer_name":     cred.IssuerName,
-		"schema_said":     cred.SchemaSAID,
+	from := cred.IssuerAID
+	if from == "" {
+		if identity, err := s.DataStore.GetIdentity(); err == nil && identity != nil {
+			from = identity.AID
+		}
 	}
-	body, _ := json.Marshal(payload)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, "POST", deliverURL, bytes.NewReader(body))
-	if err != nil {
-		log.Printf("[identity-agent-core] CREDENTIAL DELIVER: build request failed for %s: %v", deliverURL, err)
+	if err := s.SendCredential(from, contact.AID, cred); err != nil {
+		log.Printf("[credential] %s was not delivered to %s: %v", cred.SAID, contact.AID, err)
 		return
 	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		log.Printf("[identity-agent-core] CREDENTIAL DELIVER: push failed to %s: %v", deliverURL, err)
-		return
-	}
-	defer resp.Body.Close()
-	log.Printf("[identity-agent-core] CREDENTIAL DELIVER: pushed %s to %s (HTTP %d)", cred.SAID, deliverURL, resp.StatusCode)
+	log.Printf("[credential] delivered %s to %s", cred.SAID, contact.AID)
 }
-
-// handleListBuiltinSchemas returns all schemas bundled into the Identity Agent binary.
-// These are served to any KERI verifier that needs to resolve a schema SAID.
 func (s *CoreServer) handleListBuiltinSchemas(w http.ResponseWriter, r *http.Request) {
 	list := schemas.List()
 	w.Header().Set("Content-Type", "application/json")
@@ -2568,9 +2623,6 @@ func (s *CoreServer) handleGetActions(w http.ResponseWriter, r *http.Request) {
 		{Name: "Verify Signature", Endpoint: "/api/verify", Method: "POST",
 			Description: "Verify a signature against a known AID.",
 			Tags:        []string{"crypto", "verification"}},
-		{Name: "Send Exchange", Endpoint: "/api/exchange", Method: "POST",
-			Description: "Send an exchange message (payment request, credential offer, etc.) to a contact.",
-			Tags:        []string{"exchange", "payments"}},
 		{Name: "Issue Credential", Endpoint: "/api/credential/issue", Method: "POST",
 			Description: "Issue a verifiable credential (ACDC) to a contact.",
 			Tags:        []string{"credentials"}},
@@ -3219,8 +3271,14 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	contactStatus := "verified"
-	if s.KeriDriver != nil && len(oobiData.KEL) > 0 && !kelVerified {
+	// "verified" is no longer asserted where nothing was checked. What a person
+	// is shown comes from the identity level, and this field records only what
+	// this agent actually established.
+	contactStatus := "unchecked"
+	switch {
+	case kelVerified:
+		contactStatus = "verified"
+	case s.KeriDriver != nil && len(oobiData.KEL) > 0:
 		contactStatus = "unverified"
 	}
 
@@ -3234,7 +3292,7 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
 		Alias:           alias,
 		PublicKey:       currentPublicKey,
 		OobiURL:         req.OobiURL,
-		Verified:        kelVerified || s.KeriDriver == nil,
+		Verified:        kelVerified,
 		DiscoveredAt:    time.Now().UTC().Format(time.RFC3339),
 		Status:          contactStatus,
 		ContactSource:   "keri",
@@ -3315,36 +3373,23 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
 			ourAlias = jc.FullName
 		}
 
-		remoteBase := oobiBase(req.OobiURL)
-		exchangeURL := remoteBase + "/api/exchange"
-
-		log.Printf("[identity-agent-core] EXCHANGE: Preparing reverse introduction to %s", exchangeURL)
-		log.Printf("[identity-agent-core] EXCHANGE: Our OOBI: %s", ourOOBI)
-		log.Printf("[identity-agent-core] EXCHANGE: Our AID: %s", ourIdentity.AID)
-
+		// The introduction rides the envelope, and carries no claim about who
+		// sent it. Who sent it is what the envelope establishes; a field saying
+		// so would be a field somebody could fill in.
 		payload := map[string]interface{}{
-			"type":              "introduction",
-			"sender_aid":        ourIdentity.AID,
-			"sender_oobi":       ourOOBI,
-			"sender_alias":      ourAlias,
-			"sender_public_key": ourIdentity.PublicKey,
+			"alias":    ourAlias,
+			"oobi_url": ourOOBI,
+			"jcard":    jc,
 		}
-		payload["sender_jcard"] = jc
 		if photo != "" {
-			payload["sender_photo"] = photo
+			payload["photo"] = photo
 		}
-		body, _ := json.Marshal(payload)
-
-		exnClient := &http.Client{Timeout: 15 * time.Second}
-		exnResp, err := exnClient.Post(exchangeURL, "application/json", bytes.NewReader(body))
-		if err != nil {
-			log.Printf("[identity-agent-core] EXCHANGE: FAILED to send introduction to %s: %v", exchangeURL, err)
-			log.Printf("[identity-agent-core] EXCHANGE: This may mean the remote agent is not reachable. The contact was saved locally but the remote agent will not know about us.")
+		if err := s.introduceOurselvesTo(oobiData.AID, req.OobiURL, payload); err != nil {
+			log.Printf("[identity-agent-core] INTRODUCTION: could not tell %s who we are: %v — "+
+				"the contact is saved here, and they do not know about us yet",
+				oobiData.AID, err)
 			return
 		}
-		defer exnResp.Body.Close()
-		respBody, _ := io.ReadAll(exnResp.Body)
-		log.Printf("[identity-agent-core] EXCHANGE: Introduction sent to %s — response: %d %s", exchangeURL, exnResp.StatusCode, string(respBody))
 	}()
 
 	w.Header().Set("Content-Type", "application/json")
@@ -3377,249 +3422,6 @@ func (s *CoreServer) handleDeleteContact(w http.ResponseWriter, r *http.Request)
 	log.Printf("[identity-agent-core] CONTACT: Removed %s (AID: %s)", contact.Alias, aid)
 
 	w.WriteHeader(http.StatusNoContent)
-}
-
-func (s *CoreServer) handleExchange(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Type            string       `json:"type"`
-		SenderAID       string       `json:"sender_aid"`
-		SenderOOBI      string       `json:"sender_oobi"`
-		SenderAlias     string       `json:"sender_alias"`
-		SenderPublicKey string       `json:"sender_public_key"`
-		SenderJCard     *store.JCard `json:"sender_jcard,omitempty"`
-		SenderPhoto     string       `json:"sender_photo,omitempty"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
-		return
-	}
-
-	if req.Type == "acceptance" {
-		if req.SenderAID == "" {
-			writeError(w, http.StatusBadRequest, "Missing required fields", "sender_aid is required for acceptance")
-			return
-		}
-		existing, _ := s.DataStore.GetContact(req.SenderAID)
-		if existing != nil && (existing.Status == "pending_outbound" || existing.Status == "pending_inbound") {
-			existing.Status = "accepted"
-			s.DataStore.SaveContact(*existing)
-			log.Printf("[identity-agent-core] EXCHANGE: Acceptance received — contact %s upgraded to accepted", req.SenderAID)
-			s.EventHub.Broadcast(AgentEvent{
-				Type: "contact_accepted",
-				Payload: map[string]interface{}{
-					"sender_aid":   req.SenderAID,
-					"sender_alias": existing.Alias,
-				},
-			})
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"status": "acknowledged", "aid": req.SenderAID})
-		return
-	}
-
-	if req.Type != "introduction" {
-		writeError(w, http.StatusBadRequest, "Invalid exchange type", fmt.Sprintf("Expected 'introduction' or 'acceptance', got '%s'", req.Type))
-		return
-	}
-
-	if req.SenderAID == "" || req.SenderOOBI == "" {
-		writeError(w, http.StatusBadRequest, "Missing required fields", "sender_aid and sender_oobi are required")
-		return
-	}
-
-	existing, _ := s.DataStore.GetContact(req.SenderAID)
-	if existing != nil {
-		if existing.Status == "accepted" {
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]string{"status": "already_accepted", "aid": req.SenderAID})
-			return
-		}
-		if existing.Status == "pending_outbound" || existing.Status == "verified" {
-			existing.Status = "accepted"
-			s.DataStore.SaveContact(*existing)
-			log.Printf("[identity-agent-core] EXCHANGE: Introduction received — contact %s auto-upgraded to accepted", req.SenderAID)
-			s.EventHub.Broadcast(AgentEvent{
-				Type: "contact_accepted",
-				Payload: map[string]interface{}{
-					"sender_aid":   req.SenderAID,
-					"sender_alias": existing.Alias,
-				},
-			})
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]string{"status": "accepted", "aid": req.SenderAID})
-			return
-		}
-	}
-
-	log.Printf("[identity-agent-core] EXCHANGE: Attempting to resolve sender OOBI: %s", req.SenderOOBI)
-
-	client := &http.Client{Timeout: 15 * time.Second}
-	oobiResp, err := client.Get(req.SenderOOBI)
-	oobiReachable := false
-	kelPresent := false
-	var oobiErrorMsg string
-
-	if err != nil {
-		oobiErrorMsg = fmt.Sprintf("Could not reach OOBI: %v", err)
-		log.Printf("[identity-agent-core] EXCHANGE: OOBI unreachable — %s", oobiErrorMsg)
-	} else {
-		defer oobiResp.Body.Close()
-		if oobiResp.StatusCode == http.StatusOK {
-			var oobiBody struct {
-				AID string      `json:"aid"`
-				KEL interface{} `json:"kel"`
-			}
-			if err := json.NewDecoder(oobiResp.Body).Decode(&oobiBody); err == nil {
-				oobiReachable = true
-				if events, ok := oobiBody.KEL.([]interface{}); ok && len(events) > 0 {
-					kelPresent = true
-					log.Printf("[identity-agent-core] EXCHANGE: OOBI resolved — AID=%s, KEL events=%d", oobiBody.AID, len(events))
-				} else {
-					log.Printf("[identity-agent-core] EXCHANGE: OOBI resolved but KEL is empty for AID=%s", oobiBody.AID)
-				}
-			}
-		} else {
-			oobiErrorMsg = fmt.Sprintf("OOBI returned status %d", oobiResp.StatusCode)
-			log.Printf("[identity-agent-core] EXCHANGE: OOBI returned non-200: %d", oobiResp.StatusCode)
-		}
-	}
-
-	alias := req.SenderAlias
-	if alias == "" && len(req.SenderAID) >= 12 {
-		alias = req.SenderAID[:12] + "..."
-	} else if alias == "" {
-		alias = req.SenderAID
-	}
-
-	if !oobiReachable {
-		pendingJCard := req.SenderJCard
-		if pendingJCard == nil {
-			pendingJCard = &store.JCard{
-				FullName:  alias,
-				XKeriAID:  req.SenderAID,
-				XKeriOOBI: req.SenderOOBI,
-				XKeriRole: "general",
-			}
-		}
-		pendingReq := store.PendingRequest{
-			AID:         req.SenderAID,
-			Alias:       alias,
-			PublicKey:   req.SenderPublicKey,
-			OobiURL:     req.SenderOOBI,
-			ReceivedAt:  time.Now().UTC().Format(time.RFC3339),
-			ExpiresAt:   time.Now().AddDate(0, 0, 90).UTC().Format(time.RFC3339),
-			ErrorReason: oobiErrorMsg,
-			JCard:       pendingJCard,
-		}
-		if err := s.DataStore.SavePendingRequest(pendingReq); err != nil {
-			writeError(w, http.StatusInternalServerError, "Failed to save pending request", err.Error())
-			return
-		}
-		log.Printf("[identity-agent-core] EXCHANGE: Saved as PENDING REQUEST (OOBI unreachable) — AID=%s, error=%s", req.SenderAID, oobiErrorMsg)
-
-		s.EventHub.Broadcast(AgentEvent{
-			Type: "pending_request_received",
-			Payload: map[string]interface{}{
-				"sender_aid":   req.SenderAID,
-				"sender_alias": alias,
-				"error":        oobiErrorMsg,
-			},
-		})
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status":  "received_pending",
-			"aid":     req.SenderAID,
-			"error":   "sender_oobi_unreachable",
-			"message": "Contact request received but sender OOBI could not be reached. Sender needs to set up tunneling.",
-		})
-		return
-	}
-
-	contactJCard := req.SenderJCard
-	if contactJCard == nil {
-		contactJCard = &store.JCard{
-			FullName:  alias,
-			XKeriAID:  req.SenderAID,
-			XKeriOOBI: req.SenderOOBI,
-			XKeriRole: "general",
-		}
-	}
-	contact := store.ContactRecord{
-		AID:             req.SenderAID,
-		Alias:           alias,
-		PublicKey:       req.SenderPublicKey,
-		OobiURL:         req.SenderOOBI,
-		Verified:        kelPresent,
-		DiscoveredAt:    time.Now().UTC().Format(time.RFC3339),
-		Status:          "pending_inbound",
-		ContactSource:   "keri",
-		ContactCategory: "general",
-		JCard:           contactJCard,
-		Photo:           req.SenderPhoto,
-	}
-
-	// HD-derive (BIP32/SLIP-0010) + real driver icp for inbound exchange (consistent with add).
-	// Assign and persist stable RelationshipIndex; no per-rel seed persist, re-derive later.
-	if contact.RelationshipAID == "" && s.KeriDriver != nil {
-		rootSeed, rerr := secureenclave.LoadRootSeed(s.DataDir)
-		if rerr != nil {
-			writeError(w, http.StatusInternalServerError, "Root keystore seed required for HD pairwise derivation", rerr.Error())
-			return
-		}
-		cidx, err := s.DataStore.AllocateNextRelationshipIndex("contacts")
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "Failed to allocate relationship index", err.Error())
-			return
-		}
-		contact.RelationshipIndex = cidx
-
-		pwiseSeed, derr := backup.DerivePairwiseSeed(rootSeed, cidx, 0)
-		if derr != nil {
-			writeError(w, http.StatusInternalServerError, "HD derive failed", derr.Error())
-			return
-		}
-		nextPwise, _ := backup.DerivePairwiseSeed(rootSeed, cidx, 1)
-		pub := ed25519.NewKeyFromSeed(pwiseSeed).Public().(ed25519.PublicKey)
-		npub := ed25519.NewKeyFromSeed(nextPwise).Public().(ed25519.PublicKey)
-		if resp, err := s.KeriDriver.CreateInceptionNamed(iacrypto.VerkeyQB64(pub), iacrypto.VerkeyQB64(npub), "rel-"+req.SenderAID); err == nil && resp.AID != "" {
-			contact.RelationshipAID = resp.AID
-			contact.RelationshipSeedB64 = ""
-			log.Printf("[identity-agent-core] EXCHANGE: HD-derived (index %d) + minted rel P-AID %s", cidx, resp.AID)
-		} else if err != nil {
-			writeError(w, http.StatusInternalServerError, "driver mint failed for exchange rel", err.Error())
-			return
-		}
-	}
-
-	if err := s.DataStore.SaveContact(contact); err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to save contact", err.Error())
-		return
-	}
-	if contact.Verified {
-		s.notifyBackupEvent(backup.EventContactVerified)
-	}
-
-	log.Printf("[identity-agent-core] EXCHANGE: Introduction received from %s (AID: %s) — saved as pending_inbound, kel_verified=%v", alias, req.SenderAID, kelPresent)
-
-	introPayload := map[string]interface{}{
-		"sender_aid":   req.SenderAID,
-		"sender_alias": alias,
-		"sender_oobi":  req.SenderOOBI,
-	}
-	if req.SenderJCard != nil {
-		introPayload["sender_jcard"] = req.SenderJCard
-	}
-	if req.SenderPhoto != "" {
-		introPayload["sender_photo"] = req.SenderPhoto
-	}
-	s.EventHub.Broadcast(AgentEvent{
-		Type:    "introduction_received",
-		Payload: introPayload,
-	})
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "received", "aid": req.SenderAID})
 }
 
 func (s *CoreServer) handleAcceptContact(w http.ResponseWriter, r *http.Request) {
@@ -3656,6 +3458,19 @@ func (s *CoreServer) handleAcceptContact(w http.ResponseWriter, r *http.Request)
 	log.Printf("[identity-agent-core] CONTACT-ACCEPT: Upgrading contact %s (%s) to accepted, category=%s", contact.Alias, aid, acceptReq.ContactCategory)
 
 	contact.Status = "accepted"
+
+	// Register the peer from the history that was already verified.
+	//
+	// Approving a request that arrived carrying its own proof should not send
+	// this agent back out to ask for the keys again: the owner is agreeing to
+	// what was checked in front of them, and a second fetch could return
+	// something else. Where no such history was kept — a contact added by
+	// address rather than one that introduced itself — this does nothing and
+	// the ordinary path still applies.
+	if err := s.registerPeerFromVerifiedHistory(aid, contact.OobiURL); err != nil {
+		log.Printf("[identity-agent-core] CONTACT-ACCEPT: could not establish %s as a peer from the "+
+			"history it presented: %v", aid, err)
+	}
 	contact.ContactCategory = acceptReq.ContactCategory
 	if err := s.DataStore.SaveContact(*contact); err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to update contact", err.Error())
@@ -3665,31 +3480,14 @@ func (s *CoreServer) handleAcceptContact(w http.ResponseWriter, r *http.Request)
 	log.Printf("[identity-agent-core] CONTACT: Accepted %s (AID: %s) — status=accepted, category=%s", contact.Alias, aid, contact.ContactCategory)
 
 	go func() {
-		ourIdentity, err := s.DataStore.GetIdentity()
-		if err != nil || ourIdentity == nil {
-			log.Printf("[identity-agent-core] EXCHANGE: Cannot send acceptance — no identity available")
-			return
+		// They are already a peer by now: agreeing to them established one from
+		// the key history they proved themselves with. So the answer goes back
+		// the same way everything else does, and carries no claim about who
+		// sent it — that is what the envelope establishes.
+		if err := s.tellThemWeAccepted(aid, map[string]interface{}{"accepted": true}); err != nil {
+			log.Printf("[identity-agent-core] CONTACT-ACCEPT: could not tell %s they were accepted: %v",
+				aid, err)
 		}
-
-		remoteBase := oobiBase(contact.OobiURL)
-		exchangeURL := remoteBase + "/api/exchange"
-
-		log.Printf("[identity-agent-core] EXCHANGE: Sending acceptance confirmation to %s", exchangeURL)
-
-		payload := map[string]string{
-			"type":       "acceptance",
-			"sender_aid": ourIdentity.AID,
-		}
-		body, _ := json.Marshal(payload)
-
-		exnClient := &http.Client{Timeout: 15 * time.Second}
-		exnResp, err := exnClient.Post(exchangeURL, "application/json", bytes.NewReader(body))
-		if err != nil {
-			log.Printf("[identity-agent-core] EXCHANGE: Failed to send acceptance to %s: %v", exchangeURL, err)
-			return
-		}
-		defer exnResp.Body.Close()
-		log.Printf("[identity-agent-core] EXCHANGE: Acceptance sent to %s (status: %d)", exchangeURL, exnResp.StatusCode)
 	}()
 
 	if s.WitnessService != nil && contact.ContactCategory == "trusted" {
@@ -4350,8 +4148,8 @@ func (s *CoreServer) handleReleaseTunnelName(w http.ResponseWriter, r *http.Requ
 	})
 }
 
-// oobiBase extracts the scheme+host+port base URL from an OOBI URL so the
-// caller can append /api/exchange. OOBI URLs follow the /public/oobi/{aid} pattern.
+// oobiBase extracts the scheme+host+port base URL from an OOBI URL, which is
+// where an agent answers. OOBI URLs follow the /public/oobi/{aid} pattern.
 func oobiBase(oobiURL string) string {
 	if idx := strings.Index(oobiURL, "/public/oobi/"); idx != -1 {
 		return oobiURL[:idx]

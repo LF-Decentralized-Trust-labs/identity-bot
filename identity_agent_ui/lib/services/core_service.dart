@@ -607,6 +607,35 @@ class CoreService {
     }
   }
 
+  /// Attaches a controller signature to a key event that already exists.
+  ///
+  /// Signing can only happen after the event does — there are no bytes to sign
+  /// until the event has been built — so the signature travels separately. The
+  /// core verifies it against the event's own serialised bytes before storing
+  /// it, and refuses one that does not verify: a signature that is present and
+  /// wrong is worse than none, because the history then reports itself as
+  /// signed and the failure surfaces only at whoever tries to rely on it.
+  Future<bool> attachEventSignature({
+    required String aid,
+    required int sequenceNumber,
+    required String cesrSignature,
+  }) async {
+    try {
+      final resp = await http.post(
+        Uri.parse('$baseUrl/api/events/signature'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'aid': aid,
+          'sequence_number': sequenceNumber,
+          'cesr_signature': cesrSignature,
+        }),
+      );
+      return resp.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<InceptionResponse> createInception({
     required String publicKey,
     required String nextPublicKey,

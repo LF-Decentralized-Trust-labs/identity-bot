@@ -1,9 +1,14 @@
 package server
 
 import (
+	"context"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"time"
 
+	"identity-agent-core/iacrypto"
 	"identity-agent-core/secureenclave"
 	"identity-agent-core/update"
 )
@@ -19,6 +24,89 @@ type EnclaveStatusResponse struct {
 	Freshness      *FreshnessInfo   `json:"freshness,omitempty"`
 	Currency       *CurrencyInfo    `json:"currency,omitempty"`
 	TrustAllowed   *bool            `json:"trustAllowed,omitempty"`
+
+	// SealedHardware is the bottom rung of the chain, and it is present only
+	// where there is one — a machine whose memory the operator cannot read.
+	//
+	// The rest of this response is the same everywhere: which key store backs
+	// the identity, whether the running binary matches what was signed, whether
+	// it is current. An agent on somebody's desk answers those and stops. An
+	// agent on hardware somebody else owns has one more thing to prove, and it
+	// is the thing that matters most there — that the machine it runs on cannot
+	// be looked into by whoever runs it.
+	//
+	// Absent is a real answer, not a gap. It means this agent makes no such
+	// claim, which is correct for a laptop and is a red flag for anything
+	// advertised as sealed.
+	SealedHardware *SealedHardwareInfo `json:"sealedHardware,omitempty"`
+}
+
+// SealedHardwareInfo is what a sealed machine can prove about itself.
+//
+// Everything here comes from a report the CPU produced and signed. The agent
+// reads it and passes it on; it cannot forge it and does not try to interpret
+// it favourably — a reader gets the raw report and the fields that decide
+// whether it means anything.
+type SealedHardwareInfo struct {
+	// Platform names the confidential-computing technology, e.g. "sev-snp".
+	Platform string `json:"platform"`
+
+	// Measurement is the launch measurement: a digest over the image, the
+	// kernel, the initrd and the command line that were actually started. It is
+	// what "running the right software" means here, and it is computed by the
+	// hardware rather than claimed by the software.
+	Measurement string `json:"measurement"`
+
+	// ChipID identifies the physical processor. A report proves a genuine part
+	// ran a given image; it never proves WHICH part somebody meant, so this is
+	// the value an enrolment ceremony pins.
+	ChipID string `json:"chip_id"`
+
+	// DebugAllowed is the field a reader should look at first. A guest whose
+	// policy permits debug can be inspected by the hypervisor — so a report can
+	// be entirely valid and still describe a machine its operator can see into.
+	DebugAllowed bool `json:"debug_allowed"`
+
+	// SignerUnsigned reports a report signed by nothing, which is what a
+	// software emulator produces.
+	SignerUnsigned bool `json:"signer_unsigned"`
+
+	// ReportedTCB is the firmware and microcode version the platform reports.
+	// It moves when AMD ships an update, and it is part of the measurement's
+	// meaning.
+	ReportedTCB uint64 `json:"reported_tcb"`
+
+	// CertificateChain is what lets a reader check the report's signature: the
+	// certificate for this processor, then the intermediate, then the root,
+	// each base64 DER.
+	//
+	// Served alongside the report so verification needs nothing but this
+	// response and a root the reader already trusts. A reader that fetched the
+	// certificate itself would tell its issuer — and anyone watching that
+	// reader's network — which machine it is talking to.
+	CertificateChain []string `json:"certificate_chain,omitempty"`
+
+	// Report is the whole thing, base64, exactly as the hardware produced it.
+	// Included so a verifier can check the signature itself rather than trust
+	// the fields above, which this agent could in principle have made up.
+	Report string `json:"report"`
+
+	// BoundTo describes what REPORT_DATA covers, so a verifier can recompute it
+	// rather than take the binding on trust.
+	BoundTo string `json:"bound_to"`
+
+	// ChainVerified says whether the report's signature has been checked back to
+	// AMD's key distribution service.
+	//
+	// FALSE TODAY, always, and it is stated rather than omitted because its
+	// absence is the difference between "this machine is sealed" and "this
+	// machine says it is sealed". Without it, a report with the right shape and
+	// the right measurement passes, and a party who controls the image controls
+	// both.
+	ChainVerified bool `json:"chain_verified"`
+
+	// ChainNote explains the above in a sentence a person can read.
+	ChainNote string `json:"chain_note,omitempty"`
 }
 
 // GenuinenessInfo reports running-binary attestation against the signed manifest.
@@ -95,8 +183,171 @@ func (s *CoreServer) handleSecurityEnclave(w http.ResponseWriter, r *http.Reques
 			Message:          c.Message,
 		}
 	}
+	result.SealedHardware = sealedHardwareStatus(s.attestationBinding(), s.bindingOver(), s.snpCertificates)
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
+}
+
+// attestationBinding is what this agent asks the hardware to cover in
+// REPORT_DATA, so a report cannot be lifted from one machine and presented by
+// another.
+//
+// The agent's own identity where it has one, and its pairing identity before it
+// does. Either way it is a value a verifier already holds, which is what makes
+// the binding checkable rather than decorative.
+func (s *CoreServer) attestationBinding() string {
+	// The key this agent is reached over, where it has one.
+	//
+	// Preferred over any identifier, and not only because it is more useful. A
+	// report bound to an identifier is a public oracle: anyone holding a list of
+	// candidate identifiers can ask "is it this one?" of every instance, at one
+	// query each. Saying that is safe because "you would have to know the
+	// identifier already" is weaker than it sounds, since identifiers leak
+	// through other channels and the list only grows.
+	//
+	// A transport fingerprint confirms nothing new, because it is already
+	// visible to anyone who connects. It is also the thing a client actually
+	// needs bound: it proves the sealed machine holds the key on THIS
+	// connection, which is what stops a genuine report being replayed onto a
+	// connection somebody else terminates.
+	// The machine's own encryption keys, where it has an identity of its own.
+	//
+	// Preferred over the transport fingerprint now, because the fingerprint
+	// cannot be checked by the party that needs to check it: a proxy in front
+	// of this machine terminates the connection by design, so the certificate a
+	// client sees is the proxy's and the two can never match. Binding the keys
+	// instead says the private half of these keys is inside this sealed
+	// machine, which a proxy cannot produce and does not need to be able to
+	// terminate anything for the client to rely on.
+	if s.boxIdentity != nil {
+		if x, kem, err := iacrypto.AnchoredAgreementKeys(s.boxIdentity.InceptionEvent); err == nil {
+			if binding, err := iacrypto.BoxKeyBinding(x, kem); err == nil {
+				return binding
+			}
+		}
+	}
+	if s.transportIdentity != nil && s.transportIdentity.FingerprintB64 != "" {
+		return s.transportIdentity.FingerprintB64
+	}
+	if s.DataStore != nil {
+		if id, err := s.DataStore.GetIdentity(); err == nil && id != nil && id.AID != "" {
+			return id.AID
+		}
+	}
+	pairingOnce.Lock()
+	defer pairingOnce.Unlock()
+	if pairingOnce.offer != nil {
+		return pairingOnce.offer.AID
+	}
+	return ""
+}
+
+// sealedHardwareStatus asks the hardware to attest to itself, and reports what
+// came back without editorialising.
+//
+// Returns nil where there is no sealed hardware, which is the ordinary case for
+// a desktop or a phone and is a real answer rather than a missing one.
+//
+// Every failure is reported as a note rather than swallowed. An agent that
+// cannot produce a report when it is running on hardware that should be able to
+// is exactly the case somebody needs to see — it is the difference between "not
+// sealed" and "sealed but cannot prove it", and those call for different
+// reactions.
+// bindingScheme says how REPORT_DATA was computed without saying what over.
+//
+// Named separately so the distinction is visible: the construction is public
+// and must be, or nothing could check it; the value is the thing being bound
+// and is not ours to publish.
+func bindingScheme(binding, over string) string {
+	if binding == "" {
+		return ""
+	}
+	if over == "" {
+		over = "<the fingerprint of the certificate on this connection>"
+	}
+	return "blake3-256(IA-SNP-BIND-V1\n" + over + ")"
+}
+
+// bindingOver names what this agent bound, in the same terms a verifier would
+// use to recompute it — and never the value itself.
+//
+// Said the wrong thing once already: the description was fixed text naming the
+// transport certificate, so when the binding became something else the field
+// described a construction the report did not use. A verifier following it
+// would compute a value that could not match and read the mismatch as tampering.
+func (s *CoreServer) bindingOver() string {
+	if s.boxIdentity != nil {
+		return "blake3-256(IA-BOX-KEYS-V1 || the agreement and encapsulation keys " +
+			"this identifier commits to at inception)"
+	}
+	return ""
+}
+
+func sealedHardwareStatus(binding, over string, certs *snpCertificateChain) *SealedHardwareInfo {
+	if !secureenclave.SNPAvailable() {
+		return nil
+	}
+	info := &SealedHardwareInfo{
+		Platform: "sev-snp",
+		// The SCHEME, never the value.
+		//
+		// This said blake3-256(IA-SNP-BIND-V1\n<the value>) — with the value
+		// itself in it. REPORT_DATA is one-way, so the report gives nothing
+		// away; this field handed over the pre-image beside it, on an endpoint
+		// open to anyone. Where the binding was an identity rather than a
+		// transport key, that published the tenant's identifier.
+		//
+		// A verifier does not need to be told the value. It already holds what
+		// the binding is over — the certificate on the connection it is using —
+		// so it recomputes and compares. Being told would only help somebody
+		// who does not have it.
+		BoundTo:       bindingScheme(binding, over),
+		ChainVerified: false,
+		ChainNote: "the report's signature has not been checked against AMD's key " +
+			"distribution service, so this attests what the machine says about itself. " +
+			"Verify the report yourself against AMD's VCEK chain before relying on it.",
+	}
+	report, err := secureenclave.GetSNPReport(binding)
+	if err != nil {
+		info.ChainNote = "this machine reports sealed hardware but could not produce an " +
+			"attestation report, so it cannot currently prove it: " + err.Error()
+		return info
+	}
+	info.Report = base64.StdEncoding.EncodeToString(report.Raw)
+	parsed, perr := secureenclave.ParseSNPReport(report.Raw)
+	if perr != nil {
+		info.ChainNote = "an attestation report was produced but could not be read: " + perr.Error()
+		return info
+	}
+	info.Measurement = hex.EncodeToString(parsed.Measurement)
+	info.ChipID = parsed.ChipIDHex()
+	info.DebugAllowed = parsed.DebugAllowed()
+	info.SignerUnsigned = parsed.Unsigned()
+	info.ReportedTCB = parsed.ReportedTCB
+
+	// The certificates that make the report checkable. Their absence is
+	// reported rather than treated as a failure: the report is still the
+	// machine's own account of itself, and saying so plainly is more useful
+	// than withholding it.
+	if certs != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		chain, cerr := certs.forReport(ctx, parsed.ChipID, parsed.ReportedTCB)
+		if cerr != nil {
+			info.ChainNote = "this machine could not obtain the certificates that vouch " +
+				"for its report, so the report cannot yet be checked against the " +
+				"manufacturer: " + cerr.Error()
+			return info
+		}
+		for _, der := range chain {
+			info.CertificateChain = append(info.CertificateChain, base64.StdEncoding.EncodeToString(der))
+		}
+		info.ChainNote = "the certificates that vouch for this report are included. " +
+			"Check the report's signature against them, and check them against the " +
+			"manufacturer root you already trust — do not take this machine's word for it."
+	}
+	return info
 }
 
 func genuinenessFromState(st secureenclave.State) *GenuinenessInfo {

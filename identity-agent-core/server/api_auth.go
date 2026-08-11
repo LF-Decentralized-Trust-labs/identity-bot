@@ -55,6 +55,24 @@ var publicRoutes = map[string]string{
 	"POST /public/_register":        "a pairwise signer registers its key so counterparties can resolve it",
 	"GET /public/credential/{said}": "a credential the user chose to publish at a shareable link",
 
+	// --- carrying a request nothing in the middle can read ---
+	// Open in the same sense the message endpoint is open: what arrives is an
+	// envelope, and it is refused unless it comes from a sender this agent
+	// already has a relationship with and opens under a key only this agent
+	// holds. The request inside is then replayed through the ordinary router,
+	// where it meets whatever authorisation it would have met directly — so
+	// this carries requests, it does not exempt them.
+	"POST /api/sealed": "a request carried inside an envelope only this agent can open",
+
+	// --- proving what machine this agent runs on ---
+	// A client verifies a machine in order to decide whether to trust it, so it
+	// is not the owner yet and holds no owner key. Gating this would mean that
+	// by the time you could ask, you had already trusted the thing you wanted
+	// to check. It carries no tenant data: the measurement is the same for
+	// every instance of an image, the chip names the machine rather than any
+	// tenant, and REPORT_DATA is one-way.
+	"GET /api/attestation": "hardware attestation — the evidence a stranger needs to verify this machine",
+
 	// --- reaching your own agent from a browser ---
 	// Nobody is authenticated yet, which is the entire problem these solve. The
 	// flow's security is not in gating these: it is that granting requires the
@@ -78,7 +96,6 @@ var publicRoutes = map[string]string{
 	// --- agent-to-agent protocol: another Identity Agent is the caller ---
 	// These are how a peer reaches us at all. They are authenticated by what
 	// they carry (a signed event, an encrypted archive), not by who connects.
-	"POST /api/exchange": "a peer posts an introduction we consented to receive",
 
 	// --- joining something the owner published: the login SDK is the caller ---
 	// Mounted as public since they were written, and never declared public here,

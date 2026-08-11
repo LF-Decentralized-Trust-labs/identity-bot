@@ -13,9 +13,13 @@ import (
 	"sync"
 	"time"
 
+	"encoding/base64"
 	"identity-agent-core/backup"
+
+	"identity-agent-core/didcomm"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/login"
+	"identity-agent-core/secureenclave"
 	"identity-agent-core/store"
 )
 
@@ -47,6 +51,20 @@ type pairingBeginResponse struct {
 	// the entire point of the ceremony.
 	PublicKey     string `json:"public_key"`
 	NextPublicKey string `json:"next_public_key"`
+	// Attestation is this machine's hardware vouching for the two keys above.
+	//
+	// Without it a controller fetches key material and signs a delegation over
+	// it having established nothing about where it came from. Anyone able to
+	// answer this request — the machine's operator, or anything terminating the
+	// connection — could substitute their own keys, and the delegation the
+	// owner then issues covers their machine instead. It would verify. Third
+	// parties checking the chain afterwards would find it correct, and pointing
+	// somewhere nobody chose.
+	//
+	// Empty where the machine is not sealed hardware, which is an honest answer
+	// and not a failure — a laptop has no such statement to make. The adopting
+	// side decides what to do about that; it must not decide silently.
+	Attestation string `json:"attestation,omitempty"`
 }
 
 type pairingCompleteRequest struct {
@@ -72,6 +90,23 @@ type pairingCompleteRequest struct {
 	DelegatorIxn map[string]interface{} `json:"delegator_ixn,omitempty"`
 	// DelegatorAID is the controller's root AID.
 	DelegatorAID string `json:"delegator_aid"`
+	// OwnerDID is the owner device's encryption keys, so this instance can
+	// reach it without asking anybody for them later.
+	//
+	// Carried here rather than fetched afterwards, because afterwards means
+	// over the network, from whoever answers, checked against nothing. That
+	// fetch is the one step a party sitting between the two can answer with its
+	// own keys — and then read everything encrypted to what it supplied. This
+	// exchange is already proven: it takes an adoption code issued to this
+	// owner and a key this instance was told to expect, so keys arriving inside
+	// it are as trustworthy as the adoption itself.
+	//
+	// Optional, so an older client still adopts successfully. What it loses is
+	// the encrypted transport, which needs a relationship that exists in both
+	// directions.
+	OwnerDID *didcomm.DID `json:"owner_did,omitempty"`
+	// OwnerAgentEndpoint is where that owner's agent is reached.
+	OwnerAgentEndpoint string `json:"owner_agent_endpoint,omitempty"`
 	// AdoptionCode is the one-time code this instance issued with its pairing
 	// offer. Without it, whoever reaches an unadopted box first takes it.
 	AdoptionCode string `json:"adoption_code"`
@@ -154,6 +189,15 @@ func (s *CoreServer) handlePairingBegin(w http.ResponseWriter, r *http.Request) 
 	offer := &pairingBeginResponse{
 		PublicKey:     iacrypto.VerkeyQB64(pub),
 		NextPublicKey: iacrypto.VerkeyQB64(nextPub),
+	}
+	// Ask the hardware to vouch for exactly these keys, so the controller can
+	// establish that the offer came from a sealed machine before it signs
+	// anything over it. Silence here means no such hardware, which the
+	// controller is left to judge.
+	if binding, berr := iacrypto.PairingOfferBinding(offer.PublicKey, offer.NextPublicKey); berr == nil {
+		if report, rerr := secureenclave.GetSNPReport(binding); rerr == nil && report != nil {
+			offer.Attestation = base64.StdEncoding.EncodeToString(report.Raw)
+		}
 	}
 	pairingOnce.Lock()
 	if pairingOnce.offer != nil {
@@ -334,6 +378,24 @@ func (s *CoreServer) handlePairingComplete(w http.ResponseWriter, r *http.Reques
 		if err := s.recordBackupSealKeys(req.BackupSealPublicKeysB64); err != nil {
 			log.Printf("[pairing] WARNING: adopted, but the recovery keys were refused (%v) — this instance cannot back up until they are set", err)
 		}
+		// The same keys give the owner a way back into the encrypted volume,
+		// and this is the first moment there is an owner to give it to.
+		//
+		// Until now the volume opened only with a key derived from this
+		// software's measurement — which is what keeps the machine's operator
+		// out, and also what would lose the data the next time that measurement
+		// moves. It moves whenever the image is rebuilt, and the key moves with
+		// the processor's firmware level, so an ordinary security patch would
+		// otherwise strand everything here permanently.
+		//
+		// Same treatment as above and for the same reason: a failure is loud
+		// but does not undo an adoption that is already valid. An instance that
+		// is adopted and has no way back in is a problem to fix; an instance
+		// that is delegated and ownerless is worse.
+		if err := s.addVolumeRecovery(req.BackupSealPublicKeysB64); err != nil {
+			log.Printf("[pairing] WARNING: adopted, but this instance's encrypted volume has no "+
+				"owner recovery (%v) — its data would not survive an image or firmware update", err)
+		}
 	} else {
 		log.Printf("[pairing] WARNING: adopted with no recovery key — this instance can only back up by being handed a seed phrase, which is what having a recovery key avoids")
 	}
@@ -353,9 +415,35 @@ func (s *CoreServer) handlePairingComplete(w http.ResponseWriter, r *http.Reques
 	// The identity is named as what it is. One founded as its own root is not
 	// delegated, and reporting it under "delegated_aid" would be a caller's
 	// first and hardest-to-shake wrong impression of what it just created.
+	// Both halves of the relationship, established here in the one exchange
+	// that has already proved who both parties are.
+	//
+	// Nothing did this before. Adoption produced an owner and an instance that
+	// had never exchanged encryption keys, so the first time either wanted to
+	// reach the other privately it had to go and ask — over the network, from
+	// whoever answered. The encrypted transport then refused, correctly, for
+	// exactly the pair it exists to serve.
+	//
+	// A failure here does not undo the adoption, for the same reason as the
+	// recovery keys above: the instance is legitimately adopted by this point,
+	// and refusing now would leave it delegated and ownerless, which is worse
+	// than adopted without a private channel yet.
 	response := map[string]interface{}{
 		"ok":        true,
 		"owner_aid": req.OwnerAID,
+	}
+	if req.OwnerDID != nil && req.OwnerDID.AID != "" {
+		if err := s.rememberPeerFromAdoption(req.OwnerDID, req.OwnerAgentEndpoint); err != nil {
+			log.Printf("[pairing] WARNING: adopted, but this instance cannot reach its owner "+
+				"privately (%v) — sealed requests between them will be refused until that is fixed", err)
+		}
+	}
+	// This instance's own keys, so the owner can complete the other direction
+	// without a fetch of its own.
+	if ks, err := s.keySetFor(identityAID); err == nil {
+		if did, err := ks.DID(); err == nil {
+			response["agent_did"] = did
+		}
 	}
 	if req.FoundAsRoot {
 		response["root_aid"] = identityAID
@@ -462,6 +550,15 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 		// deep link or QR the provisioning page produced. The box will not be
 		// adopted without it.
 		AdoptionCode string `json:"adoption_code"`
+		// AllowUnattested adopts a machine that cannot prove what it is.
+		//
+		// Off by default, so the safe direction is the one that happens when
+		// nobody thought about it. A machine with no attestation may be
+		// perfectly legitimate — a laptop has no such hardware — but it may
+		// equally be a sealed machine whose report was stripped by something in
+		// between, and those two look identical from here. Saying which one
+		// this is has to be a deliberate act.
+		AllowUnattested bool `json:"allow_unattested,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.BoxURL == "" {
 		writeError(w, http.StatusBadRequest, "Missing box_url",
@@ -490,7 +587,20 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// 2. Issue the delegation over exactly that key, anchored in our own KEL.
+	// 2. Establish what the box is BEFORE vouching for it.
+	//
+	// The order is the entire point. Issuing the delegation is this owner
+	// saying, in a log other parties read, that these keys are their machine.
+	// If the keys were substituted on the way here, that statement is still
+	// cryptographically perfect — it just names somebody else's machine, and
+	// everyone who checks it afterwards will agree it is correct. Checking
+	// afterwards establishes nothing, because by then the statement exists.
+	if err := checkOfferBeforeDelegating(offer, req.AllowUnattested, s.acceptableMeasurement); err != nil {
+		writeError(w, http.StatusForbidden, "This box was not adopted", err.Error())
+		return
+	}
+
+	// 3. Issue the delegation over exactly that key, anchored in our own KEL.
 	name := "box-" + shortAID(offer.PairwiseAID)
 	// The driver knows an identity by the name it was incepted under, and
 	// CreateInception sends none — so the root is registered under its own AID.
@@ -501,7 +611,7 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// 3. Hand it back, along with who owns the box from now on: us, and the
+	// 4. Hand it back, along with who owns the box from now on: us, and the
 	// public key it should seal its backups to.
 	//
 	// Derived here rather than by the app, because the seed this comes from is

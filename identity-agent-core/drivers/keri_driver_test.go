@@ -43,7 +43,9 @@ func TestStartExternalModeAdopts(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/status" {
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`{"status":"active","keri_library":"keripy"}`))
+			// A driver stating the contract this agent needs. Without it the
+			// adoption is refused, which is the point of the check.
+			w.Write([]byte(`{"status":"active","keri_library":"keripy","driver_protocol":1}`))
 			return
 		}
 		http.NotFound(w, r)

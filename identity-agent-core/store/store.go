@@ -21,6 +21,26 @@ type EventRecord struct {
 	// CesrSignature: CESR '0B...' (88-char) signature over the event body.
 	// Produced by Dart local signing + /api/cesr/encode. Empty for legacy records.
 	CesrSignature string `json:"cesr_signature,omitempty"`
+	// RawBytesB64 is the event exactly as KERI serialised it, base64.
+	//
+	// EventJSON is not that, and cannot be. A KERI event's serialisation is
+	// ordered — the version string comes first and states the length — and
+	// anything that puts a JSON object through a map loses it: the encoders on
+	// both sides of this pipeline emit keys alphabetically, which moves `v` to
+	// the end and makes the length wrong. The bytes were produced, handed out
+	// to be signed, and then dropped.
+	//
+	// Everything an event's own digest is good for needs them back. Its SAID is
+	// a digest OF these bytes, so without them the identifier an event claims
+	// for itself can be read but never checked, and a signature over that
+	// identifier — a witness receipt — attests to a digest nobody verified.
+	// They are also the only form another KERI implementation would accept, so
+	// a log published without them is one nothing else can read.
+	//
+	// Empty on events written before this was kept. Absent is reported as
+	// unverifiable rather than treated as passing, because the whole point is
+	// that an unchecked digest is what got us here.
+	RawBytesB64 string `json:"raw_bytes_b64,omitempty"`
 }
 
 type IdentityState struct {

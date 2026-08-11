@@ -19,9 +19,11 @@
 package didcomm
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 
@@ -58,6 +60,84 @@ type DID struct {
 	X25519 string `json:"x25519"`       // base64url
 	MlKem  string `json:"mlkem768"`     // base64url
 	Suite  string `json:"cipher_suite"` // IA-HYBRID-1 (informational; canonical byte-freeze pending)
+
+	// KelSig is a signature over SigningInput below, made with the AID's
+	// current KERI signing key.
+	//
+	// Without it these keys are whatever the server that answered chose to
+	// return. That server is reached over the network, so anything terminating
+	// that connection can substitute its own keys and read everything
+	// subsequently encrypted to this AID — which is the whole of the
+	// protection, defeated at the step that sets it up. The receiving side
+	// checks this against the signing key it already validated from the AID's
+	// key event log, so the keys are only as trustworthy as the KEL rather than
+	// as the connection.
+	//
+	// Optional on the wire, because an agent that predates this does not send
+	// one and ordinary messaging with it still works. What it gates is the
+	// sealed transport, which makes a promise that an unverified key cannot
+	// keep.
+	KelSig string `json:"kel_sig,omitempty"`
+}
+
+// MatchesAnchoredKeys reports whether these are the keys an identifier
+// committed to at inception.
+//
+// This is the join between the two halves of an agent's identity, which until
+// now did not touch: the identifier and its key event log on one side, the
+// encryption keys used to reach it on the other. The keys were fetched from
+// whoever answered and compared to nothing, so the answer was as trustworthy as
+// the connection that carried it. Compared against the anchor, they are as
+// trustworthy as the identifier — which cannot be forged without forging the
+// identifier, because it is derived from the event the keys are inside.
+//
+// Takes raw bytes rather than the encoded form so that the caller has already
+// had to decode them under a declared type, which is where a key of one kind
+// gets caught being offered as a key of another.
+func (d *DID) MatchesAnchoredKeys(x25519, mlkem768 []byte) error {
+	got, err := b64.DecodeString(d.X25519)
+	if err != nil {
+		return fmt.Errorf("the agreement key offered is not valid base64url: %w", err)
+	}
+	if !bytes.Equal(got, x25519) {
+		return fmt.Errorf("the agreement key offered for %s is not the one that identifier "+
+			"committed to", d.AID)
+	}
+	got, err = b64.DecodeString(d.MlKem)
+	if err != nil {
+		return fmt.Errorf("the encapsulation key offered is not valid base64url: %w", err)
+	}
+	if !bytes.Equal(got, mlkem768) {
+		return fmt.Errorf("the encapsulation key offered for %s is not the one that identifier "+
+			"committed to", d.AID)
+	}
+	return nil
+}
+
+// SigningInput is the exact bytes a KERI key signs to vouch for these keys.
+//
+// Every field except the signature itself, in a fixed order, each preceded by
+// its length, after a version label. Built by hand rather than from JSON
+// marshalling because two implementations must agree on these bytes exactly,
+// and JSON gives them several ways to disagree — key order, spacing, escaping —
+// none of which show up until a signature fails somewhere else.
+//
+// Length-prefixed rather than separated by a delimiter, which is the same
+// argument one level down. A delimiter only separates fields that cannot
+// contain it, and while the four keys are base64url and never can, AID and
+// Suite are strings with no enforced character set. One newline inside either
+// of them shifts what every following field appears to be, so two different
+// key sets could produce identical signing input and a signature over one would
+// verify over the other. Lengths cannot be confused for content, so there is
+// nothing to smuggle.
+func (d *DID) SigningInput() []byte {
+	var b bytes.Buffer
+	b.WriteString("IA-DIDCOMM-KEYS-V1")
+	for _, f := range []string{d.AID, d.Ed, d.Dsa, d.X25519, d.MlKem, d.Suite} {
+		_ = binary.Write(&b, binary.BigEndian, uint32(len(f)))
+		b.WriteString(f)
+	}
+	return b.Bytes()
 }
 
 const CipherSuite = "IA-HYBRID-1"
@@ -226,4 +306,104 @@ func UnmarshalKeySet(data []byte) (*KeySet, error) {
 	ks.DsaPub = dsaPriv.(*mldsa65.PrivateKey).Public().(*mldsa65.PublicKey)
 	ks.KemPub = kemPriv.(*mlkem768.PrivateKey).Public().(*mlkem768.PublicKey)
 	return ks, nil
+}
+
+// PublicMaterial returns the raw public halves of this keyset, in the form an
+// inception event commits to.
+//
+// The point of handing these to the event is that the identity's encryption
+// keys and its messaging keys stop being two different things that have to be
+// reconciled. The event commits to these exact bytes, so an identifier vouches
+// for the keys that are actually used to reach it — rather than for a separate
+// set that then has to be fetched from somebody and believed.
+func (k *KeySet) PublicMaterial() (ed, dsa, x25519, mlkem768 []byte, err error) {
+	if k.EdPub == nil || k.DsaPub == nil || k.KemPub == nil {
+		return nil, nil, nil, nil, fmt.Errorf("this keyset is incomplete")
+	}
+	dsa, err = k.DsaPub.MarshalBinary()
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("could not encode the signing key: %w", err)
+	}
+	mlkem768, err = k.KemPub.MarshalBinary()
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("could not encode the encapsulation key: %w", err)
+	}
+	return append([]byte(nil), k.EdPub...), dsa, append([]byte(nil), k.XPub[:]...), mlkem768, nil
+}
+
+// ParseDIDForCheck reports whether a DID's four keys can actually be used,
+// without exposing the parsed form.
+//
+// Somewhere has to establish that a set of keys is usable, and the natural
+// moment is when they arrive rather than when they are first needed — by then
+// the failure surfaces in the middle of whatever the caller was doing and looks
+// like that failing instead.
+func ParseDIDForCheck(d *DID) (string, error) {
+	if d == nil {
+		return "", fmt.Errorf("no keys were supplied")
+	}
+	if _, err := d.parse(); err != nil {
+		return "", err
+	}
+	if d.Suite != CipherSuite {
+		return "", fmt.Errorf("these keys declare cipher suite %q, which this agent does not speak", d.Suite)
+	}
+	return d.AID, nil
+}
+
+// EncodeKeyForTest exposes the key encoding so a test in another package can
+// build a DID whose keys match an inception event.
+func EncodeKeyForTest(raw []byte) string { return b64.EncodeToString(raw) }
+
+// MatchesAnchoredSigningKeys checks the signature half of a DID against what an
+// identifier committed to.
+//
+// The companion to MatchesAnchoredKeys. Kept separate because the two halves
+// can be committed at different times: an identifier founded before signing
+// keys were anchored has the agreement pair and not these, and that is a
+// weaker position rather than a broken one.
+func (d *DID) MatchesAnchoredSigningKeys(ed25519Pub, mldsa65Pub []byte) error {
+	got, err := b64.DecodeString(d.Ed)
+	if err != nil {
+		return fmt.Errorf("the signing key offered is not valid base64url: %w", err)
+	}
+	if !bytes.Equal(got, ed25519Pub) {
+		return fmt.Errorf("the signing key offered for %s is not the one that identifier "+
+			"committed to", d.AID)
+	}
+	got, err = b64.DecodeString(d.Dsa)
+	if err != nil {
+		return fmt.Errorf("the post-quantum signing key offered is not valid base64url: %w", err)
+	}
+	if !bytes.Equal(got, mldsa65Pub) {
+		return fmt.Errorf("the post-quantum signing key offered for %s is not the one that "+
+			"identifier committed to", d.AID)
+	}
+	return nil
+}
+
+// DIDFromRawKeys builds a peer DID from key material recovered elsewhere —
+// notably from an identifier's own inception event.
+//
+// Takes raw bytes rather than a keyset because the caller has public halves
+// only, read out of a key history, and never sees a private key at all.
+func DIDFromRawKeys(aid string, ed25519Pub, mldsa65Pub, x25519, mlkem768 []byte) (*DID, error) {
+	if aid == "" {
+		return nil, fmt.Errorf("a DID needs the identifier the keys belong to")
+	}
+	if len(ed25519Pub) != ed25519.PublicKeySize {
+		return nil, fmt.Errorf("expected a %d-byte signing key, got %d",
+			ed25519.PublicKeySize, len(ed25519Pub))
+	}
+	if len(x25519) != 32 {
+		return nil, fmt.Errorf("expected a 32-byte agreement key, got %d", len(x25519))
+	}
+	return &DID{
+		AID:    aid,
+		Ed:     b64.EncodeToString(ed25519Pub),
+		Dsa:    b64.EncodeToString(mldsa65Pub),
+		X25519: b64.EncodeToString(x25519),
+		MlKem:  b64.EncodeToString(mlkem768),
+		Suite:  CipherSuite,
+	}, nil
 }

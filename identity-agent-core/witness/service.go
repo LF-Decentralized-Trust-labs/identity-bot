@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"identity-agent-core/drivers"
+	"identity-agent-core/iacrypto"
+	"identity-agent-core/login"
 	"identity-agent-core/store"
 )
 
@@ -41,6 +43,15 @@ type Service struct {
 	OurOOBI     func() string
 	BackendType string
 	OnEvent     func(eventType string, payload map[string]interface{})
+
+	// SignReceipt signs a key event's SAID as this witness, returning the
+	// witness's own identifier alongside the signature.
+	//
+	// Supplied by the host rather than done here because the key belongs to the
+	// agent, not to this package. Unset means this agent cannot witness, and
+	// ReceiveEvent refuses rather than issuing something that looks like a
+	// receipt and proves nothing.
+	SignReceipt func(said string) (witnessAID, cesrSig string, err error)
 
 	mu         sync.Mutex
 	finalizeWg map[string]chan struct{}
@@ -148,16 +159,30 @@ func (s *Service) ReceiveEvent(signerAID string, event map[string]interface{}) (
 		return nil, err
 	}
 
-	witnessAID := ""
-	if s.OurAID != nil {
-		witnessAID = s.OurAID()
+	// Signed with a key, or not issued at all.
+	//
+	// What stood here derived the "signature" by hashing the receipt itself:
+	// public data in, public data out, no key involved. Anybody holding the
+	// event could produce the same value, so it distinguished a genuine witness
+	// from an impostor not at all, while looking exactly like protection to
+	// every reader downstream.
+	//
+	// Refusing is the right failure. A witness that cannot sign has nothing to
+	// say, and saying it anyway is what made this dangerous rather than merely
+	// incomplete — the controller believed its event was witnessed and it was
+	// not.
+	if s.SignReceipt == nil {
+		return nil, fmt.Errorf("this agent has no witnessing key, so it cannot receipt anything")
+	}
+	witnessAID, sig, serr := s.SignReceipt(said)
+	if serr != nil {
+		return nil, fmt.Errorf("could not sign a receipt: %w", serr)
 	}
 	receipt := map[string]interface{}{
 		"v": "KERI10JSON", "t": "rct", "d": said, "i": witnessAID,
 		"aid": signerAID, "seq": seq, "dt": now,
 	}
 	receiptJSON, _ := json.Marshal(receipt)
-	sig := "0B" + fmt.Sprintf("%x", receiptJSON)[:32] // dev stub; production uses driver CESR encode
 
 	_ = s.Store.SaveIssuedReceipt(IssuedReceipt{
 		SignerAID: signerAID, EventSAID: said, SequenceNum: seq,
@@ -233,7 +258,7 @@ func (s *Service) BroadcastEvent(ctx context.Context, signerAID string, event ma
 
 	body, _ := json.Marshal(map[string]interface{}{"aid": signerAID, "event": event})
 	for _, w := range witnesses {
-		url := witnessEventURL(w.URL)
+		url := witnessEventURL(w)
 		go s.postWithRetry(ctx, url, body, said, w.AID)
 	}
 	go s.finalizeLoop(said, threshold)
@@ -297,17 +322,66 @@ func (s *Service) enrolledWitnesses(kind AidKind, aid string) ([]witnessTarget, 
 }
 
 func (s *Service) postWithRetry(ctx context.Context, url string, body []byte, eventSAID, witnessAID string) {
-	_, err := s.PostEvent(ctx, url, body)
+	resp, err := s.PostEvent(ctx, url, body)
 	if err != nil {
 		time.Sleep(BroadcastRetryDelay)
-		_, err = s.PostEvent(ctx, url, body)
+		resp, err = s.PostEvent(ctx, url, body)
 	}
 	if err != nil {
 		log.Printf("[witness] broadcast to %s failed: %v", witnessAID, err)
 		s.incrementOffline(witnessAID)
 		return
 	}
-	s.onReceipt(eventSAID, witnessAID, "")
+
+	// The reply is read, not assumed.
+	//
+	// What stood here threw the response away and counted a receipt because the
+	// POST returned 2xx. So the threshold was met by HTTP status: a witness that
+	// accepted the event and signed nothing, or signed something else, or was
+	// not the witness we addressed, counted exactly the same as one that
+	// witnessed properly. The signature was then stored as an empty string,
+	// which is what the counting was supposedly built on.
+	//
+	// A receipt that does not check out is worse than a witness being down,
+	// because being down is visible in the count and a bad receipt is not.
+	sig, wit, verr := receiptFromResponse(resp, eventSAID)
+	if verr != nil {
+		log.Printf("[witness] %s answered but its receipt does not check out: %v", witnessAID, verr)
+		return
+	}
+	if wit != witnessAID {
+		// The witness we asked is the witness the identity designated. One that
+		// answers under another name may be perfectly honest and is still not
+		// the one this threshold is counting.
+		log.Printf("[witness] asked %s for a receipt and %s answered; not counted", witnessAID, wit)
+		return
+	}
+	s.onReceipt(eventSAID, witnessAID, sig)
+}
+
+// receiptFromResponse pulls a verified receipt out of a witness's reply.
+//
+// A witness is named by a non-transferable identifier, so the identifier IS the
+// key this checks against — there is nothing to fetch and nothing that could
+// answer the fetch wrongly.
+func receiptFromResponse(resp map[string]interface{}, eventSAID string) (sig, witnessAID string, err error) {
+	if resp == nil {
+		return "", "", fmt.Errorf("the witness returned nothing to check")
+	}
+	sig, _ = resp["cesr_signature"].(string)
+	witnessAID, _ = resp["witness_aid"].(string)
+	if sig == "" || witnessAID == "" {
+		return "", "", fmt.Errorf("the reply carries no signed receipt")
+	}
+	pub, derr := iacrypto.KeyFromNonTransferableAID(witnessAID)
+	if derr != nil {
+		return "", "", fmt.Errorf("the witness is not named by a key anyone can check against: %w", derr)
+	}
+	ok, verr := login.VerifyString(eventSAID, sig, pub)
+	if verr != nil || !ok {
+		return "", "", fmt.Errorf("the signature does not cover this event")
+	}
+	return sig, witnessAID, nil
 }
 
 func (s *Service) onReceipt(eventSAID, witnessAID, cesrSig string) {
@@ -510,20 +584,37 @@ func (s *Service) ServeTELStub(issuerAID string) map[string]interface{} {
 // the event path because these are replies rather than key events, and a
 // witness should be free to treat them differently — not least by serving them
 // back to somebody asking where this identity currently is.
-func witnessEndpointURL(oobi string) string {
+// Two kinds of witness answer on two different paths.
+//
+// A contact witnessing for somebody is an Identity Agent, and everything an
+// Identity Agent serves sits under /api. A commercial witness is a service
+// built for the one job and serves the witness protocol at the root. Posting an
+// agent's path to a service — which is what happened until now — reaches a
+// route that does not exist, so every event sent to the bootstrap pool was
+// answered 404 and no receipt ever came back. Nothing reported it, because a
+// witness that does not answer is indistinguishable from one that is down, and
+// the broadcast is deliberately tolerant of that.
+func witnessBase(oobi string) string {
 	base := oobi
 	if idx := strings.Index(oobi, "/public/oobi/"); idx != -1 {
 		base = oobi[:idx]
 	}
-	return strings.TrimRight(base, "/") + "/api/witness/endpoint"
+	return strings.TrimRight(base, "/")
 }
 
-func witnessEventURL(oobi string) string {
-	base := oobi
-	if idx := strings.Index(oobi, "/public/oobi/"); idx != -1 {
-		base = oobi[:idx]
+func witnessPathPrefix(commercial bool) string {
+	if commercial {
+		return ""
 	}
-	return strings.TrimRight(base, "/") + "/api/witness/event"
+	return "/api"
+}
+
+func witnessEndpointURL(t witnessTarget) string {
+	return witnessBase(t.URL) + witnessPathPrefix(t.Commercial) + "/witness/endpoint"
+}
+
+func witnessEventURL(t witnessTarget) string {
+	return witnessBase(t.URL) + witnessPathPrefix(t.Commercial) + "/witness/event"
 }
 
 func strconvAtoi(v string, def int) (int, error) {
@@ -587,7 +678,7 @@ func (s *Service) PublishEndpointRecord(ctx context.Context, signerAID string, r
 		wg.Add(1)
 		go func(target witnessTarget) {
 			defer wg.Done()
-			if _, perr := s.PostEvent(ctx, witnessEndpointURL(target.URL), body); perr != nil {
+			if _, perr := s.PostEvent(ctx, witnessEndpointURL(target), body); perr != nil {
 				log.Printf("[witness] endpoint record to %s failed: %v", target.AID, perr)
 				return
 			}

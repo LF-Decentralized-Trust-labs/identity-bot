@@ -55,6 +55,30 @@ func (s *CoreServer) handleSetRootSeed(w http.ResponseWriter, r *http.Request) {
 	// land, at which point this tightens by itself.
 	switch cap := secureenclave.DetectCapability(); cap.Status {
 	case secureenclave.Absent, secureenclave.Present:
+		// One way past this, and it is deliberately awkward to reach.
+		//
+		// Hardware that can protect a key is not always available when the work
+		// is: an enclave on order, a test box that will never have one. Refusing
+		// outright in that window does not make anybody safer, it just stops the
+		// software being worked on, so there is a switch — named for exactly
+		// what it gives up, and unable to be set by accident.
+		//
+		// It permits INSTALLING a seed, and nothing else. It does not invent
+		// one: a seed the owner brought is still recoverable from their phrase,
+		// where a generated one would leave every identity founded here
+		// committed to keys nobody can ever reproduce. Unprotected is
+		// recoverable-but-copyable; invented is neither.
+		//
+		// The identity records that it was founded this way, because a
+		// counterparty deciding what to trust should be told, and because
+		// nothing that is only a log line survives contact with a busy month.
+		if allowUnprotectedRootKey() {
+			log.Printf("[keystore] WARNING: installing a root seed on a machine with NO hardware key "+
+				"protection (%s) because %s is set. Anyone who copies this file becomes this identity, "+
+				"permanently and undetectably. Acceptable while waiting for hardware; not a way to run.",
+				cap.String(), envAllowUnprotectedRootKey)
+			break
+		}
 		jsonError(w,
 			"this machine cannot protect a root key ("+cap.String()+"), so an identity stored here could be "+
 				"copied off it — put the root on a device with hardware key protection and pair this one to it",

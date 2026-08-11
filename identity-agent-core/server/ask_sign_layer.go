@@ -102,15 +102,57 @@ func injectSig(askBytes []byte, sig string) ([]byte, error) {
 	return json.Marshal(m)
 }
 
-// verifyAskSignature is the base-layer verification run on every decoded Ask: if the Ask
-// carries a `sig` + `signer_oobi`, the signature must verify against the signer's published
-// key. Asks without these (e.g. login's t=1 bundle, which self-verifies its own challenge sig)
-// are passed through — those are migrated to the base layer separately.
+// askAuth says how an Ask of a given action establishes who is asking.
+type askAuth int
+
+const (
+	// authBaseSignature — the Ask carries `sig` + `signer_oobi` and this layer
+	// verifies it. The default, deliberately: an action that says nothing about
+	// how it is authenticated is required to be signed.
+	authBaseSignature askAuth = iota
+	// authSelfVerifying — the handler establishes the asker itself, with a
+	// stronger check than this one. Login does: it verifies the challenge
+	// signature against the key the site's own address publishes, and where an
+	// anchor is claimed it requires a delegated inception naming it.
+	authSelfVerifying
+)
+
+// AskAuthenticator is implemented by handlers that verify the asker themselves.
+// Not implementing it means the Ask must be signed.
+type AskAuthenticator interface{ AskAuth() askAuth }
+
+// verifyAskSignature establishes who is asking, before anything is shown to a
+// person or acted on.
+//
+// This used to return nil when either `sig` or `signer_oobi` was absent — so an
+// Ask carrying neither was accepted unverified, on the strength of the address
+// it was fetched from. That is most of the way to no authentication at all: the
+// signature is what ties the request to an identity rather than to whoever
+// controls a URL, and the actions that skipped it included the invitation that
+// decides who owns an organisation.
+//
+// Now every action declares how it is authenticated and anything that does not
+// verify is refused. Adding a new action therefore means signing it, or saying
+// in code why it does not need to be — never leaving it out.
 func (s *CoreServer) verifyAskSignature(askBytes []byte) error {
+	t, terr := askActionType(askBytes)
+	if terr != nil {
+		return fmt.Errorf("this request does not say what it is asking for")
+	}
+	h, known := lookupAsk(t)
+	if !known {
+		// An unknown action cannot state how it authenticates itself, so there
+		// is no way to decide whether this one did.
+		return fmt.Errorf("this agent does not know action %d, so it cannot tell whether it is genuine", t)
+	}
+	if a, ok := h.(AskAuthenticator); ok && a.AskAuth() == authSelfVerifying {
+		return nil
+	}
+
 	sig := jsonStringField(askBytes, "sig")
 	signerOOBI := jsonStringField(askBytes, "signer_oobi")
 	if sig == "" || signerOOBI == "" {
-		return nil // not a base-layer-signed Ask; skip
+		return fmt.Errorf("this %s request is not signed, so nothing establishes who is asking", h.Action())
 	}
 	pub, err := s.resolveSignerKey(signerOOBI)
 	if err != nil {

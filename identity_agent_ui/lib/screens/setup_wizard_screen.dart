@@ -168,6 +168,16 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
       debugPrint('[SetupWizard] KeriService type: $serviceType');
       debugPrint('[SetupWizard] Bridge available: $bridgeAvailable, error: $bridgeError');
 
+      // The seed goes across BEFORE the identity is founded, not after.
+      //
+      // Founding derives the messaging keys other agents encrypt to this
+      // identity with, and writes them into the event the identifier is derived
+      // from — so they must come from the recovery phrase, or the phrase
+      // restores an identity that can prove who it is and can never be sent
+      // anything. The core has nothing to derive them from until this call, and
+      // it refuses to found an identity on keys it cannot reproduce.
+      await RootSeedHandoff.register(_mnemonic, baseUrl: _coreBaseUrl);
+
       // Race inceptAid against a 15-second timeout so we can surface diagnostics
       final stopwatch = Stopwatch()..start();
       final result = await widget.keriService.inceptAid(
@@ -186,13 +196,33 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
       );
       debugPrint('[SetupWizard] inceptAid completed in ${stopwatch.elapsedMilliseconds}ms, AID: ${result.aid}');
 
+      // Send the signature back, or the identity is founded unsigned.
+      //
+      // The order is forced: founding produces the event, and only then are
+      // there bytes to sign. That signature was computed here and then dropped,
+      // so the inception was stored with nothing showing who wrote it. Such an
+      // identity works perfectly alone and can never convince anybody else — a
+      // key history containing an unsigned event is refused, so it can never
+      // become a contact, be established as a peer, or have a credential
+      // accepted from it.
+      if (result.cesrSignature.isNotEmpty) {
+        final signed = await CoreService(baseUrl: _coreBaseUrl)
+            .attachEventSignature(
+          aid: result.aid,
+          sequenceNumber: 0,
+          cesrSignature: result.cesrSignature,
+        );
+        if (!signed) {
+          debugPrint('[SetupWizard] WARNING: the inception signature was not accepted; '
+              'this identity cannot be verified by anyone else');
+        }
+      } else {
+        debugPrint('[SetupWizard] WARNING: no signature was produced for the inception; '
+            'this identity cannot be verified by anyone else');
+      }
+
       setState(() => _processingStep = 3);
       await SecureKeyStore.saveMnemonic(_mnemonic);
-
-      // Hand the mnemonic-derived BIP39 seed to the local core: HD-derived keys
-      // (pairwise contacts, logins, assets, audit, credential vault) then share
-      // the identity's single root of trust — the phrase alone recovers all.
-      await RootSeedHandoff.register(_mnemonic, baseUrl: _coreBaseUrl);
 
       // Profile is saved in _submitProfile() after the user fills it in
       setState(() => _processingStep = 4);

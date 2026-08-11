@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"identity-agent-core/didcomm"
+	"identity-agent-core/login"
 )
 
 // DIDComm wiring — the encrypted, mutually-authenticated IA-to-IA transport.
@@ -112,6 +113,33 @@ func (s *CoreServer) keySetFor(aid string) (*didcomm.KeySet, error) {
 	return ks, nil
 }
 
+// storeKeySetFor files an already-minted keyset under aid.
+//
+// Separate from keySetFor because the order is reversed at inception: the keys
+// have to exist before the identifier does, since the identifier is derived
+// from an event that commits to them. Refuses to overwrite, because the only
+// way to reach that case is a second identity claiming an identifier that
+// already has keys, and silently replacing them would strand every message
+// anyone had already encrypted to the first set.
+func (s *CoreServer) storeKeySetFor(aid string, ks *didcomm.KeySet) error {
+	if aid == "" {
+		return fmt.Errorf("a keyset must be filed under an identifier")
+	}
+	didcommMu.Lock()
+	defer didcommMu.Unlock()
+	keys := s.loadDIDCommKeys()
+	if _, exists := keys[aid]; exists {
+		return fmt.Errorf("%s already has messaging keys, which will not be replaced", aid)
+	}
+	ks.AID = aid
+	blob, err := ks.Marshal()
+	if err != nil {
+		return err
+	}
+	keys[aid] = blob
+	return s.saveDIDCommKeys(keys)
+}
+
 // hasKeySet reports whether a keyset already exists for aid (no minting).
 func (s *CoreServer) hasKeySet(aid string) bool {
 	didcommMu.Lock()
@@ -207,7 +235,7 @@ func (s *CoreServer) ensureLocalPeer(aid string) (peerRecord, error) {
 	}
 	rec := peerRecord{
 		AID: aid, DID: *did,
-		Endpoint: fmt.Sprintf("http://127.0.0.1:%d/didcomm", s.Port),
+		Endpoint: canonicalPeerEndpoint(fmt.Sprintf("http://127.0.0.1:%d", s.Port)),
 		AddedAt:  time.Now().UTC(),
 	}
 	didcommMu.Lock()
@@ -269,6 +297,27 @@ func (s *CoreServer) handleGetDIDCommDID(w http.ResponseWriter, r *http.Request)
 		jsonError(w, "did error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	// Vouch for these keys with the identity's own signing key.
+	//
+	// Without this the keys are whatever this endpoint returned, and whoever
+	// answers it decides what a counterparty encrypts to. A signature ties them
+	// to the identifier instead: the receiving side checks it against the key
+	// that identifier's own history ends with, so substituting keys means
+	// substituting the identity.
+	//
+	// Best effort at this layer. An agent that cannot sign — because the key
+	// lives on a device that is not this one — still publishes its keys, and
+	// the receiving side decides what an unvouched-for set is worth. Refusing
+	// here would take an agent off the air for a reason its counterparties
+	// cannot see.
+	if seed, serr := s.identitySigningSeed(); serr == nil {
+		if sig, kerr := login.SignString(string(did.SigningInput()), seed); kerr == nil {
+			did.KelSig = sig
+		} else {
+			log.Printf("[didcomm] could not vouch for this agent's keys: %v", kerr)
+		}
+	}
 	jsonResponse(w, did)
 }
 
@@ -290,7 +339,7 @@ func (s *CoreServer) handleRegisterDIDCommPeer(w http.ResponseWriter, r *http.Re
 	}
 	didcommMu.Lock()
 	peers := s.loadPeers()
-	peers[req.DID.AID] = peerRecord{AID: req.DID.AID, DID: req.DID, Endpoint: req.Endpoint, AddedAt: time.Now().UTC()}
+	peers[req.DID.AID] = peerRecord{AID: req.DID.AID, DID: req.DID, Endpoint: canonicalPeerEndpoint(req.Endpoint), AddedAt: time.Now().UTC()}
 	err := s.savePeers(peers)
 	didcommMu.Unlock()
 	if err != nil {
@@ -385,6 +434,17 @@ func (s *CoreServer) handleDIDCommInbound(w http.ResponseWriter, r *http.Request
 			log.Printf("[identity-agent-core] could not reach an accepted contact's agent: %v", rerr)
 		}
 		if !resolved {
+			// A stranger who brought their own proof.
+			//
+			// Not a weakening of the rule above: nothing is fetched, nothing is
+			// minted, and nothing is stored. The sender presents its key
+			// history, this agent checks that the history digests to the
+			// identifier being claimed and takes the messaging keys out of it,
+			// and the ONLY thing that can then happen is a request appearing in
+			// front of the owner. Proving your name is not being agreed to.
+			if handled := s.tryFirstContact(w, r, skid, &env); handled {
+				return
+			}
 			jsonError(w, "sender is not a registered peer", http.StatusForbidden)
 			return
 		}
@@ -500,6 +560,19 @@ func (s *CoreServer) OnInboundDIDComm(h InboundDIDCommHandler) { s.inboundDIDCom
 // handler (if any). The core stores every message in the inbox regardless; it does not
 // interpret bodies or auto-respond — that is the overlay's job.
 func (s *CoreServer) routeInboundDIDComm(toAID, fromAID string, jwm *didcomm.JWM) {
+	// An action registered for this type performs it. The envelope has already
+	// established who sent it, that it is fresh, and that it has not been seen
+	// before, so what arrives here is authenticated in a way a plaintext POST to
+	// a REST endpoint never was.
+	if s.dispatchInbound(InboundMessage{
+		ToAID: toAID, FromAID: fromAID, Type: jwm.Type, Body: jwm.Body, MessageID: jwm.ID,
+	}) {
+		return
+	}
+
+	// Nothing registered: the behaviour that existed before. An overlay may add
+	// its own handling, and otherwise the message is already stored and this
+	// says so.
 	if s.inboundDIDComm != nil {
 		go s.inboundDIDComm(toAID, fromAID, jwm.Type, jwm.Body, jwm.ID)
 		return

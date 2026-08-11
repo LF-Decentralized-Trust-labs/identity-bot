@@ -51,6 +51,7 @@ func (s *CoreServer) handleRevokeCredential(w http.ResponseWriter, r *http.Reque
 				PublicKey:      identity.PublicKey,
 				NextKeyDigest:  identity.NextKeyDigest,
 				Timestamp:      rec.IssuedAt,
+				RawBytesB64:    resp.IxnRawBytesB64,
 			}); serr != nil {
 				log.Printf("[credential] failed to persist revocation anchor for %s: %v", said, serr)
 			}

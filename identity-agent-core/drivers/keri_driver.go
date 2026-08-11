@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -27,7 +28,16 @@ type DriverStatus struct {
 	// somebody else's — a silent no-op that reads as a failed change.
 	KeriVersion string `json:"keri_version"`
 	ScriptPath  string `json:"script_path"`
-	Uptime      string `json:"uptime"`
+	// DriverProtocol is what the driver can be relied on to do.
+	//
+	// Zero means a driver old enough not to report one, which is exactly the
+	// case worth catching: such a driver silently discards anchors it does not
+	// understand, so the event comes back well-formed and committing to
+	// nothing. Comparing script paths cannot see that — the agent may be
+	// running precisely the file it was configured with, and that file may
+	// simply be older than the agent needs.
+	DriverProtocol int    `json:"driver_protocol"`
+	Uptime         string `json:"uptime"`
 }
 
 type DriverInceptionRequest struct {
@@ -265,6 +275,29 @@ type DriverValidateKELResponse struct {
 	CurrentPublicKey string   `json:"current_public_key"`
 	EventsValidated  int      `json:"events_validated"`
 	ValidationErrors []string `json:"validation_errors,omitempty"`
+
+	// Whether anybody stood behind this log, reported separately from whether
+	// it verifies.
+	//
+	// A log can be internally sound and correctly signed by its controller and
+	// still be one of two conflicting histories — nothing inside a log can rule
+	// that out, only the witnesses who declined to sign the other one. So a
+	// caller about to rely on this being the ONLY history has to ask this
+	// question too, and a caller merely reading an identity's current key does
+	// not.
+	Witnessed        bool                   `json:"witnessed"`
+	Witnesses        []string               `json:"witnesses,omitempty"`
+	WitnessThreshold int                    `json:"witness_threshold"`
+	WitnessDetail    []DriverWitnessedEvent `json:"witness_detail,omitempty"`
+}
+
+// DriverWitnessedEvent is the witnessing position of one event in a log.
+type DriverWitnessedEvent struct {
+	SequenceNumber   int  `json:"sequence_number"`
+	Witnesses        int  `json:"witnesses"`
+	Threshold        int  `json:"threshold"`
+	ReceiptsVerified int  `json:"receipts_verified"`
+	Witnessed        bool `json:"witnessed"`
 }
 
 type DriverMultisigRequest struct {
@@ -327,6 +360,10 @@ type DriverRegistryInceptResponse struct {
 	IxnSaid        string                 `json:"ixn_said"`
 	IxnEvent       map[string]interface{} `json:"ixn_event"`
 	SequenceNumber int                    `json:"sequence_number"`
+	// IxnRawBytesB64 is the anchoring event as KERI serialised it. Returned by
+	// the driver all along and read by nobody, so the event was stored without
+	// the only bytes its signature and its own digest can be checked against.
+	IxnRawBytesB64 string `json:"ixn_raw_bytes_b64"`
 }
 
 // DriverRevokeCredentialResponse is the result of revoking a registry-backed credential.
@@ -336,6 +373,11 @@ type DriverRevokeCredentialResponse struct {
 	IxnSaid        string                 `json:"ixn_said"`
 	IxnEvent       map[string]interface{} `json:"ixn_event"`
 	SequenceNumber int                    `json:"sequence_number"`
+	// IxnRawBytesB64 is the anchoring event as KERI serialised it. The driver
+	// has always returned this; nothing read it, so the event was stored
+	// without the only bytes its signature and its own digest can be checked
+	// against.
+	IxnRawBytesB64 string `json:"ixn_raw_bytes_b64"`
 }
 
 type DriverPresentCredentialRequest struct {
@@ -474,6 +516,48 @@ func NewKeriDriver() *KeriDriver {
 	}
 }
 
+// NewKeriDriverAt returns a driver that talks to an already-running driver at
+// baseURL and never starts or stops one.
+//
+// The zero KeriDriver is not usable — its HTTP client is nil, so the first
+// request panics rather than failing — which meant the only way to exercise a
+// caller was against a real Python driver. That is a heavy dependency for
+// testing what a caller does with a response, and it is why the request-shaping
+// code below went unexercised.
+func NewKeriDriverAt(baseURL string) *KeriDriver {
+	return &KeriDriver{
+		BaseURL: strings.TrimRight(baseURL, "/"),
+		client:  &http.Client{Timeout: 30 * time.Second},
+		managed: false,
+	}
+}
+
+// requiredDriverProtocol is the driver contract this agent depends on.
+//
+// Raise it alongside the driver whenever the agent starts relying on something
+// new, so that an old driver is refused at startup rather than discovered later
+// from the shape of what it returned.
+//
+// 1: anchors written into inception events; witness receipts counted during
+//
+//	key-log validation; events verified against canonical bytes.
+const requiredDriverProtocol = 1
+
+// checkDriverProtocol refuses a driver that cannot do what this agent will ask.
+func checkDriverProtocol(status *DriverStatus) error {
+	if status == nil {
+		return fmt.Errorf("the KERI driver did not say what it is")
+	}
+	if status.DriverProtocol < requiredDriverProtocol {
+		return fmt.Errorf(
+			"the KERI driver at %s speaks contract %d and this agent needs %d — "+
+				"an older driver silently ignores what it does not understand, so an "+
+				"identity founded against it would commit to nothing and look correct",
+			orUnknown(status.ScriptPath), status.DriverProtocol, requiredDriverProtocol)
+	}
+	return nil
+}
+
 func (d *KeriDriver) Start() error {
 	log.Printf("[keri-driver] Starting managed Python KERI driver...")
 
@@ -497,7 +581,11 @@ func (d *KeriDriver) Start() error {
 		deadline := time.Now().Add(driverReadyTimeout())
 		for time.Now().Before(deadline) {
 			if status, err := d.GetStatus(); err == nil && status.Status == "active" {
-				log.Printf("[keri-driver] Adopted external driver (library: %s)", status.KeriLibrary)
+				if perr := checkDriverProtocol(status); perr != nil {
+					return perr
+				}
+				log.Printf("[keri-driver] Adopted external driver (library: %s, contract %d)",
+					status.KeriLibrary, status.DriverProtocol)
 				return nil
 			}
 			time.Sleep(500 * time.Millisecond)
@@ -530,6 +618,9 @@ func (d *KeriDriver) Start() error {
 					"changes to the configured script are NOT in effect",
 					status.ScriptPath, want)
 			}
+		}
+		if perr := checkDriverProtocol(status); perr != nil {
+			return perr
 		}
 		d.managed = false
 		return nil
@@ -755,6 +846,27 @@ func (d *KeriDriver) CreateOwnedInception(publicKey, nextPublicKey, name, ownerA
 	return d.postInception(publicKey, nextPublicKey, name, []map[string]interface{}{
 		{"i": ownerAID, "r": "owner"},
 	})
+}
+
+// CreateInceptionAnchored founds an identity that carries extra seals in the
+// event it is derived from.
+//
+// Both kinds of seal go in the same list, so they cannot be passed separately:
+// an identity may name an owner and commit to its encryption keys, and the
+// caller builds whichever of those apply. Passing an owner AID adds the owner
+// seal; passing none omits it, which is the unowned case rather than an error
+// here — the handler decides whether an owner is required.
+func (d *KeriDriver) CreateInceptionAnchored(publicKey, nextPublicKey, name, ownerAID string,
+	extra []map[string]interface{}) (*DriverInceptionResponse, error) {
+	anchors := make([]map[string]interface{}, 0, len(extra)+1)
+	if ownerAID != "" {
+		anchors = append(anchors, map[string]interface{}{"i": ownerAID, "r": "owner"})
+	}
+	anchors = append(anchors, extra...)
+	if len(anchors) == 0 {
+		anchors = nil
+	}
+	return d.postInception(publicKey, nextPublicKey, name, anchors)
 }
 
 func (d *KeriDriver) CreateHybridInception(synthetic bool, name string) (*DriverHybridInceptionResponse, error) {

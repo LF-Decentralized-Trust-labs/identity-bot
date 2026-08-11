@@ -1,12 +1,9 @@
 package server
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"log"
-	"net/http"
-	"time"
 
 	"identity-agent-core/login"
 )
@@ -40,6 +37,12 @@ func tierRank(c string) int {
 type loginAsk struct{}
 
 func (loginAsk) Action() string { return "login" }
+
+// AskAuth: login establishes the asker itself, and more strictly than the base
+// layer could. verifyChallengeSig checks the challenge against the key the
+// site's own address publishes, and where the challenge claims an anchor,
+// verifyDelegationAnchor requires a delegated inception naming it.
+func (loginAsk) AskAuth() askAuth { return authSelfVerifying }
 
 func (loginAsk) Preview(s *CoreServer, ctx AskContext) (GenericPreview, error) {
 	if s.loginHandler == nil {
@@ -194,17 +197,22 @@ func (addContactAsk) Execute(s *CoreServer, ctx AskContext, d ScanDecision) (map
 		}
 	}
 	// Tell the asker we accepted, so they record us too (best-effort).
-	go s.sendIntroduction(ctx.Base, 2)
+	go s.sendIntroduction(contact.AID, p.AskerOOBI, 2)
 	return map[string]interface{}{"ok": true, "contact_aid": contact.AID, "tier": contact.ContactCategory}, nil
 }
 
-// sendIntroduction posts our identity to a peer's /api/exchange so they can record us as a
-// contact. Extracted from handleAddContact; uses the tunnel/endpoint URL for our OOBI.
+// sendIntroduction tells a peer who we are, inside the envelope.
 //
 // What we send about ourselves comes from the action's `discloses` declaration
 // — the same list the consent screen showed — not from whatever the profile
 // happens to hold.
-func (s *CoreServer) sendIntroduction(remoteBase string, actionCode int) {
+//
+// It carries no claim about who sent it. That is what the envelope establishes,
+// and a field saying so would be a field somebody could fill in. It also needs
+// no signature of its own: signing as the identity requires a key the agent
+// does not hold, which is why this went out unsigned and was refused when it
+// was its own plaintext request.
+func (s *CoreServer) sendIntroduction(aid, oobiURL string, actionCode int) {
 	ourIdentity, err := s.DataStore.GetIdentity()
 	if err != nil || ourIdentity == nil {
 		return
@@ -229,17 +237,15 @@ func (s *CoreServer) sendIntroduction(remoteBase string, actionCode int) {
 		ourAlias = jcard.FullName
 	}
 	payload := map[string]interface{}{
-		"type": "introduction", "sender_aid": ourIdentity.AID,
-		"sender_oobi": ourOOBI, "sender_alias": ourAlias, "sender_public_key": ourIdentity.PublicKey,
-		"sender_jcard": jcard,
+		"alias":    ourAlias,
+		"oobi_url": ourOOBI,
+		"jcard":    jcard,
 	}
 	if photo != "" {
-		payload["sender_photo"] = photo
+		payload["photo"] = photo
 	}
-	body, _ := json.Marshal(payload)
-	client := &http.Client{Timeout: 15 * time.Second}
-	if resp, perr := client.Post(remoteBase+"/api/exchange", "application/json", bytes.NewReader(body)); perr == nil {
-		resp.Body.Close()
+	if err := s.introduceOurselvesTo(aid, oobiURL, payload); err != nil {
+		log.Printf("[introduction] could not tell %s who we are: %v", aid, err)
 	}
 }
 

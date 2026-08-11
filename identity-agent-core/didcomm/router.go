@@ -22,6 +22,14 @@ const (
 	TypeAgentMessage = "agent-message"
 	TypeAgentTask    = "agent-task"
 	TypeAgentResult  = "agent-result"
+
+	// An ordinary API request and its answer, carried inside an envelope so
+	// that nothing between the two agents can read either one. The router does
+	// not dispatch these — the transport handles them before dispatch — but
+	// they are registered here because every type crossing the envelope layer
+	// must be, and one that is not is rejected on unpack.
+	TypeSealedRequest  = "sealed-request"
+	TypeSealedResponse = "sealed-response"
 )
 
 var knownTypes = map[string]bool{
@@ -36,6 +44,8 @@ var knownTypes = map[string]bool{
 	TypeAgentMessage:       true,
 	TypeAgentTask:          true,
 	TypeAgentResult:        true,
+	TypeSealedRequest:      true,
+	TypeSealedResponse:     true,
 }
 
 // KnownType reports whether t is a registered payload type (E-8).

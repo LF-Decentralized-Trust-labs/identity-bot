@@ -52,6 +52,18 @@ func (s *CoreServer) SendDIDCommMessage(fromAID, toAID, typ string, body json.Ra
 	if err != nil {
 		return "", 0, fmt.Errorf("pack: %w", err)
 	}
+
+	// A request to connect carries our own key history, because the recipient
+	// by definition has no record of us and cannot otherwise open the envelope.
+	//
+	// Only on this message type. It is a few kilobytes, and attaching it to
+	// everything would pay that on every message to establish something the
+	// recipient already knows after the first one.
+	if typ == didcomm.TypeContactRequest {
+		if kel := s.ownKELForIntroduction(fromAID); len(kel) > 0 {
+			env.SenderKEL = kel
+		}
+	}
 	raw, _ := json.Marshal(env)
 	resp, err := (&http.Client{Timeout: 15 * time.Second}).Post(peer.Endpoint, "application/didcomm-envelope+json", bytes.NewReader(raw))
 	if err != nil {

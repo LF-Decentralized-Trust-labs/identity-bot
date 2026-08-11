@@ -105,17 +105,29 @@ func (s *CoreServer) EnsureKeriContact(oobiURL string) (*store.ContactRecord, bo
 	if jcard == nil {
 		jcard = &store.JCard{FullName: alias, XKeriAID: oobiData.AID, XKeriOOBI: oobiURL, XKeriRole: "transactional"}
 	}
-	status := "verified"
-	if s.KeriDriver != nil && len(oobiData.KEL) > 0 && !kelVerified {
+	// Three states, not two. "unchecked" existed all along and was reported as
+	// "verified": on a phone there is no engine to check with, and an address
+	// that publishes no history gives nothing to check — neither of which is
+	// the same as checking and finding it sound. Saying so was the software
+	// asserting a conclusion it had never reached, on the screen where somebody
+	// decides whether to trust a stranger.
+	status := "unchecked"
+	switch {
+	case kelVerified:
+		status = "verified"
+	case s.KeriDriver != nil && len(oobiData.KEL) > 0:
 		status = "unverified"
 	}
 
 	contact := store.ContactRecord{
-		AID:             oobiData.AID,
-		Alias:           alias,
-		PublicKey:       currentPublicKey,
-		OobiURL:         oobiURL,
-		Verified:        kelVerified || s.KeriDriver == nil,
+		AID:       oobiData.AID,
+		Alias:     alias,
+		PublicKey: currentPublicKey,
+		OobiURL:   oobiURL,
+		// Only what was actually established. This used to be true whenever
+		// there was no engine to check with, which made "no answer" and "yes"
+		// the same value.
+		Verified:        kelVerified,
 		DiscoveredAt:    time.Now().UTC().Format(time.RFC3339),
 		Status:          status,
 		ContactSource:   "keri",
