@@ -1,5 +1,10 @@
 package witness
 
+import (
+	"context"
+	"log"
+)
+
 // Who witnesses an identity before it knows anybody.
 //
 // The design here is peer-to-peer: every Identity Agent is a witness for its
@@ -165,8 +170,35 @@ func oneBootstrapFor(aid string) (witnessTarget, bool) {
 // witnesses is correctly reported as unwitnessed, which is a smaller problem
 // than one that appears witnessed by observers who cannot corroborate anything.
 func DesignatableWitnesses(candidates []witnessTarget) (keys []string, toad int) {
+	return DesignatableWitnessesChecked(context.Background(), candidates, nil)
+}
+
+// DesignatableWitnessesChecked confirms each candidate is the party it is
+// pinned as before allowing it to be designated.
+//
+// The check is the reason the pin is worth having. Without it a service
+// redeployed onto a new volume, or one whose address now resolves somewhere
+// else, is written permanently into an inception event as a witness that cannot
+// receipt — and nothing notices, because nothing ever compared the two.
+//
+// A candidate that cannot be confirmed is left out rather than designated
+// hopefully. An identity with fewer witnesses is a smaller problem than one
+// naming an observer that does not exist, because the second cannot be undone.
+func DesignatableWitnessesChecked(ctx context.Context, candidates []witnessTarget, check IdentityChecker) (keys []string, toad int) {
 	for _, c := range candidates {
 		if c.WitnessKey == "" {
+			continue
+		}
+		// Only services are checked this way. A contact's witness key was
+		// learned from its own OOBI rather than pinned in a shipped file, so
+		// there is no second opinion to compare it against.
+		if c.Commercial && c.URL != "" {
+			confirmed, err := ConfirmWitnessIdentity(ctx, check, c.URL, c.WitnessKey)
+			if err != nil {
+				log.Printf("[witness] not designating %s: %v", c.URL, err)
+				continue
+			}
+			keys = append(keys, confirmed)
 			continue
 		}
 		keys = append(keys, c.WitnessKey)

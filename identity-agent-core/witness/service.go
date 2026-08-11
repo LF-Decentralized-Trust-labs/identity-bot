@@ -57,6 +57,10 @@ type Service struct {
 	// organization. A peer may only witness for its own kind, so an agent that
 	// cannot answer this enrols no peer witnesses at all.
 	OurEntityType func() EntityType
+	// CheckIdentity asks a witness service which identity it is answering as,
+	// so a pinned identifier can be confirmed before it is designated. Nil uses
+	// a plain HTTP request; set in tests so they need no network.
+	CheckIdentity IdentityChecker
 	// IsOfficialService reports whether a witness is a registered service
 	// provider rather than a peer.
 	//

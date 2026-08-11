@@ -3,6 +3,7 @@ package witness
 import (
 	"context"
 	"log"
+	"time"
 )
 
 // Turning a new contact into a witness, when they can be one.
@@ -126,7 +127,11 @@ func (s *Service) WitnessesForNewIdentity(kind AidKind, aid string) (keys []stri
 	if err != nil {
 		return nil, 0
 	}
-	return DesignatableWitnesses(candidates)
+	// Confirmed against the services themselves, not taken from the registry on
+	// trust. What goes into an inception event cannot be corrected later.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return DesignatableWitnessesChecked(ctx, candidates, s.CheckIdentity)
 }
 
 // peerWitnessAllowed reports whether a contact may act as a peer witness for
