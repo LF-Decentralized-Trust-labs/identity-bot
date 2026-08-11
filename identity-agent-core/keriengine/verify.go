@@ -83,20 +83,29 @@ func (e *Engine) CesrEncode(rawSigB64 string) (*drivers.DriverCesrEncodeResponse
 	return &drivers.DriverCesrEncodeResponse{CesrSig: qb64, Length: len(qb64)}, nil
 }
 
-// ValidateKEL checks that a key log is internally consistent and that its
-// events chain to one another.
+// ValidateKEL checks a key log and reports what it established.
 //
-// The events arrive parsed, which is a problem this cannot solve by
-// re-encoding them: field order is part of an event, and a re-encoded event
-// digests to something else. So validation runs over the events as given and
-// reports what it could actually establish, rather than reporting a verified
-// log it did not verify.
+// Prefers the bytes. When the records carry the canonical serialisation and
+// the controller's signatures, this is a real verification and delegates to the
+// one implementation of it. Field order is part of an event and a re-encoded
+// event digests to something else, so those bytes are the only thing a
+// signature or an identifier can be checked against — a parsed log cannot be
+// turned back into them.
+//
+// Falls back to walking the parsed events when they are absent. That check is
+// worth something — it catches a log with a gap, a repeat, or events belonging
+// to somebody else — but it proves nothing about authorship, and it says so
+// rather than reporting a log it did not verify as verified.
 func (e *Engine) ValidateKEL(aid string, events []map[string]interface{}) (*drivers.DriverValidateKELResponse, error) {
 	if len(events) == 0 {
 		return &drivers.DriverValidateKELResponse{
 			KelVerified:      false,
 			ValidationErrors: []string{"an empty key log establishes nothing; this is not a verdict about the identity"},
 		}, nil
+	}
+
+	if in, ok := drivers.ValidateKELInputFromRecords(aid, events); ok {
+		return drivers.ValidateKELFromBytes(in)
 	}
 
 	out := &drivers.DriverValidateKELResponse{}
@@ -136,11 +145,19 @@ func (e *Engine) ValidateKEL(aid string, events []map[string]interface{}) (*driv
 
 	out.EventsValidated = len(events)
 	out.ValidationErrors = problems
-	out.KelVerified = len(problems) == 0
-	if out.KelVerified {
-		// Said explicitly: the chain holds, and no signature was checked,
-		// because the parsed form cannot carry one. A caller treating this as
-		// proof of authorship would be treating structure as authority.
+
+	// The chain holding is not authorship being proven, and this path cannot
+	// establish the second: the parsed form carries no signature to check.
+	//
+	// So KelVerified stays false here however clean the log looks. It is the
+	// boolean every trust gate reads before letting a log establish a key, and
+	// a consistent chain is something a forger produces as easily as anyone
+	// else — they wrote every event in it. What this path can honestly report
+	// is that the log holds together.
+	out.LogSound = len(problems) == 0
+	out.KelVerified = false
+	out.EventsUnsigned = len(events)
+	if out.LogSound {
 		out.ValidationErrors = []string{
 			"the chain is consistent; no signature was checked, because signatures verify " +
 				"against canonical event bytes and this log was supplied in parsed form",

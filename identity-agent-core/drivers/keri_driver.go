@@ -397,6 +397,14 @@ type DriverIssueCredentialResponse struct {
 	// IssSaid is the SAID of the TEL issuance (iss) event when the credential was
 	// issued into a registry. Persist it — revocation needs it as the prior event.
 	IssSaid string `json:"iss_said,omitempty"`
+	// IssRawBytesB64 is that issuance event as it was serialised.
+	//
+	// A verifier decides whether a credential is still valid by reading its
+	// transaction log, and a log can only be checked from the bytes each event
+	// was published as: the events are self-addressing and chain by digest, so
+	// a re-serialised copy derives a different identifier and chains to
+	// nothing. Without these the log exists and cannot be handed to anybody.
+	IssRawBytesB64 string `json:"iss_raw_bytes_b64,omitempty"`
 }
 
 // DriverRegistryInceptResponse is the result of incepting a credential registry (TEL).
@@ -426,6 +434,12 @@ type DriverRevokeCredentialResponse struct {
 	// without the only bytes its signature and its own digest can be checked
 	// against.
 	IxnRawBytesB64 string `json:"ixn_raw_bytes_b64"`
+	// RevRawBytesB64 is the revocation itself, as serialised.
+	//
+	// The event that has to reach a verifier for the revocation to have any
+	// effect. A revoked credential looks exactly like a live one until someone
+	// is handed this.
+	RevRawBytesB64 string `json:"rev_raw_bytes_b64,omitempty"`
 }
 
 type DriverPresentCredentialRequest struct {
@@ -484,7 +498,34 @@ type DriverVerifyCredentialRequest struct {
 	// CesrSignature: the holder's CESR '0B...' signature over pres_said bytes (driver field: pres_cesr_sig).
 	CesrSignature string `json:"pres_cesr_sig,omitempty"`
 	// HolderPublicKey: the holder's current Ed25519 public key (base64).
+	//
+	// Asserted by whoever is presenting, so on its own it establishes nothing:
+	// a presenter can generate a key, name it here, and sign with it. It is
+	// only worth anything once HolderKelEvents shows it is the key the subject
+	// identity actually has in force.
 	HolderPublicKey string `json:"holder_public_key,omitempty"`
+
+	// PresentationBody is the presentation the holder signed.
+	//
+	// Needed because the signature alone binds to nothing. Without the body a
+	// verifier sees a signature over some bytes and has no way to tell whether
+	// those bytes are a presentation of THIS credential by THIS subject, or a
+	// presentation of something else entirely — or not a presentation at all.
+	PresentationBody map[string]interface{} `json:"presentation_body,omitempty"`
+
+	// HolderKelEvents is the subject's key log, which is what turns the
+	// asserted holder key into an established one.
+	HolderKelEvents []map[string]interface{} `json:"holder_kel,omitempty"`
+
+	// RegistryEventsB64 is the credential's transaction log, in order, as the
+	// bytes each event was published as.
+	//
+	// Where revocation lives. A credential carries no indication that it was
+	// revoked — revocation is an event in this log — so a verifier that does
+	// not read it cannot tell a live credential from a withdrawn one, and the
+	// holder of a revoked credential has every reason not to mention it.
+	RegistryEventsB64 []string `json:"registry_events_b64,omitempty"`
+
 	// TrustedSchemaSaids: list of accepted schema SAIDs; empty = accept all.
 	TrustedSchemaSaids []string `json:"trusted_schema_saids,omitempty"`
 }

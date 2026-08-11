@@ -276,6 +276,7 @@ func (e *Engine) issue(name string, claims map[string]interface{}, schemaSaid, h
 		IxnEvent:       ixnBody,
 		SequenceNumber: int(ixnEvent.SN),
 		IssSaid:        issSAID,
+		IssRawBytesB64: b64(issRaw),
 	}, nil
 }
 
@@ -359,10 +360,53 @@ func (e *Engine) RevokeCredential(name, acdcSaid, registrySaid, issSaid string) 
 	return &drivers.DriverRevokeCredentialResponse{
 		RevSaid:        revEvent.SAID,
 		RevEvent:       revBody,
+		RevRawBytesB64: b64(rev),
 		IxnSaid:        ixnEvent.SAID,
 		IxnEvent:       ixnBody,
+		// The anchoring bytes, which this had a documented field for and did
+		// not fill in. An anchor stored without them cannot have its signature
+		// or its own digest checked against anything.
+		IxnRawBytesB64: b64(ixn),
 		SequenceNumber: int(ixnEvent.SN),
 	}, nil
+}
+
+// CredentialLog returns a credential's transaction log, in order, as the bytes
+// each event was published as.
+//
+// This is what an issuer hands a verifier, and until now there was no way to
+// get it: the events were recorded and nothing could read them back, so the
+// question "has this been revoked?" had no answer anybody could supply. Raw
+// bytes rather than parsed events, because the log chains by digest and a
+// re-serialised event derives a different identifier and chains to nothing.
+//
+// A log with no revocation in it is not the same as no log. An empty result
+// means this issuer has no record of the credential at all, which a verifier
+// must not read as "still valid".
+func (e *Engine) CredentialLog(name, registrySaid, acdcSaid string) ([]string, error) {
+	if registrySaid == "" || acdcSaid == "" {
+		return nil, fmt.Errorf("a transaction log is identified by both a registry and a credential")
+	}
+	id, err := e.state.get(name)
+	if err != nil {
+		return nil, err
+	}
+	e.state.mu.Lock()
+	defer e.state.mu.Unlock()
+	reg := id.Registries[registrySaid]
+	if reg == nil {
+		return nil, fmt.Errorf("%s knows no registry %s", name, registrySaid)
+	}
+	events := reg.TEL[acdcSaid]
+	if len(events) == 0 {
+		return nil, fmt.Errorf("registry %s holds no events for %s, so it can say nothing about "+
+			"whether that credential is still valid", registrySaid, acdcSaid)
+	}
+	out := make([]string, 0, len(events))
+	for _, raw := range events {
+		out = append(out, b64(raw))
+	}
+	return out, nil
 }
 
 // VerifyCredential checks a credential and reports what it could establish.
@@ -433,32 +477,227 @@ func (e *Engine) VerifyCredential(req *drivers.DriverVerifyCredentialRequest) (*
 		}
 	}
 
+	// Whether the credential has since been withdrawn.
+	//
+	// A credential says nothing about its own revocation — revocation is an
+	// event in the registry's transaction log — so a verifier that does not
+	// read that log cannot tell a live credential from a withdrawn one. The
+	// holder of a revoked credential is precisely the party with a reason not
+	// to mention it, which is why this is checked rather than trusted.
+	if len(req.RegistryEventsB64) > 0 {
+		events := make([][]byte, 0, len(req.RegistryEventsB64))
+		for i, b := range req.RegistryEventsB64 {
+			raw, err := decodeB64(b)
+			if err != nil {
+				return nil, fmt.Errorf("transaction event %d is not base64: %w", i, err)
+			}
+			events = append(events, raw)
+		}
+		status, err := keri.CredentialStatus(cred.SAID, events)
+		switch {
+		case err != nil:
+			// A log that does not hold together is not an absence of
+			// revocation. A withheld revocation looks exactly like this, so
+			// the only safe reading is that the status is unknown.
+			out.Checks["not_revoked"] = false
+			out.Errors = append(out.Errors, fmt.Sprintf("the credential's transaction log could "+
+				"not be read, so whether it is still valid is unknown: %v", err))
+		case status == keri.StatusRevoked:
+			out.Checks["not_revoked"] = false
+			out.Errors = append(out.Errors, "the credential has been revoked by its issuer")
+		default:
+			out.Checks["not_revoked"] = true
+		}
+	} else if cred.Registry != "" {
+		// Issued into a registry, and the log was not supplied. Reported rather
+		// than passed over: the credential could have been revoked an hour ago
+		// and nothing here would know.
+		out.Checks["not_revoked"] = nil
+	}
+
 	// A presentation is the holder proving it controls the subject identity.
 	// Without it, a verified credential says only that it was issued — anybody
 	// holding a copy could present it.
 	if req.PresentationSaid != "" && req.CesrSignature != "" && req.HolderPublicKey != "" {
-		signed, err := decodeB64(req.PresentationSaid)
-		if err != nil {
-			return nil, fmt.Errorf("the presented bytes are not base64: %w", err)
-		}
-		pub, err := normaliseKey(req.HolderPublicKey, true)
-		if err != nil {
-			return nil, fmt.Errorf("the holder's key: %w", err)
-		}
-		sig, err := signatureBytes(req.CesrSignature)
-		if err != nil {
+		if err := e.checkPresentation(req, cred, out); err != nil {
 			return nil, err
-		}
-		ok := keri.VerifySignature(pub, signed, sig) == nil
-		out.Checks["presentation"] = ok
-		if !ok {
-			out.Errors = append(out.Errors, "the presentation is not signed by the holder's key, "+
-				"so whoever presented this credential has not shown they control it")
 		}
 	}
 
 	out.Verified = len(out.Errors) == 0
 	return out, nil
+}
+
+// checkPresentation decides whether whoever handed over this credential is the
+// subject of it.
+//
+// The signature is the last step, not the check. Verifying a signature over
+// caller-supplied bytes under a caller-supplied key establishes only that the
+// caller can sign with a key they chose — which anybody can do, including
+// somebody presenting a copy of a stranger's credential. Three bindings have to
+// hold before the signature means anything:
+//
+//   - the presentation must be intact, so its identifier re-derives from its
+//     own body;
+//   - it must name THIS credential and THIS subject, or it is a valid proof of
+//     possession of something else;
+//   - the key must be the one the subject's key log puts in force, rather than
+//     one the presenter picked.
+//
+// Each is reported by name, because "the presentation failed" leaves a caller
+// unable to tell a forgery from a stale key or a missing key log.
+func (e *Engine) checkPresentation(
+	req *drivers.DriverVerifyCredentialRequest,
+	cred *keri.Credential,
+	out *drivers.DriverVerifyCredentialResponse,
+) error {
+	signed, err := decodeB64(req.PresentationSaid)
+	if err != nil {
+		return fmt.Errorf("the presented bytes are not base64: %w", err)
+	}
+
+	if len(req.PresentationBody) == 0 {
+		// Refused rather than falling back to the bare signature check. A
+		// signature that binds to nothing is not weaker evidence than one that
+		// binds; it is evidence of nothing at all, and reporting it as a passed
+		// check is how a replayed credential gets accepted.
+		out.Checks["presentation"] = false
+		out.Errors = append(out.Errors, "the presentation was not supplied, only a signature over "+
+			"it; a signature on its own cannot show which credential was presented or by whom")
+		return nil
+	}
+
+	body, said, err := reduceePresentation(req.PresentationBody)
+	if err != nil {
+		out.Checks["presentation_intact"] = false
+		out.Errors = append(out.Errors, fmt.Sprintf("the presentation does not hold together: %v", err))
+		return nil
+	}
+	out.Checks["presentation_intact"] = true
+
+	// What it is a presentation OF.
+	if body.A.CredentialSAID != cred.SAID {
+		out.Checks["presentation_binds_credential"] = false
+		out.Errors = append(out.Errors, fmt.Sprintf("the presentation is of credential %s, not %s; "+
+			"a proof of possession of a different credential says nothing about this one",
+			body.A.CredentialSAID, cred.SAID))
+	} else {
+		out.Checks["presentation_binds_credential"] = true
+	}
+
+	// Who it is a presentation BY. The subject named in the credential is the
+	// only identity a presentation of it can be made by.
+	subject := firstNonEmpty(cred.Recipient, req.HolderAid)
+	if subject != "" && body.I != subject {
+		out.Checks["presentation_binds_holder"] = false
+		out.Errors = append(out.Errors, fmt.Sprintf("the presentation is made by %s, but the "+
+			"credential is about %s", body.I, subject))
+	} else {
+		out.Checks["presentation_binds_holder"] = true
+	}
+
+	// The signature has to be over this presentation's identifier, which is
+	// what ties the proof to this presentation rather than to a credential
+	// anyone holding a copy could re-present.
+	if string(signed) != said {
+		out.Checks["presentation"] = false
+		out.Errors = append(out.Errors, "the signature is over something other than this "+
+			"presentation, so it could have been lifted from another exchange")
+		return nil
+	}
+
+	pub, err := normaliseKey(req.HolderPublicKey, true)
+	if err != nil {
+		return fmt.Errorf("the holder's key: %w", err)
+	}
+
+	// The key must be established, not asserted. Without this the presenter
+	// chooses the key the signature is checked against, and every signature
+	// verifies.
+	if len(req.HolderKelEvents) > 0 && subject != "" {
+		kel, err := e.ValidateKEL(subject, req.HolderKelEvents)
+		if err != nil {
+			return err
+		}
+		switch {
+		case !kel.KelVerified:
+			out.Checks["holder_key_established"] = false
+			out.Errors = append(out.Errors, "the subject's key log does not establish a current "+
+				"key, so the key this presentation was signed with is only claimed: "+
+				joinErrors(kel.ValidationErrors))
+		case kel.CurrentPublicKey != req.HolderPublicKey:
+			out.Checks["holder_key_established"] = false
+			out.Errors = append(out.Errors, fmt.Sprintf("the presentation is signed with %s, but "+
+				"%s currently has %s in force", req.HolderPublicKey, subject, kel.CurrentPublicKey))
+		default:
+			out.Checks["holder_key_established"] = true
+		}
+	} else {
+		// Named rather than silently absent. A caller reading a passed
+		// presentation check would otherwise believe the signer was shown to
+		// be the subject, when all that was shown is that they hold some key.
+		out.Checks["holder_key_established"] = nil
+		out.Errors = append(out.Errors, fmt.Sprintf("no key log was supplied for %s, so the key "+
+			"this presentation was signed with has not been shown to be theirs", subject))
+	}
+
+	sig, err := signatureBytes(req.CesrSignature)
+	if err != nil {
+		return err
+	}
+	ok := keri.VerifySignature(pub, signed, sig) == nil
+	out.Checks["presentation"] = ok
+	if !ok {
+		out.Errors = append(out.Errors, "the presentation is not signed by the holder's key, "+
+			"so whoever presented this credential has not shown they control it")
+	}
+	return nil
+}
+
+// reduceePresentation reads a presentation back into the shape it was built in
+// and recomputes its identifier.
+//
+// Going through the struct rather than the map is deliberate: the identifier is
+// a digest over the fields in a fixed order, and a map has no order. Anything
+// that re-serialised the map directly would compute a digest nobody else does
+// and report every genuine presentation as altered.
+func reduceePresentation(raw map[string]interface{}) (presentationBody, string, error) {
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return presentationBody{}, "", err
+	}
+	var body presentationBody
+	if err := json.Unmarshal(encoded, &body); err != nil {
+		return presentationBody{}, "", fmt.Errorf("it is not shaped like a presentation: %w", err)
+	}
+	claimed := body.D
+	if claimed == "" {
+		return presentationBody{}, "", fmt.Errorf("it carries no identifier")
+	}
+
+	// Recompute exactly as it was built: the attribute block's own identifier
+	// first, then the body with its identifier blanked.
+	attrs := body.A
+	attrs.D = ""
+	attrSAID, err := saidOfCompact(attrs)
+	if err != nil {
+		return presentationBody{}, "", err
+	}
+	if attrSAID != body.A.D {
+		return presentationBody{}, "", fmt.Errorf("its attributes do not match the identifier " +
+			"they carry, so what it says about the credential or the holder has been changed")
+	}
+	check := body
+	check.D = ""
+	recomputed, err := saidOfCompact(check)
+	if err != nil {
+		return presentationBody{}, "", err
+	}
+	if recomputed != claimed {
+		return presentationBody{}, "", fmt.Errorf("it claims to be %s but its contents derive %s",
+			claimed, recomputed)
+	}
+	return body, claimed, nil
 }
 
 func firstNonEmpty(vals ...string) string {
