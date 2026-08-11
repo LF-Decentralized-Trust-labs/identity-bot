@@ -700,6 +700,30 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// 6. The owner's half of the same exchange.
+	//
+	// The box returned its own keys in the response, so the private channel can
+	// be completed here without fetching anything from anybody — which is the
+	// point, because a fetch over a connection somebody else terminates is the
+	// one step they could answer themselves. Both sides now hold keys that
+	// arrived inside an exchange each had already proved themselves in.
+	//
+	// Reported but not fatal, for the same reason as the outbound half: an
+	// adoption that has otherwise completed should not be undone by the part
+	// that can be repaired without redoing it.
+	if raw, ok := result["agent_did"]; ok {
+		if boxDID, err := didFromResult(raw); err != nil {
+			log.Printf("[pairing] adopted %s but could not read its keys, so sealed traffic to it "+
+				"will be refused until they are: %v", base, err)
+		} else if err := s.rememberPeerFromAdoption(boxDID, base); err != nil {
+			log.Printf("[pairing] adopted %s but did not record its keys, so sealed traffic to it "+
+				"will be refused until they are: %v", base, err)
+		}
+	} else {
+		log.Printf("[pairing] adopted %s and it returned no keys of its own, so sealed traffic "+
+			"between the two is not yet possible", base)
+	}
+
 	log.Printf("[pairing] adopted box at %s: delegated AID %s under root %s", base, dip.AID, root.AID)
 	writeJSONResponse(w, map[string]interface{}{
 		"ok": true, "box_url": base,
@@ -749,4 +773,25 @@ func shortAID(aid string) string {
 		return aid[:8]
 	}
 	return aid
+}
+
+// didFromResult reads a DID out of a decoded JSON response.
+//
+// It arrives as a map rather than a typed value because the response is
+// whatever the box sent, so it round-trips through JSON to be read as the
+// thing it claims to be. A box that sent something else fails here, by name,
+// rather than at the first attempt to encrypt to it.
+func didFromResult(raw interface{}) (*didcomm.DID, error) {
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return nil, err
+	}
+	var did didcomm.DID
+	if err := json.Unmarshal(encoded, &did); err != nil {
+		return nil, fmt.Errorf("this is not a set of keys: %w", err)
+	}
+	if did.AID == "" {
+		return nil, fmt.Errorf("the keys name no identity")
+	}
+	return &did, nil
 }
