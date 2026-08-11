@@ -211,14 +211,16 @@ func (c *snpCertificateChain) writeCache(key string, chain [][]byte) {
 	_ = os.Rename(tmp, path)
 }
 
-// readHandedDownChain reads certificates the host passed in at launch.
+// readHandedDownChain reads certificates handed to the guest at launch.
 //
-// Delivered through the firmware configuration channel, which adds no device to
-// the guest — the device topology is checked against a fixed list, so anything
-// that added one would trip the check that exists to notice added devices.
+// Delivered through the firmware configuration channel rather than over the
+// network, so a guest with no route out can still be given the certificates its
+// report is checked against. The channel presents no device of its own, which
+// matters because an added device is exactly what a guest's own integrity check
+// is looking for.
 //
-// Absence is ordinary, not an error: a host that hands nothing down leaves the
-// agent to say its report cannot yet be checked, which is true and useful.
+// Absence is ordinary, not an error: with nothing handed down the agent says
+// its report cannot yet be checked, which is true and useful.
 func readHandedDownChain() [][]byte {
 	raw, err := os.ReadFile(handedDownChainPath)
 	if err != nil || len(raw) == 0 {
@@ -237,8 +239,10 @@ func readHandedDownChain() [][]byte {
 	return out
 }
 
-// Where the firmware configuration channel surfaces what the host passed under
-// the name the launch used.
+// Where the firmware configuration channel surfaces what was handed down.
+//
+// The path names QEMU because that is the interface being read, in the same way
+// a path under /proc names Linux. It says nothing about who runs the machine.
 var handedDownChainPath = "/sys/firmware/qemu_fw_cfg/by_name/opt/attestation/chain.pem/raw"
 
 // decodeTCBParts splits the reported firmware level into the four fields the

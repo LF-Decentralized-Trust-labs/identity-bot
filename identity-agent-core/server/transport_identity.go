@@ -4,12 +4,12 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"encoding/base64"
 	"encoding/pem"
 	"fmt"
+
+	"identity-agent-core/iacrypto"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -49,9 +49,14 @@ const (
 type TransportIdentity struct {
 	CertPEM []byte
 	KeyPEM  []byte
-	// FingerprintB64 is SHA-256 over the certificate, which is what an
-	// attestation binds to and what a client compares against the connection it
-	// is actually on.
+	// FingerprintB64 identifies the certificate an attestation binds to, and is
+	// what a client compares against the connection it is actually on.
+	//
+	// Blake3, like every other integrity digest here. Nothing about a
+	// certificate requires SHA-2 — that requirement belongs to the certificate
+	// chain itself, where a third party sets the rules — and using one hash for
+	// integrity everywhere means there is no second algorithm whose weakening
+	// somebody has to reason about separately.
 	FingerprintB64 string
 }
 
@@ -135,11 +140,14 @@ func identityFrom(certPEM, keyPEM []byte) (*TransportIdentity, error) {
 	if _, err := x509.ParseCertificate(block.Bytes); err != nil {
 		return nil, fmt.Errorf("the stored certificate cannot be parsed: %w", err)
 	}
-	sum := sha256.Sum256(block.Bytes)
+	fingerprint, err := iacrypto.Blake3QB64(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("the certificate could not be digested: %w", err)
+	}
 	return &TransportIdentity{
 		CertPEM:        certPEM,
 		KeyPEM:         keyPEM,
-		FingerprintB64: base64.StdEncoding.EncodeToString(sum[:]),
+		FingerprintB64: fingerprint,
 	}, nil
 }
 
