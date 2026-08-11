@@ -782,14 +782,70 @@ class CoreService {
     }
   }
 
-  /// What this agent's trust rests on, as one document.
+  /// Asks a machine this identity owns, through the local agent.
+  ///
+  /// A remote machine cannot tell who is calling from the connection alone,
+  /// and it should not try: the answer is that the local agent — which holds
+  /// this identity's key and already has a relationship with that machine —
+  /// seals the request, and the machine replays it through its own router as
+  /// though it had arrived locally.
+  ///
+  /// So an app needs no cryptography of its own. It states the request it
+  /// wants made and which machine to make it to, and everything else happens
+  /// one process away on the same device.
+  ///
+  /// This is deliberately the ONLY way this client talks to a machine it does
+  /// not run on. A second path — signing a plain request and sending it
+  /// directly — would be a parallel way of saying the same thing, and the two
+  /// would drift apart in what they permit.
+  Future<http.Response> sealedRequest({
+    required String toAid,
+    required String path,
+    String method = 'GET',
+    List<int>? body,
+  }) async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/api/sealed/send'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'to_aid': toAid,
+        'method': method,
+        'path': path,
+        if (body != null) 'body_b64': base64Encode(body),
+      }),
+    );
+    if (response.statusCode != 200) {
+      // The local agent refused to send it. Never retried in the clear: a
+      // fallback that quietly works is one anybody can force by breaking this
+      // path, which would undo the whole point of it.
+      throw Exception(
+          'Could not reach that machine privately: ${response.statusCode}');
+    }
+    final envelope = jsonDecode(response.body) as Map<String, dynamic>;
+    final bodyB64 = (envelope['body_b64'] ?? '') as String;
+    return http.Response(
+      bodyB64.isEmpty ? '' : utf8.decode(base64Decode(bodyB64)),
+      (envelope['status'] ?? 502) as int,
+    );
+  }
+
+  /// What an agent's trust rests on, as one document.
   ///
   /// The facts live in three places in the core because they answer three
   /// different questions there. This is the one call a screen makes.
-  Future<AttestationLineageDto> attestationLineage() async {
-    final response = await _client.get(Uri.parse('$baseUrl/api/security/lineage'));
+  ///
+  /// Pass [ofAgentAid] to ask a machine this identity owns rather than the
+  /// agent on this device. Same document either way, so one screen renders
+  /// both — which matters, because a person comparing their laptop with their
+  /// black box should not be reading two different reports.
+  Future<AttestationLineageDto> attestationLineage({String? ofAgentAid}) async {
+    const path = '/api/security/lineage';
+    final response = ofAgentAid == null
+        ? await _client.get(Uri.parse('$baseUrl$path'))
+        : await sealedRequest(toAid: ofAgentAid, path: path);
     if (response.statusCode != 200) {
-      throw Exception('Could not read this agent\'s attestation: ${response.statusCode}');
+      throw Exception(
+          'Could not read this agent\'s attestation: ${response.statusCode}');
     }
     return AttestationLineageDto.fromJson(
         jsonDecode(response.body) as Map<String, dynamic>);

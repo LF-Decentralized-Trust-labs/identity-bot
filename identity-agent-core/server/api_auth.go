@@ -320,16 +320,54 @@ func denyAuthorization(w http.ResponseWriter, detail string) {
 // isOwner answers the only question the default class asks: is this the person
 // who controls this agent?
 //
-// Two ways to be the owner, and they are not alternatives so much as the same
+// Three ways to be the owner, and they are not alternatives so much as the same
 // claim proved differently. On a machine you are sitting at, a request that
 // originates on that machine is you. On hardware you rent — where you are
-// remote by definition and the local test can never be true — you prove it by
-// signing the request with the owner key sealed into the box at provisioning.
+// remote by definition and the local test can never be true — you prove it
+// either by signing the request with the owner key sealed into the box at
+// provisioning, or by sending it inside an envelope only the owner's identity
+// could have sealed.
 func (s *CoreServer) isOwner(r *http.Request) bool {
 	if isLocalOwnerRequest(r) {
 		return true
 	}
+	if s.isSealedOwnerRequest(r) {
+		return true
+	}
 	return s.verifyOwnerSignature(r) == nil
+}
+
+// isSealedOwnerRequest reports whether this request arrived inside an envelope
+// sealed by the identity this agent belongs to.
+//
+// Unsealing the envelope ALREADY proved who sent it — that is what the sender's
+// key agreement establishes, and nothing weaker gets past the transport. What
+// was missing is that being a known peer answered "may you talk to me" and was
+// never carried through to "may you do this". So an owner holding the key this
+// machine was sealed to could reach it and still be refused everything, which
+// left an owner unable to ask their own machine anything at all.
+//
+// TWO CONDITIONS, AND THE FIRST IS WHAT MAKES THE SECOND SAFE. The header alone
+// is an assertion, and an assertion in a header is worth nothing: anybody could
+// send one. It counts only on a request the sealed transport itself replayed,
+// which is what the address marks — a caller cannot choose the address their
+// connection came from, and the transport strips any copy of the header a
+// sender tried to supply. Read either condition alone and this is an
+// authentication bypass; read together they are the transport's own finding.
+func (s *CoreServer) isSealedOwnerRequest(r *http.Request) bool {
+	if r.RemoteAddr != sealedRemoteAddr {
+		return false
+	}
+	sender := r.Header.Get(headerSealedFrom)
+	if sender == "" {
+		return false
+	}
+	owner, err := s.ownerAuthority()
+	if err != nil || owner == nil || owner.AID == "" {
+		// An agent nobody has adopted has no owner to match, so nobody is it.
+		return false
+	}
+	return sender == owner.AID
 }
 
 // IsOwner is the exported owner check for overlays (owner-only management routes).
