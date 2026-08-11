@@ -728,6 +728,10 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		r.Get("/info", s.handleInfo)
 		r.Get("/identity", s.handleIdentity)
 		r.Get("/security/enclave", s.handleSecurityEnclave)
+		// Everything this agent's trust rests on, assembled into one answer for
+		// the screen that shows it. Owner-only: it carries what the owner knows
+		// and a stranger should not.
+		r.Get("/security/lineage", s.handleAttestationLineage)
 		r.Get("/attestation", s.handlePublicAttestation)
 		r.Get("/keri/selftest", s.handleKeriSelfTest)
 
@@ -782,6 +786,11 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		r.Post("/pairing/complete", s.handlePairingComplete)
 		// The owner's side: adopt a box. Owner-only by default.
 		r.Post("/pairing/adopt", s.handlePairingAdopt)
+		// What this identity owns. Owner-only by default, which is right: a
+		// list of somebody's machines is a map of their infrastructure.
+		r.Get("/agents", s.handleListAdoptedAgents)
+		r.Delete("/agents/{aid}", s.handleForgetAdoptedAgent)
+		r.Post("/agents/{aid}/label", s.handleRenameAdoptedAgent)
 
 		r.Get("/contacts", s.handleGetContacts)
 		r.Post("/contacts/resolve", s.handleResolveOobiContact)

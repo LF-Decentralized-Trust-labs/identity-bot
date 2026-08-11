@@ -729,6 +729,34 @@ ALTER TABLE witness_contact_meta ADD COLUMN witness_key TEXT NOT NULL DEFAULT ''
 -- population, so naming one discloses nothing about its subject.
 ALTER TABLE witness_contact_meta ADD COLUMN entity_type TEXT NOT NULL DEFAULT '';
 `},
+	{
+		Version:     31,
+		Description: "Remember the agents this identity has adopted",
+		SQL: `
+-- An owner adopts a machine, issues a delegation over the key it generated, and
+-- until now remembered none of it. The adoption result went back to whoever
+-- asked and nothing was written down, so an app that restarted had no idea the
+-- machine existed — while the machine itself knew exactly who its owner was.
+--
+-- One row per machine this identity has adopted. The delegated identifier is
+-- what it signs as; the address is where it is reached, which changes over the
+-- machine's life and is therefore the one field expected to be updated.
+CREATE TABLE IF NOT EXISTS adopted_agents (
+    aid           TEXT PRIMARY KEY,
+    delegated_aid TEXT NOT NULL,
+    url           TEXT NOT NULL,
+    kind          TEXT NOT NULL DEFAULT 'individual',
+    label         TEXT NOT NULL DEFAULT '',
+    -- Whether the hardware proved itself when it was adopted, and what it was
+    -- running. Kept because "is this machine sealed" is a question a person
+    -- asks about a machine they already own, and re-deriving it later would
+    -- mean trusting whatever the machine says about itself today.
+    sealed        INTEGER NOT NULL DEFAULT 0,
+    measurement   TEXT NOT NULL DEFAULT '',
+    adopted_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_seen_at  DATETIME
+);
+`},
 }
 
 // ApplyIdentityMigrations creates the migrations table and applies any pending migrations.
