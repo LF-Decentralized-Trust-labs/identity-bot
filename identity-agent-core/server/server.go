@@ -105,6 +105,12 @@ type CoreServer struct {
 
 	// transportIdentity is the key this agent is reached over, where it holds
 	// one itself rather than being fronted by something that terminates for it.
+	// snpVerifier checks an attestation back to AMD's root, on this machine
+	// rather than on the machine being checked. Built once and kept, because it
+	// caches the certificates it fetches.
+	snpVerifier     *secureenclave.AMDKDSVerifier
+	snpVerifierOnce sync.Once
+
 	// AcceptedMeasurements is the software this owner will adopt a sealed box
 	// for. Empty means no policy, which is refused rather than read as "any" —
 	// see acceptableMeasurement.

@@ -2,6 +2,8 @@ package server
 
 import (
 	"encoding/base64"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -31,7 +33,7 @@ func acceptOnly(m byte) func([]byte) bool {
 // A box that proves it holds the keys it offered, running software the owner
 // accepts, may be vouched for.
 func TestABoxThatProvesItselfMayBeAdopted(t *testing.T) {
-	if err := checkOfferBeforeDelegating(offerWithReport(t, true, 0x11), false, acceptOnly(0x11)); err != nil {
+	if err := checkOfferBeforeDelegating(offerWithReport(t, true, 0x11), false, acceptOnly(0x11), chainAlwaysGenuine); err != nil {
 		t.Fatalf("a sound box was refused: %v", err)
 	}
 }
@@ -44,7 +46,7 @@ func TestSubstitutedOfferKeysAreRefused(t *testing.T) {
 	offer := offerWithReport(t, true, 0x11)
 	offer.PublicKey = "DATTACKER-KEY" // swapped in transit; report untouched
 
-	err := checkOfferBeforeDelegating(offer, false, acceptOnly(0x11))
+	err := checkOfferBeforeDelegating(offer, false, acceptOnly(0x11), chainAlwaysGenuine)
 	if err == nil {
 		t.Fatal("the owner would have delegated to keys the sealed machine does not hold")
 	}
@@ -57,7 +59,7 @@ func TestSubstitutedOfferKeysAreRefused(t *testing.T) {
 // machine exists somewhere — true of every sealed machine, and no statement
 // about this one.
 func TestAReportAboutSomethingElseIsRefused(t *testing.T) {
-	if err := checkOfferBeforeDelegating(offerWithReport(t, false, 0x11), false, acceptOnly(0x11)); err == nil {
+	if err := checkOfferBeforeDelegating(offerWithReport(t, false, 0x11), false, acceptOnly(0x11), chainAlwaysGenuine); err == nil {
 		t.Fatal("a report unrelated to the offered keys was accepted")
 	}
 }
@@ -68,10 +70,10 @@ func TestAReportAboutSomethingElseIsRefused(t *testing.T) {
 func TestAnUnattestedBoxIsRefusedUnlessAskedFor(t *testing.T) {
 	bare := &pairingBeginResponse{PublicKey: "DKEY-ONE", NextPublicKey: "DKEY-TWO"}
 
-	if err := checkOfferBeforeDelegating(bare, false, acceptOnly(0x11)); err == nil {
+	if err := checkOfferBeforeDelegating(bare, false, acceptOnly(0x11), chainAlwaysGenuine); err == nil {
 		t.Fatal("a box that proved nothing was adopted by default")
 	}
-	if err := checkOfferBeforeDelegating(bare, true, acceptOnly(0x11)); err != nil {
+	if err := checkOfferBeforeDelegating(bare, true, acceptOnly(0x11), chainAlwaysGenuine); err != nil {
 		t.Fatalf("adopting an unattested box on purpose was refused: %v", err)
 	}
 }
@@ -79,7 +81,7 @@ func TestAnUnattestedBoxIsRefusedUnlessAskedFor(t *testing.T) {
 // Software the owner has not accepted is refused even when the box is
 // genuinely sealed and genuinely holds the keys.
 func TestSoftwareTheOwnerHasNotAcceptedIsNotAdopted(t *testing.T) {
-	if err := checkOfferBeforeDelegating(offerWithReport(t, true, 0x99), false, acceptOnly(0x11)); err == nil {
+	if err := checkOfferBeforeDelegating(offerWithReport(t, true, 0x99), false, acceptOnly(0x11), chainAlwaysGenuine); err == nil {
 		t.Fatal("a box running unapproved software was adopted")
 	}
 }
@@ -87,7 +89,7 @@ func TestSoftwareTheOwnerHasNotAcceptedIsNotAdopted(t *testing.T) {
 // No policy is not the same as accepting everything. Treating it as such would
 // make every other check here decorative.
 func TestNoMeasurementPolicyRefusesRatherThanAccepts(t *testing.T) {
-	if err := checkOfferBeforeDelegating(offerWithReport(t, true, 0x11), false, nil); err == nil {
+	if err := checkOfferBeforeDelegating(offerWithReport(t, true, 0x11), false, nil, chainAlwaysGenuine); err == nil {
 		t.Fatal("a box was adopted with no statement of acceptable software")
 	}
 	s := &CoreServer{}
@@ -111,8 +113,82 @@ func TestADebuggableBoxIsNotAdopted(t *testing.T) {
 	raw[0x08+2] |= 0x08 // POLICY bit 19
 	offer.Attestation = base64.StdEncoding.EncodeToString(raw)
 
-	if err := checkOfferBeforeDelegating(offer, false, acceptOnly(0x11)); err == nil {
+	if err := checkOfferBeforeDelegating(offer, false, acceptOnly(0x11), chainAlwaysGenuine); err == nil {
 		t.Fatal("a box whose memory can be read was adopted")
 	}
 	_ = secureenclave.ReportSize
+}
+
+// chainAlwaysGenuine stands in for AMD for the tests above, each of which was
+// written to check one earlier step and should still fail on that step rather
+// than on a network call. The chain check has its own tests below.
+func chainAlwaysGenuine([]byte) error { return nil }
+
+// The check that turns every other check into evidence.
+//
+// Everything before this reads fields out of the report and compares them, and
+// a report is 1184 bytes that anything can produce — the measurement is a value
+// its author chooses. Software emulating a sealed machine passes every earlier
+// step. Only the signature, verified back to AMD's root, distinguishes a
+// machine that is sealed from one that says so.
+func TestAReportThatDidNotComeFromAMDIsRefused(t *testing.T) {
+	forged := func([]byte) error {
+		return fmt.Errorf("the report's signature does not verify against the certificate " +
+			"AMD issued for that part")
+	}
+	err := checkOfferBeforeDelegating(offerWithReport(t, true, 0x11), false, acceptOnly(0x11), forged)
+	if err == nil {
+		t.Fatal("a report whose signature does not verify was accepted, so a software " +
+			"emulator claiming any measurement would be adopted")
+	}
+	if strings.Contains(err.Error(), "could not be established") {
+		t.Errorf("a forgery was reported as an outage, which invites a retry that will "+
+			"never succeed: %v", err)
+	}
+}
+
+// An owner with no way to check is not an owner who checked.
+func TestNoChainVerifierIsRefused(t *testing.T) {
+	if err := checkOfferBeforeDelegating(offerWithReport(t, true, 0x11), false, acceptOnly(0x11), nil); err == nil {
+		t.Fatal("adoption proceeded with nothing able to check the proof's provenance")
+	}
+}
+
+// AMD being unreachable is not evidence of anything, and must not be reported
+// as though it were. The responses differ: a forgery means never adopt this
+// machine, an outage means try again later.
+func TestAnUnreachableServiceIsNotAForgery(t *testing.T) {
+	unavailable := func([]byte) error {
+		return fmt.Errorf("%w: dial tcp: lookup kdsintf.amd.com: no such host",
+			secureenclave.ErrChainUnavailable)
+	}
+	err := checkOfferBeforeDelegating(offerWithReport(t, true, 0x11), false, acceptOnly(0x11), unavailable)
+	if err == nil {
+		t.Fatal("an unverifiable proof was adopted; unknown provenance is not good provenance")
+	}
+	if !strings.Contains(err.Error(), "could not be established") {
+		t.Errorf("an outage should say the answer is unknown, not that the box is a "+
+			"forgery: %v", err)
+	}
+	if !errors.Is(err, secureenclave.ErrChainUnavailable) {
+		t.Error("callers cannot distinguish an outage from a forgery without the wrapped error")
+	}
+}
+
+// The chain is checked last, so an offer that already failed on its own
+// contents never reaches the network. Otherwise every malformed or hostile
+// offer would cost a round trip to AMD, which is both slow and a way to be
+// rate-limited by somebody else's traffic.
+func TestTheNetworkIsNotConsultedForAnOfferThatAlreadyFailed(t *testing.T) {
+	called := false
+	watch := func([]byte) error { called = true; return nil }
+
+	offer := offerWithReport(t, true, 0x11)
+	offer.PublicKey = "DATTACKER-KEY" // fails the binding check, well before the chain
+	if err := checkOfferBeforeDelegating(offer, false, acceptOnly(0x11), watch); err == nil {
+		t.Fatal("a substituted offer was accepted")
+	}
+	if called {
+		t.Error("AMD was consulted about an offer that had already failed its own checks")
+	}
 }
