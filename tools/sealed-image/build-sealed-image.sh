@@ -36,6 +36,23 @@ WEB_BUNDLE=${WEB_BUNDLE:-}
 # Without it a person is shown ninety-six characters of hex and no way to know
 # what it is a measurement OF — a fact rather than a useful one.
 BUILD_NAME=${BUILD_NAME:-}
+# ENTITY_TYPE is whether this image serves a person or an organisation.
+#
+# UNLIKE BUILD_NAME, THIS ONE IS BEHAVIOUR. The agent uses it to decide who may
+# witness and watch for it, because peers of that kind are the ones it enrols.
+# Without it the agent falls back to a profile that is empty until onboarding
+# finishes, and until then it enrols no witness and no watcher at all — it says
+# so on every boot, into a console nobody outside the machine reads.
+#
+# On a personal computer the application sets this when it starts the agent. In
+# a sealed instance there is no application to do that: systemd starts the
+# agent, so the image has to carry it. That is the whole gap this closes.
+#
+# Which kind an image serves is already decided by AGENT_BINARY, and this must
+# agree with it — but the build cannot check that, because a binary is opaque.
+# So it is stated, validated against the two values that exist, and covered by
+# the measurement like everything else in here.
+ENTITY_TYPE=${ENTITY_TYPE:-}
 OUT=${OUT:-./base.qcow2}
 # VERITY=1 builds a read-only system image whose every block is covered by a
 # hash on the measured command line. Opt-in while it is being proven; the
@@ -99,6 +116,11 @@ trap 'rm -rf "$WORK"; restore_tmp' EXIT
 [[ $EUID -eq 0 ]] || fail "run as root"
 [[ -n "$AGENT_BINARY" ]] || fail "set AGENT_BINARY to a linux/amd64 agent build. Whichever build goes in, it serves the same contract on :5050, so the image is identical apart from which binary is inside it — which is the whole reason each one needs its own image and its own measurement"
 [[ -x "$AGENT_BINARY" ]] || fail "AGENT_BINARY is not executable: $AGENT_BINARY"
+
+case "$ENTITY_TYPE" in
+  ""|individual|organization) ;;
+  *) fail "ENTITY_TYPE must be 'individual' or 'organization' (got: $ENTITY_TYPE). The agent enrols witnesses and watchers among peers of its own kind, and a value it does not recognise leaves it with none" ;;
+esac
 
 file "$AGENT_BINARY" | grep -q 'ELF 64-bit' || fail "AGENT_BINARY is not a Linux binary — build with GOOS=linux GOARCH=amd64"
 
@@ -338,6 +360,7 @@ Environment=GOGC=50
 # somebody can reach directly must not set this.
 Environment=TRUST_FORWARDED_HEADERS=1
 Environment="AGENT_BUILD_NAME=__BUILD_NAME__"
+Environment="IDENTITY_AGENT_ENTITY_TYPE=__ENTITY_TYPE__"
 ExecStart=/usr/local/bin/identity-agent-core
 Restart=always
 RestartSec=2
@@ -384,6 +407,18 @@ if [[ -n "$BUILD_NAME" ]]; then
 else
   sed -i '/^Environment="AGENT_BUILD_NAME=__BUILD_NAME__"$/d' \
     "$WORK/root/etc/systemd/system/identity-agent.service"
+fi
+# The kind. Validated above, so no escaping is needed here: the only values that
+# reach this point are two literal words.
+if [[ -n "$ENTITY_TYPE" ]]; then
+  sed -i "s|__ENTITY_TYPE__|$ENTITY_TYPE|" \
+    "$WORK/root/etc/systemd/system/identity-agent.service"
+  echo "  entity type: $ENTITY_TYPE"
+else
+  sed -i '/^Environment="IDENTITY_AGENT_ENTITY_TYPE=__ENTITY_TYPE__"$/d' \
+    "$WORK/root/etc/systemd/system/identity-agent.service"
+  echo "  WARNING: no ENTITY_TYPE, so this image will not know whether it serves"
+  echo "           a person or an organisation, and will enrol no witness or watcher"
 fi
 # The browser front end, only where one was actually installed.
 #
