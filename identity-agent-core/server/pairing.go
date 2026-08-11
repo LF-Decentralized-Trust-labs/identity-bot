@@ -628,7 +628,7 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 			return false
 		}
 	}
-	if err := checkOfferBeforeDelegating(offer, req.AllowUnattested, accept); err != nil {
+	if err := checkOfferBeforeDelegating(offer, req.AllowUnattested, accept, s.verifySNPChain); err != nil {
 		writeError(w, http.StatusForbidden, "This box was not adopted", err.Error())
 		return
 	}

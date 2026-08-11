@@ -2,8 +2,12 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
+	"os"
+	"time"
 
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/secureenclave"
@@ -21,7 +25,7 @@ import (
 // software this owner accepts. Which measurements those are is a question about
 // who publishes and approves them, so it is answered elsewhere and passed in.
 func checkOfferBeforeDelegating(offer *pairingBeginResponse, allowUnattested bool,
-	acceptableMeasurement func([]byte) bool) error {
+	acceptableMeasurement func([]byte) bool, verifyChain func([]byte) error) error {
 
 	if offer.Attestation == "" {
 		if allowUnattested {
@@ -70,6 +74,39 @@ func checkOfferBeforeDelegating(offer *pairingBeginResponse, allowUnattested boo
 	if !acceptableMeasurement(report.Measurement) {
 		return fmt.Errorf("this box launched software this owner has not accepted")
 	}
+
+	// And last, the check that makes the rest of them evidence.
+	//
+	// Everything above reads fields out of the report and compares them. A
+	// report is 1184 bytes that anything can produce: the measurement is a
+	// value its author chooses, so software emulating a sealed machine passes
+	// every check so far. The signature, verified back to AMD's root, is what
+	// separates "this machine says it is sealed" from "this machine is sealed".
+	//
+	// Left until last on purpose. It is the only step that goes to the network,
+	// and there is no reason to ask AMD about a report that already failed on
+	// its own contents.
+	//
+	// Deliberately not the operator's verification. The host running the
+	// instance verifies chains too, and that establishes nothing for an owner:
+	// it is the party a sealed VM exists to exclude, vouching for itself. This
+	// runs on the owner's own machine, against AMD, or it is not a check.
+	if verifyChain == nil {
+		return fmt.Errorf("this owner cannot check whether the proof came from real AMD " +
+			"hardware, and a proof nobody checked is a claim")
+	}
+	if err := verifyChain(raw); err != nil {
+		// An unreachable service is not a forgery. Kept separate because the
+		// responses differ: a bad signature means this machine is not what it
+		// says and must not be adopted, while an outage means nothing is known
+		// yet and the answer is to try again.
+		if errors.Is(err, secureenclave.ErrChainUnavailable) {
+			return fmt.Errorf("whether this box is genuine AMD hardware could not be "+
+				"established, so it was not adopted rather than adopted on an unchecked "+
+				"proof — this is usually temporary: %w", err)
+		}
+		return fmt.Errorf("this box's proof did not come from the AMD part it names: %w", err)
+	}
 	return nil
 }
 
@@ -97,4 +134,23 @@ func (s *CoreServer) acceptableMeasurement(measurement []byte) bool {
 		}
 	}
 	return false
+}
+
+// verifySNPChain checks a report against AMD, on this machine.
+//
+// The verifier caches what it fetches, so it is built once and kept rather than
+// made per adoption — otherwise adopting several instances would ask AMD for
+// the same certificate each time, which is both wasteful and a good way to be
+// rate-limited at the worst moment.
+//
+// AGENT_SNP_PRODUCT names the CPU family AMD's service knows. It defaults to
+// Genoa, which also covers Siena and Bergamo — those are Zen 4c parts in the
+// Genoa family, and asking for them by their own names returns 404.
+func (s *CoreServer) verifySNPChain(report []byte) error {
+	s.snpVerifierOnce.Do(func() {
+		s.snpVerifier = secureenclave.NewAMDKDSVerifier(os.Getenv("AGENT_SNP_PRODUCT"))
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	return s.snpVerifier.VerifyChain(ctx, report)
 }
