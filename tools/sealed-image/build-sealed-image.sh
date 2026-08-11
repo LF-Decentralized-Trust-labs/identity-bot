@@ -23,10 +23,6 @@ AGENT_BINARY=${AGENT_BINARY:-}
 # instance did before this existed. But an instance somebody reaches from a
 # browser needs it, and that is the whole point of a hosted agent.
 WEB_BUNDLE=${WEB_BUNDLE:-}
-# The digest of the shared runtime this image will accept. "unpinned" builds an
-# image that runs whatever it is given — for bring-up only, and it says so on
-# every boot.
-KERI_RUNTIME_DIGEST=${KERI_RUNTIME_DIGEST:-unpinned}
 OUT=${OUT:-./base.qcow2}
 # VERITY=1 builds a read-only system image whose every block is covered by a
 # hash on the measured command line. Opt-in while it is being proven; the
@@ -193,11 +189,6 @@ debootstrap --variant=minbase \
 # rather than inherit from whichever tool happened to run.
 printf 'deb https://deb.debian.org/debian %s main\n' "$SUITE" > "$WORK/root/etc/apt/sources.list"
 
-# The KERI runtime is NOT in this image. It is one read-only, digest-pinned
-# mount shared by every instance on the host — identical in all of them, never
-# written to, and verified against a digest baked into this image before use, so
-# copying it into each one bought nothing but gigabytes.
-
 say "Installing the agent"
 install -D -m 0755 "$AGENT_BINARY" "$WORK/root/usr/local/bin/identity-agent-core"
 
@@ -206,10 +197,11 @@ install -D -m 0755 "$AGENT_BINARY" "$WORK/root/usr/local/bin/identity-agent-core
 # That is the correct consequence and worth being deliberate about: the bundle
 # is code the agent serves to a browser, so it belongs to what this instance is,
 # and a change to it must change what the instance measures. The alternative --
-# mounting it from the host like the KERI runtime -- would let the operator
-# swap the interface a person types their details into without the measurement
-# moving. The KERI runtime can be shared because it is identical everywhere and
-# never touched; a front end is neither.
+# mounting it from the host -- would let the operator swap the interface a
+# person types their details into without the measurement moving.
+#
+# This image used to mount one thing that way. It no longer does: everything
+# the Identity Agent needs is now inside what it measures.
 if [[ -n "$WEB_BUNDLE" ]]; then
   mkdir -p "$WORK/root/usr/share/identity-agent/web"
   cp -a "$WEB_SRC/." "$WORK/root/usr/share/identity-agent/web/"
@@ -220,12 +212,6 @@ else
   echo "  web bundle: none — a browser will get the placeholder page"
 fi
 install -d -m 0700 "$WORK/root/var/lib/identity-agent"
-
-# Mount points must exist in the image, because a verified root is read-only and
-# systemd cannot create one at boot. Missing, they fail as "Read-only file
-# system" — which reads like a permissions problem rather than a missing
-# directory, and takes the agent down with them through the dependency chain.
-install -d -m 0755 "$WORK/root/opt/keri"
 
 # Where the agent's identity lives, on a writable volume of its own.
 #
@@ -303,110 +289,12 @@ FSTAB
 # what it is allowed to be, and a mismatch is fatal rather than a warning.
 # A .mount unit's filename must be the escaped mount point, or systemd calls
 # it a bad unit file and everything depending on it never runs.
-cat > "$WORK/root/etc/systemd/system/opt-keri.mount" <<'UNIT'
-[Unit]
-Description=Shared KERI runtime (read-only)
-Before=keri-driver.service
-
-[Mount]
-What=keri
-Where=/opt/keri
-Type=9p
-Options=trans=virtio,version=9p2000.L,ro
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-ln -sf /etc/systemd/system/opt-keri.mount \
-  "$WORK/root/etc/systemd/system/multi-user.target.wants/opt-keri.mount"
-
-# pysodium finds libsodium through ctypes.util.find_library, which consults the
-# ldconfig cache rather than LD_LIBRARY_PATH — so the runtime's lib directory
-# has to be a search path the cache knows about, refreshed once the mount is
-# there.
-echo "/opt/keri/lib" > "$WORK/root/etc/ld.so.conf.d/keri-runtime.conf"
-
-# The writable file the driver's loader cache is bound over.
-#
-# Created here rather than by the unit, because the bind is set up when the
-# unit's namespace is built — which is before anything the unit runs. A source
-# that does not exist yet makes the unit fail to start with a message about the
-# mount rather than about the file.
-install -d -m 0755 "$WORK/root/etc/tmpfiles.d"
-cat > "$WORK/root/etc/tmpfiles.d/keri-runtime.conf" <<'TMPF'
-d /run/keri 0755 root root -
-f /run/keri/ld.so.cache 0644 root root -
-TMPF
-
-cat > "$WORK/root/usr/local/bin/verify-keri-runtime" <<'VERIFY'
-#!/bin/sh
-# The digest this image expects. Baked in at build time: an instance that is
-# handed a different runtime refuses to start rather than running provider-
-# supplied code it cannot vouch for.
-set -eu
-EXPECTED="__KERI_RUNTIME_DIGEST__"
-[ "$EXPECTED" = "unpinned" ] && {
-  echo "keri-runtime: WARNING unpinned image — the runtime is not being verified" >&2
-  exit 0
-}
-# LC_ALL=C to match how the digest was computed: sort order is locale-
-# dependent, and disagreeing about it looks exactly like tampering.
-ACTUAL=$(cd /opt/keri && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -d" " -f1)
-[ "$ACTUAL" = "$EXPECTED" ] || {
-  echo "keri-runtime: FATAL expected sha256:$EXPECTED but mounted sha256:$ACTUAL" >&2
-  exit 1
-}
-VERIFY
-chmod 0755 "$WORK/root/usr/local/bin/verify-keri-runtime"
-
-# The driver is supervised in its own right rather than spawned as a child of
-# the agent — the agent's own code calls that the robust model, because a
-# backend restart then cannot orphan a driver or contend for the keystore.
-cat > "$WORK/root/etc/systemd/system/keri-driver.service" <<'UNIT'
-[Unit]
-Description=KERI driver (keripy, from the shared runtime)
-After=network.target opt-keri.mount
-Requires=opt-keri.mount
-
-[Service]
-Environment=KERI_DRIVER_PORT=9999
-# The runtime carries its own interpreter and shared objects: this image has
-# no Python at all.
-Environment=LD_LIBRARY_PATH=/opt/keri/lib
-BindPaths=/run/keri/ld.so.cache:/etc/ld.so.cache
-Environment=PYTHONHOME=/opt/keri
-Environment=PYTHONPATH=/opt/keri/driver/venv/lib/python3.11/site-packages
-ExecStartPre=/usr/local/bin/verify-keri-runtime
-# The loader cache has to be rebuilt once the runtime is mounted, and on a
-# verified root /etc cannot be written. So this unit gets a writable copy of
-# that one file and nothing else, bound over the real one: the processes that
-# read it are inside the same namespace and see it.
-#
-# -C matters as much as the bind. ldconfig writes a temporary file NEXT TO its
-# output and renames it, so pointing it at /etc/ld.so.cache still needs a
-# writable /etc no matter what is bound over the file itself. Writing to the
-# run directory keeps both the temporary file and the rename where they are
-# allowed.
-#
-# One file rather than a writable /etc, because the reason /etc is read-only is
-# the reason the image can be verified at all.
-ExecStartPre=/sbin/ldconfig -C /run/keri/ld.so.cache
-ExecStart=/opt/keri/bin/python3 /opt/keri/driver/server.py
-Restart=always
-RestartSec=2
-WorkingDirectory=/opt/keri/driver
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-ln -sf /etc/systemd/system/keri-driver.service \
-  "$WORK/root/etc/systemd/system/multi-user.target.wants/keri-driver.service"
 
 cat > "$WORK/root/etc/systemd/system/identity-agent.service" <<'UNIT'
 [Unit]
 Description=Identity Agent (sealed instance)
-After=network-online.target keri-driver.service
-Wants=network-online.target keri-driver.service
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Environment=AGENT_DATA_DIR=/var/lib/identity-agent
@@ -418,8 +306,6 @@ Environment=PORT=5050
 # wrong one on a small guest.
 Environment=GOMEMLIMIT=40MiB
 Environment=GOGC=50
-Environment=KERI_DRIVER_EXTERNAL=1
-Environment=KERI_DRIVER_PORT=9999
 # This instance is only ever reached through the proxy in front of it, so the
 # proxy is the only party that knows the name, the scheme and the path prefix a
 # person actually used. Without this the agent guesses from a local interface
@@ -490,7 +376,6 @@ rm -rf "$WORK/root/var/cache/apt" "$WORK/root/var/lib/apt/lists"
 : > "$WORK/root/etc/hostname"
 rm -f "$WORK/root/etc/ssh/ssh_host_"* 2>/dev/null || true
 
-sed -i "s/__KERI_RUNTIME_DIGEST__/$KERI_RUNTIME_DIGEST/" "$WORK/root/usr/local/bin/verify-keri-runtime"
 
 # Name resolution. Without this a guest resolves nothing.
 #

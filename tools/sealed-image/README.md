@@ -34,7 +34,6 @@ rather than failing ten minutes in.
 VERITY=1 \
 AGENT_BINARY=./identity-agent-core \
 WEB_BUNDLE=./web \
-KERI_RUNTIME_DIGEST=<the digest published for that image> \
 OUT=./image.img \
   ./build-sealed-image.sh
 ```
