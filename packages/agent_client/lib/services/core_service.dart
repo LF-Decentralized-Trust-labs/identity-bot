@@ -782,6 +782,46 @@ class CoreService {
     }
   }
 
+  /// The machines this identity has adopted.
+  ///
+  /// An agent that has adopted nothing answers with an empty list, which is an
+  /// answer rather than a failure — a person who owns no machines yet should
+  /// see "none yet", not an error, and the caller cannot tell the two apart if
+  /// this throws for both.
+  Future<List<AdoptedAgent>> listAgents() async {
+    final response = await _client.get(Uri.parse('$baseUrl/api/agents'));
+    if (response.statusCode != 200) {
+      throw Exception('Could not list this identity\'s machines: ${response.statusCode}');
+    }
+    final body = jsonDecode(response.body) as Map<String, dynamic>;
+    final raw = (body['agents'] as List?) ?? const [];
+    return raw
+        .whereType<Map<String, dynamic>>()
+        .map(AdoptedAgent.fromJson)
+        .toList(growable: false);
+  }
+
+  /// Stops listing a machine. Does NOT revoke its delegation — that was issued
+  /// in a published key event log and the machine can still sign under it.
+  Future<void> forgetAgent(String aid) async {
+    final response = await _client.delete(Uri.parse('$baseUrl/api/agents/$aid'));
+    if (response.statusCode != 200) {
+      throw Exception('Could not forget that machine: ${response.statusCode}');
+    }
+  }
+
+  /// Gives a machine a name its owner chose.
+  Future<void> labelAgent(String aid, String label) async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/api/agents/$aid/label'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'label': label}),
+    );
+    if (response.statusCode != 200) {
+      throw Exception('Could not rename that machine: ${response.statusCode}');
+    }
+  }
+
   Future<ContactsListResponse> getContacts() async {
     final response = await _client.get(Uri.parse('$baseUrl/api/contacts'));
     if (response.statusCode == 200) {
@@ -2940,4 +2980,70 @@ class AgentNotYoursException implements Exception {
   @override
   String toString() =>
       'This agent will only answer to the person it was set up for.';
+}
+
+/// A machine this identity has adopted, as its owner knows it.
+///
+/// The identifier is the one the machine minted for itself before any owner
+/// existed — the only stable thing about it. Its address moves over its life
+/// and its name is whatever a person decided to call it.
+class AdoptedAgent {
+  const AdoptedAgent({
+    required this.aid,
+    required this.delegatedAid,
+    required this.url,
+    required this.kind,
+    this.label = '',
+    this.sealed = false,
+    this.measurement = '',
+    this.adoptedAt = '',
+    this.lastSeenAt = '',
+  });
+
+  final String aid;
+
+  /// What it signs as, under this owner's authority.
+  final String delegatedAid;
+
+  /// Where it is reached. Expected to change; the identifier is not.
+  final String url;
+
+  /// 'individual' or 'organization' — which agent it runs.
+  final String kind;
+
+  /// What its owner calls it. Empty until somebody names it, which is better
+  /// than inventing a name they then have to correct.
+  final String label;
+
+  /// Whether the hardware proved itself when this machine was adopted, and
+  /// what it was running. Recorded then rather than asked for now: asking the
+  /// machine means trusting what it says about itself.
+  final bool sealed;
+  final String measurement;
+
+  final String adoptedAt;
+  final String lastSeenAt;
+
+  factory AdoptedAgent.fromJson(Map<String, dynamic> json) => AdoptedAgent(
+        aid: (json['aid'] ?? '') as String,
+        delegatedAid: (json['delegated_aid'] ?? '') as String,
+        url: (json['url'] ?? '') as String,
+        kind: (json['kind'] ?? 'individual') as String,
+        label: (json['label'] ?? '') as String,
+        sealed: (json['sealed'] ?? false) as bool,
+        measurement: (json['measurement'] ?? '') as String,
+        adoptedAt: (json['adopted_at'] ?? '') as String,
+        lastSeenAt: (json['last_seen_at'] ?? '') as String,
+      );
+
+  /// What to call this machine on screen. Falls back to something a person can
+  /// recognise rather than an identifier they cannot.
+  String get displayName {
+    if (label.isNotEmpty) return label;
+    if (url.isNotEmpty) {
+      final host = Uri.tryParse(url)?.host ?? '';
+      if (host.isNotEmpty) return host;
+    }
+    return kind == 'organization' ? 'Organisation agent' : 'Agent';
+  }
 }
