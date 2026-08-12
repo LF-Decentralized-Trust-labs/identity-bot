@@ -1992,10 +1992,26 @@ class CoreService {
     }
   }
 
+  /// The keys this agent seals its backups to — the owner's, recorded when
+  /// they agreed to own it.
+  ///
+  /// Public halves. They are read back rather than re-derived because the seed
+  /// they come from is on the OWNER's device and never on this one, so this is
+  /// the only copy an organisation has.
+  Future<List<String>> recoveryKeysHeld() async {
+    final response = await _client.get(Uri.parse('$baseUrl/api/backup/config'));
+    if (response.statusCode != 200) return const [];
+    final cfg = jsonDecode(response.body) as Map<String, dynamic>;
+    final keys = cfg['seal_to_public_keys_b64'];
+    if (keys is! List) return const [];
+    return keys.map((k) => k.toString()).where((k) => k.isNotEmpty).toList();
+  }
+
   Future<String> adoptAsOrganisation({
     required String adoptionCode,
     required String ownerAid,
     required String ownerPublicKey,
+    List<String> backupSealPublicKeys = const [],
   }) async {
     // Step one: ask the instance for the key material it generated. This is
     // also what proves it is unclaimed — an instance that already has an
@@ -2024,6 +2040,18 @@ class CoreService {
         // Named as the delegator too, for the audit line the instance logs.
         // Nothing is delegated here; the field is how it records who set it up.
         'delegator_aid': ownerAid,
+        // What this organisation will seal its backups to, and the owner's way
+        // back into its encrypted disk.
+        //
+        // Collected when the owner agreed to own it, because that is the only
+        // moment they are present — an organisation holds its own signing seed
+        // and the founder never sees it, so there is no phrase to write down.
+        // Carried here because the machine has to be given them while it is
+        // being set up: afterwards its volume opens only with a key derived
+        // from the software's measurement, and that key moves whenever the
+        // image or the firmware does.
+        if (backupSealPublicKeys.isNotEmpty)
+          'backup_seal_public_keys_b64': backupSealPublicKeys,
       }),
     );
     if (done.statusCode != 200) {
