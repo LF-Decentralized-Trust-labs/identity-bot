@@ -23,6 +23,36 @@ AGENT_BINARY=${AGENT_BINARY:-}
 # instance did before this existed. But an instance somebody reaches from a
 # browser needs it, and that is the whole point of a hosted agent.
 WEB_BUNDLE=${WEB_BUNDLE:-}
+# BUILD_NAME is what this software is CALLED, for the screens that have to tell
+# somebody what their agent is actually running.
+#
+# Optional, and it goes INSIDE the image, which is the whole point: the name is
+# covered by the measurement, so an instance cannot claim to be running
+# something it is not without producing a different measurement and failing the
+# comparison every client makes. A name supplied at launch would instead be a
+# label whoever operates the hardware could set to anything, which is precisely
+# the party a sealed instance exists to be safe from.
+#
+# Without it a person is shown ninety-six characters of hex and no way to know
+# what it is a measurement OF — a fact rather than a useful one.
+BUILD_NAME=${BUILD_NAME:-}
+# ENTITY_TYPE is whether this image serves a person or an organisation.
+#
+# UNLIKE BUILD_NAME, THIS ONE IS BEHAVIOUR. The agent uses it to decide who may
+# witness and watch for it, because peers of that kind are the ones it enrols.
+# Without it the agent falls back to a profile that is empty until onboarding
+# finishes, and until then it enrols no witness and no watcher at all — it says
+# so on every boot, into a console nobody outside the machine reads.
+#
+# On a personal computer the application sets this when it starts the agent. In
+# a sealed instance there is no application to do that: systemd starts the
+# agent, so the image has to carry it. That is the whole gap this closes.
+#
+# Which kind an image serves is already decided by AGENT_BINARY, and this must
+# agree with it — but the build cannot check that, because a binary is opaque.
+# So it is stated, validated against the two values that exist, and covered by
+# the measurement like everything else in here.
+ENTITY_TYPE=${ENTITY_TYPE:-}
 OUT=${OUT:-./base.qcow2}
 # VERITY=1 builds a read-only system image whose every block is covered by a
 # hash on the measured command line. Opt-in while it is being proven; the
@@ -86,6 +116,11 @@ trap 'rm -rf "$WORK"; restore_tmp' EXIT
 [[ $EUID -eq 0 ]] || fail "run as root"
 [[ -n "$AGENT_BINARY" ]] || fail "set AGENT_BINARY to a linux/amd64 agent build. Whichever build goes in, it serves the same contract on :5050, so the image is identical apart from which binary is inside it — which is the whole reason each one needs its own image and its own measurement"
 [[ -x "$AGENT_BINARY" ]] || fail "AGENT_BINARY is not executable: $AGENT_BINARY"
+
+case "$ENTITY_TYPE" in
+  ""|individual|organization) ;;
+  *) fail "ENTITY_TYPE must be 'individual' or 'organization' (got: $ENTITY_TYPE). The agent enrols witnesses and watchers among peers of its own kind, and a value it does not recognise leaves it with none" ;;
+esac
 
 file "$AGENT_BINARY" | grep -q 'ELF 64-bit' || fail "AGENT_BINARY is not a Linux binary — build with GOOS=linux GOARCH=amd64"
 
@@ -324,6 +359,31 @@ Environment=GOGC=50
 # nothing can reach it with forwarding headers of its own choosing. An agent
 # somebody can reach directly must not set this.
 Environment=TRUST_FORWARDED_HEADERS=1
+Environment="AGENT_BUILD_NAME=__BUILD_NAME__"
+Environment="IDENTITY_AGENT_ENTITY_TYPE=__ENTITY_TYPE__"
+# Plug-ins live on the encrypted state volume, not in this image.
+#
+# A sealed instance is meant to be the same thing as the computer in front of
+# you, so the owner installs whatever they want rather than choosing from a set
+# somebody baked in. That means the catalogue has to be WRITABLE and has to
+# SURVIVE, and this image is neither: the root filesystem is read-only and
+# every block of it is covered by the launch measurement, so anything written
+# there is either impossible or a different machine.
+#
+# The state volume is both, and it is encrypted, so what an owner installed is
+# not readable by whoever runs the hardware — which is the same protection
+# their data already gets.
+#
+# Deliberately no manifests ship inside the measurement. Baking in a curated
+# set would make the choice ours and put it beyond the owner's reach, and the
+# question of which plug-ins can be trusted is a separate mechanism rather than
+# something to settle by shipping a list.
+Environment=MANIFESTS_DIR=/var/lib/identity-agent/manifests
+# Created here rather than left to the agent, so an owner who has installed
+# nothing sees an empty catalogue instead of a failure to read one. The
+# directory cannot ship in the image: it lives on a volume that does not exist
+# until first boot.
+ExecStartPre=/bin/mkdir -p /var/lib/identity-agent/manifests
 ExecStart=/usr/local/bin/identity-agent-core
 Restart=always
 RestartSec=2
@@ -351,6 +411,38 @@ PrivateTmp=yes
 [Install]
 WantedBy=multi-user.target
 UNIT
+# Substituted rather than interpolated, because the heredoc above is quoted so
+# that systemd's own $-syntax survives it intact.
+#
+# A build that names nothing drops the line entirely: an agent that does not
+# know what it is says so, and a screen showing an empty name would look like a
+# fact rather than a gap.
+if [[ -n "$BUILD_NAME" ]]; then
+  # A name is written into a unit file, so a newline in it would forge further
+  # directives — and this value comes from whoever invokes the build. A double
+  # quote would end the quoted value early and do the same thing on one line.
+  [[ "$BUILD_NAME" != *$'\n'* ]] || fail "BUILD_NAME must be a single line"
+  [[ "$BUILD_NAME" != *'"'* ]] || fail "BUILD_NAME must not contain a double quote"
+  BUILD_NAME_ESC=${BUILD_NAME//&/\\&}
+  sed -i "s|__BUILD_NAME__|${BUILD_NAME_ESC//|/\\|}|" \
+    "$WORK/root/etc/systemd/system/identity-agent.service"
+  echo "  build name: $BUILD_NAME"
+else
+  sed -i '/^Environment="AGENT_BUILD_NAME=__BUILD_NAME__"$/d' \
+    "$WORK/root/etc/systemd/system/identity-agent.service"
+fi
+# The kind. Validated above, so no escaping is needed here: the only values that
+# reach this point are two literal words.
+if [[ -n "$ENTITY_TYPE" ]]; then
+  sed -i "s|__ENTITY_TYPE__|$ENTITY_TYPE|" \
+    "$WORK/root/etc/systemd/system/identity-agent.service"
+  echo "  entity type: $ENTITY_TYPE"
+else
+  sed -i '/^Environment="IDENTITY_AGENT_ENTITY_TYPE=__ENTITY_TYPE__"$/d' \
+    "$WORK/root/etc/systemd/system/identity-agent.service"
+  echo "  WARNING: no ENTITY_TYPE, so this image will not know whether it serves"
+  echo "           a person or an organisation, and will enrol no witness or watcher"
+fi
 # The browser front end, only where one was actually installed.
 #
 # Set unconditionally, this named a directory that a default build never
