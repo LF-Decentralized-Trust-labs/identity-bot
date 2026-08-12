@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -138,10 +139,18 @@ func (s *CoreServer) ownerAuthority() (*OwnerAuthority, error) {
 // hold, sealed before the box ever reaches the network, where there is no
 // identity yet to carry an anchor. It is no longer consulted for an identity
 // that names its own owner.
+// errNoOwnerSealed means nobody has claimed this agent yet.
+//
+// A distinct value because it is not a fault and the two callers want opposite
+// things from it: a signature check must refuse, while a screen asking who owns
+// this agent needs to say "nobody yet" rather than report a failure. Sharing
+// one error made an unclaimed agent look broken.
+var errNoOwnerSealed = errors.New("no owner authority is sealed")
+
 func (s *CoreServer) sealedOwnerAuthority() (*OwnerAuthority, error) {
 	raw, err := os.ReadFile(filepath.Join(s.DataDir, ownerAuthorityFile))
 	if err != nil {
-		return nil, fmt.Errorf("no owner authority is sealed")
+		return nil, errNoOwnerSealed
 	}
 	var oa OwnerAuthority
 	if jerr := json.Unmarshal(raw, &oa); jerr != nil {

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -19,6 +20,7 @@ func (s *CoreServer) mountOwnerCeremonyRoutes(r chi.Router) {
 	}
 	r.Route("/owners", func(r chi.Router) {
 		r.Get("/", s.handleListOwners)
+		r.Get("/authority", s.handleOwnerAuthority)
 		r.Get("/ceremony", s.handleGetCeremony)
 		r.Post("/ceremony", s.handleStartCeremony)
 		r.Delete("/ceremony", s.handleAbandonCeremony)
@@ -362,4 +364,43 @@ func digestsOf(publicKeys []string) ([]string, error) {
 		digests = append(digests, iacrypto.Blake3QB64Must([]byte(key)))
 	}
 	return digests, nil
+}
+
+// handleOwnerAuthority reports the owner this agent was sealed to.
+//
+// Different from the list next door, and the difference matters. That one reads
+// the owners out of an identity's own key event log, which is the answer
+// anybody outside can check — and it needs an identity to exist. This one is
+// what was sealed in when somebody agreed to own this agent, which is the only
+// answer available BEFORE the identity is founded.
+//
+// That gap is the whole reason this exists. An organisation about to be founded
+// on a machine it does not own has to hand that machine its owner, and at that
+// moment there is no key event log to read the owner out of. Without this the
+// agreement was recorded and then unreadable, so the founding could not name
+// the person who had just agreed to it.
+//
+// Public halves only: an identifier and a verification key. Both are things the
+// owner hands out by design.
+func (s *CoreServer) handleOwnerAuthority(w http.ResponseWriter, r *http.Request) {
+	owner, err := s.ownerAuthority()
+	if err != nil && !errors.Is(err, errNoOwnerSealed) {
+		// A record that exists and cannot be read IS a fault, and saying "no
+		// owner" to that would report a broken agent as an unclaimed one.
+		writeError(w, http.StatusInternalServerError, "Could not read the owner", err.Error())
+		return
+	}
+	if owner == nil || owner.AID == "" {
+		// An answer, not a failure. An agent nobody has claimed is a real and
+		// ordinary state, and it is the state a screen most needs to tell apart
+		// from an error.
+		writeJSONResponse(w, map[string]interface{}{"owner": nil})
+		return
+	}
+	writeJSONResponse(w, map[string]interface{}{
+		"owner": map[string]string{
+			"aid":        owner.AID,
+			"public_key": owner.PublicKey,
+		},
+	})
 }
