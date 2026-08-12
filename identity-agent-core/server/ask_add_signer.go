@@ -1,14 +1,19 @@
 package server
 
 import (
+	"crypto/ed25519"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
 
+	"identity-agent-core/backup"
+	"identity-agent-core/iacrypto"
 	"identity-agent-core/login"
+	"identity-agent-core/secureenclave"
 )
 
 // t = 4 -> sign_org. During organisation creation, an individual's PERSONAL Identity
@@ -112,11 +117,54 @@ func (addSignerAsk) Execute(s *CoreServer, ctx AskContext, d ScanDecision) (map[
 		return nil, ferr
 	}
 	profile, _ := s.DataStore.GetProfile()
+	// The key this owner will sign with, and the one they have already
+	// committed to rotating to.
+	//
+	// WITHOUT THESE THE ORGANISATION REFUSES THE WHOLE REQUEST, and it is right
+	// to: an organisation that recorded an owner whose signature it could not
+	// check would have an owner in name only, and would find out the first time
+	// that owner tried to do anything. The vouch proves a person stood behind
+	// this organisation once; these are what let it recognise them ever again.
+	//
+	// The same relationship key that signed the vouch just above, so the
+	// organisation verifies that signature against the key it was given rather
+	// than against a second key that merely arrived alongside it.
+	pub := ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)
+	nextSeed, nerr := s.nextRelationshipSeed(rel)
+	if nerr != nil {
+		return nil, fmt.Errorf("derive the rotation key this owner commits to: %w", nerr)
+	}
+	nextPub := ed25519.NewKeyFromSeed(nextSeed).Public().(ed25519.PublicKey)
+
+	// What this organisation will seal its backups and its disk to.
+	//
+	// Derived here because this is the only moment the owner is present. An
+	// organisation holds its own signing seed and the founder never sees it —
+	// there is no phrase to write down — so an archive only the owner can open
+	// is the one way an organisation survives losing the machine it runs on.
+	// On rented hardware it is also the owner's only way back into an encrypted
+	// disk whose other key moves with the software's measurement.
+	//
+	// Public halves only: they lock things TO this owner and open nothing.
+	// Not fatal if the key cannot be derived — an organisation with an owner it
+	// can verify and no recovery is a problem to fix, while refusing here would
+	// leave one with no owner at all, which cannot be repaired later.
+	sealKey := ""
+	if keys, kerr := s.ownerBackupSealPublicKeys(); kerr == nil && len(keys) > 0 {
+		sealKey = keys[0]
+	} else if kerr != nil {
+		log.Printf("[sign_org] signing for %s without a recovery key (%v) — this organisation "+
+			"will not be able to write a backup anybody can restore", p.OrgAID, kerr)
+	}
+
 	body, _ := json.Marshal(disclosureBody(fields, profile, map[string]string{
-		"pairwise_aid":  rel.PairwiseAID,
-		"oobi":          rel.RelayOOBI,
-		"vouch_sig":     vouchSig,
-		"vouch_payload": string(vouchPayload),
+		"pairwise_aid":               rel.PairwiseAID,
+		"oobi":                       rel.RelayOOBI,
+		"vouch_sig":                  vouchSig,
+		"vouch_payload":              string(vouchPayload),
+		"public_key":                 iacrypto.VerkeyQB64(pub),
+		"next_public_key":            iacrypto.VerkeyQB64(nextPub),
+		"backup_seal_public_key_b64": sealKey,
 	}))
 	redeemURL := strings.TrimRight(ctx.Base, "/") + "/api/signer/invites/" + p.InviteToken + "/redeem"
 	client := &http.Client{Timeout: 15 * time.Second}
@@ -147,4 +195,22 @@ func (addSignerAsk) Execute(s *CoreServer, ctx AskContext, d ScanDecision) (map[
 		"pairwise_aid": rel.PairwiseAID,
 		"status":       "active", // the signer is active immediately
 	}, nil
+}
+
+// nextRelationshipSeed is the key this relationship has committed to rotating
+// to — generation 1 of the same derivation that produced the current one.
+//
+// Pre-rotation is not optional in KERI: an inception commits to the NEXT key,
+// and an owner recorded without one could never rotate, which for an
+// organisation means its owner could never be replaced. That is the single
+// thing the whole found-as-root shape exists to keep possible.
+func (s *CoreServer) nextRelationshipSeed(rel *login.SiteRelationship) ([]byte, error) {
+	if rel == nil || rel.RelationshipIndex <= 0 {
+		return nil, fmt.Errorf("this relationship has no key index, so no rotation key can be derived from it")
+	}
+	root, err := secureenclave.LoadRootSeed(s.DataDir)
+	if err != nil {
+		return nil, fmt.Errorf("no root seed on this device: %w", err)
+	}
+	return backup.DerivePairwiseSeed(root, rel.RelationshipIndex, 1)
 }
