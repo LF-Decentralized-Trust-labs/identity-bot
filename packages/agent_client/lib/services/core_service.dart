@@ -2048,6 +2048,29 @@ class CoreService {
     }
   }
 
+  /// Who agreed to own this agent, as sealed when they agreed.
+  ///
+  /// Not the same question as [getOwners], and the difference decides which one
+  /// a screen wants. That reads the owners out of an identity's own key event
+  /// log — the answer anybody outside can check — and needs an identity to
+  /// exist. This is what was sealed in at the moment somebody agreed, which is
+  /// the only answer available BEFORE the identity is founded.
+  ///
+  /// Returns null when nobody has claimed this agent, which is an ordinary
+  /// state rather than a failure.
+  Future<({String aid, String publicKey})?> sealedOwner() async {
+    final response = await _client.get(Uri.parse('$baseUrl/api/owners/authority'));
+    if (response.statusCode != 200) {
+      throw Exception('Could not read who owns this agent: ${response.statusCode}');
+    }
+    final owner = (jsonDecode(response.body) as Map<String, dynamic>)['owner'];
+    if (owner is! Map) return null;
+    final aid = (owner['aid'] ?? '').toString();
+    final key = (owner['public_key'] ?? '').toString();
+    if (aid.isEmpty || key.isEmpty) return null;
+    return (aid: aid, publicKey: key);
+  }
+
   /// The keys this agent seals its backups to — the owner's, recorded when
   /// they agreed to own it.
   ///
