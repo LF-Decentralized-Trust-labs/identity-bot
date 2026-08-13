@@ -93,7 +93,13 @@ type pairingCompleteRequest struct {
 	// delegation in its own KEL — what makes the delegation verifiable by a
 	// third party rather than merely asserted here.
 	DelegatorIxn map[string]interface{} `json:"delegator_ixn,omitempty"`
-	// DelegatorAID is the controller's root AID.
+	// DelegatorAID is whose authority a delegated identity is founded under.
+	//
+	// Not a root identifier. Saying so was an instruction to put one into an
+	// event that gets published, which is what a delegated inception does with
+	// its delegator.
+	//
+	// Empty on everything pairing sends: nothing here delegates.
 	DelegatorAID string `json:"delegator_aid"`
 	// OwnerDID is the owner device's encryption keys, so this instance can
 	// reach it without asking anybody for them later.
