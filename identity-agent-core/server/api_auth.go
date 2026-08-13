@@ -203,8 +203,8 @@ var publicRoutes = map[string]string{
 	// The adoption ceremony itself. Same reasoning and the same window: an
 	// instance with no owner cannot gate these on being the owner. Both refuse
 	// the moment the instance has an identity, so the window closes on success.
-	"POST /api/pairing/begin":    "an unadopted instance offers its own public key material for delegation",
-	"POST /api/pairing/complete": "an unadopted instance accepts a delegation over that key and seals its owner",
+	"POST /api/pairing/begin":    "an unpaired computer offers its own public key material so an owner can be sealed into its first event",
+	"POST /api/pairing/complete": "an unpaired computer founds its identity over that key and seals in who owns it",
 	"GET /*":                     "the Flutter web UI itself; the API it calls is still authorised",
 }
 

@@ -98,8 +98,10 @@ func TestAdoptingAMachineNeverNamesTheRootIdentity(t *testing.T) {
 			"published event names the identifier that identifies this person " +
 			"everywhere — to anyone who can reach the machine")
 	}
-	if sent.DelegatorAID == root.AID {
-		t.Error("the root was named as delegator")
+	if sent.DelegatorAID != "" {
+		t.Errorf("a delegator was named (%q) on a machine that founds its own root — "+
+			"nothing consumes it here, so it can only teach a reader that a "+
+			"delegation is what happens", sent.DelegatorAID)
 	}
 	if sent.OwnerAID == "" {
 		t.Fatal("no owner at all, so whoever reaches the machine first becomes its owner")
@@ -233,5 +235,79 @@ func TestAdoptionRefusesAnOwnerIdentityItNeverMinted(t *testing.T) {
 	if got.Code == http.StatusOK {
 		t.Fatal("a machine was adopted under an identity this device holds no key for, " +
 			"so nobody could ever speak to it again")
+	}
+}
+
+// A computer in front of you is paired the same way a sealed one is.
+//
+// This is the point people get wrong, so it is asserted rather than left to be
+// inferred from the code having no branch. Where a computer physically sits
+// changes nothing about what it publishes: a laptop on a desk and a machine in
+// a data centre both found their own root and both name a pairwise owner.
+//
+// The only thing that differs is attestation — a laptop has no hardware that
+// can prove what it is, so pairing one is a deliberate act (AllowUnattested).
+// That is a statement about what the owner is willing to believe, not about
+// which identity shape the computer gets.
+func TestAComputerInFrontOfYouIsPairedTheSameWayAsASealedOne(t *testing.T) {
+	s := adoptingOwner(t)
+	root, err := s.DataStore.GetIdentity()
+	if err != nil || root == nil {
+		t.Fatal("fixture has no identity")
+	}
+
+	// No attestation offered at all — this stands in for an ordinary laptop or
+	// desktop, not a machine with hardware that can prove what it is.
+	var sent pairingCompleteRequest
+	plainComputer := adoptingMachine(t, &sent)
+	defer plainComputer.Close()
+
+	if rec := adoptFrom(t, s, plainComputer.URL); rec.Code != http.StatusOK {
+		t.Fatalf("pairing an ordinary computer failed: %d %s", rec.Code, rec.Body.String())
+	}
+
+	if !sent.FoundAsRoot || sent.DipEvent != nil {
+		t.Fatal("an ordinary computer was asked to be a delegate. Nothing about being " +
+			"on somebody's desk rather than in a data centre justifies publishing " +
+			"a delegator, and this is the case people reach for delegation on")
+	}
+	if sent.OwnerAID == root.AID || sent.DelegatorAID != "" {
+		t.Fatal("a computer on somebody's desk was told its owner is the ROOT identity, " +
+			"so it publishes the identifier that identifies them everywhere")
+	}
+	if sent.OwnerAID == "" {
+		t.Fatal("no owner at all, so whoever reaches it first becomes its owner")
+	}
+}
+
+// The ceremony must not grow a device-type branch later.
+//
+// The property above holds because pairing has ONE path and it does not ask
+// what kind of machine it is talking to. That is easy to undo — a well-meaning
+// "black boxes get X, desktops get Y" is exactly the change that would
+// reintroduce the exposure — so two machines are paired through the same route
+// and compared.
+func TestPairingDoesNotTreatOneKindOfComputerDifferently(t *testing.T) {
+	s := adoptingOwner(t)
+
+	var sealedLike, desktopLike pairingCompleteRequest
+	a := adoptingMachine(t, &sealedLike)
+	defer a.Close()
+	b := adoptingMachine(t, &desktopLike)
+	defer b.Close()
+
+	if rec := adoptFrom(t, s, a.URL); rec.Code != http.StatusOK {
+		t.Fatalf("first pairing failed: %s", rec.Body.String())
+	}
+	if rec := adoptFrom(t, s, b.URL); rec.Code != http.StatusOK {
+		t.Fatalf("second pairing failed: %s", rec.Body.String())
+	}
+
+	if sealedLike.FoundAsRoot != desktopLike.FoundAsRoot {
+		t.Fatal("two computers paired through the same route were given different " +
+			"identity shapes, so something has started branching on device type")
+	}
+	if (sealedLike.DipEvent == nil) != (desktopLike.DipEvent == nil) {
+		t.Fatal("one computer was delegated and the other was not")
 	}
 }

@@ -3158,7 +3158,7 @@ class AgentNotYoursException implements Exception {
 class AdoptedAgent {
   const AdoptedAgent({
     required this.aid,
-    required this.delegatedAid,
+    required this.signsAsAid,
     required this.url,
     required this.kind,
     this.label = '',
@@ -3172,7 +3172,7 @@ class AdoptedAgent {
   final String aid;
 
   /// What it signs as, under this owner's authority.
-  final String delegatedAid;
+  final String signsAsAid;
 
   /// Where it is reached. Expected to change; the identifier is not.
   final String url;
@@ -3199,7 +3199,7 @@ class AdoptedAgent {
 
   factory AdoptedAgent.fromJson(Map<String, dynamic> json) => AdoptedAgent(
         aid: (json['aid'] ?? '') as String,
-        delegatedAid: (json['delegated_aid'] ?? '') as String,
+        signsAsAid: (json['signs_as_aid'] ?? json['delegated_aid'] ?? '') as String,
         url: (json['url'] ?? '') as String,
         kind: (json['kind'] ?? 'individual') as String,
         label: (json['label'] ?? '') as String,
@@ -3244,7 +3244,7 @@ class AttestationLineageDto {
     this.ownerRecoveryPresent = 'unknown',
     this.hardwareKeyProtection = 'unknown',
     this.hardwareKeyName = '',
-    this.delegatedAid = '',
+    this.signsAsAid = '',
     this.ownerAid = '',
     this.checkedAt = '',
   });
@@ -3263,7 +3263,7 @@ class AttestationLineageDto {
   final String ownerRecoveryPresent;
   final String hardwareKeyProtection;
   final String hardwareKeyName;
-  final String delegatedAid;
+  final String signsAsAid;
   final String ownerAid;
   final String checkedAt;
 
@@ -3287,7 +3287,9 @@ class AttestationLineageDto {
         ownerRecoveryPresent: _s(json, 'owner_recovery_present', 'unknown'),
         hardwareKeyProtection: _s(json, 'hardware_key_protection', 'unknown'),
         hardwareKeyName: _s(json, 'hardware_key_name'),
-        delegatedAid: _s(json, 'delegated_aid'),
+        signsAsAid: _s(json, 'signs_as_aid').isNotEmpty
+            ? _s(json, 'signs_as_aid')
+            : _s(json, 'delegated_aid'),
         ownerAid: _s(json, 'owner_aid'),
         checkedAt: _s(json, 'checked_at'),
       );

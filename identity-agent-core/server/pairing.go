@@ -236,7 +236,7 @@ func (s *CoreServer) handlePairingComplete(w http.ResponseWriter, r *http.Reques
 	defer pairingState.Unlock()
 	if pairingState.offered == nil {
 		writeError(w, http.StatusConflict, "Nothing to complete",
-			"call /api/pairing/begin first — there is no key material to delegate over")
+			"call /api/pairing/begin first — there is no key material to found an identity over")
 		return
 	}
 
@@ -574,7 +574,7 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 		// list, a build they ran themselves — is the question this cannot
 		// answer and should not appear to.
 		AcceptedMeasurements []string `json:"accepted_measurements,omitempty"`
-	// OwnerAID and OwnerIndex name an identity minted BEFORE the machine was
+		// OwnerAID and OwnerIndex name an identity minted BEFORE the machine was
 		// asked for — see /api/machines/owner-identity. The provisioning host was
 		// told this identity may claim the machine, so adoption must use the
 		// same one or the machine will refuse it.
@@ -735,12 +735,14 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 	}
 
 	result, err := boxPairingComplete(client, base, pairingCompleteRequest{
-		AdoptionCode:            req.AdoptionCode,
+		AdoptionCode: req.AdoptionCode,
 		// Founded, not delegated: the machine incepts its own root and names
 		// this owner in a seal. Nothing here identifies the person outside
 		// this one relationship.
-		FoundAsRoot:             true,
-		DelegatorAID:            ownerAID,
+		FoundAsRoot: true,
+		// No DelegatorAID. Nothing delegates here, the receiving side ignores
+		// it on this path, and sending it anyway would tell every reader of this
+		// payload that a delegation is what happens.
 		OwnerAID:                ownerAID,
 		OwnerPublicKey:          ownerKey,
 		BackupSealPublicKeysB64: sealKeys,
@@ -792,13 +794,13 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 	//    Asking the machine afterwards means trusting what it says about
 	//    itself, which is the thing the check at adoption existed to avoid.
 	agent := store.AdoptedAgent{
-		AID:  offer.PairwiseAID,
-		// What the machine signs as. Its own root now, minted inside it, rather
-		// than an identity issued from here.
-		DelegatedAID: identityAID,
-		URL:          base,
-		Kind:         "individual",
-		Sealed:       offer.Attestation != "",
+		AID: offer.PairwiseAID,
+		// What the machine signs as. Its own root, minted inside it, rather than
+		// an identity issued from here.
+		SignsAsAID: identityAID,
+		URL:        base,
+		Kind:       "individual",
+		Sealed:     offer.Attestation != "",
 		// Which identity of ours it answers to, and where that key comes from.
 		// Without the index there is no signing to this machine again, no
 		// rotation and no revocation — so losing it is losing the machine.
@@ -934,4 +936,3 @@ func (s *CoreServer) pairwisePublicKey(idx int) (string, error) {
 	pub := ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)
 	return iacrypto.VerkeyQB64(pub), nil
 }
-

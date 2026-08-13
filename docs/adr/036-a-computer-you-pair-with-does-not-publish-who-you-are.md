@@ -128,9 +128,22 @@ owner. It is an implementation constraint, not a decision input.
   than defaulted to the first one, and a test fails if two ranges ever overlap.
   The refusal immediately surfaced a second pool that had been silently sharing
   a range with the first.
+- **What a machine signs as is recorded under a name that says so.** The column
+  was `delegated_aid`; it is `signs_as_aid`. The value was always right, but the
+  name is what the next person reads before changing pairing, and
+  `delegated_aid` teaches them that a delegation is what happens here. It is
+  named for what it holds rather than for the ceremony, so it stays honest if a
+  delegated machine is ever recorded alongside.
 - **An owner identity this device never minted is refused at pairing.** A
   computer paired under an identifier we hold no key for would answer to nobody
   and could never be reached again. It fails with that as the reason.
+- **The delegated path is still implemented, and should stay.** Pairing never
+  routes through it, but `handlePairingComplete` still accepts a `dip` for the
+  cases where a published lineage is the point — an organisation's website, its
+  services, an AI agent acting in its name. It is not dead code awaiting
+  removal, and it is not a shortcut for a personal machine. Anyone tempted to
+  "simplify" by sending machines back through it should read the Decision above
+  first.
 - **The route name still says "adopt".** `/api/pairing/adopt` predates this
   decision. Renaming it would break every already-paired computer for no
   behavioural gain, so it stays; "adopt" on the wire means pairing as described

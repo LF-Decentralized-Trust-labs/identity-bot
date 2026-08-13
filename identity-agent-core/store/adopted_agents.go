@@ -21,8 +21,11 @@ type AdoptedAgent struct {
 	// it — its address, and the key in this table because it is the one thing
 	// about the machine that never changes.
 	AID string `json:"aid"`
-	// DelegatedAID is what it signs as, under this owner's authority.
-	DelegatedAID string `json:"delegated_aid"`
+	// SignsAsAID is the identity this machine signs as: its own root, founded
+	// inside it and carrying a seal naming the owner. Named for what it holds
+	// rather than for the ceremony that produced it, so it stays honest if a
+	// machine recorded here is ever delegated instead.
+	SignsAsAID string `json:"signs_as_aid"`
 	// URL is where it is reached. The field expected to change: a machine's
 	// address moves over its life and its identifier does not.
 	URL string `json:"url"`
@@ -77,7 +80,7 @@ func (s *SQLiteStore) SaveAdoptedAgent(a AdoptedAgent) error {
 	}
 	_, err := s.db.Exec(`
 		INSERT INTO adopted_agents
-			(aid, delegated_aid, url, kind, label, sealed, measurement, owner_aid, owner_index, adopted_at)
+			(aid, signs_as_aid, url, kind, label, sealed, measurement, owner_aid, owner_index, adopted_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
 		-- Deliberately NOT updating owner_aid or owner_index. They are settled
 		-- when the machine is adopted, and a second adoption quietly rewriting
@@ -86,7 +89,7 @@ func (s *SQLiteStore) SaveAdoptedAgent(a AdoptedAgent) error {
 		ON CONFLICT(aid) DO UPDATE SET
 			url   = excluded.url,
 			label = CASE WHEN excluded.label != '' THEN excluded.label ELSE adopted_agents.label END
-	`, a.AID, a.DelegatedAID, a.URL, a.Kind, a.Label, sealed, a.Measurement,
+	`, a.AID, a.SignsAsAID, a.URL, a.Kind, a.Label, sealed, a.Measurement,
 		a.OwnerAID, a.OwnerIndex, nullIfEmpty(a.AdoptedAt))
 	if err != nil {
 		return fmt.Errorf("could not record the adopted agent: %w", err)
@@ -98,7 +101,7 @@ func (s *SQLiteStore) SaveAdoptedAgent(a AdoptedAgent) error {
 // first — which is the order somebody who just adopted one wants to see.
 func (s *SQLiteStore) ListAdoptedAgents() ([]AdoptedAgent, error) {
 	rows, err := s.db.Query(`
-		SELECT aid, delegated_aid, url, kind, label, sealed, measurement,
+		SELECT aid, signs_as_aid, url, kind, label, sealed, measurement,
 		       owner_aid, owner_index,
 		       COALESCE(adopted_at, ''), COALESCE(last_seen_at, '')
 		FROM adopted_agents
@@ -113,7 +116,7 @@ func (s *SQLiteStore) ListAdoptedAgents() ([]AdoptedAgent, error) {
 	for rows.Next() {
 		var a AdoptedAgent
 		var sealed int
-		if err := rows.Scan(&a.AID, &a.DelegatedAID, &a.URL, &a.Kind, &a.Label,
+		if err := rows.Scan(&a.AID, &a.SignsAsAID, &a.URL, &a.Kind, &a.Label,
 			&sealed, &a.Measurement, &a.OwnerAID, &a.OwnerIndex,
 			&a.AdoptedAt, &a.LastSeenAt); err != nil {
 			return nil, err

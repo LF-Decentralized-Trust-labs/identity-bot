@@ -797,6 +797,23 @@ CREATE TABLE IF NOT EXISTS machine_owner_identities (
     minted_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 `},
+	{
+		Version:     34,
+		Description: "Name the machine's identity for what it is, not what it used to be",
+		SQL: `
+-- delegated_aid held the identity a machine signs as, back when that identity
+-- was delegated from this owner. It is not delegated any more: the machine
+-- founds its own root and names a pairwise owner in a seal.
+--
+-- The value was already correct. Only the name was wrong, and a wrong name is
+-- not cosmetic here — the next person to change pairing reads "delegated_aid",
+-- concludes a delegation is what happens, and reintroduces the published
+-- delegator this was written to remove.
+--
+-- signs_as_aid says what the column holds and stays true under either
+-- ceremony, so a delegated machine recorded here later needs no third name.
+ALTER TABLE adopted_agents RENAME COLUMN delegated_aid TO signs_as_aid;
+`},
 }
 
 // ApplyIdentityMigrations creates the migrations table and applies any pending migrations.
