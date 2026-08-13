@@ -29,6 +29,64 @@ func (c *capturePoster) post(ctx context.Context, url string, body []byte) (map[
 	return map[string]interface{}{"ok": true}, nil
 }
 
+// acceptURL is where the accept was posted.
+//
+// The accept specifically, not whatever was posted last. Two services post here
+// independently — one sending a request, the other accepting it — so which
+// arrives last is not something the code decides, and asserting on it was
+// asserting an ordering that does not exist. It held while the timings happened
+// to line up and failed every run under the race detector.
+//
+// Through the lock, like everything else here. The test used to index c.posts
+// directly while a service was still appending to it, which is a data race
+// whether or not it was ever caught.
+func (c *capturePoster) acceptURL() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for i := len(c.posts) - 1; i >= 0; i-- {
+		if strings.Contains(c.posts[i].URL, "/api/witness/accept") {
+			return c.posts[i].URL
+		}
+	}
+	return ""
+}
+
+// lastURL is where the most recent post went, for saying what happened instead
+// when something expected did not.
+func (c *capturePoster) lastURL() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.posts) == 0 {
+		return ""
+	}
+	return c.posts[len(c.posts)-1].URL
+}
+
+// waitForAccept waits until the accept has actually been posted.
+//
+// It used to be a 50ms sleep, which is a guess about how long another goroutine
+// takes. That guess held until the race detector slowed everything down, and
+// then the test asserted on the request that came before the accept and failed
+// every run — so -race could not be used on this package at all, which is the
+// one package whose work happens in background goroutines and therefore the one
+// where a real race would hide.
+//
+// Waiting for the thing being asserted is both faster in the ordinary case and
+// correct in the slow one.
+func (c *capturePoster) waitForAccept(t *testing.T) AcceptCallback {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if cb := c.lastAccept(); cb.Decision != "" {
+			return cb
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no accept was posted within 5s; last post went to %q", c.lastURL())
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
 func (c *capturePoster) lastAccept() AcceptCallback {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -89,13 +147,12 @@ func TestMutualEnrollmentPostBack(t *testing.T) {
 		t.Fatalf("B should accept A: %s", result.Reason)
 	}
 
-	time.Sleep(50 * time.Millisecond)
-	cb := cap.lastAccept()
+	cb := cap.waitForAccept(t)
 	if cb.Decision != "accepted" || cb.RequesterAID != aidA || cb.ResponderAID != aidB {
 		t.Fatalf("POST-back wrong: %+v", cb)
 	}
-	if !strings.HasSuffix(cap.posts[len(cap.posts)-1].URL, "/api/witness/accept") {
-		t.Fatalf("expected accept URL, got %s", cap.posts[len(cap.posts)-1].URL)
+	if !strings.HasSuffix(cap.acceptURL(), "/api/witness/accept") {
+		t.Fatalf("the accept did not go to the accept route, it went to %q", cap.acceptURL())
 	}
 
 	// A receives the accept callback — B is now A's witness.
