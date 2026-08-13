@@ -443,10 +443,16 @@ func TestNoHandlerUsesLoopbackAsTheOwnerTest(t *testing.T) {
 			if err != nil {
 				t.Fatalf("read %s: %v", name, err)
 			}
-			if n := strings.Count(string(src), "isLocalOwnerRequest(r)"); n != 1 {
-				t.Errorf("%s gates on being local %d times; it is exempt for exactly one "+
-					"route, the one that runs before an owner exists and only to keep an "+
-					"on-screen code off the network. Anything else must use s.isOwner(r)", name, n)
+			// Two routes, both of which run before an owner exists and both of
+			// which only keep an on-screen code — and who took it — off the
+			// network: issuing the code, and reading back what happened to it.
+			// A third would not be covered by that reasoning, so it fails here
+			// and has to be argued for rather than assumed.
+			if n := strings.Count(string(src), "isLocalOwnerRequest(r)"); n != 2 {
+				t.Errorf("%s gates on being local %d times, expected 2 (issuing the code, "+
+					"and reading back what happened to it). Both run before an owner exists, "+
+					"which is the only reason the exemption holds. Anything else in this "+
+					"file must use s.isOwner(r)", name, n)
 			}
 			continue
 		}

@@ -27,6 +27,7 @@ func pairableComputer(t *testing.T) (*CoreServer, *httptest.Server, string) {
 	machine.KeriDriver = startedEngine(t)
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("/api/provisioning/expect", machine.handleProvisioningExpect)
 	mux.HandleFunc("/api/pairing/begin", machine.handlePairingBegin)
 	mux.HandleFunc("/api/pairing/complete", machine.handlePairingComplete)
 	srv := httptest.NewServer(mux)
@@ -274,6 +275,7 @@ func TestTheIdentityAMachineWasPromisedToCanClaimItByProvingControl(t *testing.T
 	t.Cleanup(resetExpectedClaimForTest)
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("/api/provisioning/expect", machine.handleProvisioningExpect)
 	mux.HandleFunc("/api/pairing/begin", machine.handlePairingBegin)
 	mux.HandleFunc("/api/pairing/complete", machine.handlePairingComplete)
 	srv := httptest.NewServer(mux)
@@ -314,6 +316,7 @@ func TestProvingControlOfSomeIdentityIsNotEnoughOnAMachinePromisedToAnother(t *t
 	t.Cleanup(resetExpectedClaimForTest)
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("/api/provisioning/expect", machine.handleProvisioningExpect)
 	mux.HandleFunc("/api/pairing/begin", machine.handlePairingBegin)
 	mux.HandleFunc("/api/pairing/complete", machine.handlePairingComplete)
 	srv := httptest.NewServer(mux)
@@ -329,5 +332,52 @@ func TestProvingControlOfSomeIdentityIsNotEnoughOnAMachinePromisedToAnother(t *t
 	}
 	if id, _ := machine.DataStore.GetIdentity(); id != nil {
 		t.Fatal("an identity was founded despite the claim being refused")
+	}
+}
+
+// Scanning locks the machine. Somebody who reads the screen later is refused.
+//
+// This is what the registration step buys. Before it, a displayed code stood
+// for its whole ten minutes and any valid claimant could use it; the machine
+// now belongs to the first identity that presents the code, which in practice
+// is seconds after the person scans.
+func TestWhoeverScansFirstLocksTheComputerToTheirIdentity(t *testing.T) {
+	machine, srv, code := pairableComputer(t)
+
+	first := adoptingOwner(t)
+	if rec := claimAs(t, first, srv.URL, code, ""); rec.Code != http.StatusOK {
+		t.Fatalf("the person who scanned it could not claim it: %s", rec.Body.String())
+	}
+
+	// Somebody who read the same screen afterwards, holding a real identity of
+	// their own and able to sign for it perfectly well.
+	later := adoptingOwner(t)
+	rec := claimAs(t, later, srv.URL, code, "")
+	if rec.Code == http.StatusOK {
+		t.Fatal("a second identity claimed a computer that was already locked to the first")
+	}
+	id, _ := machine.DataStore.GetIdentity()
+	agents, _ := first.DataStore.ListAdoptedAgents()
+	if id == nil || len(agents) != 1 || agents[0].SignsAsAID != id.AID {
+		t.Fatal("the first claimant did not end up owning the machine")
+	}
+}
+
+// The code is what earns the right to say who may claim. Guessing it does not.
+func TestSayingWhoMayClaimNeedsTheCodeOffTheScreen(t *testing.T) {
+	_, srv, _ := pairableComputer(t)
+
+	body := `{"claim_token":"WRNG-WRNG-WRNG-WRNG","owner_aid":"EAttacker"}`
+	resp, err := http.Post(srv.URL+"/api/provisioning/expect", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusOK {
+		t.Fatal("somebody who never saw the screen was allowed to say who may claim this " +
+			"computer, which is the whole race the code exists to stop")
+	}
+	if _, owner, told := expectedAdoption(); told {
+		t.Fatalf("a refused attempt still locked the machine, to %q", owner)
 	}
 }

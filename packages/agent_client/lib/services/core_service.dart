@@ -2035,6 +2035,51 @@ class CoreService {
   /// Owner-only, and signed as such. A browser cannot do this and should not be
   /// asked to: it holds no key, and the whole point is that the claim is made
   /// by something that does.
+  /// Offers THIS computer for pairing, and returns the code to show on it.
+  ///
+  /// Only ever call this against the agent running on this machine. It refuses
+  /// anything that is not a genuinely local request — not because being local
+  /// authorises the pairing (proving control of an identity does that), but
+  /// because the code is a secret meant for this machine's own screen and must
+  /// not be handed out over the network.
+  Future<ComputerPairingOffer> offerThisComputerForPairing() async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/api/pairing/offer-this-computer'),
+      headers: {'Content-Type': 'application/json'},
+      body: '{}',
+    );
+    if (response.statusCode != 200) {
+      throw Exception(
+          'This computer could not be offered for pairing: ${response.statusCode} ${response.body}');
+    }
+    final json = jsonDecode(response.body) as Map<String, dynamic>;
+    return ComputerPairingOffer(
+      code: (json['code'] ?? '').toString(),
+      validFor:
+          Duration(seconds: (json['expires_in_seconds'] as num?)?.toInt() ?? 0),
+    );
+  }
+
+  /// What has happened to the code this computer is showing.
+  ///
+  /// The screen has to say WHO took the machine, not only that somebody did.
+  /// Anyone who can see the screen can read the code, and the first identity to
+  /// present it decides who owns the machine — so if that was not you, finding
+  /// out immediately is the whole remedy.
+  Future<ThisComputersPairing> thisComputersPairingState() async {
+    final response = await _client.get(Uri.parse('$baseUrl/api/pairing/this-computer'));
+    if (response.statusCode != 200) {
+      throw Exception('Could not read this computer\'s pairing state: ${response.statusCode}');
+    }
+    final json = jsonDecode(response.body) as Map<String, dynamic>;
+    return ThisComputersPairing(
+      code: (json['code'] ?? '').toString(),
+      remaining: Duration(seconds: (json['expires_in_seconds'] as num?)?.toInt() ?? 0),
+      claimedBy: (json['claimed_by'] ?? '').toString(),
+      paired: json['paired'] == true,
+    );
+  }
+
   /// Mints the identity a machine will answer to, before the machine exists.
   ///
   /// ORDERING IS WHY THIS IS SEPARATE. A machine is told who may claim it
@@ -3293,4 +3338,37 @@ class AttestationLineageDto {
         ownerAid: _s(json, 'owner_aid'),
         checkedAt: _s(json, 'checked_at'),
       );
+}
+
+/// A standing offer to pair the computer it came from.
+class ComputerPairingOffer {
+  const ComputerPairingOffer({required this.code, required this.validFor});
+
+  /// Shown on this computer's screen and typed or scanned into the device
+  /// holding the identity that will own it. Never sent anywhere by this app.
+  final String code;
+
+  /// How long it stands, shown as a countdown so somebody who walked away
+  /// knows to ask for a new one.
+  final Duration validFor;
+}
+
+/// What has become of the code a computer is showing.
+class ThisComputersPairing {
+  const ThisComputersPairing({
+    required this.code,
+    required this.remaining,
+    required this.claimedBy,
+    required this.paired,
+  });
+
+  final String code;
+  final Duration remaining;
+
+  /// The identity that said it will claim this machine. Empty until somebody
+  /// scans. Shown on screen so a claim by anybody else is visible at once.
+  final String claimedBy;
+
+  /// Whether the machine now has an identity of its own.
+  final bool paired;
 }

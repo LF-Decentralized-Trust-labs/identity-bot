@@ -128,3 +128,47 @@ func (s *CoreServer) handleOfferThisComputer(w http.ResponseWriter, r *http.Requ
 		"expires_in_seconds": int(localOfferWindow.Seconds()),
 	})
 }
+
+// handleThisComputersPairingState tells the screen what has happened to the
+// code it is showing.
+//
+// The screen has to say WHO took the machine, not just that somebody did. A
+// code displayed on a screen can be read by anyone who can see the screen, and
+// first-write-wins means whoever presents it first decides who owns the
+// machine. That is bounded — they have to be looking at it — but it is not
+// nothing, and the only remedy is that the person standing there finds out
+// immediately rather than after they have set the machine up.
+//
+// Local-only for the same reason as the offer itself: this reports on a secret
+// shown on that machine's screen.
+func (s *CoreServer) handleThisComputersPairingState(w http.ResponseWriter, r *http.Request) {
+	if !isLocalOwnerRequest(r) {
+		writeError(w, http.StatusForbidden, "Not from this computer",
+			"what this computer is showing on its own screen is not reported over the network")
+		return
+	}
+	out := map[string]any{}
+	if s.DataStore != nil {
+		if identity, err := s.DataStore.GetIdentity(); err == nil && identity != nil {
+			out["paired"] = true
+			out["identity"] = identity.AID
+		}
+	}
+	if code, live := localPairingOffer(); live {
+		out["code"] = code
+		out["expires_in_seconds"] = int(time.Until(localOfferExpiry()).Seconds())
+	}
+	// Whoever has said they will claim it. Until somebody scans, this is empty
+	// and the screen simply waits.
+	if _, ownerAID, told := expectedAdoption(); told && ownerAID != "" {
+		out["claimed_by"] = ownerAID
+	}
+	writeJSON(w, out)
+}
+
+// localOfferExpiry is when the standing offer runs out.
+func localOfferExpiry() time.Time {
+	localOffer.Lock()
+	defer localOffer.Unlock()
+	return localOffer.expires
+}

@@ -786,6 +786,9 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		// provisions a laptop. Safe because a claim must prove control — see
 		// claim_proves_control.go — not because of where this is called from.
 		r.Post("/pairing/offer-this-computer", s.handleOfferThisComputer)
+		// What this computer is showing, and who has said they will claim it.
+		// Local-only: it reports on a secret displayed on its own screen.
+		r.Get("/pairing/this-computer", s.handleThisComputersPairingState)
 		r.Post("/pairing/begin", s.handlePairingBegin)
 		r.Post("/pairing/complete", s.handlePairingComplete)
 		// The owner's side: adopt a box. Owner-only by default.
