@@ -226,3 +226,108 @@ func TestAMachineThatCannotVerifyRefusesRatherThanTrusts(t *testing.T) {
 			"is how it ends up answering to whoever asked first")
 	}
 }
+
+// THE BLACK BOX PATH, END TO END, WITH BOTH GATES.
+//
+// A machine somebody else set up is told two things before anyone can reach it:
+// a claim token, and WHICH identity may present it. That identity is a pairwise
+// one the owner minted before the machine was asked for, and handed over at
+// reservation.
+//
+// So a claim there has to pass two independent checks — it must be the expected
+// identity, and it must prove it holds that identity. Neither alone is enough:
+// the first is a string the claimant supplies, and the second says nothing
+// about whether this machine was meant for them.
+//
+// Nothing covered this. Every existing test that told a machine who to expect
+// sent an unsigned claim, because they were written to prove refusals; the
+// honest path through both gates was never run.
+func TestTheIdentityAMachineWasPromisedToCanClaimItByProvingControl(t *testing.T) {
+	resetLocalPairingOfferForTest()
+	resetExpectedClaimForTest()
+	resetPairingOfferForTest()
+
+	owner := adoptingOwner(t)
+
+	// Before the machine is asked for: the owner mints the identity it will
+	// answer to. This is the AID that goes to whoever provisions it.
+	rec := httptest.NewRecorder()
+	owner.handleMintMachineOwner(rec, httptest.NewRequest(http.MethodPost, "/api/machines/owner-identity", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("could not mint the identity for the machine: %s", rec.Body.String())
+	}
+	var minted struct {
+		AID string `json:"aid"`
+	}
+	json.NewDecoder(rec.Body).Decode(&minted)
+	if minted.AID == "" {
+		t.Fatal("no identity was minted, so there is nothing to tell the machine to expect")
+	}
+
+	// The machine is started and told what to accept, while nobody else can
+	// reach it.
+	machine := agentWithNoIdentity(t)
+	machine.KeriDriver = startedEngine(t)
+	if err := SetExpectedClaim("TOKEN-FROM-THE-PROVISIONER", minted.AID); err != nil {
+		t.Fatalf("could not tell the machine what to expect: %v", err)
+	}
+	t.Cleanup(resetExpectedClaimForTest)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/pairing/begin", machine.handlePairingBegin)
+	mux.HandleFunc("/api/pairing/complete", machine.handlePairingComplete)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	// The owner comes back and claims it with the identity it was promised to.
+	if rec := claimAs(t, owner, srv.URL, "TOKEN-FROM-THE-PROVISIONER", minted.AID); rec.Code != http.StatusOK {
+		t.Fatalf("the identity the machine was promised to could not claim it: %d %s",
+			rec.Code, rec.Body.String())
+	}
+
+	got, err := machine.DataStore.GetIdentity()
+	if err != nil || got == nil {
+		t.Fatal("the machine did not end up with an identity of its own")
+	}
+	agents, _ := owner.DataStore.ListAdoptedAgents()
+	if len(agents) != 1 || agents[0].OwnerAID != minted.AID {
+		t.Fatalf("the machine was not recorded as owned by the identity it was promised to: %+v", agents)
+	}
+}
+
+// And the second gate still bites when the first is satisfied.
+//
+// Somebody who holds a real identity, can sign perfectly well, and has the
+// token — but is not who the machine was promised to — is still refused. This
+// is what a machine in a data centre gets that a computer offered from its own
+// screen cannot: it knows in advance who is coming.
+func TestProvingControlOfSomeIdentityIsNotEnoughOnAMachinePromisedToAnother(t *testing.T) {
+	resetLocalPairingOfferForTest()
+	resetExpectedClaimForTest()
+	resetPairingOfferForTest()
+
+	machine := agentWithNoIdentity(t)
+	machine.KeriDriver = startedEngine(t)
+	if err := SetExpectedClaim("TOKEN", "EIdentityThisMachineWasPromisedTo"); err != nil {
+		t.Fatalf("could not set the expectation: %v", err)
+	}
+	t.Cleanup(resetExpectedClaimForTest)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/pairing/begin", machine.handlePairingBegin)
+	mux.HandleFunc("/api/pairing/complete", machine.handlePairingComplete)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	// A real claimant, holding a real identity, signing correctly — just not
+	// the one this machine is waiting for.
+	stranger := adoptingOwner(t)
+	rec := claimAs(t, stranger, srv.URL, "TOKEN", "")
+	if rec.Code == http.StatusOK {
+		t.Fatal("a machine promised to one identity was claimed by another that merely " +
+			"proved it holds an identity of its own")
+	}
+	if id, _ := machine.DataStore.GetIdentity(); id != nil {
+		t.Fatal("an identity was founded despite the claim being refused")
+	}
+}
