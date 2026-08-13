@@ -228,3 +228,70 @@ func TestWitnessKeysAreFoundInEitherShapeOfLog(t *testing.T) {
 		}
 	}
 }
+
+// What a machine founds is witnessed too.
+//
+// Witnesses can only be named in the inception event, so an identity founded
+// without them can never be corroborated by anybody for as long as it exists.
+// Nothing a machine founded ever had any — not a paired computer and not an
+// organisation — which is sharpest for an organisation, whose own key log is
+// what counterparties check for the rest of its life.
+func TestAnIdentityAMachineFoundsNamesItsWitnesses(t *testing.T) {
+	wit := newStandInWitness(t)
+	machine, srv, code := pairableComputer(t)
+	owner := adoptingOwner(t)
+
+	// The owner's identity has to be corroborable for the claim to be accepted
+	// at all; this test is about the OTHER side — what the machine founds.
+	wit.mu.Lock()
+	_ = wit.held
+	wit.mu.Unlock()
+
+	if rec := claimAs(t, owner, srv.URL, code, ""); rec.Code != http.StatusOK {
+		t.Fatalf("claim failed: %s", rec.Body.String())
+	}
+
+	founded, err := machine.DataStore.GetIdentity()
+	if err != nil || founded == nil {
+		t.Fatal("the machine founded no identity")
+	}
+	events, err := machine.DataStore.GetEvents(founded.AID)
+	if err != nil || len(events) == 0 {
+		t.Fatalf("no key log for what it founded: %v", err)
+	}
+
+	var ev map[string]interface{}
+	if err := json.Unmarshal([]byte(events[0].EventJSON), &ev); err != nil {
+		t.Fatalf("its inception does not parse: %v", err)
+	}
+	b, _ := ev["b"].([]interface{})
+	if len(b) == 0 {
+		t.Fatal("the identity this machine founded names no witnesses, so nothing can " +
+			"ever corroborate its history — and a witness cannot be added afterwards, " +
+			"because they are named in the inception event or not at all")
+	}
+	if got, _ := b[0].(string); got != wit.key {
+		t.Errorf("named %q, expected the witness it could actually reach (%q)", got, wit.key)
+	}
+
+	// And it must be signed, or the witnesses it named could never attest to it.
+	if events[0].CesrSignature == "" || events[0].RawBytesB64 == "" {
+		t.Error("its inception was stored without the signature and canonical bytes a " +
+			"witness checks, so naming witnesses buys nothing")
+	}
+}
+
+// A machine that can reach no witness still founds. It says so rather than
+// refusing: a computer being set up may have no route out at all, which is the
+// ordinary case rather than an exotic one.
+func TestAMachineWithNoWitnessAvailableStillFounds(t *testing.T) {
+	machine, srv, code := pairableComputer(t)
+	owner := adoptingOwner(t)
+
+	if rec := claimAs(t, owner, srv.URL, code, ""); rec.Code != http.StatusOK {
+		t.Fatalf("a machine that could reach no witness refused to be claimed: %s", rec.Body.String())
+	}
+	if id, _ := machine.DataStore.GetIdentity(); id == nil {
+		t.Fatal("it founded nothing")
+	}
+}

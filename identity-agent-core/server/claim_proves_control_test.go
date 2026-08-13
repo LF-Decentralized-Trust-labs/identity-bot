@@ -2,6 +2,8 @@ package server
 
 import (
 	"encoding/json"
+	"identity-agent-core/store"
+	"identity-agent-core/witness"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -22,9 +24,19 @@ func pairableComputer(t *testing.T) (*CoreServer, *httptest.Server, string) {
 	resetLocalPairingOfferForTest()
 	resetExpectedClaimForTest()
 	resetPairingOfferForTest()
+	resetPairingStateForTest()
 
 	machine := agentWithNoIdentity(t)
-	machine.KeriDriver = startedEngine(t)
+	eng := startedEngine(t)
+	machine.KeriDriver = eng
+	// A real agent wires this at startup, and the identity a machine founds
+	// designates its witnesses through it. A fixture without one founds
+	// something nothing can ever corroborate, which is the state this whole
+	// file exists to detect rather than to reproduce.
+	if sq, ok := machine.DataStore.(*store.SQLiteStore); ok {
+		machine.WitnessService = witness.NewService(
+			witness.NewSQLiteStore(sq.DB()), sq, eng, "desktop")
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/provisioning/expect", machine.handleProvisioningExpect)
