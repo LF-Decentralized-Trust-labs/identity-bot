@@ -81,6 +81,42 @@ both stop answering the moment it has one, and neither discloses anything that
 is not about to be published anyway. An Identity Agent with an owner answers `409` to
 both — the window closes on success and does not reopen.
 
+## How the claim reaches the person, and why the number of codes differs
+
+*Added 2026-08-13, because the answer looks inconsistent from the outside and is
+not.*
+
+Being told who may claim an instance settles WHO. It says nothing about how the
+claim token gets from wherever it was minted to the device that will use it, and
+that is a different question with a different answer per case. **The number of
+codes a person is shown follows entirely from whether there is a hand-off
+between devices.**
+
+There is a hand-off whenever the party that STARTS the setup is not the party
+that HOLDS the key. A code — shown on a screen, scanned by a phone — is how the
+token crosses that gap. Where one device does both ends, nothing needs to cross
+and no code is shown.
+
+| Case | Codes | Why |
+|---|---|---|
+| A computer in front of you | **one** | The computer shows it; the phone scans; there is one exchange. |
+| An instance you asked for, from the device holding your key | **none** | The same app asked for the instance and claims it. Nothing crosses. |
+| An organisation on a computer in front of you | **one** | The organisation is set up at a desktop; the key is on the phone. |
+| An organisation on a hosted instance | **two** | The same gap, plus a wait: one to agree, and one when the machine is up. |
+
+**The second code in the last row is not ceremony.** The instance does not exist
+when the first is scanned, so there is no token to carry yet. The window that
+token stands for starts when the SECOND code appears — when the person can
+actually act — rather than when the instance was asked for, or a slow start
+would spend the window before anybody saw it.
+
+**A code is never what authorises the claim.** It is a hand-off, and it is
+readable by anyone who can see the screen. What authorises is the claim proving
+control of the identity the instance was told to expect. That is why the count
+can differ between cases without the security differing: showing no code, one,
+or two changes how the token travels and nothing about what is checked when it
+arrives.
+
 ## Consequences
 
 **Whoever provisions an Identity Agent can decide who owns it.** That is not a weakening,

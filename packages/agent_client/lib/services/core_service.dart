@@ -2119,6 +2119,18 @@ class CoreService {
     /// host was told this one may claim it, so adoption must name the same one
     /// or the machine refuses its own owner.
     String? ownerAid,
+
+    /// What you now own: a computer of your own, or an organisation.
+    ///
+    /// The ceremony does not differ and the machine is never told. What differs
+    /// is only what was asked — "be my always-on computer" against "be a signer
+    /// and owner of this organisation" — so this is a label on your side, kept
+    /// because your computers and your organisations are different lists.
+    ///
+    /// This is why there is no separate call for founding an organisation.
+    /// There was one, and it talked to the machine directly without proving who
+    /// was asking, so every organisation founded that way is now refused.
+    String kind = 'individual',
   }) async {
     final response = await _client.post(
       Uri.parse('$baseUrl/api/pairing/adopt'),
@@ -2127,6 +2139,7 @@ class CoreService {
         'box_url': boxUrl.toString(),
         'adoption_code': adoptionCode,
         if (ownerAid != null && ownerAid.isNotEmpty) 'owner_aid': ownerAid,
+        'kind': kind,
       }),
     );
     if (response.statusCode == 200) {
@@ -2179,64 +2192,6 @@ class CoreService {
     final keys = cfg['seal_to_public_keys_b64'];
     if (keys is! List) return const [];
     return keys.map((k) => k.toString()).where((k) => k.isNotEmpty).toList();
-  }
-
-  Future<String> adoptAsOrganisation({
-    required String adoptionCode,
-    required String ownerAid,
-    required String ownerPublicKey,
-    List<String> backupSealPublicKeys = const [],
-  }) async {
-    // Step one: ask the instance for the key material it generated. This is
-    // also what proves it is unclaimed — an instance that already has an
-    // identity refuses here.
-    final begun = await _client.post(
-      Uri.parse('$baseUrl/api/pairing/begin'),
-      headers: {'Content-Type': 'application/json'},
-      body: '{}',
-    );
-    if (begun.statusCode != 200) {
-      throw Exception(_sessionError(begun, 'This agent is not offering to be set up'));
-    }
-
-    // Step two: name the owner. found_as_root asks for an organisation with its
-    // own key rather than a delegated agent — a delegation cannot be
-    // transferred, only destroyed, so an organisation built that way could
-    // never change hands without losing everything it had ever signed.
-    final done = await _client.post(
-      Uri.parse('$baseUrl/api/pairing/complete'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'found_as_root': true,
-        'adoption_code': adoptionCode,
-        'owner_aid': ownerAid,
-        'owner_public_key': ownerPublicKey,
-        // Named as the delegator too, for the audit line the instance logs.
-        // Nothing is delegated here; the field is how it records who set it up.
-        'delegator_aid': ownerAid,
-        // What this organisation will seal its backups to, and the owner's way
-        // back into its encrypted disk.
-        //
-        // Collected when the owner agreed to own it, because that is the only
-        // moment they are present — an organisation holds its own signing seed
-        // and the founder never sees it, so there is no phrase to write down.
-        // Carried here because the machine has to be given them while it is
-        // being set up: afterwards its volume opens only with a key derived
-        // from the software's measurement, and that key moves whenever the
-        // image or the firmware does.
-        if (backupSealPublicKeys.isNotEmpty)
-          'backup_seal_public_keys_b64': backupSealPublicKeys,
-      }),
-    );
-    if (done.statusCode != 200) {
-      throw Exception(_sessionError(done, 'Could not create the organisation'));
-    }
-    final json = jsonDecode(done.body) as Map<String, dynamic>;
-    final aid = json['root_aid']?.toString() ?? json['organisation_aid']?.toString();
-    if (aid == null || aid.isEmpty) {
-      throw Exception('The instance reported no identifier for the organisation');
-    }
-    return aid;
   }
 
   // ── Signing in from a browser ────────────────────────────────────────────
