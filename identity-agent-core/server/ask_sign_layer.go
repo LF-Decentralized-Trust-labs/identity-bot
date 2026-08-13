@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"identity-agent-core/store"
 	"log"
 	"net/http"
 	"strings"
@@ -77,6 +78,41 @@ func (s *CoreServer) mintPairwiseIn(pool, name string) (aid, oobi string, seed [
 	pairwiseKeys.Unlock()
 	if kel, kerr := s.KeriDriver.GetKel(uniqueName); kerr == nil {
 		registerPairwiseKEL(icp.AID, kel.KEL)
+	}
+
+	// Write the inception down, signed, with the bytes it was signed over.
+	//
+	// A pairwise identity has to be able to PROVE it is itself, not merely
+	// assert it. Pairing a computer is the case that forced this: the machine
+	// checks a claim against this identity's key log before it will answer to
+	// anybody, and a log with no signature over canonical bytes establishes
+	// nothing — it is a document the claimant could have written.
+	//
+	// Signed here because this is where the key is. The engine produces the
+	// event; only the holder of the seed can authorise it, and that is this
+	// side.
+	//
+	// Not fatal if it cannot be written: the identity exists and most uses of a
+	// pairwise identity never need to prove authorship to a stranger. The one
+	// that does will refuse, with a reason, rather than proceed on an unproven
+	// claim.
+	if raw, derr := base64.StdEncoding.DecodeString(icp.RawBytesB64); derr == nil && len(raw) > 0 {
+		sig, serr := login.SignString(string(raw), seed)
+		if serr == nil {
+			body, _ := json.Marshal(icp.InceptionEvent)
+			if werr := s.DataStore.SaveEvent(store.EventRecord{
+				AID:            icp.AID,
+				SequenceNumber: 0,
+				EventType:      "icp",
+				EventJSON:      string(body),
+				PublicKey:      iacrypto.VerkeyQB64(pub),
+				RawBytesB64:    icp.RawBytesB64,
+				CesrSignature:  sig,
+			}); werr != nil {
+				log.Printf("[pairwise] %s minted, but its key log was not written down (%v) — "+
+					"it will be unable to prove itself to anything that checks", icp.AID, werr)
+			}
+		}
 	}
 
 	publicURL := s.EndpointService.CurrentURL()

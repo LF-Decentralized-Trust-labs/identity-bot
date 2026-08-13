@@ -422,6 +422,34 @@ func TestNoHandlerUsesLoopbackAsTheOwnerTest(t *testing.T) {
 		if name == "api_auth.go" || name == "mcp_tokens.go" {
 			continue
 		}
+		// The one route where being local is not standing in for being the
+		// owner.
+		//
+		// This rule exists so an owner who is somewhere else can still prove
+		// who they are by signing. That needs an owner to exist. A computer
+		// with no identity yet has none, so s.isOwner(r) would refuse every
+		// caller forever, including the person holding the machine.
+		//
+		// And what this gate protects is not an authorisation decision. Whether
+		// the pairing is allowed is decided by the claim proving control of the
+		// identity making it (claim_proves_control.go). This only keeps the
+		// code that is meant for the machine's own screen from being handed out
+		// over the network.
+		//
+		// Narrow, and checked rather than trusted: one gate in that file, and
+		// anything else there must use s.isOwner(r).
+		if name == "offer_this_computer.go" {
+			src, err := os.ReadFile(name)
+			if err != nil {
+				t.Fatalf("read %s: %v", name, err)
+			}
+			if n := strings.Count(string(src), "isLocalOwnerRequest(r)"); n != 1 {
+				t.Errorf("%s gates on being local %d times; it is exempt for exactly one "+
+					"route, the one that runs before an owner exists and only to keep an "+
+					"on-screen code off the network. Anything else must use s.isOwner(r)", name, n)
+			}
+			continue
+		}
 		src, err := os.ReadFile(name)
 		if err != nil {
 			t.Fatalf("read %s: %v", name, err)

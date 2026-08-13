@@ -66,6 +66,10 @@ type pairingBeginResponse struct {
 	// and not a failure — a laptop has no such statement to make. The adopting
 	// side decides what to do about that; it must not decide silently.
 	Attestation string `json:"attestation,omitempty"`
+	// Challenge is the nonce a claimant must sign to show it holds the identity
+	// it claims as. Fresh per offer and bound into what gets signed, so a
+	// signature lifted from one exchange cannot be replayed into another.
+	Challenge string `json:"challenge"`
 }
 
 type pairingCompleteRequest struct {
@@ -115,6 +119,17 @@ type pairingCompleteRequest struct {
 	// this instance will accept as its owner's from now on.
 	OwnerAID       string `json:"owner_aid"`
 	OwnerPublicKey string `json:"owner_public_key"`
+	// OwnerKEL is the claimant's own key log, presented rather than fetched.
+	//
+	// A key log is self-verifying, so a machine with no route to the internet
+	// can still establish who controls the claiming identity — which matters,
+	// because a computer being set up is the one most likely to have no working
+	// network yet.
+	OwnerKEL []map[string]interface{} `json:"owner_kel,omitempty"`
+	// OwnerSignature is a fresh signature over this exchange, by the key that
+	// log puts in force. It is what turns the claim token from a bearer secret
+	// into one factor of two.
+	OwnerSignature string `json:"owner_signature,omitempty"`
 	// BackupSealPublicKeyB64 is the X25519 public key this instance seals its
 	// backup keys to, so it can write archives it cannot itself read.
 	//
@@ -140,6 +155,10 @@ var pairingState struct {
 	// the previous event committed to, and that key exists only as a derivation
 	// nobody could repeat.
 	derivationIndex int
+	// challenge is the nonce this offer issued. Kept with the offer rather than
+	// regenerated, because the claimant signs the one it was given and a fresh
+	// one would refuse every honest claim.
+	challenge string
 }
 
 // handlePairingBegin generates this instance's delegated key material and hands
@@ -187,9 +206,16 @@ func (s *CoreServer) handlePairingBegin(w http.ResponseWriter, r *http.Request) 
 	pub := ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)
 	nextPub := ed25519.NewKeyFromSeed(nextSeed).Public().(ed25519.PublicKey)
 
+	challenge, err := newPairingChallenge()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Could not create a challenge", err.Error())
+		return
+	}
+
 	offer := &pairingBeginResponse{
 		PublicKey:     iacrypto.VerkeyQB64(pub),
 		NextPublicKey: iacrypto.VerkeyQB64(nextPub),
+		Challenge:     challenge,
 	}
 	// Ask the hardware to vouch for exactly these keys, so the controller can
 	// establish that the offer came from a sealed machine before it signs
@@ -213,6 +239,7 @@ func (s *CoreServer) handlePairingBegin(w http.ResponseWriter, r *http.Request) 
 	// event committed to, and that key is only findable by deriving it again
 	// from this index.
 	pairingState.derivationIndex = idx
+	pairingState.challenge = challenge
 	writeJSONResponse(w, offer)
 }
 
@@ -239,31 +266,54 @@ func (s *CoreServer) handlePairingComplete(w http.ResponseWriter, r *http.Reques
 			"call /api/pairing/begin first — there is no key material to found an identity over")
 		return
 	}
+	// What the claimant had to sign over, taken from what this instance issued
+	// rather than from what the claim echoes back.
+	challenge := pairingState.challenge
+	offeredPublicKey := pairingState.offered.PublicKey
 
 	// Check the code before anything else is considered. An instance that
 	// validated a delegation first would leak whether the delegation was
 	// well-formed to somebody with no standing to ask.
 	expected, expectedOwner, told := expectedAdoption()
 	if !told {
-		// Nobody told this box what to expect, so it cannot tell a real claim
-		// from a stranger's. Refusing is the safe direction: a box nobody can
-		// claim is recoverable, a box anybody can claim is not.
-		writeError(w, http.StatusConflict, "Not offered for pairing",
-			"this instance has not been told which claim to accept, so there is no adoption to complete")
-		return
+		// Not told by anybody, so the only claim it can accept is against a code
+		// it issued itself and showed on its own screen.
+		if code, live := localPairingOffer(); live {
+			expected, expectedOwner = code, ""
+		} else {
+			writeError(w, http.StatusConflict, "Not offered for pairing",
+				"this computer has not been offered for pairing. If it is in front of you, "+
+					"offer it from its own screen; otherwise it is claimed with the code "+
+					"issued when it was set up")
+			return
+		}
 	}
 	if subtle.ConstantTimeCompare([]byte(expected), []byte(req.AdoptionCode)) != 1 {
 		writeError(w, http.StatusForbidden, "Wrong adoption code",
 			"this instance was set up for somebody, and adopting it needs the token issued at that time")
 		return
 	}
-	// The token says the claimant holds the secret. This says they are the
-	// party it was issued to. Without it a leaked token would let anybody
-	// install themselves as owner, which is most of what the token exists to
-	// prevent.
-	if subtle.ConstantTimeCompare([]byte(expectedOwner), []byte(req.OwnerAID)) != 1 {
+	// The token says the claimant knows a secret. This says they are the party
+	// it was issued to. Without it a leaked token would let anybody install
+	// themselves as owner, which is most of what the token exists to prevent.
+	//
+	// Skipped where nobody was named in advance — a machine offered from its
+	// own screen has no expected identity to compare against, because the
+	// person has not yet told it anything. There the next check is the whole
+	// proof, which is why it is not optional anywhere.
+	if expectedOwner != "" &&
+		subtle.ConstantTimeCompare([]byte(expectedOwner), []byte(req.OwnerAID)) != 1 {
 		writeError(w, http.StatusForbidden, "Wrong owner",
 			"this instance was set up to answer to a different identity than the one claiming it")
+		return
+	}
+
+	// AND THIS SAYS THEY HOLD IT. Everything above establishes what the
+	// claimant knows; only this establishes what they control. It runs before
+	// anything is minted or sealed, because an owner sealed in on an unchecked
+	// claim cannot be replaced afterwards.
+	if err := s.verifyClaimantControlsTheIdentity(req, challenge, offeredPublicKey); err != nil {
+		writeError(w, http.StatusForbidden, "This claim does not prove who is making it", err.Error())
 		return
 	}
 	// Checked here, before anything is minted, because the alternative is
@@ -404,6 +454,10 @@ func (s *CoreServer) handlePairingComplete(w http.ResponseWriter, r *http.Reques
 	// The private half has done its work; the identity is persisted and the key
 	// is re-derivable from this instance's own seed.
 	pairingState.seed = nil
+
+	// Spent. A code that still works after the machine has been claimed is a
+	// second owner waiting to happen.
+	clearLocalPairingOffer()
 
 	if req.FoundAsRoot {
 		log.Printf("[pairing] adopted: AID %s founded as its own root, owner %s",
@@ -734,8 +788,27 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 		log.Printf("[pairing] adopting %s without owner encryption keys: %v", base, err)
 	}
 
+	// PROVE WE HOLD THE IDENTITY WE ARE CLAIMING AS. Without this the machine
+	// refuses, and rightly: everything else in the claim is something a
+	// stranger holding the code could also have sent.
+	ownerSig, err := s.signClaim(ownerIdx, offer.Challenge, req.AdoptionCode, ownerAID, offer.PublicKey)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Could not sign the claim",
+			"this device holds the key for "+ownerAID+" but could not sign with it: "+err.Error())
+		return
+	}
+	ownerKEL := s.kelToPresent(ownerAID)
+	if len(ownerKEL) == 0 {
+		writeError(w, http.StatusInternalServerError, "No key log to present",
+			"the machine checks the signature against "+ownerAID+"'s key log, and this device "+
+				"has no log for it to present")
+		return
+	}
+
 	result, err := boxPairingComplete(client, base, pairingCompleteRequest{
-		AdoptionCode: req.AdoptionCode,
+		AdoptionCode:   req.AdoptionCode,
+		OwnerKEL:       ownerKEL,
+		OwnerSignature: ownerSig,
 		// Founded, not delegated: the machine incepts its own root and names
 		// this owner in a seal. Nothing here identifies the person outside
 		// this one relationship.
@@ -924,6 +997,34 @@ func measurementOf(attestationB64 string) string {
 // derivation is deterministic, so keeping a copy would add a second place for
 // the same fact to live and a second place for it to be wrong. The index is
 // what is written down, and it is written down precisely so this works.
+// signClaim signs the exchange as the pairwise identity that will own the
+// machine.
+//
+// Signed with the key that identity's own log puts in force, because that is
+// the key the machine will check against. Signing with anything else — the
+// root, a convenient device key — would produce a signature that verifies here
+// and is refused there.
+func (s *CoreServer) signClaim(ownerIdx int, challenge, token, ownerAID, offeredPublicKey string) (string, error) {
+	seed, err := s.pairwiseSigningSeed(ownerIdx)
+	if err != nil {
+		return "", err
+	}
+	return login.SignString(string(claimSigningInput(challenge, token, ownerAID, offeredPublicKey)), seed)
+}
+
+// pairwiseSigningSeed re-derives the private half of a pairwise identity.
+//
+// Held nowhere: the seed is derived when it is needed and goes out of scope
+// with the request. The index is the only thing written down, which is why
+// losing it means never being able to sign to that machine again.
+func (s *CoreServer) pairwiseSigningSeed(idx int) ([]byte, error) {
+	rootSeed, err := ensureRootSeed(s.DataDir)
+	if err != nil {
+		return nil, err
+	}
+	return backup.DerivePairwiseSeed(rootSeed, idx, 0)
+}
+
 func (s *CoreServer) pairwisePublicKey(idx int) (string, error) {
 	rootSeed, err := ensureRootSeed(s.DataDir)
 	if err != nil {
