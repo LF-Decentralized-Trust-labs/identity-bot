@@ -467,6 +467,11 @@ type Store interface {
 	// without these the owner knows nothing about the machine.
 	SaveAdoptedAgent(a AdoptedAgent) error
 	ListAdoptedAgents() ([]AdoptedAgent, error)
+	// An identity minted for a machine that does not exist yet. See
+	// machine_owner_identities.go for why the index is kept rather than handed
+	// out and taken back.
+	RememberMachineOwnerIdentity(aid string, keyIndex int) error
+	MachineOwnerIndex(aid string) (int, bool, error)
 	MarkAdoptedAgentSeen(aid string) error
 	ForgetAdoptedAgent(aid string) error
 	GetIdentity() (*IdentityState, error)
@@ -561,7 +566,12 @@ func (s *FileStore) loadCounters() error {
 	path := filepath.Join(s.dir, "counters.json")
 	b, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		s.counters = map[string]int{"contacts": 1, "login": 1000001}
+		// Same ranges as the SQLite store, and for the same reason: pools that
+		// share a range hand out the same derived key to unrelated
+		// relationships. See AllocateNextRelationshipIndex there.
+		s.counters = map[string]int{"contacts": 1, "login": 1000001, "machines": 2000001,
+			"delegated-identity": 3000001, "invocation-log": 4000001,
+			"messaging-keys": 5000001, "witnessing": 6000001}
 		return nil
 	}
 	if err != nil {
@@ -578,6 +588,9 @@ func (s *FileStore) loadCounters() error {
 	}
 	if _, ok := s.counters["login"]; !ok {
 		s.counters["login"] = 1000001
+	}
+	if _, ok := s.counters["machines"]; !ok {
+		s.counters["machines"] = 2000001
 	}
 	return nil
 }

@@ -757,6 +757,46 @@ CREATE TABLE IF NOT EXISTS adopted_agents (
     last_seen_at  DATETIME
 );
 `},
+	{
+		Version:     32,
+		Description: "Remember which identity of mine owns each machine",
+		SQL: `
+-- A machine is now adopted by a PAIRWISE identity of this owner's rather than by
+-- their root, so that the machine's own published event names nothing that
+-- identifies them anywhere else.
+--
+-- Which one has to be written down. The identity is derived from the root seed
+-- at an index, and the index is the only way back to it: without it the owner
+-- can never sign to that machine again, never rotate the relationship, and
+-- never revoke it. Losing this column is losing the machine.
+--
+-- Empty on rows written before this: those machines were adopted by the root
+-- identity, and an empty owner means exactly that rather than an unknown.
+ALTER TABLE adopted_agents ADD COLUMN owner_aid TEXT NOT NULL DEFAULT '';
+ALTER TABLE adopted_agents ADD COLUMN owner_index INTEGER NOT NULL DEFAULT 0;
+`},
+	{
+		Version:     33,
+		Description: "Remember an identity minted for a machine that does not exist yet",
+		SQL: `
+-- A machine is told who may claim it BEFORE it starts, so its owner identity
+-- has to be minted before the machine is asked for — earlier than adoption,
+-- which is where it would otherwise be created.
+--
+-- What has to survive that gap is the index, because the key is derived rather
+-- than stored and the index is the only way back to it. Keeping it here means
+-- adoption LOOKS UP what was minted instead of being told: an index supplied by
+-- a caller would have to be trusted or verified, and there is no need for
+-- either when this side already knows.
+--
+-- Rows are consumed by adoption and are meaningless afterwards; nothing here is
+-- secret, since a pairwise identifier says nothing about who holds it.
+CREATE TABLE IF NOT EXISTS machine_owner_identities (
+    aid        TEXT PRIMARY KEY,
+    key_index  INTEGER NOT NULL,
+    minted_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+`},
 }
 
 // ApplyIdentityMigrations creates the migrations table and applies any pending migrations.

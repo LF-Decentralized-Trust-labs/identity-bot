@@ -1390,9 +1390,40 @@ func (s *SQLiteStore) AllocateNextRelationshipIndex(namespace string) (int, erro
 	var nextIdx int
 	err = tx.QueryRow(`SELECT next_index FROM relationship_counters WHERE namespace = ?`, namespace).Scan(&nextIdx)
 	if err == sql.ErrNoRows {
-		nextIdx = 1
-		if namespace == "login" {
+		// Each pool starts in its own range, and that is not tidiness.
+		//
+		// Every pairwise key is derived from ONE root seed and an index, so two
+		// pools that both start at 1 hand out the SAME KEY for unrelated
+		// relationships — and two parties holding keys derived from one secret
+		// can discover they are the same person, which is the correlation a
+		// pairwise identifier exists to prevent.
+		//
+		// Observed, not theorised: adding the machines pool without a base
+		// immediately minted an identifier identical to an existing one.
+		switch namespace {
+		case "contacts":
+			nextIdx = 1
+		case "login":
 			nextIdx = 1000001
+		case "machines":
+			nextIdx = 2000001
+		case "delegated-identity":
+			nextIdx = 3000001
+		case "invocation-log":
+			nextIdx = 4000001
+		case "messaging-keys":
+			nextIdx = 5000001
+		case "witnessing":
+			nextIdx = 6000001
+		default:
+			// Refused rather than started at 1, because starting at 1 is the
+			// bug: it would share a range with contacts, and the two pools
+			// would derive the same key for unrelated relationships. Silent
+			// there, and undetectable afterwards. A new pool is a deliberate
+			// decision about a range, so it is made here.
+			return 0, fmt.Errorf("pairwise pool %q has no range of its own — give it one "+
+				"in AllocateNextRelationshipIndex, because a pool without one shares "+
+				"keys with another", namespace)
 		}
 		_, err = tx.Exec(`INSERT INTO relationship_counters (namespace, next_index) VALUES (?, ?)`, namespace, nextIdx+1)
 		if err != nil {

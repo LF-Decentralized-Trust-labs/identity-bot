@@ -3,6 +3,7 @@
 **Status:** Accepted
 **Date:** 2026-08-06
 **Builds on:** ADR-032 (an identity can name who owns it, from its first event)
+**Refined by:** ADR-036 (the identifier sent ahead is pairwise, never a root)
 
 ## Context
 

@@ -40,6 +40,18 @@ type AdoptedAgent struct {
 	// today — which is exactly what the check at adoption existed to avoid.
 	Sealed      bool   `json:"sealed"`
 	Measurement string `json:"measurement,omitempty"`
+	// OwnerAID is which identity of THIS owner's the machine answers to, and
+	// OwnerIndex is where that identity's key comes from.
+	//
+	// A machine is adopted by a pairwise identity rather than by the root, so
+	// its published event names nothing that identifies the owner elsewhere.
+	// The index is the only way back to that key: without it there is no
+	// signing to this machine again, no rotation, and no revocation.
+	//
+	// Empty on a machine adopted before this existed, which means the root
+	// owned it — an answer rather than a gap.
+	OwnerAID   string `json:"owner_aid,omitempty"`
+	OwnerIndex int    `json:"owner_index,omitempty"`
 
 	AdoptedAt  string `json:"adopted_at"`
 	LastSeenAt string `json:"last_seen_at,omitempty"`
@@ -65,12 +77,17 @@ func (s *SQLiteStore) SaveAdoptedAgent(a AdoptedAgent) error {
 	}
 	_, err := s.db.Exec(`
 		INSERT INTO adopted_agents
-			(aid, delegated_aid, url, kind, label, sealed, measurement, adopted_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+			(aid, delegated_aid, url, kind, label, sealed, measurement, owner_aid, owner_index, adopted_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+		-- Deliberately NOT updating owner_aid or owner_index. They are settled
+		-- when the machine is adopted, and a second adoption quietly rewriting
+		-- them would move a machine to a different identity of this owner's
+		-- with nothing said — after which the first one could no longer reach it.
 		ON CONFLICT(aid) DO UPDATE SET
 			url   = excluded.url,
 			label = CASE WHEN excluded.label != '' THEN excluded.label ELSE adopted_agents.label END
-	`, a.AID, a.DelegatedAID, a.URL, a.Kind, a.Label, sealed, a.Measurement, nullIfEmpty(a.AdoptedAt))
+	`, a.AID, a.DelegatedAID, a.URL, a.Kind, a.Label, sealed, a.Measurement,
+		a.OwnerAID, a.OwnerIndex, nullIfEmpty(a.AdoptedAt))
 	if err != nil {
 		return fmt.Errorf("could not record the adopted agent: %w", err)
 	}
@@ -82,6 +99,7 @@ func (s *SQLiteStore) SaveAdoptedAgent(a AdoptedAgent) error {
 func (s *SQLiteStore) ListAdoptedAgents() ([]AdoptedAgent, error) {
 	rows, err := s.db.Query(`
 		SELECT aid, delegated_aid, url, kind, label, sealed, measurement,
+		       owner_aid, owner_index,
 		       COALESCE(adopted_at, ''), COALESCE(last_seen_at, '')
 		FROM adopted_agents
 		ORDER BY adopted_at DESC
@@ -96,7 +114,8 @@ func (s *SQLiteStore) ListAdoptedAgents() ([]AdoptedAgent, error) {
 		var a AdoptedAgent
 		var sealed int
 		if err := rows.Scan(&a.AID, &a.DelegatedAID, &a.URL, &a.Kind, &a.Label,
-			&sealed, &a.Measurement, &a.AdoptedAt, &a.LastSeenAt); err != nil {
+			&sealed, &a.Measurement, &a.OwnerAID, &a.OwnerIndex,
+			&a.AdoptedAt, &a.LastSeenAt); err != nil {
 			return nil, err
 		}
 		a.Sealed = sealed == 1

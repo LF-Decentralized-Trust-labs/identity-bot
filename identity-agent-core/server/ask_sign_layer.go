@@ -25,23 +25,39 @@ import (
 // mintPairwise derives a fresh pairwise relationship AID from the root seed, registers its key
 // so /public/{aid}/did.json resolves, and returns its AID, OOBI, and signing seed.
 func (s *CoreServer) mintPairwise(name string) (aid, oobi string, seed []byte, err error) {
+	aid, oobi, seed, _, err = s.mintPairwiseIn("contacts", name)
+	return aid, oobi, seed, err
+}
+
+// mintPairwiseIn is the same, in a named pool, and it hands back the index.
+//
+// THE POOL MATTERS. Every pairwise key is derived from one root seed and an
+// index, so two pools that allocate from the same range hand out the same key
+// for unrelated purposes — and two verifiers holding keys derived from one
+// secret is exactly the correlation a pairwise identifier exists to prevent.
+// A new kind of relationship gets a new pool rather than borrowing one.
+//
+// THE INDEX MATTERS TOO. It is the only way back to the key: an identity whose
+// index was not written down can never sign again and can never be rotated or
+// revoked. Callers that intend to use the identity later must store it.
+func (s *CoreServer) mintPairwiseIn(pool, name string) (aid, oobi string, seed []byte, idx int, err error) {
 	rootSeed, rerr := ensureRootSeed(s.DataDir)
 	if rerr != nil {
-		return "", "", nil, rerr
+		return "", "", nil, 0, rerr
 	}
-	idx, aerr := s.DataStore.AllocateNextRelationshipIndex("contacts")
+	idx, aerr := s.DataStore.AllocateNextRelationshipIndex(pool)
 	if aerr != nil {
-		return "", "", nil, fmt.Errorf("allocate relationship index: %w", aerr)
+		return "", "", nil, 0, fmt.Errorf("allocate relationship index: %w", aerr)
 	}
 	seed, derr := backup.DerivePairwiseSeed(rootSeed, idx, 0)
 	if derr != nil {
-		return "", "", nil, fmt.Errorf("derive pairwise seed: %w", derr)
+		return "", "", nil, 0, fmt.Errorf("derive pairwise seed: %w", derr)
 	}
 	nextSeed, _ := backup.DerivePairwiseSeed(rootSeed, idx, 1)
 	pub := ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)
 	nextPub := ed25519.NewKeyFromSeed(nextSeed).Public().(ed25519.PublicKey)
 	if s.KeriDriver == nil {
-		return "", "", nil, fmt.Errorf("keri driver required to mint pairwise AID")
+		return "", "", nil, 0, fmt.Errorf("keri driver required to mint pairwise AID")
 	}
 	// Unique driver name per mint (the index is a never-reused counter) so GetKel resolves
 	// this exact pairwise, not a collision on a shared name.
@@ -52,7 +68,7 @@ func (s *CoreServer) mintPairwise(name string) (aid, oobi string, seed []byte, e
 		uniqueName,
 	)
 	if ierr != nil || icp.AID == "" {
-		return "", "", nil, fmt.Errorf("mint pairwise inception: %w", ierr)
+		return "", "", nil, 0, fmt.Errorf("mint pairwise inception: %w", ierr)
 	}
 	// Publish the key (did.json, for signature verification) and the KEL (OOBI, so a peer can
 	// resolve this pairwise AID when adding us as a contact).
@@ -65,7 +81,7 @@ func (s *CoreServer) mintPairwise(name string) (aid, oobi string, seed []byte, e
 
 	publicURL := s.EndpointService.CurrentURL()
 	oobi = fmt.Sprintf("%s/public/oobi/%s", publicURL, icp.AID)
-	return icp.AID, oobi, seed, nil
+	return icp.AID, oobi, seed, idx, nil
 }
 
 // ensureRootSeed loads this device's root seed, bootstrapping one if there is
