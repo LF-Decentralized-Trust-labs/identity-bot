@@ -2750,8 +2750,15 @@ func (s *CoreServer) handleGenerateMultisigEvent(w http.ResponseWriter, r *http.
 }
 
 func (es *CoreServer) getPublicURL(r *http.Request) string {
-	if url := es.EndpointService.CurrentURL(); url != "" {
-		return url
+	// An agent that has not wired its endpoint service yet still has to be able
+	// to answer. This is reached before onboarding on a freshly installed
+	// machine — the one asking is the screen offering the computer for pairing
+	// — and dereferencing a service that does not exist yet turns "I do not
+	// know my address" into a crash.
+	if es.EndpointService != nil {
+		if url := es.EndpointService.CurrentURL(); url != "" {
+			return url
+		}
 	}
 
 	scheme := "https"
