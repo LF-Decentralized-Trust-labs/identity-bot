@@ -30,6 +30,11 @@ func adoptingMachine(t *testing.T, got *pairingCompleteRequest) *httptest.Server
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case strings.HasSuffix(r.URL.Path, "/api/provisioning/expect"):
+			// A real machine is told which identity may claim it before the
+			// claim arrives. The stand-in accepts and records nothing, because
+			// what these tests are about is what the OWNER sends.
+			json.NewEncoder(w).Encode(map[string]any{"ok": true})
 		case strings.HasSuffix(r.URL.Path, "/api/pairing/begin"):
 			json.NewEncoder(w).Encode(pairingBeginResponse{
 				PairwiseAID:   "EBOXPAIRWISE",

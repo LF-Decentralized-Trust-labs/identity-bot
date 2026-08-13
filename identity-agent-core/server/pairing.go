@@ -276,17 +276,26 @@ func (s *CoreServer) handlePairingComplete(w http.ResponseWriter, r *http.Reques
 	// well-formed to somebody with no standing to ask.
 	expected, expectedOwner, told := expectedAdoption()
 	if !told {
-		// Not told by anybody, so the only claim it can accept is against a code
-		// it issued itself and showed on its own screen.
-		if code, live := localPairingOffer(); live {
-			expected, expectedOwner = code, ""
-		} else {
-			writeError(w, http.StatusConflict, "Not offered for pairing",
-				"this computer has not been offered for pairing. If it is in front of you, "+
-					"offer it from its own screen; otherwise it is claimed with the code "+
-					"issued when it was set up")
+		// Nobody has said which identity may claim this machine, so it cannot
+		// tell a real claim from a stranger's.
+		//
+		// A standing offer is NOT enough on its own, and that is deliberate. If
+		// a claim could be made straight against a displayed code, the step
+		// that locks the machine to the identity that scanned it would be
+		// optional — and anyone who saw the screen would simply skip it. The
+		// code earns the right to say who may claim; it is not itself a claim.
+		if _, live := localPairingOffer(); live {
+			writeError(w, http.StatusConflict, "Nobody has claimed this yet",
+				"this computer is showing a code, and whoever scans it says which identity "+
+					"may claim it before claiming. Scan it again from the device holding "+
+					"your identity")
 			return
 		}
+		writeError(w, http.StatusConflict, "Not offered for pairing",
+			"this computer has not been offered for pairing. If it is in front of you, "+
+				"offer it from its own screen; otherwise it is claimed with the code "+
+				"issued when it was set up")
+		return
 	}
 	if subtle.ConstantTimeCompare([]byte(expected), []byte(req.AdoptionCode)) != 1 {
 		writeError(w, http.StatusForbidden, "Wrong adoption code",
@@ -297,12 +306,9 @@ func (s *CoreServer) handlePairingComplete(w http.ResponseWriter, r *http.Reques
 	// it was issued to. Without it a leaked token would let anybody install
 	// themselves as owner, which is most of what the token exists to prevent.
 	//
-	// Skipped where nobody was named in advance — a machine offered from its
-	// own screen has no expected identity to compare against, because the
-	// person has not yet told it anything. There the next check is the whole
-	// proof, which is why it is not optional anywhere.
-	if expectedOwner != "" &&
-		subtle.ConstantTimeCompare([]byte(expectedOwner), []byte(req.OwnerAID)) != 1 {
+	// Always compared now. A machine in front of you is told who to expect by
+	// whoever scanned it, so there is no case left where nobody was named.
+	if subtle.ConstantTimeCompare([]byte(expectedOwner), []byte(req.OwnerAID)) != 1 {
 		writeError(w, http.StatusForbidden, "Wrong owner",
 			"this instance was set up to answer to a different identity than the one claiming it")
 		return
@@ -788,6 +794,20 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 		log.Printf("[pairing] adopting %s without owner encryption keys: %v", base, err)
 	}
 
+	// Say which identity will claim this machine, before claiming it.
+	//
+	// On a machine somebody else set up this was already done by whoever
+	// provisioned it, and this call is refused as arriving second — correct,
+	// and not an error here. On a machine in front of you nobody has said it
+	// yet, and presenting the code off its screen is what earns the right to.
+	//
+	// Either way the machine knows who to expect BEFORE the claim, so there is
+	// one shape rather than two.
+	if err := boxExpectOwner(client, base, req.AdoptionCode, ownerAID); err != nil {
+		writeError(w, http.StatusBadGateway, "This computer would not accept that identity", err.Error())
+		return
+	}
+
 	// PROVE WE HOLD THE IDENTITY WE ARE CLAIMING AS. Without this the machine
 	// refuses, and rightly: everything else in the claim is something a
 	// stranger holding the code could also have sent.
@@ -904,6 +924,25 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 		"root_aid": identityAID, "owner_aid": ownerAID,
 		"box_pairwise_aid": offer.PairwiseAID, "box_response": result,
 	})
+}
+
+// boxExpectOwner tells a machine which identity may claim it.
+//
+// A 409 means it was already told — by whoever provisioned it — and that is the
+// normal case for a machine somebody else set up, not a failure. Anything else
+// is: a wrong code means this is not the machine whose screen was read.
+func boxExpectOwner(client *http.Client, base, code, ownerAID string) error {
+	body, _ := json.Marshal(map[string]string{"claim_token": code, "owner_aid": ownerAID})
+	resp, err := client.Post(base+"/api/provisioning/expect", "application/json", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusConflict {
+		return nil
+	}
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
+	return fmt.Errorf("status %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
 }
 
 func boxPairingBegin(client *http.Client, base string) (*pairingBeginResponse, error) {

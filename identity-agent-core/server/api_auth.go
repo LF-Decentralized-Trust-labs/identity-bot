@@ -207,6 +207,7 @@ var publicRoutes = map[string]string{
 	// request is genuinely local — the code it returns is meant for this
 	// machine's own screen, not for the network.
 	"POST /api/pairing/offer-this-computer": "a computer with no owner yet issues the claim code shown on its own screen",
+	"GET /api/pairing/this-computer":        "the screen showing that code reads back what has happened to it, before any owner exists",
 	"POST /api/pairing/begin":               "an unpaired computer offers its own public key material so an owner can be sealed into its first event",
 	"POST /api/pairing/complete":            "an unpaired computer founds its identity over that key and seals in who owns it",
 	"GET /*":                                "the Flutter web UI itself; the API it calls is still authorised",

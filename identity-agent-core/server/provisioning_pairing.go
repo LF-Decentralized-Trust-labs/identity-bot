@@ -1,6 +1,7 @@
 package server
 
 import (
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -326,6 +327,35 @@ func (s *CoreServer) handleProvisioningExpect(w http.ResponseWriter, r *http.Req
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
 		return
+	}
+	// A computer offered from its own screen is told who to expect BY WHOEVER
+	// SCANNED IT, and the code is what earns the right to say so.
+	//
+	// This is the same route the provisioning host uses, deliberately. There is
+	// one mechanism — a machine is told which identity may claim it, before the
+	// claim — and the only thing that differs is who does the telling and how
+	// they came by the code. On a machine somebody else set up, the host knows
+	// the code because it minted it. On a machine in front of you, the person
+	// knows it because it is on the screen.
+	//
+	// WHAT THIS BUYS is the window. Before it, a displayed code stood for its
+	// full ten minutes and any valid claimant could use it. Now the machine
+	// locks to the first identity that presents the code, which in practice is
+	// seconds after the person scans — so somebody who sees the screen later is
+	// refused rather than racing.
+	//
+	// It cannot make the machine safe from somebody who sees the screen FIRST:
+	// they can present the code and prove control of an identity of their own,
+	// and first-write-wins means they get it. That is bounded by the code never
+	// leaving the screen, and it is why the screen goes on to show WHICH
+	// identity took the machine.
+	if code, live := localPairingOffer(); live {
+		if subtle.ConstantTimeCompare([]byte(code), []byte(body.ClaimToken)) != 1 {
+			writeError(w, http.StatusForbidden, "Wrong code",
+				"this computer is showing a code on its own screen, and only whoever can "+
+					"read it may say who is allowed to claim it")
+			return
+		}
 	}
 	if err := SetExpectedClaim(body.ClaimToken, body.OwnerAID); err != nil {
 		// Both failures are the caller's, and they are different: one is a
