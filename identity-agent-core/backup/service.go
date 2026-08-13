@@ -2,6 +2,7 @@ package backup
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -205,6 +206,27 @@ func (s *Service) exportWithReason(mnemonic, seedB64, passphrase, destPath strin
 		return nil, err
 	}
 
+	// Opened before it counts. This runs BEFORE the archive is written or
+	// pushed anywhere, so a bad archive is never delivered to a destination
+	// and never recorded as a success. See verifyArchiveOpens.
+	if verr := verifyArchiveOpens(result, ExportRequest{
+		Mnemonic:   mnemonic,
+		BIP39Seed:  seedBytes,
+		Passphrase: passphrase,
+	}, archiveBundle); verr != nil {
+		if errors.Is(verr, ErrNoKeyToVerifyWith) {
+			// Kept, and honestly labelled. See ErrNoKeyToVerifyWith.
+			log.Printf("[backup] archive kept UNVERIFIED: %v", verr)
+		} else {
+			err := fmt.Errorf("backup failed verification and was not kept: %w", verr)
+			log.Printf("[backup] VERIFICATION FAILED: %v", verr)
+			s.recordFailure(opts.Tiers, err, time.Since(start))
+			return nil, err
+		}
+	} else {
+		result.VerifiedAt = time.Now().UTC().Format(time.RFC3339)
+	}
+
 	if destPath != "" {
 		if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
 			s.recordFailure(opts.Tiers, err, time.Since(start))
@@ -223,7 +245,7 @@ func (s *Service) exportWithReason(mnemonic, seedB64, passphrase, destPath strin
 		log.Printf("[backup] failed to persist delta state: %v", err)
 	}
 
-	s.recordSuccess(opts.Tiers, result.Size, destIDs, time.Since(start), result.SnapshotType)
+	s.recordSuccess(opts.Tiers, result.Size, destIDs, time.Since(start), result.SnapshotType, result.VerifiedAt != "")
 	s.failures = 0
 	return result, nil
 }
@@ -341,7 +363,7 @@ func (s *Service) SaveDestinationCredentials(creds RemoteCredentialSecrets) (str
 	return id, s.CredentialStore.Save(id, creds)
 }
 
-func (s *Service) recordSuccess(tiers []string, size int, dests []string, dur time.Duration, snapshotType string) {
+func (s *Service) recordSuccess(tiers []string, size int, dests []string, dur time.Duration, snapshotType string, verified bool) {
 	if snapshotType == "" {
 		snapshotType = SnapshotFull
 	}
@@ -354,6 +376,7 @@ func (s *Service) recordSuccess(tiers []string, size int, dests []string, dur ti
 		Success:      true,
 		DurationMs:   dur.Milliseconds(),
 		Destinations: dests,
+		Verified:     verified,
 	})
 }
 

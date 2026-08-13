@@ -68,6 +68,11 @@ type HistoryEntry struct {
 	DurationMs   int64    `json:"duration_ms"`
 	Destinations []string `json:"destinations"`
 	Error        string   `json:"error,omitempty"`
+
+	// Verified records that this archive was reopened and its contents checked
+	// before it was kept. A run without it succeeded at making a file, which is
+	// a different claim.
+	Verified bool `json:"verified"`
 }
 
 // StatusResponse is returned by GET /api/backup/status.
