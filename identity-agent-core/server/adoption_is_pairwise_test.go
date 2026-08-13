@@ -2,6 +2,8 @@ package server
 
 import (
 	"encoding/json"
+	"identity-agent-core/store"
+	"identity-agent-core/witness"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -67,6 +69,12 @@ func adoptingOwner(t *testing.T) *CoreServer {
 	// Minting an identity composes an OOBI from the public URL, so the service
 	// has to exist even though nothing here is reachable.
 	s.EndpointService = endpoint.New(nil, 0)
+	// A pairwise identity designates a witness at inception, which is the only
+	// moment it can. Without this the fixture mints identities nobody ever
+	// watched, and any test about corroboration would be testing the absence.
+	if sq, ok := s.DataStore.(*store.SQLiteStore); ok {
+		s.WitnessService = witness.NewService(witness.NewSQLiteStore(sq.DB()), sq, eng, "desktop")
+	}
 	return s
 }
 

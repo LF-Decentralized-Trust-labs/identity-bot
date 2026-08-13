@@ -1,12 +1,15 @@
 package server
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"identity-agent-core/drivers"
 	"identity-agent-core/store"
+	"identity-agent-core/witness"
 	"log"
 	"net/http"
 	"strings"
@@ -63,11 +66,43 @@ func (s *CoreServer) mintPairwiseIn(pool, name string) (aid, oobi string, seed [
 	// Unique driver name per mint (the index is a never-reused counter) so GetKel resolves
 	// this exact pairwise, not a collision on a shared name.
 	uniqueName := fmt.Sprintf("%s-%d", name, idx)
-	icp, ierr := s.KeriDriver.CreateInceptionNamed(
-		iacrypto.VerkeyQB64(pub),
-		iacrypto.VerkeyQB64(nextPub),
-		uniqueName,
-	)
+
+	// Designate a witness, which until now no pairwise identity had.
+	//
+	// ADR-031 already says a pairwise AID with no commercial contacts takes
+	// exactly one bootstrap witness. Nothing implemented it, so every pairwise
+	// identity was founded unwitnessed — and an unwitnessed log can be
+	// presented with a rotation withheld, which is precisely the hole a machine
+	// checking a claim cannot see.
+	//
+	// Witnesses are designated in the inception event, so this is the ONE
+	// moment it is possible without a rotation. It is also why the identifier
+	// cannot be the bucketing input: the AID is a digest of the event that
+	// names the witnesses, so it does not exist yet. The public key is stable,
+	// unique to this identity and already derived, and oneBootstrapFor is
+	// explicitly a spread rather than a security property — so the key is what
+	// is bucketed on.
+	pubQB64 := iacrypto.VerkeyQB64(pub)
+	var witnesses []string
+	var toad int
+	if s.WitnessService != nil {
+		witnesses, toad = s.WitnessService.WitnessesForNewIdentity(witness.AidKindPairwise, pubQB64)
+		if len(witnesses) == 0 {
+			// An honest answer, not a failure: with no reachable witness whose
+			// key is known, naming one would put an unverifiable observer into
+			// an event that can never be amended.
+			log.Printf("[pairwise] no designatable witness for the %s pool — this identity is "+
+				"founded unwitnessed, so nothing can corroborate its history", pool)
+		}
+	}
+
+	icp, ierr := s.KeriDriver.Incept(drivers.InceptionRequest{
+		PublicKey:     pubQB64,
+		NextPublicKey: iacrypto.VerkeyQB64(nextPub),
+		Name:          uniqueName,
+		Witnesses:     witnesses,
+		Toad:          toad,
+	})
 	if ierr != nil || icp.AID == "" {
 		return "", "", nil, 0, fmt.Errorf("mint pairwise inception: %w", ierr)
 	}
@@ -111,6 +146,29 @@ func (s *CoreServer) mintPairwiseIn(pool, name string) (aid, oobi string, seed [
 			}); werr != nil {
 				log.Printf("[pairwise] %s minted, but its key log was not written down (%v) — "+
 					"it will be unable to prove itself to anything that checks", icp.AID, werr)
+			}
+
+			// Send it to the witnesses it just designated, so somebody other
+			// than us has seen this history.
+			//
+			// Designating a witness and never telling it anything would be
+			// worse than designating none: the event would advertise
+			// corroboration that does not exist, and a verifier that went
+			// looking would find nothing rather than a contradiction.
+			//
+			// Done in the background because a witness that is slow or down
+			// must not hold up minting an identity. The receipts are stored as
+			// they arrive; an identity whose receipts have not landed yet is
+			// correctly reported as uncorroborated rather than as invalid.
+			if s.WitnessService != nil && len(witnesses) > 0 {
+				go func(aid string, raw []byte, sig string) {
+					ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+					defer cancel()
+					if berr := s.WitnessService.BroadcastEvent(ctx, aid, raw, sig); berr != nil {
+						log.Printf("[pairwise] %s designated witnesses but its inception was not "+
+							"accepted by them (%v) — its history is uncorroborated until it is", aid, berr)
+					}
+				}(icp.AID, raw, sig)
 			}
 		}
 	}

@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log"
 
 	"identity-agent-core/login"
 )
@@ -173,5 +174,46 @@ func (s *CoreServer) verifyClaimantControlsTheIdentity(req pairingCompleteReques
 		return fmt.Errorf("the signature on this claim was not made by the key %s's log puts "+
 			"in force, so whoever sent it does not hold that identity", req.OwnerAID)
 	}
+
+	// Authorship is established. Completeness is a different question, and this
+	// is where it is asked — see corroborate_the_claim.go.
+	c := s.askTheWitnesses(req.OwnerAID, req.OwnerKEL)
+	if c.Contradicted {
+		return fmt.Errorf("this history is not the whole history: %s", c.Why)
+	}
+	if !c.Corroborated() && s.mustBeCorroborated() {
+		return fmt.Errorf("nobody other than the claimant could confirm %s's history "+
+			"(%d witnesses named, %d reachable). A machine that somebody else set up can "+
+			"always reach a witness, so being unable to is a reason to refuse rather than "+
+			"to proceed", req.OwnerAID, c.Designated, c.Asked)
+	}
+	if !c.Corroborated() {
+		// Recorded, not refused. This is a computer somebody is sitting at: it
+		// may have no working network at all, which is the case the presented
+		// log exists for. Refusing would make a machine unable to be set up in
+		// exactly the situation setting it up is most normal.
+		log.Printf("[pairing] claimed by %s on an UNCORROBORATED history (%d witnesses named, "+
+			"%d reachable) — accepted because this machine was offered from its own screen, "+
+			"where the person is present; a hosted machine would refuse",
+			req.OwnerAID, c.Designated, c.Asked)
+	}
 	return nil
+}
+
+// mustBeCorroborated reports whether this machine should refuse a history
+// nobody else could confirm.
+//
+// The distinction is not about how much a machine is trusted; it is about what
+// it can reach. A machine somebody else set up was reached by a provisioning
+// host before anyone could claim it, so it has a network and can always ask a
+// witness — being unable to is a genuine signal. A computer being set up on
+// somebody's desk may have no route out at all, and refusing there would make
+// the ordinary case impossible while stopping nobody: the person is standing in
+// front of it.
+//
+// So the question is answered by HOW THIS MACHINE WAS OFFERED, which it already
+// knows: told by a host, or offered from its own screen.
+func (s *CoreServer) mustBeCorroborated() bool {
+	_, live := localPairingOffer()
+	return !live
 }
