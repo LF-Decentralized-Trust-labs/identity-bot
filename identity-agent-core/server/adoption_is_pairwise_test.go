@@ -324,3 +324,79 @@ func TestPairingDoesNotTreatOneKindOfComputerDifferently(t *testing.T) {
 		t.Fatal("one computer was delegated and the other was not")
 	}
 }
+
+// What you now own is recorded, because a list of your computers and a list of
+// the organisations you own are different questions asked of the same record.
+//
+// The ceremony is identical either way — the machine is never told which it is
+// and nothing it publishes says — so this is the one place the difference
+// survives, and it is worth asserting that it does.
+func TestWhatYouNowOwnIsRecordedAsAComputerOrAnOrganisation(t *testing.T) {
+	for _, tc := range []struct{ asked, recorded string }{
+		{"", "individual"}, // said nothing: a computer of your own
+		{"individual", "individual"},
+		{"organisation", "organisation"},
+	} {
+		s := adoptingOwner(t)
+		var sent pairingCompleteRequest
+		box := adoptingMachine(t, &sent)
+
+		body := `{"box_url":"` + box.URL + `","adoption_code":"code","allow_unattested":true`
+		if tc.asked != "" {
+			body += `,"kind":"` + tc.asked + `"`
+		}
+		body += `}`
+		req := httptest.NewRequest(http.MethodPost, "/api/pairing/adopt", strings.NewReader(body))
+		req.RemoteAddr = "127.0.0.1:1234"
+		rec := httptest.NewRecorder()
+		s.handlePairingAdopt(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("kind %q was refused: %s", tc.asked, rec.Body.String())
+		}
+
+		agents, _ := s.DataStore.ListAdoptedAgents()
+		if len(agents) != 1 || agents[0].Kind != tc.recorded {
+			t.Errorf("asked for %q, recorded %q, wanted %q", tc.asked, agents[0].Kind, tc.recorded)
+		}
+		// And the machine is not told, because it does not differ for it.
+		if strings.Contains(strings.ToLower(string(mustJSON(t, sent))), "organisation") {
+			t.Error("the machine was told what kind of thing it is founding; it founds its " +
+				"own root and seals an owner either way, and telling it invites the two " +
+				"ceremonies to drift apart")
+		}
+		box.Close()
+	}
+}
+
+// A label nobody recognises is refused, not stored.
+//
+// Silently keeping it would put an organisation in somebody's list of computers
+// or the reverse, and nothing later would disagree.
+func TestAKindNobodyRecognisesIsRefused(t *testing.T) {
+	s := adoptingOwner(t)
+	var sent pairingCompleteRequest
+	box := adoptingMachine(t, &sent)
+	defer box.Close()
+
+	body := `{"box_url":"` + box.URL + `","adoption_code":"code","allow_unattested":true,"kind":"toaster"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/pairing/adopt", strings.NewReader(body))
+	req.RemoteAddr = "127.0.0.1:1234"
+	rec := httptest.NewRecorder()
+	s.handlePairingAdopt(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("an unrecognised kind was accepted (%d), so it is now stored as fact", rec.Code)
+	}
+	if agents, _ := s.DataStore.ListAdoptedAgents(); len(agents) != 0 {
+		t.Error("something was recorded despite the claim being refused")
+	}
+}
+
+func mustJSON(t *testing.T, v interface{}) []byte {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}

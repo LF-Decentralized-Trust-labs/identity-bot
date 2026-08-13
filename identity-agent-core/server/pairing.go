@@ -618,6 +618,19 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 		// deep link or QR the provisioning page produced. The box will not be
 		// adopted without it.
 		AdoptionCode string `json:"adoption_code"`
+		// Kind says what this person now owns: a computer of their own, or an
+		// organisation.
+		//
+		// The ceremony does not differ. The machine is not told this and does
+		// not care — it founds its own root and seals in an owner either way,
+		// and nothing in what it publishes says which of the two it is. What
+		// differs is only what was ASKED: "be my always-on computer" against
+		// "be a signer and owner of this organisation".
+		//
+		// So this is a label on the owner's side, kept because a list of your
+		// machines and a list of the organisations you own are different
+		// questions to ask of the same record.
+		Kind string `json:"kind,omitempty"`
 		// AllowUnattested adopts a machine that cannot prove what it is.
 		//
 		// Off by default, so the safe direction is the one that happens when
@@ -733,6 +746,21 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 	// index: a pool that borrowed another's range would hand the same key to
 	// two unrelated relationships, which is the correlation a pairwise
 	// identifier exists to prevent.
+	// Refused rather than defaulted, because a wrong label here is silent: it
+	// puts an organisation in somebody's list of computers, or the reverse, and
+	// nothing later disagrees with it.
+	kind := req.Kind
+	switch kind {
+	case "":
+		kind = "individual"
+	case "individual", "organisation":
+	default:
+		writeError(w, http.StatusBadRequest, "Unknown kind",
+			"a claim says what it is founding — a computer of your own (individual) "+
+				"or an organisation — and "+kind+" is neither")
+		return
+	}
+
 	ownerAID, ownerIdx := req.OwnerAID, 0
 	if ownerAID != "" {
 		idx, known, lErr := s.DataStore.MachineOwnerIndex(ownerAID)
@@ -899,7 +927,7 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 		// an identity issued from here.
 		SignsAsAID: identityAID,
 		URL:        base,
-		Kind:       "individual",
+		Kind:       kind,
 		Sealed:     offer.Attestation != "",
 		// Which identity of ours it answers to, and where that key comes from.
 		// Without the index there is no signing to this machine again, no
