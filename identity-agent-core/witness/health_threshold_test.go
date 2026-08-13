@@ -51,7 +51,14 @@ func TestAWitnessThatComesBackIsReliedOnAgain(t *testing.T) {
 	if !c.IsWitness {
 		t.Fatal("a witness that came back was not resumed, so one outage cost it permanently")
 	}
-	meta, _ := s.Store.GetContactMeta("EFriend")
+	meta, err := s.Store.GetContactMeta("EFriend")
+	if err != nil || meta == nil {
+		// Said plainly rather than dereferenced. Absent is a real answer here —
+		// no row is reported as (nil, nil) — and discarding it turned a missing
+		// row into a panic that took the whole package down and pointed at
+		// witnesses instead of at the store.
+		t.Fatalf("no health record for a witness that has one: %v", err)
+	}
 	if meta.WitnessStatus != StatusOnline || meta.OfflineCount != 0 {
 		t.Fatalf("its health was not reset: status=%s count=%d", meta.WitnessStatus, meta.OfflineCount)
 	}
