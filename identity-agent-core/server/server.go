@@ -782,6 +782,10 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		// Adoption: the box generates its own delegated key, the controller
 		// issues the delegation over it. See pairing.go for why the box never
 		// receives a key.
+		// A computer in front of you issues its own claim code, because nothing
+		// provisions a laptop. Safe because a claim must prove control — see
+		// claim_proves_control.go — not because of where this is called from.
+		r.Post("/pairing/offer-this-computer", s.handleOfferThisComputer)
 		r.Post("/pairing/begin", s.handlePairingBegin)
 		r.Post("/pairing/complete", s.handlePairingComplete)
 		// The owner's side: adopt a box. Owner-only by default.

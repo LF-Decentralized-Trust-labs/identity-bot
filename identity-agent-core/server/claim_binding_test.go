@@ -79,14 +79,20 @@ func TestAClaimFromTheWrongIdentityIsRefusedEvenWithTheRightToken(t *testing.T) 
 	}
 }
 
-// The intended owner, presenting the token they were issued with, gets past
-// the gate.
+// The intended owner is not refused BY THE OWNERSHIP BINDING.
 //
 // Without this a check that refused everyone would pass the test above and
-// still be useless.
-func TestTheIntendedOwnerGetsPastTheGate(t *testing.T) {
+// still be useless. So what matters is not that the claim succeeds — it will
+// not, because it carries no proof of control — but that it fails for a
+// different reason than a stranger's does. The binding has to discriminate.
+//
+// (Before claims had to prove control, this asserted the owner got through
+// outright. That is no longer the contract: the rightful owner still has to
+// show they hold the identity, which is the point of the newer check and is
+// covered end to end in claim_proves_control_test.go.)
+func TestTheIntendedOwnerIsNotRefusedByTheOwnershipBinding(t *testing.T) {
 	s := boxAwaitingClaim(t, "TOKEN-ISSUED-TO-THE-OWNER", "EIntendedOwner")
-	s.KeriDriver = nil // reaching it is the proof; no KERI runtime needed
+	s.KeriDriver = nil
 
 	w := claim(t, s, map[string]any{
 		"adoption_code":    "TOKEN-ISSUED-TO-THE-OWNER",
@@ -95,8 +101,9 @@ func TestTheIntendedOwnerGetsPastTheGate(t *testing.T) {
 		"owner_public_key": ownerKey,
 	})
 
-	if w.Code == http.StatusForbidden {
-		t.Fatalf("the rightful owner was refused: %s", w.Body)
+	if strings.Contains(w.Body.String(), "Wrong owner") {
+		t.Fatalf("the rightful owner was refused as the wrong owner, so the binding "+
+			"refuses everybody and proves nothing: %s", w.Body)
 	}
 }
 
@@ -116,8 +123,12 @@ func TestAClaimWithNoOwnerKeyIsRefusedBeforeAnythingIsMinted(t *testing.T) {
 		"owner_aid":     "EIntendedOwner",
 	})
 
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("founded an identity whose owner cannot sign: got %d, want 400 — %s", w.Code, w.Body)
+	// Refused is what matters, and that NOTHING WAS MINTED matters more. The
+	// claim is now stopped a step earlier — by carrying no proof of control
+	// rather than by carrying no key — which is a stricter refusal for the same
+	// reason: an owner sealed in wrong cannot be replaced.
+	if w.Code < 400 {
+		t.Fatalf("founded an identity whose owner cannot sign: got %d — %s", w.Code, w.Body)
 	}
 	if id, _ := s.DataStore.GetIdentity(); id != nil {
 		t.Fatal("an identity was persisted despite the claim being refused")
@@ -135,11 +146,15 @@ func TestAnUnreadableOwnerKeyIsRefused(t *testing.T) {
 		"owner_public_key": "!!! not a key !!!",
 	})
 
-	if w.Code != http.StatusBadRequest {
+	// A key that cannot be read is now refused for a stronger reason than being
+	// unreadable: nothing proves the claimant holds the identity at all, and
+	// the key that would be sealed in is taken from their own log rather than
+	// from what they sent. Either way it never reaches the seal.
+	if w.Code < 400 {
 		t.Fatalf("accepted an owner key it cannot verify signatures with: got %d — %s", w.Code, w.Body)
 	}
-	if !strings.Contains(strings.ToLower(w.Body.String()), "key") {
-		t.Errorf("refused, but the reason never mentions the key: %s", w.Body)
+	if id, _ := s.DataStore.GetIdentity(); id != nil {
+		t.Fatal("an identity was persisted despite the claim being refused")
 	}
 }
 

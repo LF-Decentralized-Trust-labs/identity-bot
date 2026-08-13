@@ -5,7 +5,17 @@
      and the Summary below whether this one concerns them.
 
      The comments in this template disappear when the page renders — write your text
-     underneath each heading, and delete any optional line you do not use. -->
+     underneath each heading, and delete any optional line you do not use.
+
+     LENGTH. The whole body should be readable in about a minute. Reviewers read
+     the diff; this page exists to tell them what to look at and why, not to
+     re-explain the change in prose.
+
+     THE TEST FOR EVERY SENTENCE: would a reviewer be worse off if it were
+     deleted? If not, delete it. Background they already have, reasoning that
+     does not change what they check, and anything restating the diff are all
+     filler, and filler is not harmless — it buries the two or three sentences
+     that actually matter and teaches people to skim the whole page. -->
 
 ## Summary
 
@@ -44,16 +54,18 @@
 
 ## Who This Helps
 
-<!-- This project is an open, vendor-neutral reference implementation of the Identity
+<!-- ONE OR TWO SENTENCES. Who outside this project can use this, and what it gives
+     them. Longer only where the change genuinely establishes something complicated,
+     which is rare.
+
+     This project is an open, vendor-neutral reference implementation of the Identity
      Agent Protocol, so a change has to earn its place for people who are not you.
+     A narrow use case is fine when the mechanism is general — say which it is.
+     If the only honest answer is one vendor's private interest, that is a sign the
+     change belongs in a project built on top of this one.
 
-     Name who outside your own use of the project can use this, and what general thing
-     it establishes for them — a framework, a seam, an interoperability decision, a
-     schema, a contract others build against.
-
-     A narrow use case is fine when the mechanism is general: say plainly which it is.
-     If the only honest answer is one vendor's or one deployment's private interest,
-     that is a sign the change belongs in a project built on top of this one. -->
+     Do not list every party it might conceivably help, and do not restate the
+     mechanism here — that is What This Is. -->
 
 ## Testing
 
@@ -66,6 +78,10 @@
      Fixes #123
      Risk: what breaks if this is wrong, and how to revert it.
      Release note: one line for the release changelog.
+
+     Anything else — design notes, trade-offs, guidance for the reviewer — goes
+     after these headings under its own, and only when a reviewer would otherwise
+     miss something. It is not a routine section.
 
      Every commit needs a DCO sign-off line — `git commit -s` adds it:
      Signed-off-by: Your Name <you@example.com>
