@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"time"
 )
 
 // DestinationType identifies where archives are pushed.
@@ -73,16 +72,27 @@ type HistoryEntry struct {
 	// before it was kept. A run without it succeeded at making a file, which is
 	// a different claim.
 	Verified bool `json:"verified"`
+
+	// OffDevice records that the archive reached somewhere the loss of this
+	// device does not reach. A run without it produced a copy, not a backup.
+	OffDevice bool `json:"off_device"`
 }
 
 // StatusResponse is returned by GET /api/backup/status.
 type StatusResponse struct {
-	Enabled             bool           `json:"enabled"`
-	LastBackupAt        string         `json:"last_backup_at,omitempty"`
-	Health              string         `json:"health"` // green | yellow | red
-	Destinations        []Destination  `json:"destinations"`
-	RedundancyWarning   string         `json:"redundancy_warning,omitempty"`
-	AntiDeadlockWarning string         `json:"anti_deadlock_warning,omitempty"`
+	Enabled             bool          `json:"enabled"`
+	LastBackupAt        string        `json:"last_backup_at,omitempty"`
+	Health              string        `json:"health"` // green | yellow | red
+	Destinations        []Destination `json:"destinations"`
+	RedundancyWarning   string        `json:"redundancy_warning,omitempty"`
+	AntiDeadlockWarning string        `json:"anti_deadlock_warning,omitempty"`
+
+	// LastVerifiedAt, LastOffDeviceAt and Protection answer the questions
+	// LastBackupAt cannot: whether any archive has ever been proven to open,
+	// whether any of them left this device, and what is missing. See BackupFacts.
+	LastVerifiedAt      string         `json:"last_verified_at,omitempty"`
+	LastOffDeviceAt     string         `json:"last_off_device_at,omitempty"`
+	Protection          string         `json:"protection,omitempty"`
 	History             []HistoryEntry `json:"history"`
 	ConsecutiveFailures int            `json:"consecutive_failures"`
 }
@@ -227,27 +237,6 @@ func (s *ConfigStore) loadHistoryLocked() ([]HistoryEntry, error) {
 	return hist, nil
 }
 
-func ComputeHealth(lastAt string, consecutiveFailures int) string {
-	if consecutiveFailures >= 3 {
-		return "red"
-	}
-	if lastAt == "" {
-		return "red"
-	}
-	t, err := time.Parse(time.RFC3339, lastAt)
-	if err != nil {
-		return "yellow"
-	}
-	age := time.Since(t)
-	if age > 72*time.Hour {
-		return "red"
-	}
-	if age > 24*time.Hour {
-		return "yellow"
-	}
-	return "green"
-}
-
 func RedundancyWarnings(dests []Destination) string {
 	enabled := 0
 	for _, d := range dests {
@@ -279,14 +268,16 @@ func AntiDeadlockWarning(dests []Destination) string {
 }
 
 func (s *ConfigStore) BuildStatus(cfg Config, hist []HistoryEntry, failures int) StatusResponse {
-	lastAt := ""
-	if len(hist) > 0 && hist[0].Success {
-		lastAt = hist[0].Timestamp
-	}
+	// hist[0].Success was the old reading of "last backup", so a single failed
+	// run at the top hid every successful one beneath it. FactsFrom scans.
+	facts := FactsFrom(hist, cfg.Destinations, s.dir, failures)
 	return StatusResponse{
 		Enabled:             cfg.Enabled,
-		LastBackupAt:        lastAt,
-		Health:              ComputeHealth(lastAt, failures),
+		LastBackupAt:        facts.LastBackupAt,
+		LastVerifiedAt:      facts.LastVerifiedAt,
+		LastOffDeviceAt:     facts.LastOffDeviceAt,
+		Protection:          facts.Protection,
+		Health:              facts.Health,
 		Destinations:        cfg.Destinations,
 		RedundancyWarning:   RedundancyWarnings(cfg.Destinations),
 		AntiDeadlockWarning: AntiDeadlockWarning(cfg.Destinations),
