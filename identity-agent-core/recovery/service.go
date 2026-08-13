@@ -313,6 +313,50 @@ func (s *Service) applyPayload(payload *RestoredPayload) error {
 		}
 	}
 
+	// Credentials, settings and pending requests.
+	//
+	// These were collected, encrypted, digested and shipped, and then dropped
+	// here — so an archive was valid, complete against its own manifest, and
+	// restored less than it contained. Nothing that inspects an archive could
+	// catch that; only restoring one and looking at what arrived.
+	//
+	// A section that will not parse fails the restore rather than being skipped.
+	// Continuing past it is how a partial restore comes to look like a whole
+	// one, and this is the one moment somebody can still act on the truth.
+	if raw, ok := payload.Bundle.Sections["credentials"]; ok && len(raw) > 0 && s.Store != nil {
+		var creds []store.CredentialRecord
+		if err := json.Unmarshal(raw, &creds); err != nil {
+			return fmt.Errorf("credentials in this archive could not be read: %w", err)
+		}
+		for _, c := range creds {
+			if err := s.Store.SaveCredential(c); err != nil {
+				return fmt.Errorf("restore credential %s: %w", c.SAID, err)
+			}
+		}
+	}
+
+	if raw, ok := payload.Bundle.Sections["settings"]; ok && len(raw) > 0 && s.Store != nil {
+		var settings store.SettingsData
+		if err := json.Unmarshal(raw, &settings); err != nil {
+			return fmt.Errorf("settings in this archive could not be read: %w", err)
+		}
+		if err := s.Store.SaveSettings(settings); err != nil {
+			return fmt.Errorf("restore settings: %w", err)
+		}
+	}
+
+	if raw, ok := payload.Bundle.Sections["pending_requests"]; ok && len(raw) > 0 && s.Store != nil {
+		var pending []store.PendingRequest
+		if err := json.Unmarshal(raw, &pending); err != nil {
+			return fmt.Errorf("pending requests in this archive could not be read: %w", err)
+		}
+		for _, p := range pending {
+			if err := s.Store.SavePendingRequest(p); err != nil {
+				return fmt.Errorf("restore pending request: %w", err)
+			}
+		}
+	}
+
 	if raw, ok := payload.Bundle.Sections["login_relationships"]; ok && len(raw) > 0 {
 		path := filepath.Join(s.DataDir, "login_relationships.json")
 		if err := os.WriteFile(path, raw, 0600); err != nil {
