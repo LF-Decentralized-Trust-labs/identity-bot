@@ -1,8 +1,8 @@
 package server
 
 import (
-	"encoding/json"
 	"errors"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
