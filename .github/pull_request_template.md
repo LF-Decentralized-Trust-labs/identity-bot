@@ -71,7 +71,17 @@
 
 <!-- What you ran and what you saw. For a change in behaviour, name the case that
      would have failed before. "The tests pass" on its own is not evidence.
-     Say plainly what you did not test, and why. -->
+     Say plainly what you did not test, and why.
+
+     DO NOT REPORT A KNOWN FAILURE THAT IS NOT YOURS. A pre-existing red test
+     does not belong in the Testing section of an unrelated change. Repeating it
+     on every pull request teaches the reader that this project always has
+     failures, and buries the one line saying what this change proves. Fix it,
+     or log it once and say nothing further.
+
+     COUNTS ARE NOT EVIDENCE. "28 of 29 packages pass" is the same sentence on
+     every pull request and reads as a standing fault. Name the case that would
+     have failed before, and what you did not test. Nothing else earns a line. -->
 
 <!-- Optional, one line each, no heading. Delete the ones that don't apply.
 
@@ -82,6 +92,14 @@
      Anything else — design notes, trade-offs, guidance for the reviewer — goes
      after these headings under its own, and only when a reviewer would otherwise
      miss something. It is not a routine section.
+
+     SAY THE GENERAL THING, NOT THE PRIVATE ONE. This is the open, vendor-neutral
+     core. Explaining how organisations work, or what any product built on this
+     needs, is filler here. Mention an organisation only where it is the shortest
+     way to state a general rule, never to explain the organisation itself.
+
+     NEVER REVIEW YOUR OWN PULL REQUEST INSIDE IT. No commentary on the review
+     process, no notes to whoever merges it, no grading your own work.
 
      Every commit needs a DCO sign-off line — `git commit -s` adds it:
      Signed-off-by: Your Name <you@example.com>
