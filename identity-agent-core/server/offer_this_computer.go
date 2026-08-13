@@ -126,6 +126,13 @@ func (s *CoreServer) handleOfferThisComputer(w http.ResponseWriter, r *http.Requ
 		// So the screen counts down with the machine rather than to its own
 		// idea of how long is left.
 		"expires_in_seconds": int(localOfferWindow.Seconds()),
+		// Where a phone can reach this computer, so the screen can show a code
+		// that is scannable rather than only typeable.
+		//
+		// It has to come from here. The screen talks to this agent over
+		// loopback, and loopback is the one address that is useless to another
+		// device — a QR carrying it would send the phone to itself.
+		"address": s.getPublicURL(r),
 	})
 }
 
@@ -157,6 +164,7 @@ func (s *CoreServer) handleThisComputersPairingState(w http.ResponseWriter, r *h
 	if code, live := localPairingOffer(); live {
 		out["code"] = code
 		out["expires_in_seconds"] = int(time.Until(localOfferExpiry()).Seconds())
+		out["address"] = s.getPublicURL(r)
 	}
 	// Whoever has said they will claim it. Until somebody scans, this is empty
 	// and the screen simply waits.

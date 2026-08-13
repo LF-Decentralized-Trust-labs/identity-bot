@@ -2057,6 +2057,7 @@ class CoreService {
       code: (json['code'] ?? '').toString(),
       validFor:
           Duration(seconds: (json['expires_in_seconds'] as num?)?.toInt() ?? 0),
+      address: (json['address'] ?? '').toString(),
     );
   }
 
@@ -2077,6 +2078,7 @@ class CoreService {
       remaining: Duration(seconds: (json['expires_in_seconds'] as num?)?.toInt() ?? 0),
       claimedBy: (json['claimed_by'] ?? '').toString(),
       paired: json['paired'] == true,
+      address: (json['address'] ?? '').toString(),
     );
   }
 
@@ -3342,7 +3344,11 @@ class AttestationLineageDto {
 
 /// A standing offer to pair the computer it came from.
 class ComputerPairingOffer {
-  const ComputerPairingOffer({required this.code, required this.validFor});
+  const ComputerPairingOffer({
+    required this.code,
+    required this.validFor,
+    this.address = '',
+  });
 
   /// Shown on this computer's screen and typed or scanned into the device
   /// holding the identity that will own it. Never sent anywhere by this app.
@@ -3351,6 +3357,12 @@ class ComputerPairingOffer {
   /// How long it stands, shown as a countdown so somebody who walked away
   /// knows to ask for a new one.
   final Duration validFor;
+
+  /// Where another device can reach this computer.
+  ///
+  /// From the agent rather than from this app: the app talks to it over
+  /// loopback, which is the one address that would send a phone to itself.
+  final String address;
 }
 
 /// What has become of the code a computer is showing.
@@ -3360,6 +3372,7 @@ class ThisComputersPairing {
     required this.remaining,
     required this.claimedBy,
     required this.paired,
+    this.address = '',
   });
 
   final String code;
@@ -3371,4 +3384,7 @@ class ThisComputersPairing {
 
   /// Whether the machine now has an identity of its own.
   final bool paired;
+
+  /// Where another device can reach this computer.
+  final String address;
 }
