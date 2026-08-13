@@ -1400,30 +1400,9 @@ func (s *SQLiteStore) AllocateNextRelationshipIndex(namespace string) (int, erro
 		//
 		// Observed, not theorised: adding the machines pool without a base
 		// immediately minted an identifier identical to an existing one.
-		switch namespace {
-		case "contacts":
-			nextIdx = 1
-		case "login":
-			nextIdx = 1000001
-		case "machines":
-			nextIdx = 2000001
-		case "delegated-identity":
-			nextIdx = 3000001
-		case "invocation-log":
-			nextIdx = 4000001
-		case "messaging-keys":
-			nextIdx = 5000001
-		case "witnessing":
-			nextIdx = 6000001
-		default:
-			// Refused rather than started at 1, because starting at 1 is the
-			// bug: it would share a range with contacts, and the two pools
-			// would derive the same key for unrelated relationships. Silent
-			// there, and undetectable afterwards. A new pool is a deliberate
-			// decision about a range, so it is made here.
-			return 0, fmt.Errorf("pairwise pool %q has no range of its own — give it one "+
-				"in AllocateNextRelationshipIndex, because a pool without one shares "+
-				"keys with another", namespace)
+		nextIdx, err = PoolBase(namespace)
+		if err != nil {
+			return 0, err
 		}
 		_, err = tx.Exec(`INSERT INTO relationship_counters (namespace, next_index) VALUES (?, ?)`, namespace, nextIdx+1)
 		if err != nil {
@@ -1601,4 +1580,36 @@ FROM signing_requests WHERE status = 'pending' ORDER BY created_at ASC`)
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// PoolBase is where a pairwise pool's indices start.
+//
+// One definition, because two would drift and the failure would be silent: a
+// pool allocated from one base and searched from another finds nothing, and
+// reports a machine as belonging to somebody else.
+//
+// A pool with no range is REFUSED rather than started at 1. Starting at 1 is
+// the bug — it shares a range with contacts, so two pools derive the same key
+// for unrelated relationships. Observed, not theorised: adding the machines
+// pool without a base immediately minted an identifier identical to an existing
+// one. A new pool is a deliberate decision about a range, made here.
+func PoolBase(namespace string) (int, error) {
+	switch namespace {
+	case "contacts":
+		return 1, nil
+	case "login":
+		return 1000001, nil
+	case "machines":
+		return 2000001, nil
+	case "delegated-identity":
+		return 3000001, nil
+	case "invocation-log":
+		return 4000001, nil
+	case "messaging-keys":
+		return 5000001, nil
+	case "witnessing":
+		return 6000001, nil
+	}
+	return 0, fmt.Errorf("pairwise pool %q has no range of its own — give it one in "+
+		"PoolBase, because a pool without one shares keys with another", namespace)
 }

@@ -200,6 +200,13 @@ var publicRoutes = map[string]string{
 	// an OOBI anyway, nothing else, and it stops answering once paired.
 	"POST /api/provisioning/expect": "whoever provisioned a box says which claim it will accept, before it has an owner to authenticate",
 	"GET /api/provisioning/pairing": "a newly provisioned instance offers itself for pairing, before any owner exists",
+	// Readable because it is already published. This machine names its owner in
+	// the event that founded it, which anyone can fetch with no credential, and
+	// the key is the one that identity's own log puts in force. Gating it on
+	// being the owner also made it unreachable by the one party who needs it:
+	// somebody recovering from their words alone, who cannot sign as the owner
+	// yet because that is precisely what they are trying to get back.
+	"GET /api/owners/authority": "an owner recovering from their recovery words reads back which identity this machine answers to",
 	// The adoption ceremony itself. Same reasoning and the same window: an
 	// instance with no owner cannot gate these on being the owner. Both refuse
 	// the moment the instance has an identity, so the window closes on success.

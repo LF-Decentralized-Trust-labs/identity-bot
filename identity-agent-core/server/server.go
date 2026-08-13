@@ -796,6 +796,10 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		// The identity a machine will answer to, minted before the machine is
 		// asked for. Owner-only: it is this device's own key material.
 		r.Post("/machines/owner-identity", s.handleMintMachineOwner)
+		// Finding that identity again from the recovery words alone, when the
+		// record of which index it came from is gone. Owner-only: it uses this
+		// device's own seed.
+		r.Post("/machines/recover-owner", s.handleRecoverMachineOwner)
 		// What this identity owns. Owner-only by default, which is right: a
 		// list of somebody's machines is a map of their infrastructure.
 		r.Get("/agents", s.handleListAdoptedAgents)
