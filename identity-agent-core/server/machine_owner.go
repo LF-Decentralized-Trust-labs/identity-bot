@@ -22,13 +22,24 @@ type machineOwnerResponse struct {
 	// AID is what the provisioning host is told, and what the machine will
 	// accept as its owner.
 	AID string `json:"aid"`
+	// OOBI is where this identity's key log can be fetched from.
+	//
+	// Handed to the provisioning host alongside the AID so the machine can go
+	// and READ the history rather than only being shown it. A presented log is
+	// self-verifying but cannot reveal an event withheld from it; fetching, and
+	// asking the witnesses named in that log, is what closes that.
+	//
+	// Sending it discloses nothing the machine will not learn at the claim: it
+	// is a pairwise identity, so the address it names says only that some
+	// identity is reachable there.
+	OOBI string `json:"oobi,omitempty"`
 	// Deliberately no index. Where the key comes from is remembered on this
 	// device and looked up at adoption; sending it out would put a fact that
 	// only matters here into a round trip that could return it wrong.
 }
 
 func (s *CoreServer) handleMintMachineOwner(w http.ResponseWriter, r *http.Request) {
-	aid, _, _, idx, err := s.mintPairwiseIn("machines", "machine-owner")
+	aid, oobi, _, idx, err := s.mintPairwiseIn("machines", "machine-owner")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError,
 			"Could not mint an identity for this machine", err.Error())
@@ -56,7 +67,7 @@ func (s *CoreServer) handleMintMachineOwner(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(machineOwnerResponse{AID: aid})
+	json.NewEncoder(w).Encode(machineOwnerResponse{AID: aid, OOBI: oobi})
 }
 
 // persistPairwiseKEL writes a freshly minted pairwise identity's key log to

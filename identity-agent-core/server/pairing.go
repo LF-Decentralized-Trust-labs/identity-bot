@@ -112,6 +112,13 @@ type pairingCompleteRequest struct {
 	OwnerDID *didcomm.DID `json:"owner_did,omitempty"`
 	// OwnerAgentEndpoint is where that owner's agent is reached.
 	OwnerAgentEndpoint string `json:"owner_agent_endpoint,omitempty"`
+	// OwnerOOBI is where the owner's key log can be fetched from.
+	//
+	// The log is presented in OwnerKEL as well, and both matter. Presented, it
+	// can be checked with no network at all. Fetched, it can be checked against
+	// what somebody OTHER than the claimant is serving — which is the only way
+	// to notice a rotation the claimant withheld.
+	OwnerOOBI string `json:"owner_oobi,omitempty"`
 	// AdoptionCode is the one-time code this instance issued with its pairing
 	// offer. Without it, whoever reaches an unadopted box first takes it.
 	AdoptionCode string `json:"adoption_code"`

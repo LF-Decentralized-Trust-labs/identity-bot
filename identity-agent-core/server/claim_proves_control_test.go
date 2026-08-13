@@ -248,6 +248,11 @@ func TestTheIdentityAMachineWasPromisedToCanClaimItByProvingControl(t *testing.T
 	resetExpectedClaimForTest()
 	resetPairingOfferForTest()
 
+	// A machine somebody else set up refuses a history nobody else can confirm,
+	// so this needs a real witness holding it — which is the point rather than
+	// scaffolding. Stood up before minting so the identity designates it.
+	wit := newStandInWitness(t)
+
 	owner := adoptingOwner(t)
 
 	// Before the machine is asked for: the owner mints the identity it will
@@ -263,6 +268,16 @@ func TestTheIdentityAMachineWasPromisedToCanClaimItByProvingControl(t *testing.T
 	json.NewDecoder(rec.Body).Decode(&minted)
 	if minted.AID == "" {
 		t.Fatal("no identity was minted, so there is nothing to tell the machine to expect")
+	}
+
+	// The witness holds this identity's history, as it would after the identity
+	// broadcast its inception to it. Set directly rather than waited for, so
+	// the test turns on the corroboration check and not on a background send.
+	wit.mu.Lock()
+	wit.held[minted.AID] = owner.kelToPresent(minted.AID)
+	wit.mu.Unlock()
+	if len(wit.held[minted.AID]) == 0 {
+		t.Fatal("the minted identity has no key log to be witnessed")
 	}
 
 	// The machine is started and told what to accept, while nobody else can
