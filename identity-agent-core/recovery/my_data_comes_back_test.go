@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"testing"
 
 	"identity-agent-core/backup"
@@ -90,8 +89,9 @@ func restoreOntoAnotherDevice(t *testing.T, oldDir string, oldStore *store.SQLit
 		t.Fatalf("read the seed: %v", err)
 	}
 
-	// Both tiers, because that is the shipped default.
-	tiers := []string{backup.TierCritical, backup.TierImportant}
+	// Every tier. A round trip that archives only the tiers it expects to be
+	// clean cannot discover anything about the ones it skips.
+	tiers := []string{backup.TierCritical, backup.TierImportant, backup.TierFull}
 	c := &backup.Collector{DataDir: oldDir, Store: oldStore}
 	archive, err := c.CreateArchive(
 		backup.CollectOptions{Tiers: tiers},
@@ -333,49 +333,47 @@ func TestNoSectionIsCollectedAndThenIgnored(t *testing.T) {
 	}
 }
 
-// What the archive points at instead of carrying.
+// The assistant's memory goes in, and comes back.
 //
-// Under the shipped default the assistant's memory is NOT in the archive. A
-// pointer is recorded instead, and its locator is a path on the device being
-// backed up — so after that device is gone the archive holds a note saying
-// where the memory used to be. Nothing on the restore side reads pointers.
+// It used to be externalised even in the default configuration: the archive
+// recorded a pointer whose locator was a path on the device being backed up,
+// and nothing on the restore side reads pointers. So it was unrecoverable by
+// two independent routes, and every check reported a complete backup.
 //
-// This is pinned rather than fixed because whether to carry it is a product
-// decision: carrying it makes every archive much larger. The test exists so
-// the answer cannot change silently, in either direction.
-func TestTheDefaultLeavesAssistantMemoryBehind(t *testing.T) {
-	dir, st, _ := anAgentWithRealDataInIt(t)
-	c := &backup.Collector{DataDir: dir, Store: st}
-	tiers := []string{backup.TierCritical, backup.TierImportant, backup.TierFull}
+// An assistant that comes back having forgotten everything it was told is not
+// the same assistant. (Rob, 2026-08-13.)
+func TestTheAssistantsMemoryComesBack(t *testing.T) {
+	oldDir, oldStore, _ := anAgentWithRealDataInIt(t)
 
-	bundle, pointers, err := c.Collect(backup.DefaultCollectOptions(tiers))
+	memory := []byte("what the assistant was told, and must not forget")
+	if err := os.WriteFile(filepath.Join(oldDir, "ai_memory.db"), memory, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &backup.Collector{DataDir: oldDir, Store: oldStore}
+	bundle, pointers, err := c.Collect(backup.DefaultCollectOptions(
+		[]string{backup.TierCritical, backup.TierImportant, backup.TierFull}))
 	if err != nil {
 		t.Fatalf("collect: %v", err)
 	}
-
-	if _, carried := bundle.Sections["ai_memory_db"]; carried {
-		t.Fatal("the default now carries assistant memory. That is a change worth " +
-			"making deliberately — update this test and problem 194 rather than deleting it")
+	if _, carried := bundle.Sections["ai_memory_db"]; !carried {
+		t.Fatal("the default does not carry the assistant's memory")
 	}
-
-	var localPointer bool
 	for _, p := range pointers {
-		if p.Domain == "ai_memory" && strings.HasPrefix(p.Locator, dir) {
-			localPointer = true
+		if p.Domain == "ai_memory" {
+			t.Error("the memory is carried, so nothing should also point at it")
 		}
 	}
-	if !localPointer {
-		t.Fatal("expected a pointer to assistant memory on this device's own disk")
-	}
 
-	// And when it IS carried, it comes back. That half is fixed.
-	full := backup.DefaultCollectOptions(tiers)
-	full.LeanTier3 = false
-	carried, _, err := c.Collect(full)
+	newDir, _ := restoreOntoAnotherDevice(t, oldDir, oldStore)
+
+	// Read from the restored device's own disk, which is where it has to land
+	// for the assistant to find it.
+	got, err := os.ReadFile(filepath.Join(newDir, "ai_memory.db"))
 	if err != nil {
-		t.Fatalf("collect: %v", err)
+		t.Fatalf("the assistant's memory did not come back: %v", err)
 	}
-	if _, ok := carried.Sections["ai_memory_db"]; !ok {
-		t.Fatal("assistant memory was not carried even with the lean option off")
+	if !bytes.Equal(got, memory) {
+		t.Errorf("the memory came back changed: %q, was %q", got, memory)
 	}
 }

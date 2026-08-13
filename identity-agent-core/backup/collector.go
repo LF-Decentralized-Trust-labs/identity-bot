@@ -161,21 +161,28 @@ func (c *Collector) collectTier2(bundle *PayloadBundle) error {
 func (c *Collector) collectTier3(bundle *PayloadBundle, opts CollectOptions) ([]ExternalDataPointer, error) {
 	var pointers []ExternalDataPointer
 
-	// AI memory index — pointers only when lean mode (no bulk bytes).
+	// The AI assistant's memory is CARRIED, not pointed at — including in lean
+	// mode, which is the shipped default.
+	//
+	// It used to be externalised here: the archive recorded a pointer whose
+	// locator was a path on the very device being backed up, so once that
+	// device was gone the archive held a note saying where the memory used to
+	// be. Nothing on the restore side reads pointers, so it was unrecoverable
+	// by two independent routes at once.
+	//
+	// An assistant that comes back having forgotten everything it was ever told
+	// is not the same assistant, and a person experiences that as data loss
+	// whatever the manifest says. It costs archive size, and size is the easier
+	// problem of the two. (Rob, 2026-08-13.)
 	aiPath := filepath.Join(c.DataDir, "ai_memory.db")
-	if st, err := os.Stat(aiPath); err == nil && !opts.LeanTier3 {
-		data, err := os.ReadFile(aiPath)
-		if err == nil {
-			c.addRawSection(bundle, "ai_memory_db", data)
+	if _, err := os.Stat(aiPath); err == nil {
+		data, rerr := os.ReadFile(aiPath)
+		if rerr != nil {
+			// Not skipped. Failing to read something we mean to carry is the
+			// silent-partial-backup failure, and the whole point is to stop it.
+			return pointers, fmt.Errorf("read the assistant's memory at %s: %w", aiPath, rerr)
 		}
-	} else if err == nil {
-		pointers = append(pointers, ExternalDataPointer{
-			Domain:     "ai_memory",
-			Locator:    aiPath,
-			KeyRef:     "local:ai_memory.db",
-			SizeBytes:  st.Size(),
-			ArchivedAt: time.Now().UTC().Format(time.RFC3339),
-		})
+		c.addRawSection(bundle, "ai_memory_db", data)
 	}
 
 	// Sandbox — index manifest only, not container images or bulk app data.
