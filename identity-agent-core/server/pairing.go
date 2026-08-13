@@ -236,7 +236,7 @@ func (s *CoreServer) handlePairingComplete(w http.ResponseWriter, r *http.Reques
 	defer pairingState.Unlock()
 	if pairingState.offered == nil {
 		writeError(w, http.StatusConflict, "Nothing to complete",
-			"call /api/pairing/begin first — there is no key material to delegate over")
+			"call /api/pairing/begin first — there is no key material to found an identity over")
 		return
 	}
 
@@ -574,6 +574,15 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 		// list, a build they ran themselves — is the question this cannot
 		// answer and should not appear to.
 		AcceptedMeasurements []string `json:"accepted_measurements,omitempty"`
+		// OwnerAID and OwnerIndex name an identity minted BEFORE the machine was
+		// asked for — see /api/machines/owner-identity. The provisioning host was
+		// told this identity may claim the machine, so adoption must use the
+		// same one or the machine will refuse it.
+		//
+		// Only the identifier travels. Where its key came from is remembered on
+		// this device and looked up here, so nothing has to trust or re-check an
+		// index that came back through a caller.
+		OwnerAID string `json:"owner_aid,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.BoxURL == "" {
 		writeError(w, http.StatusBadRequest, "Missing box_url",
@@ -582,13 +591,13 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 	}
 	if s.KeriDriver == nil {
 		writeError(w, http.StatusServiceUnavailable, "No KERI engine",
-			"issuing a delegation needs the local KERI engine — the root key never leaves this device, so this cannot be done remotely")
+			"adopting a machine mints an identity for it to answer to, and that needs the local KERI engine — the key comes from this device's own seed, so it cannot be done remotely")
 		return
 	}
 	root, err := s.DataStore.GetIdentity()
 	if err != nil || root == nil {
 		writeError(w, http.StatusConflict, "No identity",
-			"this agent has no root identity yet; there is nothing to delegate from")
+			"this agent has no identity yet, and a machine has to belong to somebody")
 		return
 	}
 
@@ -634,14 +643,54 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// 3. Issue the delegation over exactly that key, anchored in our own KEL.
-	name := "box-" + shortAID(offer.PairwiseAID)
-	// The driver knows an identity by the name it was incepted under, and
-	// CreateInception sends none — so the root is registered under its own AID.
-	dip, err := s.KeriDriver.CreateDelegatedInception(
-		offer.PublicKey, offer.NextPublicKey, name, root.AID)
+	// 3. Mint the identity this machine will answer to.
+	//
+	// A PAIRWISE identity of this owner's, not their root, and the whole point
+	// of the change is what the machine then publishes. A delegated machine
+	// names its delegator inside its own inception event, and that event is
+	// served to anybody who can reach the machine — so delegating from the root
+	// published the one identifier that identifies this person everywhere, to
+	// anyone who knew where their machine was. Confirmed on a live machine, not
+	// inferred.
+	//
+	// It bought nothing. No code anywhere fetches the delegator's key event log
+	// to check the anchor, and the anchor was discarded by both sides after
+	// adoption. So the trade was a permanent public identifier for a
+	// verification nobody performs.
+	//
+	// The machine founds its own root instead and names this identity as its
+	// owner in a seal — the same ceremony an organisation already uses, so the
+	// two converge rather than the individual gaining a second path.
+	//
+	// Its own pool, because every pairwise key comes from one root seed and an
+	// index: a pool that borrowed another's range would hand the same key to
+	// two unrelated relationships, which is the correlation a pairwise
+	// identifier exists to prevent.
+	ownerAID, ownerIdx := req.OwnerAID, 0
+	if ownerAID != "" {
+		idx, known, lErr := s.DataStore.MachineOwnerIndex(ownerAID)
+		if lErr != nil || !known {
+			writeError(w, http.StatusBadRequest, "Unknown owner identity",
+				"this device did not mint that identity, so it holds no key for it and the machine would answer to nobody")
+			return
+		}
+		ownerIdx = idx
+	}
+	if ownerAID == "" {
+		// Nothing was reserved in advance, so mint one now. This is the path a
+		// machine obtained without a provisioning step takes.
+		var mErr error
+		ownerAID, _, _, ownerIdx, mErr = s.mintPairwiseIn("machines", "machine-"+shortAID(offer.PairwiseAID))
+		if mErr != nil {
+			writeError(w, http.StatusInternalServerError,
+				"Could not mint an identity for this machine", mErr.Error())
+			return
+		}
+	}
+	ownerKey, err := s.pairwisePublicKey(ownerIdx)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Could not issue the delegation", err.Error())
+		writeError(w, http.StatusInternalServerError,
+			"Could not read the key for this machine's owner", err.Error())
 		return
 	}
 
@@ -675,7 +724,7 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 	// is logged rather than passed over, because "adopted, and the two cannot
 	// speak privately" is a state somebody has to be able to find.
 	var ownerDID *didcomm.DID
-	if ks, err := s.keySetFor(root.AID); err == nil {
+	if ks, err := s.keySetFor(ownerAID); err == nil {
 		if did, err := ks.DID(); err == nil {
 			ownerDID = did
 		} else {
@@ -686,12 +735,16 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 	}
 
 	result, err := boxPairingComplete(client, base, pairingCompleteRequest{
-		AdoptionCode:            req.AdoptionCode,
-		DipEvent:                dip.DipEvent,
-		DelegatorIxn:            dip.DelegatorIxn,
-		DelegatorAID:            root.AID,
-		OwnerAID:                root.AID,
-		OwnerPublicKey:          root.PublicKey,
+		AdoptionCode: req.AdoptionCode,
+		// Founded, not delegated: the machine incepts its own root and names
+		// this owner in a seal. Nothing here identifies the person outside
+		// this one relationship.
+		FoundAsRoot: true,
+		// No DelegatorAID. Nothing delegates here, the receiving side ignores
+		// it on this path, and sending it anyway would tell every reader of this
+		// payload that a delegation is what happens.
+		OwnerAID:                ownerAID,
+		OwnerPublicKey:          ownerKey,
 		BackupSealPublicKeysB64: sealKeys,
 		OwnerDID:                ownerDID,
 		OwnerAgentEndpoint:      s.getPublicURL(r),
@@ -699,6 +752,13 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "The box refused the delegation", err.Error())
 		return
+	}
+
+	// What the machine founded. Read back from its answer, because it minted
+	// the identity itself — this side never computed one.
+	identityAID := ""
+	if v, ok := result["root_aid"].(string); ok {
+		identityAID = v
 	}
 
 	// 6. The owner's half of the same exchange.
@@ -734,16 +794,24 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 	//    Asking the machine afterwards means trusting what it says about
 	//    itself, which is the thing the check at adoption existed to avoid.
 	agent := store.AdoptedAgent{
-		AID:          offer.PairwiseAID,
-		DelegatedAID: dip.AID,
-		URL:          base,
-		Kind:         "individual",
-		Sealed:       offer.Attestation != "",
+		AID: offer.PairwiseAID,
+		// What the machine signs as. Its own root, minted inside it, rather than
+		// an identity issued from here.
+		SignsAsAID: identityAID,
+		URL:        base,
+		Kind:       "individual",
+		Sealed:     offer.Attestation != "",
+		// Which identity of ours it answers to, and where that key comes from.
+		// Without the index there is no signing to this machine again, no
+		// rotation and no revocation — so losing it is losing the machine.
+		OwnerAID:   ownerAID,
+		OwnerIndex: ownerIdx,
 	}
 	if agent.AID == "" {
-		// A box that published no identifier of its own is still adopted; it
-		// is keyed by the delegation instead, so it is listed rather than lost.
-		agent.AID = dip.AID
+		// A machine that published no identifier of its own is still adopted;
+		// it is keyed by the identity it founded, so it is listed rather than
+		// lost.
+		agent.AID = identityAID
 	}
 	if m := measurementOf(offer.Attestation); m != "" {
 		agent.Measurement = m
@@ -757,10 +825,10 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 			base, err)
 	}
 
-	log.Printf("[pairing] adopted box at %s: delegated AID %s under root %s", base, dip.AID, root.AID)
+	log.Printf("[pairing] adopted box at %s: it founded %s, owned by %s", base, identityAID, ownerAID)
 	writeJSONResponse(w, map[string]interface{}{
 		"ok": true, "box_url": base,
-		"delegated_aid": dip.AID, "delegator_aid": root.AID,
+		"root_aid": identityAID, "owner_aid": ownerAID,
 		"box_pairwise_aid": offer.PairwiseAID, "box_response": result,
 	})
 }
@@ -847,4 +915,24 @@ func measurementOf(attestationB64 string) string {
 		return ""
 	}
 	return hex.EncodeToString(report.Measurement)
+}
+
+// pairwisePublicKey is the verification key for one of this owner's pairwise
+// identities, re-derived from the root seed and the index it was minted at.
+//
+// Re-derived rather than stored. The seed is already on this device and the
+// derivation is deterministic, so keeping a copy would add a second place for
+// the same fact to live and a second place for it to be wrong. The index is
+// what is written down, and it is written down precisely so this works.
+func (s *CoreServer) pairwisePublicKey(idx int) (string, error) {
+	rootSeed, err := ensureRootSeed(s.DataDir)
+	if err != nil {
+		return "", err
+	}
+	seed, err := backup.DerivePairwiseSeed(rootSeed, idx, 0)
+	if err != nil {
+		return "", fmt.Errorf("derive the key at index %d: %w", idx, err)
+	}
+	pub := ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)
+	return iacrypto.VerkeyQB64(pub), nil
 }

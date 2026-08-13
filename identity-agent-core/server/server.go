@@ -786,6 +786,9 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		r.Post("/pairing/complete", s.handlePairingComplete)
 		// The owner's side: adopt a box. Owner-only by default.
 		r.Post("/pairing/adopt", s.handlePairingAdopt)
+		// The identity a machine will answer to, minted before the machine is
+		// asked for. Owner-only: it is this device's own key material.
+		r.Post("/machines/owner-identity", s.handleMintMachineOwner)
 		// What this identity owns. Owner-only by default, which is right: a
 		// list of somebody's machines is a map of their infrastructure.
 		r.Get("/agents", s.handleListAdoptedAgents)

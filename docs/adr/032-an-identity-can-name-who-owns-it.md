@@ -3,6 +3,7 @@
 **Status:** Accepted
 **Date:** 2026-07-31 · amended 2026-08-01
 **Supersedes:** the central decision of ADR-030
+**Refined by:** ADR-036 (which identifier goes in the owner seal for a paired computer)
 
 ## Context
 

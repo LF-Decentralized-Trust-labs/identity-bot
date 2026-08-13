@@ -25,7 +25,7 @@ func TestAnAdoptedAgentIsRememberedAcrossRestarts(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := s.SaveAdoptedAgent(AdoptedAgent{
-		AID: "EBoxAID", DelegatedAID: "EDelegated", URL: "https://example/abc",
+		AID: "EBoxAID", SignsAsAID: "EDelegated", URL: "https://example/abc",
 		Kind: "individual", Sealed: true, Measurement: "a45be582",
 	}); err != nil {
 		t.Fatal(err)
@@ -47,7 +47,7 @@ func TestAnAdoptedAgentIsRememberedAcrossRestarts(t *testing.T) {
 		t.Fatalf("after a restart the owner listed %d agents, expected 1", len(got))
 	}
 	a := got[0]
-	if a.DelegatedAID != "EDelegated" || a.URL != "https://example/abc" {
+	if a.SignsAsAID != "EDelegated" || a.URL != "https://example/abc" {
 		t.Errorf("the record came back changed: %+v", a)
 	}
 	if !a.Sealed || a.Measurement != "a45be582" {
@@ -60,7 +60,7 @@ func TestAnAdoptedAgentIsRememberedAcrossRestarts(t *testing.T) {
 // thing expected to change, so that is what an update carries.
 func TestReadoptingTheSameMachineUpdatesItRatherThanDuplicating(t *testing.T) {
 	s := adoptedStore(t)
-	base := AdoptedAgent{AID: "EBoxAID", DelegatedAID: "EDelegated", URL: "https://old", Kind: "individual"}
+	base := AdoptedAgent{AID: "EBoxAID", SignsAsAID: "EDelegated", URL: "https://old", Kind: "individual"}
 	if err := s.SaveAdoptedAgent(base); err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestReadoptingTheSameMachineUpdatesItRatherThanDuplicating(t *testing.T) {
 // none. Losing it would be a small thing that feels like the software forgot.
 func TestALaterAdoptionDoesNotEraseAChosenName(t *testing.T) {
 	s := adoptedStore(t)
-	a := AdoptedAgent{AID: "EBoxAID", DelegatedAID: "EDel", URL: "https://x", Label: "Study machine"}
+	a := AdoptedAgent{AID: "EBoxAID", SignsAsAID: "EDel", URL: "https://x", Label: "Study machine"}
 	if err := s.SaveAdoptedAgent(a); err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestALaterAdoptionDoesNotEraseAChosenName(t *testing.T) {
 
 func TestAnAgentWithNoIdentifierIsRefused(t *testing.T) {
 	s := adoptedStore(t)
-	if err := s.SaveAdoptedAgent(AdoptedAgent{DelegatedAID: "EDel", URL: "https://x"}); err == nil {
+	if err := s.SaveAdoptedAgent(AdoptedAgent{SignsAsAID: "EDel", URL: "https://x"}); err == nil {
 		t.Fatal("an agent with no identifier was stored, so it could never be found again")
 	}
 }
@@ -110,7 +110,7 @@ func TestAnAgentWithNoIdentifierIsRefused(t *testing.T) {
 // be able to mistake one for the other.
 func TestForgettingRemovesItFromTheListOnly(t *testing.T) {
 	s := adoptedStore(t)
-	if err := s.SaveAdoptedAgent(AdoptedAgent{AID: "EBoxAID", DelegatedAID: "EDel", URL: "https://x"}); err != nil {
+	if err := s.SaveAdoptedAgent(AdoptedAgent{AID: "EBoxAID", SignsAsAID: "EDel", URL: "https://x"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.ForgetAdoptedAgent("EBoxAID"); err != nil {
@@ -130,8 +130,8 @@ func TestForgettingRemovesItFromTheListOnly(t *testing.T) {
 func TestTheNewestAdoptionIsListedFirst(t *testing.T) {
 	s := adoptedStore(t)
 	for _, a := range []AdoptedAgent{
-		{AID: "EOld", DelegatedAID: "D1", URL: "u1", AdoptedAt: "2026-01-01 10:00:00"},
-		{AID: "ENew", DelegatedAID: "D2", URL: "u2", AdoptedAt: "2026-08-01 10:00:00"},
+		{AID: "EOld", SignsAsAID: "D1", URL: "u1", AdoptedAt: "2026-01-01 10:00:00"},
+		{AID: "ENew", SignsAsAID: "D2", URL: "u2", AdoptedAt: "2026-08-01 10:00:00"},
 	} {
 		if err := s.SaveAdoptedAgent(a); err != nil {
 			t.Fatal(err)
@@ -140,5 +140,41 @@ func TestTheNewestAdoptionIsListedFirst(t *testing.T) {
 	got, _ := s.ListAdoptedAgents()
 	if len(got) != 2 || got[0].AID != "ENew" {
 		t.Errorf("somebody who just adopted a machine should see it first, got %+v", got)
+	}
+}
+
+// The column rename must not lose what an already-installed agent recorded.
+//
+// Renaming a column in place is the one migration that can silently drop data
+// if it runs against the wrong schema, and the value it carries here is the
+// only record of what each paired machine signs as.
+func TestRenamingTheColumnKeepsWhatWasAlreadyThere(t *testing.T) {
+	s := adoptedStore(t)
+	if err := s.SaveAdoptedAgent(AdoptedAgent{
+		AID: "EPAIRWISE", SignsAsAID: "EMACHINEROOT", URL: "http://x",
+		Kind: "individual", OwnerAID: "EOWNER", OwnerIndex: 2000001,
+	}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	got, err := s.ListAdoptedAgents()
+	if err != nil || len(got) != 1 {
+		t.Fatalf("list: %v (%d rows)", err, len(got))
+	}
+	if got[0].SignsAsAID != "EMACHINEROOT" {
+		t.Fatalf("what the machine signs as did not survive the rename: %q", got[0].SignsAsAID)
+	}
+	if got[0].OwnerAID != "EOWNER" || got[0].OwnerIndex != 2000001 {
+		t.Fatal("the owner identity did not survive, so this machine could never be signed to again")
+	}
+
+	// Both names must not mean one thing. A surviving delegated_aid would let
+	// new code read one column while old code writes the other.
+	var name string
+	err = s.db.QueryRow(
+		`SELECT name FROM pragma_table_info('adopted_agents') WHERE name = 'delegated_aid'`,
+	).Scan(&name)
+	if err == nil {
+		t.Fatal("delegated_aid is still present alongside signs_as_aid, so two column " +
+			"names now mean the same thing and readers can disagree about which is current")
 	}
 }

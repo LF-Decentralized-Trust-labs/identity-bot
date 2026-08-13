@@ -757,6 +757,63 @@ CREATE TABLE IF NOT EXISTS adopted_agents (
     last_seen_at  DATETIME
 );
 `},
+	{
+		Version:     32,
+		Description: "Remember which identity of mine owns each machine",
+		SQL: `
+-- A machine is now adopted by a PAIRWISE identity of this owner's rather than by
+-- their root, so that the machine's own published event names nothing that
+-- identifies them anywhere else.
+--
+-- Which one has to be written down. The identity is derived from the root seed
+-- at an index, and the index is the only way back to it: without it the owner
+-- can never sign to that machine again, never rotate the relationship, and
+-- never revoke it. Losing this column is losing the machine.
+--
+-- Empty on rows written before this: those machines were adopted by the root
+-- identity, and an empty owner means exactly that rather than an unknown.
+ALTER TABLE adopted_agents ADD COLUMN owner_aid TEXT NOT NULL DEFAULT '';
+ALTER TABLE adopted_agents ADD COLUMN owner_index INTEGER NOT NULL DEFAULT 0;
+`},
+	{
+		Version:     33,
+		Description: "Remember an identity minted for a machine that does not exist yet",
+		SQL: `
+-- A machine is told who may claim it BEFORE it starts, so its owner identity
+-- has to be minted before the machine is asked for — earlier than adoption,
+-- which is where it would otherwise be created.
+--
+-- What has to survive that gap is the index, because the key is derived rather
+-- than stored and the index is the only way back to it. Keeping it here means
+-- adoption LOOKS UP what was minted instead of being told: an index supplied by
+-- a caller would have to be trusted or verified, and there is no need for
+-- either when this side already knows.
+--
+-- Rows are consumed by adoption and are meaningless afterwards; nothing here is
+-- secret, since a pairwise identifier says nothing about who holds it.
+CREATE TABLE IF NOT EXISTS machine_owner_identities (
+    aid        TEXT PRIMARY KEY,
+    key_index  INTEGER NOT NULL,
+    minted_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+`},
+	{
+		Version:     34,
+		Description: "Name the machine's identity for what it is, not what it used to be",
+		SQL: `
+-- delegated_aid held the identity a machine signs as, back when that identity
+-- was delegated from this owner. It is not delegated any more: the machine
+-- founds its own root and names a pairwise owner in a seal.
+--
+-- The value was already correct. Only the name was wrong, and a wrong name is
+-- not cosmetic here — the next person to change pairing reads "delegated_aid",
+-- concludes a delegation is what happens, and reintroduces the published
+-- delegator this was written to remove.
+--
+-- signs_as_aid says what the column holds and stays true under either
+-- ceremony, so a delegated machine recorded here later needs no third name.
+ALTER TABLE adopted_agents RENAME COLUMN delegated_aid TO signs_as_aid;
+`},
 }
 
 // ApplyIdentityMigrations creates the migrations table and applies any pending migrations.

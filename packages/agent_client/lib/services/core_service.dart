@@ -801,6 +801,14 @@ class CoreService {
   Future<http.Response> sealedRequest({
     required String toAid,
     required String path,
+    /// Which identity of this owner's is speaking.
+    ///
+    /// A machine is adopted by a PAIRWISE identity, and it only recognises that
+    /// one as its owner — so a request sent as the root would be refused by a
+    /// machine that has never heard of it. Left empty, the agent falls back to
+    /// its own identity, which is right for anything adopted before this and
+    /// wrong for everything after.
+    String? fromAid,
     String method = 'GET',
     List<int>? body,
   }) async {
@@ -809,6 +817,7 @@ class CoreService {
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({
         'to_aid': toAid,
+        if (fromAid != null && fromAid.isNotEmpty) 'from_aid': fromAid,
         'method': method,
         'path': path,
         if (body != null) 'body_b64': base64Encode(body),
@@ -838,11 +847,15 @@ class CoreService {
   /// agent on this device. Same document either way, so one screen renders
   /// both — which matters, because a person comparing their laptop with their
   /// black box should not be reading two different reports.
-  Future<AttestationLineageDto> attestationLineage({String? ofAgentAid}) async {
+  Future<AttestationLineageDto> attestationLineage({
+    String? ofAgentAid,
+    String? asOwnerAid,
+  }) async {
     const path = '/api/security/lineage';
     final response = ofAgentAid == null
         ? await _client.get(Uri.parse('$baseUrl$path'))
-        : await sealedRequest(toAid: ofAgentAid, path: path);
+        : await sealedRequest(
+            toAid: ofAgentAid, path: path, fromAid: asOwnerAid);
     if (response.statusCode != 200) {
       throw Exception(
           'Could not read this agent\'s attestation: ${response.statusCode}');
@@ -2022,9 +2035,43 @@ class CoreService {
   /// Owner-only, and signed as such. A browser cannot do this and should not be
   /// asked to: it holds no key, and the whole point is that the claim is made
   /// by something that does.
+  /// Mints the identity a machine will answer to, before the machine exists.
+  ///
+  /// ORDERING IS WHY THIS IS SEPARATE. A machine is told who may claim it
+  /// BEFORE it starts — that is what stops whoever reaches it first from taking
+  /// it — so the identity has to exist before the machine is even asked for.
+  ///
+  /// It is a PAIRWISE identity, not this person's root. A machine names its
+  /// owner in what it publishes, and publishing the root would hand the
+  /// identifier that identifies somebody everywhere to anyone who could reach
+  /// their machine. This one means nothing outside that single relationship.
+  ///
+  /// Only the identifier comes back. Where its key comes from stays on the
+  /// device that minted it and is looked up again at adoption.
+  Future<String> mintMachineOwner() async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/api/machines/owner-identity'),
+      headers: {'Content-Type': 'application/json'},
+      body: '{}',
+    );
+    if (response.statusCode != 200) {
+      throw Exception(
+          'Could not create an identity for this machine: ${response.statusCode}');
+    }
+    final aid = (jsonDecode(response.body)['aid'] ?? '').toString();
+    if (aid.isEmpty) {
+      throw Exception('No identity came back, so the machine would answer to nobody');
+    }
+    return aid;
+  }
+
   Future<Map<String, dynamic>> adoptAgent({
     required Uri boxUrl,
     required String adoptionCode,
+    /// The identity minted before the machine was asked for. The provisioning
+    /// host was told this one may claim it, so adoption must name the same one
+    /// or the machine refuses its own owner.
+    String? ownerAid,
   }) async {
     final response = await _client.post(
       Uri.parse('$baseUrl/api/pairing/adopt'),
@@ -2032,6 +2079,7 @@ class CoreService {
       body: jsonEncode({
         'box_url': boxUrl.toString(),
         'adoption_code': adoptionCode,
+        if (ownerAid != null && ownerAid.isNotEmpty) 'owner_aid': ownerAid,
       }),
     );
     if (response.statusCode == 200) {
@@ -3110,12 +3158,13 @@ class AgentNotYoursException implements Exception {
 class AdoptedAgent {
   const AdoptedAgent({
     required this.aid,
-    required this.delegatedAid,
+    required this.signsAsAid,
     required this.url,
     required this.kind,
     this.label = '',
     this.sealed = false,
     this.measurement = '',
+    this.ownerAid = '',
     this.adoptedAt = '',
     this.lastSeenAt = '',
   });
@@ -3123,7 +3172,7 @@ class AdoptedAgent {
   final String aid;
 
   /// What it signs as, under this owner's authority.
-  final String delegatedAid;
+  final String signsAsAid;
 
   /// Where it is reached. Expected to change; the identifier is not.
   final String url;
@@ -3141,17 +3190,22 @@ class AdoptedAgent {
   final bool sealed;
   final String measurement;
 
+  /// Which identity of yours this machine answers to. Needed to speak to it at
+  /// all: it recognises this one and no other.
+  final String ownerAid;
+
   final String adoptedAt;
   final String lastSeenAt;
 
   factory AdoptedAgent.fromJson(Map<String, dynamic> json) => AdoptedAgent(
         aid: (json['aid'] ?? '') as String,
-        delegatedAid: (json['delegated_aid'] ?? '') as String,
+        signsAsAid: (json['signs_as_aid'] ?? json['delegated_aid'] ?? '') as String,
         url: (json['url'] ?? '') as String,
         kind: (json['kind'] ?? 'individual') as String,
         label: (json['label'] ?? '') as String,
         sealed: (json['sealed'] ?? false) as bool,
         measurement: (json['measurement'] ?? '') as String,
+        ownerAid: (json['owner_aid'] ?? '') as String,
         adoptedAt: (json['adopted_at'] ?? '') as String,
         lastSeenAt: (json['last_seen_at'] ?? '') as String,
       );
@@ -3190,7 +3244,7 @@ class AttestationLineageDto {
     this.ownerRecoveryPresent = 'unknown',
     this.hardwareKeyProtection = 'unknown',
     this.hardwareKeyName = '',
-    this.delegatedAid = '',
+    this.signsAsAid = '',
     this.ownerAid = '',
     this.checkedAt = '',
   });
@@ -3209,7 +3263,7 @@ class AttestationLineageDto {
   final String ownerRecoveryPresent;
   final String hardwareKeyProtection;
   final String hardwareKeyName;
-  final String delegatedAid;
+  final String signsAsAid;
   final String ownerAid;
   final String checkedAt;
 
@@ -3233,7 +3287,9 @@ class AttestationLineageDto {
         ownerRecoveryPresent: _s(json, 'owner_recovery_present', 'unknown'),
         hardwareKeyProtection: _s(json, 'hardware_key_protection', 'unknown'),
         hardwareKeyName: _s(json, 'hardware_key_name'),
-        delegatedAid: _s(json, 'delegated_aid'),
+        signsAsAid: _s(json, 'signs_as_aid').isNotEmpty
+            ? _s(json, 'signs_as_aid')
+            : _s(json, 'delegated_aid'),
         ownerAid: _s(json, 'owner_aid'),
         checkedAt: _s(json, 'checked_at'),
       );
