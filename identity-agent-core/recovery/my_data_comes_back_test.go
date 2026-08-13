@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"identity-agent-core/backup"
@@ -65,6 +66,13 @@ func anAgentWithRealDataInIt(t *testing.T) (dir string, st *store.SQLiteStore, s
 	// present in the bundle. Without it that section is simply absent and any
 	// check over the bundle passes without having looked at it.
 	if err := os.MkdirAll(filepath.Join(dir, "sandbox", "an-app"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assistant memory, for the same reason: without a file here the section
+	// is absent and every check over the bundle passes without seeing it.
+	if err := os.WriteFile(filepath.Join(dir, "ai_memory.db"),
+		[]byte("what the assistant was told"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -291,6 +299,7 @@ func TestNoSectionIsCollectedAndThenIgnored(t *testing.T) {
 		"credentials":         true,
 		"settings":            true,
 		"pending_requests":    true,
+		"ai_memory_db":        true,
 		// Parsed into typed fields by RestoreFromArchive and applied from there.
 		"identity_state": true,
 		"kel_events":     true,
@@ -321,5 +330,52 @@ func TestNoSectionIsCollectedAndThenIgnored(t *testing.T) {
 		t.Errorf("these sections are backed up and never restored: %v\n"+
 			"They are collected, encrypted, digested and shipped, and no restore "+
 			"path reads them. The archive is valid; the data is gone.", dropped)
+	}
+}
+
+// What the archive points at instead of carrying.
+//
+// Under the shipped default the assistant's memory is NOT in the archive. A
+// pointer is recorded instead, and its locator is a path on the device being
+// backed up — so after that device is gone the archive holds a note saying
+// where the memory used to be. Nothing on the restore side reads pointers.
+//
+// This is pinned rather than fixed because whether to carry it is a product
+// decision: carrying it makes every archive much larger. The test exists so
+// the answer cannot change silently, in either direction.
+func TestTheDefaultLeavesAssistantMemoryBehind(t *testing.T) {
+	dir, st, _ := anAgentWithRealDataInIt(t)
+	c := &backup.Collector{DataDir: dir, Store: st}
+	tiers := []string{backup.TierCritical, backup.TierImportant, backup.TierFull}
+
+	bundle, pointers, err := c.Collect(backup.DefaultCollectOptions(tiers))
+	if err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+
+	if _, carried := bundle.Sections["ai_memory_db"]; carried {
+		t.Fatal("the default now carries assistant memory. That is a change worth " +
+			"making deliberately — update this test and problem 194 rather than deleting it")
+	}
+
+	var localPointer bool
+	for _, p := range pointers {
+		if p.Domain == "ai_memory" && strings.HasPrefix(p.Locator, dir) {
+			localPointer = true
+		}
+	}
+	if !localPointer {
+		t.Fatal("expected a pointer to assistant memory on this device's own disk")
+	}
+
+	// And when it IS carried, it comes back. That half is fixed.
+	full := backup.DefaultCollectOptions(tiers)
+	full.LeanTier3 = false
+	carried, _, err := c.Collect(full)
+	if err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+	if _, ok := carried.Sections["ai_memory_db"]; !ok {
+		t.Fatal("assistant memory was not carried even with the lean option off")
 	}
 }

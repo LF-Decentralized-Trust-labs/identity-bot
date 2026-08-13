@@ -373,6 +373,16 @@ func (s *Service) applyPayload(payload *RestoredPayload) error {
 			return fmt.Errorf("reseat root seed: %w", err)
 		}
 	}
+	// The assistant's memory. Collected into the full tier and, until now,
+	// dropped here — so an agent came back having forgotten everything it had
+	// been told, while every check reported a complete restore.
+	if raw, ok := payload.Bundle.Sections["ai_memory_db"]; ok && len(raw) > 0 {
+		aiPath := filepath.Join(s.DataDir, "ai_memory.db")
+		if err := os.WriteFile(aiPath, raw, 0600); err != nil {
+			return fmt.Errorf("write ai_memory.db: %w", err)
+		}
+	}
+
 	if raw, ok := payload.Bundle.Sections["sqlite_identity_db"]; ok && len(raw) > 0 {
 		dbPath := filepath.Join(s.DataDir, "identity.db")
 		if err := os.WriteFile(dbPath, raw, 0600); err != nil {
