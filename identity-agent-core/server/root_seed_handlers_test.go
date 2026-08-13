@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"identity-agent-core/store"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"identity-agent-core/backup"
@@ -135,5 +137,65 @@ func TestPhraseAloneRederivesHDKeys(t *testing.T) {
 	}
 	if !bytes.Equal(keyA, keyB) {
 		t.Fatal("the seed phrase alone must re-derive identical HD keys on a fresh device")
+	}
+}
+
+// A machine that answers to somebody else takes no root seed.
+//
+// This is the hole the pairing work left open. A paired computer holds its own
+// key and names its owner in the event that founded it; the owner's root
+// belongs on the device its owner carries. Installing it here would put the
+// identifier that identifies a person in every relationship they have onto a
+// machine they do not hold, silently, because everything would keep working.
+func TestAPairedComputerRefusesARootSeed(t *testing.T) {
+	s := agentWithNoIdentity(t)
+
+	// What being paired looks like: an identity of its own, and an owner it was
+	// sealed to that is somebody else.
+	if err := s.DataStore.SaveIdentity(store.IdentityState{
+		AID: "EThisComputersOwnIdentity", PublicKey: "DItsOwnKey",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SealOwnerAuthority(OwnerAuthority{
+		AID:       "EThePersonWhoOwnsIt",
+		PublicKey: "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	body := []byte(`{"seed_b64":"` + base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{3}, 64)) + `"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/keystore/root-seed", bytes.NewReader(body))
+	req.RemoteAddr = "127.0.0.1:5050"
+	rec := httptest.NewRecorder()
+	s.handleSetRootSeed(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("a computer that answers to somebody else accepted their root seed (%d) — "+
+			"that key can be copied off it and could never be taken back", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "EThePersonWhoOwnsIt") {
+		t.Errorf("refused, but without saying who it answers to: %s", rec.Body.String())
+	}
+}
+
+// And the case the endpoint exists for is untouched.
+//
+// A computer that IS the identity — no phone, keys on this machine — answers to
+// nobody else, so it must still be able to be given the seed its owner's phrase
+// produced. Without this, refusing above would have broken every setup that has
+// no second device.
+func TestAComputerThatIsTheIdentityStillTakesItsOwnSeed(t *testing.T) {
+	s := agentWithNoIdentity(t)
+
+	body := []byte(`{"seed_b64":"` + base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{4}, 64)) + `"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/keystore/root-seed", bytes.NewReader(body))
+	req.RemoteAddr = "127.0.0.1:5050"
+	rec := httptest.NewRecorder()
+	s.handleSetRootSeed(rec, req)
+
+	if rec.Code == http.StatusConflict {
+		t.Fatalf("a computer that answers to nobody was refused its own seed, so a setup "+
+			"with no second device cannot be completed: %s", rec.Body.String())
 	}
 }
