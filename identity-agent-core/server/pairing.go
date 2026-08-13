@@ -2,11 +2,14 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"identity-agent-core/drivers"
+	"identity-agent-core/witness"
 	"io"
 	"log"
 	"net/http"
@@ -369,6 +372,12 @@ func (s *CoreServer) handlePairingComplete(w http.ResponseWriter, r *http.Reques
 		identityAID string
 		eventType   string
 		eventBody   map[string]interface{}
+		// Carried out of the branch so the event can be sent to the witnesses
+		// it just named. Designating them and never telling them anything would
+		// advertise corroboration that does not exist.
+		foundedRaw       string
+		foundedSig       string
+		foundedWitnessed bool
 	)
 
 	if req.FoundAsRoot {
@@ -382,13 +391,63 @@ func (s *CoreServer) handlePairingComplete(w http.ResponseWriter, r *http.Reques
 				"founding an identity as its own root needs the local KERI engine")
 			return
 		}
-		result, ierr := s.KeriDriver.CreateOwnedInception(
-			pairingState.offered.PublicKey, pairingState.offered.NextPublicKey, "", req.OwnerAID)
+		// Designate witnesses, which nothing this machine founded ever had.
+		//
+		// Witnesses can only be named in the inception event, so this is the
+		// one moment it is possible — an identity founded without them can
+		// never be corroborated by anybody, for as long as it exists. That is
+		// sharpest for an organisation, whose own key log is what counterparties
+		// check for the rest of its life, and who therefore most needs somebody
+		// else positioned to notice a second, differently-signed history of it.
+		//
+		// This runs ON THE MACHINE rather than on the owner's device, so it is
+		// the machine that has to resolve them. It has the same shipped provider
+		// registry, so it can.
+		//
+		// The identity is its own root, so it is classified as one: what it is
+		// NOT is one of the owner's pairwise identities, whose witness list is
+		// kept narrow because a distinctive set shared across two of them would
+		// link them to one person. A machine has no contacts to leak.
+		//
+		// Bucketed on the offered key, because the identifier does not exist
+		// yet — it is a digest of the event that names these witnesses.
+		var witnesses []string
+		var toad int
+		if s.WitnessService != nil {
+			witnesses, toad = s.WitnessService.WitnessesForNewIdentity(
+				witness.AidKindRoot, pairingState.offered.PublicKey)
+		}
+		if len(witnesses) == 0 {
+			// An honest answer rather than a failure. A computer being set up
+			// may have no route out at all, and refusing there would make the
+			// ordinary case impossible — the same split the corroboration
+			// policy already makes.
+			log.Printf("[pairing] founding %s with no witnesses — nothing will be able to "+
+				"corroborate its history", req.OwnerAID)
+		}
+
+		result, ierr := s.KeriDriver.Incept(drivers.InceptionRequest{
+			PublicKey:     pairingState.offered.PublicKey,
+			NextPublicKey: pairingState.offered.NextPublicKey,
+			OwnerAID:      req.OwnerAID,
+			Witnesses:     witnesses,
+			Toad:          toad,
+		})
 		if ierr != nil {
 			writeError(w, http.StatusInternalServerError, "Could not found the identity", ierr.Error())
 			return
 		}
 		identityAID, eventType, eventBody = result.AID, "icp", result.InceptionEvent
+		foundedRaw, foundedWitnessed = result.RawBytesB64, len(witnesses) > 0
+
+		// Signed here, with the key this machine holds and nobody else does.
+		// A witness cannot attest to an event it cannot verify, and this is the
+		// only place the private half exists.
+		if raw, derr := base64.StdEncoding.DecodeString(result.RawBytesB64); derr == nil && pairingState.seed != nil {
+			if sig, serr := login.SignString(string(raw), pairingState.seed); serr == nil {
+				foundedSig = sig
+			}
+		}
 	} else {
 		if err := validateDelegation(req, pairingState.offered.PublicKey); err != nil {
 			writeError(w, http.StatusBadRequest, "Delegation refused", err.Error())
@@ -405,10 +464,34 @@ func (s *CoreServer) handlePairingComplete(w http.ResponseWriter, r *http.Reques
 		EventType:      eventType,
 		EventJSON:      string(eventJSON),
 		PublicKey:      pairingState.offered.PublicKey,
+		RawBytesB64:    foundedRaw,
+		CesrSignature:  foundedSig,
 		Timestamp:      now,
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "Could not persist the inception", err.Error())
 		return
+	}
+
+	// Tell the witnesses this identity just named.
+	//
+	// Naming them and never sending anything would be worse than naming none:
+	// the event would advertise corroboration that does not exist, and anybody
+	// who went looking would find nothing rather than a contradiction.
+	//
+	// In the background, because a slow witness must not hold up founding, and
+	// an identity whose receipts have not arrived yet is correctly reported as
+	// uncorroborated rather than as invalid.
+	if foundedWitnessed && s.WitnessService != nil && foundedSig != "" {
+		if raw, derr := base64.StdEncoding.DecodeString(foundedRaw); derr == nil {
+			go func(aid string, body []byte, sig string) {
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				if berr := s.WitnessService.BroadcastEvent(ctx, aid, body, sig); berr != nil {
+					log.Printf("[pairing] %s named witnesses but they did not accept its "+
+						"inception (%v) — its history is uncorroborated until they do", aid, berr)
+				}
+			}(identityAID, raw, foundedSig)
+		}
 	}
 	if err := s.DataStore.SaveIdentity(store.IdentityState{
 		AID:        identityAID,
@@ -597,12 +680,22 @@ func writeJSONResponse(w http.ResponseWriter, v interface{}) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-// resetPairingStateForTest clears the in-memory offer between tests.
+// resetPairingStateForTest clears the key material this process is offering.
+//
+// EVERYTHING handlePairingBegin sets, not just the offer. That state is
+// deliberately process-wide — one agent is one machine, offering one set of
+// keys until it is claimed — which makes it shared between tests, and a partial
+// reset is worse than none: begin hands a cached offer straight back WITHOUT
+// re-deriving the seed behind it, so the next machine is given somebody else's
+// public keys and no private half to sign its own inception with. That failed
+// only when the tests ran together, and looked like a witness problem.
 func resetPairingStateForTest() {
 	pairingState.Lock()
 	defer pairingState.Unlock()
 	pairingState.offered = nil
 	pairingState.seed = nil
+	pairingState.challenge = ""
+	pairingState.derivationIndex = 0
 }
 
 // --- the controller side: adopting a box ---
