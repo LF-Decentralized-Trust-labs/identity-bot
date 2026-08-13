@@ -2,6 +2,8 @@ package recovery
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 
@@ -59,6 +61,13 @@ func anAgentWithRealDataInIt(t *testing.T) (dir string, st *store.SQLiteStore, s
 			t.Fatal(err)
 		}
 	}
+	// A sandbox directory, so the tier-3 sandbox_index section is actually
+	// present in the bundle. Without it that section is simply absent and any
+	// check over the bundle passes without having looked at it.
+	if err := os.MkdirAll(filepath.Join(dir, "sandbox", "an-app"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
 	return dir, st, seed
 }
 
@@ -264,9 +273,12 @@ func TestEverySectionCollectedIsAlsoRestored(t *testing.T) {
 func TestNoSectionIsCollectedAndThenIgnored(t *testing.T) {
 	dir, st, _ := anAgentWithRealDataInIt(t)
 
+	// EVERY tier, including the full one. A tripwire that checks only the
+	// tiers it expects to be clean has a blind spot exactly where an
+	// unrestored section would sit.
 	c := &backup.Collector{DataDir: dir, Store: st}
 	bundle, _, err := c.Collect(backup.DefaultCollectOptions(
-		[]string{backup.TierCritical, backup.TierImportant}))
+		[]string{backup.TierCritical, backup.TierImportant, backup.TierFull}))
 	if err != nil {
 		t.Fatalf("collect: %v", err)
 	}
@@ -285,8 +297,21 @@ func TestNoSectionIsCollectedAndThenIgnored(t *testing.T) {
 		"contacts":       true,
 	}
 
+	// Collected on purpose and NOT restored on purpose. Each entry needs a
+	// reason, because "nobody restores it" and "nobody noticed it" look
+	// identical from the outside — and the second one is problem 183.
+	deliberate := map[string]string{
+		"sandbox_index": "a manifest of what sandbox directories existed, kept so a " +
+			"person can see what they had. The containers themselves are not in the " +
+			"archive, so writing the index onto a new device would describe apps that " +
+			"are not there.",
+	}
+
 	var dropped []string
 	for name := range bundle.Sections {
+		if _, ok := deliberate[name]; ok {
+			continue
+		}
 		if !consumed[name] {
 			dropped = append(dropped, name)
 		}
