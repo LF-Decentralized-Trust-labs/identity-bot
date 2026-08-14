@@ -84,3 +84,48 @@ func TestASectionNameCannotEscapeTheDataDirectory(t *testing.T) {
 		t.Errorf("an ordinary nested path should resolve, got %q ok=%v", got, ok)
 	}
 }
+
+// The sweep never leaves the agent's own storage.
+//
+// It takes everything the Identity Agent keeps, which is everything under its
+// data directory — not everything on the machine. Worth a test rather than a
+// comment: the difference between those two readings is somebody's entire home
+// directory ending up inside a backup archive.
+func TestTheSweepStaysInsideTheDataDirectory(t *testing.T) {
+	parent := t.TempDir()
+
+	// The agent's storage, and a sibling that has nothing to do with it.
+	dataDir := filepath.Join(parent, "agent-data")
+	elsewhere := filepath.Join(parent, "somebody-elses-documents")
+	for _, d := range []string{dataDir, elsewhere} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dataDir, "mine.db"), []byte("the agent's"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(elsewhere, "tax-returns.pdf"),
+		[]byte("nothing to do with the Identity Agent"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// And a symlink from inside the data directory pointing out of it, which is
+	// the way a sweep escapes without anybody meaning it to.
+	_ = os.Symlink(elsewhere, filepath.Join(dataDir, "a-link-outward"))
+
+	c := &Collector{DataDir: dataDir}
+	bundle := &PayloadBundle{Sections: map[string][]byte{}}
+	if _, err := c.collectEveryOtherFile(bundle); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+
+	if _, ok := bundle.Sections["file:mine.db"]; !ok {
+		t.Error("the agent's own file was not collected")
+	}
+	for name, data := range bundle.Sections {
+		if strings.Contains(name, "tax-returns") || strings.Contains(string(data), "nothing to do with") {
+			t.Fatalf("the sweep reached outside the agent's storage: %s", name)
+		}
+	}
+}
