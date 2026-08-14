@@ -78,6 +78,16 @@ type publicAttestation struct {
 	Note string `json:"note,omitempty"`
 }
 
+// notSealedHardware is the answer when there is nothing to attest to.
+//
+// Said once, because both the plain and the challenged reads give the same
+// answer and two copies of it would drift. It is a real answer rather than a
+// missing one: an Identity Agent on a machine its owner controls has no sealed
+// hardware to speak for it, and needs none — the owner is standing next to it.
+const notSealedHardware = "this Identity Agent does not run on sealed hardware, so it has " +
+	"no attestation to give. That is the ordinary case for an Identity Agent on a machine " +
+	"its user owns, where there is nobody to prove anything to."
+
 // handlePublicAttestation serves the evidence, or explains why it cannot.
 func (s *CoreServer) handlePublicAttestation(w http.ResponseWriter, r *http.Request) {
 	if !s.attestationLimiter.allow(callerIP(r)) {
@@ -89,12 +99,18 @@ func (s *CoreServer) handlePublicAttestation(w http.ResponseWriter, r *http.Requ
 
 	// A CHALLENGE, when the caller brings one.
 	//
-	// Without one, a report says "a sealed guest running this image produced
-	// this at some point" — which any report from any sibling instance also
-	// says, because they run the same image and it may be minutes old from the
-	// cache. That is enough for somebody deciding whether to trust a machine
-	// they are about to pair with, and it is not enough for a party that needs
-	// to know THIS guest is alive and sealed RIGHT NOW.
+	// ONLY MEANINGFUL ON SEALED HARDWARE, which in practice means an Identity
+	// Agent running on a machine its owner does not physically control. An
+	// Identity Agent on somebody's own laptop has no attestation of any kind to
+	// give and answers 404 here, with or without a challenge — correctly, since
+	// there is nobody it needs to prove its hardware to.
+	//
+	// Without a challenge, a report says "a sealed guest running this image
+	// produced this at some point" — which any report from any sibling instance
+	// also says, because they run the same image, and it may be minutes old
+	// from the cache. That is enough for somebody deciding whether to trust a
+	// machine they are about to pair with, and it is not enough for a party
+	// that needs to know THIS guest is alive and sealed RIGHT NOW.
 	//
 	// So a caller may supply a value of its own choosing and get a report bound
 	// to it, produced fresh. Nothing about the instance is disclosed by it, and
@@ -107,8 +123,7 @@ func (s *CoreServer) handlePublicAttestation(w http.ResponseWriter, r *http.Requ
 			return
 		}
 		if info == nil {
-			writeAttestationError(w, http.StatusNotFound, "not_sealed_hardware",
-				"this agent does not run on sealed hardware, so it has no attestation to give.")
+			writeAttestationError(w, http.StatusNotFound, "not_sealed_hardware", notSealedHardware)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -121,9 +136,7 @@ func (s *CoreServer) handlePublicAttestation(w http.ResponseWriter, r *http.Requ
 
 	info := s.cachedAttestation()
 	if info == nil {
-		writeAttestationError(w, http.StatusNotFound, "not_sealed_hardware",
-			"this agent does not run on sealed hardware, so it has no attestation to give. "+
-				"That is the ordinary case for an agent on a machine its user owns.")
+		writeAttestationError(w, http.StatusNotFound, "not_sealed_hardware", notSealedHardware)
 		return
 	}
 
