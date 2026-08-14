@@ -82,11 +82,12 @@ type publicAttestation struct {
 //
 // Said once, because both the plain and the challenged reads give the same
 // answer and two copies of it would drift. It is a real answer rather than a
-// missing one: an Identity Agent on a machine its owner controls has no sealed
-// hardware to speak for it, and needs none — the owner is standing next to it.
+// missing one: an Identity Agent on somebody's own machine has no sealed
+// hardware to speak for it and needs none, because the machine is already in
+// front of them.
 const notSealedHardware = "this Identity Agent does not run on sealed hardware, so it has " +
 	"no attestation to give. That is the ordinary case for an Identity Agent on a machine " +
-	"its user owns, where there is nobody to prove anything to."
+	"its user has in front of them, where the hardware speaks for itself."
 
 // handlePublicAttestation serves the evidence, or explains why it cannot.
 func (s *CoreServer) handlePublicAttestation(w http.ResponseWriter, r *http.Request) {
@@ -100,10 +101,17 @@ func (s *CoreServer) handlePublicAttestation(w http.ResponseWriter, r *http.Requ
 	// A CHALLENGE, when the caller brings one.
 	//
 	// ONLY MEANINGFUL ON SEALED HARDWARE, which in practice means an Identity
-	// Agent running on a machine its owner does not physically control. An
-	// Identity Agent on somebody's own laptop has no attestation of any kind to
-	// give and answers 404 here, with or without a challenge — correctly, since
-	// there is nobody it needs to prove its hardware to.
+	// Agent running on a rented machine that is not physically in front of the
+	// person who uses it.
+	//
+	// What attestation replaces there is eyesight, not control. Somebody with
+	// the machine on their desk can see what it is; somebody renting one cannot,
+	// so the machine proves it instead — that it booted the expected software,
+	// and that the operator running the hardware cannot see inside it.
+	//
+	// An Identity Agent on somebody's own laptop has no attestation of any kind
+	// to give and answers 404 here, with or without a challenge. That is the
+	// right answer rather than a gap: the machine is already in front of them.
 	//
 	// Without a challenge, a report says "a sealed guest running this image
 	// produced this at some point" — which any report from any sibling instance
