@@ -183,15 +183,33 @@ func (s *CoreServer) mintPairwiseIn(pool, name string) (aid, oobi string, seed [
 //
 // A freshly provisioned instance has never been through onboarding, so it has
 // no seed at all — and it needs one before it can generate any key, including
-// the one it offers for delegation. The canonical path is still the onboarding
-// handoff installing the mnemonic-derived seed; a bootstrapped root is
-// device-local, recoverable from this instance's own backup archives but never
-// from the phrase alone.
+// the one it offers when it is paired.
+//
+// WHICH SEED IT ENDS UP WITH IS THE WHOLE QUESTION, and it follows from what
+// the machine is. A computer that IS somebody's identity is handed the seed
+// their phrase produces, because losing that machine must not lose the
+// identity. A computer that merely ANSWERS to somebody bootstraps one of its
+// own here and is refused theirs — it holds its own key, and their root stays
+// on the device they carry. A device-local seed has no phrase; it is recovered
+// from this machine's own backup archive.
 func ensureRootSeed(dataDir string) ([]byte, error) {
 	if seed, err := secureenclave.LoadRootSeed(dataDir); err == nil {
 		return seed, nil
 	}
-	log.Printf("[keystore] WARNING: bootstrapping a random DEVICE-LOCAL root seed (no onboarding seed handoff yet) — HD-derived keys will not be recoverable from the seed phrase alone")
+	// Said plainly, and no longer as a warning about something missing.
+	//
+	// For a computer that answers to somebody this IS the arrangement, not a
+	// fallback waiting for a handoff: it holds its own key, its owner's root
+	// stays on the device its owner carries, and there is no phrase for this
+	// seed because it is not anybody's identity. It is in this machine's backup
+	// archive, which is what recovers it.
+	//
+	// Calling that a warning for the rest of the machine's life would train
+	// whoever reads the log to ignore the line — and it is the line that says
+	// where recovery comes from.
+	log.Printf("[keystore] this machine holds a device-local root seed of its own. Its keys " +
+		"are recoverable from this machine's backup archive, and not from a seed phrase — " +
+		"there is no phrase for it")
 	seed := make([]byte, 64)
 	if _, err := rand.Read(seed); err != nil {
 		return nil, err

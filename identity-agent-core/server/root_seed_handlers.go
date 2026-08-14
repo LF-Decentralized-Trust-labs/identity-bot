@@ -27,6 +27,39 @@ type rootSeedRequest struct {
 // Idempotent for the same seed; a DIFFERENT established seed is refused — the
 // HD root of an identity must never silently rotate.
 func (s *CoreServer) handleSetRootSeed(w http.ResponseWriter, r *http.Request) {
+	// A MACHINE THAT ANSWERS TO SOMEBODY ELSE TAKES NO ROOT SEED. Ever.
+	//
+	// This is the hole the pairing work left open. A paired computer holds its
+	// own key and names its owner in the event that founded it — the owner's
+	// root belongs on the owner's own device and nowhere else. Installing it
+	// here would put the identifier that identifies a person in every
+	// relationship they have onto a machine they do not carry, and from which
+	// it can be copied; and it would do so silently, because everything would
+	// keep working.
+	//
+	// Refused rather than gated. The old protection was that the client checked
+	// it was talking to a loopback address before handing anything over, which
+	// is a convention in the caller and not a control: anything able to sign as
+	// the owner could install a seed from anywhere. Asking the question here,
+	// about this machine's own state, cannot be bypassed by not asking.
+	//
+	// It does not stop the case this endpoint exists for. A computer that IS
+	// the identity — no phone, keys on this machine — answers to nobody else,
+	// so it is unaffected. That is the whole distinction: whose root this is.
+	if owner, oerr := s.ownerAuthority(); oerr == nil && owner != nil {
+		self := ""
+		if identity, ierr := s.DataStore.GetIdentity(); ierr == nil && identity != nil {
+			self = identity.AID
+		}
+		if owner.AID != "" && owner.AID != self {
+			writeError(w, http.StatusConflict, "This computer answers to somebody",
+				"it holds its own key and names "+owner.AID+" as its owner, so a root seed "+
+					"has no business here — that key belongs on the device its owner carries, "+
+					"and a copy of it on this machine could never be taken back")
+			return
+		}
+	}
+
 	// A root seed only goes onto a machine that can protect it.
 	//
 	// This used to be enforced in the client, which checked that it was talking
