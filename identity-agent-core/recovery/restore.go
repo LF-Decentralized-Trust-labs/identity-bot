@@ -42,6 +42,23 @@ func RestoreFromArchive(data []byte, req OpenRequest) (*RestoredPayload, error) 
 		return nil, fmt.Errorf("archive open failed: %w", err)
 	}
 
+	// An archive that cannot restore on its own is refused, loudly.
+	//
+	// A delta carries only what changed since the last backup. Restoring one
+	// alone gives an identity plus whatever happened to change recently, and
+	// silently omits everything that did not — contacts, credentials, files —
+	// which is indistinguishable from a complete restore from the outside.
+	//
+	// Refusing is the whole point. Somebody who is told their archive is a
+	// partial one can go and find the full snapshot it extends. Somebody handed
+	// a quietly incomplete restore finds out months later, if ever.
+	if !manifest.SelfSufficient && manifest.SnapshotType == backup.SnapshotDelta {
+		return nil, fmt.Errorf(
+			"this archive is an incremental backup and cannot be restored on its own: "+
+				"it holds only what changed, taken %s. Restore the most recent FULL "+
+				"backup instead", manifest.CreatedAt)
+	}
+
 	out := &RestoredPayload{
 		Manifest: *manifest,
 		Bundle:   bundle,

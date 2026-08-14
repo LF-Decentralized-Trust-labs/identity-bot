@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"identity-agent-core/backup"
@@ -427,5 +428,35 @@ func TestWhatIsNotCarriedIsRecordedWithAReason(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("the excluded archive is not in the record: %+v", skipped)
+	}
+}
+
+// Restoring an incremental archive on its own is refused, not half-done.
+//
+// It holds what changed since the last backup. Restoring one alone returns an
+// identity plus recent changes and silently omits everything that did not
+// change — which from the outside is indistinguishable from a complete
+// restore. Somebody told their archive is partial can go and find the full one
+// it extends; somebody handed a quiet half-restore finds out months later.
+func TestAnIncrementalArchiveWillNotRestoreOnItsOwn(t *testing.T) {
+	dir, st, seed := anAgentWithRealDataInIt(t)
+
+	c := &backup.Collector{DataDir: dir, Store: st}
+	tiers := []string{backup.TierCritical, backup.TierImportant, backup.TierFull}
+	archive, err := c.CreateArchive(
+		backup.CollectOptions{Tiers: tiers},
+		backup.ExportRequest{BIP39Seed: seed, Tiers: tiers, SnapshotType: backup.SnapshotDelta},
+	)
+	if err != nil {
+		t.Fatalf("create the archive: %v", err)
+	}
+
+	_, err = RestoreFromArchive(archive.Bytes, OpenRequest{BIP39Seed: seed})
+	if err == nil {
+		t.Fatal("an incremental archive restored on its own, which quietly loses " +
+			"everything that did not change since the last backup")
+	}
+	if !strings.Contains(err.Error(), "incremental") {
+		t.Errorf("the refusal should say why, said: %v", err)
 	}
 }

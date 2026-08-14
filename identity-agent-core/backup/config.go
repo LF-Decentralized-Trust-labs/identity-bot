@@ -76,6 +76,11 @@ type HistoryEntry struct {
 	// OffDevice records that the archive reached somewhere the loss of this
 	// device does not reach. A run without it produced a copy, not a backup.
 	OffDevice bool `json:"off_device"`
+
+	// SelfSufficient records that this archive restores on its own. An
+	// incremental one does not, so it is not a recovery point no matter how
+	// recent it is.
+	SelfSufficient bool `json:"self_sufficient"`
 }
 
 // StatusResponse is returned by GET /api/backup/status.

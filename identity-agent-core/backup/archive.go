@@ -82,6 +82,8 @@ func (c *Collector) CreateArchive(opts CollectOptions, req ExportRequest) (*Expo
 	manifest := NewManifest(aid, tiers, snapshotType)
 	manifest.ExternalPointers = pointers
 	manifest.DeltaStateDigestQB64 = req.DeltaStateDigestQB64
+	// Only a full snapshot holds everything. See Manifest.SelfSufficient.
+	manifest.SelfSufficient = snapshotType == SnapshotFull
 	if req.SlotPolicy != "" {
 		manifest.SlotPolicy = req.SlotPolicy
 	}

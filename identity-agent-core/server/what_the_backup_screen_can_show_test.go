@@ -74,7 +74,7 @@ func TestTheScreenCanShowLastBackupLastVerifiedAndLastOffDevice(t *testing.T) {
 	// Newest first: a recent run that was neither verified nor sent anywhere,
 	// over an older one that was both.
 	for _, h := range []backup.HistoryEntry{
-		{ID: "older", Timestamp: verifiedAt, Success: true, Verified: true, OffDevice: true},
+		{ID: "older", Timestamp: verifiedAt, Success: true, Verified: true, OffDevice: true, SelfSufficient: true},
 		{ID: "newer", Timestamp: unverifiedAt, Success: true, Verified: false, OffDevice: false},
 	} {
 		if err := svc.ConfigStore.AppendHistory(h); err != nil {

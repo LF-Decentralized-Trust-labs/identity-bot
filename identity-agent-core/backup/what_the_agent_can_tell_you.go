@@ -30,6 +30,11 @@ type BackupFacts struct {
 	// LastOffDeviceAt is the most recent archive that reached somewhere the
 	// loss of this device does not reach. Empty means every archive ever made
 	// is on the machine that made it.
+	//
+	// It counts only archives that restore on their own. An incremental backup
+	// that reached the far side of the world is still not something a person
+	// can recover from, so counting it would answer a different question than
+	// the one being asked.
 	LastOffDeviceAt string `json:"last_off_device_at,omitempty"`
 	// Protection says in plain words what is missing, or is empty when nothing is.
 	Protection string `json:"protection,omitempty"`
@@ -53,7 +58,7 @@ func FactsFrom(hist []HistoryEntry, dests []Destination, dataDir string, consecu
 		if f.LastVerifiedAt == "" && h.Verified {
 			f.LastVerifiedAt = h.Timestamp
 		}
-		if f.LastOffDeviceAt == "" && h.OffDevice {
+		if f.LastOffDeviceAt == "" && h.OffDevice && h.SelfSufficient {
 			f.LastOffDeviceAt = h.Timestamp
 		}
 		if f.LastBackupAt != "" && f.LastVerifiedAt != "" && f.LastOffDeviceAt != "" {

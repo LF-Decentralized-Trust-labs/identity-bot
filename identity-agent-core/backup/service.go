@@ -269,7 +269,8 @@ func (s *Service) exportWithReason(mnemonic, seedB64, passphrase, destPath strin
 		log.Printf("[backup] failed to persist delta state: %v", err)
 	}
 
-	s.recordSuccess(opts.Tiers, result.Size, destIDs, time.Since(start), result.SnapshotType, result.VerifiedAt != "", survived)
+	s.recordSuccess(opts.Tiers, result.Size, destIDs, time.Since(start), result.SnapshotType,
+		result.VerifiedAt != "", survived, result.Manifest.SelfSufficient)
 	s.failures = 0
 	return result, nil
 }
@@ -388,21 +389,22 @@ func (s *Service) SaveDestinationCredentials(creds RemoteCredentialSecrets) (str
 	return id, s.CredentialStore.Save(id, creds)
 }
 
-func (s *Service) recordSuccess(tiers []string, size int, dests []string, dur time.Duration, snapshotType string, verified, survived bool) {
+func (s *Service) recordSuccess(tiers []string, size int, dests []string, dur time.Duration, snapshotType string, verified, survived, selfSufficient bool) {
 	if snapshotType == "" {
 		snapshotType = SnapshotFull
 	}
 	_ = s.ConfigStore.AppendHistory(HistoryEntry{
-		ID:           uuid.New().String(),
-		Timestamp:    time.Now().UTC().Format(time.RFC3339),
-		Tiers:        tiers,
-		SizeBytes:    size,
-		SnapshotType: snapshotType,
-		Success:      true,
-		DurationMs:   dur.Milliseconds(),
-		Destinations: dests,
-		Verified:     verified,
-		OffDevice:    survived,
+		ID:             uuid.New().String(),
+		Timestamp:      time.Now().UTC().Format(time.RFC3339),
+		Tiers:          tiers,
+		SizeBytes:      size,
+		SnapshotType:   snapshotType,
+		Success:        true,
+		DurationMs:     dur.Milliseconds(),
+		Destinations:   dests,
+		Verified:       verified,
+		OffDevice:      survived,
+		SelfSufficient: selfSufficient,
 	})
 }
 

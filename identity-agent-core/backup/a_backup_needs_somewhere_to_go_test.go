@@ -124,7 +124,7 @@ func TestTheAgentReportsRanVerifiedAndOffDeviceSeparately(t *testing.T) {
 
 	hist := []HistoryEntry{
 		{Timestamp: recently(1 * time.Hour), Success: true, Verified: false, OffDevice: false},
-		{Timestamp: recently(30 * time.Hour), Success: true, Verified: true, OffDevice: true},
+		{Timestamp: recently(30 * time.Hour), Success: true, Verified: true, OffDevice: true, SelfSufficient: true},
 	}
 
 	f := FactsFrom(hist, dests, dataDir, 0)
@@ -159,7 +159,7 @@ func TestAnAgentThatNeverGotAnArchiveOffTheDeviceIsNotGreen(t *testing.T) {
 func TestAnArchiveNobodyHasOpenedIsNotGreen(t *testing.T) {
 	dataDir := t.TempDir()
 	hist := []HistoryEntry{
-		{Timestamp: recently(10 * time.Minute), Success: true, Verified: false, OffDevice: true},
+		{Timestamp: recently(10 * time.Minute), Success: true, Verified: false, OffDevice: true, SelfSufficient: true},
 	}
 	f := FactsFrom(hist, []Destination{
 		{ID: "d", Type: DestPairedAgent, Enabled: true, PairedURL: "https://x.example"},
@@ -176,7 +176,7 @@ func TestAnArchiveNobodyHasOpenedIsNotGreen(t *testing.T) {
 func TestAHealthyAgentIsGreen(t *testing.T) {
 	dataDir := t.TempDir()
 	hist := []HistoryEntry{
-		{Timestamp: recently(10 * time.Minute), Success: true, Verified: true, OffDevice: true},
+		{Timestamp: recently(10 * time.Minute), Success: true, Verified: true, OffDevice: true, SelfSufficient: true},
 	}
 	f := FactsFrom(hist, []Destination{
 		{ID: "d1", Type: DestPairedAgent, Enabled: true, PairedURL: "https://x.example"},
@@ -198,7 +198,7 @@ func TestOneFailedRunDoesNotHideTheBackupsThatWorked(t *testing.T) {
 	dataDir := t.TempDir()
 	hist := []HistoryEntry{
 		{Timestamp: recently(5 * time.Minute), Success: false},
-		{Timestamp: recently(20 * time.Minute), Success: true, Verified: true, OffDevice: true},
+		{Timestamp: recently(20 * time.Minute), Success: true, Verified: true, OffDevice: true, SelfSufficient: true},
 	}
 	f := FactsFrom(hist, []Destination{
 		{ID: "d", Type: DestPairedAgent, Enabled: true, PairedURL: "https://x.example"},
@@ -211,8 +211,53 @@ func TestOneFailedRunDoesNotHideTheBackupsThatWorked(t *testing.T) {
 
 func TestRepeatedFailuresAreRed(t *testing.T) {
 	dataDir := t.TempDir()
-	hist := []HistoryEntry{{Timestamp: recently(time.Minute), Success: true, Verified: true, OffDevice: true}}
+	hist := []HistoryEntry{{Timestamp: recently(time.Minute), Success: true, Verified: true, OffDevice: true, SelfSufficient: true}}
 	if f := FactsFrom(hist, nil, dataDir, 3); f.Health != "red" {
 		t.Errorf("three consecutive failures should be red, got %q", f.Health)
+	}
+}
+
+// An incremental backup is not a recovery point, however recent it is.
+//
+// It holds only what changed. Restoring one alone returns an identity plus
+// whatever happened to change lately and silently omits everything else, so
+// counting it as protection answers a different question than the one a person
+// is asking when they look at this screen.
+func TestAnIncrementalBackupIsNotARecoveryPoint(t *testing.T) {
+	dataDir := t.TempDir()
+	dests := []Destination{{ID: "d", Type: DestPairedAgent, Enabled: true, PairedURL: "https://x.example"}}
+
+	// Delivered, verified, minutes old — and incremental.
+	hist := []HistoryEntry{
+		{Timestamp: recently(5 * time.Minute), Success: true, Verified: true,
+			OffDevice: true, SelfSufficient: false},
+	}
+
+	f := FactsFrom(hist, dests, dataDir, 0)
+	if f.LastOffDeviceAt != "" {
+		t.Error("an incremental archive was counted as something a person can recover from")
+	}
+	if f.Health == "green" {
+		t.Fatal("an agent whose only off-device archive is incremental reported green")
+	}
+}
+
+// And a full one is.
+func TestAFullBackupIsARecoveryPoint(t *testing.T) {
+	dataDir := t.TempDir()
+	hist := []HistoryEntry{
+		{Timestamp: recently(5 * time.Minute), Success: true, Verified: true,
+			OffDevice: true, SelfSufficient: true},
+	}
+	f := FactsFrom(hist, []Destination{
+		{ID: "d1", Type: DestPairedAgent, Enabled: true, PairedURL: "https://x.example"},
+		{ID: "d2", Type: DestCloudUser, Enabled: true, CloudProvider: "s3", CredentialID: "c"},
+	}, dataDir, 0)
+
+	if f.LastOffDeviceAt == "" {
+		t.Fatal("a full, verified, delivered archive was not counted")
+	}
+	if f.Health != "green" {
+		t.Errorf("expected green, got %q (%s)", f.Health, f.Protection)
 	}
 }
