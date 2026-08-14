@@ -55,3 +55,47 @@ func TestAnUnknownPoolDoesNotSilentlyShareTheContactsRange(t *testing.T) {
 			"contact, silently and undetectably. Refusing is the point")
 	}
 }
+
+// Every pool that can be allocated from can also be read back from the same
+// base.
+//
+// Two copies of these numbers would drift, and the failure is silent: a pool
+// allocated from one base and read from another finds nothing, and reports an
+// identity as belonging to somebody else rather than as missing. So there is
+// one definition, and this checks that allocation actually uses it.
+func TestAPoolIsAllocatedFromTheBaseItIsReadFrom(t *testing.T) {
+	for _, pool := range []string{
+		"contacts", "login", "machines", "delegated-identity",
+		"invocation-log", "messaging-keys", "witnessing",
+	} {
+		base, err := PoolBase(pool)
+		if err != nil {
+			t.Fatalf("%s has no base: %v", pool, err)
+		}
+		s, serr := NewSQLiteStore(t.TempDir())
+		if serr != nil {
+			t.Skipf("data store unavailable: %v", serr)
+		}
+		got, err := s.AllocateNextRelationshipIndex(pool)
+		if err != nil {
+			t.Fatalf("%s: %v", pool, err)
+		}
+		if got != base {
+			t.Errorf("%s allocates from %d but is read from %d", pool, got, base)
+		}
+	}
+}
+
+// A pool nobody has given a range to is refused by both, identically.
+func TestAnUnknownPoolIsRefusedByBoth(t *testing.T) {
+	if _, err := PoolBase("toaster"); err == nil {
+		t.Error("PoolBase invented a range for a pool nobody assigned one to")
+	}
+	s, serr := NewSQLiteStore(t.TempDir())
+	if serr != nil {
+		t.Skipf("data store unavailable: %v", serr)
+	}
+	if _, err := s.AllocateNextRelationshipIndex("toaster"); err == nil {
+		t.Error("allocation invented a range for a pool nobody assigned one to")
+	}
+}
