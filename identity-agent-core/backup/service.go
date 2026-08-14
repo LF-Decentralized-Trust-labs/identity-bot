@@ -2,6 +2,7 @@ package backup
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -205,6 +206,27 @@ func (s *Service) exportWithReason(mnemonic, seedB64, passphrase, destPath strin
 		return nil, err
 	}
 
+	// Opened before it counts. This runs BEFORE the archive is written or
+	// pushed anywhere, so a bad archive is never delivered to a destination
+	// and never recorded as a success. See verifyArchiveOpens.
+	if verr := verifyArchiveOpens(result, ExportRequest{
+		Mnemonic:   mnemonic,
+		BIP39Seed:  seedBytes,
+		Passphrase: passphrase,
+	}, archiveBundle); verr != nil {
+		if errors.Is(verr, ErrNoKeyToVerifyWith) {
+			// Kept, and honestly labelled. See ErrNoKeyToVerifyWith.
+			log.Printf("[backup] archive kept UNVERIFIED: %v", verr)
+		} else {
+			err := fmt.Errorf("backup failed verification and was not kept: %w", verr)
+			log.Printf("[backup] VERIFICATION FAILED: %v", verr)
+			s.recordFailure(opts.Tiers, err, time.Since(start))
+			return nil, err
+		}
+	} else {
+		result.VerifiedAt = time.Now().UTC().Format(time.RFC3339)
+	}
+
 	if destPath != "" {
 		if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
 			s.recordFailure(opts.Tiers, err, time.Since(start))
@@ -216,14 +238,39 @@ func (s *Service) exportWithReason(mnemonic, seedB64, passphrase, destPath strin
 		}
 	}
 
+	// A destination this agent already has. Done here rather than at pairing
+	// time so an agent paired before backup existed still gets one, and so a
+	// person never has to know these are two separate things to set up.
+	if n, aerr := s.AdoptPairedMachinesAsDestinations(); aerr != nil {
+		log.Printf("[backup] could not check for paired machines to back up to: %v", aerr)
+	} else if n > 0 {
+		log.Printf("[backup] added %d paired machine(s) as backup destinations", n)
+	}
+
 	cfg, _ := s.ConfigStore.LoadConfig()
 	destIDs := s.pushToDestinations(cfg, result)
+
+	// Did it reach anywhere that outlives this machine? Recorded separately
+	// from "the backup ran", because they are different facts and only one of
+	// them is worth telling somebody they are safe on.
+	survived := false
+	for _, id := range destIDs {
+		for _, d := range cfg.Destinations {
+			if d.ID == id && ReachOf(d, s.DataDir) != ReachThisDeviceOnly {
+				survived = true
+			}
+		}
+	}
+	if !survived {
+		log.Printf("[backup] WARNING: this archive reached nowhere that survives losing this device")
+	}
 
 	if err := s.ConfigStore.SaveDeltaState(pendingState); err != nil {
 		log.Printf("[backup] failed to persist delta state: %v", err)
 	}
 
-	s.recordSuccess(opts.Tiers, result.Size, destIDs, time.Since(start), result.SnapshotType)
+	s.recordSuccess(opts.Tiers, result.Size, destIDs, time.Since(start), result.SnapshotType,
+		result.VerifiedAt != "", survived, result.Manifest.SelfSufficient)
 	s.failures = 0
 	return result, nil
 }
@@ -252,38 +299,39 @@ func (s *Service) sealRecipients() ([][]byte, error) {
 	return keys, nil
 }
 
+// pushToDestinations delivers the archive and reports where it actually landed.
+//
+// Every failure here used to be discarded — a local path that could not be
+// written and a paired machine that was unreachable both returned silently, and
+// the run was still recorded as a success with a shorter list. A backup that
+// reached nowhere was indistinguishable from one that reached everywhere.
 func (s *Service) pushToDestinations(cfg Config, result *ExportResult) []string {
 	destIDs := []string{}
 	for _, d := range cfg.Destinations {
 		if !d.Enabled {
 			continue
 		}
+		var err error
 		switch d.Type {
 		case DestLocalPath:
-			path := d.LocalPath
-			if path == "" {
-				continue
-			}
-			name := fmt.Sprintf("backup-%s-%s.iab", result.SnapshotType, time.Now().UTC().Format("20060102-150405"))
-			full := filepath.Join(path, name)
-			if err := os.MkdirAll(path, 0755); err == nil {
-				if err := os.WriteFile(full, result.Bytes, 0600); err == nil {
-					destIDs = append(destIDs, d.ID)
-				}
-			}
+			err = s.pushLocalDestination(d, result)
 		case DestPairedAgent:
-			if err := s.Pusher.Push(d.PairedURL, result.Bytes); err == nil {
-				destIDs = append(destIDs, d.ID)
-			}
+			err = s.Pusher.Push(d.PairedURL, result.Bytes)
 		case DestCloudUser:
-			if err := s.pushCloudDestination(d, result); err == nil {
-				destIDs = append(destIDs, d.ID)
-			} else {
-				log.Printf("[backup] cloud push %s failed: %v", d.ID, err)
-			}
+			err = s.pushCloudDestination(d, result)
 		case DestCloudHosted:
-			log.Printf("[backup] cloud_hosted destination %s is a commercial stub", d.ID)
+			err = fmt.Errorf("cloud_hosted is a commercial service and is not available here")
+		default:
+			err = fmt.Errorf("unrecognised destination type %q", d.Type)
 		}
+
+		if err != nil {
+			log.Printf("[backup] destination %s (%s) FAILED: %v", d.ID, d.Type, err)
+			s.noteDestinationResult(d.ID, err, int64(result.Size))
+			continue
+		}
+		s.noteDestinationResult(d.ID, nil, int64(result.Size))
+		destIDs = append(destIDs, d.ID)
 	}
 	return destIDs
 }
@@ -341,19 +389,22 @@ func (s *Service) SaveDestinationCredentials(creds RemoteCredentialSecrets) (str
 	return id, s.CredentialStore.Save(id, creds)
 }
 
-func (s *Service) recordSuccess(tiers []string, size int, dests []string, dur time.Duration, snapshotType string) {
+func (s *Service) recordSuccess(tiers []string, size int, dests []string, dur time.Duration, snapshotType string, verified, survived, selfSufficient bool) {
 	if snapshotType == "" {
 		snapshotType = SnapshotFull
 	}
 	_ = s.ConfigStore.AppendHistory(HistoryEntry{
-		ID:           uuid.New().String(),
-		Timestamp:    time.Now().UTC().Format(time.RFC3339),
-		Tiers:        tiers,
-		SizeBytes:    size,
-		SnapshotType: snapshotType,
-		Success:      true,
-		DurationMs:   dur.Milliseconds(),
-		Destinations: dests,
+		ID:             uuid.New().String(),
+		Timestamp:      time.Now().UTC().Format(time.RFC3339),
+		Tiers:          tiers,
+		SizeBytes:      size,
+		SnapshotType:   snapshotType,
+		Success:        true,
+		DurationMs:     dur.Milliseconds(),
+		Destinations:   dests,
+		Verified:       verified,
+		OffDevice:      survived,
+		SelfSufficient: selfSufficient,
 	})
 }
 

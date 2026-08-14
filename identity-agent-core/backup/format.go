@@ -94,18 +94,27 @@ type ExternalDataPointer struct {
 
 // Manifest is the cleartext header of every .iab archive.
 type Manifest struct {
-	FormatVersion        int                   `json:"format_version"`
-	CreatedAt            string                `json:"created_at"`
-	IdentityAID          string                `json:"identity_aid,omitempty"`
-	Tiers                []string              `json:"tiers"`
-	SnapshotType         string                `json:"snapshot_type"` // full | delta
-	Sections             []SectionMeta         `json:"sections"`
-	KeySlots             []KeySlot             `json:"key_slots"`
-	SlotPolicy           SlotPolicy            `json:"slot_policy"`
-	Argon2Params         *Argon2Params         `json:"argon2_params,omitempty"`
-	DeltaStateDigestQB64 string                `json:"delta_state_digest_blake3_qb64,omitempty"`
-	ExternalPointers     []ExternalDataPointer `json:"external_pointers,omitempty"`
-	PayloadNonceB64      string                `json:"payload_nonce_b64"`
+	FormatVersion        int           `json:"format_version"`
+	CreatedAt            string        `json:"created_at"`
+	IdentityAID          string        `json:"identity_aid,omitempty"`
+	Tiers                []string      `json:"tiers"`
+	SnapshotType         string        `json:"snapshot_type"` // full | delta
+	Sections             []SectionMeta `json:"sections"`
+	KeySlots             []KeySlot     `json:"key_slots"`
+	SlotPolicy           SlotPolicy    `json:"slot_policy"`
+	Argon2Params         *Argon2Params `json:"argon2_params,omitempty"`
+	DeltaStateDigestQB64 string        `json:"delta_state_digest_blake3_qb64,omitempty"`
+
+	// SelfSufficient says this archive restores on its own.
+	//
+	// A full snapshot does. A delta carries only what changed since the last
+	// backup, so restoring one alone returns an identity plus whatever happened
+	// to change recently — and silently omits everything that did not. That is
+	// indistinguishable from a complete restore unless the archive says so,
+	// which is what this field is for.
+	SelfSufficient   bool                  `json:"self_sufficient"`
+	ExternalPointers []ExternalDataPointer `json:"external_pointers,omitempty"`
+	PayloadNonceB64  string                `json:"payload_nonce_b64"`
 
 	// AndWrappedBEKB64 and AndNonceB64 are the second layer, present only under
 	// AND. There, the slots do not hold the payload key at all — they hold an

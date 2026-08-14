@@ -1,0 +1,462 @@
+package recovery
+
+import (
+	"bytes"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+
+	"identity-agent-core/backup"
+	"identity-agent-core/secureenclave"
+	"identity-agent-core/store"
+)
+
+// Does my data come back?
+//
+// This is the property the whole of backup and recovery exists to deliver, and
+// until now nothing asserted it. What was proven was the envelope: that an
+// archive encrypts, that the wrong key fails, that the words alone open one.
+// All true, all necessary, and none of it says the CONTENTS survive.
+//
+// So this does the only thing that answers the question. It puts real data into
+// a real agent, takes a real archive to a real file, restores it onto a
+// DIFFERENT device with nothing of its own, and compares what came back to what
+// went in — item by item, not by counting.
+
+// anAgentWithRealDataInIt builds a device holding the kinds of thing a person
+// would be devastated to lose.
+func anAgentWithRealDataInIt(t *testing.T) (dir string, st *store.SQLiteStore, seed []byte) {
+	t.Helper()
+	dir = t.TempDir()
+
+	seed = make([]byte, 64)
+	for i := range seed {
+		seed[i] = byte(i + 1)
+	}
+	if err := secureenclave.StoreRootSeed(dir, seed); err != nil {
+		t.Fatalf("seed the device: %v", err)
+	}
+
+	var err error
+	st, err = store.NewSQLiteStore(dir)
+	if err != nil {
+		t.Skipf("data store unavailable: %v", err)
+	}
+	t.Cleanup(func() { st.Close() })
+
+	if err := st.SaveIdentity(store.IdentityState{
+		AID:             "EMyIdentityThatMustSurvive",
+		PublicKey:       "DMyKey",
+		DerivationIndex: 0,
+		KeyGeneration:   0,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []store.ContactRecord{
+		{AID: "EAFriend", Alias: "a friend", Status: "accepted"},
+		{AID: "EAnother", Alias: "somebody else", Status: "accepted"},
+	} {
+		if err := st.SaveContact(c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A sandbox directory, so the tier-3 sandbox_index section is actually
+	// present in the bundle. Without it that section is simply absent and any
+	// check over the bundle passes without having looked at it.
+	if err := os.MkdirAll(filepath.Join(dir, "sandbox", "an-app"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// A file of its own, for the same reason: without one here the sweep has
+	// nothing to find and every check over the bundle passes without looking.
+	if err := os.WriteFile(filepath.Join(dir, "some_store.db"),
+		[]byte("something this device kept"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	return dir, st, seed
+}
+
+// restoreOntoAnotherDevice takes a real encrypted archive of the given agent and
+// restores it onto a device with nothing of its own — which is the situation
+// somebody is actually in when this matters.
+func restoreOntoAnotherDevice(t *testing.T, oldDir string, oldStore *store.SQLiteStore) (string, *store.SQLiteStore) {
+	t.Helper()
+
+	seed, err := secureenclave.LoadRootSeed(oldDir)
+	if err != nil {
+		t.Fatalf("read the seed: %v", err)
+	}
+
+	// Every tier. A round trip that archives only the tiers it expects to be
+	// clean cannot discover anything about the ones it skips.
+	tiers := []string{backup.TierCritical, backup.TierImportant, backup.TierFull}
+	c := &backup.Collector{DataDir: oldDir, Store: oldStore}
+	archive, err := c.CreateArchive(
+		backup.CollectOptions{Tiers: tiers},
+		backup.ExportRequest{BIP39Seed: seed, Tiers: tiers},
+	)
+	if err != nil {
+		t.Fatalf("create the archive: %v", err)
+	}
+
+	newDir := t.TempDir()
+	newStore, err := store.NewSQLiteStore(newDir)
+	if err != nil {
+		t.Skipf("data store unavailable: %v", err)
+	}
+	t.Cleanup(func() { newStore.Close() })
+
+	payload, err := RestoreFromArchive(archive.Bytes, OpenRequest{BIP39Seed: seed})
+	if err != nil {
+		t.Fatalf("the archive did not open on the new device: %v", err)
+	}
+	svc := &Service{DataDir: newDir, Store: newStore}
+	if err := svc.applyPayload(payload); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	return newDir, newStore
+}
+
+// THE TEST. Everything else in this area is a component of it.
+func TestMyDataComesBack(t *testing.T) {
+	oldDir, oldStore, seed := anAgentWithRealDataInIt(t)
+
+	// What went in, read back from the source of truth rather than assumed.
+	wantIdentity, err := oldStore.GetIdentity()
+	if err != nil || wantIdentity == nil {
+		t.Fatalf("the old device has no identity to lose: %v", err)
+	}
+	wantContacts, err := oldStore.GetContacts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(wantContacts) == 0 {
+		t.Fatal("the old device has no contacts, so this would prove nothing")
+	}
+
+	// A real archive, encrypted, as a real file.
+	// Both tiers, because that is the shipped default — and because contacts
+	// live in tier 2, so a tier-1 archive would prove nothing about them.
+	tiers := []string{backup.TierCritical, backup.TierImportant}
+	c := &backup.Collector{DataDir: oldDir, Store: oldStore}
+	archive, err := c.CreateArchive(
+		backup.CollectOptions{Tiers: tiers},
+		backup.ExportRequest{BIP39Seed: seed, Tiers: tiers},
+	)
+	if err != nil {
+		t.Fatalf("create the archive: %v", err)
+	}
+
+	// A DIFFERENT device, with nothing of its own — which is the situation
+	// somebody is actually in.
+	newDir := t.TempDir()
+	newStore, err := store.NewSQLiteStore(newDir)
+	if err != nil {
+		t.Skipf("data store unavailable: %v", err)
+	}
+	defer newStore.Close()
+
+	payload, err := RestoreFromArchive(archive.Bytes, OpenRequest{BIP39Seed: seed})
+	if err != nil {
+		t.Fatalf("the archive did not open on the new device: %v", err)
+	}
+	svc := &Service{DataDir: newDir, Store: newStore}
+	if err := svc.applyPayload(payload); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+
+	// --- and now the only question that matters ---
+
+	gotIdentity, err := newStore.GetIdentity()
+	if err != nil || gotIdentity == nil {
+		t.Fatalf("the identity did not come back: %v", err)
+	}
+	if gotIdentity.AID != wantIdentity.AID {
+		t.Fatalf("a different identity came back: %q, was %q", gotIdentity.AID, wantIdentity.AID)
+	}
+	if gotIdentity.PublicKey != wantIdentity.PublicKey {
+		t.Errorf("the identity came back with a different key: %q, was %q",
+			gotIdentity.PublicKey, wantIdentity.PublicKey)
+	}
+
+	gotContacts, err := newStore.GetContacts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Compared by identifier, not by counting. A count matches while the
+	// contents are wrong, and that is precisely the failure worth catching.
+	byAID := map[string]store.ContactRecord{}
+	for _, c := range gotContacts {
+		byAID[c.AID] = c
+	}
+	for _, want := range wantContacts {
+		got, ok := byAID[want.AID]
+		if !ok {
+			t.Errorf("contact %s (%s) did not come back", want.AID, want.Alias)
+			continue
+		}
+		if got.Alias != want.Alias {
+			t.Errorf("contact %s came back as %q, was %q", want.AID, got.Alias, want.Alias)
+		}
+	}
+
+	reseated, err := secureenclave.LoadRootSeed(newDir)
+	if err != nil || !bytes.Equal(reseated, seed) {
+		t.Fatalf("the seed did not come back, so nothing on this device can sign: %v", err)
+	}
+}
+
+// What was collected is what can be restored.
+//
+// A section can be collected, encrypted, digested and shipped, and then dropped
+// on the floor by the restore path — every check passes and the archive is
+// genuinely valid. Nothing that inspects an archive can catch that; only
+// restoring one and looking at what arrived.
+//
+// This asserts the gap explicitly rather than leaving it to be discovered by
+// somebody who needed the data.
+func TestEverySectionCollectedIsAlsoRestored(t *testing.T) {
+	oldDir, oldStore, _ := anAgentWithRealDataInIt(t)
+
+	// One real item in each of the sections that used to be dropped, so the
+	// check below is "did this come back", not "is this name on a list".
+	// A hand-maintained list of what restores is the same failure it is
+	// meant to catch, one level up.
+	if err := oldStore.SaveCredential(store.CredentialRecord{
+		SAID: "EMyCredentialThatMustSurvive", IssuerAID: "EIssuer",
+		HolderAID: "EHolder", SchemaSAID: "ESchema",
+		AcdcJson: `{"v":"ACDC10JSON"}`, Status: "issued", Format: "acdc",
+	}); err != nil {
+		t.Fatalf("save credential: %v", err)
+	}
+	if err := oldStore.SaveSettings(store.SettingsData{
+		TunnelProvider: "cloudflare", TunnelDomain: "must-survive.example",
+	}); err != nil {
+		t.Fatalf("save settings: %v", err)
+	}
+	if err := oldStore.SavePendingRequest(store.PendingRequest{
+		AID: "EPendingThatMustSurvive", Alias: "someone waiting",
+		PublicKey: "DKey", ReceivedAt: "2026-08-13T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("save pending request: %v", err)
+	}
+
+	newDir, newStore := restoreOntoAnotherDevice(t, oldDir, oldStore)
+	_ = newDir
+
+	creds, err := newStore.GetCredentials()
+	if err != nil {
+		t.Fatalf("credentials after restore: %v", err)
+	}
+	if !slices.ContainsFunc(creds, func(c store.CredentialRecord) bool {
+		return c.SAID == "EMyCredentialThatMustSurvive"
+	}) {
+		t.Errorf("the credential was backed up and did not come back: got %d credentials", len(creds))
+	}
+
+	settings, err := newStore.GetSettings()
+	if err != nil {
+		t.Fatalf("settings after restore: %v", err)
+	}
+	if settings == nil || settings.TunnelDomain != "must-survive.example" {
+		t.Errorf("settings were backed up and did not come back: %+v", settings)
+	}
+
+	pending, err := newStore.GetPendingRequests()
+	if err != nil {
+		t.Fatalf("pending requests after restore: %v", err)
+	}
+	if !slices.ContainsFunc(pending, func(p store.PendingRequest) bool {
+		return p.AID == "EPendingThatMustSurvive"
+	}) {
+		t.Errorf("the pending request was backed up and did not come back: got %d", len(pending))
+	}
+}
+
+// Anything collected that no restore path reads is carried across and then
+// discarded. This is the tripwire for a section added months from now: it
+// fails on the new name rather than on the day somebody needed the data.
+func TestNoSectionIsCollectedAndThenIgnored(t *testing.T) {
+	dir, st, _ := anAgentWithRealDataInIt(t)
+
+	// EVERY tier, including the full one. A tripwire that checks only the
+	// tiers it expects to be clean has a blind spot exactly where an
+	// unrestored section would sit.
+	c := &backup.Collector{DataDir: dir, Store: st}
+	bundle, _, err := c.Collect(backup.DefaultCollectOptions(
+		[]string{backup.TierCritical, backup.TierImportant, backup.TierFull}))
+	if err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+
+	consumed := map[string]bool{
+		// Read back as raw sections by applyPayload.
+		"login_relationships": true,
+		"root_seed":           true,
+		"sqlite_identity_db":  true,
+		"credentials":         true,
+		"settings":            true,
+		"pending_requests":    true,
+		// Parsed into typed fields by RestoreFromArchive and applied from there.
+		"identity_state": true,
+		"kel_events":     true,
+		"contacts":       true,
+	}
+
+	// Collected on purpose and NOT restored on purpose. Each entry needs a
+	// reason, because "nobody restores it" and "nobody noticed it" look
+	// identical from the outside — and the second one is problem 183.
+	deliberate := map[string]string{
+		"sandbox_index": "a manifest of what sandbox directories existed, kept so a " +
+			"person can see what they had. The containers themselves are not in the " +
+			"archive, so writing the index onto a new device would describe apps that " +
+			"are not there.",
+		"not_carried": "the list of what was deliberately left out and why. A record " +
+			"about the archive rather than data from the device, so restoring it " +
+			"would overwrite the new device's own account with the old one's.",
+	}
+
+	var dropped []string
+	for name := range bundle.Sections {
+		if _, ok := deliberate[name]; ok {
+			continue
+		}
+		// Swept files are restored generically, by path, so they need no entry.
+		if _, isFile := backup.FilePathOfSection(name); isFile {
+			continue
+		}
+		if !consumed[name] {
+			dropped = append(dropped, name)
+		}
+	}
+	slices.Sort(dropped)
+	if len(dropped) > 0 {
+		t.Errorf("these sections are backed up and never restored: %v\n"+
+			"They are collected, encrypted, digested and shipped, and no restore "+
+			"path reads them. The archive is valid; the data is gone.", dropped)
+	}
+}
+
+// A file nobody told the collector about goes in, and comes back.
+//
+// This is the property that replaced a list of known files. The core cannot
+// know what a build on top of it keeps on disk — a new database, a new store,
+// something that did not exist when this was written — and it should not have
+// to. Anything in the data directory is carried unless there is an explicit,
+// stated reason not to.
+//
+// The old arrangement failed silently in the one direction that matters:
+// something new appeared, nobody added it to the list, every backup reported
+// success, and the gap was measured on the day of the restore.
+func TestAFileNobodyListedComesBack(t *testing.T) {
+	oldDir, oldStore, _ := anAgentWithRealDataInIt(t)
+
+	// Two files this package has never heard of, one of them nested.
+	unknown := map[string][]byte{
+		"something_new.db":            []byte("a store added long after this test was written"),
+		"a_feature/its_own_state.dat": []byte("kept by something built on top of this core"),
+	}
+	for rel, data := range unknown {
+		full := filepath.Join(oldDir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	newDir, _ := restoreOntoAnotherDevice(t, oldDir, oldStore)
+
+	for rel, want := range unknown {
+		got, err := os.ReadFile(filepath.Join(newDir, filepath.FromSlash(rel)))
+		if err != nil {
+			t.Errorf("%s was on the device and did not come back: %v", rel, err)
+			continue
+		}
+		if !bytes.Equal(got, want) {
+			t.Errorf("%s came back changed: %q, was %q", rel, got, want)
+		}
+	}
+}
+
+// What is left out is left out on purpose, and says so.
+//
+// "Nothing else was on this device" and "something was and we left it" look
+// identical from an archive, so the archive carries the difference.
+func TestWhatIsNotCarriedIsRecordedWithAReason(t *testing.T) {
+	dir, st, _ := anAgentWithRealDataInIt(t)
+
+	// An archive this agent wrote. Carried, it would nest backups inside
+	// backups and grow without bound.
+	if err := os.WriteFile(filepath.Join(dir, "backup-full-20260813.iab"),
+		[]byte("a previous archive"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &backup.Collector{DataDir: dir, Store: st}
+	bundle, _, err := c.Collect(backup.DefaultCollectOptions(
+		[]string{backup.TierCritical, backup.TierImportant, backup.TierFull}))
+	if err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+
+	if _, carried := bundle.Sections["file:backup-full-20260813.iab"]; carried {
+		t.Error("an archive was carried inside the next archive")
+	}
+
+	raw, ok := bundle.Sections["not_carried"]
+	if !ok {
+		t.Fatal("something was left out and the archive does not say what")
+	}
+	var skipped []backup.SkippedFile
+	if err := json.Unmarshal(raw, &skipped); err != nil {
+		t.Fatalf("the record of what was left out is unreadable: %v", err)
+	}
+	found := false
+	for _, sk := range skipped {
+		if sk.Path == "backup-full-20260813.iab" {
+			found = true
+			if sk.Reason == "" {
+				t.Error("left out with no reason given")
+			}
+		}
+	}
+	if !found {
+		t.Errorf("the excluded archive is not in the record: %+v", skipped)
+	}
+}
+
+// Restoring an incremental archive on its own is refused, not half-done.
+//
+// It holds what changed since the last backup. Restoring one alone returns an
+// identity plus recent changes and silently omits everything that did not
+// change — which from the outside is indistinguishable from a complete
+// restore. Somebody told their archive is partial can go and find the full one
+// it extends; somebody handed a quiet half-restore finds out months later.
+func TestAnIncrementalArchiveWillNotRestoreOnItsOwn(t *testing.T) {
+	dir, st, seed := anAgentWithRealDataInIt(t)
+
+	c := &backup.Collector{DataDir: dir, Store: st}
+	tiers := []string{backup.TierCritical, backup.TierImportant, backup.TierFull}
+	archive, err := c.CreateArchive(
+		backup.CollectOptions{Tiers: tiers},
+		backup.ExportRequest{BIP39Seed: seed, Tiers: tiers, SnapshotType: backup.SnapshotDelta},
+	)
+	if err != nil {
+		t.Fatalf("create the archive: %v", err)
+	}
+
+	_, err = RestoreFromArchive(archive.Bytes, OpenRequest{BIP39Seed: seed})
+	if err == nil {
+		t.Fatal("an incremental archive restored on its own, which quietly loses " +
+			"everything that did not change since the last backup")
+	}
+	if !strings.Contains(err.Error(), "incremental") {
+		t.Errorf("the refusal should say why, said: %v", err)
+	}
+}

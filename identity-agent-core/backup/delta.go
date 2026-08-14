@@ -22,24 +22,34 @@ type DeltaState struct {
 	LastCompactionAt string            `json:"last_compaction_at,omitempty"`
 }
 
+// Sections every archive carries, whether or not they changed.
+//
+// root_seed is here for a reason worth stating: it is the one section that
+// NEVER changes, so a rule of "include what changed" excluded it from every
+// delta backup — and a delta is what the scheduler produces most days. An
+// archive with no key material restores nothing, and the failure surfaces only
+// when somebody tries to recover from the most recent backup they have.
+//
+// Correctness beats size here and it is not close. The seed is 64 bytes.
 var tier1SectionNames = map[string]bool{
 	"identity_state":      true,
 	"kel_events":          true,
 	"sqlite_identity_db":  true,
 	"login_relationships": true,
+	"root_seed":           true,
 }
 
+// isTier2Or3Section reports whether a section belongs to the tiers a delta may
+// leave out when unchanged.
+//
+// Anything that is not tier 1 is. This used to name the tier 2 and 3 sections,
+// which meant a section nobody had added to the list was dropped from every
+// delta backup — present in full ones, silently missing from the rest, and
+// noticed on the day of a restore. Naming tier 1 is safe in the way naming the
+// others was not: getting tier 1 wrong includes too much, and the failure of
+// the old list was including too little.
 func isTier2Or3Section(name string) bool {
-	if tier1SectionNames[name] {
-		return false
-	}
-	return strings.HasPrefix(name, "log_") ||
-		name == "contacts" ||
-		name == "credentials" ||
-		name == "settings" ||
-		name == "pending_requests" ||
-		name == "ai_memory_db" ||
-		name == "sandbox_index"
+	return !tier1SectionNames[name]
 }
 
 // ComputeDeltaStateDigest returns Blake3-256 qb64 of canonical delta state (excluding chain digest).

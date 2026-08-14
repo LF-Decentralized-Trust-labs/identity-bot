@@ -241,6 +241,16 @@ func (s *CoreServer) handleBackupListReceived(w http.ResponseWriter, r *http.Req
 }
 
 func (s *CoreServer) handleBackupTrigger(w http.ResponseWriter, r *http.Request) {
+	// Say whether it can actually happen, rather than reporting success for
+	// something that will skip quietly minutes later. That is how backups went
+	// un-taken for as long as they did: this route always answered
+	// "scheduled", and the only trace of the truth was a log line.
+	if sch := s.backupService().Scheduler; sch != nil {
+		if err := sch.CanRun(); err != nil {
+			writeError(w, http.StatusConflict, "This agent cannot take a backup", err.Error())
+			return
+		}
+	}
 	s.notifyBackupEvent(backup.EventManual)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "scheduled"})

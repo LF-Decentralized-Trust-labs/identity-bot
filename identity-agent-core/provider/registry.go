@@ -70,6 +70,19 @@ const (
 	// of identity behind it. Fine for something immediate, wrong for anything
 	// somebody has to find again later.
 	CapabilityTunnel Capability = "tunnel"
+
+	// CapabilityBackup keeps encrypted archives on somebody's behalf and hands
+	// them back to whoever can open them.
+	//
+	// It holds ciphertext and never the key, so this is the rare provider whose
+	// operator has nothing to be trusted with. What it is chosen for is
+	// AVAILABILITY: a destination is only worth having if it can be reached
+	// after the disaster that made it necessary, which is exactly what a
+	// machine in the same building cannot promise.
+	//
+	// Deliberately a capability like any other, so that a person can run their
+	// own, use somebody else's, or use several — the same shape as witnessing.
+	CapabilityBackup Capability = "backup"
 )
 
 // Known reports whether a capability is one this agent understands. An unknown
@@ -77,7 +90,7 @@ const (
 // registry should not be rejected wholesale by an older agent.
 func (c Capability) Known() bool {
 	switch c {
-	case CapabilityRelay, CapabilityWitness, CapabilityWatcher,
+	case CapabilityBackup, CapabilityRelay, CapabilityWitness, CapabilityWatcher,
 		CapabilityMailbox, CapabilityTunnel:
 		return true
 	}

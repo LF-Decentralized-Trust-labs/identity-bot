@@ -182,9 +182,9 @@ func TestLeanTier3StillWorksAfterDeltaChanges(t *testing.T) {
 	}
 	defer st.Close()
 
-	aiPath := filepath.Join(dbDir, "ai_memory.db")
+	bulkPath := filepath.Join(dbDir, "some_large_store.db")
 	bulk := make([]byte, 1024)
-	if err := os.WriteFile(aiPath, bulk, 0644); err != nil {
+	if err := os.WriteFile(bulkPath, bulk, 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -194,10 +194,14 @@ func TestLeanTier3StillWorksAfterDeltaChanges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	carried := false
 	for _, sec := range bundle.Ordered {
-		if sec.Name == "ai_memory_db" {
-			t.Fatal("lean tier3 must not include ai_memory_db bytes")
+		if strings.HasPrefix(sec.Name, FileSectionPrefix) {
+			carried = true
 		}
+	}
+	if !carried {
+		t.Fatal("a full backup carried no files from the device at all")
 	}
 	ds := ResetDeltaState()
 	if err := UpdateDeltaStateAfterBackup(&ds, bundle, SnapshotFull, false); err != nil {
@@ -205,14 +209,46 @@ func TestLeanTier3StillWorksAfterDeltaChanges(t *testing.T) {
 	}
 	deltaBundle := FilterDeltaBundle(bundle, &ds, opts.Tiers)
 	for _, sec := range deltaBundle.Ordered {
-		if sec.Name == "ai_memory_db" || strings.HasPrefix(sec.Name, "sandbox_") {
+		if strings.HasPrefix(sec.Name, FileSectionPrefix) || strings.HasPrefix(sec.Name, "sandbox_") {
 			t.Fatalf("unchanged tier3 lean data must not appear in delta, got %s", sec.Name)
 		}
 	}
 	if len(deltaBundle.Ordered) == 0 {
 		t.Fatal("delta should still include unchanged tier1 sections")
 	}
-	if len(pointers) == 0 {
-		t.Fatal("expected external pointer for ai_memory")
+	// Carrying a device's files does not mean carrying them every time: a
+	// delta leaves out what has not changed, so the cost of a large file lands
+	// on full backups rather than on all of them.
+	_ = pointers
+}
+
+// Every archive carries the key, including one that carries nothing else new.
+//
+// The seed is the one thing that never changes, so a rule of "include what
+// changed" left it out of every delta — and a delta is what the scheduler
+// produces most days. Somebody restoring from their most recent backup would
+// have found an archive that opens, contains their data, and cannot sign
+// anything, because there was no key in it.
+func TestADeltaStillCarriesTheKey(t *testing.T) {
+	c := &Collector{DataDir: t.TempDir()}
+	full := &PayloadBundle{Sections: map[string][]byte{}, Ordered: []PayloadSection{}}
+	c.addRawSection(full, "root_seed", []byte("the key everything derives from"))
+	c.addRawSection(full, "identity_state", []byte(`{"aid":"EAnIdentity"}`))
+	c.addRawSection(full, "contacts", []byte(`[{"aid":"EAFriend"}]`))
+
+	ds := ResetDeltaState()
+	if err := UpdateDeltaStateAfterBackup(&ds, full, SnapshotFull, false); err != nil {
+		t.Fatal(err)
+	}
+
+	// The ordinary case: a scheduled backup on a day nothing changed.
+	delta := FilterDeltaBundle(full, &ds, []string{TierCritical, TierImportant, TierFull})
+
+	if _, ok := delta.Sections["root_seed"]; !ok {
+		t.Fatal("a delta backup carries no key material, so restoring from it " +
+			"produces an identity that cannot sign anything")
+	}
+	if _, ok := delta.Sections["contacts"]; ok {
+		t.Error("unchanged bulk data should still be left out — that is what a delta is for")
 	}
 }

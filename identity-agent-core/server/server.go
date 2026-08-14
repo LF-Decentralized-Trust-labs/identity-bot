@@ -583,6 +583,13 @@ func (s *CoreServer) Start() error {
 	s.running = true
 
 	if cfg, err := s.backupService().LoadConfig(); err == nil && cfg.Enabled && cfg.ScheduleDaily {
+		// Give the scheduler a way to reach this agent's own seed, or every
+		// backup it schedules will skip. It reads the seed rather than asking
+		// for the words: an agent has the first and never has the second, and a
+		// backup that waits to be typed at is not a backup.
+		s.backupService().Scheduler.SetSeedProvider(func() ([]byte, error) {
+			return secureenclave.LoadRootSeed(s.DataDir)
+		})
 		s.backupService().Scheduler.StartDaily()
 	}
 

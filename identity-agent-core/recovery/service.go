@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -313,6 +314,50 @@ func (s *Service) applyPayload(payload *RestoredPayload) error {
 		}
 	}
 
+	// Credentials, settings and pending requests.
+	//
+	// These were collected, encrypted, digested and shipped, and then dropped
+	// here — so an archive was valid, complete against its own manifest, and
+	// restored less than it contained. Nothing that inspects an archive could
+	// catch that; only restoring one and looking at what arrived.
+	//
+	// A section that will not parse fails the restore rather than being skipped.
+	// Continuing past it is how a partial restore comes to look like a whole
+	// one, and this is the one moment somebody can still act on the truth.
+	if raw, ok := payload.Bundle.Sections["credentials"]; ok && len(raw) > 0 && s.Store != nil {
+		var creds []store.CredentialRecord
+		if err := json.Unmarshal(raw, &creds); err != nil {
+			return fmt.Errorf("credentials in this archive could not be read: %w", err)
+		}
+		for _, c := range creds {
+			if err := s.Store.SaveCredential(c); err != nil {
+				return fmt.Errorf("restore credential %s: %w", c.SAID, err)
+			}
+		}
+	}
+
+	if raw, ok := payload.Bundle.Sections["settings"]; ok && len(raw) > 0 && s.Store != nil {
+		var settings store.SettingsData
+		if err := json.Unmarshal(raw, &settings); err != nil {
+			return fmt.Errorf("settings in this archive could not be read: %w", err)
+		}
+		if err := s.Store.SaveSettings(settings); err != nil {
+			return fmt.Errorf("restore settings: %w", err)
+		}
+	}
+
+	if raw, ok := payload.Bundle.Sections["pending_requests"]; ok && len(raw) > 0 && s.Store != nil {
+		var pending []store.PendingRequest
+		if err := json.Unmarshal(raw, &pending); err != nil {
+			return fmt.Errorf("pending requests in this archive could not be read: %w", err)
+		}
+		for _, p := range pending {
+			if err := s.Store.SavePendingRequest(p); err != nil {
+				return fmt.Errorf("restore pending request: %w", err)
+			}
+		}
+	}
+
 	if raw, ok := payload.Bundle.Sections["login_relationships"]; ok && len(raw) > 0 {
 		path := filepath.Join(s.DataDir, "login_relationships.json")
 		if err := os.WriteFile(path, raw, 0600); err != nil {
@@ -329,6 +374,35 @@ func (s *Service) applyPayload(payload *RestoredPayload) error {
 			return fmt.Errorf("reseat root seed: %w", err)
 		}
 	}
+	// Every file the archive carries, back to the path it came from.
+	//
+	// The collector no longer names the files it takes — it sweeps the data
+	// directory — so this cannot name them either. A restore that knew only
+	// the files somebody remembered to list would drop exactly the ones a
+	// build on top of this core had added, which is the failure the sweep
+	// exists to remove.
+	//
+	// A section whose name does not resolve to a path inside the data
+	// directory fails the restore. An archive is opened with the owner's own
+	// key, so this is not the main line of defence — but a section name is the
+	// one part of an archive that becomes a filesystem path.
+	for name, raw := range payload.Bundle.Sections {
+		rel, ok := backup.FilePathOfSection(name)
+		if !ok {
+			if strings.HasPrefix(name, backup.FileSectionPrefix) {
+				return fmt.Errorf("this archive names a file section with an unusable path: %q", name)
+			}
+			continue
+		}
+		dest := filepath.Join(s.DataDir, rel)
+		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+			return fmt.Errorf("make room for %s: %w", rel, err)
+		}
+		if err := os.WriteFile(dest, raw, 0o600); err != nil {
+			return fmt.Errorf("write %s: %w", rel, err)
+		}
+	}
+
 	if raw, ok := payload.Bundle.Sections["sqlite_identity_db"]; ok && len(raw) > 0 {
 		dbPath := filepath.Join(s.DataDir, "identity.db")
 		if err := os.WriteFile(dbPath, raw, 0600); err != nil {

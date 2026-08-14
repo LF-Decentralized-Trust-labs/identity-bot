@@ -30,6 +30,11 @@ type ExportResult struct {
 	Size         int
 	Tiers        []string
 	SnapshotType string
+
+	// VerifiedAt is set only once the archive has been reopened and its
+	// contents checked. An archive that was never verified leaves this empty,
+	// so "we made a backup" and "we made a backup that opens" stay separable.
+	VerifiedAt string
 }
 
 // CreateArchive builds an encrypted .iab from collected data.
@@ -77,6 +82,8 @@ func (c *Collector) CreateArchive(opts CollectOptions, req ExportRequest) (*Expo
 	manifest := NewManifest(aid, tiers, snapshotType)
 	manifest.ExternalPointers = pointers
 	manifest.DeltaStateDigestQB64 = req.DeltaStateDigestQB64
+	// Only a full snapshot holds everything. See Manifest.SelfSufficient.
+	manifest.SelfSufficient = snapshotType == SnapshotFull
 	if req.SlotPolicy != "" {
 		manifest.SlotPolicy = req.SlotPolicy
 	}
