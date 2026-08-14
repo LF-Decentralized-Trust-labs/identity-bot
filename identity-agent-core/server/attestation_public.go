@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"sync"
@@ -77,6 +78,17 @@ type publicAttestation struct {
 	Note string `json:"note,omitempty"`
 }
 
+// notSealedHardware is the answer when there is nothing to attest to.
+//
+// Said once, because both the plain and the challenged reads give the same
+// answer and two copies of it would drift. It is a real answer rather than a
+// missing one: an Identity Agent on somebody's own machine has no sealed
+// hardware to speak for it and needs none, because the machine is already in
+// front of them.
+const notSealedHardware = "this Identity Agent does not run on sealed hardware, so it has " +
+	"no attestation to give. That is the ordinary case for an Identity Agent on a machine " +
+	"its user has in front of them, where the hardware speaks for itself."
+
 // handlePublicAttestation serves the evidence, or explains why it cannot.
 func (s *CoreServer) handlePublicAttestation(w http.ResponseWriter, r *http.Request) {
 	if !s.attestationLimiter.allow(callerIP(r)) {
@@ -86,11 +98,53 @@ func (s *CoreServer) handlePublicAttestation(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// A CHALLENGE, when the caller brings one.
+	//
+	// ONLY MEANINGFUL ON SEALED HARDWARE, which in practice means an Identity
+	// Agent running on a rented machine that is not physically in front of the
+	// person who uses it.
+	//
+	// What attestation replaces there is eyesight, not control. Somebody with
+	// the machine on their desk can see what it is; somebody renting one cannot,
+	// so the machine proves it instead — that it booted the expected software,
+	// and that the operator running the hardware cannot see inside it.
+	//
+	// An Identity Agent on somebody's own laptop has no attestation of any kind
+	// to give and answers 404 here, with or without a challenge. That is the
+	// right answer rather than a gap: the machine is already in front of them.
+	//
+	// Without a challenge, a report says "a sealed guest running this image
+	// produced this at some point" — which any report from any sibling instance
+	// also says, because they run the same image, and it may be minutes old
+	// from the cache. That is enough for somebody deciding whether to trust a
+	// machine they are about to pair with, and it is not enough for a party
+	// that needs to know THIS guest is alive and sealed RIGHT NOW.
+	//
+	// So a caller may supply a value of its own choosing and get a report bound
+	// to it, produced fresh. Nothing about the instance is disclosed by it, and
+	// a report bound to a value the caller invented a moment ago cannot have
+	// been lifted from anywhere else.
+	if challenge := r.URL.Query().Get("challenge"); challenge != "" {
+		info, err := s.challengedAttestation(challenge)
+		if err != nil {
+			writeAttestationError(w, http.StatusBadRequest, "bad_challenge", err.Error())
+			return
+		}
+		if info == nil {
+			writeAttestationError(w, http.StatusNotFound, "not_sealed_hardware", notSealedHardware)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		// Bound to something the caller chose, so it is theirs alone and must
+		// not be handed to the next asker.
+		w.Header().Set("Cache-Control", "no-store")
+		_ = json.NewEncoder(w).Encode(info)
+		return
+	}
+
 	info := s.cachedAttestation()
 	if info == nil {
-		writeAttestationError(w, http.StatusNotFound, "not_sealed_hardware",
-			"this agent does not run on sealed hardware, so it has no attestation to give. "+
-				"That is the ordinary case for an agent on a machine its user owns.")
+		writeAttestationError(w, http.StatusNotFound, "not_sealed_hardware", notSealedHardware)
 		return
 	}
 
@@ -99,6 +153,45 @@ func (s *CoreServer) handlePublicAttestation(w http.ResponseWriter, r *http.Requ
 	// short shared cache is safe and takes load off the firmware call.
 	w.Header().Set("Cache-Control", "public, max-age=30")
 	_ = json.NewEncoder(w).Encode(info)
+}
+
+// challengedAttestation produces a report bound to a value the caller chose.
+//
+// Never cached: the whole value of a challenge is that the report did not exist
+// before the caller asked, so serving a stored one would answer a different
+// question while looking identical.
+func (s *CoreServer) challengedAttestation(challenge string) (*publicAttestation, error) {
+	// Bounded and printable. The value ends up inside a hash, so nothing here
+	// is a safety property — it is to keep a caller from using this endpoint to
+	// push arbitrary bulk through, and to make a mistyped parameter fail
+	// loudly rather than attest to nonsense.
+	if len(challenge) < 16 {
+		return nil, fmt.Errorf("a challenge must be at least 16 characters, so it cannot be guessed in advance")
+	}
+	if len(challenge) > 512 {
+		return nil, fmt.Errorf("a challenge must be at most 512 characters")
+	}
+	for _, c := range challenge {
+		if c < 0x21 || c > 0x7e {
+			return nil, fmt.Errorf("a challenge must be printable ASCII with no spaces")
+		}
+	}
+
+	sh := sealedHardwareStatus(challenge, "challenge", s.snpCertificates)
+	if sh == nil {
+		return nil, nil
+	}
+	return &publicAttestation{
+		Platform:         sh.Platform,
+		Measurement:      sh.Measurement,
+		ChipID:           sh.ChipID,
+		DebugAllowed:     sh.DebugAllowed,
+		ReportedTCB:      sh.ReportedTCB,
+		Report:           sh.Report,
+		CertificateChain: sh.CertificateChain,
+		BoundTo:          sh.BoundTo,
+		Note:             sh.ChainNote,
+	}, nil
 }
 
 // cachedAttestation produces the evidence at most once every few seconds.
