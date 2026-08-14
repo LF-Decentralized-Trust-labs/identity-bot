@@ -19,10 +19,18 @@
 
 ## Summary
 
-<!-- One sentence: what this does and why it matters, for someone who reads nothing
-     else on this page. Carry the consequence; don't just restate the title.
+<!-- Two sentences, in this order: what was wrong before, then what this changes.
 
-     This is the change at a glance. The section below is the detail. -->
+         Previously, <the problem, concretely and in plain words>.
+         This PR <what it now does>, so <what that gets you>.
+
+     A summary that names only the problem is the most common mistake here, and
+     it is worse than a vague one: the reader cannot tell whether this PR causes
+     that problem, fixes it, or merely describes it, so they have to read the
+     diff to find out what the page was for.
+
+     One sentence is fine for a small change; never more than two. This is the
+     change at a glance — the section below is the detail. -->
 
 ## What This Is
 
@@ -50,7 +58,9 @@
 
 ## Why
 
-<!-- One or two plain sentences: what was wrong, or what this makes possible. -->
+<!-- One or two plain sentences on why this is worth doing — what it makes
+     possible, or what it costs to leave alone. The Summary already named the
+     problem in one clause; this is where it earns a paragraph. Don't repeat it. -->
 
 ## Who This Helps
 
