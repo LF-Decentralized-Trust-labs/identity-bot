@@ -221,3 +221,34 @@ func TestLeanTier3StillWorksAfterDeltaChanges(t *testing.T) {
 	// on full backups rather than on all of them.
 	_ = pointers
 }
+
+// Every archive carries the key, including one that carries nothing else new.
+//
+// The seed is the one thing that never changes, so a rule of "include what
+// changed" left it out of every delta — and a delta is what the scheduler
+// produces most days. Somebody restoring from their most recent backup would
+// have found an archive that opens, contains their data, and cannot sign
+// anything, because there was no key in it.
+func TestADeltaStillCarriesTheKey(t *testing.T) {
+	c := &Collector{DataDir: t.TempDir()}
+	full := &PayloadBundle{Sections: map[string][]byte{}, Ordered: []PayloadSection{}}
+	c.addRawSection(full, "root_seed", []byte("the key everything derives from"))
+	c.addRawSection(full, "identity_state", []byte(`{"aid":"EAnIdentity"}`))
+	c.addRawSection(full, "contacts", []byte(`[{"aid":"EAFriend"}]`))
+
+	ds := ResetDeltaState()
+	if err := UpdateDeltaStateAfterBackup(&ds, full, SnapshotFull, false); err != nil {
+		t.Fatal(err)
+	}
+
+	// The ordinary case: a scheduled backup on a day nothing changed.
+	delta := FilterDeltaBundle(full, &ds, []string{TierCritical, TierImportant, TierFull})
+
+	if _, ok := delta.Sections["root_seed"]; !ok {
+		t.Fatal("a delta backup carries no key material, so restoring from it " +
+			"produces an identity that cannot sign anything")
+	}
+	if _, ok := delta.Sections["contacts"]; ok {
+		t.Error("unchanged bulk data should still be left out — that is what a delta is for")
+	}
+}

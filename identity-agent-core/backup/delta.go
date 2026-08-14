@@ -22,11 +22,21 @@ type DeltaState struct {
 	LastCompactionAt string            `json:"last_compaction_at,omitempty"`
 }
 
+// Sections every archive carries, whether or not they changed.
+//
+// root_seed is here for a reason worth stating: it is the one section that
+// NEVER changes, so a rule of "include what changed" excluded it from every
+// delta backup — and a delta is what the scheduler produces most days. An
+// archive with no key material restores nothing, and the failure surfaces only
+// when somebody tries to recover from the most recent backup they have.
+//
+// Correctness beats size here and it is not close. The seed is 64 bytes.
 var tier1SectionNames = map[string]bool{
 	"identity_state":      true,
 	"kel_events":          true,
 	"sqlite_identity_db":  true,
 	"login_relationships": true,
+	"root_seed":           true,
 }
 
 // isTier2Or3Section reports whether a section belongs to the tiers a delta may
