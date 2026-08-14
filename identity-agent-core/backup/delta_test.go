@@ -182,9 +182,9 @@ func TestLeanTier3StillWorksAfterDeltaChanges(t *testing.T) {
 	}
 	defer st.Close()
 
-	aiPath := filepath.Join(dbDir, "ai_memory.db")
+	bulkPath := filepath.Join(dbDir, "some_large_store.db")
 	bulk := make([]byte, 1024)
-	if err := os.WriteFile(aiPath, bulk, 0644); err != nil {
+	if err := os.WriteFile(bulkPath, bulk, 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -196,12 +196,12 @@ func TestLeanTier3StillWorksAfterDeltaChanges(t *testing.T) {
 	}
 	carried := false
 	for _, sec := range bundle.Ordered {
-		if sec.Name == "ai_memory_db" {
+		if strings.HasPrefix(sec.Name, FileSectionPrefix) {
 			carried = true
 		}
 	}
 	if !carried {
-		t.Fatal("the assistant's memory must be carried through a delta backup too")
+		t.Fatal("a full backup carried no files from the device at all")
 	}
 	ds := ResetDeltaState()
 	if err := UpdateDeltaStateAfterBackup(&ds, bundle, SnapshotFull, false); err != nil {
@@ -209,15 +209,15 @@ func TestLeanTier3StillWorksAfterDeltaChanges(t *testing.T) {
 	}
 	deltaBundle := FilterDeltaBundle(bundle, &ds, opts.Tiers)
 	for _, sec := range deltaBundle.Ordered {
-		if sec.Name == "ai_memory_db" || strings.HasPrefix(sec.Name, "sandbox_") {
+		if strings.HasPrefix(sec.Name, FileSectionPrefix) || strings.HasPrefix(sec.Name, "sandbox_") {
 			t.Fatalf("unchanged tier3 lean data must not appear in delta, got %s", sec.Name)
 		}
 	}
 	if len(deltaBundle.Ordered) == 0 {
 		t.Fatal("delta should still include unchanged tier1 sections")
 	}
-	// Carrying the assistant's memory does not mean carrying it every time:
-	// a delta leaves out what has not changed, so the cost lands on full
-	// backups rather than on all of them.
+	// Carrying a device's files does not mean carrying them every time: a
+	// delta leaves out what has not changed, so the cost of a large file lands
+	// on full backups rather than on all of them.
 	_ = pointers
 }

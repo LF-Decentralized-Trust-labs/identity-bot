@@ -42,9 +42,11 @@ func TestLeanTier3NoBulkInArchive(t *testing.T) {
 	}
 	defer st.Close()
 
-	// A large assistant memory file. Carried even in lean mode: losing the
-	// assistant's memory is data loss, and archive size is the easier problem.
-	aiPath := filepath.Join(dbDir, "ai_memory.db")
+	// A large file the collector has never heard of. Carried even in lean
+	// mode: the core cannot know what a build on top of it keeps on disk, and
+	// losing somebody's data is the worse of the two problems. Size is the
+	// easier one, and a delta backup omits what has not changed.
+	aiPath := filepath.Join(dbDir, "some_large_store.db")
 	bulk := make([]byte, 2*1024*1024)
 	for i := range bulk {
 		bulk[i] = byte(i % 256)
@@ -59,25 +61,13 @@ func TestLeanTier3NoBulkInArchive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	carried := false
-	for _, sec := range bundle.Ordered {
-		if sec.Name == "ai_memory_db" {
-			carried = true
-		}
+	if _, carried := bundle.Sections["file:some_large_store.db"]; !carried {
+		t.Fatal("a file on the device was not carried. The collector does not get to " +
+			"decide it knows what matters")
 	}
-	if !carried {
-		t.Fatal("the assistant's memory must be in the archive, not pointed at — a pointer " +
-			"names a path on the device that just died")
-	}
-	found := false
-	for _, p := range pointers {
-		if p.Domain == "ai_memory" {
-			found = true
-		}
-	}
-	if found {
-		t.Fatal("the assistant's memory is carried now, so there must be no pointer standing " +
-			"in for it — two accounts of the same thing is how they drift")
+	if len(pointers) != 0 {
+		t.Fatalf("nothing is pointed at any more, and a pointer names a path on the "+
+			"device that just died: %+v", pointers)
 	}
 }
 

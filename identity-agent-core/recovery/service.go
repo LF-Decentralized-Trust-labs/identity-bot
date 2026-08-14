@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -373,13 +374,32 @@ func (s *Service) applyPayload(payload *RestoredPayload) error {
 			return fmt.Errorf("reseat root seed: %w", err)
 		}
 	}
-	// The assistant's memory. Collected into the full tier and, until now,
-	// dropped here — so an agent came back having forgotten everything it had
-	// been told, while every check reported a complete restore.
-	if raw, ok := payload.Bundle.Sections["ai_memory_db"]; ok && len(raw) > 0 {
-		aiPath := filepath.Join(s.DataDir, "ai_memory.db")
-		if err := os.WriteFile(aiPath, raw, 0600); err != nil {
-			return fmt.Errorf("write ai_memory.db: %w", err)
+	// Every file the archive carries, back to the path it came from.
+	//
+	// The collector no longer names the files it takes — it sweeps the data
+	// directory — so this cannot name them either. A restore that knew only
+	// the files somebody remembered to list would drop exactly the ones a
+	// build on top of this core had added, which is the failure the sweep
+	// exists to remove.
+	//
+	// A section whose name does not resolve to a path inside the data
+	// directory fails the restore. An archive is opened with the owner's own
+	// key, so this is not the main line of defence — but a section name is the
+	// one part of an archive that becomes a filesystem path.
+	for name, raw := range payload.Bundle.Sections {
+		rel, ok := backup.FilePathOfSection(name)
+		if !ok {
+			if strings.HasPrefix(name, backup.FileSectionPrefix) {
+				return fmt.Errorf("this archive names a file section with an unusable path: %q", name)
+			}
+			continue
+		}
+		dest := filepath.Join(s.DataDir, rel)
+		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+			return fmt.Errorf("make room for %s: %w", rel, err)
+		}
+		if err := os.WriteFile(dest, raw, 0o600); err != nil {
+			return fmt.Errorf("write %s: %w", rel, err)
 		}
 	}
 

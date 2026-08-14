@@ -2,6 +2,7 @@ package recovery
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -68,10 +69,10 @@ func anAgentWithRealDataInIt(t *testing.T) (dir string, st *store.SQLiteStore, s
 		t.Fatal(err)
 	}
 
-	// Assistant memory, for the same reason: without a file here the section
-	// is absent and every check over the bundle passes without seeing it.
-	if err := os.WriteFile(filepath.Join(dir, "ai_memory.db"),
-		[]byte("what the assistant was told"), 0o600); err != nil {
+	// A file of its own, for the same reason: without one here the sweep has
+	// nothing to find and every check over the bundle passes without looking.
+	if err := os.WriteFile(filepath.Join(dir, "some_store.db"),
+		[]byte("something this device kept"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -299,7 +300,6 @@ func TestNoSectionIsCollectedAndThenIgnored(t *testing.T) {
 		"credentials":         true,
 		"settings":            true,
 		"pending_requests":    true,
-		"ai_memory_db":        true,
 		// Parsed into typed fields by RestoreFromArchive and applied from there.
 		"identity_state": true,
 		"kel_events":     true,
@@ -314,11 +314,18 @@ func TestNoSectionIsCollectedAndThenIgnored(t *testing.T) {
 			"person can see what they had. The containers themselves are not in the " +
 			"archive, so writing the index onto a new device would describe apps that " +
 			"are not there.",
+		"not_carried": "the list of what was deliberately left out and why. A record " +
+			"about the archive rather than data from the device, so restoring it " +
+			"would overwrite the new device's own account with the old one's.",
 	}
 
 	var dropped []string
 	for name := range bundle.Sections {
 		if _, ok := deliberate[name]; ok {
+			continue
+		}
+		// Swept files are restored generically, by path, so they need no entry.
+		if _, isFile := backup.FilePathOfSection(name); isFile {
 			continue
 		}
 		if !consumed[name] {
@@ -333,47 +340,92 @@ func TestNoSectionIsCollectedAndThenIgnored(t *testing.T) {
 	}
 }
 
-// The assistant's memory goes in, and comes back.
+// A file nobody told the collector about goes in, and comes back.
 //
-// It used to be externalised even in the default configuration: the archive
-// recorded a pointer whose locator was a path on the device being backed up,
-// and nothing on the restore side reads pointers. So it was unrecoverable by
-// two independent routes, and every check reported a complete backup.
+// This is the property that replaced a list of known files. The core cannot
+// know what a build on top of it keeps on disk — a new database, a new store,
+// something that did not exist when this was written — and it should not have
+// to. Anything in the data directory is carried unless there is an explicit,
+// stated reason not to.
 //
-// An assistant that comes back having forgotten everything it was told is not
-// the same assistant. (Rob, 2026-08-13.)
-func TestTheAssistantsMemoryComesBack(t *testing.T) {
+// The old arrangement failed silently in the one direction that matters:
+// something new appeared, nobody added it to the list, every backup reported
+// success, and the gap was measured on the day of the restore.
+func TestAFileNobodyListedComesBack(t *testing.T) {
 	oldDir, oldStore, _ := anAgentWithRealDataInIt(t)
 
-	memory := []byte("what the assistant was told, and must not forget")
-	if err := os.WriteFile(filepath.Join(oldDir, "ai_memory.db"), memory, 0o600); err != nil {
-		t.Fatal(err)
+	// Two files this package has never heard of, one of them nested.
+	unknown := map[string][]byte{
+		"something_new.db":            []byte("a store added long after this test was written"),
+		"a_feature/its_own_state.dat": []byte("kept by something built on top of this core"),
 	}
-
-	c := &backup.Collector{DataDir: oldDir, Store: oldStore}
-	bundle, pointers, err := c.Collect(backup.DefaultCollectOptions(
-		[]string{backup.TierCritical, backup.TierImportant, backup.TierFull}))
-	if err != nil {
-		t.Fatalf("collect: %v", err)
-	}
-	if _, carried := bundle.Sections["ai_memory_db"]; !carried {
-		t.Fatal("the default does not carry the assistant's memory")
-	}
-	for _, p := range pointers {
-		if p.Domain == "ai_memory" {
-			t.Error("the memory is carried, so nothing should also point at it")
+	for rel, data := range unknown {
+		full := filepath.Join(oldDir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, data, 0o600); err != nil {
+			t.Fatal(err)
 		}
 	}
 
 	newDir, _ := restoreOntoAnotherDevice(t, oldDir, oldStore)
 
-	// Read from the restored device's own disk, which is where it has to land
-	// for the assistant to find it.
-	got, err := os.ReadFile(filepath.Join(newDir, "ai_memory.db"))
-	if err != nil {
-		t.Fatalf("the assistant's memory did not come back: %v", err)
+	for rel, want := range unknown {
+		got, err := os.ReadFile(filepath.Join(newDir, filepath.FromSlash(rel)))
+		if err != nil {
+			t.Errorf("%s was on the device and did not come back: %v", rel, err)
+			continue
+		}
+		if !bytes.Equal(got, want) {
+			t.Errorf("%s came back changed: %q, was %q", rel, got, want)
+		}
 	}
-	if !bytes.Equal(got, memory) {
-		t.Errorf("the memory came back changed: %q, was %q", got, memory)
+}
+
+// What is left out is left out on purpose, and says so.
+//
+// "Nothing else was on this device" and "something was and we left it" look
+// identical from an archive, so the archive carries the difference.
+func TestWhatIsNotCarriedIsRecordedWithAReason(t *testing.T) {
+	dir, st, _ := anAgentWithRealDataInIt(t)
+
+	// An archive this agent wrote. Carried, it would nest backups inside
+	// backups and grow without bound.
+	if err := os.WriteFile(filepath.Join(dir, "backup-full-20260813.iab"),
+		[]byte("a previous archive"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &backup.Collector{DataDir: dir, Store: st}
+	bundle, _, err := c.Collect(backup.DefaultCollectOptions(
+		[]string{backup.TierCritical, backup.TierImportant, backup.TierFull}))
+	if err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+
+	if _, carried := bundle.Sections["file:backup-full-20260813.iab"]; carried {
+		t.Error("an archive was carried inside the next archive")
+	}
+
+	raw, ok := bundle.Sections["not_carried"]
+	if !ok {
+		t.Fatal("something was left out and the archive does not say what")
+	}
+	var skipped []backup.SkippedFile
+	if err := json.Unmarshal(raw, &skipped); err != nil {
+		t.Fatalf("the record of what was left out is unreadable: %v", err)
+	}
+	found := false
+	for _, sk := range skipped {
+		if sk.Path == "backup-full-20260813.iab" {
+			found = true
+			if sk.Reason == "" {
+				t.Error("left out with no reason given")
+			}
+		}
+	}
+	if !found {
+		t.Errorf("the excluded archive is not in the record: %+v", skipped)
 	}
 }

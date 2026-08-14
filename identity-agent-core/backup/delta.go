@@ -29,17 +29,17 @@ var tier1SectionNames = map[string]bool{
 	"login_relationships": true,
 }
 
+// isTier2Or3Section reports whether a section belongs to the tiers a delta may
+// leave out when unchanged.
+//
+// Anything that is not tier 1 is. This used to name the tier 2 and 3 sections,
+// which meant a section nobody had added to the list was dropped from every
+// delta backup — present in full ones, silently missing from the rest, and
+// noticed on the day of a restore. Naming tier 1 is safe in the way naming the
+// others was not: getting tier 1 wrong includes too much, and the failure of
+// the old list was including too little.
 func isTier2Or3Section(name string) bool {
-	if tier1SectionNames[name] {
-		return false
-	}
-	return strings.HasPrefix(name, "log_") ||
-		name == "contacts" ||
-		name == "credentials" ||
-		name == "settings" ||
-		name == "pending_requests" ||
-		name == "ai_memory_db" ||
-		name == "sandbox_index"
+	return !tier1SectionNames[name]
 }
 
 // ComputeDeltaStateDigest returns Blake3-256 qb64 of canonical delta state (excluding chain digest).

@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"time"
 
 	"identity-agent-core/secureenclave"
 	"identity-agent-core/store"
@@ -158,74 +157,44 @@ func (c *Collector) collectTier2(bundle *PayloadBundle) error {
 	return nil
 }
 
+// collectTier3 takes everything else this device holds.
+//
+// It used to name the files it wanted, which meant anything else on the device
+// was silently absent from every backup — and required this core to know what
+// software built on top of it keeps on disk, which it cannot and should not.
+// Now it sweeps, and only an explicit, reasoned exclusion is left out. See
+// everything_this_device_holds.go.
 func (c *Collector) collectTier3(bundle *PayloadBundle, opts CollectOptions) ([]ExternalDataPointer, error) {
-	var pointers []ExternalDataPointer
-
-	// The AI assistant's memory is CARRIED, not pointed at — including in lean
-	// mode, which is the shipped default.
-	//
-	// It used to be externalised here: the archive recorded a pointer whose
-	// locator was a path on the very device being backed up, so once that
-	// device was gone the archive held a note saying where the memory used to
-	// be. Nothing on the restore side reads pointers, so it was unrecoverable
-	// by two independent routes at once.
-	//
-	// An assistant that comes back having forgotten everything it was ever told
-	// is not the same assistant, and a person experiences that as data loss
-	// whatever the manifest says. It costs archive size, and size is the easier
-	// problem of the two. (Rob, 2026-08-13.)
-	aiPath := filepath.Join(c.DataDir, "ai_memory.db")
-	if _, err := os.Stat(aiPath); err == nil {
-		data, rerr := os.ReadFile(aiPath)
-		if rerr != nil {
-			// Not skipped. Failing to read something we mean to carry is the
-			// silent-partial-backup failure, and the whole point is to stop it.
-			return pointers, fmt.Errorf("read the assistant's memory at %s: %w", aiPath, rerr)
-		}
-		c.addRawSection(bundle, "ai_memory_db", data)
-	}
-
-	// Sandbox — index manifest only, not container images or bulk app data.
+	// The sandbox index: what apps existed, without their payloads. Carried as
+	// its own section because it is a summary the sweep deliberately excludes
+	// the underlying files for.
 	sandboxDir := filepath.Join(c.DataDir, "sandbox")
 	if entries, err := os.ReadDir(sandboxDir); err == nil {
-		index := map[string]interface{}{"entries": []string{}}
 		names := []string{}
 		for _, e := range entries {
 			names = append(names, e.Name())
 		}
-		index["entries"] = names
-		if err := c.addJSONSection(bundle, "sandbox_index", index); err != nil {
-			return pointers, err
+		if err := c.addJSONSection(bundle, "sandbox_index",
+			map[string]interface{}{"entries": names}); err != nil {
+			return nil, err
 		}
 	}
 
-	// Logs — only recent window locally; older logs externalized as pointers.
-	logsDir := filepath.Join(c.DataDir, "logs")
-	cutoff := time.Now().AddDate(0, 0, -opts.LogWindowDays)
-	_ = filepath.Walk(logsDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
-			return nil
-		}
-		if info.ModTime().Before(cutoff) {
-			pointers = append(pointers, ExternalDataPointer{
-				Domain:     "logs",
-				Locator:    path,
-				KeyRef:     fmt.Sprintf("local:%s", filepath.Base(path)),
-				SizeBytes:  info.Size(),
-				ArchivedAt: info.ModTime().UTC().Format(time.RFC3339),
-			})
-			return nil
-		}
-		if !opts.LeanTier3 {
-			data, rerr := os.ReadFile(path)
-			if rerr == nil {
-				c.addRawSection(bundle, "log_"+filepath.Base(path), data)
-			}
-		}
-		return nil
-	})
+	skipped, err := c.collectEveryOtherFile(bundle)
+	if err != nil {
+		return nil, err
+	}
 
-	return pointers, nil
+	// What was deliberately left out, recorded IN the archive. Otherwise
+	// "nothing else was on this device" and "something was and we left it"
+	// look identical to whoever opens this later.
+	if len(skipped) > 0 {
+		if err := c.addJSONSection(bundle, "not_carried", skipped); err != nil {
+			return nil, err
+		}
+	}
+
+	return nil, nil
 }
 
 func (c *Collector) addJSONSection(bundle *PayloadBundle, name string, v interface{}) error {
