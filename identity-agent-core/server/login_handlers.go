@@ -206,9 +206,24 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 
 	s.challengeMu.Lock()
 	bundle, ok := s.challenges[token]
+	settled := s.challengeStatus[token] != nil &&
+		s.challengeStatus[token]["status"] != "pending"
 	s.challengeMu.Unlock()
 	if !ok {
 		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+
+	// ONE ANSWER PER QUESTION. A challenge that has already been answered is
+	// finished, whether the answer admitted somebody or refused them.
+	//
+	// Without this an assertion can be posted here as many times as somebody
+	// holds it, and each time the gate runs again. That is a replay inside the
+	// freshness window, and it needs no key and no forgery — only a copy of a
+	// message that was already sent once. It also means a refusal can be
+	// retried against a policy that has since changed.
+	if settled {
+		http.Error(w, "this sign-in has already been answered", http.StatusConflict)
 		return
 	}
 

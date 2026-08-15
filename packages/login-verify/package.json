@@ -29,7 +29,7 @@
   "scripts": {
     "build": "tsc",
     "prepublishOnly": "npm run build",
-    "test": "node src/steel-thread.test.mjs && node src/oidc/oidc.test.mjs && node scripts/golden_harness.mjs && node src/oidc/the-gate-applies-here-too.test.mjs"
+    "test": "node src/steel-thread.test.mjs && node src/oidc/oidc.test.mjs && node scripts/golden_harness.mjs && node src/oidc/the-gate-applies-here-too.test.mjs && node src/oidc/an-assertion-is-spent-once.test.mjs"
   },
   "dependencies": {
     "@noble/ed25519": "^2.1.0",

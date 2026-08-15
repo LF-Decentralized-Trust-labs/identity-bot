@@ -166,6 +166,29 @@ func signIn(t *testing.T, s *CoreServer, h *login.Handler, rel *login.SiteRelati
 	return w.Code, w.Body.String()
 }
 
+// signInReusingSession posts another assertion against a session that already
+// exists, which is what a replay looks like.
+func signInReusingSession(t *testing.T, s *CoreServer, h *login.Handler,
+	rel *login.SiteRelationship, relayURL string) (int, string) {
+	t.Helper()
+	const token = "session-1"
+	s.challengeMu.Lock()
+	bundle := s.challenges[token]
+	s.challengeMu.Unlock()
+
+	rel.RelayOOBI = relayURL + "/oobi/" + rel.PairwiseAID
+	a, err := h.BuildAssertion(rel, &bundle, nil)
+	if err != nil {
+		t.Fatalf("build assertion: %v", err)
+	}
+	body, _ := json.Marshal(a)
+	req := httptest.NewRequest(http.MethodPost,
+		fmt.Sprintf("/api/login/callback?session=%s", token), strings.NewReader(string(body)))
+	w := httptest.NewRecorder()
+	s.handleLoginCallback(w, req)
+	return w.Code, w.Body.String()
+}
+
 func TestAnActiveEmployeeSignsIn(t *testing.T) {
 	h, rel, pub := theirAgent(t, 1000001)
 	relay := theirKeyPublished(t, rel.PairwiseAID, pub)
@@ -325,5 +348,50 @@ func TestTheQrCodeIsNotEnoughToCollectTheResult(t *testing.T) {
 	// The browser that started it holds the secret.
 	if code3, body3 := status(secret); code3 != http.StatusOK {
 		t.Fatalf("the browser that started the login could not read its own result: %d %s", code3, body3)
+	}
+}
+
+// An assertion answers one question, once.
+//
+// The nonce made a captured assertion useless against a DIFFERENT sign-in.
+// Nothing stopped it being posted again against the SAME one, inside the
+// freshness window, by anybody holding a copy of a message that was already
+// sent. Each replay ran the gate again — so a refusal could be retried against
+// a policy that had since changed, and an admission could be re-established
+// after the organisation revoked it.
+func TestAnAssertionCannotBePostedTwice(t *testing.T) {
+	h, rel, pub := theirAgent(t, 1000006)
+	relay := theirKeyPublished(t, rel.PairwiseAID, pub)
+	s := theirOrganisation(t, map[string]bool{rel.PairwiseAID: true})
+
+	if code, body := signIn(t, s, h, rel, relay.URL); code != http.StatusOK {
+		t.Fatalf("the first sign-in failed: %d %s", code, body)
+	}
+	// The same session, answered again.
+	code, body := signInReusingSession(t, s, h, rel, relay.URL)
+	if code == http.StatusOK {
+		t.Fatal("the same sign-in was answered twice")
+	}
+	if code != http.StatusConflict {
+		t.Errorf("expected 409 for an already-answered sign-in, got %d: %s", code, body)
+	}
+}
+
+// A refusal is also an answer, so it cannot be retried either — otherwise
+// somebody refused now could keep posting until a policy change let them in.
+func TestARefusedSignInCannotBeRetried(t *testing.T) {
+	h, rel, pub := theirAgent(t, 1000007)
+	relay := theirKeyPublished(t, rel.PairwiseAID, pub)
+	roster := map[string]bool{}
+	s := theirOrganisation(t, roster)
+
+	if code, _ := signIn(t, s, h, rel, relay.URL); code != http.StatusForbidden {
+		t.Fatalf("expected the first attempt to be refused, got %d", code)
+	}
+
+	roster[rel.PairwiseAID] = true // the policy changes in their favour
+
+	if code, _ := signInReusingSession(t, s, h, rel, relay.URL); code == http.StatusOK {
+		t.Fatal("a refused sign-in was retried into an admission after the policy changed")
 	}
 }
