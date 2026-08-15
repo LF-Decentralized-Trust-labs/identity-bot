@@ -1,10 +1,12 @@
 package server
 
 import (
+	"context"
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/go-chi/chi/v5"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -266,5 +268,62 @@ func TestARefusalTellsTheCallerNothingAndTheOrganisationEverything(t *testing.T)
 	s.challengeMu.Unlock()
 	if got, _ := st["reason"].(string); !strings.Contains(got, "not an active employee") {
 		t.Errorf("the organisation was not told why either, which is the other failure: %v", st)
+	}
+}
+
+// Seeing the QR code must not be enough to collect the result.
+//
+// The session token is in the QR code and in the callback URL. Before this,
+// GET /challenge/{token}/status returned the person's identifier, the fields
+// they had just disclosed and their role, to anybody holding that token — so
+// photographing a sign-in screen was enough to harvest an identity the moment
+// its owner used it. Reading the result now needs a secret returned once, to
+// the browser that asked for the challenge, and never placed in the bundle the
+// signing agent reads.
+func TestTheQrCodeIsNotEnoughToCollectTheResult(t *testing.T) {
+	s := &CoreServer{challenges: map[string]login.ChallengeBundle{}}
+	const token = "session-qr"
+
+	secret, err := s.mintCollectorSecret(token)
+	if err != nil {
+		t.Fatalf("mint: %v", err)
+	}
+	s.setChallengeStatus(token, map[string]interface{}{
+		"status": "complete", "pairwise_aid": "Ealice",
+		"disclosures": map[string]string{"email": "alice@example.com"},
+	})
+
+	status := func(offer string) (int, string) {
+		req := httptest.NewRequest(http.MethodGet, "/api/login/challenge/"+token+"/status", nil)
+		if offer != "" {
+			req.Header.Set("X-Collector-Secret", offer)
+		}
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("token", token)
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+		w := httptest.NewRecorder()
+		s.handleChallengeStatus(w, req)
+		return w.Code, w.Body.String()
+	}
+
+	// Somebody who only saw the QR code holds the token and nothing else.
+	code, body := status("")
+	if code == http.StatusOK {
+		t.Fatalf("the token alone collected the result: %s", body)
+	}
+	if strings.Contains(body, "alice@example.com") {
+		t.Fatalf("a refused read still disclosed the person's email: %s", body)
+	}
+
+	// A guess is refused the same way, so this cannot be used to learn which
+	// sign-ins are in progress.
+	if code2, _ := status("not-the-secret"); code2 != code {
+		t.Errorf("a wrong secret answers differently from none (%d vs %d), which "+
+			"tells an attacker they found a live session", code2, code)
+	}
+
+	// The browser that started it holds the secret.
+	if code3, body3 := status(secret); code3 != http.StatusOK {
+		t.Fatalf("the browser that started the login could not read its own result: %d %s", code3, body3)
 	}
 }
