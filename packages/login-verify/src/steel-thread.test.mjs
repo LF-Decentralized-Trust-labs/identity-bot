@@ -57,9 +57,6 @@ async function run() {
     expectedAudience: bundle.audience,
     expectedNonce: bundle.nonce,
   });
-  // `valid`, not `ok`. This read result.ok, which the verifier has never
-  // returned, so the check was always falsy and this test could not pass —
-  // and nothing noticed, because nothing runs it.
   if (!result.valid) throw new Error(`verify failed: ${result.reason}`);
 
   const callback = await verifier.handleCallback(assertion, session_token, (aid) => `tok-${aid.slice(0, 8)}`);

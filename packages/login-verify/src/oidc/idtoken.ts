@@ -82,27 +82,14 @@ export interface VerifyIDTokenOptions {
 export async function verifyIDToken(
   token: string,
   opts: VerifyIDTokenOptions,
-  // The substrate verifier reports `valid`, not `ok`.
-  //
-  // This asked for `ok` and checked `substrate.ok`, which the assertion
-  // verifier has never returned — so the check was always falsy and EVERY
-  // id_token was rejected with "login: undefined". A reason of undefined is
-  // the signature of reading a field that is not there, and it is the only
-  // thing that made this visible at all.
   verifyAssertion: (
     assertion: LoginAssertion,
     vopts: { expectedAudience: string; expectedNonce: string; maxSkewSeconds?: number },
   ) => Promise<{ valid: boolean; reason?: string }>,
-  // WHETHER THIS PERSON IS ALLOWED IN, which is a different question from
-  // whether they are who they say.
-  //
-  // OIDC is the path a third party integrates without reading any of this, so
-  // an id_token that verifies and is admitted without asking would apply the
-  // organisation's policy to exactly the integrations we wrote ourselves. It
-  // is optional only so that a relying party with no policy — an open site —
-  // does not have to supply one; where a policy exists and this is omitted,
-  // the caller has silently skipped it, which is why the omission is reported
-  // in the result rather than passing quietly.
+  // Optional policy check — whether this person is allowed in, which is a
+  // different question from whether they are who they say. Omitting it admits
+  // anybody who verifies, which is right for an open site; the result reports
+  // that no policy was applied so the omission is not silent.
   authorize?: (
     assertion: LoginAssertion,
   ) => Promise<{ allowed: boolean; reason?: string }>,

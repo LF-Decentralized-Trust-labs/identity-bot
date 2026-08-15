@@ -9,12 +9,8 @@ import {
 
 // An assertion is spent once.
 //
-// The nonce makes a captured assertion useless against a DIFFERENT sign-in. It
-// does nothing about the same one: the standalone verifier compares the nonce
-// it is handed and remembers nothing, so a relying party calling it accepts the
-// same message as many times as it arrives. That is a replay inside the
-// freshness window, needing no key and no forgery — only a copy of a message
-// that was already sent.
+// The same assertion, presented twice against the same sign-in, must not be
+// accepted twice.
 async function run() {
   const priv = ed.utils.randomPrivateKey();
   const pub = await ed.getPublicKeyAsync(priv);

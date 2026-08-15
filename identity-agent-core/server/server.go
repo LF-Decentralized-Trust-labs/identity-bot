@@ -90,7 +90,7 @@ type CoreServer struct {
 	// callback URL, so anybody who photographs a sign-in screen could poll the
 	// status and take the identity, the disclosures and the role the moment the
 	// person signed in. This is minted per challenge, returned only to the
-	// browser that asked for it, and never put in the bundle the agent reads.
+	// browser that asked for it, never put in the bundle the Identity Agent reads.
 	challengeCollector map[string][32]byte
 
 	oidcAdapter       *oidc.Adapter

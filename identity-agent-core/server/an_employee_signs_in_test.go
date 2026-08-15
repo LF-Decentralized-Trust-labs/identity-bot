@@ -21,21 +21,16 @@ import (
 // An employee signs in to their organisation's website, and a stranger does not.
 //
 // Every part of this chain existed and no test ran the whole of it, so what each
-// piece did in the presence of the others was a matter of reading rather than
-// observation. Reading it is what produced two retracted findings: a grep for
-// the membership gate's function found no callers, because the caller is in
-// another repository behind an extension seam, and the conclusion drawn was that
-// the policy was never enforced. It is enforced. This runs it.
-//
-// The chain, and every link is the production one:
+// piece did in the presence of the others was never observed. This runs it, and
+// every link is the production one:
 //
 //	a root seed on the person's device
 //	  → a pairwise key derived from it at the relationship's index
 //	  → an assertion signed with that key over the canonical body
-//	  → the site posts it to the agent
-//	  → the agent resolves the key from the identifier's own did.json
-//	  → the agent checks the signature, the nonce, the audience, the freshness
-//	  → the agent asks the membership resolver whether this identifier is an employee
+//	  → the site posts it to the Identity Agent
+//	  → the IA resolves the key from the identifier's own did.json
+//	  → the IA checks the signature, the nonce, the audience, the freshness
+//	  → the IA asks the membership resolver whether this identifier is an employee
 //	  → admitted, with the roster's own answer for who they are
 type rosterResolver struct{ active map[string]bool }
 
@@ -296,13 +291,8 @@ func TestARefusalTellsTheCallerNothingAndTheOrganisationEverything(t *testing.T)
 
 // Seeing the QR code must not be enough to collect the result.
 //
-// The session token is in the QR code and in the callback URL. Before this,
-// GET /challenge/{token}/status returned the person's identifier, the fields
-// they had just disclosed and their role, to anybody holding that token — so
-// photographing a sign-in screen was enough to harvest an identity the moment
-// its owner used it. Reading the result now needs a secret returned once, to
-// the browser that asked for the challenge, and never placed in the bundle the
-// signing agent reads.
+// The session token travels in the QR code, so reading the result needs the
+// collector secret instead; see challengeCollector.
 func TestTheQrCodeIsNotEnoughToCollectTheResult(t *testing.T) {
 	s := &CoreServer{challenges: map[string]login.ChallengeBundle{}}
 	const token = "session-qr"

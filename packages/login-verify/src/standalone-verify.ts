@@ -31,8 +31,7 @@ export interface ConsumedNonces {
 }
 
 /** A store for one process. A deployment with more than one verifier needs a
- *  shared one, or an assertion spent on one of them still spends on the others.
- *  Said plainly because the in-memory default looks like protection either way. */
+ *  shared one, or an assertion spent on one of them still spends on the others. */
 export function inMemoryConsumedNonces(): ConsumedNonces {
   const seen = new Set<string>();
   return {

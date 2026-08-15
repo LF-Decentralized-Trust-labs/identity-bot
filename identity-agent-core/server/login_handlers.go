@@ -123,9 +123,8 @@ func (s *CoreServer) handleCreateAssetChallenge(w http.ResponseWriter, r *http.R
 	json.NewEncoder(w).Encode(map[string]string{
 		"session_token": token,
 		"qr_url":        qrURL,
-		// Held by the browser that started this, and by nothing else. It is
-		// required to read the result. Do not put it in a link or a QR code —
-		// that is the mistake this exists to correct.
+		// Held by the browser that started this, and by nothing else.
+		// Required to read the result. Never put it in a link or a QR code.
 		"collector_secret": secret,
 	})
 }
@@ -214,14 +213,10 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// ONE ANSWER PER QUESTION. A challenge that has already been answered is
-	// finished, whether the answer admitted somebody or refused them.
-	//
-	// Without this an assertion can be posted here as many times as somebody
-	// holds it, and each time the gate runs again. That is a replay inside the
-	// freshness window, and it needs no key and no forgery — only a copy of a
-	// message that was already sent once. It also means a refusal can be
-	// retried against a policy that has since changed.
+	// A challenge that has already been answered is finished, whether the
+	// answer admitted somebody or refused them. Without this, a copy of an
+	// assertion already sent once can be posted again inside the freshness
+	// window, needing no key and no forgery.
 	if settled {
 		http.Error(w, "this sign-in has already been answered", http.StatusConflict)
 		return
@@ -492,7 +487,6 @@ func credStr(v interface{}) string {
 	return s
 }
 
-// GET /api/login/challenge/{token}/status — browser polls this
 // GET /api/login/challenge/{token}/status — what happened, for the browser that
 // started it.
 //
@@ -529,8 +523,8 @@ func (s *CoreServer) handleChallengeStatus(w http.ResponseWriter, r *http.Reques
 	}
 	if !bound {
 		// A challenge created before this existed, or by a path that does not
-		// mint one. Said out loud, because an unbound status reads exactly like
-		// a bound one and the difference is who can read it.
+		// mint one. An unbound status is indistinguishable from a bound one, so
+		// it says so.
 		st["session_binding"] = "none"
 	}
 	w.Header().Set("Content-Type", "application/json")

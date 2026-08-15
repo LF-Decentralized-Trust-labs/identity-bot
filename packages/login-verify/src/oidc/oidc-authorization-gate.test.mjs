@@ -3,14 +3,9 @@ import { verifyIDToken } from "../../dist/oidc/idtoken.js";
 
 // The OIDC path must be able to refuse somebody who is who they say they are.
 //
-// This is the path a third party integrates without reading the source. If a
-// verifying id_token were admitted without asking whether the person is
-// allowed, an organisation's policy would apply to exactly the integrations we
-// wrote ourselves and to none of the ones that matter.
-//
-// The token below is REALLY signed and the key REALLY resolved, because an
-// earlier version of this test stubbed both, failed signature verification
-// before ever reaching the gate, and reported the refusal as a pass.
+// This is the path a third party integrates without reading the source. Without
+// a policy check here, an organisation's policy applies on the native path and
+// not over OIDC.
 
 async function run() {
   const priv = ed.utils.randomPrivateKey();
