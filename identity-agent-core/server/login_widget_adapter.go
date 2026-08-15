@@ -2,6 +2,8 @@ package server
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -131,27 +133,65 @@ func (s *CoreServer) handleCreateLoginSession(w http.ResponseWriter, r *http.Req
 		http.Error(w, msg, code)
 		return
 	}
+	secret, serr := s.mintCollectorSecret(token)
+	if serr != nil {
+		http.Error(w, "could not start a login", http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]string{
 		"session_token":   token,
 		"relay_or_qr_url": qrURL,
+		// Held by the browser that started this, and by nothing else.
+		// Required to read who signed in. Never put it in a link or a QR code.
+		"collector_secret": secret,
 	})
 }
 
 // GET /api/login/session/{asset_id}/{token} — poll session state (SignInButton-compatible).
 // Maps the internal challenge status to the SDK's state vocabulary.
+//
+// WHETHER somebody signed in is not the same secret as WHO. The session token
+// travels in the QR code, so anybody who photographs a sign-in screen holds it.
+// They may learn that the sign-in finished — the browser polling from the page
+// needs that much to hand off to its own backend, and it reveals nothing about
+// the person. They may not learn the identifier, the disclosures or the role,
+// which are released only against the collector secret handed once to whoever
+// created the session.
 func (s *CoreServer) handleLoginSessionStatus(w http.ResponseWriter, r *http.Request) {
 	corsHeaders(w)
 	token := chi.URLParam(r, "token")
+
+	offered := r.Header.Get("X-Collector-Secret")
+	if offered == "" {
+		offered = r.URL.Query().Get("collector")
+	}
+
 	s.challengeMu.Lock()
 	st := s.challengeStatus[token]
+	want, bound := s.challengeCollector[token]
 	s.challengeMu.Unlock()
+
+	// A session created before this existed has nothing to check against, and
+	// refusing it would break sign-ins already in flight across an upgrade.
+	mayCollect := !bound
+	if bound {
+		got := sha256.Sum256([]byte(offered))
+		mayCollect = subtle.ConstantTimeCompare(got[:], want[:]) == 1
+	}
 
 	resp := map[string]interface{}{"state": "connecting"}
 	if st != nil {
 		switch st["status"] {
 		case "complete":
 			resp["state"] = "verified"
+			if !mayCollect {
+				// Say so rather than looking like a sign-in that carried no
+				// identity, which is what a caller that has lost its secret
+				// would otherwise conclude.
+				resp["identity_withheld"] = true
+				break
+			}
 			if p, ok := st["pairwise_aid"].(string); ok {
 				resp["app_session_token"] = p
 			}
@@ -165,7 +205,9 @@ func (s *CoreServer) handleLoginSessionStatus(w http.ResponseWriter, r *http.Req
 			}
 		case "denied":
 			resp["state"] = "declined"
-			if reason, ok := st["reason"].(string); ok {
+			// A refusal reason can name the policy that refused, so it is held
+			// to the same standard as the identity.
+			if reason, ok := st["reason"].(string); ok && mayCollect {
 				resp["reason"] = reason
 			}
 		}
@@ -177,7 +219,7 @@ func (s *CoreServer) handleLoginSessionStatus(w http.ResponseWriter, r *http.Req
 func corsHeaders(w http.ResponseWriter) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Collector-Secret")
 }
 
 func corsPreflight(w http.ResponseWriter, r *http.Request) {

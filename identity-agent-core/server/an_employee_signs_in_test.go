@@ -385,3 +385,72 @@ func TestARefusedSignInCannotBeRetried(t *testing.T) {
 		t.Fatal("a refused sign-in was retried into an admission after the policy changed")
 	}
 }
+
+// Seeing the QR code must not be enough to learn WHO signed in.
+//
+// The widget endpoint is the one the SDK polls, so it is the one a relying
+// party actually exposes. It used to answer with the identifier, the
+// disclosures and the role to anybody holding the session token — and that
+// token is in the QR code on the screen.
+func TestTheWidgetEndpointWithholdsIdentityWithoutTheSecret(t *testing.T) {
+	const token = "session-widget"
+	s := &CoreServer{
+		challengeStatus: map[string]map[string]interface{}{
+			token: {
+				"status":       "complete",
+				"pairwise_aid": "EPairwiseOfARealPerson",
+				"disclosures":  map[string]string{"email": "alice@example.com"},
+				"member_info":  map[string]string{"role": "editor"},
+			},
+		},
+	}
+	secret, err := s.mintCollectorSecret(token)
+	if err != nil {
+		t.Fatalf("mint collector secret: %v", err)
+	}
+
+	poll := func(offered string) map[string]interface{} {
+		t.Helper()
+		r := chi.NewRouter()
+		s.mountLoginWidgetRoutes(r)
+		req := httptest.NewRequest(http.MethodGet, "/api/login/session/the-website/"+token, nil)
+		if offered != "" {
+			req.Header.Set("X-Collector-Secret", offered)
+		}
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		var got map[string]interface{}
+		if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+			t.Fatalf("decode: %v (%s)", err, w.Body.String())
+		}
+		return got
+	}
+
+	// Somebody who photographed the screen holds the token and nothing else.
+	onlyTheToken := poll("")
+	if onlyTheToken["state"] != "verified" {
+		t.Errorf("the page's own browser must still learn the sign-in finished, got %v", onlyTheToken["state"])
+	}
+	for _, leaked := range []string{"app_session_token", "disclosures", "member_info"} {
+		if _, present := onlyTheToken[leaked]; present {
+			t.Errorf("%s was handed to somebody holding only the QR code: %v", leaked, onlyTheToken)
+		}
+	}
+	if onlyTheToken["identity_withheld"] != true {
+		t.Errorf("a caller that cannot collect should be told so, got %v", onlyTheToken)
+	}
+
+	// The browser that started the sign-in holds the secret too.
+	withSecret := poll(secret)
+	if withSecret["app_session_token"] != "EPairwiseOfARealPerson" {
+		t.Fatalf("the initiating browser was refused its own result: %v", withSecret)
+	}
+	if _, ok := withSecret["identity_withheld"]; ok {
+		t.Errorf("nothing was withheld, so it should not say so: %v", withSecret)
+	}
+
+	// A guessed secret is no better than none.
+	if _, present := poll("not-the-secret")["app_session_token"]; present {
+		t.Error("a wrong collector secret still collected the identity")
+	}
+}

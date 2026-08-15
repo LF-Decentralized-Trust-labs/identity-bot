@@ -11,7 +11,13 @@ export interface SignInButtonProps {
   theme?: "light" | "dark" | "auto";
   size?: "small" | "medium" | "large";
   qrFallback?: boolean;
-  onSuccess?: (session: { sessionToken: string; appSessionToken?: string }) => void;
+  /** `collectorSecret` must be forwarded to your own backend and passed to
+   *  confirmLoginSession — the Identity Agent will not name the person without it. */
+  onSuccess?: (session: {
+    sessionToken: string;
+    appSessionToken?: string;
+    collectorSecret?: string | null;
+  }) => void;
   onError?: (err: Error) => void;
 }
 
@@ -42,21 +48,22 @@ export function SignInButton({
   onError,
 }: SignInButtonProps) {
   const [sessionToken, setSessionToken] = useState<string | null>(null);
+  const [collectorSecret, setCollectorSecret] = useState<string | null>(null);
   const [relayUrl, setRelayUrl] = useState<string | null>(null);
   const [qrUrl, setQrUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [showQr, setShowQr] = useState(false);
   const dims = SIZES[size];
-  const poll = useSessionPoll(sessionEndpoint, sessionToken);
+  const poll = useSessionPoll(sessionEndpoint, sessionToken, { collectorSecret });
 
   React.useEffect(() => {
     if (poll.state === "verified" && sessionToken) {
-      onSuccess?.({ sessionToken, appSessionToken: poll.appSessionToken });
+      onSuccess?.({ sessionToken, appSessionToken: poll.appSessionToken, collectorSecret });
     }
     if (poll.state === "declined" || poll.state === "expired" || poll.state === "error") {
       onError?.(new Error(poll.error ?? poll.state));
     }
-  }, [poll.state, poll.appSessionToken, poll.error, sessionToken, onSuccess, onError]);
+  }, [poll.state, poll.appSessionToken, poll.error, sessionToken, collectorSecret, onSuccess, onError]);
 
   const startLogin = useCallback(async () => {
     setBusy(true);
@@ -82,6 +89,7 @@ export function SignInButton({
       if (!resp.ok) throw new Error(`session create failed: ${resp.status}`);
       const data = await resp.json();
       setSessionToken(data.session_token);
+      setCollectorSecret(data.collector_secret ?? null);
       setRelayUrl(data.relay_or_qr_url);
       setQrUrl(data.qr_url ?? data.relay_or_qr_url);
 
