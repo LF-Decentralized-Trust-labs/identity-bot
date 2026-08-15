@@ -1231,8 +1231,10 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if s.KeriDriver == nil {
-		writeError(w, http.StatusServiceUnavailable, "KERI driver not available",
-			"On mobile, use the Rust bridge for KERI inception, then call /api/store/identity and /api/store/event to persist the results")
+		writeError(w, http.StatusServiceUnavailable, "KERI engine not available",
+			"this agent has no KERI engine, so it cannot found an identity. Every platform "+
+				"uses the engine in this process, including mobile, where this server runs "+
+				"inside the app")
 		return
 	}
 
