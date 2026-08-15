@@ -5,8 +5,6 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import '../theme/app_theme.dart';
 import 'package:agent_client/crypto/bip39.dart';
 import 'package:agent_client/services/keri_service.dart';
-import 'package:agent_client/bridge/keri_bridge_stub.dart'
-    if (dart.library.io) 'package:agent_client/bridge/keri_bridge.dart';
 import '../services/core_service.dart';
 import '../services/preferences_service.dart' show EntityType;
 import 'package:agent_client/services/root_seed_handoff.dart';
@@ -162,11 +160,8 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
 
     try {
       final serviceType = widget.keriService.runtimeType.toString();
-      final bridgeAvailable = KeriBridge.isAvailable;
-      final bridgeError = KeriBridge.loadError;
       debugPrint('[SetupWizard] Calling inceptAid...');
       debugPrint('[SetupWizard] KeriService type: $serviceType');
-      debugPrint('[SetupWizard] Bridge available: $bridgeAvailable, error: $bridgeError');
 
       // The seed goes across BEFORE the identity is founded, not after.
       //
@@ -189,8 +184,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
           throw TimeoutException(
             'DIAGNOSTIC: inceptAid timed out after 15s.\n'
             'Service: $serviceType\n'
-            'Rust bridge available: $bridgeAvailable\n'
-            'Bridge load error: $bridgeError',
+            'Core: $_coreBaseUrl',
           );
         },
       );
