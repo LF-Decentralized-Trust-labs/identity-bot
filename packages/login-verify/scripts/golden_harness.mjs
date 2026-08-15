@@ -46,13 +46,16 @@ async function main() {
     fail(`canonical_body_len ${body.length} !== ${v.canonical_body_len}`);
   }
 
-  const ok = await verifyLoginAssertion(v.assertion, {
+  // Named `result`, not `ok`. It was `ok`, which made `ok.ok` read as though
+  // it meant something; the verifier reports `valid`, so the check was always
+  // falsy and this harness could never pass.
+  const result = await verifyLoginAssertion(v.assertion, {
     expectedAudience: v.expected_verify.audience,
     expectedNonce: v.expected_verify.nonce,
     signingPublicKey: pub,
     skipDtCheck: true,
   });
-  if (!ok.ok) fail(`verify golden: ${ok.reason}`);
+  if (!result.valid) fail(`verify golden: ${result.reason}`);
 
   const badSig = { ...v.assertion, sig: v.negative_vectors.corrupt_sig_last_char };
   const bad = await verifyLoginAssertion(badSig, {

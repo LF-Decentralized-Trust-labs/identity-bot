@@ -82,10 +82,17 @@ export interface VerifyIDTokenOptions {
 export async function verifyIDToken(
   token: string,
   opts: VerifyIDTokenOptions,
+  // The substrate verifier reports `valid`, not `ok`.
+  //
+  // This asked for `ok` and checked `substrate.ok`, which the assertion
+  // verifier has never returned — so the check was always falsy and EVERY
+  // id_token was rejected with "login: undefined". A reason of undefined is
+  // the signature of reading a field that is not there, and it is the only
+  // thing that made this visible at all.
   verifyAssertion: (
     assertion: LoginAssertion,
     vopts: { expectedAudience: string; expectedNonce: string; maxSkewSeconds?: number },
-  ) => Promise<{ ok: boolean; reason?: string }>,
+  ) => Promise<{ valid: boolean; reason?: string }>,
 ): Promise<IDTokenVerifyResult> {
   const sig = await verifyIDTokenSignature(token, opts.fetchFn);
   if (!sig.ok) return { ok: false, reason: sig.reason };
@@ -112,7 +119,7 @@ export async function verifyIDToken(
     expectedNonce: opts.expectedNonce,
     maxSkewSeconds: opts.maxSkewSeconds,
   });
-  if (!substrate.ok) return { ok: false, reason: `login: ${substrate.reason}` };
+  if (!substrate.valid) return { ok: false, reason: `login: ${substrate.reason}` };
 
   return {
     ok: true,
