@@ -33,4 +33,8 @@ export interface IDTokenVerifyResult {
   audience?: string;
   disclosures?: Record<string, string>;
   assertion?: import("../types.js").LoginAssertion;
+  /** Whether a policy was applied. undefined means none was supplied — the
+   *  caller either has no policy or forgot to pass one, and those look the
+   *  same from here, so it is reported rather than assumed. */
+  authorized?: boolean;
 }

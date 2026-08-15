@@ -191,9 +191,23 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 
 	// 2) Authorize: enforce the asset's enrollment policy for the asserter,
 	// including any required credential presented in the (verified) assertion.
+	//
+	// The SPECIFIC reason goes to the organisation, never to the caller.
+	//
+	// "not an active employee" told to whoever asked is an oracle: anybody who
+	// can reach this endpoint learns, for an identifier they nominate, whether
+	// that person works here — and by varying the policy, where the credential
+	// and score thresholds sit. None of that requires being able to sign in.
+	//
+	// The organisation still needs the answer, so it goes into the challenge
+	// status the org's own app reads, and only a uniform refusal leaves here.
 	if allowed, reason := s.authorizeAssetAccess(r.Context(), bundle.SiteAID, res.PairwiseAID, a.PresentedACDCs); !allowed {
-		s.setChallengeStatus(token, map[string]interface{}{"status": "denied", "reason": reason})
-		http.Error(w, "not authorized: "+reason, http.StatusForbidden)
+		s.setChallengeStatus(token, map[string]interface{}{
+			"status": "denied",
+			// For the organisation, which is entitled to know.
+			"reason": reason,
+		})
+		http.Error(w, "not authorized", http.StatusForbidden)
 		return
 	}
 

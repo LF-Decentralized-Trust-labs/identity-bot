@@ -93,6 +93,19 @@ export async function verifyIDToken(
     assertion: LoginAssertion,
     vopts: { expectedAudience: string; expectedNonce: string; maxSkewSeconds?: number },
   ) => Promise<{ valid: boolean; reason?: string }>,
+  // WHETHER THIS PERSON IS ALLOWED IN, which is a different question from
+  // whether they are who they say.
+  //
+  // OIDC is the path a third party integrates without reading any of this, so
+  // an id_token that verifies and is admitted without asking would apply the
+  // organisation's policy to exactly the integrations we wrote ourselves. It
+  // is optional only so that a relying party with no policy — an open site —
+  // does not have to supply one; where a policy exists and this is omitted,
+  // the caller has silently skipped it, which is why the omission is reported
+  // in the result rather than passing quietly.
+  authorize?: (
+    assertion: LoginAssertion,
+  ) => Promise<{ allowed: boolean; reason?: string }>,
 ): Promise<IDTokenVerifyResult> {
   const sig = await verifyIDTokenSignature(token, opts.fetchFn);
   if (!sig.ok) return { ok: false, reason: sig.reason };
@@ -121,8 +134,18 @@ export async function verifyIDToken(
   });
   if (!substrate.valid) return { ok: false, reason: `login: ${substrate.reason}` };
 
+  if (authorize) {
+    const decision = await authorize(assertion);
+    if (!decision.allowed) {
+      // Uniform outward, for the same reason the native path is uniform: a
+      // specific reason here is an oracle anybody can query.
+      return { ok: false, reason: "not authorized", authorized: false };
+    }
+  }
+
   return {
     ok: true,
+    authorized: authorize ? true : undefined,
     iss: payload.iss as string,
     sub: payload.sub as string,
     nonce: payload.nonce as string,
