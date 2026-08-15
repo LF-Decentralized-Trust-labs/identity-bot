@@ -13,15 +13,12 @@ import 'screens/recovery/recovery_onboarding_screen.dart';
 import 'package:agent_client/services/recovery_service.dart';
 import 'services/core_service.dart';
 import 'package:agent_client/services/keri_service.dart';
-import 'package:agent_client/services/desktop_on_device_keri_service.dart';
-import 'package:agent_client/services/mobile_on_device_keri_service.dart';
-import 'package:agent_client/services/mobile_remote_keri_service.dart';
+import 'package:agent_client/services/local_core_keri_service.dart';
+import 'package:agent_client/services/mobile_core_service.dart';
 import 'services/preferences_service.dart';
 import 'services/secure_key_store.dart';
 import 'services/backend_process_service.dart';
 import 'package:agent_client/config/agent_config.dart';
-import 'package:agent_client/bridge/keri_bridge_stub.dart'
-    if (dart.library.io) 'package:agent_client/bridge/keri_bridge.dart';
 import 'screens/mobile/mobile_app.dart';
 import 'screens/hosting_choice_screen.dart';
 import 'screens/setup_checklist_screen.dart';
@@ -119,6 +116,12 @@ class AgentRouter extends StatefulWidget {
 class _AgentRouterState extends State<AgentRouter> {
   OnboardingStep _step = OnboardingStep.loading;
   KeriService? _keriService;
+
+  /// The Identity Agent core running inside this app on mobile.
+  ///
+  /// Held here rather than inside the KERI service, because starting the core
+  /// and speaking KERI to it are two jobs and only one of them is mobile.
+  final MobileCoreService _mobileCore = MobileCoreService();
   AgentMode? _selectedMode;
   EntityType? _selectedEntityType;
   String? _serverUrl;
@@ -218,48 +221,43 @@ class _AgentRouterState extends State<AgentRouter> {
     _keriService = null;
 
     if (_isMobilePlatform) {
-      await KeriBridge.ensureInitialized();
+      // The core runs inside this app, and KERI goes to it — the same
+      // arrangement desktop has always had.
+      //
+      // Mobile used to have a KERI engine of its own, a Rust library reached
+      // through a bridge. Its inception took the recovery phrase as an argument
+      // it never read, generated a random keypair and kept it in memory, so an
+      // identity created here could not be recovered from its words and did not
+      // survive the app being killed. Both failures were silent.
+      //
+      // Starting the core is therefore no longer "non-fatal": if it does not
+      // start there is nothing to do KERI with, and continuing would only
+      // reach the same failure further along and with less to say about it.
+      debugPrint('[Agent] Starting embedded Go Core...');
+      await _mobileCore.startCore();
+      if (!await _mobileCore.waitForReady()) {
+        throw Exception('the Identity Agent core did not start, so this device '
+            'has no KERI engine');
+      }
+      final coreUrl = _mobileCore.baseUrl;
+      debugPrint('[Agent] Go Core ready on ${_mobileCore.port} → $coreUrl');
+      _serverUrl = coreUrl;
 
       if (mode == AgentMode.connectExisting && serverUrl != null) {
-        if (KeriBridge.isAvailable) {
-          debugPrint('[Agent] Mobile Remote Controller WITH Keys — '
-              'Rust bridge for local key ops, '
-              'paired server ($serverUrl) for backend/stateless ops');
-          _keriService = MobileOnDeviceKeriService(pairedServerUrl: serverUrl);
-        } else {
-          debugPrint('[Agent] Mobile Remote Controller WITHOUT Keys — '
-              'Rust bridge unavailable (${KeriBridge.loadError}), '
-              'all ops forwarded to paired server');
-          _keriService = MobileRemoteKeriService(serverUrl: serverUrl);
-        }
+        debugPrint('[Agent] Mobile paired with $serverUrl — '
+            'keys stay here, backend work goes to the paired server');
       } else {
-        debugPrint('[Agent] Mobile Standalone — Rust bridge available: '
-            '${KeriBridge.isAvailable}'
-            '${KeriBridge.isAvailable ? '' : ' (error: ${KeriBridge.loadError})'}');
-
-        final onDeviceService = MobileOnDeviceKeriService();
-
-        try {
-          debugPrint('[Agent] Starting embedded Go Core...');
-          await onDeviceService.startGoCore();
-          final coreUrl = onDeviceService.mobileCore.baseUrl;
-          debugPrint('[Agent] Go Core started on port '
-              '${onDeviceService.mobileCore.port} → $coreUrl');
-          _serverUrl = coreUrl;
-        } catch (e) {
-          debugPrint('[Agent] Go Core start failed (non-fatal): $e');
-        }
-
-        _keriService = onDeviceService;
+        debugPrint('[Agent] Mobile standalone → $coreUrl');
       }
+      _keriService = LocalCoreKeriService(baseUrl: coreUrl);
     } else {
       if (mode == AgentMode.connectExisting && serverUrl != null) {
-        _keriService = DesktopOnDeviceKeriService();
+        _keriService = LocalCoreKeriService();
         debugPrint('[Agent] Desktop Remote Controller WITHOUT Keys — '
             'local Go+Python for child AID, '
             'remote parent server ($serverUrl) for backend/stateless ops');
       } else {
-        _keriService = DesktopOnDeviceKeriService();
+        _keriService = LocalCoreKeriService();
         debugPrint('[Agent] Desktop mode → ${AgentConfig.coreBaseUrl}');
       }
     }
@@ -270,13 +268,9 @@ class _AgentRouterState extends State<AgentRouter> {
 
     try {
       String baseUrl;
-      if (_keriService is MobileOnDeviceKeriService) {
-        final standalone = _keriService as MobileOnDeviceKeriService;
-        if (standalone.isCoreReady) {
-          baseUrl = standalone.mobileCore.baseUrl;
-        } else {
-          return false;
-        }
+      if (_isMobilePlatform) {
+        if (!_mobileCore.isStarted) return false;
+        baseUrl = _mobileCore.baseUrl;
       } else {
         baseUrl = _serverUrl ?? AgentConfig.coreBaseUrl;
       }
@@ -617,11 +611,8 @@ class _AgentRouterState extends State<AgentRouter> {
 
       case OnboardingStep.dashboard:
         String? effectiveServerUrl = _serverUrl;
-        if (effectiveServerUrl == null && _keriService is MobileOnDeviceKeriService) {
-          final standalone = _keriService as MobileOnDeviceKeriService;
-          if (standalone.isCoreReady) {
-            effectiveServerUrl = standalone.mobileCore.baseUrl;
-          }
+        if (effectiveServerUrl == null && _isMobilePlatform && _mobileCore.isStarted) {
+          effectiveServerUrl = _mobileCore.baseUrl;
         }
         return AgentMainScreen(
           keriService: _keriService!,

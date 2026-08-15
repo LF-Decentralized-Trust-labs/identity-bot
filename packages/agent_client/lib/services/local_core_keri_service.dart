@@ -9,11 +9,20 @@ import '../crypto/keys.dart';
 import 'keri_service.dart';
 import 'secure_key_store.dart';
 
-class DesktopOnDeviceKeriService extends KeriService {
+/// KERI against the Identity Agent core running on this machine.
+///
+/// Named for what it talks to rather than what kind of computer it is on,
+/// because it turned out to be right for both. It was DesktopOnDeviceKeriService
+/// while mobile had a KERI engine of its own — a Rust library that generated a
+/// random key instead of deriving one from the recovery phrase it was given,
+/// and held it in memory. Mobile now uses this, against the core running inside
+/// the app, so there is one KERI implementation everywhere and the key comes
+/// from the words on every platform.
+class LocalCoreKeriService extends KeriService {
   final String _baseUrl;
   final http.Client _client;
 
-  DesktopOnDeviceKeriService({String? baseUrl})
+  LocalCoreKeriService({String? baseUrl})
       : _baseUrl = baseUrl ?? AgentConfig.coreBaseUrl,
         _client = http.Client();
 
@@ -465,3 +474,7 @@ class DesktopOnDeviceKeriService extends KeriService {
     _client.close();
   }
 }
+
+/// The name this class had when it was only used on desktop.
+@Deprecated('Use LocalCoreKeriService — it serves mobile too')
+typedef DesktopOnDeviceKeriService = LocalCoreKeriService;
