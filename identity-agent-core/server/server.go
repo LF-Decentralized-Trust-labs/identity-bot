@@ -879,15 +879,19 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 
 		s.mountLoginRoutes(r)
 		s.mountAssetRoutes(r)
-		// An overlay (e.g. the Grape ID org backend) may provide its own, richer
-		// /employees routes. When it opts in via OVERLAY_OWNS_ORG_ROUTES=1, the core
-		// skips its built-in /employees so the overlay's MountExtraRoutes can own it
-		// without a chi double-mount panic. The /signer routes always mount — the org
-		// onboarding UI calls them.
+		// An extension may provide its own /employees routes. When it opts in via
+		// OVERLAY_OWNS_ORG_ROUTES=1 the core skips its built-in ones so the
+		// extension's MountExtraRoutes can own them without a chi double-mount.
+		//
+		// /signer goes with them. Redeeming a founding-signer invite writes a
+		// ROSTER ENTRY, so whoever owns the roster has to own the route that
+		// writes to it — otherwise an organisation's founder is recorded in one
+		// roster while the roster everything else reads stays empty, and founding
+		// cannot complete. Both halves succeed, so nothing reports an error.
 		if os.Getenv("OVERLAY_OWNS_ORG_ROUTES") != "1" {
 			s.mountEmployeeRoutes(r)
+			s.mountSignerRoutes(r)
 		}
-		s.mountSignerRoutes(r)
 		s.mountOwnerCeremonyRoutes(r)
 		s.mountVerificationRoutes(r)
 		s.mountWitnessRoutes(r)

@@ -32,6 +32,17 @@ func (s *CoreServer) mountSignerRoutes(r chi.Router) {
 // Ask. The signer relates to the organisation's ROOT identity — no portal exists
 // yet during onboarding. The organisation's app renders the returned URL as the
 // QR or link a founding signer scans.
+// HandleCreateSignerInvite is the founding-signer invite, exposed so an
+// extension that owns the roster can mount this route without rebuilding it.
+//
+// Only the REDEEM half differs for such an extension, because only that half
+// writes a roster. Minting the invite derives a pairwise key and signs an Ask
+// with it, and a second implementation of that is how a ceremony ends up
+// recording a signature with no cryptographic force behind it.
+func (s *CoreServer) HandleCreateSignerInvite(w http.ResponseWriter, r *http.Request) {
+	s.handleCreateSignerInvite(w, r)
+}
+
 func (s *CoreServer) handleCreateSignerInvite(w http.ResponseWriter, r *http.Request) {
 	publicURL := s.EndpointService.CurrentURL()
 	if publicURL == "" {
@@ -211,59 +222,17 @@ func (s *CoreServer) handleRedeemSignerInvite(w http.ResponseWriter, r *http.Req
 		VouchSig:     body.VouchSig,
 		VouchPayload: body.VouchPayload,
 	}
-	// If this invite belongs to an ownership ceremony, the key just presented is
-	// one of several being collected — record it and, when the last person has
-	// accepted, rotate. The founding path below is for the FIRST owner, where
-	// there is nothing yet to rotate from.
-	if ceremony, complete, cerr := s.recordAcceptance(
-		token, body.PairwiseAID, body.PublicKey, body.NextPublicKey); cerr != nil {
-		http.Error(w, "could not record your acceptance: "+cerr.Error(), http.StatusInternalServerError)
-		return
-	} else if ceremony != nil {
-		_ = s.assetHandler.Store.IncrementEmployeeInviteUse(token)
-		_ = s.assetHandler.Store.UpsertEmployee(emp)
-		if complete {
-			// The last acceptance is what applies it. Nobody has to remember to
-			// come back and press a button, and there is no window in which
-			// every owner has agreed and nothing has changed.
-			s.completeCeremonyIfReady(ceremony)
-		}
-		scanWriteJSON(w, map[string]interface{}{
-			"status":      "accepted",
-			"owner":       body.PairwiseAID,
-			"outstanding": ceremony.Outstanding(),
-		})
-		return
-	}
 
-	// Seal the signer as this agent's owner BEFORE anything is written down.
-	//
-	// Ordering is the whole point. If the roster were written first and sealing
-	// then failed, the organisation would look founded — an active Super Admin
-	// on the list — while still answering to nobody but itself. Sealing first
-	// means a failure leaves an unfounded org that can be founded again, which
-	// is a recoverable state rather than a misleading one.
-	if err := s.SealOwnerAuthority(OwnerAuthority{
-		AID:       body.PairwiseAID,
-		PublicKey: body.PublicKey,
-	}); err != nil {
-		http.Error(w, "could not seal the owner: "+err.Error(), http.StatusInternalServerError)
+	acc, err := s.AcceptFoundingSigner(SignerAcceptance{
+		InviteToken:            token,
+		PairwiseAID:            body.PairwiseAID,
+		PublicKey:              body.PublicKey,
+		NextPublicKey:          body.NextPublicKey,
+		BackupSealPublicKeyB64: body.BackupSealPublicKeyB64,
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
-	}
-
-	// Record where this organisation's archives get sealed to, in the same act.
-	//
-	// Not fatal, and deliberately so: the owner is sealed at this point and
-	// refusing now would leave an organisation with no owner at all, which is
-	// worse than one that cannot back up yet. Logged loudly instead, because an
-	// organisation that cannot back up is a real problem — its signing seed
-	// exists in exactly one place and the founder has no copy of it.
-	if body.BackupSealPublicKeyB64 != "" {
-		if err := s.recordBackupSealKeys([]string{body.BackupSealPublicKeyB64}); err != nil {
-			log.Printf("[signer] WARNING: the owner was sealed but their recovery key was refused (%v) — this organisation cannot write a backup anybody can open", err)
-		}
-	} else {
-		log.Printf("[signer] WARNING: the owner gave no recovery key — this organisation's seed exists in one place only, and losing this machine would end it")
 	}
 
 	if err := s.assetHandler.Store.UpsertEmployee(emp); err != nil {
@@ -271,9 +240,94 @@ func (s *CoreServer) handleRedeemSignerInvite(w http.ResponseWriter, r *http.Req
 		return
 	}
 	_ = s.assetHandler.Store.IncrementEmployeeInviteUse(token)
+
+	if acc.Ceremony {
+		scanWriteJSON(w, map[string]interface{}{
+			"status":      "accepted",
+			"owner":       body.PairwiseAID,
+			"outstanding": acc.Outstanding,
+		})
+		return
+	}
 	scanWriteJSON(w, map[string]string{
 		"status": "active",
 		"role":   "Super Admin",
 		"owner":  body.PairwiseAID,
 	})
+}
+
+// SignerAcceptance is what somebody presented when they agreed to own an
+// organisation.
+type SignerAcceptance struct {
+	InviteToken            string
+	PairwiseAID            string
+	PublicKey              string
+	NextPublicKey          string
+	BackupSealPublicKeyB64 string
+}
+
+// SignerAccepted says what agreeing turned out to mean: one more acceptance in
+// a ceremony still collecting them, or the founding of an organisation.
+type SignerAccepted struct {
+	Ceremony bool
+	// Who has not accepted yet, when a ceremony is still collecting.
+	Outstanding []string
+}
+
+// AcceptFoundingSigner performs the OWNER half of a signer redemption, and
+// writes no roster.
+//
+// The roster is deliberately not written here, because an organisation does not
+// necessarily keep it where this core does. An extension may own the roster,
+// and a founding signer written anywhere other than the roster in use is a
+// signer nobody can see — which leaves founding unable to complete while every
+// individual step reports success.
+//
+// What stays here is the ordering, which is the part that must not be
+// reimplemented anywhere: the owner is sealed BEFORE the caller writes anybody
+// down. If the roster were written first and sealing then failed, the
+// organisation would look founded — an active Super Admin on the list — while
+// answering to nobody but itself. Sealing first means a failure leaves an
+// unfounded organisation that can be founded again, which is recoverable
+// rather than misleading.
+func (s *CoreServer) AcceptFoundingSigner(a SignerAcceptance) (SignerAccepted, error) {
+	// An invite that belongs to an ownership ceremony is collecting keys from
+	// several people; the founding path below is for the FIRST owner, where
+	// there is nothing yet to rotate from.
+	ceremony, complete, cerr := s.recordAcceptance(
+		a.InviteToken, a.PairwiseAID, a.PublicKey, a.NextPublicKey)
+	if cerr != nil {
+		return SignerAccepted{}, fmt.Errorf("could not record your acceptance: %w", cerr)
+	}
+	if ceremony != nil {
+		if complete {
+			// The last acceptance is what applies it. Nobody has to remember to
+			// come back and press a button, and there is no window in which
+			// every owner has agreed and nothing has changed.
+			s.completeCeremonyIfReady(ceremony)
+		}
+		return SignerAccepted{Ceremony: true, Outstanding: ceremony.Outstanding()}, nil
+	}
+
+	if err := s.SealOwnerAuthority(OwnerAuthority{
+		AID:       a.PairwiseAID,
+		PublicKey: a.PublicKey,
+	}); err != nil {
+		return SignerAccepted{}, fmt.Errorf("could not seal the owner: %w", err)
+	}
+
+	// Where this organisation's archives get sealed to, recorded in the same
+	// act. Not fatal, and deliberately so: the owner is sealed by this point and
+	// refusing now would leave an organisation with no owner at all, which is
+	// worse than one that cannot back up yet. Logged loudly instead, because an
+	// organisation that cannot back up is a real problem — its signing seed
+	// exists in exactly one place and the founder has no copy of it.
+	if a.BackupSealPublicKeyB64 != "" {
+		if err := s.recordBackupSealKeys([]string{a.BackupSealPublicKeyB64}); err != nil {
+			log.Printf("[signer] WARNING: the owner was sealed but their recovery key was refused (%v) — this organisation cannot write a backup anybody can open", err)
+		}
+	} else {
+		log.Printf("[signer] WARNING: the owner gave no recovery key — this organisation's seed exists in one place only, and losing this machine would end it")
+	}
+	return SignerAccepted{}, nil
 }
