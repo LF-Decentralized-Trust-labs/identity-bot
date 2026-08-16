@@ -11,11 +11,9 @@ import (
 // An organisation has one roster, and the route that writes its founder must
 // belong to whoever owns it.
 //
-// The founding signer used to be written to this core's roster while an overlay
-// owned the roster the app displayed. Both halves worked and neither could see
-// the other: the phone reported the owner accepted, the roster the app polls
-// stayed empty, and founding never completed. Nothing errored, so nothing said
-// so — the desktop simply waited.
+// Split them and the founder is recorded in one roster while everything else
+// reads another. Both halves succeed and neither can see the other, so nothing
+// errors and nothing says so — founding simply never completes.
 func TestTheSignerRouteGoesWhereTheRosterGoes(t *testing.T) {
 	mounted := func(overlayOwns bool) map[string]bool {
 		if overlayOwns {

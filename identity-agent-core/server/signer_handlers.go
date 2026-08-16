@@ -32,14 +32,13 @@ func (s *CoreServer) mountSignerRoutes(r chi.Router) {
 // Ask. The signer relates to the organisation's ROOT identity — no portal exists
 // yet during onboarding. The organisation's app renders the returned URL as the
 // QR or link a founding signer scans.
-// HandleCreateSignerInvite is the founding-signer invite, exposed so an overlay
-// that owns the roster can mount this route without reimplementing it.
+// HandleCreateSignerInvite is the founding-signer invite, exposed so an
+// extension that owns the roster can mount this route without rebuilding it.
 //
-// Only the REDEEM half differs between the core and an overlay, because only
-// that half writes a roster. Minting the invite signs an Ask with a freshly
-// derived pairwise key, and a second copy of that is how the overlay's older
-// sponsor ceremony drifted into writing a roster row with no owner sealed at
-// all — evidence in a table with no cryptographic force behind it.
+// Only the REDEEM half differs for such an extension, because only that half
+// writes a roster. Minting the invite derives a pairwise key and signs an Ask
+// with it, and a second implementation of that is how a ceremony ends up
+// recording a signature with no cryptographic force behind it.
 func (s *CoreServer) HandleCreateSignerInvite(w http.ResponseWriter, r *http.Request) {
 	s.handleCreateSignerInvite(w, r)
 }
@@ -279,11 +278,10 @@ type SignerAccepted struct {
 // writes no roster.
 //
 // The roster is deliberately not written here, because an organisation does not
-// necessarily keep it where this core does — an overlay owns the roster it
-// shows people, and a founding signer that lands anywhere else is a signer
-// nobody can see. That is not hypothetical: the founding signer used to be
-// written to this core's roster while the app read the overlay's, so the phone
-// reported success and the organisation never finished founding.
+// necessarily keep it where this core does. An extension may own the roster,
+// and a founding signer written anywhere other than the roster in use is a
+// signer nobody can see — which leaves founding unable to complete while every
+// individual step reports success.
 //
 // What stays here is the ordering, which is the part that must not be
 // reimplemented anywhere: the owner is sealed BEFORE the caller writes anybody
