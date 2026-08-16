@@ -2,6 +2,9 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -110,11 +113,38 @@ func (s *CoreServer) handleCreateAssetChallenge(w http.ResponseWriter, r *http.R
 		http.Error(w, msg, code)
 		return
 	}
+	secret, serr := s.mintCollectorSecret(token)
+	if serr != nil {
+		http.Error(w, "could not start a login", http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
 		"session_token": token,
 		"qr_url":        qrURL,
+		// Held by the browser that started this, and by nothing else.
+		// Required to read the result. Never put it in a link or a QR code.
+		"collector_secret": secret,
 	})
+}
+
+// mintCollectorSecret gives the initiating browser something the QR code does
+// not carry, and keeps only its hash.
+func (s *CoreServer) mintCollectorSecret(token string) (string, error) {
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+	secret := base64.RawURLEncoding.EncodeToString(raw)
+	sum := sha256.Sum256([]byte(secret))
+	s.challengeMu.Lock()
+	if s.challengeCollector == nil {
+		s.challengeCollector = map[string][32]byte{}
+	}
+	s.challengeCollector[token] = sum
+	s.challengeMu.Unlock()
+	return secret, nil
 }
 
 // GET /i/{token} — public endpoint the IA fetches to get the signed bundle
@@ -175,9 +205,20 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 
 	s.challengeMu.Lock()
 	bundle, ok := s.challenges[token]
+	settled := s.challengeStatus[token] != nil &&
+		s.challengeStatus[token]["status"] != "pending"
 	s.challengeMu.Unlock()
 	if !ok {
 		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+
+	// A challenge that has already been answered is finished, whether the
+	// answer admitted somebody or refused them. Without this, a copy of an
+	// assertion already sent once can be posted again inside the freshness
+	// window, needing no key and no forgery.
+	if settled {
+		http.Error(w, "this sign-in has already been answered", http.StatusConflict)
 		return
 	}
 
@@ -191,9 +232,23 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 
 	// 2) Authorize: enforce the asset's enrollment policy for the asserter,
 	// including any required credential presented in the (verified) assertion.
+	//
+	// The SPECIFIC reason goes to the organisation, never to the caller.
+	//
+	// "not an active employee" told to whoever asked is an oracle: anybody who
+	// can reach this endpoint learns, for an identifier they nominate, whether
+	// that person works here — and by varying the policy, where the credential
+	// and score thresholds sit. None of that requires being able to sign in.
+	//
+	// The organisation still needs the answer, so it goes into the challenge
+	// status the org's own app reads, and only a uniform refusal leaves here.
 	if allowed, reason := s.authorizeAssetAccess(r.Context(), bundle.SiteAID, res.PairwiseAID, a.PresentedACDCs); !allowed {
-		s.setChallengeStatus(token, map[string]interface{}{"status": "denied", "reason": reason})
-		http.Error(w, "not authorized: "+reason, http.StatusForbidden)
+		s.setChallengeStatus(token, map[string]interface{}{
+			"status": "denied",
+			// For the organisation, which is entitled to know.
+			"reason": reason,
+		})
+		http.Error(w, "not authorized", http.StatusForbidden)
 		return
 	}
 
@@ -432,14 +487,45 @@ func credStr(v interface{}) string {
 	return s
 }
 
-// GET /api/login/challenge/{token}/status — browser polls this
+// GET /api/login/challenge/{token}/status — what happened, for the browser that
+// started it.
+//
+// The token alone is not enough to read this, and that is the point. It travels
+// in the QR code and in the callback URL, so anybody who saw a sign-in screen
+// could otherwise poll here and collect the person's identifier, the fields
+// they disclosed and their role, at the moment they signed in. The collector
+// secret was returned once, to the browser that asked for the challenge.
 func (s *CoreServer) handleChallengeStatus(w http.ResponseWriter, r *http.Request) {
 	token := chi.URLParam(r, "token")
+
+	offered := r.Header.Get("X-Collector-Secret")
+	if offered == "" {
+		offered = r.URL.Query().Get("collector")
+	}
+
 	s.challengeMu.Lock()
+	want, bound := s.challengeCollector[token]
 	st := s.challengeStatus[token]
 	s.challengeMu.Unlock()
+
+	if bound {
+		got := sha256.Sum256([]byte(offered))
+		if subtle.ConstantTimeCompare(got[:], want[:]) != 1 {
+			// Uniform: a wrong secret and an unknown token answer the same, so
+			// this cannot be used to discover which sign-ins are in progress.
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+	}
+
 	if st == nil {
 		st = map[string]interface{}{"status": "pending"}
+	}
+	if !bound {
+		// A challenge created before this existed, or by a path that does not
+		// mint one. An unbound status is indistinguishable from a bound one, so
+		// it says so.
+		st["session_binding"] = "none"
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(st)

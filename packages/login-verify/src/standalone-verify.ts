@@ -14,6 +14,33 @@ export interface StandaloneVerifyOptions extends VerifyAssertionOptions {
   /** Override clock for dt skew checks. */
   nowMs?: number;
   fetchFn?: typeof fetch;
+  /** Burns the assertion so it cannot be verified a second time.
+   *
+   *  The nonce makes a captured assertion useless against a DIFFERENT sign-in.
+   *  On its own it does nothing about the same one: this function only compares
+   *  the nonce it is handed, so a relying party calling it in a loop would
+   *  accept the same message every time. Supply a store and the second
+   *  presentation is refused. See `inMemoryConsumedNonces`. */
+  consume?: ConsumedNonces;
+}
+
+/** Remembers which assertions have already been accepted. */
+export interface ConsumedNonces {
+  /** True if this assertion had NOT been seen, and records it. False if it had. */
+  claim(key: string): Promise<boolean> | boolean;
+}
+
+/** A store for one process. A deployment with more than one verifier needs a
+ *  shared one, or an assertion spent on one of them still spends on the others. */
+export function inMemoryConsumedNonces(): ConsumedNonces {
+  const seen = new Set<string>();
+  return {
+    claim(key: string) {
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    },
+  };
 }
 
 /** Language-agnostic verify core — HTTP microservice wraps this. */
@@ -58,6 +85,15 @@ export async function verifyLoginAssertion(
   const validSig = await verifyCanonical(body, assertion.sig, publicKey);
   if (!validSig) {
     return { valid: false, reason: "invalid signature" };
+  }
+
+  // Burnt only once everything else has passed, so a malformed or badly signed
+  // assertion cannot be used to spend a nonce the real one still needs.
+  if (opts.consume) {
+    const fresh = await opts.consume.claim(`${assertion.audience}|${assertion.nonce}|${assertion.i}`);
+    if (!fresh) {
+      return { valid: false, reason: "assertion already used" };
+    }
   }
 
   return {

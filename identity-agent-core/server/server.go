@@ -84,6 +84,14 @@ type CoreServer struct {
 	challengeMu     sync.Mutex
 	challenges      map[string]login.ChallengeBundle  // keyed by session_token
 	challengeStatus map[string]map[string]interface{} // keyed by session_token; tracks pending/complete
+	// The secret that COLLECTS a finished login, hashed. Keyed by session_token.
+	//
+	// The session token cannot do this job: it is in the QR code and in the
+	// callback URL, so anybody who photographs a sign-in screen could poll the
+	// status and take the identity, the disclosures and the role the moment the
+	// person signed in. This is minted per challenge, returned only to the
+	// browser that asked for it, never put in the bundle the Identity Agent reads.
+	challengeCollector map[string][32]byte
 
 	oidcAdapter       *oidc.Adapter
 	WatcherService    *watcher.Service

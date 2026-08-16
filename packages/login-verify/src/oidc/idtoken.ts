@@ -85,7 +85,14 @@ export async function verifyIDToken(
   verifyAssertion: (
     assertion: LoginAssertion,
     vopts: { expectedAudience: string; expectedNonce: string; maxSkewSeconds?: number },
-  ) => Promise<{ ok: boolean; reason?: string }>,
+  ) => Promise<{ valid: boolean; reason?: string }>,
+  // Optional policy check — whether this person is allowed in, which is a
+  // different question from whether they are who they say. Omitting it admits
+  // anybody who verifies, which is right for an open site; the result reports
+  // that no policy was applied so the omission is not silent.
+  authorize?: (
+    assertion: LoginAssertion,
+  ) => Promise<{ allowed: boolean; reason?: string }>,
 ): Promise<IDTokenVerifyResult> {
   const sig = await verifyIDTokenSignature(token, opts.fetchFn);
   if (!sig.ok) return { ok: false, reason: sig.reason };
@@ -112,10 +119,20 @@ export async function verifyIDToken(
     expectedNonce: opts.expectedNonce,
     maxSkewSeconds: opts.maxSkewSeconds,
   });
-  if (!substrate.ok) return { ok: false, reason: `login: ${substrate.reason}` };
+  if (!substrate.valid) return { ok: false, reason: `login: ${substrate.reason}` };
+
+  if (authorize) {
+    const decision = await authorize(assertion);
+    if (!decision.allowed) {
+      // Uniform outward, for the same reason the native path is uniform: a
+      // specific reason here is an oracle anybody can query.
+      return { ok: false, reason: "not authorized", authorized: false };
+    }
+  }
 
   return {
     ok: true,
+    authorized: authorize ? true : undefined,
     iss: payload.iss as string,
     sub: payload.sub as string,
     nonce: payload.nonce as string,

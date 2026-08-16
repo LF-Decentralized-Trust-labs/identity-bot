@@ -17,6 +17,10 @@ export interface ConfirmSessionOptions {
   assetId: string;
   /** The session token handed to onSuccess (or being polled). */
   sessionToken: string;
+  /** Handed to the browser that created the session, and passed back here.
+   *  Without it the Identity Agent reports the state but withholds who signed
+   *  in, because the session token alone travels in the QR code. */
+  collectorSecret?: string | null;
   /** Optional fetch override (testing / custom agents). */
   fetchFn?: typeof fetch;
 }
@@ -46,7 +50,12 @@ export async function confirmLoginSession(opts: ConfirmSessionOptions): Promise<
   const f = opts.fetchFn ?? fetch;
   const resp = await f(
     `${base}/api/login/session/${encodeURIComponent(opts.assetId)}/${encodeURIComponent(opts.sessionToken)}`,
-    { headers: { accept: "application/json" } },
+    {
+      headers: {
+        accept: "application/json",
+        ...(opts.collectorSecret ? { "X-Collector-Secret": opts.collectorSecret } : {}),
+      },
+    },
   );
   if (!resp.ok) return { state: "pending" };
   const body = (await resp.json()) as {
@@ -55,7 +64,15 @@ export async function confirmLoginSession(opts: ConfirmSessionOptions): Promise<
     disclosures?: Record<string, unknown>;
     member_info?: { role?: string; display_name?: string };
     reason?: string;
+    identity_withheld?: boolean;
   };
+  // Verified, but this caller could not collect. Reporting it as pending would
+  // spin forever; reporting it as verified would hand back an empty identity.
+  if (body.state === "verified" && body.identity_withheld) {
+    throw new Error(
+      "login: the Identity Agent withheld the identity — pass the collectorSecret returned when the session was created",
+    );
+  }
   if (body.state === "verified" && body.app_session_token) {
     return {
       state: "verified",

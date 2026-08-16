@@ -1,6 +1,6 @@
 {
   "name": "@identity-agent/login-web",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Sign In with Identity Agent — React widget + server-side session confirmation",
   "type": "module",
   "main": "./dist/index.js",
@@ -30,6 +30,7 @@
   },
   "scripts": {
     "build": "tsc",
+    "test": "npm run build && node src/the-secret-travels-with-the-question.test.mjs",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {

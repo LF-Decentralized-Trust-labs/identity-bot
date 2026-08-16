@@ -57,7 +57,7 @@ async function run() {
     expectedAudience: bundle.audience,
     expectedNonce: bundle.nonce,
   });
-  if (!result.ok) throw new Error(`verify failed: ${result.reason}`);
+  if (!result.valid) throw new Error(`verify failed: ${result.reason}`);
 
   const callback = await verifier.handleCallback(assertion, session_token, (aid) => `tok-${aid.slice(0, 8)}`);
   if (!callback.ok) throw new Error(`callback failed: ${callback.reason}`);
