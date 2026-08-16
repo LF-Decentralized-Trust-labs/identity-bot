@@ -32,6 +32,18 @@ func (s *CoreServer) mountSignerRoutes(r chi.Router) {
 // Ask. The signer relates to the organisation's ROOT identity — no portal exists
 // yet during onboarding. The organisation's app renders the returned URL as the
 // QR or link a founding signer scans.
+// HandleCreateSignerInvite is the founding-signer invite, exposed so an overlay
+// that owns the roster can mount this route without reimplementing it.
+//
+// Only the REDEEM half differs between the core and an overlay, because only
+// that half writes a roster. Minting the invite signs an Ask with a freshly
+// derived pairwise key, and a second copy of that is how the overlay's older
+// sponsor ceremony drifted into writing a roster row with no owner sealed at
+// all — evidence in a table with no cryptographic force behind it.
+func (s *CoreServer) HandleCreateSignerInvite(w http.ResponseWriter, r *http.Request) {
+	s.handleCreateSignerInvite(w, r)
+}
+
 func (s *CoreServer) handleCreateSignerInvite(w http.ResponseWriter, r *http.Request) {
 	publicURL := s.EndpointService.CurrentURL()
 	if publicURL == "" {
