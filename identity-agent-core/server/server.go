@@ -700,6 +700,22 @@ func (s *CoreServer) IsRunning() bool {
 	return s.running
 }
 
+// corsPolicy is the router's cross-origin policy, in one place so a test can
+// exercise the same value the router uses rather than a copy of it.
+func corsPolicy() func(http.Handler) http.Handler {
+	return cors.Handler(cors.Options{
+		AllowOriginFunc: func(*http.Request, string) bool { return false },
+		AllowedMethods:  []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedHeaders: []string{
+			"Accept", "Authorization", "Content-Type", "X-CSRF-Token",
+			headerOwnerSig, headerOwnerTimestamp, headerOwnerAID,
+		},
+		ExposedHeaders:   []string{"Link"},
+		AllowCredentials: false,
+		MaxAge:           300,
+	})
+}
+
 func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 	r := chi.NewRouter()
 
@@ -710,17 +726,18 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 	// proxy in front said so and this agent has been told to believe it.
 	// Otherwise the agent publishes an address only it can reach.
 	r.Use(s.learnAddressFromProxy)
-	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins: []string{"*"},
-		AllowedMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowedHeaders: []string{
-			"Accept", "Authorization", "Content-Type", "X-CSRF-Token",
-			headerOwnerSig, headerOwnerTimestamp, headerOwnerAID,
-		},
-		ExposedHeaders:   []string{"Link"},
-		AllowCredentials: true,
-		MaxAge:           300,
-	}))
+	// No cross-origin access by default.
+	//
+	// This allowed every origin, with credentials, across the whole API. The
+	// pages that legitimately need cross-origin access are the sign-in widget
+	// routes, and they set their own headers next to their own handlers where
+	// the grant is visible — see corsHeaders in login_widget_adapter.go.
+	//
+	// The denial is a function rather than an empty AllowedOrigins list, and
+	// that is not a style choice: in this library an empty list means allow
+	// ALL origins (cors.go, "Default is all origins"). An empty slice here
+	// would read as a denial and behave as a wildcard.
+	r.Use(corsPolicy())
 
 	// Everything below is owner-only unless api_auth.go names it otherwise.
 	// Registered here, before any route, so no route can be added outside it.
@@ -4410,9 +4427,9 @@ func (s *CoreServer) reviveAssetIdentity(a asset.Asset) error {
 // carries forwarding headers, so it is correctly refused.
 //
 // Without this gate the endpoint was reachable by anyone who could reach the
-// port. The server binds 0.0.0.0, CORS allows any origin with credentials, and
-// the tunnel providers forward the whole local port — so any agent exposed
-// through a tunnel could be wiped by anyone who learned the URL.
+// port. The server binds every interface and the tunnel providers forward the
+// whole local port — so any Identity Agent exposed through a tunnel could be
+// wiped by anyone who learned the URL.
 func (s *CoreServer) handleReset(w http.ResponseWriter, r *http.Request) {
 	if !s.isOwner(r) {
 		writeError(w, http.StatusForbidden, "Forbidden",

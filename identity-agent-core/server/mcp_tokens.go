@@ -95,10 +95,44 @@ func hasForwardingHeaders(r *http.Request) bool {
 	return false
 }
 
-// isLocalOwnerRequest: genuinely local = loopback connection AND no forwarding headers.
+// isBrowserOriginated reports whether this request was issued by a web page
+// rather than by a program running on this machine.
+//
+// A page loaded from anywhere reaches 127.0.0.1 as a loopback connection with
+// no forwarding headers, so by the old test every website in the world was the
+// owner of this Identity Agent. Visiting a page was enough to read the roster, the
+// invitation secrets and the identity.
+//
+// What separates the two is that a browser describes itself and cannot be
+// talked out of it. Origin and the Sec-Fetch-* family are forbidden header
+// names: they are set by the browser, and page script cannot change or remove
+// them. A native client on this machine sends none of them.
+//
+// This does not defend against another program on the machine — that program
+// already has the user's files and does not need the API. The browser is the
+// caller this closes.
+func isBrowserOriginated(r *http.Request) bool {
+	if r.Header.Get("Origin") != "" {
+		return true
+	}
+	// Sec-Fetch-Site is "none" for a request the user typed into the address
+	// bar; anything else is a page acting on its own initiative.
+	if site := r.Header.Get("Sec-Fetch-Site"); site != "" && site != "none" {
+		return true
+	}
+	if mode := r.Header.Get("Sec-Fetch-Mode"); mode == "cors" || mode == "no-cors" {
+		return true
+	}
+	return r.Header.Get("Sec-Fetch-Dest") != ""
+}
+
+// isLocalOwnerRequest: genuinely local = loopback connection, no forwarding
+// headers, and not issued by a web page.
 func isLocalOwnerRequest(r *http.Request) bool {
 	host, _, _ := net.SplitHostPort(r.RemoteAddr)
-	return sandbox.IsLoopbackHost(host) && !hasForwardingHeaders(r)
+	return sandbox.IsLoopbackHost(host) &&
+		!hasForwardingHeaders(r) &&
+		!isBrowserOriginated(r)
 }
 
 // requestCorrelationID propagates the caller's correlation id, or mints one at this
