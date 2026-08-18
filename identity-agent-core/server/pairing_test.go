@@ -1,8 +1,12 @@
 package server
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"encoding/base64"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -13,71 +17,29 @@ func realKey() string {
 	return base64.RawURLEncoding.EncodeToString(pub)
 }
 
-// The rule the whole ceremony exists to enforce: the delegation must be over
-// the key this instance generated. Without it a controller could delegate to a
-// key it holds, and the box would end up "adopted" with an identity it cannot
-// sign for — or one somebody else can.
-func TestDelegationMustBeOverThisInstancesKey(t *testing.T) {
-	const ours = "DOURKEY"
-	req := pairingCompleteRequest{
-		DipEvent: map[string]interface{}{
+// Pairing by delegation is refused, and that refusal is the point.
+//
+// This replaces four tests of a delegation validator that no longer exists.
+// They checked that a delegation was over this instance's key, named a real
+// delegator, matched its claim, and carried an owner — all correct rules for a
+// mechanism we no longer use. A delegated inception names the delegator in a
+// publicly resolvable key log, so a computer paired that way publishes who owns
+// it. ADR-036 settled that on 2026-08-12; this is the code catching up.
+func TestPairingByDelegationIsRefused(t *testing.T) {
+	body, _ := json.Marshal(map[string]interface{}{
+		"adoption_code": "whatever",
+		"owner_aid":     "EOWNER",
+		// found_as_root omitted, which is what a delegating client would send
+		"dip_event": map[string]interface{}{
 			"t": "dip", "i": "EDELEGATED", "di": "EROOT",
-			"k": []interface{}{"DSOMEONEELSESKEY"},
 		},
-		DelegatorAID: "EROOT", OwnerAID: "EOWNER", OwnerPublicKey: realKey(),
-	}
-	if err := validateDelegation(req, ours); err == nil {
-		t.Fatal("a delegation over another key was accepted")
-	}
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/pairing/complete", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	(&CoreServer{}).handlePairingComplete(rec, req)
 
-	req.DipEvent["k"] = []interface{}{ours}
-	if err := validateDelegation(req, ours); err != nil {
-		t.Fatalf("a correct delegation was refused: %v", err)
-	}
-}
-
-func TestDelegationMustNameADelegator(t *testing.T) {
-	const ours = "DOURKEY"
-	for name, dip := range map[string]map[string]interface{}{
-		"no delegator":     {"t": "dip", "i": "EDELEGATED", "k": []interface{}{ours}},
-		"self-delegating":  {"t": "dip", "i": "EROOT", "di": "EROOT", "k": []interface{}{ours}},
-		"not a dip":        {"t": "icp", "i": "EDELEGATED", "di": "EROOT", "k": []interface{}{ours}},
-		"no delegated aid": {"t": "dip", "di": "EROOT", "k": []interface{}{ours}},
-	} {
-		req := pairingCompleteRequest{DipEvent: dip, OwnerAID: "EOWNER", OwnerPublicKey: realKey()}
-		if err := validateDelegation(req, ours); err == nil {
-			t.Errorf("%s: accepted", name)
-		}
-	}
-}
-
-// A delegation that claims one delegator while the event names another is
-// either a bug or an attempt to misattribute the adoption.
-func TestClaimedDelegatorMustMatchTheEvent(t *testing.T) {
-	const ours = "DOURKEY"
-	req := pairingCompleteRequest{
-		DipEvent: map[string]interface{}{
-			"t": "dip", "i": "EDELEGATED", "di": "EACTUAL", "k": []interface{}{ours},
-		},
-		DelegatorAID: "ECLAIMED", OwnerAID: "EOWNER", OwnerPublicKey: realKey(),
-	}
-	if err := validateDelegation(req, ours); err == nil {
-		t.Fatal("a mismatched delegator claim was accepted")
-	}
-}
-
-// An adopted instance with no owner would be administrable by nobody, and a
-// later call to name one is a window somebody else could step into.
-func TestAdoptionRequiresAnOwner(t *testing.T) {
-	const ours = "DOURKEY"
-	base := map[string]interface{}{"t": "dip", "i": "EDELEGATED", "di": "EROOT", "k": []interface{}{ours}}
-	for name, req := range map[string]pairingCompleteRequest{
-		"no owner aid": {DipEvent: base, OwnerPublicKey: realKey()},
-		"no owner key": {DipEvent: base, OwnerAID: "EOWNER"},
-	} {
-		if err := validateDelegation(req, ours); err == nil {
-			t.Errorf("%s: accepted", name)
-		}
+	if rec.Code == http.StatusOK {
+		t.Fatal("a delegated pairing was accepted; a paired computer must found its own root")
 	}
 }
 
