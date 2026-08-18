@@ -26,9 +26,10 @@ const mldsa65SeedBytes = mldsa65.SeedSize
 //
 // This is the migration KERI's own strategy describes: keep post-quantum
 // signatures out of key event logs for now, and swap the algorithms in at a
-// later rotation. Without a commitment made at founding there is no later
-// swap — pre-rotation binds an identity to the key set it committed to, and a
-// key never committed can never be revealed.
+// later rotation. A key that was never committed to cannot be revealed by the
+// rotation that follows — though a rotation may always commit to one for the
+// rotation after that, so founding is the earliest place to do this rather than
+// the only one.
 //
 // THE COMMITMENT IS A BET ON A CODE THAT IS NOT FINAL. The digest is taken over
 // the key's qb64 text, which includes its CESR code, so it can only be computed

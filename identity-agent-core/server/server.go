@@ -1356,17 +1356,22 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 	// ML-DSA key is 44 characters like any other, and nothing is encoded until
 	// the key is revealed at a rotation.
 	//
-	// It has to START here. Pre-rotation binds an identity to the key set it
-	// committed to, so an identity founded committing only a classical next key
-	// cannot rotate to a post-quantum one.
+	// Founding is the EARLIEST moment, not the only one. A rotation sets a new
+	// next-key set freely, so an identity founded without this can add the
+	// commitment whenever it next rotates — that was checked against a real
+	// validator rather than assumed, because the opposite was believed here
+	// first and stated as fact.
 	//
-	// It also has to be RENEWED at every rotation, and today it is not. KERI
-	// replaces `n` wholesale at each event, so the commitment does not persist
-	// on its own: the ordinary rotation path commits a single classical
-	// successor, which drops this the first time an identity rotates for any
-	// reason at all. That is a gap in the rotation paths rather than in this
-	// one, and it is logged as such — but nobody reading this should leave
-	// believing the property is permanent once founded.
+	// What doing it at founding buys is that an identity which never rotates
+	// still carries the commitment, and one that does rotate reaches a hybrid
+	// key set in a single rotation rather than two — one to add the commitment,
+	// another to reveal it.
+	//
+	// The corollary is that it has to be RENEWED at every rotation, and today it
+	// is not: KERI replaces the whole next-key set at each event, and the
+	// ordinary rotation path commits a single classical successor, dropping this
+	// the first time an identity rotates for any reason. That is a gap in the
+	// rotation paths rather than in this one, and it is logged as such.
 	//
 	// Best-effort on purpose. If this fails the identity is founded exactly as
 	// it was before, with one commitment, rather than not founded at all: the
