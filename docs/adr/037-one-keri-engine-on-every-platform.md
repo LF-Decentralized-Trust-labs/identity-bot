@@ -72,3 +72,22 @@ Whether the post-quantum work keeps a Rust component. `pqc-poc-rust/` is a
 separate proof of concept with its own consumers and is untouched by this — it
 is not a KERI engine, and removing a KERI engine is the whole of what this
 records.
+
+> **Answered 2026-08-17: it does not.** The crate is deleted. Two things settled
+> it. It had one consumer — `drivers/keri-core/pqc/mldsa_crypto.py`, which shelled
+> to it for ML-DSA-65 and now reaches the Go core instead — and it could not build:
+> `Cargo.toml` declared binaries at `src/bin/c4roundtrip.rs` and
+> `src/bin/pqc_mldsa_cli.rs`, neither of which was ever committed. So the "own
+> consumers" this section assumed were one consumer and a broken build.
+>
+> The post-quantum work loses nothing. ML-DSA-65 and ML-KEM-768 come from
+> `github.com/cloudflare/circl` — pure Go, `CGO_ENABLED=0` clean, so it links under
+> `gomobile`. That removes the reason the Rust fallback existed at all: `liboqs-go`
+> would not link on mobile, and circl does. One library now covers all five
+> platforms instead of liboqs on desktop and RustCrypto on mobile.
+>
+> One thing genuinely narrows. ML-DSA is no longer cross-checked against a second
+> implementation — the Python reference takes it from the Go core rather than
+> computing it independently. The golden vectors still prove the CESR wire framing
+> agrees across engines, which is what they were built to catch. Restoring the
+> independent check wants a pure-Python ML-DSA, not a second native engine.
