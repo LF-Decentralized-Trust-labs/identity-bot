@@ -5,7 +5,6 @@ import '../theme/app_theme.dart';
 // ignore_for_file: library_private_types_in_public_api
 import '../services/core_service.dart';
 import 'package:agent_client/services/keri_service.dart';
-import 'package:agent_client/services/mobile_on_device_keri_service.dart';
 import '../services/photo_picker_stub.dart'
     if (dart.library.html) '../services/photo_picker_web.dart' as photo_picker;
 
@@ -28,10 +27,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   String? _resolveServerUrl() {
     if (widget.serverUrl != null) return widget.serverUrl;
-    if (widget.keriService is MobileOnDeviceKeriService) {
-      final standalone = widget.keriService as MobileOnDeviceKeriService;
-      if (standalone.isCoreReady) return standalone.mobileCore.baseUrl;
-    }
     return null;
   }
 

@@ -374,11 +374,9 @@
                                 );
                                 LIBRARY_SEARCH_PATHS = (
                                         "$(inherited)",
-                                        "$(PROJECT_DIR)/Frameworks/RustKeri/device",
                                 );
                                 OTHER_LDFLAGS = (
                                         "$(inherited)",
-                                        "-lidentity_agent_keri",
                                         "-lresolv",
                                 );
                                 PRODUCT_BUNDLE_IDENTIFIER = com.identityagent.identityAgentUi;
@@ -562,11 +560,9 @@
                                 );
                                 LIBRARY_SEARCH_PATHS = (
                                         "$(inherited)",
-                                        "$(PROJECT_DIR)/Frameworks/RustKeri/device",
                                 );
                                 OTHER_LDFLAGS = (
                                         "$(inherited)",
-                                        "-lidentity_agent_keri",
                                         "-lresolv",
                                 );
                                 PRODUCT_BUNDLE_IDENTIFIER = com.identityagent.identityAgentUi;
@@ -593,11 +589,9 @@
                                 );
                                 LIBRARY_SEARCH_PATHS = (
                                         "$(inherited)",
-                                        "$(PROJECT_DIR)/Frameworks/RustKeri/device",
                                 );
                                 OTHER_LDFLAGS = (
                                         "$(inherited)",
-                                        "-lidentity_agent_keri",
                                         "-lresolv",
                                 );
                                 PRODUCT_BUNDLE_IDENTIFIER = com.identityagent.identityAgentUi;

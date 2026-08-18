@@ -9,7 +9,6 @@ import 'package:agent_client/services/camera_service.dart';
 import '../../services/core_service.dart';
 import 'package:agent_client/services/event_service.dart';
 import 'package:agent_client/services/keri_service.dart';
-import 'package:agent_client/services/mobile_on_device_keri_service.dart';
 import '../../widgets/identity_level_badge.dart';
 import '../../widgets/key_storage_badge.dart';
 import '../../widgets/alert_detail_modal.dart';
@@ -73,10 +72,6 @@ class _DesktopDashboardScreenState extends State<DesktopDashboardScreen> {
 
   String? _resolveServerUrl() {
     if (widget.serverUrl != null) return widget.serverUrl;
-    if (widget.keriService is MobileOnDeviceKeriService) {
-      final s = widget.keriService as MobileOnDeviceKeriService;
-      if (s.isCoreReady) return s.mobileCore.baseUrl;
-    }
     return null;
   }
 

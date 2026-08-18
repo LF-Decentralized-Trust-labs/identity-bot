@@ -4,7 +4,6 @@ import '../theme/app_theme.dart';
 import '../widgets/connected_services_section.dart';
 import '../services/core_service.dart';
 import 'package:agent_client/services/keri_service.dart';
-import 'package:agent_client/services/mobile_on_device_keri_service.dart';
 import '../services/preferences_service.dart';
 import '../main.dart';
 
@@ -31,12 +30,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   String? _resolveServerUrl() {
     if (widget.serverUrl != null) return widget.serverUrl;
-    if (widget.keriService is MobileOnDeviceKeriService) {
-      final standalone = widget.keriService as MobileOnDeviceKeriService;
-      if (standalone.isCoreReady) {
-        return standalone.mobileCore.baseUrl;
-      }
-    }
     return null;
   }
   final TextEditingController _ngrokTokenController = TextEditingController();

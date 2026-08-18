@@ -1,6 +1,6 @@
 name: Desktop — macOS Release
 
-# Side-by-side with codemagic.yaml's `macos-release` during the GitHub Actions
+# Desktop release build.
 # migration. Produces identity-agent-macos.dmg as a build artifact.
 #
 # Signing + notarization run ONLY when the Apple signing secrets are present

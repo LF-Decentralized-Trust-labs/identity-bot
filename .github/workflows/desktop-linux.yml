@@ -1,6 +1,6 @@
 name: Desktop — Linux Release
 
-# Side-by-side with codemagic.yaml's `linux-release` during the GitHub Actions
+# Desktop release build.
 # migration. Produces identity-agent-linux-x64.tar.gz as a build artifact.
 on:
   workflow_dispatch:

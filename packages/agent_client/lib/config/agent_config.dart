@@ -58,10 +58,13 @@ class AgentConfig {
 
   static const int healthPollIntervalSeconds = 15;
 
-  /// URL of the public KERI microservice used by MobileOnDeviceKeriService
-  /// for stateless ACDC operations (/format-credential, /credential/present,
-  /// /credential/verify) that keri_core v0.11 does not support natively.
-  /// Can be overridden at compile-time via KERI_SERVICE_URL env variable.
+  /// URL of the public KERI microservice for stateless ACDC operations
+  /// (/format-credential, /credential/present, /credential/verify).
+  ///
+  /// It existed because the mobile KERI engine could not perform them. That
+  /// engine is gone — every platform runs the local core — so this is only
+  /// still consulted where the local core defers a stateless operation.
+  /// Can be overridden at compile-time via the KERI_SERVICE_URL env variable.
   static const String publicKeriServiceUrl = String.fromEnvironment(
     'KERI_SERVICE_URL',
     defaultValue: 'https://keri.grapeid.org',

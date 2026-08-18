@@ -1,6 +1,8 @@
 # ADR-004: FFI Bridge, Go Mobile Core & CI/CD Pipeline
 
-**Status:** Accepted
+**Status:** Superseded in part by ADR-037 (2026-08-18) — the Rust FFI bridge it
+describes is removed. Every platform runs the Go core; a phone embeds it via
+`gomobile`. The Go Mobile Core half of this ADR still stands.
 **Date:** 2026-02-19
 **Updated:** 2026-02-22
 **Supersedes:** None

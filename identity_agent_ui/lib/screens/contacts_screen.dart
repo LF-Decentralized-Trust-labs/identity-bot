@@ -6,7 +6,6 @@ import 'package:qr_flutter/qr_flutter.dart';
 import '../theme/app_theme.dart';
 import '../services/core_service.dart';
 import 'package:agent_client/services/keri_service.dart';
-import 'package:agent_client/services/mobile_on_device_keri_service.dart';
 import '../widgets/consent_modal.dart';
 import 'package:agent_client/services/identity_level_service.dart';
 import 'package:agent_client/services/setup_task_service.dart';
@@ -27,12 +26,6 @@ class _ContactsScreenState extends State<ContactsScreen> {
 
   String? _resolveServerUrl() {
     if (widget.serverUrl != null) return widget.serverUrl;
-    if (widget.keriService is MobileOnDeviceKeriService) {
-      final standalone = widget.keriService as MobileOnDeviceKeriService;
-      if (standalone.isCoreReady) {
-        return standalone.mobileCore.baseUrl;
-      }
-    }
     return null;
   }
   List<ContactResponse> _contacts = [];

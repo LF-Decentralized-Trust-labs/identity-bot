@@ -1,6 +1,6 @@
 name: Desktop — Windows Release
 
-# Side-by-side with codemagic.yaml's `windows-release` during the GitHub Actions
+# Desktop release build.
 # migration. Produces identity-agent-windows-x64.zip as a build artifact.
 on:
   workflow_dispatch:

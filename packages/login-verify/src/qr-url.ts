@@ -17,7 +17,7 @@ export function isRpHostedOobi(oobiUrl: string): boolean {
  * (site AID, OOBI, nonce, requested disclosures) lives in the signed bundle the
  * IA fetches from this URL after scanning.
  *
- * Example: `https://asgcc.replit.app/i/Joy6X61xwxdQhhQ`
+ * Example: `https://rp.example/i/Joy6X61xwxdQhhQ`
  *
  * `/i/` is the one-char Ask namespace (keeps the pointer off the site's own
  * routes); the path segment is the session token. The IA fetches this URL to
