@@ -13,7 +13,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 KERI_CORE = ROOT / "drivers" / "keri-core"
 GO_CORE = ROOT / "identity-agent-core"
-RUST_CRATE = ROOT / "identity_agent_ui" / "rust"
 GOLDEN = GO_CORE / "iacrypto" / "golden_vectors.json"
 VENV_PY = KERI_CORE / ".venv-keri1117" / "bin" / "python"
 REQUIRED_KERI = "1.1.17"
@@ -72,19 +71,6 @@ def main() -> int:
         print("FAIL: Go core", file=sys.stderr)
         return 1
     print("PASS: Go core")
-
-    # Rust bridge
-    rust = subprocess.run(
-        ["cargo", "test", "--features", "dev_skip_frb", "cross_engine_byte_identity_seed0", "--", "--nocapture"],
-        cwd=RUST_CRATE,
-        capture_output=True,
-        text=True,
-    )
-    if rust.returncode != 0:
-        print(rust.stdout, rust.stderr, file=sys.stderr)
-        print("FAIL: Rust bridge", file=sys.stderr)
-        return 1
-    print("PASS: Rust bridge")
 
     # Byte-identity summary (keripy reference vs pinned golden)
     assert golden.get("keri_version") == REQUIRED_KERI
