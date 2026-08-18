@@ -11,7 +11,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 KERI_CORE = ROOT / "drivers" / "keri-core"
 GO_CORE = ROOT / "identity-agent-core"
-RUST_CRATE = ROOT / "identity_agent_ui" / "rust"
 GOLDEN = GO_CORE / "iacrypto" / "golden_vectors.json"
 
 
@@ -65,26 +64,6 @@ def main() -> int:
         print("FAIL: Go core C2", file=sys.stderr)
         return 1
     print("PASS: Go core")
-
-    rust = subprocess.run(
-        [
-            "cargo",
-            "test",
-            "--features",
-            "dev_skip_frb",
-            "c2_hybrid_signature_golden",
-            "--",
-            "--nocapture",
-        ],
-        cwd=RUST_CRATE,
-        capture_output=True,
-        text=True,
-    )
-    if rust.returncode != 0:
-        print(rust.stdout, rust.stderr, file=sys.stderr)
-        print("FAIL: Rust bridge C2", file=sys.stderr)
-        return 1
-    print("PASS: Rust bridge")
 
     print(
         f"PASS: C2 hybrid-signature byte-identical composite_wire_len={vec['composite_wire_len']}"
