@@ -253,18 +253,12 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> {
 
     } catch (e) {
       String errorMsg = e.toString();
-      if (errorMsg.contains('KERI_BRIDGE_NOT_AVAILABLE')) {
-        final loadReason = RegExp(r'\((.+?)\)\. This is required')
-                .firstMatch(errorMsg)
-                ?.group(1) ??
-            'unknown';
-        errorMsg = 'The native KERI engine could not be loaded on this device. '
-            'Please rebuild the app using the Codemagic CI/CD pipeline.\n\n'
-            'Diagnostic: $loadReason';
-      } else if (errorMsg.contains('UnimplementedError') ||
+      // Nothing raises KERI_BRIDGE_NOT_AVAILABLE any more: there is no bridge
+      // to be unavailable. The engine is the local core, and a core that did
+      // not start reports that on its own terms.
+      if (errorMsg.contains('UnimplementedError') ||
           errorMsg.contains('Placeholder')) {
-        errorMsg = 'The native KERI engine is not available in this build. '
-            'Please rebuild using the Codemagic CI/CD pipeline.';
+        errorMsg = 'The KERI engine is not available in this build.';
       } else if (errorMsg.contains('DIAGNOSTIC:')) {
         // Show raw diagnostic info on screen for TestFlight debugging
         errorMsg = errorMsg.replaceFirst('TimeoutException: ', '');

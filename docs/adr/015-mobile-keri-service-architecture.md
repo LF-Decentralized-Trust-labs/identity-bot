@@ -1,6 +1,8 @@
 # ADR-015: Mobile KERI Service Architecture
 
-**Status:** Accepted
+**Status:** Superseded in part by ADR-037 (2026-08-18) — stateful KERI on a phone
+no longer runs through a Rust bridge. It runs on the embedded Go core, the same
+engine a computer uses. The local-vs-remote reasoning still stands.
 **Date:** 2026-03-16
 **Related:** ADR-004 (FFI Bridge), ADR-006 (Standardized Topology — revised 2026-05-01), ADR-002 (KERI Driver Pattern)
 

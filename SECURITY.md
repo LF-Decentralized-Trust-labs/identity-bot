@@ -41,7 +41,6 @@ We follow **coordinated disclosure**: we will work with you on a timeline that p
 - The `identity-bot` / Identity Agent source code in this repository
 - The bundled Python KERI driver (`drivers/keri-core/`)
 - The Flutter UI (`identity_agent_ui/`)
-- The Rust bridge (`flutter_rust_bridge` FFI)
 - The Go backend (`identity-agent-core/`)
 - The sandbox marketplace runtime (Podman + compiled binary runtimes)
 - Official release binaries published by the project

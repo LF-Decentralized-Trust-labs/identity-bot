@@ -41,7 +41,7 @@ In either topology, the **computer** can be the user's own (laptop, desktop, min
 | Device Type | KERI Engine | Backend Engine |
 |---|---|---|
 | **Computer** (Linux, macOS, Windows) | Go backend → Python keripy (local child process) | Go Core (local binary) |
-| **Phone** (iOS, Android) | Rust bridge via flutter_rust_bridge FFI | Go Core via gomobile (embedded, platform channels) |
+| **Phone** (iOS, Android) | Go Core via gomobile (embedded, platform channels) | Go Core via gomobile (embedded, platform channels) |
 
 ### Critical Architecture Invariant
 

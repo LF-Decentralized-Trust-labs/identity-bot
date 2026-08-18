@@ -2,7 +2,9 @@
 
 **Date:** 2026-02-18
 **Updated:** 2026-02-22
-**Status:** Accepted
+**Status:** Superseded in part by ADR-037 (2026-08-18) — mobile no longer uses a
+Rust bridge for KERI. It runs the same Go core a computer runs, embedded. The
+driver pattern itself still stands.
 **Supersedes:** KERI-related sections of ADR 001
 
 ## Context

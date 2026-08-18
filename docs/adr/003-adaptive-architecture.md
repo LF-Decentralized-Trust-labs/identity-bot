@@ -2,7 +2,9 @@
 
 **Date:** 2026-02-18
 **Updated:** 2026-02-22
-**Status:** Accepted (mode definitions superseded by ADR-006 — Standardized Topology, revised 2026-05-01)
+**Status:** Superseded in part by ADR-006 (mode definitions, 2026-05-01) and by
+ADR-037 (2026-08-18) — every reference below to a Rust bridge on mobile is
+historical. That engine is removed; mobile runs the embedded Go core.
 **Context:** Phase 3 (Connectivity) — OOBI serving, contact management, and tunneling
 
 > **Note:** The four-mode model described in this ADR has been superseded twice: first by the 3-state × 2-device-type model in ADR-006 (2026-02-22), then by the two-topology + four-configuration model in ADR-006's 2026-05-01 revision. This ADR remains the authoritative source for OOBI serving, contact management, tunneling, endpoint naming conventions, trust boundaries, and configuration variables. The terms "Mobile Standalone," "Mobile Remote WITHOUT Keys," and "Mobile Remote WITH Keys" used below are historical — the current model is "Phone + Computer" / "Computer only" (with auto-detection of key location). See ADR-006 for the current architectural topology.

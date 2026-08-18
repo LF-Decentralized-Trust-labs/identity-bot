@@ -16,12 +16,13 @@ We will utilize a **Hybrid Local-Client/Server Architecture** composed of the fo
 ### 1. The Backend (The "Core")
 * **Language:** Go (Golang)
 * **KERI Engine:** Python `keripy` v1.1.17 on desktop (see [ADR 002](002-keri-driver-pattern.md)); Rust `keriox/keri-core` on mobile via FFI (see [ADR 004](004-ffi-bridge-and-ci-pipeline.md)).
-* **Role:** Runs as a persistent background service. On desktop, it spawns the Python KERI driver as a child process. On mobile, it runs embedded via gomobile (platform channels) with the KERI driver disabled — the Rust bridge handles crypto instead. Handles data persistence (file-based JSON store), OOBI serving, contact management, and tunneling.
+* **Role:** Runs as a persistent background service. On desktop, it spawns the Python KERI driver as a child process. On mobile, it runs embedded via gomobile (platform channels) with the KERI driver disabled — the embedded Go core handles crypto instead. Handles data persistence (file-based JSON store), OOBI serving, contact management, and tunneling.
 * **API:** Exposes a local HTTP API (port 5050) for the frontend to command.
 
 ### 2. The Frontend (The "Controller")
 * **Framework:** Flutter (Dart)
-* **Key Management:** On desktop, keys are managed by the Python KERI driver via the Go backend. On mobile, keys are managed locally by the Rust KERI bridge via FFI (`flutter_rust_bridge`).
+* **Key Management:** On desktop, keys are managed by the Python KERI driver via the Go backend. On mobile, keys are managed locally by the embedded Go core, reached over HTTP —
+the same engine a computer runs. (Revised 2026-08-18; see ADR-037.)
 * **Role:** The visual interface. It does *not* store the full KEL database; it queries the Go Core for persisted data.
 * **Hardware Access:** Uses Flutter native plugins for QR scanning (`mobile_scanner`), with future support for NFC and biometric storage.
 
@@ -31,4 +32,4 @@ We will utilize a **Hybrid Local-Client/Server Architecture** composed of the fo
 
 ## Consequences
 * **Pros:** Strict type safety (Go/Dart), high performance, clear separation of UI and Logic (allows the backend to be moved to a black box computer or paired computer later). Two topologies (Phone + Computer, Computer only) and four launch configurations cover phone-paired, own-computer, and black-box-computer scenarios. See ADR-006.
-* **Cons:** Requires managing multiple build pipelines (Go binary, Go gomobile library, Rust bridge, Flutter bundle) and platform-specific bridges (HTTP on desktop, platform channels + FFI on mobile).
+* **Cons:** Requires managing multiple build pipelines (Go binary, Go gomobile library, Go core, Flutter bundle) and platform-specific bridges (HTTP on desktop, platform channels + FFI on mobile).

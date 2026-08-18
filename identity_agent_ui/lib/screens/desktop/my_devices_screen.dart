@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import '../../theme/app_theme.dart';
 import '../../services/core_service.dart';
 import 'package:agent_client/services/keri_service.dart';
-import 'package:agent_client/services/mobile_on_device_keri_service.dart';
 import 'package:agent_client/config/agent_config.dart';
 
 class MyDevicesScreen extends StatefulWidget {
@@ -24,10 +23,6 @@ class _MyDevicesScreenState extends State<MyDevicesScreen> {
 
   String? _resolveUrl() {
     if (widget.serverUrl != null) return widget.serverUrl;
-    if (widget.keriService is MobileOnDeviceKeriService) {
-      final s = widget.keriService as MobileOnDeviceKeriService;
-      if (s.isCoreReady) return s.mobileCore.baseUrl;
-    }
     return null;
   }
 

@@ -32,14 +32,13 @@ The system uses a two-topology model with four launch configurations. Every Iden
 ### Device Types
 
 -   **Computer** (Linux/macOS/Windows): Utilizes a Go backend with Python `keripy` for KERI and Go Core for backend services.
--   **Phone** (iOS/Android): Employs a Rust bridge via FFI for KERI and Go Core via `gomobile` for embedded backend (used in phone-only fallback / offline credential verification mode within Phone + Computer).
+-   **Phone** (iOS/Android): Runs the Go Core embedded via `gomobile` — the same KERI engine a computer runs, reached over HTTP.
 
 ### Core Components and Technologies
 
 -   **Go Backend (`identity-agent-core/`):** Handles core orchestration, public API, file-based data persistence, OOBI management, contact management, and optional tunnel providers. Compiles for mobile via `gomobile` (with KERI driver disabled).
 -   **Python KERI Driver (`drivers/keri-core/`):** The `keripy` (v1.1.17) engine for desktop KERI operations.
 -   **Flutter Frontend (`identity_agent_ui/`):** Cross-platform UI with two modes: Desktop Mode (dark cyberpunk theme, 5-tab bottom nav) and Mobile Mode (clean light theme with blue accents, 3-button bottom nav). Features multi-step onboarding, BIP-39 mnemonic generation, contact management, OOBI sharing, profile management (jCard), and a mode-aware dashboard.
--   **Rust Bridge (`identity_agent_ui/rust/`):** Implements the mobile KERI engine (`keriox/keri-core`) via `flutter_rust_bridge` for Dart ↔ Rust FFI, providing core KERI crypto functions.
 -   **Tunnel Module (`identity-agent-core/tunnel/`):** Manages multi-provider tunnels (Cloudflare, ngrok, Grape ID) for public HTTPS URL acquisition.
 -   **Endpoint Service (`identity-agent-core/endpoint/`):** Single source of truth for the agent's current public base URL, persisting to `endpoint.json`.
 -   **AgentConfig (`identity_agent_ui/lib/config/agent_config.dart`):** Platform-aware Go backend URL for Flutter UI ↔ Go Core communication, handling desktop, mobile, and web variations.
@@ -50,7 +49,6 @@ The system uses a two-topology model with four launch configurations. Every Iden
 -   **Python for KERI (Desktop):** Leverages the established `keripy` implementation.
 -   **Embedded Python (Desktop Builds):** All desktop builds (Windows, macOS, Linux) embed a self-contained Python environment with pre-installed `flask` and `keri` packages. Windows uses the Python embeddable package; macOS/Linux use `python3 -m venv`. Users never need to install Python separately. The `BackendProcessService` checks for bundled Python at `backend/python/` (Windows/macOS) or `backend/python-env/` (Linux) before falling back to system Python.
 -   **Backend Startup Error Dialog:** Desktop builds show a modal error dialog with RETRY button if the bundled Go backend fails to start (missing binary, Python not installed, dependency issues).
--   **Rust for KERI (Mobile):** Provides native mobile KERI capabilities via FFI with `keriox` across all mobile modes.
 -   **Local-First Storage:** Emphasizes user sovereignty and data control, defaulting to file-based JSON storage.
 -   **AID Hierarchy:** Differentiates between delegated child AIDs for "Remote WITHOUT Keys" and retaining primary parent AIDs for "Remote WITH Keys."
 -   **Consent-based Contact Flow:** Implements a two-step resolve and consent process for adding contacts.
@@ -105,13 +103,6 @@ Windows builds from Codemagic no longer embed Python to reduce build time (13 mi
 
 -   `flask`: Lightweight HTTP server.
 -   `keri`: WebOfTrust reference KERI library v1.1.17.
-
-### Rust Bridge (mobile only)
-
--   `keri-core` 0.11: THCLab KERI implementation.
--   `flutter_rust_bridge` 2.11.1: Dart ↔ Rust FFI bridge.
--   `base64`: Base64 encoding/decoding.
--   `serde`, `serde_json`: JSON serialization.
 
 ### Frontend (Flutter/Dart)
 
