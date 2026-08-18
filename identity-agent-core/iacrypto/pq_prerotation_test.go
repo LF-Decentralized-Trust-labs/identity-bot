@@ -2,6 +2,7 @@ package iacrypto
 
 import (
 	"bytes"
+	"encoding/base64"
 	"testing"
 )
 
@@ -119,5 +120,40 @@ func TestTheCommitmentIsAnOrdinaryDigestWidth(t *testing.T) {
 		t.Errorf("a commitment to a 1952-byte key is %d characters and a commitment to a "+
 			"32-byte key is %d; they must be identical in width or the point does not hold",
 			len(pq.Digest), len(classical))
+	}
+}
+
+// Both forms a caller may hold a next key in must produce the SAME commitment,
+// because the engine normalises before it commits. Getting this wrong yields an
+// identity whose classical commitment nothing satisfies, and nothing notices
+// until a rotation that may be years away.
+func TestBothNextKeyFormsCommitIdentically(t *testing.T) {
+	raw := make([]byte, Ed25519PubkeyBytes)
+	for i := range raw {
+		raw[i] = byte(i)
+	}
+	qb64 := VerkeyQB64(raw)
+	plain := base64.RawURLEncoding.EncodeToString(raw)
+
+	fromQB64, err := NextKeyDigest(qb64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fromPlain, err := NextKeyDigest(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fromQB64 != fromPlain {
+		t.Errorf("the two forms of the same key produced different commitments:\n  qb64:  %s\n  plain: %s",
+			fromQB64, fromPlain)
+	}
+	// And the commitment must be the one taken over canonical qb64, which is
+	// what a validator recomputes.
+	want, err := Blake3QB64([]byte(qb64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fromPlain != want {
+		t.Errorf("commitment is not over the canonical encoding")
 	}
 }

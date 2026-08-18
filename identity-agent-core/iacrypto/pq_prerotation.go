@@ -2,6 +2,7 @@ package iacrypto
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
 
 	"github.com/cloudflare/circl/sign/mldsa/mldsa65"
@@ -133,9 +134,57 @@ func PostQuantumNextKeyFromSeed(seed32 []byte) (PostQuantumNextKey, error) {
 // The digest is over the key's qb64 text. Passing raw key bytes here instead
 // publishes the next public key with a digest prefix rather than committing to
 // it, which reads correctly and cannot be rotated against by anything.
-func NextKeyDigest(nextVerkeyQB64 string) (string, error) {
-	if nextVerkeyQB64 == "" {
+//
+// The key is normalised first, and that is not cosmetic. Callers supply a next
+// key either already CESR-encoded or as plain base64 of the raw bytes, and the
+// engine accepts both — it normalises to canonical qb64 and commits to THAT. A
+// commitment taken over the text as supplied therefore agrees with the engine
+// for one of those two forms and silently disagrees for the other, producing an
+// identity whose classical commitment no key can satisfy. Nothing detects it
+// until somebody tries to rotate, which may be years later, and by then the
+// event cannot be amended.
+func NextKeyDigest(nextVerkey string) (string, error) {
+	canonical, err := CanonicalVerkeyQB64(nextVerkey)
+	if err != nil {
+		return "", err
+	}
+	return Blake3QB64([]byte(canonical))
+}
+
+// CanonicalVerkeyQB64 puts an Ed25519 public key into the single form a
+// pre-rotation commitment is taken over, accepting either form a caller may
+// hold it in.
+func CanonicalVerkeyQB64(key string) (string, error) {
+	if key == "" {
 		return "", fmt.Errorf("a next key is required to commit to")
 	}
-	return Blake3QB64([]byte(nextVerkeyQB64))
+	raw, err := rawEd25519From(key)
+	if err != nil {
+		return "", err
+	}
+	// Always the transferable code, matching what the engine does with either
+	// input form. A non-transferable key normalises to the same commitment,
+	// because what is committed to is the key, not how it arrived.
+	return VerkeyQB64(raw), nil
+}
+
+func rawEd25519From(key string) ([]byte, error) {
+	if len(key) > 1 && (key[0] == 'D' || key[0] == 'B') {
+		raw, err := KeyFromVerkeyQB64(key)
+		if err != nil {
+			return nil, fmt.Errorf("could not read the next key: %w", err)
+		}
+		if len(raw) != Ed25519PubkeyBytes {
+			return nil, fmt.Errorf("a next key is %d bytes, got %d", Ed25519PubkeyBytes, len(raw))
+		}
+		return raw, nil
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(key)
+	if err != nil {
+		return nil, fmt.Errorf("the next key is neither CESR-encoded nor base64: %w", err)
+	}
+	if len(raw) != Ed25519PubkeyBytes {
+		return nil, fmt.Errorf("a next key is %d bytes, got %d", Ed25519PubkeyBytes, len(raw))
+	}
+	return raw, nil
 }
