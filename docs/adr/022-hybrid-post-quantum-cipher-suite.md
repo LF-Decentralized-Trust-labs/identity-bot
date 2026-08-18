@@ -1,6 +1,9 @@
 # ADR-022: Hybrid Post-Quantum KERI Cipher Suite
 
-**Status:** Accepted
+**Status:** Accepted, with the implementation notes below corrected 2026-08-18.
+The suite and its reasoning stand. Two things this ADR describes are no longer
+how the code works, and one never became true — see "What changed since this was
+written" at the end before relying on any implementation detail here.
 **Date:** 2026-06-19
 **Deciders:** Rob Andersen
 
@@ -50,6 +53,7 @@ The composite wire format, key sizes, CESR codes, and the inception event bytes 
 All three engines assert against the same JSON: Go (`iacrypto/hybrid_signature_test.go`), Python (`drivers/keri-core/tests/pqc_hybrid_signature_keripy_test.py`), and Rust (`identity_agent_ui/rust/tests/pqc_golden_constants.rs` + the in-module tests). Cross-engine agreement is therefore enforced by construction, not by hope.
 
 ### Two PQC backends: liboqs-go on desktop, RustCrypto on mobile
+*(Superseded — there is one backend now. See the end of this document.)*
 
 PQC primitives are not yet first-class in our base crypto stack, so the suite uses two interchangeable backends pinned to the same vectors:
 
@@ -85,3 +89,42 @@ Because both backends are pinned to the same golden vectors, an identity created
 - Rust engine + mobile bridge: `identity_agent_ui/rust/src/pqc/` and the underlying crate `pqc-poc-rust/` (`mldsa65.rs`, `lib.rs`).
 - liboqs desktop proof-of-concept: `pqc-poc/` (`roundtrip/`, `mobilepqc/`, `cmd/c4roundtrip/`).
 - Key sizes are FIPS Level-3: ML-DSA-65 verify key 1952 B / signature 3309 B; ML-KEM-768 encapsulation key 1184 B; X25519 / Ed25519 32 B.
+
+
+---
+
+## What changed since this was written
+
+Corrected 2026-08-18 after an audit of what the code does. The cipher suite, the
+key layout and the reasoning for hybrid-from-inception are unchanged. These
+three implementation claims are not accurate and should not be relied on:
+
+**1. There is one post-quantum backend, and it is neither of the two named
+here.** Both `ML-DSA-65` and `ML-KEM-768` come from `github.com/cloudflare/circl`
+— pure Go, no CGO, no C library to install. It compiles on every platform,
+including mobile, where the core is embedded via `gomobile`. liboqs is not a
+dependency of the core; the RustCrypto path is gone with the Rust bridge
+(ADR-037). The "two interchangeable backends pinned to the same vectors"
+reasoning no longer applies, because there is one implementation and the golden
+vectors now pin it against itself.
+
+**2. The messaging channel is hybrid. The identity is not.** This ADR describes
+every identity as founded with `k[0]` Ed25519 and `k[1]` ML-DSA-65. That is not
+what the production path does: the inception route founds with a single Ed25519
+key, and `BuildHybridInception` has no production caller. `SignHybrid` and
+`VerifyHybridSignature` have no callers outside tests.
+
+What *is* live and mandatory is DIDComm: `didcomm/crypto.go` requires both
+signatures to verify with no classical-only branch, and derives the content key
+from an X25519 exchange and an ML-KEM-768 encapsulation combined in one HKDF, so
+removing the post-quantum half means nothing decrypts.
+
+So quantum resistance today protects messages between Identity Agents, not the
+identity's own signing key — which is the longer-lived secret of the two. Closing
+that is tracked separately.
+
+**3. A hybrid identity would still declare a signing threshold of one.**
+`hybrid_inception.go` sets `Isith: "1"` with two keys, so a conformant validator
+accepts the Ed25519 signature alone. Any work to make identities hybrid has to
+address the threshold as well, or the protection is enforced by our verifier
+rather than by the identity.
