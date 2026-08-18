@@ -1356,11 +1356,17 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 	// ML-DSA key is 44 characters like any other, and nothing is encoded until
 	// the key is revealed at a rotation.
 	//
-	// It has to happen HERE or it can never happen at all. Pre-rotation binds an
-	// identity to the key set it committed to, so an identity founded committing
-	// only a classical next key can never rotate to a post-quantum one — not by
-	// any later event, because there is no later event that can add a
-	// commitment. Founding is the only moment.
+	// It has to START here. Pre-rotation binds an identity to the key set it
+	// committed to, so an identity founded committing only a classical next key
+	// cannot rotate to a post-quantum one.
+	//
+	// It also has to be RENEWED at every rotation, and today it is not. KERI
+	// replaces `n` wholesale at each event, so the commitment does not persist
+	// on its own: the ordinary rotation path commits a single classical
+	// successor, which drops this the first time an identity rotates for any
+	// reason at all. That is a gap in the rotation paths rather than in this
+	// one, and it is logged as such — but nobody reading this should leave
+	// believing the property is permanent once founded.
 	//
 	// Best-effort on purpose. If this fails the identity is founded exactly as
 	// it was before, with one commitment, rather than not founded at all: the
@@ -1376,7 +1382,11 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 		Witnesses:      witnesses,
 		Toad:           toad,
 		NextKeyDigests: nextDigests,
-		// One, not two, and this is the load-bearing choice.
+		// One, not two. Sent explicitly rather than relied upon: the engine's
+		// default for two commitments is also one, so this states the intent
+		// rather than changing the event, and the two are byte-identical.
+		//
+		// The reasoning for one over two is what matters here.
 		//
 		// Two would mean both committed keys must sign the rotation that reveals
 		// them. The post-quantum half is a bet on a CESR code that is not final,

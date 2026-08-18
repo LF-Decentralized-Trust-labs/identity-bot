@@ -14,16 +14,24 @@ import (
 
 // The branch the post-quantum pre-rotation key is derived from.
 //
-// Fixed rather than allocated, and deliberately outside the range messaging
-// keys are allocated from — those take contact indices from one upwards with a
-// key index of zero. A fixed branch is what makes the recovery phrase
+// Fixed rather than allocated. That is what makes the recovery phrase
 // sufficient on its own: an owner rebuilding on a new device regenerates this
 // key from the phrase with no file to restore and no record to find. An
 // allocated branch would have to be written down somewhere, and anything that
 // has to be written down is something a restore can lose.
+//
+// It takes the base of its own pool rather than branch (0, 1), which was the
+// first choice and was wrong. Zero is the value an identity's DerivationIndex
+// and KeyGeneration hold when nothing set them, so ownRotationKeys derives the
+// committed ROTATION key at exactly (0, 1) too. Both would then be the same 32
+// bytes — one secret behind an Ed25519 rotation key and the post-quantum
+// pre-rotation key, committed to in the same event, so obtaining either would
+// yield the whole pre-rotation set. A digest check happens to refuse it today,
+// which makes this a hazard rather than a live flaw, and not one worth leaving
+// for a future caller to walk into.
 const (
-	postQuantumPreRotationContact = 0
-	postQuantumPreRotationKey     = 1
+	postQuantumPreRotationContact = 7000001
+	postQuantumPreRotationKey     = 0
 )
 
 // postQuantumCommitmentRecord is what was committed, kept so a later rotation
