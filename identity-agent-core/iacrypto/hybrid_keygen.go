@@ -19,8 +19,7 @@ import (
 // "placeholder PQC material (PQC bytes filled for structure)" — and fills the
 // post-quantum fields with random bytes. Random bytes are not a public key:
 // there is no private half, so nothing can ever sign with them, and an identity
-// founded on one has a post-quantum key it can never use. The Rust bridge
-// refuses the non-synthetic path outright, which is at least honest.
+// founded on one has a post-quantum key it can never use.
 //
 // So a hybrid identity has never actually been creatable. This makes it so,
 // in-process, with no subprocess and no placeholder.

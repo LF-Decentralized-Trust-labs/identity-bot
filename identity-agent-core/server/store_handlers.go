@@ -1,7 +1,7 @@
 package server
 
 // store_handlers.go — pure DataStore endpoints that do NOT require the Python KERI driver.
-// Mobile Go Core uses these to persist receipts and credentials produced by the Rust bridge.
+// Mobile Go Core uses these to persist receipts and credentials it produced itself.
 
 import (
 	"encoding/json"

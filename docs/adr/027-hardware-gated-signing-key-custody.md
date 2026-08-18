@@ -1,6 +1,10 @@
 # ADR-027: Hardware-Gated Signing Key Custody
 
-**Status:** Accepted
+**Status:** Accepted, with the implementation notes below corrected 2026-08-17.
+The decision and its reasoning stand. Where this ADR says mobile signing happens in
+a Rust bridge, or weighs adding a P-256 derivation code against "the Rust `keri_core`
+bridge", that engine no longer exists — see "What changed since this was written" at
+the end before relying on any implementation detail here.
 **Date:** 2026-07-20
 **Extends:** ADR-014 (Key Custody, Backend Server Mode, Migration, and Data Partitioning)
 
@@ -84,3 +88,31 @@ The decision of *whether to unwrap the mnemonic at all* for a given signing requ
 - [ADR-015](015-mobile-keri-service-architecture.md) — mobile KERI service architecture, Rust bridge
 - `identity_agent_ui/lib/services/secure_key_store.dart` — current mnemonic storage implementation
 - `drivers/keri-core/` — pinned `keripy` version and its `MtrDex` derivation codes (`Ed25519`, `Ed25519_Seed`, `ECDSA_256k1`)
+
+## What changed since this was written (2026-08-17)
+
+Nothing here about hardware key custody has changed. What changed is the engine
+underneath it, so three implementation details in the text above are now wrong.
+
+- **"the Rust bridge on mobile"** (Context). Mobile no longer signs through a Rust
+  bridge. There is one KERI engine on every platform — the Go core — which desktop
+  spawns as a process and mobile embeds via `gomobile`. Read that clause as "the
+  embedded Go core on mobile". Software Ed25519 signing from the mnemonic is
+  unchanged; only where it runs is different.
+
+- **"The Rust CESR stack has no P-256 code point"** (the quoted note). There is no
+  Rust CESR stack. The observation it was making still holds and is now simply about
+  the Go core: P-256 is not among the derivation codes in use, so only the Python
+  driver speaks it.
+
+- **Alternative C's first prerequisite** — "matching support in both `keripy`
+  (desktop) and the Rust `keri_core` bridge (mobile) — not yet verified for the
+  latter" — now reads as matching support in `keripy` and the Go core. That is a
+  smaller prerequisite than it was, because it is one implementation on both
+  platforms rather than two that must agree. The rest of alternative C is unaffected:
+  the ecosystem-recognition and mnemonic-recovery tradeoffs are what make it a product
+  decision, and those are untouched.
+
+The reference to ADR-015 below describes the mobile architecture as it was. See
+[ADR-037](037-one-keri-engine-on-every-platform.md) for the engine that replaced it,
+and why two implementations of one protocol turned out not to behave alike.

@@ -3,6 +3,12 @@
 **Reference document** — tracks what is built, what is next, and what test proves each phase is correct.
 Each phase has a corresponding interoperability test in `tests/` that proves the cryptographic math works with the real keripy library **before** production code is written.
 
+> **Superseded where it says "Rust bridge" (2026-08-17).** Phases recorded before this
+> date describe mobile KERI running through a Rust bridge. That bridge is gone: there is
+> now one KERI engine on every platform, the Go core, which desktop spawns as a process
+> and mobile embeds via `gomobile`. The phases below are kept as the record of what was
+> built and when — read the bridge rows as history, not as the current architecture.
+
 ---
 
 ## Phase 1 — CESR Signing ✓ COMPLETE

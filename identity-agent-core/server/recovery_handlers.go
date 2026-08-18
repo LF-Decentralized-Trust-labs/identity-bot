@@ -100,7 +100,7 @@ func (s *CoreServer) handleRecoveryRotation(w http.ResponseWriter, r *http.Reque
 
 	if s.KeriDriver == nil {
 		writeError(w, http.StatusServiceUnavailable, "KERI driver not available",
-			"Use /api/rotation on desktop or Rust bridge on mobile, then record result here")
+			"Rotate via /api/rotation on desktop, or via the embedded Go core on mobile, then record the result here")
 		return
 	}
 
@@ -174,7 +174,7 @@ func (s *CoreServer) handleRecoveryRootAIDRotation(w http.ResponseWriter, r *htt
 	}
 	if s.KeriDriver == nil {
 		writeError(w, http.StatusServiceUnavailable, "KERI driver not available",
-			"Root-AID rotation requires the KERI driver on desktop or Rust bridge on mobile")
+			"Root-AID rotation requires the KERI driver on desktop, or the embedded Go core on mobile")
 		return
 	}
 	if s.DataStore == nil {

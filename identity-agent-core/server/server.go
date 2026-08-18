@@ -1261,7 +1261,7 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 
 	if s.KeriDriver == nil {
 		writeError(w, http.StatusServiceUnavailable, "KERI driver not available",
-			"On mobile, use the Rust bridge for KERI inception, then call /api/store/identity and /api/store/event to persist the results")
+			"This is the desktop KERI driver route. On mobile the embedded Go core performs inception itself")
 		return
 	}
 
@@ -1562,7 +1562,7 @@ func (s *CoreServer) handleStoreEvent(w http.ResponseWriter, r *http.Request) {
 func (s *CoreServer) handleRotation(w http.ResponseWriter, r *http.Request) {
 	if s.KeriDriver == nil {
 		writeError(w, http.StatusServiceUnavailable, "KERI driver not available",
-			"On mobile, use the Rust bridge for key rotation, then call /api/store/event to persist the result")
+			"This is the desktop KERI driver route. On mobile the embedded Go core performs rotation itself")
 		return
 	}
 
@@ -1624,7 +1624,7 @@ func (s *CoreServer) handleRotation(w http.ResponseWriter, r *http.Request) {
 func (s *CoreServer) handleInteract(w http.ResponseWriter, r *http.Request) {
 	if s.KeriDriver == nil {
 		writeError(w, http.StatusServiceUnavailable, "KERI driver not available",
-			"On mobile, use the Rust bridge for IXN events")
+			"This is the desktop KERI driver route. On mobile the embedded Go core produces IXN events itself")
 		return
 	}
 
@@ -1680,7 +1680,7 @@ func (s *CoreServer) handleInteract(w http.ResponseWriter, r *http.Request) {
 func (s *CoreServer) handleSign(w http.ResponseWriter, r *http.Request) {
 	if s.KeriDriver == nil {
 		writeError(w, http.StatusServiceUnavailable, "KERI driver not available",
-			"On mobile, use the Rust bridge for signing operations")
+			"This is the desktop KERI driver route. On mobile the embedded Go core signs")
 		return
 	}
 
@@ -1743,7 +1743,7 @@ func (s *CoreServer) handleKel(w http.ResponseWriter, r *http.Request) {
 func (s *CoreServer) handleVerify(w http.ResponseWriter, r *http.Request) {
 	if s.KeriDriver == nil {
 		writeError(w, http.StatusServiceUnavailable, "KERI driver not available",
-			"On mobile, use the Rust bridge for signature verification")
+			"This is the desktop KERI driver route. On mobile the embedded Go core verifies")
 		return
 	}
 
@@ -1775,7 +1775,7 @@ func (s *CoreServer) handleVerify(w http.ResponseWriter, r *http.Request) {
 func (s *CoreServer) handleCesrEncode(w http.ResponseWriter, r *http.Request) {
 	if s.KeriDriver == nil {
 		writeError(w, http.StatusServiceUnavailable, "KERI driver not available",
-			"On mobile, CESR encoding is handled by the Rust bridge")
+			"This is the desktop KERI driver route. On mobile the embedded Go core handles CESR encoding")
 		return
 	}
 
@@ -1804,7 +1804,7 @@ func (s *CoreServer) handleCesrEncode(w http.ResponseWriter, r *http.Request) {
 func (s *CoreServer) handleFormatCredential(w http.ResponseWriter, r *http.Request) {
 	if s.KeriDriver == nil {
 		writeError(w, http.StatusServiceUnavailable, "KERI driver not available",
-			"On mobile, use the Rust bridge or remote KERI helper for credential formatting")
+			"This is the desktop KERI driver route. On mobile use the embedded Go core or a remote KERI helper for credential formatting")
 		return
 	}
 
@@ -2689,7 +2689,7 @@ func (s *CoreServer) handleGetKERL(w http.ResponseWriter, r *http.Request) {
 func (s *CoreServer) handleResolveOobi(w http.ResponseWriter, r *http.Request) {
 	if s.KeriDriver == nil {
 		writeError(w, http.StatusServiceUnavailable, "KERI driver not available",
-			"On mobile, use the Rust bridge or remote KERI helper for OOBI resolution")
+			"This is the desktop KERI driver route. On mobile use the embedded Go core or a remote KERI helper for OOBI resolution")
 		return
 	}
 
@@ -2719,7 +2719,7 @@ func (s *CoreServer) handleResolveOobi(w http.ResponseWriter, r *http.Request) {
 func (s *CoreServer) handleGenerateMultisigEvent(w http.ResponseWriter, r *http.Request) {
 	if s.KeriDriver == nil {
 		writeError(w, http.StatusServiceUnavailable, "KERI driver not available",
-			"On mobile, use the Rust bridge or remote KERI helper for multisig event generation")
+			"This is the desktop KERI driver route. On mobile use the embedded Go core or a remote KERI helper for multisig event generation")
 		return
 	}
 
