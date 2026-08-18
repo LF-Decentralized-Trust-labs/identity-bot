@@ -24,6 +24,18 @@ class BackendProcessService {
   final List<String> _backendOutput = [];
   static const int _maxOutputLines = 200;
 
+  /// Where this app's Identity Agent keeps its data.
+  ///
+  /// Null uses the default beside the application itself, which assumes one
+  /// identity per installation. An app that holds more than one — several
+  /// identities a person chooses between — needs a directory per identity, and
+  /// only the app knows how it divides them. Set this before [start].
+  ///
+  /// It is deliberately not derived from anything: a scheme that guesses would
+  /// have to be guessed the same way by every consumer, and would move under
+  /// them when it changed.
+  static String? dataDirOverride;
+
   BackendProcessService._();
 
   static BackendProcessService get instance {
@@ -441,19 +453,25 @@ class BackendProcessService {
     final backendDir = File(_backendPath!).parent.path;
 
     _portConflict = null;
-    final defaultPort = AgentConfig.defaultDesktopPort;
-    // Scan the full fallback range (5050–5059) to kill any orphaned Identity Agent processes
-    for (int port = defaultPort; port < defaultPort + 10; port++) {
-      final conflict = await checkPortConflict(port);
-      if (conflict != null) {
-        if (conflict.isIdentityAgent) {
-          _appendOutput('[startup] Found stale Identity Agent on port $port (PID ${conflict.pid}) — auto-killing');
-          await killProcessOnPort(conflict);
-        } else if (port == defaultPort) {
-          // Only log non-Identity-Agent conflicts on the default port
-          _appendOutput('[startup] Port $defaultPort is in use by ${conflict.processName} (PID ${conflict.pid}) — backend will auto-select fallback port');
-        }
-      }
+    const defaultPort = AgentConfig.defaultDesktopPort;
+
+    // Whatever else is on the port, leave it alone.
+    //
+    // This scanned 5050-5059 on every launch and killed any Identity Agent it
+    // found, on the theory that such a process could only be a leftover of
+    // this app. It cannot: two Identity Agent apps on one machine each ran
+    // this loop and each terminated the other's backend, and an app holding
+    // several identities has more than one of its own. A process this app did
+    // not start is not this app's to end.
+    //
+    // Nothing is needed in its place. The backend already walks forward from
+    // the requested port when it is taken, so a busy port costs a different
+    // port rather than somebody else's process.
+    final conflict = await checkPortConflict(defaultPort);
+    if (conflict != null) {
+      _appendOutput('[startup] Port $defaultPort is in use by '
+          '${conflict.processName} (PID ${conflict.pid}) — this backend will '
+          'take the next free port');
     }
 
     final pythonBin = await _findPythonBinary(backendDir);
@@ -501,7 +519,7 @@ class BackendProcessService {
       // default relative "./data" store can't be created. Point it at an
       // absolute, per-app writable location so multiple flavors (oss / Grape ID
       // / Grape ID Org) keep separate state.
-      env['AGENT_DATA_DIR'] = _resolveDataDir();
+      env['AGENT_DATA_DIR'] = dataDirOverride ?? _resolveDataDir();
       debugPrint('[BackendProcess] AGENT_DATA_DIR: ${env['AGENT_DATA_DIR']}');
       // This app serves an individual, and the backend it is starting cannot
       // work that out for itself: the same Go core is used by the app for
