@@ -94,13 +94,27 @@ func TestCommitmentIsTakenOverTheEncodedKeyNotTheRawBytes(t *testing.T) {
 		t.Errorf("commitment is not the digest of the encoded key")
 	}
 
-	raw, err := KeyFromVerkeyQB64(pq.Verkey)
-	if err == nil && len(raw) > 0 {
-		overRaw, derr := Blake3QB64(raw)
-		if derr == nil && pq.Digest == overRaw {
-			t.Error("commitment was taken over the raw key bytes; a validator recomputes " +
-				"it over the qb64 text, so this could never be rotated against")
-		}
+	// And it must NOT be the digest of the raw key bytes. A guarded assertion
+	// was tried here first and could never run: KeyFromVerkeyQB64 accepts only a
+	// 44-character D-coded key, and this one is 2608 characters beginning 2AAE,
+	// so the guard was always false and the test compared the implementation to
+	// itself. The raw bytes are recovered from the encoding directly instead.
+	rawB64 := pq.Verkey[len(ProposedMLDSA65Verkey):]
+	padded, err := base64.RawURLEncoding.DecodeString(rawB64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := padded[1:] // drop the lead byte the 2 selector carries
+	if len(raw) != MLDSA65VerkeyBytes {
+		t.Fatalf("recovered %d raw bytes from the encoding, want %d", len(raw), MLDSA65VerkeyBytes)
+	}
+	overRaw, err := Blake3QB64(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pq.Digest == overRaw {
+		t.Error("commitment was taken over the raw key bytes; a validator recomputes " +
+			"it over the qb64 text, so this could never be rotated against")
 	}
 }
 
