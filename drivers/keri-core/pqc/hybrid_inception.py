@@ -71,8 +71,22 @@ def material_to_cesr(material: HybridKeyMaterial) -> dict[str, str]:
     mlkem_q = encode_large_fixed(
         CESR_MLKEM768_ENCAP, material.mlkem768_encap_raw, MLKEM768_ENCAP_BYTES
     )
-    n_ed = _blake3_digest_qb64(material.next_ed25519_signing_raw)
-    n_mldsa = _blake3_digest_qb64(material.next_mldsa65_signing_raw)
+    # A pre-rotation commitment is the digest of the next key's qb64 TEXT, not
+    # of its raw bytes.
+    #
+    # This digested the raw bytes, which produces a commitment nothing can ever
+    # satisfy: at rotation the controller publishes the key as qb64 and every
+    # verifier re-derives the digest from exactly those characters, so the
+    # rotation is refused and the identity is stranded holding keys it can prove
+    # it owns and cannot use. The Go engine has always digested the text, which
+    # is why the two never agreed on a hybrid inception despite both being
+    # described as byte-identical.
+    n_ed = _blake3_digest_qb64(_ed25519_verfer_qb64(material.next_ed25519_signing_raw).encode())
+    n_mldsa = _blake3_digest_qb64(
+        encode_large_fixed(
+            CESR_MLDSA65_VERKEY, material.next_mldsa65_signing_raw, MLDSA65_VERKEY_BYTES
+        ).encode()
+    )
     return {
         "ed25519_signing": ed_q,
         "mldsa65_signing": mldsa_q,

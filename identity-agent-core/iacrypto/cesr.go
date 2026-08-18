@@ -7,10 +7,46 @@ import (
 
 const (
 	CipherSuiteIAHybrid1 = "IA-HYBRID-1"
-	CESRMLDSA65Verkey    = "1PDA"
-	CESRMLDSA65Sig       = "1PDS"
-	CESRMLKEM768Encap    = "1PKM"
-	CESRX25519Pubkey     = "1PXB"
+
+	// CESR codes for the keys an identity publishes.
+	//
+	// The table a primitive belongs in is not a choice — it follows from the
+	// raw size modulo 3, because the encoding has to land on a 24-bit boundary.
+	// Size 0 mod 3 takes the `1` table with no lead byte, 2 mod 3 takes `2`
+	// with one, 1 mod 3 takes `3` with two. Every key here is 2 mod 3 except
+	// the Ed25519 pair, so every one of them belongs in `2`.
+	//
+	// These were previously 1PXB / 1PKM / 1PDA — four-character codes in the
+	// `1` table, encoded by gluing the code onto raw base64 with no lead byte.
+	// That is correct only for a size divisible by three, so all three came out
+	// one character short of a whole number of base64 quadruples. The CESR
+	// specification is explicit about what that costs: a parser "may become
+	// confused, especially if a portion of the Stream is malformed", and its
+	// remedy is a cold-start resynchronisation rather than a clean rejection of
+	// the one bad value. So a malformed key did not fail by itself — it took
+	// the rest of the stream with it.
+
+	// CESRX25519Pubkey is the ASSIGNED code for an X25519 public key. It is not
+	// provisional and never should have been: `C` has been in the reference
+	// implementation all along, and inventing a code for a key that already had
+	// one was simply a miss.
+	CESRX25519Pubkey = "C"
+
+	// CESRMLDSA65Verkey is the code the specification's open pull request
+	// PROPOSES for an ML-DSA-65 verification key. Unassigned until that merges.
+	CESRMLDSA65Verkey = "2AAE"
+	// CESRMLDSA65Sig is the proposed code for an ML-DSA-65 signature. Its raw
+	// size is 3309, which is 0 mod 3, so it takes the `1` table.
+	CESRMLDSA65Sig = "1AAT"
+
+	// CESRMLKEM768Encap is ours, and unavoidably so: the specification has no
+	// code for ML-KEM-768 and none is proposed — the pull request adding
+	// post-quantum primitives covers signatures only and says a key
+	// encapsulation mechanism is "left to a later version". A key counterparties
+	// encrypt to has to be published somehow, so this stays provisional. What
+	// has changed is that it is now correctly framed: 1184 is 2 mod 3, so it
+	// takes the `2` table with one lead byte.
+	CESRMLKEM768Encap    = "2PKM"
 	MLDSA65VerkeyBytes   = 1952
 	MLDSA65SigBytes      = 3309
 	MLKEM768EncapBytes   = 1184
@@ -80,14 +116,24 @@ func MatterFixedQB64(code string, raw []byte) (string, error) {
 	return code + b64[cs%4:], nil
 }
 
+// EncodeLargeFixed encodes a fixed-size primitive under a CESR code.
+//
+// Delegates the framing to MatterFixedQB64 rather than concatenating the code
+// with raw base64, which is what this used to do. That shortcut is correct only
+// when the raw size divides by three; for anything else it omits the lead bytes
+// the encoding requires and leaves a body that is not a whole number of base64
+// quadruples. Every post-quantum key here is 2 mod 3, so all of them were
+// affected — and a malformed primitive does not fail alone, because the CESR
+// specification's remedy for a confused parser is a cold-start resynchronisation
+// of the whole stream.
 func EncodeLargeFixed(code string, raw []byte, expectedLen int) (string, error) {
-	if len(code) != 4 {
-		return "", fmt.Errorf("provisional CESR code must be 4 chars, got %q", code)
+	if code == "" {
+		return "", fmt.Errorf("a CESR code is required")
 	}
 	if expectedLen > 0 && len(raw) != expectedLen {
 		return "", fmt.Errorf("expected %d raw bytes for %s, got %d", expectedLen, code, len(raw))
 	}
-	return code + base64.RawURLEncoding.EncodeToString(raw), nil
+	return MatterFixedQB64(code, raw)
 }
 
 // NonTransferableAIDQB64 encodes a raw Ed25519 public key as a CESR

@@ -27,24 +27,50 @@ func TestMLDSA65VerkeyEncodesToTheSpecifiedWidth(t *testing.T) {
 	}
 }
 
-// The bug this replaces, kept as a test so nobody reaches for that helper again
-// for a primitive whose size does not divide by three.
-func TestEncodeLargeFixedIsWrongForAnMLDSAKey(t *testing.T) {
-	pub := make([]byte, MLDSA65VerkeyBytes)
-	bad, err := EncodeLargeFixed("1PDA", pub, MLDSA65VerkeyBytes)
-	if err != nil {
-		t.Fatal(err)
+// Every key the anchor publishes must be framed correctly, whatever its size.
+//
+// This replaces a test that pinned the OLD behaviour as wrong: EncodeLargeFixed
+// used to glue the code onto raw base64 and omit lead bytes, which is correct
+// only when the raw size divides by three. All three post-quantum keys are 2
+// mod 3, so all three came out a character short of a whole number of base64
+// quadruples — and the specification's remedy for a malformed primitive is a
+// cold-start resync of the stream, not a clean rejection of the one bad value.
+func TestEveryPublishedKeyIsFramedCorrectly(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		code string
+		size int
+	}{
+		{"X25519 agreement", CESRX25519Pubkey, X25519PubkeyBytes},
+		{"ML-KEM-768 encapsulation", CESRMLKEM768Encap, MLKEM768EncapBytes},
+		{"ML-DSA-65 verification", CESRMLDSA65Verkey, MLDSA65VerkeyBytes},
+	} {
+		raw := make([]byte, c.size)
+		qb64, err := EncodeLargeFixed(c.code, raw, c.size)
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if len(qb64)%4 != 0 {
+			t.Errorf("%s: encoded to %d characters, which is not a whole number of "+
+				"base64 quadruples — a parser reading this loses its place in the stream",
+				c.name, len(qb64))
+		}
+		back, err := DecodeLargeFixed(c.code, qb64, c.size)
+		if err != nil {
+			t.Errorf("%s: does not decode: %v", c.name, err)
+			continue
+		}
+		if len(back) != c.size {
+			t.Errorf("%s: decoded to %d bytes, want %d", c.name, len(back), c.size)
+		}
 	}
-	if (len(bad)-4)%4 == 0 {
-		t.Fatal("expected the lead-byte-less encoding to be malformed; it no longer is, " +
-			"so this test and the comment it guards are stale")
-	}
-	good, err := MLDSA65VerkeyQB64(pub)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(bad) == len(good) {
-		t.Errorf("the two encodings should differ in width; both are %d", len(bad))
+}
+
+// The X25519 code is the one the reference implementation already assigns.
+// Inventing a provisional code for a key that already had one was the miss.
+func TestX25519UsesTheAssignedCode(t *testing.T) {
+	if CESRX25519Pubkey != "C" {
+		t.Errorf("X25519 public keys use assigned code C, got %q", CESRX25519Pubkey)
 	}
 }
 
