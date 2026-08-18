@@ -21,6 +21,7 @@ dependencies:
   local_auth: ^2.3.0
   nfc_manager: ^3.3.0
   blake3_dart: ^1.0.0
+  path_provider: ^2.1.5
 
 flutter:
   uses-material-design: true
