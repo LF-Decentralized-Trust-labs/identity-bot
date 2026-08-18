@@ -103,7 +103,10 @@ Generates KERI events (Inception, Rotation, Interaction) for multisig identifier
   ```
 
 ## Technical Details
-- **Base URL**: `https://keri-helper-microservice.replit.app`
+- **Base URL**: the value of `KERI_SERVICE_URL`, defaulting to the public KERI
+  service configured in `AgentConfig`. The address this document originally
+  named no longer resolves; treat the configuration as the source of truth
+  rather than any address written here.
 - **Dependencies**: Requires `libsodium` system library.
 - **Implementation**: Uses FastAPI and `uvicorn`. Temporary workspace directories are used per-request to satisfy KERI library requirements without persisting data.
 - **Naming**: All endpoint paths match the Python KERI driver (`server.py`) — the driver is the source of truth for path naming across the entire system.
