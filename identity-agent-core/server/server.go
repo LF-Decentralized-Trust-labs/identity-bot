@@ -1650,7 +1650,20 @@ func (s *CoreServer) handleRotation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := s.KeriDriver.RotateAid(req.Name, req.NewPublicKey, req.NewNextPublicKey)
+	// Carry the post-quantum commitment across the rotation.
+	//
+	// A rotation replaces the whole next-key set, so the commitment made at
+	// founding does not survive one on its own — it has to be made again in
+	// every event or it lapses at the first rotation, for any reason at all.
+	// The likely one is not exotic: somebody loses a device and rotates, which
+	// is exactly the right response, and silently spends the option to ever go
+	// post-quantum.
+	//
+	// It is also the recovery path for the commitment being wrong. The digest
+	// assumes a CESR code that is not yet assigned, so if the assigned code
+	// differs, every rotation re-commits under whatever the code is by then.
+	// A commitment made once at founding would have no such second chance.
+	result, err := s.rotateCarryingTheCommitment(req.Name, req.NewPublicKey, req.NewNextPublicKey)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Rotation failed", err.Error())
 		return

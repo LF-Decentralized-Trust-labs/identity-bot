@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"identity-agent-core/backup"
+	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/secureenclave"
 )
@@ -65,6 +66,20 @@ func (s *CoreServer) postQuantumCommitmentPath() string {
 // refusing to found an identity at all would be a much larger harm than losing
 // a future option.
 func (s *CoreServer) postQuantumPreRotation(nextPublicKey string) ([]string, *iacrypto.PostQuantumNextKey) {
+	return s.postQuantumPreRotationAt(nextPublicKey, 0)
+}
+
+// postQuantumPreRotationAt derives the commitment for a given key generation.
+//
+// A fresh key per generation, not one key committed over and over. Pre-rotation
+// commits to a successor, and a successor that is the same key every time is
+// the same key sitting behind every event's commitment — so revealing it once,
+// whenever that becomes possible, would spend it for the whole chain rather
+// than for one rotation. Generation is what keeps each commitment its own.
+//
+// Still derived, so a recovery phrase reproduces any generation without a copy
+// of anything: the generation is a count the identity already keeps.
+func (s *CoreServer) postQuantumPreRotationAt(nextPublicKey string, generation int) ([]string, *iacrypto.PostQuantumNextKey) {
 	if nextPublicKey == "" {
 		return nil, nil
 	}
@@ -76,7 +91,7 @@ func (s *CoreServer) postQuantumPreRotation(nextPublicKey string) ([]string, *ia
 		return nil, nil
 	}
 
-	seed, err := backup.DerivePairwiseSeed(rootSeed, postQuantumPreRotationContact, postQuantumPreRotationKey)
+	seed, err := backup.DerivePairwiseSeed(rootSeed, postQuantumPreRotationContact, postQuantumPreRotationKey+generation)
 	if err != nil {
 		log.Printf("[identity-agent-core] INCEPTION: could not derive the post-quantum "+
 			"pre-rotation seed: %v", err)
@@ -129,4 +144,34 @@ func (s *CoreServer) recordPostQuantumCommitment(pq *iacrypto.PostQuantumNextKey
 		return fmt.Errorf("could not record the post-quantum commitment: %w", err)
 	}
 	return nil
+}
+
+// rotateCarryingTheCommitment rotates an identity, re-committing to a
+// post-quantum key in the new next-key set.
+//
+// KERI replaces `n` wholesale at every event. A commitment is therefore a
+// property of the latest event, not of the identity, and one made only at
+// founding is gone the moment anything rotates. Renewing it here is what makes
+// it durable.
+//
+// Falls back to the ordinary rotation whenever the commitment cannot be
+// derived, for the same reason inception does: an identity that cannot rotate
+// is an identity that cannot recover from anything, and losing a future option
+// is a far smaller harm than refusing a rotation somebody may be performing
+// because they have just been compromised.
+func (s *CoreServer) rotateCarryingTheCommitment(name, newPublicKey, newNextPublicKey string) (*drivers.DriverRotationResponse, error) {
+	// The generation the identity is rotating INTO, so the commitment made here
+	// is not the one the founding event already made.
+	generation := 1
+	if identity, err := s.DataStore.GetIdentity(); err == nil && identity != nil {
+		generation = identity.KeyGeneration + 1
+	}
+	digests, _ := s.postQuantumPreRotationAt(newNextPublicKey, generation)
+	if len(digests) < 2 {
+		return s.KeriDriver.RotateAid(name, newPublicKey, newNextPublicKey)
+	}
+	// One key now, two commitments for next — so the signing threshold is one
+	// and the next threshold is one. Two would mean an unusable post-quantum
+	// commitment leaves the identity unable to rotate again at all.
+	return s.KeriDriver.RotateToMultisig(name, []string{newPublicKey}, digests, "1", "1", nil)
 }
