@@ -3,6 +3,7 @@ package keriengine
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -154,14 +155,15 @@ func (e *Engine) Incept(req drivers.InceptionRequest) (*drivers.DriverInceptionR
 		}
 		anchors = append(anchors, raw)
 	}
-	return e.inceptWith(req.PublicKey, req.NextPublicKey, req.Name, anchors, req.Witnesses, req.Toad)
+	return e.inceptWith(req.PublicKey, req.NextPublicKey, req.Name, anchors, req.Witnesses, req.Toad,
+		req.NextKeyDigests, req.NextThreshold)
 }
 
 func (e *Engine) incept(publicKey, nextPublicKey, name string, data []json.RawMessage) (*drivers.DriverInceptionResponse, error) {
-	return e.inceptWith(publicKey, nextPublicKey, name, data, nil, 0)
+	return e.inceptWith(publicKey, nextPublicKey, name, data, nil, 0, nil, "")
 }
 
-func (e *Engine) inceptWith(publicKey, nextPublicKey, name string, data []json.RawMessage, witnesses []string, toad int) (*drivers.DriverInceptionResponse, error) {
+func (e *Engine) inceptWith(publicKey, nextPublicKey, name string, data []json.RawMessage, witnesses []string, toad int, nextDigests []string, nextThreshold string) (*drivers.DriverInceptionResponse, error) {
 	pub, err := normaliseKey(publicKey, true)
 	if err != nil {
 		return nil, fmt.Errorf("the signing key: %w", err)
@@ -193,9 +195,18 @@ func (e *Engine) inceptWith(publicKey, nextPublicKey, name string, data []json.R
 				"identifier; its receipts could not be checked without resolving a key log", i, w)
 		}
 	}
+	// A caller may commit to more than one next key — a post-quantum key
+	// alongside the classical one, most importantly. Dropping these silently
+	// would leave the identity committed to a single classical successor while
+	// everything upstream believed otherwise, and nothing would notice until a
+	// rotation that could not be performed.
+	committed := []string{nextDigest}
+	if len(nextDigests) > 0 {
+		committed = nextDigests
+	}
 	in := keri.InceptionInput{
 		Keys:        []string{pub},
-		NextDigests: []string{nextDigest},
+		NextDigests: committed,
 		Data:        data,
 		Witnesses:   witnesses,
 		// Self-addressing: the identifier is a digest over the whole inception
@@ -209,6 +220,12 @@ func (e *Engine) inceptWith(publicKey, nextPublicKey, name string, data []json.R
 	// caller's arithmetic rather than the protocol's.
 	if toad > 0 {
 		in.Toad = &toad
+	}
+	// Stated only when the caller states it, for the same reason as the witness
+	// threshold: writing a guess at the builder's default is writing our
+	// arithmetic rather than the protocol's.
+	if nextThreshold != "" {
+		in.Nsith = json.RawMessage(strconv.Quote(nextThreshold))
 	}
 	raw, err := keri.BuildInception(in)
 	if err != nil {
