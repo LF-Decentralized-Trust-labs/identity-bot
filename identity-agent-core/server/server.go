@@ -1103,6 +1103,15 @@ type InceptionResponse struct {
 	RawBytesB64 string `json:"raw_bytes_b64"`
 	PublicKey   string `json:"public_key"`
 	Created     string `json:"created"`
+	// PostQuantumCommitted reports whether the founding event actually carries a
+	// commitment to a post-quantum key.
+	//
+	// Reported rather than assumed because the commitment is best-effort: an
+	// agent with no root seed to derive from founds the identity anyway, with
+	// the single classical commitment. Anything downstream that tells somebody
+	// their identity is ready for a post-quantum key has to read this rather
+	// than take it on faith, or it will eventually say so when it is not true.
+	PostQuantumCommitted bool `json:"post_quantum_committed"`
 }
 
 type HybridInceptionRequest struct {
@@ -1347,13 +1356,66 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Commit, at founding, to a post-quantum key this identity may rotate to.
+	//
+	// The signing key is classical because it has to be: CESR has no assigned
+	// code for a post-quantum key, so putting one in `k` produces an identity
+	// every other KERI implementation refuses outright. The commitment is not
+	// blocked by that, because `n` holds DIGESTS — a digest of a 1952-byte
+	// ML-DSA key is 44 characters like any other, and nothing is encoded until
+	// the key is revealed at a rotation.
+	//
+	// Founding is the EARLIEST moment, not the only one. A rotation sets a new
+	// next-key set freely, so an identity founded without this can add the
+	// commitment whenever it next rotates — that was checked against a real
+	// validator rather than assumed, because the opposite was believed here
+	// first and stated as fact.
+	//
+	// What doing it at founding buys is that an identity which never rotates
+	// still carries the commitment, and one that does rotate reaches a hybrid
+	// key set in a single rotation rather than two — one to add the commitment,
+	// another to reveal it.
+	//
+	// The corollary is that it has to be RENEWED at every rotation, and today it
+	// is not: KERI replaces the whole next-key set at each event, and the
+	// ordinary rotation path commits a single classical successor, dropping this
+	// the first time an identity rotates for any reason. That is a gap in the
+	// rotation paths rather than in this one, and it is logged as such.
+	//
+	// Best-effort on purpose. If this fails the identity is founded exactly as
+	// it was before, with one commitment, rather than not founded at all: the
+	// post-quantum rotation is a future option, and losing a future option is
+	// not a reason to refuse somebody an identity today.
+	nextDigests, pq := s.postQuantumPreRotation(req.NextPublicKey)
+
 	result, err := s.KeriDriver.Incept(drivers.InceptionRequest{
-		PublicKey:     req.PublicKey,
-		NextPublicKey: req.NextPublicKey,
-		OwnerAID:      req.OwnerAID,
-		AnchorData:    []map[string]interface{}{keyAnchor},
-		Witnesses:     witnesses,
-		Toad:          toad,
+		PublicKey:      req.PublicKey,
+		NextPublicKey:  req.NextPublicKey,
+		OwnerAID:       req.OwnerAID,
+		AnchorData:     []map[string]interface{}{keyAnchor},
+		Witnesses:      witnesses,
+		Toad:           toad,
+		NextKeyDigests: nextDigests,
+		// One, not two. Sent explicitly rather than relied upon: the engine's
+		// default for two commitments is also one, so this states the intent
+		// rather than changing the event, and the two are byte-identical.
+		//
+		// The reasoning for one over two is what matters here.
+		//
+		// Two would mean both committed keys must sign the rotation that reveals
+		// them. The post-quantum half is a bet on a CESR code that is not final,
+		// so if the assigned code differs from the one committed to, no key we
+		// hold satisfies that digest — and at a threshold of two the identity
+		// could then never rotate at all, which in KERI means never recovering
+		// from anything. Verified against a real validator rather than reasoned
+		// about: at two, a rotation revealing only the classical key is refused
+		// with "Failure satisfying prior nsith".
+		//
+		// At one, the same rotation is accepted, so a spent commitment costs the
+		// post-quantum option and nothing else. Both-must-sign is not given up,
+		// only deferred to where it belongs — the rotation that reveals the pair
+		// declares kt=2 itself, and that is enforced from then on.
+		NextThreshold: "1",
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to create inception event", err.Error())
@@ -1373,6 +1435,9 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 	// to. Restoring needs the branch; knowing whose it is makes a mismatch
 	// visible instead of quietly producing the wrong keys.
 	if err := s.recordMessagingKeyIndex(result.AID, keyIndex); err != nil {
+		log.Printf("[identity-agent-core] INCEPTION: %v", err)
+	}
+	if err := s.recordPostQuantumCommitment(pq); err != nil {
 		log.Printf("[identity-agent-core] INCEPTION: %v", err)
 	}
 
@@ -1423,6 +1488,9 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 		RawBytesB64:    result.RawBytesB64,
 		PublicKey:      result.PublicKey,
 		Created:        now,
+		// Taken from what was actually committed, not from whether the attempt
+		// was made.
+		PostQuantumCommitted: pq != nil,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -1582,7 +1650,20 @@ func (s *CoreServer) handleRotation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := s.KeriDriver.RotateAid(req.Name, req.NewPublicKey, req.NewNextPublicKey)
+	// Carry the post-quantum commitment across the rotation.
+	//
+	// A rotation replaces the whole next-key set, so the commitment made at
+	// founding does not survive one on its own — it has to be made again in
+	// every event or it lapses at the first rotation, for any reason at all.
+	// The likely one is not exotic: somebody loses a device and rotates, which
+	// is exactly the right response, and silently spends the option to ever go
+	// post-quantum.
+	//
+	// It is also the recovery path for the commitment being wrong. The digest
+	// assumes a CESR code that is not yet assigned, so if the assigned code
+	// differs, every rotation re-commits under whatever the code is by then.
+	// A commitment made once at founding would have no such second chance.
+	result, err := s.rotateCarryingTheCommitment(req.Name, req.NewPublicKey, req.NewNextPublicKey)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Rotation failed", err.Error())
 		return

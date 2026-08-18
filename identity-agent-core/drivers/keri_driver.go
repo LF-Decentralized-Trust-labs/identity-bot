@@ -901,6 +901,8 @@ func (d *KeriDriver) Incept(req InceptionRequest) (*DriverInceptionResponse, err
 		Name:          req.Name,
 		Witnesses:     req.Witnesses,
 		Toad:          req.Toad,
+		NextKeys:      req.NextKeyDigests,
+		Nsith:         req.NextThreshold,
 	}
 	if req.OwnerAID != "" {
 		seal, err := ownerEventSeal(req.OwnerAID)

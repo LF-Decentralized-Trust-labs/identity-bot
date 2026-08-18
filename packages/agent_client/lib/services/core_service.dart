@@ -100,10 +100,24 @@ class InceptionResponse {
   final String publicKey;
   final String created;
 
+  /// Whether the founding event actually carries a commitment to a
+  /// post-quantum key the identity can rotate to.
+  ///
+  /// Read rather than assumed. The commitment is best-effort in the core — an
+  /// agent with no root seed to derive from founds the identity anyway, with a
+  /// single classical commitment — so a screen that says the identity is ready
+  /// for a post-quantum key must ask, or it will eventually say so when it is
+  /// not true.
+  ///
+  /// Defaults to false against a core that predates the field, which is the
+  /// safe direction: an older core did not make the commitment.
+  final bool postQuantumCommitted;
+
   InceptionResponse({
     required this.aid,
     required this.publicKey,
     required this.created,
+    this.postQuantumCommitted = false,
   });
 
   factory InceptionResponse.fromJson(Map<String, dynamic> json) {
@@ -111,6 +125,7 @@ class InceptionResponse {
       aid: json['aid'] ?? '',
       publicKey: json['public_key'] ?? '',
       created: json['created'] ?? '',
+      postQuantumCommitted: json['post_quantum_committed'] == true,
     );
   }
 }

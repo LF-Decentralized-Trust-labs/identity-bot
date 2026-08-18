@@ -1,0 +1,173 @@
+package iacrypto
+
+import (
+	"bytes"
+	"encoding/base64"
+	"testing"
+)
+
+// The encoding a validator will recompute against has to be the right width, or
+// the commitment can never be satisfied. This is the failure the old code made:
+// a body that is not a whole number of base64 quadruples still looks like a key.
+func TestMLDSA65VerkeyEncodesToTheSpecifiedWidth(t *testing.T) {
+	pub := make([]byte, MLDSA65VerkeyBytes)
+	qb64, err := MLDSA65VerkeyQB64(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(qb64) != 2608 {
+		t.Errorf("encoded width is %d, want 2608", len(qb64))
+	}
+	body := len(qb64) - len(ProposedMLDSA65Verkey)
+	if body%4 != 0 {
+		t.Errorf("body is %d characters, which is not a whole number of base64 quadruples", body)
+	}
+	if got := qb64[:4]; got != ProposedMLDSA65Verkey {
+		t.Errorf("code is %q, want %q", got, ProposedMLDSA65Verkey)
+	}
+}
+
+// The bug this replaces, kept as a test so nobody reaches for that helper again
+// for a primitive whose size does not divide by three.
+func TestEncodeLargeFixedIsWrongForAnMLDSAKey(t *testing.T) {
+	pub := make([]byte, MLDSA65VerkeyBytes)
+	bad, err := EncodeLargeFixed("1PDA", pub, MLDSA65VerkeyBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if (len(bad)-4)%4 == 0 {
+		t.Fatal("expected the lead-byte-less encoding to be malformed; it no longer is, " +
+			"so this test and the comment it guards are stale")
+	}
+	good, err := MLDSA65VerkeyQB64(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bad) == len(good) {
+		t.Errorf("the two encodings should differ in width; both are %d", len(bad))
+	}
+}
+
+// Derivation must be deterministic, or an owner who restores from their
+// recovery phrase holds a commitment they cannot satisfy.
+func TestPostQuantumNextKeyIsReproducibleFromTheSameSeed(t *testing.T) {
+	seed := bytes.Repeat([]byte{7}, 64)
+
+	first, err := PostQuantumNextKeyFromSeed(seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := PostQuantumNextKeyFromSeed(seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Digest != again.Digest {
+		t.Errorf("same seed produced different commitments:\n  %s\n  %s", first.Digest, again.Digest)
+	}
+	if first.Verkey != again.Verkey {
+		t.Error("same seed produced a different key")
+	}
+
+	other := bytes.Repeat([]byte{8}, 64)
+	different, err := PostQuantumNextKeyFromSeed(other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if different.Digest == first.Digest {
+		t.Error("a different seed produced the same commitment, so the seed is being ignored")
+	}
+}
+
+// The commitment must be over the key's qb64 TEXT. Taken over the raw bytes it
+// still looks like a digest and nothing can ever satisfy it.
+func TestCommitmentIsTakenOverTheEncodedKeyNotTheRawBytes(t *testing.T) {
+	seed := bytes.Repeat([]byte{3}, 64)
+	pq, err := PostQuantumNextKeyFromSeed(seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	overText, err := Blake3QB64([]byte(pq.Verkey))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pq.Digest != overText {
+		t.Errorf("commitment is not the digest of the encoded key")
+	}
+
+	// And it must NOT be the digest of the raw key bytes. A guarded assertion
+	// was tried here first and could never run: KeyFromVerkeyQB64 accepts only a
+	// 44-character D-coded key, and this one is 2608 characters beginning 2AAE,
+	// so the guard was always false and the test compared the implementation to
+	// itself. The raw bytes are recovered from the encoding directly instead.
+	rawB64 := pq.Verkey[len(ProposedMLDSA65Verkey):]
+	padded, err := base64.RawURLEncoding.DecodeString(rawB64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := padded[1:] // drop the lead byte the 2 selector carries
+	if len(raw) != MLDSA65VerkeyBytes {
+		t.Fatalf("recovered %d raw bytes from the encoding, want %d", len(raw), MLDSA65VerkeyBytes)
+	}
+	overRaw, err := Blake3QB64(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pq.Digest == overRaw {
+		t.Error("commitment was taken over the raw key bytes; a validator recomputes " +
+			"it over the qb64 text, so this could never be rotated against")
+	}
+}
+
+// A digest is a digest whatever it was taken over — which is the whole reason a
+// post-quantum key can be committed to before its code exists.
+func TestTheCommitmentIsAnOrdinaryDigestWidth(t *testing.T) {
+	seed := bytes.Repeat([]byte{9}, 64)
+	pq, err := PostQuantumNextKeyFromSeed(seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	classical, err := NextKeyDigest("DAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8g")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pq.Digest) != len(classical) {
+		t.Errorf("a commitment to a 1952-byte key is %d characters and a commitment to a "+
+			"32-byte key is %d; they must be identical in width or the point does not hold",
+			len(pq.Digest), len(classical))
+	}
+}
+
+// Both forms a caller may hold a next key in must produce the SAME commitment,
+// because the engine normalises before it commits. Getting this wrong yields an
+// identity whose classical commitment nothing satisfies, and nothing notices
+// until a rotation that may be years away.
+func TestBothNextKeyFormsCommitIdentically(t *testing.T) {
+	raw := make([]byte, Ed25519PubkeyBytes)
+	for i := range raw {
+		raw[i] = byte(i)
+	}
+	qb64 := VerkeyQB64(raw)
+	plain := base64.RawURLEncoding.EncodeToString(raw)
+
+	fromQB64, err := NextKeyDigest(qb64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fromPlain, err := NextKeyDigest(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fromQB64 != fromPlain {
+		t.Errorf("the two forms of the same key produced different commitments:\n  qb64:  %s\n  plain: %s",
+			fromQB64, fromPlain)
+	}
+	// And the commitment must be the one taken over canonical qb64, which is
+	// what a validator recomputes.
+	want, err := Blake3QB64([]byte(qb64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fromPlain != want {
+		t.Errorf("commitment is not over the canonical encoding")
+	}
+}
