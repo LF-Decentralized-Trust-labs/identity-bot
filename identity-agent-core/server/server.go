@@ -1103,6 +1103,15 @@ type InceptionResponse struct {
 	RawBytesB64 string `json:"raw_bytes_b64"`
 	PublicKey   string `json:"public_key"`
 	Created     string `json:"created"`
+	// PostQuantumCommitted reports whether the founding event actually carries a
+	// commitment to a post-quantum key.
+	//
+	// Reported rather than assumed because the commitment is best-effort: an
+	// agent with no root seed to derive from founds the identity anyway, with
+	// the single classical commitment. Anything downstream that tells somebody
+	// their identity is ready for a post-quantum key has to read this rather
+	// than take it on faith, or it will eventually say so when it is not true.
+	PostQuantumCommitted bool `json:"post_quantum_committed"`
 }
 
 type HybridInceptionRequest struct {
@@ -1479,6 +1488,9 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 		RawBytesB64:    result.RawBytesB64,
 		PublicKey:      result.PublicKey,
 		Created:        now,
+		// Taken from what was actually committed, not from whether the attempt
+		// was made.
+		PostQuantumCommitted: pq != nil,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
