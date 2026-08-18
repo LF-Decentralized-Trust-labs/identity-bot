@@ -138,6 +138,24 @@ type InceptionRequest struct {
 	// Toad is how many of those must receipt an event for it to be considered
 	// witnessed. Zero lets the implementation derive a majority.
 	Toad int
+	// NextKeyDigests replaces the single commitment derived from NextPublicKey
+	// with a full set, so an identity can commit to more than one key it may
+	// rotate to. Empty means the single commitment, which is every caller that
+	// does not want a post-quantum key.
+	//
+	// These are DIGESTS, already computed. The engine writes them into `n`
+	// verbatim rather than hashing anything, which is what lets a commitment be
+	// made to a key that has no encoding yet — a digest is a digest whatever it
+	// was taken over.
+	NextKeyDigests []string
+	// NextThreshold is how many of those committed keys must sign the rotation
+	// that reveals them. Empty leaves it at one.
+	//
+	// One is the right answer while any committed key might turn out to be
+	// unusable: requiring all of them means a single unusable commitment leaves
+	// the identity unable to rotate at all, which in KERI is unable to recover
+	// from anything, ever.
+	NextThreshold string
 }
 
 // RotationRequest is everything a rotation can change.

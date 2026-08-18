@@ -1347,13 +1347,51 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Commit, at founding, to a post-quantum key this identity may rotate to.
+	//
+	// The signing key is classical because it has to be: CESR has no assigned
+	// code for a post-quantum key, so putting one in `k` produces an identity
+	// every other KERI implementation refuses outright. The commitment is not
+	// blocked by that, because `n` holds DIGESTS — a digest of a 1952-byte
+	// ML-DSA key is 44 characters like any other, and nothing is encoded until
+	// the key is revealed at a rotation.
+	//
+	// It has to happen HERE or it can never happen at all. Pre-rotation binds an
+	// identity to the key set it committed to, so an identity founded committing
+	// only a classical next key can never rotate to a post-quantum one — not by
+	// any later event, because there is no later event that can add a
+	// commitment. Founding is the only moment.
+	//
+	// Best-effort on purpose. If this fails the identity is founded exactly as
+	// it was before, with one commitment, rather than not founded at all: the
+	// post-quantum rotation is a future option, and losing a future option is
+	// not a reason to refuse somebody an identity today.
+	nextDigests, pq := s.postQuantumPreRotation(req.NextPublicKey)
+
 	result, err := s.KeriDriver.Incept(drivers.InceptionRequest{
-		PublicKey:     req.PublicKey,
-		NextPublicKey: req.NextPublicKey,
-		OwnerAID:      req.OwnerAID,
-		AnchorData:    []map[string]interface{}{keyAnchor},
-		Witnesses:     witnesses,
-		Toad:          toad,
+		PublicKey:      req.PublicKey,
+		NextPublicKey:  req.NextPublicKey,
+		OwnerAID:       req.OwnerAID,
+		AnchorData:     []map[string]interface{}{keyAnchor},
+		Witnesses:      witnesses,
+		Toad:           toad,
+		NextKeyDigests: nextDigests,
+		// One, not two, and this is the load-bearing choice.
+		//
+		// Two would mean both committed keys must sign the rotation that reveals
+		// them. The post-quantum half is a bet on a CESR code that is not final,
+		// so if the assigned code differs from the one committed to, no key we
+		// hold satisfies that digest — and at a threshold of two the identity
+		// could then never rotate at all, which in KERI means never recovering
+		// from anything. Verified against a real validator rather than reasoned
+		// about: at two, a rotation revealing only the classical key is refused
+		// with "Failure satisfying prior nsith".
+		//
+		// At one, the same rotation is accepted, so a spent commitment costs the
+		// post-quantum option and nothing else. Both-must-sign is not given up,
+		// only deferred to where it belongs — the rotation that reveals the pair
+		// declares kt=2 itself, and that is enforced from then on.
+		NextThreshold: "1",
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to create inception event", err.Error())
@@ -1373,6 +1411,9 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 	// to. Restoring needs the branch; knowing whose it is makes a mismatch
 	// visible instead of quietly producing the wrong keys.
 	if err := s.recordMessagingKeyIndex(result.AID, keyIndex); err != nil {
+		log.Printf("[identity-agent-core] INCEPTION: %v", err)
+	}
+	if err := s.recordPostQuantumCommitment(pq); err != nil {
 		log.Printf("[identity-agent-core] INCEPTION: %v", err)
 	}
 
