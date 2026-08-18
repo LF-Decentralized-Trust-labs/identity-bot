@@ -1,5 +1,5 @@
 """
-KERI Interoperability Test -- Phase 8: Mobile IXN via Rust Bridge + Cross-Instance KEL Verification
+KERI Interoperability Test -- Phase 8: Mobile IXN via the embedded core + Cross-Instance KEL Verification
 
 Proves:
 
@@ -11,7 +11,7 @@ Proves:
   STEP 6: Inception event was produced by a Rust keri_core key -- public key is Ed25519 CESR 'D...' format
   STEP 7: Any IXN events present have correct structure (type, sequence, anchor data)
   STEP 8: keripy independently constructs a reference IXN and verifies the format
-           matches what the Rust bridge produces
+           matches what the mobile core produces
   STEP 9: Cross-instance -- the LOCAL desktop agent (port 5050) resolves the mobile OOBI
            using Python keripy and confirms the KEL is valid
   STEP 10: (Optional) IXN count -- reports how many IXN events are in the live KEL
@@ -128,7 +128,7 @@ RETRY_INTERVAL   = 30    # seconds between health-check retries
 # STEP 1: Poll mobile health with retry
 # ---------------------------------------------------------------------------
 print("\n" + "=" * 70)
-print("Phase 8: Mobile IXN via Rust Bridge + Cross-Instance KEL Verification")
+print("Phase 8: Mobile IXN via the embedded core + Cross-Instance KEL Verification")
 print("=" * 70)
 print("\n-- STEP 1: Mobile agent health check (retry every %ds, up to %ds) --" % (
     RETRY_INTERVAL, MAX_WAIT_SECONDS))
@@ -305,7 +305,7 @@ check("Sequence numbers are contiguous starting from 0",
       "Got: %s" % [ev.get("s") for ev in kel_events])
 
 # ---------------------------------------------------------------------------
-# STEP 6: Inception event was produced by keri_core Rust bridge
+# STEP 6: Inception event was produced by the mobile core
 # ---------------------------------------------------------------------------
 print("\n-- STEP 6: Inception event structure (Rust keri_core fingerprints) ----")
 
@@ -359,7 +359,7 @@ else:
 # ---------------------------------------------------------------------------
 # STEP 8: keripy reference IXN construction -verify format matches mobile
 # ---------------------------------------------------------------------------
-print("\n-- STEP 8: keripy reference IXN (format parity with Rust bridge) ------")
+print("\n-- STEP 8: keripy reference IXN (format parity with the mobile core) ------")
 
 # Reconstruct the inception event using keripy to get a proper Verfer + prefix
 icp_said = icp.get("d", "")
@@ -369,12 +369,12 @@ if keys:
     try:
         # Build a keripy Verfer from the CESR public key
         verfer_mobile = coring.Verfer(qb64=keys[0])
-        check("keripy can parse mobile Rust bridge public key",
+        check("keripy can parse the mobile core's public key",
               verfer_mobile.qb64 == keys[0],
               "CESR key: %s" % keys[0])
 
         # Build a reference IXN event with the same AID + prior as what the
-        # Rust bridge would produce (data=[] for a bare IXN, or seal data for anchored)
+        # the mobile core would produce (data=[] for a bare IXN, or seal data for anchored)
         ref_ixn = eventing.interact(
             pre  = icp_pre,
             dig  = icp_said,
@@ -471,7 +471,7 @@ if ixn_count == 0:
          "Create an IXN on the mobile device (issue a credential or use Interact),\n"
          "         then re-run this test to verify STEP 7 and the full IXN chain.")
 else:
-    check("KEL has at least one IXN event (Rust bridge interact_aid confirmed)",
+    check("KEL has at least one IXN event (mobile core interact_aid confirmed)",
           ixn_count >= 1)
     check("All events account for total (icp + ixn + rot == total)",
           icp_count + ixn_count + rot_count == total_events)
@@ -498,7 +498,7 @@ if ixn_count == 0 and fails == 0:
     print("\nAll checks passed for current KEL state (inception only).")
     print("Re-run after creating an IXN on the mobile device to validate STEP 7.")
 elif fails == 0:
-    print("\nAll checks passed. Mobile Rust bridge IXN events are")
+    print("\nAll checks passed. Mobile core IXN events are")
     print("cryptographically valid and cross-instance verifiable.")
 
 sys.exit(0 if fails == 0 else 1)

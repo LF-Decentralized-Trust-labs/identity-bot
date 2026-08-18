@@ -29,7 +29,7 @@ func VerifyString(body, sigQB64 string, pub []byte) (bool, error) {
 
 // DecodeVerkey turns a stored public key into raw Ed25519 bytes. Keys reach us
 // in more than one encoding depending on which path minted them — CESR qb64
-// from the KERI driver, plain base64 from the Rust bridge, hex from older
+// from the KERI driver, plain base64 from the mobile core, hex from older
 // records — so all three are accepted rather than failing on a format detail.
 func DecodeVerkey(key string) ([]byte, error) {
 	key = strings.TrimSpace(key)

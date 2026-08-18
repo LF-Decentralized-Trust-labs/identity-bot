@@ -10,7 +10,7 @@ The Identity Agent's Flutter UI compiles to three targets: **web** (served by th
 
 Two packages caused Flutter web builds to crash:
 
-1. **`flutter_rust_bridge`** — imports `dart:ffi`, which doesn't exist on web. When Dart files importing FRB are included in the web build, dart2js fails to compile.
+1. **`flutter_rust_bridge`** — imported `dart:ffi`, which doesn't exist on web. When Dart files importing FRB were included in the web build, dart2js failed to compile. (No longer used; kept here because it is the case that motivated this ADR.)
 
 2. **`flutter_inappwebview`** — the meta-package (v6.x) includes a web plugin (`flutter_inappwebview_web`) that auto-registers during Flutter engine initialization via `web_plugin_registrant.dart`. This plugin calls `nativeCommunication` on `undefined`, causing an unhandled Promise rejection that crashes the app before any Dart code runs. This is a known, unresolved upstream bug (GitHub issues #2076, #1468).
 
@@ -66,10 +66,14 @@ This ensures any file importing the component compiles on all platforms without 
 
 | Component | Native File | Stub File | Native Packages |
 |---|---|---|---|
-| KERI Bridge | `bridge/keri_bridge.dart` | `bridge/keri_bridge_stub.dart` | `flutter_rust_bridge` |
 | Sandbox WebView | `widgets/sandbox_webview_native.dart` | `widgets/sandbox_webview_stub.dart` | `flutter_inappwebview_*` |
-| Mobile KERI Services | `services/mobile_on_device_keri_service.dart` | (uses bridge stub transitively) | `flutter_rust_bridge` |
-| | `services/mobile_remote_keri_service.dart` | (none — pure HTTP, no native packages) | — |
+
+> **Updated 2026-08-17.** This table previously also listed a KERI bridge
+> (`bridge/keri_bridge.dart`) and a mobile on-device KERI service, both needing the
+> pattern because they imported `flutter_rust_bridge` and therefore `dart:ffi`. Neither
+> file exists any more: mobile now reaches the same Go core as desktop over HTTP, which
+> compiles on web without a stub. The pattern and its rationale below are unchanged — the
+> KERI layer simply no longer needs it.
 
 ## Consequences
 
