@@ -19,12 +19,22 @@ const (
 	// These were previously 1PXB / 1PKM / 1PDA — four-character codes in the
 	// `1` table, encoded by gluing the code onto raw base64 with no lead byte.
 	// That is correct only for a size divisible by three, so all three came out
-	// one character short of a whole number of base64 quadruples. The CESR
-	// specification is explicit about what that costs: a parser "may become
-	// confused, especially if a portion of the Stream is malformed", and its
-	// remedy is a cold-start resynchronisation rather than a clean rejection of
-	// the one bad value. So a malformed key did not fail by itself — it took
-	// the rest of the stream with it.
+	// one character short of a whole number of base64 quadruples.
+	//
+	// That fault is LATENT rather than active, and the distinction is worth
+	// stating precisely because it is easy to overstate. A parser that does not
+	// recognise a code cannot determine the value's length either, so today it
+	// stops at the code and the length never matters. The damage arrives when
+	// the code becomes KNOWN: a parser then reads exactly the declared size on
+	// faith, so a value one character short consumes a character of whatever
+	// follows it and the stream is corrupted from there. Measured against the
+	// reference implementation with a known code — a correct-length value reads
+	// cleanly and its neighbour is recovered, a short one fails with a shortage
+	// error partway into the next value.
+	//
+	// So this is a bug that would activate at precisely the moment
+	// interoperability starts working, which is the argument for fixing it
+	// before then rather than after.
 
 	// CESRX25519Pubkey is the ASSIGNED code for an X25519 public key. It is not
 	// provisional and never should have been: `C` has been in the reference
