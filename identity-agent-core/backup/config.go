@@ -54,6 +54,12 @@ type Config struct {
 	// write archives forever and open none of them. For an organisation there
 	// is one per signer, and any single one restores the data.
 	SealToPublicKeysB64 []string `json:"seal_to_public_keys_b64,omitempty"`
+
+	// Offer is what this machine will hold for OTHER identities — the other
+	// direction of backup entirely. Absent on every existing installation,
+	// which decodes to the zero value and therefore to accepting nothing. See
+	// Offer for why that default is deliberate.
+	Offer Offer `json:"offer"`
 }
 
 // HistoryEntry is one backup run (D3).

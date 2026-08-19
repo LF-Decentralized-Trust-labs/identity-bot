@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -25,6 +26,12 @@ func (s *CoreServer) mountBackupRoutes(r chi.Router) {
 		r.Post("/destinations", s.handleBackupUpsertDestination)
 		r.Delete("/destinations/{id}", s.handleBackupDeleteDestination)
 		r.Post("/receive", s.handleBackupReceive)
+		// What this machine holds for other people, and the offer that decides
+		// whether it holds anything at all. See B5 and B6.
+		r.Get("/held", s.handleBackupHeld)
+		r.Get("/offer", s.handleBackupGetOffer)
+		r.Put("/offer", s.handleBackupPutOffer)
+		r.Delete("/held/{identityAID}", s.handleBackupStopHolding)
 		r.Get("/receive/{identityAID}", s.handleBackupListReceived)
 		r.Get("/receive/{identityAID}/download/{name}", s.handleBackupDownload)
 		r.Post("/trigger", s.handleBackupTrigger)
@@ -218,6 +225,17 @@ func (s *CoreServer) handleBackupReceive(w http.ResponseWriter, r *http.Request)
 	// Backup-only device stores opaque ciphertext — never unwraps BEK.
 	path, err := s.backupService().ReceiveArchive(req.IdentityAID, raw)
 	if err != nil {
+		// A refusal is not a failure, and the difference has to survive the
+		// trip. The pushing agent shows this to somebody, and "this machine is
+		// full" or "we are not taking on new identities" are things they can
+		// act on, where a 500 is not. 409 because retrying changes nothing
+		// until a person changes something.
+		var refused *backup.RefusedToHold
+		if errors.As(err, &refused) {
+			writeError(w, http.StatusConflict, "This machine will not hold that",
+				refused.Reason)
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "Store failed", err.Error())
 		return
 	}
@@ -319,4 +337,83 @@ func (s *CoreServer) handleBackupDownload(w http.ResponseWriter, r *http.Request
 	defer f.Close()
 	w.Header().Set("Content-Type", "application/octet-stream")
 	io.Copy(w, f)
+}
+
+// handleBackupHeld answers "what is this machine holding, and for whom".
+//
+// Metadata only — identifier, how many archives, how much disk, when the last
+// one arrived. Never contents, and there is no route that would return them:
+// the archives are sealed to keys this machine does not have, so the honest
+// screen is one that shows a person enough to manage disk and notice a backup
+// that stopped arriving, and nothing more.
+func (s *CoreServer) handleBackupHeld(w http.ResponseWriter, r *http.Request) {
+	held, err := s.backupService().Held()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Could not read what this machine holds", err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"held": held})
+}
+
+func (s *CoreServer) handleBackupGetOffer(w http.ResponseWriter, r *http.Request) {
+	cfg, err := s.backupService().LoadConfig()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Load config failed", err.Error())
+		return
+	}
+	offer := cfg.Offer
+	if offer.ReserveBytes == 0 {
+		// A config written before this existed decodes to a zero reserve, which
+		// would mean "fill the disk completely". Reported as the default rather
+		// than as zero, because this value is shown to somebody.
+		offer.ReserveBytes = backup.DefaultOffer().ReserveBytes
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(offer)
+}
+
+// handleBackupPutOffer is where a machine volunteers, and stops volunteering.
+func (s *CoreServer) handleBackupPutOffer(w http.ResponseWriter, r *http.Request) {
+	var offer backup.Offer
+	if err := json.NewDecoder(r.Body).Decode(&offer); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid offer", err.Error())
+		return
+	}
+	if offer.ReserveBytes <= 0 {
+		offer.ReserveBytes = backup.DefaultOffer().ReserveBytes
+	}
+	cfg, err := s.backupService().LoadConfig()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Load config failed", err.Error())
+		return
+	}
+	cfg.Offer = offer
+	if err := s.backupService().SaveConfig(cfg); err != nil {
+		writeError(w, http.StatusInternalServerError, "Save config failed", err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(offer)
+}
+
+// handleBackupStopHolding removes what this machine holds for one identity.
+//
+// Whoever owns the hardware is entitled to their disk back. What they are not
+// entitled to is doing it silently: the identity has to be told, or it goes on
+// believing it has an off-site copy it does not have, which is the worst of the
+// three states in B6. Telling it is the caller's job and is not yet built —
+// tracked rather than pretended.
+func (s *CoreServer) handleBackupStopHolding(w http.ResponseWriter, r *http.Request) {
+	aid := chi.URLParam(r, "identityAID")
+	if err := s.backupService().StopHoldingFor(aid); err != nil {
+		var refused *backup.RefusedToHold
+		if errors.As(err, &refused) {
+			writeError(w, http.StatusBadRequest, "Not something this machine holds", refused.Reason)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "Could not remove", err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
