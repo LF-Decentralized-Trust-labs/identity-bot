@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -27,7 +28,7 @@ func (s *CoreServer) mountBackupRoutes(r chi.Router) {
 		r.Delete("/destinations/{id}", s.handleBackupDeleteDestination)
 		r.Post("/receive", s.handleBackupReceive)
 		// What this machine holds for other people, and the offer that decides
-		// whether it holds anything at all. See B5 and B6.
+		// whether it holds anything at all.
 		r.Get("/held", s.handleBackupHeld)
 		r.Get("/offer", s.handleBackupGetOffer)
 		r.Put("/offer", s.handleBackupPutOffer)
@@ -211,10 +212,33 @@ type backupReceiveRequest struct {
 	ArchiveB64      string `json:"archive_b64"`
 }
 
+// maxArchiveUpload bounds what an unauthenticated caller can make this agent
+// hold in memory.
+//
+// The offer decides whether an archive is KEPT, and it is consulted far too
+// late to decide whether one is READ: by then the body has been decoded into a
+// string and base64-decoded into bytes, so a machine accepting nothing for
+// nobody was as exposed as one that had volunteered. Every other route in this
+// package that takes a JSON body already limits it.
+const maxArchiveUpload = 2 << 30 // 2 GiB of base64, ~1.5 GiB of archive
+
 func (s *CoreServer) handleBackupReceive(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxArchiveUpload)
 	var req backupReceiveRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request", err.Error())
+		return
+	}
+	// Consent before allocation, as far as it can be taken.
+	//
+	// The size limit above bounds the damage; it does not stop a machine that
+	// holds nothing for nobody from being made to allocate up to that limit.
+	// The identifier is small and arrives in the same body, so the offer can be
+	// consulted before the archive is decoded into a second copy. The
+	// authoritative check still runs inside ReceiveArchive — this one exists to
+	// refuse earlier, not instead.
+	if refusal := s.mayHold(req.IdentityAID); refusal != nil {
+		writeError(w, http.StatusConflict, "This machine will not hold that", refusal.Error())
 		return
 	}
 	raw, err := backup.DecodeB64(req.ArchiveB64)
@@ -249,6 +273,12 @@ func (s *CoreServer) handleBackupReceive(w http.ResponseWriter, r *http.Request)
 
 func (s *CoreServer) handleBackupListReceived(w http.ResponseWriter, r *http.Request) {
 	aid := chi.URLParam(r, "identityAID")
+	// See handleBackupDownload. "GET /api/backup/receive/.." listed this
+	// agent's whole data directory to anybody who asked.
+	if err := backup.AcceptableAID(aid); err != nil {
+		writeError(w, http.StatusBadRequest, "Not an identifier", err.Error())
+		return
+	}
 	paths, err := s.backupService().ListReceived(aid)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "List failed", err.Error())
@@ -324,11 +354,44 @@ func (s *CoreServer) handleBackupPull(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleBackupDownload serves a received opaque archive for recovery retrieval (C7).
+// handleBackupDownload serves a received opaque archive back to its owner.
+//
+// PUBLIC and unauthenticated, like the two routes beside it: an identity
+// recovering has no credential to present yet, which is the whole situation.
+// That makes both parameters attacker-controlled, and both used to be joined
+// straight onto a filesystem path.
+//
+//	GET /api/backup/receive/../download/backup_config.json
+//
+// returned the file. filepath.Join collapses the "..", so any host that could
+// open a connection could list this agent's data directory and read the files
+// sitting in it — contacts, profile, the backup configuration. The write side
+// of this same surface was given an identifier check; these two read routes
+// were not, and they are the half that hands data out.
 func (s *CoreServer) handleBackupDownload(w http.ResponseWriter, r *http.Request) {
 	identityAID := chi.URLParam(r, "identityAID")
+	if err := backup.AcceptableAID(identityAID); err != nil {
+		writeError(w, http.StatusBadRequest, "Not an identifier", err.Error())
+		return
+	}
 	name := chi.URLParam(r, "name")
-	path := filepath.Join(s.DataDir, "backup_receive", identityAID, name)
+	if err := backup.AcceptableArchiveName(name); err != nil {
+		writeError(w, http.StatusBadRequest, "Not an archive", err.Error())
+		return
+	}
+	root := filepath.Join(s.DataDir, "backup_receive")
+	path := filepath.Join(root, identityAID, name)
+	// Confirmed to be inside the receive directory before it is opened, the
+	// same second lock StopHoldingFor puts on its delete. The allowlists above
+	// already make traversal impossible; this survives one of them being
+	// loosened later by somebody who does not know that is what is holding the
+	// door shut.
+	if rel, rerr := filepath.Rel(root, path); rerr != nil ||
+		rel != filepath.Join(identityAID, name) {
+		writeError(w, http.StatusBadRequest, "Not an archive",
+			"that is not somewhere this machine keeps archives")
+		return
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "Not found", err.Error())
@@ -347,13 +410,31 @@ func (s *CoreServer) handleBackupDownload(w http.ResponseWriter, r *http.Request
 // screen is one that shows a person enough to manage disk and notice a backup
 // that stopped arriving, and nothing more.
 func (s *CoreServer) handleBackupHeld(w http.ResponseWriter, r *http.Request) {
+	// Archives stored before a push had to name its sender sit loose in the
+	// receive directory and are reachable by nothing. Gathered here, on the
+	// screen that reports them, rather than in a startup path where a failure
+	// would be invisible.
+	if _, merr := s.backupService().AdoptArchivesFiledUnderNoIdentity(); merr != nil {
+		log.Printf("[backup] could not tidy archives that name no identity: %v", merr)
+	}
 	held, err := s.backupService().Held()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Could not read what this machine holds", err.Error())
 		return
 	}
+	// Reported beside the identities and never as one. Gathering them somewhere
+	// tidy is not the same as making them visible: Held skips any directory
+	// that is not a well-formed identifier, so a screen that only moved them
+	// would leave them exactly where they started, which is unseen — the state
+	// this whole screen exists to end.
+	body := map[string]interface{}{"held": held}
+	if u, uerr := s.backupService().UnattributedArchives(); uerr != nil {
+		log.Printf("[backup] could not read archives that name no identity: %v", uerr)
+	} else if u != nil {
+		body["unattributed"] = u
+	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"held": held})
+	json.NewEncoder(w).Encode(body)
 }
 
 func (s *CoreServer) handleBackupGetOffer(w http.ResponseWriter, r *http.Request) {
@@ -401,8 +482,8 @@ func (s *CoreServer) handleBackupPutOffer(w http.ResponseWriter, r *http.Request
 //
 // Whoever owns the hardware is entitled to their disk back. What they are not
 // entitled to is doing it silently: the identity has to be told, or it goes on
-// believing it has an off-site copy it does not have, which is the worst of the
-// three states in B6. Telling it is the caller's job and is not yet built —
+// believing it has an off-site copy it does not have, which is the worst state
+// of the three. Telling it is the caller's job and is not yet built —
 // tracked rather than pretended.
 func (s *CoreServer) handleBackupStopHolding(w http.ResponseWriter, r *http.Request) {
 	aid := chi.URLParam(r, "identityAID")
@@ -416,4 +497,21 @@ func (s *CoreServer) handleBackupStopHolding(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// mayHold answers whether this machine would hold an archive for this identity,
+// without needing the archive.
+//
+// A cheap pre-check so a refusal costs a caller nothing and this machine no
+// memory. It deliberately mirrors rather than replaces the check inside
+// ReceiveArchive: that one is the gate, and it runs whether or not this one
+// did.
+func (s *CoreServer) mayHold(aid string) error {
+	cfg, err := s.backupService().LoadConfig()
+	if err != nil {
+		// Cannot tell. Fall through and let the real check answer.
+		return nil
+	}
+	held, _ := s.backupService().ListReceived(aid)
+	return cfg.Offer.MayAccept(aid, len(held) > 0)
 }

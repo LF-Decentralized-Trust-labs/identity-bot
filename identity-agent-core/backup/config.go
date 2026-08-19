@@ -20,27 +20,36 @@ const (
 
 // Destination describes one backup target.
 type Destination struct {
-	ID              string          `json:"id"`
-	Type            DestinationType `json:"type"`
-	Label           string          `json:"label"`
-	LocalPath       string          `json:"local_path,omitempty"`
-	PairedURL       string          `json:"paired_url,omitempty"`
-	PairedRole      string          `json:"paired_role,omitempty"` // backup_only
-	CloudProvider   string          `json:"cloud_provider,omitempty"`
-	CloudBucket     string          `json:"cloud_bucket,omitempty"`
-	CloudPrefix     string          `json:"cloud_prefix,omitempty"`
-	CloudEndpoint   string          `json:"cloud_endpoint,omitempty"`
-	CloudRegion     string          `json:"cloud_region,omitempty"`
-	RemoteURL       string          `json:"remote_url,omitempty"`
-	CredentialID    string          `json:"credential_id,omitempty"`
-	IAGated         bool            `json:"ia_gated"` // true = requires working IA to retrieve
-	Enabled         bool            `json:"enabled"`
-	LastSuccessAt   string          `json:"last_success_at,omitempty"`
-	LastError       string          `json:"last_error,omitempty"`
-	LastArchiveSize int64           `json:"last_archive_size,omitempty"`
+	ID            string          `json:"id"`
+	Type          DestinationType `json:"type"`
+	Label         string          `json:"label"`
+	LocalPath     string          `json:"local_path,omitempty"`
+	PairedURL     string          `json:"paired_url,omitempty"`
+	PairedRole    string          `json:"paired_role,omitempty"` // backup_only
+	CloudProvider string          `json:"cloud_provider,omitempty"`
+	CloudBucket   string          `json:"cloud_bucket,omitempty"`
+	CloudPrefix   string          `json:"cloud_prefix,omitempty"`
+	CloudEndpoint string          `json:"cloud_endpoint,omitempty"`
+	CloudRegion   string          `json:"cloud_region,omitempty"`
+	RemoteURL     string          `json:"remote_url,omitempty"`
+	CredentialID  string          `json:"credential_id,omitempty"`
+	IAGated       bool            `json:"ia_gated"` // true = requires working IA to retrieve
+	Enabled       bool            `json:"enabled"`
+	LastSuccessAt string          `json:"last_success_at,omitempty"`
+	// LastFullAt is when this destination last received an archive that
+	// restores on its own.
+	//
+	// Separate from LastSuccessAt because a delta is a success and is not a
+	// recovery point: a destination holding only deltas holds nothing anybody
+	// can restore from. Empty on every destination that predates this field,
+	// which is correct — none of them is known to hold a full archive, and the
+	// safe assumption is the one that sends another.
+	LastFullAt      string `json:"last_full_at,omitempty"`
+	LastError       string `json:"last_error,omitempty"`
+	LastArchiveSize int64  `json:"last_archive_size,omitempty"`
 }
 
-// Config is persisted backup configuration (D1).
+// Config is persisted backup configuration.
 type Config struct {
 	Enabled           bool          `json:"enabled"`
 	DefaultTiers      []string      `json:"default_tiers"`
@@ -62,7 +71,7 @@ type Config struct {
 	Offer Offer `json:"offer"`
 }
 
-// HistoryEntry is one backup run (D3).
+// HistoryEntry is one backup run.
 type HistoryEntry struct {
 	ID           string   `json:"id"`
 	Timestamp    string   `json:"timestamp"`

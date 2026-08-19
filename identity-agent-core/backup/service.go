@@ -13,6 +13,8 @@ import (
 	"identity-agent-core/store"
 
 	"github.com/google/uuid"
+	"sort"
+	"strings"
 )
 
 type remoteBackend interface {
@@ -139,6 +141,43 @@ func (s *Service) exportWithReason(mnemonic, seedB64, passphrase, destPath strin
 			deltaState = ResetDeltaState()
 			forceFull = true
 			chainReset = true
+		}
+	}
+
+	// A destination that has never received a FULL archive gets one.
+	//
+	// Deltas restore only on top of a full archive, so a destination holding
+	// nothing but deltas holds nothing anybody can recover from. Without this
+	// the sequence any sensible person follows — add a destination, take a
+	// backup — leaves them with a destination that cannot restore, and it stays
+	// that way until the next scheduled compaction, up to a month later. Add a
+	// host, take a backup, and the Identity Agent still reports nothing off
+	// this device that can be recovered from. It is reporting correctly.
+	//
+	// Keyed on the last FULL rather than the last success, and the difference
+	// matters twice. A destination that has only ever taken deltas has a recent
+	// success and holds nothing restorable, so keying on success would leave
+	// every destination that already exists broken and fix only new ones.
+	//
+	// And it is rate-limited rather than latched. Keying on "has never
+	// succeeded" meant one permanently unreachable destination made EVERY
+	// backup a full one, forever, silently killing deltas for that agent — and
+	// a paired machine whose offer is not turned on is exactly such a
+	// destination, so that would be the common state rather than a rare one.
+	if !forceFull {
+		if cfg, cerr := s.ConfigStore.LoadConfig(); cerr == nil {
+			for _, d := range cfg.Destinations {
+				if !d.Enabled || d.LastFullAt != "" {
+					continue
+				}
+				if d.LastError != "" && !readyToRetryFull(d) {
+					continue
+				}
+				log.Printf("[backup] destination %s holds nothing it could restore from, "+
+					"so this archive is full rather than a delta", d.ID)
+				forceFull = true
+				break
+			}
 		}
 	}
 
@@ -305,6 +344,40 @@ func (s *Service) sealRecipients() ([][]byte, error) {
 // written and a paired machine that was unreachable both returned silently, and
 // the run was still recorded as a success with a shorter list. A backup that
 // reached nowhere was indistinguishable from one that reached everywhere.
+// readyToRetryFull rate-limits the full-archive retry for a failing destination.
+//
+// A destination that has never held a full archive should get one, but one that
+// can never be reached must not turn every backup on this agent into a full
+// archive. Once a day repairs a destination that comes back, and costs almost
+// nothing for one that does not.
+func readyToRetryFull(d Destination) bool {
+	if d.LastSuccessAt == "" {
+		// It has never worked at all, so a full archive costs no more than a
+		// delta to something that will refuse both.
+		return true
+	}
+	t, err := time.Parse(time.RFC3339, d.LastSuccessAt)
+	if err != nil {
+		return true
+	}
+	return time.Since(t) >= 24*time.Hour
+}
+
+// ownAID is the identity these archives belong to.
+//
+// A destination files by identity, so an archive that cannot say whose it is
+// cannot be stored safely anywhere that holds more than one.
+func (s *Service) ownAID() string {
+	if s.Store == nil {
+		return ""
+	}
+	identity, err := s.Store.GetIdentity()
+	if err != nil || identity == nil {
+		return ""
+	}
+	return identity.AID
+}
+
 func (s *Service) pushToDestinations(cfg Config, result *ExportResult) []string {
 	destIDs := []string{}
 	for _, d := range cfg.Destinations {
@@ -316,7 +389,7 @@ func (s *Service) pushToDestinations(cfg Config, result *ExportResult) []string 
 		case DestLocalPath:
 			err = s.pushLocalDestination(d, result)
 		case DestPairedAgent:
-			err = s.Pusher.Push(d.PairedURL, result.Bytes)
+			err = s.Pusher.Push(d.PairedURL, s.ownAID(), result.Bytes)
 		case DestCloudUser:
 			err = s.pushCloudDestination(d, result)
 		case DestCloudHosted:
@@ -327,10 +400,10 @@ func (s *Service) pushToDestinations(cfg Config, result *ExportResult) []string 
 
 		if err != nil {
 			log.Printf("[backup] destination %s (%s) FAILED: %v", d.ID, d.Type, err)
-			s.noteDestinationResult(d.ID, err, int64(result.Size))
+			s.noteDestinationResult(d.ID, err, int64(result.Size), result.SnapshotType == SnapshotFull)
 			continue
 		}
-		s.noteDestinationResult(d.ID, nil, int64(result.Size))
+		s.noteDestinationResult(d.ID, nil, int64(result.Size), result.SnapshotType == SnapshotFull)
 		destIDs = append(destIDs, d.ID)
 	}
 	return destIDs
@@ -469,25 +542,61 @@ func (s *Service) ReceiveArchive(identityAID string, data []byte) (string, error
 	}
 	// Named to the second, plus a counter, because two archives CAN arrive
 	// inside one second and the timestamp alone silently overwrote the first.
-	// Found on the first live run of this path: an identity pushed twice, the
-	// second push reported success, and the machine held one file. A delta
-	// chain with a link quietly missing restores to the wrong state, so this is
-	// worse than losing the newer archive outright.
+	//
+	// The name is CLAIMED by creating the file exclusively rather than by
+	// checking whether it exists and then writing it. A stat-then-write leaves
+	// a window in which two concurrent pushes both see the name free, both take
+	// it, and both write the same file — and since the route is public and the
+	// name is a predictable timestamp, that window can be aimed at. The result
+	// there is worse than a lost archive: two interleaved writes leave one file
+	// with parts of both, and the rename below publishes it under a name that
+	// looks like a complete archive.
 	base := time.Now().UTC().Format("20060102-150405")
-	path := filepath.Join(dir, base+".iab")
-	for n := 1; ; n++ {
-		if _, err := os.Stat(path); os.IsNotExist(err) {
+	var f *os.File
+	var path string
+	for n := 0; ; n++ {
+		if n == 0 {
+			path = filepath.Join(dir, base+archiveSuffix)
+		} else {
+			path = filepath.Join(dir, fmt.Sprintf("%s-%d%s", base, n, archiveSuffix))
+		}
+		// Both names have to be free, and for different reasons. The finished
+		// archive may already be there from an earlier push in this same
+		// second — the rename below would replace it silently. The partial may
+		// be there from a push happening right now.
+		if _, serr := os.Stat(path); serr == nil {
+			continue
+		} else if !os.IsNotExist(serr) {
+			return "", serr
+		}
+		var err error
+		// O_EXCL: the create fails if somebody else already took this name, so
+		// the loop advances instead of two callers sharing a file.
+		f, err = os.OpenFile(path+partialSuffix, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+		if err == nil {
 			break
 		}
-		path = filepath.Join(dir, fmt.Sprintf("%s-%d.iab", base, n))
+		if !os.IsExist(err) {
+			// Anything other than "taken" is a real failure. The earlier
+			// version treated every error as "taken" and retried forever, so a
+			// directory that could not be read span on a public route.
+			return "", err
+		}
+		if n > 10000 {
+			return "", fmt.Errorf("could not find a free name for this archive")
+		}
 	}
 
 	// Written aside and moved into place, so a transfer that dies partway
-	// leaves nothing rather than something that looks restorable. B2 asks for
-	// this on the pushing side; it has to be true on the receiving side too,
-	// because that is where the file actually lands.
-	tmp := path + ".partial"
-	if err := os.WriteFile(tmp, data, 0600); err != nil {
+	// leaves nothing rather than something that looks restorable.
+	tmp := path + partialSuffix
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return "", err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tmp)
 		return "", err
 	}
 	if err := os.Rename(tmp, path); err != nil {
@@ -495,6 +604,49 @@ func (s *Service) ReceiveArchive(identityAID string, data []byte) (string, error
 		return "", err
 	}
 	return path, nil
+}
+
+// AdoptArchivesFiledUnderNoIdentity moves archives that were stored before a
+// push had to say who it was from.
+//
+// A push with an empty identifier used to produce a path that collapsed to the
+// receive directory itself, so those archives sit loose in backup_receive/
+// rather than in a per-identity directory under it. Held() only looks at
+// directories and the listing route cannot be called with an empty identifier,
+// so they are on disk and reachable by nothing — an off-site copy somebody is
+// relying on, invisible to every screen and every recovery path.
+//
+// They cannot be attributed: the sender is exactly the thing that was missing.
+// So they are moved somewhere a person can see them and decide, rather than
+// deleted, and rather than left where nothing looks.
+func (s *Service) AdoptArchivesFiledUnderNoIdentity() (int, error) {
+	root := filepath.Join(s.DataDir, "backup_receive")
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	moved := 0
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), archiveSuffix) {
+			continue
+		}
+		dest := filepath.Join(root, unattributed)
+		if err := os.MkdirAll(dest, 0755); err != nil {
+			return moved, err
+		}
+		if err := os.Rename(filepath.Join(root, e.Name()), filepath.Join(dest, e.Name())); err != nil {
+			return moved, err
+		}
+		moved++
+	}
+	if moved > 0 {
+		log.Printf("[backup] moved %d archive(s) that did not say which identity they belong to "+
+			"into %s, where they can at least be seen", moved, unattributed)
+	}
+	return moved, nil
 }
 
 // ListReceived returns opaque archive paths for a paired identity (no decrypt).
@@ -509,9 +661,16 @@ func (s *Service) ListReceived(identityAID string) ([]string, error) {
 	}
 	var paths []string
 	for _, e := range entries {
-		if !e.IsDir() {
-			paths = append(paths, filepath.Join(dir, e.Name()))
+		// Only finished archives. A ".partial" left by a transfer that died
+		// sorts AFTER the archive it was going to replace, and recovery takes
+		// the last entry — so an aborted push became the file somebody restored
+		// from. Writing aside and renaming is pointless if the reader picks up
+		// the aside copy.
+		if e.IsDir() || !strings.HasSuffix(e.Name(), archiveSuffix) {
+			continue
 		}
+		paths = append(paths, filepath.Join(dir, e.Name()))
 	}
+	sort.Strings(paths)
 	return paths, nil
 }

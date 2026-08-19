@@ -77,7 +77,7 @@ func TestAMachineThatNeverOfferedHoldsNothing(t *testing.T) {
 }
 
 func TestStoppingNewIdentitiesDoesNotStopTheOnesAlreadyHere(t *testing.T) {
-	// The distinction B6 turns on. Collapsing these two produces exactly the
+	// Why the two settings are separate. Collapsing them produces exactly the
 	// failure the setting exists to prevent: somebody adds this machine, is
 	// confirmed, and it silently holds nothing but the first archive.
 	o := Offer{Accepting: true, AcceptingNewIdentities: false}

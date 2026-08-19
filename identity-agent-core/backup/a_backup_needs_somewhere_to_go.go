@@ -204,7 +204,7 @@ func (s *Service) pushLocalDestination(d Destination, result *ExportResult) erro
 
 // noteDestinationResult records what happened to one destination, so a
 // persistently failing one is visible without reading logs.
-func (s *Service) noteDestinationResult(id string, err error, size int64) {
+func (s *Service) noteDestinationResult(id string, err error, size int64, wasFull bool) {
 	cfg, loadErr := s.ConfigStore.LoadConfig()
 	if loadErr != nil {
 		return
@@ -217,8 +217,15 @@ func (s *Service) noteDestinationResult(id string, err error, size int64) {
 			cfg.Destinations[i].LastError = err.Error()
 		} else {
 			cfg.Destinations[i].LastError = ""
-			cfg.Destinations[i].LastSuccessAt = time.Now().UTC().Format(time.RFC3339)
+			now := time.Now().UTC().Format(time.RFC3339)
+			cfg.Destinations[i].LastSuccessAt = now
 			cfg.Destinations[i].LastArchiveSize = size
+			// Only a full archive makes this a place somebody could recover
+			// from. Recording deltas here would let a destination that has
+			// never held a restorable archive look ready.
+			if wasFull {
+				cfg.Destinations[i].LastFullAt = now
+			}
 		}
 		if saveErr := s.ConfigStore.SaveConfig(cfg); saveErr != nil {
 			log.Printf("[backup] could not record the result for destination %s: %v", id, saveErr)

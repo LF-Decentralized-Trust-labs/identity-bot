@@ -1,4 +1,4 @@
-// The client half of B5 and B6.
+// The client half of the holding offer, and of what a machine reports it holds.
 //
 // Two things it must get right. The offer has to default to holding nothing,
 // or a machine starts storing strangers' data because somebody upgraded it. And
