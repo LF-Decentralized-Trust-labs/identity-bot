@@ -449,12 +449,21 @@ func (s *CoreServer) handlePairingComplete(w http.ResponseWriter, r *http.Reques
 			}
 		}
 	} else {
-		if err := validateDelegation(req, pairingState.offered.PublicKey); err != nil {
-			writeError(w, http.StatusBadRequest, "Delegation refused", err.Error())
-			return
-		}
-		identityAID, _ = req.DipEvent["i"].(string)
-		eventType, eventBody = "dip", req.DipEvent
+		// A computer you pair with founds its own root. It does not accept a
+		// delegation, and this is the only place that could have granted one.
+		//
+		// A delegated inception names the delegator in a publicly resolvable
+		// key log, so a computer paired that way publishes who owns it — and
+		// therefore who you are, everywhere else that root appears. ADR-036
+		// settled this on 2026-08-12 and the only caller has always asked to
+		// found as root; what is refused here is a request no client of ours
+		// makes and no client of ours should be able to make.
+		writeError(w, http.StatusBadRequest,
+			"This instance founds its own identity",
+			"pairing by delegation is not supported: a delegated inception would name your "+
+				"root identity as delegator in a publicly resolvable key log. Send "+
+				"found_as_root with the owner this machine should answer to.")
+		return
 	}
 
 	eventJSON, _ := json.Marshal(eventBody)
@@ -564,9 +573,6 @@ func (s *CoreServer) handlePairingComplete(w http.ResponseWriter, r *http.Reques
 	if req.FoundAsRoot {
 		log.Printf("[pairing] adopted: AID %s founded as its own root, owner %s",
 			identityAID, req.OwnerAID)
-	} else {
-		log.Printf("[pairing] adopted: delegated AID %s under delegator %s, owner %s",
-			identityAID, req.DelegatorAID, req.OwnerAID)
 	}
 
 	// The identity is named as what it is. One founded as its own root is not
@@ -602,60 +608,8 @@ func (s *CoreServer) handlePairingComplete(w http.ResponseWriter, r *http.Reques
 			response["agent_did"] = did
 		}
 	}
-	if req.FoundAsRoot {
-		response["root_aid"] = identityAID
-	} else {
-		response["delegated_aid"] = identityAID
-		response["delegator_aid"] = req.DelegatorAID
-	}
+	response["root_aid"] = identityAID
 	writeJSONResponse(w, response)
-}
-
-// validateDelegation checks the delegation is over this instance's key and
-// names a real delegator other than itself.
-func validateDelegation(req pairingCompleteRequest, offeredPublicKey string) error {
-	if req.DipEvent == nil {
-		return fmt.Errorf("dip_event is required")
-	}
-	if t, _ := req.DipEvent["t"].(string); t != "dip" {
-		return fmt.Errorf("expected a delegated inception (dip), got %q", t)
-	}
-	delegatedAID, _ := req.DipEvent["i"].(string)
-	if delegatedAID == "" {
-		return fmt.Errorf("dip_event has no delegated AID")
-	}
-	di, _ := req.DipEvent["di"].(string)
-	if di == "" {
-		return fmt.Errorf("dip_event names no delegator")
-	}
-	if req.DelegatorAID != "" && di != req.DelegatorAID {
-		return fmt.Errorf("dip_event delegates from %s but the request claims %s", di, req.DelegatorAID)
-	}
-	if di == delegatedAID {
-		return fmt.Errorf("an AID cannot delegate to itself")
-	}
-
-	// The check that matters: the delegation must be over the key this instance
-	// generated. Without it a controller could delegate to a key it holds and
-	// hand the box a delegation the box cannot sign with — or worse, one
-	// somebody else can.
-	keys, _ := req.DipEvent["k"].([]interface{})
-	if len(keys) == 0 {
-		return fmt.Errorf("dip_event carries no key")
-	}
-	if first, _ := keys[0].(string); first != offeredPublicKey {
-		return fmt.Errorf("the delegation is over a different key than this instance generated")
-	}
-
-	if req.OwnerAID == "" || req.OwnerPublicKey == "" {
-		return fmt.Errorf("owner_aid and owner_public_key are required: an adopted instance must know whose signature counts as its owner's")
-	}
-	// One decoder for key material, shared with the owner-signature path, so a
-	// key this accepts is exactly a key that path can later verify against.
-	if _, err := login.DecodeVerkey(req.OwnerPublicKey); err != nil {
-		return fmt.Errorf("owner_public_key: %w", err)
-	}
-	return nil
 }
 
 // refuseIfAlreadyPaired stops a second adoption. First pairing wins, and the
@@ -977,7 +931,7 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 		OwnerAgentEndpoint:      s.getPublicURL(r),
 	})
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "The box refused the delegation", err.Error())
+		writeError(w, http.StatusBadGateway, "The box refused to be adopted", err.Error())
 		return
 	}
 
