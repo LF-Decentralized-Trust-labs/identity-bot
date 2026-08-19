@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"identity-agent-core/authprovider"
 	"io"
 	"net/http"
 	"os"
@@ -103,6 +104,22 @@ type Service struct {
 	Store         store.Store
 	BackupService *backup.Service
 	CancelGate    *CancelWindowGate
+	// Authenticator establishes that the person completing a recovery is the
+	// person the identity belongs to. The phrase proves control of the
+	// identity and unlocks the data; it says nothing about who is holding it.
+	//
+	// The same provider feeds AuthProvider below, which turns the answer into a
+	// waiting period. One question, asked once.
+	Authenticator authprovider.Provider
+	// RequiredLevel is how well authenticated somebody must be to complete a
+	// recovery on this agent.
+	//
+	// LevelUnknown means the gate is not enforced, which is what an agent with
+	// no provider has to do — refusing every recovery because nothing can
+	// measure would lock people out of their own identities to protect them
+	// from nobody. The waiting period is what stands in for it there, and an
+	// unmeasured level already draws the longest one.
+	RequiredLevel authprovider.Level
 	Rotation      *RotationTracker
 	AuthProvider  AuthProviderGate
 
@@ -127,14 +144,24 @@ type sessionRecord struct {
 // started it.
 
 func NewService(dataDir string, st store.Store, backupSvc *backup.Service) *Service {
-	auth := NewStubAuthProviderGate()
+	// One provider, read for both questions it answers: how well authenticated
+	// somebody is, and therefore how long this recovery waits. An agent with no
+	// provider configured says so rather than producing a level, and an
+	// unmeasured level draws the longest window.
+	provider := authprovider.Provider(authprovider.NotConfigured{})
+	gate := FromAuthProvider{Provider: provider}
 	return &Service{
 		DataDir:       dataDir,
 		Store:         st,
 		BackupService: backupSvc,
-		CancelGate:    NewCancelWindowGate(auth),
+		CancelGate:    NewCancelWindowGate(gate),
 		Rotation:      NewRotationTracker(),
-		AuthProvider:  auth,
+		AuthProvider:  gate,
+		Authenticator: provider,
+		// Not enforced until a provider exists. Refusing every recovery on an
+		// agent that cannot measure would lock people out of their own
+		// identities to protect them from nobody.
+		RequiredLevel: authprovider.LevelUnknown,
 		sessions:      map[string]*sessionRecord{},
 	}
 }
@@ -343,6 +370,26 @@ func (s *Service) Cancel(sessionID string) (*Session, error) {
 	return &sess, nil
 }
 
+// ErrNotAuthenticated means the recovery is controlled by somebody this agent
+// cannot establish is the owner.
+//
+// A distinct type because it is not a failure of the recovery — the archive
+// opened and the words were right. It is the second gate saying that
+// controlling an identity and being its owner are different things.
+type ErrNotAuthenticated struct {
+	Required authprovider.Level
+	Got      authprovider.Result
+}
+
+func (e *ErrNotAuthenticated) Error() string {
+	if !e.Got.Measured {
+		return "this recovery cannot complete because nothing here can establish who you are: " +
+			e.Got.Why
+	}
+	return fmt.Sprintf("this recovery needs you authenticated to %q and you are %q",
+		e.Required, e.Got.Level)
+}
+
 // ActivateRequest carries what finishing a recovery needs and nothing else.
 type ActivateRequest struct {
 	Mnemonic   string `json:"mnemonic"`
@@ -387,6 +434,23 @@ func (s *Service) Activate(sessionID string, req ActivateRequest) (*Session, err
 	}
 	if err := s.Rotation.RequireCompleted(sessionID); err != nil {
 		return nil, err
+	}
+	// The second gate. Controlling the identity is not the same as being the
+	// person it belongs to, and until now completing a recovery asked only the
+	// first question — the phrase opened the archive and the identity was
+	// written straight in.
+	//
+	// Checked here rather than at the start, deliberately: a recovery waits days,
+	// and an authentication from the day it began is not evidence about who is
+	// finishing it. This is the moment that matters.
+	if s.RequiredLevel != "" && s.RequiredLevel != authprovider.LevelUnknown {
+		res := authprovider.Of(s.Authenticator)
+		if !res.Level.AtLeast(s.RequiredLevel) {
+			return nil, &ErrNotAuthenticated{
+				Required: s.RequiredLevel,
+				Got:      res,
+			}
+		}
 	}
 	if len(archive) == 0 {
 		return nil, fmt.Errorf("this recovery has no archive to restore from")
