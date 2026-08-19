@@ -248,7 +248,7 @@ func (s *Service) LoadSessions() (int, error) {
 		}
 		rec := &sessionRecord{Session: p.Session}
 		if p.ArchiveB64 != "" {
-			if raw, derr := decodeArchiveInput(p.ArchiveB64, ""); derr == nil {
+			if raw, derr := decodeArchiveInput(p.ArchiveB64); derr == nil {
 				rec.Archive = raw
 			}
 		}

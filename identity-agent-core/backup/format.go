@@ -242,3 +242,19 @@ func DeserializePayloadBundle(data []byte) (*PayloadBundle, error) {
 	}
 	return b, nil
 }
+
+// LooksLikeAnArchive reports whether these bytes are one of ours.
+//
+// Structure only — the magic and a manifest that parses. It says nothing about
+// whether the archive can be opened, which needs a key this check does not
+// have and should not want.
+//
+// It exists so a route that hands back an archive can require that what it
+// hands back IS an archive. The alternative, confining which paths may be read,
+// closes the same hole and breaks the case the route exists for: somebody
+// restoring onto a new machine has their archive on a USB stick, not in this
+// agent's own export directory.
+func LooksLikeAnArchive(raw []byte) bool {
+	_, err := DecodeArchive(raw)
+	return err == nil
+}

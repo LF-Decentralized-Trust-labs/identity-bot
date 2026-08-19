@@ -141,7 +141,7 @@ func NewService(dataDir string, st store.Store, backupSvc *backup.Service) *Serv
 
 // Verify decrypts and integrity-checks an archive, then verifies HD pairwise keys.
 func (s *Service) Verify(req VerifyRequest) (*VerifyResponse, error) {
-	raw, err := decodeArchiveInput(req.ArchiveB64, "")
+	raw, err := decodeArchiveInput(req.ArchiveB64)
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +176,7 @@ func (s *Service) Verify(req VerifyRequest) (*VerifyResponse, error) {
 
 // Start creates a recovery session with assurance-graduated cancel-window delay.
 func (s *Service) Start(req StartRequest) (*Session, error) {
-	raw, err := decodeArchiveInput(req.ArchiveB64, "")
+	raw, err := decodeArchiveInput(req.ArchiveB64)
 	if err != nil {
 		return nil, err
 	}
@@ -584,6 +584,17 @@ func (s *Service) retrieveFromBackupOnly(req RetrieveRequest) (*RetrieveResponse
 	if req.IdentityAID == "" {
 		return nil, fmt.Errorf("identity_aid required for backup-only retrieval")
 	}
+	// The same checks the HTTP download route was given. This is the sibling
+	// read path and it was left unvalidated, so it joined a caller-supplied
+	// identifier and filename onto a path exactly as that one used to.
+	if err := backup.AcceptableAID(req.IdentityAID); err != nil {
+		return nil, err
+	}
+	if req.ArchiveName != "" {
+		if err := backup.AcceptableArchiveName(req.ArchiveName); err != nil {
+			return nil, err
+		}
+	}
 	paths, err := s.BackupService.ListReceived(req.IdentityAID)
 	if err != nil {
 		return nil, err
@@ -607,17 +618,60 @@ func (s *Service) retrieveFromBackupOnly(req RetrieveRequest) (*RetrieveResponse
 	}, nil
 }
 
+// maxArchiveOnDisk bounds what local retrieval will read into memory.
+const maxArchiveOnDisk = 2 << 30 // 2 GiB
+
 func (s *Service) retrieveFromLocal(req RetrieveRequest) (*RetrieveResponse, error) {
 	if req.LocalPath == "" {
 		return nil, fmt.Errorf("local_path required for local retrieval")
 	}
-	raw, err := os.ReadFile(req.LocalPath)
+	// It has to BE an archive. That is the check, and confining the path was
+	// not.
+	//
+	// This read whatever absolute path it was handed and returned the bytes
+	// base64-encoded, which makes it a general file-read rather than a way to
+	// fetch a backup. The file that matters most is the root seed: on every
+	// platform without a hardware wrapper it is stored unwrapped, and it
+	// derives both the backup key and the seal keypair — so one read of it
+	// opens every archive that identity has ever written, without the recovery
+	// phrase ever being involved.
+	//
+	// Confining the path to this agent's own export directory would close that
+	// and break the only situation this route exists for. Somebody restoring
+	// onto a new machine has an empty data directory and their archive on a USB
+	// stick or in their downloads; the export directory is written by exactly
+	// one thing, which is this agent making a backup, and a fresh machine has
+	// never done that.
+	//
+	// So the file is read and then required to be an archive. Its contents are
+	// sealed, so returning one discloses nothing that holding it did not
+	// already; a file that is not one is refused before any of it goes back.
+	clean := filepath.Clean(req.LocalPath)
+
+	// Followed symlinks land somewhere else by definition, and a symlink is how
+	// a confined directory stops being confined.
+	info, lerr := os.Lstat(clean)
+	if lerr != nil {
+		return nil, lerr
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("that is not a file")
+	}
+	if info.Size() > maxArchiveOnDisk {
+		return nil, fmt.Errorf("that file is too large to be an archive")
+	}
+
+	raw, err := os.ReadFile(clean)
 	if err != nil {
 		return nil, err
 	}
+	if !backup.LooksLikeAnArchive(raw) {
+		return nil, fmt.Errorf("that is not an archive: local retrieval reads backups, " +
+			"and returning anything else would make this a way to read any file on this machine")
+	}
 	return &RetrieveResponse{
 		Source:     SourceLocalFile,
-		Path:       req.LocalPath,
+		Path:       clean,
 		ArchiveB64: base64.StdEncoding.EncodeToString(raw),
 		SizeBytes:  len(raw),
 	}, nil
@@ -675,14 +729,16 @@ func FetchBackupOnlyArchive(baseURL, identityAID, archiveName string) ([]byte, e
 	return io.ReadAll(resp.Body)
 }
 
-func decodeArchiveInput(archiveB64, archivePath string) ([]byte, error) {
-	if archiveB64 != "" {
-		return base64.StdEncoding.DecodeString(archiveB64)
+func decodeArchiveInput(archiveB64 string) ([]byte, error) {
+	// The path branch is gone. Both callers passed an empty string, so it was
+	// dead — and it was an unconstrained ReadFile of a caller-supplied path,
+	// which is the exact primitive this package just removed from the two
+	// routes that could reach it. A dead one is one argument away from being
+	// live.
+	if archiveB64 == "" {
+		return nil, fmt.Errorf("archive_b64 required")
 	}
-	if archivePath != "" {
-		return os.ReadFile(archivePath)
-	}
-	return nil, fmt.Errorf("archive_b64 or archive path required")
+	return base64.StdEncoding.DecodeString(archiveB64)
 }
 
 func parseTime(ts string) time.Time {

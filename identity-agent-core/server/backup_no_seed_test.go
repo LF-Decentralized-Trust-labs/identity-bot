@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -56,7 +57,7 @@ func TestARootDeviceBacksUpWithoutBeingGivenAPhrase(t *testing.T) {
 	}
 	s := exportServer(t, dir)
 
-	w := exportRequest(t, s, `{"dest_path":"`+dir+`/out.iab"}`)
+	w := exportRequest(t, s, `{"dest_path":"out.iab"}`)
 	if w.Code != http.StatusOK {
 		t.Fatalf("a root device could not back up without a phrase: %d %s", w.Code, w.Body)
 	}
@@ -80,11 +81,15 @@ func TestWhatItWroteOpensWithTheOwnersPhrase(t *testing.T) {
 	}
 	s := exportServer(t, dir)
 
-	dest := dir + "/out.iab"
-	if w := exportRequest(t, s, `{"dest_path":"`+dest+`"}`); w.Code != http.StatusOK {
+	// dest_path chooses the NAME, not the place. It used to be taken as given
+	// and passed to WriteFile, so a caller picked any path on the machine — the
+	// identity store included — and could also push this identity's sealed
+	// archive into a synced folder.
+	if w := exportRequest(t, s, `{"dest_path":"out.iab"}`); w.Code != http.StatusOK {
 		t.Fatalf("export failed: %d %s", w.Code, w.Body)
 	}
 
+	dest := filepath.Join(dir, "exports", "out.iab")
 	raw, err := readFileForTest(dest)
 	if err != nil {
 		t.Fatalf("archive not written: %v", err)
@@ -115,7 +120,7 @@ func TestAPhraseIsStillHonouredWhenOneIsGiven(t *testing.T) {
 	dir := t.TempDir()
 	s := exportServer(t, dir)
 
-	body := `{"mnemonic":"` + sealTestMnemonic + `","dest_path":"` + dir + `/out.iab"}`
+	body := `{"mnemonic":"` + sealTestMnemonic + `","dest_path":"out.iab"}`
 	if w := exportRequest(t, s, body); w.Code != http.StatusOK {
 		t.Fatalf("an explicit phrase was rejected: %d %s", w.Code, w.Body)
 	}

@@ -51,8 +51,16 @@ func TestRetrieveFromBackupOnlyDevice(t *testing.T) {
 
 func TestRetrieveFromLocalFile(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "backup.iab")
-	payload := []byte("local-archive-bytes")
+	// Local retrieval reads the export directory and nothing else. It used to
+	// read any absolute path it was handed and return the bytes, which made it
+	// a general file-read rather than a way to fetch a backup.
+	if err := os.MkdirAll(filepath.Join(dir, "exports"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "exports", "20260819-120000.iab")
+	// A real archive: local retrieval requires the bytes to BE one, which is
+	// what stops it handing back any file it is pointed at.
+	payload := buildTestArchive(t, testMnemonic, nil)
 	if err := os.WriteFile(path, payload, 0600); err != nil {
 		t.Fatal(err)
 	}
