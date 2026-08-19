@@ -124,3 +124,43 @@ func TestASecondIdentityIsRefusedWhileTheFirstKeepsWorking(t *testing.T) {
 		t.Fatal("a new identity was taken on after new identities were stopped")
 	}
 }
+
+func TestTwoArchivesInOneSecondAreBothKept(t *testing.T) {
+	// Found on the first live run: an identity pushed twice inside a second,
+	// both pushes reported success, and the machine held one file. Archives are
+	// named to the second, so the second write landed on the first name.
+	//
+	// Losing a delta silently is worse than refusing it. A chain with a link
+	// missing still restores — to the wrong state.
+	svc, _ := serviceWithOffer(t, Offer{
+		Accepting: true, AcceptingNewIdentities: true, ReserveBytes: 1024,
+	})
+	aid := "E" + strings.Repeat("A", 43)
+
+	first, err := svc.ReceiveArchive(aid, []byte("the first one"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := svc.ReceiveArchive(aid, []byte("the second one"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == second {
+		t.Fatalf("both archives were written to the same file: %s", first)
+	}
+
+	held, err := svc.Held()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(held) != 1 || held[0].Archives != 2 {
+		t.Fatalf("expected two archives held, got %+v", held)
+	}
+
+	// And both still say what they said.
+	one, _ := os.ReadFile(first)
+	two, _ := os.ReadFile(second)
+	if string(one) != "the first one" || string(two) != "the second one" {
+		t.Fatalf("archives were overwritten: %q %q", one, two)
+	}
+}

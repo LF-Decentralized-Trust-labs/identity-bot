@@ -467,8 +467,20 @@ func (s *Service) ReceiveArchive(identityAID string, data []byte) (string, error
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return "", err
 	}
-	name := fmt.Sprintf("%s.iab", time.Now().UTC().Format("20060102-150405"))
-	path := filepath.Join(dir, name)
+	// Named to the second, plus a counter, because two archives CAN arrive
+	// inside one second and the timestamp alone silently overwrote the first.
+	// Found on the first live run of this path: an identity pushed twice, the
+	// second push reported success, and the machine held one file. A delta
+	// chain with a link quietly missing restores to the wrong state, so this is
+	// worse than losing the newer archive outright.
+	base := time.Now().UTC().Format("20060102-150405")
+	path := filepath.Join(dir, base+".iab")
+	for n := 1; ; n++ {
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			break
+		}
+		path = filepath.Join(dir, fmt.Sprintf("%s-%d.iab", base, n))
+	}
 
 	// Written aside and moved into place, so a transfer that dies partway
 	// leaves nothing rather than something that looks restorable. B2 asks for
