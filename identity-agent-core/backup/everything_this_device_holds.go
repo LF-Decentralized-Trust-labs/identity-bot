@@ -67,6 +67,18 @@ func skipReason(rel string, info fs.FileInfo) string {
 		return "an archive this agent wrote; carrying it would nest backups inside backups"
 	}
 
+	// A recovery in progress holds a whole sealed archive, base64 inside a
+	// JSON file — so it walks straight past the rule above and nests one
+	// archive inside the next at four thirds the size, for as long as the
+	// recovery waits out its window.
+	//
+	// Restoring one would be worse than the size: the file lands in the new
+	// device's data directory and the next startup resurrects somebody's stale
+	// recovery session from it.
+	if strings.HasPrefix(slashed, "recovery_sessions/") {
+		return "a recovery in progress; it holds a sealed archive and belongs to this device"
+	}
+
 	// Container images and app payloads: large, and re-fetched rather than
 	// recovered. The sandbox INDEX is carried separately so a person can see
 	// what they had.

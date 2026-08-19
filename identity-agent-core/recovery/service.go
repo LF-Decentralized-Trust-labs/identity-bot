@@ -37,6 +37,9 @@ const (
 	SessionRotated   SessionState = "rotation_complete"
 	SessionActivated SessionState = "activated"
 	SessionFailed    SessionState = "failed"
+	// SessionCancelled is a recovery somebody stopped during its window, which
+	// is what the window is for.
+	SessionCancelled SessionState = "cancelled"
 )
 
 // Session is a recovery workflow instance.
@@ -108,11 +111,20 @@ type Service struct {
 }
 
 type sessionRecord struct {
-	Session  Session
-	Archive  []byte
-	Mnemonic string
-	Payload  *RestoredPayload
+	Session Session
+	// Archive is the sealed archive. Ciphertext this agent cannot open on its
+	// own, which is why it can be kept for the length of the wait.
+	Archive []byte
 }
+
+// Neither the recovery phrase nor the decrypted payload is held here.
+//
+// Both used to be, for the length of the cancel window — a day at minimum, two
+// by default. The phrase opens everything and the payload IS everything, so
+// keeping either for two days undoes the wait it is kept across. They are
+// derived again at activation from the phrase the person supplies then, which
+// also re-proves that whoever is completing the recovery is the one who
+// started it.
 
 func NewService(dataDir string, st store.Store, backupSvc *backup.Service) *Service {
 	auth := NewStubAuthProviderGate()
@@ -189,9 +201,18 @@ func (s *Service) Start(req StartRequest) (*Session, error) {
 	completeAfter, window, band, _ := s.CancelGate.Schedule(started)
 
 	id := uuid.New().String()
+	// The identity this session is for. Taken from the restored identity when
+	// it names one, and from the manifest otherwise — an archive whose identity
+	// section carries a blank AID used to blank a perfectly good manifest AID,
+	// which then disabled the check in Activate that the phrase must open the
+	// same identity this session was started for.
 	aid := payload.Manifest.IdentityAID
-	if payload.Identity != nil {
+	if payload.Identity != nil && payload.Identity.AID != "" {
 		aid = payload.Identity.AID
+	}
+	if aid == "" {
+		return nil, fmt.Errorf("this archive does not say which identity it belongs to, " +
+			"so a recovery from it could not be bound to one")
 	}
 
 	sess := Session{
@@ -212,13 +233,24 @@ func (s *Service) Start(req StartRequest) (*Session, error) {
 	}
 
 	s.mu.Lock()
-	s.sessions[id] = &sessionRecord{
-		Session:  sess,
-		Archive:  raw,
-		Mnemonic: req.Mnemonic,
-		Payload:  payload,
-	}
+	rec := &sessionRecord{Session: sess, Archive: raw}
+	s.sessions[id] = rec
 	s.mu.Unlock()
+
+	// Written down before this returns. A session the caller has been told
+	// about and that this agent would lose on the next restart is the defect
+	// this whole file exists to fix, so the record has to exist before the id
+	// does anywhere else.
+	if werr := s.writeSession(rec); werr != nil {
+		// The caller is being told this failed, so the agent must not go on
+		// holding a session they believe does not exist — and which would
+		// vanish at the next restart anyway.
+		s.mu.Lock()
+		delete(s.sessions, id)
+		s.mu.Unlock()
+		s.forgetSession(id)
+		return nil, fmt.Errorf("could not record this recovery so it survives a restart: %w", werr)
+	}
 
 	return &sess, nil
 }
@@ -232,10 +264,19 @@ func (s *Service) GetSession(id string) (*Session, error) {
 		return nil, fmt.Errorf("recovery session not found")
 	}
 	sess := rec.Session
-	if sess.RotationDone {
-		sess.State = SessionRotated
-	} else if s.CancelGate.Remaining(parseTime(sess.CompleteAfter)) > 0 {
-		sess.State = SessionPending
+	// A finished session keeps the state it finished in. This ran
+	// unconditionally and overwrote both SessionActivated and SessionFailed
+	// with SessionRotated, so a screen polling this after activating could
+	// never see that it had worked — and the natural response to that is to
+	// activate again.
+	switch sess.State {
+	case SessionActivated, SessionFailed:
+	default:
+		if sess.RotationDone {
+			sess.State = SessionRotated
+		} else if s.CancelGate.Remaining(parseTime(sess.CompleteAfter)) > 0 {
+			sess.State = SessionPending
+		}
 	}
 	return &sess, nil
 }
@@ -253,11 +294,69 @@ func (s *Service) RecordRotation(sessionID string, result RotationResult) (*Sess
 	rec.Session.State = SessionRotated
 	sess := rec.Session
 	s.mu.Unlock()
+
+	// Written down, because this is the other half of surviving the wait.
+	//
+	// The wait was made to survive a restart and this was not, so a session
+	// came back after a restart having forgotten that its mandatory rotation
+	// had been done — and demanded it again, on an agent where the rotation
+	// route may not even be available. The session on disk is the record; the
+	// tracker is a cache of it, rebuilt at startup.
+	if werr := s.writeSession(rec); werr != nil {
+		return nil, fmt.Errorf("the rotation was done but could not be recorded, "+
+			"so it would be asked for again after a restart: %w", werr)
+	}
 	return &sess, nil
 }
 
 // Activate applies restored payload after cancel window and mandatory rotation.
-func (s *Service) Activate(sessionID string) (*Session, error) {
+// Cancel stops a recovery that should not complete.
+//
+// The cancel window is, in its own words, the time somebody who did not start
+// a recovery has to stop it — and until now nothing could. Restarting the agent
+// discarded the session, which was the only lever anybody had and a crude one;
+// making sessions survive a restart removed even that, so the wait would have
+// had no action attached to it at all.
+//
+// Deliberately does NOT require the recovery phrase. Somebody stopping an
+// unwanted recovery is by definition not the person who started it, and
+// demanding the phrase would mean only the attacker could cancel.
+func (s *Service) Cancel(sessionID string) (*Session, error) {
+	s.mu.Lock()
+	rec, ok := s.sessions[sessionID]
+	if !ok {
+		s.mu.Unlock()
+		return nil, fmt.Errorf("recovery session not found")
+	}
+	if rec.Session.State == SessionActivated {
+		s.mu.Unlock()
+		return nil, fmt.Errorf("this recovery has already completed and cannot be cancelled")
+	}
+	rec.Session.State = SessionCancelled
+	rec.Archive = nil
+	sess := rec.Session
+	delete(s.sessions, sessionID)
+	s.mu.Unlock()
+
+	s.Rotation.Forget(sessionID)
+	s.forgetSession(sessionID)
+	return &sess, nil
+}
+
+// ActivateRequest carries what finishing a recovery needs and nothing else.
+type ActivateRequest struct {
+	Mnemonic   string `json:"mnemonic"`
+	Passphrase string `json:"passphrase,omitempty"`
+}
+
+// Activate completes a recovery once its cancel window has elapsed.
+//
+// Takes the recovery phrase, which is not a redundant request. The phrase is
+// deliberately not kept for the length of the window — see sessionRecord — so
+// the archive is opened here rather than at the start, and the payload never
+// sits on disk or in memory across the wait. Asking again also re-establishes
+// that the person finishing this is the one who began it, two days later.
+func (s *Service) Activate(sessionID string, req ActivateRequest) (*Session, error) {
 	s.mu.Lock()
 	rec, ok := s.sessions[sessionID]
 	if !ok {
@@ -265,8 +364,20 @@ func (s *Service) Activate(sessionID string) (*Session, error) {
 		return nil, fmt.Errorf("recovery session not found")
 	}
 	sess := rec.Session
-	payload := rec.Payload
+	archive := rec.Archive
 	s.mu.Unlock()
+
+	// A recovery happens once.
+	//
+	// Activation rewrites the identity, the key event log and every restored
+	// file, and re-seats the root seed. Running it a second time rolls all of
+	// that back to whatever the archive held — undoing key rotations and
+	// everything done since. The session used to be deleted from disk and left
+	// in memory with its archive, so a completed recovery could be replayed for
+	// as long as the process lived.
+	if sess.State == SessionActivated {
+		return nil, fmt.Errorf("this recovery has already been completed")
+	}
 
 	if remaining := s.CancelGate.Remaining(parseTime(sess.CompleteAfter)); remaining > 0 {
 		return nil, &ErrCancelWindowActive{
@@ -277,18 +388,58 @@ func (s *Service) Activate(sessionID string) (*Session, error) {
 	if err := s.Rotation.RequireCompleted(sessionID); err != nil {
 		return nil, err
 	}
+	if len(archive) == 0 {
+		return nil, fmt.Errorf("this recovery has no archive to restore from")
+	}
+	if req.Mnemonic == "" {
+		return nil, fmt.Errorf("the recovery phrase is needed again to finish this: " +
+			"it is not kept while the waiting period runs")
+	}
+
+	payload, err := RestoreFromArchive(archive, OpenRequest{
+		Mnemonic:   req.Mnemonic,
+		Passphrase: req.Passphrase,
+	})
+	if err != nil {
+		// Not marked failed. A mistyped phrase is the ordinary case at this
+		// point, and burning the session for it would mean starting the wait
+		// again from the beginning.
+		return nil, fmt.Errorf("those words do not open this archive: %w", err)
+	}
+	// The phrase must produce the identity this session was started for.
+	// Without this, a DIFFERENT valid archive-and-phrase pair supplied here
+	// would restore somebody else's identity under a session that had already
+	// waited out its window.
+	restoredAID := payload.Manifest.IdentityAID
+	if payload.Identity != nil {
+		restoredAID = payload.Identity.AID
+	}
+	if sess.IdentityAID != "" && restoredAID != sess.IdentityAID {
+		return nil, fmt.Errorf("those words open a different identity than the one this recovery started for")
+	}
+
 	if err := s.applyPayload(payload); err != nil {
 		s.mu.Lock()
 		rec.Session.State = SessionFailed
 		rec.Session.Error = err.Error()
+		sess = rec.Session
 		s.mu.Unlock()
+		_ = s.writeSession(rec)
 		return nil, err
 	}
 
 	s.mu.Lock()
 	rec.Session.State = SessionActivated
 	sess = rec.Session
+	// The archive has served its purpose, so it stops being held anywhere:
+	// removed from disk below, and dropped from memory here. Keeping it in RAM
+	// while deleting the file is not "no longer holding somebody's sealed
+	// identity", which is what the comment here used to claim.
+	rec.Archive = nil
+	delete(s.sessions, sessionID)
 	s.mu.Unlock()
+	s.Rotation.Forget(sessionID)
+	s.forgetSession(sessionID)
 	return &sess, nil
 }
 
