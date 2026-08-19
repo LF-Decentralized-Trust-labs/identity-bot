@@ -37,10 +37,29 @@ func NewPairedPusher() *PairedPusher {
 }
 
 // Push transmits ciphertext to POST {pairedURL}/api/backup/receive.
-func (p *PairedPusher) Push(pairedURL string, archive []byte) error {
+//
+// identityAID says whose archive this is, and leaving it out was a real fault
+// rather than an omission of detail. PushRequest has always had the field and
+// this function never set it, so every archive from every identity arrived
+// nameless — and the receiving side filed nameless archives in one directory.
+// Two identities backing up to the same machine therefore overwrote each
+// other, which is the normal case rather than an exceptional one: a household
+// has more identities than always-on computers.
+//
+// It stayed invisible because nothing looked. The receiving side accepted
+// whatever it was given, so a push with no sender succeeded exactly like a
+// push with one, and a round trip with a single identity proved nothing about
+// the case with two.
+func (p *PairedPusher) Push(pairedURL, identityAID string, archive []byte) error {
+	if identityAID == "" {
+		return fmt.Errorf("refusing to push an archive that does not say whose it is: " +
+			"a destination files archives by identity, and a nameless one would " +
+			"either be refused or overwrite somebody else's")
+	}
 	base := trimSlash(pairedURL)
 	reqBody := PushRequest{
 		ProtocolVersion: 1,
+		IdentityAID:     identityAID,
 		ArchiveB64:      EncodeB64(archive),
 		ArchiveSize:     len(archive),
 		SentAt:          time.Now().UTC().Format(time.RFC3339),

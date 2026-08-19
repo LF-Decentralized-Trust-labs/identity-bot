@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -32,15 +31,27 @@ import (
 //
 // Three separate things, one shape: the machine had no say in what it held.
 // Everything below is that say.
+// archiveSuffix is what a stored archive is called. One constant because three
+// places have to agree: what we write, what we list, and what we serve back.
+const archiveSuffix = ".iab"
+
+// partialSuffix marks an archive still being written.
+const partialSuffix = ".partial"
+
+// unattributed is where archives go when nothing recorded whose they were.
+//
+// Deliberately not a valid identifier, so nothing can push here and Held()
+// skips it — it is a place for a person to look, not a destination.
+const unattributed = "not-attributed"
+
 type Offer struct {
 	// Accepting is whether this machine has volunteered at all. False on every
 	// existing installation, which is the point — a machine that never offered
 	// must not start holding archives because somebody upgraded it.
 	Accepting bool `json:"accepting"`
 
-	// AcceptingNewIdentities can be turned off on its own, which is the state
-	// B6 calls "stop taking on new identities": somebody already pushing here
-	// keeps working, and nobody new is taken on.
+	// AcceptingNewIdentities can be turned off on its own: somebody already
+	// pushing here keeps working, and nobody new is taken on.
 	//
 	// Separated because collapsing them produces the failure the setting exists
 	// to prevent. If turning off new identities also stopped existing deltas,
@@ -67,10 +78,9 @@ func DefaultOffer() Offer {
 // RefusedToHold is why this machine will not take an archive.
 //
 // A distinct type because every one of these must reach the pushing agent as a
-// refusal it can act on. B5 and B6 both turn on the same point: an identity
-// that believes it has an off-site copy and does not is worse off than one that
-// knows it has none. Silence is the failure mode; this is what makes refusal
-// loud.
+// refusal it can act on, because an identity that believes it has an off-site
+// copy and does not is worse off than one that knows it has none. Silence is
+// the failure mode; this is what makes refusal loud.
 type RefusedToHold struct {
 	Reason string
 }
@@ -104,6 +114,27 @@ func AcceptableAID(aid string) error {
 				"that is not an identifier: %q is not a character an AID can contain",
 				string(c))}
 		}
+	}
+	return nil
+}
+
+// AcceptableArchiveName reports whether this is a name we are willing to open.
+//
+// Same reasoning as AcceptableAID and the same shape: an allowlist of what a
+// name this package produces can contain, rather than a blocklist of tricks. We
+// write "20060102-150405.iab" and "20060102-150405-1.iab", so digits, hyphens
+// and the .iab suffix are the whole vocabulary. A blocklist would have to
+// anticipate every separator every filesystem collapses.
+func AcceptableArchiveName(name string) error {
+	if !strings.HasSuffix(name, archiveSuffix) || len(name) <= len(archiveSuffix) {
+		return &RefusedToHold{Reason: "that is not an archive name"}
+	}
+	for i := 0; i < len(name)-len(archiveSuffix); i++ {
+		c := name[i]
+		if (c >= '0' && c <= '9') || c == '-' {
+			continue
+		}
+		return &RefusedToHold{Reason: "that is not an archive name"}
 	}
 	return nil
 }
@@ -154,14 +185,6 @@ func (o Offer) RoomFor(dir string, size int64) error {
 	return nil
 }
 
-func freeBytes(dir string) (int64, error) {
-	var st syscall.Statfs_t
-	if err := syscall.Statfs(dir, &st); err != nil {
-		return 0, err
-	}
-	return int64(st.Bavail) * int64(st.Bsize), nil
-}
-
 func human(n int64) string {
 	const unit = 1024
 	if n < unit {
@@ -180,7 +203,7 @@ func human(n int64) string {
 // Metadata and nothing else, and that is the design rather than an omission.
 // Whoever owns the hardware needs to manage disk, notice a backup that stopped
 // arriving, and decide what to remove. They must never be able to read any of
-// it. See B5 and B6.
+// it.
 type HeldFor struct {
 	IdentityAID string `json:"identity_aid"`
 	Archives    int    `json:"archives"`
@@ -189,6 +212,56 @@ type HeldFor struct {
 	// stopped pushing three months ago looks exactly like a healthy one if all
 	// you show is a count.
 	LastArrivedAt string `json:"last_arrived_at,omitempty"`
+}
+
+// Unattributed is what this machine holds that names no identity.
+//
+// Archives written before a push had to say who it was from cannot be
+// attributed — the sender is exactly what was missing. They are still
+// somebody's off-site copy, so they are counted and reported, separately from
+// the identities, and never as one.
+type Unattributed struct {
+	Archives      int    `json:"archives"`
+	TotalBytes    int64  `json:"total_bytes"`
+	LastArrivedAt string `json:"last_arrived_at,omitempty"`
+	// Where they are, because acting on them means going and looking.
+	Directory string `json:"directory,omitempty"`
+}
+
+// UnattributedArchives reports what is held that belongs to nobody nameable.
+//
+// Separate from Held because it is a different kind of answer. Held returns
+// identities, and this is the pile that has no identity — folding it in would
+// mean inventing an identifier for it, which is the one thing that cannot be
+// done honestly here.
+func (s *Service) UnattributedArchives() (*Unattributed, error) {
+	dir := filepath.Join(s.DataDir, "backup_receive", unattributed)
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	u := &Unattributed{Directory: dir}
+	for _, f := range files {
+		if f.IsDir() || !strings.HasSuffix(f.Name(), archiveSuffix) {
+			continue
+		}
+		info, ierr := f.Info()
+		if ierr != nil {
+			continue
+		}
+		u.Archives++
+		u.TotalBytes += info.Size()
+		if at := info.ModTime().UTC().Format(time.RFC3339); at > u.LastArrivedAt {
+			u.LastArrivedAt = at
+		}
+	}
+	if u.Archives == 0 {
+		return nil, nil
+	}
+	return u, nil
 }
 
 // Held lists everything this machine is holding, for every identity.

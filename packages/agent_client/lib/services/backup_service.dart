@@ -284,12 +284,16 @@ class HoldingOffer {
         'reserve_bytes': reserveBytes,
       };
 
-  HoldingOffer copyWith({bool? accepting, bool? acceptingNewIdentities}) =>
+  HoldingOffer copyWith({
+    bool? accepting,
+    bool? acceptingNewIdentities,
+    int? reserveBytes,
+  }) =>
       HoldingOffer(
         accepting: accepting ?? this.accepting,
         acceptingNewIdentities:
             acceptingNewIdentities ?? this.acceptingNewIdentities,
-        reserveBytes: reserveBytes,
+        reserveBytes: reserveBytes ?? this.reserveBytes,
       );
 }
 
@@ -357,8 +361,12 @@ class BackupService {
   }
 
   static Future<void> removeDestination(String id) async {
-    final resp = await http.delete(Uri.parse('$_base/destinations/$id'));
-    if (resp.statusCode != 200) {
+    final resp = await http
+        .delete(Uri.parse('$_base/destinations/${Uri.encodeComponent(id)}'));
+    // 204 is what this route actually answers. Checking only for 200 threw on
+    // every successful removal, so somebody saw "could not remove that
+    // destination" having just removed it - and would reasonably try again.
+    if (resp.statusCode != 204 && resp.statusCode != 200) {
       throw Exception('Could not remove that destination: ${resp.body}');
     }
   }
@@ -415,7 +423,7 @@ class BackupService {
 
   /// What this machine is holding for one identity you already know of.
   static Future<List<dynamic>> whatThisMachineHoldsFor(String identityAid) async {
-    final resp = await http.get(Uri.parse('$_base/receive/$identityAid'));
+    final resp = await http.get(Uri.parse('$_base/receive/${Uri.encodeComponent(identityAid)}'));
     if (resp.statusCode != 200) {
       throw Exception('Could not list what is held: ${resp.body}');
     }
@@ -425,7 +433,7 @@ class BackupService {
         const [];
   }
 
-  /// Everything this machine holds, for every identity. See B5 and B6.
+  /// Everything this machine holds, for every identity.
   ///
   /// The question the person who owns the hardware actually has, and the one
   /// that could not be asked: the older route needed an identity you already
@@ -470,7 +478,7 @@ class BackupService {
   /// Whoever calls this owes them that, or leaves an agent believing it has an
   /// off-site copy it no longer has.
   static Future<void> stopHoldingFor(String identityAid) async {
-    final resp = await http.delete(Uri.parse('$_base/held/$identityAid'));
+    final resp = await http.delete(Uri.parse('$_base/held/${Uri.encodeComponent(identityAid)}'));
     if (resp.statusCode != 204 && resp.statusCode != 200) {
       throw Exception('Could not remove those archives: ${resp.body}');
     }
