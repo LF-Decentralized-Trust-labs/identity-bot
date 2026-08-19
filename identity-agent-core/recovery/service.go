@@ -45,14 +45,17 @@ const (
 
 // Session is a recovery workflow instance.
 type Session struct {
-	ID              string                 `json:"id"`
-	State           SessionState           `json:"state"`
-	IdentityAID     string                 `json:"identity_aid,omitempty"`
-	StartedAt       string                 `json:"started_at"`
-	CompleteAfter   string                 `json:"complete_after"`
-	CancelWindow    string                 `json:"cancel_window"`
-	AssuranceBand   AssuranceBand          `json:"assurance_band"`
-	RotationDone    bool                   `json:"rotation_done"`
+	ID            string        `json:"id"`
+	State         SessionState  `json:"state"`
+	IdentityAID   string        `json:"identity_aid,omitempty"`
+	StartedAt     string        `json:"started_at"`
+	CompleteAfter string        `json:"complete_after"`
+	CancelWindow  string        `json:"cancel_window"`
+	AssuranceBand AssuranceBand `json:"assurance_band"`
+	RotationDone  bool          `json:"rotation_done"`
+	// DuressApprovals are the trusted contacts who have confirmed this
+	// recovery should proceed, when the identity asks for them.
+	DuressApprovals []string               `json:"duress_approvals,omitempty"`
 	PairwiseChecks  []PairwiseVerification `json:"pairwise_checks,omitempty"`
 	ManifestSummary map[string]interface{} `json:"manifest_summary,omitempty"`
 	Error           string                 `json:"error,omitempty"`
@@ -451,6 +454,12 @@ func (s *Service) Activate(sessionID string, req ActivateRequest) (*Session, err
 				Got:      res,
 			}
 		}
+	}
+	// The third gate. Whether this person is acting freely, which neither the
+	// phrase nor an authentication provider can answer — somebody being forced
+	// satisfies both perfectly. Off unless the owner turned it on.
+	if err := s.LoadDuressPolicy().Held(parseTime(sess.StartedAt), sess.DuressApprovals, time.Now()); err != nil {
+		return nil, err
 	}
 	if len(archive) == 0 {
 		return nil, fmt.Errorf("this recovery has no archive to restore from")

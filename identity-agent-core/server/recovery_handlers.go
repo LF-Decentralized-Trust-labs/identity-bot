@@ -19,6 +19,10 @@ func (s *CoreServer) mountRecoveryRoutes(r chi.Router) {
 		r.Post("/sessions/{id}/rotation", s.handleRecoveryRotation)
 		r.Post("/sessions/{id}/activate", s.handleRecoveryActivate)
 		r.Post("/sessions/{id}/cancel", s.handleRecoveryCancel)
+		// What this identity has chosen about being coerced. Off unless
+		// somebody turned it on.
+		r.Get("/duress-policy", s.handleGetDuressPolicy)
+		r.Put("/duress-policy", s.handlePutDuressPolicy)
 		r.Post("/retrieve", s.handleRecoveryRetrieve)
 		r.Post("/root-aid-rotation", s.handleRecoveryRootAIDRotation)
 		r.Get("/root-aid-rotation/status", s.handleRecoveryRootAIDStatus)
@@ -271,4 +275,29 @@ func (s *CoreServer) handleRecoveryCancel(w http.ResponseWriter, r *http.Request
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(sess)
+}
+
+func (s *CoreServer) handleGetDuressPolicy(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(s.recoveryService().LoadDuressPolicy())
+}
+
+// handlePutDuressPolicy records what an identity wants to happen when somebody
+// may be being forced.
+//
+// A policy that cannot be satisfied is refused here rather than stored, so the
+// moment somebody discovers they locked themselves out is not their recovery.
+func (s *CoreServer) handlePutDuressPolicy(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRecoveryBody)
+	var p recovery.DuressPolicy
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request", err.Error())
+		return
+	}
+	if err := s.recoveryService().SaveDuressPolicy(p); err != nil {
+		writeError(w, http.StatusBadRequest, "That setting would not work", err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(s.recoveryService().LoadDuressPolicy())
 }
