@@ -445,13 +445,53 @@ func (s *Service) LoadConfig() (Config, error) {
 
 // ReceiveArchive stores an opaque archive on a backup-only device (ACT2 boundary).
 func (s *Service) ReceiveArchive(identityAID string, data []byte) (string, error) {
+	// Whether this machine will hold this at all, before a byte is written.
+	//
+	// This route is PUBLIC, so "the caller" is any host that can open a
+	// connection. It used to write whatever it was given to a directory named
+	// after whatever the caller claimed, which made the caller the author of
+	// both the bytes and the path.
+	cfg, cerr := s.ConfigStore.LoadConfig()
+	if cerr != nil {
+		return "", cerr
+	}
+	held, _ := s.ListReceived(identityAID)
+	if err := cfg.Offer.MayAccept(identityAID, len(held) > 0); err != nil {
+		return "", err
+	}
+
 	dir := filepath.Join(s.DataDir, "backup_receive", identityAID)
+	if err := cfg.Offer.RoomFor(s.DataDir, int64(len(data))); err != nil {
+		return "", err
+	}
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return "", err
 	}
-	name := fmt.Sprintf("%s.iab", time.Now().UTC().Format("20060102-150405"))
-	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, data, 0600); err != nil {
+	// Named to the second, plus a counter, because two archives CAN arrive
+	// inside one second and the timestamp alone silently overwrote the first.
+	// Found on the first live run of this path: an identity pushed twice, the
+	// second push reported success, and the machine held one file. A delta
+	// chain with a link quietly missing restores to the wrong state, so this is
+	// worse than losing the newer archive outright.
+	base := time.Now().UTC().Format("20060102-150405")
+	path := filepath.Join(dir, base+".iab")
+	for n := 1; ; n++ {
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			break
+		}
+		path = filepath.Join(dir, fmt.Sprintf("%s-%d.iab", base, n))
+	}
+
+	// Written aside and moved into place, so a transfer that dies partway
+	// leaves nothing rather than something that looks restorable. B2 asks for
+	// this on the pushing side; it has to be true on the receiving side too,
+	// because that is where the file actually lands.
+	tmp := path + ".partial"
+	if err := os.WriteFile(tmp, data, 0600); err != nil {
+		return "", err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
 		return "", err
 	}
 	return path, nil

@@ -3,6 +3,7 @@ package backup
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -11,8 +12,24 @@ func TestBackupOnlyDeviceOpaqueStorage(t *testing.T) {
 	dir := t.TempDir()
 	svc := NewService(dir, nil)
 
+	// This machine has to have offered before it holds anything for anybody,
+	// and the identifier has to be one. Both were added when the receiving path
+	// was found accepting archives from any host that could reach it, filed
+	// under a caller-chosen path. What this test is actually about — that the
+	// stored bytes are opaque and no key material lands beside them — is
+	// unchanged.
+	owner := "E" + strings.Repeat("A", 43)
+	cfg, err := svc.ConfigStore.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Offer = Offer{Accepting: true, AcceptingNewIdentities: true, ReserveBytes: 1024}
+	if err := svc.ConfigStore.SaveConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+
 	ciphertext := []byte{0xDE, 0xAD, 0xBE, 0xEF} // simulated encrypted archive
-	path, err := svc.ReceiveArchive("Eowner123", ciphertext)
+	path, err := svc.ReceiveArchive(owner, ciphertext)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +48,7 @@ func TestBackupOnlyDeviceOpaqueStorage(t *testing.T) {
 	}
 
 	// No key material written alongside archive.
-	entries, _ := os.ReadDir(filepath.Join(dir, "backup_receive", "Eowner123"))
+	entries, _ := os.ReadDir(filepath.Join(dir, "backup_receive", owner))
 	if len(entries) != 1 {
 		t.Fatalf("expected 1 opaque file, got %d", len(entries))
 	}
