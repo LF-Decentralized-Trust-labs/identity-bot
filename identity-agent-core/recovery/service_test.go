@@ -3,6 +3,7 @@ package recovery
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"identity-agent-core/backup"
@@ -12,8 +13,24 @@ import (
 func TestRetrieveFromBackupOnlyDevice(t *testing.T) {
 	dir := t.TempDir()
 	backupSvc := backup.NewService(dir, nil)
+
+	// A machine holds an archive for somebody else only after it has offered
+	// to, and only under something that is actually an identifier. Both were
+	// added when the receiving path was found accepting from any host that
+	// could reach it, into a caller-chosen directory. What this test is about —
+	// retrieving an opaque archive from a backup-only device — is unchanged.
+	owner := "E" + strings.Repeat("A", 43)
+	cfg, err := backupSvc.ConfigStore.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Offer = backup.Offer{Accepting: true, AcceptingNewIdentities: true, ReserveBytes: 1024}
+	if err := backupSvc.ConfigStore.SaveConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+
 	raw := []byte{0x49, 0x41, 0x42, 0x31, 0x00, 0x01}
-	path, err := backupSvc.ReceiveArchive("Eowner123", raw)
+	path, err := backupSvc.ReceiveArchive(owner, raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -22,7 +39,7 @@ func TestRetrieveFromBackupOnlyDevice(t *testing.T) {
 	svc := NewService(dir, nil, backupSvc)
 	resp, err := svc.Retrieve(RetrieveRequest{
 		Source:      SourceBackupOnlyDevice,
-		IdentityAID: "Eowner123",
+		IdentityAID: owner,
 	})
 	if err != nil {
 		t.Fatal(err)
