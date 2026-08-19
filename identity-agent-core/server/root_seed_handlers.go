@@ -79,15 +79,27 @@ func (s *CoreServer) handleSetRootSeed(w http.ResponseWriter, r *http.Request) {
 	// a file, and whoever copies that file becomes its owner permanently, with
 	// nothing to detect and no rotation possible.
 	//
-	// It refuses only on a PROVEN answer. Unknown — a platform whose detector
-	// is not written yet, or a machine we could not read — is allowed through
-	// with a warning, because refusing on a non-measurement is precisely the
-	// defect the detector exists to end. Turning "we did not look" into "you
-	// may not use this software" would be the same wrong answer wearing
-	// authority. The warning is what makes the gap visible until the detectors
-	// land, at which point this tightens by itself.
+	// Anything but a PROVEN usable answer refuses. Including unknown.
+	//
+	// Unknown used to pass with a warning, on the reasoning that refusing over
+	// a non-measurement turns "we did not look" into "you may not use this
+	// software". That reasoning is wrong here, and the reason it is wrong is
+	// the reason unknown is usually returned: not that the machine could not
+	// answer, but that the detector for this platform has not been written.
+	// That is our gap, and shipping onto a platform we have not taught this
+	// software to inspect is a decision to not know.
+	//
+	// The consequence of being wrong is total and permanent. A seed on a
+	// machine that cannot protect it is a file, and whoever copies that file
+	// becomes the identity, undetectably, with no rotation possible. There is
+	// no partial version of that failure to trade against the inconvenience of
+	// refusing.
+	//
+	// So a platform without a detector cannot hold a root key, and the way to
+	// change that is to write the detector rather than to widen the gate.
+	// Superseded 2026-08-19: unknown does NOT proceed.
 	switch cap := secureenclave.DetectCapability(); cap.Status {
-	case secureenclave.Absent, secureenclave.Present:
+	case secureenclave.Absent, secureenclave.Present, secureenclave.Unknown:
 		// One way past this, and it is deliberately awkward to reach.
 		//
 		// Hardware that can protect a key is not always available when the work
@@ -112,14 +124,8 @@ func (s *CoreServer) handleSetRootSeed(w http.ResponseWriter, r *http.Request) {
 				cap.String(), envAllowUnprotectedRootKey)
 			break
 		}
-		jsonError(w,
-			"this machine cannot protect a root key ("+cap.String()+"), so an identity stored here could be "+
-				"copied off it — put the root on a device with hardware key protection and pair this one to it",
-			http.StatusPreconditionFailed)
+		jsonError(w, refusalFor(cap), http.StatusPreconditionFailed)
 		return
-	case secureenclave.Unknown:
-		log.Printf("[keystore] WARNING: installing a root seed on a machine whose key protection could not be determined (%s) — "+
-			"this is allowed because we did not check, not because we checked and approved", cap.String())
 	}
 	if !s.isOwner(r) {
 		jsonError(w, "keystore management is for the owner of this agent", http.StatusForbidden)

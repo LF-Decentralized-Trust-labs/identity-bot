@@ -7,6 +7,7 @@ import (
 	"identity-agent-core/store"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -34,6 +35,11 @@ func postSeed(s *CoreServer, seedB64 string, remote bool) *httptest.ResponseReco
 // The onboarding handoff installs the mnemonic-derived seed exactly once:
 // stored, then idempotent for the same seed, refused for a different one.
 func TestSetRootSeedLifecycle(t *testing.T) {
+	// This machine has no written enclave detector, so it reports unknown —
+	// and unknown no longer proceeds. The named override is the development
+	// path it exists for; what is under test here is the seed lifecycle, not
+	// the hardware gate.
+	t.Setenv(envAllowUnprotectedRootKey, "1")
 	s := rootSeedServer(t)
 	seed, err := backup.MnemonicToBIP39Seed(
 		"abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art", "")
@@ -50,7 +56,7 @@ func TestSetRootSeedLifecycle(t *testing.T) {
 		t.Fatalf("stored seed must equal the BIP39 seed: %v", err)
 	}
 
-	if w := postSeed(s, b64, false); w.Code != http.StatusOK {
+	if w := postSeed(s, b64, false); w.Code != http.StatusOK && w.Code != http.StatusCreated {
 		t.Fatalf("same-seed handoff must be idempotent: %d %s", w.Code, w.Body)
 	}
 
@@ -67,6 +73,11 @@ func TestSetRootSeedLifecycle(t *testing.T) {
 
 // Keystore management is local-owner only; a tunneled request never reaches it.
 func TestSetRootSeedRemoteDenied(t *testing.T) {
+	// This machine has no written enclave detector, so it reports unknown —
+	// and unknown no longer proceeds. The named override is the development
+	// path it exists for; what is under test here is the seed lifecycle, not
+	// the hardware gate.
+	t.Setenv(envAllowUnprotectedRootKey, "1")
 	s := rootSeedServer(t)
 	seed := base64.StdEncoding.EncodeToString(make([]byte, 64))
 	if w := postSeed(s, seed, true); w.Code != http.StatusForbidden {
@@ -75,6 +86,11 @@ func TestSetRootSeedRemoteDenied(t *testing.T) {
 }
 
 func TestSetRootSeedRejectsBadInput(t *testing.T) {
+	// This machine has no written enclave detector, so it reports unknown —
+	// and unknown no longer proceeds. The named override is the development
+	// path it exists for; what is under test here is the seed lifecycle, not
+	// the hardware gate.
+	t.Setenv(envAllowUnprotectedRootKey, "1")
 	s := rootSeedServer(t)
 	if w := postSeed(s, "not-base64!!", false); w.Code != http.StatusBadRequest {
 		t.Fatalf("bad base64: %d", w.Code)
@@ -89,6 +105,11 @@ func TestSetRootSeedRejectsBadInput(t *testing.T) {
 
 // Status reports establishment without ever returning the seed.
 func TestRootSeedStatus(t *testing.T) {
+	// This machine has no written enclave detector, so it reports unknown —
+	// and unknown no longer proceeds. The named override is the development
+	// path it exists for; what is under test here is the seed lifecycle, not
+	// the hardware gate.
+	t.Setenv(envAllowUnprotectedRootKey, "1")
 	s := rootSeedServer(t)
 	get := func() map[string]any {
 		req := httptest.NewRequest(http.MethodGet, "/api/keystore/root-seed", nil)
@@ -115,6 +136,9 @@ func TestRootSeedStatus(t *testing.T) {
 // The recovery acceptance: phrase -> BIP39 seed -> handoff on a fresh device
 // re-derives the identical HD pairwise key.
 func TestPhraseAloneRederivesHDKeys(t *testing.T) {
+	// See the note in TestSetRootSeedLifecycle: unknown hardware no longer
+	// proceeds, and this test is about the derivation rather than the gate.
+	t.Setenv(envAllowUnprotectedRootKey, "1")
 	mnemonic := "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art"
 	seed, _ := backup.MnemonicToBIP39Seed(mnemonic, "")
 	b64 := base64.StdEncoding.EncodeToString(seed)
@@ -197,5 +221,68 @@ func TestAComputerThatIsTheIdentityStillTakesItsOwnSeed(t *testing.T) {
 	if rec.Code == http.StatusConflict {
 		t.Fatalf("a computer that answers to nobody was refused its own seed, so a setup "+
 			"with no second device cannot be completed: %s", rec.Body.String())
+	}
+}
+
+func TestNotKnowingIsNotAReasonToProceed(t *testing.T) {
+	// Unknown used to pass with a warning. The reasoning was that refusing over
+	// a non-measurement turns "we did not look" into "you may not use this
+	// software" — and that is wrong here, because of WHY unknown is usually
+	// returned: not that the machine could not answer, but that the detector
+	// for this platform has never been written.
+	//
+	// A seed on a machine that cannot protect it is a file. Whoever copies that
+	// file becomes the identity, undetectably, with no rotation possible. There
+	// is no partial version of that to trade against the inconvenience of
+	// refusing.
+	mnemonic := "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art"
+	seed, _ := backup.MnemonicToBIP39Seed(mnemonic, "")
+	b64 := base64.StdEncoding.EncodeToString(seed)
+
+	// No override: this machine has no written detector, so it reports unknown.
+	s := rootSeedServer(t)
+	w := postSeed(s, b64, false)
+	if w.Code == http.StatusOK {
+		t.Fatal("a root seed was installed on a machine this build cannot inspect")
+	}
+	if w.Code != http.StatusPreconditionFailed {
+		t.Fatalf("refused with %d, which is not the refusal a caller can act on", w.Code)
+	}
+
+	// And it says whose gap this is. Telling somebody their laptop is
+	// unsuitable, when the truth is that we never wrote the check, would be a
+	// false statement about their computer.
+	if !strings.Contains(w.Body.String(), "has not been written") {
+		t.Fatalf("the refusal blames the machine rather than this software: %s", w.Body)
+	}
+
+	// And it is not a dead end. Somebody refused because we never wrote the
+	// check is the one person who can get it written, so they are told how and
+	// given the environment detail to include — asking them to go and find
+	// their architecture is how a report never gets sent.
+	body := w.Body.String()
+	if !strings.Contains(body, "report it") {
+		t.Fatalf("a refusal with no way out: %s", body)
+	}
+	if !strings.Contains(body, runtime.GOOS) || !strings.Contains(body, runtime.GOARCH) {
+		t.Fatalf("the report has nothing in it we could act on: %s", body)
+	}
+
+	// A deployment can say where to send it, and one that says nothing does
+	// not invent an address.
+	t.Setenv(envUnsupportedPlatformURL, "https://example.invalid/unsupported")
+	if b := postSeed(s, b64, false).Body.String(); !strings.Contains(b, "example.invalid") {
+		t.Fatalf("the configured report address was ignored: %s", b)
+	}
+
+	// Nothing was written.
+	if _, err := secureenclave.LoadRootSeed(s.DataDir); err == nil {
+		t.Fatal("the seed landed on disk despite being refused")
+	}
+
+	// The named override is the way through, and it is the only way through.
+	t.Setenv(envAllowUnprotectedRootKey, "1")
+	if w := postSeed(s, b64, false); w.Code != http.StatusOK && w.Code != http.StatusCreated {
+		t.Fatalf("the development override did not permit an owner-supplied seed: %d %s", w.Code, w.Body)
 	}
 }
