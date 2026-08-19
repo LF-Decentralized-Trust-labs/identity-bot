@@ -220,6 +220,79 @@ class BackupConfig {
       };
 }
 
+/// What one machine holds for one other identity.
+///
+/// Metadata and nothing else, deliberately. Somebody hosting archives needs to
+/// manage disk and notice a backup that stopped arriving; they must never be
+/// able to read what they hold.
+class HeldArchives {
+  final String identityAid;
+  final int archives;
+  final int totalBytes;
+
+  /// When the last archive arrived. What makes a stalled backup visible - an
+  /// identity that stopped pushing months ago looks exactly like a healthy one
+  /// if all you show is a count.
+  final String? lastArrivedAt;
+
+  HeldArchives({
+    required this.identityAid,
+    required this.archives,
+    required this.totalBytes,
+    this.lastArrivedAt,
+  });
+
+  factory HeldArchives.fromJson(Map<String, dynamic> json) => HeldArchives(
+        identityAid: json['identity_aid'] ?? '',
+        archives: json['archives'] ?? 0,
+        totalBytes: json['total_bytes'] ?? 0,
+        lastArrivedAt: json['last_arrived_at'],
+      );
+}
+
+/// What this machine has volunteered to hold for other identities.
+class HoldingOffer {
+  /// Whether it holds anything for anyone. False until somebody says otherwise,
+  /// so a machine never starts holding strangers' data by being upgraded.
+  final bool accepting;
+
+  /// Whether it takes on identities it does not already hold. Separate from
+  /// [accepting] on purpose: turning this off must not stop the deltas of
+  /// somebody already relying on this machine, or they are left with a
+  /// destination that holds only their first archive.
+  final bool acceptingNewIdentities;
+
+  /// Disk this machine will not fill with other people's archives. Hosting a
+  /// backup is a favour and must not cost somebody a working computer.
+  final int reserveBytes;
+
+  const HoldingOffer({
+    this.accepting = false,
+    this.acceptingNewIdentities = false,
+    this.reserveBytes = 5 * 1024 * 1024 * 1024,
+  });
+
+  factory HoldingOffer.fromJson(Map<String, dynamic> json) => HoldingOffer(
+        accepting: json['accepting'] ?? false,
+        acceptingNewIdentities: json['accepting_new_identities'] ?? false,
+        reserveBytes: json['reserve_bytes'] ?? 5 * 1024 * 1024 * 1024,
+      );
+
+  Map<String, dynamic> toJson() => {
+        'accepting': accepting,
+        'accepting_new_identities': acceptingNewIdentities,
+        'reserve_bytes': reserveBytes,
+      };
+
+  HoldingOffer copyWith({bool? accepting, bool? acceptingNewIdentities}) =>
+      HoldingOffer(
+        accepting: accepting ?? this.accepting,
+        acceptingNewIdentities:
+            acceptingNewIdentities ?? this.acceptingNewIdentities,
+        reserveBytes: reserveBytes,
+      );
+}
+
 class BackupService {
   static String get _base => '${AgentConfig.coreBaseUrl}/api/backup';
 
@@ -340,7 +413,7 @@ class BackupService {
     return jsonDecode(resp.body) as Map<String, dynamic>;
   }
 
-  /// What this machine is holding for other identities. See B5 and B6.
+  /// What this machine is holding for one identity you already know of.
   static Future<List<dynamic>> whatThisMachineHoldsFor(String identityAid) async {
     final resp = await http.get(Uri.parse('$_base/receive/$identityAid'));
     if (resp.statusCode != 200) {
@@ -350,6 +423,57 @@ class BackupService {
     if (body is List) return body;
     return (body as Map<String, dynamic>)['archives'] as List<dynamic>? ??
         const [];
+  }
+
+  /// Everything this machine holds, for every identity. See B5 and B6.
+  ///
+  /// The question the person who owns the hardware actually has, and the one
+  /// that could not be asked: the older route needed an identity you already
+  /// knew of, so nothing could answer "what is this machine holding".
+  ///
+  /// Metadata only. There is no route that returns contents - the archives are
+  /// sealed to keys this machine does not hold, which is the whole arrangement.
+  static Future<List<HeldArchives>> whatThisMachineHolds() async {
+    final resp = await http.get(Uri.parse('$_base/held'));
+    if (resp.statusCode != 200) {
+      throw Exception('Could not read what this machine holds: ${resp.body}');
+    }
+    final body = jsonDecode(resp.body) as Map<String, dynamic>;
+    return (body['held'] as List<dynamic>? ?? const [])
+        .map((h) => HeldArchives.fromJson(h as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// What this machine has volunteered to hold for others.
+  static Future<HoldingOffer> readOffer() async {
+    final resp = await http.get(Uri.parse('$_base/offer'));
+    if (resp.statusCode != 200) throw Exception('Could not read the offer');
+    return HoldingOffer.fromJson(jsonDecode(resp.body) as Map<String, dynamic>);
+  }
+
+  /// Volunteers this machine, or stops volunteering it.
+  static Future<HoldingOffer> setOffer(HoldingOffer offer) async {
+    final resp = await http.put(
+      Uri.parse('$_base/offer'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(offer.toJson()),
+    );
+    if (resp.statusCode != 200) {
+      throw Exception('Could not change what this machine offers: ${resp.body}');
+    }
+    return HoldingOffer.fromJson(jsonDecode(resp.body) as Map<String, dynamic>);
+  }
+
+  /// Removes everything this machine holds for one identity.
+  ///
+  /// The identity is NOT told by this call, and nothing else tells it either.
+  /// Whoever calls this owes them that, or leaves an agent believing it has an
+  /// off-site copy it no longer has.
+  static Future<void> stopHoldingFor(String identityAid) async {
+    final resp = await http.delete(Uri.parse('$_base/held/$identityAid'));
+    if (resp.statusCode != 204 && resp.statusCode != 200) {
+      throw Exception('Could not remove those archives: ${resp.body}');
+    }
   }
 
   /// Pulls the core's own sentence out of an error body, so the reason a
