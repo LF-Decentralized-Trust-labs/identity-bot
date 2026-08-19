@@ -347,3 +347,28 @@ func (s *Service) StopHoldingFor(aid string) error {
 	}
 	return os.RemoveAll(dir)
 }
+
+// AcceptableExportName reports whether this is a name we will write an archive
+// under.
+//
+// Same reasoning as the two above: an allowlist of what a name may contain
+// rather than a blocklist of what it may not. Export names are chosen by
+// people, so letters are allowed where the received-archive names are pure
+// timestamps — but nothing that can traverse, and nothing hidden.
+func AcceptableExportName(name string) error {
+	if !strings.HasSuffix(name, archiveSuffix) || len(name) <= len(archiveSuffix) {
+		return &RefusedToHold{Reason: "an archive is named with a .iab ending"}
+	}
+	if strings.HasPrefix(name, ".") {
+		return &RefusedToHold{Reason: "an archive is not named with a leading dot"}
+	}
+	for i := 0; i < len(name)-len(archiveSuffix); i++ {
+		c := name[i]
+		ok := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+			(c >= '0' && c <= '9') || c == '-' || c == '_'
+		if !ok {
+			return &RefusedToHold{Reason: "an archive name holds letters, digits, hyphens and underscores"}
+		}
+	}
+	return nil
+}

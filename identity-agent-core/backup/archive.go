@@ -87,6 +87,21 @@ func (c *Collector) CreateArchive(opts CollectOptions, req ExportRequest) (*Expo
 	if req.SlotPolicy != "" {
 		manifest.SlotPolicy = req.SlotPolicy
 	}
+	// A passphrase makes an archive HARDER to open, never easier.
+	//
+	// Under the OR policy a passphrase slot wraps the payload key itself, so
+	// the passphrase alone opens the archive — a second key, and a far weaker
+	// one than twenty-four words, offline-guessable by anybody holding the
+	// file. No caller outside this package's tests ever set a policy, and the
+	// default is OR, so every archive any route could produce was in the mode
+	// this file's own comments describe as making things easier.
+	//
+	// Supplying a passphrase now means BOTH factors are required. That is what
+	// somebody adding one believes they are getting, and it is the only reading
+	// under which adding a secret is not a downgrade.
+	if req.Passphrase != "" && req.SlotPolicy == "" {
+		manifest.SlotPolicy = PolicyAND
+	}
 
 	for _, sec := range bundle.Ordered {
 		dig := DigestSectionMust(sec.Data)

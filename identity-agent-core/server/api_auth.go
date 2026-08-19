@@ -427,6 +427,12 @@ func rememberSignature(sig string, now time.Time) (alreadyUsed bool) {
 var sessionForbidden = map[string]string{
 	// --- the root of trust ---
 	"POST /api/keystore/root-seed":         "installing a root seed decides what this identity is",
+	// Retrieval hands back the bytes of an archive. A browser session is
+	// something the owner grants for a while and that whoever holds the browser
+	// then has; it must not be enough to pull an identity's sealed backups out
+	// of this machine, because the archive plus a guessable passphrase, or the
+	// archive plus later possession of the phrase, is the identity.
+	"POST /api/recovery/retrieve": "retrieval hands back an archive, and an archive is the identity to anyone who can open it",
 	"POST /api/recovery/root-aid-rotation": "rotating the root AID replaces the identity's controlling key",
 
 	// --- who may act for this identity ---

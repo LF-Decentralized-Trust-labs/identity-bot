@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"identity-agent-core/backup"
@@ -98,9 +99,26 @@ func (s *CoreServer) handleBackupExport(w http.ResponseWriter, r *http.Request) 
 		}
 		seed = base64.StdEncoding.EncodeToString(local)
 	}
-	if req.DestPath == "" {
-		req.DestPath = filepath.Join(s.DataDir, "exports", "manual-"+time.Now().UTC().Format("20060102-150405")+".iab")
+	// Where the archive is written is this agent's decision, not the caller's.
+	//
+	// dest_path was taken as given and passed to MkdirAll and WriteFile, so a
+	// caller chose any path on the machine and the archive replaced whatever
+	// was there — the identity store included. It also pointed the other way:
+	// an archive written to a synced folder is this identity's sealed backup
+	// leaving the machine on somebody else's instruction. That is the same hole
+	// as reading an arbitrary file, with the arrow reversed.
+	//
+	// A caller may still choose the NAME, which is all any caller needed.
+	name := "manual-" + time.Now().UTC().Format("20060102-150405") + ".iab"
+	if req.DestPath != "" {
+		chosen := filepath.Base(filepath.Clean(req.DestPath))
+		if err := backup.AcceptableExportName(chosen); err != nil {
+			writeError(w, http.StatusBadRequest, "Not a name for an archive", err.Error())
+			return
+		}
+		name = chosen
 	}
+	req.DestPath = filepath.Join(s.DataDir, "exports", name)
 	result, err := s.backupService().ExportWithSeed(req.Mnemonic, seed, req.Passphrase, req.DestPath, req.Tiers)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Export failed", err.Error())
@@ -138,11 +156,46 @@ func (s *CoreServer) handleBackupGetConfig(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *CoreServer) handleBackupPutConfig(w http.ResponseWriter, r *http.Request) {
-	var cfg backup.Config
+	// Decoded ONTO what is stored, not into a blank config.
+	//
+	// This decoded a whole Config and saved it verbatim, so every field the
+	// sender left out was silently reset. The client does exactly that: it
+	// sends six fields and omits the rest, so saving any backup setting from a
+	// screen wiped the recipients able to open this identity's archives, and
+	// wiped whether this machine had volunteered to hold archives for other
+	// identities — turning a working destination somebody else relies on into
+	// one that refuses everything, with nothing said.
+	//
+	// Decoding onto the stored value means an absent field keeps what it had,
+	// and only what was actually sent can change. Guarding one field at a time
+	// would leave the next one to be found the same way.
+	cfg, lerr := s.backupService().LoadConfig()
+	if lerr != nil {
+		writeError(w, http.StatusInternalServerError, "Load config failed", lerr.Error())
+		return
+	}
+	before := cfg.SealToPublicKeysB64
+
 	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid config", err.Error())
 		return
 	}
+
+	// Recipients are not settable here.
+	//
+	// A seal recipient is a standing key to every archive this agent writes
+	// from now on, openable by that recipient alone and by nobody else's
+	// inspection: the archive deliberately carries no recipient names, so a
+	// planted slot looks exactly like a legitimate one. There is already a path
+	// that does this properly — it validates each key and runs only after the
+	// claimant has proved control of the identity.
+	if !slices.Equal(cfg.SealToPublicKeysB64, before) {
+		writeError(w, http.StatusConflict, "Recipients are not set here",
+			"who can open this identity's archives is decided when a machine is paired, "+
+				"not by writing configuration")
+		return
+	}
+
 	if err := s.backupService().SaveConfig(cfg); err != nil {
 		writeError(w, http.StatusInternalServerError, "Save config failed", err.Error())
 		return

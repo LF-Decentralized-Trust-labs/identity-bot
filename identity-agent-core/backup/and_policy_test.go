@@ -166,9 +166,43 @@ func TestAndAppliesToEverySealedOwner(t *testing.T) {
 
 // The default must not change. An archive that does not ask for AND keeps
 // behaving exactly as it did, including the passphrase being a second door.
-func TestOrRemainsTheDefaultAndKeepsWorking(t *testing.T) {
+func TestOrIsStillAvailableButNoLongerWhatAPassphraseGetsYou(t *testing.T) {
+	// This test used to assert that a passphrase alone opens the archive, and
+	// to fail with "the passphrase alone stopped working under OR". That is the
+	// behaviour, stated as a requirement: under OR the passphrase slot wraps
+	// the payload key itself, so the passphrase is a second and much weaker key
+	// to somebody's whole identity — guessable offline by anyone holding the
+	// file, where the phrase is not.
+	//
+	// Supplying a passphrase now means both factors are required, which is what
+	// somebody adding one believes they are asking for. OR remains selectable
+	// in code for a caller that genuinely wants either-or, and is covered here
+	// so the mode itself does not rot.
 	collector := testCollector(t)
 	result, err := collector.CreateArchive(
+		CollectOptions{Tiers: []string{TierCritical}},
+		ExportRequest{
+			Bundle:     testBundle(),
+			Mnemonic:   testMnemonic,
+			Passphrase: "a passphrase",
+			SlotPolicy: PolicyOR,
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Manifest.SlotPolicy != PolicyOR {
+		t.Fatalf("OR was asked for and not honoured: %q", result.Manifest.SlotPolicy)
+	}
+	if _, _, err := OpenArchive(result.Bytes, OpenRequest{Mnemonic: testMnemonic}); err != nil {
+		t.Fatalf("the phrase alone stopped working under OR: %v", err)
+	}
+	if _, _, err := OpenArchive(result.Bytes, OpenRequest{Passphrase: "a passphrase"}); err != nil {
+		t.Fatalf("the passphrase alone stopped working under OR: %v", err)
+	}
+
+	// And without an explicit policy, a passphrase means both.
+	def, err := collector.CreateArchive(
 		CollectOptions{Tiers: []string{TierCritical}},
 		ExportRequest{
 			Bundle:     testBundle(),
@@ -179,14 +213,9 @@ func TestOrRemainsTheDefaultAndKeepsWorking(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Manifest.SlotPolicy == PolicyAND {
-		t.Fatal("AND was applied without being asked for")
-	}
-	if _, _, err := OpenArchive(result.Bytes, OpenRequest{Mnemonic: testMnemonic}); err != nil {
-		t.Fatalf("the phrase alone stopped working under OR: %v", err)
-	}
-	if _, _, err := OpenArchive(result.Bytes, OpenRequest{Passphrase: "a passphrase"}); err != nil {
-		t.Fatalf("the passphrase alone stopped working under OR: %v", err)
+	if def.Manifest.SlotPolicy != PolicyAND {
+		t.Fatalf("a passphrase with no policy produced %q, so it is still a second key",
+			def.Manifest.SlotPolicy)
 	}
 }
 
