@@ -20,6 +20,16 @@ const (
 	BandRed   AssuranceBand = "red"
 	BandAmber AssuranceBand = "amber"
 	BandGreen AssuranceBand = "green"
+
+	// BandUnknown is what an agent reports when nothing measured the band.
+	//
+	// It used to report amber in this case, which is a measurement somebody
+	// could act on, produced by nothing having been measured. Every deployment
+	// without a provider running therefore showed a graded assurance level that
+	// was really a fallback constant — and it is the shorter of the two
+	// available answers, so the guess erred towards less waiting rather than
+	// more.
+	BandUnknown AssuranceBand = "unknown"
 )
 
 // AuthProviderGate queries an AuthProvider for the current assurance band/score.
@@ -46,7 +56,7 @@ func NewStubAuthProviderGate() *StubAuthProviderGate {
 
 func (g *StubAuthProviderGate) CurrentBand() (AssuranceBand, int, error) {
 	if g == nil {
-		return BandAmber, 60, nil
+		return BandUnknown, 0, fmt.Errorf("no assurance provider configured")
 	}
 	client := g.HTTPClient
 	if client == nil {
@@ -54,24 +64,31 @@ func (g *StubAuthProviderGate) CurrentBand() (AssuranceBand, int, error) {
 	}
 	resp, err := client.Get(g.BaseURL + "/score")
 	if err != nil {
-		// Stub fallback — conservative delay when provider unreachable.
-		return BandAmber, 60, nil
+		// Unreachable is not a band. Reporting one here is how an agent with no
+		// provider at all showed a graded assurance level to somebody.
+		return BandUnknown, 0, fmt.Errorf("assurance provider unreachable: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return BandAmber, 60, fmt.Errorf("auth provider score returned %d", resp.StatusCode)
+		return BandUnknown, 0, fmt.Errorf("auth provider score returned %d", resp.StatusCode)
 	}
 	var body struct {
 		Band  string `json:"band"`
 		Score int    `json:"score"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return BandAmber, 60, err
+		return BandUnknown, 0, err
 	}
 	return AssuranceBand(body.Band), body.Score, nil
 }
 
 // CancelWindowForBand returns the assurance-graduated cancel-window delay.
+//
+// An unmeasured band gets the LONGEST window, not the shortest. The window is
+// the time somebody who did not start this recovery has to stop it, so when
+// nothing is known about the person asking, the answer that protects the owner
+// is more time rather than less. The default arm used to return the minimum,
+// which meant an agent that could not measure anything waited the least.
 func CancelWindowForBand(band AssuranceBand) time.Duration {
 	switch band {
 	case BandGreen:
@@ -81,7 +98,7 @@ func CancelWindowForBand(band AssuranceBand) time.Duration {
 	case BandRed:
 		return 72 * time.Hour
 	default:
-		return MinCancelWindow
+		return 72 * time.Hour
 	}
 }
 
@@ -102,7 +119,10 @@ func NewCancelWindowGate(auth AuthProviderGate) *CancelWindowGate {
 func (g *CancelWindowGate) Schedule(startedAt time.Time) (time.Time, time.Duration, AssuranceBand, error) {
 	band, _, err := g.AuthProvider.CurrentBand()
 	if err != nil {
-		band = BandAmber
+		// Say it is unknown rather than substituting a band. The window this
+		// produces is the longest one, so the caution is real rather than
+		// cosmetic.
+		band = BandUnknown
 	}
 	window := CancelWindowForBand(band)
 	if window < MinCancelWindow {

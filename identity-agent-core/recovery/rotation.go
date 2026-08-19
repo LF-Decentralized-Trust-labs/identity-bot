@@ -2,6 +2,7 @@ package recovery
 
 import (
 	"fmt"
+	"sync"
 	"time"
 )
 
@@ -35,8 +36,20 @@ type KeriRotator interface {
 	RotateAid(name, newPublicKey, newNextPublicKey string) (aid string, newPub string, seq int, err error)
 }
 
-// RotationTracker records whether mandatory rotation completed for a recovery session.
+// RotationTracker records whether mandatory rotation completed for a recovery
+// session.
+//
+// This is a cache of something the session itself records, and not the record.
+// It used to be the only place the fact lived, and it lives in memory — so an
+// agent that restarted forgot that the rotation had happened and demanded it
+// again, on a session whose whole purpose was to survive being waited out.
+// Rebuilt from the sessions on disk at startup.
+//
+// Guarded, because the rotation route writes it while the activate route reads
+// it, and an unsynchronised map in Go is a process-ending fatal error rather
+// than a wrong answer.
 type RotationTracker struct {
+	mu        sync.Mutex
 	Completed map[string]RotationResult
 }
 
@@ -45,6 +58,8 @@ func NewRotationTracker() *RotationTracker {
 }
 
 func (t *RotationTracker) MarkCompleted(sessionID string, result RotationResult) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	if t.Completed == nil {
 		t.Completed = map[string]RotationResult{}
 	}
@@ -55,8 +70,17 @@ func (t *RotationTracker) MarkCompleted(sessionID string, result RotationResult)
 }
 
 func (t *RotationTracker) IsCompleted(sessionID string) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	_, ok := t.Completed[sessionID]
 	return ok
+}
+
+// Forget drops a session's rotation record once the session is over.
+func (t *RotationTracker) Forget(sessionID string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	delete(t.Completed, sessionID)
 }
 
 func (t *RotationTracker) RequireCompleted(sessionID string) error {

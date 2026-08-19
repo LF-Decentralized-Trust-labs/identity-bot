@@ -8,7 +8,10 @@ import (
 
 func TestRotationMandatoryBeforeActivate(t *testing.T) {
 	svc := NewService(t.TempDir(), nil, nil)
-	svc.CancelGate.Now = func() time.Time { return time.Now().Add(48 * time.Hour) }
+	// Past the longest window. An agent with no assurance provider now waits
+	// 72 hours rather than the minimum, because an unmeasured band is not a
+	// reason to wait less.
+	svc.CancelGate.Now = func() time.Time { return time.Now().Add(96 * time.Hour) }
 
 	archive := buildTestArchive(t, testMnemonic, nil)
 	sess, err := svc.Start(StartRequest{
@@ -19,7 +22,7 @@ func TestRotationMandatoryBeforeActivate(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = svc.Activate(sess.ID)
+	_, err = svc.Activate(sess.ID, ActivateRequest{Mnemonic: testMnemonic})
 	if err == nil {
 		t.Fatal("activate without rotation must fail")
 	}
@@ -30,7 +33,7 @@ func TestRotationMandatoryBeforeActivate(t *testing.T) {
 
 func TestActivateAfterRotationWhenWindowElapsed(t *testing.T) {
 	svc := NewService(t.TempDir(), nil, nil)
-	svc.CancelGate.Now = func() time.Time { return time.Now().Add(72 * time.Hour) }
+	svc.CancelGate.Now = func() time.Time { return time.Now().Add(96 * time.Hour) }
 
 	archive := buildTestArchive(t, testMnemonic, nil)
 	sess, err := svc.Start(StartRequest{
@@ -50,7 +53,7 @@ func TestActivateAfterRotationWhenWindowElapsed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	activated, err := svc.Activate(sess.ID)
+	activated, err := svc.Activate(sess.ID, ActivateRequest{Mnemonic: testMnemonic})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +74,7 @@ func TestCancelWindowBlocksActivate(t *testing.T) {
 	}
 	_, _ = svc.RecordRotation(sess.ID, RotationResult{AID: "EtestRecoveryAID", NewPublicKey: "x", SequenceNumber: 1})
 
-	_, err = svc.Activate(sess.ID)
+	_, err = svc.Activate(sess.ID, ActivateRequest{Mnemonic: testMnemonic})
 	if err == nil {
 		t.Fatal("activate during cancel window must fail")
 	}
