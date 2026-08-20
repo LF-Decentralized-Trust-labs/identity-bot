@@ -447,19 +447,24 @@ func (s *Service) Activate(sessionID string, req ActivateRequest) (*Session, err
 	// and an authentication from the day it began is not evidence about who is
 	// finishing it. This is the moment that matters.
 	if s.RequiredLevel != "" && s.RequiredLevel != authprovider.LevelUnknown {
+		// A requirement this package does not recognise is a typo, and a typo
+		// must not quietly turn a gate off. Unrecognised levels rank alongside
+		// unknown, so "verifed" would be satisfied by having measured nothing.
+		if !s.RequiredLevel.Known() {
+			return nil, fmt.Errorf("this agent is configured to require an authentication level "+
+				"it does not recognise (%q), so it cannot tell whether anybody meets it",
+				s.RequiredLevel)
+		}
 		res := authprovider.Of(s.Authenticator)
-		if !res.Level.AtLeast(s.RequiredLevel) {
+		// Measured is the whole premise of this package and was checked
+		// nowhere: a provider returning a high level with Measured false and no
+		// error satisfied the gate. Not having measured is not a measurement.
+		if !res.Measured || !res.Level.AtLeast(s.RequiredLevel) {
 			return nil, &ErrNotAuthenticated{
 				Required: s.RequiredLevel,
 				Got:      res,
 			}
 		}
-	}
-	// The third gate. Whether this person is acting freely, which neither the
-	// phrase nor an authentication provider can answer — somebody being forced
-	// satisfies both perfectly. Off unless the owner turned it on.
-	if err := s.LoadDuressPolicy().Held(parseTime(sess.StartedAt), sess.DuressApprovals, time.Now()); err != nil {
-		return nil, err
 	}
 	if len(archive) == 0 {
 		return nil, fmt.Errorf("this recovery has no archive to restore from")
@@ -489,6 +494,24 @@ func (s *Service) Activate(sessionID string, req ActivateRequest) (*Session, err
 	}
 	if sess.IdentityAID != "" && restoredAID != sess.IdentityAID {
 		return nil, fmt.Errorf("those words open a different identity than the one this recovery started for")
+	}
+
+	// The third gate. Whether this person is acting freely, which neither the
+	// phrase nor an authentication provider can answer — somebody being forced
+	// satisfies both perfectly.
+	//
+	// Read from the ARCHIVE, and checked here rather than earlier, because a
+	// recovery by definition runs on a device that does not hold this
+	// identity's data. Reading the policy off local disk meant a fresh machine
+	// found none, defaulted to no protection, and let the recovery through —
+	// so the gate fired only on the owner's own machine, which is the one place
+	// it is not needed. An attacker with the archive and the phrase stepped
+	// around it by running the recovery anywhere else.
+	//
+	// The policy travels with the identity because it is a property of the
+	// identity, not of a machine.
+	if err := duressPolicyFrom(payload).Held(parseTime(sess.StartedAt), sess.DuressApprovals, time.Now()); err != nil {
+		return nil, err
 	}
 
 	if err := s.applyPayload(payload); err != nil {

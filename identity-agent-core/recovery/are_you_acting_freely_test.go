@@ -1,6 +1,8 @@
 package recovery
 
 import (
+	"encoding/json"
+	"identity-agent-core/backup"
 	"strings"
 	"testing"
 	"time"
@@ -51,11 +53,8 @@ func TestAPolicyNobodyCanSatisfyIsRefusedWhenItIsSet(t *testing.T) {
 		t.Fatal("the same person named twice was accepted as two people")
 	}
 
-	good := DuressPolicy{
-		Protection: DuressBoth, WaitHours: 24,
-		Contacts:  []TrustedContact{{AID: "EA"}, {AID: "EB"}, {AID: "EC"}},
-		Approvals: 2,
-	}
+	// A waiting period is satisfiable and is accepted.
+	good := DuressPolicy{Protection: DuressWait, WaitHours: 24}
 	if err := good.Validate(); err != nil {
 		t.Fatalf("a sensible policy was refused: %v", err)
 	}
@@ -140,29 +139,94 @@ func TestAChosenPolicySurvivesAndABadOneIsNeverStored(t *testing.T) {
 		t.Fatalf("a fresh identity already has protection %q", p.Protection)
 	}
 
-	chosen := DuressPolicy{
-		Protection: DuressTrustedContacts,
-		Contacts:   []TrustedContact{{AID: "EA", Label: "my brother"}},
-		Approvals:  1,
-	}
+	chosen := DuressPolicy{Protection: DuressWait, WaitHours: 48}
 	if err := svc.SaveDuressPolicy(chosen); err != nil {
 		t.Fatal(err)
 	}
 	back := svc.LoadDuressPolicy()
-	if back.Protection != DuressTrustedContacts || len(back.Contacts) != 1 ||
-		back.Contacts[0].Label != "my brother" {
+	if back.Protection != DuressWait || back.WaitHours != 48 {
 		t.Fatalf("what came back is not what was chosen: %+v", back)
 	}
 
 	// A policy that cannot be met is refused before it is stored, so a bad
 	// choice cannot be discovered during a recovery.
 	if err := svc.SaveDuressPolicy(DuressPolicy{
-		Protection: DuressTrustedContacts, Approvals: 2,
+		Protection: DuressWait, WaitHours: 0,
 	}); err == nil {
 		t.Fatal("a policy nobody can satisfy was stored")
 	}
-	if svc.LoadDuressPolicy().Protection != DuressTrustedContacts ||
-		len(svc.LoadDuressPolicy().Contacts) != 1 {
+	if svc.LoadDuressPolicy().Protection != DuressWait ||
+		svc.LoadDuressPolicy().WaitHours != 48 {
 		t.Fatal("a refused policy overwrote the good one")
+	}
+}
+
+func TestRequiringPeopleWhoCannotAnswerIsRefused(t *testing.T) {
+	// The lockout this function exists to catch, which it was green-lighting.
+	//
+	// Session.DuressApprovals is read when a recovery completes and written by
+	// nothing — there is no route a trusted contact can use to say yes. So a
+	// policy requiring them can never be satisfied, and somebody who chose it
+	// would discover that during a recovery, which is the worst moment there is.
+	for _, p := range []DuressPolicy{
+		{Protection: DuressTrustedContacts, Contacts: []TrustedContact{{AID: "EA"}}, Approvals: 1},
+		{Protection: DuressBoth, WaitHours: 24, Contacts: []TrustedContact{{AID: "EA"}}, Approvals: 1},
+	} {
+		err := p.Validate()
+		if err == nil {
+			t.Fatalf("accepted a policy nothing can satisfy: %+v", p)
+		}
+		if !strings.Contains(err.Error(), "cannot approve a recovery yet") {
+			t.Fatalf("refused without saying why it is impossible: %v", err)
+		}
+	}
+
+	// And it is not stored either, so it cannot arrive by another route.
+	svc := NewService(t.TempDir(), nil, nil)
+	if err := svc.SaveDuressPolicy(DuressPolicy{
+		Protection: DuressTrustedContacts,
+		Contacts:   []TrustedContact{{AID: "EA"}},
+		Approvals:  1,
+	}); err == nil {
+		t.Fatal("a policy nothing can satisfy was written to disk")
+	}
+}
+
+func TestThePolicyTravelsWithTheIdentityNotTheMachine(t *testing.T) {
+	// A recovery runs on a device that does not hold this identity's data —
+	// that is what makes it a recovery. Reading the policy off local disk meant
+	// a fresh machine found none, defaulted to no protection, and let the
+	// recovery through: the gate fired only on the owner's own machine, which
+	// is the one place it is not needed.
+	held := DuressPolicy{Protection: DuressWait, WaitHours: 72}
+	body, err := json.Marshal(held)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	payload := &RestoredPayload{Bundle: &backup.PayloadBundle{
+		Sections: map[string][]byte{"file:duress_policy.json": body},
+	}}
+	got := duressPolicyFrom(payload)
+	if got.Protection != DuressWait || got.WaitHours != 72 {
+		t.Fatalf("the policy did not travel with the identity: %+v", got)
+	}
+
+	// It actually holds, which is the point.
+	if err := got.Held(time.Now(), nil, time.Now().Add(time.Hour)); err == nil {
+		t.Fatal("a recovery completed an hour into a 72-hour hold carried by the archive")
+	}
+
+	// An archive that predates the setting yields the default, because an
+	// identity that never chose a policy does not have one.
+	for _, empty := range []*RestoredPayload{
+		nil,
+		{},
+		{Bundle: &backup.PayloadBundle{Sections: map[string][]byte{}}},
+		{Bundle: &backup.PayloadBundle{Sections: map[string][]byte{"file:duress_policy.json": []byte("not json")}}},
+	} {
+		if p := duressPolicyFrom(empty); p.Protection != DuressNone {
+			t.Fatalf("an archive with no policy produced %q", p.Protection)
+		}
 	}
 }

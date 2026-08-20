@@ -1,6 +1,8 @@
 package recovery
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -127,4 +129,98 @@ func asErr(err error, target **ErrNotAuthenticated) bool {
 		*target = e
 	}
 	return ok
+}
+
+type unmeasuredButConfident struct{}
+
+func (unmeasuredButConfident) Name() string { return "confident" }
+func (unmeasuredButConfident) Authenticate() (authprovider.Result, error) {
+	// A high level, no error, and nothing actually measured. The shape of a bug
+	// in somebody else's implementation, and it satisfied the gate.
+	return authprovider.Result{Level: authprovider.LevelHigh, Score: 99, Measured: false}, nil
+}
+
+func TestClaimingWithoutMeasuringDoesNotSatisfyTheGate(t *testing.T) {
+	dir := t.TempDir()
+	svc, sess := startedSession(t, dir)
+	waitedOut(t, svc, sess)
+	svc.RequiredLevel = authprovider.LevelVerified
+	svc.Authenticator = unmeasuredButConfident{}
+
+	if _, err := svc.Activate(sess.ID, ActivateRequest{Mnemonic: testMnemonic}); err == nil {
+		t.Fatal("a provider that measured nothing but claimed a high level satisfied the gate")
+	}
+}
+
+func TestARequirementThisAgentCannotReadRefusesRatherThanPasses(t *testing.T) {
+	// A typo in the requirement used to disable the gate. Unrecognised levels
+	// rank alongside unknown, so "verifed" was satisfied by having measured
+	// nothing — the misconfiguration made the agent LESS strict, silently.
+	dir := t.TempDir()
+	svc, sess := startedSession(t, dir)
+	waitedOut(t, svc, sess)
+	svc.RequiredLevel = authprovider.Level("verifed")
+	svc.Authenticator = authprovider.NotConfigured{}
+
+	_, err := svc.Activate(sess.ID, ActivateRequest{Mnemonic: testMnemonic})
+	if err == nil {
+		t.Fatal("a misspelled requirement let an unmeasured operator complete a recovery")
+	}
+	if !strings.Contains(err.Error(), "does not recognise") {
+		t.Fatalf("refused without naming the misconfiguration: %v", err)
+	}
+}
+
+func TestActivateActuallyConsultsBothGates(t *testing.T) {
+	// The gates were tested in isolation and nothing tested that Activate calls
+	// them. Deleting either check from Activate left every test passing, which
+	// is the defect this repo has shipped before.
+	dir := t.TempDir()
+
+	// Gate 2: a requirement that is not met must stop this.
+	svc, sess := startedSession(t, dir)
+	waitedOut(t, svc, sess)
+	svc.RequiredLevel = authprovider.LevelHigh
+	svc.Authenticator = saying{level: authprovider.LevelBasic, score: 10}
+	if _, err := svc.Activate(sess.ID, ActivateRequest{Mnemonic: testMnemonic}); err == nil {
+		t.Fatal("Activate does not consult the authentication gate")
+	}
+
+	// Gate 3: a hold carried by the archive must stop this, on a device that
+	// has no local policy of its own — which is every recovering device.
+	dir2 := t.TempDir()
+	svc2, sess2 := startedSessionHeldForDuress(t, dir2)
+	waitedOut(t, svc2, sess2)
+	if _, err := svc2.Activate(sess2.ID, ActivateRequest{Mnemonic: testMnemonic}); err == nil {
+		t.Fatal("Activate does not consult the duress gate")
+	} else if _, ok := err.(*ErrHeldForDuress); !ok {
+		t.Fatalf("stopped for the wrong reason: %v", err)
+	}
+}
+
+// startedSessionHeldForDuress starts a recovery from an archive whose identity
+// chose a waiting period, on a device that has no local policy — which is every
+// device a recovery actually runs on.
+func startedSessionHeldForDuress(t *testing.T, dir string) (*Service, *Session) {
+	t.Helper()
+	body, err := json.Marshal(DuressPolicy{Protection: DuressWait, WaitHours: 72})
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive := buildTestArchiveWith(t, testMnemonic, nil,
+		map[string][]byte{"file:duress_policy.json": body})
+
+	svc := NewService(dir, nil, nil)
+	sess, err := svc.Start(StartRequest{
+		ArchiveB64: base64.StdEncoding.EncodeToString(archive),
+		Mnemonic:   testMnemonic,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The recovering device has no policy of its own, which is the point.
+	if svc.LoadDuressPolicy().Protection != DuressNone {
+		t.Fatal("this device already has a duress policy, so the test proves nothing")
+	}
+	return svc, sess
 }

@@ -5,17 +5,17 @@
 // answer different questions. Keeping them apart is the whole point of this
 // package existing.
 //
-//	1. Do you control the identity?   The recovery phrase answers this. It
-//	                                  proves cryptographic control and unlocks
-//	                                  the DATA.
-//	2. Are you the same person?       An authentication provider answers this,
-//	                                  by matching what somebody can produce now
-//	                                  against what the recovered data holds —
-//	                                  the data being the identity.
-//	3. Are you acting freely?         NOTHING here answers this. A person under
-//	                                  duress passes every check perfectly. Only
-//	                                  time, or another human who knows them,
-//	                                  can speak to it.
+//  1. Do you control the identity?   The recovery phrase answers this. It
+//     proves cryptographic control and unlocks
+//     the DATA.
+//  2. Are you the same person?       An authentication provider answers this,
+//     by matching what somebody can produce now
+//     against what the recovered data holds —
+//     the data being the identity.
+//  3. Are you acting freely?         NOTHING here answers this. A person under
+//     duress passes every check perfectly. Only
+//     time, or another human who knows them,
+//     can speak to it.
 //
 // Holding the phrase used to be the end of it: recovery finished by writing the
 // identity straight in, with no second gate at all. That makes the words the
@@ -75,6 +75,21 @@ func (l Level) Badge() string {
 		// one. Nobody has checked.
 		return "red"
 	}
+}
+
+// Known reports whether this is a level this package defines.
+//
+// A requirement that is not a known level is a typo, and a typo must not
+// silently disable a gate. Unrecognised values rank 0 like unknown does, which
+// is right for a level a PROVIDER returns — the weakest answer — and exactly
+// wrong for a level somebody REQUIRES, because 0 >= 0 makes the requirement
+// satisfied by having measured nothing.
+func (l Level) Known() bool {
+	switch l {
+	case LevelUnknown, LevelNone, LevelBasic, LevelAuthenticated, LevelVerified, LevelHigh:
+		return true
+	}
+	return false
 }
 
 // AtLeast reports whether this level meets a requirement.

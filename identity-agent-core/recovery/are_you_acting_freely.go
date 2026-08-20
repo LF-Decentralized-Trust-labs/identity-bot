@@ -54,6 +54,14 @@ const (
 	DuressBoth DuressProtection = "both"
 )
 
+// trustedContactsCanApprove is false until a trusted contact has some way to
+// say yes.
+//
+// A constant rather than a comment, so the shape below stays compiled and
+// tested while the option it guards stays unreachable — and so turning it on is
+// one edit rather than a reconstruction.
+const trustedContactsCanApprove = false
+
 // TrustedContact is somebody the owner named to vouch for a recovery.
 //
 // Identified by their own identifier and never by an email address or a phone
@@ -117,6 +125,21 @@ func (p DuressPolicy) Validate() error {
 	}
 
 	if p.Protection == DuressTrustedContacts || p.Protection == DuressBoth {
+		// Nothing can approve yet, so choosing this is choosing a lockout.
+		//
+		// Session.DuressApprovals is read when a recovery completes and is
+		// written by nothing: there is no route a trusted contact can use to
+		// say yes. A policy requiring them is therefore never satisfiable, and
+		// this function exists precisely to refuse a policy that cannot be met
+		// rather than let somebody discover it during a recovery. It was
+		// green-lighting the one case it was written to catch.
+		//
+		// Removed when the approval route lands, not before. See T-494.
+		if !trustedContactsCanApprove {
+			return fmt.Errorf("trusted contacts cannot approve a recovery yet, so requiring them " +
+				"would mean no recovery could ever complete. Use a waiting period until that is built")
+		}
+
 		if len(p.Contacts) == 0 {
 			return fmt.Errorf("trusted contacts are required and nobody is named")
 		}
@@ -226,4 +249,32 @@ func (s *Service) SaveDuressPolicy(p DuressPolicy) error {
 		return err
 	}
 	return os.WriteFile(filepath.Join(s.DataDir, "duress_policy.json"), body, 0600)
+}
+
+// duressPolicyFrom reads what the identity chose, out of the archive that
+// carries it.
+//
+// The archive is the only place a recovering device can learn this. It has no
+// local policy — that is what makes it a recovery — so anything read off local
+// disk would be the default, which is no protection at all.
+//
+// An archive that predates the setting, or one written by an agent that never
+// had it, yields the default. That is correct: an identity that never chose a
+// duress policy does not have one.
+func duressPolicyFrom(payload *RestoredPayload) DuressPolicy {
+	if payload == nil || payload.Bundle == nil {
+		return DefaultDuressPolicy()
+	}
+	raw, ok := payload.Bundle.Sections["file:duress_policy.json"]
+	if !ok || len(raw) == 0 {
+		raw, ok = payload.Bundle.Sections["duress_policy"]
+	}
+	if !ok || len(raw) == 0 {
+		return DefaultDuressPolicy()
+	}
+	var p DuressPolicy
+	if json.Unmarshal(raw, &p) != nil || p.Protection == "" {
+		return DefaultDuressPolicy()
+	}
+	return p
 }

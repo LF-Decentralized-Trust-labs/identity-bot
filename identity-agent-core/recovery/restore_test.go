@@ -55,6 +55,14 @@ func TestRestoreValidSeedPassesIntegrity(t *testing.T) {
 
 func buildTestArchive(t *testing.T, mnemonic string, contacts []ContactPairwiseExpectation) []byte {
 	t.Helper()
+	return buildTestArchiveWith(t, mnemonic, contacts, nil)
+}
+
+// buildTestArchiveWith builds one carrying extra sections, so a test can put
+// something in the archive that a recovering device would otherwise never see.
+func buildTestArchiveWith(t *testing.T, mnemonic string,
+	contacts []ContactPairwiseExpectation, extra map[string][]byte) []byte {
+	t.Helper()
 
 	identity := store.IdentityState{
 		AID:           "EtestRecoveryAID",
@@ -75,6 +83,10 @@ func buildTestArchive(t *testing.T, mnemonic string, contacts []ContactPairwiseE
 			"identity_state": idJSON,
 			"contacts":       contactsJSON,
 		},
+	}
+	for k, v := range extra {
+		bundle.Sections[k] = v
+		bundle.Ordered = append(bundle.Ordered, backup.PayloadSection{Name: k, Data: v})
 	}
 
 	plain, err := backup.SerializePayloadBundle(bundle)
