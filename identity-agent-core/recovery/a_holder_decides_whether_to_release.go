@@ -129,6 +129,24 @@ func (h *Holder) Release(holding Holding, sealed backup.SealedShare, now time.Ti
 		return nil, fmt.Errorf("this share is addressed to a different holder")
 	}
 
+	// Whether this share is even ours is settled BEFORE anything else, and
+	// before anything is written down.
+	//
+	// Opening it needs a private key only this holder has, so getting past
+	// here is proof the caller holds a share genuinely addressed to us — which
+	// in turn means they opened the bootstrap envelope, which needed the
+	// recovery words. Everything after this point can therefore answer
+	// honestly ("held until Tuesday") without telling a stranger anything,
+	// because a stranger never reaches it.
+	//
+	// Doing it the other way round would make this route a probe: ask about an
+	// identity, and the difference between "no such holding" and "held" tells
+	// you whether this machine protects that identity at all.
+	share, err := h.unseal(holding, sealed)
+	if err != nil {
+		return nil, err
+	}
+
 	h.mu.Lock()
 	record, err := h.recordAsk(holding.IdentityAID, now)
 	h.mu.Unlock()
@@ -155,28 +173,6 @@ func (h *Holder) Release(holding Holding, sealed backup.SealedShare, now time.Ti
 		return nil, &ErrNeedsApproval{IdentityAID: holding.IdentityAID}
 	}
 
-	priv, err := backup.DecodeB64(holding.PrivateKeyB64)
-	if err != nil {
-		return nil, fmt.Errorf("this holder's key is unreadable: %w", err)
-	}
-	eph, err := backup.DecodeB64(sealed.EphemeralPubB64)
-	if err != nil {
-		return nil, fmt.Errorf("this share is unreadable: %w", err)
-	}
-	wrapped, err := backup.DecodeB64(sealed.WrappedB64)
-	if err != nil {
-		return nil, fmt.Errorf("this share is unreadable: %w", err)
-	}
-	nonce, err := backup.DecodeB64(sealed.NonceB64)
-	if err != nil {
-		return nil, fmt.Errorf("this share is unreadable: %w", err)
-	}
-	share, err := backup.UnsealBEK(priv, eph, wrapped, nonce)
-	if err != nil {
-		// Somebody asking this holder for a share sealed to somebody else.
-		return nil, fmt.Errorf("this share was not sealed to this holder")
-	}
-
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	record.ReleasedAt = now.UTC().Format(time.RFC3339)
@@ -190,6 +186,39 @@ func (h *Holder) Release(holding Holding, sealed backup.SealedShare, now time.Ti
 }
 
 // Approve records that a person said yes.
+// unseal opens a share addressed to this holder, and refuses everything else
+// with one answer.
+//
+// One answer on purpose: a share sealed to somebody else, a malformed share
+// and a share for an identity this machine has never heard of must not be
+// distinguishable, or the difference is a way to enumerate what a machine
+// holds and for whom.
+func (h *Holder) unseal(holding Holding, sealed backup.SealedShare) ([]byte, error) {
+	refuse := fmt.Errorf("this share was not sealed to this holder")
+
+	priv, err := backup.DecodeB64(holding.PrivateKeyB64)
+	if err != nil {
+		return nil, fmt.Errorf("this holder's key is unreadable: %w", err)
+	}
+	eph, err := backup.DecodeB64(sealed.EphemeralPubB64)
+	if err != nil {
+		return nil, refuse
+	}
+	wrapped, err := backup.DecodeB64(sealed.WrappedB64)
+	if err != nil {
+		return nil, refuse
+	}
+	nonce, err := backup.DecodeB64(sealed.NonceB64)
+	if err != nil {
+		return nil, refuse
+	}
+	share, err := backup.UnsealBEK(priv, eph, wrapped, nonce)
+	if err != nil {
+		return nil, refuse
+	}
+	return share, nil
+}
+
 func (h *Holder) Approve(identityAID string, now time.Time) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()

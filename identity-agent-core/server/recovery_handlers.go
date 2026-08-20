@@ -2,10 +2,13 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"sync"
+	"time"
 
+	"identity-agent-core/backup"
 	"identity-agent-core/recovery"
 
 	"github.com/go-chi/chi/v5"
@@ -30,6 +33,14 @@ func (s *CoreServer) mountRecoveryRoutes(r chi.Router) {
 		r.Post("/retrieve", s.handleRecoveryRetrieve)
 		r.Post("/root-aid-rotation", s.handleRecoveryRootAIDRotation)
 		r.Get("/root-aid-rotation/status", s.handleRecoveryRootAIDStatus)
+
+		// Holding a share for somebody else's identity. Small on purpose: a
+		// machine that agrees to help stores one key and one promise, and
+		// learns nothing about the person it is helping.
+		r.Post("/holdings", s.handleAgreeToHold)
+		r.Get("/holdings", s.handleWhatThisMachineHolds)
+		r.Post("/holdings/approve", s.handleApproveShare)
+		r.Post("/share-requests", s.handleReleaseShare)
 	})
 }
 
@@ -42,6 +53,39 @@ func (s *CoreServer) mountRecoveryRoutes(r chi.Router) {
 // concurrently, so this was reachable by two people, or one person and a
 // retry.
 var recoveryOnce sync.Once
+
+var (
+	holdingsOnce sync.Once
+	holdingsVal  *recovery.Holdings
+	holderOnce   sync.Once
+	holderVal    *recovery.Holder
+)
+
+// holdings is what this machine has agreed to hold for other identities.
+func (s *CoreServer) holdings() *recovery.Holdings {
+	holdingsOnce.Do(func() {
+		holdingsVal = &recovery.Holdings{DataDir: s.DataDir}
+	})
+	return holdingsVal
+}
+
+// shareHolder decides whether to release a share, and is the clock while it
+// does.
+func (s *CoreServer) shareHolder() *recovery.Holder {
+	holderOnce.Do(func() {
+		holderVal = &recovery.Holder{
+			DataDir: s.DataDir,
+			Notify: func(identityAID string, first bool) {
+				// Somebody is recovering an identity this machine helps
+				// protect. Logged for now: the owner-facing notification is
+				// the point of it, and there is nowhere yet to send one.
+				log.Printf("[recovery] a share was asked for: identity=%s first=%v",
+					identityAID, first)
+			},
+		}
+	})
+	return holderVal
+}
 
 func (s *CoreServer) recoveryService() *recovery.Service {
 	recoveryOnce.Do(func() {
@@ -345,4 +389,128 @@ func statusForActivateError(err error) int {
 	default:
 		return http.StatusBadRequest
 	}
+}
+
+// --- holding a share for somebody else's identity -------------------------
+
+// handleAgreeToHold takes on a share for another identity and answers with the
+// public key to seal it to.
+//
+// The keypair is made here, by the machine that will have to use it, and only
+// the public half goes back. If the asking agent generated it instead, the
+// machine that wrote the backup would once have held every key needed to open
+// it.
+func (s *CoreServer) handleAgreeToHold(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRecoveryBody)
+	var req recovery.AgreeToHold
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request", err.Error())
+		return
+	}
+	agreed, err := s.holdings().Agree(req)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "This machine cannot hold that", err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(agreed)
+}
+
+// handleWhatThisMachineHolds lists what somebody has taken on, without keys.
+func (s *CoreServer) handleWhatThisMachineHolds(w http.ResponseWriter, r *http.Request) {
+	held, err := s.holdings().All()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Could not read what this machine holds", err.Error())
+		return
+	}
+	asked, err := s.shareHolder().WhatHasBeenAsked()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Could not read what has been asked", err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"holding": held,
+		"asked":   asked,
+	})
+}
+
+// handleReleaseShare is a recovering machine asking for a share back.
+//
+// Unauthenticated by design, and the reason is the sealed share it carries:
+// opening that needs a private key only this machine has, and holding it at
+// all means the caller opened a bootstrap envelope, which needed the recovery
+// words. So the request authenticates itself with something no stranger can
+// forge, and everything that cannot be opened gets one answer.
+func (s *CoreServer) handleReleaseShare(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRecoveryBody)
+	var req struct {
+		IdentityAID string             `json:"identity_aid"`
+		HolderID    string             `json:"holder_id"`
+		Sealed      backup.SealedShare `json:"sealed_share"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request", err.Error())
+		return
+	}
+
+	holding, err := s.holdings().Find(req.IdentityAID, req.HolderID)
+	if err != nil || holding == nil {
+		// The same answer a share sealed to somebody else gets. Telling a
+		// caller that this machine holds nothing for that identity is how a
+		// stranger enumerates whose backups a machine helps protect.
+		writeError(w, http.StatusForbidden, "This share was not released",
+			"this share was not sealed to this holder")
+		return
+	}
+
+	share, err := s.shareHolder().Release(*holding, req.Sealed, time.Now())
+	if err != nil {
+		writeShareRefusal(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"share_b64": backup.EncodeB64(share)})
+}
+
+// handleApproveShare records that a person said yes to a recovery.
+func (s *CoreServer) handleApproveShare(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRecoveryBody)
+	var req struct {
+		IdentityAID string `json:"identity_aid"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request", err.Error())
+		return
+	}
+	if err := s.shareHolder().Approve(req.IdentityAID, time.Now()); err != nil {
+		writeError(w, http.StatusBadRequest, "That could not be approved", err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// writeShareRefusal answers a refusal in a way a screen can act on.
+//
+// Being held and being refused are different things and must not arrive as the
+// same status, or no client can tell "come back on Tuesday" from "this will
+// never work".
+func writeShareRefusal(w http.ResponseWriter, err error) {
+	var held *recovery.ErrHeldForWait
+	if errors.As(err, &held) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error":         "This share is being held",
+			"detail":        err.Error(),
+			"release_after": held.Until.UTC().Format(time.RFC3339),
+		})
+		return
+	}
+	var approval *recovery.ErrNeedsApproval
+	if errors.As(err, &approval) {
+		writeError(w, http.StatusConflict, "This share is waiting to be approved", err.Error())
+		return
+	}
+	writeError(w, http.StatusForbidden, "This share was not released", err.Error())
 }

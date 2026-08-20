@@ -60,6 +60,19 @@ type ShareHolder struct {
 	// Address is where to ask, when there is somewhere to ask. Empty for a
 	// passphrase, which is not somewhere you send a request.
 	Address string `json:"address,omitempty"`
+	// KnownAs is what THIS holder files its holding under, and the only
+	// identifier a request to it may carry.
+	//
+	// Never the identity's own AID. A holder is asked to protect somebody
+	// without being told who they are, so each relationship gets an
+	// identifier of its own — and sending the real one would hand every
+	// holder, and anybody watching, the name of the identity they help
+	// protect. It would also undo the reason a witness is addressed by a
+	// pairwise identifier and a relay of its own in the first place.
+	//
+	// Empty means the holder files under the identity's own AID, which is
+	// only appropriate for one of the owner's own devices.
+	KnownAs string `json:"known_as,omitempty"`
 }
 
 // SealedShare is one holder's share, sealed so only that holder can read it.
