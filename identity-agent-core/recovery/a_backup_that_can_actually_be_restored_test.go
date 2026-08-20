@@ -293,19 +293,20 @@ func writeDB(dir string, raw []byte) error {
 	return os.WriteFile(filepath.Join(dir, "identity.db"), raw, 0600)
 }
 
-// The irreplaceable part of an archive must land even when the rest fails.
+// An archive that cannot be used is refused before anything is written.
 //
-// Every other thing an archive carries can be fetched again, re-agreed, or
-// asked for a second time. The root seed cannot: every pairwise, login, asset
-// and audit key re-derives from it, and if it is not written there is nowhere
-// else on earth to get it.
+// This replaced an earlier property — "the root seed lands even when the rest
+// fails" — which was solving a problem that does not exist. A failed restore
+// does not consume the archive: the seed is still in it, and the recovery can
+// be run again. What actually matters is that a machine is never left in a
+// state neither the archive nor the machine describes.
 //
-// Moving the database import to the front of the restore — so the parsed
-// sections have the final say — put the most fragile step in front of it. A
-// corrupt or truncated database section then failed the whole restore having
-// written nothing, and the seed was lost with it. The key material now goes
-// down first.
-func TestTheRootSeedLandsEvenWhenTheDatabaseSectionIsUnusable(t *testing.T) {
+// The database section is the one this had to reach. Its failures are ordinary
+// — a schema newer than this build, a file that is not an identity database, a
+// migration that will not apply — and left until the import they land after
+// the seed has been reseated, giving a machine the archive's seed and its own
+// database. So it is opened, migrated and checked in the preflight.
+func TestAnUnusableDatabaseSectionRefusesBeforeWritingAnything(t *testing.T) {
 	oldDir, oldStore := machineWithAnIdentity(t, "ESeedFirst")
 	seed := make([]byte, 32)
 	for i := range seed {
@@ -339,14 +340,19 @@ func TestTheRootSeedLandsEvenWhenTheDatabaseSectionIsUnusable(t *testing.T) {
 		t.Fatal("an unusable database section was accepted silently")
 	}
 
-	// The restore failed, loudly, and the one thing that cannot be
-	// reconstructed is on disk anyway.
-	got, err := secureenclave.LoadRootSeed(newDir)
-	if err != nil {
-		t.Fatalf("the root seed was lost with the failed restore: %v", err)
+	// Nothing was written. Not the seed, and so not anything derived from it.
+	if _, err := secureenclave.LoadRootSeed(newDir); err == nil {
+		t.Fatal("the archive's root seed was written before the archive was known to be usable")
 	}
-	if !bytes.Equal(got, seed) {
-		t.Fatalf("the root seed came back wrong")
+	// And no working copy of the identity store was left lying about.
+	entries, err := os.ReadDir(newDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.IsDir() && strings.HasPrefix(e.Name(), backup.RestoringPrefix) {
+			t.Fatalf("a plaintext working copy was left behind: %s", e.Name())
+		}
 	}
 }
 
@@ -507,5 +513,64 @@ func TestABackupThatCannotReadTheDatabaseFails(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "identity database") {
 		t.Fatalf("the failure does not say what went wrong: %v", err)
+	}
+}
+
+// The database is checked before the seed is written, not while it is imported.
+//
+// Grok's finding, and the one three passes of review missed: parsing the JSON
+// sections up front is not enough. A backup from a newer build, or one that is
+// not an identity database, fails inside the import — which runs AFTER the
+// root seed has been reseated. So an ordinary, expected refusal left a machine
+// holding the archive's seed and its own database, which is the state the
+// whole ordering exists to prevent. Only disk failure was supposed to be able
+// to do that.
+func TestABackupFromANewerBuildDoesNotReseatTheSeedFirst(t *testing.T) {
+	oldDir, oldStore := machineWithAnIdentity(t, "EFromTheFuture")
+	fromArchive := make([]byte, 32)
+	for i := range fromArchive {
+		fromArchive[i] = 0xAA
+	}
+	if err := secureenclave.StoreRootSeed(oldDir, fromArchive); err != nil {
+		t.Fatal(err)
+	}
+	// A backup whose schema this build does not understand. Refused, by
+	// design — the question is when.
+	if _, err := oldStore.DB().Exec(
+		`INSERT INTO identity_schema_migrations (version, description, applied_at)
+		 VALUES (9999, 'from a later release', '2030-01-01')`); err != nil {
+		t.Fatal(err)
+	}
+	archive := archiveOf(t, oldDir, oldStore)
+	oldStore.Close()
+
+	newDir, newStore := machineWithAnIdentity(t, "EAlreadyHere")
+	defer newStore.Close()
+	alreadyHere := make([]byte, 32)
+	for i := range alreadyHere {
+		alreadyHere[i] = 0x55
+	}
+	if err := secureenclave.StoreRootSeed(newDir, alreadyHere); err != nil {
+		t.Fatal(err)
+	}
+
+	payload, err := RestoreFromArchive(archive, OpenRequest{Mnemonic: testPhrase})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = NewService(newDir, newStore, nil).applyPayload(payload)
+	if err == nil {
+		t.Fatal("a backup from a newer build was accepted")
+	}
+	if !strings.Contains(err.Error(), "newer version") {
+		t.Fatalf("refused for the wrong reason: %v", err)
+	}
+
+	got, err := secureenclave.LoadRootSeed(newDir)
+	if err != nil {
+		t.Fatalf("this machine's root seed is gone: %v", err)
+	}
+	if !bytes.Equal(got, alreadyHere) {
+		t.Fatal("an expected refusal reseated this machine's root seed from the archive")
 	}
 }

@@ -40,7 +40,12 @@ import (
 // Two kinds of table are the exception, both because adding would corrupt
 // rather than accumulate — see copyTable.
 func (s *SQLiteStore) ImportSnapshot(path string) error {
-	if err := bringTheBackupUpToDate(path); err != nil {
+	// Safe to have been done already: migrations skip versions the file has,
+	// and the two refusals below are pure checks. The restore runs this in its
+	// preflight so that a backup which cannot be used is refused before
+	// anything is written, and calling it again here keeps ImportSnapshot
+	// correct for any other caller.
+	if err := PrepareSnapshotForImport(path); err != nil {
 		return err
 	}
 
@@ -156,13 +161,20 @@ func (s *SQLiteStore) ImportSnapshot(path string) error {
 	return nil
 }
 
-// bringTheBackupUpToDate runs this build's migrations against the backup.
+// PrepareSnapshotForImport runs this build's migrations against a backup and
+// refuses one that cannot be used.
 //
-// The backup is a file of our own making, opened here only to migrate it, so
-// this mutates it in place. Refusing happens here rather than later because
-// these are the two things that make a backup unusable rather than merely old,
-// and both should be said plainly before anything has been written.
-func bringTheBackupUpToDate(path string) error {
+// It MUTATES the file at path, which is why the restore writes the archive's
+// database section to a working copy rather than pointing this at anything it
+// wants to keep.
+//
+// Separate from ImportSnapshot so that it can run in a preflight. Everything
+// that makes a backup unusable rather than merely old is decided here — too
+// new for this build, not an identity database, a migration that will not
+// apply — and deciding it early is what lets the restore refuse before it has
+// written anything. Idempotent: running it twice on the same file is a check
+// and then a no-op.
+func PrepareSnapshotForImport(path string) error {
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		return fmt.Errorf("open the backed-up database: %w", err)

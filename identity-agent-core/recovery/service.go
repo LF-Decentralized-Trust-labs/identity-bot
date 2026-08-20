@@ -586,15 +586,18 @@ func (s *Service) applyPayload(payload *RestoredPayload) error {
 	// what both of those attempts were reaching for. What remains after this
 	// point is disk failure, which can still leave a restore half-applied —
 	// that is real, and it is not something ordering can solve.
-	checked, err := checkBeforeWriting(payload)
+	checked, err := s.checkBeforeWriting(payload)
 	if err != nil {
 		return err
+	}
+	if checked.cleanup != nil {
+		defer checked.cleanup()
 	}
 
 	if err := s.restoreTheKeyMaterial(payload); err != nil {
 		return err
 	}
-	if err := s.restoreTheDatabase(payload); err != nil {
+	if err := s.restoreTheDatabase(checked); err != nil {
 		return err
 	}
 	if payload.Identity != nil && s.Store != nil {
@@ -698,6 +701,13 @@ type checkedPayload struct {
 	credentials []store.CredentialRecord
 	settings    *store.SettingsData
 	pending     []store.PendingRequest
+
+	// databasePath is the archive's database, unpacked to a working copy and
+	// already migrated to this build's schema — so importing it is a copy
+	// between two databases known to be compatible, with the refusals already
+	// made.
+	databasePath string
+	cleanup      func()
 }
 
 // checkBeforeWriting reads every section this code can parse, and resolves
@@ -707,7 +717,7 @@ type checkedPayload struct {
 // Parsing as each section is written means the machine is already part-way
 // through when a malformed one is found — key material replaced, database
 // committed — and there is no coherent way back from there.
-func checkBeforeWriting(payload *RestoredPayload) (*checkedPayload, error) {
+func (s *Service) checkBeforeWriting(payload *RestoredPayload) (*checkedPayload, error) {
 	checked := &checkedPayload{}
 
 	if raw, ok := payload.Bundle.Sections["credentials"]; ok && len(raw) > 0 {
@@ -741,7 +751,58 @@ func checkBeforeWriting(payload *RestoredPayload) (*checkedPayload, error) {
 				"this archive names a file section with an unusable path: %q", name)
 		}
 	}
+
+	// The database, unpacked and brought to this build's schema — here, before
+	// the seed is written, rather than during the restore.
+	//
+	// Everything that makes a backup unusable rather than merely old is
+	// decided by PrepareSnapshotForImport: a schema newer than this build
+	// understands, a file that is not an identity database, a migration that
+	// will not apply. Those are ordinary conditions, not disk failure. Left
+	// until the import they land AFTER the root seed has been reseated, which
+	// is the incoherent "new seed, old database" state this whole ordering
+	// exists to prevent — so they have to be reached first.
+	if err := s.prepareTheDatabase(payload, checked); err != nil {
+		if checked.cleanup != nil {
+			checked.cleanup()
+		}
+		return nil, err
+	}
 	return checked, nil
+}
+
+func (s *Service) prepareTheDatabase(payload *RestoredPayload, checked *checkedPayload) error {
+	raw, ok := payload.Bundle.Sections["sqlite_identity_db"]
+	if !ok || len(raw) == 0 {
+		return nil
+	}
+	if _, ok := s.Store.(*store.SQLiteStore); !ok {
+		return nil
+	}
+
+	// Anything a previous run left behind when it died mid-way. This is a
+	// plaintext copy of the whole identity store, and nothing else removes it.
+	backup.SweepUpAbandoned(s.DataDir)
+
+	dir, err := os.MkdirTemp(s.DataDir, backup.RestoringPrefix)
+	if err != nil {
+		return fmt.Errorf("make room for the backed-up database: %w", err)
+	}
+	backup.InUse(dir)
+	checked.cleanup = func() {
+		backup.NoLongerInUse(dir)
+		os.RemoveAll(dir)
+	}
+
+	path := filepath.Join(dir, "identity.db")
+	if err := os.WriteFile(path, raw, 0600); err != nil {
+		return fmt.Errorf("unpack the backed-up database: %w", err)
+	}
+	if err := store.PrepareSnapshotForImport(path); err != nil {
+		return err
+	}
+	checked.databasePath = path
+	return nil
 }
 
 // restoreTheDatabase brings back the identity database the archive carries.
@@ -754,39 +815,15 @@ func checkBeforeWriting(payload *RestoredPayload) (*checkedPayload, error) {
 // and carries across everything the parsed sections do not know about.
 //
 // See SQLiteStore.ImportSnapshot for why this is not simply a file write.
-func (s *Service) restoreTheDatabase(payload *RestoredPayload) error {
-	raw, ok := payload.Bundle.Sections["sqlite_identity_db"]
-	if !ok || len(raw) == 0 {
+func (s *Service) restoreTheDatabase(checked *checkedPayload) error {
+	if checked.databasePath == "" {
 		return nil
 	}
 	sqlStore, ok := s.Store.(*store.SQLiteStore)
 	if !ok {
 		return nil
 	}
-
-	// Anything a previous restore left behind when it died mid-way. Same
-	// reasoning as the snapshot side: this is a plaintext copy of the whole
-	// identity store, and nothing else will ever remove it.
-	backup.SweepUpAbandoned(s.DataDir)
-
-	dir, err := os.MkdirTemp(s.DataDir, backup.RestoringPrefix)
-	if err != nil {
-		return fmt.Errorf("make room for the backed-up database: %w", err)
-	}
-	backup.InUse(dir)
-	defer func() {
-		backup.NoLongerInUse(dir)
-		os.RemoveAll(dir)
-	}()
-
-	path := filepath.Join(dir, "identity.db")
-	if err := os.WriteFile(path, raw, 0600); err != nil {
-		return fmt.Errorf("unpack the backed-up database: %w", err)
-	}
-	if err := sqlStore.ImportSnapshot(path); err != nil {
-		return err
-	}
-	return nil
+	return sqlStore.ImportSnapshot(checked.databasePath)
 }
 
 // Retrieve loads an opaque .iab archive from backup-only device, local path, or cloud stub.
