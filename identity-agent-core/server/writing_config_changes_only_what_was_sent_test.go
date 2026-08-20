@@ -71,6 +71,53 @@ func TestSavingOneSettingDoesNotWipeTheOthers(t *testing.T) {
 	}
 }
 
+func TestARecipientCannotBeSwappedForAnother(t *testing.T) {
+	// The case the other test missed, and the one that matters. Starting from
+	// an EMPTY list and sending one entry changes the length, so any comparison
+	// catches it. Starting from one and REPLACING it does not — and every
+	// paired agent already has one, because pairing is what sets it.
+	//
+	// The guard compared a slice header copy against the slice json.Unmarshal
+	// had just decoded into, which is the same backing array. It was comparing
+	// the new value to itself.
+	dir := t.TempDir()
+	s := exportServer(t, dir)
+
+	svc := s.backupService()
+	cfg, err := svc.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.SealToPublicKeysB64 = []string{"the-owners-key"}
+	if err := svc.SaveConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	w := putConfig(t, s, `{"seal_to_public_keys_b64":["AN-ATTACKERS-KEY"]}`)
+	if w.Code == http.StatusOK {
+		t.Fatal("a recipient was swapped for another, so every future archive " +
+			"carries a slot for somebody the owner never chose")
+	}
+
+	after, err := svc.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after.SealToPublicKeysB64) != 1 || after.SealToPublicKeysB64[0] != "the-owners-key" {
+		t.Fatalf("the owner's recipient was replaced: %v", after.SealToPublicKeysB64)
+	}
+
+	// Same length, same content, reordered — also a change to who can open
+	// this identity's archives if it were ever honoured positionally.
+	cfg.SealToPublicKeysB64 = []string{"key-a", "key-b"}
+	if err := svc.SaveConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if w := putConfig(t, s, `{"seal_to_public_keys_b64":["key-b","key-a"]}`); w.Code == http.StatusOK {
+		t.Fatal("the recipient list was reordered without being refused")
+	}
+}
+
 func TestConfigCannotAddAReaderOfEveryFutureArchive(t *testing.T) {
 	// A seal recipient is a standing key to every archive written from now on,
 	// openable by that recipient alone. Archives carry no recipient names by

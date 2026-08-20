@@ -118,7 +118,24 @@ func (c *Collector) collectTier1(bundle *PayloadBundle) error {
 		c.addRawSection(bundle, "root_seed", seed)
 	}
 
+	// What this identity chose about being coerced, in tier 1.
+	//
+	// It lived only in the tier-3 sweep, which nothing requests: the default
+	// tiers are tier1 and tier2 in Go and hardcoded twice in the Dart client,
+	// and no screen can select tier 3. So somebody set a duress policy, the
+	// agent stored it and read it back and confirmed it — and it was absent
+	// from every archive, which is the only place a recovering device can
+	// learn it. The gate then found nothing and passed.
+	//
+	// It belongs in tier 1 regardless of that bug: it is a property of the
+	// identity that governs how the identity may be recovered, which is the
+	// same class of thing as the key material beside it.
+	if raw, err := os.ReadFile(filepath.Join(c.DataDir, "duress_policy.json")); err == nil && len(raw) > 0 {
+		c.addRawSection(bundle, "file:duress_policy.json", raw)
+	}
+
 	return nil
+
 }
 
 func (c *Collector) collectTier2(bundle *PayloadBundle) error {

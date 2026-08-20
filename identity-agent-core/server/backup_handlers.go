@@ -174,7 +174,12 @@ func (s *CoreServer) handleBackupPutConfig(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusInternalServerError, "Load config failed", lerr.Error())
 		return
 	}
-	before := cfg.SealToPublicKeysB64
+	// CLONED, not aliased. A slice header copy shares its backing array, and
+	// json.Unmarshal decodes into that same array whenever the incoming list
+	// fits the existing capacity — so "before" became the new value too, and
+	// the comparison below was a slice against itself. The guard passed for
+	// every agent that already had a recipient, which is every paired agent.
+	before := slices.Clone(cfg.SealToPublicKeysB64)
 
 	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid config", err.Error())

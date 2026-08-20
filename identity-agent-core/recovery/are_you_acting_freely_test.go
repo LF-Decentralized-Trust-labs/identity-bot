@@ -3,6 +3,7 @@ package recovery
 import (
 	"encoding/json"
 	"identity-agent-core/backup"
+	"identity-agent-core/store"
 	"strings"
 	"testing"
 	"time"
@@ -228,5 +229,47 @@ func TestThePolicyTravelsWithTheIdentityNotTheMachine(t *testing.T) {
 		if p := duressPolicyFrom(empty); p.Protection != DuressNone {
 			t.Fatalf("an archive with no policy produced %q", p.Protection)
 		}
+	}
+}
+
+func TestTheChosenPolicyActuallyReachesAnArchive(t *testing.T) {
+	// Every test of this gate injected the section into a hand-built bundle, so
+	// they proved the gate READS it and nothing proved it is ever there.
+	//
+	// It was not. The section came only from the tier-3 sweep, which nothing
+	// requests — the default tiers are tier1 and tier2 in Go and hardcoded
+	// twice in the Dart client, and no screen can select tier 3. So somebody
+	// set a duress policy, the agent stored it and read it back and confirmed
+	// it, and it was absent from every archive: the one place a recovering
+	// device can learn it.
+	dir := t.TempDir()
+	svc := NewService(dir, nil, nil)
+	if err := svc.SaveDuressPolicy(DuressPolicy{
+		Protection: DuressWait, WaitHours: 72,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	st, serr := store.NewSQLiteStore(dir)
+	if serr != nil {
+		t.Fatal(serr)
+	}
+	defer st.Close()
+	c := &backup.Collector{DataDir: dir, Store: st}
+	bundle, _, err := c.Collect(backup.CollectOptions{Tiers: []string{backup.TierCritical}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	raw, ok := bundle.Sections["file:duress_policy.json"]
+	if !ok || len(raw) == 0 {
+		t.Fatal("the duress policy is not in a default archive, so the gate has " +
+			"nothing to read on the device that is recovering")
+	}
+
+	// And it survives the trip as what was chosen.
+	got := duressPolicyFrom(&RestoredPayload{Bundle: bundle})
+	if got.Protection != DuressWait || got.WaitHours != 72 {
+		t.Fatalf("the policy did not survive collection: %+v", got)
 	}
 }
