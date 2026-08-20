@@ -148,6 +148,27 @@ func (s *Service) forgetSession(id string) {
 	os.Remove(p + partialSuffix)
 }
 
+// ForgetFailed drops the archive of a recovery that ended badly.
+//
+// A failure leaves the record in place so somebody can read what happened, but
+// there is no reason to keep the ciphertext: the recovery is over, and holding
+// somebody's sealed identity for the thirty days an abandoned session gets is
+// keeping it for no purpose at all.
+func (s *Service) ForgetFailed(id string) {
+	s.mu.Lock()
+	rec, ok := s.sessions[id]
+	if ok {
+		rec.Archive = nil
+	}
+	s.mu.Unlock()
+	if ok {
+		// Written back WITHOUT the archive rather than deleted, so the failure
+		// and its reason survive a restart and somebody can still be told what
+		// went wrong.
+		_ = s.writeSession(rec)
+	}
+}
+
 // ForgetExpiredSessions drops sessions that were abandoned.
 //
 // Called whenever a session is written, rather than only at startup. Expiry

@@ -373,6 +373,13 @@ func (s *Service) Cancel(sessionID string) (*Session, error) {
 	return &sess, nil
 }
 
+// authenticationCountsFor is how recent an authentication must be to stand in
+// for one taken now.
+//
+// Long enough that somebody is not asked twice inside one sitting, short enough
+// that it cannot span the wait it is meant to be checked at the end of.
+const authenticationCountsFor = 15 * time.Minute
+
 // ErrNotAuthenticated means the recovery is controlled by somebody this agent
 // cannot establish is the owner.
 //
@@ -456,6 +463,14 @@ func (s *Service) Activate(sessionID string, req ActivateRequest) (*Session, err
 				s.RequiredLevel)
 		}
 		res := authprovider.Of(s.Authenticator)
+		// And recently. An authentication is a statement about a moment, and a
+		// recovery waits days — so a provider answering with a level it
+		// established last week says nothing about who is finishing this. Fresh
+		// existed and was tested and nothing consulted it, which made it look
+		// load-bearing when it was not.
+		if !res.Fresh(authenticationCountsFor) {
+			return nil, &ErrNotAuthenticated{Required: s.RequiredLevel, Got: res}
+		}
 		// Measured is the whole premise of this package and was checked
 		// nowhere: a provider returning a high level with Measured false and no
 		// error satisfied the gate. Not having measured is not a measurement.
@@ -520,7 +535,9 @@ func (s *Service) Activate(sessionID string, req ActivateRequest) (*Session, err
 		rec.Session.Error = err.Error()
 		sess = rec.Session
 		s.mu.Unlock()
-		_ = s.writeSession(rec)
+		// The recovery is over, so the sealed archive stops being held. The
+		// record stays, without it, so somebody can still read what went wrong.
+		s.ForgetFailed(sessionID)
 		return nil, err
 	}
 

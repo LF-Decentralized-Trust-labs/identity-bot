@@ -224,3 +224,76 @@ func startedSessionHeldForDuress(t *testing.T, dir string) (*Service, *Session) 
 	}
 	return svc, sess
 }
+
+type staleButHigh struct{}
+
+func (staleButHigh) Name() string { return "stale" }
+func (staleButHigh) Authenticate() (authprovider.Result, error) {
+	// Measured, high, and from last week. A provider that caches, or one asked
+	// once when the recovery began.
+	return authprovider.Result{
+		Level: authprovider.LevelHigh, Score: 99, Measured: true,
+		At: time.Now().Add(-7 * 24 * time.Hour),
+	}, nil
+}
+
+func TestAnAuthenticationFromLastWeekDoesNotFinishThisRecovery(t *testing.T) {
+	// A recovery waits days, and the gate is checked at the end precisely
+	// because who started it says nothing about who is finishing it. A
+	// provider answering with a level it established last week defeats that.
+	//
+	// Result.Fresh existed and was tested and nothing consulted it, which made
+	// it look load-bearing when it was not.
+	dir := t.TempDir()
+	svc, sess := startedSession(t, dir)
+	waitedOut(t, svc, sess)
+	svc.RequiredLevel = authprovider.LevelVerified
+	svc.Authenticator = staleButHigh{}
+
+	if _, err := svc.Activate(sess.ID, ActivateRequest{Mnemonic: testMnemonic}); err == nil {
+		t.Fatal("a week-old authentication completed a recovery")
+	}
+
+	// A current one of the same level does finish it.
+	svc.Authenticator = saying{level: authprovider.LevelVerified, score: 90}
+	if _, err := svc.Activate(sess.ID, ActivateRequest{Mnemonic: testMnemonic}); err != nil {
+		t.Fatalf("a current authentication was refused: %v", err)
+	}
+}
+
+func TestAFailedRecoveryStopsHoldingTheArchive(t *testing.T) {
+	// The record stays so somebody can read what went wrong; the sealed
+	// identity does not need to stay with it for the thirty days an abandoned
+	// session gets.
+	dir := t.TempDir()
+	svc, sess := startedSession(t, dir)
+
+	svc.ForgetFailed(sess.ID)
+
+	svc.mu.Lock()
+	rec, ok := svc.sessions[sess.ID]
+	held := ok && len(rec.Archive) > 0
+	svc.mu.Unlock()
+	if held {
+		t.Fatal("a failed recovery is still holding the archive in memory")
+	}
+
+	// And it is gone from disk too, while the session itself survives.
+	restarted := NewService(dir, nil, nil)
+	if _, err := restarted.LoadSessions(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := restarted.GetSession(sess.ID)
+	if err != nil {
+		t.Fatalf("the record did not survive, so nobody can be told what happened: %v", err)
+	}
+	if got.ID != sess.ID {
+		t.Fatalf("wrong session came back: %+v", got)
+	}
+	restarted.mu.Lock()
+	stillHeld := len(restarted.sessions[sess.ID].Archive) > 0
+	restarted.mu.Unlock()
+	if stillHeld {
+		t.Fatal("the archive came back from disk after the recovery failed")
+	}
+}

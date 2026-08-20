@@ -134,7 +134,8 @@ func (p DuressPolicy) Validate() error {
 		// rather than let somebody discover it during a recovery. It was
 		// green-lighting the one case it was written to catch.
 		//
-		// Removed when the approval route lands, not before. See T-494.
+		// Removed when there is a route a trusted contact can approve through,
+		// and not before.
 		if !trustedContactsCanApprove {
 			return fmt.Errorf("trusted contacts cannot approve a recovery yet, so requiring them " +
 				"would mean no recovery could ever complete. Use a waiting period until that is built")
