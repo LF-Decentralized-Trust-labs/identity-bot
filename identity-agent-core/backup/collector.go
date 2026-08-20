@@ -92,13 +92,20 @@ func (c *Collector) collectTier1(bundle *PayloadBundle) error {
 		return err
 	}
 
-	// SQLite identity.db snapshot for tier1 tables.
+	// The identity database, taken as a snapshot rather than read off disk.
+	//
+	// A failure to snapshot fails the whole collection. This used to be an
+	// ignored error — os.ReadFile with `err == nil`, so an unreadable database
+	// produced an archive with no database section and no complaint. That is
+	// the same class of bug as the WAL one SnapshotSQLite exists to fix: the
+	// archive is valid and incomplete, and nobody learns which until they try
+	// to recover from it.
 	if sqlStore, ok := c.Store.(*store.SQLiteStore); ok {
-		dbPath := filepath.Join(c.DataDir, "identity.db")
-		if data, err := os.ReadFile(dbPath); err == nil {
-			c.addRawSection(bundle, "sqlite_identity_db", data)
+		data, err := SnapshotSQLite(sqlStore.DB(), c.DataDir)
+		if err != nil {
+			return fmt.Errorf("identity database: %w", err)
 		}
-		_ = sqlStore // used for type assertion path
+		c.addRawSection(bundle, "sqlite_identity_db", data)
 	}
 
 	// Login relationships (pairwise seeds) — tier1 key material.
