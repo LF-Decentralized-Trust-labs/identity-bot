@@ -564,32 +564,36 @@ func (s *Service) applyPayload(payload *RestoredPayload) error {
 		return fmt.Errorf("this archive carries no sections")
 	}
 
-	// The key material goes down first, before anything that can fail on the
-	// shape of the data.
+	// Everything is read and checked BEFORE anything is written.
 	//
-	// Everything else in an archive describes things that can be fetched,
-	// re-agreed or asked for again. The root seed cannot: every pairwise,
-	// login, asset and audit key re-derives from it, and if it is not written
-	// there is nowhere else to get it. So it must not sit behind a step that
-	// refuses a malformed table — a restore that fails on a machine with
-	// nothing to lose should still fail with the irreplaceable part on disk.
+	// This ordering is the whole answer to a problem two earlier attempts got
+	// wrong. Writing the key material last meant a machine that had lost
+	// everything could fail the restore and lose the root seed with it, which
+	// is the one thing no other copy exists of. Writing it first meant a
+	// machine that already HELD an identity had that identity's seed
+	// overwritten by any later failure — a malformed credentials section,
+	// nothing to do with key material at all.
 	//
-	// But a machine may already hold an identity, and then writing first is
-	// destructive: the seed is overwritten in place, so a restore that failed
-	// for any reason at all — a malformed credentials section, nothing to do
-	// with key material — took the working identity down with it. So what was
-	// there is put back if this does not complete.
-	putItBack, err := s.restoreTheKeyMaterial(payload)
+	// Undoing the seed afterwards is not the fix either, and looked like one
+	// for a while: the database import commits before those later sections are
+	// parsed, so putting only the seed back leaves this machine's seed beside
+	// the archive's identity. Every derived key then belongs to an identity
+	// that is no longer in the store. Two coherent states became one
+	// incoherent one.
+	//
+	// So nothing is written until everything that CAN be checked has been. A
+	// malformed archive is refused having touched nothing at all, which is
+	// what both of those attempts were reaching for. What remains after this
+	// point is disk failure, which can still leave a restore half-applied —
+	// that is real, and it is not something ordering can solve.
+	checked, err := checkBeforeWriting(payload)
 	if err != nil {
 		return err
 	}
-	finished := false
-	defer func() {
-		if !finished {
-			putItBack()
-		}
-	}()
 
+	if err := s.restoreTheKeyMaterial(payload); err != nil {
+		return err
+	}
 	if err := s.restoreTheDatabase(payload); err != nil {
 		return err
 	}
@@ -618,37 +622,21 @@ func (s *Service) applyPayload(payload *RestoredPayload) error {
 	// restored less than it contained. Nothing that inspects an archive could
 	// catch that; only restoring one and looking at what arrived.
 	//
-	// A section that will not parse fails the restore rather than being skipped.
-	// Continuing past it is how a partial restore comes to look like a whole
-	// one, and this is the one moment somebody can still act on the truth.
-	if raw, ok := payload.Bundle.Sections["credentials"]; ok && len(raw) > 0 && s.Store != nil {
-		var creds []store.CredentialRecord
-		if err := json.Unmarshal(raw, &creds); err != nil {
-			return fmt.Errorf("credentials in this archive could not be read: %w", err)
-		}
-		for _, c := range creds {
+	// They were parsed by checkBeforeWriting, so a section that will not read
+	// has already refused the restore before anything was written. Continuing
+	// past one is how a partial restore comes to look like a whole one.
+	if s.Store != nil {
+		for _, c := range checked.credentials {
 			if err := s.Store.SaveCredential(c); err != nil {
 				return fmt.Errorf("restore credential %s: %w", c.SAID, err)
 			}
 		}
-	}
-
-	if raw, ok := payload.Bundle.Sections["settings"]; ok && len(raw) > 0 && s.Store != nil {
-		var settings store.SettingsData
-		if err := json.Unmarshal(raw, &settings); err != nil {
-			return fmt.Errorf("settings in this archive could not be read: %w", err)
+		if checked.settings != nil {
+			if err := s.Store.SaveSettings(*checked.settings); err != nil {
+				return fmt.Errorf("restore settings: %w", err)
+			}
 		}
-		if err := s.Store.SaveSettings(settings); err != nil {
-			return fmt.Errorf("restore settings: %w", err)
-		}
-	}
-
-	if raw, ok := payload.Bundle.Sections["pending_requests"]; ok && len(raw) > 0 && s.Store != nil {
-		var pending []store.PendingRequest
-		if err := json.Unmarshal(raw, &pending); err != nil {
-			return fmt.Errorf("pending requests in this archive could not be read: %w", err)
-		}
-		for _, p := range pending {
+		for _, p := range checked.pending {
 			if err := s.Store.SavePendingRequest(p); err != nil {
 				return fmt.Errorf("restore pending request: %w", err)
 			}
@@ -661,18 +649,12 @@ func (s *Service) applyPayload(payload *RestoredPayload) error {
 	// directory — so this cannot name them either. A restore that knew only
 	// the files somebody remembered to list would drop exactly the ones a
 	// build on top of this core had added, which is the failure the sweep
-	// exists to remove.
-	//
-	// A section whose name does not resolve to a path inside the data
-	// directory fails the restore. An archive is opened with the owner's own
-	// key, so this is not the main line of defence — but a section name is the
-	// one part of an archive that becomes a filesystem path.
+	// exists to remove. Every name was resolved to a path by
+	// checkBeforeWriting, so none of them can surprise this loop half-way
+	// through.
 	for name, raw := range payload.Bundle.Sections {
 		rel, ok := backup.FilePathOfSection(name)
 		if !ok {
-			if strings.HasPrefix(name, backup.FileSectionPrefix) {
-				return fmt.Errorf("this archive names a file section with an unusable path: %q", name)
-			}
 			continue
 		}
 		dest := filepath.Join(s.DataDir, rel)
@@ -684,7 +666,6 @@ func (s *Service) applyPayload(payload *RestoredPayload) error {
 		}
 	}
 
-	finished = true
 	return nil
 }
 
@@ -696,43 +677,71 @@ func (s *Service) applyPayload(payload *RestoredPayload) error {
 // deliberately: the on-disk copy may be sealed to the old device's hardware,
 // and a recovery onto new hardware must never need the old secure element.
 // StoreRootSeed re-wraps it under THIS device's key where one is usable.
-// It returns a function that puts back whatever this machine held before, for
-// the caller to run if the restore does not complete. On a machine with no
-// identity that function does nothing, so a failed recovery there still leaves
-// the seed on disk rather than losing it — which is the reason for writing it
-// first. On a machine that already had one, it is the difference between a
-// failed restore and a destroyed identity.
-func (s *Service) restoreTheKeyMaterial(payload *RestoredPayload) (func(), error) {
-	var undo []func()
-	putItBack := func() {
-		for _, u := range undo {
-			u()
-		}
-	}
-
+func (s *Service) restoreTheKeyMaterial(payload *RestoredPayload) error {
 	if raw, ok := payload.Bundle.Sections["root_seed"]; ok && len(raw) >= 32 {
-		if previous, err := secureenclave.LoadRootSeed(s.DataDir); err == nil && len(previous) >= 32 {
-			undo = append(undo, func() {
-				_ = secureenclave.StoreRootSeed(s.DataDir, previous)
-			})
-		}
 		if err := secureenclave.StoreRootSeed(s.DataDir, raw); err != nil {
-			putItBack()
-			return func() {}, fmt.Errorf("reseat root seed: %w", err)
+			return fmt.Errorf("reseat root seed: %w", err)
 		}
 	}
-
 	if raw, ok := payload.Bundle.Sections["login_relationships"]; ok && len(raw) > 0 {
 		path := filepath.Join(s.DataDir, "login_relationships.json")
-		if previous, err := os.ReadFile(path); err == nil {
-			undo = append(undo, func() { _ = os.WriteFile(path, previous, 0600) })
-		}
 		if err := os.WriteFile(path, raw, 0600); err != nil {
-			putItBack()
-			return func() {}, fmt.Errorf("write login_relationships: %w", err)
+			return fmt.Errorf("write login_relationships: %w", err)
 		}
 	}
-	return putItBack, nil
+	return nil
+}
+
+// checkedPayload is everything an archive's sections mean, read and validated
+// before the restore has written anything.
+type checkedPayload struct {
+	credentials []store.CredentialRecord
+	settings    *store.SettingsData
+	pending     []store.PendingRequest
+}
+
+// checkBeforeWriting reads every section this code can parse, and resolves
+// every path it would write, before the restore touches the machine.
+//
+// Doing this up front is what lets a failed restore leave the machine alone.
+// Parsing as each section is written means the machine is already part-way
+// through when a malformed one is found — key material replaced, database
+// committed — and there is no coherent way back from there.
+func checkBeforeWriting(payload *RestoredPayload) (*checkedPayload, error) {
+	checked := &checkedPayload{}
+
+	if raw, ok := payload.Bundle.Sections["credentials"]; ok && len(raw) > 0 {
+		if err := json.Unmarshal(raw, &checked.credentials); err != nil {
+			return nil, fmt.Errorf("credentials in this archive could not be read: %w", err)
+		}
+	}
+	if raw, ok := payload.Bundle.Sections["settings"]; ok && len(raw) > 0 {
+		var settings store.SettingsData
+		if err := json.Unmarshal(raw, &settings); err != nil {
+			return nil, fmt.Errorf("settings in this archive could not be read: %w", err)
+		}
+		checked.settings = &settings
+	}
+	if raw, ok := payload.Bundle.Sections["pending_requests"]; ok && len(raw) > 0 {
+		if err := json.Unmarshal(raw, &checked.pending); err != nil {
+			return nil, fmt.Errorf("pending requests in this archive could not be read: %w", err)
+		}
+	}
+
+	// A section name is the one part of an archive that becomes a filesystem
+	// path, so every one is resolved here. A name that does not land inside
+	// the data directory refuses the archive rather than being discovered
+	// part-way through writing the others.
+	for name := range payload.Bundle.Sections {
+		if _, ok := backup.FilePathOfSection(name); ok {
+			continue
+		}
+		if strings.HasPrefix(name, backup.FileSectionPrefix) {
+			return nil, fmt.Errorf(
+				"this archive names a file section with an unusable path: %q", name)
+		}
+	}
+	return checked, nil
 }
 
 // restoreTheDatabase brings back the identity database the archive carries.
@@ -758,13 +767,17 @@ func (s *Service) restoreTheDatabase(payload *RestoredPayload) error {
 	// Anything a previous restore left behind when it died mid-way. Same
 	// reasoning as the snapshot side: this is a plaintext copy of the whole
 	// identity store, and nothing else will ever remove it.
-	backup.SweepUpAbandoned(s.DataDir, ".restoring-")
+	backup.SweepUpAbandoned(s.DataDir)
 
-	dir, err := os.MkdirTemp(s.DataDir, ".restoring-")
+	dir, err := os.MkdirTemp(s.DataDir, backup.RestoringPrefix)
 	if err != nil {
 		return fmt.Errorf("make room for the backed-up database: %w", err)
 	}
-	defer os.RemoveAll(dir)
+	backup.InUse(dir)
+	defer func() {
+		backup.NoLongerInUse(dir)
+		os.RemoveAll(dir)
+	}()
 
 	path := filepath.Join(dir, "identity.db")
 	if err := os.WriteFile(path, raw, 0600); err != nil {

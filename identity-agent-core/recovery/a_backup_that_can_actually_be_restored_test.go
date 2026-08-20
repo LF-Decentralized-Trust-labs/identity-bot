@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -349,15 +350,19 @@ func TestTheRootSeedLandsEvenWhenTheDatabaseSectionIsUnusable(t *testing.T) {
 	}
 }
 
-// A restore must not leave an unencrypted copy of the identity store behind.
+// Neither side may leave an unencrypted copy of the identity store behind.
 //
-// Both sides unpack a plaintext database into the data directory and remove it
-// on the way out; a crash between those points leaves it there forever. The
-// file sweep cannot report it either — it matches on basename, sees
-// identity.db, and records it as already captured.
+// Both unpack a plaintext database into the data directory and remove it on
+// the way out; a crash between those points leaves it there forever. The file
+// sweep cannot report it either — it matches on basename, sees identity.db,
+// and records it as already captured.
+//
+// Each side sweeps BOTH prefixes. Sweeping only its own means a crashed
+// restore's copy is cleaned up only by another restore, which most people
+// never run a second time, so it survives every backup indefinitely.
 func TestAnAbandonedPlaintextCopyIsCleanedUp(t *testing.T) {
 	dir := t.TempDir()
-	abandoned := filepath.Join(dir, ".restoring-crashed")
+	abandoned := filepath.Join(dir, ".snapshot-crashed")
 	if err := os.MkdirAll(abandoned, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -372,13 +377,21 @@ func TestAnAbandonedPlaintextCopyIsCleanedUp(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// And one that a run started moments ago is still writing into.
-	inUse := filepath.Join(dir, ".restoring-live")
-	if err := os.MkdirAll(inUse, 0o700); err != nil {
+	// And one a run started moments ago is still writing into. Age cannot tell
+	// these apart: a directory's mtime moves when entries are added, not while
+	// a file inside it is written, so a snapshot of a large database ages from
+	// the moment its file was created however long the work then takes.
+	live := filepath.Join(dir, ".restoring-live")
+	if err := os.MkdirAll(live, 0o700); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Chtimes(live, old, old); err != nil {
+		t.Fatal(err)
+	}
+	backup.InUse(live)
+	defer backup.NoLongerInUse(live)
 
-	backup.SweepUpAbandoned(dir, ".restoring-")
+	backup.SweepUpAbandoned(dir)
 
 	if _, err := os.Stat(abandoned); !os.IsNotExist(err) {
 		t.Fatal("a plaintext copy of the identity store was left on disk")
@@ -386,7 +399,7 @@ func TestAnAbandonedPlaintextCopyIsCleanedUp(t *testing.T) {
 	// Removing every match deletes the working directory of a restore that is
 	// still running — two started close together and the second wipes the
 	// first mid-write, failing a restore that had nothing wrong with it.
-	if _, err := os.Stat(inUse); err != nil {
+	if _, err := os.Stat(live); err != nil {
 		t.Fatal("the sweep deleted a working directory that is still in use")
 	}
 }
@@ -442,5 +455,57 @@ func TestAFailedRestoreLeavesAnExistingIdentityAlone(t *testing.T) {
 	}
 	if !bytes.Equal(got, alreadyHere) {
 		t.Fatal("the failed restore replaced this machine's root seed with the archive's")
+	}
+
+	// And the database is untouched too.
+	//
+	// Undoing only the seed was an earlier attempt at this and it is worse
+	// than doing nothing: the database import commits before the malformed
+	// section is reached, so putting back the seed alone leaves this machine's
+	// seed beside the archive's identity, and every key derived from that seed
+	// belongs to an identity that is no longer in the store. Two coherent
+	// states made into one incoherent one.
+	newStore.Close()
+	reopened, err := store.NewSQLiteStore(newDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	identity, err := reopened.GetIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if identity == nil || identity.AID != "EAlreadyHere" {
+		t.Fatalf("the failed restore left the archive's identity on this machine "+
+			"beside its own root seed: %+v", identity)
+	}
+}
+
+// A backup that cannot read the database fails, rather than shipping without it.
+//
+// The collector used to do `if data, err := os.ReadFile(...); err == nil`, so
+// an unreadable database produced an archive with no database section and no
+// complaint — the same class as the write-ahead gap: a valid archive, an
+// honest manifest, and nothing inside. This is the change the collector's own
+// comment says is the point, and nothing was holding it.
+func TestABackupThatCannotReadTheDatabaseFails(t *testing.T) {
+	_, st := machineWithAnIdentity(t, "EWillNotSnapshot")
+	defer st.Close()
+
+	// The store answers normally; the snapshot is what cannot be taken. Every
+	// other part of the collection succeeds, so if the failure is swallowed
+	// the archive is built and simply has no database in it.
+	notADir := filepath.Join(t.TempDir(), "this-is-a-file")
+	if err := os.WriteFile(notADir, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &backup.Collector{DataDir: notADir, Store: st}
+	_, _, err := c.Collect(backup.CollectOptions{Tiers: []string{backup.TierCritical}})
+	if err == nil {
+		t.Fatal("a backup was produced without the identity database in it")
+	}
+	if !strings.Contains(err.Error(), "identity database") {
+		t.Fatalf("the failure does not say what went wrong: %v", err)
 	}
 }

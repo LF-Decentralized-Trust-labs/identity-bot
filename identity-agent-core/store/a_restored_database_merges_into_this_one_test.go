@@ -300,6 +300,16 @@ func TestATableThatMerelySharesAVirtualTablesNameSurvives(t *testing.T) {
 		`SELECT body FROM notes_archive WHERE id='a1'`).Scan(&body); err != nil {
 		t.Fatalf("notes_archive did not survive the restore: %v", err)
 	}
+
+	// The other direction, so this cannot be satisfied by finding no internal
+	// tables at all: the virtual table's own content must still come back.
+	if _, err := into.db.Exec(
+		`INSERT INTO notes (body) VALUES ('afterwards')`); err != nil {
+		t.Fatalf("the virtual table is unusable after the restore: %v", err)
+	}
+	if _, err := into.db.Exec(`INSERT INTO notes(notes) VALUES('integrity-check')`); err != nil {
+		t.Fatalf("the restored index does not pass its own integrity check: %v", err)
+	}
 }
 
 // A table is virtual or not according to SQLite, not according to its text.
@@ -380,7 +390,11 @@ func TestRestoringAVirtualTableOverAnExistingOneDoesNotLoseRows(t *testing.T) {
 	if _, err := from.db.Exec(`CREATE VIRTUAL TABLE notes USING fts5(body)`); err != nil {
 		t.Skipf("this build has no FTS5: %v", err)
 	}
-	for i := 0; i < 50; i++ {
+	// Deliberately fewer than the local index holds. Equal counts make the
+	// backup's row ids overwrite the local ones exactly, so merging and
+	// replacing produce the same answer and the test proves nothing — which is
+	// what an earlier version of it did.
+	for i := 0; i < 40; i++ {
 		if _, err := from.db.Exec(
 			`INSERT INTO notes (body) VALUES (?)`, fmt.Sprintf("backedup%d", i)); err != nil {
 			t.Fatal(err)
@@ -393,7 +407,7 @@ func TestRestoringAVirtualTableOverAnExistingOneDoesNotLoseRows(t *testing.T) {
 	if _, err := into.db.Exec(`CREATE VIRTUAL TABLE notes USING fts5(body)`); err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 50; i++ {
+	for i := 0; i < 400; i++ {
 		if _, err := into.db.Exec(
 			`INSERT INTO notes (body) VALUES (?)`, fmt.Sprintf("localonly%d", i)); err != nil {
 			t.Fatal(err)
@@ -409,11 +423,143 @@ func TestRestoringAVirtualTableOverAnExistingOneDoesNotLoseRows(t *testing.T) {
 		`SELECT count(*) FROM notes WHERE notes MATCH 'backedup*'`).Scan(&backedUp); err != nil {
 		t.Fatalf("the restored index is unusable: %v", err)
 	}
-	if backedUp != 50 {
-		t.Fatalf("the backup's index came back with %d of 50 entries", backedUp)
+	if backedUp != 40 {
+		t.Fatalf("the backup's index came back with %d of 40 entries", backedUp)
 	}
 	// And it is coherent rather than two indexes stirred together.
 	if _, err := into.db.Exec(`INSERT INTO notes(notes) VALUES('integrity-check')`); err != nil {
 		t.Fatalf("the restored index does not pass its own integrity check: %v", err)
+	}
+}
+
+// Schema text carried by a backup is executed against the live database, so it
+// must be one statement creating one thing.
+//
+// sqlite_master.sql is normally exactly what SQLite recorded, but
+// PRAGMA writable_schema lets it be anything. The restore replaced "write
+// bytes over a file" with "execute the artifact's schema", which is a surface
+// that did not exist before — a second statement behind a semicolon runs with
+// the restore's own access. The archive is opened with the owner's key so this
+// is not a remote attack; it is containment for something that has been off
+// this machine.
+func TestSchemaTextCarryingASecondStatementIsRefused(t *testing.T) {
+	// Built as a file rather than through VACUUM INTO, deliberately. VACUUM
+	// rewrites sqlite_master from the parsed schema, so it launders tampering
+	// — which means a backup this agent took is safe by construction. The
+	// bytes in an archive are not: an archive is an artifact that has been off
+	// this machine, and the restore reads whatever the section contains.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tampered.db")
+	raw, err := sqlOpenForTest(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := applyMigrationsUpTo(raw, newestKnownMigration()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(`CREATE TABLE downstream_thing (id TEXT PRIMARY KEY)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(`PRAGMA writable_schema=ON`); err != nil {
+		t.Skipf("this build will not allow the schema to be rewritten: %v", err)
+	}
+	if _, err := raw.Exec(
+		`UPDATE sqlite_master
+		    SET sql = 'CREATE TABLE downstream_thing (id TEXT PRIMARY KEY); DELETE FROM contacts'
+		  WHERE name = 'downstream_thing'`); err != nil {
+		t.Fatal(err)
+	}
+	raw.Close()
+
+	_, into := openStore(t)
+	if err := into.SaveContact(ContactRecord{AID: "EStillHere", Alias: "Still here"}); err != nil {
+		t.Fatal(err)
+	}
+
+	err = into.ImportSnapshot(path)
+	if err == nil {
+		t.Fatal("schema text carrying a second statement was executed")
+	}
+	if !strings.Contains(err.Error(), "more than one statement") {
+		t.Fatalf("refused for the wrong reason: %v", err)
+	}
+
+	contacts, err := into.GetContacts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(contacts) != 1 {
+		t.Fatal("the smuggled statement ran against the live identity database")
+	}
+}
+
+// A child row copied before its parent must not fail the restore.
+//
+// Tables are copied in whatever order sqlite_master lists them, so a row can
+// legitimately arrive before the row it refers to. Enforcement goes off for
+// the copy, and back to whatever this connection had — not unconditionally on,
+// which would newly enable it on a connection that did not have it and make
+// later writes checked or unchecked depending on which one the pool serves.
+func TestAChildRowCopiedBeforeItsParentStillRestores(t *testing.T) {
+	_, from := openStore(t)
+	if _, err := from.db.Exec(
+		// The child is created FIRST, so sqlite_master lists it first and the
+		// copy reaches it before the parent exists. Created the other way round
+		// there is no violation to enforce and the test proves nothing.
+		`CREATE TABLE aa_child (id TEXT PRIMARY KEY,
+		   parent TEXT NOT NULL REFERENCES zz_parent(id));
+		 CREATE TABLE zz_parent (id TEXT PRIMARY KEY);
+		 INSERT INTO zz_parent VALUES ('p1');
+		 INSERT INTO aa_child VALUES ('c1', 'p1');`); err != nil {
+		t.Fatal(err)
+	}
+	snap := snapshotOf(t, from)
+
+	_, into := openStore(t)
+	if err := into.ImportSnapshot(snap); err != nil {
+		t.Fatalf("a child row copied before its parent failed the restore: %v", err)
+	}
+	var parent string
+	if err := into.db.QueryRow(`SELECT parent FROM aa_child WHERE id='c1'`).Scan(&parent); err != nil {
+		t.Fatal(err)
+	}
+	if parent != "p1" {
+		t.Fatalf("the child row came back wrong: %q", parent)
+	}
+}
+
+// A downstream table with no primary key is left alone, not cleared.
+//
+// Clearing is right for this schema's four single-row tables. It is wrong for
+// a table this core has never heard of: an append-only log or an audit trail
+// written on this machine since the backup would be deleted. Duplicating rows
+// is recoverable in a way that deleting them is not.
+func TestADownstreamTableWithNoPrimaryKeyIsNotCleared(t *testing.T) {
+	_, from := openStore(t)
+	if _, err := from.db.Exec(
+		`CREATE TABLE downstream_log (line TEXT);
+		 INSERT INTO downstream_log VALUES ('from the backup')`); err != nil {
+		t.Fatal(err)
+	}
+	snap := snapshotOf(t, from)
+
+	_, into := openStore(t)
+	if _, err := into.db.Exec(
+		`CREATE TABLE downstream_log (line TEXT);
+		 INSERT INTO downstream_log VALUES ('written on this machine since')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := into.ImportSnapshot(snap); err != nil {
+		t.Fatal(err)
+	}
+
+	var kept int
+	if err := into.db.QueryRow(
+		`SELECT count(*) FROM downstream_log WHERE line='written on this machine since'`).
+		Scan(&kept); err != nil {
+		t.Fatal(err)
+	}
+	if kept != 1 {
+		t.Fatal("a downstream table written since the backup was cleared by the restore")
 	}
 }

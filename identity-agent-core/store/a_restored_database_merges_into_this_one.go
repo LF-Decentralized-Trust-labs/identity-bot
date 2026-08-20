@@ -92,10 +92,21 @@ func (s *SQLiteStore) ImportSnapshot(path string) error {
 	// order sqlite_master lists them, so a child row can legitimately arrive
 	// before its parent. This must happen before the transaction opens —
 	// SQLite ignores the pragma inside one. It goes back on either way.
+	// Put back what this connection had, rather than switching enforcement on.
+	// NewSQLiteStore sets its pragmas with db.Exec, which reaches whichever
+	// single pooled connection served it, so foreign_keys is already on for
+	// some connections and off for others. Ending with an unconditional ON
+	// newly enables it on a connection that did not have it, and afterwards
+	// whether a write is checked depends on which connection the pool hands
+	// out.
+	var hadForeignKeys int
+	if err := conn.QueryRowContext(ctx, "PRAGMA foreign_keys").Scan(&hadForeignKeys); err != nil {
+		return fmt.Errorf("prepare the restore: %w", err)
+	}
 	if _, err := conn.ExecContext(ctx, "PRAGMA foreign_keys=OFF"); err != nil {
 		return fmt.Errorf("prepare the restore: %w", err)
 	}
-	defer conn.ExecContext(ctx, "PRAGMA foreign_keys=ON")
+	defer conn.ExecContext(ctx, fmt.Sprintf("PRAGMA foreign_keys=%d", hadForeignKeys))
 
 	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
@@ -117,23 +128,25 @@ func (s *SQLiteStore) ImportSnapshot(path string) error {
 			return err
 		}
 	}
-	for _, o := range ordinary {
-		if err := copyTable(ctx, tx, conn, o.name, shadow[o.name]); err != nil {
-			return err
-		}
-	}
-
-	// Indexes, triggers and views last, once the tables they refer to exist.
-	// These are separate rows in sqlite_master, so copying only tables left a
-	// restored database without them — and a dropped UNIQUE index is not
-	// cosmetic, it silently starts accepting duplicates.
+	// Indexes, triggers and views once their tables exist and BEFORE the rows
+	// arrive. These are separate rows in sqlite_master, so copying only tables
+	// left a restored database without them — and a dropped UNIQUE index is
+	// not cosmetic, it silently starts accepting duplicates. They go in first
+	// because the copy below asks whether a table has anything to match rows
+	// on, and a unique index is one of the answers.
 	for _, o := range objects {
 		if o.kind == "table" || o.ddl == "" {
 			continue
 		}
-		if _, err := tx.ExecContext(ctx, o.ddl); err != nil &&
+		if err := execOneStatementTx(ctx, tx, o.ddl, o.name); err != nil &&
 			!strings.Contains(err.Error(), "already exists") {
 			return fmt.Errorf("recreate %s %s: %w", o.kind, o.name, err)
+		}
+	}
+
+	for _, o := range ordinary {
+		if err := copyTable(ctx, tx, conn, o.name, shadow[o.name]); err != nil {
+			return err
 		}
 	}
 
@@ -220,9 +233,14 @@ func objectsIn(ctx context.Context, conn *sql.Conn, schema string) ([]object, er
 		if err := rows.Scan(&o.kind, &o.name, &o.ddl, &o.virtual); err != nil {
 			return nil, fmt.Errorf("read what the backup contains: %w", err)
 		}
-		// Never carried: this is bookkeeping about which migrations have run
-		// and it must describe THIS database. The backup has just been
-		// migrated to the same version anyway.
+		// Never carried: this is bookkeeping about which migrations have run,
+		// and it describes the database it came from rather than this one.
+		//
+		// It is belt and braces rather than load-bearing, and worth saying so:
+		// the backup has just been migrated to this build's version, so the two
+		// tables now agree and copying it would change nothing. It earns its
+		// place only if that ever stops being true — which is exactly the
+		// condition under which copying it wedges the schema permanently.
 		if o.name == "identity_schema_migrations" {
 			continue
 		}
@@ -237,7 +255,19 @@ func shadowTablesOf(virtual []object) (map[string]bool, error) {
 	if len(virtual) == 0 {
 		return shadow, nil
 	}
-	probe, err := sql.Open("sqlite", ":memory:")
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		return nil, fmt.Errorf("inspect the backup's tables: %w", err)
+	}
+	defer db.Close()
+
+	// Pinned, because every connection to ":memory:" is a SEPARATE empty
+	// database. Creating the virtual table on one pooled connection and then
+	// listing tables on another reports nothing, silently — and a silently
+	// empty shadow map merges those tables row by row, which is what corrupts
+	// the index. Sequential use happens to reuse one idle connection today;
+	// nothing holds it there.
+	probe, err := db.Conn(context.Background())
 	if err != nil {
 		return nil, fmt.Errorf("inspect the backup's tables: %w", err)
 	}
@@ -248,7 +278,7 @@ func shadowTablesOf(virtual []object) (map[string]bool, error) {
 		if err != nil {
 			return nil, err
 		}
-		if _, err := probe.Exec(v.ddl); err != nil {
+		if err := execOneStatement(context.Background(), probe, v.ddl, v.name); err != nil {
 			// A module this build does not have. The virtual table will fail
 			// to create during the restore too, and that error is the one
 			// worth reporting; nothing is assumed about its tables here.
@@ -267,8 +297,9 @@ func shadowTablesOf(virtual []object) (map[string]bool, error) {
 	return shadow, nil
 }
 
-func tableNamesIn(db *sql.DB) (map[string]bool, error) {
-	rows, err := db.Query(`SELECT name FROM sqlite_master WHERE type='table'`)
+func tableNamesIn(conn *sql.Conn) (map[string]bool, error) {
+	rows, err := conn.QueryContext(context.Background(),
+		`SELECT name FROM sqlite_master WHERE type='table'`)
 	if err != nil {
 		return nil, fmt.Errorf("inspect the backup's tables: %w", err)
 	}
@@ -284,6 +315,76 @@ func tableNamesIn(db *sql.DB) (map[string]bool, error) {
 	return names, rows.Err()
 }
 
+// execOneStatement runs schema text from the backup, and only if it is one
+// statement.
+//
+// sqlite_master.sql is free text. It is normally exactly what SQLite recorded
+// when the object was created, but PRAGMA writable_schema lets it be anything,
+// and this code hands it to Exec against the live identity database. The
+// previous restore wrote bytes over a file; this one executes the artifact's
+// schema, which is a surface that did not exist before. A second statement
+// smuggled in behind a semicolon runs with the same access the restore has.
+//
+// The archive is opened with the owner's own key, so this is not a remote
+// attack — it is containment for an artifact that has been off this machine.
+// Refusing anything that is not a single statement creating the object
+// sqlite_master says it is costs nothing legitimate.
+func execOneStatement(ctx context.Context, conn *sql.Conn, ddl, name string) error {
+	if !isOneStatement(ddl) {
+		return fmt.Errorf(
+			"the backup's definition of %q carries more than one statement", name)
+	}
+	_, err := conn.ExecContext(ctx, ddl)
+	return err
+}
+
+func execOneStatementTx(ctx context.Context, tx *sql.Tx, ddl, name string) error {
+	if !isOneStatement(ddl) {
+		return fmt.Errorf(
+			"the backup's definition of %q carries more than one statement", name)
+	}
+	_, err := tx.ExecContext(ctx, ddl)
+	return err
+}
+
+// isOneStatement reports whether ddl contains a single statement, ignoring
+// semicolons inside string literals, identifiers and comments.
+func isOneStatement(ddl string) bool {
+	rest := strings.TrimSpace(ddl)
+	for i := 0; i < len(rest); i++ {
+		switch rest[i] {
+		case '\'', '"', '`':
+			quote := rest[i]
+			i++
+			for i < len(rest) && rest[i] != quote {
+				i++
+			}
+		case '[':
+			for i < len(rest) && rest[i] != ']' {
+				i++
+			}
+		case '-':
+			if i+1 < len(rest) && rest[i+1] == '-' {
+				for i < len(rest) && rest[i] != '\n' {
+					i++
+				}
+			}
+		case '/':
+			if i+1 < len(rest) && rest[i+1] == '*' {
+				i += 2
+				for i+1 < len(rest) && !(rest[i] == '*' && rest[i+1] == '/') {
+					i++
+				}
+				i++
+			}
+		case ';':
+			// Trailing semicolons are fine; anything after one is not.
+			return strings.TrimSpace(rest[i+1:]) == ""
+		}
+	}
+	return true
+}
+
 func createIfAbsent(ctx context.Context, tx *sql.Tx, conn *sql.Conn, o object) error {
 	live, err := columnsOn(ctx, conn, "main", o.name)
 	if err != nil {
@@ -292,7 +393,7 @@ func createIfAbsent(ctx context.Context, tx *sql.Tx, conn *sql.Conn, o object) e
 	if len(live) > 0 || strings.TrimSpace(o.ddl) == "" {
 		return nil
 	}
-	if _, err := tx.ExecContext(ctx, o.ddl); err != nil {
+	if err := execOneStatementTx(ctx, tx, o.ddl, o.name); err != nil {
 		return fmt.Errorf("recreate %s from the backup: %w", o.name, err)
 	}
 	return nil
@@ -338,7 +439,7 @@ func copyTable(ctx context.Context, tx *sql.Tx, conn *sql.Conn, name string, isS
 	// interleaves two unrelated indexes, and the result passes an integrity
 	// check while having quietly lost entries from both.
 	wholesale := isShadow
-	if !wholesale {
+	if !wholesale && singleRowCoreTables[name] {
 		wholesale, err = hasNothingToMatchRowsOn(ctx, conn, name)
 		if err != nil {
 			return err
@@ -370,6 +471,19 @@ func copyTable(ctx context.Context, tx *sql.Tx, conn *sql.Conn, name string, isS
 		return fmt.Errorf("restore the %s table: %w", name, err)
 	}
 	return nil
+}
+
+// singleRowCoreTables are the tables of this schema that hold exactly one row
+// and are declared with no primary key.
+//
+// Only these are cleared before copying. A downstream table with no primary
+// key is left additive even though restoring it twice duplicates its rows,
+// because this core cannot know what such a table is for — an append-only log
+// or an audit trail written on this machine since the backup would be deleted,
+// and duplicating rows is recoverable in a way that deleting them is not. It
+// is the same reason the sweep carries files it does not recognise.
+var singleRowCoreTables = map[string]bool{
+	"identity": true, "profile": true, "settings": true, "endpoint": true,
 }
 
 // hasNothingToMatchRowsOn reports whether a table has no primary key and no

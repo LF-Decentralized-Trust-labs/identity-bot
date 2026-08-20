@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -41,7 +42,7 @@ func SnapshotSQLite(db *sql.DB, dir string) ([]byte, error) {
 	// the device, so it must not be allowed to accumulate — and it would
 	// otherwise be invisible, because the sweep skips anything named
 	// identity.db as already captured and so never reports it either.
-	SweepUpAbandoned(dir, snapshotPrefix)
+	SweepUpAbandoned(dir)
 
 	// VACUUM INTO refuses to overwrite, so this must be a path that does not
 	// exist yet rather than a created temp file.
@@ -49,7 +50,11 @@ func SnapshotSQLite(db *sql.DB, dir string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("make room for the snapshot: %w", err)
 	}
-	defer os.RemoveAll(tmp)
+	inUse(tmp)
+	defer func() {
+		noLongerInUse(tmp)
+		os.RemoveAll(tmp)
+	}()
 	path := filepath.Join(tmp, "identity.db")
 
 	if _, err := db.Exec("VACUUM INTO ?", path); err != nil {
@@ -66,8 +71,46 @@ func SnapshotSQLite(db *sql.DB, dir string) ([]byte, error) {
 	return data, nil
 }
 
-// snapshotPrefix names the working directory a snapshot is taken in.
-const snapshotPrefix = ".snapshot-"
+// The working directories both sides of a backup unpack into. Each sweeps
+// BOTH, because a directory is only ever cleaned by the next run of whatever
+// made it — and a crashed restore's copy would otherwise survive every backup
+// forever, since most people never run a second restore.
+const (
+	snapshotPrefix  = ".snapshot-"
+	restoringPrefix = ".restoring-"
+)
+
+// RestoringPrefix is the working directory prefix the restore side uses.
+const RestoringPrefix = restoringPrefix
+
+var (
+	workingDirs   = map[string]bool{}
+	workingDirsMu sync.Mutex
+)
+
+// InUse marks a working directory as belonging to a run that is still going.
+func InUse(dir string) { inUse(dir) }
+
+// NoLongerInUse releases a working directory marked by InUse.
+func NoLongerInUse(dir string) { noLongerInUse(dir) }
+
+func inUse(dir string) {
+	workingDirsMu.Lock()
+	workingDirs[dir] = true
+	workingDirsMu.Unlock()
+}
+
+func noLongerInUse(dir string) {
+	workingDirsMu.Lock()
+	delete(workingDirs, dir)
+	workingDirsMu.Unlock()
+}
+
+func isInUse(dir string) bool {
+	workingDirsMu.Lock()
+	defer workingDirsMu.Unlock()
+	return workingDirs[dir]
+}
 
 // SweepUpAbandoned removes working directories left by a run that did not
 // finish.
@@ -81,30 +124,40 @@ const snapshotPrefix = ".snapshot-"
 // duplicate of the whole identity store then sits there indefinitely and
 // nothing says so.
 //
-// Called at the start of each run rather than only at the end, because the
-// run that could have cleaned up is precisely the one that died.
-// Only what is old enough to be certainly finished. Removing every matching
-// directory deletes the working directory of a run that is still using it —
-// two backups started close together, or two restores, and the second wipes
-// the first mid-write, which fails a backup that had nothing wrong with it.
-// Nothing here takes an hour, so anything older than that is abandoned.
-func SweepUpAbandoned(dir, prefix string) {
+// Called at the start of each run rather than only at the end, because the run
+// that could have cleaned up is precisely the one that died.
+//
+// A directory this process is still using is never taken, and that check is
+// what makes this safe rather than the age below. A directory's mtime moves
+// when entries are added or removed, NOT when a file inside it is written — so
+// a snapshot directory ages from the moment VACUUM INTO created the file in
+// it, however long the vacuum then runs. Ageing alone would delete the working
+// directory of a live backup of a large database, which is the failure this
+// used to have.
+func SweepUpAbandoned(dir string) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return
 	}
 	for _, e := range entries {
-		if !e.IsDir() || !strings.HasPrefix(e.Name(), prefix) {
+		name := e.Name()
+		if !e.IsDir() ||
+			(!strings.HasPrefix(name, snapshotPrefix) && !strings.HasPrefix(name, restoringPrefix)) {
+			continue
+		}
+		full := filepath.Join(dir, name)
+		if isInUse(full) {
 			continue
 		}
 		info, err := e.Info()
 		if err != nil || time.Since(info.ModTime()) < abandonedAfter {
 			continue
 		}
-		os.RemoveAll(filepath.Join(dir, e.Name()))
+		os.RemoveAll(full)
 	}
 }
 
-// abandonedAfter is how long a working directory must have sat untouched
-// before it is treated as left behind rather than in use.
+// abandonedAfter is how long a working directory left by ANOTHER process must
+// have sat untouched before it is treated as abandoned. Directories belonging
+// to this process are known exactly and are not subject to it.
 const abandonedAfter = time.Hour
