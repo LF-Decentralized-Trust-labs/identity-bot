@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // SnapshotSQLite writes a complete, consistent copy of a live database.
@@ -33,9 +34,17 @@ func SnapshotSQLite(db *sql.DB, dir string) ([]byte, error) {
 		return nil, fmt.Errorf("no database to snapshot")
 	}
 
+	// Anything left behind by a run that died before its cleanup.
+	//
+	// What is in here is an unencrypted copy of the most sensitive store on
+	// the device, so it must not be allowed to accumulate — and it would
+	// otherwise be invisible, because the sweep skips anything named
+	// identity.db as already captured and so never reports it either.
+	SweepUpAbandoned(dir, snapshotPrefix)
+
 	// VACUUM INTO refuses to overwrite, so this must be a path that does not
 	// exist yet rather than a created temp file.
-	tmp, err := os.MkdirTemp(dir, ".snapshot-")
+	tmp, err := os.MkdirTemp(dir, snapshotPrefix)
 	if err != nil {
 		return nil, fmt.Errorf("make room for the snapshot: %w", err)
 	}
@@ -54,4 +63,33 @@ func SnapshotSQLite(db *sql.DB, dir string) ([]byte, error) {
 		return nil, fmt.Errorf("the snapshot came out empty")
 	}
 	return data, nil
+}
+
+// snapshotPrefix names the working directory a snapshot is taken in.
+const snapshotPrefix = ".snapshot-"
+
+// SweepUpAbandoned removes working directories left by a run that did not
+// finish.
+//
+// Both the snapshot side and the restore side unpack a plaintext copy of the
+// identity database into the data directory and remove it on the way out. A
+// crash, a kill or a power loss between those two points leaves that copy on
+// disk with nothing that will ever clean it up, and the file sweep skips it —
+// it matches on basename, sees identity.db, and records it as already
+// captured — so it is not reported as skipped either. An unencrypted
+// duplicate of the whole identity store then sits there indefinitely and
+// nothing says so.
+//
+// Called at the start of each run rather than only at the end, because the
+// run that could have cleaned up is precisely the one that died.
+func SweepUpAbandoned(dir, prefix string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() && strings.HasPrefix(e.Name(), prefix) {
+			os.RemoveAll(filepath.Join(dir, e.Name()))
+		}
+	}
 }

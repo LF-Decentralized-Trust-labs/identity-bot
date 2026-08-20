@@ -1,11 +1,13 @@
 package recovery
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"identity-agent-core/backup"
+	"identity-agent-core/secureenclave"
 	"identity-agent-core/store"
 )
 
@@ -287,4 +289,85 @@ func TestATableThisCoreDoesNotKnowAboutComesBack(t *testing.T) {
 
 func writeDB(dir string, raw []byte) error {
 	return os.WriteFile(filepath.Join(dir, "identity.db"), raw, 0600)
+}
+
+// The irreplaceable part of an archive must land even when the rest fails.
+//
+// Every other thing an archive carries can be fetched again, re-agreed, or
+// asked for a second time. The root seed cannot: every pairwise, login, asset
+// and audit key re-derives from it, and if it is not written there is nowhere
+// else on earth to get it.
+//
+// Moving the database import to the front of the restore — so the parsed
+// sections have the final say — put the most fragile step in front of it. A
+// corrupt or truncated database section then failed the whole restore having
+// written nothing, and the seed was lost with it. The key material now goes
+// down first.
+func TestTheRootSeedLandsEvenWhenTheDatabaseSectionIsUnusable(t *testing.T) {
+	oldDir, oldStore := machineWithAnIdentity(t, "ESeedFirst")
+	seed := make([]byte, 32)
+	for i := range seed {
+		seed[i] = byte(i + 1)
+	}
+	if err := secureenclave.StoreRootSeed(oldDir, seed); err != nil {
+		t.Fatal(err)
+	}
+	archive := archiveOf(t, oldDir, oldStore)
+	oldStore.Close()
+
+	payload, err := RestoreFromArchive(archive, OpenRequest{Mnemonic: testPhrase})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Bundle.Sections["root_seed"]) < 32 {
+		t.Fatal("this archive carries no root seed, so the test proves nothing")
+	}
+	// Whatever reason the database will not go in — truncation here, but a
+	// half-written file or an unreadable page reads the same.
+	payload.Bundle.Sections["sqlite_identity_db"] = []byte("not a database")
+
+	newDir := t.TempDir()
+	newStore, err := store.NewSQLiteStore(newDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer newStore.Close()
+
+	if err := NewService(newDir, newStore, nil).applyPayload(payload); err == nil {
+		t.Fatal("an unusable database section was accepted silently")
+	}
+
+	// The restore failed, loudly, and the one thing that cannot be
+	// reconstructed is on disk anyway.
+	got, err := secureenclave.LoadRootSeed(newDir)
+	if err != nil {
+		t.Fatalf("the root seed was lost with the failed restore: %v", err)
+	}
+	if !bytes.Equal(got, seed) {
+		t.Fatalf("the root seed came back wrong")
+	}
+}
+
+// A restore must not leave an unencrypted copy of the identity store behind.
+//
+// Both sides unpack a plaintext database into the data directory and remove it
+// on the way out; a crash between those points leaves it there forever. The
+// file sweep cannot report it either — it matches on basename, sees
+// identity.db, and records it as already captured.
+func TestAnAbandonedPlaintextCopyIsCleanedUp(t *testing.T) {
+	dir := t.TempDir()
+	abandoned := filepath.Join(dir, ".restoring-crashed")
+	if err := os.MkdirAll(abandoned, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(abandoned, "identity.db"),
+		[]byte("the whole identity store, in the clear"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	backup.SweepUpAbandoned(dir, ".restoring-")
+
+	if _, err := os.Stat(abandoned); !os.IsNotExist(err) {
+		t.Fatal("a plaintext copy of the identity store was left on disk")
+	}
 }

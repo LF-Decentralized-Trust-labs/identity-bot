@@ -560,6 +560,22 @@ func (s *Service) applyPayload(payload *RestoredPayload) error {
 	if payload == nil {
 		return fmt.Errorf("empty restored payload")
 	}
+	if payload.Bundle == nil {
+		return fmt.Errorf("this archive carries no sections")
+	}
+
+	// The key material goes down first, before anything that can fail on the
+	// shape of the data.
+	//
+	// Everything else in an archive describes things that can be fetched,
+	// re-agreed or asked for again. The root seed cannot: every pairwise,
+	// login, asset and audit key re-derives from it, and if it is not written
+	// there is nowhere else to get it. So it must not sit behind a step that
+	// refuses a malformed table or an unreadable database — a restore that
+	// fails should fail with the irreplaceable part already on disk.
+	if err := s.restoreTheKeyMaterial(payload); err != nil {
+		return err
+	}
 	if err := s.restoreTheDatabase(payload); err != nil {
 		return err
 	}
@@ -625,22 +641,6 @@ func (s *Service) applyPayload(payload *RestoredPayload) error {
 		}
 	}
 
-	if raw, ok := payload.Bundle.Sections["login_relationships"]; ok && len(raw) > 0 {
-		path := filepath.Join(s.DataDir, "login_relationships.json")
-		if err := os.WriteFile(path, raw, 0600); err != nil {
-			return fmt.Errorf("write login_relationships: %w", err)
-		}
-	}
-	// Reseat the root keystore seed so every HD-derived key (pairwise contacts,
-	// login relationships, asset signing, audit signing, credential vault)
-	// re-derives on this device. StoreRootSeed re-wraps it under THIS device's
-	// hardware key where one is usable — the old device's secure element is
-	// never needed.
-	if raw, ok := payload.Bundle.Sections["root_seed"]; ok && len(raw) >= 32 {
-		if err := secureenclave.StoreRootSeed(s.DataDir, raw); err != nil {
-			return fmt.Errorf("reseat root seed: %w", err)
-		}
-	}
 	// Every file the archive carries, back to the path it came from.
 	//
 	// The collector no longer names the files it takes — it sweeps the data
@@ -673,6 +673,29 @@ func (s *Service) applyPayload(payload *RestoredPayload) error {
 	return nil
 }
 
+// restoreTheKeyMaterial writes the parts of an archive that exist nowhere else.
+//
+// The root keystore seed is the HD derivation root for every pairwise contact,
+// login relationship, asset signing and audit signing key, and for the
+// credential vault. It is carried unwrapped inside the encrypted payload
+// deliberately: the on-disk copy may be sealed to the old device's hardware,
+// and a recovery onto new hardware must never need the old secure element.
+// StoreRootSeed re-wraps it under THIS device's key where one is usable.
+func (s *Service) restoreTheKeyMaterial(payload *RestoredPayload) error {
+	if raw, ok := payload.Bundle.Sections["root_seed"]; ok && len(raw) >= 32 {
+		if err := secureenclave.StoreRootSeed(s.DataDir, raw); err != nil {
+			return fmt.Errorf("reseat root seed: %w", err)
+		}
+	}
+	if raw, ok := payload.Bundle.Sections["login_relationships"]; ok && len(raw) > 0 {
+		path := filepath.Join(s.DataDir, "login_relationships.json")
+		if err := os.WriteFile(path, raw, 0600); err != nil {
+			return fmt.Errorf("write login_relationships: %w", err)
+		}
+	}
+	return nil
+}
+
 // restoreTheDatabase brings back the identity database the archive carries.
 //
 // This runs FIRST, before anything is restored through the store, and that
@@ -692,6 +715,11 @@ func (s *Service) restoreTheDatabase(payload *RestoredPayload) error {
 	if !ok {
 		return nil
 	}
+
+	// Anything a previous restore left behind when it died mid-way. Same
+	// reasoning as the snapshot side: this is a plaintext copy of the whole
+	// identity store, and nothing else will ever remove it.
+	backup.SweepUpAbandoned(s.DataDir, ".restoring-")
 
 	dir, err := os.MkdirTemp(s.DataDir, ".restoring-")
 	if err != nil {
