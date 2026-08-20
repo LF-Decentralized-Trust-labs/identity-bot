@@ -560,6 +560,9 @@ func (s *Service) applyPayload(payload *RestoredPayload) error {
 	if payload == nil {
 		return fmt.Errorf("empty restored payload")
 	}
+	if err := s.restoreTheDatabase(payload); err != nil {
+		return err
+	}
 	if payload.Identity != nil && s.Store != nil {
 		if err := s.Store.SaveIdentity(*payload.Identity); err != nil {
 			return fmt.Errorf("save identity: %w", err)
@@ -667,11 +670,41 @@ func (s *Service) applyPayload(payload *RestoredPayload) error {
 		}
 	}
 
-	if raw, ok := payload.Bundle.Sections["sqlite_identity_db"]; ok && len(raw) > 0 {
-		dbPath := filepath.Join(s.DataDir, "identity.db")
-		if err := os.WriteFile(dbPath, raw, 0600); err != nil {
-			return fmt.Errorf("write identity.db: %w", err)
-		}
+	return nil
+}
+
+// restoreTheDatabase brings back the identity database the archive carries.
+//
+// This runs FIRST, before anything is restored through the store, and that
+// ordering is deliberate. The archive holds the same data twice — once as the
+// database itself, once as parsed sections — and whichever is applied second
+// wins. The parsed sections are the ones this code understands and can fail
+// loudly on, so they go last and have the final say; the database goes first
+// and carries across everything the parsed sections do not know about.
+//
+// See SQLiteStore.ImportSnapshot for why this is not simply a file write.
+func (s *Service) restoreTheDatabase(payload *RestoredPayload) error {
+	raw, ok := payload.Bundle.Sections["sqlite_identity_db"]
+	if !ok || len(raw) == 0 {
+		return nil
+	}
+	sqlStore, ok := s.Store.(*store.SQLiteStore)
+	if !ok {
+		return nil
+	}
+
+	dir, err := os.MkdirTemp(s.DataDir, ".restoring-")
+	if err != nil {
+		return fmt.Errorf("make room for the backed-up database: %w", err)
+	}
+	defer os.RemoveAll(dir)
+
+	path := filepath.Join(dir, "identity.db")
+	if err := os.WriteFile(path, raw, 0600); err != nil {
+		return fmt.Errorf("unpack the backed-up database: %w", err)
+	}
+	if err := sqlStore.ImportSnapshot(path); err != nil {
+		return err
 	}
 	return nil
 }
