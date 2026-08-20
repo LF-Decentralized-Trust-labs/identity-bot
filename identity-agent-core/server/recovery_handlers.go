@@ -325,3 +325,24 @@ func (s *CoreServer) handleRecoveryListSessions(w http.ResponseWriter, r *http.R
 		"sessions": s.recoveryService().InProgress(),
 	})
 }
+
+// statusForActivateError says which refusal this is.
+//
+// Lifted out of the handler so it can be tested, and so the two cannot drift.
+// None of these is a server fault: each is a true statement about the request
+// or about where the recovery has got to, and somebody reading it should be
+// able to act on it.
+func statusForActivateError(err error) int {
+	switch err.(type) {
+	case *recovery.ErrCancelWindowActive:
+		return http.StatusConflict
+	case *recovery.ErrRotationMandatory:
+		return http.StatusPreconditionFailed
+	case *recovery.ErrHeldForDuress:
+		return http.StatusConflict
+	case *recovery.ErrNotAuthenticated:
+		return http.StatusForbidden
+	default:
+		return http.StatusBadRequest
+	}
+}

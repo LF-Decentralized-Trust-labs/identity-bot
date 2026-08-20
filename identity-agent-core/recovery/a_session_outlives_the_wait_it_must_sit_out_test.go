@@ -431,3 +431,30 @@ func waitedOutFor(t *testing.T, svc *Service, sess *Session) {
 	svc.CancelGate.Now = func() time.Time { return time.Now().Add(96 * time.Hour) }
 	svc.Rotation.MarkCompleted(sess.ID, RotationResult{})
 }
+
+func TestAFailedRecoveryIsNotOfferedToResume(t *testing.T) {
+	// Activated and cancelled sessions are deleted outright; a failure leaves
+	// the record in place. A client asking what to resume was handed it, and
+	// showed it as waiting with a live "finish" button — on a recovery that
+	// was already over.
+	dir := t.TempDir()
+	svc, sess := startedSession(t, dir)
+
+	svc.mu.Lock()
+	svc.sessions[sess.ID].Session.State = SessionFailed
+	svc.sessions[sess.ID].Session.Error = "the archive would not open"
+	svc.mu.Unlock()
+
+	if left := svc.InProgress(); len(left) != 0 {
+		t.Fatalf("a failed recovery is offered as resumable: %+v", left)
+	}
+
+	// It is still readable by id, so somebody who has it can see what happened.
+	got, err := svc.GetSession(sess.ID)
+	if err != nil {
+		t.Fatalf("a failed recovery became unreadable: %v", err)
+	}
+	if got.State != SessionFailed || got.Error == "" {
+		t.Fatalf("the failure lost its reason: %+v", got)
+	}
+}

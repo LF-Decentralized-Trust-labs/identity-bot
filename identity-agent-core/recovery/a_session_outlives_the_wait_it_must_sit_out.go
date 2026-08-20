@@ -283,6 +283,13 @@ func (s *Service) InProgress() []Session {
 	out := make([]Session, 0, len(s.sessions))
 	for _, rec := range s.sessions {
 		sess := rec.Session
+		// A failed recovery is not in progress. Activated and cancelled ones
+		// are deleted outright, but a failure leaves the record in place — so a
+		// client asking what to resume was offered something already over, and
+		// showed it as waiting with a live button to finish it.
+		if sess.State == SessionFailed {
+			continue
+		}
 		// The same reading GetSession gives, so a list and a detail view cannot
 		// disagree about what state something is in.
 		switch sess.State {

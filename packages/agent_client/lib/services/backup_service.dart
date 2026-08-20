@@ -141,6 +141,29 @@ class BackupStatus {
   /// [health] and are the opposite of each other to act on.
   bool get everRan => (lastBackupAt ?? '').isNotEmpty;
 
+  /// Whether this is genuinely good news right now.
+  ///
+  /// All three things must have happened AND the agent must still grade it
+  /// green. Presence alone is a claim about the past.
+  bool get isReassuring =>
+      everRan &&
+      (lastOffDeviceAt ?? '').isNotEmpty &&
+      (lastVerifiedAt ?? '').isNotEmpty &&
+      agentSaysHealthy;
+
+  /// Whether the agent itself considers this healthy.
+  ///
+  /// The three facts below say whether something ever happened; HEALTH says
+  /// whether it is still true. The agent grades red on three consecutive
+  /// failures, red when nothing has left this device in 72 hours, and yellow
+  /// when nothing has been checked in a week — none of which presence can see.
+  ///
+  /// Without this the summary was computed from presence alone, so an identity
+  /// whose every destination had been failing for months, with an off-device
+  /// copy six months stale, read as "backed up, off this device, and checked
+  /// that it opens". The agent was saying red the whole time and nothing asked.
+  bool get agentSaysHealthy => health == 'green';
+
   /// The one sentence this status is worth. Written here rather than in each
   /// screen so both apps say the same true thing, and so no screen can
   /// accidentally summarise a red status optimistically.
@@ -155,6 +178,16 @@ class BackupStatus {
     }
     if ((lastVerifiedAt ?? '').isEmpty) {
       return 'Backed up off this device, never checked that it opens';
+    }
+    // Everything has happened at least once. Whether it is still true is a
+    // different question, and it is the agent's to answer.
+    if (health == 'red') {
+      return consecutiveFailures > 0
+          ? 'Backed up before, but the last $consecutiveFailures attempts failed'
+          : 'Backed up before, but not recently enough to rely on';
+    }
+    if (health == 'yellow') {
+      return 'Backed up, and it has been a while since that was checked';
     }
     return 'Backed up, off this device, and checked that it opens';
   }
