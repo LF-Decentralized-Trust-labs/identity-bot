@@ -9,18 +9,24 @@ import (
 
 // ImportSnapshot brings the contents of a backed-up database into this one.
 //
-// The restore used to do this by writing the archived bytes straight over
-// identity.db while this process held it open. That overwrite was the only
-// path by which a table arrived — it WAS the restore for anything without a
-// named section — so any table this package cannot parse, meaning anything a
-// build on top of this core keeps in here, came back only if it survived
-// intact. Replacing bytes under a live write-ahead log is also undefined,
-// though in practice the log checkpoints back over the new file and the known
-// tables survive, which is why this showed up as lost tables rather than as
-// visible damage.
+// The restore used to write the archived bytes straight over identity.db while
+// this process held it open. That overwrite was the only path by which a table
+// arrived — it WAS the restore for anything without a named section — so any
+// table this package cannot parse, meaning anything a build on top of this
+// core keeps in here, came back only if it survived intact. Replacing bytes
+// under a live write-ahead log is also undefined, though in practice the log
+// checkpoints back over the new file and the known tables survive, which is
+// why this showed up as lost tables rather than as visible damage.
 //
-// Attaching instead means SQLite performs the copy, through the open
-// connection, in a transaction.
+// The backup is migrated to this build's schema BEFORE anything is copied.
+// That ordering is the whole design. Copying row by row into an already-
+// migrated database means intersecting columns, and a migration that renames a
+// column or adds a NOT NULL one makes that intersection wrong rather than
+// merely lossy: the rename leaves the old name unmatched and the insert omits
+// a column that cannot be null, so an ordinary older backup fails the restore
+// with a constraint error. Migrations exist to transform data across exactly
+// those changes, so the backup is brought forward by running them, and the
+// copy then happens between two databases with the same schema.
 //
 // Everything below runs on ONE pinned connection. ATTACH is a property of a
 // connection, not of a database, and database/sql hands out whichever pooled
@@ -28,13 +34,16 @@ import (
 // coin flip that fails with "unknown database restored" as often as the pool
 // happens to be warm.
 //
-// WHAT THIS DELIBERATELY DOES NOT DO. It is additive: a row that exists here
-// and not in the backup stays. Restoring is for a machine that has lost an
-// identity, not for winding one back, and silently deleting rows somebody
-// added since the backup is the worse failure of the two. The exception is
-// tables with nothing to match rows on — see replaceWholesale below, where
-// additive would mean duplicating.
+// It is additive: a row that exists here and not in the backup stays. Restoring
+// is for a machine that has lost an identity, not for winding one back, and
+// silently deleting rows somebody added since the backup is the worse failure.
+// Two kinds of table are the exception, both because adding would corrupt
+// rather than accumulate — see copyTable.
 func (s *SQLiteStore) ImportSnapshot(path string) error {
+	if err := bringTheBackupUpToDate(path); err != nil {
+		return err
+	}
+
 	ctx := context.Background()
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
@@ -47,38 +56,36 @@ func (s *SQLiteStore) ImportSnapshot(path string) error {
 	}
 	defer conn.ExecContext(ctx, "DETACH DATABASE restored")
 
-	// A backup from a build newer than this one is refused rather than
-	// half-restored.
-	//
-	// The schema version is bookkeeping in a table like any other, so copying
-	// it across records every migration the backup had run as already applied
-	// — while the columns those migrations added stay behind, because whole
-	// tables are copied and an added column is not a table. The database is
-	// then permanently wedged: the binary skips the migrations it needs, and
-	// upgrading later does not help because the bookkeeping already says done.
-	// The symptom is "table kel has no column named cesr_signature" forever.
-	//
-	// So the version is never copied, and a newer backup stops here with
-	// something a person can act on. Dropping the columns this build does not
-	// know about would restore silently and lose whatever was in them.
-	theirs, err := schemaVersionOf(ctx, conn, "restored")
-	if err != nil {
-		return err
-	}
-	if newest := newestKnownMigration(); theirs > newest {
-		return fmt.Errorf(
-			"this backup was made by a newer version of the software "+
-				"(it expects database version %d, this build understands %d) — "+
-				"update the software and run the recovery again", theirs, newest)
-	}
-
 	objects, err := objectsIn(ctx, conn, "restored")
 	if err != nil {
 		return err
 	}
-	tables, virtual, shadows := classify(objects)
-	if len(tables) == 0 && len(virtual) == 0 {
+	var virtual, ordinary []object
+	for _, o := range objects {
+		switch {
+		case o.kind != "table":
+		case o.virtual:
+			virtual = append(virtual, o)
+		default:
+			ordinary = append(ordinary, o)
+		}
+	}
+	if len(ordinary) == 0 && len(virtual) == 0 {
 		return fmt.Errorf("the backed-up database has no tables in it")
+	}
+
+	// Which tables belong to a virtual table, established by building each
+	// virtual table in a scratch database and seeing what appears beside it.
+	//
+	// These cannot be told apart by name. A virtual table stores itself in
+	// several ordinary-looking tables, and guessing which they are from a name
+	// prefix silently swallows any real table that happens to share it — with
+	// a virtual table `notes`, a downstream table `notes_archive` is not a
+	// shadow of it, and treating it as one loses it completely. Asking SQLite
+	// to create the thing and observing the result cannot be wrong about it.
+	shadow, err := shadowTablesOf(virtual)
+	if err != nil {
+		return err
 	}
 
 	// Foreign keys go off for the duration: tables are copied in whatever
@@ -96,26 +103,22 @@ func (s *SQLiteStore) ImportSnapshot(path string) error {
 	}
 	defer tx.Rollback()
 
-	// Virtual tables first, and their shadow tables are never created
-	// directly. A virtual table is stored as several ordinary-looking shadow
-	// tables which sqlite_master lists BEFORE it; creating those as plain
-	// tables makes the real CREATE VIRTUAL TABLE fail with "shadow table
-	// already exists", which used to abort the whole restore. Creating the
-	// virtual table makes its own shadows, and the data is then copied into
-	// them like any other table, because the shadows are where it lives.
+	// Virtual tables first: creating one creates the tables it stores itself
+	// in, which the copy below then fills. Creating those directly instead
+	// makes the real CREATE VIRTUAL TABLE fail with "shadow table already
+	// exists", which used to abort the entire restore.
 	for _, o := range virtual {
 		if err := createIfAbsent(ctx, tx, conn, o); err != nil {
 			return err
 		}
 	}
-	for _, o := range tables {
+	for _, o := range ordinary {
 		if err := createIfAbsent(ctx, tx, conn, o); err != nil {
 			return err
 		}
 	}
-
-	for _, o := range append(append([]object{}, tables...), shadows...) {
-		if err := copyTable(ctx, tx, conn, o.name); err != nil {
+	for _, o := range ordinary {
+		if err := copyTable(ctx, tx, conn, o.name, shadow[o.name]); err != nil {
 			return err
 		}
 	}
@@ -125,7 +128,7 @@ func (s *SQLiteStore) ImportSnapshot(path string) error {
 	// restored database without them — and a dropped UNIQUE index is not
 	// cosmetic, it silently starts accepting duplicates.
 	for _, o := range objects {
-		if o.kind == "table" || o.ddl == "" || isShadow(o.name, virtual) {
+		if o.kind == "table" || o.ddl == "" {
 			continue
 		}
 		if _, err := tx.ExecContext(ctx, o.ddl); err != nil &&
@@ -137,22 +140,76 @@ func (s *SQLiteStore) ImportSnapshot(path string) error {
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit the restore: %w", err)
 	}
+	return nil
+}
 
-	// Bring the schema up to what this build expects. The backup was at or
-	// below this version — anything above was refused already — so the
-	// migrations it has not seen are exactly the ones that still need running.
-	if err := ApplyIdentityMigrations(s.db); err != nil {
-		return fmt.Errorf("bring the restored database up to date: %w", err)
+// bringTheBackupUpToDate runs this build's migrations against the backup.
+//
+// The backup is a file of our own making, opened here only to migrate it, so
+// this mutates it in place. Refusing happens here rather than later because
+// these are the two things that make a backup unusable rather than merely old,
+// and both should be said plainly before anything has been written.
+func bringTheBackupUpToDate(path string) error {
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		return fmt.Errorf("open the backed-up database: %w", err)
+	}
+	defer db.Close()
+
+	// Rolling the journal into the file itself means closing this leaves one
+	// self-contained file, which is what the copy below expects to attach.
+	if _, err := db.Exec("PRAGMA journal_mode=DELETE"); err != nil {
+		return fmt.Errorf("open the backed-up database: %w", err)
+	}
+
+	// Every identity database has this table — it is created when the store is
+	// opened, before anything else can happen. Its absence means this is not
+	// one, and merging an unrelated database into the identity store wholesale
+	// is not something to do quietly.
+	var present string
+	if err := db.QueryRow(
+		`SELECT name FROM sqlite_master
+		  WHERE type='table' AND name='identity_schema_migrations'`).Scan(&present); err != nil {
+		return fmt.Errorf(
+			"this backup does not look like an identity database — " +
+				"it has no schema history in it")
+	}
+
+	var theirs int
+	if err := db.QueryRow(
+		`SELECT COALESCE(MAX(version), 0) FROM identity_schema_migrations`).Scan(&theirs); err != nil {
+		return fmt.Errorf("read the backup's schema history: %w", err)
+	}
+	if newest := newestKnownMigration(); theirs > newest {
+		return fmt.Errorf(
+			"this backup was made by a newer version of the software "+
+				"(it expects database version %d, this build understands %d) — "+
+				"update the software and run the recovery again", theirs, newest)
+	}
+
+	// Bring it forward. This is where a renamed column is renamed and a new
+	// NOT NULL column gets its default, so that the copy afterwards is between
+	// two identical schemas rather than an intersection of two different ones.
+	if err := ApplyIdentityMigrations(db); err != nil {
+		return fmt.Errorf("bring the backup up to this version: %w", err)
 	}
 	return nil
 }
 
-type object struct{ kind, name, ddl string }
+type object struct {
+	kind, name, ddl string
+	virtual         bool
+}
 
 func objectsIn(ctx context.Context, conn *sql.Conn, schema string) ([]object, error) {
+	// rootpage is 0 for a virtual table and non-zero for a real one. Searching
+	// the DDL text for "CREATE VIRTUAL TABLE" instead misreads any ordinary
+	// table that merely mentions it — in a default value, a check constraint
+	// or a comment — and a table classified virtual is never copied, so its
+	// schema arrives and its rows do not.
 	rows, err := conn.QueryContext(ctx, fmt.Sprintf(
-		`SELECT type, name, COALESCE(sql, '') FROM %s.sqlite_master
-		  WHERE name NOT LIKE 'sqlite_%%'`, schema))
+		`SELECT type, name, COALESCE(sql, ''), rootpage = 0
+		   FROM %s.sqlite_master WHERE name NOT LIKE 'sqlite_%%'`, schema))
 	if err != nil {
 		return nil, fmt.Errorf("read what the backup contains: %w", err)
 	}
@@ -160,11 +217,12 @@ func objectsIn(ctx context.Context, conn *sql.Conn, schema string) ([]object, er
 	var out []object
 	for rows.Next() {
 		var o object
-		if err := rows.Scan(&o.kind, &o.name, &o.ddl); err != nil {
+		if err := rows.Scan(&o.kind, &o.name, &o.ddl, &o.virtual); err != nil {
 			return nil, fmt.Errorf("read what the backup contains: %w", err)
 		}
-		// Never carried: this is bookkeeping about which migrations have run,
-		// and it must describe THIS database, not the one in the backup.
+		// Never carried: this is bookkeeping about which migrations have run
+		// and it must describe THIS database. The backup has just been
+		// migrated to the same version anyway.
 		if o.name == "identity_schema_migrations" {
 			continue
 		}
@@ -173,38 +231,57 @@ func objectsIn(ctx context.Context, conn *sql.Conn, schema string) ([]object, er
 	return out, rows.Err()
 }
 
-func classify(objects []object) (tables, virtual, shadows []object) {
-	for _, o := range objects {
-		if o.kind != "table" {
+// shadowTablesOf reports the tables SQLite creates to store a virtual table in.
+func shadowTablesOf(virtual []object) (map[string]bool, error) {
+	shadow := map[string]bool{}
+	if len(virtual) == 0 {
+		return shadow, nil
+	}
+	probe, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		return nil, fmt.Errorf("inspect the backup's tables: %w", err)
+	}
+	defer probe.Close()
+
+	for _, v := range virtual {
+		before, err := tableNamesIn(probe)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := probe.Exec(v.ddl); err != nil {
+			// A module this build does not have. The virtual table will fail
+			// to create during the restore too, and that error is the one
+			// worth reporting; nothing is assumed about its tables here.
 			continue
 		}
-		if strings.Contains(strings.ToUpper(o.ddl), "CREATE VIRTUAL TABLE") {
-			virtual = append(virtual, o)
+		after, err := tableNamesIn(probe)
+		if err != nil {
+			return nil, err
+		}
+		for name := range after {
+			if !before[name] && name != v.name {
+				shadow[name] = true
+			}
 		}
 	}
-	for _, o := range objects {
-		if o.kind != "table" {
-			continue
-		}
-		if strings.Contains(strings.ToUpper(o.ddl), "CREATE VIRTUAL TABLE") {
-			continue
-		}
-		if isShadow(o.name, virtual) {
-			shadows = append(shadows, o)
-			continue
-		}
-		tables = append(tables, o)
-	}
-	return tables, virtual, shadows
+	return shadow, nil
 }
 
-func isShadow(name string, virtual []object) bool {
-	for _, v := range virtual {
-		if strings.HasPrefix(name, v.name+"_") {
-			return true
-		}
+func tableNamesIn(db *sql.DB) (map[string]bool, error) {
+	rows, err := db.Query(`SELECT name FROM sqlite_master WHERE type='table'`)
+	if err != nil {
+		return nil, fmt.Errorf("inspect the backup's tables: %w", err)
 	}
-	return false
+	defer rows.Close()
+	names := map[string]bool{}
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			return nil, fmt.Errorf("inspect the backup's tables: %w", err)
+		}
+		names[n] = true
+	}
+	return names, rows.Err()
 }
 
 func createIfAbsent(ctx context.Context, tx *sql.Tx, conn *sql.Conn, o object) error {
@@ -221,22 +298,18 @@ func createIfAbsent(ctx context.Context, tx *sql.Tx, conn *sql.Conn, o object) e
 	return nil
 }
 
-func copyTable(ctx context.Context, tx *sql.Tx, conn *sql.Conn, name string) error {
+func copyTable(ctx context.Context, tx *sql.Tx, conn *sql.Conn, name string, isShadow bool) error {
 	live, err := columnsOn(ctx, conn, "main", name)
 	if err != nil {
 		return err
 	}
 	if len(live) == 0 {
-		// Creation was skipped because the backup carried no usable DDL.
-		return nil
+		return nil // creation was skipped: the backup carried no usable DDL
 	}
 	backed, err := columnsOn(ctx, conn, "restored", name)
 	if err != nil {
 		return err
 	}
-
-	// Only the columns both sides have. A backup taken before a migration
-	// lacks columns this database now has, and neither should fail a restore.
 	var shared []string
 	for _, c := range backed {
 		for _, l := range live {
@@ -250,20 +323,41 @@ func copyTable(ctx context.Context, tx *sql.Tx, conn *sql.Conn, name string) err
 		return nil
 	}
 
-	// A table with nothing to match rows on gets replaced rather than added
-	// to. INSERT OR REPLACE resolves against a primary key or a unique index;
-	// with neither there is no conflict to detect, so every restore appends a
-	// second copy of every row. Four tables in this schema are declared with
-	// no primary key — identity, profile, settings and endpoint — and two of
-	// them, profile and endpoint, have no parsed section either, so this copy
-	// is the only way they come back at all. Appending left the local
-	// placeholder row first and the restored one unreachable behind it, which
-	// reads as the backup simply not containing a profile.
-	wholesale, err := replaceWholesale(ctx, conn, name)
-	if err != nil {
-		return err
+	// Two kinds of table are replaced rather than added to, and in both cases
+	// adding produces something wrong rather than something merely bigger.
+	//
+	// A table with no primary key and no unique index gives INSERT OR REPLACE
+	// nothing to conflict on, so every restore appends another copy of every
+	// row. Four tables here are declared that way, and profile and endpoint
+	// have no parsed section either — so the local placeholder stayed at the
+	// lower rowid and the restored row sat unreachable behind it, which reads
+	// exactly like a backup that contained no profile.
+	//
+	// A table storing a virtual table holds an internal structure keyed by
+	// row ids that mean nothing outside it. Merging two of them by row id
+	// interleaves two unrelated indexes, and the result passes an integrity
+	// check while having quietly lost entries from both.
+	wholesale := isShadow
+	if !wholesale {
+		wholesale, err = hasNothingToMatchRowsOn(ctx, conn, name)
+		if err != nil {
+			return err
+		}
 	}
 	if wholesale {
+		// Only when the backup actually has something to put back. Clearing a
+		// table the backup left empty deletes what is here and restores
+		// nothing — and for profile and endpoint there is no parsed section to
+		// repair it afterwards, so an ordinary restore from a machine that
+		// never set a profile would wipe the local one.
+		var incoming int
+		if err := tx.QueryRowContext(ctx, fmt.Sprintf(
+			`SELECT COUNT(*) FROM restored."%s"`, name)).Scan(&incoming); err != nil {
+			return fmt.Errorf("read the %s table from the backup: %w", name, err)
+		}
+		if incoming == 0 {
+			return nil
+		}
 		if _, err := tx.ExecContext(ctx, fmt.Sprintf(`DELETE FROM main."%s"`, name)); err != nil {
 			return fmt.Errorf("clear the %s table before restoring it: %w", name, err)
 		}
@@ -278,10 +372,10 @@ func copyTable(ctx context.Context, tx *sql.Tx, conn *sql.Conn, name string) err
 	return nil
 }
 
-// replaceWholesale reports whether a table has no way to tell one row from
-// another — no primary key and no unique index — so that inserting is the
-// only outcome INSERT OR REPLACE can produce.
-func replaceWholesale(ctx context.Context, conn *sql.Conn, table string) (bool, error) {
+// hasNothingToMatchRowsOn reports whether a table has no primary key and no
+// unique index, so that inserting is the only outcome INSERT OR REPLACE can
+// produce.
+func hasNothingToMatchRowsOn(ctx context.Context, conn *sql.Conn, table string) (bool, error) {
 	rows, err := conn.QueryContext(ctx, fmt.Sprintf(`PRAGMA main.table_info("%s")`, table))
 	if err != nil {
 		return false, fmt.Errorf("inspect %s: %w", table, err)
@@ -328,18 +422,6 @@ func replaceWholesale(ctx context.Context, conn *sql.Conn, table string) (bool, 
 		}
 	}
 	return true, idx.Err()
-}
-
-func schemaVersionOf(ctx context.Context, conn *sql.Conn, schema string) (int, error) {
-	var v int
-	err := conn.QueryRowContext(ctx, fmt.Sprintf(
-		`SELECT COALESCE(MAX(version), 0) FROM %s.identity_schema_migrations`, schema)).Scan(&v)
-	if err != nil {
-		// A backup with no migrations table predates it, or is not this
-		// schema at all. Either way it is not newer than this build.
-		return 0, nil
-	}
-	return v, nil
 }
 
 func newestKnownMigration() int {
