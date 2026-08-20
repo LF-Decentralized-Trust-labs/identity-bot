@@ -265,3 +265,37 @@ func (s *Service) LoadSessions() (int, error) {
 	}
 	return loaded, nil
 }
+
+// InProgress lists the recoveries this agent is holding.
+//
+// Without this a recovery is reachable only through the screen that started
+// it. The wait is measured in days and was deliberately made to survive the
+// agent restarting — but a person who pressed back, or closed the app, had no
+// way to reach the session again: the id lived in a widget and there was no
+// route to rediscover it. The recovery could then be neither finished nor
+// stopped, while the agent kept it alive and waiting.
+//
+// That defeats both halves of what the wait is for. The owner cannot finish,
+// and the person who did NOT start it cannot stop it.
+func (s *Service) InProgress() []Session {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]Session, 0, len(s.sessions))
+	for _, rec := range s.sessions {
+		sess := rec.Session
+		// The same reading GetSession gives, so a list and a detail view cannot
+		// disagree about what state something is in.
+		switch sess.State {
+		case SessionActivated, SessionFailed, SessionCancelled:
+		default:
+			if sess.RotationDone {
+				sess.State = SessionRotated
+			} else if s.CancelGate.Remaining(parseTime(sess.CompleteAfter)) > 0 {
+				sess.State = SessionPending
+			}
+		}
+		out = append(out, sess)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].StartedAt < out[j].StartedAt })
+	return out
+}

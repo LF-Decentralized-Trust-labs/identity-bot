@@ -385,3 +385,49 @@ func TestAnArchiveThatNamesNoIdentityIsRefused(t *testing.T) {
 		t.Fatal("a session was started that is bound to no identity")
 	}
 }
+
+func TestARecoveryCanBeFoundAgainWithoutItsId(t *testing.T) {
+	// A recovery was reachable only through the screen that started it. The
+	// wait is measured in days and the session was deliberately made to survive
+	// the agent restarting — but somebody who pressed back, or closed the app,
+	// had no way to reach it again: the id lived in a widget and nothing could
+	// rediscover it. The recovery could then be neither finished nor stopped
+	// while the agent kept it alive and waiting, which defeats both halves of
+	// what the wait is for.
+	dir := t.TempDir()
+	svc, sess := startedSession(t, dir)
+
+	found := svc.InProgress()
+	if len(found) != 1 || found[0].ID != sess.ID {
+		t.Fatalf("a recovery in progress could not be found without its id: %+v", found)
+	}
+	// Enough to resume from, not just an id.
+	if found[0].CompleteAfter == "" || found[0].IdentityAID == "" {
+		t.Fatalf("the listing does not say what is waiting or for whom: %+v", found[0])
+	}
+
+	// It survives the restart too, which is the case that matters.
+	restarted := NewService(dir, nil, nil)
+	if _, err := restarted.LoadSessions(); err != nil {
+		t.Fatal(err)
+	}
+	if again := restarted.InProgress(); len(again) != 1 || again[0].ID != sess.ID {
+		t.Fatalf("after a restart it is unreachable again: %+v", again)
+	}
+
+	// And a finished one stops being offered, so nobody is invited to resume
+	// something that already happened.
+	waitedOutFor(t, restarted, sess)
+	if _, err := restarted.Activate(sess.ID, ActivateRequest{Mnemonic: testMnemonic}); err != nil {
+		t.Fatal(err)
+	}
+	if left := restarted.InProgress(); len(left) != 0 {
+		t.Fatalf("a completed recovery is still offered as resumable: %+v", left)
+	}
+}
+
+func waitedOutFor(t *testing.T, svc *Service, sess *Session) {
+	t.Helper()
+	svc.CancelGate.Now = func() time.Time { return time.Now().Add(96 * time.Hour) }
+	svc.Rotation.MarkCompleted(sess.ID, RotationResult{})
+}

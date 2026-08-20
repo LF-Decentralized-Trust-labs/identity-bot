@@ -15,6 +15,10 @@ func (s *CoreServer) mountRecoveryRoutes(r chi.Router) {
 	r.Route("/recovery", func(r chi.Router) {
 		r.Post("/verify", s.handleRecoveryVerify)
 		r.Post("/start", s.handleRecoveryStart)
+		// Every recovery this agent is holding. Without it a session is
+		// reachable only from the screen that started it, and the wait is
+		// measured in days.
+		r.Get("/sessions", s.handleRecoveryListSessions)
 		r.Get("/sessions/{id}", s.handleRecoveryGetSession)
 		r.Post("/sessions/{id}/rotation", s.handleRecoveryRotation)
 		r.Post("/sessions/{id}/activate", s.handleRecoveryActivate)
@@ -300,4 +304,16 @@ func (s *CoreServer) handlePutDuressPolicy(w http.ResponseWriter, r *http.Reques
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(s.recoveryService().LoadDuressPolicy())
+}
+
+// handleRecoveryListSessions answers what recoveries are in progress.
+//
+// So an app can offer to resume one. A recovery that survives the agent
+// restarting but not the screen closing is not something anybody can actually
+// wait out.
+func (s *CoreServer) handleRecoveryListSessions(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"sessions": s.recoveryService().InProgress(),
+	})
 }
