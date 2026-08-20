@@ -2,6 +2,7 @@ package backup
 
 import (
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
 )
 
@@ -21,6 +22,16 @@ type ExportRequest struct {
 	// export without ever being told the seed phrase. Any one of them opens
 	// the archive.
 	SealToPublicKeys [][]byte
+
+	// Split, when it names holders, is what makes this archive need the words
+	// PLUS shares. Leaving it empty writes an archive of the older shape,
+	// openable from a key slot, which is what every existing archive is.
+	Split HowTheWayInIsSplit
+	// DuressPolicy and AuthenticatorPublicKeys ride in the bootstrap envelope,
+	// where a machine with nothing of its own can read them before deciding
+	// whether to ask for shares.
+	DuressPolicy            []byte
+	AuthenticatorPublicKeys []string
 }
 
 // ExportResult describes a completed export.
@@ -127,6 +138,87 @@ func (c *Collector) CreateArchive(opts CollectOptions, req ExportRequest) (*Expo
 		return nil, err
 	}
 	manifest.PayloadNonceB64 = EncodeB64(payloadNonce)
+
+	// An archive whose way in is split across holders.
+	//
+	// The body key goes into the shares and NOWHERE ELSE — no seed slot, no
+	// passphrase slot, no sealed slot. That is the whole change: leave a slot
+	// wrapping it and the recovery words open the body directly, and every
+	// share becomes decoration. So this returns here rather than falling
+	// through to the slot-writing below.
+	//
+	// What the words do open is the bootstrap envelope: who holds a share and
+	// where to reach them, the duress policy a blank machine must be able to
+	// consult before asking anyone, and the wraps that k shares reassemble.
+	if len(req.Split.Holders) > 0 {
+		if req.Split.OnlyShareIsAPassphrase() {
+			// An attacker holds the file and can try every short secret
+			// offline, without asking anybody and without anything noticing.
+			// As the only share that is a way in rather than a share.
+			return nil, fmt.Errorf(
+				"a passphrase cannot be the only thing protecting this backup besides the " +
+					"recovery words: add a device or a person")
+		}
+		// A split archive needs the words at the moment it is written,
+		// because the key each combination of shares produces is combined
+		// with the key the words derive. That makes it incompatible with the
+		// sealed-export path, where a machine writes a backup for an identity
+		// whose seed it has never been told — and saying so here beats
+		// producing an archive that quietly is not split.
+		seed := req.BIP39Seed
+		if len(seed) == 0 && req.Mnemonic != "" {
+			seed, err = MnemonicToBIP39Seed(req.Mnemonic, "")
+			if err != nil {
+				return nil, err
+			}
+		}
+		if len(seed) == 0 {
+			return nil, fmt.Errorf(
+				"this backup is protected by shares as well as the recovery words, so it " +
+					"cannot be written by a machine that has never been told them")
+		}
+		seedKEK, err := DeriveBackupKEK(seed)
+		if err != nil {
+			return nil, err
+		}
+		sealedShares, wraps, err := SplitTheWayIn(bek, seedKEK, req.Split)
+		if err != nil {
+			return nil, err
+		}
+		env := WhatTheWordsOpen{
+			IdentityAID:             manifest.IdentityAID,
+			Split:                   req.Split,
+			SealedShares:            sealedShares,
+			SubsetWraps:             wraps,
+			DuressPolicy:            req.DuressPolicy,
+			AuthenticatorPublicKeys: req.AuthenticatorPublicKeys,
+		}
+		if err := env.Validate(); err != nil {
+			return nil, err
+		}
+		envPlain, err := json.Marshal(env)
+		if err != nil {
+			return nil, err
+		}
+		bootKEK, err := DeriveBootstrapKEK(seed)
+		if err != nil {
+			return nil, err
+		}
+		envCipher, envNonce, err := EncryptPayload(bootKEK, envPlain)
+		if err != nil {
+			return nil, err
+		}
+		manifest.BootstrapB64 = EncodeB64(envCipher)
+		manifest.BootstrapNonceB64 = EncodeB64(envNonce)
+		// Stated rather than relied upon: returning here is what actually
+		// keeps slots off a split archive, since the slot-writing below is
+		// never reached. Removing the return DOES fail a test — the one that
+		// inspects a finished archive and refuses to find a slot in it.
+		manifest.KeySlots = nil
+		manifest.SlotPolicy = ""
+
+		return finishArchive(manifest, ciphertext, tiers, snapshotType)
+	}
 
 	// Under AND, the slots stop holding the payload key and hold this instead.
 	// Opening a slot then yields a secret that is useless on its own, and the
@@ -244,12 +336,15 @@ func (c *Collector) CreateArchive(opts CollectOptions, req ExportRequest) (*Expo
 
 	manifest.KeySlots = append(manifest.KeySlots, req.GuardianSlots...)
 
+	return finishArchive(manifest, ciphertext, tiers, snapshotType)
+}
+
+func finishArchive(manifest Manifest, ciphertext []byte, tiers []string, snapshotType string) (*ExportResult, error) {
 	arch := &ArchiveFile{Manifest: manifest, Ciphertext: ciphertext}
 	raw, err := EncodeArchive(arch)
 	if err != nil {
 		return nil, err
 	}
-
 	return &ExportResult{
 		Bytes:        raw,
 		Manifest:     manifest,
@@ -268,12 +363,128 @@ type OpenRequest struct {
 	// a mnemonic or seed derives the same key, so recovery from the phrase
 	// alone works without the caller knowing sealing exists.
 	SealPrivateKey []byte
+	// Shares are what holders returned, keyed by holder id. Needed only for an
+	// archive that was written with a split; ignored otherwise.
+	Shares map[string][]byte
+}
+
+// ErrNeedsShares says the recovery words were right and are not enough.
+//
+// It is a distinct error rather than a general refusal because it is the one
+// thing somebody in the middle of a recovery has to be told plainly, and
+// because it is not a failure — it is the design working. What it carries is
+// what a screen needs to say next: who to ask, and how many of them.
+type ErrNeedsShares struct {
+	Bootstrap *WhatTheWordsOpen
+	Gathered  int
+}
+
+func (e *ErrNeedsShares) Error() string {
+	return fmt.Sprintf(
+		"the recovery words are right; this backup also needs %d of %d shares, and %d have been gathered",
+		e.Bootstrap.Split.Needed, len(e.Bootstrap.Split.Holders), e.Gathered)
+}
+
+// OpenBootstrap opens the envelope the recovery words alone open.
+//
+// This is the whole of what a stolen phrase now gets: who holds a share and
+// where to reach them, the duress policy, and wraps that are useless without
+// k shares. A machine recovering an identity reads this FIRST, because it has
+// nothing of its own to tell it who to ask.
+//
+// An archive written before shares existed has no such envelope, and that
+// absence is not an error — it is how an old archive says its body can still
+// be opened from a key slot.
+func OpenBootstrap(data []byte, req OpenRequest) (*WhatTheWordsOpen, *Manifest, error) {
+	arch, err := DecodeArchive(data)
+	if err != nil {
+		return nil, nil, err
+	}
+	if arch.Manifest.BootstrapB64 == "" {
+		return nil, &arch.Manifest, nil
+	}
+	seed, err := seedFrom(req)
+	if err != nil {
+		return nil, &arch.Manifest, err
+	}
+	env, err := openBootstrapWith(seed, &arch.Manifest)
+	if err != nil {
+		return nil, &arch.Manifest, err
+	}
+	return env, &arch.Manifest, nil
+}
+
+func seedFrom(req OpenRequest) ([]byte, error) {
+	if len(req.BIP39Seed) > 0 {
+		return req.BIP39Seed, nil
+	}
+	if req.Mnemonic == "" {
+		return nil, fmt.Errorf("no recovery words were given")
+	}
+	return MnemonicToBIP39Seed(req.Mnemonic, "")
+}
+
+func openBootstrapWith(seed []byte, manifest *Manifest) (*WhatTheWordsOpen, error) {
+	bootKEK, err := DeriveBootstrapKEK(seed)
+	if err != nil {
+		return nil, err
+	}
+	cipher, err := DecodeB64(manifest.BootstrapB64)
+	if err != nil {
+		return nil, fmt.Errorf("read the envelope: %w", err)
+	}
+	nonce, err := DecodeB64(manifest.BootstrapNonceB64)
+	if err != nil {
+		return nil, fmt.Errorf("read the envelope: %w", err)
+	}
+	plain, err := DecryptPayload(bootKEK, cipher, nonce)
+	if err != nil {
+		// The same message a wrong phrase has always produced. A phrase that
+		// opens no envelope and a phrase that opens the wrong identity are
+		// both "these words do not open this backup".
+		return nil, fmt.Errorf("those words do not open this backup")
+	}
+	var env WhatTheWordsOpen
+	if err := json.Unmarshal(plain, &env); err != nil {
+		return nil, fmt.Errorf("this backup's envelope could not be read: %w", err)
+	}
+	return &env, nil
 }
 
 func OpenArchive(data []byte, req OpenRequest) (*PayloadBundle, *Manifest, error) {
 	arch, err := DecodeArchive(data)
 	if err != nil {
 		return nil, nil, err
+	}
+
+	// An archive whose way in is split across holders. The words open the
+	// envelope; the body needs k shares, and there is no key slot holding the
+	// body key — that is what makes the shares load-bearing rather than
+	// decorative.
+	if arch.Manifest.BootstrapB64 != "" {
+		seed, err := seedFrom(req)
+		if err != nil {
+			return nil, &arch.Manifest, err
+		}
+		env, err := openBootstrapWith(seed, &arch.Manifest)
+		if err != nil {
+			return nil, &arch.Manifest, err
+		}
+		seedKEK, err := DeriveBackupKEK(seed)
+		if err != nil {
+			return nil, &arch.Manifest, err
+		}
+		bek, err := ReassembleTheWayIn(seedKEK, req.Shares, env.SubsetWraps)
+		if err != nil {
+			return nil, &arch.Manifest, &ErrNeedsShares{
+				Bootstrap: env, Gathered: len(req.Shares),
+			}
+		}
+		bundle, err := decryptBody(bek, arch)
+		if err != nil {
+			return nil, &arch.Manifest, err
+		}
+		return bundle, &arch.Manifest, nil
 	}
 	if arch.Manifest.FormatVersion > FormatVersion {
 		return nil, nil, fmt.Errorf("unsupported format_version %d", arch.Manifest.FormatVersion)
@@ -459,4 +670,29 @@ func combineWithPassphrase(slotSecret []byte, passphrase string, manifest *Manif
 		return CombineFactors(slotSecret, passKEK)
 	}
 	return nil, fmt.Errorf("this archive requires a passphrase but carries no salt to derive it with")
+}
+
+// decryptBody opens the main envelope and checks it against the manifest.
+//
+// The same integrity check the slot path performs, kept in one place so that
+// the split path cannot quietly skip it. An archive that decrypts and does not
+// match its own manifest is a partial restore waiting to be mistaken for a
+// whole one.
+func decryptBody(bek []byte, arch *ArchiveFile) (*PayloadBundle, error) {
+	nonce, err := DecodeB64(arch.Manifest.PayloadNonceB64)
+	if err != nil {
+		return nil, err
+	}
+	plain, err := DecryptPayload(bek, arch.Ciphertext, nonce)
+	if err != nil {
+		return nil, err
+	}
+	bundle, err := DeserializePayloadBundle(plain)
+	if err != nil {
+		return nil, err
+	}
+	if err := arch.Manifest.ValidateSections(bundle); err != nil {
+		return nil, fmt.Errorf("integrity check failed: %w", err)
+	}
+	return bundle, nil
 }

@@ -1,8 +1,11 @@
 package backup
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+
+	"golang.org/x/crypto/hkdf"
 )
 
 // BootstrapSection is where the words-openable envelope lives in a payload.
@@ -110,4 +113,30 @@ func (w WhatTheWordsOpen) Validate() error {
 		return fmt.Errorf("this backup carries no way to reassemble its key")
 	}
 	return nil
+}
+
+// DeriveBootstrapKEK derives the key that opens the bootstrap envelope.
+//
+// Domain-separated from the backup KEK so that the key the words produce for
+// this envelope is not the key they produce for anything else. Both come from
+// the same seed, so this is not a second secret to remember — it is the same
+// answer to the same question, kept from being reused across two purposes.
+//
+// Hygiene rather than load-bearing, and worth saying so: pointing this at the
+// backup KEK's own salt and info fails no test here, because the two
+// ciphertexts carry independent random nonces and reaching either key needs
+// the seed regardless. It stays because a key that encrypts two different
+// things is a thing to avoid on principle, not because something breaks.
+func DeriveBootstrapKEK(bip39Seed []byte) ([]byte, error) {
+	if len(bip39Seed) < 32 {
+		return nil, fmt.Errorf("bip39 seed must be at least 32 bytes")
+	}
+	r := hkdf.New(sha256.New, bip39Seed,
+		[]byte("identity-agent-bootstrap-salt-v1"),
+		[]byte("identity-agent/bootstrap-kek/v1"))
+	out := make([]byte, 32)
+	if _, err := r.Read(out); err != nil {
+		return nil, fmt.Errorf("hkdf bootstrap kek: %w", err)
+	}
+	return out, nil
 }

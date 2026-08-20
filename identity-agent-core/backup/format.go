@@ -115,6 +115,15 @@ type Manifest struct {
 	SelfSufficient   bool                  `json:"self_sufficient"`
 	ExternalPointers []ExternalDataPointer `json:"external_pointers,omitempty"`
 	PayloadNonceB64  string                `json:"payload_nonce_b64"`
+	// The envelope the recovery words open, encrypted under a key derived from
+	// them alone. Absent on an archive written before shares existed, and its
+	// absence is what says the body can still be opened from a key slot.
+	//
+	// It rides in the manifest rather than the body because the body is what
+	// needs shares to open, and a machine has to read this before it knows who
+	// to ask for one. The manifest is cleartext; this field is not.
+	BootstrapB64      string `json:"bootstrap_b64,omitempty"`
+	BootstrapNonceB64 string `json:"bootstrap_nonce_b64,omitempty"`
 
 	// AndWrappedBEKB64 and AndNonceB64 are the second layer, present only under
 	// AND. There, the slots do not hold the payload key at all — they hold an
