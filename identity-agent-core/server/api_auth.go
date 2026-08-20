@@ -426,14 +426,33 @@ func rememberSignature(sig string, now time.Time) (alreadyUsed bool) {
 // Keyed by "METHOD /chi/pattern", the same way publicRoutes is.
 var sessionForbidden = map[string]string{
 	// --- the root of trust ---
-	"POST /api/keystore/root-seed":         "installing a root seed decides what this identity is",
+	"POST /api/keystore/root-seed": "installing a root seed decides what this identity is",
 	// Retrieval hands back the bytes of an archive. A browser session is
 	// something the owner grants for a while and that whoever holds the browser
 	// then has; it must not be enough to pull an identity's sealed backups out
 	// of this machine, because the archive plus a guessable passphrase, or the
 	// archive plus later possession of the phrase, is the identity.
-	"POST /api/recovery/retrieve": "retrieval hands back an archive, and an archive is the identity to anyone who can open it",
+	"POST /api/recovery/retrieve":          "retrieval hands back an archive, and an archive is the identity to anyone who can open it",
 	"POST /api/recovery/root-aid-rotation": "rotating the root AID replaces the identity's controlling key",
+	// Everything that starts, finishes, stops or weakens a recovery.
+	//
+	// A recovery replaces this identity's key material and everything it held,
+	// so it belongs on this list for the same reason installing a root seed
+	// does — a browser session is something the owner grants for a while and
+	// that whoever holds the browser then has.
+	//
+	// The duress policy is the sharpest of these. It is the control that says
+	// what must happen if the owner may be being forced, and a session that
+	// could turn it off could disable the protection and then use the recovery
+	// it was protecting against.
+	"PUT /api/recovery/duress-policy":           "this decides what happens if the owner is being coerced",
+	"POST /api/recovery/start":                  "starting a recovery begins replacing this identity",
+	"POST /api/recovery/sessions/{id}/activate": "activating a recovery replaces this identity and everything it held",
+	"POST /api/recovery/sessions/{id}/cancel":   "stopping a recovery decides whether it happens",
+	"POST /api/recovery/sessions/{id}/rotation": "this rotates the identity's keys",
+	// Founding and rotation outside recovery, for the same reason.
+	"POST /api/inception": "founding an identity decides what this agent is",
+	"POST /api/rotation":  "rotation replaces the keys this identity signs with",
 
 	// --- who may act for this identity ---
 	"POST /api/signer/invites":                "inviting a signer decides who may bring this organisation into existence",
