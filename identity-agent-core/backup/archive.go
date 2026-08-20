@@ -151,6 +151,24 @@ func (c *Collector) CreateArchive(opts CollectOptions, req ExportRequest) (*Expo
 	// where to reach them, the duress policy a blank machine must be able to
 	// consult before asking anyone, and the wraps that k shares reassemble.
 	if len(req.Split.Holders) > 0 {
+		// The other ways into an archive are refused rather than dropped.
+		//
+		// The split path returns before any slot is written, so a caller that
+		// asked for a sealed recipient, a guardian slot or a passphrase got an
+		// archive where none of them exist — and no error. The export path
+		// always passes sealed recipients, so wiring a split into it would
+		// have silently produced archives that every destination meant to open
+		// them could not.
+		//
+		// Combining them is a real thing to build and is not built: a sealed
+		// slot would have to become one share among the rest rather than a
+		// second independent way in, which is the whole rule this design
+		// rests on. Until then, saying so beats quietly ignoring it.
+		if len(req.SealToPublicKeys) > 0 || len(req.GuardianSlots) > 0 || req.Passphrase != "" {
+			return nil, fmt.Errorf(
+				"this backup is protected by shares, which cannot yet be combined with " +
+					"a passphrase, a guardian slot, or sealing to another recipient")
+		}
 		if req.Split.OnlyShareIsAPassphrase() {
 			// An attacker holds the file and can try every short secret
 			// offline, without asking anybody and without anything noticing.
@@ -204,7 +222,7 @@ func (c *Collector) CreateArchive(opts CollectOptions, req ExportRequest) (*Expo
 		if err != nil {
 			return nil, err
 		}
-		envCipher, envNonce, err := EncryptPayload(bootKEK, envPlain)
+		envCipher, envNonce, err := EncryptPayload(bootKEK, PadEnvelope(envPlain))
 		if err != nil {
 			return nil, err
 		}
@@ -444,8 +462,12 @@ func openBootstrapWith(seed []byte, manifest *Manifest) (*WhatTheWordsOpen, erro
 		// both "these words do not open this backup".
 		return nil, fmt.Errorf("those words do not open this backup")
 	}
+	unpadded, err := UnpadEnvelope(plain)
+	if err != nil {
+		return nil, fmt.Errorf("this backup's envelope could not be read: %w", err)
+	}
 	var env WhatTheWordsOpen
-	if err := json.Unmarshal(plain, &env); err != nil {
+	if err := json.Unmarshal(unpadded, &env); err != nil {
 		return nil, fmt.Errorf("this backup's envelope could not be read: %w", err)
 	}
 	return &env, nil
@@ -455,6 +477,17 @@ func OpenArchive(data []byte, req OpenRequest) (*PayloadBundle, *Manifest, error
 	arch, err := DecodeArchive(data)
 	if err != nil {
 		return nil, nil, err
+	}
+
+	// Before anything else, including the split path below. This used to sit
+	// after it, so an archive from a future version reported "you need more
+	// shares" rather than "this build cannot read this", and somebody would
+	// have gone looking for holders instead of an update.
+	if arch.Manifest.FormatVersion > FormatVersion {
+		return nil, &arch.Manifest, fmt.Errorf(
+			"this backup was made by a newer version of the software (format %d, this "+
+				"build understands %d) — update the software and try again",
+			arch.Manifest.FormatVersion, FormatVersion)
 	}
 
 	// An archive whose way in is split across holders. The words open the
@@ -476,6 +509,16 @@ func OpenArchive(data []byte, req OpenRequest) (*PayloadBundle, *Manifest, error
 		}
 		bek, err := ReassembleTheWayIn(seedKEK, req.Shares, env.SubsetWraps)
 		if err != nil {
+			// Enough shares that did not work is a DIFFERENT thing from too
+			// few, and saying "you need 2 of 3 and have 3" is both false and
+			// hides the one condition the owner most needs told — that a
+			// holder handed back something wrong.
+			if len(req.Shares) >= env.Split.Needed {
+				return nil, &arch.Manifest, fmt.Errorf(
+					"%d share(s) came back, which is enough, and they do not open this "+
+						"backup — at least one holder returned something that is not its share",
+					len(req.Shares))
+			}
 			return nil, &arch.Manifest, &ErrNeedsShares{
 				Bootstrap: env, Gathered: len(req.Shares),
 			}

@@ -2,6 +2,7 @@ package backup
 
 import (
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 
@@ -89,9 +90,18 @@ var bootstrapFields = []string{
 
 // Validate refuses a bootstrap envelope that cannot do its job.
 func (w WhatTheWordsOpen) Validate() error {
-	if w.IdentityAID == "" {
-		return fmt.Errorf("the bootstrap envelope does not say which identity this is")
-	}
+	// No check that the AID is set, deliberately.
+	//
+	// The manifest says an AID is "a label on the manifest, not something the
+	// archive depends on, so its absence must not stop a backup" — an agent
+	// exporting before an identity exists, or on a machine with no store, has
+	// none to give. Requiring one here made a split backup impossible in
+	// exactly those cases and turned a documented-optional label into
+	// something load-bearing.
+	//
+	// A recovering machine reads this to know what it is about to become, and
+	// an empty answer is worse than a filled one — but refusing to back up is
+	// worse than both.
 	if err := w.Split.Validate(); err != nil {
 		return err
 	}
@@ -113,6 +123,44 @@ func (w WhatTheWordsOpen) Validate() error {
 		return fmt.Errorf("this backup carries no way to reassemble its key")
 	}
 	return nil
+}
+
+// PadEnvelope rounds an envelope up so its length stops describing its
+// contents.
+//
+// AES-GCM does not pad, so the encrypted envelope is exactly as long as what
+// went into it — and what goes into it is one wrap per combination of holders
+// that can open it. Every shape from one-of-two upward therefore produced a
+// distinct length, printed in the CLEARTEXT manifest, so anybody holding the
+// file could read off how many holders an identity has and exactly how many
+// are needed, without the words and without opening anything.
+//
+// Who the holders are stayed hidden, which was the part this envelope was
+// built to protect. The threshold did not. Rounding to a bucket costs a few
+// kilobytes and takes the shape away.
+func PadEnvelope(plain []byte) []byte {
+	const bucket = 16 << 10
+	// A length prefix, so the padding can be removed exactly rather than by
+	// guessing where the JSON ends.
+	out := make([]byte, 4, ((len(plain)+4)/bucket+1)*bucket)
+	binary.BigEndian.PutUint32(out, uint32(len(plain)))
+	out = append(out, plain...)
+	for len(out) < cap(out) {
+		out = append(out, 0)
+	}
+	return out
+}
+
+// UnpadEnvelope recovers what PadEnvelope wrapped.
+func UnpadEnvelope(padded []byte) ([]byte, error) {
+	if len(padded) < 4 {
+		return nil, fmt.Errorf("this envelope is too short to be one")
+	}
+	n := binary.BigEndian.Uint32(padded[:4])
+	if int(n)+4 > len(padded) {
+		return nil, fmt.Errorf("this envelope says it is longer than it is")
+	}
+	return padded[4 : 4+n], nil
 }
 
 // DeriveBootstrapKEK derives the key that opens the bootstrap envelope.

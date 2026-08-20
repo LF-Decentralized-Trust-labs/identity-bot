@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -153,7 +154,7 @@ func TestTimePassingIsNotApproval(t *testing.T) {
 		t.Fatalf("the wait passing released a share a person was meant to approve: %v", err)
 	}
 
-	if err := h.Approve(holding.IdentityAID, start.Add(3*time.Hour)); err != nil {
+	if err := h.Approve(holding.IdentityAID, holding.HolderID, start.Add(3*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	got, err := h.Release(holding, sealed, start.Add(4*time.Hour))
@@ -171,7 +172,7 @@ func TestTimePassingIsNotApproval(t *testing.T) {
 // future request and walk straight past the gate.
 func TestARecoveryNobodyHasAskedAboutCannotBeApproved(t *testing.T) {
 	h, _, _, _ := aHoldingOf(t, HoldingPolicy{RequireApproval: true})
-	err := h.Approve("ESomeIdentity", time.Now())
+	err := h.Approve("ESomeIdentity", "EThisHolder", time.Now())
 	if err == nil {
 		t.Fatal("a recovery nobody had asked about was approved in advance")
 	}
@@ -235,5 +236,103 @@ func TestAHolderWithNoWaitReleasesImmediately(t *testing.T) {
 	}
 	if !bytes.Equal(got, want) {
 		t.Fatal("the wrong share came back")
+	}
+}
+
+// A recovery that already happened must not disarm this holder forever.
+//
+// The record used to be keyed by identity, with the first-asked timestamp
+// never touched again and the approval never cleared. So an owner who
+// recovered once — or ran a drill — left the gates permanently open: years
+// later, a thief with a fresh backup and the words was released instantly,
+// with no wait, no fresh approval, and no notification, because this holder
+// had "already been asked about" that identity.
+func TestASecondRecoveryFacesTheGatesAgain(t *testing.T) {
+	h, holding, first, _ := aHoldingOf(t, HoldingPolicy{WaitHours: 48, RequireApproval: true})
+	start := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
+
+	// One legitimate recovery, all the way through.
+	h.Release(holding, first, start)
+	if err := h.Approve(holding.IdentityAID, holding.HolderID, start.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.Release(holding, first, start.Add(49*time.Hour)); err != nil {
+		t.Fatalf("the legitimate recovery did not complete: %v", err)
+	}
+
+	// Years later, a different backup of the same identity — a new archive
+	// means a new sealing, which is what makes it a different attempt.
+	newShare := make([]byte, 32)
+	rand.Read(newShare)
+	_, second := reSealTo(t, holding, newShare)
+
+	var told int
+	h.Notify = func(string, bool) { told++ }
+
+	much := start.Add(10 * 365 * 24 * time.Hour)
+	_, err := h.Release(holding, second, much)
+	if !errors.As(err, new(*ErrHeldForWait)) {
+		t.Fatalf("a second recovery skipped the waiting period entirely: %v", err)
+	}
+	if told != 1 {
+		t.Fatalf("the owner was told %d times about a brand-new recovery", told)
+	}
+
+	// And the approval from years ago is not spent on this one.
+	_, err = h.Release(holding, second, much.Add(49*time.Hour))
+	if !errors.As(err, new(*ErrNeedsApproval)) {
+		t.Fatalf("an approval given years ago released a share today: %v", err)
+	}
+}
+
+// Asks are not lost when several arrive together.
+func TestConcurrentAsksAreAllRecorded(t *testing.T) {
+	// A wait, so none of them releases and rearms — this is about the count.
+	h, holding, sealed, _ := aHoldingOf(t, HoldingPolicy{WaitHours: 48})
+	start := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			h.Release(holding, sealed, start)
+		}()
+	}
+	wg.Wait()
+
+	asked, err := h.WhatHasBeenAsked()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(asked) != 1 {
+		t.Fatalf("expected one record, got %d", len(asked))
+	}
+	if asked[0].Times != 8 {
+		t.Fatalf("eight asks arrived together and %d were recorded; a lost update "+
+			"means the count an owner is shown is wrong", asked[0].Times)
+	}
+}
+
+// reSealTo seals a share to a holding's own key, for building a second attempt.
+func reSealTo(t *testing.T, holding Holding, share []byte) ([]byte, backup.SealedShare) {
+	t.Helper()
+	priv, err := backup.DecodeB64(holding.PrivateKeyB64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub, err := backup.PublicFromPrivate(priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eph, wrapped, nonce, err := backup.SealBEK(pub, share)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return share, backup.SealedShare{
+		HolderID:        holding.HolderID,
+		EphemeralPubB64: backup.EncodeB64(eph),
+		WrappedB64:      backup.EncodeB64(wrapped),
+		NonceB64:        backup.EncodeB64(nonce),
 	}
 }

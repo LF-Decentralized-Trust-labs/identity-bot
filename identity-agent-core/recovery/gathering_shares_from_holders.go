@@ -14,8 +14,15 @@ import (
 
 // Gathering shares, which is what a recovering machine spends the wait doing.
 //
-// It asks every holder the bootstrap envelope names, keeps whatever comes
-// back, and stops as soon as it has enough. It does not stop at the first
+// It asks EVERY holder the bootstrap envelope names, and keeps whatever comes
+// back.
+//
+// Every one, deliberately, rather than stopping at k. Stopping early tells
+// fewer holders that a recovery is happening, which sounds like the more
+// private thing — but the owner being told is the property this whole design
+// has that no other configuration does, and it is the honest owner's only
+// warning that somebody is using their words. A thief running this software
+// can stop early whenever they like; we should not do it for them. It does not stop at the first
 // refusal: a holder that is waiting, a holder whose owner has not approved
 // yet, and a holder nobody can reach are all ordinary, and any of them would
 // otherwise end a recovery that the remaining holders could have completed.
@@ -55,7 +62,14 @@ func GatherShares(env *backup.WhatTheWordsOpen, client *http.Client) (map[string
 		return nil, WhereTheSharesGotTo{}, fmt.Errorf("there is no envelope to read holders from")
 	}
 	if client == nil {
-		client = &http.Client{Timeout: 20 * time.Second}
+		// Short, and deliberately so. Holders are asked one after another, so
+		// a long timeout multiplies: five unreachable holders at twenty
+		// seconds each is a hundred seconds of nothing on the screen of
+		// somebody who has just lost their identity. A holder that has not
+		// answered in six seconds is one to come back to, and coming back is
+		// free — nothing here is stateful, and the clock that matters belongs
+		// to the holders.
+		client = &http.Client{Timeout: 6 * time.Second}
 	}
 
 	sealedBy := map[string]backup.SealedShare{}
@@ -143,12 +157,49 @@ func askOneHolder(client *http.Client, h backup.ShareHolder, knownAs string,
 		}
 		return raw, "", nil
 	}
-	why := answer.Detail
-	if why == "" {
-		why = answer.Error
+	// What a holder SAYS never reaches the screen.
+	//
+	// The reply comes from a machine somebody else runs, and it was being
+	// copied verbatim into the field whose own job is to be shown to a person
+	// mid-recovery. A compromised or malicious holder could therefore write
+	// the text on the one screen where the reader is most likely to do as they
+	// are told — "your recovery has been suspended for fraud, call this number
+	// with your recovery words" is a sentence it could put in front of them.
+	//
+	// So the status decides the wording, and it is ours. A holder can refuse,
+	// stall, or lie about which of those it is doing; it cannot choose the
+	// words.
+	return nil, sanitisedReleaseAfter(answer.ReleaseAfter), whyFromStatus(resp.StatusCode)
+}
+
+// whyFromStatus turns a holder's answer into wording of our own.
+func whyFromStatus(status int) error {
+	switch status {
+	case http.StatusConflict:
+		// Held, or waiting for a person. Both mean "not yet", which is what
+		// somebody needs to know; which of the two is the holder's own screen
+		// to explain, not this one's.
+		return fmt.Errorf("this holder has not released its share yet")
+	case http.StatusForbidden:
+		return fmt.Errorf("this holder will not release a share for this backup")
+	case http.StatusNotFound:
+		return fmt.Errorf("this holder does not answer requests for shares")
+	default:
+		return fmt.Errorf("this holder did not release its share")
 	}
-	if why == "" {
-		why = "this holder did not release its share"
+}
+
+// sanitisedReleaseAfter accepts a timestamp and nothing else.
+//
+// It is shown to somebody, so it must be a time rather than whatever a holder
+// felt like sending. An unparseable value is dropped rather than displayed.
+func sanitisedReleaseAfter(v string) string {
+	if v == "" {
+		return ""
 	}
-	return nil, answer.ReleaseAfter, fmt.Errorf("%s", why)
+	t, err := time.Parse(time.RFC3339, v)
+	if err != nil {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
 }

@@ -472,6 +472,7 @@ var sessionForbidden = map[string]string{
 	// decisions about their own machine.
 	"POST /api/recovery/holdings":         "agreeing to hold part of somebody's recovery is a commitment",
 	"POST /api/recovery/holdings/approve": "approving a recovery is the whole of what a human gate decides",
+	"POST /api/recovery/holdings/stop":    "giving up a share makes somebody else's backups unopenable by this machine",
 
 	"GET /api/recovery/sessions":      "a recovery in progress says this identity is being taken over, and when",
 	"GET /api/recovery/sessions/{id}": "a recovery in progress says this identity is being taken over, and when",

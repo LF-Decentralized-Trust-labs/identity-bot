@@ -52,11 +52,34 @@ func (h *Holdings) Agree(req AgreeToHold) (*AgreedToHold, error) {
 	if strings.TrimSpace(req.HolderID) == "" {
 		return nil, fmt.Errorf("this holding has no name for this machine")
 	}
-	if existing, err := h.Find(req.IdentityAID, req.HolderID); err == nil && existing != nil {
-		// Agreeing twice would mint a second key and silently invalidate every
-		// share already sealed to the first one — so every backup taken before
-		// today would quietly stop being openable by this holder.
-		return nil, fmt.Errorf("this machine already holds a share for that identity")
+	// Agreeing again gives back the SAME key, and never a new one.
+	//
+	// Minting a second key silently invalidates every share already sealed to
+	// the first, so every backup taken before today stops being openable by
+	// this holder — and nothing would say so until a recovery. Refusing
+	// outright was the first attempt at preventing that, and it broke the
+	// ordinary case instead: every backup after the first asks its holders
+	// again, got a refusal, and quietly dropped them, so the day-one story
+	// worked exactly once.
+	//
+	// A Find that ERRORS is not a Find that found nothing. Treating it as one
+	// meant a truncated or unreadable holding file walked straight past the
+	// guard and minted a second key — the exact outcome the guard exists to
+	// prevent, reached by the one path where the file is already in trouble.
+	existing, err := h.Find(req.IdentityAID, req.HolderID)
+	if err != nil {
+		return nil, fmt.Errorf("this machine cannot read what it already holds: %w", err)
+	}
+	if existing != nil {
+		priv, derr := backup.DecodeB64(existing.PrivateKeyB64)
+		if derr != nil {
+			return nil, fmt.Errorf("this machine cannot read the key it already holds: %w", derr)
+		}
+		pub, perr := backup.PublicFromPrivate(priv)
+		if perr != nil {
+			return nil, fmt.Errorf("this machine cannot read the key it already holds: %w", perr)
+		}
+		return &AgreedToHold{HolderID: existing.HolderID, PublicKeyB64: backup.EncodeB64(pub)}, nil
 	}
 
 	seed := make([]byte, 64)
@@ -158,9 +181,26 @@ func (h *Holdings) save(holding Holding) error {
 	if err != nil {
 		return err
 	}
+	// Written aside, flushed, and renamed. A holding IS a private key, and it
+	// is the only copy — losing it to a power cut makes every share already
+	// sealed to it unopenable, permanently and silently. The ask record beside
+	// it was already written this way; this was not, which had it backwards:
+	// of the two, this is the one that cannot be reconstructed.
 	path := h.pathFor(holding.IdentityAID, holding.HolderID)
 	tmp := path + ".writing"
-	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(raw); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
 		return err
 	}
 	return os.Rename(tmp, path)

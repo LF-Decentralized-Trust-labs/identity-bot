@@ -2,6 +2,7 @@ package recovery
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"identity-agent-core/backup"
@@ -13,6 +14,15 @@ type OpenRequest struct {
 	Mnemonic   string
 	Passphrase string
 	BIP39Seed  []byte
+	// Shares are what the holders returned, keyed by holder id.
+	//
+	// An archive protected by shares does not open without enough of them, so
+	// this has to reach all the way down. Leaving it off meant every path
+	// above backup — verifying, starting a session, activating — refused a
+	// split archive and reported it as a failure, which made the session, the
+	// cancel window and the duress gate unreachable for exactly the archives
+	// this design was built for.
+	Shares map[string][]byte
 }
 
 // RestoredPayload is the decrypted, integrity-checked content of a .iab archive.
@@ -37,8 +47,18 @@ func RestoreFromArchive(data []byte, req OpenRequest) (*RestoredPayload, error) 
 		Mnemonic:   req.Mnemonic,
 		Passphrase: req.Passphrase,
 		BIP39Seed:  req.BIP39Seed,
+		Shares:     req.Shares,
 	})
 	if err != nil {
+		// Needing shares is not this archive failing to open, and wrapping it
+		// as one produced "archive open failed: the recovery words are right"
+		// — a sentence that contradicts itself, on the screen of somebody in
+		// the middle of losing their identity. It travels untouched so the
+		// layers above can act on it.
+		var needs *backup.ErrNeedsShares
+		if errors.As(err, &needs) {
+			return nil, err
+		}
 		return nil, fmt.Errorf("archive open failed: %w", err)
 	}
 

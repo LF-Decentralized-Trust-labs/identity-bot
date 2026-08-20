@@ -1,6 +1,7 @@
 package recovery
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -71,13 +72,47 @@ type HoldingPolicy struct {
 	RequireApproval bool `json:"require_approval"`
 }
 
-// AskRecord is what this holder remembers about being asked.
+// AskRecord is what this holder remembers about ONE ATTEMPT to recover.
 //
-// It is kept whatever the outcome, and that is deliberate: the record of
-// having been asked is the thing that tells an owner somebody tried, and a
-// refusal that leaves no trace is a refusal nobody learns from.
+// One attempt, not one identity, and that distinction is the whole of whether
+// these gates work. Keyed by identity, the wait and the approval are spent
+// once and disarmed forever: somebody recovers legitimately in one year, and
+// years later a thief with a fresh backup and the words is released instantly,
+// with no wait, no fresh approval, and no notification — because the record
+// said this identity had been asked about before.
+//
+// So an attempt is identified by the archive it is being made from, and an
+// attempt that has already been released rearms. Asking repeatedly within one
+// attempt still does not move anything, which is the property that mattered in
+// the first place.
+//
+// The record is kept whatever the outcome: a refusal that leaves no trace is a
+// refusal nobody learns from, and the record of having been asked is what
+// tells an owner somebody tried.
 type AskRecord struct {
 	IdentityAID string `json:"identity_aid"`
+	// HolderID is which of this machine's holdings was asked.
+	//
+	// A machine may hold more than one share for one identity, and a record
+	// keyed by identity alone gave them a single clock and a single approval
+	// between them — so releasing one released the other, which is a threshold
+	// of two satisfied by one machine.
+	HolderID string `json:"holder_id"`
+	// Attempt is which recovery this is: a digest of the archive's own sealing
+	// material, so the same archive asked ten times is one attempt and a
+	// different archive is a different one.
+	Attempt string `json:"attempt"`
+	// Completed counts attempts this holder has already released for. Kept so
+	// that rearming is visible rather than looking like a first request.
+	Completed int `json:"completed"`
+	// AsksInTotal is every ask this holder has ever seen for this identity,
+	// across every attempt, and is never reset.
+	//
+	// Times counts asks within the CURRENT attempt, because that is what
+	// decides whether the owner is told; this counts them all, because that is
+	// what somebody looking at a screen wants to know. Keeping only the first
+	// would make a rearm look like the beginning of history.
+	AsksInTotal int `json:"asks_in_total"`
 	// FirstAskedAt is the clock. Written once and never moved.
 	FirstAskedAt string `json:"first_asked_at"`
 	Times        int    `json:"times"`
@@ -125,10 +160,6 @@ type Holder struct {
 // the requester opened the bootstrap envelope — which needs the recovery words.
 // So a holder is asked only by somebody who already passed gate one.
 func (h *Holder) Release(holding Holding, sealed backup.SealedShare, now time.Time) ([]byte, error) {
-	if holding.HolderID != sealed.HolderID {
-		return nil, fmt.Errorf("this share is addressed to a different holder")
-	}
-
 	// Whether this share is even ours is settled BEFORE anything else, and
 	// before anything is written down.
 	//
@@ -147,42 +178,65 @@ func (h *Holder) Release(holding Holding, sealed backup.SealedShare, now time.Ti
 		return nil, err
 	}
 
+	// One critical section for the whole decision.
+	//
+	// It used to take the lock, drop it, decide, and take it again to write
+	// the result — so two asks arriving together each read the record, each
+	// incremented their own copy, and the second write erased the first. That
+	// loses the count an owner is shown, and anything else later kept in here
+	// would be lost the same way. The unseal above needs no lock and stays
+	// outside it.
 	h.mu.Lock()
-	record, err := h.recordAsk(holding.IdentityAID, now)
-	h.mu.Unlock()
+
+	record, err := h.recordAsk(holding, attemptFrom(sealed), now)
 	if err != nil {
+		h.mu.Unlock()
 		return nil, err
 	}
-
-	if record.Times == 1 && h.Notify != nil {
-		h.Notify(holding.IdentityAID, true)
-	}
+	firstAsk := record.Times == 1
 
 	if holding.Policy.WaitHours > 0 {
-		first, err := time.Parse(time.RFC3339, record.FirstAskedAt)
-		if err != nil {
-			return nil, fmt.Errorf("this holder's record of when it was first asked is unreadable: %w", err)
+		first, perr := time.Parse(time.RFC3339, record.FirstAskedAt)
+		if perr != nil {
+			h.mu.Unlock()
+			h.tell(holding.IdentityAID, firstAsk)
+			return nil, fmt.Errorf(
+				"this holder's record of when it was first asked is unreadable: %w", perr)
 		}
 		until := first.Add(time.Duration(holding.Policy.WaitHours) * time.Hour)
 		if now.Before(until) {
+			h.mu.Unlock()
+			h.tell(holding.IdentityAID, firstAsk)
 			return nil, &ErrHeldForWait{Until: until, Remaining: until.Sub(now)}
 		}
 	}
 
 	if holding.Policy.RequireApproval && !record.Approved {
+		h.mu.Unlock()
+		h.tell(holding.IdentityAID, firstAsk)
 		return nil, &ErrNeedsApproval{IdentityAID: holding.IdentityAID}
 	}
 
-	h.mu.Lock()
-	defer h.mu.Unlock()
 	record.ReleasedAt = now.UTC().Format(time.RFC3339)
-	if err := h.save(record); err != nil {
-		// The release is not reported as having happened unless it was
-		// written down. A share handed out with no record is one nobody can
-		// ever be told about.
-		return nil, fmt.Errorf("could not record releasing this share: %w", err)
+	saveErr := h.save(record)
+	h.mu.Unlock()
+
+	h.tell(holding.IdentityAID, firstAsk)
+	if saveErr != nil {
+		// Not reported as released unless it was written down. A share handed
+		// out with no record is one nobody can ever be told about, and the
+		// next ask would look like a first one.
+		return nil, fmt.Errorf("could not record releasing this share: %w", saveErr)
 	}
 	return share, nil
+}
+
+// tell notifies the owner outside the lock, so a slow or blocking notifier
+// cannot hold up every other holder decision on this machine.
+func (h *Holder) tell(identityAID string, firstAsk bool) {
+	if firstAsk && h.Notify != nil {
+		h.Notify(identityAID, true)
+	}
 }
 
 // Approve records that a person said yes.
@@ -195,6 +249,18 @@ func (h *Holder) Release(holding Holding, sealed backup.SealedShare, now time.Ti
 // holds and for whom.
 func (h *Holder) unseal(holding Holding, sealed backup.SealedShare) ([]byte, error) {
 	refuse := fmt.Errorf("this share was not sealed to this holder")
+
+	// Addressed elsewhere gets the SAME answer as sealed elsewhere, and is
+	// checked here rather than before the lookup that finds this holding.
+	//
+	// It used to be its own message ahead of everything, which made this route
+	// an oracle: send a mismatched holder id and random bytes, and the wording
+	// that came back said whether this machine holds a share for that identity
+	// at all. No words, no archive, no keys needed — exactly the enumeration
+	// the rest of this file is written to prevent.
+	if holding.HolderID != sealed.HolderID {
+		return nil, refuse
+	}
 
 	priv, err := backup.DecodeB64(holding.PrivateKeyB64)
 	if err != nil {
@@ -219,10 +285,17 @@ func (h *Holder) unseal(holding Holding, sealed backup.SealedShare) ([]byte, err
 	return share, nil
 }
 
-func (h *Holder) Approve(identityAID string, now time.Time) error {
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+func (h *Holder) Approve(identityAID, holderID string, now time.Time) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	record, err := h.load(identityAID)
+	record, err := h.load(identityAID, holderID)
 	if err != nil {
 		return err
 	}
@@ -268,15 +341,45 @@ func (h *Holder) WhatHasBeenAsked() ([]AskRecord, error) {
 	return out, nil
 }
 
-func (h *Holder) recordAsk(identityAID string, now time.Time) (*AskRecord, error) {
-	record, err := h.load(identityAID)
+// attemptFrom names the recovery an ask belongs to.
+//
+// The ephemeral public key is minted once per archive per holder when the
+// share is sealed, so it identifies the archive without naming it: the same
+// backup asked repeatedly is one attempt, and a backup taken since is another.
+// Digested rather than used directly so that what is written to disk does not
+// carry archive material.
+func attemptFrom(sealed backup.SealedShare) string {
+	sum := sha256.Sum256([]byte(sealed.EphemeralPubB64))
+	return backup.EncodeB64(sum[:])
+}
+
+func (h *Holder) recordAsk(holding Holding, attempt string, now time.Time) (*AskRecord, error) {
+	identityAID := holding.IdentityAID
+	record, err := h.load(holding.IdentityAID, holding.HolderID)
 	if err != nil {
 		return nil, err
 	}
 	stamp := now.UTC().Format(time.RFC3339)
+
+	// A different recovery, or one this holder has already completed, starts
+	// again from nothing: a fresh clock, no approval carried over, and the
+	// owner told. Otherwise a single legitimate recovery would disarm this
+	// holder permanently.
+	if record != nil && (record.Attempt != attempt || record.ReleasedAt != "") {
+		record = &AskRecord{
+			IdentityAID:  identityAID,
+			HolderID:     holding.HolderID,
+			Attempt:      attempt,
+			FirstAskedAt: stamp,
+			Completed:    record.Completed + boolToInt(record.ReleasedAt != ""),
+			AsksInTotal:  record.AsksInTotal,
+		}
+	}
 	if record == nil {
 		record = &AskRecord{
 			IdentityAID:  identityAID,
+			HolderID:     holding.HolderID,
+			Attempt:      attempt,
 			FirstAskedAt: stamp,
 		}
 	}
@@ -284,6 +387,7 @@ func (h *Holder) recordAsk(identityAID string, now time.Time) (*AskRecord, error
 	// can be restarted by asking again is a wait an attacker skips by asking
 	// twice.
 	record.Times++
+	record.AsksInTotal++
 	record.LastAskedAt = stamp
 	if err := h.save(record); err != nil {
 		return nil, err
@@ -293,12 +397,13 @@ func (h *Holder) recordAsk(identityAID string, now time.Time) (*AskRecord, error
 
 func (h *Holder) asksDir() string { return filepath.Join(h.DataDir, "shares_asked_for") }
 
-func (h *Holder) pathFor(identityAID string) string {
-	return filepath.Join(h.asksDir(), backup.EncodeB64([]byte(identityAID))+".json")
+func (h *Holder) pathFor(identityAID, holderID string) string {
+	return filepath.Join(h.asksDir(),
+		backup.EncodeB64([]byte(identityAID+"\x00"+holderID))+".json")
 }
 
-func (h *Holder) load(identityAID string) (*AskRecord, error) {
-	raw, err := os.ReadFile(h.pathFor(identityAID))
+func (h *Holder) load(identityAID, holderID string) (*AskRecord, error) {
+	raw, err := os.ReadFile(h.pathFor(identityAID, holderID))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -322,7 +427,7 @@ func (h *Holder) save(r *AskRecord) error {
 	}
 	// Written aside and renamed, so a machine that loses power part-way
 	// through does not come back with a half-written clock.
-	path := h.pathFor(r.IdentityAID)
+	path := h.pathFor(r.IdentityAID, r.HolderID)
 	tmp := path + ".writing"
 	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {

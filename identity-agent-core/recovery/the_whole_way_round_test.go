@@ -2,8 +2,11 @@ package recovery
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -277,15 +280,77 @@ func TestAHolderThatCannotBeReachedIsJustOneThatDidNotAnswer(t *testing.T) {
 	}
 }
 
-// A machine agreeing twice would invalidate every share already sealed to it.
-func TestAgreeingTwiceIsRefused(t *testing.T) {
+// Agreeing again gives back the same key, and never a new one.
+//
+// Two things have to be true at once, and an earlier version got one by
+// breaking the other. Minting a second key silently orphans every share
+// already sealed to the first, so every backup taken before today stops
+// opening — but refusing the second agreement outright broke the ordinary
+// case, because every backup after the first asks its holders again, and a
+// refusal meant they were quietly dropped. The day-one story then worked
+// exactly once.
+func TestAgreeingAgainReturnsTheSameKey(t *testing.T) {
+	h := startAHolder(t, HoldingPolicy{})
+	first, err := h.holdings.Agree(AgreeToHold{IdentityAID: "EX", HolderID: "EMe"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := h.holdings.Agree(AgreeToHold{IdentityAID: "EX", HolderID: "EMe"})
+	if err != nil {
+		t.Fatalf("agreeing again was refused, which drops this holder from every later backup: %v", err)
+	}
+	if again.PublicKeyB64 != first.PublicKeyB64 {
+		t.Fatal("agreeing again minted a second key and orphaned every share sealed to the first")
+	}
+}
+
+// A backup taken later keeps the holders the first one had.
+//
+// The day-one story is that the machines somebody already has become the
+// holders. That has to keep working on the second backup and the hundredth,
+// and it did not: asking a machine that had already agreed was refused, the
+// machine landed in "could not ask", and the archive was written without it.
+func TestTheSecondBackupKeepsTheSameHolders(t *testing.T) {
+	a := startAHoldingServer(t)
+	b := startAHoldingServer(t)
+	machines := []store.AdoptedAgent{{AID: "EPhone", URL: a.URL}, {AID: "ELaptop", URL: b.URL}}
+
+	first, couldNotAsk := HoldersFromPairedMachines(machines, "EMyIdentity", HoldingPolicy{}, a.Client())
+	if len(first) != 2 || len(couldNotAsk) != 0 {
+		t.Fatalf("the first backup got %d holders, could not ask %v", len(first), couldNotAsk)
+	}
+	second, couldNotAsk := HoldersFromPairedMachines(machines, "EMyIdentity", HoldingPolicy{}, a.Client())
+	if len(second) != 2 {
+		t.Fatalf("the second backup got %d holders, could not ask %v", len(second), couldNotAsk)
+	}
+	// And the same keys, so an archive taken before still opens.
+	for i := range first {
+		if first[i].PublicKeyB64 != second[i].PublicKeyB64 {
+			t.Fatalf("holder %s changed key between backups, so the earlier archive "+
+				"can no longer be opened by it", first[i].ID)
+		}
+	}
+}
+
+// A holding file that cannot be read must not be treated as no holding.
+func TestACorruptHoldingDoesNotMintASecondKey(t *testing.T) {
 	h := startAHolder(t, HoldingPolicy{})
 	if _, err := h.holdings.Agree(AgreeToHold{IdentityAID: "EX", HolderID: "EMe"}); err != nil {
 		t.Fatal(err)
 	}
-	_, err := h.holdings.Agree(AgreeToHold{IdentityAID: "EX", HolderID: "EMe"})
-	if err == nil {
-		t.Fatal("agreeing twice minted a second key and orphaned every existing share")
+	// The file is there and unreadable, which is not the same as absent.
+	entries, _ := os.ReadDir(filepath.Join(h.holdings.DataDir, "shares_held"))
+	if len(entries) != 1 {
+		t.Fatalf("expected one holding on disk, found %d", len(entries))
+	}
+	path := filepath.Join(h.holdings.DataDir, "shares_held", entries[0].Name())
+	if err := os.WriteFile(path, []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := h.holdings.Agree(AgreeToHold{IdentityAID: "EX", HolderID: "EMe"}); err == nil {
+		t.Fatal("a corrupt holding was treated as none, and a second key was minted — " +
+			"silently orphaning every share sealed to the first")
 	}
 }
 
@@ -418,6 +483,13 @@ func TestThePairedMachinesBecomeHolders(t *testing.T) {
 	if len(couldNotAsk) != 2 {
 		t.Fatalf("expected two machines that could not be asked, got %v", couldNotAsk)
 	}
+	// And each says WHY, because a holder silently missing from a backup is
+	// discovered during a recovery.
+	for _, c := range couldNotAsk {
+		if c.Why == "" {
+			t.Fatalf("machine %s was dropped with no reason given", c.AID)
+		}
+	}
 	// A machine that was shut must not fail the backup — it is one holder
 	// fewer, which is what a threshold is built to survive.
 	for _, h := range holders {
@@ -462,4 +534,162 @@ func startAHoldingServer(t *testing.T) *httptest.Server {
 	}))
 	t.Cleanup(s.Close)
 	return s
+}
+
+// A holder does not get to write on the recovery screen.
+//
+// The reply comes from a machine somebody else runs, and it was being copied
+// verbatim into the field whose whole job is to be shown to a person in the
+// middle of losing their identity. That is the one screen where a reader is
+// most likely to do as they are told.
+func TestAMaliciousHolderCannotWriteOnTheScreen(t *testing.T) {
+	const lie = "Your recovery has been suspended for fraud. " +
+		"Call +1-555-0100 with your recovery words to restore access."
+
+	nasty := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		json.NewEncoder(w).Encode(map[string]string{
+			"detail":        lie,
+			"error":         lie,
+			"release_after": lie,
+		})
+	}))
+	defer nasty.Close()
+
+	env := &backup.WhatTheWordsOpen{
+		IdentityAID: "EMyIdentity",
+		Split: backup.HowTheWayInIsSplit{
+			Needed:  1,
+			Holders: []backup.ShareHolder{{ID: "ENasty", Kind: "witness", Address: nasty.URL}},
+		},
+		SealedShares: []backup.SealedShare{{HolderID: "ENasty"}},
+	}
+	_, state, err := GatherShares(env, nasty.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Holders) != 1 {
+		t.Fatalf("expected one holder, got %d", len(state.Holders))
+	}
+	got := state.Holders[0]
+	if strings.Contains(got.Why, "555") || strings.Contains(got.Why, "recovery words") {
+		t.Fatalf("a holder wrote its own text onto the recovery screen: %q", got.Why)
+	}
+	if got.ReleaseAfter != "" {
+		t.Fatalf("a holder put %q where a timestamp is shown", got.ReleaseAfter)
+	}
+}
+
+// An identity comes back THROUGH THE RECOVERY SERVICE, not around it.
+//
+// Every other end-to-end test here calls backup.OpenArchive directly, and that
+// is how a blocking defect stayed invisible: a split archive could not be
+// recovered through recovery.Service at all. Verify and Start both refused it,
+// so no session could exist for one — which made the cancel window, the duress
+// gate, the rotation gate and applyPayload unreachable for exactly the archives
+// this design was built for.
+//
+// An archive that decrypts is not an identity that came back. This asks for the
+// identity.
+func TestAnIdentityComesBackThroughTheRecoveryService(t *testing.T) {
+	const knownAs = "EPairwiseForThisBackup"
+
+	a := startAHolder(t, HoldingPolicy{})
+	b := startAHolder(t, HoldingPolicy{})
+	holders := []backup.ShareHolder{
+		a.agreesToHold(t, knownAs, "EFriendA", HoldingPolicy{}),
+		b.agreesToHold(t, knownAs, "EFriendB", HoldingPolicy{}),
+	}
+
+	oldDir, oldStore := machineWithAnIdentity(t, "EMyRealIdentity")
+	if err := oldStore.SaveContact(contactNamed("EAlice", "Alice")); err != nil {
+		t.Fatal(err)
+	}
+	archive := archiveSplitAcross(t, oldDir, oldStore, holders, 2)
+	oldStore.Close()
+
+	env, _, err := backup.OpenBootstrap(archive, backup.OpenRequest{Mnemonic: testPhrase})
+	if err != nil {
+		t.Fatal(err)
+	}
+	shares, state, err := GatherShares(env, a.server.Client())
+	if err != nil || !state.Enough() {
+		t.Fatalf("could not gather shares: %v %+v", err, state.Holders)
+	}
+	sharesB64 := map[string]string{}
+	for id, raw := range shares {
+		sharesB64[id] = backup.EncodeB64(raw)
+	}
+
+	newDir := t.TempDir()
+	newStore, err := store.NewSQLiteStore(newDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer newStore.Close()
+	svc := NewService(newDir, newStore, nil)
+
+	// Verifying must not report a split archive as broken.
+	verified, err := svc.Verify(VerifyRequest{
+		ArchiveB64: backup.EncodeB64(archive),
+		Mnemonic:   testPhrase,
+		SharesB64:  sharesB64,
+	})
+	if err != nil {
+		t.Fatalf("Verify refused an archive it had every share for: %v", err)
+	}
+	if verified.IdentityAID != "EMyRealIdentity" {
+		t.Fatalf("Verify came back with %q", verified.IdentityAID)
+	}
+
+	// And a session can exist for one, which is what everything else hangs off.
+	session, err := svc.Start(StartRequest{
+		ArchiveB64: backup.EncodeB64(archive),
+		Mnemonic:   testPhrase,
+		SharesB64:  sharesB64,
+	})
+	if err != nil {
+		t.Fatalf("no session could be started for a split archive: %v", err)
+	}
+	if session.IdentityAID != "EMyRealIdentity" {
+		t.Fatalf("the session is for %q", session.IdentityAID)
+	}
+}
+
+// Without the shares, the service says so rather than reporting a failure.
+func TestTheServiceSaysSharesAreNeededRatherThanFailing(t *testing.T) {
+	const knownAs = "EPairwiseForThisBackup"
+	a := startAHolder(t, HoldingPolicy{})
+	holders := []backup.ShareHolder{a.agreesToHold(t, knownAs, "EFriendA", HoldingPolicy{})}
+
+	oldDir, oldStore := machineWithAnIdentity(t, "EMyRealIdentity")
+	archive := archiveSplitAcross(t, oldDir, oldStore, holders, 1)
+	oldStore.Close()
+
+	newDir := t.TempDir()
+	newStore, err := store.NewSQLiteStore(newDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer newStore.Close()
+
+	_, err = NewService(newDir, newStore, nil).Verify(VerifyRequest{
+		ArchiveB64: backup.EncodeB64(archive),
+		Mnemonic:   testPhrase,
+	})
+	if err == nil {
+		t.Fatal("an archive needing shares was verified without them")
+	}
+	var needs *backup.ErrNeedsShares
+	if !errors.As(err, &needs) {
+		t.Fatalf("the service reported needing shares as something else: %v", err)
+	}
+	// And the sentence does not contradict itself.
+	if strings.Contains(err.Error(), "archive open failed") {
+		t.Fatalf("the message says the archive failed to open and then that the words "+
+			"were right: %q", err)
+	}
+	if needs.Bootstrap == nil || len(needs.Bootstrap.Split.Holders) != 1 {
+		t.Fatal("the refusal does not carry who to ask")
+	}
 }

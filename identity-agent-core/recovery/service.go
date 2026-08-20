@@ -66,6 +66,9 @@ type VerifyRequest struct {
 	ArchiveB64 string `json:"archive_b64,omitempty"`
 	Mnemonic   string `json:"mnemonic"`
 	Passphrase string `json:"passphrase,omitempty"`
+	// SharesB64 is what the holders returned, keyed by holder id, for an
+	// archive that needs them.
+	SharesB64 map[string]string `json:"shares_b64,omitempty"`
 }
 
 // VerifyResponse is returned from the verify endpoint.
@@ -78,9 +81,10 @@ type VerifyResponse struct {
 
 // StartRequest begins a gated recovery session after successful verify.
 type StartRequest struct {
-	ArchiveB64 string `json:"archive_b64"`
-	Mnemonic   string `json:"mnemonic"`
-	Passphrase string `json:"passphrase,omitempty"`
+	ArchiveB64 string            `json:"archive_b64"`
+	Mnemonic   string            `json:"mnemonic"`
+	Passphrase string            `json:"passphrase,omitempty"`
+	SharesB64  map[string]string `json:"shares_b64,omitempty"`
 }
 
 // RetrieveRequest fetches an opaque archive for recovery.
@@ -175,9 +179,14 @@ func (s *Service) Verify(req VerifyRequest) (*VerifyResponse, error) {
 	if err != nil {
 		return nil, err
 	}
+	shares, err := decodeShares(req.SharesB64)
+	if err != nil {
+		return nil, err
+	}
 	payload, err := RestoreFromArchive(raw, OpenRequest{
 		Mnemonic:   req.Mnemonic,
 		Passphrase: req.Passphrase,
+		Shares:     shares,
 	})
 	if err != nil {
 		return nil, err
@@ -210,9 +219,14 @@ func (s *Service) Start(req StartRequest) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
+	shares, err := decodeShares(req.SharesB64)
+	if err != nil {
+		return nil, err
+	}
 	payload, err := RestoreFromArchive(raw, OpenRequest{
 		Mnemonic:   req.Mnemonic,
 		Passphrase: req.Passphrase,
+		Shares:     shares,
 	})
 	if err != nil {
 		return nil, err
@@ -404,6 +418,12 @@ func (e *ErrNotAuthenticated) Error() string {
 type ActivateRequest struct {
 	Mnemonic   string `json:"mnemonic"`
 	Passphrase string `json:"passphrase,omitempty"`
+	// SharesB64 is what the holders returned, gathered again at activation.
+	//
+	// Asked for again here for the same reason the phrase is: neither is kept
+	// across the wait, and gathering them at the end is what proves the
+	// holders still agree NOW rather than that they agreed days ago.
+	SharesB64 map[string]string `json:"shares_b64,omitempty"`
 }
 
 // Activate completes a recovery once its cancel window has elapsed.
@@ -489,9 +509,14 @@ func (s *Service) Activate(sessionID string, req ActivateRequest) (*Session, err
 			"it is not kept while the waiting period runs")
 	}
 
+	shares, err := decodeShares(req.SharesB64)
+	if err != nil {
+		return nil, err
+	}
 	payload, err := RestoreFromArchive(archive, OpenRequest{
 		Mnemonic:   req.Mnemonic,
 		Passphrase: req.Passphrase,
+		Shares:     shares,
 	})
 	if err != nil {
 		// Not marked failed. A mistyped phrase is the ordinary case at this
@@ -1022,4 +1047,20 @@ func trimSlash(s string) string {
 // MarshalSession exports session JSON for persistence tests.
 func MarshalSession(sess Session) ([]byte, error) {
 	return json.Marshal(sess)
+}
+
+// decodeShares turns what came back from holders into what an archive needs.
+func decodeShares(in map[string]string) (map[string][]byte, error) {
+	if len(in) == 0 {
+		return nil, nil
+	}
+	out := make(map[string][]byte, len(in))
+	for id, b64 := range in {
+		raw, err := backup.DecodeB64(b64)
+		if err != nil {
+			return nil, fmt.Errorf("the share from %s could not be read", id)
+		}
+		out[id] = raw
+	}
+	return out, nil
 }

@@ -28,6 +28,12 @@ import (
 // DefaultThresholdWithPeople is the threshold when somebody chooses witnesses.
 const DefaultThresholdWithPeople = 3
 
+// CouldNotAsk says why one machine is not holding a share.
+type CouldNotAsk struct {
+	AID string `json:"aid"`
+	Why string `json:"why"`
+}
+
 // HoldersFromPairedMachines asks each machine already paired to this identity
 // to hold a share, and returns those that agreed.
 //
@@ -35,18 +41,29 @@ const DefaultThresholdWithPeople = 3
 // the backup: it is one holder fewer, which a threshold is built to survive,
 // and refusing to back up at all because a laptop was closed would be the
 // worse outcome by a distance.
+//
+// KNOWN GAP, and it is why the reason comes back rather than just the name.
+// Agreeing to hold is an owner-only route, and this call carries nothing that
+// proves it is the owner — so a machine on the far side of a network answers
+// 403, and this is the only place that knows. On the same computer it works,
+// because a local request is recognised as the owner's; the remote paired
+// machine, which is the case the feature exists for, does not. Agent-to-agent
+// owner authentication is the missing piece; until it lands, this reports the
+// refusal instead of quietly dropping the machine, because a holder silently
+// missing from a backup is discovered during a recovery.
 func HoldersFromPairedMachines(machines []store.AdoptedAgent, identityAID string,
-	policy HoldingPolicy, client *http.Client) ([]backup.ShareHolder, []string) {
+	policy HoldingPolicy, client *http.Client) ([]backup.ShareHolder, []CouldNotAsk) {
 
 	if client == nil {
 		client = &http.Client{Timeout: 15 * time.Second}
 	}
 	var holders []backup.ShareHolder
-	var couldNotAsk []string
+	var couldNotAsk []CouldNotAsk
 
 	for _, m := range machines {
 		if strings.TrimSpace(m.URL) == "" || strings.TrimSpace(m.AID) == "" {
-			couldNotAsk = append(couldNotAsk, m.AID)
+			couldNotAsk = append(couldNotAsk, CouldNotAsk{
+				AID: m.AID, Why: "this machine has no address to reach it at"})
 			continue
 		}
 		agreed, err := askAMachineToHold(client, m.URL, AgreeToHold{
@@ -59,7 +76,7 @@ func HoldersFromPairedMachines(machines []store.AdoptedAgent, identityAID string
 			Policy:      policy,
 		})
 		if err != nil {
-			couldNotAsk = append(couldNotAsk, m.AID)
+			couldNotAsk = append(couldNotAsk, CouldNotAsk{AID: m.AID, Why: err.Error()})
 			continue
 		}
 		holders = append(holders, backup.ShareHolder{
@@ -110,6 +127,14 @@ func askAMachineToHold(client *http.Client, url string, req AgreeToHold) (*Agree
 		return nil, fmt.Errorf("that machine could not be reached")
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusUnauthorized {
+		// Said precisely, because it is not a refusal — it is this agent being
+		// unable to show that it is the owner, and the fix is ours rather than
+		// anything the person can do.
+		return nil, fmt.Errorf(
+			"this agent cannot yet prove to that machine that it is the owner, so that " +
+				"machine refused to hold a share")
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("that machine did not agree to hold a share")
 	}
