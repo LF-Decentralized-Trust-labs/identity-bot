@@ -56,7 +56,7 @@ func TestLeanTier3NoBulkInArchive(t *testing.T) {
 	}
 
 	collector := &Collector{DataDir: dbDir, Store: st}
-	opts := CollectOptions{Tiers: []string{TierFull}, LeanTier3: true}
+	opts := CollectOptions{Tiers: []string{TierFull}}
 	bundle, pointers, err := collector.Collect(opts)
 	if err != nil {
 		t.Fatal(err)

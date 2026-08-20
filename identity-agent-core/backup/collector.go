@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 
@@ -13,24 +14,32 @@ import (
 )
 
 // CollectOptions controls which tiers are gathered.
+//
+// It used to carry LeanTier3 and LogWindowDays as well — externalise bulk,
+// keep pointers only; a thirty-day log window. Both were declared, defaulted,
+// threaded through every call and never read: collectTier3 ignored its options
+// entirely and no ExternalDataPointer was ever constructed. Options that do
+// nothing are worse than absent, because they read as decisions somebody made.
+// The job they described is done by the exclusions in
+// everything_this_device_holds.go, where each one says what it leaves out and
+// why.
 type CollectOptions struct {
-	Tiers         []string
-	LeanTier3     bool // default true — externalize bulk, keep pointers only
-	LogWindowDays int  // local log retention window (default 30)
+	Tiers []string
 }
 
 func DefaultCollectOptions(tiers []string) CollectOptions {
-	return CollectOptions{
-		Tiers:         tiers,
-		LeanTier3:     true,
-		LogWindowDays: 30,
-	}
+	return CollectOptions{Tiers: tiers}
 }
 
 // Collector gathers identity data from the agent data directory.
 type Collector struct {
 	DataDir string
 	Store   store.Store
+
+	// NotCarried is what the last Collect deliberately left out, so a caller
+	// can put it in front of somebody rather than it being knowable only by
+	// opening the archive.
+	NotCarried []SkippedFile
 }
 
 // Collect builds a payload bundle for the requested tiers.
@@ -216,7 +225,15 @@ func (c *Collector) collectTier3(bundle *PayloadBundle, opts CollectOptions) ([]
 		if err := c.addJSONSection(bundle, "not_carried", skipped); err != nil {
 			return nil, err
 		}
+		// And said out loud, which it never was. It was written into the
+		// archive and read by nothing — no log line, no screen — so the one
+		// record of what a backup does not contain lived where nobody would
+		// find it until they were already trying to recover from it.
+		for _, s := range skipped {
+			log.Printf("[backup] not carried: %s (%s)", s.Path, s.Reason)
+		}
 	}
+	c.NotCarried = skipped
 
 	return nil, nil
 }

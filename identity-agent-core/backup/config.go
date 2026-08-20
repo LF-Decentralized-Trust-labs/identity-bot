@@ -174,8 +174,26 @@ func (s *ConfigStore) SaveDeltaState(ds DeltaState) error {
 
 func DefaultConfig() Config {
 	return Config{
-		Enabled:        false,
-		DefaultTiers:   []string{TierCritical, TierImportant},
+		Enabled: false,
+		// Everything, which is what a backup is for.
+		//
+		// This was tier1+tier2, and tier3 is where the sweep lives — the step
+		// that takes every file in the data directory rather than the ones
+		// somebody remembered to name. So nothing requested it, and a backup
+		// carried a hand-written list: the identity database, the login
+		// relationships, the root seed, the duress policy. Everything else a
+		// running agent holds — three further databases, the DIDComm keys, the
+		// assets, the tokens, the workspaces, the certificates — was absent
+		// from every archive, and would stay absent for anything added next.
+		//
+		// The tests that prove the sweep works pass tier3 explicitly, so the
+		// safety net was demonstrably correct and demonstrably disconnected.
+		//
+		// Size is not the reason to leave it off: a real agent's data
+		// directory measures in the low megabytes, and the bulk that could
+		// grow without bound — sandbox payloads, caches, archives this agent
+		// wrote — is excluded by name with a reason beside it.
+		DefaultTiers:   []string{TierCritical, TierImportant, TierFull},
 		Destinations:   []Destination{},
 		ScheduleDaily:  true,
 		WifiOnlyTier23: true,
