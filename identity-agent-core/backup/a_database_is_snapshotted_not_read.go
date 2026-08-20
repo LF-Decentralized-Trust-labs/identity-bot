@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // SnapshotSQLite writes a complete, consistent copy of a live database.
@@ -82,14 +83,28 @@ const snapshotPrefix = ".snapshot-"
 //
 // Called at the start of each run rather than only at the end, because the
 // run that could have cleaned up is precisely the one that died.
+// Only what is old enough to be certainly finished. Removing every matching
+// directory deletes the working directory of a run that is still using it —
+// two backups started close together, or two restores, and the second wipes
+// the first mid-write, which fails a backup that had nothing wrong with it.
+// Nothing here takes an hour, so anything older than that is abandoned.
 func SweepUpAbandoned(dir, prefix string) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return
 	}
 	for _, e := range entries {
-		if e.IsDir() && strings.HasPrefix(e.Name(), prefix) {
-			os.RemoveAll(filepath.Join(dir, e.Name()))
+		if !e.IsDir() || !strings.HasPrefix(e.Name(), prefix) {
+			continue
 		}
+		info, err := e.Info()
+		if err != nil || time.Since(info.ModTime()) < abandonedAfter {
+			continue
+		}
+		os.RemoveAll(filepath.Join(dir, e.Name()))
 	}
 }
+
+// abandonedAfter is how long a working directory must have sat untouched
+// before it is treated as left behind rather than in use.
+const abandonedAfter = time.Hour

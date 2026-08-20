@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"identity-agent-core/backup"
 	"identity-agent-core/secureenclave"
@@ -365,9 +366,81 @@ func TestAnAbandonedPlaintextCopyIsCleanedUp(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Old enough that no run could still be using it.
+	old := time.Now().Add(-2 * time.Hour)
+	if err := os.Chtimes(abandoned, old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	// And one that a run started moments ago is still writing into.
+	inUse := filepath.Join(dir, ".restoring-live")
+	if err := os.MkdirAll(inUse, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
 	backup.SweepUpAbandoned(dir, ".restoring-")
 
 	if _, err := os.Stat(abandoned); !os.IsNotExist(err) {
 		t.Fatal("a plaintext copy of the identity store was left on disk")
+	}
+	// Removing every match deletes the working directory of a restore that is
+	// still running — two started close together and the second wipes the
+	// first mid-write, failing a restore that had nothing wrong with it.
+	if _, err := os.Stat(inUse); err != nil {
+		t.Fatal("the sweep deleted a working directory that is still in use")
+	}
+}
+
+// A restore that fails must not take an identity already on the machine with it.
+//
+// Writing the key material first is right on a machine with nothing to lose:
+// the seed is irreplaceable, so a restore that fails afterwards should still
+// leave it on disk. But StoreRootSeed overwrites in place, so on a machine
+// that already holds an identity the same ordering means any later failure —
+// a malformed credentials section, nothing to do with key material at all —
+// replaces a working identity's seed with the archive's and destroys it.
+//
+// Every pairwise, login, asset and audit key on that machine derives from the
+// seed that was just overwritten.
+func TestAFailedRestoreLeavesAnExistingIdentityAlone(t *testing.T) {
+	oldDir, oldStore := machineWithAnIdentity(t, "EFromTheArchive")
+	fromArchive := make([]byte, 32)
+	for i := range fromArchive {
+		fromArchive[i] = 0xAA
+	}
+	if err := secureenclave.StoreRootSeed(oldDir, fromArchive); err != nil {
+		t.Fatal(err)
+	}
+	archive := archiveOf(t, oldDir, oldStore)
+	oldStore.Close()
+
+	// The machine being restored onto is not empty. It has its own identity.
+	newDir, newStore := machineWithAnIdentity(t, "EAlreadyHere")
+	defer newStore.Close()
+	alreadyHere := make([]byte, 32)
+	for i := range alreadyHere {
+		alreadyHere[i] = 0x55
+	}
+	if err := secureenclave.StoreRootSeed(newDir, alreadyHere); err != nil {
+		t.Fatal(err)
+	}
+
+	payload, err := RestoreFromArchive(archive, OpenRequest{Mnemonic: testPhrase})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Something unrelated to key material goes wrong part-way through.
+	payload.Bundle.Sections["credentials"] = []byte("{not json")
+
+	if err := NewService(newDir, newStore, nil).applyPayload(payload); err == nil {
+		t.Fatal("a malformed section was accepted silently")
+	}
+
+	got, err := secureenclave.LoadRootSeed(newDir)
+	if err != nil {
+		t.Fatalf("the failed restore removed this machine's root seed: %v", err)
+	}
+	if !bytes.Equal(got, alreadyHere) {
+		t.Fatal("the failed restore replaced this machine's root seed with the archive's")
 	}
 }

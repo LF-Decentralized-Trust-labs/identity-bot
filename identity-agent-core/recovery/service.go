@@ -571,11 +571,25 @@ func (s *Service) applyPayload(payload *RestoredPayload) error {
 	// re-agreed or asked for again. The root seed cannot: every pairwise,
 	// login, asset and audit key re-derives from it, and if it is not written
 	// there is nowhere else to get it. So it must not sit behind a step that
-	// refuses a malformed table or an unreadable database — a restore that
-	// fails should fail with the irreplaceable part already on disk.
-	if err := s.restoreTheKeyMaterial(payload); err != nil {
+	// refuses a malformed table — a restore that fails on a machine with
+	// nothing to lose should still fail with the irreplaceable part on disk.
+	//
+	// But a machine may already hold an identity, and then writing first is
+	// destructive: the seed is overwritten in place, so a restore that failed
+	// for any reason at all — a malformed credentials section, nothing to do
+	// with key material — took the working identity down with it. So what was
+	// there is put back if this does not complete.
+	putItBack, err := s.restoreTheKeyMaterial(payload)
+	if err != nil {
 		return err
 	}
+	finished := false
+	defer func() {
+		if !finished {
+			putItBack()
+		}
+	}()
+
 	if err := s.restoreTheDatabase(payload); err != nil {
 		return err
 	}
@@ -670,6 +684,7 @@ func (s *Service) applyPayload(payload *RestoredPayload) error {
 		}
 	}
 
+	finished = true
 	return nil
 }
 
@@ -681,19 +696,43 @@ func (s *Service) applyPayload(payload *RestoredPayload) error {
 // deliberately: the on-disk copy may be sealed to the old device's hardware,
 // and a recovery onto new hardware must never need the old secure element.
 // StoreRootSeed re-wraps it under THIS device's key where one is usable.
-func (s *Service) restoreTheKeyMaterial(payload *RestoredPayload) error {
-	if raw, ok := payload.Bundle.Sections["root_seed"]; ok && len(raw) >= 32 {
-		if err := secureenclave.StoreRootSeed(s.DataDir, raw); err != nil {
-			return fmt.Errorf("reseat root seed: %w", err)
+// It returns a function that puts back whatever this machine held before, for
+// the caller to run if the restore does not complete. On a machine with no
+// identity that function does nothing, so a failed recovery there still leaves
+// the seed on disk rather than losing it — which is the reason for writing it
+// first. On a machine that already had one, it is the difference between a
+// failed restore and a destroyed identity.
+func (s *Service) restoreTheKeyMaterial(payload *RestoredPayload) (func(), error) {
+	var undo []func()
+	putItBack := func() {
+		for _, u := range undo {
+			u()
 		}
 	}
+
+	if raw, ok := payload.Bundle.Sections["root_seed"]; ok && len(raw) >= 32 {
+		if previous, err := secureenclave.LoadRootSeed(s.DataDir); err == nil && len(previous) >= 32 {
+			undo = append(undo, func() {
+				_ = secureenclave.StoreRootSeed(s.DataDir, previous)
+			})
+		}
+		if err := secureenclave.StoreRootSeed(s.DataDir, raw); err != nil {
+			putItBack()
+			return func() {}, fmt.Errorf("reseat root seed: %w", err)
+		}
+	}
+
 	if raw, ok := payload.Bundle.Sections["login_relationships"]; ok && len(raw) > 0 {
 		path := filepath.Join(s.DataDir, "login_relationships.json")
+		if previous, err := os.ReadFile(path); err == nil {
+			undo = append(undo, func() { _ = os.WriteFile(path, previous, 0600) })
+		}
 		if err := os.WriteFile(path, raw, 0600); err != nil {
-			return fmt.Errorf("write login_relationships: %w", err)
+			putItBack()
+			return func() {}, fmt.Errorf("write login_relationships: %w", err)
 		}
 	}
-	return nil
+	return putItBack, nil
 }
 
 // restoreTheDatabase brings back the identity database the archive carries.
