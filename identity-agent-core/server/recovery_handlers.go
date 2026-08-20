@@ -179,6 +179,14 @@ func (s *CoreServer) handleRecoveryActivate(w http.ResponseWriter, r *http.Reque
 			writeError(w, http.StatusConflict, "Cancel window active", err.Error())
 		case *recovery.ErrRotationMandatory:
 			writeError(w, http.StatusPreconditionFailed, "Rotation required", err.Error())
+		case *recovery.ErrHeldForDuress:
+			// Its own status, because a client has to be able to tell this from
+			// a mistyped phrase. Falling to the default made a duress hold a
+			// bad request, which threw away the "until" and "how many more
+			// approvals" this type carries precisely so a screen can say them.
+			writeError(w, http.StatusConflict, "Held", err.Error())
+		case *recovery.ErrNotAuthenticated:
+			writeError(w, http.StatusForbidden, "Not authenticated", err.Error())
 		default:
 			// A wrong phrase, a missing phrase and an archive that opens a
 			// different identity are all the caller's to fix, not this
