@@ -33,13 +33,32 @@ const FileSectionPrefix = "file:"
 //
 // Written as one function so the whole policy is readable in one place. Every
 // branch names what would go wrong if it were carried.
-func skipReason(rel string, info fs.FileInfo) string {
+func skipReason(rel string) string {
 	base := filepath.Base(rel)
 	slashed := filepath.ToSlash(rel)
 
+	// This agent's own working directories, where a backup or a restore
+	// unpacks a plaintext copy of a database while it works.
+	//
+	// Named explicitly rather than left to the identity.db rule below. That
+	// rule matches on basename, so a copy sitting inside one of these was
+	// skipped as "already captured" — which is true of the real database and
+	// false of the copy, and meant an abandoned plaintext duplicate of the
+	// whole identity store was neither carried nor reported.
+	if strings.HasPrefix(slashed, snapshotPrefix) || strings.HasPrefix(slashed, restoringPrefix) ||
+		strings.Contains(slashed, "/"+snapshotPrefix) || strings.Contains(slashed, "/"+restoringPrefix) {
+		return "this agent's own working copy, being written right now or left by a run that died"
+	}
+
 	// Already captured by name, in a form that is consistent rather than a
 	// mid-write copy of a live file.
-	switch base {
+	//
+	// Anchored to the top of the data directory. Matching identity.db
+	// anywhere means a build on top of this core that keeps its own
+	// identity.db in a subdirectory has it silently dropped from every
+	// backup — an allow-list failure of exactly the kind this file exists to
+	// remove.
+	switch slashed {
 	case "identity.db":
 		return "captured as sqlite_identity_db"
 	case "login_relationships.json":
@@ -115,6 +134,12 @@ func (c *Collector) collectEveryOtherFile(bundle *PayloadBundle) ([]SkippedFile,
 	var skipped []SkippedFile
 
 	err := filepath.WalkDir(c.DataDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil && os.IsNotExist(err) {
+			// A directory that vanished mid-walk, for the same reasons as a
+			// file below. There is nothing left to carry or to report a size
+			// for.
+			return nil
+		}
 		if err != nil {
 			// A directory that cannot be read might hold anything. Refusing to
 			// guess is the point of this whole file.
@@ -128,8 +153,33 @@ func (c *Collector) collectEveryOtherFile(bundle *PayloadBundle) ([]SkippedFile,
 			return fmt.Errorf("locate %s: %w", path, rerr)
 		}
 
+		// Whether to carry it is decided from the path alone, BEFORE anything
+		// touches the file.
+		//
+		// The excluded set is mostly transient — a write-ahead log, a shared
+		// memory file, a journal — and those come and go continuously while an
+		// agent is running. Stating them first meant a backup taken during
+		// ordinary use could fail with "no such file" for a file it was about
+		// to exclude anyway. Found by running a collection against a copy of a
+		// real agent's data directory, which is the first thing here that ever
+		// had live sidecars in it.
+		if reason := skipReason(rel); reason != "" {
+			skipped = append(skipped, SkippedFile{Path: filepath.ToSlash(rel),
+				Reason: reason, Size: sizeIfStillThere(d)})
+			return nil
+		}
+
 		info, ierr := d.Info()
 		if ierr != nil {
+			if os.IsNotExist(ierr) {
+				// Gone between being listed and being read. Recorded rather
+				// than ignored, and rather than failing the whole backup: a
+				// file that no longer exists cannot be carried, and saying so
+				// is the honest outcome.
+				skipped = append(skipped, SkippedFile{Path: filepath.ToSlash(rel),
+					Reason: "removed while the backup was running"})
+				return nil
+			}
 			return fmt.Errorf("inspect %s: %w", rel, ierr)
 		}
 
@@ -147,14 +197,36 @@ func (c *Collector) collectEveryOtherFile(bundle *PayloadBundle) ([]SkippedFile,
 			return nil
 		}
 
-		if reason := skipReason(rel, info); reason != "" {
-			skipped = append(skipped, SkippedFile{Path: filepath.ToSlash(rel),
-				Reason: reason, Size: info.Size()})
+		// A database is copied through SQLite, never read as bytes.
+		//
+		// Reading one as a file is what produced the fault this whole change
+		// began with: they run in write-ahead-log mode, so the file on disk is
+		// short by every transaction since the last checkpoint — on a young
+		// database, all of them — and the archive is valid and empty. The
+		// sidecar that holds those transactions is excluded above, correctly,
+		// because it is meaningless apart from its database.
+		//
+		// Recognised by its header rather than its name, and copied without
+		// anybody registering it, because a registry is an allow list wearing
+		// a different hat: somebody adds a database, nobody registers it,
+		// every backup succeeds, and the gap surfaces on the day of the
+		// restore.
+		if LooksLikeADatabase(path) {
+			data, derr := snapshotAnotherDatabase(path, c.DataDir)
+			if derr != nil {
+				return derr
+			}
+			c.addRawSection(bundle, FileSectionPrefix+filepath.ToSlash(rel), data)
 			return nil
 		}
 
 		data, rerr := os.ReadFile(path)
 		if rerr != nil {
+			if os.IsNotExist(rerr) {
+				skipped = append(skipped, SkippedFile{Path: filepath.ToSlash(rel),
+					Reason: "removed while the backup was running"})
+				return nil
+			}
 			return fmt.Errorf("read %s: %w", rel, rerr)
 		}
 		c.addRawSection(bundle, FileSectionPrefix+filepath.ToSlash(rel), data)
@@ -164,6 +236,17 @@ func (c *Collector) collectEveryOtherFile(bundle *PayloadBundle) ([]SkippedFile,
 		return skipped, err
 	}
 	return skipped, nil
+}
+
+// sizeIfStillThere reports a file's size, or zero if it has already gone.
+// Only used for recording what was skipped, where an unknown size is a far
+// better outcome than failing a backup.
+func sizeIfStillThere(d fs.DirEntry) int64 {
+	info, err := d.Info()
+	if err != nil {
+		return 0
+	}
+	return info.Size()
 }
 
 // FilePathOfSection returns the relative path a file section restores to, and

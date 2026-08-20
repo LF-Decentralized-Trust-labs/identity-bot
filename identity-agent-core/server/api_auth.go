@@ -450,6 +450,15 @@ var sessionForbidden = map[string]string{
 	"POST /api/recovery/sessions/{id}/activate": "activating a recovery replaces this identity and everything it held",
 	"POST /api/recovery/sessions/{id}/cancel":   "stopping a recovery decides whether it happens",
 	"POST /api/recovery/sessions/{id}/rotation": "this rotates the identity's keys",
+	// Reading is forbidden too, which the writes above are not enough for.
+	//
+	// A recovery in progress is the fact that somebody is taking this identity
+	// over, and when it can be completed. Anything holding a browser session
+	// could watch the clock and time itself against the window, or simply
+	// learn that a recovery is running — which is exactly what the window
+	// exists to give the owner, and nobody else, a chance to act on.
+	"GET /api/recovery/sessions":      "a recovery in progress says this identity is being taken over, and when",
+	"GET /api/recovery/sessions/{id}": "a recovery in progress says this identity is being taken over, and when",
 	// Founding and rotation outside recovery, for the same reason.
 	"POST /api/inception": "founding an identity decides what this agent is",
 	"POST /api/rotation":  "rotation replaces the keys this identity signs with",

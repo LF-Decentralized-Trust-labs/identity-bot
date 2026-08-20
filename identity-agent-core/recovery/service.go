@@ -560,6 +560,46 @@ func (s *Service) applyPayload(payload *RestoredPayload) error {
 	if payload == nil {
 		return fmt.Errorf("empty restored payload")
 	}
+	if payload.Bundle == nil {
+		return fmt.Errorf("this archive carries no sections")
+	}
+
+	// Everything is read and checked BEFORE anything is written.
+	//
+	// This ordering is the whole answer to a problem two earlier attempts got
+	// wrong. Writing the key material last meant a machine that had lost
+	// everything could fail the restore and lose the root seed with it, which
+	// is the one thing no other copy exists of. Writing it first meant a
+	// machine that already HELD an identity had that identity's seed
+	// overwritten by any later failure — a malformed credentials section,
+	// nothing to do with key material at all.
+	//
+	// Undoing the seed afterwards is not the fix either, and looked like one
+	// for a while: the database import commits before those later sections are
+	// parsed, so putting only the seed back leaves this machine's seed beside
+	// the archive's identity. Every derived key then belongs to an identity
+	// that is no longer in the store. Two coherent states became one
+	// incoherent one.
+	//
+	// So nothing is written until everything that CAN be checked has been. A
+	// malformed archive is refused having touched nothing at all, which is
+	// what both of those attempts were reaching for. What remains after this
+	// point is disk failure, which can still leave a restore half-applied —
+	// that is real, and it is not something ordering can solve.
+	checked, err := s.checkBeforeWriting(payload)
+	if err != nil {
+		return err
+	}
+	if checked.cleanup != nil {
+		defer checked.cleanup()
+	}
+
+	if err := s.restoreTheKeyMaterial(payload); err != nil {
+		return err
+	}
+	if err := s.restoreTheDatabase(checked); err != nil {
+		return err
+	}
 	if payload.Identity != nil && s.Store != nil {
 		if err := s.Store.SaveIdentity(*payload.Identity); err != nil {
 			return fmt.Errorf("save identity: %w", err)
@@ -585,77 +625,39 @@ func (s *Service) applyPayload(payload *RestoredPayload) error {
 	// restored less than it contained. Nothing that inspects an archive could
 	// catch that; only restoring one and looking at what arrived.
 	//
-	// A section that will not parse fails the restore rather than being skipped.
-	// Continuing past it is how a partial restore comes to look like a whole
-	// one, and this is the one moment somebody can still act on the truth.
-	if raw, ok := payload.Bundle.Sections["credentials"]; ok && len(raw) > 0 && s.Store != nil {
-		var creds []store.CredentialRecord
-		if err := json.Unmarshal(raw, &creds); err != nil {
-			return fmt.Errorf("credentials in this archive could not be read: %w", err)
-		}
-		for _, c := range creds {
+	// They were parsed by checkBeforeWriting, so a section that will not read
+	// has already refused the restore before anything was written. Continuing
+	// past one is how a partial restore comes to look like a whole one.
+	if s.Store != nil {
+		for _, c := range checked.credentials {
 			if err := s.Store.SaveCredential(c); err != nil {
 				return fmt.Errorf("restore credential %s: %w", c.SAID, err)
 			}
 		}
-	}
-
-	if raw, ok := payload.Bundle.Sections["settings"]; ok && len(raw) > 0 && s.Store != nil {
-		var settings store.SettingsData
-		if err := json.Unmarshal(raw, &settings); err != nil {
-			return fmt.Errorf("settings in this archive could not be read: %w", err)
+		if checked.settings != nil {
+			if err := s.Store.SaveSettings(*checked.settings); err != nil {
+				return fmt.Errorf("restore settings: %w", err)
+			}
 		}
-		if err := s.Store.SaveSettings(settings); err != nil {
-			return fmt.Errorf("restore settings: %w", err)
-		}
-	}
-
-	if raw, ok := payload.Bundle.Sections["pending_requests"]; ok && len(raw) > 0 && s.Store != nil {
-		var pending []store.PendingRequest
-		if err := json.Unmarshal(raw, &pending); err != nil {
-			return fmt.Errorf("pending requests in this archive could not be read: %w", err)
-		}
-		for _, p := range pending {
+		for _, p := range checked.pending {
 			if err := s.Store.SavePendingRequest(p); err != nil {
 				return fmt.Errorf("restore pending request: %w", err)
 			}
 		}
 	}
 
-	if raw, ok := payload.Bundle.Sections["login_relationships"]; ok && len(raw) > 0 {
-		path := filepath.Join(s.DataDir, "login_relationships.json")
-		if err := os.WriteFile(path, raw, 0600); err != nil {
-			return fmt.Errorf("write login_relationships: %w", err)
-		}
-	}
-	// Reseat the root keystore seed so every HD-derived key (pairwise contacts,
-	// login relationships, asset signing, audit signing, credential vault)
-	// re-derives on this device. StoreRootSeed re-wraps it under THIS device's
-	// hardware key where one is usable — the old device's secure element is
-	// never needed.
-	if raw, ok := payload.Bundle.Sections["root_seed"]; ok && len(raw) >= 32 {
-		if err := secureenclave.StoreRootSeed(s.DataDir, raw); err != nil {
-			return fmt.Errorf("reseat root seed: %w", err)
-		}
-	}
 	// Every file the archive carries, back to the path it came from.
 	//
 	// The collector no longer names the files it takes — it sweeps the data
 	// directory — so this cannot name them either. A restore that knew only
 	// the files somebody remembered to list would drop exactly the ones a
 	// build on top of this core had added, which is the failure the sweep
-	// exists to remove.
-	//
-	// A section whose name does not resolve to a path inside the data
-	// directory fails the restore. An archive is opened with the owner's own
-	// key, so this is not the main line of defence — but a section name is the
-	// one part of an archive that becomes a filesystem path.
+	// exists to remove. Every name was resolved to a path by
+	// checkBeforeWriting, so none of them can surprise this loop half-way
+	// through.
 	for name, raw := range payload.Bundle.Sections {
 		rel, ok := backup.FilePathOfSection(name)
 		if !ok {
-			if strings.HasPrefix(name, backup.FileSectionPrefix) {
-				return fmt.Errorf("this archive names a file section with an unusable path: %q", name)
-			}
 			continue
 		}
 		dest := filepath.Join(s.DataDir, rel)
@@ -667,13 +669,161 @@ func (s *Service) applyPayload(payload *RestoredPayload) error {
 		}
 	}
 
-	if raw, ok := payload.Bundle.Sections["sqlite_identity_db"]; ok && len(raw) > 0 {
-		dbPath := filepath.Join(s.DataDir, "identity.db")
-		if err := os.WriteFile(dbPath, raw, 0600); err != nil {
-			return fmt.Errorf("write identity.db: %w", err)
+	return nil
+}
+
+// restoreTheKeyMaterial writes the parts of an archive that exist nowhere else.
+//
+// The root keystore seed is the HD derivation root for every pairwise contact,
+// login relationship, asset signing and audit signing key, and for the
+// credential vault. It is carried unwrapped inside the encrypted payload
+// deliberately: the on-disk copy may be sealed to the old device's hardware,
+// and a recovery onto new hardware must never need the old secure element.
+// StoreRootSeed re-wraps it under THIS device's key where one is usable.
+func (s *Service) restoreTheKeyMaterial(payload *RestoredPayload) error {
+	if raw, ok := payload.Bundle.Sections["root_seed"]; ok && len(raw) >= 32 {
+		if err := secureenclave.StoreRootSeed(s.DataDir, raw); err != nil {
+			return fmt.Errorf("reseat root seed: %w", err)
+		}
+	}
+	if raw, ok := payload.Bundle.Sections["login_relationships"]; ok && len(raw) > 0 {
+		path := filepath.Join(s.DataDir, "login_relationships.json")
+		if err := os.WriteFile(path, raw, 0600); err != nil {
+			return fmt.Errorf("write login_relationships: %w", err)
 		}
 	}
 	return nil
+}
+
+// checkedPayload is everything an archive's sections mean, read and validated
+// before the restore has written anything.
+type checkedPayload struct {
+	credentials []store.CredentialRecord
+	settings    *store.SettingsData
+	pending     []store.PendingRequest
+
+	// databasePath is the archive's database, unpacked to a working copy and
+	// already migrated to this build's schema — so importing it is a copy
+	// between two databases known to be compatible, with the refusals already
+	// made.
+	databasePath string
+	cleanup      func()
+}
+
+// checkBeforeWriting reads every section this code can parse, and resolves
+// every path it would write, before the restore touches the machine.
+//
+// Doing this up front is what lets a failed restore leave the machine alone.
+// Parsing as each section is written means the machine is already part-way
+// through when a malformed one is found — key material replaced, database
+// committed — and there is no coherent way back from there.
+func (s *Service) checkBeforeWriting(payload *RestoredPayload) (*checkedPayload, error) {
+	checked := &checkedPayload{}
+
+	if raw, ok := payload.Bundle.Sections["credentials"]; ok && len(raw) > 0 {
+		if err := json.Unmarshal(raw, &checked.credentials); err != nil {
+			return nil, fmt.Errorf("credentials in this archive could not be read: %w", err)
+		}
+	}
+	if raw, ok := payload.Bundle.Sections["settings"]; ok && len(raw) > 0 {
+		var settings store.SettingsData
+		if err := json.Unmarshal(raw, &settings); err != nil {
+			return nil, fmt.Errorf("settings in this archive could not be read: %w", err)
+		}
+		checked.settings = &settings
+	}
+	if raw, ok := payload.Bundle.Sections["pending_requests"]; ok && len(raw) > 0 {
+		if err := json.Unmarshal(raw, &checked.pending); err != nil {
+			return nil, fmt.Errorf("pending requests in this archive could not be read: %w", err)
+		}
+	}
+
+	// A section name is the one part of an archive that becomes a filesystem
+	// path, so every one is resolved here. A name that does not land inside
+	// the data directory refuses the archive rather than being discovered
+	// part-way through writing the others.
+	for name := range payload.Bundle.Sections {
+		if _, ok := backup.FilePathOfSection(name); ok {
+			continue
+		}
+		if strings.HasPrefix(name, backup.FileSectionPrefix) {
+			return nil, fmt.Errorf(
+				"this archive names a file section with an unusable path: %q", name)
+		}
+	}
+
+	// The database, unpacked and brought to this build's schema — here, before
+	// the seed is written, rather than during the restore.
+	//
+	// Everything that makes a backup unusable rather than merely old is
+	// decided by PrepareSnapshotForImport: a schema newer than this build
+	// understands, a file that is not an identity database, a migration that
+	// will not apply. Those are ordinary conditions, not disk failure. Left
+	// until the import they land AFTER the root seed has been reseated, which
+	// is the incoherent "new seed, old database" state this whole ordering
+	// exists to prevent — so they have to be reached first.
+	if err := s.prepareTheDatabase(payload, checked); err != nil {
+		if checked.cleanup != nil {
+			checked.cleanup()
+		}
+		return nil, err
+	}
+	return checked, nil
+}
+
+func (s *Service) prepareTheDatabase(payload *RestoredPayload, checked *checkedPayload) error {
+	raw, ok := payload.Bundle.Sections["sqlite_identity_db"]
+	if !ok || len(raw) == 0 {
+		return nil
+	}
+	if _, ok := s.Store.(*store.SQLiteStore); !ok {
+		return nil
+	}
+
+	// Anything a previous run left behind when it died mid-way. This is a
+	// plaintext copy of the whole identity store, and nothing else removes it.
+	backup.SweepUpAbandoned(s.DataDir)
+
+	dir, err := os.MkdirTemp(s.DataDir, backup.RestoringPrefix)
+	if err != nil {
+		return fmt.Errorf("make room for the backed-up database: %w", err)
+	}
+	backup.InUse(dir)
+	checked.cleanup = func() {
+		backup.NoLongerInUse(dir)
+		os.RemoveAll(dir)
+	}
+
+	path := filepath.Join(dir, "identity.db")
+	if err := os.WriteFile(path, raw, 0600); err != nil {
+		return fmt.Errorf("unpack the backed-up database: %w", err)
+	}
+	if err := store.PrepareSnapshotForImport(path); err != nil {
+		return err
+	}
+	checked.databasePath = path
+	return nil
+}
+
+// restoreTheDatabase brings back the identity database the archive carries.
+//
+// This runs FIRST, before anything is restored through the store, and that
+// ordering is deliberate. The archive holds the same data twice — once as the
+// database itself, once as parsed sections — and whichever is applied second
+// wins. The parsed sections are the ones this code understands and can fail
+// loudly on, so they go last and have the final say; the database goes first
+// and carries across everything the parsed sections do not know about.
+//
+// See SQLiteStore.ImportSnapshot for why this is not simply a file write.
+func (s *Service) restoreTheDatabase(checked *checkedPayload) error {
+	if checked.databasePath == "" {
+		return nil
+	}
+	sqlStore, ok := s.Store.(*store.SQLiteStore)
+	if !ok {
+		return nil
+	}
+	return sqlStore.ImportSnapshot(checked.databasePath)
 }
 
 // Retrieve loads an opaque .iab archive from backup-only device, local path, or cloud stub.
