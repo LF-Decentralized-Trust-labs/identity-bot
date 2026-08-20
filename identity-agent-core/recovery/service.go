@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"identity-agent-core/authprovider"
 	"io"
 	"net/http"
 	"os"
@@ -44,14 +45,17 @@ const (
 
 // Session is a recovery workflow instance.
 type Session struct {
-	ID              string                 `json:"id"`
-	State           SessionState           `json:"state"`
-	IdentityAID     string                 `json:"identity_aid,omitempty"`
-	StartedAt       string                 `json:"started_at"`
-	CompleteAfter   string                 `json:"complete_after"`
-	CancelWindow    string                 `json:"cancel_window"`
-	AssuranceBand   AssuranceBand          `json:"assurance_band"`
-	RotationDone    bool                   `json:"rotation_done"`
+	ID            string        `json:"id"`
+	State         SessionState  `json:"state"`
+	IdentityAID   string        `json:"identity_aid,omitempty"`
+	StartedAt     string        `json:"started_at"`
+	CompleteAfter string        `json:"complete_after"`
+	CancelWindow  string        `json:"cancel_window"`
+	AssuranceBand AssuranceBand `json:"assurance_band"`
+	RotationDone  bool          `json:"rotation_done"`
+	// DuressApprovals are the trusted contacts who have confirmed this
+	// recovery should proceed, when the identity asks for them.
+	DuressApprovals []string               `json:"duress_approvals,omitempty"`
 	PairwiseChecks  []PairwiseVerification `json:"pairwise_checks,omitempty"`
 	ManifestSummary map[string]interface{} `json:"manifest_summary,omitempty"`
 	Error           string                 `json:"error,omitempty"`
@@ -103,6 +107,22 @@ type Service struct {
 	Store         store.Store
 	BackupService *backup.Service
 	CancelGate    *CancelWindowGate
+	// Authenticator establishes that the person completing a recovery is the
+	// person the identity belongs to. The phrase proves control of the
+	// identity and unlocks the data; it says nothing about who is holding it.
+	//
+	// The same provider feeds AuthProvider below, which turns the answer into a
+	// waiting period. One question, asked once.
+	Authenticator authprovider.Provider
+	// RequiredLevel is how well authenticated somebody must be to complete a
+	// recovery on this agent.
+	//
+	// LevelUnknown means the gate is not enforced, which is what an agent with
+	// no provider has to do — refusing every recovery because nothing can
+	// measure would lock people out of their own identities to protect them
+	// from nobody. The waiting period is what stands in for it there, and an
+	// unmeasured level already draws the longest one.
+	RequiredLevel authprovider.Level
 	Rotation      *RotationTracker
 	AuthProvider  AuthProviderGate
 
@@ -127,14 +147,24 @@ type sessionRecord struct {
 // started it.
 
 func NewService(dataDir string, st store.Store, backupSvc *backup.Service) *Service {
-	auth := NewStubAuthProviderGate()
+	// One provider, read for both questions it answers: how well authenticated
+	// somebody is, and therefore how long this recovery waits. An agent with no
+	// provider configured says so rather than producing a level, and an
+	// unmeasured level draws the longest window.
+	provider := authprovider.Provider(authprovider.NotConfigured{})
+	gate := FromAuthProvider{Provider: provider}
 	return &Service{
 		DataDir:       dataDir,
 		Store:         st,
 		BackupService: backupSvc,
-		CancelGate:    NewCancelWindowGate(auth),
+		CancelGate:    NewCancelWindowGate(gate),
 		Rotation:      NewRotationTracker(),
-		AuthProvider:  auth,
+		AuthProvider:  gate,
+		Authenticator: provider,
+		// Not enforced until a provider exists. Refusing every recovery on an
+		// agent that cannot measure would lock people out of their own
+		// identities to protect them from nobody.
+		RequiredLevel: authprovider.LevelUnknown,
 		sessions:      map[string]*sessionRecord{},
 	}
 }
@@ -343,6 +373,33 @@ func (s *Service) Cancel(sessionID string) (*Session, error) {
 	return &sess, nil
 }
 
+// authenticationCountsFor is how recent an authentication must be to stand in
+// for one taken now.
+//
+// Long enough that somebody is not asked twice inside one sitting, short enough
+// that it cannot span the wait it is meant to be checked at the end of.
+const authenticationCountsFor = 15 * time.Minute
+
+// ErrNotAuthenticated means the recovery is controlled by somebody this agent
+// cannot establish is the owner.
+//
+// A distinct type because it is not a failure of the recovery — the archive
+// opened and the words were right. It is the second gate saying that
+// controlling an identity and being its owner are different things.
+type ErrNotAuthenticated struct {
+	Required authprovider.Level
+	Got      authprovider.Result
+}
+
+func (e *ErrNotAuthenticated) Error() string {
+	if !e.Got.Measured {
+		return "this recovery cannot complete because nothing here can establish who you are: " +
+			e.Got.Why
+	}
+	return fmt.Sprintf("this recovery needs you authenticated to %q and you are %q",
+		e.Required, e.Got.Level)
+}
+
 // ActivateRequest carries what finishing a recovery needs and nothing else.
 type ActivateRequest struct {
 	Mnemonic   string `json:"mnemonic"`
@@ -388,6 +445,42 @@ func (s *Service) Activate(sessionID string, req ActivateRequest) (*Session, err
 	if err := s.Rotation.RequireCompleted(sessionID); err != nil {
 		return nil, err
 	}
+	// The second gate. Controlling the identity is not the same as being the
+	// person it belongs to, and until now completing a recovery asked only the
+	// first question — the phrase opened the archive and the identity was
+	// written straight in.
+	//
+	// Checked here rather than at the start, deliberately: a recovery waits days,
+	// and an authentication from the day it began is not evidence about who is
+	// finishing it. This is the moment that matters.
+	if s.RequiredLevel != "" && s.RequiredLevel != authprovider.LevelUnknown {
+		// A requirement this package does not recognise is a typo, and a typo
+		// must not quietly turn a gate off. Unrecognised levels rank alongside
+		// unknown, so "verifed" would be satisfied by having measured nothing.
+		if !s.RequiredLevel.Known() {
+			return nil, fmt.Errorf("this agent is configured to require an authentication level "+
+				"it does not recognise (%q), so it cannot tell whether anybody meets it",
+				s.RequiredLevel)
+		}
+		res := authprovider.Of(s.Authenticator)
+		// And recently. An authentication is a statement about a moment, and a
+		// recovery waits days — so a provider answering with a level it
+		// established last week says nothing about who is finishing this. Fresh
+		// existed and was tested and nothing consulted it, which made it look
+		// load-bearing when it was not.
+		if !res.Fresh(authenticationCountsFor) {
+			return nil, &ErrNotAuthenticated{Required: s.RequiredLevel, Got: res}
+		}
+		// Measured is the whole premise of this package and was checked
+		// nowhere: a provider returning a high level with Measured false and no
+		// error satisfied the gate. Not having measured is not a measurement.
+		if !res.Measured || !res.Level.AtLeast(s.RequiredLevel) {
+			return nil, &ErrNotAuthenticated{
+				Required: s.RequiredLevel,
+				Got:      res,
+			}
+		}
+	}
 	if len(archive) == 0 {
 		return nil, fmt.Errorf("this recovery has no archive to restore from")
 	}
@@ -418,13 +511,33 @@ func (s *Service) Activate(sessionID string, req ActivateRequest) (*Session, err
 		return nil, fmt.Errorf("those words open a different identity than the one this recovery started for")
 	}
 
+	// The third gate. Whether this person is acting freely, which neither the
+	// phrase nor an authentication provider can answer — somebody being forced
+	// satisfies both perfectly.
+	//
+	// Read from the ARCHIVE, and checked here rather than earlier, because a
+	// recovery by definition runs on a device that does not hold this
+	// identity's data. Reading the policy off local disk meant a fresh machine
+	// found none, defaulted to no protection, and let the recovery through —
+	// so the gate fired only on the owner's own machine, which is the one place
+	// it is not needed. An attacker with the archive and the phrase stepped
+	// around it by running the recovery anywhere else.
+	//
+	// The policy travels with the identity because it is a property of the
+	// identity, not of a machine.
+	if err := duressPolicyFrom(payload).Held(parseTime(sess.StartedAt), sess.DuressApprovals, time.Now()); err != nil {
+		return nil, err
+	}
+
 	if err := s.applyPayload(payload); err != nil {
 		s.mu.Lock()
 		rec.Session.State = SessionFailed
 		rec.Session.Error = err.Error()
 		sess = rec.Session
 		s.mu.Unlock()
-		_ = s.writeSession(rec)
+		// The recovery is over, so the sealed archive stops being held. The
+		// record stays, without it, so somebody can still read what went wrong.
+		s.ForgetFailed(sessionID)
 		return nil, err
 	}
 

@@ -3,6 +3,7 @@ package recovery
 import (
 	"encoding/json"
 	"fmt"
+	"identity-agent-core/authprovider"
 	"net/http"
 	"os"
 	"time"
@@ -32,9 +33,40 @@ const (
 	BandUnknown AssuranceBand = "unknown"
 )
 
-// AuthProviderGate queries an AuthProvider for the current assurance band/score.
+// AuthProviderGate reports how well the person operating this agent has been
+// authenticated.
+//
+// The window this produces is the answer to "how long before this recovery
+// completes", and it turns on a question the phrase cannot answer: the words
+// prove control of the identity, not that the person holding them is the
+// person it belongs to. See the authprovider package for the three gates and
+// why they are separate.
 type AuthProviderGate interface {
 	CurrentBand() (AssuranceBand, int, error)
+}
+
+// FromAuthProvider adapts the shared authentication seam to this gate.
+//
+// One concept had three names — a tier computed in the app, a level provider in
+// the link verifier, and this. They are the same question asked in three
+// places, so they read one provider now.
+type FromAuthProvider struct {
+	Provider authprovider.Provider
+}
+
+func (f FromAuthProvider) CurrentBand() (AssuranceBand, int, error) {
+	res := authprovider.Of(f.Provider)
+	if !res.Measured {
+		return BandUnknown, 0, fmt.Errorf("%s", res.Why)
+	}
+	switch res.Level.Badge() {
+	case "green":
+		return BandGreen, res.Score, nil
+	case "amber":
+		return BandAmber, res.Score, nil
+	default:
+		return BandRed, res.Score, nil
+	}
 }
 
 // StubAuthProviderGate is a local stub until a live AuthProvider is wired.

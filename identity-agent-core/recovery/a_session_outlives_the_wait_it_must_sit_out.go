@@ -148,6 +148,27 @@ func (s *Service) forgetSession(id string) {
 	os.Remove(p + partialSuffix)
 }
 
+// ForgetFailed drops the archive of a recovery that ended badly.
+//
+// A failure leaves the record in place so somebody can read what happened, but
+// there is no reason to keep the ciphertext: the recovery is over, and holding
+// somebody's sealed identity for the thirty days an abandoned session gets is
+// keeping it for no purpose at all.
+func (s *Service) ForgetFailed(id string) {
+	s.mu.Lock()
+	rec, ok := s.sessions[id]
+	if ok {
+		rec.Archive = nil
+	}
+	s.mu.Unlock()
+	if ok {
+		// Written back WITHOUT the archive rather than deleted, so the failure
+		// and its reason survive a restart and somebody can still be told what
+		// went wrong.
+		_ = s.writeSession(rec)
+	}
+}
+
 // ForgetExpiredSessions drops sessions that were abandoned.
 //
 // Called whenever a session is written, rather than only at startup. Expiry
@@ -264,4 +285,45 @@ func (s *Service) LoadSessions() (int, error) {
 		loaded++
 	}
 	return loaded, nil
+}
+
+// InProgress lists the recoveries this agent is holding.
+//
+// Without this a recovery is reachable only through the screen that started
+// it. The wait is measured in days and was deliberately made to survive the
+// agent restarting — but a person who pressed back, or closed the app, had no
+// way to reach the session again: the id lived in a widget and there was no
+// route to rediscover it. The recovery could then be neither finished nor
+// stopped, while the agent kept it alive and waiting.
+//
+// That defeats both halves of what the wait is for. The owner cannot finish,
+// and the person who did NOT start it cannot stop it.
+func (s *Service) InProgress() []Session {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]Session, 0, len(s.sessions))
+	for _, rec := range s.sessions {
+		sess := rec.Session
+		// A failed recovery is not in progress. Activated and cancelled ones
+		// are deleted outright, but a failure leaves the record in place — so a
+		// client asking what to resume was offered something already over, and
+		// showed it as waiting with a live button to finish it.
+		if sess.State == SessionFailed {
+			continue
+		}
+		// The same reading GetSession gives, so a list and a detail view cannot
+		// disagree about what state something is in.
+		switch sess.State {
+		case SessionActivated, SessionFailed, SessionCancelled:
+		default:
+			if sess.RotationDone {
+				sess.State = SessionRotated
+			} else if s.CancelGate.Remaining(parseTime(sess.CompleteAfter)) > 0 {
+				sess.State = SessionPending
+			}
+		}
+		out = append(out, sess)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].StartedAt < out[j].StartedAt })
+	return out
 }

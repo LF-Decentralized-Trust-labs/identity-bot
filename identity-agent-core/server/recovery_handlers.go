@@ -15,10 +15,18 @@ func (s *CoreServer) mountRecoveryRoutes(r chi.Router) {
 	r.Route("/recovery", func(r chi.Router) {
 		r.Post("/verify", s.handleRecoveryVerify)
 		r.Post("/start", s.handleRecoveryStart)
+		// Every recovery this agent is holding. Without it a session is
+		// reachable only from the screen that started it, and the wait is
+		// measured in days.
+		r.Get("/sessions", s.handleRecoveryListSessions)
 		r.Get("/sessions/{id}", s.handleRecoveryGetSession)
 		r.Post("/sessions/{id}/rotation", s.handleRecoveryRotation)
 		r.Post("/sessions/{id}/activate", s.handleRecoveryActivate)
 		r.Post("/sessions/{id}/cancel", s.handleRecoveryCancel)
+		// What this identity has chosen about being coerced. Off unless
+		// somebody turned it on.
+		r.Get("/duress-policy", s.handleGetDuressPolicy)
+		r.Put("/duress-policy", s.handlePutDuressPolicy)
 		r.Post("/retrieve", s.handleRecoveryRetrieve)
 		r.Post("/root-aid-rotation", s.handleRecoveryRootAIDRotation)
 		r.Get("/root-aid-rotation/status", s.handleRecoveryRootAIDStatus)
@@ -171,6 +179,14 @@ func (s *CoreServer) handleRecoveryActivate(w http.ResponseWriter, r *http.Reque
 			writeError(w, http.StatusConflict, "Cancel window active", err.Error())
 		case *recovery.ErrRotationMandatory:
 			writeError(w, http.StatusPreconditionFailed, "Rotation required", err.Error())
+		case *recovery.ErrHeldForDuress:
+			// Its own status, because a client has to be able to tell this from
+			// a mistyped phrase. Falling to the default made a duress hold a
+			// bad request, which threw away the "until" and "how many more
+			// approvals" this type carries precisely so a screen can say them.
+			writeError(w, http.StatusConflict, "Held", err.Error())
+		case *recovery.ErrNotAuthenticated:
+			writeError(w, http.StatusForbidden, "Not authenticated", err.Error())
 		default:
 			// A wrong phrase, a missing phrase and an archive that opens a
 			// different identity are all the caller's to fix, not this
@@ -271,4 +287,62 @@ func (s *CoreServer) handleRecoveryCancel(w http.ResponseWriter, r *http.Request
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(sess)
+}
+
+func (s *CoreServer) handleGetDuressPolicy(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(s.recoveryService().LoadDuressPolicy())
+}
+
+// handlePutDuressPolicy records what an identity wants to happen when somebody
+// may be being forced.
+//
+// A policy that cannot be satisfied is refused here rather than stored, so the
+// moment somebody discovers they locked themselves out is not their recovery.
+func (s *CoreServer) handlePutDuressPolicy(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRecoveryBody)
+	var p recovery.DuressPolicy
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request", err.Error())
+		return
+	}
+	if err := s.recoveryService().SaveDuressPolicy(p); err != nil {
+		writeError(w, http.StatusBadRequest, "That setting would not work", err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(s.recoveryService().LoadDuressPolicy())
+}
+
+// handleRecoveryListSessions answers what recoveries are in progress.
+//
+// So an app can offer to resume one. A recovery that survives the agent
+// restarting but not the screen closing is not something anybody can actually
+// wait out.
+func (s *CoreServer) handleRecoveryListSessions(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"sessions": s.recoveryService().InProgress(),
+	})
+}
+
+// statusForActivateError says which refusal this is.
+//
+// Lifted out of the handler so it can be tested, and so the two cannot drift.
+// None of these is a server fault: each is a true statement about the request
+// or about where the recovery has got to, and somebody reading it should be
+// able to act on it.
+func statusForActivateError(err error) int {
+	switch err.(type) {
+	case *recovery.ErrCancelWindowActive:
+		return http.StatusConflict
+	case *recovery.ErrRotationMandatory:
+		return http.StatusPreconditionFailed
+	case *recovery.ErrHeldForDuress:
+		return http.StatusConflict
+	case *recovery.ErrNotAuthenticated:
+		return http.StatusForbidden
+	default:
+		return http.StatusBadRequest
+	}
 }
