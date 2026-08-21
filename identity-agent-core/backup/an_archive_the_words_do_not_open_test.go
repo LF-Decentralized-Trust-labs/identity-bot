@@ -3,6 +3,8 @@ package backup
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"sort"
 	"strings"
 	"testing"
 
@@ -503,6 +505,13 @@ func TestAStrangerCannotOpenAMachineWrittenArchive(t *testing.T) {
 }
 
 // A machine with neither the words nor anybody to seal to is told so.
+//
+// Caught by the guard at the top of CreateArchive rather than by the split
+// path's own check — which an earlier version of this test claimed to be
+// exercising and was not. The message it asserts on exists only in that guard,
+// so the branch in theFirstFactor is unreachable: no seed and no recipients is
+// refused before it, a seed takes the words branch, and recipients take the
+// sealed one. Kept as a test of the outcome, with the branch below removed.
 func TestAMachineWithNothingToSealToIsRefused(t *testing.T) {
 	split, _ := aSplitOf(t, 3, 2)
 	bundle := &PayloadBundle{Sections: map[string][]byte{}}
@@ -517,5 +526,49 @@ func TestAMachineWithNothingToSealToIsRefused(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "public key to seal to") {
 		t.Fatalf("refused without saying what is missing: %v", err)
+	}
+}
+
+// The size of an archive must not say how many holders it has, or how many of
+// them are needed.
+//
+// AES-GCM does not pad, so the envelope was exactly as long as its contents —
+// and its contents are one wrap per combination that can open it. Every shape
+// therefore had its own length, printed in the CLEARTEXT manifest, so anybody
+// holding the file could read off the holder count and the exact threshold
+// without the words and without opening anything.
+//
+// Checked across the range the code actually permits rather than a couple of
+// small shapes, because the first version of this padding covered the small
+// ones and stopped at eight holders — where a more careful configuration
+// starts leaking again.
+func TestTheSizeOfAnArchiveSaysNothingAboutItsThreshold(t *testing.T) {
+	lengths := map[int][]string{}
+	for _, shape := range []struct{ n, k int }{
+		{2, 1}, {3, 2}, {5, 3}, {6, 6},
+		{7, 3}, {7, 4}, {8, 3}, {8, 4}, {9, 4}, {9, 5},
+	} {
+		data, _, _ := aSplitArchive(t, shape.n, shape.k)
+		arch, err := DecodeArchive(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		env, err := DecodeB64(arch.Manifest.BootstrapB64)
+		if err != nil {
+			t.Fatal(err)
+		}
+		name := fmt.Sprintf("%d-of-%d", shape.k, shape.n)
+		lengths[len(env)] = append(lengths[len(env)], name)
+	}
+
+	if len(lengths) != 1 {
+		var lines []string
+		for size, shapes := range lengths {
+			lines = append(lines, fmt.Sprintf("%d bytes: %v", size, shapes))
+		}
+		sort.Strings(lines)
+		t.Fatalf("the envelope's length distinguishes these shapes, so anybody holding "+
+			"the file reads off the holder count and the threshold:\n  %s",
+			strings.Join(lines, "\n  "))
 	}
 }

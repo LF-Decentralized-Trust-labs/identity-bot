@@ -113,8 +113,11 @@ func TestNoDestinationsIsSaidOnceNotTwice(t *testing.T) {
 
 // The screen is told about it, and it changes the colour.
 //
-// A function nobody calls is not a warning. This is the fact reaching the same
-// place the other backup facts do.
+// A function nobody calls is not a warning, and neither is a fact that stops
+// at the edge of the process. An earlier version of this test asserted only on
+// FactsFrom — which computed the answer correctly while BuildStatus dropped it,
+// so the wire carried a yellow health with nothing explaining it. The
+// assertion on StatusResponse below is the one that matters.
 func TestTheScreenIsToldWhatALocalDisasterWouldTake(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -141,6 +144,24 @@ func TestTheScreenIsToldWhatALocalDisasterWouldTake(t *testing.T) {
 	if g := FactsFrom(hist, elsewhere, dir, 0); g.Health != "green" || g.LocalDisaster != "" {
 		t.Fatalf("adding somewhere else did not settle it: health=%q said=%q",
 			g.Health, g.LocalDisaster)
+	}
+}
+
+// And it reaches the wire, not just the struct it is computed in.
+func TestWhatALocalDisasterWouldTakeReachesTheStatus(t *testing.T) {
+	dir := t.TempDir()
+	cs := NewConfigStore(dir)
+	cfg := DefaultConfig()
+	cfg.Enabled = true
+	cfg.Destinations = []Destination{{ID: "1", Type: DestPairedAgent, Enabled: true}}
+
+	status := cs.BuildStatus(cfg, nil, 0)
+	if status.LocalDisaster == "" {
+		t.Fatal("the status says nothing about every copy being in one place, so a screen " +
+			"showing yellow has no reason to show with it")
+	}
+	if !strings.Contains(status.LocalDisaster, "same room") {
+		t.Fatalf("it does not say what the risk is: %q", status.LocalDisaster)
 	}
 }
 

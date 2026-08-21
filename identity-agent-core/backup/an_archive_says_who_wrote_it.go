@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -99,6 +100,18 @@ func SignWithMachineKey(arch *ArchiveFile, priv ed25519.PrivateKey) error {
 // an archive that says a machine wrote it, checked with nothing to check it
 // against, is refused rather than passed.
 func CheckWhoWroteIt(arch *ArchiveFile, seed []byte, expectedWriterKey []byte) error {
+	// The manifest in the file must BE the manifest, not merely decode to it.
+	//
+	// The mark is computed over the decoded manifest re-marshalled, so a file
+	// carrying an unknown field the decoder drops, or a duplicate key whose
+	// first copy is a lie, produced different bytes on disk and the same mark.
+	// Both verified. A parser that takes the first duplicate then reads
+	// something the mark never covered, and any digest or comparison of the
+	// file itself is defeated while the check says yes.
+	if err := manifestIsCanonical(arch); err != nil {
+		return err
+	}
+
 	switch arch.Manifest.WrittenBy {
 	case "":
 		return ErrArchiveUnattributed
@@ -126,9 +139,19 @@ func CheckWhoWroteIt(arch *ArchiveFile, seed []byte, expectedWriterKey []byte) e
 		if len(expectedWriterKey) != ed25519.PublicKeySize {
 			// The whole point. A signature checked against the key that came
 			// with it proves only that the writer can sign their own work.
+			// Says what to do, because this is the ordinary state of a
+			// machine that has just been rebuilt rather than a fault.
+			//
+			// Which machines an identity has is recorded in that identity's
+			// OWN backup, so restoring it first is what teaches a fresh
+			// machine to check its computer's. That is the order the design
+			// already has: the words plus shares bring the identity back, and
+			// the recovered identity opens everything else.
 			return fmt.Errorf(
-				"this archive says a machine wrote it, and there is no record of that " +
-					"machine's signing key to check it against")
+				"this archive was written by one of this identity's machines, and this " +
+					"agent has no record of which machines those are. Restore this " +
+					"identity's own backup first — that is what lists them — or supply " +
+					"the machine's signing key")
 		}
 		if arch.Manifest.WriterKeyB64 != EncodeB64(expectedWriterKey) {
 			return fmt.Errorf(
@@ -152,6 +175,27 @@ func CheckWhoWroteIt(arch *ArchiveFile, seed []byte, expectedWriterKey []byte) e
 	default:
 		return fmt.Errorf("this archive says it was written in a way this build does not know about")
 	}
+}
+
+// manifestIsCanonical refuses a file whose manifest bytes are not what
+// encoding this manifest produces.
+//
+// Skipped when there are no raw bytes, which is an archive assembled in memory
+// rather than read from a file — there is nothing to disagree with there.
+func manifestIsCanonical(arch *ArchiveFile) error {
+	if len(arch.RawManifest) == 0 {
+		return nil
+	}
+	canonical, err := json.Marshal(arch.Manifest)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(canonical, arch.RawManifest) {
+		return fmt.Errorf(
+			"this archive's header is not in the form this software writes, so part of it " +
+				"is not covered by the mark saying who wrote it")
+	}
+	return nil
 }
 
 // whatIsSigned is the manifest with the mark removed, plus the ciphertext.

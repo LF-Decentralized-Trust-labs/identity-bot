@@ -336,3 +336,45 @@ func reSealTo(t *testing.T, holding Holding, share []byte) ([]byte, backup.Seale
 		NonceB64:        backup.EncodeB64(nonce),
 	}
 }
+
+// The attacker cannot reset the owner's wait, or wipe their approval.
+//
+// The gates were rearmed on a digest of the archive's sealing material — a
+// value whoever is ASKING supplies. So anybody able to seal to this holder
+// could mint a fresh blob, land on a "different" recovery, and start the
+// owner's clock again from zero while clearing the approval they had already
+// given. Through an unauthenticated route, as often as they liked.
+//
+// A fix that hands the attacker the reset is worse than the thing it fixed.
+func TestSomebodyElseCannotResetTheOwnersWaitOrApproval(t *testing.T) {
+	h, holding, owners, _ := aHoldingOf(t, HoldingPolicy{WaitHours: 48, RequireApproval: true})
+	start := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
+
+	// The owner starts a recovery and a person approves it.
+	if _, err := h.Release(holding, owners, start); !errors.As(err, new(*ErrHeldForWait)) {
+		t.Fatalf("the owner's first ask was not held: %v", err)
+	}
+	if err := h.Approve(holding.IdentityAID, holding.HolderID, start.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	// Somebody else asks, with a share sealed freshly to this same holder —
+	// which anybody holding the archive and the words can produce.
+	attackerShare := make([]byte, 32)
+	rand.Read(attackerShare)
+	_, theirs := reSealTo(t, holding, attackerShare)
+	for i := 0; i < 5; i++ {
+		h.Release(holding, theirs, start.Add(time.Duration(i+2)*time.Hour))
+	}
+
+	// The owner's wait still ends when it always would have, and the approval
+	// they gave still stands.
+	got, err := h.Release(holding, owners, start.Add(49*time.Hour))
+	if err != nil {
+		t.Fatalf("somebody else's requests moved the owner's clock or wiped their "+
+			"approval: %v", err)
+	}
+	if len(got) == 0 {
+		t.Fatal("nothing came back")
+	}
+}

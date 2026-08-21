@@ -166,6 +166,17 @@ type PayloadSection struct {
 type ArchiveFile struct {
 	Manifest   Manifest
 	Ciphertext []byte
+	// RawManifest is the manifest exactly as it appeared in the file, when
+	// this came from one.
+	//
+	// Kept because the mark covers what the manifest MEANS, and a file is
+	// bytes. Two files whose manifests decode alike but differ on disk — one
+	// carrying a field the decoder drops, one carrying a duplicate key whose
+	// first copy is a lie — both verified, so any digest, deduplication or
+	// same-archive comparison was defeated while the mark said yes. Verifying
+	// requires this to be the canonical encoding, which makes those two files
+	// into one.
+	RawManifest []byte
 }
 
 func NewManifest(aid string, tiers []string, snapshotType string) Manifest {
@@ -245,10 +256,12 @@ func DecodeArchive(data []byte) (*ArchiveFile, error) {
 	if err := json.Unmarshal(data[off:off+int(manifestLen)], &manifest); err != nil {
 		return nil, fmt.Errorf("manifest parse: %w", err)
 	}
+	raw := append([]byte(nil), data[off:off+int(manifestLen)]...)
 	off += int(manifestLen)
 	return &ArchiveFile{
-		Manifest:   manifest,
-		Ciphertext: data[off:],
+		Manifest:    manifest,
+		RawManifest: raw,
+		Ciphertext:  data[off:],
 	}, nil
 }
 

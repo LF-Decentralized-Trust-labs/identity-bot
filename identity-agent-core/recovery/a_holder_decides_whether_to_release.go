@@ -1,7 +1,6 @@
 package recovery
 
 import (
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -98,10 +97,6 @@ type AskRecord struct {
 	// between them — so releasing one released the other, which is a threshold
 	// of two satisfied by one machine.
 	HolderID string `json:"holder_id"`
-	// Attempt is which recovery this is: a digest of the archive's own sealing
-	// material, so the same archive asked ten times is one attempt and a
-	// different archive is a different one.
-	Attempt string `json:"attempt"`
 	// Completed counts attempts this holder has already released for. Kept so
 	// that rearming is visible rather than looking like a first request.
 	Completed int `json:"completed"`
@@ -188,7 +183,7 @@ func (h *Holder) Release(holding Holding, sealed backup.SealedShare, now time.Ti
 	// outside it.
 	h.mu.Lock()
 
-	record, err := h.recordAsk(holding, attemptFrom(sealed), now)
+	record, err := h.recordAsk(holding, now)
 	if err != nil {
 		h.mu.Unlock()
 		return nil, err
@@ -341,19 +336,7 @@ func (h *Holder) WhatHasBeenAsked() ([]AskRecord, error) {
 	return out, nil
 }
 
-// attemptFrom names the recovery an ask belongs to.
-//
-// The ephemeral public key is minted once per archive per holder when the
-// share is sealed, so it identifies the archive without naming it: the same
-// backup asked repeatedly is one attempt, and a backup taken since is another.
-// Digested rather than used directly so that what is written to disk does not
-// carry archive material.
-func attemptFrom(sealed backup.SealedShare) string {
-	sum := sha256.Sum256([]byte(sealed.EphemeralPubB64))
-	return backup.EncodeB64(sum[:])
-}
-
-func (h *Holder) recordAsk(holding Holding, attempt string, now time.Time) (*AskRecord, error) {
+func (h *Holder) recordAsk(holding Holding, now time.Time) (*AskRecord, error) {
 	identityAID := holding.IdentityAID
 	record, err := h.load(holding.IdentityAID, holding.HolderID)
 	if err != nil {
@@ -361,15 +344,25 @@ func (h *Holder) recordAsk(holding Holding, attempt string, now time.Time) (*Ask
 	}
 	stamp := now.UTC().Format(time.RFC3339)
 
-	// A different recovery, or one this holder has already completed, starts
-	// again from nothing: a fresh clock, no approval carried over, and the
-	// owner told. Otherwise a single legitimate recovery would disarm this
-	// holder permanently.
-	if record != nil && (record.Attempt != attempt || record.ReleasedAt != "") {
+	// A recovery this holder has ALREADY COMPLETED starts again from nothing:
+	// a fresh clock, no approval carried over, and the owner told. Otherwise
+	// one legitimate recovery, or a drill, disarms this holder permanently and
+	// a thief years later is released instantly.
+	//
+	// Rearming on anything the REQUESTER chooses is how that fix became worse
+	// than the thing it fixed. This keyed the record on a digest of the
+	// archive's sealing material — which whoever is asking supplies. So
+	// anybody able to seal to this holder could mint a fresh blob, land on a
+	// "different" attempt, and reset the owner's wait and wipe their approval,
+	// through an unauthenticated route, as many times as they liked. The gate
+	// became a thing the attacker controlled.
+	//
+	// Completion is not attacker-chosen: it happens only when this holder
+	// itself hands a share back.
+	if record != nil && record.ReleasedAt != "" {
 		record = &AskRecord{
 			IdentityAID:  identityAID,
 			HolderID:     holding.HolderID,
-			Attempt:      attempt,
 			FirstAskedAt: stamp,
 			Completed:    record.Completed + boolToInt(record.ReleasedAt != ""),
 			AsksInTotal:  record.AsksInTotal,
@@ -379,7 +372,6 @@ func (h *Holder) recordAsk(holding Holding, attempt string, now time.Time) (*Ask
 		record = &AskRecord{
 			IdentityAID:  identityAID,
 			HolderID:     holding.HolderID,
-			Attempt:      attempt,
 			FirstAskedAt: stamp,
 		}
 	}

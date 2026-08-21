@@ -741,7 +741,7 @@ func TestAnArchiveFromSomebodyElsesMachineIsRefused(t *testing.T) {
 	if err == nil {
 		t.Fatal("an archive written by a machine this owner never paired was restored")
 	}
-	if !strings.Contains(err.Error(), "no record of that machine") &&
+	if !strings.Contains(err.Error(), "no record of which machines") &&
 		!strings.Contains(err.Error(), "different machine") {
 		t.Fatalf("refused for the wrong reason: %v", err)
 	}

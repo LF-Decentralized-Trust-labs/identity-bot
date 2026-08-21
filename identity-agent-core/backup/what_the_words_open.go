@@ -139,7 +139,21 @@ func (w WhatTheWordsOpen) Validate() error {
 // built to protect. The threshold did not. Rounding to a bucket costs a few
 // kilobytes and takes the shape away.
 func PadEnvelope(plain []byte) []byte {
-	const bucket = 16 << 10
+	// One bucket, large enough for every shape the code permits.
+	//
+	// Sixteen kilobytes covered one-of-two through six-of-six and then stopped:
+	// at eight holders the envelope spilled into a second bucket, and
+	// four-of-nine and five-of-nine were each identified by file length alone
+	// again. maxCombinations allows two hundred and fifty-six wraps, so the
+	// design permitted shapes the bucket did not cover — which is a leak that
+	// arrives exactly when somebody chooses a more careful configuration.
+	//
+	// Sized from the limit instead of guessed. A wrap is a holder list and two
+	// short base64 fields; two hundred and fifty-six of them with the holders
+	// and the policy beside them fit inside this with room to spare, and a few
+	// spare kilobytes on an archive measured in megabytes is not a cost worth
+	// leaking a threshold to avoid.
+	const bucket = 256 << 10
 	// A length prefix, so the padding can be removed exactly rather than by
 	// guessing where the JSON ends.
 	out := make([]byte, 4, ((len(plain)+4)/bucket+1)*bucket)

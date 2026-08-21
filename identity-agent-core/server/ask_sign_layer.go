@@ -217,6 +217,13 @@ func ensureRootSeed(dataDir string) ([]byte, error) {
 	if err := secureenclave.StoreRootSeed(dataDir, seed); err != nil {
 		return nil, fmt.Errorf("bootstrap root seed: %w", err)
 	}
+	// Written down, because nothing else can tell afterwards. This seed is
+	// random and belongs to no identity, so an archive marked as though the
+	// owner's words had written it is one they can never restore.
+	if err := secureenclave.RecordSeedOrigin(dataDir, secureenclave.SeedIsDeviceLocal); err != nil {
+		log.Printf("[keystore] could not record where this machine's root seed came from, "+
+			"so its backups will be signed as this machine's rather than its owner's: %v", err)
+	}
 	return seed, nil
 }
 

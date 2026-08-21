@@ -995,10 +995,20 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 		// What the machine signs as. Its own root, minted inside it, rather than
 		// an identity issued from here.
 		SignsAsAID: identityAID,
-		// What this machine signs its backups with, recorded at the one moment
-		// the hardware vouched for it. Without this the owner has nothing to
-		// check an archive against, and a machine-signed archive proves only
-		// that its writer can sign their own work.
+		// What this machine signs its backups with. Without it the owner has
+		// nothing to check an archive against, and a machine-signed archive
+		// proves only that its writer can sign their own work.
+		//
+		// VOUCHED FOR ONLY WHERE Sealed IS TRUE. On sealed hardware the
+		// attestation covers this key, so nothing terminating the connection
+		// can substitute it. On an unattested machine — an ordinary laptop —
+		// nothing covers it, and nothing covers the machine's OWN key either:
+		// the whole offer is taken on trust there, which is a property of
+		// pairing an unattested machine and not of this key. It is recorded
+		// anyway, because a key taken on trust at pairing is still worth far
+		// more than no key at all: it pins THIS machine from that moment on,
+		// so an archive substituted later is caught even though one
+		// substituted during the ceremony would not be.
 		BackupSigningKeyB64: offer.BackupSigningKey,
 		URL:                 base,
 		Kind:                kind,

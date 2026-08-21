@@ -4,6 +4,9 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"golang.org/x/crypto/hkdf"
 )
@@ -60,4 +63,60 @@ func backupSigningKeyFromSeed(rootSeed []byte) (ed25519.PrivateKey, error) {
 		return nil, fmt.Errorf("derive this machine's backup signing key: %w", err)
 	}
 	return ed25519.NewKeyFromSeed(material), nil
+}
+
+// Where a machine's root seed came from.
+//
+// Two machines hold a root seed and they are not the same thing. On a device
+// its owner carries, it is derived from the recovery words, so those words
+// reproduce it. On a paired machine it is minted on the spot and random —
+// ensureRootSeed says so plainly: "there is no phrase for it".
+//
+// Both are 64 bytes and neither says which it is, which is how every scheduled
+// backup a paired machine took came to be marked as though the owner's words
+// had written it. It verified, it went to every destination, and the owner
+// could never restore it, because a wrong mark cannot be waved through the way
+// a missing one can. Nobody would have learned that until the day it mattered.
+//
+// So a machine writes down which it has. One line, beside the seed.
+const (
+	// SeedFromPhrase means the recovery words reproduce this seed, so an
+	// archive marked with it can be checked by whoever holds them.
+	SeedFromPhrase = "phrase"
+	// SeedIsDeviceLocal means this seed was minted here and belongs to no
+	// identity. Nobody's words reproduce it.
+	SeedIsDeviceLocal = "device"
+)
+
+func seedOriginPath(dataDir string) string {
+	return filepath.Join(dataDir, "secureenclave", "root_seed.origin")
+}
+
+// RecordSeedOrigin writes down where this machine's root seed came from.
+func RecordSeedOrigin(dataDir, origin string) error {
+	if origin != SeedFromPhrase && origin != SeedIsDeviceLocal {
+		return fmt.Errorf("a seed origin is %q or %q, not %q",
+			SeedFromPhrase, SeedIsDeviceLocal, origin)
+	}
+	if err := os.MkdirAll(filepath.Dir(seedOriginPath(dataDir)), 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(seedOriginPath(dataDir), []byte(origin), 0o600)
+}
+
+// SeedCameFromAPhrase reports whether the recovery words reproduce this
+// machine's root seed.
+//
+// An unrecorded origin answers false, and that direction is deliberate. A
+// machine that seed-marks its archives wrongly produces backups its owner can
+// never restore and cannot be told about; a machine that machine-marks them
+// wrongly produces backups that need the machine's key, which its owner has
+// recorded and can supply. Of the two ways to be wrong, only one is
+// recoverable, so the unknown case takes it.
+func SeedCameFromAPhrase(dataDir string) bool {
+	raw, err := os.ReadFile(seedOriginPath(dataDir))
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(raw)) == SeedFromPhrase
 }

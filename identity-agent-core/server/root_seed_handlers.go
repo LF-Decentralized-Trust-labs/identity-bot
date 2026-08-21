@@ -149,6 +149,11 @@ func (s *CoreServer) handleSetRootSeed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := secureenclave.RecordSeedOrigin(s.DataDir, secureenclave.SeedFromPhrase); err != nil {
+		writeError(w, http.StatusInternalServerError,
+			"Could not record where this seed came from", err.Error())
+		return
+	}
 	if err := secureenclave.StoreRootSeed(s.DataDir, seed); err != nil {
 		jsonError(w, "failed to store root seed", http.StatusInternalServerError)
 		return

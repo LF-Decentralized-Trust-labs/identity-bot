@@ -830,11 +830,10 @@ func theFirstFactor(req ExportRequest) (secret []byte, slots []KeySlot, err erro
 				return nil, nil, err
 			}
 		}
-		if len(seed) == 0 {
-			return nil, nil, fmt.Errorf(
-				"this backup is protected by shares, so it needs either the recovery " +
-					"words or somebody to seal it to")
-		}
+		// No unreachable branch here for "neither words nor recipients".
+		// CreateArchive refuses that at its own door, before this is called,
+		// and a second message for the same condition is one that can never be
+		// read and can quietly rot.
 		kek, err := DeriveBackupKEK(seed)
 		return kek, nil, err
 	}
@@ -870,15 +869,37 @@ func theFirstFactor(req ExportRequest) (secret []byte, slots []KeySlot, err erro
 // archive nobody can attribute is refused rather than written, because it is
 // indistinguishable from one somebody substituted.
 func markWhoWroteIt(arch *ArchiveFile, req ExportRequest, dataDir string) error {
-	seed := req.BIP39Seed
-	if len(seed) == 0 && req.Mnemonic != "" {
-		var err error
-		if seed, err = MnemonicToBIP39Seed(req.Mnemonic, ""); err != nil {
+	// A MACHINE mark unless a person actually typed their recovery phrase.
+	//
+	// Deciding this from BIP39Seed was wrong, and wrong in the worst way: on a
+	// root device that field holds the seed the owner's words derive, and on a
+	// PAIRED machine it holds a device-local random seed with no phrase behind
+	// it at all — ensureRootSeed mints one and says so. Both arrive here as
+	// bytes, indistinguishable.
+	//
+	// So every scheduled backup a paired machine took was marked as though the
+	// owner's words had written it, using a key the owner does not have. It
+	// verified on the way out, went to every destination, and the owner could
+	// never restore it — because a wrong mark is refused and there is no
+	// escape from a wrong mark. The first anybody would learn of it is the day
+	// they needed it.
+	//
+	// A mnemonic is the one unambiguous signal: somebody typed their phrase.
+	// Anything else is a machine acting on its own, and a machine has a key of
+	// its own to say so with.
+	if req.Mnemonic != "" {
+		seed, err := MnemonicToBIP39Seed(req.Mnemonic, "")
+		if err != nil {
 			return err
 		}
-	}
-	if len(seed) >= 32 {
 		return SignWithSeed(arch, seed)
+	}
+	// A seed with no phrase typed alongside it is only the owner's if this
+	// machine's root seed came from one. On a paired machine it did not, and
+	// nothing about the bytes says so — which is exactly how this went wrong.
+	if len(req.BIP39Seed) >= 32 && dataDir != "" &&
+		secureenclave.SeedCameFromAPhrase(dataDir) {
+		return SignWithSeed(arch, req.BIP39Seed)
 	}
 	if len(req.MachineSigningKey) > 0 {
 		return SignWithMachineKey(arch, req.MachineSigningKey)
