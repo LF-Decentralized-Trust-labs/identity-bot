@@ -44,6 +44,11 @@ func (s *CoreServer) mountRecoveryRoutes(r chi.Router) {
 		r.Get("/holdings", s.handleWhatThisMachineHolds)
 		r.Post("/holdings/approve", s.handleApproveShare)
 		r.Post("/holdings/stop", s.handleStopHolding)
+
+		// Who holds a share of THIS identity's recovery — the other side of
+		// holding, and the setting that makes any of it reachable.
+		r.Get("/who-holds-this", s.handleGetWhoHoldsYourRecovery)
+		r.Put("/who-holds-this", s.handleSetWhoHoldsYourRecovery)
 		r.Post("/share-requests", s.handleReleaseShare)
 	})
 }

@@ -73,6 +73,19 @@ type Config struct {
 	// is one per signer, and any single one restores the data.
 	SealToPublicKeysB64 []string `json:"seal_to_public_keys_b64,omitempty"`
 
+	// Split is who holds a share of this identity's recovery, and how many of
+	// them are needed.
+	//
+	// Stored here because a scheduled backup runs when nobody is present, and
+	// the choice has to outlive the screen it was made on. Without it, shares
+	// were something a caller could pass to one export and nothing a person
+	// could ever set — a mechanism with no way to reach it.
+	//
+	// Empty means the recovery words alone open this identity's archives,
+	// which is what every archive written before this was. It is a real
+	// configuration and not a broken one, and the screen says what it costs.
+	Split HowTheWayInIsSplit `json:"split,omitempty"`
+
 	// Offer is what this machine will hold for OTHER identities — the other
 	// direction of backup entirely. Absent on every existing installation,
 	// which decodes to the zero value and therefore to accepting nothing. See
