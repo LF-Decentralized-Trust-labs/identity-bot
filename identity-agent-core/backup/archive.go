@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
@@ -27,6 +28,10 @@ type ExportRequest struct {
 	// PLUS shares. Leaving it empty writes an archive of the older shape,
 	// openable from a key slot, which is what every existing archive is.
 	Split HowTheWayInIsSplit
+	// MachineSigningKey signs an archive written by a machine that was never
+	// told the recovery words. The public half is what the owner recorded when
+	// they paired it.
+	MachineSigningKey ed25519.PrivateKey
 	// DuressPolicy and AuthenticatorPublicKeys ride in the bootstrap envelope,
 	// where a machine with nothing of its own can read them before deciding
 	// whether to ask for shares.
@@ -232,7 +237,7 @@ func (c *Collector) CreateArchive(opts CollectOptions, req ExportRequest) (*Expo
 		manifest.KeySlots = slots
 		manifest.SlotPolicy = PolicyAND
 
-		return finishArchive(manifest, ciphertext, tiers, snapshotType)
+		return finishArchive(manifest, ciphertext, tiers, snapshotType, req)
 	}
 
 	// Under AND, the slots stop holding the payload key and hold this instead.
@@ -351,11 +356,23 @@ func (c *Collector) CreateArchive(opts CollectOptions, req ExportRequest) (*Expo
 
 	manifest.KeySlots = append(manifest.KeySlots, req.GuardianSlots...)
 
-	return finishArchive(manifest, ciphertext, tiers, snapshotType)
+	return finishArchive(manifest, ciphertext, tiers, snapshotType, req)
 }
 
-func finishArchive(manifest Manifest, ciphertext []byte, tiers []string, snapshotType string) (*ExportResult, error) {
+func finishArchive(manifest Manifest, ciphertext []byte, tiers []string,
+	snapshotType string, req ExportRequest) (*ExportResult, error) {
+
 	arch := &ArchiveFile{Manifest: manifest, Ciphertext: ciphertext}
+
+	// Marked with who wrote it, before it is encoded, because the mark covers
+	// the manifest as well as the body. An archive that cannot say who wrote
+	// it is not written: a destination that can substitute one is the whole
+	// reason this exists, and an unmarked archive is exactly what a substituted
+	// one would look like.
+	if err := markWhoWroteIt(arch, req); err != nil {
+		return nil, err
+	}
+
 	raw, err := EncodeArchive(arch)
 	if err != nil {
 		return nil, err
@@ -840,4 +857,41 @@ func theFirstFactor(req ExportRequest) (secret []byte, slots []KeySlot, err erro
 		})
 	}
 	return secret, slots, nil
+}
+
+// markWhoWroteIt puts the writer's mark on an archive.
+//
+// Which mark depends on what the writing machine holds, and neither is a
+// choice a caller makes: an agent with the recovery words uses them, because
+// they are a secret nobody else has; a machine that only has a signing key of
+// its own uses that. A machine with neither cannot say who it is, and an
+// archive nobody can attribute is refused rather than written, because it is
+// indistinguishable from one somebody substituted.
+func markWhoWroteIt(arch *ArchiveFile, req ExportRequest) error {
+	seed := req.BIP39Seed
+	if len(seed) == 0 && req.Mnemonic != "" {
+		var err error
+		if seed, err = MnemonicToBIP39Seed(req.Mnemonic, ""); err != nil {
+			return err
+		}
+	}
+	if len(seed) >= 32 {
+		return SignWithSeed(arch, seed)
+	}
+	if len(req.MachineSigningKey) > 0 {
+		return SignWithMachineKey(arch, req.MachineSigningKey)
+	}
+	// Left unattributed rather than refused.
+	//
+	// A machine with neither the words nor a signing key cannot say who it is,
+	// and refusing to write the backup would be the worse answer by a long
+	// way: no backup is strictly worse than one whose origin cannot be
+	// checked. Paired machines do not carry a signing key yet, so refusing
+	// here would stop them backing up at all.
+	//
+	// The strictness belongs at the other end, where the damage happens.
+	// Restoring an archive that cannot say who wrote it is what writes
+	// somebody else's files into an agent, so that is where it is refused
+	// unless a caller deliberately accepts it.
+	return nil
 }

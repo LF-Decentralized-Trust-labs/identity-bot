@@ -122,6 +122,22 @@ type Manifest struct {
 	// It rides in the manifest rather than the body because the body is what
 	// needs shares to open, and a machine has to read this before it knows who
 	// to ask for one. The manifest is cleartext; this field is not.
+	// Who wrote this archive, and the mark that proves it.
+	//
+	// Absent on every archive written before this existed, and that absence is
+	// itself the answer: unattributed, which a caller has to be able to tell
+	// from a mark that is WRONG. Sealing proves an archive was encrypted to
+	// somebody; it never proved who encrypted it, and anybody can encrypt to a
+	// public key.
+	WrittenBy string `json:"written_by,omitempty"`
+	// WriterKeyB64 is the machine signing key, when a machine wrote it. It is
+	// recorded so a reader knows what was claimed — it is not what makes the
+	// claim true, since a writer chooses the key they publish. What makes it
+	// true is comparing this against the key recorded when that machine was
+	// paired.
+	WriterKeyB64 string `json:"writer_key_b64,omitempty"`
+	AuthTagB64   string `json:"auth_tag_b64,omitempty"`
+
 	BootstrapB64      string `json:"bootstrap_b64,omitempty"`
 	BootstrapNonceB64 string `json:"bootstrap_nonce_b64,omitempty"`
 
