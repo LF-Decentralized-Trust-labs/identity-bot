@@ -10,6 +10,9 @@ import (
 
 	"identity-agent-core/backup"
 	"identity-agent-core/recovery"
+	"identity-agent-core/store"
+
+	"github.com/google/uuid"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -79,10 +82,15 @@ func (s *CoreServer) holderPairFor() *holderPair {
 			DataDir: s.DataDir,
 			Notify: func(identityAID string, first bool) {
 				// Somebody is recovering an identity this machine helps
-				// protect. Logged for now: the owner-facing notification is
-				// the point of it, and there is nowhere yet to send one.
+				// protect, and the owner is told.
+				//
+				// This is the property no other configuration has — a theft
+				// becomes an event the owner hears about rather than one they
+				// never do — so a log line was the wrong place for it. A log
+				// line is not a warning; it is a warning nobody reads.
 				log.Printf("[recovery] a share was asked for: identity=%s first=%v",
 					identityAID, first)
+				s.tellTheOwnerAShareWasAskedFor(identityAID)
 			},
 		}
 	})
@@ -521,6 +529,34 @@ func (s *CoreServer) handleStopHolding(w http.ResponseWriter, r *http.Request) {
 		"tell_them": "Every backup already sealed to this machine can no longer be opened " +
 			"by it. Whoever this was helping needs to take a fresh backup.",
 	})
+}
+
+// tellTheOwnerAShareWasAskedFor puts a share request in front of somebody.
+//
+// Written where the owner already looks rather than into a log: the whole
+// value of a holder being asked is that the person it protects finds out
+// early enough to stop it, and a line in a server log does not reach them.
+//
+// A failure here does not fail the request. The holder still recorded the ask
+// and still waits, and refusing to answer because a notification could not be
+// written would turn a delivery problem into a broken recovery.
+func (s *CoreServer) tellTheOwnerAShareWasAskedFor(identityAID string) {
+	if s.DataStore == nil {
+		return
+	}
+	if err := s.DataStore.SaveNotification(store.Notification{
+		ID:       "share-asked-" + uuid.NewString(),
+		Kind:     "recovery.share_requested",
+		Severity: "warning",
+		Title:    "Somebody is recovering an identity you hold part of",
+		Body: "A machine asked this one for its share of a recovery. If this is not " +
+			"something you expected, tell whoever this identity belongs to — they may " +
+			"not know their recovery words have been used.",
+		Payload: identityAID,
+		Status:  "unread",
+	}); err != nil {
+		log.Printf("[recovery] a share was asked for and the owner could not be told: %v", err)
+	}
 }
 
 // notSealedToThisHolder is the one answer every unopenable request gets.
