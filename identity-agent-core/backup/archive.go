@@ -367,10 +367,7 @@ func finishArchive(manifest Manifest, ciphertext []byte, tiers []string,
 	arch := &ArchiveFile{Manifest: manifest, Ciphertext: ciphertext}
 
 	// Marked with who wrote it, before it is encoded, because the mark covers
-	// the manifest as well as the body. An archive that cannot say who wrote
-	// it is not written: a destination that can substitute one is the whole
-	// reason this exists, and an unmarked archive is exactly what a substituted
-	// one would look like.
+	// the manifest as well as the body.
 	if err := markWhoWroteIt(arch, req, dataDir); err != nil {
 		return nil, err
 	}
@@ -414,6 +411,11 @@ type ErrNeedsShares struct {
 }
 
 func (e *ErrNeedsShares) Error() string {
+	if e.Bootstrap == nil {
+		// Formatting an error must not be the thing that brings an agent down,
+		// least of all one being read by somebody mid-recovery.
+		return "the recovery words are right; this backup also needs shares"
+	}
 	return fmt.Sprintf(
 		"the recovery words are right; this backup also needs %d of %d shares, and %d have been gathered",
 		e.Bootstrap.Split.Needed, len(e.Bootstrap.Split.Holders), e.Gathered)
@@ -586,9 +588,6 @@ func OpenArchive(data []byte, req OpenRequest) (*PayloadBundle, *Manifest, error
 			return nil, &arch.Manifest, err
 		}
 		return bundle, &arch.Manifest, nil
-	}
-	if arch.Manifest.FormatVersion > FormatVersion {
-		return nil, nil, fmt.Errorf("unsupported format_version %d", arch.Manifest.FormatVersion)
 	}
 
 	nonce, err := DecodeB64(arch.Manifest.PayloadNonceB64)
@@ -915,15 +914,15 @@ func markWhoWroteIt(arch *ArchiveFile, req ExportRequest, dataDir string) error 
 	}
 	// Left unattributed rather than refused.
 	//
-	// A machine with neither the words nor a signing key cannot say who it is,
-	// and refusing to write the backup would be the worse answer by a long
-	// way: no backup is strictly worse than one whose origin cannot be
-	// checked. Paired machines do not carry a signing key yet, so refusing
-	// here would stop them backing up at all.
+	// Every machine that can write a backup can now say who it is — a device
+	// its owner carries has the words, and a paired machine derives a signing
+	// key from its own root seed. So this is reached only by something with
+	// neither, which is a caller assembling an archive by hand.
 	//
-	// The strictness belongs at the other end, where the damage happens.
-	// Restoring an archive that cannot say who wrote it is what writes
-	// somebody else's files into an agent, so that is where it is refused
-	// unless a caller deliberately accepts it.
+	// Refusing would still be the worse answer: no backup is strictly worse
+	// than one whose origin cannot be checked. The strictness belongs at the
+	// other end, where the damage happens — restoring an archive that cannot
+	// say who wrote it is what writes somebody else's files into an agent, and
+	// that is refused unless a caller deliberately accepts it.
 	return nil
 }

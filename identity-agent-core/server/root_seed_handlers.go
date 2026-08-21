@@ -149,13 +149,16 @@ func (s *CoreServer) handleSetRootSeed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := secureenclave.RecordSeedOrigin(s.DataDir, secureenclave.SeedFromPhrase); err != nil {
-		writeError(w, http.StatusInternalServerError,
-			"Could not record where this seed came from", err.Error())
-		return
-	}
 	if err := secureenclave.StoreRootSeed(s.DataDir, seed); err != nil {
 		jsonError(w, "failed to store root seed", http.StatusInternalServerError)
+		return
+	}
+	// AFTER the seed is stored, never before. Claiming a phrase-derived seed
+	// this machine does not have would make it mark its backups with a key
+	// nobody can check them against — and of the two ways to be wrong, that is
+	// the one there is no way back from.
+	if err := secureenclave.RecordSeedOrigin(s.DataDir, secureenclave.SeedFromPhrase); err != nil {
+		jsonError(w, "failed to record where this seed came from", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

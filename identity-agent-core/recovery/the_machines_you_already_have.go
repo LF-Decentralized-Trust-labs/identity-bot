@@ -25,9 +25,6 @@ import (
 // every share. The screen has to say so, which is why AskForMorePeople exists
 // rather than this quietly looking finished.
 
-// DefaultThresholdWithPeople is the threshold when somebody chooses witnesses.
-const DefaultThresholdWithPeople = 3
-
 // CouldNotAsk says why one machine is not holding a share.
 type CouldNotAsk struct {
 	AID string `json:"aid"`

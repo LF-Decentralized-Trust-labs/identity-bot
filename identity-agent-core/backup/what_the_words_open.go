@@ -9,9 +9,6 @@ import (
 	"golang.org/x/crypto/hkdf"
 )
 
-// BootstrapSection is where the words-openable envelope lives in a payload.
-const BootstrapSection = "bootstrap"
-
 // WhatTheWordsOpen is everything the recovery phrase alone gives access to.
 //
 // It is a CLOSED LIST, and it is the only allow list in this package that

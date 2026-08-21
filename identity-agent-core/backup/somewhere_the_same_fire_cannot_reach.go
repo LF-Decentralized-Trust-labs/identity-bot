@@ -13,8 +13,8 @@ import "fmt"
 // So there are two axes and only one was being measured. Two destinations that
 // both survive their own device read as protected, and a person who has done
 // exactly what the screen asked can still lose everything to one ordinary
-// domestic accident. B3 says it plainly: a destination that shares a room with
-// the original is a copy, not a backup.
+// domestic accident. A destination that shares a room with the original is a
+// copy, not a backup.
 //
 // WHAT SOFTWARE CAN AND CANNOT KNOW. It cannot know where anything physically
 // is. It can know what KIND of thing a destination is, and two of those kinds

@@ -3,6 +3,7 @@ package recovery
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -259,7 +260,14 @@ func (h *Holder) unseal(holding Holding, sealed backup.SealedShare) ([]byte, err
 
 	priv, err := backup.DecodeB64(holding.PrivateKeyB64)
 	if err != nil {
-		return nil, fmt.Errorf("this holder's key is unreadable: %w", err)
+		// The same answer as everything else, even though this one is OUR
+		// fault rather than the caller's. A refusal that reads differently is
+		// a way to tell what this machine holds, and "the key is unreadable"
+		// says there IS a key — which is exactly what a stranger is asking.
+		// The detail belongs in this machine's own log, not in the reply.
+		log.Printf("[recovery] a holding for %s has an unreadable key: %v",
+			holding.IdentityAID, err)
+		return nil, refuse
 	}
 	eph, err := backup.DecodeB64(sealed.EphemeralPubB64)
 	if err != nil {
