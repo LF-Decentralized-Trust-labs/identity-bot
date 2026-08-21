@@ -814,6 +814,21 @@ CREATE TABLE IF NOT EXISTS machine_owner_identities (
 -- ceremony, so a delegated machine recorded here later needs no third name.
 ALTER TABLE adopted_agents RENAME COLUMN delegated_aid TO signs_as_aid;
 `},
+	{
+		Version:     35,
+		Description: "Record what a paired machine signs its backups with",
+		SQL: `
+-- Sealing an archive to somebody proves it was encrypted TO them and nothing
+-- about who encrypted it, and sealing needs only a public key. So an owner had
+-- no way to tell one of their machine's archives from one somebody had
+-- substituted, and restoring the substitute writes that person's files,
+-- contacts and credentials into the agent.
+--
+-- Recorded at pairing, because that is the one moment the machine's hardware
+-- vouches for what it hands over. A key learned later is a key anything
+-- terminating the connection can replace, after which every forgery verifies.
+ALTER TABLE adopted_agents ADD COLUMN backup_signing_key_b64 TEXT;
+`},
 }
 
 // ApplyIdentityMigrations creates the migrations table and applies any pending migrations.

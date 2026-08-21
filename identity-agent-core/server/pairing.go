@@ -69,6 +69,14 @@ type pairingBeginResponse struct {
 	// and not a failure — a laptop has no such statement to make. The adopting
 	// side decides what to do about that; it must not decide silently.
 	Attestation string `json:"attestation,omitempty"`
+	// BackupSigningKey is the key this machine signs its own backups with, so
+	// its owner can tell one of its archives from one somebody substituted.
+	//
+	// Published here and nowhere else, because here is the one moment the
+	// hardware is vouching for what the machine hands over. A key learned
+	// afterwards is a key anything in the middle can replace, and the owner
+	// would record the substitute and verify forgeries against it forever.
+	BackupSigningKey string `json:"backup_signing_key,omitempty"`
 	// Challenge is the nonce a claimant must sign to show it holds the identity
 	// it claims as. Fresh per offer and bound into what gets signed, so a
 	// signature lifted from one exchange cannot be replayed into another.
@@ -233,11 +241,19 @@ func (s *CoreServer) handlePairingBegin(w http.ResponseWriter, r *http.Request) 
 		NextPublicKey: iacrypto.VerkeyQB64(nextPub),
 		Challenge:     challenge,
 	}
+	backupPub, err := secureenclave.BackupSigningPublicKey(s.DataDir)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError,
+			"This machine cannot say what it signs its backups with", err.Error())
+		return
+	}
+	offer.BackupSigningKey = base64.StdEncoding.EncodeToString(backupPub)
 	// Ask the hardware to vouch for exactly these keys, so the controller can
 	// establish that the offer came from a sealed machine before it signs
 	// anything over it. Silence here means no such hardware, which the
 	// controller is left to judge.
-	if binding, berr := iacrypto.PairingOfferBinding(offer.PublicKey, offer.NextPublicKey); berr == nil {
+	if binding, berr := iacrypto.PairingOfferBinding(
+		offer.PublicKey, offer.NextPublicKey, offer.BackupSigningKey); berr == nil {
 		if report, rerr := secureenclave.GetSNPReport(binding); rerr == nil && report != nil {
 			offer.Attestation = base64.StdEncoding.EncodeToString(report.Raw)
 		}
@@ -979,9 +995,14 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 		// What the machine signs as. Its own root, minted inside it, rather than
 		// an identity issued from here.
 		SignsAsAID: identityAID,
-		URL:        base,
-		Kind:       kind,
-		Sealed:     offer.Attestation != "",
+		// What this machine signs its backups with, recorded at the one moment
+		// the hardware vouched for it. Without this the owner has nothing to
+		// check an archive against, and a machine-signed archive proves only
+		// that its writer can sign their own work.
+		BackupSigningKeyB64: offer.BackupSigningKey,
+		URL:                 base,
+		Kind:                kind,
+		Sealed:              offer.Attestation != "",
 		// Which identity of ours it answers to, and where that key comes from.
 		// Without the index there is no signing to this machine again, no
 		// rotation and no revocation — so losing it is losing the machine.

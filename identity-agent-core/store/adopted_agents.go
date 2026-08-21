@@ -29,6 +29,16 @@ type AdoptedAgent struct {
 	// URL is where it is reached. The field expected to change: a machine's
 	// address moves over its life and its identifier does not.
 	URL string `json:"url"`
+	// BackupSigningKeyB64 is what this machine signs its own backups with,
+	// recorded when it was paired because that is the one moment its hardware
+	// vouched for it.
+	//
+	// Sealing an archive to somebody proves it was encrypted to them and
+	// nothing about who encrypted it, and sealing needs only a public key. So
+	// without this an owner cannot tell one of this machine's archives from
+	// one somebody substituted — and restoring the substitute writes their
+	// files into the agent.
+	BackupSigningKeyB64 string `json:"backup_signing_key_b64,omitempty"`
 	// Kind is what it runs — an individual agent or an organisation's.
 	Kind string `json:"kind"`
 	// Label is what its owner calls it. Empty until somebody names it, which
@@ -80,17 +90,28 @@ func (s *SQLiteStore) SaveAdoptedAgent(a AdoptedAgent) error {
 	}
 	_, err := s.db.Exec(`
 		INSERT INTO adopted_agents
-			(aid, signs_as_aid, url, kind, label, sealed, measurement, owner_aid, owner_index, adopted_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+			(aid, signs_as_aid, url, kind, label, sealed, measurement, owner_aid, owner_index,
+			 backup_signing_key_b64, adopted_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
 		-- Deliberately NOT updating owner_aid or owner_index. They are settled
 		-- when the machine is adopted, and a second adoption quietly rewriting
 		-- them would move a machine to a different identity of this owner's
 		-- with nothing said — after which the first one could no longer reach it.
+		-- Nor the backup signing key, for the same reason and a sharper one:
+		-- it was vouched for by hardware at the one moment that could happen,
+		-- and letting a later adoption overwrite it is exactly how somebody
+		-- substitutes the key that every future archive is checked against.
+		-- Only filled where it was empty, so a machine paired before this
+		-- existed can gain one.
 		ON CONFLICT(aid) DO UPDATE SET
 			url   = excluded.url,
-			label = CASE WHEN excluded.label != '' THEN excluded.label ELSE adopted_agents.label END
+			label = CASE WHEN excluded.label != '' THEN excluded.label ELSE adopted_agents.label END,
+			backup_signing_key_b64 = CASE
+				WHEN COALESCE(adopted_agents.backup_signing_key_b64, '') = ''
+				THEN excluded.backup_signing_key_b64
+				ELSE adopted_agents.backup_signing_key_b64 END
 	`, a.AID, a.SignsAsAID, a.URL, a.Kind, a.Label, sealed, a.Measurement,
-		a.OwnerAID, a.OwnerIndex, nullIfEmpty(a.AdoptedAt))
+		a.OwnerAID, a.OwnerIndex, a.BackupSigningKeyB64, nullIfEmpty(a.AdoptedAt))
 	if err != nil {
 		return fmt.Errorf("could not record the adopted agent: %w", err)
 	}
@@ -102,7 +123,7 @@ func (s *SQLiteStore) SaveAdoptedAgent(a AdoptedAgent) error {
 func (s *SQLiteStore) ListAdoptedAgents() ([]AdoptedAgent, error) {
 	rows, err := s.db.Query(`
 		SELECT aid, signs_as_aid, url, kind, label, sealed, measurement,
-		       owner_aid, owner_index,
+		       owner_aid, owner_index, COALESCE(backup_signing_key_b64, ''),
 		       COALESCE(adopted_at, ''), COALESCE(last_seen_at, '')
 		FROM adopted_agents
 		ORDER BY adopted_at DESC
@@ -117,7 +138,7 @@ func (s *SQLiteStore) ListAdoptedAgents() ([]AdoptedAgent, error) {
 		var a AdoptedAgent
 		var sealed int
 		if err := rows.Scan(&a.AID, &a.SignsAsAID, &a.URL, &a.Kind, &a.Label,
-			&sealed, &a.Measurement, &a.OwnerAID, &a.OwnerIndex,
+			&sealed, &a.Measurement, &a.OwnerAID, &a.OwnerIndex, &a.BackupSigningKeyB64,
 			&a.AdoptedAt, &a.LastSeenAt); err != nil {
 			return nil, err
 		}

@@ -5,6 +5,8 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+
+	"identity-agent-core/secureenclave"
 )
 
 // ExportRequest parameters for creating an archive.
@@ -237,7 +239,7 @@ func (c *Collector) CreateArchive(opts CollectOptions, req ExportRequest) (*Expo
 		manifest.KeySlots = slots
 		manifest.SlotPolicy = PolicyAND
 
-		return finishArchive(manifest, ciphertext, tiers, snapshotType, req)
+		return finishArchive(manifest, ciphertext, tiers, snapshotType, req, c.DataDir)
 	}
 
 	// Under AND, the slots stop holding the payload key and hold this instead.
@@ -356,11 +358,11 @@ func (c *Collector) CreateArchive(opts CollectOptions, req ExportRequest) (*Expo
 
 	manifest.KeySlots = append(manifest.KeySlots, req.GuardianSlots...)
 
-	return finishArchive(manifest, ciphertext, tiers, snapshotType, req)
+	return finishArchive(manifest, ciphertext, tiers, snapshotType, req, c.DataDir)
 }
 
 func finishArchive(manifest Manifest, ciphertext []byte, tiers []string,
-	snapshotType string, req ExportRequest) (*ExportResult, error) {
+	snapshotType string, req ExportRequest, dataDir string) (*ExportResult, error) {
 
 	arch := &ArchiveFile{Manifest: manifest, Ciphertext: ciphertext}
 
@@ -369,7 +371,7 @@ func finishArchive(manifest Manifest, ciphertext []byte, tiers []string,
 	// it is not written: a destination that can substitute one is the whole
 	// reason this exists, and an unmarked archive is exactly what a substituted
 	// one would look like.
-	if err := markWhoWroteIt(arch, req); err != nil {
+	if err := markWhoWroteIt(arch, req, dataDir); err != nil {
 		return nil, err
 	}
 
@@ -867,7 +869,7 @@ func theFirstFactor(req ExportRequest) (secret []byte, slots []KeySlot, err erro
 // its own uses that. A machine with neither cannot say who it is, and an
 // archive nobody can attribute is refused rather than written, because it is
 // indistinguishable from one somebody substituted.
-func markWhoWroteIt(arch *ArchiveFile, req ExportRequest) error {
+func markWhoWroteIt(arch *ArchiveFile, req ExportRequest, dataDir string) error {
 	seed := req.BIP39Seed
 	if len(seed) == 0 && req.Mnemonic != "" {
 		var err error
@@ -880,6 +882,15 @@ func markWhoWroteIt(arch *ArchiveFile, req ExportRequest) error {
 	}
 	if len(req.MachineSigningKey) > 0 {
 		return SignWithMachineKey(arch, req.MachineSigningKey)
+	}
+	// Failing that, the key this machine derives from the root seed it already
+	// holds. Found here rather than required from every caller: an archive that
+	// cannot say who wrote it is what a substituted one looks like, and that
+	// should not depend on somebody remembering to pass a parameter.
+	if dataDir != "" {
+		if key, kerr := secureenclave.BackupSigningKey(dataDir); kerr == nil {
+			return SignWithMachineKey(arch, key)
+		}
 	}
 	// Left unattributed rather than refused.
 	//

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"identity-agent-core/backup"
+	"identity-agent-core/secureenclave"
 	"identity-agent-core/store"
 )
 
@@ -691,5 +692,148 @@ func TestTheServiceSaysSharesAreNeededRatherThanFailing(t *testing.T) {
 	}
 	if needs.Bootstrap == nil || len(needs.Bootstrap.Split.Holders) != 1 {
 		t.Fatal("the refusal does not carry who to ask")
+	}
+}
+
+// A substituted archive is refused, and the machine's own is not.
+//
+// This is the whole point of a machine signing its backups. Sealing needs only
+// a public key, so anybody can write an archive addressed to an owner — and
+// restoring it writes their files, contacts and credentials into the agent.
+// The realistic route is whoever controls a destination swapping one archive
+// for another.
+//
+// The owner records the machine's signing key when they pair it, at the one
+// moment its hardware vouches for what it hands over. An archive signed with
+// anything else is not that machine's.
+func TestAnArchiveFromSomebodyElsesMachineIsRefused(t *testing.T) {
+	ownerSeed, err := backup.MnemonicToBIP39Seed(testPhrase, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, ownerPub, err := backup.DeriveSealKeypair(ownerSeed)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The owner's real machine, and an attacker's, each with their own seed.
+	real := aMachineThatWritesBackups(t, ownerPub, 0x11)
+	fake := aMachineThatWritesBackups(t, ownerPub, 0x99)
+
+	// The owner paired only one of them.
+	paired := []store.AdoptedAgent{{
+		AID: "EMyComputer", URL: "https://example",
+		BackupSigningKeyB64: backup.EncodeB64(real.pub),
+	}}
+
+	// The machine's own archive restores.
+	if _, err := RestoreFromArchive(real.archive, OpenRequest{
+		Mnemonic: testPhrase, KnownMachines: paired,
+	}); err != nil {
+		t.Fatalf("the owner's own machine's backup was refused: %v", err)
+	}
+
+	// The substitute — correctly sealed to this owner, perfectly openable,
+	// written by somebody else — is not.
+	_, err = RestoreFromArchive(fake.archive, OpenRequest{
+		Mnemonic: testPhrase, KnownMachines: paired,
+	})
+	if err == nil {
+		t.Fatal("an archive written by a machine this owner never paired was restored")
+	}
+	if !strings.Contains(err.Error(), "no record of that machine") &&
+		!strings.Contains(err.Error(), "different machine") {
+		t.Fatalf("refused for the wrong reason: %v", err)
+	}
+
+	// And knowing about no machines at all is not a reason to accept one.
+	if _, err := RestoreFromArchive(real.archive, OpenRequest{
+		Mnemonic: testPhrase,
+	}); err == nil {
+		t.Fatal("an archive was accepted by an owner with no record of any machine")
+	}
+}
+
+type aWrittenBackup struct {
+	pub     []byte
+	archive []byte
+}
+
+// aMachineThatWritesBackups is a machine with a root seed of its own, writing
+// an archive sealed to the owner — which is all a paired computer does.
+func aMachineThatWritesBackups(t *testing.T, ownerPub []byte, fill byte) aWrittenBackup {
+	t.Helper()
+	dir := t.TempDir()
+	seed := make([]byte, 64)
+	for i := range seed {
+		seed[i] = fill
+	}
+	if err := secureenclave.StoreRootSeed(dir, seed); err != nil {
+		t.Fatal(err)
+	}
+	pub, err := secureenclave.BackupSigningPublicKey(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	bundle := &backup.PayloadBundle{Sections: map[string][]byte{}}
+	bundle.Sections["identity_state"] = []byte(`{"aid":"EMyComputer"}`)
+	bundle.Ordered = []backup.PayloadSection{
+		{Name: "identity_state", Data: bundle.Sections["identity_state"]},
+	}
+
+	c := &backup.Collector{DataDir: dir}
+	res, err := c.CreateArchive(
+		backup.CollectOptions{Tiers: []string{backup.TierCritical}},
+		backup.ExportRequest{
+			Tiers: []string{backup.TierCritical}, Bundle: bundle,
+			SealToPublicKeys: [][]byte{ownerPub},
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return aWrittenBackup{pub: pub, archive: res.Bytes}
+}
+
+// An archive that says nothing about who wrote it is refused by default.
+//
+// That default flipped once paired machines began carrying a signing key.
+// Before that, refusing would have broken the one backup a paired computer
+// could make — a failed recovery is a certainty where a substituted archive is
+// a risk — so unattributed archives were tolerated. Both halves now exist, so
+// the compromise is over, and an unattributed archive is what a substituted
+// one looks like.
+//
+// It is still openable deliberately, because an archive written before any of
+// this is unattributed and is not forged. Deliberately, though, and never by a
+// default nobody chose.
+func TestAnArchiveThatSaysNothingIsRefusedUnlessSomebodySaysOtherwise(t *testing.T) {
+	oldDir, oldStore := machineWithAnIdentity(t, "EMyIdentity")
+	archive := archiveWithTheDefaultTiers(t, oldDir, oldStore)
+	oldStore.Close()
+
+	// Strip the mark, which is exactly what an archive from before this looks
+	// like — and what somebody substituting one would produce.
+	arch, err := backup.DecodeArchive(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	arch.Manifest.WrittenBy = ""
+	arch.Manifest.AuthTagB64 = ""
+	arch.Manifest.WriterKeyB64 = ""
+	silent, err := backup.EncodeArchive(arch)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := RestoreFromArchive(silent, OpenRequest{Mnemonic: testPhrase}); err == nil {
+		t.Fatal("an archive that says nothing about who wrote it was restored by default")
+	}
+
+	// And openable when somebody says so, having been told what it means.
+	if _, err := RestoreFromArchive(silent, OpenRequest{
+		Mnemonic: testPhrase, AcceptUnattributed: true,
+	}); err != nil {
+		t.Fatalf("an old archive could not be opened even deliberately: %v", err)
 	}
 }

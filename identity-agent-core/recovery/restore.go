@@ -17,24 +17,33 @@ type OpenRequest struct {
 	// ExpectedWriterKey is the signing key recorded when the machine that
 	// wrote this archive was paired. Without it, a machine-signed archive
 	// proves only that its writer can sign their own work.
+	//
+	// Usually left empty and resolved from KnownMachines instead, because the
+	// caller does not know in advance which of somebody's machines wrote a
+	// given archive.
 	ExpectedWriterKey []byte
-	// RequireAttribution refuses an archive that says nothing about who wrote
-	// it.
+	// KnownMachines are the machines this owner has paired, used to answer the
+	// only question that matters about a machine-signed archive: is this one
+	// of mine?
 	//
-	// OFF by default, and that default is a compromise rather than a
-	// preference. Every archive written before origin was recorded is
-	// unattributed, and so is every archive a paired machine writes today —
-	// those machines hold the owner's public key and no signing key of their
-	// own, so they cannot say who they are yet. Refusing them would break the
-	// one backup a paired computer can make, which is worse than the hole it
-	// would close, because a failed recovery is a certainty and a substituted
-	// archive is a risk.
+	// Matching on the key rather than on a name is deliberate. The archive
+	// need not say which machine wrote it — a name it chose would prove
+	// nothing anyway — and a key that matches one recorded at pairing answers
+	// the question outright.
+	KnownMachines []store.AdoptedAgent
+	// AcceptUnattributed opens an archive that says nothing about who wrote it.
 	//
-	// It flips to on once machines carry a signing key, and a caller that
-	// knows it is dealing with modern archives can turn it on today. Either
-	// way the payload says which it got, so a screen can tell somebody that
-	// this archive could not prove where it came from.
-	RequireAttribution bool
+	// OFF by default, so an unattributed archive is refused. That default
+	// flipped once paired machines began carrying a signing key of their own:
+	// until then, refusing would have broken the one backup a paired computer
+	// could make, and a failed recovery is a certainty where a substituted
+	// archive is a risk. Both halves now exist, so the compromise is over.
+	//
+	// It remains possible because an archive written before any of this is
+	// unattributed and is not forged, and somebody holding one should be able
+	// to say so — deliberately, having been told what it means, rather than by
+	// a default nobody chose.
+	AcceptUnattributed bool
 	// Shares are what the holders returned, keyed by holder id.
 	//
 	// An archive protected by shares does not open without enough of them, so
@@ -173,12 +182,39 @@ func checkWhoWroteIt(data []byte, req OpenRequest) error {
 		}
 	}
 
-	err = backup.CheckWhoWroteIt(arch, seed, req.ExpectedWriterKey)
-	if errors.Is(err, backup.ErrArchiveUnattributed) && !req.RequireAttribution {
+	expected := req.ExpectedWriterKey
+	if len(expected) == 0 {
+		expected = machineThatWroteIt(arch.Manifest.WriterKeyB64, req.KnownMachines)
+	}
+
+	err = backup.CheckWhoWroteIt(arch, seed, expected)
+	if errors.Is(err, backup.ErrArchiveUnattributed) && req.AcceptUnattributed {
 		// Allowed, and recorded on the payload so it is not silent. A wrong
 		// mark is always refused — only a MISSING one is tolerated, and only
 		// while archives that cannot carry one still exist.
 		return nil
 	}
 	return err
+}
+
+// machineThatWroteIt finds the paired machine whose recorded key matches the
+// one an archive was signed with, or nothing.
+//
+// Nothing is the honest answer for an archive signed by a machine this owner
+// never paired, and CheckWhoWroteIt refuses on it — which is the point. A
+// machine that signs its own work proves only that it can.
+func machineThatWroteIt(writerKeyB64 string, machines []store.AdoptedAgent) []byte {
+	if writerKeyB64 == "" {
+		return nil
+	}
+	for _, m := range machines {
+		if m.BackupSigningKeyB64 != "" && m.BackupSigningKeyB64 == writerKeyB64 {
+			raw, err := backup.DecodeB64(m.BackupSigningKeyB64)
+			if err != nil {
+				return nil
+			}
+			return raw
+		}
+	}
+	return nil
 }

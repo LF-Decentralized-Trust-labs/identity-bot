@@ -184,9 +184,10 @@ func (s *Service) Verify(req VerifyRequest) (*VerifyResponse, error) {
 		return nil, err
 	}
 	payload, err := RestoreFromArchive(raw, OpenRequest{
-		Mnemonic:   req.Mnemonic,
-		Passphrase: req.Passphrase,
-		Shares:     shares,
+		Mnemonic:      req.Mnemonic,
+		Passphrase:    req.Passphrase,
+		Shares:        shares,
+		KnownMachines: s.knownMachines(),
 	})
 	if err != nil {
 		return nil, err
@@ -224,9 +225,10 @@ func (s *Service) Start(req StartRequest) (*Session, error) {
 		return nil, err
 	}
 	payload, err := RestoreFromArchive(raw, OpenRequest{
-		Mnemonic:   req.Mnemonic,
-		Passphrase: req.Passphrase,
-		Shares:     shares,
+		Mnemonic:      req.Mnemonic,
+		Passphrase:    req.Passphrase,
+		Shares:        shares,
+		KnownMachines: s.knownMachines(),
 	})
 	if err != nil {
 		return nil, err
@@ -514,9 +516,10 @@ func (s *Service) Activate(sessionID string, req ActivateRequest) (*Session, err
 		return nil, err
 	}
 	payload, err := RestoreFromArchive(archive, OpenRequest{
-		Mnemonic:   req.Mnemonic,
-		Passphrase: req.Passphrase,
-		Shares:     shares,
+		Mnemonic:      req.Mnemonic,
+		Passphrase:    req.Passphrase,
+		Shares:        shares,
+		KnownMachines: s.knownMachines(),
 	})
 	if err != nil {
 		// Not marked failed. A mistyped phrase is the ordinary case at this
@@ -1063,4 +1066,22 @@ func decodeShares(in map[string]string) (map[string][]byte, error) {
 		out[id] = raw
 	}
 	return out, nil
+}
+
+// knownMachines is what this agent has paired, for deciding whether an archive
+// was written by one of them.
+//
+// A store that cannot answer gives nothing rather than an error: an archive
+// then fails to attribute and is refused, which is the safe direction. The
+// alternative — treating "I could not check" as "it is fine" — is how a check
+// becomes decoration.
+func (s *Service) knownMachines() []store.AdoptedAgent {
+	if s.Store == nil {
+		return nil
+	}
+	machines, err := s.Store.ListAdoptedAgents()
+	if err != nil {
+		return nil
+	}
+	return machines
 }

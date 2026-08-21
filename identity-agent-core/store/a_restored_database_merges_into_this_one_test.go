@@ -81,7 +81,11 @@ func TestABackupFromThePreviousSchemaVersionRestores(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := applyMigrationsUpTo(old, newestKnownMigration()-1); err != nil {
+	// Pinned to the migration BEFORE the rename this test is about, rather
+	// than to "the newest minus one" — which silently stopped targeting the
+	// rename the moment another migration was added, and failed with a
+	// confusing message rather than a clear one.
+	if err := applyMigrationsUpTo(old, renameOfDelegatedAID-1); err != nil {
 		t.Fatal(err)
 	}
 	// A row stored under the name the column had back then.
@@ -106,6 +110,10 @@ func TestABackupFromThePreviousSchemaVersionRestores(t *testing.T) {
 		t.Fatalf("the renamed column did not carry its value: %q", signsAs)
 	}
 }
+
+// renameOfDelegatedAID is the migration that renames adopted_agents.delegated_aid
+// to signs_as_aid, which is the column rename this test exists to exercise.
+const renameOfDelegatedAID = 34
 
 // applyMigrationsUpTo builds a database as an older build would have left it.
 func applyMigrationsUpTo(db *sql.DB, version int) error {
