@@ -66,6 +66,10 @@ type VerifyRequest struct {
 	ArchiveB64 string `json:"archive_b64,omitempty"`
 	Mnemonic   string `json:"mnemonic"`
 	Passphrase string `json:"passphrase,omitempty"`
+	// SharesB64 is what the holders returned, keyed by holder id, for an
+	// archive that needs them.
+	SharesB64 map[string]string `json:"shares_b64,omitempty"`
+	whoWroteItFields
 }
 
 // VerifyResponse is returned from the verify endpoint.
@@ -78,9 +82,11 @@ type VerifyResponse struct {
 
 // StartRequest begins a gated recovery session after successful verify.
 type StartRequest struct {
-	ArchiveB64 string `json:"archive_b64"`
-	Mnemonic   string `json:"mnemonic"`
-	Passphrase string `json:"passphrase,omitempty"`
+	ArchiveB64 string            `json:"archive_b64"`
+	Mnemonic   string            `json:"mnemonic"`
+	Passphrase string            `json:"passphrase,omitempty"`
+	SharesB64  map[string]string `json:"shares_b64,omitempty"`
+	whoWroteItFields
 }
 
 // RetrieveRequest fetches an opaque archive for recovery.
@@ -175,9 +181,17 @@ func (s *Service) Verify(req VerifyRequest) (*VerifyResponse, error) {
 	if err != nil {
 		return nil, err
 	}
+	shares, err := decodeShares(req.SharesB64)
+	if err != nil {
+		return nil, err
+	}
 	payload, err := RestoreFromArchive(raw, OpenRequest{
-		Mnemonic:   req.Mnemonic,
-		Passphrase: req.Passphrase,
+		Mnemonic:           req.Mnemonic,
+		Passphrase:         req.Passphrase,
+		Shares:             shares,
+		KnownMachines:      s.knownMachines(),
+		AcceptUnattributed: req.AcceptUnattributed,
+		ExpectedWriterKey:  decodeWriterKey(req.ExpectedWriterKeyB64),
 	})
 	if err != nil {
 		return nil, err
@@ -210,9 +224,17 @@ func (s *Service) Start(req StartRequest) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
+	shares, err := decodeShares(req.SharesB64)
+	if err != nil {
+		return nil, err
+	}
 	payload, err := RestoreFromArchive(raw, OpenRequest{
-		Mnemonic:   req.Mnemonic,
-		Passphrase: req.Passphrase,
+		Mnemonic:           req.Mnemonic,
+		Passphrase:         req.Passphrase,
+		Shares:             shares,
+		KnownMachines:      s.knownMachines(),
+		AcceptUnattributed: req.AcceptUnattributed,
+		ExpectedWriterKey:  decodeWriterKey(req.ExpectedWriterKeyB64),
 	})
 	if err != nil {
 		return nil, err
@@ -404,6 +426,32 @@ func (e *ErrNotAuthenticated) Error() string {
 type ActivateRequest struct {
 	Mnemonic   string `json:"mnemonic"`
 	Passphrase string `json:"passphrase,omitempty"`
+	// SharesB64 is what the holders returned, gathered again at activation.
+	//
+	// Asked for again here for the same reason the phrase is: neither is kept
+	// across the wait, and gathering them at the end is what proves the
+	// holders still agree NOW rather than that they agreed days ago.
+	SharesB64 map[string]string `json:"shares_b64,omitempty"`
+	whoWroteItFields
+}
+
+// whoWroteItFields are the two answers only a person can give about where an
+// archive came from.
+//
+// Both existed in the library and neither could be reached from outside it,
+// which made them documentation rather than choices. An archive from before
+// origin was recorded was simply unrestorable, and a machine-signed archive
+// could not be restored onto a machine that had not yet learned which machines
+// this identity has — which is every fresh one.
+type whoWroteItFields struct {
+	// AcceptUnattributed opens an archive that says nothing about who wrote
+	// it. Somebody holding one made before this existed has to be able to say
+	// so, deliberately, having been told what it means.
+	AcceptUnattributed bool `json:"accept_unattributed,omitempty"`
+	// ExpectedWriterKeyB64 is the signing key of the machine that wrote this
+	// archive, when the restoring agent has no record of it yet — which is the
+	// ordinary case on a machine that has just been rebuilt.
+	ExpectedWriterKeyB64 string `json:"expected_writer_key_b64,omitempty"`
 }
 
 // Activate completes a recovery once its cancel window has elapsed.
@@ -489,9 +537,17 @@ func (s *Service) Activate(sessionID string, req ActivateRequest) (*Session, err
 			"it is not kept while the waiting period runs")
 	}
 
+	shares, err := decodeShares(req.SharesB64)
+	if err != nil {
+		return nil, err
+	}
 	payload, err := RestoreFromArchive(archive, OpenRequest{
-		Mnemonic:   req.Mnemonic,
-		Passphrase: req.Passphrase,
+		Mnemonic:           req.Mnemonic,
+		Passphrase:         req.Passphrase,
+		Shares:             shares,
+		KnownMachines:      s.knownMachines(),
+		AcceptUnattributed: req.AcceptUnattributed,
+		ExpectedWriterKey:  decodeWriterKey(req.ExpectedWriterKeyB64),
 	})
 	if err != nil {
 		// Not marked failed. A mistyped phrase is the ordinary case at this
@@ -684,6 +740,13 @@ func (s *Service) restoreTheKeyMaterial(payload *RestoredPayload) error {
 	if raw, ok := payload.Bundle.Sections["root_seed"]; ok && len(raw) >= 32 {
 		if err := secureenclave.StoreRootSeed(s.DataDir, raw); err != nil {
 			return fmt.Errorf("reseat root seed: %w", err)
+		}
+		// This seed arrived inside an archive the recovery words opened, so
+		// those words reproduce it and this machine's own backups can be
+		// marked with it.
+		if err := secureenclave.RecordSeedOrigin(
+			s.DataDir, secureenclave.SeedFromPhrase); err != nil {
+			return fmt.Errorf("record where the restored seed came from: %w", err)
 		}
 	}
 	if raw, ok := payload.Bundle.Sections["login_relationships"]; ok && len(raw) > 0 {
@@ -1022,4 +1085,55 @@ func trimSlash(s string) string {
 // MarshalSession exports session JSON for persistence tests.
 func MarshalSession(sess Session) ([]byte, error) {
 	return json.Marshal(sess)
+}
+
+// decodeShares turns what came back from holders into what an archive needs.
+func decodeShares(in map[string]string) (map[string][]byte, error) {
+	if len(in) == 0 {
+		return nil, nil
+	}
+	out := make(map[string][]byte, len(in))
+	for id, b64 := range in {
+		raw, err := backup.DecodeB64(b64)
+		if err != nil {
+			return nil, fmt.Errorf("the share from %s could not be read", id)
+		}
+		out[id] = raw
+	}
+	return out, nil
+}
+
+// knownMachines is what this agent has paired, for deciding whether an archive
+// was written by one of them.
+//
+// A store that cannot answer gives nothing rather than an error: an archive
+// then fails to attribute and is refused, which is the safe direction. The
+// alternative — treating "I could not check" as "it is fine" — is how a check
+// becomes decoration.
+func (s *Service) knownMachines() []store.AdoptedAgent {
+	if s.Store == nil {
+		return nil
+	}
+	machines, err := s.Store.ListAdoptedAgents()
+	if err != nil {
+		return nil
+	}
+	return machines
+}
+
+// decodeWriterKey reads a machine signing key somebody supplied.
+//
+// A key that will not decode gives nothing rather than an error, so the
+// attribution check refuses with its own message about who wrote the archive
+// instead of a base64 complaint. That is what somebody in the middle of a
+// recovery needs to read.
+func decodeWriterKey(b64 string) []byte {
+	if b64 == "" {
+		return nil
+	}
+	raw, err := backup.DecodeB64(b64)
+	if err != nil {
+		return nil
+	}
+	return raw
 }

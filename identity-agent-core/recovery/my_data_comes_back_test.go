@@ -39,6 +39,12 @@ func anAgentWithRealDataInIt(t *testing.T) (dir string, st *store.SQLiteStore, s
 	if err := secureenclave.StoreRootSeed(dir, seed); err != nil {
 		t.Fatalf("seed the device: %v", err)
 	}
+	// A device its owner carries derives its root seed from the recovery
+	// words, and says so — which is what lets its archives be marked with
+	// those words rather than with a key of the machine's own.
+	if err := secureenclave.RecordSeedOrigin(dir, secureenclave.SeedFromPhrase); err != nil {
+		t.Fatal(err)
+	}
 
 	var err error
 	st, err = store.NewSQLiteStore(dir)

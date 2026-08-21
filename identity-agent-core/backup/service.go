@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"identity-agent-core/secureenclave"
 	"log"
 	"os"
 	"path/filepath"
@@ -221,6 +222,21 @@ func (s *Service) exportWithReason(mnemonic, seedB64, passphrase, destPath strin
 		return nil, err
 	}
 
+	// What this machine signs its backups with, so its owner can tell one of
+	// its archives from one somebody substituted. Derived from the root seed
+	// this machine already holds, and its public half was recorded when the
+	// machine was paired.
+	//
+	// Its absence does not stop a backup: an unattributed archive is worse
+	// than an attributed one and far better than none, and the restoring side
+	// says which it got. A machine that has the recovery words does not use
+	// this at all — they are a better mark and it already holds them.
+	signingKey, skErr := secureenclave.BackupSigningKey(s.DataDir)
+	if skErr != nil {
+		log.Printf("[backup] this machine cannot sign its archives, so they will not say "+
+			"who wrote them: %v", skErr)
+	}
+
 	var seedBytes []byte
 	if seedB64 != "" {
 		if seedBytes, err = DecodeB64(seedB64); err != nil {
@@ -230,6 +246,7 @@ func (s *Service) exportWithReason(mnemonic, seedB64, passphrase, destPath strin
 	}
 
 	result, err := collector.CreateArchive(opts, ExportRequest{
+		MachineSigningKey:    signingKey,
 		Mnemonic:             mnemonic,
 		BIP39Seed:            seedBytes,
 		Passphrase:           passphrase,

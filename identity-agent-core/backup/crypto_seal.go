@@ -196,3 +196,14 @@ func UnsealBEK(recipientPriv, ephemeralPub, wrapped, nonce []byte) ([]byte, erro
 	}
 	return UnwrapBEK(kek, wrapped, nonce)
 }
+
+// PublicFromPrivate recovers the public half of a sealing key.
+//
+// Only the private half is stored by a holder, because the public half is
+// derivable and storing both is two things to keep in step.
+func PublicFromPrivate(priv []byte) ([]byte, error) {
+	if len(priv) != X25519KeyLen {
+		return nil, fmt.Errorf("private key must be %d bytes", X25519KeyLen)
+	}
+	return curve25519.X25519(priv, curve25519.Basepoint)
+}

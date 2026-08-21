@@ -64,6 +64,17 @@ var publicRoutes = map[string]string{
 	// this carries requests, it does not exempt them.
 	"POST /api/sealed": "a request carried inside an envelope only this agent can open",
 
+	// --- handing back a share somebody asked this machine to hold ---
+	// Open in the same sense as the envelope above: what arrives carries a
+	// share sealed to a key only this machine holds, so opening it is the
+	// authentication, and it cannot be forged by somebody who does not already
+	// have the backup and the recovery words. Gating it on a session instead
+	// would mean a recovering machine — which by definition has no session
+	// here, and belongs to somebody this machine may never have met — could
+	// never ask, and the shares would protect nothing because nobody could
+	// ever gather them.
+	"POST /api/recovery/share-requests": "a recovering machine asks for a share sealed to this one",
+
 	// --- proving what machine this agent runs on ---
 	// A client verifies a machine in order to decide whether to trust it, so it
 	// is not the owner yet and holds no owner key. Gating this would mean that
@@ -457,6 +468,12 @@ var sessionForbidden = map[string]string{
 	// could watch the clock and time itself against the window, or simply
 	// learn that a recovery is running — which is exactly what the window
 	// exists to give the owner, and nobody else, a chance to act on.
+	// Agreeing to hold a share, and approving a release, are the owner's
+	// decisions about their own machine.
+	"POST /api/recovery/holdings":         "agreeing to hold part of somebody's recovery is a commitment",
+	"POST /api/recovery/holdings/approve": "approving a recovery is the whole of what a human gate decides",
+	"POST /api/recovery/holdings/stop":    "giving up a share makes somebody else's backups unopenable by this machine",
+
 	"GET /api/recovery/sessions":      "a recovery in progress says this identity is being taken over, and when",
 	"GET /api/recovery/sessions/{id}": "a recovery in progress says this identity is being taken over, and when",
 	// Founding and rotation outside recovery, for the same reason.

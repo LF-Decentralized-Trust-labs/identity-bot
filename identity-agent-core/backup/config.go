@@ -20,22 +20,31 @@ const (
 
 // Destination describes one backup target.
 type Destination struct {
-	ID            string          `json:"id"`
-	Type          DestinationType `json:"type"`
-	Label         string          `json:"label"`
-	LocalPath     string          `json:"local_path,omitempty"`
-	PairedURL     string          `json:"paired_url,omitempty"`
-	PairedRole    string          `json:"paired_role,omitempty"` // backup_only
-	CloudProvider string          `json:"cloud_provider,omitempty"`
-	CloudBucket   string          `json:"cloud_bucket,omitempty"`
-	CloudPrefix   string          `json:"cloud_prefix,omitempty"`
-	CloudEndpoint string          `json:"cloud_endpoint,omitempty"`
-	CloudRegion   string          `json:"cloud_region,omitempty"`
-	RemoteURL     string          `json:"remote_url,omitempty"`
-	CredentialID  string          `json:"credential_id,omitempty"`
-	IAGated       bool            `json:"ia_gated"` // true = requires working IA to retrieve
-	Enabled       bool            `json:"enabled"`
-	LastSuccessAt string          `json:"last_success_at,omitempty"`
+	ID         string          `json:"id"`
+	Type       DestinationType `json:"type"`
+	Label      string          `json:"label"`
+	LocalPath  string          `json:"local_path,omitempty"`
+	PairedURL  string          `json:"paired_url,omitempty"`
+	PairedRole string          `json:"paired_role,omitempty"` // backup_only
+	// Elsewhere is the owner saying this destination is not in the same place
+	// as the machine backing up to it.
+	//
+	// Only a person can answer this. Software knows what KIND of thing a
+	// destination is and never where it physically sits, so a paired machine
+	// at a relative's house and one on the same desk are identical from here.
+	// Left alone it stays false, which counts as "cannot tell" rather than as
+	// "here" — the difference being that the owner is asked rather than told.
+	Elsewhere     bool   `json:"elsewhere,omitempty"`
+	CloudProvider string `json:"cloud_provider,omitempty"`
+	CloudBucket   string `json:"cloud_bucket,omitempty"`
+	CloudPrefix   string `json:"cloud_prefix,omitempty"`
+	CloudEndpoint string `json:"cloud_endpoint,omitempty"`
+	CloudRegion   string `json:"cloud_region,omitempty"`
+	RemoteURL     string `json:"remote_url,omitempty"`
+	CredentialID  string `json:"credential_id,omitempty"`
+	IAGated       bool   `json:"ia_gated"` // true = requires working IA to retrieve
+	Enabled       bool   `json:"enabled"`
+	LastSuccessAt string `json:"last_success_at,omitempty"`
 	// LastFullAt is when this destination last received an archive that
 	// restores on its own.
 	//
@@ -110,9 +119,20 @@ type StatusResponse struct {
 	// LastVerifiedAt, LastOffDeviceAt and Protection answer the questions
 	// LastBackupAt cannot: whether any archive has ever been proven to open,
 	// whether any of them left this device, and what is missing. See BackupFacts.
-	LastVerifiedAt      string         `json:"last_verified_at,omitempty"`
-	LastOffDeviceAt     string         `json:"last_off_device_at,omitempty"`
-	Protection          string         `json:"protection,omitempty"`
+	LastVerifiedAt  string `json:"last_verified_at,omitempty"`
+	LastOffDeviceAt string `json:"last_off_device_at,omitempty"`
+	Protection      string `json:"protection,omitempty"`
+	// LocalDisaster says what a fire, a burglary or a flood in one place would
+	// take, or is empty when something would survive it.
+	//
+	// On the wire beside Protection rather than folded into it, because they
+	// answer different questions — losing a machine, losing a room — and
+	// somebody can be fine on the first and ruined on the second. It also
+	// carries the reason for a health that would otherwise go yellow with
+	// nothing on the wire explaining why, which is the common configuration:
+	// a paired machine becomes a destination automatically, and two machines
+	// in one room is what most people will have.
+	LocalDisaster       string         `json:"local_disaster,omitempty"`
 	History             []HistoryEntry `json:"history"`
 	ConsecutiveFailures int            `json:"consecutive_failures"`
 }
@@ -315,6 +335,7 @@ func (s *ConfigStore) BuildStatus(cfg Config, hist []HistoryEntry, failures int)
 		LastVerifiedAt:      facts.LastVerifiedAt,
 		LastOffDeviceAt:     facts.LastOffDeviceAt,
 		Protection:          facts.Protection,
+		LocalDisaster:       facts.LocalDisaster,
 		Health:              facts.Health,
 		Destinations:        cfg.Destinations,
 		RedundancyWarning:   RedundancyWarnings(cfg.Destinations),

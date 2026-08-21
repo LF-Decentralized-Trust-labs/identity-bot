@@ -124,7 +124,20 @@ func buildTestArchiveWith(t *testing.T, mnemonic string,
 		})
 	}
 
-	raw, err := backup.EncodeArchive(&backup.ArchiveFile{Manifest: manifest, Ciphertext: ct})
+	// Marked with who wrote it, the way a real archive is. Hand-built archives
+	// that skip this are exactly what a substituted one looks like, and a
+	// restore refuses them — so leaving it out would mean every test here
+	// exercised a shape no real archive has.
+	arch := &backup.ArchiveFile{Manifest: manifest, Ciphertext: ct}
+	seed, err := backup.MnemonicToBIP39Seed(mnemonic, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := backup.SignWithSeed(arch, seed); err != nil {
+		t.Fatal(err)
+	}
+
+	raw, err := backup.EncodeArchive(arch)
 	if err != nil {
 		t.Fatal(err)
 	}

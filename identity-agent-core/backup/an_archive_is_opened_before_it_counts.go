@@ -40,6 +40,23 @@ func verifyArchiveOpens(result *ExportResult, req ExportRequest, collected *Payl
 		return ErrNoKeyToVerifyWith
 	}
 
+	// An archive protected by shares is verified as far as it CAN be verified
+	// here, which is the envelope and everything needed to reassemble the key.
+	//
+	// The body deliberately does not open without k shares, and the machine
+	// that just wrote the backup has none — that is the entire point of it. So
+	// asking for the body back would fail every split archive, and the caller
+	// treats a failed verification as "not kept", meaning the moment shares
+	// were wired into the export path every backup would be discarded.
+	//
+	// What can be checked is checked: that the words open the envelope, that
+	// it names holders and carries a share for each, and that there is
+	// something for k of them to reassemble. What cannot be is stated rather
+	// than skipped — see the returned error when the envelope is unusable.
+	if verr := verifySplitArchiveOpens(result, req); verr != errNotASplitArchive {
+		return verr
+	}
+
 	// Opened the way a person in trouble would open it — from the key material
 	// alone. Verifying with anything the maker happens to be holding would
 	// prove the archive opens for somebody who does not need it to.
@@ -85,5 +102,40 @@ func verifyArchiveOpens(result *ExportResult, req ExportRequest, collected *Payl
 		}
 	}
 
+	return nil
+}
+
+// errNotASplitArchive says this archive is of the older shape and should be
+// verified the ordinary way.
+var errNotASplitArchive = fmt.Errorf("not a split archive")
+
+// verifySplitArchiveOpens checks everything about a share-protected archive
+// that can be checked without the shares.
+func verifySplitArchiveOpens(result *ExportResult, req ExportRequest) error {
+	if result.Manifest.BootstrapB64 == "" {
+		return errNotASplitArchive
+	}
+
+	env, _, err := OpenBootstrap(result.Bytes, OpenRequest{
+		Mnemonic:  req.Mnemonic,
+		BIP39Seed: req.BIP39Seed,
+	})
+	if err != nil {
+		return fmt.Errorf("the archive could not be reopened: %w", err)
+	}
+	if env == nil {
+		return fmt.Errorf("the archive says it is protected by shares and carries no envelope")
+	}
+	// The same checks the envelope refuses to be built without, run again on
+	// what actually reached the file — because the thing being verified is the
+	// bytes, not the intention.
+	if err := env.Validate(); err != nil {
+		return fmt.Errorf("the archive's envelope would not let it be opened: %w", err)
+	}
+	if want := countCombinations(len(env.Split.Holders), env.Split.Needed); len(env.SubsetWraps) != want {
+		return fmt.Errorf(
+			"this archive carries %d ways to reassemble its key and needs %d, so some "+
+				"combinations of holders could never open it", len(env.SubsetWraps), want)
+	}
 	return nil
 }

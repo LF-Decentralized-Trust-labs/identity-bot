@@ -53,7 +53,8 @@ func checkOfferBeforeDelegating(offer *pairingBeginResponse, allowUnattested boo
 	// sealed machine exists somewhere, which is true of every sealed machine
 	// and says nothing about the one being adopted — a genuine report from any
 	// of them would pass.
-	expected, err := iacrypto.PairingOfferBinding(offer.PublicKey, offer.NextPublicKey)
+	expected, err := iacrypto.PairingOfferBinding(
+		offer.PublicKey, offer.NextPublicKey, offer.BackupSigningKey)
 	if err != nil {
 		return fmt.Errorf("this box's offer is incomplete: %w", err)
 	}

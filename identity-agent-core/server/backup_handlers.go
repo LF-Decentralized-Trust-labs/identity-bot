@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -169,6 +170,13 @@ func (s *CoreServer) handleBackupPutConfig(w http.ResponseWriter, r *http.Reques
 	// Decoding onto the stored value means an absent field keeps what it had,
 	// and only what was actually sent can change. Guarding one field at a time
 	// would leave the next one to be found the same way.
+	body, rerr := io.ReadAll(http.MaxBytesReader(w, r.Body, maxRecoveryBody))
+	if rerr != nil {
+		writeError(w, http.StatusBadRequest, "Invalid config", rerr.Error())
+		return
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+
 	cfg, lerr := s.backupService().LoadConfig()
 	if lerr != nil {
 		writeError(w, http.StatusInternalServerError, "Load config failed", lerr.Error())
@@ -181,9 +189,56 @@ func (s *CoreServer) handleBackupPutConfig(w http.ResponseWriter, r *http.Reques
 	// every agent that already had a recipient, which is every paired agent.
 	before := slices.Clone(cfg.SealToPublicKeysB64)
 
+	// The same aliasing problem, one field deeper.
+	//
+	// Go decodes a JSON array onto an existing slice POSITIONALLY, reusing
+	// each element in place, so a field the client omits keeps whatever the
+	// destination at that INDEX had. Send a shorter or reordered list — which
+	// is what removing a destination does — and the answer belonging to one
+	// destination silently attaches to another.
+	//
+	// That is tolerable for a label. It is not tolerable for Elsewhere, which
+	// is the owner's own statement that a destination is not in the same
+	// building, and which decides whether the agent says a fire would take
+	// everything. So the answers are taken from what was stored, by ID, after
+	// the decode.
+	elsewhereWas := map[string]bool{}
+	for _, d := range cfg.Destinations {
+		elsewhereWas[d.ID] = d.Elsewhere
+	}
+
 	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid config", err.Error())
 		return
+	}
+
+	// Put each destination's own answer back, by identity rather than by
+	// position. A client that genuinely means to change one sends it, and this
+	// keeps the sent value; a client that omits it keeps what that destination
+	// had rather than inheriting a neighbour's.
+	var sent struct {
+		Destinations []struct {
+			ID        string `json:"id"`
+			Elsewhere *bool  `json:"elsewhere"`
+		} `json:"destinations"`
+	}
+	saidElsewhere := map[string]bool{}
+	if len(body) > 0 {
+		if err := json.Unmarshal(body, &sent); err == nil {
+			for _, d := range sent.Destinations {
+				if d.Elsewhere != nil {
+					saidElsewhere[d.ID] = *d.Elsewhere
+				}
+			}
+		}
+	}
+	for i := range cfg.Destinations {
+		id := cfg.Destinations[i].ID
+		if answer, ok := saidElsewhere[id]; ok {
+			cfg.Destinations[i].Elsewhere = answer
+			continue
+		}
+		cfg.Destinations[i].Elsewhere = elsewhereWas[id]
 	}
 
 	// Recipients are not settable here.

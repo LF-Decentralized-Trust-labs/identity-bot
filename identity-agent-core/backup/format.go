@@ -115,6 +115,31 @@ type Manifest struct {
 	SelfSufficient   bool                  `json:"self_sufficient"`
 	ExternalPointers []ExternalDataPointer `json:"external_pointers,omitempty"`
 	PayloadNonceB64  string                `json:"payload_nonce_b64"`
+	// The envelope the recovery words open, encrypted under a key derived from
+	// them alone. Absent on an archive written before shares existed, and its
+	// absence is what says the body can still be opened from a key slot.
+	//
+	// It rides in the manifest rather than the body because the body is what
+	// needs shares to open, and a machine has to read this before it knows who
+	// to ask for one. The manifest is cleartext; this field is not.
+	// Who wrote this archive, and the mark that proves it.
+	//
+	// Absent on every archive written before this existed, and that absence is
+	// itself the answer: unattributed, which a caller has to be able to tell
+	// from a mark that is WRONG. Sealing proves an archive was encrypted to
+	// somebody; it never proved who encrypted it, and anybody can encrypt to a
+	// public key.
+	WrittenBy string `json:"written_by,omitempty"`
+	// WriterKeyB64 is the machine signing key, when a machine wrote it. It is
+	// recorded so a reader knows what was claimed — it is not what makes the
+	// claim true, since a writer chooses the key they publish. What makes it
+	// true is comparing this against the key recorded when that machine was
+	// paired.
+	WriterKeyB64 string `json:"writer_key_b64,omitempty"`
+	AuthTagB64   string `json:"auth_tag_b64,omitempty"`
+
+	BootstrapB64      string `json:"bootstrap_b64,omitempty"`
+	BootstrapNonceB64 string `json:"bootstrap_nonce_b64,omitempty"`
 
 	// AndWrappedBEKB64 and AndNonceB64 are the second layer, present only under
 	// AND. There, the slots do not hold the payload key at all — they hold an
@@ -141,6 +166,17 @@ type PayloadSection struct {
 type ArchiveFile struct {
 	Manifest   Manifest
 	Ciphertext []byte
+	// RawManifest is the manifest exactly as it appeared in the file, when
+	// this came from one.
+	//
+	// Kept because the mark covers what the manifest MEANS, and a file is
+	// bytes. Two files whose manifests decode alike but differ on disk — one
+	// carrying a field the decoder drops, one carrying a duplicate key whose
+	// first copy is a lie — both verified, so any digest, deduplication or
+	// same-archive comparison was defeated while the mark said yes. Verifying
+	// requires this to be the canonical encoding, which makes those two files
+	// into one.
+	RawManifest []byte
 }
 
 func NewManifest(aid string, tiers []string, snapshotType string) Manifest {
@@ -220,10 +256,12 @@ func DecodeArchive(data []byte) (*ArchiveFile, error) {
 	if err := json.Unmarshal(data[off:off+int(manifestLen)], &manifest); err != nil {
 		return nil, fmt.Errorf("manifest parse: %w", err)
 	}
+	raw := append([]byte(nil), data[off:off+int(manifestLen)]...)
 	off += int(manifestLen)
 	return &ArchiveFile{
-		Manifest:   manifest,
-		Ciphertext: data[off:],
+		Manifest:    manifest,
+		RawManifest: raw,
+		Ciphertext:  data[off:],
 	}, nil
 }
 
