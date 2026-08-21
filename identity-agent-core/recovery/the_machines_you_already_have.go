@@ -42,17 +42,29 @@ type CouldNotAsk struct {
 // and refusing to back up at all because a laptop was closed would be the
 // worse outcome by a distance.
 //
-// KNOWN GAP, and it is why the reason comes back rather than just the name.
-// Agreeing to hold is an owner-only route, and this call carries nothing that
-// proves it is the owner — so a machine on the far side of a network answers
-// 403, and this is the only place that knows. On the same computer it works,
-// because a local request is recognised as the owner's; the remote paired
-// machine, which is the case the feature exists for, does not. Agent-to-agent
-// owner authentication is the missing piece; until it lands, this reports the
-// refusal instead of quietly dropping the machine, because a holder silently
-// missing from a backup is discovered during a recovery.
+// WHO CAN MAKE THIS CALL, which is not a detail.
+//
+// Agreeing to hold a share is an owner-only route, so a machine across a
+// network wants proof that the request is the owner's. On the same computer
+// there is none to give and none needed — a local request is recognised as the
+// owner's outright.
+//
+// A remote one needs a signature, and THE AGENT CORE CANNOT PRODUCE IT. That
+// is deliberate and long-standing: the root identity's key belongs to the
+// controller, and signingSeedForAID refuses to sign as the root precisely so
+// that a core cannot claim an authority it does not have. So this is not a
+// missing piece of plumbing that a later change drops in. Whatever holds the
+// root key — the app — has to sign these requests, and this function is given
+// a way to sign rather than being taught to.
+//
+// Sign may be nil, and then only machines that trust a local request will
+// agree. The rest come back in couldNotAsk saying so, because a holder
+// silently missing from a backup is discovered during a recovery and not
+// before.
+type SignAsOwner func(method, path, timestamp string, body []byte) (signature string, err error)
+
 func HoldersFromPairedMachines(machines []store.AdoptedAgent, identityAID string,
-	policy HoldingPolicy, client *http.Client) ([]backup.ShareHolder, []CouldNotAsk) {
+	policy HoldingPolicy, client *http.Client, sign SignAsOwner) ([]backup.ShareHolder, []CouldNotAsk) {
 
 	if client == nil {
 		client = &http.Client{Timeout: 15 * time.Second}
@@ -66,7 +78,7 @@ func HoldersFromPairedMachines(machines []store.AdoptedAgent, identityAID string
 				AID: m.AID, Why: "this machine has no address to reach it at"})
 			continue
 		}
-		agreed, err := askAMachineToHold(client, m.URL, AgreeToHold{
+		agreed, err := askAMachineToHold(client, m.URL, sign, AgreeToHold{
 			// One of the owner's own machines files under the identity's own
 			// AID: it already knows whose it is, so a pairwise identifier
 			// would hide nothing from it. A witness belonging to somebody else
@@ -116,24 +128,46 @@ func AskForMorePeople(holders []backup.ShareHolder) string {
 	return ""
 }
 
-func askAMachineToHold(client *http.Client, url string, req AgreeToHold) (*AgreedToHold, error) {
+func askAMachineToHold(client *http.Client, url string, sign SignAsOwner,
+	req AgreeToHold) (*AgreedToHold, error) {
+
 	body, err := json.Marshal(req)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := client.Post(strings.TrimRight(url, "/")+"/api/recovery/holdings",
-		"application/json", bytes.NewReader(body))
+	const path = "/api/recovery/holdings"
+	httpReq, err := http.NewRequest(http.MethodPost,
+		strings.TrimRight(url, "/")+path, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("that machine could not be reached")
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	if sign != nil {
+		stamp := time.Now().UTC().Format(time.RFC3339)
+		sig, serr := sign(http.MethodPost, path, stamp, body)
+		if serr != nil {
+			return nil, fmt.Errorf("this request could not be signed as the owner")
+		}
+		httpReq.Header.Set("X-IA-Owner-Sig", sig)
+		httpReq.Header.Set("X-IA-Owner-Timestamp", stamp)
+	}
+
+	resp, err := client.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("that machine could not be reached")
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusUnauthorized {
-		// Said precisely, because it is not a refusal — it is this agent being
-		// unable to show that it is the owner, and the fix is ours rather than
-		// anything the person can do.
+		// Said precisely, because it is not that machine refusing to help — it
+		// is this request not showing that the owner made it, and what to do
+		// about that differs entirely.
+		if sign == nil {
+			return nil, fmt.Errorf(
+				"that machine wants proof the owner asked, and this request was not signed")
+		}
 		return nil, fmt.Errorf(
-			"this agent cannot yet prove to that machine that it is the owner, so that " +
-				"machine refused to hold a share")
+			"that machine did not accept this owner's signature")
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("that machine did not agree to hold a share")

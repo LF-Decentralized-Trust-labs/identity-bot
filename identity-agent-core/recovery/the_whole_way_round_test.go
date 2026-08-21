@@ -316,11 +316,11 @@ func TestTheSecondBackupKeepsTheSameHolders(t *testing.T) {
 	b := startAHoldingServer(t)
 	machines := []store.AdoptedAgent{{AID: "EPhone", URL: a.URL}, {AID: "ELaptop", URL: b.URL}}
 
-	first, couldNotAsk := HoldersFromPairedMachines(machines, "EMyIdentity", HoldingPolicy{}, a.Client())
+	first, couldNotAsk := HoldersFromPairedMachines(machines, "EMyIdentity", HoldingPolicy{}, a.Client(), nil)
 	if len(first) != 2 || len(couldNotAsk) != 0 {
 		t.Fatalf("the first backup got %d holders, could not ask %v", len(first), couldNotAsk)
 	}
-	second, couldNotAsk := HoldersFromPairedMachines(machines, "EMyIdentity", HoldingPolicy{}, a.Client())
+	second, couldNotAsk := HoldersFromPairedMachines(machines, "EMyIdentity", HoldingPolicy{}, a.Client(), nil)
 	if len(second) != 2 {
 		t.Fatalf("the second backup got %d holders, could not ask %v", len(second), couldNotAsk)
 	}
@@ -476,7 +476,7 @@ func TestThePairedMachinesBecomeHolders(t *testing.T) {
 		{AID: "EShutLaptop", URL: off.URL},
 		{AID: "ENoAddress"},
 	}
-	holders, couldNotAsk := HoldersFromPairedMachines(machines, "EMyIdentity", HoldingPolicy{}, a.Client())
+	holders, couldNotAsk := HoldersFromPairedMachines(machines, "EMyIdentity", HoldingPolicy{}, a.Client(), nil)
 
 	if len(holders) != 2 {
 		t.Fatalf("expected the two reachable machines to agree, got %d", len(holders))
@@ -835,5 +835,69 @@ func TestAnArchiveThatSaysNothingIsRefusedUnlessSomebodySaysOtherwise(t *testing
 		Mnemonic: testPhrase, AcceptUnattributed: true,
 	}); err != nil {
 		t.Fatalf("an old archive could not be opened even deliberately: %v", err)
+	}
+}
+
+// A machine that wants proof the owner asked gets it, when there is something
+// that can sign.
+//
+// The agent core cannot sign as the root identity — it refuses to, so that a
+// core cannot claim an authority it does not have. So this is given a way to
+// sign rather than taught to, and what actually signs is whatever holds the
+// root key.
+func TestAskingAMachineToHoldCarriesTheOwnersSignature(t *testing.T) {
+	var sawSig, sawStamp string
+	fussy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawSig = r.Header.Get("X-IA-Owner-Sig")
+		sawStamp = r.Header.Get("X-IA-Owner-Timestamp")
+		if sawSig == "" {
+			// What a remote paired machine does with an unsigned request.
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		holdings := &Holdings{DataDir: t.TempDir()}
+		var req AgreeToHold
+		json.NewDecoder(r.Body).Decode(&req)
+		agreed, err := holdings.Agree(req)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		json.NewEncoder(w).Encode(agreed)
+	}))
+	defer fussy.Close()
+
+	machines := []store.AdoptedAgent{{AID: "ELaptop", URL: fussy.URL}}
+
+	// Nothing to sign with: refused, and it says which kind of refusal it is.
+	_, couldNotAsk := HoldersFromPairedMachines(machines, "EMyIdentity", HoldingPolicy{},
+		fussy.Client(), nil)
+	if len(couldNotAsk) != 1 {
+		t.Fatalf("expected the machine to refuse, got %v", couldNotAsk)
+	}
+	if !strings.Contains(couldNotAsk[0].Why, "was not signed") {
+		t.Fatalf("the reason does not say the request was unsigned: %q", couldNotAsk[0].Why)
+	}
+
+	// With something that can sign, it agrees.
+	signed := func(method, path, timestamp string, body []byte) (string, error) {
+		if method != http.MethodPost || path != "/api/recovery/holdings" {
+			t.Fatalf("signed the wrong thing: %s %s", method, path)
+		}
+		if len(body) == 0 {
+			t.Fatal("signed a request with no body, so the body is not covered")
+		}
+		return "a-signature", nil
+	}
+	holders, couldNotAsk := HoldersFromPairedMachines(machines, "EMyIdentity", HoldingPolicy{},
+		fussy.Client(), signed)
+	if len(holders) != 1 {
+		t.Fatalf("a signed request was still refused: %v", couldNotAsk)
+	}
+	if sawSig == "" || sawStamp == "" {
+		t.Fatal("the request arrived without both the signature and its timestamp")
+	}
+	if _, err := time.Parse(time.RFC3339, sawStamp); err != nil {
+		t.Fatalf("the timestamp is not something a machine can check a window against: %q", sawStamp)
 	}
 }
