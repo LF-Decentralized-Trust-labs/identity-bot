@@ -13,6 +13,16 @@ class BackupDestination {
   final String? lastSuccessAt;
   final String? lastError;
 
+  /// Whether the owner has said this destination is not in the same place as
+  /// the machine backing up to it.
+  ///
+  /// Only a person can answer it. The agent knows what KIND of thing a
+  /// destination is and never where it physically sits, so a machine at a
+  /// relative's house and one on the same desk look identical to it — and two
+  /// copies in one room is a copy, not a backup, however healthy everything
+  /// else looks.
+  final bool elsewhere;
+
   BackupDestination({
     required this.id,
     required this.type,
@@ -21,6 +31,7 @@ class BackupDestination {
     this.pairedUrl,
     this.iaGated = false,
     this.enabled = true,
+    this.elsewhere = false,
     this.lastSuccessAt,
     this.lastError,
   });
@@ -34,6 +45,7 @@ class BackupDestination {
       pairedUrl: json['paired_url'],
       iaGated: json['ia_gated'] ?? false,
       enabled: json['enabled'] ?? true,
+      elsewhere: json['elsewhere'] ?? false,
       lastSuccessAt: json['last_success_at'],
       lastError: json['last_error'],
     );
@@ -46,6 +58,11 @@ class BackupDestination {
         if (localPath != null) 'local_path': localPath,
         if (pairedUrl != null) 'paired_url': pairedUrl,
         'ia_gated': iaGated,
+        // Sent back deliberately. This map is a whitelist and the agent
+        // decodes onto what it has stored, so a field left out of it is one
+        // the owner can never change — and for this one, only they can
+        // answer it at all.
+        'elsewhere': elsewhere,
         'enabled': enabled,
       };
 }
@@ -120,6 +137,17 @@ class BackupStatus {
   /// What is missing, in the core's own plain words, or null when nothing is.
   final String? protection;
 
+  /// What a fire, a burglary or a flood in one place would take, or null when
+  /// something would survive it.
+  ///
+  /// Its own field beside [protection] rather than folded into it, because
+  /// they answer different questions — losing a machine, losing a room — and
+  /// somebody can be fine on the first and ruined on the second. It also
+  /// carries the reason health goes yellow in the commonest arrangement there
+  /// is: a paired machine becomes a destination on its own, and two machines
+  /// in one room is what most people will have.
+  final String? localDisaster;
+
   final List<BackupRun> history;
 
   BackupStatus({
@@ -133,6 +161,7 @@ class BackupStatus {
     this.lastVerifiedAt,
     this.lastOffDeviceAt,
     this.protection,
+    this.localDisaster,
     this.history = const [],
   });
 
@@ -206,6 +235,7 @@ class BackupStatus {
       lastVerifiedAt: json['last_verified_at'],
       lastOffDeviceAt: json['last_off_device_at'],
       protection: json['protection'],
+      localDisaster: json['local_disaster'],
       history: (json['history'] as List<dynamic>? ?? const [])
           .map((h) => BackupRun.fromJson(h as Map<String, dynamic>))
           .toList(),
@@ -332,6 +362,52 @@ class HoldingOffer {
 
 class BackupService {
   static String get _base => '${AgentConfig.coreBaseUrl}/api/backup';
+  static String get _recovery => '${AgentConfig.coreBaseUrl}/api/recovery';
+
+  /// Who holds a share of this identity's recovery.
+  static Future<WhoHoldsYourRecovery> getWhoHoldsYourRecovery() async {
+    final resp = await http.get(Uri.parse('$_recovery/who-holds-this'));
+    if (resp.statusCode != 200) {
+      throw Exception('Could not read who holds your recovery: ${resp.statusCode}');
+    }
+    return WhoHoldsYourRecovery.fromJson(jsonDecode(resp.body));
+  }
+
+  /// Records who holds a share, and answers with what that choice costs.
+  ///
+  /// A refusal comes back as the agent's own sentence rather than a status
+  /// code, because everything refused here is refused for a reason somebody
+  /// can act on — a threshold nobody could ever satisfy, a holder named at an
+  /// email address, a passphrase standing alone. Showing "400" instead would
+  /// throw away the only useful part.
+  static Future<WhoHoldsYourRecovery> setWhoHoldsYourRecovery(
+      WhoHoldsYourRecovery choice) async {
+    final resp = await http.put(
+      Uri.parse('$_recovery/who-holds-this'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(choice.toJson()),
+    );
+    if (resp.statusCode != 200) {
+      throw Exception(_whyItWasRefused(resp.body, resp.statusCode));
+    }
+    return WhoHoldsYourRecovery.fromJson(jsonDecode(resp.body));
+  }
+
+  /// The agent's own explanation, or something honest when there is not one.
+  static String _whyItWasRefused(String body, int status) {
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map) {
+        for (final key in ['details', 'detail', 'error']) {
+          final v = decoded[key];
+          if (v is String && v.isNotEmpty) return v;
+        }
+      }
+    } catch (_) {
+      // Falls through to the status, which is all there is to say.
+    }
+    return 'Your Identity Agent would not save this setting ($status).';
+  }
 
   static Future<BackupStatus> getStatus() async {
     final resp = await http.get(Uri.parse('$_base/status'));
@@ -542,4 +618,80 @@ class BackupImpossible implements Exception {
   BackupImpossible(this.reason);
   @override
   String toString() => reason;
+}
+/// Who holds a share of this identity's recovery, and what that choice costs.
+///
+/// The recovery words alone used to open a backup, so anybody holding both
+/// read everything in it — offline, with their own code, and with nothing to
+/// notice it. A share is one piece of a second key, held by one person or one
+/// machine, and useless on its own.
+class WhoHoldsYourRecovery {
+  /// How many shares must come back before a backup opens. Zero with no
+  /// holders means the recovery words alone, which is a real answer.
+  final int needed;
+  final List<ShareHolder> holders;
+
+  /// What the agent says this choice costs, in the agent's own words.
+  ///
+  /// Shown verbatim and never rewritten here. Both apps ask the same question
+  /// and must give the same answer, and working out what a threshold of one
+  /// means is not a thing to reimplement twice.
+  final String sayThis;
+
+  WhoHoldsYourRecovery({
+    required this.needed,
+    required this.holders,
+    this.sayThis = '',
+  });
+
+  factory WhoHoldsYourRecovery.fromJson(Map<String, dynamic> json) =>
+      WhoHoldsYourRecovery(
+        needed: json['needed'] ?? 0,
+        holders: ((json['holders'] as List?) ?? [])
+            .map((h) => ShareHolder.fromJson(h as Map<String, dynamic>))
+            .toList(),
+        sayThis: json['say_this'] ?? '',
+      );
+
+  Map<String, dynamic> toJson() => {
+        'needed': needed,
+        'holders': holders.map((h) => h.toJson()).toList(),
+      };
+}
+
+/// One person or machine holding a share.
+class ShareHolder {
+  /// How this holder is named — its own identifier, never an email address or
+  /// a phone number. A holder reachable only at a handle is one an attacker
+  /// can take over, and a recovery approved through a hijacked mailbox looks
+  /// exactly like a genuine one.
+  final String id;
+
+  /// 'witness' for a person, 'device' for one of the owner's own machines,
+  /// 'passphrase' for something they know. For what the screen says rather
+  /// than for how any of it works.
+  final String kind;
+  final String publicKeyB64;
+  final String address;
+
+  ShareHolder({
+    required this.id,
+    required this.kind,
+    required this.publicKeyB64,
+    this.address = '',
+  });
+
+  factory ShareHolder.fromJson(Map<String, dynamic> json) => ShareHolder(
+        id: json['id'] ?? '',
+        kind: json['kind'] ?? '',
+        publicKeyB64: json['public_key_b64'] ?? '',
+        address: json['address'] ?? '',
+      );
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'kind': kind,
+        'public_key_b64': publicKeyB64,
+        if (address.isNotEmpty) 'address': address,
+      };
 }
