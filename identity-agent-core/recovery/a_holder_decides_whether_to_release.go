@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"identity-agent-core/authprovider"
 	"identity-agent-core/backup"
 )
 
@@ -70,6 +71,44 @@ type HoldingPolicy struct {
 	// somebody's agent this is the strong answer to gate three: a human sees
 	// that a request is wrong in a way no timer can.
 	RequireApproval bool `json:"require_approval"`
+	// ApproverMinimumScore is how well authenticated the person approving must
+	// themselves be, out of a hundred. Eighty is the minimum for a green
+	// badge and is the default everywhere.
+	//
+	// Adding somebody as a holder asks nothing of them — anybody can be named,
+	// including somebody who has never authenticated at all. VOUCHING is the
+	// other thing entirely: releasing a share is the act that lets a recovery
+	// finish, so whoever performs it should be established as themselves.
+	// Otherwise a stolen unlocked phone approves a recovery on its owner's
+	// behalf, and the human gate that was supposed to be the strong answer
+	// becomes the weakest thing in the chain.
+	//
+	// UNLIKE the authentication a REQUESTER reports, this is checkable. It is
+	// the holder's own agent measuring its own person, on its own machine, at
+	// the moment they press the button — not a number arriving in a request
+	// from somebody who chose it.
+	//
+	// Zero means the default rather than "no minimum". A holder that wanted no
+	// minimum would be one that lets anybody holding the device approve, and
+	// that is not a thing to arrive at by leaving a field out.
+	ApproverMinimumScore int `json:"approver_minimum_score,omitempty"`
+}
+
+// GreenBadge is the score everything starts at, and the minimum for a green
+// badge: eighty out of a hundred.
+//
+// The same number as signing in to anything holding sensitive data, and
+// deliberately so. Approving somebody else's recovery is at least as
+// consequential as opening your own identity, so it does not get a lower bar
+// than the one already set for that.
+const GreenBadge = 80
+
+// MinimumToApprove is what this policy actually requires of an approver.
+func (p HoldingPolicy) MinimumToApprove() int {
+	if p.ApproverMinimumScore <= 0 {
+		return GreenBadge
+	}
+	return p.ApproverMinimumScore
 }
 
 // AskRecord is what this holder remembers about ONE ATTEMPT to recover.
@@ -137,6 +176,26 @@ func (e *ErrNeedsApproval) Error() string {
 	return "somebody needs to approve this recovery before this share is released"
 }
 
+// ErrApproverNotAuthenticated says whoever is approving has not established
+// that they are themselves.
+type ErrApproverNotAuthenticated struct {
+	Needed int
+	Got    int
+	// Measured distinguishes "we asked and they scored badly" from "nobody
+	// asked", which are different problems with different answers.
+	Measured bool
+}
+
+func (e *ErrApproverNotAuthenticated) Error() string {
+	if !e.Measured {
+		return "nothing here can establish who is approving this, and approving somebody " +
+			"else's recovery needs that"
+	}
+	return fmt.Sprintf(
+		"whoever is approving this is authenticated to %d, and approving somebody else's "+
+			"recovery needs %d", e.Got, e.Needed)
+}
+
 // Holder is this machine's side of holding shares for other identities.
 type Holder struct {
 	DataDir string
@@ -144,6 +203,15 @@ type Holder struct {
 	// becomes an event the owner hears about rather than one they never do. A
 	// holder that cannot notify still records and still waits.
 	Notify func(identityAID string, firstAsk bool)
+
+	// WhoIsHere answers how well authenticated the person at THIS machine is,
+	// which is the one authentication claim a holder can actually check.
+	//
+	// Absent, nobody can be established, so nobody can approve. That direction
+	// is deliberate: an agent with no way to tell who is present should refuse
+	// to let them vouch for somebody else's recovery rather than assume the
+	// best about whoever is holding the device.
+	WhoIsHere func() authprovider.Result
 
 	mu sync.Mutex
 }
@@ -296,6 +364,17 @@ func boolToInt(b bool) int {
 }
 
 func (h *Holder) Approve(identityAID, holderID string, now time.Time) error {
+	// Who is approving, before anything is written down.
+	//
+	// Adding a holder asks nothing of them; vouching is what lets a recovery
+	// finish. So the person pressing this must be established as themselves —
+	// otherwise a stolen unlocked phone approves a recovery on its owner's
+	// behalf, and the human gate meant to be the strong answer becomes the
+	// weakest thing in the chain.
+	if err := h.whoeverIsApproving(holderID, identityAID); err != nil {
+		return err
+	}
+
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	record, err := h.load(identityAID, holderID)
@@ -445,4 +524,31 @@ func (h *Holder) save(r *AskRecord) error {
 		return err
 	}
 	return os.Rename(tmp, path)
+}
+
+// whoeverIsApproving refuses an approval from somebody this machine cannot
+// establish.
+func (h *Holder) whoeverIsApproving(holderID, identityAID string) error {
+	holding, err := (&Holdings{DataDir: h.DataDir}).Find(identityAID, holderID)
+	if err != nil {
+		return err
+	}
+	needed := GreenBadge
+	if holding != nil {
+		needed = holding.Policy.MinimumToApprove()
+	}
+
+	if h.WhoIsHere == nil {
+		return &ErrApproverNotAuthenticated{Needed: needed, Measured: false}
+	}
+	who := h.WhoIsHere()
+	if !who.Measured {
+		return &ErrApproverNotAuthenticated{Needed: needed, Measured: false}
+	}
+	if who.Score < needed {
+		return &ErrApproverNotAuthenticated{
+			Needed: needed, Got: who.Score, Measured: true,
+		}
+	}
+	return nil
 }
