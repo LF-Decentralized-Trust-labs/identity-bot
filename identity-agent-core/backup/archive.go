@@ -151,23 +151,17 @@ func (c *Collector) CreateArchive(opts CollectOptions, req ExportRequest) (*Expo
 	// where to reach them, the duress policy a blank machine must be able to
 	// consult before asking anyone, and the wraps that k shares reassemble.
 	if len(req.Split.Holders) > 0 {
-		// The other ways into an archive are refused rather than dropped.
+		// A passphrase or a guardian slot alongside shares is refused rather
+		// than dropped. Both would be a second independent way in, which is
+		// the one thing this design does not allow anywhere; making either of
+		// them a share instead is real work and is not done.
 		//
-		// The split path returns before any slot is written, so a caller that
-		// asked for a sealed recipient, a guardian slot or a passphrase got an
-		// archive where none of them exist — and no error. The export path
-		// always passes sealed recipients, so wiring a split into it would
-		// have silently produced archives that every destination meant to open
-		// them could not.
-		//
-		// Combining them is a real thing to build and is not built: a sealed
-		// slot would have to become one share among the rest rather than a
-		// second independent way in, which is the whole rule this design
-		// rests on. Until then, saying so beats quietly ignoring it.
-		if len(req.SealToPublicKeys) > 0 || len(req.GuardianSlots) > 0 || req.Passphrase != "" {
+		// Sealing is different, and is the case this whole path exists for —
+		// see below.
+		if len(req.GuardianSlots) > 0 || req.Passphrase != "" {
 			return nil, fmt.Errorf(
 				"this backup is protected by shares, which cannot yet be combined with " +
-					"a passphrase, a guardian slot, or sealing to another recipient")
+					"a passphrase or a guardian slot")
 		}
 		if req.Split.OnlyShareIsAPassphrase() {
 			// An attacker holds the file and can try every short secret
@@ -177,29 +171,36 @@ func (c *Collector) CreateArchive(opts CollectOptions, req ExportRequest) (*Expo
 				"a passphrase cannot be the only thing protecting this backup besides the " +
 					"recovery words: add a device or a person")
 		}
-		// A split archive needs the words at the moment it is written,
-		// because the key each combination of shares produces is combined
-		// with the key the words derive. That makes it incompatible with the
-		// sealed-export path, where a machine writes a backup for an identity
-		// whose seed it has never been told — and saying so here beats
-		// producing an archive that quietly is not split.
-		seed := req.BIP39Seed
-		if len(seed) == 0 && req.Mnemonic != "" {
-			seed, err = MnemonicToBIP39Seed(req.Mnemonic, "")
-			if err != nil {
-				return nil, err
-			}
-		}
-		if len(seed) == 0 {
-			return nil, fmt.Errorf(
-				"this backup is protected by shares as well as the recovery words, so it " +
-					"cannot be written by a machine that has never been told them")
-		}
-		seedKEK, err := DeriveBackupKEK(seed)
+
+		// THE FIRST FACTOR — the thing the shares are combined with.
+		//
+		// It used to be the key the recovery words derive, full stop, which
+		// meant only a machine that had been told the words could write a
+		// share-protected archive. A paired computer never is: it holds the
+		// owner's PUBLIC key so it can write backups it cannot read, and that
+		// is the point of it. So its archives could not be share-protected at
+		// all — and since the owner's sealing key comes from their seed, the
+		// words alone still opened them. The hole this design closes for a
+		// phone was left open for the computer beside it.
+		//
+		// So the first factor is now either of two things, and everything
+		// after this point is identical for both:
+		//
+		//   the words          — this machine knows them, and the key they
+		//                        derive is the factor
+		//   a sealed secret    — this machine does not, so it invents one and
+		//                        seals it to the owner. The owner reaches it
+		//                        from their own seed, and nobody else can.
+		//
+		// Either way the BODY key is in the shares and nowhere else, so a slot
+		// yields something useless on its own. That is the same arrangement
+		// the passphrase slot already documents for AND.
+		firstFactor, slots, err := theFirstFactor(req)
 		if err != nil {
 			return nil, err
 		}
-		sealedShares, wraps, err := SplitTheWayIn(bek, seedKEK, req.Split)
+
+		sealedShares, wraps, err := SplitTheWayIn(bek, firstFactor, req.Split)
 		if err != nil {
 			return nil, err
 		}
@@ -218,22 +219,18 @@ func (c *Collector) CreateArchive(opts CollectOptions, req ExportRequest) (*Expo
 		if err != nil {
 			return nil, err
 		}
-		bootKEK, err := DeriveBootstrapKEK(seed)
-		if err != nil {
-			return nil, err
-		}
-		envCipher, envNonce, err := EncryptPayload(bootKEK, PadEnvelope(envPlain))
+		envCipher, envNonce, err := EncryptPayload(
+			DeriveBootstrapKEKFrom(firstFactor), PadEnvelope(envPlain))
 		if err != nil {
 			return nil, err
 		}
 		manifest.BootstrapB64 = EncodeB64(envCipher)
 		manifest.BootstrapNonceB64 = EncodeB64(envNonce)
-		// Stated rather than relied upon: returning here is what actually
-		// keeps slots off a split archive, since the slot-writing below is
-		// never reached. Removing the return DOES fail a test — the one that
-		// inspects a finished archive and refuses to find a slot in it.
-		manifest.KeySlots = nil
-		manifest.SlotPolicy = ""
+		// The slots carry the FIRST FACTOR, never the body key. Stated rather
+		// than relied upon: returning here is what keeps the ordinary
+		// slot-writing below from running.
+		manifest.KeySlots = slots
+		manifest.SlotPolicy = PolicyAND
 
 		return finishArchive(manifest, ciphertext, tiers, snapshotType)
 	}
@@ -442,11 +439,53 @@ func seedFrom(req OpenRequest) ([]byte, error) {
 	return MnemonicToBIP39Seed(req.Mnemonic, "")
 }
 
-func openBootstrapWith(seed []byte, manifest *Manifest) (*WhatTheWordsOpen, error) {
-	bootKEK, err := DeriveBootstrapKEK(seed)
+// firstFactorFrom recovers the secret the shares were combined with.
+//
+// The owner reaches it either way. When the words wrote the archive, the key
+// they derive IS the factor. When a machine that had never been told them
+// wrote it, the factor was sealed to the owner — and the key that opens that
+// seal comes from the same seed, so the person is asked for nothing extra.
+// What changed is that reaching it stopped being enough.
+func firstFactorFrom(seed []byte, manifest *Manifest) ([]byte, error) {
+	if len(manifest.KeySlots) == 0 {
+		return DeriveBackupKEK(seed)
+	}
+	priv, _, err := DeriveSealKeypair(seed)
 	if err != nil {
 		return nil, err
 	}
+	for _, slot := range manifest.KeySlots {
+		if slot.Type != SlotSealedX25519 {
+			continue
+		}
+		eph, err := DecodeB64(slot.EphemeralPubB64)
+		if err != nil {
+			continue
+		}
+		wrapped, err := DecodeB64(slot.WrappedBEKB64)
+		if err != nil {
+			continue
+		}
+		nonce, err := DecodeB64(slot.NonceB64)
+		if err != nil {
+			continue
+		}
+		if secret, err := UnsealBEK(priv, eph, wrapped, nonce); err == nil {
+			return secret, nil
+		}
+	}
+	// Indistinguishable from a wrong phrase, deliberately: an archive sealed
+	// to somebody else and an archive opened with the wrong words are the same
+	// answer to whoever is holding it.
+	return nil, fmt.Errorf("those words do not open this backup")
+}
+
+func openBootstrapWith(seed []byte, manifest *Manifest) (*WhatTheWordsOpen, error) {
+	firstFactor, err := firstFactorFrom(seed, manifest)
+	if err != nil {
+		return nil, err
+	}
+	bootKEK := DeriveBootstrapKEKFrom(firstFactor)
 	cipher, err := DecodeB64(manifest.BootstrapB64)
 	if err != nil {
 		return nil, fmt.Errorf("read the envelope: %w", err)
@@ -503,11 +542,11 @@ func OpenArchive(data []byte, req OpenRequest) (*PayloadBundle, *Manifest, error
 		if err != nil {
 			return nil, &arch.Manifest, err
 		}
-		seedKEK, err := DeriveBackupKEK(seed)
+		firstFactor, err := firstFactorFrom(seed, &arch.Manifest)
 		if err != nil {
 			return nil, &arch.Manifest, err
 		}
-		bek, err := ReassembleTheWayIn(seedKEK, req.Shares, env.SubsetWraps)
+		bek, err := ReassembleTheWayIn(firstFactor, req.Shares, env.SubsetWraps)
 		if err != nil {
 			// Enough shares that did not work is a DIFFERENT thing from too
 			// few, and saying "you need 2 of 3 and have 3" is both false and
@@ -738,4 +777,67 @@ func decryptBody(bek []byte, arch *ArchiveFile) (*PayloadBundle, error) {
 		return nil, fmt.Errorf("integrity check failed: %w", err)
 	}
 	return bundle, nil
+}
+
+// theFirstFactor produces the secret the shares are combined with, and any key
+// slots needed to reach it.
+//
+// Two cases, and which one applies is decided by what the machine writing the
+// backup actually holds rather than by a setting:
+//
+//   - It knows the recovery words. The key they derive IS the factor, and no
+//     slot is written, because a slot would be a second way to the same secret
+//     and this design has no second ways.
+//   - It does not. It invents a secret, seals it to the owner's public keys,
+//     and that is the factor. The owner reaches it from their own seed. This
+//     is what lets a paired computer — which is never told the words — write a
+//     backup that is share-protected and that it still cannot read.
+func theFirstFactor(req ExportRequest) (secret []byte, slots []KeySlot, err error) {
+	// Sealing decides, and it decides even when the words are also known.
+	//
+	// Taking the words whenever they are available would drop the recipients
+	// silently — the export path always passes them, so every archive it wrote
+	// would name recipients who could not open it. And sealing the
+	// words-derived key itself is not the answer either: that key has other
+	// uses, and handing it to a recipient gives them more than the one archive
+	// they were meant to reach.
+	//
+	// So: recipients present means an invented secret sealed to each of them,
+	// which gives every recipient exactly one archive and nothing else.
+	if len(req.SealToPublicKeys) == 0 {
+		seed := req.BIP39Seed
+		if len(seed) == 0 && req.Mnemonic != "" {
+			if seed, err = MnemonicToBIP39Seed(req.Mnemonic, ""); err != nil {
+				return nil, nil, err
+			}
+		}
+		if len(seed) == 0 {
+			return nil, nil, fmt.Errorf(
+				"this backup is protected by shares, so it needs either the recovery " +
+					"words or somebody to seal it to")
+		}
+		kek, err := DeriveBackupKEK(seed)
+		return kek, nil, err
+	}
+
+	secret, err = NewBEK()
+	if err != nil {
+		return nil, nil, err
+	}
+	for i, recipientPub := range req.SealToPublicKeys {
+		ephPub, wrapped, nonce, serr := SealBEK(recipientPub, secret)
+		if serr != nil {
+			return nil, nil, fmt.Errorf("seal to recipient %d: %w", i, serr)
+		}
+		slots = append(slots, KeySlot{
+			Type: SlotSealedX25519,
+			// AND, because opening this slot yields the first factor and not
+			// the archive. Anybody who reaches it still needs the shares.
+			Policy:          PolicyAND,
+			WrappedBEKB64:   EncodeB64(wrapped),
+			NonceB64:        EncodeB64(nonce),
+			EphemeralPubB64: EncodeB64(ephPub),
+		})
+	}
+	return secret, slots, nil
 }

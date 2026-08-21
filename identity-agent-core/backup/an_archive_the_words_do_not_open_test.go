@@ -296,13 +296,12 @@ func TestADamagedSplitArchiveIsStillCaught(t *testing.T) {
 	}
 }
 
-// Shares cannot yet be combined with the other ways into an archive, and that
-// is said rather than silently dropped.
+// A passphrase or a guardian slot alongside shares is refused, not dropped.
 //
-// The split path returns before any slot is written, so a caller asking for a
-// sealed recipient got an archive where none exists and no error — and the
-// export path always passes sealed recipients, so wiring a split in would have
-// produced archives every destination meant to open them could not.
+// Both would be a second independent way in, which this design does not allow
+// anywhere. Sealing is the exception and is tested separately: it is not a
+// second way in, it is how a machine that was never told the words provides
+// the first factor at all.
 func TestSharesCannotBeSilentlyCombinedWithTheOtherWaysIn(t *testing.T) {
 	_, split, _ := aSplitArchive(t, 3, 2)
 	bundle := &PayloadBundle{Sections: map[string][]byte{}}
@@ -313,7 +312,6 @@ func TestSharesCannotBeSilentlyCombinedWithTheOtherWaysIn(t *testing.T) {
 		what string
 		req  ExportRequest
 	}{
-		{"a sealed recipient", ExportRequest{SealToPublicKeys: [][]byte{make([]byte, 32)}}},
 		{"a passphrase", ExportRequest{Passphrase: "something"}},
 		{"a guardian slot", ExportRequest{GuardianSlots: []KeySlot{{Type: SlotGuardianMS}}}},
 	} {
@@ -388,5 +386,136 @@ func TestAFutureArchiveSaysToUpdateRatherThanToFindHolders(t *testing.T) {
 	var needs *ErrNeedsShares
 	if errors.As(err, &needs) {
 		t.Fatal("a future-format archive sent somebody looking for holders")
+	}
+}
+
+// A machine that was never told the recovery words can still write a backup
+// the words alone will not open.
+//
+// This is the paired-computer case, and it was the hole left open when shares
+// were built. A paired computer holds the owner's PUBLIC key so it can write
+// backups it cannot read — so it has no words to combine shares with, and its
+// archives could not be share-protected at all. Since the owner's sealing key
+// comes from their seed, the words alone still opened them: the exact failure
+// closed for the phone, still wide open for the computer beside it.
+func TestAMachineWithNoWordsWritesAnArchiveTheWordsAloneDoNotOpen(t *testing.T) {
+	// The owner's sealing key, which is what a paired machine is given.
+	ownerSeed, err := MnemonicToBIP39Seed(wordsForTest, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, ownerPub, err := DeriveSealKeypair(ownerSeed)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	split, privs := aSplitOf(t, 3, 2)
+	bundle := &PayloadBundle{Sections: map[string][]byte{}}
+	bundle.addSection("identity_state", []byte(`{"aid":"EMyComputer"}`))
+	bundle.addSection("credentials", []byte(`[{"secret":"what the computer holds"}]`))
+
+	// No mnemonic, no seed. Exactly what a paired computer has.
+	c := aCollectorForAnIdentity(t, "EMyComputer")
+	res, err := c.CreateArchive(CollectOptions{Tiers: []string{TierCritical}}, ExportRequest{
+		Tiers:            []string{TierCritical},
+		Bundle:           bundle,
+		SealToPublicKeys: [][]byte{ownerPub},
+		Split:            split,
+	})
+	if err != nil {
+		t.Fatalf("a machine with no words could not write a share-protected backup: %v", err)
+	}
+
+	// The owner's words alone are not enough — which they were before.
+	_, _, err = OpenArchive(res.Bytes, OpenRequest{Mnemonic: wordsForTest})
+	if err == nil {
+		t.Fatal("the owner's words alone opened the computer's backup")
+	}
+	var needs *ErrNeedsShares
+	if !errors.As(err, &needs) {
+		t.Fatalf("refused, but not in a way that says what is missing: %v", err)
+	}
+
+	// The words plus enough shares are.
+	env, _, err := OpenBootstrap(res.Bytes, OpenRequest{Mnemonic: wordsForTest})
+	if err != nil {
+		t.Fatalf("the owner could not open the envelope: %v", err)
+	}
+	byHolder := map[string]SealedShare{}
+	for _, s := range env.SealedShares {
+		byHolder[s.HolderID] = s
+	}
+	gathered := map[string][]byte{}
+	for _, id := range holderIDs(split.Holders)[:2] {
+		gathered[id] = openShare(t, privs[id], byHolder[id])
+	}
+	opened, _, err := OpenArchive(res.Bytes, OpenRequest{
+		Mnemonic: wordsForTest, Shares: gathered,
+	})
+	if err != nil {
+		t.Fatalf("the owner with two shares could not open it: %v", err)
+	}
+	if !strings.Contains(string(opened.Sections["credentials"]), "what the computer holds") {
+		t.Fatal("the computer's data did not come back")
+	}
+}
+
+// Somebody the archive was not sealed to cannot open it, shares or not.
+func TestAStrangerCannotOpenAMachineWrittenArchive(t *testing.T) {
+	ownerSeed, _ := MnemonicToBIP39Seed(wordsForTest, "")
+	_, ownerPub, err := DeriveSealKeypair(ownerSeed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	split, privs := aSplitOf(t, 3, 2)
+	bundle := &PayloadBundle{Sections: map[string][]byte{}}
+	bundle.addSection("identity_state", []byte(`{"aid":"EMyComputer"}`))
+
+	c := aCollectorForAnIdentity(t, "EMyComputer")
+	res, err := c.CreateArchive(CollectOptions{Tiers: []string{TierCritical}}, ExportRequest{
+		Tiers: []string{TierCritical}, Bundle: bundle,
+		SealToPublicKeys: [][]byte{ownerPub}, Split: split,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Every share, and the wrong words. The holders between them must not be
+	// able to open what they are protecting.
+	env, _, err := OpenBootstrap(res.Bytes, OpenRequest{Mnemonic: wordsForTest})
+	if err != nil {
+		t.Fatal(err)
+	}
+	byHolder := map[string]SealedShare{}
+	for _, s := range env.SealedShares {
+		byHolder[s.HolderID] = s
+	}
+	all := map[string][]byte{}
+	for _, id := range holderIDs(split.Holders) {
+		all[id] = openShare(t, privs[id], byHolder[id])
+	}
+	stranger := "zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong"
+	if _, _, err := OpenArchive(res.Bytes, OpenRequest{
+		Mnemonic: stranger, Shares: all,
+	}); err == nil {
+		t.Fatal("every share plus the wrong words opened the computer's backup")
+	}
+}
+
+// A machine with neither the words nor anybody to seal to is told so.
+func TestAMachineWithNothingToSealToIsRefused(t *testing.T) {
+	split, _ := aSplitOf(t, 3, 2)
+	bundle := &PayloadBundle{Sections: map[string][]byte{}}
+	bundle.addSection("identity_state", []byte(`{"aid":"E"}`))
+
+	c := aCollectorForAnIdentity(t, "EMyComputer")
+	_, err := c.CreateArchive(CollectOptions{Tiers: []string{TierCritical}}, ExportRequest{
+		Tiers: []string{TierCritical}, Bundle: bundle, Split: split,
+	})
+	if err == nil {
+		t.Fatal("a share-protected archive was written with no way to reach its first factor")
+	}
+	if !strings.Contains(err.Error(), "public key to seal to") {
+		t.Fatalf("refused without saying what is missing: %v", err)
 	}
 }

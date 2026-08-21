@@ -163,7 +163,8 @@ func UnpadEnvelope(padded []byte) ([]byte, error) {
 	return padded[4 : 4+n], nil
 }
 
-// DeriveBootstrapKEK derives the key that opens the bootstrap envelope.
+// DeriveBootstrapKEKFrom derives the key that opens the bootstrap envelope,
+// from whichever first factor this archive uses.
 //
 // Domain-separated from the backup KEK so that the key the words produce for
 // this envelope is not the key they produce for anything else. Both come from
@@ -175,16 +176,11 @@ func UnpadEnvelope(padded []byte) ([]byte, error) {
 // ciphertexts carry independent random nonces and reaching either key needs
 // the seed regardless. It stays because a key that encrypts two different
 // things is a thing to avoid on principle, not because something breaks.
-func DeriveBootstrapKEK(bip39Seed []byte) ([]byte, error) {
-	if len(bip39Seed) < 32 {
-		return nil, fmt.Errorf("bip39 seed must be at least 32 bytes")
-	}
-	r := hkdf.New(sha256.New, bip39Seed,
+func DeriveBootstrapKEKFrom(firstFactor []byte) []byte {
+	r := hkdf.New(sha256.New, firstFactor,
 		[]byte("identity-agent-bootstrap-salt-v1"),
 		[]byte("identity-agent/bootstrap-kek/v1"))
 	out := make([]byte, 32)
-	if _, err := r.Read(out); err != nil {
-		return nil, fmt.Errorf("hkdf bootstrap kek: %w", err)
-	}
-	return out, nil
+	r.Read(out)
+	return out
 }
