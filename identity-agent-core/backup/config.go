@@ -20,22 +20,31 @@ const (
 
 // Destination describes one backup target.
 type Destination struct {
-	ID            string          `json:"id"`
-	Type          DestinationType `json:"type"`
-	Label         string          `json:"label"`
-	LocalPath     string          `json:"local_path,omitempty"`
-	PairedURL     string          `json:"paired_url,omitempty"`
-	PairedRole    string          `json:"paired_role,omitempty"` // backup_only
-	CloudProvider string          `json:"cloud_provider,omitempty"`
-	CloudBucket   string          `json:"cloud_bucket,omitempty"`
-	CloudPrefix   string          `json:"cloud_prefix,omitempty"`
-	CloudEndpoint string          `json:"cloud_endpoint,omitempty"`
-	CloudRegion   string          `json:"cloud_region,omitempty"`
-	RemoteURL     string          `json:"remote_url,omitempty"`
-	CredentialID  string          `json:"credential_id,omitempty"`
-	IAGated       bool            `json:"ia_gated"` // true = requires working IA to retrieve
-	Enabled       bool            `json:"enabled"`
-	LastSuccessAt string          `json:"last_success_at,omitempty"`
+	ID         string          `json:"id"`
+	Type       DestinationType `json:"type"`
+	Label      string          `json:"label"`
+	LocalPath  string          `json:"local_path,omitempty"`
+	PairedURL  string          `json:"paired_url,omitempty"`
+	PairedRole string          `json:"paired_role,omitempty"` // backup_only
+	// Elsewhere is the owner saying this destination is not in the same place
+	// as the machine backing up to it.
+	//
+	// Only a person can answer this. Software knows what KIND of thing a
+	// destination is and never where it physically sits, so a paired machine
+	// at a relative's house and one on the same desk are identical from here.
+	// Left alone it stays false, which counts as "cannot tell" rather than as
+	// "here" — the difference being that the owner is asked rather than told.
+	Elsewhere     bool   `json:"elsewhere,omitempty"`
+	CloudProvider string `json:"cloud_provider,omitempty"`
+	CloudBucket   string `json:"cloud_bucket,omitempty"`
+	CloudPrefix   string `json:"cloud_prefix,omitempty"`
+	CloudEndpoint string `json:"cloud_endpoint,omitempty"`
+	CloudRegion   string `json:"cloud_region,omitempty"`
+	RemoteURL     string `json:"remote_url,omitempty"`
+	CredentialID  string `json:"credential_id,omitempty"`
+	IAGated       bool   `json:"ia_gated"` // true = requires working IA to retrieve
+	Enabled       bool   `json:"enabled"`
+	LastSuccessAt string `json:"last_success_at,omitempty"`
 	// LastFullAt is when this destination last received an archive that
 	// restores on its own.
 	//
