@@ -213,6 +213,15 @@ func (s *Service) exportWithReason(mnemonic, seedB64, passphrase, destPath strin
 		return nil, err
 	}
 
+	// The stored configuration, for the two things a scheduled run cannot be
+	// told at the moment it happens: who may open an archive, and who holds a
+	// share of the recovery.
+	storedCfg, cerr := s.ConfigStore.LoadConfig()
+	if cerr != nil {
+		s.recordFailure(opts.Tiers, cerr, time.Since(start))
+		return nil, cerr
+	}
+
 	// Recipients configured once, at pairing, are what let a scheduled backup
 	// run unattended: nobody is present to type a phrase at 3am, and an agent
 	// that had to store one to keep working would defeat the point.
@@ -256,6 +265,11 @@ func (s *Service) exportWithReason(mnemonic, seedB64, passphrase, destPath strin
 		ExternalPointers:     pointers,
 		DeltaStateDigestQB64: pendingState.ChainDigestQB64,
 		SealToPublicKeys:     sealTo,
+		// Who holds a share, as this identity chose. A scheduled backup runs
+		// with nobody present, so the stored choice is the only way it reaches
+		// an archive — passing it per-export would mean shares existed only
+		// when somebody was watching.
+		Split: storedCfg.Split,
 	})
 	if err != nil {
 		s.recordFailure(opts.Tiers, err, time.Since(start))

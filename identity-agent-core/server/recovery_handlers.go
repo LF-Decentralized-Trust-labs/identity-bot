@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"identity-agent-core/authprovider"
 	"identity-agent-core/backup"
 	"identity-agent-core/recovery"
 	"identity-agent-core/store"
@@ -44,6 +45,11 @@ func (s *CoreServer) mountRecoveryRoutes(r chi.Router) {
 		r.Get("/holdings", s.handleWhatThisMachineHolds)
 		r.Post("/holdings/approve", s.handleApproveShare)
 		r.Post("/holdings/stop", s.handleStopHolding)
+
+		// Who holds a share of THIS identity's recovery — the other side of
+		// holding, and the setting that makes any of it reachable.
+		r.Get("/who-holds-this", s.handleGetWhoHoldsYourRecovery)
+		r.Put("/who-holds-this", s.handleSetWhoHoldsYourRecovery)
 		r.Post("/share-requests", s.handleReleaseShare)
 	})
 }
@@ -80,6 +86,19 @@ func (s *CoreServer) holderPairFor() *holderPair {
 		pair.holdings = &recovery.Holdings{DataDir: s.DataDir}
 		pair.holder = &recovery.Holder{
 			DataDir: s.DataDir,
+			// How well established the person at THIS machine is, which is the
+			// one authentication claim a holder can actually check — its own
+			// agent measuring its own person, rather than a number arriving in
+			// a request from somebody who chose it.
+			WhoIsHere: func() authprovider.Result {
+				res, err := s.recoveryService().Authenticator.Authenticate()
+				if err != nil {
+					// A provider that could not answer is not a provider that
+					// found nothing. Unmeasured, which fails every minimum.
+					return authprovider.Unmeasured(err.Error())
+				}
+				return res
+			},
 			Notify: func(identityAID string, first bool) {
 				// Somebody is recovering an identity this machine helps
 				// protect, and the owner is told.

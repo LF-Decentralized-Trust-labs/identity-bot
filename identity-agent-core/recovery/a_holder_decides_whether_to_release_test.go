@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"crypto/rand"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"identity-agent-core/authprovider"
 	"identity-agent-core/backup"
 )
 
@@ -39,7 +41,18 @@ func aHoldingOf(t *testing.T, policy HoldingPolicy) (*Holder, Holding, backup.Se
 		PrivateKeyB64: backup.EncodeB64(priv),
 		Policy:        policy,
 	}
-	return &Holder{DataDir: t.TempDir()}, holding, sealed, share
+	// A holder whose person is established as themselves, which is what
+	// approving somebody else's recovery requires. Tests that care about the
+	// requirement override this.
+	h := &Holder{
+		DataDir: t.TempDir(),
+		WhoIsHere: func() authprovider.Result {
+			return authprovider.Result{
+				Level: authprovider.LevelVerified, Score: GreenBadge, Measured: true,
+			}
+		},
+	}
+	return h, holding, sealed, share
 }
 
 // The wait cannot be skipped by asking again.
@@ -376,5 +389,89 @@ func TestSomebodyElseCannotResetTheOwnersWaitOrApproval(t *testing.T) {
 	}
 	if len(got) == 0 {
 		t.Fatal("nothing came back")
+	}
+}
+
+// Vouching for somebody's recovery requires being established as yourself.
+//
+// Adding a holder asks nothing of them — anybody can be named, including
+// somebody who has never authenticated at all. Releasing a share is the other
+// thing entirely: it is the act that lets a recovery finish, so whoever
+// performs it should be who they say they are. Otherwise a stolen unlocked
+// phone approves a recovery on its owner's behalf, and the human gate meant to
+// be the strong answer becomes the weakest thing in the chain.
+func TestApprovingSomebodyElsesRecoveryNeedsAGreenBadge(t *testing.T) {
+	h, holding, sealed, want := aHoldingOf(t, HoldingPolicy{RequireApproval: true})
+	start := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
+	if _, err := h.Release(holding, sealed, start); !errors.As(err, new(*ErrNeedsApproval)) {
+		t.Fatalf("expected it to wait for a person: %v", err)
+	}
+
+	// Somebody holding the device who is not established as themselves.
+	h.WhoIsHere = func() authprovider.Result {
+		return authprovider.Result{Score: GreenBadge - 1, Measured: true}
+	}
+	err := h.Approve(holding.IdentityAID, holding.HolderID, start)
+	var notMe *ErrApproverNotAuthenticated
+	if !errors.As(err, &notMe) {
+		t.Fatalf("a recovery was approved by somebody nobody had established: %v", err)
+	}
+	if notMe.Needed != GreenBadge {
+		t.Fatalf("the requirement is %d, not the green badge", notMe.Needed)
+	}
+
+	// And once they are.
+	h.WhoIsHere = func() authprovider.Result {
+		return authprovider.Result{Score: GreenBadge, Measured: true}
+	}
+	if err := h.Approve(holding.IdentityAID, holding.HolderID, start); err != nil {
+		t.Fatalf("a green badge could not approve: %v", err)
+	}
+	got, err := h.Release(holding, sealed, start.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("approved and still refused: %v", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatal("the wrong share came back")
+	}
+}
+
+// Nobody measured is not the same as somebody measured badly.
+//
+// A zero score with nothing having asked means nobody was established, and an
+// agent with no way to tell who is present must refuse rather than assume the
+// best about whoever is holding the device.
+func TestNothingBeingAbleToTellWhoIsHereRefuses(t *testing.T) {
+	h, holding, sealed, _ := aHoldingOf(t, HoldingPolicy{RequireApproval: true})
+	h.Release(holding, sealed, time.Now())
+
+	h.WhoIsHere = nil
+	err := h.Approve(holding.IdentityAID, holding.HolderID, time.Now())
+	var notMe *ErrApproverNotAuthenticated
+	if !errors.As(err, &notMe) || notMe.Measured {
+		t.Fatalf("an unmeasured approver was let through, or reported as measured: %v", err)
+	}
+	if !strings.Contains(err.Error(), "establish who is approving") {
+		t.Fatalf("it does not say what is wrong: %v", err)
+	}
+
+	// A provider that answered and found nothing is a different sentence.
+	h.WhoIsHere = func() authprovider.Result {
+		return authprovider.Result{Score: 10, Measured: true}
+	}
+	err = h.Approve(holding.IdentityAID, holding.HolderID, time.Now())
+	if !strings.Contains(err.Error(), "authenticated to 10") {
+		t.Fatalf("a measured-but-low approver got the unmeasured message: %v", err)
+	}
+}
+
+// A policy that names no minimum gets the green badge, not no minimum.
+func TestLeavingTheMinimumOutMeansGreenRatherThanNothing(t *testing.T) {
+	if got := (HoldingPolicy{}).MinimumToApprove(); got != GreenBadge {
+		t.Fatalf("an unset minimum resolved to %d; leaving a field out must not mean "+
+			"anybody holding the device can approve", got)
+	}
+	if got := (HoldingPolicy{ApproverMinimumScore: 95}).MinimumToApprove(); got != 95 {
+		t.Fatalf("a chosen minimum was ignored: %d", got)
 	}
 }
