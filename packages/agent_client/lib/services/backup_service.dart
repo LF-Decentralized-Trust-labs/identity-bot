@@ -1,6 +1,8 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import '../config/agent_config.dart';
+import '../crypto/owner_signature.dart';
 
 class BackupDestination {
   final String id;
@@ -694,4 +696,148 @@ class ShareHolder {
         'public_key_b64': publicKeyB64,
         if (address.isNotEmpty) 'address': address,
       };
+}
+
+/// Setting up the machines somebody already has as share holders.
+///
+/// This lives in the app rather than in the agent, and that is not an
+/// arrangement anybody chose for convenience. Asking a machine to hold a share
+/// is owner-only, and THE AGENT CORE CANNOT PROVE IT IS THE OWNER: the root
+/// identity's key belongs to whatever the person carries, and the core refuses
+/// to sign as the root precisely so that it cannot claim an authority it does
+/// not have. So the request has to be made by the thing holding that key.
+///
+/// The agent says which machines exist; this signs and asks each one; the
+/// answers go back as the choice. Three steps, each in the place that can
+/// actually do it.
+class RecoveryHolderSetup {
+  /// Asks every paired machine to hold a share, and records those that agreed.
+  ///
+  /// A machine that refuses or cannot be reached is left out rather than
+  /// failing the whole thing — it is one holder fewer, which a threshold is
+  /// built to survive, and refusing to set anything up because a laptop was
+  /// closed would be the worse outcome by a distance. What went wrong with
+  /// each one comes back so a screen can say so, because a holder silently
+  /// missing from a backup is discovered during a recovery and not before.
+  static Future<HolderSetupResult> enrolPairedMachines({
+    required Uint8List ownerSeed,
+    required String identityAid,
+    int waitHours = 0,
+    bool requireApproval = false,
+  }) async {
+    final machines = await _pairedMachines();
+    final holders = <ShareHolder>[];
+    final couldNotAsk = <String, String>{};
+
+    for (final m in machines) {
+      final url = (m['url'] ?? '') as String;
+      final aid = (m['aid'] ?? '') as String;
+      if (url.isEmpty || aid.isEmpty) {
+        couldNotAsk[aid.isEmpty ? '(unnamed machine)' : aid] =
+            'there is no address to reach this machine at';
+        continue;
+      }
+      try {
+        final key = await _askOneMachine(
+          url: url,
+          ownerSeed: ownerSeed,
+          // One of the owner's OWN machines files the holding under this
+          // identity's AID: it already knows whose machine it is, so an
+          // identifier made to hide that would hide nothing from it. Somebody
+          // else's machine is the case that needs one.
+          identityAid: identityAid,
+          holderId: aid,
+          waitHours: waitHours,
+          requireApproval: requireApproval,
+        );
+        holders.add(ShareHolder(
+          id: aid,
+          kind: 'device',
+          publicKeyB64: key,
+          address: url,
+        ));
+      } catch (e) {
+        couldNotAsk[aid] = _plainly(e);
+      }
+    }
+    return HolderSetupResult(holders: holders, couldNotAsk: couldNotAsk);
+  }
+
+  static Future<List<Map<String, dynamic>>> _pairedMachines() async {
+    final resp = await http
+        .get(Uri.parse('${AgentConfig.coreBaseUrl}/api/pairing/agents'));
+    if (resp.statusCode != 200) {
+      throw Exception('Could not read which machines are paired.');
+    }
+    final decoded = jsonDecode(resp.body);
+    final list = decoded is List ? decoded : (decoded['agents'] as List? ?? []);
+    return list.cast<Map<String, dynamic>>();
+  }
+
+  static Future<String> _askOneMachine({
+    required String url,
+    required Uint8List ownerSeed,
+    required String identityAid,
+    required String holderId,
+    required int waitHours,
+    required bool requireApproval,
+  }) async {
+    const path = '/api/recovery/holdings';
+    final body = utf8.encode(jsonEncode({
+      'identity_aid': identityAid,
+      'holder_id': holderId,
+      'policy': {'wait_hours': waitHours, 'require_approval': requireApproval},
+    }));
+
+    final resp = await http.post(
+      Uri.parse('${url.replaceAll(RegExp(r'/+$'), '')}$path'),
+      headers: {
+        'Content-Type': 'application/json',
+        // What proves the owner asked. Without it a machine across a network
+        // answers 403 — correctly, because from its side the request is
+        // indistinguishable from a stranger's.
+        ...OwnerSignature.headers(
+          method: 'POST',
+          path: path,
+          body: body,
+          ownerSeed: ownerSeed,
+        ),
+      },
+      body: body,
+    );
+    if (resp.statusCode == 403 || resp.statusCode == 401) {
+      throw Exception('this machine did not accept your signature');
+    }
+    if (resp.statusCode != 200) {
+      throw Exception('this machine did not agree to hold a share');
+    }
+    final key = (jsonDecode(resp.body)['public_key_b64'] ?? '') as String;
+    if (key.isEmpty) {
+      // Without a key there is nothing to seal a share to, and carrying on
+      // would record a holder that could never take part.
+      throw Exception('this machine agreed but gave no key');
+    }
+    return key;
+  }
+
+  /// What to show somebody, with no address, port or errno in it.
+  static String _plainly(Object e) {
+    final s = e.toString().replaceFirst('Exception: ', '');
+    if (s.contains('SocketException') ||
+        s.contains('Connection') ||
+        s.contains('127.0.0.1')) {
+      return 'this machine could not be reached';
+    }
+    return s;
+  }
+}
+
+/// What came back from asking the machines somebody already has.
+class HolderSetupResult {
+  final List<ShareHolder> holders;
+
+  /// Which machines are not holding a share, and why — keyed by machine.
+  final Map<String, String> couldNotAsk;
+
+  HolderSetupResult({required this.holders, required this.couldNotAsk});
 }
