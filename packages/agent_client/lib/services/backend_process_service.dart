@@ -695,19 +695,46 @@ class BackendProcessService {
 
   /// Read the actual port from the .port file written by the Go backend.
   /// Returns the discovered port, or the default if the file doesn't exist yet.
+  /// Exposed for the test that locks this in. The rule it protects is easy to
+  /// re-break, because the wrong path looks perfectly reasonable.
+  @visibleForTesting
+  int debugDiscoverActualPort(String backendDir) => _discoverActualPort(backendDir);
+
   int _discoverActualPort(String backendDir) {
-    // The Go backend writes data/.port relative to its working directory
-    final portFile = File('$backendDir${Platform.pathSeparator}data${Platform.pathSeparator}.port');
-    try {
-      if (portFile.existsSync()) {
-        final content = portFile.readAsStringSync().trim();
-        final port = int.tryParse(content);
-        if (port != null && port > 0 && port < 65536) {
-          return port;
+    // Looked for where the backend actually writes it, which is its DATA
+    // directory — not a fixed path under the backend directory.
+    //
+    // Those were the same thing while every installation kept one identity in
+    // one place. They stopped being the same when each identity got its own
+    // directory: the data directory is then handed over from outside, the
+    // backend writes .port into that, and this went on reading a path that
+    // nothing had written since.
+    //
+    // What it cost is out of proportion to the mistake. The backend already
+    // steps forward when its port is taken and says so; this is how the app
+    // learns which port it settled on. Not finding the file, the app health
+    // checked the default port instead, got nothing because the backend was one
+    // or two ports along, and reported that its own backend had failed to
+    // start — on a machine where the only thing wrong was that something else
+    // held 5050.
+    final candidates = <String>[
+      if (dataDirOverride != null && dataDirOverride!.isNotEmpty)
+        dataDirOverride!,
+      '$backendDir${Platform.pathSeparator}data',
+    ];
+    for (final dir in candidates) {
+      final portFile = File('$dir${Platform.pathSeparator}.port');
+      try {
+        if (portFile.existsSync()) {
+          final content = portFile.readAsStringSync().trim();
+          final port = int.tryParse(content);
+          if (port != null && port > 0 && port < 65536) {
+            return port;
+          }
         }
+      } catch (e) {
+        debugPrint('[BackendProcess] Could not read .port in $dir: $e');
       }
-    } catch (e) {
-      debugPrint('[BackendProcess] Could not read .port file: $e');
     }
     return AgentConfig.defaultDesktopPort;
   }
