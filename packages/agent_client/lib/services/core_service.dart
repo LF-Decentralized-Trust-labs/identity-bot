@@ -2146,6 +2146,20 @@ class CoreService {
     /// There was one, and it talked to the machine directly without proving who
     /// was asking, so every organisation founded that way is now refused.
     String kind = 'individual',
+
+    /// The software this owner is willing to adopt, as hex launch measurements.
+    ///
+    /// An agent with no measurement policy refuses every sealed machine, by
+    /// design: read as "accept anything", a missing policy would make every
+    /// other check decorative. So something has to say which software is
+    /// acceptable, and until a signed list is published this is where it comes
+    /// from — the owner stating their own policy on an owner-only route.
+    ///
+    /// It does not make a measurement trustworthy. It records which value the
+    /// owner decided to accept. Where that value came from — a published list,
+    /// a build they ran themselves — is the question this cannot answer and
+    /// should not appear to.
+    List<String> acceptedMeasurements = const [],
   }) async {
     final response = await _client.post(
       Uri.parse('$baseUrl/api/pairing/adopt'),
@@ -2155,6 +2169,8 @@ class CoreService {
         'adoption_code': adoptionCode,
         if (ownerAid != null && ownerAid.isNotEmpty) 'owner_aid': ownerAid,
         'kind': kind,
+        if (acceptedMeasurements.isNotEmpty)
+          'accepted_measurements': acceptedMeasurements,
       }),
     );
     if (response.statusCode == 200) {
