@@ -83,6 +83,19 @@ type pairingBeginResponse struct {
 	Challenge string `json:"challenge"`
 }
 
+// foundedOwner is an identity offered as the owner of what this machine founds,
+// with everything needed to prove the offer rather than assert it.
+//
+// The same evidence the claim itself carries, because it is answering a question
+// of the same weight: an owner is named once, at inception, and can never be
+// replaced afterwards.
+type foundedOwner struct {
+	AID       string                   `json:"aid"`
+	PublicKey string                   `json:"public_key"`
+	KEL       []map[string]interface{} `json:"kel,omitempty"`
+	Signature string                   `json:"signature,omitempty"`
+}
+
 type pairingCompleteRequest struct {
 	// DipEvent is the delegated inception the controller issued over the key
 	// material from begin.
@@ -93,6 +106,20 @@ type pairingCompleteRequest struct {
 	// Such an identity incepts its own root instead and names its owner in that
 	// event — see FoundAsRoot.
 	DipEvent map[string]interface{} `json:"dip_event"`
+	// FoundedOwner names a DIFFERENT identity as the owner of what this machine
+	// founds, rather than reusing the identity that claimed it.
+	//
+	// Those are two questions and they were being answered with one value. The
+	// claim says which party the machine was reserved for; the seal says who
+	// the founded identity answers to, for ever. Whoever provisioned the
+	// machine was told the first, so sealing it as the second lets them
+	// recognise their own customer in a published inception event — which is
+	// the correlation the pairwise scheme exists to prevent, handed to the one
+	// party sealed hardware exists to exclude. See ADR-038.
+	//
+	// Absent, the claimant is the owner. A computer somebody pairs from its own
+	// screen told nobody anything, so there is nobody to correlate against.
+	FoundedOwner *foundedOwner `json:"founded_owner,omitempty"`
 	// FoundAsRoot asks this instance to found an identity of its own, naming
 	// who owns it, rather than become somebody's delegated agent.
 	//
@@ -396,6 +423,15 @@ func (s *CoreServer) handlePairingComplete(w http.ResponseWriter, r *http.Reques
 		foundedWitnessed bool
 	)
 
+	// Who the founded identity answers to, decided once so the inception and
+	// the sealed authority cannot disagree. Defaults to the claimant, which is
+	// a computer somebody paired from its own screen: it told nobody anything,
+	// so there is nobody who could correlate it. See ADR-038.
+	ownerAID, ownerPublicKey := req.OwnerAID, req.OwnerPublicKey
+	if req.FoundedOwner != nil {
+		ownerAID, ownerPublicKey = req.FoundedOwner.AID, req.FoundedOwner.PublicKey
+	}
+
 	if req.FoundAsRoot {
 		if req.OwnerAID == "" {
 			writeError(w, http.StatusBadRequest, "This identity needs an owner",
@@ -445,7 +481,7 @@ func (s *CoreServer) handlePairingComplete(w http.ResponseWriter, r *http.Reques
 		result, ierr := s.KeriDriver.Incept(drivers.InceptionRequest{
 			PublicKey:     pairingState.offered.PublicKey,
 			NextPublicKey: pairingState.offered.NextPublicKey,
-			OwnerAID:      req.OwnerAID,
+			OwnerAID:      ownerAID,
 			Witnesses:     witnesses,
 			Toad:          toad,
 		})
@@ -537,8 +573,8 @@ func (s *CoreServer) handlePairingComplete(w http.ResponseWriter, r *http.Reques
 	// owner would be adopted and unadministrable — and a later, separate call
 	// to name the owner is a window somebody else could step into.
 	if err := s.SealOwnerAuthority(OwnerAuthority{
-		AID:       req.OwnerAID,
-		PublicKey: req.OwnerPublicKey,
+		AID:       ownerAID,
+		PublicKey: ownerPublicKey,
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "Could not seal the owner", err.Error())
 		return
@@ -587,8 +623,8 @@ func (s *CoreServer) handlePairingComplete(w http.ResponseWriter, r *http.Reques
 	clearLocalPairingOffer()
 
 	if req.FoundAsRoot {
-		log.Printf("[pairing] adopted: AID %s founded as its own root, owner %s",
-			identityAID, req.OwnerAID)
+		log.Printf("[pairing] adopted: AID %s founded as its own root, owner %s (claimed by %s)",
+			identityAID, ownerAID, req.OwnerAID)
 	}
 
 	// The identity is named as what it is. One founded as its own root is not
