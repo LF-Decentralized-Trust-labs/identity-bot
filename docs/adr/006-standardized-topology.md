@@ -133,14 +133,22 @@ always-on computer, and the only case for somebody who has no phone.
 
 | Grade | For | What the identity issues | Lifetime |
 |---|---|---|---|
-| **Delegated** | a machine somebody keeps — their laptop, an organisation's desktop | a delegated AID, anchored in the identity's key event log | until revoked; visible in the device list |
+| **Enrolled** | a machine somebody keeps — their laptop, an organisation's desktop | a pairwise owner identity, derived for that one machine, named in the seal of the controller's own inception | until the owner stops signing to it; visible in the device list |
 | **Scoped** | a machine somebody borrowed — a library, a hotel, a colleague's desk | a scoped authorisation over the controller's own public key | expires; nothing permanent is written |
 
-The distinction is not security theatre. A delegation is revocable and *visible*
-— it is in a log a third party can read — which is what you want for a machine
-that will still be yours next month. Writing one for a computer used once would
-put a permanent device on an identity for a session that ended the same
-afternoon, so the borrowed case is authorised without being enrolled.
+The distinction is not security theatre. An enrolled machine is one somebody
+will still be using next month, so it is worth a durable record; a computer used
+once should not leave a permanent device on an identity for a session that ended
+the same afternoon. So the borrowed case is authorised without being enrolled.
+
+**Neither grade issues a delegated identifier, and that is deliberate.** An
+earlier revision of this section said the enrolled grade got a delegated
+identifier anchored in the key event log. That repeats a mistake already
+corrected elsewhere: a delegated inception names its delegator in an event
+anybody can read, which publishes the one identifier the rest of the design
+works hardest to keep pairwise — and nothing ever read the delegator's log, so
+it bought nothing. A controller founds its own root and is named to an owner
+identity derived for that machine alone, exactly as a paired computer is.
 
 ### Rules
 
