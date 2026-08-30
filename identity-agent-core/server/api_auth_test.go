@@ -13,6 +13,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"identity-agent-core/login"
 	"identity-agent-core/store"
+
+	"identity-agent-core/asset"
 )
 
 func newAuthTestServer(t *testing.T) *CoreServer {
@@ -469,32 +471,56 @@ func TestNoHandlerUsesLoopbackAsTheOwnerTest(t *testing.T) {
 	}
 }
 
-// A publicRoutes entry only opens a route if its key is the exact pattern chi
-// matches, because classify does a string lookup and otherwise falls through to
-// owner-only. So an entry with the wrong path is worse than no entry: in review
-// it reads as the route having been deliberately opened, while the route
-// answers 403 to the party it exists for, logs nothing, and appears to work
-// only from loopback — where the caller is treated as the owner and so never
-// finds out.
+// An entry in publicRoutes or scopedRoutes only opens a route if its key is the
+// EXACT pattern chi matches. classify does a string lookup and otherwise falls
+// through to owner-only, so an entry with the wrong path is worse than no entry:
+// in review it reads as the route having been deliberately opened, while the
+// route answers 403 to the party it exists for, logs nothing, and appears to
+// work only from loopback — where the caller is treated as the owner and so
+// never finds out.
 //
-// These are the routes whose whole purpose is to be reachable by somebody who
-// is not the owner. Each is spelled here as its full mounted path.
-func TestRoutesForNonOwnersAreOpenAtTheirRealPaths(t *testing.T) {
-	for _, tc := range []struct{ method, pattern, who string }{
-		{"POST", "/api/assets/enrol", "a machine enrolling with the key it generated"},
-	} {
-		if got := classify(tc.method, tc.pattern); got != accessPublic {
-			t.Errorf("%s %s classified %q, so %s is refused before the handler runs",
-				tc.method, tc.pattern, got, tc.who)
-		}
+// This is checked against the ROUTER rather than against classify, because
+// classify agrees with whatever is written in the map. A test that asks
+// classify what it thinks confirms the typo instead of catching it — which is
+// how POST /api/enrol shipped owner-gated while two tests covering that exact
+// entry passed. Walking the router is the only version of this test that can
+// fail when the map is wrong.
+func TestEveryOpenRouteIsMountedWhereItSaysItIs(t *testing.T) {
+	s := newAuthTestServer(t)
+	// mountAssetRoutes returns early on a nil handler, so a bare server does not
+	// mount the very routes this test exists to check. The engine is nil because
+	// nothing is called — the router is walked, not served.
+	ah, err := asset.NewHandler(s.DataDir, nil)
+	if err != nil {
+		t.Fatalf("asset handler: %v", err)
 	}
-}
+	s.assetHandler = ah
 
-// And the mistake itself: the path that is NOT mounted must not be classified
-// public, or the entry has simply been duplicated rather than corrected.
-func TestTheUnmountedEnrolPathIsNotOpen(t *testing.T) {
-	if got := classify("POST", "/api/enrol"); got == accessPublic {
-		t.Error("/api/enrol is classified public, but nothing is mounted there — " +
-			"the stale entry was left behind")
+	mounted := map[string]bool{}
+	if err := chi.Walk(s.buildRouter(""),
+		func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+			mounted[method+" "+route] = true
+			return nil
+		}); err != nil {
+		t.Fatalf("walk: %v", err)
+	}
+	if len(mounted) < 100 {
+		t.Fatalf("only %d routes walked — the router did not build", len(mounted))
+	}
+
+	for _, m := range []struct {
+		name  string
+		table map[string]string
+	}{
+		{"publicRoutes", publicRoutes},
+		{"scopedRoutes", scopedRoutes},
+	} {
+		for key, why := range m.table {
+			if !mounted[key] {
+				t.Errorf("%s names %q, which nothing mounts — so it opens nothing "+
+					"and %q is refused 403 before its handler runs",
+					m.name, key, why)
+			}
+		}
 	}
 }
