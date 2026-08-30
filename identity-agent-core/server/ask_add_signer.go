@@ -157,8 +157,30 @@ func (addSignerAsk) Execute(s *CoreServer, ctx AskContext, d ScanDecision) (map[
 			"will not be able to write a backup anybody can restore", p.OrgAID, kerr)
 	}
 
+	// The identity this person will claim a machine with, minted now.
+	//
+	// A machine is told which identity may claim it BEFORE it starts, so that
+	// identity has to exist before anybody asks for a machine. This is the
+	// earliest moment this device is in the conversation at all, and minting it
+	// later -- at the moment of claiming -- produced a second, different
+	// identity that the machine had never been told to expect, so it refused
+	// its own owner and nothing about the flow could recover.
+	//
+	// Not fatal if it cannot be minted, for the same reason as the recovery key
+	// below: agreeing to own an organisation without ever renting a machine is
+	// an ordinary thing to do, and refusing here would leave an organisation
+	// with no owner at all, which cannot be repaired afterwards.
+	machineOwnerAID := ""
+	if aid, _, merr := s.mintAnIdentityToClaimAMachineWith(); merr == nil {
+		machineOwnerAID = aid
+	} else {
+		log.Printf("[sign_org] signing for %s without an identity to claim a machine with "+
+			"(%v) — founding on rented hardware will refuse until one exists", p.OrgAID, merr)
+	}
+
 	body, _ := json.Marshal(disclosureBody(fields, profile, map[string]string{
 		"pairwise_aid":               rel.PairwiseAID,
+		"machine_owner_aid":          machineOwnerAID,
 		"oobi":                       rel.RelayOOBI,
 		"vouch_sig":                  vouchSig,
 		"vouch_payload":              string(vouchPayload),

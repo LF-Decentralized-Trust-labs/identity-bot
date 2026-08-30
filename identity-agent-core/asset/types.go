@@ -176,13 +176,20 @@ type EmployeeInvite struct {
 // "employees") admits only Status == "active" entries. CredentialSAID records
 // the issued Employee-Authorization ACDC (set on approval).
 type Employee struct {
-	PairwiseAID    string `json:"pairwise_aid"`
-	Name           string `json:"name"`
-	Role           string `json:"role"`
-	Status         string `json:"status"` // "pending"|"active"|"revoked"
-	InviteToken    string `json:"invite_token,omitempty"`
-	CredentialSAID string `json:"credential_said,omitempty"`
-	OOBI           string `json:"oobi,omitempty"`
+	PairwiseAID string `json:"pairwise_aid"`
+	// MachineOwnerAID is the identity this person will claim a rented machine
+	// with, minted when they agreed rather than when they claim.
+	//
+	// A machine is told who may claim it before it starts, so the identity has
+	// to exist before anybody asks for one. Empty is ordinary: somebody may
+	// agree to own an organisation and never rent anything.
+	MachineOwnerAID string `json:"machine_owner_aid,omitempty"`
+	Name            string `json:"name"`
+	Role            string `json:"role"`
+	Status          string `json:"status"` // "pending"|"active"|"revoked"
+	InviteToken     string `json:"invite_token,omitempty"`
+	CredentialSAID  string `json:"credential_said,omitempty"`
+	OOBI            string `json:"oobi,omitempty"`
 	// IsSigner and the vouch: set when this member is a founding signer of the
 	// organisation.
 	// VouchSig is the individual's signature over {signer_aid, org_aid} — the
