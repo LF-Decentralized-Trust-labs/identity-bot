@@ -2,6 +2,8 @@ package server
 
 import (
 	"crypto/ed25519"
+	"identity-agent-core/asset"
+	"identity-agent-core/iacrypto"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -99,4 +101,27 @@ func TestAnUnprovenClaimIsNobody(t *testing.T) {
 	if len(cc.DelegationChain) != 0 {
 		t.Fatalf("an unproven caller was given a lineage: %v", cc.DelegationChain)
 	}
+}
+
+// enrolledMachineOf records a machine delegated from a named root, so a test
+// can say whose it is. The organisation fixture in asset_notify_test.go fixes
+// the root; an individual's differs only in that value.
+func enrolledMachineOf(t *testing.T, s *CoreServer, aid, rootAID string) ed25519.PrivateKey {
+	t.Helper()
+	seed := make([]byte, ed25519.SeedSize)
+	copy(seed, "a person's machine key, fixed for the test")
+	key := ed25519.NewKeyFromSeed(seed)
+
+	if err := s.assetHandler.Store.UpsertAsset(asset.Asset{
+		ID:              "asset-person-1",
+		DisplayName:     "a laptop this person controls their agent from",
+		AssetType:       "host",
+		PairwiseAID:     aid,
+		PublicKey:       iacrypto.VerkeyQB64(key.Public().(ed25519.PublicKey)),
+		DelegationModel: "delegated",
+		DelegatorAID:    rootAID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return key
 }

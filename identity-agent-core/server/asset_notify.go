@@ -44,7 +44,34 @@ const (
 // another endpoint, replayed later, or reused with a different body. Reusing it
 // rather than inventing a second format means there is one construction to get
 // right and one to review.
+// verifyAssetSignature identifies the machine AND spends the signature, so the
+// same request cannot be replayed into a second action. Callers that ACT on a
+// request use this one.
 func (s *CoreServer) verifyAssetSignature(r *http.Request) (*asset.Asset, error) {
+	found, err := s.identifyAssetFromSignature(r)
+	if err != nil {
+		return nil, err
+	}
+	// Spent last, so a bad signature cannot burn a good one by arriving first.
+	if rememberSignature(r.Header.Get(headerAssetSig), time.Now().UTC()) {
+		return nil, fmt.Errorf("this signed request has already been used")
+	}
+	return found, nil
+}
+
+// identifyAssetFromSignature answers WHO signed this request and spends nothing.
+//
+// Split out because caller resolution can run BEFORE the handler on the same
+// request — authorize() resolves the caller for a scoped route, and several
+// handlers resolve it themselves — and a resolver that spent the signature made
+// the handler's own verification fail with "this signed request has already
+// been used". Asking who was calling was enough to refuse them. The replay
+// protection has to sit at the point something is DONE, not at the point
+// somebody is recognised, or looking becomes the attack.
+//
+// Both callers still verify the signature in full. What differs is only which
+// of them burns it.
+func (s *CoreServer) identifyAssetFromSignature(r *http.Request) (*asset.Asset, error) {
 	if s.assetHandler == nil || s.assetHandler.Store == nil {
 		return nil, fmt.Errorf("this agent has no assets")
 	}
@@ -109,10 +136,6 @@ func (s *CoreServer) verifyAssetSignature(r *http.Request) (*asset.Asset, error)
 		return nil, fmt.Errorf("signature does not match the key %s enrolled with", claimedAID)
 	}
 
-	// Spent last, so a bad signature cannot burn a good one by arriving first.
-	if rememberSignature(sig, now) {
-		return nil, fmt.Errorf("this signed request has already been used")
-	}
 	return found, nil
 }
 

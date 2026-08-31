@@ -221,7 +221,7 @@ func (t tokenAwareResolver) Resolve(r *http.Request) sandbox.CallerContext {
 	// What it does buy immediately is an audit record that names the machine
 	// and its lineage to the owner, where there was previously a remote caller
 	// with no name at all.
-	if a, err := t.s.verifyAssetSignature(r); err == nil && a != nil {
+	if a, err := t.s.identifyAssetFromSignature(r); err == nil && a != nil {
 		cc.CallerAID = a.PairwiseAID
 		cc.AuthLevel = "signed_request"
 		cc.EnvelopeVerified = true
