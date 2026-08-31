@@ -200,6 +200,39 @@ func (t tokenAwareResolver) Resolve(r *http.Request) sandbox.CallerContext {
 		// An invalid token is a remote caller with no scopes — not the owner.
 		return cc
 	}
+
+	// A machine this identity enrolled, signing as itself.
+	//
+	// This is the seam caller_resolver.go describes and left empty — "when
+	// delegated-identity resolution is implemented it is injected via
+	// CoreServer.CallerResolver and fills the AID + granted scopes". The
+	// enrolment ceremony already anchors a delegated inception over a key the
+	// machine generated and records that key, so the agent has everything it
+	// needs to recognise the machine again. Nothing was asking.
+	//
+	// IT IDENTIFIES AND GRANTS NOTHING, and that separation is the whole point
+	// of doing it in this order. Scopes stay empty, so this changes what the
+	// agent KNOWS about a caller and not one thing about what any caller may
+	// reach: authorize() gives a scoped route to anyone holding any scope, so
+	// filling them here would quietly hand an enrolled machine the capability
+	// surface on the way past. What a controller may do is a decision, and it
+	// is a separate one from being able to tell who is asking.
+	//
+	// What it does buy immediately is an audit record that names the machine
+	// and its lineage to the owner, where there was previously a remote caller
+	// with no name at all.
+	if a, err := t.s.verifyAssetSignature(r); err == nil && a != nil {
+		cc.CallerAID = a.PairwiseAID
+		cc.AuthLevel = "signed_request"
+		cc.EnvelopeVerified = true
+		cc.Transport = "signed"
+		cc.DelegationChain = []string{a.PairwiseAID}
+		if a.DelegatorAID != "" {
+			cc.DelegationChain = append(cc.DelegationChain, a.DelegatorAID)
+		}
+		return cc
+	}
+
 	if isLocalOwnerRequest(r) {
 		cc.Remote = false
 		cc.CallerAID = "local-owner"
