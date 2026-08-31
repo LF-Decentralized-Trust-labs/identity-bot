@@ -212,3 +212,28 @@ func TestAnAIAgentsMachineGetsNoCeilingForSigningAHeader(t *testing.T) {
 		t.Fatalf("signing a header bought the capability ceiling %v", cc.Scopes)
 	}
 }
+
+// Identifying itself must not cost a machine the standing it had for being
+// local.
+//
+// Remote describes the connection; CallerAID describes who sent it. Setting
+// the second used to flip the first, so a host plug-in on this machine that
+// signed its requests was refused host_control — which structuralAuthorizer
+// denies to any remote caller — where signing nothing had been allowed.
+func TestSigningLocallyDoesNotMakeYouRemote(t *testing.T) {
+	s := notifyTestServer(t)
+	const aid = "EMACHINE-ONE"
+	key := enrolledMachine(t, s, aid)
+
+	req := signedAs(t, key, aid, http.MethodGet, "/api/identity")
+	req.RemoteAddr = "127.0.0.1:51000" // the same machine, signing anyway
+
+	cc := s.resolveCaller(req)
+	if cc.CallerAID != aid {
+		t.Fatalf("the machine was not recognised: %q", cc.CallerAID)
+	}
+	if cc.Remote {
+		t.Fatal("a request from this machine became remote because it said who it was, " +
+			"which costs it host_control at the gate")
+	}
+}

@@ -251,6 +251,20 @@ func (t tokenAwareResolver) Resolve(r *http.Request) sandbox.CallerContext {
 		// in another file rather than a reason. Not claiming what we do not
 		// have is the reason.
 		cc.AuthLevel = "signed_headers"
+
+		// Local stays local. Remote describes the CONNECTION — whether this
+		// arrived from somewhere else — and CallerAID describes who sent it.
+		// They are independent, and returning here without asking made a
+		// loopback request remote purely because it identified itself.
+		//
+		// That cost something real: structuralAuthorizer refuses host_control
+		// to any remote caller, so a host plug-in on this machine that signs
+		// its requests was denied where signing nothing had been allowed. Being
+		// able to say who you are should not take away standing you had for
+		// being where you are.
+		if isLocalOwnerRequest(r) {
+			cc.Remote = false
+		}
 		return cc
 	}
 
