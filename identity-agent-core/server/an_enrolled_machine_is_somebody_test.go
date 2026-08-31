@@ -51,9 +51,16 @@ func TestAnEnrolledMachineIsRecognisedAsItself(t *testing.T) {
 	if cc.CallerAID != aid {
 		t.Fatalf("the machine was not recognised: CallerAID = %q", cc.CallerAID)
 	}
-	if cc.AuthLevel != "signed_request" || !cc.EnvelopeVerified {
-		t.Errorf("a per-request signature was not recorded as one: AuthLevel=%q verified=%v",
-			cc.AuthLevel, cc.EnvelopeVerified)
+	// Recorded as what it is: a signature carried in headers.
+	if cc.AuthLevel != "signed_headers" {
+		t.Errorf("the signature was not recorded: AuthLevel = %q", cc.AuthLevel)
+	}
+	// And NOT as an envelope, which is documented to mean a fresh, non-replayed
+	// signed-request envelope. Claiming it would let enrichCallerFromIdentity
+	// hand an AI agent's machine a capability ceiling for signing a header.
+	if cc.EnvelopeVerified {
+		t.Error("a header signature was recorded as a verified envelope, which is " +
+			"the stronger proof this path does not have")
 	}
 
 	// The lineage, owner last. This is what lets an audit entry say "owner ->
@@ -127,4 +134,81 @@ func enrolledMachineOf(t *testing.T, s *CoreServer, aid, rootAID string) ed25519
 		t.Fatal(err)
 	}
 	return key
+}
+
+// Recognition must still grant nothing after the whole resolution chain has
+// run, not only after the resolver.
+//
+// ResolveEndpointCaller resolves, verifies any envelope, and then calls
+// enrichCallerFromIdentity — which looks up a provisioned agent's capability
+// ceiling and would fill Scopes. It bails here only because DelegationChain is
+// already set, so the "grants nothing" property currently rests on a guard
+// clause in another file rather than on anything that says so.
+//
+// This asserts the property where it has to hold. Without it, dropping or
+// reordering that guard hands an enrolled machine a capability ceiling and
+// nothing fails.
+func TestRecognitionGrantsNothingThroughTheWholeChain(t *testing.T) {
+	s := notifyTestServer(t)
+	const aid = "EMACHINE-ONE"
+	key := enrolledMachine(t, s, aid)
+
+	cc, err := s.ResolveEndpointCaller(
+		signedAs(t, key, aid, http.MethodGet, "/api/identity"), http.MethodGet, nil)
+	if err != nil {
+		t.Fatalf("resolution failed: %v", err)
+	}
+	if cc.CallerAID != aid {
+		t.Fatalf("the machine was not recognised through the chain: %q", cc.CallerAID)
+	}
+	if len(cc.Scopes) != 0 {
+		t.Fatalf("the full chain granted scopes %v to a machine that only proved who it is", cc.Scopes)
+	}
+	if cc.GrantSAID != "" {
+		t.Fatalf("a capability grant was attached: %q", cc.GrantSAID)
+	}
+}
+
+// An AI agent's machine gets no capability ceiling for signing a header.
+//
+// This is the case the host fixture above cannot show. enrichCallerFromIdentity
+// grants an envelope-proven caller the scopes of its provisioned agent, and
+// findAgentAssetByAID only matches assets of type ai_agent — so a host asset
+// never reaches it whatever the resolver claims, and the property looked safe
+// for the wrong reason.
+//
+// Claiming EnvelopeVerified here would have handed those scopes over for a
+// signature carried in headers. It bailed anyway, on an unrelated guard in
+// another file; this asserts it bails for the reason that is actually true.
+func TestAnAIAgentsMachineGetsNoCeilingForSigningAHeader(t *testing.T) {
+	s := notifyTestServer(t)
+	const aid = "EAI-AGENT-MACHINE"
+
+	seed := make([]byte, ed25519.SeedSize)
+	copy(seed, "an ai agent's machine key, for the test")
+	key := ed25519.NewKeyFromSeed(seed)
+	if err := s.assetHandler.Store.UpsertAsset(asset.Asset{
+		ID:              "asset-ai-1",
+		DisplayName:     "an AI agent acting in this identity's name",
+		AssetType:       "ai_agent",
+		PairwiseAID:     aid,
+		PublicKey:       iacrypto.VerkeyQB64(key.Public().(ed25519.PublicKey)),
+		DelegationModel: "delegated",
+		DelegatorAID:    "EORG-ROOT",
+		Capabilities:    []string{"send.email", "read.calendar"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	cc, err := s.ResolveEndpointCaller(
+		signedAs(t, key, aid, http.MethodGet, "/api/identity"), http.MethodGet, nil)
+	if err != nil {
+		t.Fatalf("resolution failed: %v", err)
+	}
+	if cc.CallerAID != aid {
+		t.Fatalf("the machine was not recognised: %q", cc.CallerAID)
+	}
+	if len(cc.Scopes) != 0 {
+		t.Fatalf("signing a header bought the capability ceiling %v", cc.Scopes)
+	}
 }

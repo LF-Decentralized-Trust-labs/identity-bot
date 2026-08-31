@@ -228,13 +228,29 @@ func (t tokenAwareResolver) Resolve(r *http.Request) sandbox.CallerContext {
 	// with no name at all.
 	if a, err := t.s.identifyAssetFromSignature(r); err == nil && a != nil {
 		cc.CallerAID = a.PairwiseAID
-		cc.AuthLevel = "signed_request"
-		cc.EnvelopeVerified = true
 		cc.Transport = "signed"
 		cc.DelegationChain = []string{a.PairwiseAID}
 		if a.DelegatorAID != "" {
 			cc.DelegationChain = append(cc.DelegationChain, a.DelegatorAID)
 		}
+		// AuthLevel and EnvelopeVerified are deliberately NOT set, and that is
+		// what keeps this from granting anything.
+		//
+		// Both are documented to mean something stronger than a header
+		// signature: EnvelopeVerified is "a valid, fresh, NON-REPLAYED
+		// signed-request envelope", and this path is a header signature that
+		// deliberately does not spend the replay slot. AuthLevel's
+		// "signed_request" means "token + a verified per-request signature",
+		// and there is no token here.
+		//
+		// It is not only a naming question. enrichCallerFromIdentity gives an
+		// envelope-proven caller the capability ceiling of its provisioned
+		// agent — so claiming an envelope here would hand an AI agent's machine
+		// a set of scopes by signing a header. It happens to bail today because
+		// a delegation chain is already set, which is an accident of ordering
+		// in another file rather than a reason. Not claiming what we do not
+		// have is the reason.
+		cc.AuthLevel = "signed_headers"
 		return cc
 	}
 
