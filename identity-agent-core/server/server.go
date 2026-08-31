@@ -772,6 +772,13 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		r.Get("/attestation", s.handlePublicAttestation)
 		r.Get("/keri/selftest", s.handleKeriSelfTest)
 
+		// Which machines may act for this identity. Owner-only by being
+		// unlisted, and that is load-bearing: an agent that could authorise its
+		// own controllers could be talked into authorising somebody else's.
+		r.Post("/controllers", s.handleGrantController)
+		r.Get("/controllers", s.handleListControllers)
+		r.Delete("/controllers/{aid}", s.handleRevokeController)
+
 		r.Post("/keystore/root-seed", s.handleSetRootSeed)
 		r.Get("/keystore/root-seed", s.handleRootSeedStatus)
 
