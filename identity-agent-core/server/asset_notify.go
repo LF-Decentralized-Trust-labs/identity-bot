@@ -37,13 +37,6 @@ const (
 	headerAssetAID       = "X-IA-Asset-AID"
 )
 
-// verifyAssetSignature returns the asset that signed this request.
-//
-// The canonical string is the same one the owner signs — method, path,
-// timestamp and a digest of the body — so a signature cannot be moved to
-// another endpoint, replayed later, or reused with a different body. Reusing it
-// rather than inventing a second format means there is one construction to get
-// right and one to review.
 // verifyAssetSignature identifies the machine AND spends the signature, so the
 // same request cannot be replayed into a second action. Callers that ACT on a
 // request use this one.
@@ -60,6 +53,12 @@ func (s *CoreServer) verifyAssetSignature(r *http.Request) (*asset.Asset, error)
 }
 
 // identifyAssetFromSignature answers WHO signed this request and spends nothing.
+//
+// The canonical string is the same one the owner signs — method, path,
+// timestamp and a digest of the body — so a signature cannot be moved to
+// another endpoint, replayed later, or reused with a different body. Reusing it
+// rather than inventing a second format means there is one construction to get
+// right and one to review.
 //
 // Split out because caller resolution can run BEFORE the handler on the same
 // request — authorize() resolves the caller for a scoped route, and several

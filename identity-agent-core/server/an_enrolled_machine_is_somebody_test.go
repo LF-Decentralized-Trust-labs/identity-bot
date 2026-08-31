@@ -22,7 +22,10 @@ import (
 // Identifying is not authorising. authorize() lets anybody holding any scope
 // reach a scoped route, so a resolver that filled in scopes here would hand
 // every enrolled machine the capability surface as a side effect of being
-// recognised. What a controller may DO is a decision, and a separate one.
+// recognised. What such a machine may DO is a decision, and a separate one.
+
+// signedAs builds a request signed by a machine's own key, as one arriving from
+// elsewhere.
 func signedAs(t *testing.T, key ed25519.PrivateKey, aid, method, path string) *http.Request {
 	t.Helper()
 	stamp := time.Now().UTC().Format(time.RFC3339)
@@ -103,18 +106,18 @@ func TestAnUnprovenClaimIsNobody(t *testing.T) {
 	}
 }
 
-// enrolledMachineOf records a machine delegated from a named root, so a test
-// can say whose it is. The organisation fixture in asset_notify_test.go fixes
-// the root; an individual's differs only in that value.
+// enrolledMachineOf records an asset delegated from a named root, so a test can
+// vary whose it is. enrolledMachine in asset_notify_test.go is this with the
+// root fixed.
 func enrolledMachineOf(t *testing.T, s *CoreServer, aid, rootAID string) ed25519.PrivateKey {
 	t.Helper()
 	seed := make([]byte, ed25519.SeedSize)
-	copy(seed, "a person's machine key, fixed for the test")
+	copy(seed, "a second machine's key, fixed for the test")
 	key := ed25519.NewKeyFromSeed(seed)
 
 	if err := s.assetHandler.Store.UpsertAsset(asset.Asset{
-		ID:              "asset-person-1",
-		DisplayName:     "a laptop this person controls their agent from",
+		ID:              "asset-2",
+		DisplayName:     "something this identity owns and delegated to",
 		AssetType:       "host",
 		PairwiseAID:     aid,
 		PublicKey:       iacrypto.VerkeyQB64(key.Public().(ed25519.PublicKey)),

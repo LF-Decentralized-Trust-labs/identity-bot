@@ -203,20 +203,25 @@ func (t tokenAwareResolver) Resolve(r *http.Request) sandbox.CallerContext {
 
 	// A machine this identity enrolled, signing as itself.
 	//
-	// This is the seam caller_resolver.go describes and left empty — "when
-	// delegated-identity resolution is implemented it is injected via
-	// CoreServer.CallerResolver and fills the AID + granted scopes". The
-	// enrolment ceremony already anchors a delegated inception over a key the
-	// machine generated and records that key, so the agent has everything it
-	// needs to recognise the machine again. Nothing was asking.
+	// This is the seam caller_resolver.go describes and left empty. The
+	// enrolment ceremony already records the key a machine generated, so this
+	// Identity Agent has everything it needs to recognise it again. Nothing was
+	// asking.
+	//
+	// ASSETS, NOT CONTROLLERS. What enrolment issues is a delegated identifier,
+	// which ADR-006 says a controller must never get: "A controller founds its
+	// own root and is named to an owner identity derived for that machine
+	// alone, exactly as a paired computer is." So this recognises the machines
+	// an identity OWNS and delegated to — where a published lineage is the
+	// point — and is not the controller ceremony, which is a different shape.
 	//
 	// IT IDENTIFIES AND GRANTS NOTHING, and that separation is the whole point
-	// of doing it in this order. Scopes stay empty, so this changes what the
-	// agent KNOWS about a caller and not one thing about what any caller may
-	// reach: authorize() gives a scoped route to anyone holding any scope, so
-	// filling them here would quietly hand an enrolled machine the capability
-	// surface on the way past. What a controller may do is a decision, and it
-	// is a separate one from being able to tell who is asking.
+	// of doing it in this order. Scopes stay empty, so this changes what is
+	// KNOWN about a caller and not one thing about what any caller may reach:
+	// authorize() gives a scoped route to anyone holding any scope, so filling
+	// them here would quietly hand an enrolled machine the capability surface
+	// on the way past. What such a machine may do is a decision, and a separate
+	// one from being able to tell who is asking.
 	//
 	// What it does buy immediately is an audit record that names the machine
 	// and its lineage to the owner, where there was previously a remote caller
