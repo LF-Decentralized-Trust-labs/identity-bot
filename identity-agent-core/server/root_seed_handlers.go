@@ -26,6 +26,17 @@ type rootSeedRequest struct {
 // handleSetRootSeed installs the mnemonic-derived root seed. Local owner only.
 // Idempotent for the same seed; a DIFFERENT established seed is refused — the
 // HD root of an identity must never silently rotate.
+// detectKeyProtection is the gate's view of this machine, behind a seam so the
+// refusal can be tested on any host.
+//
+// It used to call secureenclave.DetectCapability directly, and the test for the
+// refusal relied on the HOST being unable to answer — which was true on every
+// platform when this was written and is true on none of them now. A test whose
+// precondition is our own missing code stops testing anything the day that code
+// is written, and it stopped silently: the install simply succeeded and the
+// assertion about refusing never ran.
+var detectKeyProtection = secureenclave.DetectCapability
+
 func (s *CoreServer) handleSetRootSeed(w http.ResponseWriter, r *http.Request) {
 	// A MACHINE THAT ANSWERS TO SOMEBODY ELSE TAKES NO ROOT SEED. Ever.
 	//
@@ -98,7 +109,7 @@ func (s *CoreServer) handleSetRootSeed(w http.ResponseWriter, r *http.Request) {
 	// So a platform without a detector cannot hold a root key, and the way to
 	// change that is to write the detector rather than to widen the gate.
 	// Superseded 2026-08-19: unknown does NOT proceed.
-	switch cap := secureenclave.DetectCapability(); cap.Status {
+	switch cap := detectKeyProtection(); cap.Status {
 	case secureenclave.Absent, secureenclave.Present, secureenclave.Unknown:
 		// One way past this, and it is deliberately awkward to reach.
 		//

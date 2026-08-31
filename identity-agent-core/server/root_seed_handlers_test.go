@@ -35,11 +35,6 @@ func postSeed(s *CoreServer, seedB64 string, remote bool) *httptest.ResponseReco
 // The onboarding handoff installs the mnemonic-derived seed exactly once:
 // stored, then idempotent for the same seed, refused for a different one.
 func TestSetRootSeedLifecycle(t *testing.T) {
-	// This machine has no written enclave detector, so it reports unknown —
-	// and unknown no longer proceeds. The named override is the development
-	// path it exists for; what is under test here is the seed lifecycle, not
-	// the hardware gate.
-	t.Setenv(envAllowUnprotectedRootKey, "1")
 	s := rootSeedServer(t)
 	seed, err := backup.MnemonicToBIP39Seed(
 		"abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art", "")
@@ -73,11 +68,6 @@ func TestSetRootSeedLifecycle(t *testing.T) {
 
 // Keystore management is local-owner only; a tunneled request never reaches it.
 func TestSetRootSeedRemoteDenied(t *testing.T) {
-	// This machine has no written enclave detector, so it reports unknown —
-	// and unknown no longer proceeds. The named override is the development
-	// path it exists for; what is under test here is the seed lifecycle, not
-	// the hardware gate.
-	t.Setenv(envAllowUnprotectedRootKey, "1")
 	s := rootSeedServer(t)
 	seed := base64.StdEncoding.EncodeToString(make([]byte, 64))
 	if w := postSeed(s, seed, true); w.Code != http.StatusForbidden {
@@ -86,11 +76,6 @@ func TestSetRootSeedRemoteDenied(t *testing.T) {
 }
 
 func TestSetRootSeedRejectsBadInput(t *testing.T) {
-	// This machine has no written enclave detector, so it reports unknown —
-	// and unknown no longer proceeds. The named override is the development
-	// path it exists for; what is under test here is the seed lifecycle, not
-	// the hardware gate.
-	t.Setenv(envAllowUnprotectedRootKey, "1")
 	s := rootSeedServer(t)
 	if w := postSeed(s, "not-base64!!", false); w.Code != http.StatusBadRequest {
 		t.Fatalf("bad base64: %d", w.Code)
@@ -105,11 +90,6 @@ func TestSetRootSeedRejectsBadInput(t *testing.T) {
 
 // Status reports establishment without ever returning the seed.
 func TestRootSeedStatus(t *testing.T) {
-	// This machine has no written enclave detector, so it reports unknown —
-	// and unknown no longer proceeds. The named override is the development
-	// path it exists for; what is under test here is the seed lifecycle, not
-	// the hardware gate.
-	t.Setenv(envAllowUnprotectedRootKey, "1")
 	s := rootSeedServer(t)
 	get := func() map[string]any {
 		req := httptest.NewRequest(http.MethodGet, "/api/keystore/root-seed", nil)
@@ -136,9 +116,6 @@ func TestRootSeedStatus(t *testing.T) {
 // The recovery acceptance: phrase -> BIP39 seed -> handoff on a fresh device
 // re-derives the identical HD pairwise key.
 func TestPhraseAloneRederivesHDKeys(t *testing.T) {
-	// See the note in TestSetRootSeedLifecycle: unknown hardware no longer
-	// proceeds, and this test is about the derivation rather than the gate.
-	t.Setenv(envAllowUnprotectedRootKey, "1")
 	mnemonic := "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art"
 	seed, _ := backup.MnemonicToBIP39Seed(mnemonic, "")
 	b64 := base64.StdEncoding.EncodeToString(seed)
@@ -239,7 +216,20 @@ func TestNotKnowingIsNotAReasonToProceed(t *testing.T) {
 	seed, _ := backup.MnemonicToBIP39Seed(mnemonic, "")
 	b64 := base64.StdEncoding.EncodeToString(seed)
 
-	// No override: this machine has no written detector, so it reports unknown.
+	// The machine is MADE to answer unknown, rather than the test relying on
+	// this host being unable to answer.
+	//
+	// That reliance is what this line used to be, and it expired: every
+	// supported platform has a detector now, so on any of them the install
+	// simply succeeded and the assertions below never ran. A test whose
+	// precondition is our own missing code stops testing the day that code is
+	// written, and stops silently.
+	prev := detectKeyProtection
+	detectKeyProtection = func() secureenclave.Capability {
+		return secureenclave.NotImplemented("a platform nobody has taught this software to inspect")
+	}
+	t.Cleanup(func() { detectKeyProtection = prev })
+
 	s := rootSeedServer(t)
 	w := postSeed(s, b64, false)
 	if w.Code == http.StatusOK {
