@@ -2161,16 +2161,6 @@ class CoreService {
     /// should not appear to.
     List<String> acceptedMeasurements = const [],
 
-    /// Adopt a machine that cannot prove what it is.
-    ///
-    /// Off by default, so the safe direction is the one that happens when
-    /// nobody thought about it. A machine with no attestation may be perfectly
-    /// legitimate — a laptop has no such hardware — but it may equally be a
-    /// sealed one whose proof was stripped in transit, and those look identical
-    /// from here. Saying which has to be a deliberate act, which means somebody
-    /// has to be able to say it: the agent has always read this field, and no
-    /// app could send it, so an unattested machine could not be adopted at all.
-    bool allowUnattested = false,
   }) async {
     final response = await _client.post(
       Uri.parse('$baseUrl/api/pairing/adopt'),
@@ -2182,7 +2172,6 @@ class CoreService {
         'kind': kind,
         if (acceptedMeasurements.isNotEmpty)
           'accepted_measurements': acceptedMeasurements,
-        if (allowUnattested) 'allow_unattested': true,
       }),
     );
     if (response.statusCode == 200) {

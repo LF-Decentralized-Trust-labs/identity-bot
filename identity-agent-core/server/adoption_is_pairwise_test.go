@@ -29,7 +29,18 @@ import (
 // adoptingMachine stands in for a black box: it offers key material and records
 // what it is asked to become.
 func adoptingMachine(t *testing.T, got *pairingCompleteRequest) *httptest.Server {
+	return machineOffering(t, got, true)
+}
+
+// machineOffering is the same stand-in with its proof switchable, so a test can
+// ask for a machine that says nothing rather than getting one by accident.
+// Silence used to be this fixture's default and is now something to request.
+func machineOffering(t *testing.T, got *pairingCompleteRequest, proves bool) *httptest.Server {
 	t.Helper()
+	proof := ""
+	if proves {
+		proof = aBoxThatProvesItself(t, "DBOXKEY", "DBOXNEXTKEY", "DBOXBACKUPSIGNING")
+	}
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/api/provisioning/expect"):
@@ -39,9 +50,11 @@ func adoptingMachine(t *testing.T, got *pairingCompleteRequest) *httptest.Server
 			json.NewEncoder(w).Encode(map[string]any{"ok": true})
 		case strings.HasSuffix(r.URL.Path, "/api/pairing/begin"):
 			json.NewEncoder(w).Encode(pairingBeginResponse{
-				PairwiseAID:   "EBOXPAIRWISE",
-				PublicKey:     "DBOXKEY",
-				NextPublicKey: "DBOXNEXTKEY",
+				PairwiseAID:      "EBOXPAIRWISE",
+				PublicKey:        "DBOXKEY",
+				NextPublicKey:    "DBOXNEXTKEY",
+				BackupSigningKey: "DBOXBACKUPSIGNING",
+				Attestation:      proof,
 			})
 		case strings.HasSuffix(r.URL.Path, "/api/pairing/complete"):
 			if err := json.NewDecoder(r.Body).Decode(got); err != nil {
@@ -75,12 +88,17 @@ func adoptingOwner(t *testing.T) *CoreServer {
 	if sq, ok := s.DataStore.(*store.SQLiteStore); ok {
 		s.WitnessService = witness.NewService(witness.NewSQLiteStore(sq.DB()), sq, eng, "desktop")
 	}
+	// This owner accepts what the stand-in box proves. Every one of these tests
+	// used to send allow_unattested instead, so none of them exercised the
+	// check that now stands between an owner and a machine that will not say
+	// what it is.
+	acceptsThatBox(s)
 	return s
 }
 
 func adoptFrom(t *testing.T, s *CoreServer, url string) *httptest.ResponseRecorder {
 	t.Helper()
-	body := `{"box_url":"` + url + `","adoption_code":"code","allow_unattested":true}`
+	body := `{"box_url":"` + url + `","adoption_code":"code"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/pairing/adopt", strings.NewReader(body))
 	req.RemoteAddr = "127.0.0.1:1234"
 	rec := httptest.NewRecorder()
@@ -215,7 +233,7 @@ func TestAdoptionUsesTheIdentityMintedBeforeTheMachineExisted(t *testing.T) {
 	box := adoptingMachine(t, &sent)
 	defer box.Close()
 
-	body := `{"box_url":"` + box.URL + `","adoption_code":"code","allow_unattested":true,"owner_aid":"` + minted.AID + `"}`
+	body := `{"box_url":"` + box.URL + `","adoption_code":"code","owner_aid":"` + minted.AID + `"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/pairing/adopt", strings.NewReader(body))
 	req.RemoteAddr = "127.0.0.1:1234"
 	got := httptest.NewRecorder()
@@ -239,7 +257,7 @@ func TestAdoptionRefusesAnOwnerIdentityItNeverMinted(t *testing.T) {
 	box := adoptingMachine(t, &sent)
 	defer box.Close()
 
-	body := `{"box_url":"` + box.URL + `","adoption_code":"code","allow_unattested":true,"owner_aid":"ESOMETHINGWEDIDNOTMINT"}`
+	body := `{"box_url":"` + box.URL + `","adoption_code":"code","owner_aid":"ESOMETHINGWEDIDNOTMINT"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/pairing/adopt", strings.NewReader(body))
 	req.RemoteAddr = "127.0.0.1:1234"
 	got := httptest.NewRecorder()
@@ -251,17 +269,24 @@ func TestAdoptionRefusesAnOwnerIdentityItNeverMinted(t *testing.T) {
 	}
 }
 
-// A computer in front of you is paired the same way a sealed one is.
+// A computer in front of you is paired the same way a sealed one is — and it
+// still has to prove what it is.
 //
-// This is the point people get wrong, so it is asserted rather than left to be
-// inferred from the code having no branch. Where a computer physically sits
-// changes nothing about what it publishes: a laptop on a desk and a machine in
-// a data centre both found their own root and both name a pairwise owner.
+// The first half is the point people get wrong, so it is asserted rather than
+// left to be inferred from the code having no branch. Where a computer
+// physically sits changes nothing about what it publishes: a laptop on a desk
+// and a machine in a data centre both found their own root and both name a
+// pairwise owner.
 //
-// The only thing that differs is attestation — a laptop has no hardware that
-// can prove what it is, so pairing one is a deliberate act (AllowUnattested).
-// That is a statement about what the owner is willing to believe, not about
-// which identity shape the computer gets.
+// The second half is new, and it replaces what this test used to say. It used
+// to pair a machine offering NO attestation, on the reasoning that a laptop has
+// no hardware to prove itself with and pairing one is therefore a deliberate
+// act. That deliberate act was allow_unattested, and it is gone — so the case
+// this test was built on cannot happen, and asserting the shape alone would
+// leave it passing for the one reason it was written to rule out.
+//
+// So it asserts both: a machine that proves itself gets the same identity shape
+// wherever it sits, and one that proves nothing is refused wherever it sits.
 func TestAComputerInFrontOfYouIsPairedTheSameWayAsASealedOne(t *testing.T) {
 	s := adoptingOwner(t)
 	root, err := s.DataStore.GetIdentity()
@@ -269,14 +294,12 @@ func TestAComputerInFrontOfYouIsPairedTheSameWayAsASealedOne(t *testing.T) {
 		t.Fatal("fixture has no identity")
 	}
 
-	// No attestation offered at all — this stands in for an ordinary laptop or
-	// desktop, not a machine with hardware that can prove what it is.
 	var sent pairingCompleteRequest
-	plainComputer := adoptingMachine(t, &sent)
-	defer plainComputer.Close()
+	computer := adoptingMachine(t, &sent)
+	defer computer.Close()
 
-	if rec := adoptFrom(t, s, plainComputer.URL); rec.Code != http.StatusOK {
-		t.Fatalf("pairing an ordinary computer failed: %d %s", rec.Code, rec.Body.String())
+	if rec := adoptFrom(t, s, computer.URL); rec.Code != http.StatusOK {
+		t.Fatalf("pairing a computer that proved itself failed: %d %s", rec.Code, rec.Body.String())
 	}
 
 	if !sent.FoundAsRoot || sent.DipEvent != nil {
@@ -290,6 +313,17 @@ func TestAComputerInFrontOfYouIsPairedTheSameWayAsASealedOne(t *testing.T) {
 	}
 	if sent.OwnerAID == "" {
 		t.Fatal("no owner at all, so whoever reaches it first becomes its owner")
+	}
+
+	// And the same computer, offering nothing, is refused. Sitting on a desk
+	// was never what made a machine adoptable, and it is not what makes one
+	// unadoptable either — proving what it launched is.
+	var ignored pairingCompleteRequest
+	silent := machineOffering(t, &ignored, false)
+	defer silent.Close()
+
+	if rec := adoptFrom(t, s, silent.URL); rec.Code == http.StatusOK {
+		t.Fatal("a computer that proved nothing was adopted because it was in front of somebody")
 	}
 }
 
@@ -341,7 +375,7 @@ func TestWhatYouNowOwnIsRecordedAsAComputerOrAnOrganisation(t *testing.T) {
 		var sent pairingCompleteRequest
 		box := adoptingMachine(t, &sent)
 
-		body := `{"box_url":"` + box.URL + `","adoption_code":"code","allow_unattested":true`
+		body := `{"box_url":"` + box.URL + `","adoption_code":"code"`
 		if tc.asked != "" {
 			body += `,"kind":"` + tc.asked + `"`
 		}
@@ -378,7 +412,7 @@ func TestAKindNobodyRecognisesIsRefused(t *testing.T) {
 	box := adoptingMachine(t, &sent)
 	defer box.Close()
 
-	body := `{"box_url":"` + box.URL + `","adoption_code":"code","allow_unattested":true,"kind":"toaster"}`
+	body := `{"box_url":"` + box.URL + `","adoption_code":"code","kind":"toaster"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/pairing/adopt", strings.NewReader(body))
 	req.RemoteAddr = "127.0.0.1:1234"
 	rec := httptest.NewRecorder()
