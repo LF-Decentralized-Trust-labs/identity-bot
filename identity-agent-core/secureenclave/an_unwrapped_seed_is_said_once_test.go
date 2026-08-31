@@ -25,9 +25,13 @@ func TestAnUnwrappedSeedIsSaidOnceAndNotOncePerStore(t *testing.T) {
 		t.Skip("this machine cannot protect a key, so the warning correctly stays silent")
 	}
 
+	// Restored to stderr, not to nil. log.SetOutput(nil) leaves the default
+	// logger writing to a nil writer, which breaks every later test in the
+	// package that logs anything — and it did.
 	var out bytes.Buffer
+	prev := log.Writer()
 	log.SetOutput(&out)
-	t.Cleanup(func() { log.SetOutput(nil) })
+	t.Cleanup(func() { log.SetOutput(prev) })
 
 	// Reset, because another test in this package may already have spent it.
 	unwrappedSeedWarning = sync.Once{}
