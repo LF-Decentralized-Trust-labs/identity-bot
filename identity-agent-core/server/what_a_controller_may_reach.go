@@ -59,8 +59,52 @@ var controllerNeedsLevel = map[string]controllerRequirement{
 	// --- material an identity can be rebuilt from ---
 	// An archive plus a passphrase is the identity to whoever holds both, so
 	// pulling one out of this machine is close to taking the identity itself.
+	// Three doors to the same room, and raising only the one named "recovery"
+	// would have left the other two open.
 	"POST /api/recovery/retrieve": {authprovider.LevelHigh,
 		"an archive is the identity to anyone who can open it"},
+	"POST /api/backup/export": {authprovider.LevelHigh,
+		"an archive is the identity to anyone who can open it"},
+	"POST /api/backup/pull/{destID}": {authprovider.LevelHigh,
+		"this pulls back an archive, and an archive is the identity to anyone who can open it"},
+
+	// --- where this identity's archives go ---
+	// Not the identity itself, but the place copies of it are sent. Redirecting
+	// that is a quiet way to be handed every future backup, and it would not look
+	// like an attack in any log — which is exactly why it is raised.
+	"PUT /api/backup/config": {authprovider.LevelVerified,
+		"this decides where copies of this identity are sent"},
+	"POST /api/backup/destinations": {authprovider.LevelVerified,
+		"this adds a place copies of this identity are sent"},
+	"DELETE /api/backup/destinations/{id}": {authprovider.LevelVerified,
+		"removing a destination can leave this identity with nowhere it survives losing this machine"},
+	"POST /api/backup/credentials": {authprovider.LevelVerified,
+		"these are the credentials for the place copies of this identity are sent"},
+	"PUT /api/backup/offer": {authprovider.LevelVerified,
+		"this decides what this machine offers to hold for other people"},
+	"DELETE /api/backup/held/{identityAID}": {authprovider.LevelVerified,
+		"this destroys backups somebody else is relying on this machine to keep"},
+
+	// --- acting as the identity ---
+	// Signing arbitrary content IS the identity speaking, and unlike a credential
+	// it carries no shape anybody can reason about afterwards. It belongs with the
+	// strongest, beside the routes that replace keys.
+	"POST /api/sign": {authprovider.LevelHigh,
+		"this signs as the identity, and anything it signs cannot be unsaid"},
+	"POST /api/events/signature": {authprovider.LevelVerified,
+		"this attaches this identity's signature to an event"},
+
+	// --- what this identity says about other people ---
+	"POST /api/credential/issue": {authprovider.LevelVerified,
+		"issuing a credential is this identity making a claim other people will rely on"},
+	"POST /api/credentials/{said}/revoke": {authprovider.LevelVerified,
+		"revoking withdraws something other people are relying on"},
+
+	// --- the keys this identity holds for other services ---
+	"POST /api/vault/credentials": {authprovider.LevelVerified,
+		"these are the keys this identity holds for other services"},
+	"DELETE /api/vault/credentials/{service}": {authprovider.LevelVerified,
+		"removing a stored key can cut this identity off from a service it relies on"},
 
 	// --- what it takes to get back in ---
 	// The duress policy is the sharpest of these: it says what must happen if

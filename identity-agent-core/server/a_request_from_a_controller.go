@@ -144,11 +144,22 @@ func (s *CoreServer) theControllerBehind(r *http.Request) (ControllerGrant, auth
 	}
 
 	// Read the body to digest it, then put it back — the handler still needs it.
+	//
+	// A body over the limit is REFUSED, never truncated. Truncating would hand
+	// the handler a shortened body and check the signature against that same
+	// shortened copy, so the two would agree and the request would succeed while
+	// silently doing something other than what was sent — a transfer, a policy,
+	// a list, cut off at the limit with nothing reporting it.
 	var body []byte
 	if r.Body != nil {
-		body, err = io.ReadAll(io.LimitReader(r.Body, maxSignedBodyBytes))
+		body, err = io.ReadAll(io.LimitReader(r.Body, maxSignedBodyBytes+1))
 		if err != nil {
 			return none, unmeasured, fmt.Errorf("read body: %w", err)
+		}
+		if int64(len(body)) > maxSignedBodyBytes {
+			return none, unmeasured, fmt.Errorf(
+				"this request is larger than the %d bytes a signed request may carry",
+				maxSignedBodyBytes)
 		}
 		r.Body = io.NopCloser(bytes.NewReader(body))
 	}

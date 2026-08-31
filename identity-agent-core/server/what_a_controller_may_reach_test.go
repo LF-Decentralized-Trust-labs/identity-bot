@@ -402,3 +402,75 @@ func TestEveryActionClosedToASessionWasDecidedForAControllerToo(t *testing.T) {
 		}
 	}
 }
+
+// Being admitted is not being granted capability scopes.
+//
+// A controller reaches capability routes because it acts for the owner, but it
+// carries no capability grant and must not appear to. The near-identical mistake
+// has been made here before: a caller was admitted for holding a signature and
+// picked up an AI agent's ceiling on the way through.
+func TestAnAdmittedMachineCarriesNoCapabilityScopes(t *testing.T) {
+	s := newAuthTestServer(t)
+	aid, seed := anAuthorisedMachine(t, s, GradeEnrolled)
+
+	req := asThatMachine(t, aid, "POST", "/api/capabilities/send.email/invoke", `{}`,
+		seed, authprovider.LevelHigh, time.Now())
+	if got := s.resolveCaller(req).Scopes; len(got) != 0 {
+		t.Fatalf("an authorised machine resolved with scopes %v — it holds no capability "+
+			"grant, so anything it reaches must still be decided by the handler", got)
+	}
+}
+
+// A body larger than a signed request may carry is refused, not truncated.
+//
+// Truncating would check the signature against the same shortened copy the
+// handler then reads, so both would agree and the request would succeed while
+// doing something other than what was sent.
+func TestAnOversizedBodyIsRefusedRatherThanTruncated(t *testing.T) {
+	s := newAuthTestServer(t)
+	aid, seed := anAuthorisedMachine(t, s, GradeEnrolled)
+
+	big := strings.Repeat("x", int(maxSignedBodyBytes)+64)
+	req := asThatMachine(t, aid, "POST", "/api/profile", big, seed, "", time.Time{})
+
+	_, _, err := s.theControllerBehind(req)
+	if err == nil {
+		t.Fatal("an oversized body was accepted, so the handler reads a truncated " +
+			"request that the signature appears to cover")
+	}
+	if !strings.Contains(err.Error(), "larger than") {
+		t.Fatalf("refused for the wrong reason: %v", err)
+	}
+}
+
+// The routes that hand out or redirect this identity's archives are raised.
+//
+// Found by walking the router rather than by reading the list: three doors led
+// to the same room and only the one with "recovery" in its name had been raised.
+func TestEveryDoorToAnArchiveIsRaised(t *testing.T) {
+	for _, route := range []string{
+		"POST /api/recovery/retrieve",
+		"POST /api/backup/export",
+		"POST /api/backup/pull/{destID}",
+		"POST /api/sign",
+	} {
+		parts := strings.SplitN(route, " ", 2)
+		req, raised := theLevelThisActionNeeds(parts[0], parts[1])
+		if !raised || !req.Level.AtLeast(authprovider.LevelHigh) {
+			t.Errorf("%s is reachable without the strongest check (raised=%v level=%q)",
+				route, raised, req.Level)
+		}
+	}
+	// Where archives are SENT is raised too — redirecting it is a quiet way to
+	// be handed every future copy.
+	for _, route := range []string{
+		"PUT /api/backup/config",
+		"POST /api/backup/destinations",
+		"POST /api/backup/credentials",
+	} {
+		parts := strings.SplitN(route, " ", 2)
+		if _, raised := theLevelThisActionNeeds(parts[0], parts[1]); !raised {
+			t.Errorf("%s is reachable by any authorised machine", route)
+		}
+	}
+}
