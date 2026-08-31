@@ -64,6 +64,24 @@ func TestAbsentIsOnlyEverTheDeviceRegistersAnswer(t *testing.T) {
 	}
 }
 
+// A TPM that cannot do elliptic curves must still be reported usable.
+//
+// TPM 1.2 is RSA-only by specification, and some early 2.0 modules shipped
+// without NIST P-256. Those machines protect a key perfectly well, so asking
+// only for ECDSA_P256 would report Present on hardware that can hold a root
+// key — a refusal caused by our choice of algorithm rather than by the machine.
+//
+// This cannot be forced on a host whose TPM does support EC, so it verifies the
+// property that makes the fallback reachable: whatever this machine answered,
+// it was not decided by a single algorithm attempt.
+func TestAnRSAOnlyTPMIsNotReportedAsMerelyPresent(t *testing.T) {
+	cap := DetectCapability()
+	if cap.Status == Present && cap.Reason == "key_creation_refused" {
+		t.Error("Present was reached from one algorithm's refusal — " +
+			"an RSA-only TPM would be understated by that")
+	}
+}
+
 // Probing must not leave anything behind.
 //
 // The key is ephemeral, which on this platform matters more than tidiness: a
