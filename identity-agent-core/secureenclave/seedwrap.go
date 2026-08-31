@@ -92,6 +92,21 @@ func rootSeedPath(dataDir string) string {
 
 // StoreRootSeed persists the root keystore seed (64-byte BIP39-class seed),
 // wrapped under the platform hardware key when one is usable.
+// whyNotWrapped names which of the two gaps this build has, because the remedy
+// differs entirely: a wrapper nobody has written yet, or one that is there and
+// cannot get at the hardware.
+func whyNotWrapped() string {
+	w := platformSeedWrapper()
+	switch {
+	case w == nil:
+		return "no seed wrapper is compiled in for this platform"
+	case !w.Available():
+		return "the " + w.Scheme() + " wrapper is compiled in and cannot use the hardware"
+	default:
+		return "the wrapper reported itself available and the seed was stored unwrapped anyway"
+	}
+}
+
 func StoreRootSeed(dataDir string, seed []byte) error {
 	if len(seed) < 32 {
 		return fmt.Errorf("root seed must be at least 32 bytes")
@@ -102,6 +117,29 @@ func StoreRootSeed(dataDir string, seed []byte) error {
 	}
 
 	env := seedEnvelope{V: 1, Wrap: seedWrapNone, Blob: base64.StdEncoding.EncodeToString(toStore)}
+
+	// SAY WHICH ONE HAPPENED. Storing wrapped and storing in the clear look
+	// identical from outside this function, and the second is the failure
+	// everything upstream exists to prevent — so a machine that could have
+	// protected this seed and did not says so, once, at the moment it does it.
+	//
+	// The two questions are different and both are asked here. DetectCapability
+	// answers whether the HARDWARE can protect a key; the wrapper answers
+	// whether THIS BUILD uses it to protect the seed. A machine can pass the
+	// first and fail the second, which is the case this warns about: our gap,
+	// on somebody's hardware, and silent until now.
+	defer func() {
+		if env.Wrap != seedWrapNone {
+			return
+		}
+		if cap := DetectCapability(); cap.RootKeyPermitted() {
+			log.Printf("[keystore] this machine can protect a key (%s) and this build did "+
+				"not use it: the root seed is stored UNWRAPPED. Anyone who reads the file "+
+				"becomes this identity, permanently and undetectably. The hardware is not "+
+				"the gap here — %s", cap.String(), whyNotWrapped())
+		}
+	}()
+
 	if w := platformSeedWrapper(); w != nil && w.Available() {
 		blob, err := w.Wrap(toStore)
 		if err != nil {
