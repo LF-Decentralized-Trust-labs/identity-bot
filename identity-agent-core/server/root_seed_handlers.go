@@ -23,6 +23,17 @@ type rootSeedRequest struct {
 	SeedB64 string `json:"seed_b64"`
 }
 
+// detectKeyProtection is the gate's view of this machine, behind a seam so the
+// refusal can be tested on any host.
+//
+// It used to call secureenclave.DetectCapability directly, and the test for the
+// refusal relied on the HOST being unable to answer — which was true on every
+// platform when this was written and is true on none of them now. A test whose
+// precondition is our own missing code stops testing anything the day that code
+// is written, and it stopped silently: the install simply succeeded and the
+// assertion about refusing never ran.
+var detectKeyProtection = secureenclave.DetectCapability
+
 // handleSetRootSeed installs the mnemonic-derived root seed. Local owner only.
 // Idempotent for the same seed; a DIFFERENT established seed is refused — the
 // HD root of an identity must never silently rotate.
@@ -79,15 +90,34 @@ func (s *CoreServer) handleSetRootSeed(w http.ResponseWriter, r *http.Request) {
 	// a file, and whoever copies that file becomes its owner permanently, with
 	// nothing to detect and no rotation possible.
 	//
-	// It refuses only on a PROVEN answer. Unknown — a platform whose detector
-	// is not written yet, or a machine we could not read — is allowed through
-	// with a warning, because refusing on a non-measurement is precisely the
-	// defect the detector exists to end. Turning "we did not look" into "you
-	// may not use this software" would be the same wrong answer wearing
-	// authority. The warning is what makes the gap visible until the detectors
-	// land, at which point this tightens by itself.
-	switch cap := secureenclave.DetectCapability(); cap.Status {
-	case secureenclave.Absent, secureenclave.Present:
+	// Anything but a PROVEN usable answer refuses. Including unknown.
+	//
+	// Unknown used to pass with a warning, on the reasoning that refusing over
+	// a non-measurement turns "we did not look" into "you may not use this
+	// software". That reasoning is wrong here, and the reason it is wrong is
+	// the reason unknown is usually returned: not that the machine could not
+	// answer, but that the detector for this platform has not been written.
+	// That is our gap, and shipping onto a platform we have not taught this
+	// software to inspect is a decision to not know.
+	//
+	// The consequence of being wrong is total and permanent. A seed on a
+	// machine that cannot protect it is a file, and whoever copies that file
+	// becomes the identity, undetectably, with no rotation possible. There is
+	// no partial version of that failure to trade against the inconvenience of
+	// refusing.
+	//
+	// So a platform without a detector cannot hold a root key, and the way to
+	// change that is to write the detector rather than to widen the gate.
+	// Superseded 2026-08-19: unknown does NOT proceed.
+	//
+	// ASKED AS RootKeyPermitted, NOT AS A LIST OF STATUSES TO REFUSE. capability.go
+	// ships that method and enclave_detect.go says why: it is "the question
+	// everything downstream actually asks, so it is answered here rather than
+	// left to each caller to re-derive from the status and get subtly wrong."
+	// A list of bad statuses fails open — a fifth status added later, or a
+	// zero-value Capability whose Status is "", matches none of them and
+	// installs the seed. Asking for the one good answer cannot do that.
+	if cap := detectKeyProtection(); !cap.RootKeyPermitted() {
 		// One way past this, and it is deliberately awkward to reach.
 		//
 		// Hardware that can protect a key is not always available when the work
@@ -106,20 +136,20 @@ func (s *CoreServer) handleSetRootSeed(w http.ResponseWriter, r *http.Request) {
 		// counterparty deciding what to trust should be told, and because
 		// nothing that is only a log line survives contact with a busy month.
 		if allowUnprotectedRootKey() {
-			log.Printf("[keystore] WARNING: installing a root seed on a machine with NO hardware key "+
-				"protection (%s) because %s is set. Anyone who copies this file becomes this identity, "+
+			// "not proven to protect a key", never "NO hardware key protection".
+			// Most machines reaching this line are ones we could not READ, and
+			// capability.go is explicit that Unknown is "never to be rendered to
+			// a person as 'your device has no security hardware'". A log written
+			// by the file enforcing that rule should not be the thing that
+			// breaks it.
+			log.Printf("[keystore] WARNING: installing a root seed on a machine not proven to protect "+
+				"a key (%s) because %s is set. Anyone who copies this file becomes this identity, "+
 				"permanently and undetectably. Acceptable while waiting for hardware; not a way to run.",
 				cap.String(), envAllowUnprotectedRootKey)
-			break
+		} else {
+			jsonError(w, refusalFor(cap), http.StatusPreconditionFailed)
+			return
 		}
-		jsonError(w,
-			"this machine cannot protect a root key ("+cap.String()+"), so an identity stored here could be "+
-				"copied off it — put the root on a device with hardware key protection and pair this one to it",
-			http.StatusPreconditionFailed)
-		return
-	case secureenclave.Unknown:
-		log.Printf("[keystore] WARNING: installing a root seed on a machine whose key protection could not be determined (%s) — "+
-			"this is allowed because we did not check, not because we checked and approved", cap.String())
 	}
 	if !s.isOwner(r) {
 		jsonError(w, "keystore management is for the owner of this agent", http.StatusForbidden)

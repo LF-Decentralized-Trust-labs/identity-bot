@@ -46,7 +46,9 @@ The Linux detector asks "is it there" and "can I use it" as separate questions, 
 
 **Good.** A machine is no longer told it lacks hardware it has. Failures carry their platform error, so `errSecMissingEntitlement` is distinguishable from absent hardware. An unclassifiable device is a signal to learn from rather than a verdict.
 
-**Costly.** `Unknown` is a real state that callers must handle, and it is currently the answer on three platforms. Anything gated on hardware is therefore unavailable there until a detector exists — which is correct, because the alternative is gating on a guess.
+**Costly.** `Unknown` is a real state that callers must handle. Anything gated on hardware is unavailable while it is the answer — which is correct, because the alternative is gating on a guess.
+
+*Updated 2026-08-31: when this was written, `Unknown` was the answer on three of the five supported platforms and the cost above was mostly theoretical. Detectors have since been written for all of them, so `Unknown` now means a specific machine could not be read rather than a platform nobody had taught this software to inspect. The distinction matters to the wording of any refusal built on this: it is no longer safe to explain an unknown answer as a missing detector.*
 
 **Accepted risk.** Detection runs on the machine being detected, so a compromised host can lie about itself. That is unavoidable for local detection and is why remote attestation exists as a separate mechanism; this ADR is about not lying to ourselves in the ordinary case.
 

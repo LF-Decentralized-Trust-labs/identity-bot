@@ -23,8 +23,18 @@ BUILD_NUMBER="${BUILD_NUMBER:-0}"
 
 echo "--- Build Go backend (macOS universal) ---"
 ( cd identity-agent-core
-  CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -o bin/identity-agent-core-arm64 .
-  CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -o bin/identity-agent-core-amd64 .
+  # CGO_ENABLED=1, and it is load-bearing rather than incidental.
+  #
+  # Three files in secureenclave are tagged `darwin && cgo`: the Secure Enclave
+  # signer, the seed wrapping, and the key-protection detector. Built with cgo
+  # off, none of them is compiled in — so the shipped app fell through to the
+  # software signer and answered "we have not looked" about its own hardware,
+  # on a machine with a Secure Enclave, while `go test` on the same source said
+  # `usable`. The tests and the thing users install were different programs.
+  #
+  # Verify with: CGO_ENABLED=0 go list -f '{{.CgoFiles}}' ./secureenclave
+  CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -o bin/identity-agent-core-arm64 .
+  CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 go build -o bin/identity-agent-core-amd64 .
   lipo -create -output bin/identity-agent-core bin/identity-agent-core-arm64 bin/identity-agent-core-amd64
   file bin/identity-agent-core
   ls -lh bin/identity-agent-core )
