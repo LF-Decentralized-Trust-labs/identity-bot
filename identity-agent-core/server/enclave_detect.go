@@ -13,6 +13,21 @@ import (
 	"identity-agent-core/update"
 )
 
+// KeyProtectionInfo is what this machine can protect a key with, and why we
+// believe it. Mirrors secureenclave.Capability rather than embedding it, so the
+// wire shape stays this package's to change.
+type KeyProtectionInfo struct {
+	Status string `json:"status"`
+	Kind   string `json:"kind,omitempty"`
+	Reason string `json:"reason,omitempty"`
+	Detail string `json:"detail,omitempty"`
+
+	// RootKeyPermitted is the question everything downstream actually asks, so
+	// it is answered here rather than left to each caller to re-derive from the
+	// status and get subtly wrong.
+	RootKeyPermitted bool `json:"rootKeyPermitted"`
+}
+
 // EnclaveStatusResponse describes the hardware security backing available on this device.
 type EnclaveStatusResponse struct {
 	HardwareBacked bool             `json:"hardwareBacked"`
@@ -24,6 +39,19 @@ type EnclaveStatusResponse struct {
 	Freshness      *FreshnessInfo   `json:"freshness,omitempty"`
 	Currency       *CurrencyInfo    `json:"currency,omitempty"`
 	TrustAllowed   *bool            `json:"trustAllowed,omitempty"`
+
+	// KeyProtection is what DetectCapability established about this machine's
+	// ability to hold a key, which is a different question from the signer
+	// fields above and was previously not reported anywhere.
+	//
+	// The two disagree on purpose. BackingType names the signer this build
+	// happens to be using — on a phone that is the software fallback, because
+	// the identity's keys live in the on-device KERI engine and not in that
+	// signer. KeyProtection names what the HARDWARE can do, which is what
+	// decides whether a root key may live here. A phone reporting a software
+	// signer and StrongBox key protection is not a contradiction; it is those
+	// two facts.
+	KeyProtection *KeyProtectionInfo `json:"keyProtection,omitempty"`
 
 	// SealedHardware is the bottom rung of the chain, and it is present only
 	// where there is one — a machine whose memory the operator cannot read.
@@ -144,6 +172,19 @@ type CurrencyInfo struct {
 
 func (s *CoreServer) handleSecurityEnclave(w http.ResponseWriter, r *http.Request) {
 	result := detectEnclave()
+
+	// What the hardware can do, as established by asking it. Reported alongside
+	// the signer rather than instead of it, because they answer different
+	// questions and both are needed to explain a refusal to somebody.
+	cap := secureenclave.DetectCapability()
+	result.KeyProtection = &KeyProtectionInfo{
+		Status:           string(cap.Status),
+		Kind:             string(cap.Kind),
+		Reason:           cap.Reason,
+		Detail:           cap.Detail,
+		RootKeyPermitted: cap.RootKeyPermitted(),
+	}
+
 	if s.AttestationRunner != nil {
 		// Only let a USABLE signer refine the platform detection. An
 		// uninitializable signer (e.g. the Security-framework key create failing
