@@ -37,14 +37,46 @@ const (
 	headerAssetAID       = "X-IA-Asset-AID"
 )
 
-// verifyAssetSignature returns the asset that signed this request.
+// verifyAssetSignature identifies the machine AND spends the signature, so the
+// same request cannot be replayed into a second action. Callers that ACT on a
+// request use this one.
+// maxSignedBodyBytes bounds what a request may make this agent buffer before
+// its signature has been checked. Above the 8 MB the capability handlers accept,
+// so a legitimate request is never truncated by this and an illegitimate one
+// stops here rather than at whatever the sender felt like sending.
+const maxSignedBodyBytes = 12 << 20
+
+func (s *CoreServer) verifyAssetSignature(r *http.Request) (*asset.Asset, error) {
+	found, err := s.identifyAssetFromSignature(r)
+	if err != nil {
+		return nil, err
+	}
+	// Spent last, so a bad signature cannot burn a good one by arriving first.
+	if rememberSignature(r.Header.Get(headerAssetSig), time.Now().UTC()) {
+		return nil, fmt.Errorf("this signed request has already been used")
+	}
+	return found, nil
+}
+
+// identifyAssetFromSignature answers WHO signed this request and spends nothing.
 //
 // The canonical string is the same one the owner signs — method, path,
 // timestamp and a digest of the body — so a signature cannot be moved to
 // another endpoint, replayed later, or reused with a different body. Reusing it
 // rather than inventing a second format means there is one construction to get
 // right and one to review.
-func (s *CoreServer) verifyAssetSignature(r *http.Request) (*asset.Asset, error) {
+//
+// Split out because caller resolution can run BEFORE the handler on the same
+// request — authorize() resolves the caller for a scoped route, and several
+// handlers resolve it themselves — and a resolver that spent the signature made
+// the handler's own verification fail with "this signed request has already
+// been used". Asking who was calling was enough to refuse them. The replay
+// protection has to sit at the point something is DONE, not at the point
+// somebody is recognised, or looking becomes the attack.
+//
+// Both callers still verify the signature in full. What differs is only which
+// of them burns it.
+func (s *CoreServer) identifyAssetFromSignature(r *http.Request) (*asset.Asset, error) {
 	if s.assetHandler == nil || s.assetHandler.Store == nil {
 		return nil, fmt.Errorf("this agent has no assets")
 	}
@@ -93,7 +125,14 @@ func (s *CoreServer) verifyAssetSignature(r *http.Request) (*asset.Asset, error)
 
 	var body []byte
 	if r.Body != nil {
-		body, err = io.ReadAll(r.Body)
+		// BOUNDED. An unauthenticated caller reaches this by naming an enrolled
+		// identifier and signing garbage — the identifier is not a secret, and
+		// the signature is not checked until after the body has been read. An
+		// unbounded read there lets anyone who knows one make this agent hold
+		// as much memory as they care to send, on a route that then refuses
+		// them. The handlers downstream cap the body at 8 MB and never see it,
+		// because this runs first.
+		body, err = io.ReadAll(io.LimitReader(r.Body, maxSignedBodyBytes))
 		if err != nil {
 			return nil, fmt.Errorf("read body: %w", err)
 		}
@@ -109,10 +148,6 @@ func (s *CoreServer) verifyAssetSignature(r *http.Request) (*asset.Asset, error)
 		return nil, fmt.Errorf("signature does not match the key %s enrolled with", claimedAID)
 	}
 
-	// Spent last, so a bad signature cannot burn a good one by arriving first.
-	if rememberSignature(sig, now) {
-		return nil, fmt.Errorf("this signed request has already been used")
-	}
 	return found, nil
 }
 
