@@ -24,20 +24,13 @@ import (
 // acceptableMeasurement decides whether the software the box launched is
 // software this owner accepts. Which measurements those are is a question about
 // who publishes and approves them, so it is answered elsewhere and passed in.
-func checkOfferBeforeDelegating(offer *pairingBeginResponse, allowUnattested bool,
+func checkOfferBeforeDelegating(offer *pairingBeginResponse,
 	acceptableMeasurement func([]byte) bool, verifyChain func([]byte) error) error {
 
 	if offer.Attestation == "" {
-		if allowUnattested {
-			// A deliberate choice, so it proceeds — and says so, because an
-			// unattested box is a different thing from a sealed one and the
-			// difference should not be discoverable only by reading code.
-			return nil
-		}
-		return fmt.Errorf("this box did not prove what it is, and adopting it anyway has to be " +
-			"asked for: a machine with no attestation may be an ordinary computer, or may be a " +
-			"sealed one whose proof was removed in transit, and those look the same from here. " +
-			"Send allow_unattested if you know which")
+		return fmt.Errorf("this box did not prove what it is, so it was not adopted. A machine " +
+			"with no attestation may be an ordinary computer, or a sealed one whose proof was " +
+			"removed in transit, and those look the same from here — so neither is taken on trust")
 	}
 
 	raw, err := base64.StdEncoding.DecodeString(offer.Attestation)
@@ -120,11 +113,11 @@ func checkOfferBeforeDelegating(offer *pairingBeginResponse, allowUnattested boo
 // missing policy read as "accept anything" would make every other check here
 // decorative.
 //
-// The deliberate consequence: adopting a sealed box requires either a
-// measurement policy or an explicit allow_unattested, and both are visible
-// choices. That is the right failure while the question of who signs the
-// measurement list is open, and it is the hook that question plugs into when it
-// is answered.
+// The deliberate consequence: adopting a sealed box requires a measurement
+// policy. There is no longer an allow_unattested to set instead — a machine
+// that will not say what it is is refused, full stop. That is the right failure
+// while the question of who signs the measurement list is open, and it is the
+// hook that question plugs into when it is answered.
 func (s *CoreServer) acceptableMeasurement(measurement []byte) bool {
 	if len(s.AcceptedMeasurements) == 0 {
 		return false
@@ -148,6 +141,13 @@ func (s *CoreServer) acceptableMeasurement(measurement []byte) bool {
 // Genoa, which also covers Siena and Bergamo — those are Zen 4c parts in the
 // Genoa family, and asking for them by their own names returns 404.
 func (s *CoreServer) verifySNPChain(report []byte) error {
+	// A seam, and only a seam. It substitutes WHO checks the report — never
+	// whether one is required. The flag that used to skip this entirely is
+	// gone, so a test that wants a box adopted has to present a report and say
+	// what would accept it, which is the shape production runs in.
+	if s.snpChainVerifier != nil {
+		return s.snpChainVerifier(report)
+	}
 	s.snpVerifierOnce.Do(func() {
 		s.snpVerifier = secureenclave.NewAMDKDSVerifier(os.Getenv("AGENT_SNP_PRODUCT"))
 	})

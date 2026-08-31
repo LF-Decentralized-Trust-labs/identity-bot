@@ -123,6 +123,11 @@ type CoreServer struct {
 	// for. Empty means no policy, which is refused rather than read as "any" —
 	// see acceptableMeasurement.
 	AcceptedMeasurements [][]byte
+
+	// snpChainVerifier replaces the AMD chain check. Unexported and never read
+	// from configuration: it exists so a test can present a synthetic report,
+	// not so a deployment can decline to check one.
+	snpChainVerifier func([]byte) error
 	// boxIdentity is this machine's own identity where it made one, which is
 	// what its attestation vouches for.
 	boxIdentity       *boxIdentity

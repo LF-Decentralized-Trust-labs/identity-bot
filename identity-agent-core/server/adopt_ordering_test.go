@@ -37,7 +37,7 @@ func acceptOnly(m byte) func([]byte) bool {
 // A box that proves it holds the keys it offered, running software the owner
 // accepts, may be vouched for.
 func TestABoxThatProvesItselfMayBeAdopted(t *testing.T) {
-	if err := checkOfferBeforeDelegating(offerWithReport(t, true, 0x11), false, acceptOnly(0x11), chainAlwaysGenuine); err != nil {
+	if err := checkOfferBeforeDelegating(offerWithReport(t, true, 0x11), acceptOnly(0x11), chainAlwaysGenuine); err != nil {
 		t.Fatalf("a sound box was refused: %v", err)
 	}
 }
@@ -50,7 +50,7 @@ func TestSubstitutedOfferKeysAreRefused(t *testing.T) {
 	offer := offerWithReport(t, true, 0x11)
 	offer.PublicKey = "DATTACKER-KEY" // swapped in transit; report untouched
 
-	err := checkOfferBeforeDelegating(offer, false, acceptOnly(0x11), chainAlwaysGenuine)
+	err := checkOfferBeforeDelegating(offer, acceptOnly(0x11), chainAlwaysGenuine)
 	if err == nil {
 		t.Fatal("the owner would have delegated to keys the sealed machine does not hold")
 	}
@@ -63,29 +63,34 @@ func TestSubstitutedOfferKeysAreRefused(t *testing.T) {
 // machine exists somewhere — true of every sealed machine, and no statement
 // about this one.
 func TestAReportAboutSomethingElseIsRefused(t *testing.T) {
-	if err := checkOfferBeforeDelegating(offerWithReport(t, false, 0x11), false, acceptOnly(0x11), chainAlwaysGenuine); err == nil {
+	if err := checkOfferBeforeDelegating(offerWithReport(t, false, 0x11), acceptOnly(0x11), chainAlwaysGenuine); err == nil {
 		t.Fatal("a report unrelated to the offered keys was accepted")
 	}
 }
 
-// No attestation is refused by default. It may be an ordinary computer, or a
-// sealed one whose proof was stripped on the way — and those are identical from
-// here, so which one it is has to be stated rather than assumed.
-func TestAnUnattestedBoxIsRefusedUnlessAskedFor(t *testing.T) {
+// No attestation is refused, and there is nothing to send that changes it.
+//
+// It may be an ordinary computer, or a sealed one whose proof was stripped on
+// the way, and those are identical from here — so neither is taken on trust.
+// There used to be an allow_unattested for the second case. Nobody could tell
+// the two apart in order to use it honestly, which is exactly what made it a
+// way to adopt the first case by accident.
+func TestAnUnattestedBoxIsRefused(t *testing.T) {
 	bare := &pairingBeginResponse{PublicKey: "DKEY-ONE", NextPublicKey: "DKEY-TWO"}
 
-	if err := checkOfferBeforeDelegating(bare, false, acceptOnly(0x11), chainAlwaysGenuine); err == nil {
-		t.Fatal("a box that proved nothing was adopted by default")
+	err := checkOfferBeforeDelegating(bare, acceptOnly(0x11), chainAlwaysGenuine)
+	if err == nil {
+		t.Fatal("a box that proved nothing was adopted")
 	}
-	if err := checkOfferBeforeDelegating(bare, true, acceptOnly(0x11), chainAlwaysGenuine); err != nil {
-		t.Fatalf("adopting an unattested box on purpose was refused: %v", err)
+	if !strings.Contains(err.Error(), "did not prove what it is") {
+		t.Fatalf("the refusal does not say why: %v", err)
 	}
 }
 
 // Software the owner has not accepted is refused even when the box is
 // genuinely sealed and genuinely holds the keys.
 func TestSoftwareTheOwnerHasNotAcceptedIsNotAdopted(t *testing.T) {
-	if err := checkOfferBeforeDelegating(offerWithReport(t, true, 0x99), false, acceptOnly(0x11), chainAlwaysGenuine); err == nil {
+	if err := checkOfferBeforeDelegating(offerWithReport(t, true, 0x99), acceptOnly(0x11), chainAlwaysGenuine); err == nil {
 		t.Fatal("a box running unapproved software was adopted")
 	}
 }
@@ -93,7 +98,7 @@ func TestSoftwareTheOwnerHasNotAcceptedIsNotAdopted(t *testing.T) {
 // No policy is not the same as accepting everything. Treating it as such would
 // make every other check here decorative.
 func TestNoMeasurementPolicyRefusesRatherThanAccepts(t *testing.T) {
-	if err := checkOfferBeforeDelegating(offerWithReport(t, true, 0x11), false, nil, chainAlwaysGenuine); err == nil {
+	if err := checkOfferBeforeDelegating(offerWithReport(t, true, 0x11), nil, chainAlwaysGenuine); err == nil {
 		t.Fatal("a box was adopted with no statement of acceptable software")
 	}
 	s := &CoreServer{}
@@ -117,7 +122,7 @@ func TestADebuggableBoxIsNotAdopted(t *testing.T) {
 	raw[0x08+2] |= 0x08 // POLICY bit 19
 	offer.Attestation = base64.StdEncoding.EncodeToString(raw)
 
-	if err := checkOfferBeforeDelegating(offer, false, acceptOnly(0x11), chainAlwaysGenuine); err == nil {
+	if err := checkOfferBeforeDelegating(offer, acceptOnly(0x11), chainAlwaysGenuine); err == nil {
 		t.Fatal("a box whose memory can be read was adopted")
 	}
 	_ = secureenclave.ReportSize
@@ -140,7 +145,7 @@ func TestAReportThatDidNotComeFromAMDIsRefused(t *testing.T) {
 		return fmt.Errorf("the report's signature does not verify against the certificate " +
 			"AMD issued for that part")
 	}
-	err := checkOfferBeforeDelegating(offerWithReport(t, true, 0x11), false, acceptOnly(0x11), forged)
+	err := checkOfferBeforeDelegating(offerWithReport(t, true, 0x11), acceptOnly(0x11), forged)
 	if err == nil {
 		t.Fatal("a report whose signature does not verify was accepted, so a software " +
 			"emulator claiming any measurement would be adopted")
@@ -153,7 +158,7 @@ func TestAReportThatDidNotComeFromAMDIsRefused(t *testing.T) {
 
 // An owner with no way to check is not an owner who checked.
 func TestNoChainVerifierIsRefused(t *testing.T) {
-	if err := checkOfferBeforeDelegating(offerWithReport(t, true, 0x11), false, acceptOnly(0x11), nil); err == nil {
+	if err := checkOfferBeforeDelegating(offerWithReport(t, true, 0x11), acceptOnly(0x11), nil); err == nil {
 		t.Fatal("adoption proceeded with nothing able to check the proof's provenance")
 	}
 }
@@ -166,7 +171,7 @@ func TestAnUnreachableServiceIsNotAForgery(t *testing.T) {
 		return fmt.Errorf("%w: dial tcp: lookup kdsintf.amd.com: no such host",
 			secureenclave.ErrChainUnavailable)
 	}
-	err := checkOfferBeforeDelegating(offerWithReport(t, true, 0x11), false, acceptOnly(0x11), unavailable)
+	err := checkOfferBeforeDelegating(offerWithReport(t, true, 0x11), acceptOnly(0x11), unavailable)
 	if err == nil {
 		t.Fatal("an unverifiable proof was adopted; unknown provenance is not good provenance")
 	}
@@ -189,7 +194,7 @@ func TestTheNetworkIsNotConsultedForAnOfferThatAlreadyFailed(t *testing.T) {
 
 	offer := offerWithReport(t, true, 0x11)
 	offer.PublicKey = "DATTACKER-KEY" // fails the binding check, well before the chain
-	if err := checkOfferBeforeDelegating(offer, false, acceptOnly(0x11), watch); err == nil {
+	if err := checkOfferBeforeDelegating(offer, acceptOnly(0x11), watch); err == nil {
 		t.Fatal("a substituted offer was accepted")
 	}
 	if called {

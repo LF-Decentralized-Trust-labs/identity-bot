@@ -59,9 +59,29 @@ In either topology, the **computer** can be the user's own (laptop, desktop, min
 | # | Topology | Computer | Who it suits |
 |---|---|---|---|
 | 1 | Phone + Computer | Black box computer (data center) | **Most common at launch.** 60-second setup, no hardware to maintain, always-on. The default. |
-| 2 | Phone + Computer | Own computer | Willing to leave a laptop/desktop on 24/7 and maintain it. Wants control of hardware. |
-| 3 | Computer only | Own computer | Power users, privacy maximalists, people without smartphones, single-device households. |
+| 2 | ~~Phone + Computer~~ | ~~Own computer~~ | **WITHDRAWN 2026-08-31 — see below.** |
+| 3 | ~~Computer only~~ | ~~Own computer~~ | **WITHDRAWN 2026-08-31 — see below.** |
 | 4 | Computer only | Black box computer | No smartphone *and* no personal computer. Needs 24/7 service. Elderly, accessibility-constrained, regions where smartphones aren't practical. |
+
+**Configurations 2 and 3 are withdrawn (2026-08-31).**
+
+*Tried:* an ordinary laptop or desktop holding the identity, on the reasoning
+that hardware key protection is what matters and where the machine sits is not.
+
+*Switched because:* holding a key and proving what software is using it are
+different questions, and only the second is what a counterparty can check. An
+ordinary computer can protect a key perfectly well and cannot produce a
+statement about its own software that anybody else can verify — so an identity
+kept there can never be shown to be running software anybody agreed to. Adoption
+now requires an attestation, with nothing to send that skips it, so a machine
+with no such hardware has no path to holding an identity.
+
+*New canonical path:* an identity lives on a phone or on a machine with
+confidential-computing hardware. A computer without it may still run the
+software as a **controller** for an identity living elsewhere, and as a place
+backups land — both need a secure enclave to hold their own key, and neither
+needs to attest, because neither holds the identity. That is the third topology
+described below, and it is what configurations 2 and 3 become.
 
 **Future:** Personal black box infrastructure (single- or multi-tenant TEE hardware operated by you, family, neighbor, or community steward — same protocol, different operator). Backup is orthogonal — any configuration can mirror to a second computer.
 

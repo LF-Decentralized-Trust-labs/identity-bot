@@ -26,6 +26,12 @@ func pairableComputer(t *testing.T) (*CoreServer, *httptest.Server, string) {
 	resetPairingOfferForTest()
 	resetPairingStateForTest()
 
+	// The machine offers a report, as a sealed one does, and the owner accepts
+	// what it proves. Both of these used to be replaced by allow_unattested in
+	// the request — so these tests, which are about proving control, ran past
+	// the check that decides whether the machine is worth proving control TO.
+	aMachineThatCanAttest(t)
+
 	machine := agentWithNoIdentity(t)
 	eng := startedEngine(t)
 	machine.KeriDriver = eng
@@ -80,7 +86,11 @@ func beginAt(t *testing.T, url string) map[string]any {
 
 func claimAs(t *testing.T, owner *CoreServer, url, code, ownerAID string) *httptest.ResponseRecorder {
 	t.Helper()
-	body := `{"box_url":"` + url + `","adoption_code":"` + code + `","allow_unattested":true`
+	// This owner accepts what the machine proves. Without it the claim is
+	// refused for the software the machine is running, which is a real check
+	// and not the one these tests are about.
+	acceptsThatBox(owner)
+	body := `{"box_url":"` + url + `","adoption_code":"` + code + `"`
 	if ownerAID != "" {
 		body += `,"owner_aid":"` + ownerAID + `"`
 	}

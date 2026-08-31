@@ -214,6 +214,16 @@ var pairingState struct {
 
 // handlePairingBegin generates this instance's delegated key material and hands
 // out the public halves.
+
+// snpReportForOffer is where a machine's own attestation comes from, behind a
+// seam so a machine WITHOUT sealed hardware can stand in for one during tests.
+//
+// It substitutes the source of the report, never the requirement for one. The
+// owner side still checks that a report is present, that it is bound to these
+// exact keys, that the software is accepted and that the chain is genuine —
+// which is the whole of what allow_unattested used to skip.
+var snpReportForOffer = secureenclave.GetSNPReport
+
 func (s *CoreServer) handlePairingBegin(w http.ResponseWriter, r *http.Request) {
 	if err := s.refuseIfAlreadyPaired(w); err != nil {
 		return
@@ -281,7 +291,7 @@ func (s *CoreServer) handlePairingBegin(w http.ResponseWriter, r *http.Request) 
 	// controller is left to judge.
 	if binding, berr := iacrypto.PairingOfferBinding(
 		offer.PublicKey, offer.NextPublicKey, offer.BackupSigningKey); berr == nil {
-		if report, rerr := secureenclave.GetSNPReport(binding); rerr == nil && report != nil {
+		if report, rerr := snpReportForOffer(binding); rerr == nil && report != nil {
 			offer.Attestation = base64.StdEncoding.EncodeToString(report.Raw)
 		}
 	}
@@ -736,15 +746,6 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 		// machines and a list of the organisations you own are different
 		// questions to ask of the same record.
 		Kind string `json:"kind,omitempty"`
-		// AllowUnattested adopts a machine that cannot prove what it is.
-		//
-		// Off by default, so the safe direction is the one that happens when
-		// nobody thought about it. A machine with no attestation may be
-		// perfectly legitimate — a laptop has no such hardware — but it may
-		// equally be a sealed machine whose report was stripped by something in
-		// between, and those two look identical from here. Saying which one
-		// this is has to be a deliberate act.
-		AllowUnattested bool `json:"allow_unattested,omitempty"`
 		// AcceptedMeasurements is the software this owner will adopt, as hex,
 		// for this adoption only. It adds to any standing policy in
 		// AGENT_ACCEPTED_MEASUREMENTS rather than replacing it.
@@ -823,7 +824,7 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 			return false
 		}
 	}
-	if err := checkOfferBeforeDelegating(offer, req.AllowUnattested, accept, s.verifySNPChain); err != nil {
+	if err := checkOfferBeforeDelegating(offer, accept, s.verifySNPChain); err != nil {
 		writeError(w, http.StatusForbidden, "This box was not adopted", err.Error())
 		return
 	}
@@ -1035,16 +1036,17 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 		// nothing to check an archive against, and a machine-signed archive
 		// proves only that its writer can sign their own work.
 		//
-		// VOUCHED FOR ONLY WHERE Sealed IS TRUE. On sealed hardware the
-		// attestation covers this key, so nothing terminating the connection
-		// can substitute it. On an unattested machine — an ordinary laptop —
-		// nothing covers it, and nothing covers the machine's OWN key either:
-		// the whole offer is taken on trust there, which is a property of
-		// pairing an unattested machine and not of this key. It is recorded
-		// anyway, because a key taken on trust at pairing is still worth far
-		// more than no key at all: it pins THIS machine from that moment on,
-		// so an archive substituted later is caught even though one
-		// substituted during the ceremony would not be.
+		// VOUCHED FOR BY THE ATTESTATION THAT GOT THIS FAR. The attestation
+		// covers this key, so nothing terminating the connection can
+		// substitute it.
+		//
+		// This used to describe a second case — an unattested machine, where
+		// nothing covered this key or the machine's own, and the whole offer
+		// was taken on trust. That case no longer reaches here: a machine that
+		// offers no attestation is refused before this point, so Sealed a few
+		// lines below is true whenever this runs. Rows written before that was
+		// so may still carry a key taken on trust, which is why it is read
+		// back rather than assumed.
 		BackupSigningKeyB64: offer.BackupSigningKey,
 		URL:                 base,
 		Kind:                kind,
@@ -1166,8 +1168,10 @@ func didFromResult(raw interface{}) (*didcomm.DID, error) {
 
 // measurementOf reads what a box was running out of the report it offered.
 //
-// Best effort by design: a box adopted with allow_unattested has no report and
-// no measurement, which is a real state rather than a failure. The caller
+// Best effort by design. Nothing adopted from here on carries an empty report —
+// a machine that will not say what it is is refused before this is reached —
+// but boxes adopted before that was true have no measurement recorded, and an
+// unreadable report is still a real state rather than a failure. The caller
 // records what it has.
 func measurementOf(attestationB64 string) string {
 	if attestationB64 == "" {
