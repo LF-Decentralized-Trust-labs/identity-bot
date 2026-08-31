@@ -52,12 +52,45 @@ func (s *CoreServer) handleGrantController(w http.ResponseWriter, r *http.Reques
 		g.ExpiresAt = parsed
 	}
 
-	granted, err := s.controllers().Grant(g, time.Now().UTC())
+	now := time.Now().UTC()
+	granted, err := s.controllers().Grant(g, now)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error(), "")
 		return
 	}
-	writeJSON(w, map[string]any{"ok": true, "grant": granted})
+	writeJSON(w, map[string]any{"ok": true, "grant": onTheWire(granted, now)})
+}
+
+// onTheWire is how a grant is described to a caller, and there is exactly one
+// of these so that every route describes it the same way.
+//
+// The struct cannot be marshalled directly. `omitempty` does not omit a
+// non-pointer struct, so a time.Time that is not set marshals as
+// "0001-01-01T00:00:00Z" rather than disappearing — and a machine the owner
+// KEEPS would come back carrying an expiry in year one. Any client comparing
+// that against now reads it as long dead. Before this, the grant route
+// marshalled the struct and the list route built its own map, so the two
+// disagreed about whether the field existed at all — on the very response the
+// granting device acts on.
+func onTheWire(g ControllerGrant, now time.Time) map[string]any {
+	live, why := g.Live(now)
+	out := map[string]any{
+		"controller_aid": g.ControllerAID,
+		"public_key":     g.PublicKey,
+		"label":          g.Label,
+		"grade":          g.Grade,
+		"granted_at":     g.GrantedAt,
+		"live":           live,
+	}
+	// Present only when there is one, which is what distinguishes a machine
+	// somebody keeps from one they borrowed.
+	if !g.ExpiresAt.IsZero() {
+		out["expires_at"] = g.ExpiresAt
+	}
+	if !live {
+		out["why_not"] = why
+	}
+	return out
 }
 
 // handleListControllers answers what this identity has authorised.
@@ -68,27 +101,20 @@ func (s *CoreServer) handleGrantController(w http.ResponseWriter, r *http.Reques
 // just granted is the one they are looking for.
 func (s *CoreServer) handleListControllers(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
-	all := s.controllers().All()
+	all, err := s.controllers().All()
+	if err != nil {
+		// Never an empty list. "No machines are authorised" and "what was
+		// authorised could not be read" are opposite answers, and showing the
+		// owner the first when the second is true invites them to grant again.
+		writeError(w, http.StatusInternalServerError,
+			"could not read which machines may act for this identity", err.Error())
+		return
+	}
 	sort.Slice(all, func(i, j int) bool { return all[i].GrantedAt.After(all[j].GrantedAt) })
 
 	out := make([]map[string]any, 0, len(all))
 	for _, g := range all {
-		live, why := g.Live(now)
-		e := map[string]any{
-			"controller_aid": g.ControllerAID,
-			"public_key":     g.PublicKey,
-			"label":          g.Label,
-			"grade":          g.Grade,
-			"granted_at":     g.GrantedAt,
-			"live":           live,
-		}
-		if !g.ExpiresAt.IsZero() {
-			e["expires_at"] = g.ExpiresAt
-		}
-		if !live {
-			e["why_not"] = why
-		}
-		out = append(out, e)
+		out = append(out, onTheWire(g, now))
 	}
 	writeJSON(w, map[string]any{"controllers": out})
 }

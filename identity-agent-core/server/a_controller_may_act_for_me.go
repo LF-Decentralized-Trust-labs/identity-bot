@@ -56,6 +56,19 @@ const (
 // granting it forever — which is the whole reason the borrowed grade exists.
 const scopedGrantLifetime = 12 * time.Hour
 
+// maxScopedGrantLifetime is the longest a borrowed machine may be given,
+// whatever the caller asks for.
+//
+// Without this, scopedGrantLifetime is only a default, and a caller passing its
+// own expiry could grant a library computer a century — which is the borrowed
+// grade in name and the permanent one in effect. A bound the caller cannot
+// exceed is the only version of "it expires" that means anything.
+//
+// A week rather than a day: somebody working from a machine they do not own for
+// a few days is an ordinary thing, and a limit people routinely hit is a limit
+// people route around.
+const maxScopedGrantLifetime = 7 * 24 * time.Hour
+
 // ControllerGrant is one machine's permission to act for this identity.
 type ControllerGrant struct {
 	// ControllerAID is the root the controller founded for itself. Not derived
@@ -125,12 +138,31 @@ func (c *controllerGrants) path() string {
 // Read per call rather than cached, so a grant removed by one path is gone for
 // every other immediately — a revocation that takes effect on restart is not a
 // revocation.
-func (c *controllerGrants) load() map[string]ControllerGrant {
+//
+// A FILE THAT CANNOT BE READ IS AN ERROR, NEVER AN EMPTY LIST. Those two look
+// identical to a caller and are opposites: "this identity has authorised no
+// machines" versus "what it authorised could not be read". Collapsing them
+// loses the grants permanently, because the next Grant or Revoke writes the
+// empty map back over the file — one unreadable read, and three authorised
+// machines are gone with nothing said. Not exotic either: save fsyncs nothing,
+// so an unclean shutdown can truncate this file.
+//
+// A missing file is genuinely no grants, and only that case returns empty.
+func (c *controllerGrants) load() (map[string]ControllerGrant, error) {
 	out := map[string]ControllerGrant{}
-	if b, err := os.ReadFile(c.path()); err == nil {
-		_ = json.Unmarshal(b, &out)
+	b, err := os.ReadFile(c.path())
+	if os.IsNotExist(err) {
+		return out, nil
 	}
-	return out
+	if err != nil {
+		return nil, fmt.Errorf("the record of which machines may act for this identity "+
+			"could not be read, so it was left untouched: %w", err)
+	}
+	if err := json.Unmarshal(b, &out); err != nil {
+		return nil, fmt.Errorf("the record of which machines may act for this identity is "+
+			"not readable as JSON, so it was left untouched rather than replaced: %w", err)
+	}
+	return out, nil
 }
 
 func (c *controllerGrants) save(all map[string]ControllerGrant) error {
@@ -174,8 +206,20 @@ func (c *controllerGrants) Grant(g ControllerGrant, now time.Time) (ControllerGr
 		// No expiry: a machine somebody keeps lasts until they say otherwise.
 		g.ExpiresAt = time.Time{}
 	case GradeScoped:
-		if g.ExpiresAt.IsZero() {
+		switch {
+		case g.ExpiresAt.IsZero():
 			g.ExpiresAt = now.Add(scopedGrantLifetime)
+		case !g.ExpiresAt.After(now):
+			// Storing this would report success for an authorisation that never
+			// worked, and the owner would be told their machine was approved. A
+			// granting device with a stale clock produces exactly this.
+			return ControllerGrant{}, fmt.Errorf(
+				"this authorisation would already have expired when it was granted — " +
+					"check the clock on the device granting it")
+		case g.ExpiresAt.After(now.Add(maxScopedGrantLifetime)):
+			return ControllerGrant{}, fmt.Errorf(
+				"a machine somebody borrowed cannot be authorised for longer than %s; "+
+					"a machine they keep is the other grade", maxScopedGrantLifetime)
 		}
 	default:
 		return ControllerGrant{}, fmt.Errorf(
@@ -185,7 +229,10 @@ func (c *controllerGrants) Grant(g ControllerGrant, now time.Time) (ControllerGr
 
 	grantsLock.Lock()
 	defer grantsLock.Unlock()
-	all := c.load()
+	all, err := c.load()
+	if err != nil {
+		return ControllerGrant{}, err
+	}
 	all[g.ControllerAID] = g
 	if err := c.save(all); err != nil {
 		return ControllerGrant{}, err
@@ -199,17 +246,25 @@ func (c *controllerGrants) Grant(g ControllerGrant, now time.Time) (ControllerGr
 // caller that has to remember to check is a caller that will one day forget,
 // and this is the check that stands between a borrowed computer and an
 // identity.
-func (c *controllerGrants) Live(aid string, now time.Time) (ControllerGrant, bool) {
+// The error is returned rather than folded into the bool, so a caller cannot
+// mistake "this record could not be read" for "this machine was never
+// authorised". Both deny, which is the safe direction, but only one of them
+// should be reported to the owner as a fault rather than as a decision.
+func (c *controllerGrants) Live(aid string, now time.Time) (ControllerGrant, bool, error) {
 	grantsLock.Lock()
 	defer grantsLock.Unlock()
-	g, ok := c.load()[strings.TrimSpace(aid)]
+	all, err := c.load()
+	if err != nil {
+		return ControllerGrant{}, false, err
+	}
+	g, ok := all[strings.TrimSpace(aid)]
 	if !ok {
-		return ControllerGrant{}, false
+		return ControllerGrant{}, false, nil
 	}
 	if live, _ := g.Live(now); !live {
-		return ControllerGrant{}, false
+		return ControllerGrant{}, false, nil
 	}
-	return g, true
+	return g, true, nil
 }
 
 // All returns every grant, expired ones included.
@@ -217,23 +272,34 @@ func (c *controllerGrants) Live(aid string, now time.Time) (ControllerGrant, boo
 // Deliberately unfiltered: this is what the owner is shown, and a machine whose
 // authorisation ran out yesterday is something they may still want to know
 // about — that it existed, and that it stopped.
-func (c *controllerGrants) All() []ControllerGrant {
+func (c *controllerGrants) All() ([]ControllerGrant, error) {
 	grantsLock.Lock()
 	defer grantsLock.Unlock()
-	all := c.load()
+	all, err := c.load()
+	if err != nil {
+		return nil, err
+	}
 	out := make([]ControllerGrant, 0, len(all))
 	for _, g := range all {
 		out = append(out, g)
 	}
-	return out
+	return out, nil
 }
 
 // Revoke removes a grant. Removing one that is not there is not an error: the
 // caller wanted it gone, and it is.
+//
+// A file that cannot be read stops this rather than writing an empty one. It
+// looks like over-caution on a route whose job is removal — but writing `{}`
+// here would revoke every OTHER machine too, silently, while reporting that the
+// one named was removed.
 func (c *controllerGrants) Revoke(aid string) error {
 	grantsLock.Lock()
 	defer grantsLock.Unlock()
-	all := c.load()
+	all, err := c.load()
+	if err != nil {
+		return err
+	}
 	delete(all, strings.TrimSpace(aid))
 	return c.save(all)
 }
