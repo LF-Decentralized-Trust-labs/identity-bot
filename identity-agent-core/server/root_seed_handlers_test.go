@@ -51,7 +51,11 @@ func TestSetRootSeedLifecycle(t *testing.T) {
 		t.Fatalf("stored seed must equal the BIP39 seed: %v", err)
 	}
 
-	if w := postSeed(s, b64, false); w.Code != http.StatusOK && w.Code != http.StatusCreated {
+	// 200 exactly, not "200 or 201". The handler answers 201 {"status":"stored"}
+	// for a fresh store and 200 {"status":"unchanged"} for the idempotent one,
+	// so accepting either lets this pass in the case it exists to catch: the
+	// first store having silently failed and this being the first real one.
+	if w := postSeed(s, b64, false); w.Code != http.StatusOK {
 		t.Fatalf("same-seed handoff must be idempotent: %d %s", w.Code, w.Body)
 	}
 

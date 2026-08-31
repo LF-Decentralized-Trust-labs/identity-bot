@@ -33,6 +33,22 @@ const envUnsupportedPlatformURL = "IA_UNSUPPORTED_PLATFORM_URL"
 func refusalFor(cap secureenclave.Capability) string {
 	var msg string
 	switch {
+	// An app that never told us. Android only: the Keystore is a Java API the
+	// core cannot reach, so the app probes it and reports — and one that stays
+	// quiet is indistinguishable from one that looked and found nothing.
+	//
+	// It gets its own branch because the default below says "this machine was
+	// checked", which is false here, and then asks the person to report their
+	// platform — when the platform is supported and the fix is a line of wiring
+	// in whatever app is embedding the core. Sending somebody to file a report
+	// about their phone for a mistake in our code is the failure this whole
+	// file is about, aimed at the wrong target.
+	case cap.Reason == "app_did_not_report_key_protection":
+		msg = "this app did not tell the agent what protects a key on this device, so " +
+			"nothing is known about it. That is a gap in the app rather than in the " +
+			"device: it must probe the keystore and report what it found before the " +
+			"agent starts. An identity may not be founded on a maybe."
+
 	case cap.Status == secureenclave.Absent:
 		msg = "this machine has no hardware that can protect a root key, so an identity kept " +
 			"here could be copied off it. Put the root on a device that has such hardware and " +
@@ -57,7 +73,21 @@ func refusalFor(cap secureenclave.Capability) string {
 			"). An identity may not be founded on a maybe, so this is refused rather than guessed at."
 	}
 
-	if cap.Status == secureenclave.Unknown {
+	// The detector's own words, when it had any.
+	//
+	// Every detector was written to put the actionable part in Detail — which
+	// firmware setting, which group, that the module needs provisioning — and
+	// refusalFor used only cap.String(), which renders Status, Kind and Reason
+	// and never Detail. So the one sentence that told somebody what to DO was
+	// composed, carried across a process boundary, and dropped at the last
+	// step, leaving a generic guess in its place.
+	if cap.Detail != "" {
+		msg += " The check reported: " + cap.Detail + "."
+	}
+
+	// Only for what we could not classify, and not for an app that never asked
+	// — that one has an answer already and a report would not add to it.
+	if cap.Status == secureenclave.Unknown && cap.Reason != "app_did_not_report_key_protection" {
 		msg += " " + howToReport(cap)
 	}
 	return msg
@@ -75,9 +105,10 @@ func refusalFor(cap secureenclave.Capability) string {
 func howToReport(cap secureenclave.Capability) string {
 	env := fmt.Sprintf("platform %s/%s, detector said %q", runtime.GOOS, runtime.GOARCH, cap.String())
 	if url := strings.TrimSpace(os.Getenv(envUnsupportedPlatformURL)); url != "" {
-		return "If you would like this platform supported, report it at " + url +
-			" and include: " + env + "."
+		return "This machine produced an answer this build does not recognise. If you " +
+			"would like it supported, report it at " + url + " and include: " + env + "."
 	}
-	return "If you would like this platform supported, report it to whoever maintains this " +
-		"software and include: " + env + "."
+	return "This machine produced an answer this build does not recognise. If you would " +
+		"like it supported, report it to whoever maintains this software and include: " +
+		env + "."
 }
