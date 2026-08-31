@@ -161,12 +161,19 @@ var publicRoutes = map[string]string{
 	// cannot be owner-gated. The enrolment token authorises it: single-use,
 	// time-bounded, and it names in advance what may enrol. ISSUING a token
 	// stays owner-only, which is where the decision actually is.
-	// The pattern is the FULL path chi matches, and these asset routes are
-	// mounted under /assets — an entry spelled "/api/enrol" silently does
-	// nothing, because classify does an exact string match and then falls
-	// through to owner-only. The route answers 403 to the machine it exists
-	// for, no error is logged, and it looks in review as though it was opened.
-	"POST /api/assets/enrol": "a machine presents the key it generated and the token it was given",
+	// The pattern is the FULL path chi matches. mountAssetRoutes closes its
+	// /assets block before this route, so enrol is mounted at /api/enrol —
+	// and an entry spelled "/api/assets/enrol" silently does nothing, because
+	// classify does an exact string match and then falls through to owner-only.
+	// The route answers 403 to the machine it exists for, no error is logged,
+	// and it looks in review as though it was opened.
+	//
+	// That is not hypothetical: this entry named the /assets path from the day
+	// the warning above it was written, so enrolment answered 403 for as long
+	// as the note explaining how to avoid it sat directly on top. A comment
+	// cannot check a path. TestEveryOpenRouteIsMountedWhereItSaysItIs can, and
+	// now does.
+	"POST /api/enrol": "a machine presents the key it generated and the token it was given",
 
 	// A DID document is public key material — that is the whole idea of one.
 	// Not being reachable meant two agents could never establish a relationship
