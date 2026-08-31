@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sync"
 )
 
 // Root-seed protection at rest.
@@ -92,6 +93,9 @@ func rootSeedPath(dataDir string) string {
 
 // StoreRootSeed persists the root keystore seed (64-byte BIP39-class seed),
 // wrapped under the platform hardware key when one is usable.
+// unwrappedSeedWarning keeps the line below to one per process.
+var unwrappedSeedWarning sync.Once
+
 // whyNotWrapped names which of the two gaps this build has, because the remedy
 // differs entirely: a wrapper nobody has written yet, or one that is there and
 // cannot get at the hardware.
@@ -128,16 +132,27 @@ func StoreRootSeed(dataDir string, seed []byte) error {
 	// whether THIS BUILD uses it to protect the seed. A machine can pass the
 	// first and fail the second, which is the case this warns about: our gap,
 	// on somebody's hardware, and silent until now.
+	// ONCE PER PROCESS, not once per store. Said every time it would be noise,
+	// and ask_sign_layer.go already records where that leads: a line printed
+	// for the rest of a machine's life trains whoever reads the log to ignore
+	// it, and this is the line that must not be ignored. Once per process is
+	// also what makes the enclave probe below affordable — it creates a real
+	// key to answer, which is milliseconds, and a seed can be stored on a hot
+	// path during recovery.
 	defer func() {
 		if env.Wrap != seedWrapNone {
 			return
 		}
-		if cap := DetectCapability(); cap.RootKeyPermitted() {
+		unwrappedSeedWarning.Do(func() {
+			cap := DetectCapability()
+			if !cap.RootKeyPermitted() {
+				return
+			}
 			log.Printf("[keystore] this machine can protect a key (%s) and this build did "+
 				"not use it: the root seed is stored UNWRAPPED. Anyone who reads the file "+
 				"becomes this identity, permanently and undetectably. The hardware is not "+
 				"the gap here — %s", cap.String(), whyNotWrapped())
-		}
+		})
 	}()
 
 	if w := platformSeedWrapper(); w != nil && w.Available() {
