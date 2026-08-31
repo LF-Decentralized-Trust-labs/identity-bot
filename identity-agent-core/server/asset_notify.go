@@ -40,6 +40,12 @@ const (
 // verifyAssetSignature identifies the machine AND spends the signature, so the
 // same request cannot be replayed into a second action. Callers that ACT on a
 // request use this one.
+// maxSignedBodyBytes bounds what a request may make this agent buffer before
+// its signature has been checked. Above the 8 MB the capability handlers accept,
+// so a legitimate request is never truncated by this and an illegitimate one
+// stops here rather than at whatever the sender felt like sending.
+const maxSignedBodyBytes = 12 << 20
+
 func (s *CoreServer) verifyAssetSignature(r *http.Request) (*asset.Asset, error) {
 	found, err := s.identifyAssetFromSignature(r)
 	if err != nil {
@@ -119,7 +125,14 @@ func (s *CoreServer) identifyAssetFromSignature(r *http.Request) (*asset.Asset, 
 
 	var body []byte
 	if r.Body != nil {
-		body, err = io.ReadAll(r.Body)
+		// BOUNDED. An unauthenticated caller reaches this by naming an enrolled
+		// identifier and signing garbage — the identifier is not a secret, and
+		// the signature is not checked until after the body has been read. An
+		// unbounded read there lets anyone who knows one make this agent hold
+		// as much memory as they care to send, on a route that then refuses
+		// them. The handlers downstream cap the body at 8 MB and never see it,
+		// because this runs first.
+		body, err = io.ReadAll(io.LimitReader(r.Body, maxSignedBodyBytes))
 		if err != nil {
 			return nil, fmt.Errorf("read body: %w", err)
 		}

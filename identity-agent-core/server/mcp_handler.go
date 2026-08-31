@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -35,6 +36,13 @@ func (s *CoreServer) handleMCP(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
 		return
 	}
+	// Put the body back before anything resolves the caller.
+	//
+	// Identification digests the body, so reading it here and resolving after
+	// left the resolver hashing nothing: the middleware saw a named machine and
+	// this handler saw an anonymous remote, for the same request. The audit
+	// record is written from the handler's context, so the caller it names was
+	// the blank one.
 	body, err := io.ReadAll(io.LimitReader(r.Body, 8<<20))
 	if err != nil {
 		jsonResponse(w, mcpResp{JSONRPC: "2.0", Error: &mcpErr{Code: -32700, Message: "parse error"}})
@@ -46,6 +54,7 @@ func (s *CoreServer) handleMCP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = io.NopCloser(bytes.NewReader(body))
 	caller := s.resolveCaller(r)
 	applyCallerWhy(r, &caller)
 
