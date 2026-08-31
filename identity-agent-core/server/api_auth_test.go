@@ -421,7 +421,12 @@ func TestNoHandlerUsesLoopbackAsTheOwnerTest(t *testing.T) {
 			continue
 		}
 		// The predicates themselves, and the one place entitled to call them.
-		if name == "api_auth.go" || name == "mcp_tokens.go" {
+		// caller_resolver.go joined this list on 2026-08-31, when the default
+		// resolver moved into the file it is named for. Its use is the legitimate
+		// one: deciding whether a caller is local is what a resolver is FOR, and
+		// the result is recorded as a fact about the connection rather than used
+		// as an ownership test.
+		if name == "api_auth.go" || name == "mcp_tokens.go" || name == "caller_resolver.go" {
 			continue
 		}
 		// The one route where being local is not standing in for being the
