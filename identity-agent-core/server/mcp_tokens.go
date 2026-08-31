@@ -3,7 +3,6 @@ package server
 import (
 	"crypto/rand"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -154,125 +153,6 @@ func bearerFrom(r *http.Request) string {
 		return strings.TrimPrefix(h, "Bearer ")
 	}
 	return r.Header.Get("X-IA-Token")
-}
-
-// tokenAwareResolver is the default CallerResolver: a valid MCP token grants its
-// scopes (as a remote caller); a genuinely local request is the owner; everything
-// else is remote with no scopes (default-deny at the gateway).
-type tokenAwareResolver struct{ s *CoreServer }
-
-func (t tokenAwareResolver) Resolve(r *http.Request) sandbox.CallerContext {
-	cc := sandbox.CallerContext{
-		Remote:        true,
-		CorrelationID: requestCorrelationID(r),
-		Transport:     "mcp",
-	}
-	if tok := bearerFrom(r); tok != "" {
-		cc.AuthLevel = "bearer" // upgraded to "signed_request" if an envelope verifies
-		presented := hashMCPToken(tok)
-		mcpTokensMu.Lock()
-		toks := t.s.loadMCPTokens()
-		mcpTokensMu.Unlock()
-		for _, entry := range toks {
-			if subtle.ConstantTimeCompare([]byte(entry.Hash), []byte(presented)) == 1 {
-				cc.Scopes = entry.Scopes
-				if entry.AgentAID != "" {
-					// A token bound to a provisioned agent identity: the caller IS
-					// that delegated AID, with its lineage to the owner root.
-					cc.CallerAID = entry.AgentAID
-					cc.DelegationChain = []string{entry.AgentAID}
-					if entry.DelegatorAID != "" {
-						cc.DelegationChain = append(cc.DelegationChain, entry.DelegatorAID)
-					}
-					// Credential-proven authority: when the agent holds a capability
-					// grant (an ACDC the owner issued to it) and the KERI driver is
-					// available, verify it and derive the ceiling FROM the credential
-					// rather than trusting the stored scope list. A revoked, missing,
-					// tampered, or wrong-issuer grant yields no scopes (default-deny).
-					// Driverless builds fall back to the stored ceiling above.
-					t.s.applyGrantScopes(entry, &cc)
-				} else {
-					cc.CallerAID = "token:" + entry.Name
-				}
-				return cc
-			}
-		}
-		// An invalid token is a remote caller with no scopes — not the owner.
-		return cc
-	}
-
-	// A machine this identity enrolled, signing as itself.
-	//
-	// This is the seam caller_resolver.go describes and left empty. The
-	// enrolment ceremony already records the key a machine generated, so this
-	// Identity Agent has everything it needs to recognise it again. Nothing was
-	// asking.
-	//
-	// ASSETS, NOT CONTROLLERS. What enrolment issues is a delegated identifier,
-	// which ADR-006 says a controller must never get: "A controller founds its
-	// own root and is named to an owner identity derived for that machine
-	// alone, exactly as a paired computer is." So this recognises the machines
-	// an identity OWNS and delegated to — where a published lineage is the
-	// point — and is not the controller ceremony, which is a different shape.
-	//
-	// IT IDENTIFIES AND GRANTS NOTHING, and that separation is the whole point
-	// of doing it in this order. Scopes stay empty, so this changes what is
-	// KNOWN about a caller and not one thing about what any caller may reach:
-	// authorize() gives a scoped route to anyone holding any scope, so filling
-	// them here would quietly hand an enrolled machine the capability surface
-	// on the way past. What such a machine may do is a decision, and a separate
-	// one from being able to tell who is asking.
-	//
-	// What it does buy immediately is an audit record that names the machine
-	// and its lineage to the owner, where there was previously a remote caller
-	// with no name at all.
-	if a, err := t.s.identifyAssetFromSignature(r); err == nil && a != nil {
-		cc.CallerAID = a.PairwiseAID
-		cc.Transport = "signed"
-		cc.DelegationChain = []string{a.PairwiseAID}
-		if a.DelegatorAID != "" {
-			cc.DelegationChain = append(cc.DelegationChain, a.DelegatorAID)
-		}
-		// AuthLevel and EnvelopeVerified are deliberately NOT set, and that is
-		// what keeps this from granting anything.
-		//
-		// Both are documented to mean something stronger than a header
-		// signature: EnvelopeVerified is "a valid, fresh, NON-REPLAYED
-		// signed-request envelope", and this path is a header signature that
-		// deliberately does not spend the replay slot. AuthLevel's
-		// "signed_request" means "token + a verified per-request signature",
-		// and there is no token here.
-		//
-		// It is not only a naming question. enrichCallerFromIdentity gives an
-		// envelope-proven caller the capability ceiling of its provisioned
-		// agent — so claiming an envelope here would hand an AI agent's machine
-		// a set of scopes by signing a header. It happens to bail today because
-		// a delegation chain is already set, which is an accident of ordering
-		// in another file rather than a reason. Not claiming what we do not
-		// have is the reason.
-		cc.AuthLevel = "signed_headers"
-
-		// Local stays local. Remote describes the CONNECTION — whether this
-		// arrived from somewhere else — and CallerAID describes who sent it.
-		// They are independent, and returning here without asking made a
-		// loopback request remote purely because it identified itself.
-		//
-		// That cost something real: structuralAuthorizer refuses host_control
-		// to any remote caller, so a host plug-in on this machine that signs
-		// its requests was denied where signing nothing had been allowed. Being
-		// able to say who you are should not take away standing you had for
-		// being where you are.
-		if isLocalOwnerRequest(r) {
-			cc.Remote = false
-		}
-		return cc
-	}
-
-	if isLocalOwnerRequest(r) {
-		cc.Remote = false
-		cc.CallerAID = "local-owner"
-	}
-	return cc
 }
 
 // handleMintMCPToken mints a token (owner only). Scopes are capability ids the
