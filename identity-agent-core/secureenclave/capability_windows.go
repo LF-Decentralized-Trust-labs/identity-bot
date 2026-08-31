@@ -138,37 +138,65 @@ func DetectCapability() Capability {
 	}
 	defer procFreeObject.Call(uintptr(provider))
 
-	algorithm, err := windows.UTF16PtrFromString("ECDSA_P256")
+	// EC first, RSA second, and the second one matters.
+	//
+	// Asking only for ECDSA_P256 understates any TPM that does not do elliptic
+	// curves. A TPM 1.2 module is RSA-only by specification, and some early
+	// 2.0 modules shipped without the NIST P-256 algorithm — those machines
+	// protect an RSA key perfectly well, and reporting them as merely Present
+	// would refuse a root key on hardware that can hold one.
+	//
+	// The order is deliberate: EC is what everything else here uses, so a TPM
+	// that can do it should be recorded as doing it.
+	var lastCode uint32
+	for _, algorithm := range []string{"ECDSA_P256", "RSA"} {
+		code, ok := tryOneKey(provider, algorithm)
+		if ok {
+			return Capability{Status: Usable, Kind: KindTPM2}
+		}
+		lastCode = code
+	}
+
+	// The provider opened and neither key would be made. That is the ordinary
+	// shape of an unprovisioned or locked-out TPM, so the answer is Present —
+	// and never Absent, because the provider opening already proved something
+	// is there.
+	return tpmIsThereButRefused("no_key_algorithm_accepted", lastCode)
+}
+
+// tryOneKey asks the TPM for one ephemeral key of the named algorithm.
+//
+// The key is unnamed, so nothing is written to the TPM's small persistent
+// storage and nothing has to be cleaned up if this process dies mid-probe.
+func tryOneKey(provider windows.Handle, algorithm string) (uint32, bool) {
+	name, err := windows.UTF16PtrFromString(algorithm)
 	if err != nil {
-		return Unproven("algorithm_name_unusable", err.Error())
+		return 0, false
 	}
 	var key windows.Handle
 	if r, _, _ := procCreatePersistedKey.Call(
 		uintptr(provider),
 		uintptr(unsafe.Pointer(&key)),
-		uintptr(unsafe.Pointer(algorithm)),
+		uintptr(unsafe.Pointer(name)),
 		0, // no key name — ephemeral, so nothing is stored
 		0,
 		0,
 	); r != 0 {
-		return tpmIsThereButRefused("key_creation_refused", uint32(r))
+		return uint32(r), false
 	}
 	defer procFreeObject.Call(uintptr(key))
 
-	// Finalizing is where the TPM actually generates it. A provider that opens
-	// and a key that will not finalize is the ordinary shape of an
-	// unprovisioned or locked-out TPM, so the answer is Present rather than
-	// Usable — and never Absent, because the provider opening already proved
-	// something is there.
+	// Finalizing is where the TPM actually generates it. Creating the handle
+	// proves only that the provider accepted the request.
 	if r, _, _ := procFinalizeKey.Call(uintptr(key), 0); r != 0 {
-		return tpmIsThereButRefused("key_finalize_refused", uint32(r))
+		return uint32(r), false
 	}
-
-	return Capability{Status: Usable, Kind: KindTPM2}
+	return 0, true
 }
 
-// tpmIsThereButRefused describes a TPM that answered and would not do the work.
-// Never Absent: the provider opened, so the hardware is there.
+// tpmIsThereButRefused describes a TPM that answered and would not do the work,
+// for any key algorithm it was offered. Never Absent: the provider opened, so
+// the hardware is there.
 func tpmIsThereButRefused(reason string, code uint32) Capability {
 	return Capability{
 		Status: Present,
