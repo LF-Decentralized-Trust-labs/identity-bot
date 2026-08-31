@@ -1,4 +1,13 @@
-//go:build !(linux && !android)
+//go:build !(linux && !android) && !(darwin && cgo)
+
+// Narrowed 2026-08-31. This used to catch darwin as well, so every Mac, iPhone
+// and iPad answered "we have not looked" while the attestation signer on the
+// very same build was creating and using Secure Enclave keys. capability_darwin.go
+// now answers for them by asking the enclave for a key.
+//
+// What still lands here: Android, Windows, iOS or macOS built without cgo, and
+// anything unrecognised. Android is the one that matters most — it is a phone,
+// and a phone is one of only two places a root key may live.
 
 package secureenclave
 
