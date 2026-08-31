@@ -56,3 +56,43 @@ func TestAnUnwrappedSeedIsSaidOnceAndNotOncePerStore(t *testing.T) {
 		t.Error("the warning does not say whose gap it is")
 	}
 }
+
+// A store that failed must not claim an unwrapped seed, and must not spend the
+// one warning the process has.
+//
+// Both halves happened. The line was a deferred call registered before the wrap
+// block, so it ran on the wrap failure, the round-trip failure and both write
+// failures — announcing a seed in the clear that was never written. Holding the
+// warning to one per process then made it worse rather than better: that false
+// line was the only one the process would emit, so the real unwrapped store
+// immediately after it was silent.
+func TestAStoreThatFailedClaimsNothingAndSilencesNothing(t *testing.T) {
+	if SeedWrapAvailable() || !DetectCapability().RootKeyPermitted() {
+		t.Skip("this machine has no unwrapped-seed warning to misfire")
+	}
+
+	var out bytes.Buffer
+	prev := log.Writer()
+	log.SetOutput(&out)
+	t.Cleanup(func() { log.SetOutput(prev) })
+	unwrappedSeedWarning = sync.Once{}
+	t.Cleanup(func() { unwrappedSeedWarning = sync.Once{} })
+
+	// A path that cannot be written, so the store fails and nothing lands.
+	if err := StoreRootSeed("/proc/a-path-that-cannot-be-created", make([]byte, 64)); err == nil {
+		t.Skip("this platform allowed the write, so there is no failed store to check")
+	}
+	if strings.Contains(out.String(), "stored UNWRAPPED") {
+		t.Fatalf("a store that wrote nothing announced an unwrapped seed: %s",
+			strings.TrimSpace(out.String()))
+	}
+
+	// And the real one that follows must still be able to speak.
+	out.Reset()
+	if err := StoreRootSeed(t.TempDir(), make([]byte, 64)); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "stored UNWRAPPED") {
+		t.Fatal("the genuine unwrapped store was silent, because a failed one had spent the warning")
+	}
+}

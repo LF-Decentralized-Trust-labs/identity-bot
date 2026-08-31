@@ -21,6 +21,14 @@ import (
 //     platform has one (Secure Enclave today; TPM/StrongBox/TEE behind the same
 //     seam later). The hardware key never leaves its element; the seed file alone
 //     is useless off-device.
+//
+//     CORRECTED 2026-08-31: that is the intent and it is not what happens. Only
+//     darwin arm64 with cgo has a wrapper at all, and on macOS it cannot persist
+//     its key because a nested helper binary carries no keychain entitlement —
+//     so the seed is stored in the clear on every target but iOS, and the file
+//     alone is exactly as useful off-device as the seed. Reported rather than
+//     refused, because writing the wrappers is our work and not a fault in
+//     anybody's hardware; announceIfStoredInTheClear below is what says so.
 //  2. Hardware is a device-local confidentiality layer, NEVER part of recovery.
 //     The seed is included (plaintext, inside the encrypted payload) in backup
 //     archives, so recovery = mnemonic -> open archive -> reseat seed on the new
@@ -91,9 +99,7 @@ func rootSeedPath(dataDir string) string {
 	return filepath.Join(dataDir, "secureenclave", "root_seed.key")
 }
 
-// StoreRootSeed persists the root keystore seed (64-byte BIP39-class seed),
-// wrapped under the platform hardware key when one is usable.
-// unwrappedSeedWarning keeps the line below to one per process.
+// unwrappedSeedWarning holds the unwrapped-seed line to one per process.
 var unwrappedSeedWarning sync.Once
 
 // whyNotWrapped names which of the two gaps this build has, because the remedy
@@ -107,9 +113,12 @@ func whyNotWrapped() string {
 	case !w.Available():
 		return "the " + w.Scheme() + " wrapper is compiled in and cannot use the hardware"
 	default:
-		return "the wrapper reported itself available and the seed was stored unwrapped anyway"
+		return "the " + w.Scheme() + " wrapper is available and this seed was not put through it"
 	}
 }
+
+// StoreRootSeed persists the root keystore seed (64-byte BIP39-class seed),
+// wrapped under the platform hardware key when one is usable.
 
 func StoreRootSeed(dataDir string, seed []byte) error {
 	if len(seed) < 32 {
@@ -132,29 +141,6 @@ func StoreRootSeed(dataDir string, seed []byte) error {
 	// whether THIS BUILD uses it to protect the seed. A machine can pass the
 	// first and fail the second, which is the case this warns about: our gap,
 	// on somebody's hardware, and silent until now.
-	// ONCE PER PROCESS, not once per store. Said every time it would be noise,
-	// and ask_sign_layer.go already records where that leads: a line printed
-	// for the rest of a machine's life trains whoever reads the log to ignore
-	// it, and this is the line that must not be ignored. Once per process is
-	// also what makes the enclave probe below affordable — it creates a real
-	// key to answer, which is milliseconds, and a seed can be stored on a hot
-	// path during recovery.
-	defer func() {
-		if env.Wrap != seedWrapNone {
-			return
-		}
-		unwrappedSeedWarning.Do(func() {
-			cap := DetectCapability()
-			if !cap.RootKeyPermitted() {
-				return
-			}
-			log.Printf("[keystore] this machine can protect a key (%s) and this build did "+
-				"not use it: the root seed is stored UNWRAPPED. Anyone who reads the file "+
-				"becomes this identity, permanently and undetectably. The hardware is not "+
-				"the gap here — %s", cap.String(), whyNotWrapped())
-		})
-	}()
-
 	if w := platformSeedWrapper(); w != nil && w.Available() {
 		blob, err := w.Wrap(toStore)
 		if err != nil {
@@ -183,7 +169,46 @@ func StoreRootSeed(dataDir string, seed []byte) error {
 	if err := os.WriteFile(tmp, data, 0600); err != nil {
 		return err
 	}
-	return os.Rename(tmp, p)
+	if err := os.Rename(tmp, p); err != nil {
+		return err
+	}
+
+	// AFTER THE SEED IS ON DISK, AND ONLY THEN.
+	//
+	// This was a defer, which ran on every exit — including the wrap failure,
+	// the round-trip failure and both write failures, where env.Wrap is still
+	// "none" and nothing was written. So it announced an unwrapped seed for a
+	// store that never happened; and because the warning is held to one per
+	// process, that false line was the only one the process would ever emit,
+	// silencing the real unwrapped store that came next. A warning that lies
+	// and then silences itself is worse than no warning, which is the thing
+	// this whole line exists to say about a seed in the clear.
+	announceIfStoredInTheClear(env.Wrap)
+	return nil
+}
+
+// announceIfStoredInTheClear says, once per process, that a machine which could
+// have protected this seed did not.
+//
+// Once rather than per store: a line printed for the rest of a machine's life
+// teaches whoever reads the log to skip it, and this is the line that must not
+// be skipped — ask_sign_layer.go records the same reasoning for the same
+// reason. Once also keeps the cost bearable, since answering means asking the
+// hardware and a seed can be stored on a hot path during recovery.
+func announceIfStoredInTheClear(wrap string) {
+	if wrap != seedWrapNone {
+		return
+	}
+	unwrappedSeedWarning.Do(func() {
+		cap := DetectCapability()
+		if !cap.RootKeyPermitted() {
+			return
+		}
+		log.Printf("[keystore] this machine can protect a key (%s) and this build did "+
+			"not use it: the root seed is stored UNWRAPPED. Anyone who reads the file "+
+			"becomes this identity, permanently and undetectably. The hardware is not "+
+			"the gap here — %s", cap.String(), whyNotWrapped())
+	})
 }
 
 // LoadRootSeed reads the root keystore seed, unwrapping it when stored under a

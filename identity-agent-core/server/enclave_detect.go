@@ -38,7 +38,8 @@ type KeyProtectionInfo struct {
 	// usable, be permitted a root key, and store that seed in the clear.
 	SeedWrapped bool `json:"seedWrapped"`
 
-	// SeedWrapScheme names what protects it, empty when nothing does.
+	// SeedWrapScheme names what protects it, and reads "none" when nothing
+	// does — not empty, which is why omitempty never fires on it.
 	SeedWrapScheme string `json:"seedWrapScheme,omitempty"`
 }
 
