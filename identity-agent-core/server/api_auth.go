@@ -297,10 +297,24 @@ func (s *CoreServer) authorize(routes chi.Routes) func(http.Handler) http.Handle
 					next.ServeHTTP(w, r)
 					return
 				}
+				// A controller acts for the owner, so it reaches these for the
+				// same reason the owner does. Left out, the owner's own front end
+				// would be the one caller that could not use a route an AI agent
+				// could — the exact inversion this class exists to avoid.
+				if served := s.controllerActsForTheOwner(w, r, pattern, next); served {
+					return
+				}
 				denyAuthorization(w, "this endpoint needs a token carrying the capability scope for it")
 			default:
 				if s.isOwner(r) {
 					next.ServeHTTP(w, r)
+					return
+				}
+				// Tried before the browser session because a request can carry
+				// both, and the controller signature is the stronger claim: it
+				// proves this request came from that machine, where a session
+				// proves only that somebody holds a cookie.
+				if served := s.controllerActsForTheOwner(w, r, pattern, next); served {
 					return
 				}
 				// A browser session stands in for the owner on everything
