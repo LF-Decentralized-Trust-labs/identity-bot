@@ -20,22 +20,31 @@ const (
 
 // Destination describes one backup target.
 type Destination struct {
-	ID            string          `json:"id"`
-	Type          DestinationType `json:"type"`
-	Label         string          `json:"label"`
-	LocalPath     string          `json:"local_path,omitempty"`
-	PairedURL     string          `json:"paired_url,omitempty"`
-	PairedRole    string          `json:"paired_role,omitempty"` // backup_only
-	CloudProvider string          `json:"cloud_provider,omitempty"`
-	CloudBucket   string          `json:"cloud_bucket,omitempty"`
-	CloudPrefix   string          `json:"cloud_prefix,omitempty"`
-	CloudEndpoint string          `json:"cloud_endpoint,omitempty"`
-	CloudRegion   string          `json:"cloud_region,omitempty"`
-	RemoteURL     string          `json:"remote_url,omitempty"`
-	CredentialID  string          `json:"credential_id,omitempty"`
-	IAGated       bool            `json:"ia_gated"` // true = requires working IA to retrieve
-	Enabled       bool            `json:"enabled"`
-	LastSuccessAt string          `json:"last_success_at,omitempty"`
+	ID         string          `json:"id"`
+	Type       DestinationType `json:"type"`
+	Label      string          `json:"label"`
+	LocalPath  string          `json:"local_path,omitempty"`
+	PairedURL  string          `json:"paired_url,omitempty"`
+	PairedRole string          `json:"paired_role,omitempty"` // backup_only
+	// Elsewhere is the owner saying this destination is not in the same place
+	// as the machine backing up to it.
+	//
+	// Only a person can answer this. Software knows what KIND of thing a
+	// destination is and never where it physically sits, so a paired machine
+	// at a relative's house and one on the same desk are identical from here.
+	// Left alone it stays false, which counts as "cannot tell" rather than as
+	// "here" — the difference being that the owner is asked rather than told.
+	Elsewhere     bool   `json:"elsewhere,omitempty"`
+	CloudProvider string `json:"cloud_provider,omitempty"`
+	CloudBucket   string `json:"cloud_bucket,omitempty"`
+	CloudPrefix   string `json:"cloud_prefix,omitempty"`
+	CloudEndpoint string `json:"cloud_endpoint,omitempty"`
+	CloudRegion   string `json:"cloud_region,omitempty"`
+	RemoteURL     string `json:"remote_url,omitempty"`
+	CredentialID  string `json:"credential_id,omitempty"`
+	IAGated       bool   `json:"ia_gated"` // true = requires working IA to retrieve
+	Enabled       bool   `json:"enabled"`
+	LastSuccessAt string `json:"last_success_at,omitempty"`
 	// LastFullAt is when this destination last received an archive that
 	// restores on its own.
 	//
@@ -63,6 +72,19 @@ type Config struct {
 	// write archives forever and open none of them. For an organisation there
 	// is one per signer, and any single one restores the data.
 	SealToPublicKeysB64 []string `json:"seal_to_public_keys_b64,omitempty"`
+
+	// Split is who holds a share of this identity's recovery, and how many of
+	// them are needed.
+	//
+	// Stored here because a scheduled backup runs when nobody is present, and
+	// the choice has to outlive the screen it was made on. Without it, shares
+	// were something a caller could pass to one export and nothing a person
+	// could ever set — a mechanism with no way to reach it.
+	//
+	// Empty means the recovery words alone open this identity's archives,
+	// which is what every archive written before this was. It is a real
+	// configuration and not a broken one, and the screen says what it costs.
+	Split HowTheWayInIsSplit `json:"split,omitempty"`
 
 	// Offer is what this machine will hold for OTHER identities — the other
 	// direction of backup entirely. Absent on every existing installation,
@@ -110,9 +132,20 @@ type StatusResponse struct {
 	// LastVerifiedAt, LastOffDeviceAt and Protection answer the questions
 	// LastBackupAt cannot: whether any archive has ever been proven to open,
 	// whether any of them left this device, and what is missing. See BackupFacts.
-	LastVerifiedAt      string         `json:"last_verified_at,omitempty"`
-	LastOffDeviceAt     string         `json:"last_off_device_at,omitempty"`
-	Protection          string         `json:"protection,omitempty"`
+	LastVerifiedAt  string `json:"last_verified_at,omitempty"`
+	LastOffDeviceAt string `json:"last_off_device_at,omitempty"`
+	Protection      string `json:"protection,omitempty"`
+	// LocalDisaster says what a fire, a burglary or a flood in one place would
+	// take, or is empty when something would survive it.
+	//
+	// On the wire beside Protection rather than folded into it, because they
+	// answer different questions — losing a machine, losing a room — and
+	// somebody can be fine on the first and ruined on the second. It also
+	// carries the reason for a health that would otherwise go yellow with
+	// nothing on the wire explaining why, which is the common configuration:
+	// a paired machine becomes a destination automatically, and two machines
+	// in one room is what most people will have.
+	LocalDisaster       string         `json:"local_disaster,omitempty"`
 	History             []HistoryEntry `json:"history"`
 	ConsecutiveFailures int            `json:"consecutive_failures"`
 }
@@ -174,8 +207,26 @@ func (s *ConfigStore) SaveDeltaState(ds DeltaState) error {
 
 func DefaultConfig() Config {
 	return Config{
-		Enabled:        false,
-		DefaultTiers:   []string{TierCritical, TierImportant},
+		Enabled: false,
+		// Everything, which is what a backup is for.
+		//
+		// This was tier1+tier2, and tier3 is where the sweep lives — the step
+		// that takes every file in the data directory rather than the ones
+		// somebody remembered to name. So nothing requested it, and a backup
+		// carried a hand-written list: the identity database, the login
+		// relationships, the root seed, the duress policy. Everything else a
+		// running agent holds — three further databases, the DIDComm keys, the
+		// assets, the tokens, the workspaces, the certificates — was absent
+		// from every archive, and would stay absent for anything added next.
+		//
+		// The tests that prove the sweep works pass tier3 explicitly, so the
+		// safety net was demonstrably correct and demonstrably disconnected.
+		//
+		// Size is not the reason to leave it off: a real agent's data
+		// directory measures in the low megabytes, and the bulk that could
+		// grow without bound — sandbox payloads, caches, archives this agent
+		// wrote — is excluded by name with a reason beside it.
+		DefaultTiers:   []string{TierCritical, TierImportant, TierFull},
 		Destinations:   []Destination{},
 		ScheduleDaily:  true,
 		WifiOnlyTier23: true,
@@ -297,6 +348,7 @@ func (s *ConfigStore) BuildStatus(cfg Config, hist []HistoryEntry, failures int)
 		LastVerifiedAt:      facts.LastVerifiedAt,
 		LastOffDeviceAt:     facts.LastOffDeviceAt,
 		Protection:          facts.Protection,
+		LocalDisaster:       facts.LocalDisaster,
 		Health:              facts.Health,
 		Destinations:        cfg.Destinations,
 		RedundancyWarning:   RedundancyWarnings(cfg.Destinations),

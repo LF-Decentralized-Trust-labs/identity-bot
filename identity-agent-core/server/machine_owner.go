@@ -39,19 +39,36 @@ type machineOwnerResponse struct {
 }
 
 func (s *CoreServer) handleMintMachineOwner(w http.ResponseWriter, r *http.Request) {
-	aid, oobi, _, idx, err := s.mintPairwiseIn("machines", "machine-owner")
+	aid, oobi, err := s.mintAnIdentityToClaimAMachineWith()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError,
 			"Could not mint an identity for this machine", err.Error())
 		return
 	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(machineOwnerResponse{AID: aid, OOBI: oobi})
+}
+
+// mintAnIdentityToClaimAMachineWith derives, records and publishes an identity
+// this device can claim a machine as.
+//
+// Separated from the route because it is needed before there is anything to
+// route to. A machine is told which identity may claim it BEFORE it starts, so
+// the identity has to exist earlier than the moment somebody asks for a machine
+// -- and the earliest point this device is in the conversation at all is when
+// its owner agrees to own the organisation. Minting it there, rather than at
+// claim time, is what stops the two being different identities and the machine
+// refusing its own owner.
+func (s *CoreServer) mintAnIdentityToClaimAMachineWith() (aid, oobi string, err error) {
+	aid, oobi, _, idx, err := s.mintPairwiseIn("machines", "machine-owner")
+	if err != nil {
+		return "", "", fmt.Errorf("could not mint an identity for this machine: %w", err)
+	}
 	// Remembered here rather than handed out and taken back. Adoption looks it
 	// up; an index that travelled through a caller would have to be trusted or
 	// verified, and neither is needed when this side minted it.
 	if err := s.DataStore.RememberMachineOwnerIdentity(aid, idx); err != nil {
-		writeError(w, http.StatusInternalServerError,
-			"Could not record the identity for this machine", err.Error())
-		return
+		return "", "", fmt.Errorf("could not record the identity for this machine: %w", err)
 	}
 	// Its key log is written down too, not only held in memory.
 	//
@@ -61,13 +78,10 @@ func (s *CoreServer) handleMintMachineOwner(w http.ResponseWriter, r *http.Reque
 	// unable to prove itself — and the machine correctly refusing its own
 	// owner, permanently, with no way back.
 	if err := s.persistPairwiseKEL(aid); err != nil {
-		writeError(w, http.StatusInternalServerError,
-			"Could not record this identity's key log",
-			"without it this identity could not prove itself to the machine later: "+err.Error())
-		return
+		return "", "", fmt.Errorf("could not record this identity's key log, without which "+
+			"it could not prove itself to the machine later: %w", err)
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(machineOwnerResponse{AID: aid, OOBI: oobi})
+	return aid, oobi, nil
 }
 
 // persistPairwiseKEL writes a freshly minted pairwise identity's key log to

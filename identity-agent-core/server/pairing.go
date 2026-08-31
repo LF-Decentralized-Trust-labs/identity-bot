@@ -69,10 +69,31 @@ type pairingBeginResponse struct {
 	// and not a failure — a laptop has no such statement to make. The adopting
 	// side decides what to do about that; it must not decide silently.
 	Attestation string `json:"attestation,omitempty"`
+	// BackupSigningKey is the key this machine signs its own backups with, so
+	// its owner can tell one of its archives from one somebody substituted.
+	//
+	// Published here and nowhere else, because here is the one moment the
+	// hardware is vouching for what the machine hands over. A key learned
+	// afterwards is a key anything in the middle can replace, and the owner
+	// would record the substitute and verify forgeries against it forever.
+	BackupSigningKey string `json:"backup_signing_key,omitempty"`
 	// Challenge is the nonce a claimant must sign to show it holds the identity
 	// it claims as. Fresh per offer and bound into what gets signed, so a
 	// signature lifted from one exchange cannot be replayed into another.
 	Challenge string `json:"challenge"`
+}
+
+// foundedOwner is an identity offered as the owner of what this machine founds,
+// with everything needed to prove the offer rather than assert it.
+//
+// The same evidence the claim itself carries, because it is answering a question
+// of the same weight: an owner is named once, at inception, and can never be
+// replaced afterwards.
+type foundedOwner struct {
+	AID       string                   `json:"aid"`
+	PublicKey string                   `json:"public_key"`
+	KEL       []map[string]interface{} `json:"kel,omitempty"`
+	Signature string                   `json:"signature,omitempty"`
 }
 
 type pairingCompleteRequest struct {
@@ -85,6 +106,20 @@ type pairingCompleteRequest struct {
 	// Such an identity incepts its own root instead and names its owner in that
 	// event — see FoundAsRoot.
 	DipEvent map[string]interface{} `json:"dip_event"`
+	// FoundedOwner names a DIFFERENT identity as the owner of what this machine
+	// founds, rather than reusing the identity that claimed it.
+	//
+	// Those are two questions and they were being answered with one value. The
+	// claim says which party the machine was reserved for; the seal says who
+	// the founded identity answers to, for ever. Whoever provisioned the
+	// machine was told the first, so sealing it as the second lets them
+	// recognise their own customer in a published inception event — which is
+	// the correlation the pairwise scheme exists to prevent, handed to the one
+	// party sealed hardware exists to exclude. See ADR-038.
+	//
+	// Absent, the claimant is the owner. A computer somebody pairs from its own
+	// screen told nobody anything, so there is nobody to correlate against.
+	FoundedOwner *foundedOwner `json:"founded_owner,omitempty"`
 	// FoundAsRoot asks this instance to found an identity of its own, naming
 	// who owns it, rather than become somebody's delegated agent.
 	//
@@ -233,11 +268,19 @@ func (s *CoreServer) handlePairingBegin(w http.ResponseWriter, r *http.Request) 
 		NextPublicKey: iacrypto.VerkeyQB64(nextPub),
 		Challenge:     challenge,
 	}
+	backupPub, err := secureenclave.BackupSigningPublicKey(s.DataDir)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError,
+			"This machine cannot say what it signs its backups with", err.Error())
+		return
+	}
+	offer.BackupSigningKey = base64.StdEncoding.EncodeToString(backupPub)
 	// Ask the hardware to vouch for exactly these keys, so the controller can
 	// establish that the offer came from a sealed machine before it signs
 	// anything over it. Silence here means no such hardware, which the
 	// controller is left to judge.
-	if binding, berr := iacrypto.PairingOfferBinding(offer.PublicKey, offer.NextPublicKey); berr == nil {
+	if binding, berr := iacrypto.PairingOfferBinding(
+		offer.PublicKey, offer.NextPublicKey, offer.BackupSigningKey); berr == nil {
 		if report, rerr := secureenclave.GetSNPReport(binding); rerr == nil && report != nil {
 			offer.Attestation = base64.StdEncoding.EncodeToString(report.Raw)
 		}
@@ -380,6 +423,15 @@ func (s *CoreServer) handlePairingComplete(w http.ResponseWriter, r *http.Reques
 		foundedWitnessed bool
 	)
 
+	// Who the founded identity answers to, decided once so the inception and
+	// the sealed authority cannot disagree. Defaults to the claimant, which is
+	// a computer somebody paired from its own screen: it told nobody anything,
+	// so there is nobody who could correlate it. See ADR-038.
+	ownerAID, ownerPublicKey := req.OwnerAID, req.OwnerPublicKey
+	if req.FoundedOwner != nil {
+		ownerAID, ownerPublicKey = req.FoundedOwner.AID, req.FoundedOwner.PublicKey
+	}
+
 	if req.FoundAsRoot {
 		if req.OwnerAID == "" {
 			writeError(w, http.StatusBadRequest, "This identity needs an owner",
@@ -429,7 +481,7 @@ func (s *CoreServer) handlePairingComplete(w http.ResponseWriter, r *http.Reques
 		result, ierr := s.KeriDriver.Incept(drivers.InceptionRequest{
 			PublicKey:     pairingState.offered.PublicKey,
 			NextPublicKey: pairingState.offered.NextPublicKey,
-			OwnerAID:      req.OwnerAID,
+			OwnerAID:      ownerAID,
 			Witnesses:     witnesses,
 			Toad:          toad,
 		})
@@ -521,8 +573,8 @@ func (s *CoreServer) handlePairingComplete(w http.ResponseWriter, r *http.Reques
 	// owner would be adopted and unadministrable — and a later, separate call
 	// to name the owner is a window somebody else could step into.
 	if err := s.SealOwnerAuthority(OwnerAuthority{
-		AID:       req.OwnerAID,
-		PublicKey: req.OwnerPublicKey,
+		AID:       ownerAID,
+		PublicKey: ownerPublicKey,
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "Could not seal the owner", err.Error())
 		return
@@ -571,8 +623,8 @@ func (s *CoreServer) handlePairingComplete(w http.ResponseWriter, r *http.Reques
 	clearLocalPairingOffer()
 
 	if req.FoundAsRoot {
-		log.Printf("[pairing] adopted: AID %s founded as its own root, owner %s",
-			identityAID, req.OwnerAID)
+		log.Printf("[pairing] adopted: AID %s founded as its own root, owner %s (claimed by %s)",
+			identityAID, ownerAID, req.OwnerAID)
 	}
 
 	// The identity is named as what it is. One founded as its own root is not
@@ -979,9 +1031,24 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 		// What the machine signs as. Its own root, minted inside it, rather than
 		// an identity issued from here.
 		SignsAsAID: identityAID,
-		URL:        base,
-		Kind:       kind,
-		Sealed:     offer.Attestation != "",
+		// What this machine signs its backups with. Without it the owner has
+		// nothing to check an archive against, and a machine-signed archive
+		// proves only that its writer can sign their own work.
+		//
+		// VOUCHED FOR ONLY WHERE Sealed IS TRUE. On sealed hardware the
+		// attestation covers this key, so nothing terminating the connection
+		// can substitute it. On an unattested machine — an ordinary laptop —
+		// nothing covers it, and nothing covers the machine's OWN key either:
+		// the whole offer is taken on trust there, which is a property of
+		// pairing an unattested machine and not of this key. It is recorded
+		// anyway, because a key taken on trust at pairing is still worth far
+		// more than no key at all: it pins THIS machine from that moment on,
+		// so an archive substituted later is caught even though one
+		// substituted during the ceremony would not be.
+		BackupSigningKeyB64: offer.BackupSigningKey,
+		URL:                 base,
+		Kind:                kind,
+		Sealed:              offer.Attestation != "",
 		// Which identity of ours it answers to, and where that key comes from.
 		// Without the index there is no signing to this machine again, no
 		// rotation and no revocation — so losing it is losing the machine.

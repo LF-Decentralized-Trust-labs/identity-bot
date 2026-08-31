@@ -1,4 +1,17 @@
-//go:build !(linux && !android)
+//go:build !(linux && !android) && !(darwin && cgo) && !windows && !android
+
+// Narrowed 2026-08-31. This used to catch darwin as well, so every Mac, iPhone
+// and iPad answered "we have not looked" while the attestation signer on the
+// very same build was creating and using Secure Enclave keys. capability_darwin.go
+// now answers for them by asking the enclave for a key.
+//
+// Windows and Android were excluded the same day, by capability_windows.go and
+// capability_android.go.
+//
+// WHAT STILL LANDS HERE IS NOTHING WE SHIP. iOS or macOS built without cgo, and
+// any platform that does not exist yet. All five supported platforms now have a
+// detector, so a machine reaching this file is one nobody has taught this
+// software to inspect — which is exactly what the answer below says.
 
 package secureenclave
 

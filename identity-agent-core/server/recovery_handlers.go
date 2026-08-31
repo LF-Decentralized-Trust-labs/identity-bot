@@ -2,11 +2,18 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"sync"
+	"time"
 
+	"identity-agent-core/authprovider"
+	"identity-agent-core/backup"
 	"identity-agent-core/recovery"
+	"identity-agent-core/store"
+
+	"github.com/google/uuid"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -15,13 +22,35 @@ func (s *CoreServer) mountRecoveryRoutes(r chi.Router) {
 	r.Route("/recovery", func(r chi.Router) {
 		r.Post("/verify", s.handleRecoveryVerify)
 		r.Post("/start", s.handleRecoveryStart)
+		// Every recovery this agent is holding. Without it a session is
+		// reachable only from the screen that started it, and the wait is
+		// measured in days.
+		r.Get("/sessions", s.handleRecoveryListSessions)
 		r.Get("/sessions/{id}", s.handleRecoveryGetSession)
 		r.Post("/sessions/{id}/rotation", s.handleRecoveryRotation)
 		r.Post("/sessions/{id}/activate", s.handleRecoveryActivate)
 		r.Post("/sessions/{id}/cancel", s.handleRecoveryCancel)
+		// What this identity has chosen about being coerced. Off unless
+		// somebody turned it on.
+		r.Get("/duress-policy", s.handleGetDuressPolicy)
+		r.Put("/duress-policy", s.handlePutDuressPolicy)
 		r.Post("/retrieve", s.handleRecoveryRetrieve)
 		r.Post("/root-aid-rotation", s.handleRecoveryRootAIDRotation)
 		r.Get("/root-aid-rotation/status", s.handleRecoveryRootAIDStatus)
+
+		// Holding a share for somebody else's identity. Small on purpose: a
+		// machine that agrees to help stores one key and one promise, and
+		// learns nothing about the person it is helping.
+		r.Post("/holdings", s.handleAgreeToHold)
+		r.Get("/holdings", s.handleWhatThisMachineHolds)
+		r.Post("/holdings/approve", s.handleApproveShare)
+		r.Post("/holdings/stop", s.handleStopHolding)
+
+		// Who holds a share of THIS identity's recovery — the other side of
+		// holding, and the setting that makes any of it reachable.
+		r.Get("/who-holds-this", s.handleGetWhoHoldsYourRecovery)
+		r.Put("/who-holds-this", s.handleSetWhoHoldsYourRecovery)
+		r.Post("/share-requests", s.handleReleaseShare)
 	})
 }
 
@@ -34,6 +63,65 @@ func (s *CoreServer) mountRecoveryRoutes(r chi.Router) {
 // concurrently, so this was reachable by two people, or one person and a
 // retry.
 var recoveryOnce sync.Once
+
+// Built per server rather than once per process.
+//
+// A package-level sync.Once binds whichever CoreServer ran first to the whole
+// program: a second instance then serves the first one's holdings and writes
+// its waiting clock into the first one's data directory. That is wrong in
+// tests and worse in anything running two agents, and it is reached through an
+// unauthenticated route.
+var holderState sync.Map // *CoreServer -> *holderPair
+
+type holderPair struct {
+	once     sync.Once
+	holdings *recovery.Holdings
+	holder   *recovery.Holder
+}
+
+func (s *CoreServer) holderPairFor() *holderPair {
+	v, _ := holderState.LoadOrStore(s, &holderPair{})
+	pair := v.(*holderPair)
+	pair.once.Do(func() {
+		pair.holdings = &recovery.Holdings{DataDir: s.DataDir}
+		pair.holder = &recovery.Holder{
+			DataDir: s.DataDir,
+			// How well established the person at THIS machine is, which is the
+			// one authentication claim a holder can actually check — its own
+			// agent measuring its own person, rather than a number arriving in
+			// a request from somebody who chose it.
+			WhoIsHere: func() authprovider.Result {
+				res, err := s.recoveryService().Authenticator.Authenticate()
+				if err != nil {
+					// A provider that could not answer is not a provider that
+					// found nothing. Unmeasured, which fails every minimum.
+					return authprovider.Unmeasured(err.Error())
+				}
+				return res
+			},
+			Notify: func(identityAID string, first bool) {
+				// Somebody is recovering an identity this machine helps
+				// protect, and the owner is told.
+				//
+				// This is the property no other configuration has — a theft
+				// becomes an event the owner hears about rather than one they
+				// never do — so a log line was the wrong place for it. A log
+				// line is not a warning; it is a warning nobody reads.
+				log.Printf("[recovery] a share was asked for: identity=%s first=%v",
+					identityAID, first)
+				s.tellTheOwnerAShareWasAskedFor(identityAID)
+			},
+		}
+	})
+	return pair
+}
+
+// holdings is what this machine has agreed to hold for other identities.
+func (s *CoreServer) holdings() *recovery.Holdings { return s.holderPairFor().holdings }
+
+// shareHolder decides whether to release a share, and is the clock while it
+// does.
+func (s *CoreServer) shareHolder() *recovery.Holder { return s.holderPairFor().holder }
 
 func (s *CoreServer) recoveryService() *recovery.Service {
 	recoveryOnce.Do(func() {
@@ -171,6 +259,14 @@ func (s *CoreServer) handleRecoveryActivate(w http.ResponseWriter, r *http.Reque
 			writeError(w, http.StatusConflict, "Cancel window active", err.Error())
 		case *recovery.ErrRotationMandatory:
 			writeError(w, http.StatusPreconditionFailed, "Rotation required", err.Error())
+		case *recovery.ErrHeldForDuress:
+			// Its own status, because a client has to be able to tell this from
+			// a mistyped phrase. Falling to the default made a duress hold a
+			// bad request, which threw away the "until" and "how many more
+			// approvals" this type carries precisely so a screen can say them.
+			writeError(w, http.StatusConflict, "Held", err.Error())
+		case *recovery.ErrNotAuthenticated:
+			writeError(w, http.StatusForbidden, "Not authenticated", err.Error())
 		default:
 			// A wrong phrase, a missing phrase and an archive that opens a
 			// different identity are all the caller's to fix, not this
@@ -271,4 +367,265 @@ func (s *CoreServer) handleRecoveryCancel(w http.ResponseWriter, r *http.Request
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(sess)
+}
+
+func (s *CoreServer) handleGetDuressPolicy(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(s.recoveryService().LoadDuressPolicy())
+}
+
+// handlePutDuressPolicy records what an identity wants to happen when somebody
+// may be being forced.
+//
+// A policy that cannot be satisfied is refused here rather than stored, so the
+// moment somebody discovers they locked themselves out is not their recovery.
+func (s *CoreServer) handlePutDuressPolicy(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRecoveryBody)
+	var p recovery.DuressPolicy
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request", err.Error())
+		return
+	}
+	if err := s.recoveryService().SaveDuressPolicy(p); err != nil {
+		writeError(w, http.StatusBadRequest, "That setting would not work", err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(s.recoveryService().LoadDuressPolicy())
+}
+
+// handleRecoveryListSessions answers what recoveries are in progress.
+//
+// So an app can offer to resume one. A recovery that survives the agent
+// restarting but not the screen closing is not something anybody can actually
+// wait out.
+func (s *CoreServer) handleRecoveryListSessions(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"sessions": s.recoveryService().InProgress(),
+	})
+}
+
+// statusForActivateError says which refusal this is.
+//
+// Lifted out of the handler so it can be tested, and so the two cannot drift.
+// None of these is a server fault: each is a true statement about the request
+// or about where the recovery has got to, and somebody reading it should be
+// able to act on it.
+func statusForActivateError(err error) int {
+	// Needing shares is not a bad request. It is the archive working as
+	// designed, and a client has to be able to tell it from a mistyped phrase
+	// — which is what 400 already means here.
+	var needs *backup.ErrNeedsShares
+	if errors.As(err, &needs) {
+		return http.StatusConflict
+	}
+	switch err.(type) {
+	case *recovery.ErrCancelWindowActive:
+		return http.StatusConflict
+	case *recovery.ErrRotationMandatory:
+		return http.StatusPreconditionFailed
+	case *recovery.ErrHeldForDuress:
+		return http.StatusConflict
+	case *recovery.ErrNotAuthenticated:
+		return http.StatusForbidden
+	default:
+		return http.StatusBadRequest
+	}
+}
+
+// --- holding a share for somebody else's identity -------------------------
+
+// handleAgreeToHold takes on a share for another identity and answers with the
+// public key to seal it to.
+//
+// The keypair is made here, by the machine that will have to use it, and only
+// the public half goes back. If the asking agent generated it instead, the
+// machine that wrote the backup would once have held every key needed to open
+// it.
+func (s *CoreServer) handleAgreeToHold(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRecoveryBody)
+	var req recovery.AgreeToHold
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request", err.Error())
+		return
+	}
+	agreed, err := s.holdings().Agree(req)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "This machine cannot hold that", err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(agreed)
+}
+
+// handleWhatThisMachineHolds lists what somebody has taken on, without keys.
+func (s *CoreServer) handleWhatThisMachineHolds(w http.ResponseWriter, r *http.Request) {
+	held, err := s.holdings().All()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Could not read what this machine holds", err.Error())
+		return
+	}
+	asked, err := s.shareHolder().WhatHasBeenAsked()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Could not read what has been asked", err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"holding": held,
+		"asked":   asked,
+	})
+}
+
+// handleReleaseShare is a recovering machine asking for a share back.
+//
+// Unauthenticated by design, and the reason is the sealed share it carries:
+// opening that needs a private key only this machine has, and holding it at
+// all means the caller opened a bootstrap envelope, which needed the recovery
+// words. So the request authenticates itself with something no stranger can
+// forge, and everything that cannot be opened gets one answer.
+func (s *CoreServer) handleReleaseShare(w http.ResponseWriter, r *http.Request) {
+	// Kilobytes, not the half a gigabyte the rest of recovery allows. This
+	// route is unauthenticated, so anybody at all can post to it, and a share
+	// request is an identifier, a name and a sealed 32-byte secret. Reading
+	// megabytes from a stranger before deciding anything is work they get for
+	// free.
+	r.Body = http.MaxBytesReader(w, r.Body, maxShareRequestBody)
+	var req struct {
+		IdentityAID string             `json:"identity_aid"`
+		HolderID    string             `json:"holder_id"`
+		Sealed      backup.SealedShare `json:"sealed_share"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request", err.Error())
+		return
+	}
+
+	holding, err := s.holdings().Find(req.IdentityAID, req.HolderID)
+	if err != nil || holding == nil {
+		// Byte-for-byte the answer a share sealed to somebody else gets.
+		// Anything that distinguishes them turns this route into a way for a
+		// stranger to enumerate whose backups this machine helps protect.
+		writeError(w, http.StatusForbidden, "This share was not released",
+			notSealedToThisHolder)
+		return
+	}
+
+	share, err := s.shareHolder().Release(*holding, req.Sealed, time.Now())
+	if err != nil {
+		writeShareRefusal(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"share_b64": backup.EncodeB64(share)})
+}
+
+// handleStopHolding is somebody deciding they no longer want to hold a share.
+//
+// Agreeing to hold part of a recovery is a commitment, and a commitment with
+// no way out is not one somebody can make freely. Every share sealed to this
+// key stops being openable, so whoever was being helped needs a fresh backup —
+// which the answer says, because a holder quietly disappearing is the failure
+// nobody finds out about until a recovery.
+func (s *CoreServer) handleStopHolding(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxShareRequestBody)
+	var req struct {
+		IdentityAID string `json:"identity_aid"`
+		HolderID    string `json:"holder_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request", err.Error())
+		return
+	}
+	if err := s.holdings().Forget(req.IdentityAID, req.HolderID); err != nil {
+		writeError(w, http.StatusInternalServerError, "That could not be given up", err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"stopped_holding": req.HolderID,
+		"tell_them": "Every backup already sealed to this machine can no longer be opened " +
+			"by it. Whoever this was helping needs to take a fresh backup.",
+	})
+}
+
+// tellTheOwnerAShareWasAskedFor puts a share request in front of somebody.
+//
+// Written where the owner already looks rather than into a log: the whole
+// value of a holder being asked is that the person it protects finds out
+// early enough to stop it, and a line in a server log does not reach them.
+//
+// A failure here does not fail the request. The holder still recorded the ask
+// and still waits, and refusing to answer because a notification could not be
+// written would turn a delivery problem into a broken recovery.
+func (s *CoreServer) tellTheOwnerAShareWasAskedFor(identityAID string) {
+	if s.DataStore == nil {
+		return
+	}
+	if err := s.DataStore.SaveNotification(store.Notification{
+		ID:       "share-asked-" + uuid.NewString(),
+		Kind:     "recovery.share_requested",
+		Severity: "warning",
+		Title:    "Somebody is recovering an identity you hold part of",
+		Body: "A machine asked this one for its share of a recovery. If this is not " +
+			"something you expected, tell whoever this identity belongs to — they may " +
+			"not know their recovery words have been used.",
+		Payload: identityAID,
+		Status:  "unread",
+	}); err != nil {
+		log.Printf("[recovery] a share was asked for and the owner could not be told: %v", err)
+	}
+}
+
+// notSealedToThisHolder is the one answer every unopenable request gets.
+//
+// One string, used from both places, because two messages that mean "no" and
+// differ by a word are a way to tell what a machine holds.
+const notSealedToThisHolder = "this share was not sealed to this holder"
+
+// maxShareRequestBody bounds what an unauthenticated caller may send.
+const maxShareRequestBody = 64 << 10
+
+// handleApproveShare records that a person said yes to a recovery.
+func (s *CoreServer) handleApproveShare(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRecoveryBody)
+	var req struct {
+		IdentityAID string `json:"identity_aid"`
+		HolderID    string `json:"holder_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request", err.Error())
+		return
+	}
+	if err := s.shareHolder().Approve(req.IdentityAID, req.HolderID, time.Now()); err != nil {
+		writeError(w, http.StatusBadRequest, "That could not be approved", err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// writeShareRefusal answers a refusal in a way a screen can act on.
+//
+// Being held and being refused are different things and must not arrive as the
+// same status, or no client can tell "come back on Tuesday" from "this will
+// never work".
+func writeShareRefusal(w http.ResponseWriter, err error) {
+	var held *recovery.ErrHeldForWait
+	if errors.As(err, &held) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error":         "This share is being held",
+			"detail":        err.Error(),
+			"release_after": held.Until.UTC().Format(time.RFC3339),
+		})
+		return
+	}
+	var approval *recovery.ErrNeedsApproval
+	if errors.As(err, &approval) {
+		writeError(w, http.StatusConflict, "This share is waiting to be approved", err.Error())
+		return
+	}
+	writeError(w, http.StatusForbidden, "This share was not released", err.Error())
 }

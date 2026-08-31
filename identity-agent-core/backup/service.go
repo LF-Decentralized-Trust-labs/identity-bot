@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"identity-agent-core/secureenclave"
 	"log"
 	"os"
 	"path/filepath"
@@ -212,6 +213,15 @@ func (s *Service) exportWithReason(mnemonic, seedB64, passphrase, destPath strin
 		return nil, err
 	}
 
+	// The stored configuration, for the two things a scheduled run cannot be
+	// told at the moment it happens: who may open an archive, and who holds a
+	// share of the recovery.
+	storedCfg, cerr := s.ConfigStore.LoadConfig()
+	if cerr != nil {
+		s.recordFailure(opts.Tiers, cerr, time.Since(start))
+		return nil, cerr
+	}
+
 	// Recipients configured once, at pairing, are what let a scheduled backup
 	// run unattended: nobody is present to type a phrase at 3am, and an agent
 	// that had to store one to keep working would defeat the point.
@@ -219,6 +229,21 @@ func (s *Service) exportWithReason(mnemonic, seedB64, passphrase, destPath strin
 	if err != nil {
 		s.recordFailure(opts.Tiers, err, time.Since(start))
 		return nil, err
+	}
+
+	// What this machine signs its backups with, so its owner can tell one of
+	// its archives from one somebody substituted. Derived from the root seed
+	// this machine already holds, and its public half was recorded when the
+	// machine was paired.
+	//
+	// Its absence does not stop a backup: an unattributed archive is worse
+	// than an attributed one and far better than none, and the restoring side
+	// says which it got. A machine that has the recovery words does not use
+	// this at all — they are a better mark and it already holds them.
+	signingKey, skErr := secureenclave.BackupSigningKey(s.DataDir)
+	if skErr != nil {
+		log.Printf("[backup] this machine cannot sign its archives, so they will not say "+
+			"who wrote them: %v", skErr)
 	}
 
 	var seedBytes []byte
@@ -230,6 +255,7 @@ func (s *Service) exportWithReason(mnemonic, seedB64, passphrase, destPath strin
 	}
 
 	result, err := collector.CreateArchive(opts, ExportRequest{
+		MachineSigningKey:    signingKey,
 		Mnemonic:             mnemonic,
 		BIP39Seed:            seedBytes,
 		Passphrase:           passphrase,
@@ -239,6 +265,11 @@ func (s *Service) exportWithReason(mnemonic, seedB64, passphrase, destPath strin
 		ExternalPointers:     pointers,
 		DeltaStateDigestQB64: pendingState.ChainDigestQB64,
 		SealToPublicKeys:     sealTo,
+		// Who holds a share, as this identity chose. A scheduled backup runs
+		// with nobody present, so the stored choice is the only way it reaches
+		// an archive — passing it per-export would mean shares existed only
+		// when somebody was watching.
+		Split: storedCfg.Split,
 	})
 	if err != nil {
 		s.recordFailure(opts.Tiers, err, time.Since(start))

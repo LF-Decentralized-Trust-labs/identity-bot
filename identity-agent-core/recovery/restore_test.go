@@ -55,6 +55,14 @@ func TestRestoreValidSeedPassesIntegrity(t *testing.T) {
 
 func buildTestArchive(t *testing.T, mnemonic string, contacts []ContactPairwiseExpectation) []byte {
 	t.Helper()
+	return buildTestArchiveWith(t, mnemonic, contacts, nil)
+}
+
+// buildTestArchiveWith builds one carrying extra sections, so a test can put
+// something in the archive that a recovering device would otherwise never see.
+func buildTestArchiveWith(t *testing.T, mnemonic string,
+	contacts []ContactPairwiseExpectation, extra map[string][]byte) []byte {
+	t.Helper()
 
 	identity := store.IdentityState{
 		AID:           "EtestRecoveryAID",
@@ -75,6 +83,10 @@ func buildTestArchive(t *testing.T, mnemonic string, contacts []ContactPairwiseE
 			"identity_state": idJSON,
 			"contacts":       contactsJSON,
 		},
+	}
+	for k, v := range extra {
+		bundle.Sections[k] = v
+		bundle.Ordered = append(bundle.Ordered, backup.PayloadSection{Name: k, Data: v})
 	}
 
 	plain, err := backup.SerializePayloadBundle(bundle)
@@ -112,7 +124,20 @@ func buildTestArchive(t *testing.T, mnemonic string, contacts []ContactPairwiseE
 		})
 	}
 
-	raw, err := backup.EncodeArchive(&backup.ArchiveFile{Manifest: manifest, Ciphertext: ct})
+	// Marked with who wrote it, the way a real archive is. Hand-built archives
+	// that skip this are exactly what a substituted one looks like, and a
+	// restore refuses them — so leaving it out would mean every test here
+	// exercised a shape no real archive has.
+	arch := &backup.ArchiveFile{Manifest: manifest, Ciphertext: ct}
+	seed, err := backup.MnemonicToBIP39Seed(mnemonic, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := backup.SignWithSeed(arch, seed); err != nil {
+		t.Fatal(err)
+	}
+
+	raw, err := backup.EncodeArchive(arch)
 	if err != nil {
 		t.Fatal(err)
 	}

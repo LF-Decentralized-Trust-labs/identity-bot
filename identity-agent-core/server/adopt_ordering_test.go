@@ -13,10 +13,14 @@ import (
 
 func offerWithReport(t *testing.T, bindKeys bool, measurement byte) *pairingBeginResponse {
 	t.Helper()
-	offer := &pairingBeginResponse{PublicKey: "DKEY-ONE", NextPublicKey: "DKEY-TWO"}
+	offer := &pairingBeginResponse{
+		PublicKey: "DKEY-ONE", NextPublicKey: "DKEY-TWO",
+		BackupSigningKey: "DKEY-BACKUP-SIGNING",
+	}
 	bound := "something-else"
 	if bindKeys {
-		b, err := iacrypto.PairingOfferBinding(offer.PublicKey, offer.NextPublicKey)
+		b, err := iacrypto.PairingOfferBinding(
+			offer.PublicKey, offer.NextPublicKey, offer.BackupSigningKey)
 		if err != nil {
 			t.Fatal(err)
 		}

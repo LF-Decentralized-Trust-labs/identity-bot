@@ -184,6 +184,16 @@ func (s *CoreServer) handleRedeemSignerInvite(w http.ResponseWriter, r *http.Req
 		// organisation survives losing the machine it runs on. Asking for it
 		// later means a window where the answer is "it does not survive".
 		BackupSealPublicKeyB64 string `json:"backup_seal_public_key_b64,omitempty"`
+		// MachineOwnerAID is the identity this owner will claim a rented
+		// machine with, minted while they were here rather than at the moment
+		// of claiming.
+		//
+		// A machine is told who may claim it before it starts, so the identity
+		// has to exist before anybody asks for a machine -- and this is the
+		// only moment the owner's device is in the conversation beforehand.
+		// Optional: agreeing to own an organisation and never renting anything
+		// is ordinary.
+		MachineOwnerAID string `json:"machine_owner_aid,omitempty"`
 	}
 	json.NewDecoder(r.Body).Decode(&body)
 	if body.PairwiseAID == "" || body.VouchSig == "" {
@@ -212,15 +222,16 @@ func (s *CoreServer) handleRedeemSignerInvite(w http.ResponseWriter, r *http.Req
 		return
 	}
 	emp := asset.Employee{
-		PairwiseAID:  body.PairwiseAID,
-		Name:         body.Name,
-		Role:         "Super Admin",
-		Status:       "active", // founding signer is active immediately
-		InviteToken:  token,
-		OOBI:         body.OOBI,
-		IsSigner:     true,
-		VouchSig:     body.VouchSig,
-		VouchPayload: body.VouchPayload,
+		PairwiseAID:     body.PairwiseAID,
+		MachineOwnerAID: body.MachineOwnerAID,
+		Name:            body.Name,
+		Role:            "Super Admin",
+		Status:          "active", // founding signer is active immediately
+		InviteToken:     token,
+		OOBI:            body.OOBI,
+		IsSigner:        true,
+		VouchSig:        body.VouchSig,
+		VouchPayload:    body.VouchPayload,
 	}
 
 	acc, err := s.AcceptFoundingSigner(SignerAcceptance{

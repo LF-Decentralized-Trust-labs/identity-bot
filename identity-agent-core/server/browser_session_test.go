@@ -284,3 +284,29 @@ func TestEveryForbiddenRouteIsARealRoute(t *testing.T) {
 		}
 	}
 }
+
+func TestASessionCannotStartStopOrWeakenARecovery(t *testing.T) {
+	// A browser session is something the owner grants for a while and that
+	// whoever holds the browser then has. A recovery replaces this identity's
+	// key material and everything it held, so it belongs behind the same bar as
+	// installing a root seed.
+	//
+	// The duress policy is the sharpest of these: it says what must happen if
+	// the owner may be being forced. A session that could turn it off could
+	// disable the protection and then use the recovery it was protecting
+	// against — which would make the control the third gate exists to provide
+	// removable by the very thing it defends against.
+	for _, route := range []string{
+		"PUT /api/recovery/duress-policy",
+		"POST /api/recovery/start",
+		"POST /api/recovery/sessions/{id}/activate",
+		"POST /api/recovery/sessions/{id}/cancel",
+		"POST /api/recovery/sessions/{id}/rotation",
+		"POST /api/inception",
+		"POST /api/rotation",
+	} {
+		if _, forbidden := sessionForbidden[route]; !forbidden {
+			t.Fatalf("a browser session can reach %s", route)
+		}
+	}
+}

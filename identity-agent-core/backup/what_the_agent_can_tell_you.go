@@ -38,6 +38,15 @@ type BackupFacts struct {
 	LastOffDeviceAt string `json:"last_off_device_at,omitempty"`
 	// Protection says in plain words what is missing, or is empty when nothing is.
 	Protection string `json:"protection,omitempty"`
+	// LocalDisaster says what a fire, a burglary or a flood in one place would
+	// take, or is empty when something would survive it.
+	//
+	// Its own field rather than folded into Protection, because they answer
+	// different questions — one about losing a machine, one about losing a
+	// room — and somebody can be fine on the first and ruined on the second.
+	// A single sentence covering both would have to be vague enough to be
+	// useless.
+	LocalDisaster string `json:"local_disaster,omitempty"`
 	// Health is green, yellow or red, and accounts for all three facts above.
 	Health string `json:"health"`
 }
@@ -46,7 +55,10 @@ type BackupFacts struct {
 //
 // History is newest-first.
 func FactsFrom(hist []HistoryEntry, dests []Destination, dataDir string, consecutiveFailures int) BackupFacts {
-	f := BackupFacts{Protection: ProtectionOf(dests, dataDir)}
+	f := BackupFacts{
+		Protection:    ProtectionOf(dests, dataDir),
+		LocalDisaster: WhatALocalDisasterWouldTake(dests, dataDir),
+	}
 
 	for _, h := range hist {
 		if !h.Success {
@@ -94,7 +106,6 @@ func healthFrom(f BackupFacts, consecutiveFailures int) string {
 	if f.LastVerifiedAt == "" {
 		return "yellow"
 	}
-
 	age := ageOf(f.LastOffDeviceAt)
 	switch {
 	case age < 0:
@@ -108,6 +119,19 @@ func healthFrom(f BackupFacts, consecutiveFailures int) string {
 	// A recent copy that is off-device, and an older proof that archives open,
 	// is worth distinguishing from both being current.
 	if v := ageOf(f.LastVerifiedAt); v < 0 || v > 7*24*time.Hour {
+		return "yellow"
+	}
+
+	// Everything survives losing a machine, recently and provably, and nothing
+	// is known to survive losing the room they are all in.
+	//
+	// Checked LAST, so that a staler or unproven backup still answers red or
+	// yellow for its own reason — a house fire is not the most urgent thing
+	// wrong with a backup nobody has taken in a week. Yellow rather than red:
+	// there is a working backup and the common accidents are covered, and
+	// calling that the same as having none would make red mean nothing. But
+	// not green either, because one ordinary house fire takes the lot.
+	if f.LocalDisaster != "" {
 		return "yellow"
 	}
 	return "green"

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"identity-agent-core/backup"
+	"identity-agent-core/secureenclave"
 	"identity-agent-core/store"
 )
 
@@ -16,6 +17,10 @@ const (
 // sealedArchiveFor builds an archive the way an agent that has never held the
 // seed would build one: a random backup key sealed to a public key, and no
 // seed slot at all.
+// machineSigningKeyForTest is the key the machine in these tests derives, so a
+// restore can be given what an owner records when they pair one.
+var machineSigningKeyForTest []byte
+
 func sealedArchiveFor(t *testing.T, mnemonics ...string) []byte {
 	t.Helper()
 
@@ -42,7 +47,24 @@ func sealedArchiveFor(t *testing.T, mnemonics ...string) []byte {
 		t.Fatal(err)
 	}
 
-	collector := &backup.Collector{DataDir: t.TempDir()}
+	// A real machine has a root seed, and that is what it derives its backup
+	// signing key from — so an archive it writes says who wrote it. A test
+	// directory with no seed produces an unattributed archive, which is a
+	// shape no running machine has.
+	dir := t.TempDir()
+	machineSeed := make([]byte, 64)
+	for i := range machineSeed {
+		machineSeed[i] = byte(i + 7)
+	}
+	if err := secureenclave.StoreRootSeed(dir, machineSeed); err != nil {
+		t.Fatal(err)
+	}
+	pub, err := secureenclave.BackupSigningPublicKey(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	machineSigningKeyForTest = pub
+	collector := &backup.Collector{DataDir: dir}
 	result, err := collector.CreateArchive(
 		backup.CollectOptions{Tiers: []string{backup.TierCritical}},
 		backup.ExportRequest{
@@ -64,7 +86,12 @@ func sealedArchiveFor(t *testing.T, mnemonics ...string) []byte {
 func TestRestoreSealedArchiveFromThePhraseAlone(t *testing.T) {
 	archive := sealedArchiveFor(t, ownerMnemonic)
 
-	payload, err := RestoreFromArchive(archive, OpenRequest{Mnemonic: ownerMnemonic})
+	payload, err := RestoreFromArchive(archive, OpenRequest{
+		Mnemonic: ownerMnemonic,
+		// What an owner records when they pair the machine. Without it, a
+		// machine-signed archive proves only that its writer can sign.
+		ExpectedWriterKey: machineSigningKeyForTest,
+	})
 	if err != nil {
 		t.Fatalf("restore from the phrase alone: %v", err)
 	}
@@ -96,7 +123,10 @@ func TestEitherOwnerRestoresAnOrganisationArchive(t *testing.T) {
 	archive := sealedArchiveFor(t, owners...)
 
 	for i, m := range owners {
-		payload, err := RestoreFromArchive(archive, OpenRequest{Mnemonic: m})
+		payload, err := RestoreFromArchive(archive, OpenRequest{
+			Mnemonic:          m,
+			ExpectedWriterKey: machineSigningKeyForTest,
+		})
 		if err != nil {
 			t.Fatalf("owner %d could not restore alone: %v", i, err)
 		}

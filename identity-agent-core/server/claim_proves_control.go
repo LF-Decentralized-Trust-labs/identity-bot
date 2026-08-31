@@ -217,3 +217,81 @@ func (s *CoreServer) mustBeCorroborated() bool {
 	_, live := localPairingOffer()
 	return !live
 }
+
+// verifyTheOwnerBeingSealed checks that the claimant also holds the identity it
+// is naming as the owner of what this machine founds.
+//
+// Separate from the claim itself because they answer different questions. The
+// claim asks whether this is the party the machine was reserved for. This asks
+// whether the identity about to be written into an inception event, permanently,
+// is one the claimant can actually sign as. ADR-038 explains why those are two
+// identities rather than one: the party that reserved the machine knows the
+// first, and would otherwise be able to recognise its own customer in every
+// identity that machine went on to found.
+//
+// An owner sealed on an unproved assertion could be an identity that never
+// agreed to anything — and an owner named at inception can never be replaced.
+// So the evidence demanded here is the same in kind as the claim: the key log,
+// checked for its own authorship, and a fresh signature over this exchange by
+// the key that log puts in force.
+//
+// WHAT IS NOT REPEATED, and why. The claim above is corroborated by witnesses
+// where this machine requires it. That is not asked a second time here. The
+// party presenting this identity has already been corroborated in this same
+// exchange, and is presenting a second identity of their own; a second
+// corroboration adds no independent evidence and adds a way to fail that nobody
+// on either side could act on.
+func (s *CoreServer) verifyTheOwnerBeingSealed(
+	owner *foundedOwner, challenge, adoptionCode, offeredPublicKey string,
+) error {
+	if owner.AID == "" {
+		return fmt.Errorf("an owner has to say which identity it is")
+	}
+	if owner.Signature == "" {
+		return fmt.Errorf("no signature was offered for %s, so naming it as owner "+
+			"asserts control rather than proving it", owner.AID)
+	}
+	if len(owner.KEL) == 0 {
+		return fmt.Errorf("no key log was offered for %s, so there is nothing to check "+
+			"its signature against", owner.AID)
+	}
+	if s.KeriDriver == nil {
+		return fmt.Errorf("this instance cannot verify a key log right now, and sealing " +
+			"an owner it could not check is not a lesser version of checking it")
+	}
+
+	result, err := s.KeriDriver.ValidateKEL(owner.AID, owner.KEL)
+	if err != nil {
+		return fmt.Errorf("could not check the key log for %s: %w", owner.AID, err)
+	}
+	if !result.KelVerified {
+		return fmt.Errorf("the key log for %s does not prove its own authorship (%v)",
+			owner.AID, result.ValidationErrors)
+	}
+	if result.CurrentPublicKey == "" {
+		return fmt.Errorf("the key log for %s names no key currently in force", owner.AID)
+	}
+	if owner.PublicKey != "" && owner.PublicKey != result.CurrentPublicKey {
+		return fmt.Errorf("the key offered for %s is not the one its own log puts in "+
+			"force; the log says %s", owner.AID, result.CurrentPublicKey)
+	}
+
+	pub, err := login.DecodeVerkey(result.CurrentPublicKey)
+	if err != nil {
+		return fmt.Errorf("the key %s's log puts in force cannot be read: %w", owner.AID, err)
+	}
+	// Over the same exchange the claim signed. A signature over anything else
+	// could have been made at another time, for another machine, and replayed
+	// here by whoever collected it.
+	ok, err := login.VerifyString(
+		string(claimSigningInput(challenge, adoptionCode, owner.AID, offeredPublicKey)),
+		owner.Signature, pub)
+	if err != nil {
+		return fmt.Errorf("the signature offered for %s could not be checked: %w", owner.AID, err)
+	}
+	if !ok {
+		return fmt.Errorf("the signature offered for %s was not made by the key its log puts "+
+			"in force, so whoever sent it does not hold that identity", owner.AID)
+	}
+	return nil
+}

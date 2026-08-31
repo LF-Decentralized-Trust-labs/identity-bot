@@ -78,6 +78,12 @@ func BoxKeyBindingForEvent(event map[string]interface{}) (string, error) {
 	return BoxKeyBinding(x, kem)
 }
 
+// The label says V2 because the covered set changed, and a value computed one
+// way must never verify against a value computed the other. There is no path
+// for V1: nothing has been paired, so nothing attests the old shape, and
+// carrying a compatibility route for a population of zero would mean keeping
+// forever the exact hole this closes — an offer whose third key is unvouched.
+//
 // PairingOfferBinding is what a machine's hardware vouches for while it is
 // being adopted.
 //
@@ -90,13 +96,24 @@ func BoxKeyBindingForEvent(event map[string]interface{}) (string, error) {
 //
 // So the report covers exactly the two keys being offered, and the owner
 // recomputes this from what arrived before signing anything.
-func PairingOfferBinding(publicKey, nextPublicKey string) (string, error) {
+func PairingOfferBinding(publicKey, nextPublicKey, backupSigningKey string) (string, error) {
 	if publicKey == "" || nextPublicKey == "" {
 		return "", fmt.Errorf("an offer must carry both a key and its successor")
 	}
+	if backupSigningKey == "" {
+		// Not optional, and this is the reason it is not.
+		//
+		// A key the hardware does not vouch for is a key anything terminating
+		// the connection can replace. Do that to this one and the owner
+		// records the substitute as their machine's, and every backup the
+		// substituter forges afterwards verifies as that machine's own work —
+		// permanently, with the check saying yes. An offer that leaves it out
+		// is therefore refused rather than covered for two keys out of three.
+		return "", fmt.Errorf("an offer must carry the key its backups are signed with")
+	}
 	h := blake3.New()
-	_, _ = h.Write([]byte("IA-BOX-OFFER-V1"))
-	for _, k := range []string{publicKey, nextPublicKey} {
+	_, _ = h.Write([]byte("IA-BOX-OFFER-V2"))
+	for _, k := range []string{publicKey, nextPublicKey, backupSigningKey} {
 		var n [4]byte
 		n[0] = byte(len(k) >> 24)
 		n[1] = byte(len(k) >> 16)
