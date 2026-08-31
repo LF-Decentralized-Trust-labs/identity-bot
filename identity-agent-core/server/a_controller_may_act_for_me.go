@@ -95,9 +95,22 @@ func (g ControllerGrant) Live(now time.Time) (bool, string) {
 // controllerGrants is the store. A small file of its own beside the others, so
 // adding it changed no existing load path.
 type controllerGrants struct {
-	mu      sync.Mutex
 	dataDir string
 }
+
+// grantsLock serialises the read-modify-write of the grants file.
+//
+// It is package-level and NOT a field, which is deliberate: every accessor
+// builds its own controllerGrants value, so a mutex on the struct would be a
+// fresh lock per call and would exclude nothing. Two grants arriving together
+// would each read the file, each add their own entry to what they read, and the
+// second write would drop the first — losing an authorisation, or worse,
+// resurrecting one that was concurrently revoked.
+//
+// One lock for the process rather than one per directory. An agent serves a
+// single identity, so there is nothing to contend with, and a global lock that
+// is obviously right beats a keyed one that is nearly right.
+var grantsLock sync.Mutex
 
 func (s *CoreServer) controllers() *controllerGrants {
 	return &controllerGrants{dataDir: s.DataDir}
@@ -170,8 +183,8 @@ func (c *controllerGrants) Grant(g ControllerGrant, now time.Time) (ControllerGr
 	}
 	g.GrantedAt = now
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	grantsLock.Lock()
+	defer grantsLock.Unlock()
 	all := c.load()
 	all[g.ControllerAID] = g
 	if err := c.save(all); err != nil {
@@ -187,8 +200,8 @@ func (c *controllerGrants) Grant(g ControllerGrant, now time.Time) (ControllerGr
 // and this is the check that stands between a borrowed computer and an
 // identity.
 func (c *controllerGrants) Live(aid string, now time.Time) (ControllerGrant, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	grantsLock.Lock()
+	defer grantsLock.Unlock()
 	g, ok := c.load()[strings.TrimSpace(aid)]
 	if !ok {
 		return ControllerGrant{}, false
@@ -205,8 +218,8 @@ func (c *controllerGrants) Live(aid string, now time.Time) (ControllerGrant, boo
 // authorisation ran out yesterday is something they may still want to know
 // about — that it existed, and that it stopped.
 func (c *controllerGrants) All() []ControllerGrant {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	grantsLock.Lock()
+	defer grantsLock.Unlock()
 	all := c.load()
 	out := make([]ControllerGrant, 0, len(all))
 	for _, g := range all {
@@ -218,8 +231,8 @@ func (c *controllerGrants) All() []ControllerGrant {
 // Revoke removes a grant. Removing one that is not there is not an error: the
 // caller wanted it gone, and it is.
 func (c *controllerGrants) Revoke(aid string) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	grantsLock.Lock()
+	defer grantsLock.Unlock()
 	all := c.load()
 	delete(all, strings.TrimSpace(aid))
 	return c.save(all)

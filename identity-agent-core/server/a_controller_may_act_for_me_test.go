@@ -1,8 +1,14 @@
 package server
 
 import (
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/go-chi/chi/v5"
 )
 
 func aStore(t *testing.T) *controllerGrants {
@@ -142,6 +148,37 @@ func TestGrantsAndRevocationsSurviveRestart(t *testing.T) {
 	}
 }
 
+// Two machines authorised at the same moment both end up authorised.
+//
+// Each accessor builds its own store value, so a mutex held on that value would
+// be a fresh lock every call and would exclude nothing: both calls would read
+// the file, each add its own entry to what it read, and the second write would
+// drop the first. The owner would have approved two machines and found one.
+func TestTwoMachinesAuthorisedAtOnceBothSurvive(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now().UTC()
+
+	const machines = 24
+	var wg sync.WaitGroup
+	for i := 0; i < machines; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			g := aGrant(GradeEnrolled)
+			g.ControllerAID = fmt.Sprintf("EController%02d", i)
+			if _, err := (&controllerGrants{dataDir: dir}).Grant(g, now); err != nil {
+				t.Errorf("granting %s: %v", g.ControllerAID, err)
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	if got := len((&controllerGrants{dataDir: dir}).All()); got != machines {
+		t.Fatalf("%d of %d authorisations survived — the rest were overwritten by "+
+			"a grant that arrived at the same time", got, machines)
+	}
+}
+
 // Revoking something that is not there is what the caller wanted, not an error.
 func TestRevokingAMachineThatIsNotThereSucceeds(t *testing.T) {
 	if err := aStore(t).Revoke("ENeverGranted"); err != nil {
@@ -150,18 +187,61 @@ func TestRevokingAMachineThatIsNotThereSucceeds(t *testing.T) {
 }
 
 // The routes are owner-only, and this is the property everything else rests on:
-// a controller that could reach these could grant itself, which is not an
-// authorisation. They are owner-only by being unlisted, so what this actually
-// guards is somebody later adding them to publicRoutes or scopedRoutes.
-func TestGrantingAControllerIsOwnerOnly(t *testing.T) {
-	for _, r := range []struct{ method, pattern string }{
+// anybody who could reach them could authorise their own machine to act as this
+// identity's owner.
+//
+// Driven through the real router rather than by calling classify with a pattern
+// written out here. Those two are not the same test: classify keys on the
+// pattern chi composes at dispatch, so a hand-typed string that does not match
+// it would pass while proving nothing — and it would keep passing after a change
+// that genuinely exposed the route.
+func TestGrantingAControllerIsRefusedToAnybodyButTheOwner(t *testing.T) {
+	s := newAuthTestServer(t)
+	r := s.buildRouter("")
+
+	for _, c := range []struct{ method, path string }{
 		{"POST", "/api/controllers"},
 		{"GET", "/api/controllers"},
-		{"DELETE", "/api/controllers/{aid}"},
+		{"DELETE", "/api/controllers/EAnyIdentityAtAll"},
 	} {
-		if got := classify(r.method, r.pattern); got != accessOwner {
-			t.Fatalf("%s %s is %q — anybody who can reach this agent could authorise "+
-				"their own machine to act as its owner", r.method, r.pattern, got)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, remote(c.method, c.path, `{"controller_aid":"EMine",`+
+			`"public_key":"DMine","label":"my laptop","grade":"enrolled"}`))
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("%s %s from a remote caller: got %d, want 403 — a stranger can "+
+				"authorise their own machine to act as this identity's owner",
+				c.method, c.path, w.Code)
+		}
+	}
+}
+
+// The routes this test names are the ones actually registered. Without this,
+// the test above could be refusing 403s on paths that route nowhere — which is
+// what an unmatched path does — and prove nothing about the real ones.
+func TestTheControllerRoutesAreTheOnesRegistered(t *testing.T) {
+	s := newAuthTestServer(t)
+	want := map[string]bool{
+		"POST /api/controllers":         false,
+		"GET /api/controllers":          false,
+		"DELETE /api/controllers/{aid}": false,
+	}
+	err := chi.Walk(s.buildRouter(""),
+		func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+			if _, ok := want[method+" "+route]; ok {
+				want[method+" "+route] = true
+				if got := classify(method, route); got != accessOwner {
+					t.Errorf("%s %s is %q, not owner-only", method, route, got)
+				}
+			}
+			return nil
+		})
+	if err != nil {
+		t.Fatalf("walking the router: %v", err)
+	}
+	for k, found := range want {
+		if !found {
+			t.Errorf("%s is not a route this agent serves, so the test above proves "+
+				"nothing about it", k)
 		}
 	}
 }
