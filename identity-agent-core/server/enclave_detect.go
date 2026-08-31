@@ -26,6 +26,21 @@ type KeyProtectionInfo struct {
 	// it is answered here rather than left to each caller to re-derive from the
 	// status and get subtly wrong.
 	RootKeyPermitted bool `json:"rootKeyPermitted"`
+
+	// SeedWrapped is whether THIS BUILD actually uses that hardware to protect
+	// the root seed, which is a different question from whether the hardware
+	// could — and the one that decides whether the seed on this disk is a file
+	// anybody can copy.
+	//
+	// Reported beside RootKeyPermitted because the two disagree on most
+	// platforms today, and reading the first as though it implied the second is
+	// the mistake this field exists to make impossible. A machine can answer
+	// usable, be permitted a root key, and store that seed in the clear.
+	SeedWrapped bool `json:"seedWrapped"`
+
+	// SeedWrapScheme names what protects it, and reads "none" when nothing
+	// does — not empty, which is why omitempty never fires on it.
+	SeedWrapScheme string `json:"seedWrapScheme,omitempty"`
 }
 
 // EnclaveStatusResponse describes the hardware security backing available on this device.
@@ -183,6 +198,8 @@ func (s *CoreServer) handleSecurityEnclave(w http.ResponseWriter, r *http.Reques
 		Reason:           cap.Reason,
 		Detail:           cap.Detail,
 		RootKeyPermitted: cap.RootKeyPermitted(),
+		SeedWrapped:      secureenclave.SeedWrapAvailable(),
+		SeedWrapScheme:   secureenclave.SeedWrapScheme(),
 	}
 
 	if s.AttestationRunner != nil {

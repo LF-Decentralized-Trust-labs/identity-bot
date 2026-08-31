@@ -50,6 +50,19 @@ The Linux detector asks "is it there" and "can I use it" as separate questions, 
 
 *Updated 2026-08-31: when this was written, `Unknown` was the answer on three of the five supported platforms and the cost above was mostly theoretical. Detectors have since been written for all of them, so `Unknown` now means a specific machine could not be read rather than a platform nobody had taught this software to inspect. The distinction matters to the wording of any refusal built on this: it is no longer safe to explain an unknown answer as a missing detector.*
 
+**`RootKeyPermitted` says the hardware COULD protect a key. It does not say anything did.**
+
+This is the sharpest edge on the whole thing and it was implicit until 2026-08-31, when it stopped being safe to leave that way. The status answers a question about the machine. Whether the seed on that machine's disk is actually protected is a question about this build — whether a wrapper exists for the platform, and whether it can reach the hardware — and the two answers disagree today on every target but one.
+
+A machine can therefore report `usable`, be permitted a root key, and store that seed in the clear. Read together those look like a contradiction; read apart they are two facts, and only the second decides whether the file on the disk is one anybody who copies it becomes.
+
+Two things follow, and both are load-bearing rather than stylistic:
+
+- **Nothing may treat `RootKeyPermitted` as though it meant the seed is safe.** It is the hardware's answer, and a caller wanting the other answer has to ask for it. `SeedWrapAvailable` is that question, and the enclave status route reports both beside each other so they can be seen to disagree.
+- **A seed stored in the clear on capable hardware is our gap, not the machine's**, so it is reported rather than refused. Refusing would tell somebody their computer is inadequate for a wrapper nobody has written yet, which is the mistake this whole ADR exists to prevent, one layer along.
+
+*Recorded here because the distinction previously lived only in a code comment and a pull request, and a fact asserted in one place and relied on in several is the arrangement that goes stale first.*
+
 **Accepted risk.** Detection runs on the machine being detected, so a compromised host can lie about itself. That is unavoidable for local detection and is why remote attestation exists as a separate mechanism; this ADR is about not lying to ourselves in the ordinary case.
 
 ## Alternatives Considered
