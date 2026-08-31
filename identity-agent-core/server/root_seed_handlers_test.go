@@ -274,9 +274,17 @@ func TestNotKnowingIsNotAReasonToProceed(t *testing.T) {
 		t.Fatal("the seed landed on disk despite being refused")
 	}
 
-	// The named override is the way through, and it is the only way through.
-	t.Setenv(envAllowUnprotectedRootKey, "1")
-	if w := postSeed(s, b64, false); w.Code != http.StatusOK && w.Code != http.StatusCreated {
-		t.Fatalf("the development override did not permit an owner-supplied seed: %d %s", w.Code, w.Body)
+	// AND THERE IS NO WAY THROUGH. This asserted the opposite until the last
+	// detector landed: IA_ALLOW_UNPROTECTED_ROOT_KEY existed so work could
+	// continue on a platform nobody had taught this software to inspect, and
+	// there is no such platform now. Repeating the request with the old
+	// variable set must change nothing, which is what makes its removal a
+	// property of the software rather than a line somebody deleted.
+	t.Setenv("IA_ALLOW_UNPROTECTED_ROOT_KEY", "1")
+	if w := postSeed(s, b64, false); w.Code != http.StatusPreconditionFailed {
+		t.Fatalf("a machine that cannot protect a key accepted a seed: %d %s", w.Code, w.Body)
+	}
+	if _, err := secureenclave.LoadRootSeed(s.DataDir); err == nil {
+		t.Fatal("the seed landed on disk after the override was set")
 	}
 }

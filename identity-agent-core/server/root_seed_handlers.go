@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
-	"log"
 	"net/http"
 
 	"identity-agent-core/secureenclave"
@@ -118,38 +117,32 @@ func (s *CoreServer) handleSetRootSeed(w http.ResponseWriter, r *http.Request) {
 	// zero-value Capability whose Status is "", matches none of them and
 	// installs the seed. Asking for the one good answer cannot do that.
 	if cap := detectKeyProtection(); !cap.RootKeyPermitted() {
-		// One way past this, and it is deliberately awkward to reach.
+		// No way past THIS ROUTE any more, and that is the change.
 		//
-		// Hardware that can protect a key is not always available when the work
-		// is: an enclave on order, a test box that will never have one. Refusing
-		// outright in that window does not make anybody safer, it just stops the
-		// software being worked on, so there is a switch — named for exactly
-		// what it gives up, and unable to be set by accident.
+		// There used to be one: IA_ALLOW_UNPROTECTED_ROOT_KEY, so that work
+		// could continue on a platform whose detector had never been written.
+		// That reason has expired — every supported platform answers now — so
+		// what remained was a named, documented way to write a root seed onto a
+		// machine that cannot protect it. The consequence of using it is total
+		// and permanent: the seed is a file, whoever copies that file becomes
+		// the identity, and no rotation undoes it. An escape hatch nobody needs
+		// is one somebody will use.
 		//
-		// It permits INSTALLING a seed, and nothing else. It does not invent
-		// one: a seed the owner brought is still recoverable from their phrase,
-		// where a generated one would leave every identity founded here
-		// committed to keys nobody can ever reproduce. Unprotected is
-		// recoverable-but-copyable; invented is neither.
+		// WHAT THIS DOES NOT COVER, said here because the sentence above reads
+		// like it does. This is one of five places that store a root seed and
+		// the only one that asks this question. restoreTheKeyMaterial in
+		// recovery/service.go writes the owner's phrase-derived seed straight
+		// out of an archive; getOrCreateRelationship in login/handlers.go and
+		// ensureRootSeed in ask_sign_layer.go each mint a device-local one.
+		// None consults the capability, and StoreRootSeed itself degrades to an
+		// unwrapped envelope rather than refusing. So recovering onto a machine
+		// that cannot protect a key still does what this route now forbids.
 		//
-		// The identity records that it was founded this way, because a
-		// counterparty deciding what to trust should be told, and because
-		// nothing that is only a log line survives contact with a busy month.
-		if allowUnprotectedRootKey() {
-			// "not proven to protect a key", never "NO hardware key protection".
-			// Most machines reaching this line are ones we could not READ, and
-			// capability.go is explicit that Unknown is "never to be rendered to
-			// a person as 'your device has no security hardware'". A log written
-			// by the file enforcing that rule should not be the thing that
-			// breaks it.
-			log.Printf("[keystore] WARNING: installing a root seed on a machine not proven to protect "+
-				"a key (%s) because %s is set. Anyone who copies this file becomes this identity, "+
-				"permanently and undetectably. Acceptable while waiting for hardware; not a way to run.",
-				cap.String(), envAllowUnprotectedRootKey)
-		} else {
-			jsonError(w, refusalFor(cap), http.StatusPreconditionFailed)
-			return
-		}
+		// The way to run this software on hardware this route refuses is to fix
+		// the hardware, or to hold the identity somewhere else and control it
+		// from here. It is not to tell the Identity Agent to stop checking.
+		jsonError(w, refusalFor(cap), http.StatusPreconditionFailed)
+		return
 	}
 	if !s.isOwner(r) {
 		jsonError(w, "keystore management is for the owner of this agent", http.StatusForbidden)
