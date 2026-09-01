@@ -62,17 +62,14 @@ func (contactRequest) Perform(s *CoreServer, in InboundMessage) error {
 	// Establish who they are from their own key history, which is the part the
 	// envelope cannot do for us: it proves somebody holds this identity's
 	// encryption keys, not that the identity is what it claims about itself.
-	contact, _, err := s.EnsureKeriContact(body.SenderOOBI)
+	// The identity we expect is passed IN, so a mismatch is refused before
+	// anything is written. This used to resolve first and compare afterwards,
+	// which recorded the stranger it was refusing — and on an agent whose owner
+	// is named by its inception but has no sealed key, that record is what the
+	// owner's key resolves from, so a known peer could name itself the owner.
+	contact, _, err := s.ensureKeriContactIs(body.SenderOOBI, in.FromAID)
 	if err != nil {
 		return fmt.Errorf("could not establish who %s is: %w", in.FromAID, err)
-	}
-	if contact.AID != in.FromAID {
-		// The address they gave belongs to somebody else. Refused rather than
-		// reconciled — an introduction that points at a different identity than
-		// the one that sent it is either broken or an attempt to have us record
-		// a stranger under a name we already trust.
-		return fmt.Errorf("the envelope came from %s but the address given belongs to %s",
-			in.FromAID, contact.AID)
 	}
 
 	if body.SenderAlias != "" && contact.Alias == "" {

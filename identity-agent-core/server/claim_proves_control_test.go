@@ -275,7 +275,13 @@ func TestTheIdentityAMachineWasPromisedToCanClaimItByProvingControl(t *testing.T
 	// scaffolding. Stood up before minting so the identity designates it.
 	wit := newStandInWitness(t)
 
+	// The machine proves what it is, and this owner accepts that proof. Not
+	// scaffolding either: adoption refuses a box that will not say what it is,
+	// so without these the test never reaches the two gates it exists to
+	// exercise — it stops at the one before them.
+	aMachineThatCanAttest(t)
 	owner := adoptingOwner(t)
+	acceptsThatBox(owner)
 
 	// Before the machine is asked for: the owner mints the identity it will
 	// answer to. This is the AID that goes to whoever provisions it.

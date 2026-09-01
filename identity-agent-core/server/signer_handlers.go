@@ -320,6 +320,36 @@ func (s *CoreServer) AcceptFoundingSigner(a SignerAcceptance) (SignerAccepted, e
 		return SignerAccepted{Ceremony: true, Outstanding: ceremony.Outstanding()}, nil
 	}
 
+	// SEALING IS ONCE. This is the FOUNDING path — the first owner, where there
+	// is nothing yet to rotate from — and it is reached through a route declared
+	// public, from a token carried in a link or a QR. So it must not be able to
+	// replace an owner who already exists.
+	//
+	// It matters more than it did. The sealed record is now the only thing a
+	// controller's authentication level is checked against, so an unredeemed
+	// founding-signer token would otherwise be an unauthenticated rewrite of the
+	// key that vouches for every raised action on this agent.
+	//
+	// A second owner joins through the ceremony path above, which collects keys
+	// from several people and is not this.
+	// ANYTHING ALREADY SEALED STOPS THIS, not merely a different identity.
+	//
+	// Comparing only the AID left the hole open: a pairwise owner AID is not a
+	// secret — this handler returns it, and it sits on the roster — so a second
+	// redeem naming the SAME identity with a DIFFERENT public key was accepted,
+	// and the later key won. That is the whole of the attack, since what the
+	// sealed record decides is which key may speak for this identity.
+	//
+	// A founding invite founds. An owner joining an identity that already has
+	// one goes through the ownership ceremony above, which collects keys from
+	// several people and is a different path.
+	if existing, err := s.sealedOwnerAuthority(); err == nil && existing != nil &&
+		existing.AID != "" {
+		return SignerAccepted{}, fmt.Errorf(
+			"this agent already answers to an owner, so a founding invite cannot " +
+				"seal another — an owner joins through an ownership ceremony")
+	}
+
 	if err := s.SealOwnerAuthority(OwnerAuthority{
 		AID:       a.PairwiseAID,
 		PublicKey: a.PublicKey,

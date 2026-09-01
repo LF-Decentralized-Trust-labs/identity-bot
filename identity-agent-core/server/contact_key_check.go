@@ -154,9 +154,24 @@ func (s *CoreServer) checkContactKEL(aid string) kelCheckResult {
 		return kelCheckResult{State: kelFailed, Reason: reason, CheckedAt: now}
 	}
 
+	// VERIFIED WITH NO KEY IS NOT VERIFIED.
+	//
+	// Falling back to the stored key here would write KelVerified: true beside a
+	// key the validator did not produce — and that record is the one the owner's
+	// key is read from when nothing is sealed. A validator that ever answered
+	// "verified" without a current key would launder a caller-chosen key into
+	// the one place that is trusted for saying who the owner is.
+	//
+	// Not reachable today: both validators derive the key from the inception
+	// event they just checked. Closed anyway, because the cost is a line and the
+	// failure would be silent and total.
 	key := val.CurrentPublicKey
 	if key == "" {
-		key = stored.PublicKey
+		return kelCheckResult{
+			State: kelFailed, CheckedAt: now,
+			Reason: "their key history checked out but named no current key, which is not " +
+				"something this agent can act on",
+		}
 	}
 	// Record what was found, so the current key survives a restart and so
 	// anything reading the history later sees the latest check rather than the

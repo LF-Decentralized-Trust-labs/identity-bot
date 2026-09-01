@@ -772,6 +772,28 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		r.Get("/attestation", s.handlePublicAttestation)
 		r.Get("/keri/selftest", s.handleKeriSelfTest)
 
+		// Which machines may act for this identity. Owner-only by being
+		// unlisted, and that is load-bearing: an agent that could authorise its
+		// own controllers could be talked into authorising somebody else's.
+		// What THIS computer would offer if it were to act for an identity.
+		// Read by the app on this machine so it can show the person what they
+		// are approving.
+		r.Get("/controller/this-machine", s.handleThisMachineAsAController)
+		// Signing a request as THIS machine, for the app on it to send to the
+		// agent it is pointed at. The only work a controller's own computer
+		// does, and it is about the controller rather than the identity.
+		r.Post("/controller/sign", s.handleSignAsThisController)
+
+		// What an authorised machine asks once it has been approved: which
+		// identity this is, and what it was approved as. The controller has no
+		// other way to learn the ceremony finished — it asks, rather than being
+		// told, which needs no channel back to a machine never spoken to.
+		r.Get("/controller/agent", s.handleWhoThisAgentIs)
+
+		r.Post("/controllers", s.handleGrantController)
+		r.Get("/controllers", s.handleListControllers)
+		r.Delete("/controllers/{aid}", s.handleRevokeController)
+
 		r.Post("/keystore/root-seed", s.handleSetRootSeed)
 		r.Get("/keystore/root-seed", s.handleRootSeedStatus)
 
@@ -833,6 +855,11 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		// The identity a machine will answer to, minted before the machine is
 		// asked for. Owner-only: it is this device's own key material.
 		r.Post("/machines/owner-identity", s.handleMintMachineOwner)
+		// Signing a request to a machine as the identity that owns it. Owner-only
+		// for the same reason as the line above, and closed to a controller: a
+		// machine acting for somebody must never be able to obtain the owner's
+		// own signature, which would make the controller gate decorative.
+		r.Post("/machines/owner/sign", s.handleSignAsAMachineOwner)
 		// What this identity owns. Owner-only by default, which is right: a
 		// list of somebody's machines is a map of their infrastructure.
 		r.Get("/agents", s.handleListAdoptedAgents)

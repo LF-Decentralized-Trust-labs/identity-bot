@@ -40,6 +40,10 @@ class RootSeedHandoff {
     String? baseUrl,
     http.Client? client,
   }) async {
+    // THIS COMPUTER, deliberately. A handoff gives the seed to the core beside
+    // you; sending it to an agent elsewhere would put a root seed on a machine
+    // that is not meant to hold one — and a controller has no root seed to hand
+    // over in the first place.
     final url = baseUrl ?? AgentConfig.coreBaseUrl;
 
     // A LOCAL core only. This posts the root seed itself, which is correct when

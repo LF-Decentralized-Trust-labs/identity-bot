@@ -1,0 +1,451 @@
+package server
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"identity-agent-core/authprovider"
+	"identity-agent-core/iacrypto"
+	"identity-agent-core/login"
+)
+
+// Recognising a request from a machine this identity authorised.
+//
+// The shape is the owner-signature path with one substitution: the key a
+// signature is checked against comes from the grant rather than from the owner
+// authority. Everything that makes that path safe is kept — the request is
+// signed over its own method, path and body, the timestamp bounds the window,
+// and a signature is spent once so a captured one cannot be replayed.
+//
+// WHAT IT NEVER DOES IS SIGN AS THE IDENTITY. A controller signs as ITSELF, with
+// the key that never left it, and asks the agent to act. The agent performs its
+// own key operations, always. That is why revoking a grant is enough to stop a
+// machine: it never held anything of the identity's to keep.
+
+const (
+	headerControllerAID       = "X-IA-Controller-AID"
+	headerControllerSig       = "X-IA-Controller-Sig"
+	headerControllerTimestamp = "X-IA-Controller-Timestamp"
+
+	// How well the person was authenticated, and who says so.
+	//
+	// The controller CARRIES these; it does not get to make them up. The level is
+	// established on the device holding this identity's root key, which signs the
+	// statement, and headerAuthLevelVouchedBy is that signature. Without it the
+	// level counts as nothing measured — see theAuthenticationSomebodyVouchedFor
+	// for why a machine may not score itself.
+	//
+	// They are bound into the request signature too, so nothing in the middle can
+	// alter them in flight. That is defence in depth, not the thing that makes
+	// them trustworthy.
+	headerControllerAuthLevel = "X-IA-Controller-Auth-Level"
+	headerControllerAuthAt    = "X-IA-Controller-Auth-At"
+	headerControllerAuthScore = "X-IA-Controller-Auth-Score"
+	headerAuthLevelVouchedBy  = "X-IA-Auth-Level-Vouched-By"
+)
+
+// canonicalAuthLevelStatement is what the device holding the root key signs when
+// it says how well somebody was authenticated.
+//
+// Bound to ONE controller, so a statement made for the laptop cannot be relayed
+// by a different machine. Bound to the moment, so freshness means something. Its
+// own first line so it can never be confused with a request signature.
+//
+// It is not bound to a single request, and that is a real choice: the person
+// authenticates on their phone and then works at the laptop, so the statement
+// covers a short window rather than one action. What that costs is that a
+// controller compromised DURING the window can spend it on something other than
+// what the person had in mind — which is the argument for binding the highest
+// actions to a specific one, and is left open deliberately.
+func canonicalAuthLevelStatement(
+	controllerAID string, level authprovider.Level, at time.Time, score int,
+) string {
+	return strings.Join([]string{
+		"IA-AUTH-LEVEL-V1",
+		controllerAID,
+		string(level),
+		at.UTC().Format(time.RFC3339),
+		strconv.Itoa(score),
+	}, "\n")
+}
+
+// controllerContextKey carries which machine acted, for anything downstream that
+// needs to record it.
+//
+// An action taken from an authorised laptop and one taken by the owner at their
+// own device are not the same event, and an audit trail that cannot tell them
+// apart cannot answer the question somebody asks after a machine is stolen:
+// what did it do. Its own type so nothing else can collide with it.
+type controllerContextKey struct{}
+
+// TheControllerThatAsked names the machine that signed this request, if one did.
+//
+// Empty for the owner acting directly, which is the honest answer rather than a
+// default — nothing acted for them.
+func TheControllerThatAsked(r *http.Request) (ControllerGrant, bool) {
+	g, ok := r.Context().Value(controllerContextKey{}).(ControllerGrant)
+	return g, ok
+}
+
+// controllerActsForTheOwner serves this request if an authorised machine signed
+// it and the action is within what the person at that machine has proved.
+//
+// Reports whether it answered — either by serving or by refusing. False means
+// no machine signed this, and the caller should carry on trying whatever else
+// might stand in for the owner.
+//
+// A machine the owner authorised acts for them on everything except the actions
+// that change who this identity IS. Those are not shut to it — a controller is
+// hardware the owner approved, operated by a person who can be measured — they
+// are RAISED, and the person has to authenticate to the level that action needs.
+func (s *CoreServer) controllerActsForTheOwner(
+	w http.ResponseWriter, r *http.Request, pattern string, next http.Handler,
+) bool {
+	grant, authenticated, err := s.theControllerBehind(r)
+	if err != nil {
+		// A request carrying no controller headers at all is simply not from a
+		// controller, and the caller carries on trying whatever else might stand
+		// in for the owner. Anything else IS a controller and was refused for a
+		// reason the person needs, so say it here rather than letting them fall
+		// through to "sign the request with the owner key" — advice a controller
+		// cannot act on, since by design it has no owner key.
+		//
+		// It also mattered for faults: an unreadable grants file gave every
+		// authorised machine the same misleading line, with nothing reporting
+		// that anything was wrong.
+		if errors.Is(err, errNotFromAController) {
+			return false
+		}
+		denyAuthorization(w, err.Error())
+		return true
+	}
+	if ok, why := mayThisControllerDoThis(
+		r.Method, pattern, authenticated, time.Now().UTC()); !ok {
+		denyAuthorization(w, "this machine may act for you, but "+why)
+		return true
+	}
+	// Carried forward so what this machine did is attributable to it rather than
+	// to the owner.
+	next.ServeHTTP(w, r.WithContext(
+		context.WithValue(r.Context(), controllerContextKey{}, grant)))
+	return true
+}
+
+// errNotFromAController means no machine claimed this request, which is the
+// ordinary case for every other caller and not a fault.
+//
+// Distinct from the other refusals because it is the only one where the right
+// thing to do is carry on and try something else. The rest describe a machine
+// that IS a controller and could not be admitted, and each of those needs
+// different action from the person.
+var errNotFromAController = errors.New("this request is not from a controller")
+
+// theControllerBehind identifies the machine that signed this request, if a
+// machine did and its grant still stands.
+//
+// The error says which of those failed, because "not a controller" and "your
+// authorisation ran out" need different things from the person.
+func (s *CoreServer) theControllerBehind(r *http.Request) (ControllerGrant, authprovider.Result, error) {
+	var none ControllerGrant
+	unmeasured := authprovider.Unmeasured("this machine reported no authentication")
+
+	aid := strings.TrimSpace(r.Header.Get(headerControllerAID))
+	sig := strings.TrimSpace(r.Header.Get(headerControllerSig))
+	stamp := strings.TrimSpace(r.Header.Get(headerControllerTimestamp))
+	if aid == "" || sig == "" {
+		return none, unmeasured, errNotFromAController
+	}
+	if stamp == "" {
+		return none, unmeasured, fmt.Errorf(
+			"a signed request must carry %s", headerControllerTimestamp)
+	}
+	signedAt, err := time.Parse(time.RFC3339, stamp)
+	if err != nil {
+		return none, unmeasured, fmt.Errorf("%s must be RFC3339", headerControllerTimestamp)
+	}
+	now := time.Now().UTC()
+	if diff := now.Sub(signedAt); diff > signedRequestWindow || diff < -signedRequestWindow {
+		return none, unmeasured, fmt.Errorf(
+			"this request was signed outside the %s window", signedRequestWindow)
+	}
+
+	// The grant decides whether this machine is anybody. Checked before the
+	// signature is verified only to fail fast; neither answer is given away,
+	// because both end in the same refusal.
+	grant, live, err := s.controllers().Live(aid, now)
+	if err != nil {
+		return none, unmeasured, fmt.Errorf(
+			"which machines may act for this identity could not be read, so none were admitted: %w", err)
+	}
+	if !live {
+		return none, unmeasured, fmt.Errorf(
+			"this machine is not authorised to act for this identity, or its authorisation has ended")
+	}
+
+	pub, err := login.DecodeVerkey(grant.PublicKey)
+	if err != nil {
+		return none, unmeasured, fmt.Errorf("the key recorded for this machine is unusable: %w", err)
+	}
+
+	// Read the body to digest it, then put it back — the handler still needs it.
+	//
+	// A body over the limit is REFUSED, never truncated. Truncating would hand
+	// the handler a shortened body and check the signature against that same
+	// shortened copy, so the two would agree and the request would succeed while
+	// silently doing something other than what was sent — a transfer, a policy,
+	// a list, cut off at the limit with nothing reporting it.
+	// PUT IT BACK ON EVERY PATH, INCLUDING THE REFUSALS. A refusal here is not
+	// the end of the request: the caller turns it into "no controller signed
+	// this", and the middleware carries on to whatever else might stand in for
+	// the owner. If the body were left consumed, that next handler would serve a
+	// silently truncated request — the same "refused, never truncated" failure
+	// this reads the body carefully to avoid, moved one layer out. Measured
+	// before the fix: 12,582,976 bytes sent, 63 still readable afterwards.
+	var body []byte
+	if r.Body != nil {
+		body, err = io.ReadAll(io.LimitReader(r.Body, maxSignedBodyBytes+1))
+		r.Body = io.NopCloser(bytes.NewReader(body))
+		if err != nil {
+			return none, unmeasured, fmt.Errorf("read body: %w", err)
+		}
+		if int64(len(body)) > maxSignedBodyBytes {
+			return none, unmeasured, fmt.Errorf(
+				"this request is larger than the %d bytes a signed request may carry",
+				maxSignedBodyBytes)
+		}
+	}
+
+	asserted := s.theAuthenticationSomebodyVouchedFor(r, aid, now)
+	ok, err := login.VerifyString(
+		canonicalControllerRequest(aid, r.Method, r.URL.Path, stamp, asserted, body), sig, pub)
+	if err != nil {
+		return none, unmeasured, fmt.Errorf("signature: %w", err)
+	}
+	if !ok {
+		// Also what a tampered authentication level lands on, since the level is
+		// inside the signed string.
+		return none, unmeasured, fmt.Errorf(
+			"this request was not signed by the machine it claims to be from")
+	}
+
+	// Valid — and now spent. Checked last so a bad signature cannot burn a good
+	// one by presenting it first.
+	if rememberSignature(sig, now) {
+		return none, unmeasured, fmt.Errorf("this signed request has already been used")
+	}
+	return grant, asserted, nil
+}
+
+// theAuthenticationSomebodyVouchedFor reads how well the person was
+// authenticated, and accepts it only from somebody entitled to say.
+//
+// A MACHINE MAY NOT SCORE ITSELF. An authentication level is only worth what the
+// software producing it can be held to: if the controller measures the person
+// and reports the answer, then whoever runs modified software on that machine
+// reports whatever they like, and every threshold in this package becomes a
+// number the attacker chooses. Nobody is auditing what build is running there.
+//
+// So the level has to be established where the build can be attested. By default
+// that is the device holding this identity's root key — in most cases a phone —
+// and this agent already knows the key that device signs with. The controller
+// RELAYS the statement; it does not make it. A machine that could attest its own
+// build could make it too, but that is a decision about which devices qualify,
+// and it is not this function's to take.
+//
+// Absence is Unmeasured rather than a low level, matching the provider seam: an
+// agent that measured nothing must not be treated as one that measured and found
+// little, or removing the provider would be a way past a gate.
+func (s *CoreServer) theAuthenticationSomebodyVouchedFor(
+	r *http.Request, controllerAID string, now time.Time,
+) authprovider.Result {
+
+	level := authprovider.Level(strings.TrimSpace(r.Header.Get(headerControllerAuthLevel)))
+	at := strings.TrimSpace(r.Header.Get(headerControllerAuthAt))
+	vouched := strings.TrimSpace(r.Header.Get(headerAuthLevelVouchedBy))
+	if level == "" || at == "" {
+		return authprovider.Unmeasured("nobody has said how well this person was authenticated")
+	}
+	when, err := time.Parse(time.RFC3339, at)
+	if err != nil {
+		return authprovider.Unmeasured("when the person was checked was reported unreadably")
+	}
+	if !level.Known() {
+		// A level this build does not define is not a level. Treated as nothing
+		// measured, so a newer device inventing a name cannot clear a gate on an
+		// older agent.
+		return authprovider.Unmeasured(
+			"an authentication level this agent does not recognise was reported")
+	}
+	score, _ := strconv.Atoi(strings.TrimSpace(r.Header.Get(headerControllerAuthScore)))
+
+	// The statement has to be signed by the device that made it. Unsigned, this
+	// is the controller scoring itself, which is worth nothing.
+	if vouched == "" {
+		return authprovider.Unmeasured(
+			"this machine reported an authentication level with nothing vouching for it, " +
+				"and a machine may not score itself")
+	}
+	// WHOSE KEY THIS IS CHECKED AGAINST MATTERS AS MUCH AS THE CHECK.
+	//
+	// Not ownerAuthority(), which is right for deciding whether a request came
+	// from the owner and wrong here. Two of its answers are derived from state a
+	// request can write — the agent's own identity record, and the contact the
+	// owner's key is resolved from — so a caller who could reach either could
+	// install the key that vouches for it and then vouch for itself at the
+	// strongest level. That is not hypothetical: it was reachable on this branch
+	// at no authentication level at all, because a controller is permitted by
+	// default and neither route was named.
+	//
+	// Those routes are closed to controllers now. This is the second lock, and
+	// it is the one that does not depend on having thought of every route.
+	key, kerr := s.theKeyEntitledToVouch()
+	if kerr != nil {
+		return authprovider.Unmeasured(
+			"this agent knows of no device entitled to say how well somebody was authenticated")
+	}
+	pub, err := login.DecodeVerkey(key)
+	if err != nil {
+		return authprovider.Unmeasured("the key of the device that vouches is unusable")
+	}
+	ok, err := login.VerifyString(
+		canonicalAuthLevelStatement(controllerAID, level, when, score), vouched, pub)
+	if err != nil || !ok {
+		return authprovider.Unmeasured(
+			"the authentication level was not vouched for by the device that holds this identity's key")
+	}
+
+	return authprovider.Result{
+		Level:    level,
+		Score:    score,
+		Measured: true,
+		At:       when.UTC(),
+		Provider: "root-identity-device",
+	}
+}
+
+// canonicalControllerRequest is the string a controller signs.
+//
+// Distinct from the owner's canonical string by its first line, so a signature
+// made for one can never be presented as the other — the owner path and this one
+// admit different keys to different authority, and a string both would accept is
+// a way to cross between them.
+//
+// The asserted authentication is part of it. Left out, a level would be an
+// unauthenticated header on an authenticated request, and anything in the middle
+// could raise it.
+//
+// So is the machine's own identifier. The signature is already checked against
+// the key recorded for that identifier, so this is not what stops an imposter —
+// it stops one machine's signature from being presented under another's name,
+// and it keeps two machines from ever producing identical signed bytes for the
+// same request, which the replay guard would otherwise treat as a reused one.
+func canonicalControllerRequest(
+	controllerAID, method, path, timestamp string,
+	authenticated authprovider.Result,
+	body []byte,
+) string {
+	measuredAt := ""
+	if authenticated.Measured && !authenticated.At.IsZero() {
+		measuredAt = authenticated.At.UTC().Format(time.RFC3339)
+	}
+	level := ""
+	if authenticated.Measured {
+		level = string(authenticated.Level)
+	}
+	return strings.Join([]string{
+		"IA-CONTROLLER-REQ-V1",
+		controllerAID,
+		strings.ToUpper(method),
+		path,
+		timestamp,
+		level,
+		measuredAt,
+		strconv.Itoa(authenticated.Score),
+		iacrypto.Blake3QB64Must(body),
+	}, "\n")
+}
+
+// theKeyEntitledToVouch is whose statement about an authentication level this
+// agent will believe.
+//
+// Deliberately narrower than ownerAuthority, which also answers from an
+// unverified contact row — a row written by handlers that fetch a record from an
+// address the caller names. Believing that here would let anything able to reach
+// one of those routes install the key that vouches for it and then vouch for
+// itself at the strongest level. That was reachable, and it was reachable again
+// through a second route after the first was closed, which is why this does not
+// depend on the list of routes being complete.
+//
+// Two sources, both of which a request cannot write:
+//
+//   - the record sealed at provisioning or at pairing, written before this agent
+//     was reachable and now written only once;
+//   - the owner's current key as this agent verified it against a key event log,
+//     which is evidence rather than an assertion.
+//
+// Neither present means nobody may speak for this identity, and every raised
+// action stays shut. That is a real configuration rather than a test shape — an
+// identity founded through inception names an owner but seals no key for them,
+// because inception is given the owner's identifier and not their key — so on
+// that agent a controller cannot perform a raised action until the owner's log
+// has been verified. Shut is the right answer while nothing trustworthy says
+// otherwise; the way to open it is to verify the owner's log, not to lower this.
+func (s *CoreServer) theKeyEntitledToVouch() (string, error) {
+	// THE LOG DECIDES WHO, AND THE SEALED RECORD ONLY SUPPLIES A KEY FOR THAT
+	// SOMEBODY. Exactly as ownerAuthority does it, and for the same reason.
+	//
+	// This used to return the sealed key without asking who the log named. That
+	// split the two questions apart: a sealed record naming an identity the
+	// inception never anchored was REFUSED for "who is the owner" and ACCEPTED
+	// for "whose statement about an authentication level do I believe". Since
+	// the founding-signer redeem route is public and writes that record, anyone
+	// holding an unredeemed invite could install the key that vouches for every
+	// raised action on the agent — rotation, seed install, signing, archive
+	// retrieval — without ever becoming the owner.
+	if owner, oerr := s.ownerFromOwnIdentity(s.identityAIDForVouching()); oerr == nil &&
+		owner != "" {
+		// The verified log first, so a rotation is followed. Nothing rewrites
+		// the sealed record when an owner rotates, so asking it first would go
+		// on believing a key the owner has replaced.
+		if key, kerr := s.ownerKeyFromAVerifiedLog(owner); kerr == nil {
+			return key, nil
+		}
+		// Then the sealed record, and only for the owner the log named.
+		if sealed, serr := s.sealedOwnerAuthority(); serr == nil && sealed != nil &&
+			sealed.AID == owner && sealed.PublicKey != "" {
+			return sealed.PublicKey, nil
+		}
+		return "", fmt.Errorf(
+			"this identity names %s as its owner and this agent holds no key for them "+
+				"that it can trust, so nobody may speak for it", owner)
+	}
+
+	// No anchor at all — a machine sealed at provisioning before it had an
+	// identity. The sealed record is the only thing there is, and it was written
+	// before the machine was reachable.
+	if sealed, err := s.sealedOwnerAuthority(); err == nil && sealed != nil &&
+		sealed.PublicKey != "" {
+		return sealed.PublicKey, nil
+	}
+	return "", fmt.Errorf("nothing is sealed and this identity names no owner")
+}
+
+// identityAIDForVouching is this agent's own identifier, or empty when it has
+// none. Separated only so the caller above reads as one thought.
+func (s *CoreServer) identityAIDForVouching() string {
+	if s.DataStore == nil {
+		return ""
+	}
+	identity, err := s.DataStore.GetIdentity()
+	if err != nil || identity == nil {
+		return ""
+	}
+	return identity.AID
+}

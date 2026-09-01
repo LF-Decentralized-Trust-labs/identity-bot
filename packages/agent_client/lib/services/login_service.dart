@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import '../config/agent_config.dart';
+import 'the_agent_this_app_talks_to.dart';
 
 /// One credential the site asks you to present, as the consent screen needs to
 /// describe it: what is asked, whether it is optional, and whether approving
@@ -140,8 +140,10 @@ class LoginService {
   final http.Client _client;
 
   LoginService({String? baseUrl, http.Client? client})
-      : baseUrl = baseUrl ?? AgentConfig.coreBaseUrl,
-        _client = client ?? http.Client();
+      // The agent, not this computer: signing in somewhere is done AS the
+      // identity, and the key that does it is wherever the identity lives.
+      : baseUrl = baseUrl ?? TheAgentThisAppTalksTo.origin,
+        _client = client ?? TheAgentThisAppTalksTo.clientFor(baseUrl);
 
   Uri _uri(String path) => Uri.parse('$baseUrl/api/login$path');
 

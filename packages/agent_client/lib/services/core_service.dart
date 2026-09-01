@@ -7,6 +7,7 @@ import 'package:crypto/crypto.dart';
 
 import 'owner_signing_client.dart';
 import 'browser_session_client.dart';
+import 'the_agent_this_app_talks_to.dart';
 import '../config/agent_config.dart';
 
 class HealthResponse {
@@ -690,10 +691,25 @@ class CoreService {
     Future<Uint8List?> Function()? ownerSeed,
     String? ownerAid,
   }) {
-    final origin = baseUrl ?? AgentConfig.coreBaseUrl;
-    if (ownerSeed == null) {
-      final session = BrowserSessionClient(agentOrigin: origin);
-      return CoreService._(origin, session, session);
+    // The agent, which is this machine's core in the ordinary case and a
+    // different machine when this installation is only the front end.
+    final origin = baseUrl ?? TheAgentThisAppTalksTo.origin;
+
+    // In controller mode this machine signs as ITSELF, and does so even when a
+    // seed was handed in. That looks like ignoring the caller and is the safe
+    // direction: an installation holding the identity's key is not a
+    // controller, so a seed here is a mistake — and honouring it would sign as
+    // the OWNER, granting everything the controller gate exists to hold back.
+    // Signing as the controller grants controller authority, which is what this
+    // machine actually has.
+    //
+    // Everything except the seed case is decided in one place, shared with
+    // every other service, because a service that answered "where" and "what
+    // signs it" differently from this one would reach the local core in
+    // controller mode and report no problem.
+    if (ownerSeed == null || AgentConfig.isAController) {
+      final how = TheAgentThisAppTalksTo.theAgent(origin: origin);
+      return CoreService._(origin, how.client, how.session);
     }
     return CoreService._(
       origin,
@@ -704,6 +720,16 @@ class CoreService {
   }
 
   CoreService._(this.baseUrl, this._client, this._session);
+
+  /// The client this service sends with, for callers that talk to the same
+  /// agent about something this class does not cover.
+  ///
+  /// Exposed rather than letting them build their own, because what is in here
+  /// is not a plain client: it signs as the owner, or carries a session, or
+  /// signs as this machine when the app is a controller. A caller that made its
+  /// own would send unsigned requests to an agent that correctly refuses them,
+  /// and the reason would not be visible anywhere.
+  http.Client get client => _client;
 
   Future<HealthResponse> getHealth() async {
     final response = await _client.get(

@@ -153,7 +153,7 @@ always-on computer, and the only case for somebody who has no phone.
 
 | Grade | For | What the identity issues | Lifetime |
 |---|---|---|---|
-| **Enrolled** | a machine somebody keeps — their laptop, an organisation's desktop | a pairwise owner identity, derived for that one machine, named in the seal of the controller's own inception | until the owner stops signing to it; visible in the device list |
+| **Enrolled** | a machine somebody keeps — their laptop, an organisation's desktop | a grant against the machine's own key, which is also its identifier | until the owner removes it; visible in the device list |
 | **Scoped** | a machine somebody borrowed — a library, a hotel, a colleague's desk | a scoped authorisation over the controller's own public key | expires; nothing permanent is written |
 
 The distinction is not security theatre. An enrolled machine is one somebody
@@ -167,8 +167,42 @@ identifier anchored in the key event log. That repeats a mistake already
 corrected elsewhere: a delegated inception names its delegator in an event
 anybody can read, which publishes the one identifier the rest of the design
 works hardest to keep pairwise — and nothing ever read the delegator's log, so
-it bought nothing. A controller founds its own root and is named to an owner
-identity derived for that machine alone, exactly as a paired computer is.
+it bought nothing. A controller is named by its own key — see the deviation
+below, which took this one step further and removed the inception too.
+
+**Deviation, 2026-08-31 — a controller is named by its own key, and founds
+nothing.** Tried the paragraph above as written: a controller founding a root
+and being named to a pairwise owner identity in the seal of its own inception.
+Switched because an inception is machinery a controller has no use for. It
+exists so an identifier can rotate its keys and so others can read the history
+that proves it — and a controller is never read by anybody but the agent it asks,
+and is never rotated: a compromised one is revoked, which is removing the grant.
+So the inception published a key event log nobody fetched, and required a witness
+and a seal to say something already true of the key itself.
+
+The new canonical path is a **non-transferable identifier** — the CESR `B` form,
+which encodes the public key. There is no inception event, no key event log, no
+witness, and nothing published anywhere, which is a stronger version of the same
+goal this section already argues for. It also makes a grant checkable against
+itself: an identifier that IS a key cannot name a different one, so a grant
+recording identifier X against key Y is refused, where before nothing could tell.
+
+What it gives up is rotation and the pairwise owner identity. Rotation is not
+wanted here, per above. The pairwise owner identity had one job — keeping the
+root unlinkable to whoever the machine deals with — and a controller deals only
+with its own agent, which already knows the root. Where a controller does face
+a third party, that is not a controller function and belongs to the identity.
+
+**Confirmed 2026-08-31.** The question put was whether a controller needs an
+inception at all, and the answer was that it needs only enough to prove itself
+cryptographically in the same language as everything else — which a
+non-transferable identifier does, being a key. A controller is emphatically not
+a root identity: the root lives where the person's keys live, normally a phone,
+and nothing here changes that.
+
+**"Founds its own root" is retired as a phrase**, because it caused this. It
+meant "runs an inception of its own rather than a delegated one" and reads as
+"has a root identity", which a controller never has.
 
 ### Rules
 

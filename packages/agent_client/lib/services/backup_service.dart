@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:http/http.dart' as http;
-import '../config/agent_config.dart';
 import '../crypto/owner_signature.dart';
+import 'the_agent_this_app_talks_to.dart';
 
 class BackupDestination {
   final String id;
@@ -363,12 +363,26 @@ class HoldingOffer {
 }
 
 class BackupService {
-  static String get _base => '${AgentConfig.coreBaseUrl}/api/backup';
-  static String get _recovery => '${AgentConfig.coreBaseUrl}/api/recovery';
+  /// The agent, not this computer.
+  ///
+  /// An archive is of the IDENTITY, so it is made and read where the identity
+  /// is. In controller mode the local core holds none, and every call here
+  /// would have described an empty agent as though it were the person's.
+  static String get _agent => TheAgentThisAppTalksTo.origin;
+  static String get _base => '$_agent/api/backup';
+  static String get _recovery => '$_agent/api/recovery';
+
+  /// A client that proves who is asking.
+  ///
+  /// Backup routes are owner-only, and the top-level http functions used here
+  /// before sent nothing — so on an agent reached over a network every one of
+  /// these was correctly refused, which is the state this whole class was
+  /// unusable in.
+  static http.Client get _client => TheAgentThisAppTalksTo.clientFor(_agent);
 
   /// Who holds a share of this identity's recovery.
   static Future<WhoHoldsYourRecovery> getWhoHoldsYourRecovery() async {
-    final resp = await http.get(Uri.parse('$_recovery/who-holds-this'));
+    final resp = await _client.get(Uri.parse('$_recovery/who-holds-this'));
     if (resp.statusCode != 200) {
       throw Exception('Could not read who holds your recovery: ${resp.statusCode}');
     }
@@ -384,7 +398,7 @@ class BackupService {
   /// throw away the only useful part.
   static Future<WhoHoldsYourRecovery> setWhoHoldsYourRecovery(
       WhoHoldsYourRecovery choice) async {
-    final resp = await http.put(
+    final resp = await _client.put(
       Uri.parse('$_recovery/who-holds-this'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode(choice.toJson()),
@@ -412,7 +426,7 @@ class BackupService {
   }
 
   static Future<BackupStatus> getStatus() async {
-    final resp = await http.get(Uri.parse('$_base/status'));
+    final resp = await _client.get(Uri.parse('$_base/status'));
     if (resp.statusCode != 200) {
       throw Exception('Backup status failed: ${resp.statusCode}');
     }
@@ -420,13 +434,13 @@ class BackupService {
   }
 
   static Future<BackupConfig> getConfig() async {
-    final resp = await http.get(Uri.parse('$_base/config'));
+    final resp = await _client.get(Uri.parse('$_base/config'));
     if (resp.statusCode != 200) throw Exception('Load config failed');
     return BackupConfig.fromJson(jsonDecode(resp.body) as Map<String, dynamic>);
   }
 
   static Future<void> saveConfig(BackupConfig config) async {
-    final resp = await http.put(
+    final resp = await _client.put(
       Uri.parse('$_base/config'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode(config.toJson()),
@@ -446,7 +460,7 @@ class BackupService {
     List<String>? tiers,
     String? destPath,
   }) async {
-    final resp = await http.post(
+    final resp = await _client.post(
       Uri.parse('$_base/export'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({
@@ -463,7 +477,7 @@ class BackupService {
   }
 
   static Future<void> addDestination(BackupDestination dest) async {
-    final resp = await http.post(
+    final resp = await _client.post(
       Uri.parse('$_base/destinations'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({'destination': dest.toJson()}),
@@ -472,7 +486,7 @@ class BackupService {
   }
 
   static Future<void> removeDestination(String id) async {
-    final resp = await http
+    final resp = await _client
         .delete(Uri.parse('$_base/destinations/${Uri.encodeComponent(id)}'));
     // 204 is what this route actually answers. Checking only for 200 threw on
     // every successful removal, so somebody saw "could not remove that
@@ -516,7 +530,7 @@ class BackupService {
   /// seed. The core checks that before answering rather than reporting
   /// "scheduled" for a run that will skip quietly minutes later.
   static Future<void> requestScheduledRun() async {
-    final resp = await http.post(Uri.parse('$_base/trigger'));
+    final resp = await _client.post(Uri.parse('$_base/trigger'));
     if (resp.statusCode == 409) {
       throw BackupImpossible(_detailOf(resp.body));
     }
@@ -525,7 +539,7 @@ class BackupService {
 
   /// Fetches back what a destination is holding, for a restore.
   static Future<Map<String, dynamic>> pullFrom(String destId) async {
-    final resp = await http.post(Uri.parse('$_base/pull/$destId'));
+    final resp = await _client.post(Uri.parse('$_base/pull/$destId'));
     if (resp.statusCode != 200) {
       throw Exception('Could not fetch from that destination: ${resp.body}');
     }
@@ -534,7 +548,7 @@ class BackupService {
 
   /// What this machine is holding for one identity you already know of.
   static Future<List<dynamic>> whatThisMachineHoldsFor(String identityAid) async {
-    final resp = await http.get(Uri.parse('$_base/receive/${Uri.encodeComponent(identityAid)}'));
+    final resp = await _client.get(Uri.parse('$_base/receive/${Uri.encodeComponent(identityAid)}'));
     if (resp.statusCode != 200) {
       throw Exception('Could not list what is held: ${resp.body}');
     }
@@ -553,7 +567,7 @@ class BackupService {
   /// Metadata only. There is no route that returns contents - the archives are
   /// sealed to keys this machine does not hold, which is the whole arrangement.
   static Future<List<HeldArchives>> whatThisMachineHolds() async {
-    final resp = await http.get(Uri.parse('$_base/held'));
+    final resp = await _client.get(Uri.parse('$_base/held'));
     if (resp.statusCode != 200) {
       throw Exception('Could not read what this machine holds: ${resp.body}');
     }
@@ -565,14 +579,14 @@ class BackupService {
 
   /// What this machine has volunteered to hold for others.
   static Future<HoldingOffer> readOffer() async {
-    final resp = await http.get(Uri.parse('$_base/offer'));
+    final resp = await _client.get(Uri.parse('$_base/offer'));
     if (resp.statusCode != 200) throw Exception('Could not read the offer');
     return HoldingOffer.fromJson(jsonDecode(resp.body) as Map<String, dynamic>);
   }
 
   /// Volunteers this machine, or stops volunteering it.
   static Future<HoldingOffer> setOffer(HoldingOffer offer) async {
-    final resp = await http.put(
+    final resp = await _client.put(
       Uri.parse('$_base/offer'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode(offer.toJson()),
@@ -589,7 +603,7 @@ class BackupService {
   /// Whoever calls this owes them that, or leaves an agent believing it has an
   /// off-site copy it no longer has.
   static Future<void> stopHoldingFor(String identityAid) async {
-    final resp = await http.delete(Uri.parse('$_base/held/${Uri.encodeComponent(identityAid)}'));
+    final resp = await _client.delete(Uri.parse('$_base/held/${Uri.encodeComponent(identityAid)}'));
     if (resp.statusCode != 204 && resp.statusCode != 200) {
       throw Exception('Could not remove those archives: ${resp.body}');
     }
@@ -763,9 +777,12 @@ class RecoveryHolderSetup {
     return HolderSetupResult(holders: holders, couldNotAsk: couldNotAsk);
   }
 
+  /// Which machines are paired, read from the agent — a fact about the
+  /// identity, so it is asked where the identity is, with something that proves
+  /// who is asking.
   static Future<List<Map<String, dynamic>>> _pairedMachines() async {
-    final resp = await http
-        .get(Uri.parse('${AgentConfig.coreBaseUrl}/api/pairing/agents'));
+    final resp = await TheAgentThisAppTalksTo.clientFor()
+        .get(Uri.parse('${TheAgentThisAppTalksTo.origin}/api/pairing/agents'));
     if (resp.statusCode != 200) {
       throw Exception('Could not read which machines are paired.');
     }
@@ -789,6 +806,10 @@ class RecoveryHolderSetup {
       'policy': {'wait_hours': waitHours, 'require_approval': requireApproval},
     }));
 
+    // A plain client, deliberately. This asks SOMEBODY ELSE'S machine, not
+    // this identity's agent, and it carries its own owner signature below. A
+    // client built for the agent would pass this through untouched anyway,
+    // which would work and would say the wrong thing about what is going on.
     final resp = await http.post(
       Uri.parse('${url.replaceAll(RegExp(r'/+$'), '')}$path'),
       headers: {
