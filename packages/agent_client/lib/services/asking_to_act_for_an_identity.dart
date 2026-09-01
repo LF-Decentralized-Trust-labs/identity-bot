@@ -4,7 +4,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../config/agent_config.dart';
-import 'the_agent_this_app_talks_to.dart';
+import 'controller_signing_client.dart';
 
 /// The machine's own half of asking to act for an identity.
 ///
@@ -71,14 +71,24 @@ class AskingToActForAnIdentity {
   /// nothing has been granted — a refusal is the ordinary state before somebody
   /// approves, not an error worth showing anybody.
   Future<WhatThisMachineWasTold?> whatTheAgentSays(String agentOrigin) async {
-    // Through the ordinary transport, which signs as this machine. Built here
-    // rather than reusing the plain client above, because the agent has never
-    // seen this connection and an unsigned request to it is correctly refused —
-    // the two questions this class asks need two different clients, which is
-    // most of why it exists.
-    final client =
-        TheAgentThisAppTalksTo.theAgent(origin: agentOrigin, inner: _plain)
-            .client;
+    // SIGNED AS THIS MACHINE, EXPLICITLY, and not through the transport that
+    // decides for itself.
+    //
+    // That transport picks the controller client only once this installation
+    // already IS a controller, which is the state this call exists to reach —
+    // so going through it during the ceremony is circular. It would fall to the
+    // client for "a machine this device owns", find no record of having adopted
+    // anything, and send the request unsigned. The agent would then read it as
+    // not coming from a controller at all, refuse it, and this method would
+    // report that as "nobody has approved you yet" — forever, however many
+    // times somebody approved it.
+    final client = ControllerSigningClient(
+      agentOrigin: agentOrigin,
+      // The key that signs is in THIS machine's hardware, and the agent cannot
+      // reach it, so the signing happens next door and this asks for it.
+      localCoreOrigin: _localCore,
+      inner: _plain,
+    );
     try {
       final res = await client.get(Uri.parse('$agentOrigin/api/controller/agent'));
       if (res.statusCode == 401 || res.statusCode == 403) return null;
