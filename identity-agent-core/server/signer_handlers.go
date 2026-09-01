@@ -325,13 +325,13 @@ func (s *CoreServer) AcceptFoundingSigner(a SignerAcceptance) (SignerAccepted, e
 	// public, from a token carried in a link or a QR. So it must not be able to
 	// replace an owner who already exists.
 	//
-	// It matters more than it did. The sealed record is now the only thing a
-	// controller's authentication level is checked against, so an unredeemed
-	// founding-signer token would otherwise be an unauthenticated rewrite of the
-	// key that vouches for every raised action on this agent.
+	// It matters more than it did. The sealed record is one of the two things a
+	// controller's authentication level is checked against — a verified key
+	// event log answers first, and this answers when it names the same identity
+	// — so an unredeemed founding-signer token would otherwise be an
+	// unauthenticated way to install the key that vouches for every raised
+	// action on this agent.
 	//
-	// A second owner joins through the ceremony path above, which collects keys
-	// from several people and is not this.
 	// ANYTHING ALREADY SEALED STOPS THIS, not merely a different identity.
 	//
 	// Comparing only the AID left the hole open: a pairwise owner AID is not a
