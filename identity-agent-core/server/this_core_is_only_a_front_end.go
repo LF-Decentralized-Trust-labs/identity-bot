@@ -186,7 +186,30 @@ func (s *CoreServer) beAFrontEndFor(f AFrontEndFor) error {
 	if err := os.Chmod(tmp.Name(), 0o600); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), s.frontEndFile())
+	if err := os.Rename(tmp.Name(), s.frontEndFile()); err != nil {
+		return err
+	}
+
+	// ASKED AGAIN, AFTER THE WRITE. The guard above and an inception are two
+	// owner-only operations on this machine, and nothing holds a lock across
+	// both — so an identity founded in between would leave this computer holding
+	// one AND carrying a record that makes it refuse every question about it.
+	// That is the exact state the guard exists to prevent, and the only way out
+	// of it is the route that removes the record.
+	//
+	// Narrow, because it needs both at once. Cheap to close, because the write
+	// has just happened and undoing it is one call.
+	if id, err := s.DataStore.GetIdentity(); err == nil && id != nil && id.AID != "" {
+		if rerr := os.Remove(s.frontEndFile()); rerr != nil {
+			return fmt.Errorf("an identity was founded here while this was being "+
+				"recorded, and the record could not be undone (%v) — remove %s by "+
+				"hand or this computer will refuse every question about %s",
+				rerr, s.frontEndFile(), id.AID)
+		}
+		return fmt.Errorf("an identity was founded on this computer while this was " +
+			"being recorded, so it is not a front end for another")
+	}
+	return nil
 }
 
 // stopBeingAFrontEnd returns this core to answering for itself.
@@ -249,7 +272,15 @@ var whatAFrontEndAnswersFor = map[string]string{
 func (s *CoreServer) refuseWhatBelongsToTheAgent(routes chi.Routes) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Method == http.MethodOptions || !strings.HasPrefix(r.URL.Path, "/api/") {
+			// Both forms, the same way authorize tests them. The decoded path
+			// alone fails safe here — anything that routes under /api carries the
+			// prefix once decoded — but this file already cites the escaped-
+			// separator incident as its reason for matching on patterns, and
+			// doing half of that fix invites somebody to re-derive the other half
+			// the hard way.
+			underTheAPI := strings.HasPrefix(r.URL.Path, "/api/") ||
+				strings.HasPrefix(r.URL.EscapedPath(), "/api/")
+			if r.Method == http.MethodOptions || !underTheAPI {
 				next.ServeHTTP(w, r)
 				return
 			}

@@ -358,3 +358,35 @@ func TestSettingWhichHalfAComputerRunsIsNotReachableFromElsewhere(t *testing.T) 
 			"closed, and should not be silent")
 	}
 }
+
+// The real router actually refuses — not just the small one these tests build.
+//
+// THE GAP THIS CLOSES IS THE WORST KIND. Every other test here builds its own
+// router and installs the middleware on it, so deleting the one line in
+// server.go that installs it on the REAL router made the whole feature stop
+// existing while the suite stayed green. A test that passes when the thing it
+// tests is not wired in is worse than no test: it reports that the protection
+// is there.
+func TestTheRealRouterRefusesWhatBelongsToTheAgent(t *testing.T) {
+	s := agentWithNoIdentity(t)
+	real := s.buildRouter("")
+
+	if err := s.beAFrontEndFor(AFrontEndFor{
+		AgentAID: "EAGENT", AgentURL: "https://box.example.test",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Owner-class, so a local request would otherwise be answered — which is
+	// what makes this prove the middleware ran rather than something else.
+	req := httptest.NewRequest(http.MethodGet, "/api/credentials", nil)
+	req.RemoteAddr = "127.0.0.1:1234"
+	rec := httptest.NewRecorder()
+	real.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("the real router answered %d for a computer that holds no identity — "+
+			"the refusal is not installed on it, so nothing in production refuses",
+			rec.Code)
+	}
+}
