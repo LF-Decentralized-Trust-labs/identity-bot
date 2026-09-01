@@ -87,31 +87,51 @@ func (s *CoreServer) ownerAuthority() (*OwnerAuthority, error) {
 	// answer cannot be edited, only re-founded. Nothing on disk gets to disagree
 	// with it.
 	if owner, aerr := s.ownerFromOwnIdentity(identity.AID); aerr == nil && owner != "" {
-		key, kerr := s.publicKeyOf(owner)
+		// THE SEALED KEY ANSWERS BEFORE THE CONTACT RECORD, and that ordering is
+		// as load-bearing as the one above it.
+		//
+		// publicKeyOf resolves a counterparty's key from contacts, and contacts
+		// are written by handlers that fetch a record from an address the CALLER
+		// names — POST /api/contacts, /api/contacts/resolve, /api/scan/execute,
+		// /api/ask/create, and whatever is added next. Reading the owner's key
+		// from there meant anyone who could reach any one of those could write
+		// the key that decides whether they are the owner, and then be the
+		// owner. Proven end to end through the scan route, which nothing had
+		// thought to close, after the two obvious contact routes were closed.
+		//
+		// The sealed record is written at provisioning and at pairing, both
+		// before anything is reachable, and it is matched on AID here — so the
+		// log still decides WHO the owner is and the file only supplies key
+		// material for the owner the log already named. That is the same
+		// property the fallback below used to rest on; it is simply asked first
+		// now, so a contact record cannot get in ahead of it.
+		if sealed, serr := s.sealedOwnerAuthority(); serr == nil && sealed.AID == owner &&
+			sealed.PublicKey != "" {
+			return &OwnerAuthority{AID: owner, PublicKey: sealed.PublicKey}, nil
+		}
 
-		// The key handed over when this identity was founded, for the owner the
-		// log names — and only for that owner.
+		// Nothing sealed for THIS owner — which is the case where a sealed file
+		// names somebody else, and the anchor has to win over it.
 		//
-		// publicKeyOf looks in contacts, and at the moment an identity is
-		// founded its owner is not one: nothing in the pairing flow adds them.
-		// So every identity founded that way came up naming an owner whose key
-		// could not be resolved, and refused every owner-signed request from
-		// then on — administrable by nobody, permanently — while that owner's
-		// public key sat in owner_authority.json where pairing had written it
-		// seconds earlier. It only shows up by founding an identity through the
-		// real flow and then trying to use it, because every test of this code
-		// seeds the owner into contacts first.
+		// A key this agent verified against a key event log answers next,
+		// because a contact row on its own is written by handlers that fetch a
+		// record from an address the caller supplies.
+		if key, kerr := s.ownerKeyFromAVerifiedLog(owner); kerr == nil {
+			return &OwnerAuthority{AID: owner, PublicKey: key}, nil
+		}
+
+		// And last, an unverified contact row. Kept because the anchor naming an
+		// owner whose key is only on file that way is a real state — it is what
+		// the precedence test describes — and refusing it would lock an owner
+		// out of their own agent, which is worse than the narrowed risk.
 		//
-		// This does not reopen the hole the ordering closed. That hole was a
-		// file naming a DIFFERENT owner and winning. The AIDs must match here,
-		// so the log still decides WHO the owner is and the file only supplies
-		// key material for the owner the log already named. Somebody re-sealing
-		// under their own AID still changes nothing, which is the property that
-		// mattered.
+		// Narrowed, not gone: this is only reached when nothing is sealed for
+		// the owner the log names, so an agent that was paired or provisioned is
+		// already past it. What remains is worth closing at the source, by
+		// verifying the owner's log when the relationship is established rather
+		// than by refusing here.
+		key, kerr := s.publicKeyOf(owner)
 		if kerr != nil {
-			if sealed, serr := s.sealedOwnerAuthority(); serr == nil && sealed.AID == owner {
-				return &OwnerAuthority{AID: owner, PublicKey: sealed.PublicKey}, nil
-			}
 			// Refused rather than falling through. Falling back to this agent's
 			// own identity would mean an identity whose owner cannot be resolved
 			// quietly starts answering to itself, which is the failure this
@@ -267,4 +287,38 @@ func (s *CoreServer) verifyOwnerSignature(r *http.Request) error {
 		return fmt.Errorf("this signed request has already been used")
 	}
 	return nil
+}
+
+// ownerKeyFromAVerifiedLog resolves the owner's signing key, accepting only a
+// key this agent verified against a key event log.
+//
+// Deliberately NOT publicKeyOf. That function answers "what key do we have on
+// file for this counterparty", which is the right question for talking to
+// somebody and the wrong one for deciding who may administer this agent: it
+// accepts a contact row, and contact rows are written by handlers that fetch a
+// record from an address the caller supplies. Anything that could reach one of
+// those could otherwise write the key that decides whether it is the owner.
+//
+// Kept separate rather than tightening publicKeyOf, because the two callers want
+// different things. Refusing an unverified key when addressing a counterparty
+// would break ordinary messaging with everybody whose log has not been walked;
+// accepting one here hands over the agent.
+func (s *CoreServer) ownerKeyFromAVerifiedLog(aid string) (string, error) {
+	if s.DataStore == nil {
+		return "", fmt.Errorf("no store to resolve %s from", aid)
+	}
+	record, err := s.DataStore.GetContactKEL(aid)
+	if err != nil || record == nil {
+		return "", fmt.Errorf("no verified key event log on file for %s", aid)
+	}
+	if !record.KelVerified {
+		// Present but unverified is the exact state a written-in record is in.
+		return "", fmt.Errorf(
+			"the key on file for %s came from a record this agent has not verified "+
+				"against a key event log, so it does not decide who the owner is", aid)
+	}
+	if record.CurrentPublicKey == "" {
+		return "", fmt.Errorf("the verified log for %s names no current key", aid)
+	}
+	return record.CurrentPublicKey, nil
 }

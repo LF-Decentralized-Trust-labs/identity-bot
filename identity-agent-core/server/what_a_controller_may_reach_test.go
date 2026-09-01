@@ -879,3 +879,65 @@ func asThatMachineAt(t *testing.T, aid, method, path, body string, seed []byte,
 	req.Header.Set(headerControllerTimestamp, stamp)
 	return req
 }
+
+// The doors that write a contact record are closed, including the two that do
+// not say "contact" anywhere in their names.
+//
+// A reviewer proved this end to end after the obvious contact routes were shut:
+// POST /api/scan/execute reaches EnsureKeriContact, which fetches a record from
+// an address in the payload and stores the key it gets back — the identical
+// primitive. The owner's key is resolved from those records, so writing one
+// makes the writer the owner. POST /api/ask/create is the same door.
+//
+// The lesson is in how they were found: by tracing what the handlers CALL, not
+// by reading what they are named. This list cannot be kept correct by reading.
+func TestTheLessObviousDoorsToAContactRecordAreClosedToo(t *testing.T) {
+	s := newAuthTestServer(t)
+	aid, seed := anAuthorisedMachine(t, s, GradeEnrolled)
+	r := s.buildRouter("")
+
+	for _, path := range []string{"/api/scan/execute", "/api/ask/create"} {
+		req, raised := theLevelThisActionNeeds("POST", path)
+		if !raised || !req.Closed {
+			t.Errorf("POST %s is not closed, and it can write the record the owner's "+
+				"key is read from: %+v", path, req)
+		}
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, asThatMachine(t, aid, "POST", path, `{}`, seed,
+			authprovider.LevelHigh, time.Now()))
+		if w.Code != http.StatusForbidden {
+			t.Errorf("POST %s admitted a controller at the strongest level: %d", path, w.Code)
+		}
+	}
+}
+
+// A sealed owner is not replaced by somebody redeeming a founding invite.
+//
+// That route is declared public and reached from a token in a link or a QR, and
+// the sealed record is now the only thing a controller's authentication level is
+// checked against — so without this, an unredeemed founding token is an
+// unauthenticated rewrite of the key that vouches for every raised action.
+func TestAFoundingInviteCannotReplaceAnOwnerWhoAlreadyExists(t *testing.T) {
+	s := agentWithNoIdentity(t)
+	if err := s.SealOwnerAuthority(OwnerAuthority{
+		AID:       "BTheRealOwner",
+		PublicKey: aGrant(GradeEnrolled).PublicKey,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := s.AcceptFoundingSigner(SignerAcceptance{
+		InviteToken: "whatever-token",
+		PairwiseAID: "BSomebodyElse",
+		PublicKey:   grantFor(55, GradeEnrolled).PublicKey,
+	})
+	if err == nil {
+		t.Fatal("a founding invite replaced an owner who already existed, so anyone " +
+			"holding an unredeemed token owns this agent")
+	}
+
+	sealed, serr := s.sealedOwnerAuthority()
+	if serr != nil || sealed.AID != "BTheRealOwner" {
+		t.Fatalf("the owner was changed anyway: %+v (%v)", sealed, serr)
+	}
+}

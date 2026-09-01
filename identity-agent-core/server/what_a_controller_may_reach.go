@@ -190,6 +190,16 @@ var controllerNeedsLevel = map[string]controllerRequirement{
 		"the owner's key is resolved from contacts, so editing one can replace the owner"},
 	"POST /api/contacts/resolve": {neverByAController, authprovider.LevelHigh,
 		"this fetches a record from an address the caller names and stores the key it returns"},
+	// The same primitive by two less obvious doors, both found only by tracing
+	// what the handlers CALL rather than by reading their names. handleScanExecute
+	// and the ask handlers reach EnsureKeriContact, which fetches an OOBI from an
+	// address in the payload and stores the key it gets back — exactly what the
+	// contact routes above do. Neither route has "contact" in its name, which is
+	// the whole lesson: this list cannot be kept correct by reading it.
+	"POST /api/scan/execute": {neverByAController, authprovider.LevelHigh,
+		"performing a scanned request can write a contact record, and the owner's key is resolved from those"},
+	"POST /api/ask/create": {neverByAController, authprovider.LevelHigh,
+		"creating a request can write a contact record, and the owner's key is resolved from those"},
 	"DELETE /api/contacts/{aid}": {neverByAController, authprovider.LevelHigh,
 		"removing the owner's contact record changes how the owner's key is resolved"},
 
