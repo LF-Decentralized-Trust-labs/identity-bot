@@ -779,6 +779,10 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		// Read by the app on this machine so it can show the person what they
 		// are approving.
 		r.Get("/controller/this-machine", s.handleThisMachineAsAController)
+		// Signing a request as THIS machine, for the app on it to send to the
+		// agent it is pointed at. The only work a controller's own computer
+		// does, and it is about the controller rather than the identity.
+		r.Post("/controller/sign", s.handleSignAsThisController)
 
 		r.Post("/controllers", s.handleGrantController)
 		r.Get("/controllers", s.handleListControllers)
