@@ -26,6 +26,15 @@ import 'which_half_this_app_is_running.dart';
 /// never of the installation.
 Future<void> pointThisAppAtItsAgent({http.Client? using}) async {
   final half = await WhichHalfThisAppIsRunning.now();
+  if (half.couldNotTell) {
+    // Nothing is changed on a non-answer. Clearing the origin would point a
+    // running front end back at its own core, and telling that core to forget
+    // the record would un-arm the protection permanently — both on a failure
+    // that may last one read.
+    debugPrint('[controller] leaving this app as it is: which half it runs '
+        'could not be read');
+    return;
+  }
   AgentConfig.agentOrigin = half.agentOrigin;
   if (half.isAController) {
     debugPrint('[controller] this app is the front end for ${half.agentAid} '
@@ -62,20 +71,25 @@ Future<void> tellThisComputerWhichHalfItIsRunning({
   final url = Uri.parse('${AgentConfig.coreBaseUrl}/api/controller/front-end-for');
   try {
     if (agentOrigin.isNotEmpty) {
-      await client.post(
-        url,
-        headers: const {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'agent_aid': agentAid,
-          'agent_url': agentOrigin,
-        }),
-      );
+      // Retried briefly, because this is called the moment the core is asked to
+      // start and a core still binding its port is the ordinary case rather
+      // than the exception. Swallowing that first refusal would leave the
+      // protection unarmed on exactly the launches where it matters, and say
+      // nothing.
+      await _keepAsking(() => client.post(
+            url,
+            headers: const {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'agent_aid': agentAid,
+              'agent_url': agentOrigin,
+            }),
+          ));
     } else {
       // Symmetrical on purpose. An installation that stopped being a front end
       // and left the record behind would have a core refusing every question
       // about the identity it now holds — locked out by its own safety net,
       // with a refusal naming an agent that is no longer anything to do with it.
-      await client.delete(url);
+      await _keepAsking(() => client.delete(url));
     }
   } catch (e) {
     debugPrint('[controller] could not tell this computer which half it is '
@@ -94,4 +108,26 @@ Future<void> tellThisComputerWhichHalfItIsRunning({
 /// calling the wrong one would silently unpair a working controller.
 void stopPointingThisProcessAnywhere() {
   AgentConfig.agentOrigin = '';
+}
+
+/// Tries for a few seconds, because a core that has just been asked to start is
+/// normally not listening yet.
+///
+/// Bounded rather than indefinite: if it is still refusing after this, something
+/// is wrong that retrying will not fix, and the caller logs it rather than
+/// holding up the app.
+Future<void> _keepAsking(Future<http.Response> Function() send) async {
+  Object? last;
+  for (var attempt = 0; attempt < 20; attempt++) {
+    try {
+      final res = await send();
+      if (res.statusCode < 500) return;
+      last = 'the core answered ${res.statusCode}';
+    } catch (e) {
+      last = e;
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+  }
+  throw StateError('the core on this computer never accepted which half this '
+      'app is running: $last');
 }

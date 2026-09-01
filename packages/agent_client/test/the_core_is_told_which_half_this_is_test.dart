@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:agent_client/config/agent_config.dart';
 import 'package:agent_client/services/point_this_app_at_its_agent.dart';
+import 'package:agent_client/services/which_half_this_app_is_running.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:test/test.dart';
@@ -21,6 +22,8 @@ import 'package:test/test.dart';
 /// now holds, by its own safety net, with a refusal naming an agent that is no
 /// longer anything to do with it.
 void main() {
+  _aNonAnswerChangesNothing();
+
   late List<http.Request> seen;
   late http.Client client;
 
@@ -76,5 +79,28 @@ void main() {
       agentOrigin: 'https://box.example.test',
       using: broken,
     );
+  });
+}
+
+/// A read that failed is not an answer, and must not be acted on.
+///
+/// The settings say which half this app is running. When they cannot be read,
+/// "it holds the identity" and "we do not know" look identical from outside —
+/// both have no agent — and treating the second as the first is a guess that
+/// gets written down: it tells the core beside this app to forget it is a front
+/// end, and it stays forgotten after the settings come back. A working front
+/// end is un-armed by one bad read.
+void _aNonAnswerChangesNothing() {
+  test('a settings read that failed does not un-arm a front end', () {
+    final unknown = const WhichHalfThisAppIsRunning.couldNotBeRead();
+    final holdsIt = const WhichHalfThisAppIsRunning.itHoldsTheIdentity();
+
+    // The two must be distinguishable, or no caller can behave differently.
+    expect(unknown.couldNotTell, isTrue);
+    expect(holdsIt.couldNotTell, isFalse);
+    // And both report no agent, which is the safe read for anybody only asking
+    // where requests go.
+    expect(unknown.isAController, isFalse);
+    expect(holdsIt.isAController, isFalse);
   });
 }
