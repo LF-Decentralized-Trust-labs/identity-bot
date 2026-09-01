@@ -25,6 +25,9 @@ import (
 // test for a reason that has nothing to do with what it was checking.
 func anAuthorisedMachine(t *testing.T, s *CoreServer, grade ControllerGrade) (string, []byte) {
 	t.Helper()
+	// The device holding this identity's root key, because it is the only thing
+	// entitled to say how well somebody was authenticated.
+	ownerSeedForTest(t, s)
 	seed := make([]byte, ed25519.SeedSize)
 	for i, c := range []byte(t.Name()) {
 		seed[i%ed25519.SeedSize] ^= c + byte(i)
@@ -61,6 +64,11 @@ func asThatMachine(t *testing.T, aid, method, path, body string, seed []byte,
 		req.Header.Set(headerControllerAuthLevel, string(level))
 		req.Header.Set(headerControllerAuthAt, measuredAt.UTC().Format(time.RFC3339))
 		req.Header.Set(headerControllerAuthScore, "80")
+		// Vouched for by the root-identity device. Without this the level is the
+		// machine scoring itself, which the agent refuses.
+		if vouch := theRootDeviceVouches(t, aid, level, measuredAt, 80); vouch != "" {
+			req.Header.Set(headerAuthLevelVouchedBy, vouch)
+		}
 	}
 
 	sig, err := login.SignString(
@@ -201,12 +209,13 @@ func TestRaisingTheLevelInFlightIsRefused(t *testing.T) {
 // A level this build does not define is not a level. A newer controller naming
 // something unrecognised must not clear a gate on an older agent.
 func TestAnUnrecognisedLevelIsTreatedAsNothingMeasured(t *testing.T) {
-	got := theAuthenticationItAsserts(func() *http.Request {
+	s := newAuthTestServer(t)
+	got := s.theAuthenticationSomebodyVouchedFor(func() *http.Request {
 		req := remote("POST", "/api/rotation", "")
 		req.Header.Set(headerControllerAuthLevel, "platinum")
 		req.Header.Set(headerControllerAuthAt, time.Now().UTC().Format(time.RFC3339))
 		return req
-	}())
+	}(), "EAnyMachine", time.Now().UTC())
 	if got.Measured {
 		t.Fatalf("an unrecognised level was treated as a measurement: %+v", got)
 	}
@@ -472,5 +481,106 @@ func TestEveryDoorToAnArchiveIsRaised(t *testing.T) {
 		if _, raised := theLevelThisActionNeeds(parts[0], parts[1]); !raised {
 			t.Errorf("%s is reachable by any authorised machine", route)
 		}
+	}
+}
+
+// ownerSeedForTest gives the agent a root-identity device whose statements about
+// authentication it will accept, and returns that device's seed.
+//
+// Stored in a package-level map keyed by the test, because a controller request
+// is built by a helper that does not otherwise know the owner.
+func ownerSeedForTest(t *testing.T, s *CoreServer) []byte {
+	t.Helper()
+	seed, _ := sealTestOwner(t, s)
+	rootDeviceSeeds[t.Name()] = seed
+	t.Cleanup(func() { delete(rootDeviceSeeds, t.Name()) })
+	return seed
+}
+
+var rootDeviceSeeds = map[string][]byte{}
+
+// theRootDeviceVouches is the phone signing "this person reached this level, at
+// this moment, for this machine".
+func theRootDeviceVouches(t *testing.T, controllerAID string, level authprovider.Level,
+	at time.Time, score int) string {
+	t.Helper()
+	seed, ok := rootDeviceSeeds[t.Name()]
+	if !ok {
+		return ""
+	}
+	sig, err := login.SignString(
+		canonicalAuthLevelStatement(controllerAID, level, at, score), seed)
+	if err != nil {
+		t.Fatalf("the root device could not vouch: %v", err)
+	}
+	return sig
+}
+
+// A machine may not score itself.
+//
+// Rob, 2026-08-31: an authentication level is only worth what the software
+// producing it can be held to. If the controller measures the person and reports
+// the answer, whoever runs modified software there reports whatever they like,
+// and every threshold here becomes a number the attacker chooses — because
+// nobody is auditing what build is running on that machine.
+func TestAMachineMayNotScoreItself(t *testing.T) {
+	s := newAuthTestServer(t)
+	aid, seed := anAuthorisedMachine(t, s, GradeEnrolled)
+	r := s.buildRouter("")
+
+	req := asThatMachine(t, aid, "POST", "/api/rotation", `{}`, seed,
+		authprovider.LevelHigh, time.Now())
+	// Strip what the root-identity device said, leaving the machine's own claim.
+	req.Header.Del(headerAuthLevelVouchedBy)
+	// Re-sign, so this fails on the missing voucher rather than on the signature.
+	stamp := req.Header.Get(headerControllerTimestamp)
+	sig, err := login.SignString(canonicalControllerRequest(aid, "POST", "/api/rotation", stamp,
+		authprovider.Result{Level: authprovider.LevelHigh, Measured: true,
+			At: time.Now().UTC(), Score: 80}, []byte(`{}`)), seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set(headerControllerSig, sig)
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("a machine scored itself and was believed: %d %s", w.Code, w.Body.String())
+	}
+}
+
+// A statement the root device made about ONE machine cannot be relayed by
+// another, or an authorised laptop could borrow the level granted to a phone.
+func TestOneMachinesLevelCannotBeRelayedByAnother(t *testing.T) {
+	s := newAuthTestServer(t)
+	aid, seed := anAuthorisedMachine(t, s, GradeEnrolled)
+	r := s.buildRouter("")
+
+	req := asThatMachine(t, aid, "POST", "/api/rotation", `{}`, seed,
+		authprovider.LevelHigh, time.Now())
+	// A perfectly good statement — about a different machine.
+	req.Header.Set(headerAuthLevelVouchedBy,
+		theRootDeviceVouches(t, "ESomeOtherMachine", authprovider.LevelHigh, time.Now(), 80))
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("a level vouched for another machine was accepted here: %d", w.Code)
+	}
+}
+
+// An agent that knows of no root-identity device cannot be told a level by
+// anybody, rather than falling back to believing the machine.
+func TestWithNoRootDeviceNobodyCanVouch(t *testing.T) {
+	s := newAuthTestServer(t)
+	got := s.theAuthenticationSomebodyVouchedFor(func() *http.Request {
+		req := remote("POST", "/api/rotation", "")
+		req.Header.Set(headerControllerAuthLevel, string(authprovider.LevelHigh))
+		req.Header.Set(headerControllerAuthAt, time.Now().UTC().Format(time.RFC3339))
+		req.Header.Set(headerAuthLevelVouchedBy, "AAnythingAtAll")
+		return req
+	}(), "EAnyMachine", time.Now().UTC())
+	if got.Measured {
+		t.Fatalf("an agent with no root-identity device accepted a level anyway: %+v", got)
 	}
 }

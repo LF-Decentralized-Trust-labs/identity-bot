@@ -33,20 +33,47 @@ const (
 	headerControllerSig       = "X-IA-Controller-Sig"
 	headerControllerTimestamp = "X-IA-Controller-Timestamp"
 
-	// How well the person at that machine has been authenticated, as measured
-	// there and asserted by the machine.
+	// How well the person was authenticated, and who says so.
 	//
-	// SIGNED OVER, NEVER READ ALONE. These are bound into the canonical string
-	// below, so nothing between the controller and the agent can raise a level
-	// in flight. What they rest on is that the machine is enclave hardware the
-	// owner authorised, running a provider that measures the PERSON — the
-	// controller is not choosing a number, it is reporting what its provider
-	// found. A thief holding the laptop still has to produce the person's
-	// factors.
+	// The controller CARRIES these; it does not get to make them up. The level is
+	// established on the device holding this identity's root key, which signs the
+	// statement, and headerAuthLevelVouchedBy is that signature. Without it the
+	// level counts as nothing measured — see theAuthenticationSomebodyVouchedFor
+	// for why a machine may not score itself.
+	//
+	// They are bound into the request signature too, so nothing in the middle can
+	// alter them in flight. That is defence in depth, not the thing that makes
+	// them trustworthy.
 	headerControllerAuthLevel = "X-IA-Controller-Auth-Level"
 	headerControllerAuthAt    = "X-IA-Controller-Auth-At"
 	headerControllerAuthScore = "X-IA-Controller-Auth-Score"
+	headerAuthLevelVouchedBy  = "X-IA-Auth-Level-Vouched-By"
 )
+
+// canonicalAuthLevelStatement is what the device holding the root key signs when
+// it says how well somebody was authenticated.
+//
+// Bound to ONE controller, so a statement made for the laptop cannot be relayed
+// by a different machine. Bound to the moment, so freshness means something. Its
+// own first line so it can never be confused with a request signature.
+//
+// It is not bound to a single request, and that is a real choice: the person
+// authenticates on their phone and then works at the laptop, so the statement
+// covers a short window rather than one action. What that costs is that a
+// controller compromised DURING the window can spend it on something other than
+// what the person had in mind — which is the argument for binding the highest
+// actions to a specific one, and is left open deliberately.
+func canonicalAuthLevelStatement(
+	controllerAID string, level authprovider.Level, at time.Time, score int,
+) string {
+	return strings.Join([]string{
+		"IA-AUTH-LEVEL-V1",
+		controllerAID,
+		string(level),
+		at.UTC().Format(time.RFC3339),
+		strconv.Itoa(score),
+	}, "\n")
+}
 
 // controllerContextKey carries which machine acted, for anything downstream that
 // needs to record it.
@@ -164,7 +191,7 @@ func (s *CoreServer) theControllerBehind(r *http.Request) (ControllerGrant, auth
 		r.Body = io.NopCloser(bytes.NewReader(body))
 	}
 
-	asserted := theAuthenticationItAsserts(r)
+	asserted := s.theAuthenticationSomebodyVouchedFor(r, aid, now)
 	ok, err := login.VerifyString(
 		canonicalControllerRequest(aid, r.Method, r.URL.Path, stamp, asserted, body), sig, pub)
 	if err != nil {
@@ -185,35 +212,77 @@ func (s *CoreServer) theControllerBehind(r *http.Request) (ControllerGrant, auth
 	return grant, asserted, nil
 }
 
-// theAuthenticationItAsserts reads what the machine says about the person at it.
+// theAuthenticationSomebodyVouchedFor reads how well the person was
+// authenticated, and accepts it only from somebody entitled to say.
+//
+// A MACHINE MAY NOT SCORE ITSELF. An authentication level is only worth what the
+// software producing it can be held to: if the controller measures the person
+// and reports the answer, then whoever runs modified software on that machine
+// reports whatever they like, and every threshold in this package becomes a
+// number the attacker chooses. Nobody is auditing what build is running there.
+//
+// So the level has to be established where the build can be attested. By default
+// that is the device holding this identity's root key — in most cases a phone —
+// and this agent already knows the key that device signs with. The controller
+// RELAYS the statement; it does not make it. A machine that could attest its own
+// build could make it too, but that is a decision about which devices qualify,
+// and it is not this function's to take.
 //
 // Absence is Unmeasured rather than a low level, matching the provider seam: an
 // agent that measured nothing must not be treated as one that measured and found
 // little, or removing the provider would be a way past a gate.
-func theAuthenticationItAsserts(r *http.Request) authprovider.Result {
+func (s *CoreServer) theAuthenticationSomebodyVouchedFor(
+	r *http.Request, controllerAID string, now time.Time,
+) authprovider.Result {
+
 	level := authprovider.Level(strings.TrimSpace(r.Header.Get(headerControllerAuthLevel)))
 	at := strings.TrimSpace(r.Header.Get(headerControllerAuthAt))
+	vouched := strings.TrimSpace(r.Header.Get(headerAuthLevelVouchedBy))
 	if level == "" || at == "" {
-		return authprovider.Unmeasured("this machine reported no authentication")
+		return authprovider.Unmeasured("nobody has said how well this person was authenticated")
 	}
 	when, err := time.Parse(time.RFC3339, at)
 	if err != nil {
-		return authprovider.Unmeasured("this machine reported when it checked, unreadably")
+		return authprovider.Unmeasured("when the person was checked was reported unreadably")
 	}
 	if !level.Known() {
 		// A level this build does not define is not a level. Treated as nothing
-		// measured, so a newer controller inventing a name cannot clear a gate
-		// on an older agent.
+		// measured, so a newer device inventing a name cannot clear a gate on an
+		// older agent.
 		return authprovider.Unmeasured(
-			"this machine reported an authentication level this agent does not recognise")
+			"an authentication level this agent does not recognise was reported")
 	}
 	score, _ := strconv.Atoi(strings.TrimSpace(r.Header.Get(headerControllerAuthScore)))
+
+	// The statement has to be signed by the device that made it. Unsigned, this
+	// is the controller scoring itself, which is worth nothing.
+	if vouched == "" {
+		return authprovider.Unmeasured(
+			"this machine reported an authentication level with nothing vouching for it, " +
+				"and a machine may not score itself")
+	}
+	authority, err := s.ownerAuthority()
+	if err != nil || authority == nil || authority.PublicKey == "" {
+		return authprovider.Unmeasured(
+			"this agent knows of no device entitled to say how well somebody was authenticated")
+	}
+	pub, err := login.DecodeVerkey(authority.PublicKey)
+	if err != nil {
+		return authprovider.Unmeasured("the key of the device that vouches is unusable")
+	}
+	ok, err := login.VerifyString(
+		canonicalAuthLevelStatement(controllerAID, level, when, score), vouched, pub)
+	if err != nil || !ok {
+		return authprovider.Unmeasured(
+			"the authentication level was not vouched for by the device that holds this identity's key")
+	}
+
 	return authprovider.Result{
 		Level:    level,
 		Score:    score,
 		Measured: true,
 		At:       when.UTC(),
-		Provider: "controller",
+		Provider: "root-identity-device",
 	}
 }
 
