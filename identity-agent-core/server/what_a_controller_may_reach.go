@@ -146,6 +146,22 @@ var controllerNeedsLevel = map[string]controllerRequirement{
 	"POST /api/employees/{aid}/revoke": {alsoRaised, authprovider.LevelVerified,
 		"revoking somebody takes away what this organisation said about them"},
 
+	// --- this machine's own enclave ---
+	//
+	// Closed for the same reason as the group below, one step removed. The file
+	// says this route is "owner-only, which on a controller means the app
+	// running on it" — which stopped being true the moment an authorised
+	// controller began reaching owner-class routes. Left open, anyone holding a
+	// grant on this machine, or a browser session on it, could make its enclave
+	// sign arbitrary controller requests as this machine, to be replayed at any
+	// agent where it is a controller.
+	//
+	// The app on this computer reaches it as the LOCAL owner, which is a
+	// different caller from a controller and is unaffected.
+	"POST /api/controller/sign": {neverByAController, authprovider.LevelHigh,
+		"asking this computer's secure hardware to sign is for the app running on it, " +
+			"not for something reaching it from elsewhere"},
+
 	// --- the state that decides WHO THE OWNER IS ---
 	//
 	// CLOSED, and this group is the one with a rule behind it rather than a

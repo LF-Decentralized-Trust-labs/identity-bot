@@ -13,6 +13,7 @@ import (
 
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/login"
+	"identity-agent-core/secureenclave"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -465,14 +466,26 @@ func TestAGrantCannotNameOneMachineAndCarryAnothersKey(t *testing.T) {
 // enclave requirement exists to prevent.
 func TestThisMachineOffersOnlyWhatItsHardwareHolds(t *testing.T) {
 	s := newAuthTestServer(t)
+
+	// The predicate first, directly, because the rest of this test skips on a
+	// host with no enclave — and a skip cannot fail. Removing the refusal made
+	// this test SKIP rather than fail, on exactly the hosts where it matters.
+	if secureenclave.UsingHardware(secureenclave.NewPlatformSigner(s.DataDir)) {
+		if _, err := s.thisMachineAsAController(); err != nil {
+			t.Fatalf("hardware is present and it refused anyway: %v", err)
+		}
+	} else if _, err := s.thisMachineAsAController(); err == nil {
+		t.Fatal("this host has no hardware that can keep a key to itself, and it " +
+			"offered to act for an identity anyway — that is a key on disk, which " +
+			"is an authorisation granted to anybody who can read the file")
+	}
+
 	id, err := s.thisMachineAsAController()
 	if err != nil {
-		// No enclave on this host, which is a legitimate answer — and it must be
-		// an error rather than a key on disk.
 		if id.AID != "" || id.PublicKey != "" {
 			t.Fatalf("refused and still produced an identity: %+v", id)
 		}
-		t.Skipf("no hardware on this host to offer: %v", err)
+		t.Skipf("no hardware on this host, and the refusal above is the assertion: %v", err)
 	}
 
 	// The identifier must be the key, or the grant it is used in would be refused

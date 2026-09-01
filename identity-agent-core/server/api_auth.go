@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -283,8 +284,26 @@ func (s *CoreServer) authorize(routes chi.Routes) func(http.Handler) http.Handle
 
 			pattern := matchedRoutePattern(routes, r)
 			if pattern == "" {
-				// No route matched — let the router answer 404 rather than
-				// telling an unauthenticated caller which paths exist.
+				// No route matched HERE. That is normally a 404 waiting to
+				// happen, and letting the router answer it avoids telling an
+				// unauthenticated caller which paths exist.
+				//
+				// But "this middleware could not match it" and "chi will not
+				// serve it" are not the same statement, and treating them as
+				// one was an unauthenticated way into every owner-only handler
+				// with a {param} in its pattern: a caller who could make the
+				// two matchers disagree — an escaped separator was enough —
+				// got no authorisation check at all and a handler that ran.
+				//
+				// So anything under /api is refused rather than passed on. A
+				// 404 that this cannot classify is worth losing; an owner route
+				// served without a check is not.
+				if strings.HasPrefix(r.URL.Path, "/api/") ||
+					strings.HasPrefix(r.URL.EscapedPath(), "/api/") {
+					denyAuthorization(w, "this request could not be resolved to a known route, "+
+						"so it was refused rather than served without a check")
+					return
+				}
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -338,6 +357,21 @@ func (s *CoreServer) authorize(routes chi.Routes) func(http.Handler) http.Handle
 
 // matchedRoutePattern resolves which registered route would serve this request.
 func matchedRoutePattern(routes chi.Routes, r *http.Request) string {
+	// MATCH THE STRING CHI WILL ROUTE ON, NOT A DIFFERENT ONE.
+	//
+	// chi dispatches on RawPath when the URL carries escaped characters, and on
+	// Path otherwise. Matching only on Path meant the two could disagree — and
+	// on exactly the requests where they disagree, this returned "" while chi
+	// went on to serve a handler. See the caller for why that was an
+	// unauthenticated way in.
+	//
+	// Raw first, because that is what chi prefers when it is set.
+	if raw := r.URL.EscapedPath(); raw != "" && raw != r.URL.Path {
+		rctx := chi.NewRouteContext()
+		if routes.Match(rctx, r.Method, raw) {
+			return rctx.RoutePattern()
+		}
+	}
 	rctx := chi.NewRouteContext()
 	if !routes.Match(rctx, r.Method, r.URL.Path) {
 		return ""
@@ -513,6 +547,11 @@ var sessionForbidden = map[string]string{
 
 	// --- destruction ---
 	"POST /api/reset": "resetting destroys the identity, and a session should never be enough for that",
+
+	// A session is software holding a cookie. Letting it drive this machine's
+	// enclave would make the enclave reachable by whatever holds that cookie,
+	// which is the opposite of what keeping the key in hardware is for.
+	"POST /api/controller/sign": "asking this computer's secure hardware to sign is for the app running on it",
 }
 
 // requiresTheKeyItself reports whether a route is one a browser session must

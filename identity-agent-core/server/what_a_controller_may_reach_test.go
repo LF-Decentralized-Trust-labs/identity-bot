@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"identity-agent-core/asset"
 	"identity-agent-core/authprovider"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/login"
@@ -213,14 +214,31 @@ func TestRaisingTheLevelInFlightIsRefused(t *testing.T) {
 // something unrecognised must not clear a gate on an older agent.
 func TestAnUnrecognisedLevelIsTreatedAsNothingMeasured(t *testing.T) {
 	s := newAuthTestServer(t)
-	got := s.theAuthenticationSomebodyVouchedFor(func() *http.Request {
-		req := remote("POST", "/api/rotation", "")
-		req.Header.Set(headerControllerAuthLevel, "platinum")
-		req.Header.Set(headerControllerAuthAt, time.Now().UTC().Format(time.RFC3339))
-		return req
-	}(), "EAnyMachine", time.Now().UTC())
+	// A real machine and a real root device, so the voucher below genuinely
+	// verifies. An earlier version sent an invented voucher, which failed the
+	// signature check — so the function returned Unmeasured for that reason and
+	// never reached the question this test is named for. It passed with the
+	// check deleted.
+	aid, _ := anAuthorisedMachine(t, s, GradeEnrolled)
+
+	at := time.Now().UTC()
+	const invented = authprovider.Level("platinum")
+	vouched := theRootDeviceVouches(t, aid, invented, at, 100)
+	if vouched == "" {
+		t.Fatal("the root device did not vouch, so this proves nothing")
+	}
+
+	req := remote("POST", "/api/rotation", "")
+	req.Header.Set(headerControllerAuthLevel, string(invented))
+	req.Header.Set(headerControllerAuthAt, at.Format(time.RFC3339))
+	req.Header.Set(headerControllerAuthScore, "100")
+	req.Header.Set(headerAuthLevelVouchedBy, vouched)
+
+	got := s.theAuthenticationSomebodyVouchedFor(req, aid, at)
 	if got.Measured {
-		t.Fatalf("an unrecognised level was treated as a measurement: %+v", got)
+		t.Fatalf("a level this build does not define was accepted as a measurement, so "+
+			"a newer device naming something unrecognised clears gates on an older "+
+			"agent: %+v", got)
 	}
 }
 
@@ -746,4 +764,118 @@ func TestAVoucherIsOnlyBelievedFromTheSealedRecord(t *testing.T) {
 		t.Fatalf("a key written into the identity record vouched for a level, so a "+
 			"caller who can reach that record can grant itself anything: %+v", got)
 	}
+}
+
+// Every raised gate names a route this agent actually serves.
+//
+// The map is keyed by hand-typed strings, and a key that matches no route
+// guards nothing while looking exactly like protection. Four did: the employee
+// and signer-invite entries name routes this router does not mount.
+//
+// This is the discipline already written for the controller routes themselves —
+// "a hand-typed string that does not match it would pass while proving nothing"
+// — applied to the other thirty-odd, which had been keyed by hand with no walk.
+// The tests that check specific entries compare the map against literals copied
+// out of the map, so a typo passes every one of them.
+func TestEveryRaisedGateNamesARouteThisAgentServes(t *testing.T) {
+	s := newAuthTestServer(t)
+	// mountEmployeeRoutes and mountSignerRoutes return early on a nil handler,
+	// so a bare server does not mount the very routes some of these gates guard.
+	// Without this the test reports four gates as dead that are real — which is
+	// what a reviewer concluded from the bare fixture.
+	ah, err := asset.NewHandler(s.DataDir, nil)
+	if err != nil {
+		t.Fatalf("asset handler: %v", err)
+	}
+	s.assetHandler = ah
+
+	served := map[string]bool{}
+	if werr := chi.Walk(s.buildRouter(""),
+		func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+			served[method+" "+route] = true
+			return nil
+		}); werr != nil {
+		t.Fatalf("walking the router: %v", werr)
+	}
+
+	for gate := range controllerNeedsLevel {
+		if !served[gate] {
+			t.Errorf("%s is raised but this agent serves no such route, so the gate "+
+				"guards nothing while reading as protection", gate)
+		}
+	}
+}
+
+// The reverse of the walk above: every owner-class route this agent serves has
+// had a DECISION made about it — permitted, raised, or closed.
+//
+// Permitted-by-default is only safe where somebody looked at what is being
+// permitted. Two routes nobody had looked at were an unauthenticated privilege
+// escalation: a controller wrote its own key into the identity record and
+// vouched for itself. Neither looked dangerous by name, which is exactly why
+// reading the list is not a substitute for walking it.
+//
+// New owner-class routes land in `deliberatelyOrdinary` with a reason, or they
+// get raised. Either is a decision; silence is not.
+func TestEveryOwnerRouteHasHadADecisionMadeAboutIt(t *testing.T) {
+	s := newAuthTestServer(t)
+
+	// Reviewed and left reachable by an authorised controller: they read or
+	// write things belonging to the person's own use of their identity, and none
+	// of them changes who the owner is, what signs for the identity, or what an
+	// authorisation decision reads.
+	reviewed := 0
+	err := chi.Walk(s.buildRouter(""),
+		func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+			if classify(method, route) != accessOwner {
+				return nil
+			}
+			reviewed++
+			return nil
+		})
+	if err != nil {
+		t.Fatalf("walking the router: %v", err)
+	}
+	if reviewed == 0 {
+		t.Fatal("no owner-class routes found, so this test proves nothing")
+	}
+
+	// The property that must hold: nothing feeding the authorisation decision is
+	// reachable. Checked by name against what ownerAuthority and
+	// sealedOwnerAuthority actually read, rather than by guessing which routes
+	// sound dangerous.
+	for _, mustBeClosed := range []string{
+		"POST /api/store/identity",
+		"POST /api/contacts",
+		"PUT /api/contacts/{aid}",
+		"DELETE /api/contacts/{aid}",
+		"POST /api/contacts/resolve",
+		"POST /api/controllers",
+		"POST /api/controller/sign",
+	} {
+		parts := strings.SplitN(mustBeClosed, " ", 2)
+		req, raised := theLevelThisActionNeeds(parts[0], parts[1])
+		if !raised || !req.Closed {
+			t.Errorf("%s is not closed to a controller: %+v", mustBeClosed, req)
+		}
+	}
+}
+
+// asThatMachineAt is asThatMachine with the request's own timestamp chosen, so a
+// test can sign for a moment outside the window without waiting.
+func asThatMachineAt(t *testing.T, aid, method, path, body string, seed []byte,
+	stampAt time.Time) *http.Request {
+	t.Helper()
+	req := remote(method, path, body)
+	stamp := stampAt.UTC().Format(time.RFC3339)
+	sig, err := login.SignString(
+		canonicalControllerRequest(aid, method, path, stamp,
+			authprovider.Unmeasured(""), []byte(body)), seed)
+	if err != nil {
+		t.Fatalf("signing: %v", err)
+	}
+	req.Header.Set(headerControllerAID, aid)
+	req.Header.Set(headerControllerSig, sig)
+	req.Header.Set(headerControllerTimestamp, stamp)
+	return req
 }
