@@ -56,6 +56,10 @@ func fakeInceptionDriver(t *testing.T, aid string, seen *map[string]interface{})
 // the peer-key check was unreachable and every agent fell back to being taken
 // at its word.
 func TestAFoundedIdentityCommitsToTheKeysItPublishes(t *testing.T) {
+	// This is about what founding produces, not about where it is
+	// allowed to happen. The machines these run on are the machines the
+	// platform check refuses, so it stands in for one that may found.
+	aMachineThatMayFound(t)
 	const aid = "EFoundedHere"
 	s := witnessWithSeed(t, 1)
 	var sent map[string]interface{}
@@ -96,6 +100,10 @@ func TestAFoundedIdentityCommitsToTheKeysItPublishes(t *testing.T) {
 // And the check that consumes it agrees — end to end, through the same function
 // a counterparty runs.
 func TestAFoundedIdentityPassesThePeerKeyCheckAsAnchored(t *testing.T) {
+	// This is about what founding produces, not about where it is
+	// allowed to happen. The machines these run on are the machines the
+	// platform check refuses, so it stands in for one that may found.
+	aMachineThatMayFound(t)
 	const aid = "EFoundedHere2"
 	s := witnessWithSeed(t, 1)
 	var sent map[string]interface{}
@@ -126,6 +134,10 @@ func TestAFoundedIdentityPassesThePeerKeyCheckAsAnchored(t *testing.T) {
 // Substituting the keys must fail even though the identifier is unchanged —
 // otherwise the anchor is decoration.
 func TestSubstitutedKeysAreRefusedAgainstAnAnchoredIdentity(t *testing.T) {
+	// This is about what founding produces, not about where it is
+	// allowed to happen. The machines these run on are the machines the
+	// platform check refuses, so it stands in for one that may found.
+	aMachineThatMayFound(t)
 	const aid = "EFoundedHere3"
 	s := witnessWithSeed(t, 1)
 	var sent map[string]interface{}
@@ -163,6 +175,10 @@ func TestSubstitutedKeysAreRefusedAgainstAnAnchoredIdentity(t *testing.T) {
 // committing to a keyset nobody holds — permanently, since no later event can
 // withdraw the commitment.
 func TestTheMessagingKeysSurviveTheFoundingRequest(t *testing.T) {
+	// This is about what founding produces, not about where it is
+	// allowed to happen. The machines these run on are the machines the
+	// platform check refuses, so it stands in for one that may found.
+	aMachineThatMayFound(t)
 	const aid = "EFoundedHere4"
 	s := witnessWithSeed(t, 1)
 	s.KeriDriver = fakeInceptionDriver(t, aid, nil)

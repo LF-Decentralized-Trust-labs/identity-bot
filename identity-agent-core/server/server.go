@@ -1294,6 +1294,19 @@ func (s *CoreServer) handleIdentity(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
+	// WHERE, BEFORE ANYTHING ELSE. Founding is the one act that cannot be
+	// undone: an identity's owner is fixed in the event that creates it, so one
+	// founded on a machine that cannot prove its software can never be moved to
+	// a machine that can. Everything below this line is detail by comparison.
+	//
+	// Refused first, and refused before the request is even read, so a machine
+	// that may not found never gets as far as producing key material.
+	if v := mayFoundAnIdentityHere(); !v.Permitted {
+		writeError(w, http.StatusForbidden,
+			"an identity cannot be created on this computer", v.Why+" — "+v.Instead)
+		return
+	}
+
 	existing, _ := s.DataStore.GetIdentity()
 	if existing != nil {
 		writeError(w, http.StatusConflict, "Identity already exists", "AID: "+existing.AID)
