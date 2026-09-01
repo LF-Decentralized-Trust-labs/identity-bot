@@ -285,13 +285,32 @@ func (s *CoreServer) refuseWhatBelongsToTheAgent(routes chi.Routes) func(http.Ha
 				return
 			}
 
+			// The cheap question first: is there anything to decide at all.
+			//
+			// Asking it is a read lock and two comparisons, with no allocation
+			// and no syscall, because the answer is remembered. Working out
+			// which route was matched allocates a routing context and walks the
+			// trie — twice when the escaped and decoded paths differ — and the
+			// authorisation middleware then does the identical work again one
+			// step later. So on every installation that holds its own identity,
+			// which is nearly all of them, that work was being done twice for
+			// nothing, on a path an unauthenticated caller sets the rate of.
+			front, err := s.whatThisCoreIsAFrontEndFor()
+			if err == nil && front == nil {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// Worked out above the unreadable branch on purpose: it is what
+			// keeps health and the route that removes the record answerable
+			// when the record cannot be read, which is the difference between a
+			// machine that can be repaired and one that cannot.
 			pattern := matchedRoutePattern(routes, r)
 			answersFor := false
 			if pattern != "" {
 				_, answersFor = whatAFrontEndAnswersFor[r.Method+" "+pattern]
 			}
 
-			front, err := s.whatThisCoreIsAFrontEndFor()
 			if err != nil {
 				// UNREADABLE, AND THE WAY OUT STAYS OPEN.
 				//
@@ -314,7 +333,7 @@ func (s *CoreServer) refuseWhatBelongsToTheAgent(routes chi.Routes) func(http.Ha
 					"this computer cannot tell which half it is running", err.Error())
 				return
 			}
-			if front == nil || answersFor {
+			if answersFor {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -328,9 +347,12 @@ func (s *CoreServer) refuseWhatBelongsToTheAgent(routes chi.Routes) func(http.Ha
 					"holds no identity, and an answer from it would be true and about nobody",
 					front.AgentAID, front.AgentURL)
 			}
+			// "Identity Agent", spelled out, because this line is read by a person
+			// and the repository's terminology rule exists for exactly that: the
+			// bare word is two different things and a reader has to guess which.
 			writeError(w, http.StatusConflict,
-				"this computer is the front end for an identity kept elsewhere, so it "+
-					"cannot answer this", detail)
+				"this computer is the front end for an Identity Agent kept elsewhere, "+
+					"so it cannot answer this", detail)
 		})
 	}
 }

@@ -126,6 +126,22 @@ Future<void> _keepAsking(Future<http.Response> Function() send) async {
       // swallowed as though it had worked. A 400 on a malformed body and a 403
       // from a caller the core does not recognise went the same way.
       if (res.statusCode >= 200 && res.statusCode < 300) return;
+      // A CORE THAT HAS NEVER HEARD OF THIS IS NOT A FAILURE. An application
+      // and the core beside it are pinned separately and move separately, so an
+      // app that knows about this arriving before a core that does is the
+      // ordinary case during a rollout — not a fault, and not something the
+      // person can act on. Treating it as one would refuse to start on every
+      // launch until both pins had moved.
+      //
+      // What it costs is the defence in depth. The app is pointed at its agent
+      // either way, so its own requests go to the right place; the core beside
+      // it simply cannot yet refuse the ones that reach it by mistake.
+      if (res.statusCode == 404) {
+        debugPrint('[controller] the core on this computer is older than this '
+            'and cannot record which half the app is running — the app is '
+            'pointed correctly, but that core cannot refuse a stray request');
+        return;
+      }
       if (res.statusCode < 500) {
         // The core read this and said no on its merits. Sending it again
         // changes nothing, and spending ten seconds doing so hides the answer.

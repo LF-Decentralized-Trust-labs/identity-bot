@@ -23,6 +23,7 @@ import 'package:test/test.dart';
 /// longer anything to do with it.
 void main() {
   _aNonAnswerChangesNothing();
+  _anOlderCoreIsNotAFailure();
 
   late List<http.Request> seen;
   late http.Client client;
@@ -145,5 +146,32 @@ void _aNonAnswerChangesNothing() {
     // where requests go.
     expect(unknown.isAController, isFalse);
     expect(holdsIt.isAController, isFalse);
+  });
+}
+
+/// A core older than this feature is not a failure to start over.
+///
+/// An application and the core beside it are pinned separately and move
+/// separately, so an app that knows about this reaching a core that does not is
+/// the ordinary case during a rollout. Raising it would refuse to start on every
+/// launch until both pins had moved — and the screen would say the backend
+/// failed to start, about a backend that started perfectly.
+void _anOlderCoreIsNotAFailure() {
+  test('a core that has never heard of this is not treated as a refusal',
+      () async {
+    var sent = 0;
+    final older = MockClient((_) async {
+      sent++;
+      return http.Response('404 page not found', 404);
+    });
+
+    await tellThisComputerWhichHalfItIsRunning(
+      agentAid: 'EAGENT',
+      agentOrigin: 'https://box.example.test',
+      using: older,
+    );
+    // Once. Retrying a route that does not exist spends the whole budget
+    // proving it still does not exist.
+    expect(sent, 1);
   });
 }
