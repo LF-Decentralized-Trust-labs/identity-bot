@@ -81,8 +81,10 @@ const maxScopedGrantLifetime = 7 * 24 * time.Hour
 type ControllerGrant struct {
 	// ControllerAID is the machine's own identifier, which IS its public key —
 	// the non-transferable form, with no inception event and nothing published.
-	// Not derived here and not derivable here: the private half never leaves
-	// that machine, which is what makes revoking this grant enough to stop it.
+	// The PRIVATE half is not derivable here — it never leaves that machine,
+	// which is what makes revoking this grant enough to stop it. The public half
+	// IS read back out of the identifier, in Grant, because an identifier that is
+	// a key cannot name a different one.
 	//
 	// This said "the root the controller founded for itself" until the phrase
 	// was withdrawn. It described an earlier design and it kept sending readers
