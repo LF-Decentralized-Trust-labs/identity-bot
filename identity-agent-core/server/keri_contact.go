@@ -33,6 +33,24 @@ import (
 // Persistence: contacts are kept indefinitely for now (no expiry). Per-action TTLs are future
 // work and will ride on the Ask's `t`, letting a repeat interaction skip a fresh OOBI exchange.
 func (s *CoreServer) EnsureKeriContact(oobiURL string) (*store.ContactRecord, bool, error) {
+	return s.ensureKeriContactIs(oobiURL, "")
+}
+
+// ensureKeriContactIs is EnsureKeriContact with the identity the caller expects
+// to find there.
+//
+// An empty expectation means "whoever this turns out to be", which is right when
+// the caller is resolving somebody it has not met. Where the caller ALREADY
+// knows who should be at that address, it must say so here — checking afterwards
+// is too late, because by then the record is written.
+//
+// That is not hypothetical. The DIDComm introduction path checked the answer
+// against the sender AFTER calling this, with a comment saying the refusal
+// existed to stop "an attempt to have us record a stranger under a name we
+// already trust" — and the stranger was recorded anyway, every time, before the
+// check ran. On an agent whose owner is named by its inception but has no sealed
+// key, that record is what the owner's key resolves from.
+func (s *CoreServer) ensureKeriContactIs(oobiURL, expected string) (*store.ContactRecord, bool, error) {
 	if oobiURL == "" {
 		return nil, false, fmt.Errorf("oobi_url is required")
 	}
@@ -74,6 +92,12 @@ func (s *CoreServer) EnsureKeriContact(oobiURL string) (*store.ContactRecord, bo
 	if oobiData.AID == "" {
 		return nil, false, fmt.Errorf("oobi response did not contain an AID")
 	}
+	// Before anything is written. See ensureKeriContactIs.
+	if expected != "" && oobiData.AID != expected {
+		return nil, false, fmt.Errorf(
+			"the address given belongs to %s, not to %s, so nothing was recorded",
+			oobiData.AID, expected)
+	}
 
 	// Idempotent: if we already know this counterparty, return it without downgrading its tier.
 	if existing, err := s.DataStore.GetContact(oobiData.AID); err == nil && existing != nil && existing.AID != "" {
@@ -95,7 +119,11 @@ func (s *CoreServer) EnsureKeriContact(oobiURL string) (*store.ContactRecord, bo
 		if valResult, verr := validate(); verr != nil {
 			log.Printf("[identity-agent-core] EnsureKeriContact: KEL validation error for %s: %v", oobiData.AID, verr)
 		} else {
-			kelVerified = valResult.KelVerified
+			// Verified with no key is not verified — see the same rule in
+			// checkContactKEL. Marking the record verified while keeping the key
+			// the OOBI supplied would put a caller-chosen key in the one record
+			// trusted for deciding who the owner is.
+			kelVerified = valResult.KelVerified && valResult.CurrentPublicKey != ""
 			if valResult.CurrentPublicKey != "" {
 				currentPublicKey = valResult.CurrentPublicKey
 			}
