@@ -855,6 +855,11 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		// The identity a machine will answer to, minted before the machine is
 		// asked for. Owner-only: it is this device's own key material.
 		r.Post("/machines/owner-identity", s.handleMintMachineOwner)
+		// Signing a request to a machine as the identity that owns it. Owner-only
+		// for the same reason as the line above, and closed to a controller: a
+		// machine acting for somebody must never be able to obtain the owner's
+		// own signature, which would make the controller gate decorative.
+		r.Post("/machines/owner/sign", s.handleSignAsAMachineOwner)
 		// What this identity owns. Owner-only by default, which is right: a
 		// list of somebody's machines is a map of their infrastructure.
 		r.Get("/agents", s.handleListAdoptedAgents)

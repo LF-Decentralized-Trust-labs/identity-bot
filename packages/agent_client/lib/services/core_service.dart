@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 
 import 'package:crypto/crypto.dart';
@@ -8,6 +9,7 @@ import 'package:crypto/crypto.dart';
 import 'controller_signing_client.dart';
 import 'owner_signing_client.dart';
 import 'browser_session_client.dart';
+import 'signing_as_the_identity_that_owns_a_machine.dart';
 import '../config/agent_config.dart';
 
 class HealthResponse {
@@ -710,6 +712,33 @@ class CoreService {
           // Always this machine, never the agent: the enclave key that signs
           // lives here and the agent cannot reach it.
           localCoreOrigin: AgentConfig.coreBaseUrl,
+        ),
+        null,
+      );
+    }
+
+    // A machine this device owns but is not sitting at.
+    //
+    // Every owner route there answers "sign this", and until something does, an
+    // agent on rented hardware is correctly locked and completely unusable by
+    // the person who owns it. The key is not the root: a machine is adopted by a
+    // pairwise identity minted for that machine alone, derived at an index only
+    // the local core wrote down, so the signing happens there.
+    //
+    // Applied here rather than at the call sites because there are forty of
+    // them, all `CoreService(baseUrl: …)`, and a transport that has to be
+    // remembered is one that will not be. A device this does not fit — the web
+    // build has no local core to sign with — carries a session instead.
+    if (ownerSeed == null && !kIsWeb && origin != AgentConfig.coreBaseUrl) {
+      return CoreService._(
+        origin,
+        SigningAsTheIdentityThatOwnsAMachine(
+          machineOrigin: origin,
+          // Always this device, never the machine: the key is derived here and
+          // the machine has no way to reach it.
+          localCoreOrigin: AgentConfig.coreBaseUrl,
+          ownerAid: theIdentityThatAdopted(origin,
+              localCoreOrigin: AgentConfig.coreBaseUrl),
         ),
         null,
       );

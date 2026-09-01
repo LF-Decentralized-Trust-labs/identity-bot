@@ -162,6 +162,17 @@ var controllerNeedsLevel = map[string]controllerRequirement{
 		"asking this computer's secure hardware to sign is for the app running on it, " +
 			"not for something reaching it from elsewhere"},
 
+	// The same door, one step worse. This one signs as the OWNER of a machine —
+	// a pairwise identity derived from the root seed — so a controller that
+	// could reach it would obtain owner signatures and every raised action with
+	// them, which is the entire gate this file exists to hold.
+	//
+	// Reached by the app on this computer as the local owner, which is a
+	// different caller and unaffected.
+	"POST /api/machines/owner/sign": {neverByAController, authprovider.LevelHigh,
+		"signing as the identity that owns a machine is the owner's own key, and a " +
+			"machine acting for somebody is not that person"},
+
 	// --- the state that decides WHO THE OWNER IS ---
 	//
 	// CLOSED, and this group is the one with a rule behind it rather than a
