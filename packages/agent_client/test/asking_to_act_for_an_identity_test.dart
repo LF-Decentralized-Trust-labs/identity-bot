@@ -125,7 +125,16 @@ void main() {
       var asked = 0;
       final asking = AskingToActForAnIdentity(
         localCoreOrigin: localCore,
-        client: MockClient((_) async {
+        client: MockClient((req) async {
+          if (req.url.path == '/api/controller/sign') {
+            return http.Response(
+                jsonEncode({
+                  'controller_aid': 'BTHISMACHINE',
+                  'signature': '0BSIG',
+                  'timestamp': '2026-09-01T00:00:00Z',
+                }),
+                200);
+          }
           asked++;
           return http.Response('not authorised', 403);
         }),
@@ -223,6 +232,53 @@ void main() {
 
       await asking.whatTheAgentSays(agent);
       expect(asked, isNot(contains('/api/agents')));
+    });
+  });
+
+  /// A machine that cannot sign is told so, rather than left waiting.
+  ///
+  /// The signing client sends unsigned when the core will not sign — by design,
+  /// documented, and correct for its own purposes. From here that is
+  /// indistinguishable from nobody having approved anything, so without this a
+  /// machine whose enclave is locked waits the full ten minutes and then
+  /// reports that nothing was approved, however many times somebody approved
+  /// it. The person would go and check their phone, find they HAD approved it,
+  /// and have nowhere to go from there.
+  group('a machine that cannot sign', () {
+    test('is told so before it waits on anything', () async {
+      var reachedTheAgent = false;
+      final asking = AskingToActForAnIdentity(
+        localCoreOrigin: localCore,
+        client: MockClient((req) async {
+          if (req.url.path == '/api/controller/sign') {
+            return http.Response('this computer has no usable enclave', 501);
+          }
+          reachedTheAgent = true;
+          return http.Response('not authorised', 403);
+        }),
+      );
+
+      await expectLater(
+        asking.waitUntilGranted(agent,
+            every: const Duration(milliseconds: 1),
+            until: const Duration(milliseconds: 20)),
+        throwsA(isA<Exception>()),
+      );
+      expect(reachedTheAgent, isFalse,
+          reason: 'it waited on an Identity Agent that could never have '
+              'recognised it, which reads to the person as nobody approving');
+    });
+
+    test('and the reason it gives is the one somebody can act on', () async {
+      final asking = AskingToActForAnIdentity(
+        localCoreOrigin: localCore,
+        client: MockClient((_) async =>
+            http.Response('the enclave is locked', 501)),
+      );
+      await expectLater(
+        asking.confirmThisMachineCanSign(),
+        throwsA(predicate((e) => '$e'.contains('the enclave is locked'))),
+      );
     });
   });
 }

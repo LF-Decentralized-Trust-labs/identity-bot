@@ -115,6 +115,33 @@ class AskingToActForAnIdentity {
     }
   }
 
+  /// Whether the core beside this app will actually sign for it.
+  ///
+  /// Asked because the signing client cannot report that it did not. By design
+  /// it sends unsigned when the core will not sign, and the agent then refuses
+  /// — which is indistinguishable, from here, from nobody having approved
+  /// anything. So a machine whose core cannot sign would wait the full ten
+  /// minutes and then say nothing had been approved, however many times
+  /// somebody approved it. That is the same shape as the bug this whole class
+  /// was written around, one layer down.
+  ///
+  /// Throws with what the core said, because it is the one thing anybody can
+  /// act on: an enclave that is locked, a core that is not running, hardware
+  /// that cannot hold a key.
+  Future<void> confirmThisMachineCanSign() async {
+    final res = await _plain.post(
+      Uri.parse('$_localCore/api/controller/sign'),
+      headers: const {'Content-Type': 'application/json'},
+      // A request that goes nowhere. What is being established is whether this
+      // machine's hardware will produce a signature at all, not what it says.
+      body: jsonEncode({'method': 'GET', 'path': '/api/controller/agent'}),
+    );
+    if (res.statusCode != 200) {
+      throw Exception('this computer cannot sign for itself, so nothing it '
+          'sends can be recognised (${res.statusCode}): ${res.body}');
+    }
+  }
+
   /// Asks until the agent says this machine may act, or [until] passes.
   ///
   /// Every failure is treated as "not yet". The agent is reached over a network
@@ -131,6 +158,12 @@ class AskingToActForAnIdentity {
     Duration every = const Duration(seconds: 2),
     Duration until = const Duration(minutes: 10),
   }) async {
+    // Established once, before waiting on anything. A machine that cannot sign
+    // will never be recognised no matter how long it waits, and every minute
+    // spent finding that out is a minute somebody spends believing the delay is
+    // at the other end.
+    await confirmThisMachineCanSign();
+
     final deadline = DateTime.now().add(until);
     while (DateTime.now().isBefore(deadline)) {
       try {
