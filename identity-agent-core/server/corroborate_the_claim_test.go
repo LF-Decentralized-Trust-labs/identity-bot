@@ -237,6 +237,10 @@ func TestWitnessKeysAreFoundInEitherShapeOfLog(t *testing.T) {
 // organisation — which is sharpest for an organisation, whose own key log is
 // what counterparties check for the rest of its life.
 func TestAnIdentityAMachineFoundsNamesItsWitnesses(t *testing.T) {
+	// About what a machine founds, not about where founding is allowed.
+	// These run on the machines the platform check refuses, so this
+	// stands in for one that may found.
+	aMachineThatMayFound(t)
 	wit := newStandInWitness(t)
 	machine, srv, code := pairableComputer(t)
 	owner := adoptingOwner(t)
@@ -285,6 +289,10 @@ func TestAnIdentityAMachineFoundsNamesItsWitnesses(t *testing.T) {
 // refusing: a computer being set up may have no route out at all, which is the
 // ordinary case rather than an exotic one.
 func TestAMachineWithNoWitnessAvailableStillFounds(t *testing.T) {
+	// About what a machine founds, not about where founding is allowed.
+	// These run on the machines the platform check refuses, so this
+	// stands in for one that may found.
+	aMachineThatMayFound(t)
 	machine, srv, code := pairableComputer(t)
 	owner := adoptingOwner(t)
 

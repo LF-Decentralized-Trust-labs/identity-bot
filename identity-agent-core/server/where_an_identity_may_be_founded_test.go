@@ -81,3 +81,115 @@ func TestAMachineThatCanProveItselfIsNotStopped(t *testing.T) {
 			rec.Body.String())
 	}
 }
+
+// EVERY WAY IN IS REFUSED, not just the one named "inception".
+//
+// A gate on one route out of several is worse than no gate, because it reads as
+// closed. This one covered founding directly and missed four others: a computer
+// founding its own root as it is paired, a break-glass path called a rotation
+// that mints a new root at sequence zero, a hybrid inception that produces real
+// key material, and the route that stores an identity somebody else made — the
+// last two of which compose into a founding out of parts.
+//
+// They do not resemble each other, which is the point. Anything added later
+// that brings an identity into being on this machine belongs in this list on
+// sight, and if it is not here somebody has to notice, which is what this test
+// is for.
+func TestEveryWayAnIdentityCanBeginIsRefusedOnAMachineThatMayNotFound(t *testing.T) {
+	refuseHere := func(t *testing.T) {
+		t.Helper()
+		was := mayFoundAnIdentityHere
+		mayFoundAnIdentityHere = func() foundingVerdict {
+			return foundingVerdict{
+				Permitted: false, Platform: "macos",
+				Why: cannotProveItsSoftware, Instead: actForOneInstead,
+			}
+		}
+		t.Cleanup(func() { mayFoundAnIdentityHere = was })
+	}
+
+	for _, door := range []struct {
+		what   string
+		method string
+		path   string
+		body   string
+		call   func(*CoreServer, http.ResponseWriter, *http.Request)
+	}{
+		{
+			what: "founding directly", method: http.MethodPost, path: "/api/inception",
+			body: `{"public_key":"D1","next_public_key":"D2"}`,
+			call: (*CoreServer).handleInception,
+		},
+		{
+			// Named a rotation, and it mints a NEW root at sequence zero. The
+			// name is exactly why it was missed.
+			what:   "a rotation that is really a founding",
+			method: http.MethodPost, path: "/api/recovery/root-aid-rotation",
+			body: `{}`,
+			call: (*CoreServer).handleRecoveryRootAIDRotation,
+		},
+		{
+			what: "hybrid inception", method: http.MethodPost, path: "/api/hybrid-inception",
+			body: `{}`,
+			call: (*CoreServer).handleHybridInception,
+		},
+		{
+			what:   "storing an identity somebody else made",
+			method: http.MethodPost, path: "/api/store/identity",
+			body: `{"aid":"EWHATEVER","public_key":"D1"}`,
+			call: (*CoreServer).handleStoreIdentity,
+		},
+	} {
+		t.Run(door.what, func(t *testing.T) {
+			s := agentWithNoIdentity(t)
+			refuseHere(t)
+
+			req := httptest.NewRequest(door.method, door.path, strings.NewReader(door.body))
+			req.RemoteAddr = "127.0.0.1:1234"
+			rec := httptest.NewRecorder()
+			door.call(s, rec, req)
+
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("%s is not refused on a computer that cannot prove its "+
+					"software: %d %s", door.what, rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+// A computer founding its own root as it is paired is refused too.
+//
+// Its own test because it needs a pairing already begun: without one the
+// handler refuses for having nothing to complete, which is a different refusal
+// and would let this pass with the check deleted. The ceremony matters — it is
+// the one that replaced the withdrawn design, and it was the way round the gate
+// on the direct route.
+func TestAComputerThatMayNotFoundIsRefusedWhileBeingPaired(t *testing.T) {
+	machine, srv, code := pairableComputer(t)
+
+	// The key material exists by this point, which is the honest limit of what
+	// this refuses: the offer and the begin already happened. What it stops is
+	// an identity; the material is discarded unused.
+	_ = beginAt(t, srv.URL)
+
+	was := mayFoundAnIdentityHere
+	mayFoundAnIdentityHere = func() foundingVerdict {
+		return foundingVerdict{
+			Permitted: false, Platform: "macos",
+			Why: cannotProveItsSoftware, Instead: actForOneInstead,
+		}
+	}
+	t.Cleanup(func() { mayFoundAnIdentityHere = was })
+
+	body := `{"found_as_root":true,"owner_aid":"EOWNER","adoption_code":"` + code + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/pairing/complete",
+		strings.NewReader(body))
+	req.RemoteAddr = "127.0.0.1:1234"
+	rec := httptest.NewRecorder()
+	machine.handlePairingComplete(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("a computer that cannot prove its software founded its own root "+
+			"while being paired: %d %s", rec.Code, rec.Body.String())
+	}
+}

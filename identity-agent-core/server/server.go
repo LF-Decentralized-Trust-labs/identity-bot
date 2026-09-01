@@ -1301,9 +1301,7 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 	//
 	// Refused first, and refused before the request is even read, so a machine
 	// that may not found never gets as far as producing key material.
-	if v := mayFoundAnIdentityHere(); !v.Permitted {
-		writeError(w, http.StatusForbidden,
-			"an identity cannot be created on this computer", v.Why+" — "+v.Instead)
+	if s.refuseIfThisComputerMayNotFound(w) {
 		return
 	}
 
@@ -1544,6 +1542,13 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *CoreServer) handleHybridInception(w http.ResponseWriter, r *http.Request) {
+	// Real key material and a real inception event, so the same rule applies as
+	// to founding through any other door. The secrets are discarded afterwards,
+	// which makes this the weakest of the ways in and not a permitted one.
+	if s.refuseIfThisComputerMayNotFound(w) {
+		return
+	}
+
 	var req HybridInceptionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
@@ -1597,6 +1602,17 @@ func (s *CoreServer) handleHybridInception(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *CoreServer) handleStoreIdentity(w http.ResponseWriter, r *http.Request) {
+	// Storing one somebody else made puts an identity on this machine just as
+	// surely as founding it here, and this route is what decides which identity
+	// this agent IS. Composed with the route above it, two ungated calls made a
+	// founding out of parts.
+	//
+	// The mobile core stores its identity through here, which is why the answer
+	// is the platform's rather than a flat refusal: a phone may, and does.
+	if s.refuseIfThisComputerMayNotFound(w) {
+		return
+	}
+
 	var req store.IdentityState
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())

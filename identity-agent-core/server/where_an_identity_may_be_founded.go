@@ -1,5 +1,7 @@
 package server
 
+import "net/http"
+
 // Whether an identity may be brought into being on THIS machine.
 //
 // THE QUESTION IS NOT WHETHER A KEY CAN BE PROTECTED HERE. That one has its own
@@ -59,3 +61,25 @@ const actForOneInstead = "it can act for an identity kept on a machine that " +
 // this, the only tests that could exercise founding would be the ones nobody
 // can run.
 var mayFoundAnIdentityHere = foundingVerdictForThisPlatform
+
+// refuseIfThisComputerMayNotFound writes the refusal and reports whether it did.
+//
+// EVERY WAY IN GOES THROUGH THIS. A gate on one route out of several is worse
+// than no gate, because it reads as closed: somebody adds a second path, nobody
+// notices it was never covered, and the first one goes on looking like the
+// answer. There is more than one way to bring an identity into being here and
+// they do not resemble each other — founding directly, a computer founding its
+// own root as it is paired, a recovery minting a new one, and storing one
+// somebody else made.
+//
+// Placed before anything is read or generated, so a machine that may not found
+// never produces key material it would then have to throw away.
+func (s *CoreServer) refuseIfThisComputerMayNotFound(w http.ResponseWriter) bool {
+	v := mayFoundAnIdentityHere()
+	if v.Permitted {
+		return false
+	}
+	writeError(w, http.StatusForbidden,
+		"an identity cannot be created on this computer", v.Why+" — "+v.Instead)
+	return true
+}
