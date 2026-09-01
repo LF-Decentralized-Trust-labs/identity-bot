@@ -110,7 +110,30 @@ func (s *CoreServer) beAFrontEndFor(f AFrontEndFor) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.frontEndFile(), raw, 0o600)
+	// Written beside and renamed over, never truncated in place. A crash, a
+	// power loss or a full disk halfway through a plain write leaves half a
+	// record, which reads back as unreadable — and this core then cannot tell
+	// which half it is running. A rename is the one step that is all or nothing.
+	tmp, err := os.CreateTemp(s.DataDir, filepath.Base(s.frontEndFile())+".*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(raw); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmp.Name(), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), s.frontEndFile())
 }
 
 // stopBeingAFrontEnd returns this core to answering for itself.
@@ -155,11 +178,20 @@ var whatAFrontEndAnswersFor = map[string]string{
 }
 
 // refuseWhatBelongsToTheAgent answers anything about an identity with a refusal
-// naming where the question should have gone.
+// naming where the question should have gone — to the owner, and to nobody else.
 //
-// Placed before authorisation rather than after: the point is that this core has
-// no business answering, which does not depend on who is asking, and a caller
-// should get the same clear answer whether or not they could have authenticated.
+// Placed before authorisation, because whether this core has any business
+// answering does not depend on who is asking. WHAT THE REFUSAL SAYS does depend
+// on it, and those are different questions: the first line is safe for anybody,
+// and the identity and its address are told only to the owner.
+//
+// Getting that wrong made this worse than what it replaced. This listener is not
+// loopback-only, so before the check existed a stranger on the same network
+// asking about the identity got a flat refusal from authorisation; with the
+// address in the body they got the owner's identifier and the address of the
+// machine holding their keys, from one unauthenticated request. Which machines
+// may act for an identity is deliberately gated a few files away for being a map
+// of somebody's devices; this was the same linkage with no gate at all.
 func (s *CoreServer) refuseWhatBelongsToTheAgent(routes chi.Routes) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -168,34 +200,52 @@ func (s *CoreServer) refuseWhatBelongsToTheAgent(routes chi.Routes) func(http.Ha
 				return
 			}
 
+			pattern := matchedRoutePattern(routes, r)
+			answersFor := false
+			if pattern != "" {
+				_, answersFor = whatAFrontEndAnswersFor[r.Method+" "+pattern]
+			}
+
 			front, err := s.whatThisCoreIsAFrontEndFor()
 			if err != nil {
-				// Unreadable. Refused rather than served: this core cannot tell
-				// whether it is entitled to answer, and answering anyway is the
-				// failure the record exists to prevent.
+				// UNREADABLE, AND THE WAY OUT STAYS OPEN.
+				//
+				// Refusing everything here bricked the machine: health answered
+				// 503, so the app that starts this core decided it was dead and
+				// began restarting a backend that was running fine — and the one
+				// route that removes the record answered 503 too, so there was no
+				// way back through the API at all. A record is written by a
+				// request, so a full disk or a crash mid-write is enough to reach
+				// this, and the only repair was deleting the file by hand.
+				//
+				// What this core is FOR still works, because none of it is about
+				// an identity. Everything else is refused, which is the safe
+				// direction: it cannot tell whether it is entitled to answer.
+				if answersFor {
+					next.ServeHTTP(w, r)
+					return
+				}
 				writeError(w, http.StatusServiceUnavailable,
 					"this computer cannot tell which half it is running", err.Error())
 				return
 			}
-			if front == nil {
+			if front == nil || answersFor {
 				next.ServeHTTP(w, r)
 				return
 			}
 
-			pattern := matchedRoutePattern(routes, r)
-			if pattern != "" {
-				if _, ok := whatAFrontEndAnswersFor[r.Method+" "+pattern]; ok {
-					next.ServeHTTP(w, r)
-					return
-				}
+			// Where to ask instead is told to the owner only. To anybody else the
+			// refusal is the first line and nothing more — enough to know this
+			// machine will not answer, and nothing about whose it is.
+			detail := ""
+			if s.isOwner(r) {
+				detail = fmt.Sprintf("the identity is %s at %s — ask it there. This core "+
+					"holds no identity, and an answer from it would be true and about nobody",
+					front.AgentAID, front.AgentURL)
 			}
-
 			writeError(w, http.StatusConflict,
 				"this computer is the front end for an identity kept elsewhere, so it "+
-					"cannot answer this",
-				fmt.Sprintf("the identity is %s at %s — ask it there. This core holds no "+
-					"identity, and an answer from it would be true and about nobody",
-					front.AgentAID, front.AgentURL))
+					"cannot answer this", detail)
 		})
 	}
 }
