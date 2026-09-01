@@ -33,7 +33,9 @@ func anAuthorisedMachine(t *testing.T, s *CoreServer, grade ControllerGrade) (st
 		seed[i%ed25519.SeedSize] ^= c + byte(i)
 	}
 	pub := ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)
-	aid := "EMachineFor" + t.Name()
+	// A controller is named by its own key, so the identifier is derived rather
+	// than invented — the agent refuses a grant whose two halves disagree.
+	aid := iacrypto.NonTransferableAIDQB64(pub)
 	if _, err := s.controllers().Grant(ControllerGrant{
 		ControllerAID: aid,
 		PublicKey:     iacrypto.VerkeyQB64(pub),

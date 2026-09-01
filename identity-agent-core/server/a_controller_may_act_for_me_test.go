@@ -1,14 +1,18 @@
 package server
 
 import (
+	"bytes"
+	"crypto/ed25519"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"sync"
 	"testing"
 	"time"
+
+	"identity-agent-core/iacrypto"
+	"identity-agent-core/login"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -18,10 +22,22 @@ func aStore(t *testing.T) *controllerGrants {
 	return &controllerGrants{dataDir: t.TempDir()}
 }
 
+// aGrant builds a grant for a machine named by its own key, which is what a
+// controller's identifier is. Derived from a seed rather than written out,
+// because the identifier and the key have to agree or the grant is refused.
 func aGrant(grade ControllerGrade) ControllerGrant {
+	return grantFor(1, grade)
+}
+
+func grantFor(n byte, grade ControllerGrade) ControllerGrant {
+	seed := make([]byte, ed25519.SeedSize)
+	for i := range seed {
+		seed[i] = n + byte(i)
+	}
+	pub := ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)
 	return ControllerGrant{
-		ControllerAID: "EController123",
-		PublicKey:     "DKey456",
+		ControllerAID: iacrypto.NonTransferableAIDQB64(pub),
+		PublicKey:     iacrypto.VerkeyQB64(pub),
 		Label:         "the laptop in the study",
 		Grade:         grade,
 	}
@@ -88,10 +104,10 @@ func TestAGrantThatNamesNothingIsRefused(t *testing.T) {
 		name string
 		g    ControllerGrant
 	}{
-		{"no identity", ControllerGrant{PublicKey: "D1", Label: "l", Grade: GradeEnrolled}},
-		{"no key to check it by", ControllerGrant{ControllerAID: "E1", Label: "l", Grade: GradeEnrolled}},
-		{"nothing the owner could recognise", ControllerGrant{ControllerAID: "E1", PublicKey: "D1", Grade: GradeEnrolled}},
-		{"neither grade", ControllerGrant{ControllerAID: "E1", PublicKey: "D1", Label: "l", Grade: "admin"}},
+		{"no identity", ControllerGrant{PublicKey: aGrant(GradeEnrolled).PublicKey, Label: "l", Grade: GradeEnrolled}},
+		{"no key to check it by", ControllerGrant{ControllerAID: aGrant(GradeEnrolled).ControllerAID, Label: "l", Grade: GradeEnrolled}},
+		{"nothing the owner could recognise", ControllerGrant{ControllerAID: aGrant(GradeEnrolled).ControllerAID, PublicKey: aGrant(GradeEnrolled).PublicKey, Grade: GradeEnrolled}},
+		{"neither grade", ControllerGrant{ControllerAID: aGrant(GradeEnrolled).ControllerAID, PublicKey: aGrant(GradeEnrolled).PublicKey, Label: "l", Grade: "admin"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := aStore(t).Grant(tc.g, now); err == nil {
@@ -141,14 +157,14 @@ func TestGrantsAndRevocationsSurviveRestart(t *testing.T) {
 	if _, err := (&controllerGrants{dataDir: dir}).Grant(aGrant(GradeEnrolled), now); err != nil {
 		t.Fatalf("granting: %v", err)
 	}
-	if _, ok, _ := (&controllerGrants{dataDir: dir}).Live("EController123", now); !ok {
+	if _, ok, _ := (&controllerGrants{dataDir: dir}).Live(aGrant(GradeEnrolled).ControllerAID, now); !ok {
 		t.Fatal("a grant did not survive restart")
 	}
 
-	if err := (&controllerGrants{dataDir: dir}).Revoke("EController123"); err != nil {
+	if err := (&controllerGrants{dataDir: dir}).Revoke(aGrant(GradeEnrolled).ControllerAID); err != nil {
 		t.Fatalf("revoking: %v", err)
 	}
-	if _, ok, _ := (&controllerGrants{dataDir: dir}).Live("EController123", now); ok {
+	if _, ok, _ := (&controllerGrants{dataDir: dir}).Live(aGrant(GradeEnrolled).ControllerAID, now); ok {
 		t.Fatal("a revocation did not survive restart, so the machine is still in")
 	}
 }
@@ -169,8 +185,7 @@ func TestTwoMachinesAuthorisedAtOnceBothSurvive(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			g := aGrant(GradeEnrolled)
-			g.ControllerAID = fmt.Sprintf("EController%02d", i)
+			g := grantFor(byte(i+1), GradeEnrolled)
 			if _, err := (&controllerGrants{dataDir: dir}).Grant(g, now); err != nil {
 				t.Errorf("granting %s: %v", g.ControllerAID, err)
 			}
@@ -190,7 +205,7 @@ func TestTwoMachinesAuthorisedAtOnceBothSurvive(t *testing.T) {
 
 // Revoking something that is not there is what the caller wanted, not an error.
 func TestRevokingAMachineThatIsNotThereSucceeds(t *testing.T) {
-	if err := aStore(t).Revoke("ENeverGranted"); err != nil {
+	if err := aStore(t).Revoke(grantFor(9, GradeEnrolled).ControllerAID); err != nil {
 		t.Fatalf("revoking an absent grant errored: %v", err)
 	}
 }
@@ -267,12 +282,13 @@ func TestTheControllerRoutesAreTheOnesRegistered(t *testing.T) {
 func TestAnUnreadableRecordIsNotAnEmptyOne(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Now().UTC()
-	for _, aid := range []string{"EOne", "ETwo", "EThree"} {
-		g := aGrant(GradeEnrolled)
-		g.ControllerAID = aid
+	var placed []string
+	for n := range 3 {
+		g := grantFor(byte(n+2), GradeEnrolled)
 		if _, err := (&controllerGrants{dataDir: dir}).Grant(g, now); err != nil {
-			t.Fatalf("granting %s: %v", aid, err)
+			t.Fatalf("granting: %v", err)
 		}
+		placed = append(placed, g.ControllerAID)
 	}
 
 	if err := os.WriteFile((&controllerGrants{dataDir: dir}).path(),
@@ -363,8 +379,10 @@ func TestGrantingAndListingDescribeAMachineTheSameWay(t *testing.T) {
 	r := s.buildRouter("")
 
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, local("POST", "/api/controllers", `{"controller_aid":"EKept",`+
-		`"public_key":"DKept","label":"the laptop in the study","grade":"enrolled"}`))
+	kept := aGrant(GradeEnrolled)
+	r.ServeHTTP(w, local("POST", "/api/controllers",
+		`{"controller_aid":"`+kept.ControllerAID+`","public_key":"`+kept.PublicKey+
+			`","label":"the laptop in the study","grade":"enrolled"}`))
 	if w.Code != http.StatusOK {
 		t.Fatalf("granting: %d %s", w.Code, w.Body.String())
 	}
@@ -405,5 +423,73 @@ func TestGrantingAndListingDescribeAMachineTheSameWay(t *testing.T) {
 	}
 	if granted.Grant["live"] != true {
 		t.Error("a machine just authorised did not come back live")
+	}
+}
+
+// A grant cannot name one machine and carry another's key.
+//
+// A controller's identifier IS its key, so the two are checkable against each
+// other with no network and no stored state. Without the check, a grant could
+// record identifier X against key Y: the owner's list would say X, anything they
+// later revoked would be X, and what actually got admitted would be whoever
+// holds Y.
+func TestAGrantCannotNameOneMachineAndCarryAnothersKey(t *testing.T) {
+	now := time.Now().UTC()
+	mine, theirs := grantFor(3, GradeEnrolled), grantFor(4, GradeEnrolled)
+
+	crossed := mine
+	crossed.PublicKey = theirs.PublicKey
+	if _, err := aStore(t).Grant(crossed, now); err == nil {
+		t.Fatal("a grant naming one machine and carrying another's key was stored, so " +
+			"what it admits is not what it appears to authorise")
+	}
+
+	// And an identifier that is not a key at all is not a controller.
+	invented := mine
+	invented.ControllerAID = "EJustSomeText"
+	if _, err := aStore(t).Grant(invented, now); err == nil {
+		t.Fatal("an identifier that is not a key was accepted as a controller's")
+	}
+
+	// The honest pair still works, or the rule would be unusable rather than safe.
+	if _, err := aStore(t).Grant(mine, now); err != nil {
+		t.Fatalf("a machine named by its own key was refused: %v", err)
+	}
+}
+
+// What this computer offers is derived from hardware it actually has, and is
+// refused rather than faked when it has none.
+//
+// The refusal is the important half: a software fallback here would be an
+// authorisation anybody who can read a file could take, which is the failure the
+// enclave requirement exists to prevent.
+func TestThisMachineOffersOnlyWhatItsHardwareHolds(t *testing.T) {
+	s := newAuthTestServer(t)
+	id, err := s.thisMachineAsAController()
+	if err != nil {
+		// No enclave on this host, which is a legitimate answer — and it must be
+		// an error rather than a key on disk.
+		if id.AID != "" || id.PublicKey != "" {
+			t.Fatalf("refused and still produced an identity: %+v", id)
+		}
+		t.Skipf("no hardware on this host to offer: %v", err)
+	}
+
+	// The identifier must be the key, or the grant it is used in would be refused
+	// by the check above — the two halves of this design have to agree.
+	named, err := theKeyThisIdentifierNames(id.AID)
+	if err != nil {
+		t.Fatalf("this machine named itself something a grant would reject: %v", err)
+	}
+	offered, err := login.DecodeVerkey(id.PublicKey)
+	if err != nil {
+		t.Fatalf("this machine offered an unusable key: %v", err)
+	}
+	if !bytes.Equal(named, offered) {
+		t.Fatal("this machine's identifier and its key disagree, so it could never be granted")
+	}
+	if id.ProtectedBy == "" {
+		t.Error("this machine did not say what is protecting the key, so nobody " +
+			"approving it can be told")
 	}
 }

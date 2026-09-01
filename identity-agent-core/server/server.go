@@ -775,6 +775,11 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		// Which machines may act for this identity. Owner-only by being
 		// unlisted, and that is load-bearing: an agent that could authorise its
 		// own controllers could be talked into authorising somebody else's.
+		// What THIS computer would offer if it were to act for an identity.
+		// Read by the app on this machine so it can show the person what they
+		// are approving.
+		r.Get("/controller/this-machine", s.handleThisMachineAsAController)
+
 		r.Post("/controllers", s.handleGrantController)
 		r.Get("/controllers", s.handleListControllers)
 		r.Delete("/controllers/{aid}", s.handleRevokeController)

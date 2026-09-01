@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -8,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"identity-agent-core/login"
 )
 
 // What an identity has agreed somebody's computer may do on its behalf.
@@ -200,6 +203,29 @@ func (c *controllerGrants) Grant(g ControllerGrant, now time.Time) (ControllerGr
 	if g.Label == "" {
 		return ControllerGrant{}, fmt.Errorf(
 			"a grant must say which machine it is for, or nobody can tell which one to remove")
+	}
+
+	// A controller's identifier IS its key, so the two must agree.
+	//
+	// Without this a grant could record identifier X against key Y, and what got
+	// admitted afterwards would be whatever holds Y — while the owner's list, and
+	// anything they later revoked, named X. The check needs no network and no
+	// stored state: the identifier decodes to the key or it does not.
+	named, err := theKeyThisIdentifierNames(g.ControllerAID)
+	if err != nil {
+		return ControllerGrant{}, fmt.Errorf(
+			"%q is not a controller's identifier: a controller is named by its own key, "+
+				"which is what lets this be checked without asking anybody: %w",
+			g.ControllerAID, err)
+	}
+	offered, err := login.DecodeVerkey(g.PublicKey)
+	if err != nil {
+		return ControllerGrant{}, fmt.Errorf("the key offered is unusable: %w", err)
+	}
+	if !bytes.Equal(named, offered) {
+		return ControllerGrant{}, fmt.Errorf(
+			"this grant names one machine and carries a different machine's key, so what " +
+				"it would admit is not what it appears to authorise")
 	}
 	switch g.Grade {
 	case GradeEnrolled:
