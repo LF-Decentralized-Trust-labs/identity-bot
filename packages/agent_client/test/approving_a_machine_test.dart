@@ -23,16 +23,15 @@ void main() {
 
   test('what a machine offers is read from the code it showed', () {
     final m = ApprovingAMachineToActForYou.readWhatItOffers(jsonEncode({
+      // The same 32 bytes twice: B says the identifier IS a non-transferable
+      // key, D says this is a verification key. Never equal as text.
       'aid': 'BTheLaptop',
-      // A computer is named BY its key: the identifier and the key are one value.
-      'public_key': 'BTheLaptop',
+      'public_key': 'DTheLaptop',
       'protected_by': 'Apple Secure Enclave',
       'label': 'MacBook',
     }));
     expect(m.aid, 'BTheLaptop');
-    // The identifier and the key are one value, which is what tells a computer
-    // apart from an identity.
-    expect(m.publicKey, 'BTheLaptop');
+    expect(m.publicKey, 'DTheLaptop');
     expect(m.protectedBy, 'Apple Secure Enclave');
     // A suggestion only. A machine that could name itself in somebody's device
     // list could name itself something reassuring.
@@ -168,10 +167,24 @@ void _anIdentityIsNotAComputer() {
     );
   });
 
-  test('and a machine, whose identifier IS its key, is still read', () {
+  test('a machine whose identifier and key are different bytes is refused', () {
+    // The `B` and the `D` say the same 32 bytes are the identifier and the
+    // verification key. Two different values wearing the two codes is a grant
+    // the agent would refuse, and refusing it here is where the words are
+    // still about what happened.
+    expect(
+      () => ApprovingAMachineToActForYou.readWhatItOffers(jsonEncode({
+        'aid': 'BTHISMACHINE',
+        'public_key': 'DSOMEOTHERKEY',
+      })),
+      throwsA(isA<FormatException>()),
+    );
+  });
+
+  test('and a machine, whose identifier carries its key, is still read', () {
     final m = ApprovingAMachineToActForYou.readWhatItOffers(jsonEncode({
       'aid': 'BTHISMACHINE',
-      'public_key': 'BTHISMACHINE',
+      'public_key': 'DTHISMACHINE',
     }));
     expect(m.aid, 'BTHISMACHINE');
   });

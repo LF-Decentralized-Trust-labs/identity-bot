@@ -48,14 +48,23 @@ class ApprovingAMachineToActForYou {
     // things — an agent's own discovery record is exactly that shape, is served
     // to anybody who knows the identifier, and was being read as a computer
     // asking to act. It got no further, because the agent refuses a grant whose
-    // identifier and key disagree, but the refusal talked about a controller's
+    // identifier and key disagree; but the refusal talked about a controller's
     // identifier at somebody who had scanned a person.
     //
-    // Checked here so the words match what happened. The identifier of a
-    // machine IS its key: not derived from it, not committed to by it — the
-    // same value, in the non-transferable form that carries the key and
-    // publishes nothing.
-    if (aid != key) {
+    // ONE VALUE IS NOT ONE STRING, which is the trap here and the one this
+    // check was written wrong for once already. The same 32 bytes are carried
+    // twice in two different encodings: `B` says this identifier IS a
+    // non-transferable key, `D` says this is a verification key. Same bytes,
+    // two statements about what they are for — so they are never equal as
+    // text, and comparing them as text refuses every real machine.
+    //
+    // The agent decodes both and compares the bytes. Without that decoding
+    // here, comparing everything after the code is the same test: the encoding
+    // below the first character is identical.
+    if (!aid.startsWith('B') ||
+        !key.startsWith('D') ||
+        aid.length != key.length ||
+        aid.substring(1) != key.substring(1)) {
       throw const FormatException(
           'that code names an identity rather than a computer — a computer is '
           'named by the very key it acts with, and these are two different '
