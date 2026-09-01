@@ -16,11 +16,16 @@ import (
 // What an identity has agreed somebody's computer may do on its behalf.
 //
 // A controller is a machine somebody reaches their Identity Agent FROM. It
-// holds its own key and founds its own root — never a delegated identifier,
+// holds its own key and is NAMED BY that key — never a delegated identifier,
 // because a delegated inception names its parent to anybody who can reach the
 // machine, and that publishes the one identifier the design keeps pairwise. So
 // what an agent stores about a controller is not a lineage. It is a grant: this
 // identity may act for me, at this grade, until this.
+//
+// See this_machine_as_a_controller.go for what "named by its key" means and what
+// it gives up. This comment used to say the controller "founds its own root",
+// which the code has not done since a controller became a non-transferable
+// identifier — there is no inception event to found.
 //
 // NOTHING HERE AUTHORISES ANYTHING YET, and that separation is deliberate. This
 // records what the owner agreed and answers whether it still stands. What a

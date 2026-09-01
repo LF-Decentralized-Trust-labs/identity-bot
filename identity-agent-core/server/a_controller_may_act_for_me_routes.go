@@ -13,10 +13,21 @@ import (
 
 // The owner's side of authorising a controller.
 //
-// These are owner-only by being unlisted: this router denies by default, and a
-// route reaches anybody else only by being named in publicRoutes or
-// scopedRoutes. That default is what makes these safe, so DO NOT add them to
-// either list — a controller that could grant itself is not an authorisation.
+// These are unlisted, so the router's default-deny keeps them from the public
+// and from capability holders: a route reaches either only by being named in
+// publicRoutes or scopedRoutes, and these must never be added to those.
+//
+// UNLISTED IS NOT THE WHOLE STORY, and saying only that used to make this
+// comment wrong. An authorised controller also reaches unlisted routes, because
+// a controller acts for the owner — so what actually governs these three is
+// controllerNeedsLevel:
+//
+//   - Granting is CLOSED to a controller at any level. A controller that could
+//     enrol another one could make its own access outlive the revocation of the
+//     grant the owner knows about.
+//   - Revoking is raised, and open: somebody whose laptop was stolen should be
+//     able to remove it from their desktop.
+//   - Listing is raised, because it hands over every machine's label and key.
 
 // handleGrantController records that a machine may act for this identity.
 //

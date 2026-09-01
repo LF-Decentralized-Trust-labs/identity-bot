@@ -309,9 +309,83 @@ func TestTheActionsThatChangeTheIdentityAreAllRaised(t *testing.T) {
 	}
 }
 
-// A controller cannot quietly authorise more controllers at its own level —
-// that is how a machine makes its own access outlive the revocation of the one
-// the owner knows about.
+// A controller cannot enrol another controller AT ANY LEVEL, including the
+// strongest one it could ever present.
+//
+// The earlier version of this only proved refusal at a middling level, which
+// left the dangerous case untested — and the dangerous case is the whole point.
+// The statement vouching for a level names the machine, the level and the
+// moment, but NOT the action, so one high statement obtained honestly for
+// something the person did intend can be spent inside its window on enrolling a
+// second machine. That second grant outlives the revocation of the first, so an
+// attacker who briefly holds a controller leaves with access the owner cannot
+// see they gave.
+func TestNoLevelLetsAControllerEnrolAnotherController(t *testing.T) {
+	s := newAuthTestServer(t)
+	aid, seed := anAuthorisedMachine(t, s, GradeEnrolled)
+	r := s.buildRouter("")
+
+	for _, level := range []authprovider.Level{
+		authprovider.LevelAuthenticated,
+		authprovider.LevelVerified,
+		authprovider.LevelHigh,
+	} {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, asThatMachine(t, aid, "POST", "/api/controllers",
+			`{"controller_aid":"BSecond","public_key":"DSecond","label":"another","grade":"enrolled"}`,
+			seed, level, time.Now()))
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("a controller enrolled another one at %q: %d %s",
+				level, w.Code, w.Body.String())
+		}
+	}
+
+	// And it is closed rather than merely very high, so adding a stronger level
+	// later cannot open it by accident.
+	req, raised := theLevelThisActionNeeds("POST", "/api/controllers")
+	if !raised || !req.Closed {
+		t.Fatalf("enrolling is not closed to controllers: %+v", req)
+	}
+}
+
+// Reading the list is raised: it hands over every machine that may act for this
+// identity, its label and its key — a map of the owner's devices that a machine
+// somebody borrowed for an afternoon should not leave with.
+func TestListingEveryMachineIsRaised(t *testing.T) {
+	s := newAuthTestServer(t)
+	aid, seed := anAuthorisedMachine(t, s, GradeScoped)
+	r := s.buildRouter("")
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, asThatMachine(t, aid, "GET", "/api/controllers", "", seed, "", time.Time{}))
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("a borrowed machine with nothing measured listed every controller, "+
+			"its label and its key: %d %s", w.Code, w.Body.String())
+	}
+}
+
+// A closed action stays closed even if its level entry is mistyped, because the
+// two are independent — a typo must not turn "never from here" into "prove more".
+func TestAMistypedLevelDoesNotOpenAClosedAction(t *testing.T) {
+	const typo = "POST /api/some-closed-thing"
+	controllerNeedsLevel[typo] = controllerRequirement{
+		Closed: neverByAController, Level: "hgih", Why: "a typo",
+	}
+	t.Cleanup(func() { delete(controllerNeedsLevel, typo) })
+
+	req, raised := theLevelThisActionNeeds("POST", "/api/some-closed-thing")
+	if !raised || !req.Closed {
+		t.Fatalf("a mistyped level reopened a closed action: %+v", req)
+	}
+	if ok, _ := mayThisControllerDoThis("POST", "/api/some-closed-thing",
+		authprovider.Result{Level: authprovider.LevelHigh, Measured: true,
+			At: time.Now().UTC()}, time.Now().UTC()); ok {
+		t.Fatal("a closed action was performed by presenting the strongest level")
+	}
+}
+
+// Superseded by TestNoLevelLetsAControllerEnrolAnotherController, kept only to
+// show a weak level is refused too.
 func TestAuthorisingAnotherMachineIsItselfRaised(t *testing.T) {
 	s := newAuthTestServer(t)
 	aid, seed := anAuthorisedMachine(t, s, GradeEnrolled)

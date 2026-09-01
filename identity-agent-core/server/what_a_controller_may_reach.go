@@ -47,13 +47,13 @@ import (
 // material an identity could be reconstructed from.
 var controllerNeedsLevel = map[string]controllerRequirement{
 	// --- the root of trust ---
-	"POST /api/keystore/root-seed": {authprovider.LevelHigh,
+	"POST /api/keystore/root-seed": {alsoRaised, authprovider.LevelHigh,
 		"installing a root seed decides what this identity is"},
-	"POST /api/recovery/root-aid-rotation": {authprovider.LevelHigh,
+	"POST /api/recovery/root-aid-rotation": {alsoRaised, authprovider.LevelHigh,
 		"rotating the root identifier replaces the identity's controlling key"},
-	"POST /api/rotation": {authprovider.LevelHigh,
+	"POST /api/rotation": {alsoRaised, authprovider.LevelHigh,
 		"rotating keys replaces what signs for this identity"},
-	"POST /api/reset": {authprovider.LevelHigh,
+	"POST /api/reset": {alsoRaised, authprovider.LevelHigh,
 		"resetting destroys this identity"},
 
 	// --- material an identity can be rebuilt from ---
@@ -61,110 +61,147 @@ var controllerNeedsLevel = map[string]controllerRequirement{
 	// pulling one out of this machine is close to taking the identity itself.
 	// Three doors to the same room, and raising only the one named "recovery"
 	// would have left the other two open.
-	"POST /api/recovery/retrieve": {authprovider.LevelHigh,
+	"POST /api/recovery/retrieve": {alsoRaised, authprovider.LevelHigh,
 		"an archive is the identity to anyone who can open it"},
-	"POST /api/backup/export": {authprovider.LevelHigh,
+	"POST /api/backup/export": {alsoRaised, authprovider.LevelHigh,
 		"an archive is the identity to anyone who can open it"},
-	"POST /api/backup/pull/{destID}": {authprovider.LevelHigh,
+	"POST /api/backup/pull/{destID}": {alsoRaised, authprovider.LevelHigh,
 		"this pulls back an archive, and an archive is the identity to anyone who can open it"},
 
 	// --- where this identity's archives go ---
 	// Not the identity itself, but the place copies of it are sent. Redirecting
 	// that is a quiet way to be handed every future backup, and it would not look
 	// like an attack in any log — which is exactly why it is raised.
-	"PUT /api/backup/config": {authprovider.LevelVerified,
+	"PUT /api/backup/config": {alsoRaised, authprovider.LevelVerified,
 		"this decides where copies of this identity are sent"},
-	"POST /api/backup/destinations": {authprovider.LevelVerified,
+	"POST /api/backup/destinations": {alsoRaised, authprovider.LevelVerified,
 		"this adds a place copies of this identity are sent"},
-	"DELETE /api/backup/destinations/{id}": {authprovider.LevelVerified,
+	"DELETE /api/backup/destinations/{id}": {alsoRaised, authprovider.LevelVerified,
 		"removing a destination can leave this identity with nowhere it survives losing this machine"},
-	"POST /api/backup/credentials": {authprovider.LevelVerified,
+	"POST /api/backup/credentials": {alsoRaised, authprovider.LevelVerified,
 		"these are the credentials for the place copies of this identity are sent"},
-	"PUT /api/backup/offer": {authprovider.LevelVerified,
+	"PUT /api/backup/offer": {alsoRaised, authprovider.LevelVerified,
 		"this decides what this machine offers to hold for other people"},
-	"DELETE /api/backup/held/{identityAID}": {authprovider.LevelVerified,
+	"DELETE /api/backup/held/{identityAID}": {alsoRaised, authprovider.LevelVerified,
 		"this destroys backups somebody else is relying on this machine to keep"},
 
 	// --- acting as the identity ---
 	// Signing arbitrary content IS the identity speaking, and unlike a credential
 	// it carries no shape anybody can reason about afterwards. It belongs with the
 	// strongest, beside the routes that replace keys.
-	"POST /api/sign": {authprovider.LevelHigh,
+	"POST /api/sign": {alsoRaised, authprovider.LevelHigh,
 		"this signs as the identity, and anything it signs cannot be unsaid"},
-	"POST /api/events/signature": {authprovider.LevelVerified,
+	"POST /api/events/signature": {alsoRaised, authprovider.LevelVerified,
 		"this attaches this identity's signature to an event"},
 
 	// --- what this identity says about other people ---
-	"POST /api/credential/issue": {authprovider.LevelVerified,
+	"POST /api/credential/issue": {alsoRaised, authprovider.LevelVerified,
 		"issuing a credential is this identity making a claim other people will rely on"},
-	"POST /api/credentials/{said}/revoke": {authprovider.LevelVerified,
+	"POST /api/credentials/{said}/revoke": {alsoRaised, authprovider.LevelVerified,
 		"revoking withdraws something other people are relying on"},
 
 	// --- the keys this identity holds for other services ---
-	"POST /api/vault/credentials": {authprovider.LevelVerified,
+	"POST /api/vault/credentials": {alsoRaised, authprovider.LevelVerified,
 		"these are the keys this identity holds for other services"},
-	"DELETE /api/vault/credentials/{service}": {authprovider.LevelVerified,
+	"DELETE /api/vault/credentials/{service}": {alsoRaised, authprovider.LevelVerified,
 		"removing a stored key can cut this identity off from a service it relies on"},
 
 	// --- what it takes to get back in ---
 	// The duress policy is the sharpest of these: it says what must happen if
 	// the owner is being forced, so anything that could switch it off could
 	// disable the protection and then use the recovery it protected against.
-	"PUT /api/recovery/duress-policy": {authprovider.LevelHigh,
+	"PUT /api/recovery/duress-policy": {alsoRaised, authprovider.LevelHigh,
 		"this decides what happens if the owner is being coerced"},
-	"PUT /api/recovery/who-holds-this": {authprovider.LevelVerified,
+	"PUT /api/recovery/who-holds-this": {alsoRaised, authprovider.LevelVerified,
 		"this decides what it takes to get back into this identity"},
 
 	// --- taking the identity over ---
-	"POST /api/recovery/start": {authprovider.LevelVerified,
+	"POST /api/recovery/start": {alsoRaised, authprovider.LevelVerified,
 		"starting a recovery begins replacing this identity"},
-	"POST /api/recovery/sessions/{id}/activate": {authprovider.LevelHigh,
+	"POST /api/recovery/sessions/{id}/activate": {alsoRaised, authprovider.LevelHigh,
 		"activating a recovery replaces this identity and everything it held"},
-	"POST /api/recovery/sessions/{id}/rotation": {authprovider.LevelHigh,
+	"POST /api/recovery/sessions/{id}/rotation": {alsoRaised, authprovider.LevelHigh,
 		"this rotates the identity's keys"},
-	"POST /api/recovery/sessions/{id}/cancel": {authprovider.LevelVerified,
+	"POST /api/recovery/sessions/{id}/cancel": {alsoRaised, authprovider.LevelVerified,
 		"stopping a recovery decides whether it happens"},
 
 	// --- bringing an identity into being, and using its key ---
-	"POST /api/inception": {authprovider.LevelHigh,
+	"POST /api/inception": {alsoRaised, authprovider.LevelHigh,
 		"this creates the identity itself"},
 	// Fulfilling a signing request is the identity's own key being used. A
 	// controller never signs as the identity — it asks the agent to — so this is
 	// the point where asking becomes the identity having said something.
-	"POST /api/signing-requests/{id}/fulfil": {authprovider.LevelVerified,
+	"POST /api/signing-requests/{id}/fulfil": {alsoRaised, authprovider.LevelVerified,
 		"this signs as the identity, and what is signed cannot be unsaid"},
 
 	// --- who may sign for this identity ---
-	"POST /api/signer/invites": {authprovider.LevelHigh,
+	"POST /api/signer/invites": {alsoRaised, authprovider.LevelHigh,
 		"inviting a signer decides who else may sign for this identity"},
-	"POST /api/signer/invites/{token}/redeem": {authprovider.LevelVerified,
+	"POST /api/signer/invites/{token}/redeem": {alsoRaised, authprovider.LevelVerified,
 		"redeeming a signer invitation adds somebody who may sign"},
 
 	// --- who belongs to this organisation ---
-	"POST /api/employees/{aid}/approve": {authprovider.LevelVerified,
+	"POST /api/employees/{aid}/approve": {alsoRaised, authprovider.LevelVerified,
 		"approving somebody gives them a credential from this organisation"},
-	"POST /api/employees/{aid}/revoke": {authprovider.LevelVerified,
+	"POST /api/employees/{aid}/revoke": {alsoRaised, authprovider.LevelVerified,
 		"revoking somebody takes away what this organisation said about them"},
 
 	// --- who else may act for this identity ---
-	// A controller that could freely authorise more controllers is a controller
-	// that can make its own access permanent — including after the owner
-	// revokes the one they know about.
-	"POST /api/controllers": {authprovider.LevelHigh,
-		"this decides which other machines may act for this identity"},
-	"DELETE /api/controllers/{aid}": {authprovider.LevelVerified,
+	//
+	// ENROLLING A CONTROLLER IS CLOSED TO CONTROLLERS, at any level. It is the
+	// only entry here that no authentication opens, and the reason is
+	// persistence: the statement vouching for a level names the machine, the
+	// level and the moment, but NOT the action. So one high statement, obtained
+	// honestly for something the person did intend, can be spent inside its
+	// window on enrolling a second machine — and that second grant outlives the
+	// revocation of the first. An attacker who briefly holds a controller would
+	// leave with permanent access the owner cannot see they gave.
+	//
+	// It costs nothing to close. The ceremony never routed through here: a grant
+	// is created by the device holding the key, which is the owner and is not a
+	// controller. The case Rob's ruling protects — a stolen key device, where
+	// rotation must stay reachable from a laptop — is rotation, not enrolment.
+	"POST /api/controllers": {neverByAController, authprovider.LevelHigh,
+		"deciding which other machines may act for this identity is the owner's " +
+			"alone, and is done from the device holding the key"},
+
+	// Revoking stays open, at a level. An attacker who reached it could remove
+	// the owner's other machines, which is a nuisance and not an escalation —
+	// and the case for keeping it is real: somebody whose laptop was stolen
+	// removes it from their desktop.
+	"DELETE /api/controllers/{aid}": {alsoRaised, authprovider.LevelVerified,
 		"removing another machine's authorisation is the owner's decision"},
+
+	// Reading the list is raised because of what it contains: every machine that
+	// may act for this identity, its label, and its key. That is a map of the
+	// owner's devices, and a machine somebody borrowed for an afternoon should
+	// not leave with it.
+	"GET /api/controllers": {alsoRaised, authprovider.LevelAuthenticated,
+		"this lists every machine that may act for you, and the key each one uses"},
 }
 
 // controllerRequirement is what one of those actions asks for.
 type controllerRequirement struct {
-	// Level the person must have reached. Never LevelUnknown — see
-	// theLevelThisActionNeeds.
+	// Closed marks an action no authentication level opens to a controller.
+	//
+	// Distinct from a very high level rather than expressed as one, because they
+	// are different statements: a level says "prove more"; this says "not from
+	// here, whatever you prove". Written as a level it would silently become
+	// reachable the day a stronger level was added.
+	Closed bool
+	// Level the person must have reached, when the action is open at all. Never
+	// LevelUnknown — see theLevelThisActionNeeds.
 	Level authprovider.Level
 	// Why is said to the person when they are stopped, because "denied" leaves
 	// somebody with no idea what would let them through.
 	Why string
 }
+
+// Named so the table reads as what it means rather than as a bare true/false.
+const (
+	neverByAController = true
+	alsoRaised         = false
+)
 
 // controllerAuthenticationFreshness is how recently the person must have been
 // measured for a raised action.
@@ -189,8 +226,9 @@ func theLevelThisActionNeeds(method, pattern string) (controllerRequirement, boo
 	}
 	if !req.Level.Known() || req.Level == authprovider.LevelUnknown {
 		return controllerRequirement{
-			Level: authprovider.LevelHigh,
-			Why:   req.Why,
+			Closed: req.Closed,
+			Level:  authprovider.LevelHigh,
+			Why:    req.Why,
 		}, true
 	}
 	return req, true
@@ -215,6 +253,12 @@ func mayThisControllerDoThis(
 		// Permitted by default. This is the common path and the point of the
 		// whole class.
 		return true, ""
+	}
+
+	// Closed before any level is considered, so no authentication opens it and
+	// adding a stronger level later cannot open it by accident.
+	if req.Closed {
+		return false, req.Why
 	}
 
 	if !authenticated.Measured {
