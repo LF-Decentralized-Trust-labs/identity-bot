@@ -69,16 +69,59 @@ void main() {
     expect(theOneAbout(seen).method, 'DELETE');
   });
 
-  test('a core that cannot be reached does not stop the app starting',
-      () async {
+  test('a core that never answers is reported, not swallowed', () async {
     final broken = MockClient((_) async => throw const SocketException('no'));
-    // What a failure costs is the safety net, not the behaviour: the app is
-    // pointed at its agent by the caller before this runs.
+    // It used to be logged and dropped. That left the app running as a front
+    // end with an unarmed core and a debugPrint as the only trace — the state
+    // this whole area exists to make impossible, reached quietly. It is raised
+    // now, and the caller that starts the core already renders a thrown detail.
+    await expectLater(
+      tellThisComputerWhichHalfItIsRunning(
+        agentAid: 'EAGENT',
+        agentOrigin: 'https://box.example.test',
+        using: broken,
+      ),
+      throwsA(isA<StateError>()),
+    );
+  });
+
+  test('a refusal is raised at once rather than retried for ten seconds',
+      () async {
+    var sent = 0;
+    // 409 is what the core answers when it already holds an identity, which is
+    // the one refusal a person can act on. Treating anything under 500 as
+    // accepted reported it as success; retrying it would bury it instead.
+    final refuses = MockClient((_) async {
+      sent++;
+      return http.Response('this computer holds an identity', 409);
+    });
+
+    await expectLater(
+      tellThisComputerWhichHalfItIsRunning(
+        agentAid: 'EAGENT',
+        agentOrigin: 'https://box.example.test',
+        using: refuses,
+      ),
+      throwsA(isA<StateError>()),
+    );
+    expect(sent, 1, reason: 'the core read it and said no on its merits, so '
+        'sending it again changes nothing and only hides the answer');
+  });
+
+  test('a core still starting is retried rather than given up on', () async {
+    var sent = 0;
+    final comingUp = MockClient((_) async {
+      sent++;
+      if (sent < 3) throw const SocketException('not listening yet');
+      return http.Response('{}', 200);
+    });
+
     await tellThisComputerWhichHalfItIsRunning(
       agentAid: 'EAGENT',
       agentOrigin: 'https://box.example.test',
-      using: broken,
+      using: comingUp,
     );
+    expect(sent, 3);
   });
 }
 

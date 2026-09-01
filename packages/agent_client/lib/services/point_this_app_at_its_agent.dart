@@ -91,9 +91,6 @@ Future<void> tellThisComputerWhichHalfItIsRunning({
       // with a refusal naming an agent that is no longer anything to do with it.
       await _keepAsking(() => client.delete(url));
     }
-  } catch (e) {
-    debugPrint('[controller] could not tell this computer which half it is '
-        'running: $e');
   } finally {
     if (using == null) client.close();
   }
@@ -118,12 +115,28 @@ void stopPointingThisProcessAnywhere() {
 /// holding up the app.
 Future<void> _keepAsking(Future<http.Response> Function() send) async {
   Object? last;
-  for (var attempt = 0; attempt < 20; attempt++) {
+  for (var attempt = 0; attempt < 40; attempt++) {
     try {
       final res = await send();
-      if (res.statusCode < 500) return;
+      // ACCEPTED IS 2xx, AND NOTHING ELSE.
+      //
+      // Treating anything under 500 as accepted reported the most likely real
+      // failure as a success: the core refuses with 409 when it already holds
+      // an identity, which is the one refusal a person can act on, and it was
+      // swallowed as though it had worked. A 400 on a malformed body and a 403
+      // from a caller the core does not recognise went the same way.
+      if (res.statusCode >= 200 && res.statusCode < 300) return;
+      if (res.statusCode < 500) {
+        // The core read this and said no on its merits. Sending it again
+        // changes nothing, and spending ten seconds doing so hides the answer.
+        throw StateError('the core on this computer refused to record which '
+            'half this app is running (${res.statusCode}): ${res.body}');
+      }
       last = 'the core answered ${res.statusCode}';
+    } on StateError {
+      rethrow;
     } catch (e) {
+      // A core still binding its port, which is the ordinary case at start-up.
       last = e;
     }
     await Future<void>.delayed(const Duration(milliseconds: 250));

@@ -132,6 +132,15 @@ class IdentityProfiles {
           'no embedded core to start. Set it once at start-up.');
     }
     await core.startCore(dataDir: dir);
+    // AFTER it is answering, not merely after it was asked to start. Telling it
+    // which half this app runs is a request like any other, and sending it into
+    // a core still binding its port spends the whole retry budget before the
+    // code that actually knows when it is ready has run — so on the slowest
+    // cold starts, the ones where it matters most, it would give up.
+    if (!await core.waitForReady()) {
+      throw StateError('the Identity Agent core did not become ready, so this '
+          'app could not tell it which half it is running');
+    }
     await pointThisAppAtItsAgent();
   }
 
