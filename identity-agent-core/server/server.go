@@ -746,6 +746,10 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 
 	// Everything below is owner-only unless api_auth.go names it otherwise.
 	// Registered here, before any route, so no route can be added outside it.
+	// Before authorisation, because "this core has no business answering" does
+	// not depend on who is asking, and the caller should get the same clear
+	// answer either way.
+	r.Use(s.refuseWhatBelongsToTheAgent(r))
 	r.Use(s.authorize(r))
 
 	// G-052: public endpoint for IA to fetch signed login challenge bundle (QR pointer)
@@ -789,6 +793,14 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		// other way to learn the ceremony finished — it asks, rather than being
 		// told, which needs no channel back to a machine never spoken to.
 		r.Get("/controller/agent", s.handleWhoThisAgentIs)
+
+		// Which half this installation is running. Written by the app on this
+		// computer when it is pointed at an agent elsewhere, and read back so a
+		// screen can say so. Local-only, like everything else about this
+		// machine rather than about an identity.
+		r.Get("/controller/front-end-for", s.handleReadFrontEndFor)
+		r.Post("/controller/front-end-for", s.handleBeAFrontEndFor)
+		r.Delete("/controller/front-end-for", s.handleStopBeingAFrontEnd)
 
 		r.Post("/controllers", s.handleGrantController)
 		r.Get("/controllers", s.handleListControllers)
