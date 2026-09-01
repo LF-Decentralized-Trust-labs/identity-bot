@@ -170,6 +170,34 @@ works hardest to keep pairwise — and nothing ever read the delegator's log, so
 it bought nothing. A controller founds its own root and is named to an owner
 identity derived for that machine alone, exactly as a paired computer is.
 
+**Deviation, 2026-08-31 — a controller is named by its own key, and founds
+nothing.** Tried the paragraph above as written: a controller founding a root
+and being named to a pairwise owner identity in the seal of its own inception.
+Switched because an inception is machinery a controller has no use for. It
+exists so an identifier can rotate its keys and so others can read the history
+that proves it — and a controller is never read by anybody but the agent it asks,
+and is never rotated: a compromised one is revoked, which is removing the grant.
+So the inception published a key event log nobody fetched, and required a witness
+and a seal to say something already true of the key itself.
+
+The new canonical path is a **non-transferable identifier** — the CESR `B` form,
+which encodes the public key. There is no inception event, no key event log, no
+witness, and nothing published anywhere, which is a stronger version of the same
+goal this section already argues for. It also makes a grant checkable against
+itself: an identifier that IS a key cannot name a different one, so a grant
+recording identifier X against key Y is refused, where before nothing could tell.
+
+What it gives up is rotation and the pairwise owner identity. Rotation is not
+wanted here, per above. The pairwise owner identity had one job — keeping the
+root unlinkable to whoever the machine deals with — and a controller deals only
+with its own agent, which already knows the root. Where a controller does face
+a third party, that is not a controller function and belongs to the identity.
+
+**Not yet swept into `O6` or into `S7` of `superseded-claims.md`,** both of which
+still describe the inception-and-seal version. That is deliberate rather than
+forgotten: this deviation is cheap to reverse while nothing depends on it, and
+it is recorded here first so the divergence is visible rather than silent.
+
 ### Rules
 
 - **A controller holds a key, and that key is its own.** It is never handed the
