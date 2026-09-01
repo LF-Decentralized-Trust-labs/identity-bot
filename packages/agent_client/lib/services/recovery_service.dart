@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import '../config/agent_config.dart';
+import 'the_agent_this_app_talks_to.dart';
 
 class PairwiseCheck {
   final int contactIndex;
@@ -177,9 +177,21 @@ class RootAidRotationResult {
 
 class RecoveryService {
   final String baseUrl;
+  final http.Client _client;
 
-  RecoveryService({String? baseUrl})
-      : baseUrl = baseUrl ?? AgentConfig.coreBaseUrl;
+  /// The agent, not this computer.
+  ///
+  /// Recovery restores an IDENTITY, and in controller mode this installation
+  /// holds none — so the local core would answer about nothing and say so as
+  /// though it were the truth about the person's identity.
+  ///
+  /// It also needs a client that proves who is asking. Recovery is owner-only
+  /// on an agent somebody reaches over a network, and the top-level http
+  /// functions used here before sent nothing, so every one of these calls was
+  /// refused the moment the agent was not on this machine.
+  RecoveryService({String? baseUrl, http.Client? client})
+      : baseUrl = baseUrl ?? TheAgentThisAppTalksTo.origin,
+        _client = client ?? TheAgentThisAppTalksTo.clientFor(baseUrl);
 
   String get _base => '$baseUrl/api/recovery';
 
@@ -188,7 +200,7 @@ class RecoveryService {
     required String archiveB64,
     String? passphrase,
   }) async {
-    final resp = await http.post(
+    final resp = await _client.post(
       Uri.parse('$_base/verify'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({
@@ -209,7 +221,7 @@ class RecoveryService {
     required String archiveB64,
     String? passphrase,
   }) async {
-    final resp = await http.post(
+    final resp = await _client.post(
       Uri.parse('$_base/start'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({
@@ -226,7 +238,7 @@ class RecoveryService {
   }
 
   Future<RecoverySession> getSession(String id) async {
-    final resp = await http.get(Uri.parse('$_base/sessions/$id'));
+    final resp = await _client.get(Uri.parse('$_base/sessions/$id'));
     if (resp.statusCode != 200) {
       throw Exception(_errorMessage(resp));
     }
@@ -254,7 +266,7 @@ class RecoveryService {
   }
 
   Future<RecoveryRetrieveResult> _retrieve(Map<String, dynamic> body) async {
-    final resp = await http.post(
+    final resp = await _client.post(
       Uri.parse('$_base/retrieve'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode(body),
@@ -267,7 +279,7 @@ class RecoveryService {
   }
 
   Future<RootAidRotationStatus> rootAidRotationStatus() async {
-    final resp = await http.get(Uri.parse('$_base/root-aid-rotation/status'));
+    final resp = await _client.get(Uri.parse('$_base/root-aid-rotation/status'));
     if (resp.statusCode != 200) {
       throw Exception(_errorMessage(resp));
     }
@@ -286,7 +298,7 @@ class RecoveryService {
     int witnessThreshold = 0,
     String? backAnchorCesrSignature,
   }) async {
-    final resp = await http.post(
+    final resp = await _client.post(
       Uri.parse('$_base/root-aid-rotation'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({

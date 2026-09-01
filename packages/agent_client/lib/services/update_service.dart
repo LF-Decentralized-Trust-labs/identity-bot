@@ -146,6 +146,11 @@ class UpdateService {
   final http.Client _client;
 
   UpdateService({String? baseUrl, http.Client? client})
+      // THIS COMPUTER, deliberately, and it is the exception rather than an
+      // oversight. An update installs software HERE. Pointing it at the agent
+      // in controller mode would have this installation report the version of a
+      // machine it is only the front end for, and offer to update software it
+      // does not run.
       : baseUrl = baseUrl ?? AgentConfig.coreBaseUrl,
         _client = client ?? http.Client();
 

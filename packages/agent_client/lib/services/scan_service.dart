@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import '../config/agent_config.dart';
+import 'the_agent_this_app_talks_to.dart';
 
 /// Type-agnostic preview returned by the scan gate (`/api/scan/decode`). The scanner renders
 /// this without knowing what the transaction is — Go decided that from the Ask's action `t`.
@@ -70,8 +70,11 @@ class ScanService {
   final http.Client _client;
 
   ScanService({String? baseUrl, http.Client? client})
-      : baseUrl = baseUrl ?? AgentConfig.coreBaseUrl,
-        _client = client ?? http.Client();
+      // The agent, not this computer. What a scan resolves to is decided by the
+      // identity — which credentials it holds, what it may sign — so it is
+      // answered where the identity is.
+      : baseUrl = baseUrl ?? TheAgentThisAppTalksTo.origin,
+        _client = client ?? TheAgentThisAppTalksTo.clientFor(baseUrl);
 
   Future<ScanPreview> decode(String url) async {
     final resp = await _client.post(

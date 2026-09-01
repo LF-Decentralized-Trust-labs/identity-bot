@@ -1,15 +1,13 @@
 import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 
 import 'package:crypto/crypto.dart';
 
-import 'controller_signing_client.dart';
 import 'owner_signing_client.dart';
 import 'browser_session_client.dart';
-import 'signing_as_the_identity_that_owns_a_machine.dart';
+import 'the_agent_this_app_talks_to.dart';
 import '../config/agent_config.dart';
 
 class HealthResponse {
@@ -695,7 +693,7 @@ class CoreService {
   }) {
     // The agent, which is this machine's core in the ordinary case and a
     // different machine when this installation is only the front end.
-    final origin = baseUrl ?? AgentConfig.agentBaseUrl;
+    final origin = baseUrl ?? TheAgentThisAppTalksTo.origin;
 
     // In controller mode this machine signs as ITSELF, and does so even when a
     // seed was handed in. That looks like ignoring the caller and is the safe
@@ -704,49 +702,14 @@ class CoreService {
     // the OWNER, granting everything the controller gate exists to hold back.
     // Signing as the controller grants controller authority, which is what this
     // machine actually has.
-    if (AgentConfig.isAController && origin == AgentConfig.agentBaseUrl) {
-      return CoreService._(
-        origin,
-        ControllerSigningClient(
-          agentOrigin: origin,
-          // Always this machine, never the agent: the enclave key that signs
-          // lives here and the agent cannot reach it.
-          localCoreOrigin: AgentConfig.coreBaseUrl,
-        ),
-        null,
-      );
-    }
-
-    // A machine this device owns but is not sitting at.
     //
-    // Every owner route there answers "sign this", and until something does, an
-    // agent on rented hardware is correctly locked and completely unusable by
-    // the person who owns it. The key is not the root: a machine is adopted by a
-    // pairwise identity minted for that machine alone, derived at an index only
-    // the local core wrote down, so the signing happens there.
-    //
-    // Applied here rather than at the call sites because there are forty of
-    // them, all `CoreService(baseUrl: …)`, and a transport that has to be
-    // remembered is one that will not be. A device this does not fit — the web
-    // build has no local core to sign with — carries a session instead.
-    if (ownerSeed == null && !kIsWeb && origin != AgentConfig.coreBaseUrl) {
-      return CoreService._(
-        origin,
-        SigningAsTheIdentityThatOwnsAMachine(
-          machineOrigin: origin,
-          // Always this device, never the machine: the key is derived here and
-          // the machine has no way to reach it.
-          localCoreOrigin: AgentConfig.coreBaseUrl,
-          ownerAid: theIdentityThatAdopted(origin,
-              localCoreOrigin: AgentConfig.coreBaseUrl),
-        ),
-        null,
-      );
-    }
-
-    if (ownerSeed == null) {
-      final session = BrowserSessionClient(agentOrigin: origin);
-      return CoreService._(origin, session, session);
+    // Everything except the seed case is decided in one place, shared with
+    // every other service, because a service that answered "where" and "what
+    // signs it" differently from this one would reach the local core in
+    // controller mode and report no problem.
+    if (ownerSeed == null || AgentConfig.isAController) {
+      final how = TheAgentThisAppTalksTo.theAgent(origin: origin);
+      return CoreService._(origin, how.client, how.session);
     }
     return CoreService._(
       origin,

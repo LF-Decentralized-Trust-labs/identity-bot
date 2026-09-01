@@ -3,11 +3,11 @@ import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 import 'package:ed25519_edwards/ed25519_edwards.dart' as ed;
 import 'package:http/http.dart' as http;
-import '../config/agent_config.dart';
 import '../crypto/bip39.dart';
 import '../crypto/keys.dart';
 import 'keri_service.dart';
 import 'secure_key_store.dart';
+import 'the_agent_this_app_talks_to.dart';
 
 /// KERI against the Identity Agent core running on this machine.
 ///
@@ -23,8 +23,18 @@ class LocalCoreKeriService extends KeriService {
   final http.Client _client;
 
   LocalCoreKeriService({String? baseUrl})
-      : _baseUrl = baseUrl ?? AgentConfig.coreBaseUrl,
-        _client = http.Client();
+      // Where the KEYS are, which is not always this computer.
+      //
+      // Stateful KERI operations always run on the engine local to the keys —
+      // that invariant is about the KEYS, not about this process. When the
+      // identity lives on a sealed machine, that machine's engine is the local
+      // one and this installation is only the front end.
+      : _baseUrl = baseUrl ?? TheAgentThisAppTalksTo.origin,
+        _client = TheAgentThisAppTalksTo.clientFor(baseUrl);
+
+  /// Where this service sends, for a caller checking it is pointed at the
+  /// identity rather than at whichever core happens to be on this machine.
+  String get baseUrl => _baseUrl;
 
   @override
   AgentEnvironment get environment => AgentEnvironment.desktop;

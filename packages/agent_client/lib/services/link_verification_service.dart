@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import '../config/agent_config.dart';
+import 'the_agent_this_app_talks_to.dart';
 
 /// VerificationResult mirror for Flutter surfaces, matching the link verification contract.
 class VerificationResult {
@@ -88,10 +88,14 @@ class LinkVerificationService {
   final String? _baseUrl;
 
   LinkVerificationService({http.Client? client, String? baseUrl})
-      : _client = client ?? http.Client(),
+      : _client = client ?? TheAgentThisAppTalksTo.clientFor(baseUrl),
         _baseUrl = baseUrl;
 
-  String get baseUrl => _baseUrl ?? AgentConfig.coreBaseUrl;
+  /// The agent, not this computer. A link is verified as the IDENTITY, so in
+  /// controller mode this has to leave the machine — asking the local core
+  /// would ask a core that holds no identity and get a plausible answer about
+  /// nobody.
+  String get baseUrl => _baseUrl ?? TheAgentThisAppTalksTo.origin;
 
   Future<VerificationResult> verify({
     required String input,

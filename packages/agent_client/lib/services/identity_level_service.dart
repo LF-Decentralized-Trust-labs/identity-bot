@@ -1,10 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
-import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-import '../config/agent_config.dart';
 import 'pin_password_service.dart';
 import 'local_auth_service.dart';
+import 'the_agent_this_app_talks_to.dart';
 
 /// Identity assurance tier levels.
 ///
@@ -109,9 +108,15 @@ class IdentityLevelService {
   /// reasonable fallback exists when the backend is temporarily unreachable.
   static Future<bool> _checkHasCredentialFromDB() async {
     try {
-      final baseUrl = AgentConfig.coreBaseUrl;
+      // The agent, not this computer, and asked with something that proves who
+      // is asking. Which credentials somebody holds is a fact about the
+      // IDENTITY: in controller mode the local core holds none, so this used to
+      // report "no credentials" for a person who has them.
+      final baseUrl = TheAgentThisAppTalksTo.origin;
       final uri = Uri.parse('$baseUrl/api/credentials?role=holder&status=valid');
-      final response = await http.get(uri).timeout(const Duration(seconds: 3));
+      final response = await TheAgentThisAppTalksTo.clientFor(baseUrl)
+          .get(uri)
+          .timeout(const Duration(seconds: 3));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         final list = data['credentials'] as List<dynamic>? ?? [];
