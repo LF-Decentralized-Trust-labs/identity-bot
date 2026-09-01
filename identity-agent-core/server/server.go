@@ -784,6 +784,12 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		// does, and it is about the controller rather than the identity.
 		r.Post("/controller/sign", s.handleSignAsThisController)
 
+		// What an authorised machine asks once it has been approved: which
+		// identity this is, and what it was approved as. The controller has no
+		// other way to learn the ceremony finished — it asks, rather than being
+		// told, which needs no channel back to a machine never spoken to.
+		r.Get("/controller/agent", s.handleWhoThisAgentIs)
+
 		r.Post("/controllers", s.handleGrantController)
 		r.Get("/controllers", s.handleListControllers)
 		r.Delete("/controllers/{aid}", s.handleRevokeController)

@@ -1006,3 +1006,52 @@ func TestAnUnverifiedOwnerRowCannotVouch(t *testing.T) {
 			"anything able to write one grants itself everything: %+v", got)
 	}
 }
+
+// A machine that IS a controller is told why it was refused.
+//
+// Every refusal used to be discarded and replaced with "sign the request with
+// the owner key or call it locally" — advice a controller cannot act on, since
+// by design it holds no owner key. The same line appeared when the grants file
+// could not be read, so a fault that locked every authorised machine out
+// reported nothing at all.
+func TestARefusedControllerIsToldWhichRefusalItHit(t *testing.T) {
+	s := newAuthTestServer(t)
+	aid, seed := anAuthorisedMachine(t, s, GradeEnrolled)
+	r := s.buildRouter("")
+
+	// An authorisation that has been removed.
+	if err := s.controllers().Revoke(aid); err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, asThatMachine(t, aid, "GET", "/api/profile", "", seed, "", time.Time{}))
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("a revoked machine was admitted: %d", w.Code)
+	}
+	if strings.Contains(w.Body.String(), "owner key") {
+		t.Errorf("a controller was told to sign with the owner key, which it does not "+
+			"have and never will: %s", w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "not authorised") {
+		t.Errorf("the refusal does not say the authorisation is gone: %s", w.Body.String())
+	}
+
+	// A request from nobody in particular still falls through to the ordinary
+	// answer, or every non-controller caller would start getting controller
+	// errors.
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, remote("GET", "/api/profile", ""))
+	if !strings.Contains(w.Body.String(), "owner") {
+		t.Errorf("an ordinary caller stopped getting the ordinary refusal: %s", w.Body.String())
+	}
+}
+
+// seedForGrant is the seed behind grantFor, so a test can sign as a machine it
+// built with that helper.
+func seedForGrant(n byte) []byte {
+	seed := make([]byte, ed25519.SeedSize)
+	for i := range seed {
+		seed[i] = n + byte(i)
+	}
+	return seed
+}

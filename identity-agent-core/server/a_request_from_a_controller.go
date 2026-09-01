@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -109,7 +110,21 @@ func (s *CoreServer) controllerActsForTheOwner(
 ) bool {
 	grant, authenticated, err := s.theControllerBehind(r)
 	if err != nil {
-		return false
+		// A request carrying no controller headers at all is simply not from a
+		// controller, and the caller carries on trying whatever else might stand
+		// in for the owner. Anything else IS a controller and was refused for a
+		// reason the person needs, so say it here rather than letting them fall
+		// through to "sign the request with the owner key" — advice a controller
+		// cannot act on, since by design it has no owner key.
+		//
+		// It also mattered for faults: an unreadable grants file gave every
+		// authorised machine the same misleading line, with nothing reporting
+		// that anything was wrong.
+		if errors.Is(err, errNotFromAController) {
+			return false
+		}
+		denyAuthorization(w, err.Error())
+		return true
 	}
 	if ok, why := mayThisControllerDoThis(
 		r.Method, pattern, authenticated, time.Now().UTC()); !ok {
@@ -122,6 +137,15 @@ func (s *CoreServer) controllerActsForTheOwner(
 		context.WithValue(r.Context(), controllerContextKey{}, grant)))
 	return true
 }
+
+// errNotFromAController means no machine claimed this request, which is the
+// ordinary case for every other caller and not a fault.
+//
+// Distinct from the other refusals because it is the only one where the right
+// thing to do is carry on and try something else. The rest describe a machine
+// that IS a controller and could not be admitted, and each of those needs
+// different action from the person.
+var errNotFromAController = errors.New("this request is not from a controller")
 
 // theControllerBehind identifies the machine that signed this request, if a
 // machine did and its grant still stands.
@@ -136,7 +160,7 @@ func (s *CoreServer) theControllerBehind(r *http.Request) (ControllerGrant, auth
 	sig := strings.TrimSpace(r.Header.Get(headerControllerSig))
 	stamp := strings.TrimSpace(r.Header.Get(headerControllerTimestamp))
 	if aid == "" || sig == "" {
-		return none, unmeasured, fmt.Errorf("this request is not from a controller")
+		return none, unmeasured, errNotFromAController
 	}
 	if stamp == "" {
 		return none, unmeasured, fmt.Errorf(
