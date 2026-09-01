@@ -1668,6 +1668,22 @@ func (s *CoreServer) handleStoreEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// AN INCEPTION EVENT IS A FOUNDING, whatever route it arrives by. This one
+	// writes it into this machine's key event log AND publishes it to the
+	// witnesses, so it is the more consequential half of the pair — and it was
+	// missed because storage endpoints read as plumbing rather than as a way an
+	// identity begins.
+	//
+	// Guarded on the event type rather than closed, for the same reason the
+	// pairing route is guarded on the flag: rotations, interactions and receipts
+	// on an identity that already exists have to keep working, and refusing
+	// those would stop an identity living rather than stop one starting.
+	if req.EventType == "icp" || req.EventType == "dip" {
+		if s.refuseIfThisComputerMayNotFound(w) {
+			return
+		}
+	}
+
 	if req.Timestamp == "" {
 		req.Timestamp = time.Now().UTC().Format(time.RFC3339)
 	}

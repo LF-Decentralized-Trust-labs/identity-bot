@@ -193,6 +193,14 @@ var controllerNeedsLevel = map[string]controllerRequirement{
 	// WRITE ANYTHING THE AUTHORISATION DECISION READS. Anything added later that
 	// feeds ownerAuthority — the identity record, the contact records its key is
 	// resolved from, the sealed record — belongs here on sight.
+	// Its twin, and it was missed for the same reason: the two are the storage
+	// pair, adjacent in the router, and one was named here while the other was
+	// named nowhere. This one writes key events and publishes them to the
+	// witnesses, which is a stronger thing than writing the identity row.
+	"POST /api/store/event": {neverByAController, authprovider.LevelHigh,
+		"writing key events decides what this identity's own history says, which " +
+			"is what every other check is read against"},
+
 	"POST /api/store/identity": {neverByAController, authprovider.LevelHigh,
 		"this decides which identity this agent is, and so whose signature counts as its owner's"},
 	"POST /api/contacts": {neverByAController, authprovider.LevelHigh,

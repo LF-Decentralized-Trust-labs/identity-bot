@@ -139,6 +139,14 @@ func TestEveryWayAnIdentityCanBeginIsRefusedOnAMachineThatMayNotFound(t *testing
 			body: `{"aid":"EWHATEVER","public_key":"D1"}`,
 			call: (*CoreServer).handleStoreIdentity,
 		},
+		{
+			// The more consequential half of that pair: it writes the event into
+			// this machine's key log AND publishes it to the witnesses.
+			what:   "storing an inception event",
+			method: http.MethodPost, path: "/api/store/event",
+			body: `{"aid":"EWHATEVER","event_type":"icp","sequence_number":0}`,
+			call: (*CoreServer).handleStoreEvent,
+		},
 	} {
 		t.Run(door.what, func(t *testing.T) {
 			s := agentWithNoIdentity(t)
@@ -191,5 +199,41 @@ func TestAComputerThatMayNotFoundIsRefusedWhileBeingPaired(t *testing.T) {
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("a computer that cannot prove its software founded its own root "+
 			"while being paired: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// An identity that already exists goes on living on a machine that may not have
+// founded it.
+//
+// The gate is about where an identity BEGINS. Refusing a rotation, an
+// interaction or a receipt would stop one continuing, which is a different and
+// much worse thing: four identities already exist on machines that may not have
+// founded them, and cutting them off is not a security improvement, it is
+// somebody losing their identity.
+func TestAnIdentityThatAlreadyExistsGoesOnWorking(t *testing.T) {
+	for _, kind := range []string{"rot", "ixn", "rct"} {
+		t.Run(kind, func(t *testing.T) {
+			s := agentWithNoIdentity(t)
+			was := mayFoundAnIdentityHere
+			mayFoundAnIdentityHere = func() foundingVerdict {
+				return foundingVerdict{
+					Permitted: false, Platform: "macos",
+					Why: cannotProveItsSoftware, Instead: actForOneInstead,
+				}
+			}
+			t.Cleanup(func() { mayFoundAnIdentityHere = was })
+
+			body := `{"aid":"EWHATEVER","event_type":"` + kind + `","sequence_number":1}`
+			req := httptest.NewRequest(http.MethodPost, "/api/store/event",
+				strings.NewReader(body))
+			req.RemoteAddr = "127.0.0.1:1234"
+			rec := httptest.NewRecorder()
+			s.handleStoreEvent(rec, req)
+
+			if rec.Code == http.StatusForbidden {
+				t.Fatalf("a %s event was refused, so an identity that already "+
+					"exists here cannot go on working: %s", kind, rec.Body.String())
+			}
+		})
 	}
 }
