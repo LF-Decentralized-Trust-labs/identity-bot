@@ -115,6 +115,43 @@ class AskingToActForAnIdentity {
     }
   }
 
+  /// Whether an Identity Agent is really at [agentOrigin], and which one.
+  ///
+  /// ASKED OF THE TWO ROUTES A REAL AGENT ANSWERS TO A STRANGER. Health is a
+  /// liveness probe that reveals nothing, and identity names the agent — both
+  /// public, both unauthenticated, and between them nothing else answers the
+  /// pair. Reaching for an owner-only route instead and reading its refusal as
+  /// success accepts far too much: anything behind an access proxy, any server
+  /// with a deny rule, any JSON endpoint returning an object without the field
+  /// being looked for, and any OTHER person's agent all refuse identically.
+  ///
+  /// The identifier comes back so it can be shown before the code goes on
+  /// screen and recorded then, rather than trusting whatever answers ten
+  /// minutes later. An address is not an identity; this is the moment somebody
+  /// can still act on the difference.
+  Future<String> whichAgentIsAt(String agentOrigin) async {
+    final health = await _plain.get(Uri.parse('$agentOrigin/api/health'));
+    if (health.statusCode != 200) {
+      throw Exception('nothing that looks like an Identity Agent answered at '
+          '$agentOrigin (${health.statusCode})');
+    }
+    final res = await _plain.get(Uri.parse('$agentOrigin/api/identity'));
+    if (res.statusCode != 200) {
+      throw Exception('there is something at $agentOrigin, and it did not say '
+          'which identity it holds (${res.statusCode})');
+    }
+    final body = jsonDecode(res.body);
+    final aid = body is Map<String, dynamic>
+        ? (body['aid'] ?? (body['identity'] is Map ? body['identity']['aid'] : ''))
+            .toString()
+        : '';
+    if (aid.isEmpty) {
+      throw Exception('whatever is at $agentOrigin holds no identity yet, so '
+          'there is nothing for this computer to act for');
+    }
+    return aid;
+  }
+
   /// Whether the core beside this app will actually sign for it.
   ///
   /// Asked because the signing client cannot report that it did not. By design
@@ -188,6 +225,7 @@ class AMachineOffering {
     required this.aid,
     required this.publicKey,
     this.protectedBy = '',
+    this.agentOrigin = '',
   });
 
   /// This machine's identifier, which IS its public key — the non-transferable
@@ -201,6 +239,21 @@ class AMachineOffering {
   /// at all.
   final String protectedBy;
 
+  /// WHICH IDENTITY AGENT THIS MACHINE IS ASKING, and the field without which
+  /// none of this works.
+  ///
+  /// The grant is written on the agent, by the device holding the identity's
+  /// key — so that device has to know which agent to write it on. It cannot
+  /// work that out: the person is standing at the computer, and the phone has
+  /// never seen this ceremony. Without this the phone posts the grant to its
+  /// own core, which on the ordinary arrangement is not the agent at all, and
+  /// the computer waits for a grant that was written somewhere else.
+  ///
+  /// It is a claim, not an instruction. The device receiving it looks for that
+  /// address among the machines it actually owns and refuses anything else,
+  /// so a code naming somebody else's agent gets nowhere.
+  final String agentOrigin;
+
   /// What the owner's device reads.
   ///
   /// Both fields, though they are the same value in different clothes: the
@@ -212,6 +265,7 @@ class AMachineOffering {
         'aid': aid,
         'public_key': publicKey,
         if (protectedBy.isNotEmpty) 'protected_by': protectedBy,
+        if (agentOrigin.isNotEmpty) 'agent_origin': agentOrigin,
       });
 }
 

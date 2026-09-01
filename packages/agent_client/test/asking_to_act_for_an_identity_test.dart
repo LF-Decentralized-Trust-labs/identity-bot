@@ -281,4 +281,70 @@ void main() {
       );
     });
   });
+
+  /// Which Identity Agent is at an address, and whether one is.
+  ///
+  /// Asked of the two routes a real agent answers to a stranger. Reaching for
+  /// an owner-only route and reading its refusal as success accepts far too
+  /// much: anything behind an access proxy, any server with a deny rule, any
+  /// JSON endpoint returning an object without the field, and any OTHER
+  /// person's agent all refuse identically — and the person then spends ten
+  /// silent minutes waiting on a machine that was never going to answer.
+  group('which agent is at an address', () {
+    http.Client answering(Map<String, int> codes, {String body = '{}'}) =>
+        MockClient((req) async =>
+            http.Response(body, codes[req.url.path] ?? 404));
+
+    test('a real Identity Agent is recognised, and names itself', () async {
+      final asking = AskingToActForAnIdentity(
+        localCoreOrigin: localCore,
+        client: MockClient((req) async {
+          if (req.url.path == '/api/health') return http.Response('{}', 200);
+          if (req.url.path == '/api/identity') {
+            return http.Response(jsonEncode({'aid': 'EMYIDENTITY'}), 200);
+          }
+          return http.Response('no', 404);
+        }),
+      );
+      expect(await asking.whichAgentIsAt(agent), 'EMYIDENTITY');
+    });
+
+    test('a server that merely refuses is not an Identity Agent', () async {
+      // The whole class the previous check accepted: an access proxy, a deny
+      // rule, a relay that refuses unknown paths, somebody else's agent.
+      final asking = AskingToActForAnIdentity(
+        localCoreOrigin: localCore,
+        client: answering({'/api/health': 403, '/api/identity': 403}),
+      );
+      expect(asking.whichAgentIsAt(agent), throwsA(isA<Exception>()));
+    });
+
+    test('a JSON endpoint that is not an Identity Agent is refused', () async {
+      final asking = AskingToActForAnIdentity(
+        localCoreOrigin: localCore,
+        client: answering({'/api/health': 200, '/api/identity': 200},
+            body: '{"status":"ok"}'),
+      );
+      expect(asking.whichAgentIsAt(agent), throwsA(isA<Exception>()));
+    });
+
+    test('an agent holding no identity yet has nothing to act for', () async {
+      final asking = AskingToActForAnIdentity(
+        localCoreOrigin: localCore,
+        client: answering({'/api/health': 200, '/api/identity': 200},
+            body: '{"initialized":false}'),
+      );
+      expect(asking.whichAgentIsAt(agent), throwsA(isA<Exception>()));
+    });
+  });
+
+  test('what is scanned names the Identity Agent being asked', () {
+    // Without it the device holding the key posts the grant to its own core,
+    // which on the ordinary arrangement is not the agent — and the computer
+    // waits for a grant written somewhere else.
+    const offering = AMachineOffering(
+        aid: 'BTHIS', publicKey: 'BTHIS', agentOrigin: 'https://box.example.test');
+    final decoded = jsonDecode(offering.toBeScanned) as Map<String, dynamic>;
+    expect(decoded['agent_origin'], 'https://box.example.test');
+  });
 }

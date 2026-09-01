@@ -48,6 +48,7 @@ class ApprovingAMachineToActForYou {
       publicKey: key,
       protectedBy: (data['protected_by'] ?? '').toString(),
       suggestedLabel: (data['label'] ?? '').toString(),
+      agentOrigin: (data['agent_origin'] ?? '').toString().trim(),
     );
   }
 
@@ -121,6 +122,7 @@ class AMachineAsking {
     required this.publicKey,
     this.protectedBy = '',
     this.suggestedLabel = '',
+    this.agentOrigin = '',
   });
 
   final String aid;
@@ -135,6 +137,19 @@ class AMachineAsking {
   /// a machine that could name itself in somebody's device list could name
   /// itself something reassuring.
   final String suggestedLabel;
+
+  /// Which Identity Agent this machine says it is asking.
+  ///
+  /// The grant is written on the agent, so this device has to know which one —
+  /// and it cannot work that out, because the person is standing at the other
+  /// computer and this device has never seen the ceremony.
+  ///
+  /// A CLAIM, NEVER AN INSTRUCTION. What this device does with it is look for
+  /// it among the machines it actually owns; a code naming somebody else's
+  /// agent matches nothing and gets no further. Treating it as an instruction
+  /// would let a code somebody photographed send this device's grant wherever
+  /// it liked.
+  final String agentOrigin;
 }
 
 /// A machine already authorised, as the owner's device sees it.
