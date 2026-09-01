@@ -45,10 +45,41 @@ type AFrontEndFor struct {
 	Since    string `json:"since"`
 }
 
-var frontEndLock sync.Mutex
+// Held in memory after the first read, because this is asked on EVERY request.
+//
+// It is checked before authorisation, so an unauthenticated caller drives it at
+// whatever rate they like — and reading and parsing a file inside a
+// process-wide lock on that path serialises the whole core behind one syscall,
+// on installations that hold their own identity as much as on the front ends
+// this is for. The answer changes only when something here writes it, so it is
+// read once and remembered.
+//
+// The cost is that editing the file by hand no longer takes effect until this
+// core restarts. That is the right trade: the supported way to change it is the
+// route, which updates both, and a file somebody edited underneath a running
+// process was never a state to design around.
+var (
+	frontEndLock  sync.RWMutex
+	frontEndKnown bool
+	frontEndValue *AFrontEndFor
+	frontEndErr   error
+	frontEndOf    string
+)
 
 func (s *CoreServer) frontEndFile() string {
 	return filepath.Join(s.DataDir, "this-core-is-only-a-front-end.json")
+}
+
+// forgetTheCachedFrontEnd drops what is remembered, so the next ask reads.
+//
+// Called by both writers rather than having them update the cache directly: the
+// file is what decides, and a cache written from what a caller MEANT to store
+// would disagree with it the first time a write half-succeeded.
+func forgetTheCachedFrontEnd() {
+	frontEndKnown = false
+	frontEndValue = nil
+	frontEndErr = nil
+	frontEndOf = ""
 }
 
 // whatThisCoreIsAFrontEndFor returns the record, or nil when this installation
@@ -58,9 +89,30 @@ func (s *CoreServer) frontEndFile() string {
 // that failed to parse would quietly restore this core to answering about
 // identities — the exact state the record exists to leave.
 func (s *CoreServer) whatThisCoreIsAFrontEndFor() (*AFrontEndFor, error) {
+	file := s.frontEndFile()
+
+	frontEndLock.RLock()
+	if frontEndKnown && frontEndOf == file {
+		v, err := frontEndValue, frontEndErr
+		frontEndLock.RUnlock()
+		return v, err
+	}
+	frontEndLock.RUnlock()
+
 	frontEndLock.Lock()
 	defer frontEndLock.Unlock()
-	return s.readFrontEnd()
+	// Asked again under the write lock: another request may have read it while
+	// this one waited, and reading the file twice is harmless but pointless.
+	if frontEndKnown && frontEndOf == file {
+		return frontEndValue, frontEndErr
+	}
+	// The path is part of what is remembered. One process can serve more than
+	// one data directory in a test, and a cache that ignored which one it came
+	// from would answer for the wrong machine.
+	frontEndValue, frontEndErr = s.readFrontEnd()
+	frontEndKnown = true
+	frontEndOf = file
+	return frontEndValue, frontEndErr
 }
 
 func (s *CoreServer) readFrontEnd() (*AFrontEndFor, error) {
@@ -95,6 +147,7 @@ func (s *CoreServer) beAFrontEndFor(f AFrontEndFor) error {
 	}
 	frontEndLock.Lock()
 	defer frontEndLock.Unlock()
+	defer forgetTheCachedFrontEnd()
 
 	// An identity here is not a thing to overwrite. This computer holding one
 	// and being a front end for another are different installations, and
@@ -140,6 +193,7 @@ func (s *CoreServer) beAFrontEndFor(f AFrontEndFor) error {
 func (s *CoreServer) stopBeingAFrontEnd() error {
 	frontEndLock.Lock()
 	defer frontEndLock.Unlock()
+	defer forgetTheCachedFrontEnd()
 	if err := os.Remove(s.frontEndFile()); err != nil && !os.IsNotExist(err) {
 		return err
 	}

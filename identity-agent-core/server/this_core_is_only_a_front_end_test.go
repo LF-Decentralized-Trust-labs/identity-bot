@@ -298,3 +298,63 @@ func TestEveryRouteAFrontEndAnswersForActuallyExists(t *testing.T) {
 		}
 	}
 }
+
+// What is remembered has to follow what is written, immediately.
+//
+// The answer is held in memory because it is asked on every request, before
+// authorisation, by callers who need not have proved anything — reading and
+// parsing a file inside a process-wide lock on that path serialises the whole
+// core behind one syscall. The risk a cache adds is staleness, and here
+// staleness is the original bug wearing a different hat: a front end that went
+// on answering, or one that went on refusing after being told to stop.
+func TestWhatIsRememberedFollowsWhatIsWritten(t *testing.T) {
+	s := agentWithNoIdentity(t)
+	h := aFrontEndsRouter(t, s)
+
+	// Asked first, so there is something remembered to be wrong.
+	if rec := ask(t, h, http.MethodGet, "/api/credentials"); rec.Code != http.StatusOK {
+		t.Fatalf("precondition: %d", rec.Code)
+	}
+	pointItAt(t, s)
+	if rec := ask(t, h, http.MethodGet, "/api/credentials"); rec.Code != http.StatusConflict {
+		t.Fatalf("it went on answering after being told it is a front end: %d", rec.Code)
+	}
+
+	if err := s.stopBeingAFrontEnd(); err != nil {
+		t.Fatal(err)
+	}
+	if rec := ask(t, h, http.MethodGet, "/api/credentials"); rec.Code != http.StatusOK {
+		t.Fatalf("it went on refusing after being told it holds its own identity: %d", rec.Code)
+	}
+}
+
+// Setting which half this computer is running is decided, not left to silence.
+//
+// It decides whether this core answers about an identity at all, so it is one
+// step further out than the rest of that list: not what a machine acting for
+// somebody may do, but whether the door is open. Left unnamed it is permitted
+// by default to any authorised controller and any browser session, and either
+// could make somebody else's machine refuse its own owner from a distance.
+func TestSettingWhichHalfAComputerRunsIsNotReachableFromElsewhere(t *testing.T) {
+	for _, route := range []string{
+		"POST /api/controller/front-end-for",
+		"DELETE /api/controller/front-end-for",
+	} {
+		req, ok := controllerNeedsLevel[route]
+		if !ok || !req.Closed {
+			t.Errorf("%s is reachable by a machine acting for somebody, so it could "+
+				"flip that gate on a computer it is not sitting at", route)
+		}
+		if _, ok := sessionForbidden[route]; !ok {
+			t.Errorf("%s is reachable from a browser session, which is not the app "+
+				"on this machine", route)
+		}
+	}
+
+	// Reading it is deliberately open at a level, not closed: a machine acting
+	// for somebody may reasonably ask which half it is talking to.
+	if req, ok := controllerNeedsLevel["GET /api/controller/front-end-for"]; !ok || req.Closed {
+		t.Error("reading which half this computer runs should be raised rather than " +
+			"closed, and should not be silent")
+	}
+}

@@ -493,6 +493,13 @@ func rememberSignature(sig string, now time.Time) (alreadyUsed bool) {
 var sessionForbidden = map[string]string{
 	// --- the root of trust ---
 	"POST /api/keystore/root-seed": "installing a root seed decides what this identity is",
+	// Which half this computer is running. A browser is not the app on this
+	// machine, and this decides whether this core answers about an identity at
+	// all — a session that could set it would make the machine refuse its own
+	// owner, and one that could clear it would put a front end back to giving
+	// answers about nobody.
+	"POST /api/controller/front-end-for":   "which half a computer is running is set on that computer, by the app on it",
+	"DELETE /api/controller/front-end-for": "which half a computer is running is set on that computer, by the app on it",
 	// Retrieval hands back the bytes of an archive. A browser session is
 	// something the owner grants for a while and that whoever holds the browser
 	// then has; it must not be enough to pull an identity's sealed backups out
