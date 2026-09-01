@@ -1,0 +1,198 @@
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:http/http.dart' as http;
+
+import '../config/agent_config.dart';
+import 'the_agent_this_app_talks_to.dart';
+
+/// The machine's own half of asking to act for an identity.
+///
+/// Two questions, asked of two different places, and keeping them apart is the
+/// whole of it. What this computer OFFERS is asked of the core beside it, which
+/// holds the enclave key and is the only thing that can answer. What this
+/// computer has BEEN GRANTED is asked of the agent, because the agent is where
+/// the grant lives and nothing else knows.
+///
+/// IT ASKS RATHER THAN BEING TOLD, and that is not a limitation to fix later.
+/// The device holding the identity's key has never spoken to this machine and
+/// has no way to reach it — a push would mean an address this computer
+/// published and something listening on it, which is a great deal of machinery
+/// to avoid one poll. Asking needs nothing, works behind anything, and the
+/// answer is the same.
+class AskingToActForAnIdentity {
+  AskingToActForAnIdentity({
+    String? localCoreOrigin,
+    http.Client? client,
+  })  : _localCore = localCoreOrigin ?? AgentConfig.coreBaseUrl,
+        _plain = client ?? http.Client(),
+        _ownClient = client == null;
+
+  /// The core on THIS computer. Never the agent: the key that names this
+  /// machine is in this machine's hardware, and the agent cannot reach it.
+  final String _localCore;
+
+  /// Unsigned, deliberately. Asking this computer what it would offer is a
+  /// local question and the core answers a local request as its owner's.
+  final http.Client _plain;
+  final bool _ownClient;
+
+  /// What this computer would offer if somebody authorised it.
+  ///
+  /// Returns null when this hardware cannot act for an identity at all — no
+  /// enclave, or one the software cannot use. That is an answer rather than a
+  /// failure, and the screen says so plainly instead of offering a button that
+  /// will not work.
+  Future<AMachineOffering?> whatThisComputerOffers() async {
+    final res = await _plain.get(Uri.parse('$_localCore/api/controller/this-machine'));
+    if (res.statusCode == 501) return null;
+    if (res.statusCode != 200) {
+      throw Exception('this computer could not say what it offers '
+          '(${res.statusCode}): ${res.body}');
+    }
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    final aid = (body['aid'] ?? '').toString();
+    final key = (body['public_key'] ?? '').toString();
+    if (aid.isEmpty || key.isEmpty) {
+      throw Exception('this computer named no identifier and no key, so there '
+          'is nothing anybody could authorise');
+    }
+    return AMachineOffering(
+      aid: aid,
+      publicKey: key,
+      protectedBy: (body['protected_by'] ?? '').toString(),
+    );
+  }
+
+  /// What the agent at [agentOrigin] says this machine has been granted.
+  ///
+  /// Signed as this machine, because the agent has never seen this connection
+  /// and there is nothing else to prove who is asking. Returns null while
+  /// nothing has been granted — a refusal is the ordinary state before somebody
+  /// approves, not an error worth showing anybody.
+  Future<WhatThisMachineWasTold?> whatTheAgentSays(String agentOrigin) async {
+    // Through the ordinary transport, which signs as this machine. Built here
+    // rather than reusing the plain client above, because the agent has never
+    // seen this connection and an unsigned request to it is correctly refused —
+    // the two questions this class asks need two different clients, which is
+    // most of why it exists.
+    final client =
+        TheAgentThisAppTalksTo.theAgent(origin: agentOrigin, inner: _plain)
+            .client;
+    try {
+      final res = await client.get(Uri.parse('$agentOrigin/api/controller/agent'));
+      if (res.statusCode == 401 || res.statusCode == 403) return null;
+      if (res.statusCode != 200) {
+        throw Exception('the Identity Agent at $agentOrigin answered '
+            '${res.statusCode}: ${res.body}');
+      }
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      final aid = (body['aid'] ?? '').toString();
+      if (aid.isEmpty) return null;
+      return WhatThisMachineWasTold(
+        agentAid: aid,
+        agentLabel: (body['label'] ?? '').toString(),
+        yourLabel: (body['your_label'] ?? '').toString(),
+        yourGrade: (body['your_grade'] ?? '').toString(),
+        yourAuthorisationEnds: body['your_authorisation_ends'] == null
+            ? null
+            : DateTime.tryParse(body['your_authorisation_ends'].toString()),
+      );
+    } finally {
+      // Closes only the wrapper. The transport underneath belongs to this
+      // object and is closed by dispose, or by whoever handed it in.
+      client.close();
+    }
+  }
+
+  /// Asks until the agent says this machine may act, or [until] passes.
+  ///
+  /// Every failure is treated as "not yet". The agent is reached over a network
+  /// that may be down, through a relay that may still be allocating, on a
+  /// machine that may still be starting — and none of those is distinguishable
+  /// from "nobody has approved you", nor should they be: the person is waiting
+  /// for the same thing either way.
+  ///
+  /// Returns null on running out, which the screen says as "nothing yet" rather
+  /// than as a failure, because the usual reason is that nobody has picked up
+  /// their phone.
+  Future<WhatThisMachineWasTold?> waitUntilGranted(
+    String agentOrigin, {
+    Duration every = const Duration(seconds: 2),
+    Duration until = const Duration(minutes: 10),
+  }) async {
+    final deadline = DateTime.now().add(until);
+    while (DateTime.now().isBefore(deadline)) {
+      try {
+        final told = await whatTheAgentSays(agentOrigin);
+        if (told != null) return told;
+      } catch (_) {
+        // Not yet, for one of many reasons that look the same from here.
+      }
+      await Future<void>.delayed(every);
+    }
+    return null;
+  }
+
+  void dispose() {
+    if (_ownClient) _plain.close();
+  }
+}
+
+/// What a computer says about itself when it asks to act for an identity.
+class AMachineOffering {
+  const AMachineOffering({
+    required this.aid,
+    required this.publicKey,
+    this.protectedBy = '',
+  });
+
+  /// This machine's identifier, which IS its public key — the non-transferable
+  /// form, with no inception event and nothing published. Knowing it proves
+  /// nothing, which is why it can be shown on a screen.
+  final String aid;
+  final String publicKey;
+
+  /// What is holding the private half. Shown to the person, because "this
+  /// computer can keep a key to itself" is what makes authorising it reasonable
+  /// at all.
+  final String protectedBy;
+
+  /// What the owner's device reads.
+  ///
+  /// Both fields, though they are the same value in different clothes: the
+  /// agent refuses a grant whose identifier and key disagree, so sending both
+  /// lets it check rather than trust. A payload naming only the identifier
+  /// would have to be expanded by whoever received it, and the expansion is the
+  /// part worth checking.
+  String get toBeScanned => jsonEncode({
+        'aid': aid,
+        'public_key': publicKey,
+        if (protectedBy.isNotEmpty) 'protected_by': protectedBy,
+      });
+}
+
+/// What an agent tells a machine it has been granted.
+class WhatThisMachineWasTold {
+  const WhatThisMachineWasTold({
+    required this.agentAid,
+    this.agentLabel = '',
+    this.yourLabel = '',
+    this.yourGrade = '',
+    this.yourAuthorisationEnds,
+  });
+
+  /// Which identity this machine is now a front end for. Recorded alongside the
+  /// address, because an address is not an identity.
+  final String agentAid;
+  final String agentLabel;
+
+  /// What the person called this machine when they approved it.
+  final String yourLabel;
+
+  /// Whether they said they are keeping it, or using it for now.
+  final String yourGrade;
+  final DateTime? yourAuthorisationEnds;
+
+  bool get theyAreKeepingIt => yourGrade == 'enrolled';
+}
