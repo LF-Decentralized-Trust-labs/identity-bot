@@ -2,6 +2,7 @@ package server
 
 import (
 	"crypto/ed25519"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"identity-agent-core/asset"
 	"identity-agent-core/authprovider"
+	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/login"
 	"identity-agent-core/store"
@@ -939,5 +941,68 @@ func TestAFoundingInviteCannotReplaceAnOwnerWhoAlreadyExists(t *testing.T) {
 	sealed, serr := s.sealedOwnerAuthority()
 	if serr != nil || sealed.AID != "BTheRealOwner" {
 		t.Fatalf("the owner was changed anyway: %+v (%v)", sealed, serr)
+	}
+}
+
+// An owner named by the log, whose key is only an unverified contact row, cannot
+// vouch for an authentication level.
+//
+// This is the door that stayed open after the sealed-only rule: an anchored
+// identity has no sealed record, so the voucher falls back to the owner's key —
+// and if that may come from a contact row, anything able to write one is back to
+// vouching for itself. Contact rows are written by handlers that fetch a record
+// from an address the caller names, which is how this was reached twice.
+//
+// It stays shut rather than trusting the row. The way to open it is to verify
+// the owner's key event log, not to lower this.
+func TestAnUnverifiedOwnerRowCannotVouch(t *testing.T) {
+	s := serverWithIdentity(t, "EORG")
+
+	// The identity's inception names an owner — an anchor, and nothing sealed.
+	keri := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"aid": "EORG",
+			"kel": []map[string]interface{}{{
+				"t": "icp", "i": "EORG",
+				"a": []interface{}{map[string]interface{}{
+					"i": "ETHEOWNER", "s": "0", "d": "ETHEOWNER"}},
+			}},
+		})
+	}))
+	defer keri.Close()
+	driver := drivers.NewKeriDriver()
+	driver.BaseURL = keri.URL
+	s.KeriDriver = driver
+
+	// The attacker writes the owner's key, exactly as the scan and contact
+	// routes do.
+	attacker := make([]byte, ed25519.SeedSize)
+	for i := range attacker {
+		attacker[i] = byte(i + 31)
+	}
+	pub := ed25519.NewKeyFromSeed(attacker).Public().(ed25519.PublicKey)
+	if err := s.DataStore.SaveContact(store.ContactRecord{
+		AID: "ETHEOWNER", Status: "accepted", PublicKey: iacrypto.VerkeyQB64(pub),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	at := time.Now().UTC()
+	vouched, err := login.SignString(
+		canonicalAuthLevelStatement("BSomeController", authprovider.LevelHigh, at, 99),
+		attacker)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := remote("POST", "/api/rotation", "")
+	req.Header.Set(headerControllerAuthLevel, string(authprovider.LevelHigh))
+	req.Header.Set(headerControllerAuthAt, at.Format(time.RFC3339))
+	req.Header.Set(headerControllerAuthScore, "99")
+	req.Header.Set(headerAuthLevelVouchedBy, vouched)
+
+	if got := s.theAuthenticationSomebodyVouchedFor(req, "BSomeController", at); got.Measured {
+		t.Fatalf("a contact row nobody verified vouched for the strongest level, so "+
+			"anything able to write one grants itself everything: %+v", got)
 	}
 }

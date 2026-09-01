@@ -280,16 +280,13 @@ func (s *CoreServer) theAuthenticationSomebodyVouchedFor(
 	// default and neither route was named.
 	//
 	// Those routes are closed to controllers now. This is the second lock, and
-	// it is the one that does not depend on having thought of every route: the
-	// voucher is only ever checked against the record SEALED at provisioning,
-	// which no API route writes. An agent with no sealed record has no device
-	// entitled to speak for it, and every raised action stays shut.
-	authority, err := s.sealedOwnerAuthority()
-	if err != nil || authority == nil || authority.PublicKey == "" {
+	// it is the one that does not depend on having thought of every route.
+	key, kerr := s.theKeyEntitledToVouch()
+	if kerr != nil {
 		return authprovider.Unmeasured(
 			"this agent knows of no device entitled to say how well somebody was authenticated")
 	}
-	pub, err := login.DecodeVerkey(authority.PublicKey)
+	pub, err := login.DecodeVerkey(key)
 	if err != nil {
 		return authprovider.Unmeasured("the key of the device that vouches is unusable")
 	}
@@ -349,4 +346,54 @@ func canonicalControllerRequest(
 		strconv.Itoa(authenticated.Score),
 		iacrypto.Blake3QB64Must(body),
 	}, "\n")
+}
+
+// theKeyEntitledToVouch is whose statement about an authentication level this
+// agent will believe.
+//
+// Deliberately narrower than ownerAuthority, which also answers from an
+// unverified contact row — a row written by handlers that fetch a record from an
+// address the caller names. Believing that here would let anything able to reach
+// one of those routes install the key that vouches for it and then vouch for
+// itself at the strongest level. That was reachable, and it was reachable again
+// through a second route after the first was closed, which is why this does not
+// depend on the list of routes being complete.
+//
+// Two sources, both of which a request cannot write:
+//
+//   - the record sealed at provisioning or at pairing, written before this agent
+//     was reachable and now written only once;
+//   - the owner's current key as this agent verified it against a key event log,
+//     which is evidence rather than an assertion.
+//
+// Neither present means nobody may speak for this identity, and every raised
+// action stays shut. That is a real configuration rather than a test shape — an
+// identity founded through inception names an owner but seals no key for them,
+// because inception is given the owner's identifier and not their key — so on
+// that agent a controller cannot perform a raised action until the owner's log
+// has been verified. Shut is the right answer while nothing trustworthy says
+// otherwise; the way to open it is to verify the owner's log, not to lower this.
+func (s *CoreServer) theKeyEntitledToVouch() (string, error) {
+	if sealed, err := s.sealedOwnerAuthority(); err == nil && sealed != nil &&
+		sealed.PublicKey != "" {
+		return sealed.PublicKey, nil
+	}
+	owner, err := s.ownerFromOwnIdentity(s.identityAIDForVouching())
+	if err != nil || owner == "" {
+		return "", fmt.Errorf("nothing is sealed and this identity names no owner")
+	}
+	return s.ownerKeyFromAVerifiedLog(owner)
+}
+
+// identityAIDForVouching is this agent's own identifier, or empty when it has
+// none. Separated only so the caller above reads as one thought.
+func (s *CoreServer) identityAIDForVouching() string {
+	if s.DataStore == nil {
+		return ""
+	}
+	identity, err := s.DataStore.GetIdentity()
+	if err != nil || identity == nil {
+		return ""
+	}
+	return identity.AID
 }
