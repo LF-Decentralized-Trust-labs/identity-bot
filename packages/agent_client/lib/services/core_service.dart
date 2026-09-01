@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import 'package:crypto/crypto.dart';
 
+import 'controller_signing_client.dart';
 import 'owner_signing_client.dart';
 import 'browser_session_client.dart';
 import '../config/agent_config.dart';
@@ -690,7 +691,30 @@ class CoreService {
     Future<Uint8List?> Function()? ownerSeed,
     String? ownerAid,
   }) {
-    final origin = baseUrl ?? AgentConfig.coreBaseUrl;
+    // The agent, which is this machine's core in the ordinary case and a
+    // different machine when this installation is only the front end.
+    final origin = baseUrl ?? AgentConfig.agentBaseUrl;
+
+    // In controller mode this machine signs as ITSELF, and does so even when a
+    // seed was handed in. That looks like ignoring the caller and is the safe
+    // direction: an installation holding the identity's key is not a
+    // controller, so a seed here is a mistake — and honouring it would sign as
+    // the OWNER, granting everything the controller gate exists to hold back.
+    // Signing as the controller grants controller authority, which is what this
+    // machine actually has.
+    if (AgentConfig.isAController && origin == AgentConfig.agentBaseUrl) {
+      return CoreService._(
+        origin,
+        ControllerSigningClient(
+          agentOrigin: origin,
+          // Always this machine, never the agent: the enclave key that signs
+          // lives here and the agent cannot reach it.
+          localCoreOrigin: AgentConfig.coreBaseUrl,
+        ),
+        null,
+      );
+    }
+
     if (ownerSeed == null) {
       final session = BrowserSessionClient(agentOrigin: origin);
       return CoreService._(origin, session, session);
