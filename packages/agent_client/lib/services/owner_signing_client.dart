@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
+import '../crypto/keys.dart';
 import '../crypto/owner_signature.dart';
 
 /// Signing every request to your own agent, without having to remember to.
@@ -129,10 +130,15 @@ Future<Uint8List?> Function() seedFromMnemonic(
     final words = await loadMnemonic();
     if (words == null || words.isEmpty) return null;
     final seed = toSeed(words.join(' '));
-    // Ed25519 takes a 32-byte seed; a BIP39 seed is 64. Truncating rather than
-    // hashing matches what the agent derives from, and getting this wrong
-    // produces a valid signature by the wrong key — which verifies as an
-    // impostor rather than as an error.
-    return seed.length > 32 ? Uint8List.fromList(seed.sublist(0, 32)) : seed;
+    // The same 32 bytes the identity was founded with, obtained by calling the
+    // one function that defines them rather than by repeating its steps.
+    //
+    // This used to truncate the BIP39 seed to 32 bytes, with a comment saying
+    // truncating rather than hashing was what matched. It was the wrong half of
+    // its own warning: KeyManager.generateFromSeed hashes the first 32 bytes,
+    // so a truncated seed signs as a key this identity has never used. Proven
+    // by deriving both and comparing — see the test beside this file. Nothing
+    // called it, so nothing had ever failed.
+    return KeyManager.signingSeed(seed);
   };
 }

@@ -743,7 +743,27 @@ class BackendProcessService {
     final client = HttpClient();
     client.connectionTimeout = const Duration(seconds: 2);
 
-    for (int i = 0; i < 30; i++) {
+    // HOW LONG TO WAIT, AND WHY IT IS NOT FIFTEEN SECONDS.
+    //
+    // This used to give up after 30 attempts at half a second. The backend it
+    // is waiting for routinely takes longer than that: it starts a KERI driver
+    // and waits on it, tries to raise a tunnel, and asks for an update
+    // manifest — and every one of those is SLOWER when it fails than when it
+    // succeeds. A machine with no route to the update host spends seconds in
+    // DNS before giving up.
+    //
+    // So the app reported "Backend failed to start" while the backend was
+    // starting perfectly and answered two seconds later. Measured on a Mac
+    // where cloudflared was refused and the update host did not resolve: window
+    // closed at :41, backend bound at :43, and the app then sat on an error
+    // screen in front of a working agent for the rest of the session.
+    //
+    // Waiting longer costs nothing when the backend is healthy — the loop exits
+    // on the first success, which is usually the first or second attempt. It
+    // costs only in the genuinely broken case, which is the one where a person
+    // is best served by a slower answer that is right.
+    const attempts = 120; // a minute, at half a second each
+    for (int i = 0; i < attempts; i++) {
       if (hasProcessExited()) {
         debugPrint('[BackendProcess] Process already exited — aborting health check');
         client.close();
@@ -773,8 +793,9 @@ class BackendProcessService {
       await Future.delayed(const Duration(milliseconds: 500));
     }
     client.close();
-    debugPrint('[BackendProcess] Health check timed out after 15s');
-    _appendOutput('[startup] Health check timed out after 15s');
+    final waited = attempts ~/ 2;
+    debugPrint('[BackendProcess] Health check timed out after ${waited}s');
+    _appendOutput('[startup] Health check timed out after ${waited}s');
     return false;
   }
 
