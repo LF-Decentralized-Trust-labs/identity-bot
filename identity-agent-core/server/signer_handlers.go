@@ -332,11 +332,22 @@ func (s *CoreServer) AcceptFoundingSigner(a SignerAcceptance) (SignerAccepted, e
 	//
 	// A second owner joins through the ceremony path above, which collects keys
 	// from several people and is not this.
+	// ANYTHING ALREADY SEALED STOPS THIS, not merely a different identity.
+	//
+	// Comparing only the AID left the hole open: a pairwise owner AID is not a
+	// secret — this handler returns it, and it sits on the roster — so a second
+	// redeem naming the SAME identity with a DIFFERENT public key was accepted,
+	// and the later key won. That is the whole of the attack, since what the
+	// sealed record decides is which key may speak for this identity.
+	//
+	// A founding invite founds. An owner joining an identity that already has
+	// one goes through the ownership ceremony above, which collects keys from
+	// several people and is a different path.
 	if existing, err := s.sealedOwnerAuthority(); err == nil && existing != nil &&
-		existing.AID != "" && existing.AID != a.PairwiseAID {
+		existing.AID != "" {
 		return SignerAccepted{}, fmt.Errorf(
 			"this agent already answers to an owner, so a founding invite cannot " +
-				"name a different one — an owner joins through an ownership ceremony")
+				"seal another — an owner joins through an ownership ceremony")
 	}
 
 	if err := s.SealOwnerAuthority(OwnerAuthority{

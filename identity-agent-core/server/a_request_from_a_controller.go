@@ -398,15 +398,43 @@ func canonicalControllerRequest(
 // has been verified. Shut is the right answer while nothing trustworthy says
 // otherwise; the way to open it is to verify the owner's log, not to lower this.
 func (s *CoreServer) theKeyEntitledToVouch() (string, error) {
+	// THE LOG DECIDES WHO, AND THE SEALED RECORD ONLY SUPPLIES A KEY FOR THAT
+	// SOMEBODY. Exactly as ownerAuthority does it, and for the same reason.
+	//
+	// This used to return the sealed key without asking who the log named. That
+	// split the two questions apart: a sealed record naming an identity the
+	// inception never anchored was REFUSED for "who is the owner" and ACCEPTED
+	// for "whose statement about an authentication level do I believe". Since
+	// the founding-signer redeem route is public and writes that record, anyone
+	// holding an unredeemed invite could install the key that vouches for every
+	// raised action on the agent — rotation, seed install, signing, archive
+	// retrieval — without ever becoming the owner.
+	if owner, oerr := s.ownerFromOwnIdentity(s.identityAIDForVouching()); oerr == nil &&
+		owner != "" {
+		// The verified log first, so a rotation is followed. Nothing rewrites
+		// the sealed record when an owner rotates, so asking it first would go
+		// on believing a key the owner has replaced.
+		if key, kerr := s.ownerKeyFromAVerifiedLog(owner); kerr == nil {
+			return key, nil
+		}
+		// Then the sealed record, and only for the owner the log named.
+		if sealed, serr := s.sealedOwnerAuthority(); serr == nil && sealed != nil &&
+			sealed.AID == owner && sealed.PublicKey != "" {
+			return sealed.PublicKey, nil
+		}
+		return "", fmt.Errorf(
+			"this identity names %s as its owner and this agent holds no key for them "+
+				"that it can trust, so nobody may speak for it", owner)
+	}
+
+	// No anchor at all — a machine sealed at provisioning before it had an
+	// identity. The sealed record is the only thing there is, and it was written
+	// before the machine was reachable.
 	if sealed, err := s.sealedOwnerAuthority(); err == nil && sealed != nil &&
 		sealed.PublicKey != "" {
 		return sealed.PublicKey, nil
 	}
-	owner, err := s.ownerFromOwnIdentity(s.identityAIDForVouching())
-	if err != nil || owner == "" {
-		return "", fmt.Errorf("nothing is sealed and this identity names no owner")
-	}
-	return s.ownerKeyFromAVerifiedLog(owner)
+	return "", fmt.Errorf("nothing is sealed and this identity names no owner")
 }
 
 // identityAIDForVouching is this agent's own identifier, or empty when it has

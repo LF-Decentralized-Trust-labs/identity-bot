@@ -1117,3 +1117,79 @@ func TestAnOwnerWhoRotatesIsNotLockedOutOfTheirOwnMachine(t *testing.T) {
 		t.Fatalf("resolved to neither the old nor the rotated key: %q", authority.PublicKey)
 	}
 }
+
+// A sealed record naming somebody the log never anchored cannot vouch.
+//
+// The two questions were split apart: such a record was refused for "who is the
+// owner" and accepted for "whose statement about an authentication level do I
+// believe". The founding-signer redeem route is public and writes that record,
+// so anybody holding an unredeemed invite could install the key that vouches for
+// every raised action — rotation, seed install, signing, archive retrieval —
+// without ever becoming the owner.
+func TestASealedRecordTheLogNeverNamedCannotVouch(t *testing.T) {
+	s := serverWithIdentity(t, "EMACHINE")
+
+	keri := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"aid": "EMACHINE",
+			"kel": []map[string]interface{}{{
+				"t": "icp", "i": "EMACHINE",
+				"a": []interface{}{map[string]interface{}{
+					"i": "ETHEREALOWNER", "s": "0", "d": "ETHEREALOWNER"}},
+			}},
+		})
+	}))
+	defer keri.Close()
+	driver := drivers.NewKeriDriver()
+	driver.BaseURL = keri.URL
+	s.KeriDriver = driver
+
+	// Somebody seals themselves under an identity the inception never named.
+	attacker := grantFor(70, GradeEnrolled)
+	if err := s.SealOwnerAuthority(OwnerAuthority{
+		AID: "EANIMPOSTER", PublicKey: attacker.PublicKey,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	key, err := s.theKeyEntitledToVouch()
+	if err == nil && key == attacker.PublicKey {
+		t.Fatal("a sealed record naming an identity the log never anchored was " +
+			"accepted as the thing that may vouch, so anybody who can write that " +
+			"record grants themselves every raised action")
+	}
+	if err == nil {
+		t.Fatalf("expected nobody to be entitled to vouch, got key %q", key)
+	}
+}
+
+// Sealing an owner is once, including a second attempt naming the SAME identity
+// with a different key.
+//
+// A pairwise owner AID is not a secret — the redeem handler returns it and it
+// sits on the roster — so comparing only the AID left the attack intact: the
+// later key simply won, and what the sealed record decides is which key may
+// speak for this identity.
+func TestAnOwnerCannotBeResealedUnderTheSameNameWithANewKey(t *testing.T) {
+	s := agentWithNoIdentity(t)
+	first := grantFor(71, GradeEnrolled)
+	if err := s.SealOwnerAuthority(OwnerAuthority{
+		AID: "BTHEOWNER", PublicKey: first.PublicKey,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	second := grantFor(72, GradeEnrolled)
+	if _, err := s.AcceptFoundingSigner(SignerAcceptance{
+		InviteToken: "a-token",
+		PairwiseAID: "BTHEOWNER", // the same name
+		PublicKey:   second.PublicKey,
+	}); err == nil {
+		t.Fatal("the owner was re-sealed under the same name with a different key")
+	}
+
+	sealed, serr := s.sealedOwnerAuthority()
+	if serr != nil || sealed.PublicKey != first.PublicKey {
+		t.Fatalf("the sealed key changed: %+v (%v)", sealed, serr)
+	}
+}

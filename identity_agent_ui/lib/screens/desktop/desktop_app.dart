@@ -5,7 +5,6 @@ import 'package:agent_client/services/keri_service.dart';
 import '../../services/preferences_service.dart';
 import 'desktop_dashboard_screen.dart';
 import '../../screens/contacts_screen.dart';
-import '../../screens/machines_that_may_act_screen.dart';
 import '../../screens/owners_screen.dart';
 import '../../screens/profile_screen.dart';
 import '../../screens/settings_screen.dart';
@@ -71,11 +70,6 @@ class _DesktopAppState extends State<DesktopApp> {
 
       case DesktopRoute.identityOwners:
         return OwnersScreen(coreService: CoreService(baseUrl: url));
-
-      // Which computers may act for this identity, and what this one would
-      // offer if somebody authorised it.
-      case DesktopRoute.identityMachines:
-        return MachinesThatMayActScreen(serverUrl: url);
 
       // ── Contacts / Apps ────────────────────────────────────────────────────
       case DesktopRoute.contacts:
