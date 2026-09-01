@@ -1055,3 +1055,65 @@ func seedForGrant(n byte) []byte {
 	}
 	return seed
 }
+
+// An owner who rotates their key is not locked out of their own machine.
+//
+// The owner of a paired machine is a pairwise identity their own device minted
+// for it, and that identity can rotate. Nothing rewrites the record sealed at
+// pairing when it does — changing owners is a separate ceremony — so the sealed
+// key is the key as it was at pairing and no later.
+//
+// Asking the sealed record FIRST, which this briefly did, means the machine goes
+// on checking against a key its owner has replaced and refuses them for good,
+// with no way back in. A verified key event log is the only source that tracks a
+// rotation, and it cannot be written by a caller, which is what makes it safe to
+// prefer.
+func TestAnOwnerWhoRotatesIsNotLockedOutOfTheirOwnMachine(t *testing.T) {
+	s := serverWithIdentity(t, "EMACHINE")
+
+	// The machine's inception names its owner.
+	keri := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"aid": "EMACHINE",
+			"kel": []map[string]interface{}{{
+				"t": "icp", "i": "EMACHINE",
+				"a": []interface{}{map[string]interface{}{
+					"i": "ETHEOWNER", "s": "0", "d": "ETHEOWNER"}},
+			}},
+		})
+	}))
+	defer keri.Close()
+	driver := drivers.NewKeriDriver()
+	driver.BaseURL = keri.URL
+	s.KeriDriver = driver
+
+	// Sealed at pairing: the owner's key as it was THEN.
+	old := grantFor(60, GradeEnrolled)
+	if err := s.SealOwnerAuthority(OwnerAuthority{
+		AID: "ETHEOWNER", PublicKey: old.PublicKey,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// The owner rotates. Their new key is recorded from a log this agent
+	// verified — the only place a rotation can honestly show up.
+	rotated := grantFor(61, GradeEnrolled)
+	if err := s.DataStore.SaveContactKEL(store.ContactKELRecord{
+		AID: "ETHEOWNER", KelVerified: true,
+		CurrentPublicKey: rotated.PublicKey,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	authority, err := s.ownerAuthority()
+	if err != nil {
+		t.Fatalf("the machine could not resolve its own owner: %v", err)
+	}
+	if authority.PublicKey == old.PublicKey {
+		t.Fatal("the machine is still checking against the key its owner replaced, " +
+			"so the owner is locked out of their own machine permanently")
+	}
+	if authority.PublicKey != rotated.PublicKey {
+		t.Fatalf("resolved to neither the old nor the rotated key: %q", authority.PublicKey)
+	}
+}

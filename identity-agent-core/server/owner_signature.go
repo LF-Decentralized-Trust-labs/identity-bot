@@ -99,37 +99,39 @@ func (s *CoreServer) ownerAuthority() (*OwnerAuthority, error) {
 		// owner. Proven end to end through the scan route, which nothing had
 		// thought to close, after the two obvious contact routes were closed.
 		//
-		// The sealed record is written at provisioning and at pairing, both
-		// before anything is reachable, and it is matched on AID here — so the
-		// log still decides WHO the owner is and the file only supplies key
-		// material for the owner the log already named. That is the same
-		// property the fallback below used to rest on; it is simply asked first
-		// now, so a contact record cannot get in ahead of it.
+		// A VERIFIED KEY EVENT LOG ANSWERS FIRST, because it is the only source
+		// that tracks a rotation.
+		//
+		// The owner of a paired machine is a pairwise identity the owner's own
+		// device minted for it, and that identity can rotate its keys. Nothing
+		// rewrites the sealed record when it does - changing owners is a
+		// separate ceremony - so the sealed key is the key as it was at pairing
+		// and no later. Asking it first, as this did briefly, means an owner who
+		// rotates is refused by their own machine, permanently, with no way back
+		// in. That is worse than the hole the ordering was closing.
+		//
+		// A verified log cannot be written by a caller, which is what makes it
+		// safe to prefer: the validators bind the log to the identifier before
+		// trusting anything in it, so forging one means forging a
+		// self-addressing identifier.
+		if key, kerr := s.ownerKeyFromAVerifiedLog(owner); kerr == nil {
+			return &OwnerAuthority{AID: owner, PublicKey: key}, nil
+		}
+
+		// Then the record sealed at provisioning or pairing. This is the
+		// founding case: at the moment a machine is adopted its owner is not yet
+		// a contact, so nothing has a log for them and this is the only key
+		// there is. Matched on AID, so the log still decides WHO the owner is
+		// and the file only supplies key material for the owner it named.
 		if sealed, serr := s.sealedOwnerAuthority(); serr == nil && sealed.AID == owner &&
 			sealed.PublicKey != "" {
 			return &OwnerAuthority{AID: owner, PublicKey: sealed.PublicKey}, nil
 		}
 
-		// Nothing sealed for THIS owner — which is the case where a sealed file
-		// names somebody else, and the anchor has to win over it.
-		//
-		// A key this agent verified against a key event log answers next,
-		// because a contact row on its own is written by handlers that fetch a
-		// record from an address the caller supplies.
-		if key, kerr := s.ownerKeyFromAVerifiedLog(owner); kerr == nil {
-			return &OwnerAuthority{AID: owner, PublicKey: key}, nil
-		}
-
-		// And last, an unverified contact row. Kept because the anchor naming an
-		// owner whose key is only on file that way is a real state — it is what
-		// the precedence test describes — and refusing it would lock an owner
-		// out of their own agent, which is worse than the narrowed risk.
-		//
-		// Narrowed, not gone: this is only reached when nothing is sealed for
-		// the owner the log names, so an agent that was paired or provisioned is
-		// already past it. What remains is worth closing at the source, by
-		// verifying the owner's log when the relationship is established rather
-		// than by refusing here.
+		// And last, an unverified contact row. Kept because refusing here would
+		// lock an owner out of their own agent, which is worse than the narrowed
+		// risk - but it stays last, because those rows are written by handlers
+		// that fetch a record from an address the caller supplies.
 		key, kerr := s.publicKeyOf(owner)
 		if kerr != nil {
 			// Refused rather than falling through. Falling back to this agent's

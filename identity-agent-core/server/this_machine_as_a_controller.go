@@ -56,11 +56,31 @@ func (s *CoreServer) thisMachineAsAController() (ControllerIdentity, error) {
 	// than assumed: the fallback is silent by design.
 	signer := secureenclave.NewPlatformSigner(s.DataDir)
 	if !secureenclave.UsingHardware(signer) {
+		// TWO DIFFERENT ANSWERS, AND THEY NEED DIFFERENT WORDS.
+		//
+		// The capability check and the signer ask different questions. The check
+		// creates an ephemeral key in the hardware and throws it away, so it
+		// answers "can this hardware do it at all". The signer has to PERSIST a
+		// key, which on a Mac needs the keychain, and that can be refused while
+		// the hardware itself is perfectly present — a machine with no
+		// interactive session is the ordinary case.
+		//
+		// Saying "no hardware that can keep a key to itself (hardware key
+		// protection available)" is what this produced before, which is a
+		// sentence that argues with itself and sends somebody looking for a
+		// missing chip they have.
+		found := secureenclave.HardwareRootStatus()
+		if found.Status == secureenclave.Absent {
+			return ControllerIdentity{}, fmt.Errorf(
+				"this computer has no hardware that can keep a key to itself, so it "+
+					"cannot act for an identity — a key anybody can copy off is an "+
+					"authorisation granted to anybody (%s)", found.String())
+		}
 		return ControllerIdentity{}, fmt.Errorf(
-			"this computer has no hardware that can keep a key to itself (%s), so it "+
-				"cannot act for an identity — a key anybody can copy off is an "+
-				"authorisation granted to anybody",
-			secureenclave.HardwareRootStatus().String())
+			"this computer has hardware that can keep a key to itself, but could not "+
+				"use it just now, so it has not been given one — %s. A key held any "+
+				"other way is an authorisation granted to anybody who can read it",
+			found.String())
 	}
 	pub, err := signer.PublicKey()
 	if err != nil {
