@@ -295,46 +295,46 @@ void main() {
         MockClient((req) async =>
             http.Response(body, codes[req.url.path] ?? 404));
 
-    test('a real Identity Agent is recognised, and names itself', () async {
+    test('a real Identity Agent is recognised by how it answers', () async {
       final asking = AskingToActForAnIdentity(
         localCoreOrigin: localCore,
         client: MockClient((req) async {
-          if (req.url.path == '/api/health') return http.Response('{}', 200);
-          if (req.url.path == '/api/identity') {
-            return http.Response(jsonEncode({'aid': 'EMYIDENTITY'}), 200);
+          if (req.url.path == '/api/health') {
+            return http.Response(
+                jsonEncode({'status': 'active', 'agent': 'keri-go'}), 200);
           }
           return http.Response('no', 404);
         }),
       );
-      expect(await asking.whichAgentIsAt(agent), 'EMYIDENTITY');
+      await asking.confirmAnAgentIsAt(agent);
     });
 
     test('a server that merely refuses is not an Identity Agent', () async {
-      // The whole class the previous check accepted: an access proxy, a deny
+      // The whole class an owner-only check accepted: an access proxy, a deny
       // rule, a relay that refuses unknown paths, somebody else's agent.
       final asking = AskingToActForAnIdentity(
         localCoreOrigin: localCore,
-        client: answering({'/api/health': 403, '/api/identity': 403}),
+        client: answering({'/api/health': 403}),
       );
-      expect(asking.whichAgentIsAt(agent), throwsA(isA<Exception>()));
+      expect(asking.confirmAnAgentIsAt(agent), throwsA(isA<Exception>()));
     });
 
-    test('a JSON endpoint that is not an Identity Agent is refused', () async {
+    test('a JSON endpoint answering 200 is not an Identity Agent', () async {
+      // The status alone is not enough: a great many things answer 200 at a
+      // path they do not know. Far fewer describe themselves this way.
       final asking = AskingToActForAnIdentity(
         localCoreOrigin: localCore,
-        client: answering({'/api/health': 200, '/api/identity': 200},
-            body: '{"status":"ok"}'),
+        client: answering({'/api/health': 200}, body: '{"status":"ok"}'),
       );
-      expect(asking.whichAgentIsAt(agent), throwsA(isA<Exception>()));
+      expect(asking.confirmAnAgentIsAt(agent), throwsA(isA<Exception>()));
     });
 
-    test('an agent holding no identity yet has nothing to act for', () async {
+    test('an HTML page is refused rather than parsed', () async {
       final asking = AskingToActForAnIdentity(
         localCoreOrigin: localCore,
-        client: answering({'/api/health': 200, '/api/identity': 200},
-            body: '{"initialized":false}'),
+        client: answering({'/api/health': 200}, body: '<html>hello</html>'),
       );
-      expect(asking.whichAgentIsAt(agent), throwsA(isA<Exception>()));
+      expect(asking.confirmAnAgentIsAt(agent), throwsA(isA<Exception>()));
     });
   });
 
@@ -346,5 +346,42 @@ void main() {
         aid: 'BTHIS', publicKey: 'BTHIS', agentOrigin: 'https://box.example.test');
     final decoded = jsonDecode(offering.toBeScanned) as Map<String, dynamic>;
     expect(decoded['agent_origin'], 'https://box.example.test');
+  });
+
+  test('a wait stops when the screen that started it goes away', () async {
+    // It used to go on asking every two seconds for the rest of its ten
+    // minutes, against a client already closed, long after anybody was
+    // watching. Nothing broke; it kept a machine busy for nobody.
+    var asked = 0;
+    final asking = AskingToActForAnIdentity(
+      localCoreOrigin: localCore,
+      client: MockClient((req) async {
+        if (req.url.path == '/api/controller/sign') {
+          return http.Response(
+              jsonEncode({
+                'controller_aid': 'B1',
+                'signature': '0BSIG',
+                'timestamp': '2026-09-01T00:00:00Z',
+              }),
+              200);
+        }
+        asked++;
+        return http.Response('not authorised', 403);
+      }),
+    );
+
+    final waiting = asking.waitUntilGranted(agent,
+        every: const Duration(milliseconds: 5),
+        until: const Duration(seconds: 30));
+
+    await Future<void>.delayed(const Duration(milliseconds: 30));
+    asking.dispose();
+    final afterDispose = asked;
+
+    // It returns rather than running out the clock.
+    expect(await waiting.timeout(const Duration(seconds: 2)), isNull);
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+    expect(asked, lessThanOrEqualTo(afterDispose + 1),
+        reason: 'it went on asking after being disposed');
   });
 }

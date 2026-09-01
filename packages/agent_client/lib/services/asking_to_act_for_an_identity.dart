@@ -37,6 +37,15 @@ class AskingToActForAnIdentity {
   final http.Client _plain;
   final bool _ownClient;
 
+  /// Set when this object is disposed, so a wait in flight stops.
+  ///
+  /// Without it the loop went on asking every two seconds for the rest of its
+  /// ten minutes, against a client that had already been closed, long after the
+  /// screen that started it was gone. Nothing broke; it simply kept a machine
+  /// busy doing something nobody was waiting for, which is the kind of thing
+  /// that is only ever found by somebody looking.
+  bool _disposed = false;
+
   /// What this computer would offer if somebody authorised it.
   ///
   /// Returns null when this hardware cannot act for an identity at all — no
@@ -115,41 +124,50 @@ class AskingToActForAnIdentity {
     }
   }
 
-  /// Whether an Identity Agent is really at [agentOrigin], and which one.
+  /// Whether an Identity Agent is really at [agentOrigin].
   ///
-  /// ASKED OF THE TWO ROUTES A REAL AGENT ANSWERS TO A STRANGER. Health is a
-  /// liveness probe that reveals nothing, and identity names the agent — both
-  /// public, both unauthenticated, and between them nothing else answers the
-  /// pair. Reaching for an owner-only route instead and reading its refusal as
-  /// success accepts far too much: anything behind an access proxy, any server
-  /// with a deny rule, any JSON endpoint returning an object without the field
-  /// being looked for, and any OTHER person's agent all refuse identically.
+  /// ASKED OF THE ONE ROUTE AN AGENT ANSWERS TO A STRANGER, and checked on what
+  /// comes back rather than on the status alone. Health is a liveness probe
+  /// that reveals nothing, which is exactly why it is public — and it names the
+  /// software answering, so a 200 from something else does not pass.
   ///
-  /// The identifier comes back so it can be shown before the code goes on
-  /// screen and recorded then, rather than trusting whatever answers ten
-  /// minutes later. An address is not an identity; this is the moment somebody
-  /// can still act on the difference.
-  Future<String> whichAgentIsAt(String agentOrigin) async {
-    final health = await _plain.get(Uri.parse('$agentOrigin/api/health'));
-    if (health.statusCode != 200) {
-      throw Exception('nothing that looks like an Identity Agent answered at '
-          '$agentOrigin (${health.statusCode})');
+  /// It cannot say WHICH identity is there. Nothing public does: the routes that
+  /// name an identity all need to know the identifier already, which is the
+  /// thing being looked for. So the identifier is learned when the grant
+  /// arrives, and this establishes only that the address leads to an agent —
+  /// which is the common mistake, a typo, and worth catching before somebody
+  /// watches a code for ten minutes.
+  ///
+  /// Reaching for an owner-only route and reading its refusal as success would
+  /// accept far more: anything behind an access proxy, any server with a deny
+  /// rule, any JSON endpoint, and any OTHER person's agent all refuse
+  /// identically.
+  Future<void> confirmAnAgentIsAt(String agentOrigin) async {
+    late final http.Response res;
+    try {
+      res = await _plain.get(Uri.parse('$agentOrigin/api/health'));
+    } catch (e) {
+      throw Exception('nothing answered at $agentOrigin — check the address');
     }
-    final res = await _plain.get(Uri.parse('$agentOrigin/api/identity'));
     if (res.statusCode != 200) {
-      throw Exception('there is something at $agentOrigin, and it did not say '
-          'which identity it holds (${res.statusCode})');
+      throw Exception('something answered at $agentOrigin and it is not an '
+          'Identity Agent (${res.statusCode})');
     }
-    final body = jsonDecode(res.body);
-    final aid = body is Map<String, dynamic>
-        ? (body['aid'] ?? (body['identity'] is Map ? body['identity']['aid'] : ''))
-            .toString()
-        : '';
-    if (aid.isEmpty) {
-      throw Exception('whatever is at $agentOrigin holds no identity yet, so '
-          'there is nothing for this computer to act for');
+    Object? body;
+    try {
+      body = jsonDecode(res.body);
+    } catch (_) {
+      throw Exception('whatever is at $agentOrigin did not answer like an '
+          'Identity Agent');
     }
-    return aid;
+    // The shape, not merely the status. A great many things answer 200 at a
+    // path they do not know; far fewer describe themselves this way.
+    if (body is! Map<String, dynamic> ||
+        (body['agent'] ?? '').toString().isEmpty ||
+        (body['status'] ?? '').toString().isEmpty) {
+      throw Exception('whatever is at $agentOrigin did not answer like an '
+          'Identity Agent');
+    }
   }
 
   /// Whether the core beside this app will actually sign for it.
@@ -202,7 +220,7 @@ class AskingToActForAnIdentity {
     await confirmThisMachineCanSign();
 
     final deadline = DateTime.now().add(until);
-    while (DateTime.now().isBefore(deadline)) {
+    while (!_disposed && DateTime.now().isBefore(deadline)) {
       try {
         final told = await whatTheAgentSays(agentOrigin);
         if (told != null) return told;
@@ -215,6 +233,7 @@ class AskingToActForAnIdentity {
   }
 
   void dispose() {
+    _disposed = true;
     if (_ownClient) _plain.close();
   }
 }

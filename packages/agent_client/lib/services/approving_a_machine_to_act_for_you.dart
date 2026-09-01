@@ -43,6 +43,24 @@ class ApprovingAMachineToActForYou {
       throw const FormatException(
           'that code does not name a computer and the key it would act with');
     }
+    // A COMPUTER IS NAMED BY ITS KEY, and that is what tells one apart from an
+    // identity. An identifier and a public key together describe a great many
+    // things — an agent's own discovery record is exactly that shape, is served
+    // to anybody who knows the identifier, and was being read as a computer
+    // asking to act. It got no further, because the agent refuses a grant whose
+    // identifier and key disagree, but the refusal talked about a controller's
+    // identifier at somebody who had scanned a person.
+    //
+    // Checked here so the words match what happened. The identifier of a
+    // machine IS its key: not derived from it, not committed to by it — the
+    // same value, in the non-transferable form that carries the key and
+    // publishes nothing.
+    if (aid != key) {
+      throw const FormatException(
+          'that code names an identity rather than a computer — a computer is '
+          'named by the very key it acts with, and these are two different '
+          'things');
+    }
     return AMachineAsking(
       aid: aid,
       publicKey: key,
