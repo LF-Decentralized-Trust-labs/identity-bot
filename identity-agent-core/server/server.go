@@ -1607,8 +1607,11 @@ func (s *CoreServer) handleStoreIdentity(w http.ResponseWriter, r *http.Request)
 	// this agent IS. Composed with the route above it, two ungated calls made a
 	// founding out of parts.
 	//
-	// The mobile core stores its identity through here, which is why the answer
-	// is the platform's rather than a flat refusal: a phone may, and does.
+	// The platform's answer rather than a flat refusal, because the question is
+	// the same one founding asks and on a phone the answer is yes. Nothing in
+	// the client tree calls this today — both storage routes are reachable only
+	// by something hand-rolling HTTP — so this costs nothing now and is correct
+	// the day something does.
 	if s.refuseIfThisComputerMayNotFound(w) {
 		return
 	}
