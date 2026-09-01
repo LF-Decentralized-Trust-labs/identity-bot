@@ -729,6 +729,16 @@ class CoreService {
 
   CoreService._(this.baseUrl, this._client, this._session);
 
+  /// The client this service sends with, for callers that talk to the same
+  /// agent about something this class does not cover.
+  ///
+  /// Exposed rather than letting them build their own, because what is in here
+  /// is not a plain client: it signs as the owner, or carries a session, or
+  /// signs as this machine when the app is a controller. A caller that made its
+  /// own would send unsigned requests to an agent that correctly refuses them,
+  /// and the reason would not be visible anywhere.
+  http.Client get client => _client;
+
   Future<HealthResponse> getHealth() async {
     final response = await _client.get(
       Uri.parse('$baseUrl/api/health'),
