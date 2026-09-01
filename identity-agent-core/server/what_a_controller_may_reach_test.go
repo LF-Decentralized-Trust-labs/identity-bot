@@ -11,6 +11,7 @@ import (
 	"identity-agent-core/authprovider"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/login"
+	"identity-agent-core/store"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -658,5 +659,91 @@ func TestWithNoRootDeviceNobodyCanVouch(t *testing.T) {
 	}(), "EAnyMachine", time.Now().UTC())
 	if got.Measured {
 		t.Fatalf("an agent with no root-identity device accepted a level anyway: %+v", got)
+	}
+}
+
+// A controller cannot install the key that vouches for it.
+//
+// This is the attack a reviewer proved on this branch, and it needed no
+// authentication at all: a controller is permitted by default, POST
+// /api/store/identity was named nowhere, and ownerAuthority() falls back to the
+// agent's own identity record when nothing is anchored or sealed. So the machine
+// wrote its own key in as the owner, signed a statement vouching for itself at
+// the strongest level, and every raised gate opened — and it was then the owner
+// for isOwner on every route, which survives revoking the grant.
+//
+// Two locks now. The route is closed, and the voucher is checked only against
+// the record sealed at provisioning, which no route writes.
+func TestAControllerCannotInstallTheKeyThatVouchesForIt(t *testing.T) {
+	s := newAuthTestServer(t)
+	aid, seed := anAuthorisedMachine(t, s, GradeEnrolled)
+	r := s.buildRouter("")
+
+	// The first lock: the routes that decide who the owner is are closed.
+	for _, route := range []struct{ method, path, pattern string }{
+		{"POST", "/api/store/identity", "/api/store/identity"},
+		{"POST", "/api/contacts", "/api/contacts"},
+		{"PUT", "/api/contacts/BSomebody", "/api/contacts/{aid}"},
+		{"POST", "/api/contacts/resolve", "/api/contacts/resolve"},
+		{"DELETE", "/api/contacts/BSomebody", "/api/contacts/{aid}"},
+	} {
+		req, raised := theLevelThisActionNeeds(route.method, route.pattern)
+		if !raised || !req.Closed {
+			t.Errorf("%s %s is not closed to a controller, so it can rewrite who the "+
+				"owner is: %+v", route.method, route.pattern, req)
+		}
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, asThatMachine(t, aid, route.method, route.path,
+			`{"aid":"BAttackerChosen","public_key":"DAttackerChosen"}`, seed,
+			authprovider.LevelHigh, time.Now()))
+		if w.Code != http.StatusForbidden {
+			t.Errorf("%s %s admitted a controller at the strongest level: %d %s",
+				route.method, route.path, w.Code, w.Body.String())
+		}
+	}
+}
+
+// The second lock, checked on its own so it holds even if a route like those is
+// added and nobody remembers to close it.
+//
+// An agent whose owner is only its own identity record has no device entitled to
+// speak for it, so no voucher is accepted and every raised action stays shut.
+// Before this, that fallback key was what the voucher was checked against.
+func TestAVoucherIsOnlyBelievedFromTheSealedRecord(t *testing.T) {
+	// An agent with a real store, so the identity record below is genuinely the
+	// thing ownerAuthority would have fallen back to.
+	s := agentWithNoIdentity(t)
+
+	// An agent with an identity but nothing sealed: the ordinary personal agent,
+	// and the configuration the attack was proven against.
+	attacker := make([]byte, ed25519.SeedSize)
+	for i := range attacker {
+		attacker[i] = byte(i + 90)
+	}
+	pub := ed25519.NewKeyFromSeed(attacker).Public().(ed25519.PublicKey)
+	if err := s.DataStore.SaveIdentity(store.IdentityState{
+		AID:       "BWhateverTheCallerWrote",
+		PublicKey: iacrypto.VerkeyQB64(pub),
+	}); err != nil {
+		t.Fatalf("seeding the identity record: %v", err)
+	}
+
+	at := time.Now().UTC()
+	statement := canonicalAuthLevelStatement("BSomeController", authprovider.LevelHigh, at, 99)
+	vouched, err := login.SignString(statement, attacker)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := remote("POST", "/api/rotation", "")
+	req.Header.Set(headerControllerAuthLevel, string(authprovider.LevelHigh))
+	req.Header.Set(headerControllerAuthAt, at.Format(time.RFC3339))
+	req.Header.Set(headerControllerAuthScore, "99")
+	req.Header.Set(headerAuthLevelVouchedBy, vouched)
+
+	got := s.theAuthenticationSomebodyVouchedFor(req, "BSomeController", at)
+	if got.Measured {
+		t.Fatalf("a key written into the identity record vouched for a level, so a "+
+			"caller who can reach that record can grant itself anything: %+v", got)
 	}
 }

@@ -261,7 +261,23 @@ func (s *CoreServer) theAuthenticationSomebodyVouchedFor(
 			"this machine reported an authentication level with nothing vouching for it, " +
 				"and a machine may not score itself")
 	}
-	authority, err := s.ownerAuthority()
+	// WHOSE KEY THIS IS CHECKED AGAINST MATTERS AS MUCH AS THE CHECK.
+	//
+	// Not ownerAuthority(), which is right for deciding whether a request came
+	// from the owner and wrong here. Two of its answers are derived from state a
+	// request can write — the agent's own identity record, and the contact the
+	// owner's key is resolved from — so a caller who could reach either could
+	// install the key that vouches for it and then vouch for itself at the
+	// strongest level. That is not hypothetical: it was reachable on this branch
+	// at no authentication level at all, because a controller is permitted by
+	// default and neither route was named.
+	//
+	// Those routes are closed to controllers now. This is the second lock, and
+	// it is the one that does not depend on having thought of every route: the
+	// voucher is only ever checked against the record SEALED at provisioning,
+	// which no API route writes. An agent with no sealed record has no device
+	// entitled to speak for it, and every raised action stays shut.
+	authority, err := s.sealedOwnerAuthority()
 	if err != nil || authority == nil || authority.PublicKey == "" {
 		return authprovider.Unmeasured(
 			"this agent knows of no device entitled to say how well somebody was authenticated")

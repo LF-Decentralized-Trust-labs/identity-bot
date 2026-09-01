@@ -146,6 +146,37 @@ var controllerNeedsLevel = map[string]controllerRequirement{
 	"POST /api/employees/{aid}/revoke": {alsoRaised, authprovider.LevelVerified,
 		"revoking somebody takes away what this organisation said about them"},
 
+	// --- the state that decides WHO THE OWNER IS ---
+	//
+	// CLOSED, and this group is the one with a rule behind it rather than a
+	// judgement. Permitted-by-default is safe only where the thing being
+	// permitted cannot change the decision that permitted it. These routes can:
+	// each writes state that ownerAuthority() reads to work out whose signature
+	// counts as the owner's, and whose statement counts when vouching for an
+	// authentication level.
+	//
+	// The attack, proven on this branch before these were closed: a controller
+	// at NO authentication level posts its own key here, becomes the owner
+	// authority, signs an IA-AUTH-LEVEL-V1 statement for itself at the strongest
+	// level, and every raised gate opens. Worse than that, it is then the owner
+	// for isOwner on every route — which survives revoking its grant, because
+	// the grant is no longer what it is using.
+	//
+	// So the rule, and it generalises past these five: A CONTROLLER MAY NOT
+	// WRITE ANYTHING THE AUTHORISATION DECISION READS. Anything added later that
+	// feeds ownerAuthority — the identity record, the contact records its key is
+	// resolved from, the sealed record — belongs here on sight.
+	"POST /api/store/identity": {neverByAController, authprovider.LevelHigh,
+		"this decides which identity this agent is, and so whose signature counts as its owner's"},
+	"POST /api/contacts": {neverByAController, authprovider.LevelHigh,
+		"the owner's key is resolved from contacts, so writing one can replace the owner"},
+	"PUT /api/contacts/{aid}": {neverByAController, authprovider.LevelHigh,
+		"the owner's key is resolved from contacts, so editing one can replace the owner"},
+	"POST /api/contacts/resolve": {neverByAController, authprovider.LevelHigh,
+		"this fetches a record from an address the caller names and stores the key it returns"},
+	"DELETE /api/contacts/{aid}": {neverByAController, authprovider.LevelHigh,
+		"removing the owner's contact record changes how the owner's key is resolved"},
+
 	// --- who else may act for this identity ---
 	//
 	// ENROLLING A CONTROLLER IS CLOSED TO CONTROLLERS, at any level. It is the
