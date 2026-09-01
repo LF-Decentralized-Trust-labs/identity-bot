@@ -201,7 +201,86 @@ func (s *CoreServer) SealOwnerAuthority(oa OwnerAuthority) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(s.DataDir, ownerAuthorityFile), raw, 0o600)
+	// CREATE OR FAIL, and the kernel decides which — not a check above this line.
+	//
+	// Checking first and writing second is two operations, and everything that
+	// seals an owner does it from a request. Two concurrent redeems of a
+	// founding invite both read "nothing sealed", both pass, and the later write
+	// wins: an attacker racing the real founder seals their own key and the
+	// founder is refused from then on. The use-count on the invite is racy by
+	// the same mechanism, so one token is enough.
+	//
+	// A mutex would close it for one process and not for two, and — worse — it
+	// would live in whichever caller remembered it. This is exported and called
+	// from adoption as well as from redeeming an invite, so the guarantee has to
+	// be here, where it cannot be forgotten.
+	//
+	// O_EXCL also makes the write itself all-or-nothing at creation. Truncating
+	// an existing file and writing over it can be interrupted, and half a record
+	// reads back as unreadable rather than as unclaimed.
+	f, err := os.OpenFile(filepath.Join(s.DataDir, ownerAuthorityFile),
+		os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		if os.IsExist(err) {
+			return fmt.Errorf("this agent already answers to an owner — replacing one " +
+				"is an ownership ceremony, not a seal")
+		}
+		return err
+	}
+	defer f.Close()
+	if _, err := f.Write(raw); err != nil {
+		return err
+	}
+	return f.Sync()
+}
+
+// ReSealOwnerAuthority replaces the record for a path that legitimately changes
+// who a machine answers to.
+//
+// Separate from SealOwnerAuthority, and named so it cannot be reached by
+// accident. Sealing is once; replacing is a decision somebody with authority
+// already made — an ownership ceremony, or a restore that puts back what was
+// there. A caller that only means to seal must not be able to replace by
+// forgetting a flag, which is why this is a second function rather than an
+// argument.
+func (s *CoreServer) ReSealOwnerAuthority(oa OwnerAuthority) error {
+	if oa.AID == "" || oa.PublicKey == "" {
+		return fmt.Errorf("owner authority needs both an AID and a public key")
+	}
+	if _, err := login.DecodeVerkey(oa.PublicKey); err != nil {
+		return fmt.Errorf("owner public key: %w", err)
+	}
+	if oa.SealedAt == "" {
+		oa.SealedAt = time.Now().UTC().Format(time.RFC3339)
+	}
+	raw, err := json.MarshalIndent(oa, "", "  ")
+	if err != nil {
+		return err
+	}
+	// Written beside and renamed over, so a reader never sees half a record.
+	// A partial owner record is worse than none: it reads as unreadable, which
+	// is a different answer from unclaimed and sends a screen somewhere else.
+	dir := s.DataDir
+	tmp, err := os.CreateTemp(dir, ownerAuthorityFile+".*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(raw); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmp.Name(), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), filepath.Join(dir, ownerAuthorityFile))
 }
 
 // decodeOwnerKey and verifyOwnerString are the two steps of verification,

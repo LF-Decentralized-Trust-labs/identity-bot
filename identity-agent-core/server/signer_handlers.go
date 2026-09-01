@@ -350,6 +350,35 @@ func (s *CoreServer) AcceptFoundingSigner(a SignerAcceptance) (SignerAccepted, e
 				"seal another — an owner joins through an ownership ceremony")
 	}
 
+	// AND THE PUBLISHED LOG DECIDES, not only the sealed file.
+	//
+	// Refusing on the sealed record alone turned one attack into another. On an
+	// agent whose identity already anchors an owner but which has nothing
+	// sealed, a token-holder could still write the record — it granted them
+	// nothing once the vouching key started checking the anchor, but it took the
+	// slot, and every later redeem including the real founder's was refused for
+	// good. An attacker with one token could lock an organisation out of its own
+	// founding.
+	//
+	// So the anchored owner is asked too, and a founding invite may only seal
+	// the identity the inception already named.
+	if identity := s.identityAIDForVouching(); identity != "" {
+		anchored, aerr := s.ownerFromOwnIdentity(identity)
+		if aerr != nil {
+			// Not readable is not the same as absent, and treating it as absent
+			// is exactly how the slot gets taken. A founding redeem is not
+			// urgent; it can be retried when the log can be read.
+			return SignerAccepted{}, fmt.Errorf(
+				"this agent cannot read who its identity answers to, so it will not "+
+					"seal an owner on a guess: %w", aerr)
+		}
+		if anchored != "" && anchored != a.PairwiseAID {
+			return SignerAccepted{}, fmt.Errorf(
+				"this identity already answers to %s, so a founding invite naming "+
+					"%s cannot seal it", anchored, a.PairwiseAID)
+		}
+	}
+
 	if err := s.SealOwnerAuthority(OwnerAuthority{
 		AID:       a.PairwiseAID,
 		PublicKey: a.PublicKey,
