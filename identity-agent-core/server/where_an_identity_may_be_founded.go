@@ -79,7 +79,14 @@ func (s *CoreServer) refuseIfThisComputerMayNotFound(w http.ResponseWriter) bool
 	if v.Permitted {
 		return false
 	}
+	// Joined rather than concatenated, so a verdict written without an "instead"
+	// cannot produce a sentence trailing off after a dash. The shape is asserted
+	// in a test as well; this is what stops it reaching anybody meanwhile.
+	detail := v.Why
+	if v.Instead != "" {
+		detail = v.Why + " — " + v.Instead
+	}
 	writeError(w, http.StatusForbidden,
-		"an identity cannot be created on this computer", v.Why+" — "+v.Instead)
+		"an identity cannot be created on this computer", detail)
 	return true
 }
