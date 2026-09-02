@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'backend_process_service.dart';
 import 'mobile_core_service.dart';
 import 'profile_scope.dart';
+import 'point_this_app_at_its_agent.dart';
 
 /// One identity this installation holds, as it can be described while its
 /// Identity Agent is not running.
@@ -110,6 +111,18 @@ class IdentityProfiles {
         throw Exception(BackendProcessService.instance.startupError ??
             'the Identity Agent did not start');
       }
+      // WHICH HALF THIS APP IS RUNNING IS A PROPERTY OF THE OPEN PROFILE, so it
+      // is settled here — the one place that is passed through at start-up, on
+      // a switch, and when a profile is begun.
+      //
+      // Doing it only at start-up is the trap. One profile may be the front end
+      // for a sealed machine while another holds its own identity, and the
+      // answer lives in a process-wide value: a switch that did not redo this
+      // would leave every screen in the newly opened profile sending its
+      // requests to the PREVIOUS profile's agent, signed as this machine, and
+      // getting entirely plausible answers about the wrong identity — until the
+      // app was restarted.
+      await pointThisAppAtItsAgent();
       return;
     }
 
@@ -119,6 +132,16 @@ class IdentityProfiles {
           'no embedded core to start. Set it once at start-up.');
     }
     await core.startCore(dataDir: dir);
+    // AFTER it is answering, not merely after it was asked to start. Telling it
+    // which half this app runs is a request like any other, and sending it into
+    // a core still binding its port spends the whole retry budget before the
+    // code that actually knows when it is ready has run — so on the slowest
+    // cold starts, the ones where it matters most, it would give up.
+    if (!await core.waitForReady()) {
+      throw StateError('the Identity Agent core did not become ready, so this '
+          'app could not tell it which half it is running');
+    }
+    await pointThisAppAtItsAgent();
   }
 
   /// Make [profileId] the open one.

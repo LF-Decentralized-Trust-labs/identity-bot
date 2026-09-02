@@ -1,0 +1,177 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:agent_client/config/agent_config.dart';
+import 'package:agent_client/services/point_this_app_at_its_agent.dart';
+import 'package:agent_client/services/which_half_this_app_is_running.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:test/test.dart';
+
+/// Pointing the app also tells the core on this computer which half it is
+/// running.
+///
+/// The app knowing is not enough. A core with no identity answers every
+/// question about one correctly and about nobody — not initialized, no
+/// credentials, an empty roster — so a screen still calling this machine shows
+/// that as the person's own and nothing reports a problem. The core has to be
+/// told before it can refuse.
+///
+/// The symmetrical case matters as much: an installation that stopped being a
+/// front end and left the record behind would be locked out of the identity it
+/// now holds, by its own safety net, with a refusal naming an agent that is no
+/// longer anything to do with it.
+void main() {
+  _aNonAnswerChangesNothing();
+  _anOlderCoreIsNotAFailure();
+
+  late List<http.Request> seen;
+  late http.Client client;
+
+  setUp(() {
+    seen = [];
+    client = MockClient((req) async {
+      seen.add(req);
+      return http.Response('{}', 200);
+    });
+  });
+
+  http.Request theOneAbout(List<http.Request> rs) =>
+      rs.singleWhere((r) => r.url.path == '/api/controller/front-end-for');
+
+  test('it is told, when this app becomes a front end', () async {
+    await tellThisComputerWhichHalfItIsRunning(
+      agentAid: 'EAGENT',
+      agentOrigin: 'https://box.example.test',
+      using: client,
+    );
+
+    final told = theOneAbout(seen);
+    expect(told.method, 'POST');
+    final body = jsonDecode(told.body) as Map<String, dynamic>;
+    // Both, always. An address alone would leave the core naming an agent it
+    // cannot tell apart from whatever answers there.
+    expect(body['agent_aid'], 'EAGENT');
+    expect(body['agent_url'], 'https://box.example.test');
+    // Its own core, never the agent. The record is about THIS computer, and
+    // writing it on the agent would say something false about a machine that
+    // does hold the identity.
+    expect(told.url.toString(),
+        startsWith('${AgentConfig.coreBaseUrl}/api/controller/front-end-for'));
+  });
+
+  test('and it is untold, when this app holds the identity itself', () async {
+    await tellThisComputerWhichHalfItIsRunning(
+      agentAid: '',
+      agentOrigin: '',
+      using: client,
+    );
+
+    expect(theOneAbout(seen).method, 'DELETE');
+  });
+
+  test('a core that never answers is reported, not swallowed', () async {
+    final broken = MockClient((_) async => throw const SocketException('no'));
+    // It used to be logged and dropped. That left the app running as a front
+    // end with an unarmed core and a debugPrint as the only trace — the state
+    // this whole area exists to make impossible, reached quietly. It is raised
+    // now, and the caller that starts the core already renders a thrown detail.
+    await expectLater(
+      tellThisComputerWhichHalfItIsRunning(
+        agentAid: 'EAGENT',
+        agentOrigin: 'https://box.example.test',
+        using: broken,
+      ),
+      throwsA(isA<StateError>()),
+    );
+  });
+
+  test('a refusal is raised at once rather than retried for ten seconds',
+      () async {
+    var sent = 0;
+    // 409 is what the core answers when it already holds an identity, which is
+    // the one refusal a person can act on. Treating anything under 500 as
+    // accepted reported it as success; retrying it would bury it instead.
+    final refuses = MockClient((_) async {
+      sent++;
+      return http.Response('this computer holds an identity', 409);
+    });
+
+    await expectLater(
+      tellThisComputerWhichHalfItIsRunning(
+        agentAid: 'EAGENT',
+        agentOrigin: 'https://box.example.test',
+        using: refuses,
+      ),
+      throwsA(isA<StateError>()),
+    );
+    expect(sent, 1, reason: 'the core read it and said no on its merits, so '
+        'sending it again changes nothing and only hides the answer');
+  });
+
+  test('a core still starting is retried rather than given up on', () async {
+    var sent = 0;
+    final comingUp = MockClient((_) async {
+      sent++;
+      if (sent < 3) throw const SocketException('not listening yet');
+      return http.Response('{}', 200);
+    });
+
+    await tellThisComputerWhichHalfItIsRunning(
+      agentAid: 'EAGENT',
+      agentOrigin: 'https://box.example.test',
+      using: comingUp,
+    );
+    expect(sent, 3);
+  });
+}
+
+/// A read that failed is not an answer, and must not be acted on.
+///
+/// The settings say which half this app is running. When they cannot be read,
+/// "it holds the identity" and "we do not know" look identical from outside —
+/// both have no agent — and treating the second as the first is a guess that
+/// gets written down: it tells the core beside this app to forget it is a front
+/// end, and it stays forgotten after the settings come back. A working front
+/// end is un-armed by one bad read.
+void _aNonAnswerChangesNothing() {
+  test('a settings read that failed does not un-arm a front end', () {
+    final unknown = const WhichHalfThisAppIsRunning.couldNotBeRead();
+    final holdsIt = const WhichHalfThisAppIsRunning.itHoldsTheIdentity();
+
+    // The two must be distinguishable, or no caller can behave differently.
+    expect(unknown.couldNotTell, isTrue);
+    expect(holdsIt.couldNotTell, isFalse);
+    // And both report no agent, which is the safe read for anybody only asking
+    // where requests go.
+    expect(unknown.isAController, isFalse);
+    expect(holdsIt.isAController, isFalse);
+  });
+}
+
+/// A core older than this feature is not a failure to start over.
+///
+/// An application and the core beside it are pinned separately and move
+/// separately, so an app that knows about this reaching a core that does not is
+/// the ordinary case during a rollout. Raising it would refuse to start on every
+/// launch until both pins had moved — and the screen would say the backend
+/// failed to start, about a backend that started perfectly.
+void _anOlderCoreIsNotAFailure() {
+  test('a core that has never heard of this is not treated as a refusal',
+      () async {
+    var sent = 0;
+    final older = MockClient((_) async {
+      sent++;
+      return http.Response('404 page not found', 404);
+    });
+
+    await tellThisComputerWhichHalfItIsRunning(
+      agentAid: 'EAGENT',
+      agentOrigin: 'https://box.example.test',
+      using: older,
+    );
+    // Once. Retrying a route that does not exist spends the whole budget
+    // proving it still does not exist.
+    expect(sent, 1);
+  });
+}

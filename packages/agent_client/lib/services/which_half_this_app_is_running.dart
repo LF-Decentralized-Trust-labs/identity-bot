@@ -27,12 +27,27 @@ class WhichHalfThisAppIsRunning {
   const WhichHalfThisAppIsRunning._({
     required this.agentOrigin,
     required this.agentAid,
-  });
+  }) : couldNotTell = false;
 
   /// This installation holds the identity: the local core is the agent.
   const WhichHalfThisAppIsRunning.itHoldsTheIdentity()
       : agentOrigin = '',
-        agentAid = '';
+        agentAid = '',
+        couldNotTell = false;
+
+  /// The settings could not be read, so this is not an answer.
+  ///
+  /// A THIRD STATE, because two were not enough and the missing one was
+  /// dangerous. "It holds the identity" and "we do not know" look identical
+  /// from the outside — both have no agent — and a caller that treats the
+  /// second as the first acts on a guess. The guess un-armed a real front end:
+  /// a transient read failure said "not a controller", which told the core
+  /// beside it to forget the record, and it stayed forgotten after the settings
+  /// came back.
+  const WhichHalfThisAppIsRunning.couldNotBeRead()
+      : agentOrigin = '',
+        agentAid = '',
+        couldNotTell = true;
 
   /// The origin of the agent this app is a front end for, empty when this
   /// installation holds the identity itself.
@@ -46,6 +61,14 @@ class WhichHalfThisAppIsRunning {
   /// the identifier is what makes the next launch safe rather than trusting
   /// whatever answers.
   final String agentAid;
+
+  /// True when the settings could not be read, so nothing below is an answer.
+  ///
+  /// Callers that only ask "where do requests go" can ignore it and get the
+  /// local core, which is the safe read. Callers that CHANGE something on the
+  /// strength of it must not: acting on a non-answer is how a working front end
+  /// gets un-armed.
+  final bool couldNotTell;
 
   /// True when this app is only the front end.
   bool get isAController => agentOrigin.isNotEmpty;
@@ -111,7 +134,11 @@ class WhichHalfThisAppIsRunning {
       // answer is the ordinary one: talk to the local core, which will simply
       // have no identity, rather than send signed requests somewhere unverified.
       debugPrint('[controller] could not read which half this app is: $e');
-      return const WhichHalfThisAppIsRunning.itHoldsTheIdentity();
+      // NOT "it holds the identity". Saying that here is a guess dressed as an
+      // answer, and the guess is acted on: it tells the core beside this app to
+      // forget that it is a front end, which stays forgotten after the settings
+      // come back. Reading it is the safe direction; writing on it is not.
+      return const WhichHalfThisAppIsRunning.couldNotBeRead();
     }
   }
 }

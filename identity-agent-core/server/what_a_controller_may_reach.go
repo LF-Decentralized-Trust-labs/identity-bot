@@ -162,6 +162,27 @@ var controllerNeedsLevel = map[string]controllerRequirement{
 		"asking this computer's secure hardware to sign is for the app running on it, " +
 			"not for something reaching it from elsewhere"},
 
+	// Which half this computer is running. Written from the machine itself, by
+	// the app on it, and never from elsewhere.
+	//
+	// It decides whether this core answers about an identity at all, so it is
+	// one step further out than the rest of this list: not what a machine acting
+	// for somebody may DO, but whether the door is open. A controller that could
+	// set it would make an agent refuse its own owner; one that could clear it
+	// would put a front end back to answering about nobody. Neither is an
+	// escalation and both are somebody else's machine changed from a distance,
+	// which is enough.
+	//
+	// Reading it is raised rather than closed: a machine acting for somebody may
+	// reasonably want to know which half it is talking to, and the answer is an
+	// address the owner's device already has.
+	"POST /api/controller/front-end-for": {neverByAController, authprovider.LevelHigh,
+		"which half a computer is running is set on that computer, by the app on it"},
+	"DELETE /api/controller/front-end-for": {neverByAController, authprovider.LevelHigh,
+		"which half a computer is running is set on that computer, by the app on it"},
+	"GET /api/controller/front-end-for": {alsoRaised, authprovider.LevelAuthenticated,
+		"it names the identity this computer fronts for and where that identity is"},
+
 	// The same door, one step worse. This one signs as the OWNER of a machine —
 	// a pairwise identity derived from the root seed — so a controller that
 	// could reach it would obtain owner signatures and every raised action with
@@ -193,6 +214,14 @@ var controllerNeedsLevel = map[string]controllerRequirement{
 	// WRITE ANYTHING THE AUTHORISATION DECISION READS. Anything added later that
 	// feeds ownerAuthority — the identity record, the contact records its key is
 	// resolved from, the sealed record — belongs here on sight.
+	// Its twin, and it was missed for the same reason: the two are the storage
+	// pair, adjacent in the router, and one was named here while the other was
+	// named nowhere. This one writes key events and publishes them to the
+	// witnesses, which is a stronger thing than writing the identity row.
+	"POST /api/store/event": {neverByAController, authprovider.LevelHigh,
+		"writing key events decides what this identity's own history says, which " +
+			"is what every other check is read against"},
+
 	"POST /api/store/identity": {neverByAController, authprovider.LevelHigh,
 		"this decides which identity this agent is, and so whose signature counts as its owner's"},
 	"POST /api/contacts": {neverByAController, authprovider.LevelHigh,

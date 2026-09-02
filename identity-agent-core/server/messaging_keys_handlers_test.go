@@ -15,6 +15,10 @@ import (
 // end up in the same position as one founded here: committing to messaging keys
 // that come back from the recovery phrase. It got neither.
 func TestAnIdentityFoundedElsewhereStillGetsItsMessagingKeys(t *testing.T) {
+	// About what a machine founds, not about where founding is allowed.
+	// These run on the machines the platform check refuses, so this
+	// stands in for one that may found.
+	aMachineThatMayFound(t)
 	s := witnessWithSeed(t, 1)
 	const aid = "EFoundedOnAPhone"
 
@@ -77,6 +81,10 @@ func TestPreparingTwiceYieldsTheSameCommitment(t *testing.T) {
 // The keys sealed into the event must be the keys the agent then holds, or the
 // identity commits to something it cannot use.
 func TestTheSealedKeysAreTheKeysTheAgentKeeps(t *testing.T) {
+	// About what a machine founds, not about where founding is allowed.
+	// These run on the machines the platform check refuses, so this
+	// stands in for one that may found.
+	aMachineThatMayFound(t)
 	s := witnessWithSeed(t, 1)
 	const aid = "EFoundedOnAPhone2"
 
