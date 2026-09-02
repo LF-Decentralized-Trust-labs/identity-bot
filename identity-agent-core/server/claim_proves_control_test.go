@@ -107,6 +107,10 @@ func claimAs(t *testing.T, owner *CoreServer, url, code, ownerAID string) *httpt
 // Without this every refusal below would be satisfied by a machine that refuses
 // everybody, which would be useless and would look identical in a test report.
 func TestAComputerCanBeClaimedByWhoeverProvesTheyHoldTheIdentity(t *testing.T) {
+	// About what a machine founds, not about where founding is allowed.
+	// These run on the machines the platform check refuses, so this
+	// stands in for one that may found.
+	aMachineThatMayFound(t)
 	machine, srv, code := pairableComputer(t)
 	owner := adoptingOwner(t)
 
@@ -266,6 +270,10 @@ func TestAMachineThatCannotVerifyRefusesRatherThanTrusts(t *testing.T) {
 // sent an unsigned claim, because they were written to prove refusals; the
 // honest path through both gates was never run.
 func TestTheIdentityAMachineWasPromisedToCanClaimItByProvingControl(t *testing.T) {
+	// About what a machine founds, not about where founding is allowed.
+	// These run on the machines the platform check refuses, so this
+	// stands in for one that may found.
+	aMachineThatMayFound(t)
 	resetLocalPairingOfferForTest()
 	resetExpectedClaimForTest()
 	resetPairingOfferForTest()
@@ -385,6 +393,10 @@ func TestProvingControlOfSomeIdentityIsNotEnoughOnAMachinePromisedToAnother(t *t
 // now belongs to the first identity that presents the code, which in practice
 // is seconds after the person scans.
 func TestWhoeverScansFirstLocksTheComputerToTheirIdentity(t *testing.T) {
+	// About what a machine founds, not about where founding is allowed.
+	// These run on the machines the platform check refuses, so this
+	// stands in for one that may found.
+	aMachineThatMayFound(t)
 	machine, srv, code := pairableComputer(t)
 
 	first := adoptingOwner(t)

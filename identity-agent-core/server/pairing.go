@@ -328,6 +328,18 @@ func (s *CoreServer) handlePairingComplete(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// A COMPUTER YOU PAIR WITH FOUNDS ITS OWN ROOT, and this is where it does
+	// it — so the machine doing the founding has to be one that may. On a
+	// sealed machine it is; on the laptop somebody is pairing, it is not, and
+	// this was the way round the check on the direct route.
+	//
+	// Asked as soon as the request has been read and before any of the state
+	// below, so somebody being refused is told the thing that actually stops
+	// them rather than a complaint about the ceremony they are midway through.
+	if req.FoundAsRoot && s.refuseIfThisComputerMayNotFound(w) {
+		return
+	}
+
 	pairingState.Lock()
 	defer pairingState.Unlock()
 	if pairingState.offered == nil {

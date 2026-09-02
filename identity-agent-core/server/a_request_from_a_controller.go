@@ -42,8 +42,14 @@ const (
 	// level counts as nothing measured — see theAuthenticationSomebodyVouchedFor
 	// for why a machine may not score itself.
 	//
-	// They are bound into the request signature too, so nothing in the middle can
-	// alter them in flight. That is defence in depth, not the thing that makes
+	// The first three are bound into the request signature, so nothing in the
+	// middle can alter them in flight. The vouching signature is not: stripping
+	// it downgrades the level to nothing measured, which then disagrees with the
+	// level inside the signed string, and the request is refused as a mismatch.
+	// The outcome is the same and the mechanism is not, which is worth saying
+	// rather than leaving a reader to assume all four are covered the same way.
+	//
+	// Either way this is defence in depth, not the thing that makes
 	// them trustworthy.
 	headerControllerAuthLevel = "X-IA-Controller-Auth-Level"
 	headerControllerAuthAt    = "X-IA-Controller-Auth-At"

@@ -154,12 +154,21 @@ always-on computer, and the only case for somebody who has no phone.
 | Grade | For | What the identity issues | Lifetime |
 |---|---|---|---|
 | **Enrolled** | a machine somebody keeps — their laptop, an organisation's desktop | a grant against the machine's own key, which is also its identifier | until the owner removes it; visible in the device list |
-| **Scoped** | a machine somebody borrowed — a library, a hotel, a colleague's desk | a scoped authorisation over the controller's own public key | expires; nothing permanent is written |
+| **Scoped** | a machine somebody borrowed — a library, a hotel, a colleague's desk | a grant against the machine's own key, carrying an expiry | stops at the expiry; the row stays, marked, in the device list |
 
 The distinction is not security theatre. An enrolled machine is one somebody
-will still be using next month, so it is worth a durable record; a computer used
-once should not leave a permanent device on an identity for a session that ended
-the same afternoon. So the borrowed case is authorised without being enrolled.
+will still be using next month; a borrowed one should stop being able to act
+when the afternoon ends, without anybody having to remember to remove it. That
+is the whole of the difference today: an expiry, and what it is called.
+
+**Corrected 2026-09-01.** The Scoped row said *"nothing permanent is written"*
+and the paragraph said a borrowed computer should not leave a device on an
+identity. Neither is what happens. Both grades are written to the same store,
+nothing prunes either, and one whose authorisation ran out is listed and marked
+rather than hidden — deliberately, because a machine that stopped is something
+its owner may still want to see, and a device list that quietly forgets is a
+device list nobody can audit. Whether a borrowed machine should also disappear
+from that list after some time is an open question, and not one this decides.
 
 **Neither grade issues a delegated identifier, and that is deliberate.** An
 earlier revision of this section said the enrolled grade got a delegated
@@ -209,14 +218,26 @@ meant "runs an inception of its own rather than a delegated one" and reads as
 - **A controller holds a key, and that key is its own.** It is never handed the
   identity's key material. What it is given is authority to act, which can be
   taken away without touching the identity itself.
-- **A controller runs only on hardware with a secure enclave** — the same bar an
-  agent must meet. A device that cannot protect a key cannot hold one, and an
-  authorisation granted to a key anybody can extract is an authorisation granted
-  to anybody.
+- **A controller runs only on hardware with a secure enclave.** A device that
+  cannot protect a key cannot hold one, and an authorisation granted to a key
+  anybody can extract is an authorisation granted to anybody. This is not the
+  same bar as an agent's — that one is attestation, and neither a controller nor
+  a paired machine has to meet it, because neither holds the identity.
 - **The device holding the identity decides.** Authority is granted by the party
-  that holds the keys, and how strongly the person was authenticated at that
-  moment is part of the decision — a borrowed machine can be made to require a
-  stronger proof than one somebody uses daily.
+  that holds the keys, and taken away by it. How strongly the person was
+  authenticated is part of what a request is judged against — but it is judged
+  per action, at the moment of asking, from a statement the key-holding device
+  signed. It is not a property of the grant.
+
+  **Corrected 2026-09-01.** This said the authentication at the moment of
+  granting was part of the decision, and that a borrowed machine could be made
+  to require stronger proof than one somebody uses daily. Neither is
+  implemented, and neither follows from the design as it stands: a grant records
+  the machine, its key, a label, a grade and an expiry, and nothing about how
+  its owner was authenticated when they made it. What a machine may do is
+  decided per route and is identical for both grades. The line above says what
+  is true instead. Whether the grade should raise the bar as well is a question
+  worth asking and has never been answered.
 - **It is an application, never a browser.** A page delivered by the machine it
   is meant to protect you against cannot be checked by the browser receiving it,
   and a browser has no enclave to hold a key in. Browser access is deferred
