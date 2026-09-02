@@ -295,6 +295,12 @@ func (s *CoreServer) handleRecoveryRetrieve(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *CoreServer) handleRecoveryRootAIDRotation(w http.ResponseWriter, r *http.Request) {
+	// Named a rotation and it MINTS A NEW ROOT: a fresh identity at sequence
+	// zero, with its own inception event, created on this machine. Whatever it
+	// is called, it is a founding, and the name is exactly why it was missed.
+	if s.refuseIfThisComputerMayNotFound(w) {
+		return
+	}
 	if !recovery.RootAIDRotationAvailable() {
 		writeError(w, http.StatusServiceUnavailable, "Root-AID rotation not available",
 			"Break-glass root-AID rotation is gated pending security review of the signed old-root delegation anchor")

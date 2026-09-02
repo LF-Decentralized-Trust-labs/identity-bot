@@ -29,6 +29,10 @@ func inceptionRequest(t *testing.T, s *CoreServer, body map[string]any) *httptes
 }
 
 func TestAnAgentThatServesSomebodyElseRefusesToFoundAnUnownedIdentity(t *testing.T) {
+	// This is about what founding produces, not about where it is
+	// allowed to happen. The machines these run on are the machines the
+	// platform check refuses, so it stands in for one that may found.
+	aMachineThatMayFound(t)
 	s := witnessWithStore(t)
 	s.requireOwnerAtInception = true
 	// Non-nil so the request reaches the owner check; never called, because the

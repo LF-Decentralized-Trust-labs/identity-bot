@@ -1306,6 +1306,17 @@ func (s *CoreServer) handleIdentity(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
+	// WHERE, BEFORE ANYTHING ELSE. Founding is the one act that cannot be
+	// undone: an identity's owner is fixed in the event that creates it, so one
+	// founded on a machine that cannot prove its software can never be moved to
+	// a machine that can. Everything below this line is detail by comparison.
+	//
+	// Refused first, and refused before the request is even read, so a machine
+	// that may not found never gets as far as producing key material.
+	if s.refuseIfThisComputerMayNotFound(w) {
+		return
+	}
+
 	existing, _ := s.DataStore.GetIdentity()
 	if existing != nil {
 		writeError(w, http.StatusConflict, "Identity already exists", "AID: "+existing.AID)
@@ -1543,6 +1554,13 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *CoreServer) handleHybridInception(w http.ResponseWriter, r *http.Request) {
+	// Real key material and a real inception event, so the same rule applies as
+	// to founding through any other door. The secrets are discarded afterwards,
+	// which makes this the weakest of the ways in and not a permitted one.
+	if s.refuseIfThisComputerMayNotFound(w) {
+		return
+	}
+
 	var req HybridInceptionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
@@ -1596,6 +1614,20 @@ func (s *CoreServer) handleHybridInception(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *CoreServer) handleStoreIdentity(w http.ResponseWriter, r *http.Request) {
+	// Storing one somebody else made puts an identity on this machine just as
+	// surely as founding it here, and this route is what decides which identity
+	// this agent IS. Composed with the route above it, two ungated calls made a
+	// founding out of parts.
+	//
+	// The platform's answer rather than a flat refusal, because the question is
+	// the same one founding asks and on a phone the answer is yes. Nothing in
+	// the client tree calls this today — both storage routes are reachable only
+	// by something hand-rolling HTTP — so this costs nothing now and is correct
+	// the day something does.
+	if s.refuseIfThisComputerMayNotFound(w) {
+		return
+	}
+
 	var req store.IdentityState
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
@@ -1649,6 +1681,22 @@ func (s *CoreServer) handleStoreEvent(w http.ResponseWriter, r *http.Request) {
 	if req.AID == "" || req.EventType == "" {
 		writeError(w, http.StatusBadRequest, "Missing required fields", "aid and event_type are required")
 		return
+	}
+
+	// AN INCEPTION EVENT IS A FOUNDING, whatever route it arrives by. This one
+	// writes it into this machine's key event log AND publishes it to the
+	// witnesses, so it is the more consequential half of the pair — and it was
+	// missed because storage endpoints read as plumbing rather than as a way an
+	// identity begins.
+	//
+	// Guarded on the event type rather than closed, for the same reason the
+	// pairing route is guarded on the flag: rotations, interactions and receipts
+	// on an identity that already exists have to keep working, and refusing
+	// those would stop an identity living rather than stop one starting.
+	if req.EventType == "icp" || req.EventType == "dip" {
+		if s.refuseIfThisComputerMayNotFound(w) {
+			return
+		}
 	}
 
 	if req.Timestamp == "" {
