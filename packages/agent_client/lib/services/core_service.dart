@@ -839,39 +839,6 @@ class CoreService {
     return inception;
   }
 
-  /// Signs the founding of an identity that already exists here.
-  ///
-  /// THE REPAIR, and the reason signing can be a separate act at all. Founding
-  /// happens, and then it is signed; anything between the two can fail, and
-  /// what is left behind is an identity nobody can verify. Given the phrase it
-  /// was founded from, that is fixable — the bytes are kept, so they can be
-  /// signed again.
-  ///
-  /// Idempotent in the way that matters: a signature over the same bytes by the
-  /// same key is the same signature, so running it twice changes nothing.
-  Future<void> signTheFoundingOf(String aid, Uint8List signingSeed) async {
-    final events = await _client.get(Uri.parse('$baseUrl/api/kel?name=$aid'));
-    if (events.statusCode != 200) {
-      throw Exception('could not read this identity\'s founding event to sign '
-          'it (${events.statusCode})');
-    }
-    final decoded = jsonDecode(events.body);
-    final list = decoded is Map ? (decoded['kel'] ?? decoded['events']) : decoded;
-    if (list is! List || list.isEmpty) {
-      throw Exception('this identity has no founding event to sign');
-    }
-    final founding = list.firstWhere(
-      (e) => e is Map && (e['sequence_number'] ?? e['s']) == 0,
-      orElse: () => list.first,
-    ) as Map;
-    final raw = (founding['raw_bytes_b64'] ?? '').toString();
-    if (raw.isEmpty) {
-      throw Exception('this identity\'s founding event was stored without the '
-          'bytes it was made from, so no signature over it can be checked');
-    }
-    await _signTheseBytes(aid, raw, signingSeed);
-  }
-
   /// Signs the founding event and hands the signature back to the agent.
   ///
   /// Throws rather than returning quietly. An identity whose founding nobody
