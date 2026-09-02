@@ -79,6 +79,18 @@ class LocalCoreKeriService extends KeriService {
 
       // Step 3: CESR-encode the raw signature via the stateless /cesr/encode endpoint.
       cesrSignature = await _cesrEncode(base64Encode(rawSig));
+
+      // STEP 4, WHICH DID NOT EXIST. The signature was computed correctly,
+      // returned in the result below, and read by nobody — so every identity
+      // founded here published a key history in which nothing had been
+      // authorised by anyone. A counterparty checking properly refuses such a
+      // log, which means the identity works alone and can convince nobody, and
+      // nothing said so at any point.
+      //
+      // It cannot be sent with the inception itself: the signature is over
+      // bytes the engine has not produced yet when that call is made. So
+      // founding is two steps, and this is the second.
+      await _attachTheSignature(json['aid'] as String? ?? '', cesrSignature);
     }
 
     return InceptionResult(
@@ -89,6 +101,29 @@ class LocalCoreKeriService extends KeriService {
       cesrSignature: cesrSignature,
       rawBytesB64: rawBytesB64,
     );
+  }
+
+  /// Hands back the signature over the founding event, which completes it.
+  ///
+  /// Throws on failure rather than carrying on. An identity whose founding
+  /// nobody signed is refused by every counterparty that checks — so finishing
+  /// quietly would hand somebody an identity that looks made and cannot be
+  /// used with anybody, and the failure would surface weeks later as a stranger
+  /// refusing them for no reason they can see.
+  Future<void> _attachTheSignature(String aid, String cesrSignature) async {
+    if (aid.isEmpty || cesrSignature.isEmpty) {
+      throw Exception('this identity was founded and could not be signed, so '
+          'nobody would be able to verify it');
+    }
+    final res = await _client.post(
+      Uri.parse('$_baseUrl/api/inception/signature'),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({'aid': aid, 'cesr_signature': cesrSignature}),
+    );
+    if (res.statusCode != 200) {
+      throw Exception('this identity was founded and its signature was refused '
+          '(${res.statusCode}): ${res.body}');
+    }
   }
 
   /// Calls POST /api/cesr/encode to wrap a raw base64 signature in CESR '0B...' format.
