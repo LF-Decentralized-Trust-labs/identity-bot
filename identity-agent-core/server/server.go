@@ -798,11 +798,6 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		r.Get("/keystore/root-seed", s.handleRootSeedStatus)
 
 		r.Post("/inception", s.handleInception)
-		// The second half of founding. The signature is over bytes the engine
-		// produces, and the key that makes it is on the device holding the
-		// recovery phrase — so there is nothing to sign until the event exists,
-		// and this is where the result comes back.
-		r.Post("/inception/signature", s.handleAttachInceptionSignature)
 		r.Post("/hybrid-inception", s.handleHybridInception)
 		r.Post("/rotation", s.handleRotation)
 		r.Post("/interact", s.handleInteract)
