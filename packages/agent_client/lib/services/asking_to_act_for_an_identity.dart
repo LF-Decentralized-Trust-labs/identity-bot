@@ -170,6 +170,57 @@ class AskingToActForAnIdentity {
     }
   }
 
+  /// Whether the identity answering at an address really is the one it claims.
+  ///
+  /// THE CHECK THAT RUNS THE OTHER WAY. Everything else here is about the
+  /// Identity Agent satisfying itself that a request came from a machine it
+  /// authorised. This is the reverse, and without it the machine took the
+  /// identifier the agent reported at face value and wrote it down as the
+  /// identity it now fronts for — so anything at that address could name any
+  /// identity and be believed, permanently, because every later launch trusts
+  /// what was written.
+  ///
+  /// Asked of THIS computer's own core, which is the only party with an engine
+  /// it controls. Asking the agent to verify itself would be asking the thing
+  /// under question to answer for itself.
+  ///
+  /// The answer is worth something because a key event log is self-verifying:
+  /// the identifier is derived from the inception event, so a log that checks
+  /// out cannot name an identifier other than its own. Nobody is trusted for
+  /// this — not the agent, not the address, not whatever is in between.
+  ///
+  /// Throws rather than returning false. There is one thing to do about every
+  /// reason it fails, and a caller offered a boolean will eventually treat one
+  /// of them as good enough.
+  Future<String> confirmThisIsReally(String agentAid, String agentOrigin) async {
+    final res = await _plain.post(
+      Uri.parse('$_localCore/api/verify/identity-elsewhere'),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'aid': agentAid,
+        // Where a KERI identity publishes its history, composed from the
+        // address rather than taken from the far side — an address that names
+        // where to check itself is not a check.
+        'oobi_url': '$agentOrigin/oobi/$agentAid',
+      }),
+    );
+    if (res.statusCode != 200) {
+      throw Exception('this computer could not check who is at $agentOrigin '
+          '(${res.statusCode}): ${res.body}');
+    }
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    if (body['verified'] != true) {
+      throw Exception('the identity at $agentOrigin could not be verified: '
+          '${body['why'] ?? 'no reason given'}');
+    }
+    final confirmed = (body['aid'] ?? '').toString();
+    if (confirmed != agentAid) {
+      throw Exception('the address $agentOrigin answers for $confirmed, not '
+          'for $agentAid');
+    }
+    return (body['public_key'] ?? '').toString();
+  }
+
   /// Whether the core beside this app will actually sign for it.
   ///
   /// Asked because the signing client cannot report that it did not. By design

@@ -790,6 +790,12 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		// told, which needs no channel back to a machine never spoken to.
 		r.Get("/controller/agent", s.handleWhoThisAgentIs)
 
+		// Checking that an identity somewhere else is the one it says it is.
+		// Runs on the asking computer's own core, because that is the only
+		// party with an engine it controls — asking the agent to verify itself
+		// would be asking the thing under question to answer for itself.
+		r.Post("/verify/identity-elsewhere", s.handleVerifyAnIdentityElsewhere)
+
 		r.Post("/controllers", s.handleGrantController)
 		r.Get("/controllers", s.handleListControllers)
 		r.Delete("/controllers/{aid}", s.handleRevokeController)

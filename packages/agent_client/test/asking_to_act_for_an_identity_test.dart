@@ -384,4 +384,84 @@ void main() {
     expect(asked, lessThanOrEqualTo(afterDispose + 1),
         reason: 'it went on asking after being disposed');
   });
+
+  /// The agent has to prove itself back.
+  ///
+  /// Everything else in the ceremony is this computer proving itself to the
+  /// Identity Agent. Without this, the identity was whatever the agent said it
+  /// was — written down, and believed by every later launch. Anything at that
+  /// address could have named any identity.
+  group('the identity at an address is checked, not taken on its word', () {
+    test('a verified log answers with the key it puts in force', () async {
+      Map<String, dynamic>? asked;
+      final asking = AskingToActForAnIdentity(
+        localCoreOrigin: localCore,
+        client: MockClient((req) async {
+          asked = jsonDecode(req.body) as Map<String, dynamic>;
+          return http.Response(
+              jsonEncode({
+                'verified': true,
+                'aid': 'EMYIDENTITY',
+                'public_key': 'DTHEKEY',
+              }),
+              200);
+        }),
+      );
+
+      expect(await asking.confirmThisIsReally('EMYIDENTITY', agent), 'DTHEKEY');
+      // Asked of THIS computer's own core. Asking the agent to verify itself
+      // is asking the thing under question to answer for itself.
+      expect(asked!['aid'], 'EMYIDENTITY');
+      // The address to check at is composed here rather than taken from the far
+      // side: an address that names where to check itself is not a check.
+      expect(asked!['oobi_url'], '$agent/oobi/EMYIDENTITY');
+    });
+
+    test('an unverified identity is refused, with what went wrong', () async {
+      final asking = AskingToActForAnIdentity(
+        localCoreOrigin: localCore,
+        client: MockClient((_) async => http.Response(
+            jsonEncode({
+              'verified': false,
+              'why': 'that key history did not check out',
+            }),
+            200)),
+      );
+      expect(
+        asking.confirmThisIsReally('EMYIDENTITY', agent),
+        throwsA(predicate(
+            (e) => '$e'.contains('that key history did not check out'))),
+      );
+    });
+
+    test('a log that checks out for somebody else is refused', () async {
+      // The case the whole check exists for: something at the address answers,
+      // its history is real, and it is not the identity that was claimed.
+      final asking = AskingToActForAnIdentity(
+        localCoreOrigin: localCore,
+        client: MockClient((_) async => http.Response(
+            jsonEncode({
+              'verified': true,
+              'aid': 'ESOMEBODYELSE',
+              'public_key': 'DTHEIRKEY',
+            }),
+            200)),
+      );
+      expect(
+        asking.confirmThisIsReally('EMYIDENTITY', agent),
+        throwsA(predicate((e) => '$e'.contains('ESOMEBODYELSE'))),
+      );
+    });
+
+    test('a computer that cannot check refuses rather than shrugging', () async {
+      // Not the same as "not verified". A machine with no engine cannot tell,
+      // and an identity that cannot be checked must not be acted on.
+      final asking = AskingToActForAnIdentity(
+        localCoreOrigin: localCore,
+        client: MockClient((_) async => http.Response('no engine', 501)),
+      );
+      expect(asking.confirmThisIsReally('EMYIDENTITY', agent),
+          throwsA(isA<Exception>()));
+    });
+  });
 }
