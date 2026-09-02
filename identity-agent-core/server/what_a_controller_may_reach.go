@@ -162,6 +162,27 @@ var controllerNeedsLevel = map[string]controllerRequirement{
 		"asking this computer's secure hardware to sign is for the app running on it, " +
 			"not for something reaching it from elsewhere"},
 
+	// Which half this computer is running. Written from the machine itself, by
+	// the app on it, and never from elsewhere.
+	//
+	// It decides whether this core answers about an identity at all, so it is
+	// one step further out than the rest of this list: not what a machine acting
+	// for somebody may DO, but whether the door is open. A controller that could
+	// set it would make an agent refuse its own owner; one that could clear it
+	// would put a front end back to answering about nobody. Neither is an
+	// escalation and both are somebody else's machine changed from a distance,
+	// which is enough.
+	//
+	// Reading it is raised rather than closed: a machine acting for somebody may
+	// reasonably want to know which half it is talking to, and the answer is an
+	// address the owner's device already has.
+	"POST /api/controller/front-end-for": {neverByAController, authprovider.LevelHigh,
+		"which half a computer is running is set on that computer, by the app on it"},
+	"DELETE /api/controller/front-end-for": {neverByAController, authprovider.LevelHigh,
+		"which half a computer is running is set on that computer, by the app on it"},
+	"GET /api/controller/front-end-for": {alsoRaised, authprovider.LevelAuthenticated,
+		"it names the identity this computer fronts for and where that identity is"},
+
 	// The same door, one step worse. This one signs as the OWNER of a machine —
 	// a pairwise identity derived from the root seed — so a controller that
 	// could reach it would obtain owner signatures and every raised action with

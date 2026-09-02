@@ -32,8 +32,8 @@ import (
 // handleGrantController records that a machine may act for this identity.
 //
 // Called by the device holding the key, after it has authenticated the person
-// and derived a pairwise owner identity for this machine — steps 7 to 9 of O6.
-// The agent is the register here, never the decider.
+// and derived a pairwise owner identity for this machine. The agent is the
+// register here, never the decider.
 func (s *CoreServer) handleGrantController(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		ControllerAID string `json:"controller_aid"`

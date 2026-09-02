@@ -3,9 +3,11 @@ package server
 import (
 	"crypto/ed25519"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1191,5 +1193,92 @@ func TestAnOwnerCannotBeResealedUnderTheSameNameWithANewKey(t *testing.T) {
 	sealed, serr := s.sealedOwnerAuthority()
 	if serr != nil || sealed.PublicKey != first.PublicKey {
 		t.Fatalf("the sealed key changed: %+v (%v)", sealed, serr)
+	}
+}
+
+// Sealing an owner is atomic, so two requests racing cannot both pass.
+//
+// The seal-once guard reads and then writes, and everything that seals does it
+// from a request. Both readers see nothing sealed, both pass, and the later
+// write wins — so an attacker racing the real founding redeem seals their own
+// key, and the founder is refused from then on. One invite is enough, because
+// the use-count is incremented only after the seal returns.
+func TestTwoRequestsRacingToSealAnOwnerCannotBothWin(t *testing.T) {
+	s := agentWithNoIdentity(t)
+
+	const racers = 24
+	var wg sync.WaitGroup
+	won := make([]bool, racers)
+	start := make(chan struct{})
+	for i := 0; i < racers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			key := grantFor(byte(80+i), GradeEnrolled)
+			<-start
+			won[i] = s.SealOwnerAuthority(OwnerAuthority{
+				AID: fmt.Sprintf("BRACER%d", i), PublicKey: key.PublicKey,
+			}) == nil
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	winners := 0
+	for _, w := range won {
+		if w {
+			winners++
+		}
+	}
+	if winners != 1 {
+		t.Fatalf("%d of %d requests sealed an owner — sealing is not once, so the "+
+			"last writer decides who this agent answers to", winners, racers)
+	}
+
+	// And what is on disk is one of them, whole, rather than two overlaid.
+	sealed, err := s.sealedOwnerAuthority()
+	if err != nil || sealed == nil || sealed.AID == "" {
+		t.Fatalf("the record is not readable after the race: %+v (%v)", sealed, err)
+	}
+}
+
+// A founding invite may only seal the identity the inception already named.
+//
+// Refusing on the sealed record alone turned the escalation into a lockout: on
+// an agent that anchors an owner but has nothing sealed, a token-holder took the
+// slot. It granted them nothing, and it refused every later redeem including the
+// real founder's, for good.
+func TestAFoundingInviteCannotSealSomebodyTheLogNeverNamed(t *testing.T) {
+	s := serverWithIdentity(t, "EMACHINE")
+
+	keri := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"aid": "EMACHINE",
+			"kel": []map[string]interface{}{{
+				"t": "icp", "i": "EMACHINE",
+				"a": []interface{}{map[string]interface{}{
+					"i": "ETHEREALOWNER", "s": "0", "d": "ETHEREALOWNER"}},
+			}},
+		})
+	}))
+	defer keri.Close()
+	driver := drivers.NewKeriDriver()
+	driver.BaseURL = keri.URL
+	s.KeriDriver = driver
+
+	stranger := grantFor(190, GradeEnrolled)
+	if _, err := s.AcceptFoundingSigner(SignerAcceptance{
+		InviteToken: "a-token",
+		PairwiseAID: "EANIMPOSTER",
+		PublicKey:   stranger.PublicKey,
+	}); err == nil {
+		t.Fatal("a founding invite sealed an identity the inception never named, " +
+			"taking the slot the real founder needs")
+	}
+
+	// The slot is still free, so the owner the log names can still found.
+	if sealed, err := s.sealedOwnerAuthority(); err == nil && sealed != nil &&
+		sealed.AID != "" {
+		t.Fatalf("the refused redeem left a record behind: %+v", sealed)
 	}
 }

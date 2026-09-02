@@ -26,6 +26,13 @@ import 'signing_as_the_identity_that_owns_a_machine.dart';
 /// the identity: installing an update, handing a seed to the core beside you.
 /// Those keep [AgentConfig.coreBaseUrl] and say why, because sending them to
 /// the agent would be the same failure pointing the other way.
+///
+/// STAYING LOCAL IS NOT THE SAME AS BEING ANSWERED. A front end refuses
+/// questions about an identity, and handing it a root seed is one — it holds no
+/// identity to hand one to. So the seed handoff correctly addresses this
+/// computer and is correctly refused on a front end, which is the right outcome
+/// reached by two rules that look like they disagree. Updating is different:
+/// software installs here whichever half this is, so it is answered here.
 class TheAgentThisAppTalksTo {
   const TheAgentThisAppTalksTo._();
 
@@ -36,6 +43,15 @@ class TheAgentThisAppTalksTo {
   /// profile — never guessed per screen, because a screen that guesses wrong
   /// gets a plausible answer about nobody.
   static String get origin => AgentConfig.agentBaseUrl;
+
+  /// Just the client, for the services that do not carry a session.
+  ///
+  /// Takes the caller's own nullable address so the client is built for the
+  /// SAME place the service will send to. A service that defaulted the two
+  /// separately could sign for one agent and call another, which is a signature
+  /// handed to whoever is at the second.
+  static http.Client clientFor([String? origin]) =>
+      theAgent(origin: origin).client;
 
   /// A client that proves who is sending, for requests to [origin].
   ///
@@ -48,15 +64,6 @@ class TheAgentThisAppTalksTo {
   /// It never falls back to the local core's own answer. Where nothing can
   /// sign, the request goes unsigned and the agent refuses it — a refusal says
   /// what to do next, and a screen full of somebody else's data does not.
-  /// Just the client, for the services that do not carry a session.
-  ///
-  /// Takes the caller's own nullable address so the client is built for the
-  /// SAME place the service will send to. A service that defaulted the two
-  /// separately could sign for one agent and call another, which is a signature
-  /// handed to whoever is at the second.
-  static http.Client clientFor([String? origin]) =>
-      theAgent(origin: origin).client;
-
   static HowThisAppReaches theAgent({String? origin}) {
     final to = origin ?? TheAgentThisAppTalksTo.origin;
 

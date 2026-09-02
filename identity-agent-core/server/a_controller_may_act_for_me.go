@@ -43,7 +43,7 @@ import (
 // ControllerGrade says what kind of machine this is, which decides only how
 // permanent the record is.
 //
-// Both grades hold their own key and both are named pairwise. The difference is
+// Both grades hold their own key and both are named by it. The difference is
 // whether the person expects to still be using the machine: one they keep earns
 // a durable record they can find and remove, one they borrowed should not leave
 // a device on an identity for an afternoon that ended.
@@ -79,9 +79,18 @@ const maxScopedGrantLifetime = 7 * 24 * time.Hour
 
 // ControllerGrant is one machine's permission to act for this identity.
 type ControllerGrant struct {
-	// ControllerAID is the root the controller founded for itself. Not derived
-	// here and not derivable here: the private half never leaves that machine,
-	// which is what makes revoking this grant enough to stop it.
+	// ControllerAID is the machine's own identifier, which IS its public key —
+	// the non-transferable form, with no inception event and nothing published.
+	// The PRIVATE half is not derivable here — it never leaves that machine,
+	// which is what makes revoking this grant enough to stop it. The public half
+	// IS read back out of the identifier, in Grant, because an identifier that is
+	// a key cannot name a different one.
+	//
+	// This said "the root the controller founded for itself" until the phrase
+	// was withdrawn. It described an earlier design and it kept sending readers
+	// to look for an inception that has never existed — the same wording the
+	// header of this file already corrects, still standing on the field where a
+	// reader actually lands.
 	ControllerAID string `json:"controller_aid"`
 
 	// PublicKey is what its requests are checked against. Without it the grant
