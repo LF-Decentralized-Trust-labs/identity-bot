@@ -87,9 +87,15 @@ func (s *SQLiteStore) SaveEvent(record EventRecord) error {
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(aid, seq_num) DO UPDATE SET
 		    event_json     = excluded.event_json,
-		    public_key     = excluded.public_key,
 		    next_key_digest = excluded.next_key_digest,
 		    timestamp      = excluded.timestamp,
+		    -- The key an event names is guarded like the signature below it,
+		    -- and for a sharper reason. A signature is checked against THIS
+		    -- key, so a later write that carried none would blank it and leave
+		    -- the event unverifiable — and the route that attaches a signature
+		    -- refuses an event that names no key, so blanking it is enough to
+		    -- make a founding permanently unsignable. One request could do it.
+		    public_key     = CASE WHEN excluded.public_key != '' THEN excluded.public_key ELSE kel.public_key END,
 		    -- An existing signature or set of bytes is never replaced by an
 		    -- empty one. A later write that simply does not carry them must not
 		    -- erase what an earlier one established.

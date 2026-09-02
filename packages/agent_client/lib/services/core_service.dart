@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 
 import 'package:crypto/crypto.dart';
+import 'package:ed25519_edwards/ed25519_edwards.dart' as ed;
 
 import 'owner_signing_client.dart';
 import 'browser_session_client.dart';
@@ -114,11 +115,21 @@ class InceptionResponse {
   /// safe direction: an older core did not make the commitment.
   final bool postQuantumCommitted;
 
+  /// The founding event exactly as it was serialised, which is what a signature
+  /// over it has to cover.
+  ///
+  /// The core returned these all along and this class dropped them, so no
+  /// application could sign its own founding even had it tried — it never saw
+  /// the bytes. Every identity founded through one therefore published a key
+  /// history in which nobody had authorised anything.
+  final String rawBytesB64;
+
   InceptionResponse({
     required this.aid,
     required this.publicKey,
     required this.created,
     this.postQuantumCommitted = false,
+    this.rawBytesB64 = '',
   });
 
   factory InceptionResponse.fromJson(Map<String, dynamic> json) {
@@ -127,6 +138,7 @@ class InceptionResponse {
       publicKey: json['public_key'] ?? '',
       created: json['created'] ?? '',
       postQuantumCommitted: json['post_quantum_committed'] == true,
+      rawBytesB64: json['raw_bytes_b64'] ?? '',
     );
   }
 }
@@ -686,10 +698,14 @@ class CoreService {
   /// A factory, because the session client and the request client must be the
   /// SAME object: adopting a token has to change the client that actually sends
   /// requests, and an initialiser list cannot build one field from another.
+  /// [inner] replaces the transport underneath, never the proving. A test can
+  /// stand in for the network and still cannot make this send unsigned: which
+  /// wrapper goes on top is decided in one place and not here.
   factory CoreService({
     String? baseUrl,
     Future<Uint8List?> Function()? ownerSeed,
     String? ownerAid,
+    http.Client? inner,
   }) {
     // The agent, which is this machine's core in the ordinary case and a
     // different machine when this installation is only the front end.
@@ -708,13 +724,16 @@ class CoreService {
     // signs it" differently from this one would reach the local core in
     // controller mode and report no problem.
     if (ownerSeed == null || AgentConfig.isAController) {
-      final how = TheAgentThisAppTalksTo.theAgent(origin: origin);
+      final how = TheAgentThisAppTalksTo.theAgent(origin: origin, inner: inner);
       return CoreService._(origin, how.client, how.session);
     }
     return CoreService._(
       origin,
       OwnerSigningClient(
-          agentOrigin: origin, ownerSeed: ownerSeed, ownerAid: ownerAid),
+          agentOrigin: origin,
+          ownerSeed: ownerSeed,
+          ownerAid: ownerAid,
+          inner: inner),
       null,
     );
   }
@@ -788,9 +807,24 @@ class CoreService {
   ///
   /// Left out for a person's own agent, whose identity is delegated and whose
   /// delegator is already named in its event.
+  /// Brings an identity into being, and finishes it by signing it.
+  ///
+  /// FOUNDING IS TWO STEPS AND BOTH HAPPEN HERE. The event has to carry a
+  /// signature by the key it commits to, or no counterparty can rely on it —
+  /// and the signature is over bytes the engine does not produce until this
+  /// call is made, so it cannot travel with the request. The second step was
+  /// left to each caller, one screen did it, the applications people run did
+  /// not, and every identity they founded published a key history in which
+  /// nobody had authorised anything.
+  ///
+  /// [signingSeed] is required for that reason rather than offered. A founding
+  /// that cannot be signed is one nobody can accept, so it should not be
+  /// possible to ask for. The seed never leaves this device: it signs here and
+  /// only the signature is sent.
   Future<InceptionResponse> createInception({
     required String publicKey,
     required String nextPublicKey,
+    required Uint8List signingSeed,
     String? ownerAid,
   }) async {
     final response = await _client.post(
@@ -803,11 +837,142 @@ class CoreService {
       }),
     );
 
-    if (response.statusCode == 201) {
-      return InceptionResponse.fromJson(jsonDecode(response.body));
-    } else {
+    if (response.statusCode != 201) {
       final body = jsonDecode(response.body);
       throw Exception(body['error'] ?? 'Inception failed: ${response.statusCode}');
+    }
+    final inception = InceptionResponse.fromJson(jsonDecode(response.body));
+    await _signTheFounding(inception, signingSeed);
+    return inception;
+  }
+
+  /// Signs the founding of an identity that already exists here.
+  ///
+  /// THE REASON THIS IS NEEDED. Founding is two acts: the identity is created,
+  /// and then it is signed. Anything between them can fail — a timeout, the
+  /// application killed, a machine that went to sleep — and what is left is an
+  /// identity nobody can verify. Given the words it was founded from that is
+  /// fixable, because the bytes it was made from are kept and can be signed
+  /// again.
+  ///
+  /// Idempotent in the way that matters: a signature over the same bytes by the
+  /// same key is the same signature, so doing it twice changes nothing.
+  ///
+  /// TWO SHAPES, AND THE ONE THAT MATTERS IS THE SECOND. An agent with the key
+  /// engine beside it answers with the engine's own events and puts the bytes
+  /// in a separate list, aligned by position, with the sequence number as text.
+  /// An agent whose engine is embedded answers with its own records, carrying
+  /// the bytes on each event and the sequence as a number. The first version of
+  /// this read only the second shape and therefore failed every time, because
+  /// founding needs the engine and so only ever meets the first.
+  Future<void> signTheFoundingOf(String aid, Uint8List signingSeed) async {
+    final res = await _client.get(Uri.parse('$baseUrl/api/kel?name=$aid'));
+    if (res.statusCode != 200) {
+      throw Exception('could not read this identity\'s founding event to sign '
+          'it (${res.statusCode})');
+    }
+    final body = jsonDecode(res.body);
+    if (body is! Map<String, dynamic>) {
+      throw Exception('this identity\'s key history could not be read');
+    }
+    final events = body['kel'];
+    if (events is! List || events.isEmpty) {
+      throw Exception('this identity has no founding event to sign');
+    }
+
+    // REFUSED RATHER THAN GUESSED. Neither shape promises an order, and signing
+    // the wrong event fails at the agent with a complaint about the signature —
+    // which sends somebody looking at the signing rather than at the choosing.
+    final at = events.indexWhere((e) => e is Map && _isTheFounding(e));
+    if (at < 0) {
+      throw Exception('this identity\'s key history does not contain a founding '
+          'event, so there is nothing here to sign');
+    }
+
+    final founding = events[at] as Map;
+    var rawBytesB64 = (founding['raw_bytes_b64'] ?? '').toString();
+    if (rawBytesB64.isEmpty) {
+      // The other shape: a list beside the events, aligned by position.
+      final beside = body['raw_events_b64'];
+      if (beside is List && at < beside.length) {
+        rawBytesB64 = (beside[at] ?? '').toString();
+      }
+    }
+    if (rawBytesB64.isEmpty) {
+      throw Exception('this identity\'s founding event was stored without the '
+          'bytes it was made from, so no signature over it can be checked');
+    }
+    await _signTheseBytes(aid, rawBytesB64, signingSeed);
+  }
+
+  /// Whether an event is the founding one, in either shape.
+  ///
+  /// The sequence arrives as a number from one and as text from the other, and
+  /// Dart does not treat those as equal — which is how the first version of
+  /// this matched nothing and fell back to whatever was first in the list.
+  static bool _isTheFounding(Map e) {
+    final n = e['sequence_number'];
+    if (n is int) return n == 0;
+    final s = (e['s'] ?? e['sequence_number'] ?? '').toString();
+    // KERI writes the sequence as hexadecimal, so the founding is "0" — and
+    // "00" and "0x0" are the same event written differently.
+    return s.isNotEmpty && int.tryParse(s.replaceFirst('0x', ''), radix: 16) == 0;
+  }
+
+  /// Signs the founding event and hands the signature back to the agent.
+  ///
+  /// Throws rather than returning quietly. An identity whose founding nobody
+  /// signed looks made and cannot be used with anybody — the failure would
+  /// otherwise surface much later, as a stranger refusing somebody for no
+  /// reason they can see.
+  Future<void> _signTheFounding(
+      InceptionResponse inception, Uint8List signingSeed) async {
+    if (inception.rawBytesB64.isEmpty) {
+      throw Exception('this identity was created and the agent did not say what '
+          'its founding event is, so nothing can sign it and nobody would be '
+          'able to verify it');
+    }
+    await _signTheseBytes(inception.aid, inception.rawBytesB64, signingSeed);
+  }
+
+  Future<void> _signTheseBytes(
+      String aid, String rawBytesB64, Uint8List signingSeed) async {
+    final raw = base64Decode(rawBytesB64);
+    final signature = ed.sign(ed.newKeyFromSeed(signingSeed), raw);
+
+
+    // CESR-encoded by the agent rather than here, because the encoding is part
+    // of the protocol and there is one implementation of it.
+    final encoded = await _client.post(
+      Uri.parse('$baseUrl/api/cesr/encode'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'raw_sig_b64': base64Encode(signature)}),
+    );
+    if (encoded.statusCode != 200) {
+      throw Exception('this identity was created and its signature could not be '
+          'encoded (${encoded.statusCode}): ${encoded.body}');
+    }
+    final cesr =
+        (jsonDecode(encoded.body)['cesr_sig'] ?? '').toString();
+    if (cesr.isEmpty) {
+      throw Exception('this identity was created and no signature came back to '
+          'record');
+    }
+
+    final attached = await _client.post(
+      Uri.parse('$baseUrl/api/events/signature'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'aid': aid,
+        // The founding event. This route takes any of them, which is what
+        // rotations and interactions need too.
+        'sequence_number': 0,
+        'cesr_signature': cesr,
+      }),
+    );
+    if (attached.statusCode != 200) {
+      throw Exception('this identity was created and its signature was refused '
+          '(${attached.statusCode}): ${attached.body}');
     }
   }
 

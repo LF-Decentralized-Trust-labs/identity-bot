@@ -79,6 +79,25 @@ class LocalCoreKeriService extends KeriService {
 
       // Step 3: CESR-encode the raw signature via the stateless /cesr/encode endpoint.
       cesrSignature = await _cesrEncode(base64Encode(rawSig));
+
+      // STEP 4, WHICH EVERY CALLER HAD TO REMEMBER AND ONE DID.
+      //
+      // The route that records this has existed since August and is correct.
+      // What was missing is that nothing here called it: each screen was
+      // expected to, the reference application did, and the applications people
+      // actually run did not — so every identity they founded published a key
+      // history in which nothing had been authorised by anybody. A counterparty
+      // checking properly refuses such a log, so the identity works alone and
+      // can convince nobody, and nothing said so at any point.
+      //
+      // It belongs here rather than in a screen for exactly that reason: this
+      // is the one place that knows the signature was made, and a step every
+      // caller must remember is a step somebody will not.
+      //
+      // It cannot be sent with the inception itself — the signature is over
+      // bytes the engine has not produced when that call is made — so founding
+      // is two steps, and this is the second.
+      await _attachTheSignature(json['aid'] as String? ?? '', cesrSignature);
     }
 
     return InceptionResult(
@@ -89,6 +108,36 @@ class LocalCoreKeriService extends KeriService {
       cesrSignature: cesrSignature,
       rawBytesB64: rawBytesB64,
     );
+  }
+
+  /// Hands back the signature over the founding event, which completes it.
+  ///
+  /// Throws on failure rather than carrying on. An identity whose founding
+  /// nobody signed is refused by every counterparty that checks — so finishing
+  /// quietly would hand somebody an identity that looks made and cannot be
+  /// used with anybody, and the failure would surface weeks later as a stranger
+  /// refusing them for no reason they can see.
+  Future<void> _attachTheSignature(String aid, String cesrSignature) async {
+    if (aid.isEmpty || cesrSignature.isEmpty) {
+      throw Exception('this identity was founded and could not be signed, so '
+          'nobody would be able to verify it');
+    }
+    final res = await _client.post(
+      Uri.parse('$_baseUrl/api/events/signature'),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'aid': aid,
+        // The founding event. This route takes any of them, which is what
+        // rotations and interactions need too — a second route that only ever
+        // understood the founding would have to be duplicated for each.
+        'sequence_number': 0,
+        'cesr_signature': cesrSignature,
+      }),
+    );
+    if (res.statusCode != 200) {
+      throw Exception('this identity was founded and its signature was refused '
+          '(${res.statusCode}): ${res.body}');
+    }
   }
 
   /// Calls POST /api/cesr/encode to wrap a raw base64 signature in CESR '0B...' format.
