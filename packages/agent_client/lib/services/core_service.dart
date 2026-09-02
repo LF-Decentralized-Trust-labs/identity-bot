@@ -698,10 +698,14 @@ class CoreService {
   /// A factory, because the session client and the request client must be the
   /// SAME object: adopting a token has to change the client that actually sends
   /// requests, and an initialiser list cannot build one field from another.
+  /// [inner] replaces the transport underneath, never the proving. A test can
+  /// stand in for the network and still cannot make this send unsigned: which
+  /// wrapper goes on top is decided in one place and not here.
   factory CoreService({
     String? baseUrl,
     Future<Uint8List?> Function()? ownerSeed,
     String? ownerAid,
+    http.Client? inner,
   }) {
     // The agent, which is this machine's core in the ordinary case and a
     // different machine when this installation is only the front end.
@@ -720,13 +724,16 @@ class CoreService {
     // signs it" differently from this one would reach the local core in
     // controller mode and report no problem.
     if (ownerSeed == null || AgentConfig.isAController) {
-      final how = TheAgentThisAppTalksTo.theAgent(origin: origin);
+      final how = TheAgentThisAppTalksTo.theAgent(origin: origin, inner: inner);
       return CoreService._(origin, how.client, how.session);
     }
     return CoreService._(
       origin,
       OwnerSigningClient(
-          agentOrigin: origin, ownerSeed: ownerSeed, ownerAid: ownerAid),
+          agentOrigin: origin,
+          ownerSeed: ownerSeed,
+          ownerAid: ownerAid,
+          inner: inner),
       null,
     );
   }
@@ -837,6 +844,79 @@ class CoreService {
     final inception = InceptionResponse.fromJson(jsonDecode(response.body));
     await _signTheFounding(inception, signingSeed);
     return inception;
+  }
+
+  /// Signs the founding of an identity that already exists here.
+  ///
+  /// THE REASON THIS IS NEEDED. Founding is two acts: the identity is created,
+  /// and then it is signed. Anything between them can fail — a timeout, the
+  /// application killed, a machine that went to sleep — and what is left is an
+  /// identity nobody can verify. Given the words it was founded from that is
+  /// fixable, because the bytes it was made from are kept and can be signed
+  /// again.
+  ///
+  /// Idempotent in the way that matters: a signature over the same bytes by the
+  /// same key is the same signature, so doing it twice changes nothing.
+  ///
+  /// TWO SHAPES, AND THE ONE THAT MATTERS IS THE SECOND. An agent with the key
+  /// engine beside it answers with the engine's own events and puts the bytes
+  /// in a separate list, aligned by position, with the sequence number as text.
+  /// An agent whose engine is embedded answers with its own records, carrying
+  /// the bytes on each event and the sequence as a number. The first version of
+  /// this read only the second shape and therefore failed every time, because
+  /// founding needs the engine and so only ever meets the first.
+  Future<void> signTheFoundingOf(String aid, Uint8List signingSeed) async {
+    final res = await _client.get(Uri.parse('$baseUrl/api/kel?name=$aid'));
+    if (res.statusCode != 200) {
+      throw Exception('could not read this identity\'s founding event to sign '
+          'it (${res.statusCode})');
+    }
+    final body = jsonDecode(res.body);
+    if (body is! Map<String, dynamic>) {
+      throw Exception('this identity\'s key history could not be read');
+    }
+    final events = body['kel'];
+    if (events is! List || events.isEmpty) {
+      throw Exception('this identity has no founding event to sign');
+    }
+
+    // REFUSED RATHER THAN GUESSED. Neither shape promises an order, and signing
+    // the wrong event fails at the agent with a complaint about the signature —
+    // which sends somebody looking at the signing rather than at the choosing.
+    final at = events.indexWhere((e) => e is Map && _isTheFounding(e));
+    if (at < 0) {
+      throw Exception('this identity\'s key history does not contain a founding '
+          'event, so there is nothing here to sign');
+    }
+
+    final founding = events[at] as Map;
+    var rawBytesB64 = (founding['raw_bytes_b64'] ?? '').toString();
+    if (rawBytesB64.isEmpty) {
+      // The other shape: a list beside the events, aligned by position.
+      final beside = body['raw_events_b64'];
+      if (beside is List && at < beside.length) {
+        rawBytesB64 = (beside[at] ?? '').toString();
+      }
+    }
+    if (rawBytesB64.isEmpty) {
+      throw Exception('this identity\'s founding event was stored without the '
+          'bytes it was made from, so no signature over it can be checked');
+    }
+    await _signTheseBytes(aid, rawBytesB64, signingSeed);
+  }
+
+  /// Whether an event is the founding one, in either shape.
+  ///
+  /// The sequence arrives as a number from one and as text from the other, and
+  /// Dart does not treat those as equal — which is how the first version of
+  /// this matched nothing and fell back to whatever was first in the list.
+  static bool _isTheFounding(Map e) {
+    final n = e['sequence_number'];
+    if (n is int) return n == 0;
+    final s = (e['s'] ?? e['sequence_number'] ?? '').toString();
+    // KERI writes the sequence as hexadecimal, so the founding is "0" — and
+    // "00" and "0x0" are the same event written differently.
+    return s.isNotEmpty && int.tryParse(s.replaceFirst('0x', ''), radix: 16) == 0;
   }
 
   /// Signs the founding event and hands the signature back to the agent.
