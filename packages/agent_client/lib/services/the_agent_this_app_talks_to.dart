@@ -50,8 +50,8 @@ class TheAgentThisAppTalksTo {
   /// SAME place the service will send to. A service that defaulted the two
   /// separately could sign for one agent and call another, which is a signature
   /// handed to whoever is at the second.
-  static http.Client clientFor([String? origin]) =>
-      theAgent(origin: origin).client;
+  static http.Client clientFor([String? origin, http.Client? inner]) =>
+      theAgent(origin: origin, inner: inner).client;
 
   /// A client that proves who is sending, for requests to [origin].
   ///
@@ -64,7 +64,12 @@ class TheAgentThisAppTalksTo {
   /// It never falls back to the local core's own answer. Where nothing can
   /// sign, the request goes unsigned and the agent refuses it — a refusal says
   /// what to do next, and a screen full of somebody else's data does not.
-  static HowThisAppReaches theAgent({String? origin}) {
+  ///
+  /// [inner] replaces the transport underneath, never the proving. A caller can
+  /// stand in for the network — a test, a client with its own timeouts — and
+  /// still cannot send unsigned: which wrapper goes on top is decided here and
+  /// nowhere else, which is the whole reason this function exists.
+  static HowThisAppReaches theAgent({String? origin, http.Client? inner}) {
     final to = origin ?? TheAgentThisAppTalksTo.origin;
 
     // This app is the front end for an agent elsewhere. It signs as ITSELF —
@@ -77,6 +82,7 @@ class TheAgentThisAppTalksTo {
           // Always this machine, never the agent: the key that signs lives here
           // and the agent cannot reach it.
           localCoreOrigin: AgentConfig.coreBaseUrl,
+          inner: inner,
         ),
         null,
       );
@@ -91,7 +97,8 @@ class TheAgentThisAppTalksTo {
           machineOrigin: to,
           localCoreOrigin: AgentConfig.coreBaseUrl,
           ownerAid: theIdentityThatAdopted(to,
-              localCoreOrigin: AgentConfig.coreBaseUrl),
+              localCoreOrigin: AgentConfig.coreBaseUrl, using: inner),
+          inner: inner,
         ),
         null,
       );
@@ -100,7 +107,7 @@ class TheAgentThisAppTalksTo {
     // The ordinary case: the core on this computer, which recognises a request
     // that originated on the machine it runs on. A browser holds no key, so
     // where this build is a page it carries a session instead.
-    final session = BrowserSessionClient(agentOrigin: to);
+    final session = BrowserSessionClient(agentOrigin: to, inner: inner);
     return HowThisAppReaches._(session, session);
   }
 }
