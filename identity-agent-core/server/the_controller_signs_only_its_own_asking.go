@@ -138,10 +138,19 @@ func (s *CoreServer) handleSignAsThisController(w http.ResponseWriter, r *http.R
 			"this computer's secure hardware would not sign", err.Error())
 		return
 	}
-	// Encoded the way every other signature in this protocol is, so the agent
-	// verifies it with the same code path rather than a second one that could
-	// drift from this.
-	sigQB64, err := iacrypto.MatterFixedQB64("0B", sig)
+	// The code follows the key, and it has to be asked rather than assumed.
+	//
+	// An Ed25519 signature and a P-256 signature are both 64 bytes, so naming a
+	// machine's signature with the Ed25519 code encodes cleanly, is the right
+	// length, and claims to be something it is not. No length check can catch
+	// that; only deciding from the key can, which is why this asks.
+	pub, err := signer.PublicKey()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError,
+			"this computer's key could not be read", err.Error())
+		return
+	}
+	sigQB64, err := iacrypto.MachineSignatureQB64(pub, sig)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError,
 			"this computer's signature could not be encoded", err.Error())

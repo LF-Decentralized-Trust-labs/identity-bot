@@ -5,7 +5,7 @@ package secureenclave
 // Linux has no Apple Secure Enclave or Android StrongBox — these hardware-backed
 // signers are unavailable here; NewPlatformSigner falls back to TPM/software.
 func newDarwinSecureEnclaveSigner(dataDir string) PlatformSigner { return nil }
-func newStrongBoxSigner() PlatformSigner           { return nil }
+func newStrongBoxSigner() PlatformSigner                         { return nil }
 
 // tpmSigner is a TPM 2.0 stub; production wiring will bind to tpm2-tools or go-tpm.
 type tpmSigner struct{}
