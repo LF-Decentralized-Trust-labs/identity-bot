@@ -4,13 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"identity-agent-core/iacrypto"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
-
-	"identity-agent-core/login"
 )
 
 // What an identity has agreed somebody's computer may do on its behalf.
@@ -232,7 +231,11 @@ func (c *controllerGrants) Grant(g ControllerGrant, now time.Time) (ControllerGr
 				"which is what lets this be checked without asking anybody: %w",
 			g.ControllerAID, err)
 	}
-	offered, err := login.DecodeVerkey(g.PublicKey)
+	// Decoded by the same rules the identifier was, because the next line
+	// compares them. A machine's key is P-256 where an identity's is Ed25519,
+	// and reading the identifier as a machine's while reading the key as an
+	// identity's makes a correct grant look like a forged one.
+	offered, err := iacrypto.KeyFromMachineVerkey(g.PublicKey)
 	if err != nil {
 		return ControllerGrant{}, fmt.Errorf("the key offered is unusable: %w", err)
 	}

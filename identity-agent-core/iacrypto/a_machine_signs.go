@@ -133,6 +133,15 @@ func VerifyMachineSignature(verkeyQB64 string, sigQB64 string, message []byte) (
 	return ed25519.Verify(ed25519.PublicKey(pub), message, sig), nil
 }
 
+// KeyFromMachineVerkey recovers the key behind a machine's published
+// verification key, whichever kind it is.
+//
+// Exported because a grant records the identifier AND the key and has to compare
+// them, and comparing them means decoding both by the same rules. Decoding one
+// with Ed25519 rules and the other with the machine's is how a grant refuses a
+// key that is perfectly correct.
+func KeyFromMachineVerkey(qb64 string) ([]byte, error) { return keyFromMachineVerkey(qb64) }
+
 func keyFromMachineVerkey(qb64 string) ([]byte, error) {
 	if len(qb64) == 48 && qb64[:4] == CodeP256 {
 		raw, err := KeyFromMachineAID(CodeP256N + qb64[4:])
