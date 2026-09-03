@@ -23,7 +23,7 @@ type PlatformSigner interface {
 
 // NewPlatformSigner selects the best available signer for this host.
 func NewPlatformSigner(dataDir string) PlatformSigner {
-	if s := newDarwinSecureEnclaveSigner(); s != nil && s.Available() {
+	if s := newDarwinSecureEnclaveSigner(dataDir); s != nil && s.Available() {
 		return s
 	}
 	if s := newTPMSigner(); s != nil && s.Available() {

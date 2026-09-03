@@ -1,4 +1,4 @@
-//go:build darwin && cgo
+//go:build darwin && cgo && !sepblob
 
 // Intel Macs are included deliberately.
 //
@@ -126,7 +126,7 @@ type darwinSecureEnclaveSigner struct {
 	ready bool
 }
 
-func newDarwinSecureEnclaveSigner() PlatformSigner {
+func newDarwinSecureEnclaveSigner(dataDir string) PlatformSigner {
 	return &darwinSecureEnclaveSigner{}
 }
 

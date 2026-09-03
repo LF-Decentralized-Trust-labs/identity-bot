@@ -6,6 +6,6 @@
 
 package secureenclave
 
-func newDarwinSecureEnclaveSigner() PlatformSigner {
+func newDarwinSecureEnclaveSigner(dataDir string) PlatformSigner {
 	return nil
 }
