@@ -392,9 +392,9 @@ func (s *CoreServer) handleBeAFrontEndFor(w http.ResponseWriter, r *http.Request
 	// itself into this mode cleanly and then fail every request it ever made,
 	// with nothing having warned it.
 	//
-	// That is not hypothetical on two platforms: the Windows and Linux signers
-	// return false unconditionally today, so those machines could only ever
-	// arrive here and then not work.
+	// Not hypothetical on Linux, where the signer refuses by design because a
+	// Linux desktop is not a supported place to run this — so such a machine
+	// could only ever arrive here and then not work.
 	//
 	// Checked at the moment of arming rather than at first use, because this is
 	// the only moment where the answer is still useful — afterwards the machine
