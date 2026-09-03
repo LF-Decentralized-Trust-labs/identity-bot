@@ -86,3 +86,6 @@ drivers/keri-core/.venv/
 # shape rather than the one place it has appeared.
 *.key
 **/data/
+
+# Build outputs, including the Secure Enclave shim the macOS build compiles.
+identity-agent-core/build/

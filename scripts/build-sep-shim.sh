@@ -57,12 +57,18 @@ mkdir -p "$OUT"
 # back, which is the better failure but only if it happens at build time.
 SLICES=()
 for arch in "${ARCHES[@]}"; do
-  # MACOSX_DEPLOYMENT_TARGET, not -target. Naming a target explicitly makes
-  # swiftc emit back-deployment compatibility shims that reference static runtime
-  # libraries the toolchain does not ship, and the core then fails to link on an
-  # undefined swiftCompatibility symbol — measured. The environment variable sets
-  # the same floor for swiftc and for the clang that cgo invokes, so the two
-  # halves of the binary agree about how old a Mac they serve.
+  # -target names the ARCHITECTURE, which is what makes a universal binary
+  # possible: swiftc builds one slice at a time and without it there is only the
+  # host's. MACOSX_DEPLOYMENT_TARGET is set alongside it so the clang that cgo
+  # invokes agrees with swiftc about how old a Mac this serves.
+  #
+  # Naming a floor older than the toolchain makes swiftc emit back-deployment
+  # compatibility shims, which reference static libraries that live inside Xcode
+  # rather than /usr/lib/swift — so the core fails to link on an undefined
+  # swiftCompatibility symbol until the link is told where they are. That is what
+  # SWIFT_COMPAT_DIR above is for. Raising the floor to 13 would make the shims
+  # disappear and take working Macs with it, which is not a trade to make by
+  # accident.
   MACOSX_DEPLOYMENT_TARGET="$FLOOR" \
   swiftc -emit-library -static -O \
     -target "${arch}-apple-macos${FLOOR}" \

@@ -58,7 +58,23 @@ echo "--- Build Go backend (macOS universal) ---"
     go build -tags sepblob -o bin/identity-agent-core-amd64 .
   lipo -create -output bin/identity-agent-core bin/identity-agent-core-arm64 bin/identity-agent-core-amd64
   file bin/identity-agent-core
-  ls -lh bin/identity-agent-core )
+  ls -lh bin/identity-agent-core
+
+  # ASKED OF THE BINARY, NOT OF THE BUILD. Every other way this has gone wrong
+  # was invisible in a green build: cgo off compiled the enclave out, and the tag
+  # unpassed selected a signer that refuses. Both produced a perfectly good
+  # binary that could not keep a key, and nothing said so until somebody used it.
+  #
+  # Combining CGO_ENABLED=0 with the tag still exits zero, so the flags are not
+  # the thing to check — the symbol is.
+  for slice in bin/identity-agent-core-arm64 bin/identity-agent-core-amd64; do
+    nm "$slice" 2>/dev/null | grep -q "_sep_create" || {
+      echo "ERROR: $slice has no Secure Enclave signer in it." >&2
+      echo "  The core built, and it cannot keep a key. Check that the shim was" >&2
+      echo "  built, that CGO_ENABLED=1, and that -tags sepblob was passed." >&2
+      exit 1; }
+  done
+  echo "  enclave signer present in both slices" )
 
 echo "--- Get Flutter packages ---"
 ( cd identity_agent_ui && flutter pub get )
