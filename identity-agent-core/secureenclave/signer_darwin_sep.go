@@ -11,10 +11,15 @@
 //
 // The way out is to notice what the keychain was being asked to do. A Secure
 // Enclave key is never stored in the enclave; the enclave wraps it and returns a
-// blob only that chip can unwrap. The keychain was only ever holding that blob.
-// Holding it ourselves is the same mechanism with the middleman removed — same
-// hardware, same guarantee that the private half never leaves the chip, and none
-// of the apparatus.
+// blob only that chip can unwrap. The keychain was holding that blob. Holding it
+// ourselves keeps the same hardware and the same fact that the private half never
+// leaves the chip, without any of the apparatus.
+//
+// It does NOT keep everything the keychain offered. A keychain item has a
+// per-application access control list; a file at 0600 does not, so any process
+// running as this person can read it and ask the enclave to sign. The key cannot
+// be taken; its use can be borrowed locally. That is a real difference and it is
+// recorded here rather than left for somebody to discover.
 //
 // Built behind a tag because it needs a Swift library compiled first: only
 // CryptoKit exposes the wrapped blob, and cgo cannot compile Swift. The macOS
@@ -103,8 +108,25 @@ func (s *sepSigner) ensure() error {
 		return nil
 	}
 	if blob, err := s.read(); err == nil {
-		s.blob, s.loaded = blob, true
-		return nil
+		// USABLE, not merely well-formed. A blob wrapped by a DIFFERENT chip is
+		// the right size and passes every check above, because the wrapped size is
+		// the same on every Mac — so a data directory restored from a backup, or
+		// copied to other hardware, yields a signer that reports itself available
+		// and then fails every signature for the life of the installation, with no
+		// path that ever re-mints. Asking the enclave to use it once is the only
+		// thing that distinguishes our key from somebody else's.
+		if _, uerr := publicFrom(blob); uerr == nil {
+			s.blob, s.loaded = blob, true
+			return nil
+		}
+		// KEPT, NOT DELETED. This machine cannot use it, but it is a real key
+		// belonging to whichever machine made it, and a file that turns out to
+		// matter is not one to remove on a guess.
+		aside := s.path() + ".not-this-machine"
+		if rerr := os.Rename(s.path(), aside); rerr != nil {
+			return fmt.Errorf("this machine holds a key it cannot use and could not set "+
+				"it aside: %w", rerr)
+		}
 	}
 
 	buf := make([]byte, 1024)
@@ -126,12 +148,45 @@ func (s *sepSigner) ensure() error {
 	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 		return err
 	}
-	tmp := p + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+	// Written to a UNIQUE temporary name and flushed before the rename.
+	//
+	// A fixed name is not exclusive, and this mutex is per process: two cores over
+	// one data directory would interleave on the same temp file, each keep its own
+	// key in memory, and one would silently win on disk. After a restart the
+	// machine would have a different identifier than the grant made to it, which
+	// is a machine that has quietly become a different machine.
+	//
+	// The flush matters for the same reason: a rename that lands before the bytes
+	// do leaves an empty file, and the next start mints another identity.
+	tmp, err := os.CreateTemp(filepath.Dir(p), filepath.Base(p)+".*")
+	if err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, p); err != nil {
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
 		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmp.Name(), 0o600); err != nil {
+		return err
+	}
+	// Create-or-fail, so a key minted concurrently is adopted rather than
+	// overwritten. Losing that race is an ordinary outcome, not an error: the
+	// other process's key is just as much this machine's key, and the one thing
+	// that must not happen is two of them.
+	if err := os.Link(tmp.Name(), p); err != nil {
+		if existing, rerr := s.read(); rerr == nil {
+			s.blob, s.loaded = existing, true
+			return nil
+		}
+		return fmt.Errorf("this machine's key could not be stored: %w", err)
 	}
 	s.blob, s.loaded = blob, true
 	return nil
@@ -152,6 +207,9 @@ func (s *sepSigner) read() ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("the machine key is not valid base64: %w", err)
 	}
+	if len(blob) == 0 {
+		return nil, fmt.Errorf("the machine key file holds no key")
+	}
 	if len(blob) != env.Len {
 		return nil, fmt.Errorf("the machine key is %d bytes where its envelope says %d",
 			len(blob), env.Len)
@@ -169,12 +227,24 @@ func (s *sepSigner) PublicKey() ([]byte, error) {
 	if err := s.ensure(); err != nil {
 		return nil, err
 	}
+	return publicFrom(s.blob)
+}
+
+// publicFrom asks the enclave to unwrap a blob and hand back the public half.
+//
+// Separate so that loading can use it as a usability check without duplicating
+// the call, which is what stops a blob from another machine being accepted.
+func publicFrom(blob []byte) ([]byte, error) {
+	if len(blob) == 0 {
+		return nil, fmt.Errorf("there is no key to read")
+	}
 	out := make([]byte, 128)
 	var n C.size_t
-	rc := C.sep_public((*C.uchar)(unsafe.Pointer(&s.blob[0])), C.size_t(len(s.blob)),
+	rc := C.sep_public((*C.uchar)(unsafe.Pointer(&blob[0])), C.size_t(len(blob)),
 		(*C.uchar)(unsafe.Pointer(&out[0])), C.size_t(len(out)), &n)
 	if rc != 0 {
-		return nil, fmt.Errorf("this machine's key could not be read back (%d)", int(rc))
+		return nil, fmt.Errorf("this enclave cannot use that key (%d) — it was wrapped "+
+			"by a different machine", int(rc))
 	}
 	return out[:int(n)], nil
 }

@@ -75,9 +75,41 @@ func MachineVerkeyForKey(pub []byte) (string, error) {
 // signature.
 func MachineSignatureQB64(pub, sig []byte) (string, error) {
 	if aMachineKeyIsP256(pub) {
-		return MatterFixedQB64(CodeP256Sig, sig)
+		// NORMALISED HERE, because the hardware does not do it.
+		//
+		// ECDSA admits two valid signatures per message — (r, s) and (r, n-s) —
+		// and MEASURED: Apple's Secure Enclave emits either. Left alone, one
+		// request has two signature strings, and a request is remembered by its
+		// signature so it cannot be replayed; the second string would spend it
+		// again.
+		//
+		// So the canonical low form is chosen at the moment of encoding, which is
+		// the one place every machine signature passes through, and the verifier
+		// then requires it. Normalising does not invalidate the signature: both
+		// forms verify, and this picks the one that is a stable name for itself.
+		return MatterFixedQB64(CodeP256Sig, canonicalP256Signature(sig))
 	}
 	return MatterFixedQB64("0B", sig)
+}
+
+// canonicalP256Signature returns the low-s form of a 64-byte r||s signature.
+//
+// Anything that is not 64 bytes is handed back untouched, so the length check in
+// MatterFixedQB64 reports it rather than this quietly reshaping a value it does
+// not understand.
+func canonicalP256Signature(sig []byte) []byte {
+	if len(sig) != 64 {
+		return sig
+	}
+	s := new(big.Int).SetBytes(sig[32:])
+	if !isHighS(s) {
+		return sig
+	}
+	low := new(big.Int).Sub(elliptic.P256().Params().N, s)
+	out := make([]byte, 64)
+	copy(out[:32], sig[:32])
+	low.FillBytes(out[32:])
+	return out
 }
 
 // KeyFromMachineIdentifier recovers the key a machine identifier stands for,
@@ -87,7 +119,7 @@ func MachineSignatureQB64(pub, sig []byte) (string, error) {
 // without asking anybody anything: the identifier decodes to the key, or it does
 // not name that machine.
 func KeyFromMachineIdentifier(aid string) ([]byte, error) {
-	if len(aid) == 48 && len(aid) > 4 && aid[:4] == CodeP256N {
+	if len(aid) == 48 && aid[:4] == CodeP256N {
 		return KeyFromMachineAID(aid)
 	}
 	return KeyFromNonTransferableAID(aid)
@@ -120,9 +152,41 @@ func VerifyMachineSignature(verkeyQB64 string, sigQB64 string, message []byte) (
 		sum := sha256.Sum256(message)
 		r := new(big.Int).SetBytes(sig[:32])
 		s := new(big.Int).SetBytes(sig[32:])
+
+		// ONLY THE LOW-S FORM IS ACCEPTED, and this is not fastidiousness.
+		//
+		// ECDSA verifies both (r, s) and (r, n-s) — two different signatures over
+		// one message, either valid. Ed25519 has no such property, so nothing
+		// upstream was built expecting it, and one thing upstream depends on its
+		// absence: a signed request is remembered by its signature string so it
+		// cannot be replayed. Under ECDSA anybody who observes a request inside
+		// the freshness window can negate s, produce a second string that
+		// verifies the same bytes, and spend the request again.
+		//
+		// So the malleable half is refused here rather than defended against
+		// everywhere it could be replayed. The hardware does NOT produce the low
+		// form on its own — Apple's Secure Enclave emits either, measured — so
+		// MachineSignatureQB64 normalises at the moment of encoding and this
+		// requires what that produced.
+		if isHighS(s) {
+			return false, fmt.Errorf("this signature is in the malleable form; only the " +
+				"canonical low-s form is accepted, because a request is remembered by " +
+				"its signature and the other form would spend it twice")
+		}
+		if r.Sign() <= 0 || s.Sign() <= 0 {
+			return false, fmt.Errorf("a signature component is zero, which is not a signature")
+		}
 		return ecdsa.Verify(&ecdsa.PublicKey{Curve: elliptic.P256(), X: x, Y: y}, sum[:], r, s), nil
 	}
 
+	// Checked before the call, because ed25519.Verify PANICS on a key of the
+	// wrong length rather than returning false. Anything reaching here that is
+	// not an Ed25519 key is a value that classified as neither, and the honest
+	// answer is to say so.
+	if len(pub) != ed25519.PublicKeySize {
+		return false, fmt.Errorf("that is not a key this machine could have signed with: "+
+			"%d bytes is neither an Ed25519 key nor a P-256 point", len(pub))
+	}
 	if len(sigQB64) != 88 || sigQB64[:2] != "0B" {
 		return false, fmt.Errorf("an Ed25519 machine signature carries the 0B code")
 	}
@@ -182,4 +246,14 @@ func uncompressedP256(pub []byte) []byte {
 		return nil
 	}
 	return elliptic.Marshal(elliptic.P256(), x, y)
+}
+
+// isHighS reports whether s is above half the curve order.
+//
+// The negation of any valid s is also valid, so exactly one of the pair is below
+// the halfway point. Taking the low one as canonical is the ordinary convention
+// and it is what makes a signature a stable name for itself.
+func isHighS(s *big.Int) bool {
+	half := new(big.Int).Rsh(elliptic.P256().Params().N, 1)
+	return s.Cmp(half) > 0
 }

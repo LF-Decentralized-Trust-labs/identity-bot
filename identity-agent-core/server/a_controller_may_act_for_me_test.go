@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"identity-agent-core/iacrypto"
-	"identity-agent-core/login"
 	"identity-agent-core/secureenclave"
 
 	"github.com/go-chi/chi/v5"
@@ -494,7 +493,7 @@ func TestThisMachineOffersOnlyWhatItsHardwareHolds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("this machine named itself something a grant would reject: %v", err)
 	}
-	offered, err := login.DecodeVerkey(id.PublicKey)
+	offered, err := iacrypto.KeyFromMachineVerkey(id.PublicKey)
 	if err != nil {
 		t.Fatalf("this machine offered an unusable key: %v", err)
 	}

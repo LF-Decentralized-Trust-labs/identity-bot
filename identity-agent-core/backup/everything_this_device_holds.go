@@ -70,6 +70,19 @@ func skipReason(rel string) string {
 		// must not depend on the old device's secure element.
 		return "captured as root_seed, unwrapped"
 	}
+	if strings.HasPrefix(slashed, "secureenclave/machine_key.sep") {
+		// THIS MACHINE'S OWN KEY, and it belongs to the machine rather than to
+		// the identity. It is wrapped by a secure element that exists in exactly
+		// one processor, so a copy is useless anywhere else — carrying it would
+		// put an unusable file in every archive and, worse, restore it onto new
+		// hardware where the agent would find a key it can never use.
+		//
+		// Nothing is lost by leaving it. A machine mints its own on first run,
+		// and its authority comes from a grant the owner makes, not from the key
+		// surviving a move. The right thing after a restore is to be granted
+		// again as the new machine that it is.
+		return "not carried: this machine's own key, usable only in this processor"
+	}
 
 	// SQLite's write-ahead log and shared-memory files are only meaningful
 	// beside the exact database they belong to, mid-transaction. Restoring a

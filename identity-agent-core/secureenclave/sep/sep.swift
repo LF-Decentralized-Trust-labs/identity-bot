@@ -7,11 +7,26 @@
 // cannot be given them, because the system finds a profile only inside the
 // bundle of the binary claiming it.
 //
-// So this holds the blob itself. Same enclave, same wrapping, same guarantee
-// that the private half never exists outside the chip — without the keychain,
-// and therefore without any of the apparatus the keychain requires. Measured: a
-// bare unsigned executable with no entitlements creates a key, and a separate
-// process restores it and signs with it.
+// So this holds the blob itself. Same enclave, same wrapping, and the private
+// half still never exists outside the chip — without the keychain, and therefore
+// without the apparatus the keychain requires. Measured: a bare unsigned
+// executable with no entitlements creates a key, and a separate process restores
+// it and signs with it.
+//
+// WHAT IS GIVEN UP, stated because the rest of this reads like nothing is. A
+// keychain item carries a per-application access control list, so a different
+// binary running as the same person is prompted or refused. A file at 0600 has no
+// such gate: anything running as that person can read it and ask the enclave to
+// sign. The key cannot be COPIED — it is useless on any other processor — but its
+// USE can be borrowed locally. What changed versus the keychain is access
+// control, not confidentiality.
+//
+// Accepted deliberately. The keychain path never worked here at all, so nothing
+// real was given up, and the alternative — requiring a person's presence for
+// each signature — is not available to a machine that signs every request. What
+// governs a borrowed key is the authentication level a controller must reach for
+// anything that matters, which is a separate mechanism and the right place for
+// it.
 //
 // CryptoKit rather than Security.framework because only CryptoKit exposes the
 // wrapped blob. Security.framework can create the key and then only offer to
@@ -31,10 +46,18 @@ public func sep_available() -> Int32 {
 // wrong size — a `try!` inside SEP_P256.swift — so a truncated or corrupted file
 // takes the whole process down instead of returning an error. The length has to
 // be judged before the call, because after it there is nothing to judge.
+// Asked once and remembered. This mints a real enclave key to measure one, and
+// restore() consults it — so without memoising, a single signing request made
+// three throwaway keys in the enclave. Nothing leaked, because CryptoKit does not
+// persist them, but it is work the hardware should not be asked to repeat.
+private var cachedBlobSize: Int32 = 0
+
 @_cdecl("sep_blob_size")
 public func sep_blob_size() -> Int32 {
+    if cachedBlobSize > 0 { return cachedBlobSize }
     guard let k = try? SecureEnclave.P256.Signing.PrivateKey() else { return -1 }
-    return Int32(k.dataRepresentation.count)
+    cachedBlobSize = Int32(k.dataRepresentation.count)
+    return cachedBlobSize
 }
 
 @_cdecl("sep_create")

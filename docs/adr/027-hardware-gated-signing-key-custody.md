@@ -1,6 +1,8 @@
 # ADR-027: Hardware-Gated Signing Key Custody
 
-**Status:** Accepted, with the implementation notes below corrected 2026-08-17.
+**Status:** Accepted, with the implementation notes below corrected 2026-08-17 and
+the machine-key custody superseded 2026-09-03 — see "What changed on 2026-09-03"
+at the end.
 The decision and its reasoning stand. Where this ADR says mobile signing happens in
 a Rust bridge, or weighs adding a P-256 derivation code against "the Rust `keri_core`
 bridge", that engine no longer exists — see "What changed since this was written" at
@@ -116,3 +118,52 @@ underneath it, so three implementation details in the text above are now wrong.
 The reference to ADR-015 below describes the mobile architecture as it was. See
 [ADR-037](037-one-keri-engine-on-every-platform.md) for the engine that replaced it,
 and why two implementations of one protocol turned out not to behave alike.
+
+
+## What changed on 2026-09-03: the machine's own key
+
+Two things this ADR says about a machine's key are no longer how it works. Both
+were corrected by measurement rather than by argument.
+
+**The keychain is not how an enclave key is kept.** This ADR describes creating
+the platform key through the Keychain with `kSecAttrTokenIDSecureEnclave`. That
+path cannot work in the shape this software ships: persisting an enclave key
+needs a keychain access group, which needs an entitlement authorised by a
+provisioning profile, which needs an app-like bundle to embed the profile in —
+and the backend is a bare executable inside the app's resources, with nowhere to
+put one. Every attempt returned `errSecMissingEntitlement`.
+
+The way out is that an enclave key is never stored in the enclave at all. The
+enclave wraps it and returns a blob only that same processor can unwrap, and the
+keychain was holding that blob. The agent now holds it directly, at mode 0600 in
+its data directory. No entitlement, no profile, no repackaging. Measured: a bare
+unsigned executable creates a key, a separate process restores it and signs, and
+the signature verifies.
+
+What is given up is access control rather than confidentiality. A keychain item
+carries a per-application list, so a different binary running as the same person
+is prompted or refused; a file has no such gate. The key still cannot be carried
+to another machine — it is useless off that processor — but its use can be
+borrowed by code already running as that person. Local misuse is governed by the
+authentication level a controller must reach, not by key custody.
+
+**P-256 is the machine's key, not a gate in front of an Ed25519 one.** This ADR
+frames P-256 as a hardware gate protecting an Ed25519 identity. For a machine's
+own key that framing is now wrong: the key IS secp256r1, and the machine's
+identifier is that key, encoded with the codes the reference implementation
+already defines (`1AAI`, `1AAJ`, `0I`) rather than an extension of our own.
+
+The reason is that no secure element does anything else. No shipping TPM
+implements Ed25519 and the TCG registry defines no Edwards curve, so an Ed25519
+machine key is a key no hardware can hold — which is why three platform signers
+were stubs that refused. Identities are untouched and remain Ed25519; this
+applies only to the key a machine uses to say it is itself.
+
+This ADR's warning that a non-keripy verifier may fail to PARSE these codes
+rather than reject them cleanly still stands, and matters less than it did: a
+machine's identifier is never published. It has no inception event, no key event
+log and no witnesses, so no third party parses it — only the agent holding the
+grant.
+
+Implemented in PR #231. Registered in the superseded-claims register as an
+amendment to S6.

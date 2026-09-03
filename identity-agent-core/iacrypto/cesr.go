@@ -1,6 +1,7 @@
 package iacrypto
 
 import (
+	"crypto/elliptic"
 	"encoding/base64"
 	"fmt"
 )
@@ -331,6 +332,15 @@ func KeyFromMachineAID(aid string) ([]byte, error) {
 	}
 	if len(raw) != 33 {
 		return nil, fmt.Errorf("expected a 33-byte compressed point, got %d", len(raw))
+	}
+	// VALIDATED, NOT MERELY MEASURED. A 33-byte value of the right length whose
+	// prefix is not 0x02 or 0x03 is not a point on the curve, and letting it
+	// through means it is classified as neither a P-256 key nor an Ed25519 one
+	// later — where the Ed25519 verifier panics on a 33-byte key rather than
+	// returning false. So a grant carrying such a pair could be stored and then
+	// take down every request made against it.
+	if x, _ := elliptic.UnmarshalCompressed(elliptic.P256(), raw); x == nil {
+		return nil, fmt.Errorf("that identifier does not name a point on P-256")
 	}
 	return raw, nil
 }

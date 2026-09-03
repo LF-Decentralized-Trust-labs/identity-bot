@@ -2,6 +2,11 @@ package iacrypto
 
 import (
 	"bytes"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/sha256"
+	"math/big"
 	"strings"
 	"testing"
 )
@@ -136,6 +141,112 @@ func TestAMachineNamesItselfTheWayKeripyDoes(t *testing.T) {
 		edAID := NonTransferableAIDQB64(ed)
 		if _, err := KeyFromMachineAID(edAID); err == nil {
 			t.Fatal("the machine decoder must refuse an Ed25519 identifier")
+		}
+	})
+}
+
+// What a machine signature must refuse.
+//
+// Each of these was found by review rather than by writing the code, and each is
+// the kind that passes every obvious test: a signature that verifies, a key of
+// the right length, an identifier that round-trips. They are pinned here because
+// the next person to touch the verifier will not rediscover them.
+func TestWhatAMachineSignatureRefuses(t *testing.T) {
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub := elliptic.Marshal(elliptic.P256(), priv.PublicKey.X, priv.PublicKey.Y)
+	verkey, err := MachineVerkeyForKey(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg := []byte("this machine is asking to act for you")
+	sum := sha256.Sum256(msg)
+
+	// A signature in the low-s form, which is what any honest signer emits.
+	var r, s *big.Int
+	for {
+		r, s, err = ecdsa.Sign(rand.Reader, priv, sum[:])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !isHighS(s) {
+			break
+		}
+		s = new(big.Int).Sub(elliptic.P256().Params().N, s)
+		break
+	}
+	sig := make([]byte, 64)
+	r.FillBytes(sig[:32])
+	s.FillBytes(sig[32:])
+	good, err := MachineSignatureQB64(pub, sig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := VerifyMachineSignature(verkey, good, msg); err != nil || !ok {
+		t.Fatalf("an honest signature must verify: ok=%v err=%v", ok, err)
+	}
+
+	t.Run("the same signature with s negated", func(t *testing.T) {
+		// THE ONE THAT MATTERS. ECDSA verifies both (r, s) and (r, n-s), so one
+		// message has two valid signature strings. A request is remembered by its
+		// signature so it cannot be replayed — under the malleable form somebody
+		// who watched a request go past can negate s and spend it again.
+		neg := new(big.Int).Sub(elliptic.P256().Params().N, s)
+		other := make([]byte, 64)
+		r.FillBytes(other[:32])
+		neg.FillBytes(other[32:])
+		// Encoded WITHOUT going through MachineSignatureQB64, because that
+		// normalises — which is the fix. An attacker replaying a request does not
+		// use our encoder, so the test must not either.
+		malleable, err := MatterFixedQB64(CodeP256Sig, other)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if malleable == good {
+			t.Fatal("the two forms must be different strings, or there is nothing to test")
+		}
+		ok, _ := VerifyMachineSignature(verkey, malleable, msg)
+		if ok {
+			t.Fatal("the malleable form verified, so a signed request can be replayed " +
+				"under a signature the replay guard has never seen")
+		}
+	})
+
+	t.Run("a signature component of zero", func(t *testing.T) {
+		zeroed := make([]byte, 64)
+		copy(zeroed[32:], sig[32:])
+		bad, err := MatterFixedQB64(CodeP256Sig, zeroed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ok, _ := VerifyMachineSignature(verkey, bad, msg); ok {
+			t.Fatal("a zero component is not a signature")
+		}
+	})
+
+	t.Run("an identifier of the right length that names no point", func(t *testing.T) {
+		// 33 bytes, right length, prefix that is not 0x02 or 0x03. Classified as
+		// neither a P-256 point nor an Ed25519 key — and the Ed25519 verifier
+		// panics on a 33-byte key rather than returning false, so this used to be
+		// reachable all the way from a stored grant.
+		notAPoint := make([]byte, 33)
+		notAPoint[0] = 0x07
+		aid, err := MatterFixedQB64(CodeP256N, notAPoint)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := KeyFromMachineIdentifier(aid); err == nil {
+			t.Fatal("an identifier that names no point on the curve must be refused")
+		}
+		vk, err := MatterFixedQB64(CodeP256, notAPoint)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Must return an error rather than panicking, which is what this pins.
+		if ok, err := VerifyMachineSignature(vk, good, msg); ok || err == nil {
+			t.Fatalf("expected a refusal, got ok=%v err=%v", ok, err)
 		}
 	})
 }

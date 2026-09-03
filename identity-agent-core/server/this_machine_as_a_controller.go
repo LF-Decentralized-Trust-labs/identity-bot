@@ -73,13 +73,14 @@ func (s *CoreServer) thisMachineAsAController() (ControllerIdentity, error) {
 		if found.Status == secureenclave.Absent {
 			return ControllerIdentity{}, fmt.Errorf(
 				"this computer has no hardware that can keep a key to itself, so it "+
-					"cannot act for an identity — a key anybody can copy off is an "+
-					"authorisation granted to anybody (%s)", found.String())
+					"cannot act for an identity — a key held in software can be copied "+
+					"to another machine and used there, which is an authorisation "+
+					"granted to whoever takes it (%s)", found.String())
 		}
 		return ControllerIdentity{}, fmt.Errorf(
 			"this computer has hardware that can keep a key to itself, but could not "+
 				"use it just now, so it has not been given one — %s. A key held any "+
-				"other way is an authorisation granted to anybody who can read it",
+				"other way could be carried to a different machine and used there",
 			found.String())
 	}
 	pub, err := signer.PublicKey()
