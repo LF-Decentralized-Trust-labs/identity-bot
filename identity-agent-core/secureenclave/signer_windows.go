@@ -11,11 +11,14 @@ package secureenclave
 // this machine protect a key", never to hold one.
 //
 // P-256, not Ed25519, and that is not a compromise. No shipping TPM implements
-// Ed25519; the TCG algorithm registry defines no Edwards curve at all, and the
-// platform provider does RSA and the NIST curves and nothing else. A machine key
-// that insisted on Ed25519 is a key no hardware can hold, which is exactly how
-// this file came to be a stub. Identities stay Ed25519 — this is the machine's
-// own key, and it is never an identity anybody founds anything on.
+// Ed25519; the TCG registry defines no Edwards curve, and this provider does RSA
+// and the NIST curves and nothing else. What the curve buys is non-extractability
+// — the key cannot be carried to another machine — which a seed sealed to the TPM
+// and unwrapped into memory would give up while keeping one curve.
+//
+// This is the key a machine signs its own requests with. A KERI identity prefix
+// stays Ed25519 wherever it lives, INCLUDING on a machine that holds one; the
+// distinction is what the key is for, not what kind of thing holds it.
 //
 // WRITTEN BUT NOT YET RUN ON WINDOWS. It compiles for windows/amd64 and follows
 // the provider's documented contract, and no Windows machine was available to

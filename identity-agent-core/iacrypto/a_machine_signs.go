@@ -13,11 +13,22 @@ import (
 // Everything about a machine's own key lives here, so the question "which
 // algorithm is this" is answered once.
 //
-// It has to be asked at all because a machine's key is not an identity's key.
-// People, organisations and instances are Ed25519. A machine is secp256r1,
-// because that is the only thing a Secure Enclave, a Windows platform provider
-// or a TPM will hold — and a key no hardware can hold is how three platforms
-// ended up with signers that refuse.
+// THE LINE IS NOT MACHINE VERSUS PERSON, and stating it that way is a trap.
+//
+// "Machines are secp256r1, people are Ed25519" reads well and will be
+// implemented literally — and the sealed box that HOLDS an identity is a
+// machine, as is a phone. Someone will read that sentence and put an identity
+// key on P-256 inside an attested guest.
+//
+// The actual invariant: a key a chip holds on a machine's behalf uses the curve
+// that chip can sign with, which is secp256r1 on every secure element that
+// exists. A KERI identity prefix stays Ed25519 wherever it lives, including on
+// machines. This file is only ever about the first kind.
+//
+// And the reason is non-extractability, not that an API lacks Ed25519. A seed
+// sealed to a TPM and unwrapped into memory would keep one curve and give up the
+// property worth having: same-user code can USE a hardware key, and cannot carry
+// it to another machine. A software key loses that.
 //
 // The danger of spreading that question around is specific and it has already
 // happened once: the signing path encoded a machine's signature under the
