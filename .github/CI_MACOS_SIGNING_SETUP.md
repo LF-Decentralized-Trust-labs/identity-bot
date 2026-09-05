@@ -25,10 +25,11 @@ Add these under **GitHub → repo Settings → Secrets and variables → Actions
 | `APP_STORE_CONNECT_KEY_IDENTIFIER` | the API key's Key ID (10 chars, e.g. `2X9R4HXF34`) |
 | `APP_STORE_CONNECT_ISSUER_ID` | the Issuer ID (a UUID from App Store Connect → Users and Access → Integrations) |
 
-> The names match the Codemagic env-group names on purpose, so the build logic
-> is identical across both CI systems.
+> The `CM_` prefix and these names are inherited from a CI service this project
+> no longer uses. They were kept so the build scripts did not have to change; the
+> letters carry no meaning today.
 
-## Can I reuse the Codemagic ones?
+## Reusing keys from an earlier CI setup
 
 **Short version:** make a **new App Store Connect API key** for Actions; **reuse
 the same `.p12`** if you still have the file, otherwise re-export or regenerate.
@@ -36,9 +37,9 @@ the same `.p12`** if you still have the file, otherwise re-export or regenerate.
 ### `APP_STORE_CONNECT_PRIVATE_KEY` (the `.p8`) — make a NEW one (recommended)
 
 Apple lets you download a `.p8` **only once**, at creation. If it only ever went
-into Codemagic, you can't get it back. You **can** have several active keys at
+into a CI service, you can't get it back. You **can** have several active keys at
 once and they don't interfere, so the clean move is a dedicated key for Actions —
-Codemagic's existing key keeps working, and you can revoke either independently.
+any existing key keeps working, and you can revoke either independently.
 
 1. App Store Connect → **Users and Access → Integrations → App Store Connect API**.
 2. Create a key with the **Developer** role (sufficient for notarization).
@@ -52,8 +53,8 @@ Codemagic's existing key keeps working, and you can revoke either independently.
 ### `CM_CERTIFICATE` (the `.p12`) — reuse if you have it
 
 A Developer ID Application cert is just a cert + private key in a file; the same
-`.p12` works in unlimited places at once, so reusing it does **not** break
-Codemagic. Three ways to get it:
+`.p12` works in unlimited places at once, so reusing it breaks nothing that
+already uses it. Three ways to get it:
 
 - **You still have the `.p12`** → use it directly (skip to "Encode" below).
 - **Re-export from the Mac that created it:** open **Keychain Access**, find

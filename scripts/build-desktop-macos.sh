@@ -3,9 +3,8 @@
 # Build + bundle the Identity Agent macOS desktop .app (UNSIGNED).
 #
 # The build/bundle steps for a macOS release. Signing, notarization and DMG
-# packaging are handled
-# separately (sign-notarize-macos.sh) so this build runs green even before
-# the Apple signing secrets are configured.
+# packaging are handled separately (sign-notarize-macos.sh) so this build runs
+# green even before the Apple signing secrets are configured.
 #
 # The CALLER installs the toolchain first:
 #   - Go 1.24.0

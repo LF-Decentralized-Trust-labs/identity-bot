@@ -2,7 +2,7 @@
 
 ## Windows Setup (Required for Desktop Testing)
 
-The Windows builds from Codemagic no longer include an embedded Python runtime to reduce build time and ZIP size. You must install Python and its dependencies on your system manually.
+The Windows builds do not include an embedded Python runtime, which keeps build time and download size down. You must install Python and its dependencies on your system manually.
 
 ### System Requirements
 
@@ -53,7 +53,7 @@ Should output something like: `C:\Users\YourUsername\AppData\Local\Programs\Pyth
 
 #### 4. Run Identity Agent
 
-Unzip the `identity-agent-windows-x64.zip` from the Codemagic build to any location and run:
+Unzip the `identity-agent-windows-x64.zip` produced by the Windows build to any location and run:
 ```
 .\identity-agent-windows-x64-v6\identity_agent_ui.exe
 ```
@@ -78,7 +78,7 @@ pip install flask keri==1.1.17 --upgrade
 
 ### Build Time Savings
 
-By removing embedded Python from Codemagic:
+By not embedding Python in the Windows build:
 - **Build time reduced**: ~13 minutes → ~6 minutes (50% faster)
 - **ZIP size reduced**: ~800-1000MB → ~200-300MB
 - **Unzip time reduced**: ~4 minutes → ~30 seconds

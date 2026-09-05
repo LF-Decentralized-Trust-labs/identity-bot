@@ -7,8 +7,8 @@
 # This script detects the TLS issue and falls back to the official Flutter
 # SDK from Google, which ships with its own working root certificates.
 #
-# This script is ONLY used by Replit build scripts. Codemagic, local dev,
-# and other CI systems are unaffected.
+# This script is ONLY used by Replit build scripts. Local dev and other CI
+# systems are unaffected.
 
 FLUTTER_VERSION="3.41.4"
 FLUTTER_CHANNEL="stable"
