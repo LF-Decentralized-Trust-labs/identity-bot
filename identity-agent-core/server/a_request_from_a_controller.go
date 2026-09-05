@@ -182,17 +182,25 @@ func (s *CoreServer) theControllerBehind(r *http.Request) (ControllerGrant, auth
 			"this request was signed outside the %s window", signedRequestWindow)
 	}
 
-	// The grant decides whether this machine is anybody. Checked before the
-	// signature is verified only to fail fast; neither answer is given away,
-	// because both end in the same refusal.
+	// The grant decides whether this machine is anybody, and is checked before
+	// the signature only to fail fast.
+	//
+	// Admitting still requires the signature to verify against the key the GRANT
+	// records, below — reaching this point proves nothing. What the refusal is
+	// allowed to SAY, though, does depend on proof, and that is settled
+	// separately: an unproven caller gets the same sentence it always got, and
+	// only a caller that demonstrates it holds this machine's key learns which
+	// of the reasons applies.
 	grant, live, err := s.controllers().Live(aid, now)
 	if err != nil {
 		return none, unmeasured, fmt.Errorf(
 			"which machines may act for this identity could not be read, so none were admitted: %w", err)
 	}
 	if !live {
-		return none, unmeasured, fmt.Errorf(
-			"this machine is not authorised to act for this identity, or its authorisation has ended")
+		// The refusal is the same either way; only what it SAYS depends on
+		// whether the caller can prove it is the machine it claims to be. See
+		// why_a_machine_was_not_admitted.go — nothing there can admit anybody.
+		return none, unmeasured, s.whyThisMachineWasNotAdmitted(r, aid, sig, stamp, now)
 	}
 
 	// The key is NOT decoded here any more. A machine's key is P-256 where an
