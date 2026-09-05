@@ -95,10 +95,16 @@ func skipReason(rel string) string {
 		// and closing it here is cheaper than reconciling a restored list against
 		// anything.
 		//
-		// The cost is that a restored Identity Agent has no controllers and each
-		// machine must be granted again. That is the right cost: after a restore,
-		// which machines may act is exactly the question an owner should be asked
-		// rather than have answered from a file.
+		// Restoring onto a fresh installation therefore leaves it with no
+		// controllers, and each machine must be granted again. That is the right
+		// cost: after a restore, which machines may act is exactly the question
+		// an owner should be asked rather than have answered from a file.
+		//
+		// Restoring in place leaves the grants already on disk untouched, because
+		// a restore writes the sections an archive names and deletes nothing.
+		// Those are the current grants rather than a resurrected past, so there
+		// is nothing to reconcile — but it does mean this rule bounds what an
+		// archive can carry, not what a restore ends up holding.
 		return "not carried: which machines may act is decided now, not restored"
 	}
 	if strings.HasPrefix(slashed, "secureenclave/machine_key.sep") {

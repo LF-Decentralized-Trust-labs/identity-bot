@@ -74,12 +74,21 @@ identity's side. It is never a reason to start backing up installations.
 
 ## Consequences
 
-**Which machines may act is decided after a restore, not restored from a file.**
-`skipReason` in `backup/everything_this_device_holds.go` excludes the record of
-granted controllers from every archive. The cost is that a restored Identity Agent
-has no controllers and each machine must be granted again — which is the right
-cost, because after a restore that is exactly the question an owner should be asked
-rather than have answered from a file.
+**Which machines may act is never carried in an archive.** `skipReason` in
+`backup/everything_this_device_holds.go` excludes the record of granted
+controllers, so no archive holds one to restore.
+
+What follows differs by where the archive lands, and the difference is worth
+stating because only one half is a cost:
+
+- Onto a **fresh installation** there are no controllers, and each machine must be
+  granted again. That is the right cost — after a restore, which machines may act
+  is exactly the question an owner should be asked rather than have answered from
+  a file.
+- Onto an installation that **already holds grants**, a restore leaves them
+  untouched, because a restore writes the sections an archive names and deletes
+  nothing. Those grants are the current ones rather than a resurrected past, which
+  is the correct outcome and the reason nothing has to reconcile them.
 
 **Revocation stays complete.** A grant is consulted only by the Identity Agent
 holding it; there is no published list and no other party to inform. The restore
