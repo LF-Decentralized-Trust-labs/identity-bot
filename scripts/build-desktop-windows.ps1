@@ -1,8 +1,8 @@
 <#
   Build + bundle the Identity Agent Windows desktop release.
 
-  Mirrors the `windows-release` workflow in codemagic.yaml so both CI vendors
-  call the same logic. The CALLER is responsible for installing the toolchain
+  The build steps for a Windows release, kept as a script so CI and a developer
+  run the same logic. The CALLER is responsible for installing the toolchain
   first:
     - Go 1.24.0
     - Flutter 3.27.3
