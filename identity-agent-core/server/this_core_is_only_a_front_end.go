@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 
+	"identity-agent-core/secureenclave"
+
 	"github.com/go-chi/chi/v5"
 	"time"
 )
@@ -379,6 +381,34 @@ func (s *CoreServer) handleBeAFrontEndFor(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "body must be JSON", err.Error())
 		return
 	}
+
+	// REFUSED IF THIS MACHINE COULD NEVER SIGN, because every single thing a
+	// front end does afterwards is signed.
+	//
+	// A front end holds no identity. It reaches the agent that does, and every
+	// request it makes is signed per request with this machine's own key — the
+	// route that signs returns 501 without hardware to hold that key, and does
+	// not fall back, deliberately. So a machine with no hardware key could arm
+	// itself into this mode cleanly and then fail every request it ever made,
+	// with nothing having warned it.
+	//
+	// Not hypothetical on Linux, where the signer refuses by design because a
+	// Linux desktop is not a supported place to run this — so such a machine
+	// could only ever arrive here and then not work.
+	//
+	// Checked at the moment of arming rather than at first use, because this is
+	// the only moment where the answer is still useful — afterwards the machine
+	// is in a mode whose every operation is the one that fails.
+	signer := secureenclave.NewPlatformSigner(s.DataDir)
+	if !secureenclave.UsingHardware(signer) {
+		found := secureenclave.HardwareRootStatus()
+		writeError(w, http.StatusPreconditionFailed,
+			"this computer cannot act for an identity, so it cannot be a front end for one",
+			"a front end signs every request with a key this machine keeps to itself, and this "+
+				"one has none — "+found.String())
+		return
+	}
+
 	if err := s.beAFrontEndFor(f); err != nil {
 		writeError(w, http.StatusConflict,
 			"this computer cannot be made a front end for that agent", err.Error())

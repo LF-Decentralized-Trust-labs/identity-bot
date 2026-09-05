@@ -21,6 +21,20 @@ set -euo pipefail
 
 BUILD_NUMBER="${BUILD_NUMBER:-0}"
 
+echo "--- Build the Secure Enclave shim ---"
+# WITHOUT THIS THE ENCLAVE CODE SHIPS IN NOTHING, which is the failure this
+# whole area keeps producing: the capability is written, proven on hardware, and
+# then reaches no artifact because no build script asks for it.
+#
+# Only CryptoKit exposes the enclave's wrapped key blob and cgo cannot compile
+# Swift, so the Swift becomes a static library the core links under a build tag.
+# The tag is what selects the signer that can actually keep a key; without it the
+# core falls back to the keychain path, which needs an entitlement a bare helper
+# cannot carry and therefore refuses.
+SEP_OUT="$(pwd)/identity-agent-core/build/sep"
+bash scripts/build-sep-shim.sh "$SEP_OUT"
+SEP_LDFLAGS="$(bash "$SEP_OUT/sep-ldflags.sh")"
+
 echo "--- Build Go backend (macOS universal) ---"
 ( cd identity-agent-core
   # CGO_ENABLED=1, and it is load-bearing rather than incidental.
@@ -33,11 +47,34 @@ echo "--- Build Go backend (macOS universal) ---"
   # `usable`. The tests and the thing users install were different programs.
   #
   # Verify with: CGO_ENABLED=0 go list -f '{{.CgoFiles}}' ./secureenclave
-  CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -o bin/identity-agent-core-arm64 .
-  CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 go build -o bin/identity-agent-core-amd64 .
+  # MACOSX_DEPLOYMENT_TARGET is set because cgo forces external linking, and the
+  # system linker otherwise stamps the binary with the OS of whatever machine
+  # built it — so a build box running a new macOS produced a binary claiming to
+  # need one.
+  export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-12.0}"
+  CGO_ENABLED=1 CGO_LDFLAGS="$SEP_LDFLAGS" GOOS=darwin GOARCH=arm64 \
+    go build -tags sepblob -o bin/identity-agent-core-arm64 .
+  CGO_ENABLED=1 CGO_LDFLAGS="$SEP_LDFLAGS" GOOS=darwin GOARCH=amd64 \
+    go build -tags sepblob -o bin/identity-agent-core-amd64 .
   lipo -create -output bin/identity-agent-core bin/identity-agent-core-arm64 bin/identity-agent-core-amd64
   file bin/identity-agent-core
-  ls -lh bin/identity-agent-core )
+  ls -lh bin/identity-agent-core
+
+  # ASKED OF THE BINARY, NOT OF THE BUILD. Every other way this has gone wrong
+  # was invisible in a green build: cgo off compiled the enclave out, and the tag
+  # unpassed selected a signer that refuses. Both produced a perfectly good
+  # binary that could not keep a key, and nothing said so until somebody used it.
+  #
+  # Combining CGO_ENABLED=0 with the tag still exits zero, so the flags are not
+  # the thing to check — the symbol is.
+  for slice in bin/identity-agent-core-arm64 bin/identity-agent-core-amd64; do
+    nm "$slice" 2>/dev/null | grep -q "_sep_create" || {
+      echo "ERROR: $slice has no Secure Enclave signer in it." >&2
+      echo "  The core built, and it cannot keep a key. Check that the shim was" >&2
+      echo "  built, that CGO_ENABLED=1, and that -tags sepblob was passed." >&2
+      exit 1; }
+  done
+  echo "  enclave signer present in both slices" )
 
 echo "--- Get Flutter packages ---"
 ( cd identity_agent_ui && flutter pub get )

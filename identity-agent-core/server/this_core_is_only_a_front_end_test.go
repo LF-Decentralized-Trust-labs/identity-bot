@@ -3,6 +3,7 @@ package server
 import (
 	"crypto/ed25519"
 	"encoding/json"
+	"identity-agent-core/secureenclave"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -388,5 +389,47 @@ func TestTheRealRouterRefusesWhatBelongsToTheAgent(t *testing.T) {
 		t.Fatalf("the real router answered %d for a computer that holds no identity — "+
 			"the refusal is not installed on it, so nothing in production refuses",
 			rec.Code)
+	}
+}
+
+// A machine that could never sign is not allowed to become a front end.
+//
+// Everything a front end does afterwards is signed with this machine's own key,
+// per request, by a route that returns 501 without hardware to hold that key and
+// does not fall back. So arming this mode on a machine with no such key produces
+// an installation that is correctly configured and cannot make a single request
+// — and says nothing until the first one fails.
+//
+// Not hypothetical on two platforms: the Windows and Linux signers return false
+// unconditionally today, so those machines could only ever reach this state.
+//
+// Driven through the real router rather than the handler, because a check that
+// is only reachable in a test is the shape of guard that gets removed by
+// accident and takes nothing with it.
+func TestAMachineThatCannotSignIsNotMadeAFrontEnd(t *testing.T) {
+	s := &CoreServer{DataDir: t.TempDir()}
+	if secureenclave.UsingHardware(secureenclave.NewPlatformSigner(s.DataDir)) {
+		t.Skip("this machine can hold a key, so it is allowed to be a front end")
+	}
+
+	body := `{"agent_aid":"EAgentaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",` +
+		`"agent_url":"https://box.example.test"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/controller/front-end-for",
+		strings.NewReader(body))
+	req.RemoteAddr = "127.0.0.1:54321"
+	rec := httptest.NewRecorder()
+	s.buildRouter("").ServeHTTP(rec, req)
+
+	if rec.Code == http.StatusOK {
+		t.Fatal("a machine with no hardware key was armed as a front end, and every " +
+			"request it makes from now on will be refused by the agent")
+	}
+	if rec.Code != http.StatusPreconditionFailed {
+		t.Fatalf("expected 412 so the reason is legible, got %d: %s", rec.Code, rec.Body.String())
+	}
+	// The record must not exist either — a refusal that still wrote the file
+	// would leave the machine in the state the refusal exists to prevent.
+	if front, err := s.whatThisCoreIsAFrontEndFor(); err == nil && front != nil {
+		t.Fatal("the request was refused but the record was written anyway")
 	}
 }

@@ -195,9 +195,12 @@ func (s *CoreServer) theControllerBehind(r *http.Request) (ControllerGrant, auth
 			"this machine is not authorised to act for this identity, or its authorisation has ended")
 	}
 
-	pub, err := login.DecodeVerkey(grant.PublicKey)
-	if err != nil {
-		return none, unmeasured, fmt.Errorf("the key recorded for this machine is unusable: %w", err)
+	// The key is NOT decoded here any more. A machine's key is P-256 where an
+	// identity's is Ed25519, and the published form says which -- so the form is
+	// carried to the verifier, which asks once, rather than being flattened to
+	// raw bytes that no longer say what they are.
+	if grant.PublicKey == "" {
+		return none, unmeasured, fmt.Errorf("no key is recorded for this machine")
 	}
 
 	// Read the body to digest it, then put it back — the handler still needs it.
@@ -229,8 +232,8 @@ func (s *CoreServer) theControllerBehind(r *http.Request) (ControllerGrant, auth
 	}
 
 	asserted := s.theAuthenticationSomebodyVouchedFor(r, aid, now)
-	ok, err := login.VerifyString(
-		canonicalControllerRequest(aid, r.Method, r.URL.Path, stamp, asserted, body), sig, pub)
+	ok, err := iacrypto.VerifyMachineSignature(grant.PublicKey, sig,
+		[]byte(canonicalControllerRequest(aid, r.Method, r.URL.Path, stamp, asserted, body)))
 	if err != nil {
 		return none, unmeasured, fmt.Errorf("signature: %w", err)
 	}

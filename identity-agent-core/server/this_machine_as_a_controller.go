@@ -73,13 +73,14 @@ func (s *CoreServer) thisMachineAsAController() (ControllerIdentity, error) {
 		if found.Status == secureenclave.Absent {
 			return ControllerIdentity{}, fmt.Errorf(
 				"this computer has no hardware that can keep a key to itself, so it "+
-					"cannot act for an identity — a key anybody can copy off is an "+
-					"authorisation granted to anybody (%s)", found.String())
+					"cannot act for an identity — a key held in software can be copied "+
+					"to another machine and used there, which is an authorisation "+
+					"granted to whoever takes it (%s)", found.String())
 		}
 		return ControllerIdentity{}, fmt.Errorf(
 			"this computer has hardware that can keep a key to itself, but could not "+
 				"use it just now, so it has not been given one — %s. A key held any "+
-				"other way is an authorisation granted to anybody who can read it",
+				"other way could be carried to a different machine and used there",
 			found.String())
 	}
 	pub, err := signer.PublicKey()
@@ -87,13 +88,22 @@ func (s *CoreServer) thisMachineAsAController() (ControllerIdentity, error) {
 		return ControllerIdentity{}, fmt.Errorf(
 			"this computer's secure hardware would not produce a key: %w", err)
 	}
-	aid := iacrypto.NonTransferableAIDQB64(pub)
-	if aid == "" {
-		return ControllerIdentity{}, fmt.Errorf("this computer's key could not be named")
+	// The codes follow the key rather than being chosen here. A machine's key is
+	// whatever its hardware makes -- P-256 on every secure element that exists --
+	// and naming it with the Ed25519 code produced an identifier of the wrong
+	// length that this agent then rejected as not being a controller's, blaming
+	// whoever passed in the value it had just made itself.
+	aid, err := iacrypto.MachineAIDForKey(pub)
+	if err != nil {
+		return ControllerIdentity{}, fmt.Errorf("this computer's key could not be named: %w", err)
+	}
+	verkey, err := iacrypto.MachineVerkeyForKey(pub)
+	if err != nil {
+		return ControllerIdentity{}, fmt.Errorf("this computer's key could not be published: %w", err)
 	}
 	return ControllerIdentity{
 		AID:         aid,
-		PublicKey:   iacrypto.VerkeyQB64(pub),
+		PublicKey:   verkey,
 		ProtectedBy: signer.Label(),
 	}, nil
 }
@@ -120,5 +130,5 @@ func (s *CoreServer) handleThisMachineAsAController(w http.ResponseWriter, r *ht
 // one, so a grant recording identifier X against key Y is a mistake or an
 // attempt, and either way what would be admitted afterwards is whatever Y is.
 func theKeyThisIdentifierNames(aid string) ([]byte, error) {
-	return iacrypto.KeyFromNonTransferableAID(aid)
+	return iacrypto.KeyFromMachineIdentifier(aid)
 }

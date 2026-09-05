@@ -70,6 +70,56 @@ func skipReason(rel string) string {
 		// must not depend on the old device's secure element.
 		return "captured as root_seed, unwrapped"
 	}
+	if strings.HasPrefix(slashed, "controller_grants.json") {
+		// WHICH MACHINES MAY ACT FOR THIS IDENTITY, deliberately not carried.
+		//
+		// HasPrefix rather than equality, matching the machine-key rule below,
+		// because save() writes controller_grants.json.tmp and renames over the
+		// real file. A walk that lands inside that window would otherwise carry
+		// a full copy of the grant list. Restoring one could not re-authorise
+		// anything — load() reads only the real name — but it would put every
+		// machine that may act for this identity into an archive, which is the
+		// disclosure this rule exists to prevent.
+		//
+		// A backup is of an identity, never of an installation, per ADR-039.
+		//
+		// A grant is a statement about the machines that exist right now, and a
+		// backup is a statement about a moment that has passed. Restoring one
+		// into the other is the single way a revoked controller comes back: take
+		// a backup, revoke a machine, restore the backup, and the machine is
+		// authorised again with nothing having said so.
+		//
+		// Revocation is otherwise complete, because the Identity Agent holding
+		// the grant is the only party that consults it — there is no published
+		// list and nobody else to tell. So this is the one place it could leak,
+		// and closing it here is cheaper than reconciling a restored list against
+		// anything.
+		//
+		// Restoring onto a fresh installation therefore leaves it with no
+		// controllers, and each machine must be granted again. That is the right
+		// cost: after a restore, which machines may act is exactly the question
+		// an owner should be asked rather than have answered from a file.
+		//
+		// Restoring in place leaves the grants already on disk untouched, because
+		// a restore writes the sections an archive names and deletes nothing.
+		// Those are the current grants rather than a resurrected past, so there
+		// is nothing to reconcile — but it does mean this rule bounds what an
+		// archive can carry, not what a restore ends up holding.
+		return "not carried: which machines may act is decided now, not restored"
+	}
+	if strings.HasPrefix(slashed, "secureenclave/machine_key.sep") {
+		// THIS MACHINE'S OWN KEY, and it belongs to the machine rather than to
+		// the identity. It is wrapped by a secure element that exists in exactly
+		// one processor, so a copy is useless anywhere else — carrying it would
+		// put an unusable file in every archive and, worse, restore it onto new
+		// hardware where the Identity Agent would find a key it can never use.
+		//
+		// Nothing is lost by leaving it. A machine mints its own on first run,
+		// and its authority comes from a grant the owner makes, not from the key
+		// surviving a move. The right thing after a restore is to be granted
+		// again as the new machine that it is.
+		return "not carried: this machine's own key, usable only in this processor"
+	}
 
 	// SQLite's write-ahead log and shared-memory files are only meaningful
 	// beside the exact database they belong to, mid-transaction. Restoring a
