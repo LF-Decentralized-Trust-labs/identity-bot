@@ -70,8 +70,16 @@ func skipReason(rel string) string {
 		// must not depend on the old device's secure element.
 		return "captured as root_seed, unwrapped"
 	}
-	if slashed == "controller_grants.json" {
+	if strings.HasPrefix(slashed, "controller_grants.json") {
 		// WHICH MACHINES MAY ACT FOR THIS IDENTITY, deliberately not carried.
+		//
+		// HasPrefix rather than equality, matching the machine-key rule below,
+		// because save() writes controller_grants.json.tmp and renames over the
+		// real file. A walk that lands inside that window would otherwise carry
+		// a full copy of the grant list. Restoring one could not re-authorise
+		// anything — load() reads only the real name — but it would put every
+		// machine that may act for this identity into an archive, which is the
+		// disclosure this rule exists to prevent.
 		//
 		// A backup is of an identity, never of an installation, per ADR-039.
 		//
