@@ -66,14 +66,12 @@ echo "--- Build Go backend (macOS universal) ---"
   # binary that could not keep a key, and nothing said so until somebody used it.
   #
   # Combining CGO_ENABLED=0 with the tag still exits zero, so the flags are not
-  # the thing to check — the symbol is.
-  for slice in bin/identity-agent-core-arm64 bin/identity-agent-core-amd64; do
-    nm "$slice" 2>/dev/null | grep -q "_sep_create" || {
-      echo "ERROR: $slice has no Secure Enclave signer in it." >&2
-      echo "  The core built, and it cannot keep a key. Check that the shim was" >&2
-      echo "  built, that CGO_ENABLED=1, and that -tags sepblob was passed." >&2
-      exit 1; }
-  done
+  # the thing to check — the symbol is. The check itself lives beside the shim,
+  # so every build path that produces a macOS core asks the same question, and
+  # this was already wrong in the copy that lived here: nm piped into `grep -q`
+  # dies of SIGPIPE under pipefail and fails a correct binary, depending on
+  # where the symbol lands in nm's output.
+  bash "$SEP_OUT/sep-assert.sh" bin/identity-agent-core-arm64 bin/identity-agent-core-amd64
   echo "  enclave signer present in both slices" )
 
 echo "--- Get Flutter packages ---"

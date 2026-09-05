@@ -93,3 +93,53 @@ cat > "$OUT/sep-ldflags.sh" <<FLAGS
 echo "-L$OUT -L$SWIFT_COMPAT_DIR"
 FLAGS
 echo "  link with: -L$OUT -L$SWIFT_COMPAT_DIR"
+
+# The check every caller needs, emitted beside the flags for the same reason:
+# every build path that produces a macOS core needs it, and an assertion copied
+# into each is a copy that drifts — or that gets quietly deleted the first time
+# it misfires. One copy, next to the artifact it is about.
+cat > "$OUT/sep-assert.sh" <<'ASSERT'
+#!/usr/bin/env bash
+# Ask a built core whether it can actually keep a key in the Secure Enclave.
+#
+#   sep-assert.sh <binary>...
+#
+# ASKED OF THE BINARY, NOT OF THE BUILD. A tag that stopped being passed, a
+# shim that failed to link, or a slice built without cgo all produce a core
+# that runs perfectly and quietly cannot keep a key — and every build step
+# still exits zero. The artifact is the only thing that can answer.
+set -euo pipefail
+
+# NOTHING TO CHECK IS NOT A PASS. `for slice in "$@"` over an empty list runs no
+# iterations and exits zero, which is the exact shape this script exists to
+# refuse — a green result standing for a question nobody asked. Callers that
+# compute their list (a glob that matched nothing, a find, a variable that came
+# back empty) would otherwise get a clean assertion over no binaries at all.
+[[ $# -gt 0 ]] || { echo "sep-assert.sh: no binaries given" >&2; exit 1; }
+
+for slice in "$@"; do
+  # Separated from the symbol check because the answers are different work. A
+  # path that is missing or unreadable reported as "no Secure Enclave signer"
+  # sends the reader to the build tag, which is the one thing that is not wrong.
+  if [[ ! -r "$slice" || -d "$slice" ]]; then
+    echo "ERROR: $slice cannot be read, so nothing can be said about it." >&2
+    exit 1
+  fi
+  # CAPTURED, NOT PIPED INTO grep. `grep -q` exits at its first match, which
+  # closes the pipe, which kills nm with SIGPIPE, which under `set -o pipefail`
+  # fails the pipeline — on a binary that is completely correct. Whether it
+  # fires depends on where the symbol falls in nm's output, so it passes until
+  # one day it does not, and the natural fix when a check misfires is to delete
+  # it. Measured: the piped form failed here on a core that had the signer.
+  symbols=$(nm "$slice" 2>/dev/null || true)
+  case "$symbols" in
+    *_sep_create*) ;;
+    *)
+      echo "ERROR: $slice has no Secure Enclave signer in it." >&2
+      echo "  The core built, and it cannot keep a key. Check that the shim was" >&2
+      echo "  built, that CGO_ENABLED=1, and that -tags sepblob was passed." >&2
+      exit 1 ;;
+  esac
+done
+ASSERT
+chmod +x "$OUT/sep-assert.sh"
