@@ -53,9 +53,46 @@ var (
 // after a restart, which is the whole requirement for a key a grant was made to.
 const machineKeyName = "IdentityAgentMachineKey.v1"
 
-// ntStatusNotFound is NTE_BAD_KEYSET — the provider saying there is no key of
-// that name yet, which is the ordinary first-run answer rather than a fault.
-const ntStatusNotFound = 0x80090016
+// The provider has three ways of saying "there is no key of that name yet",
+// which is the ordinary first-run answer rather than a fault.
+//
+// Only NTE_BAD_KEYSET was handled. The other two reached the generic branch and
+// were reported as "this machine's key could not be opened", so a machine that
+// had simply never made one would refuse to act for an identity and give a
+// reason that sounds like broken hardware.
+//
+// Taken from x/sys/windows rather than transcribed. This file already imports
+// that package, and three hand-typed hex values are three chances to mistype a
+// status code in a way nothing on this platform would catch.
+
+// meansNoKeyYet reports whether the provider is saying there is no key of that
+// name, rather than that something is wrong.
+//
+// SAFE TO WIDEN because creating cannot clobber. createMachineKey calls
+// NCryptCreatePersistedKey with no NCRYPT_OVERWRITE_KEY_FLAG, so if a key of
+// this name does exist, creation fails with NTE_EXISTS and ensure returns an
+// error. A status wrongly classified here therefore changes which error a
+// person sees; it cannot replace a key a grant was made to.
+//
+// Access-denied is NTE_PERM and is deliberately NOT in this set: a key that
+// exists but cannot be opened is a fault to report, not a first run.
+func meansNoKeyYet(code uint32) bool {
+	switch code {
+	case uint32(windows.NTE_BAD_KEYSET), uint32(windows.NTE_NO_KEY), uint32(windows.NTE_NOT_FOUND):
+		return true
+	}
+	return false
+}
+
+// bcryptECDSAPublicP256Magic is the magic number at the head of a
+// BCRYPT_ECCKEY_BLOB holding a P-256 public key.
+//
+// Checked rather than assumed. The coordinate size alone does not identify a
+// curve: several curves have 32-byte coordinates, so a blob for one of those
+// would pass the size check and be assembled into a point that is not on P-256.
+// The failure would then surface much later as a signature that never verifies,
+// with nothing pointing back here.
+const bcryptECDSAPublicP256Magic = 0x31534345
 
 type tpmSigner struct {
 	mu     sync.Mutex
@@ -117,7 +154,7 @@ func (s *tpmSigner) ensure() error {
 	var key windows.Handle
 	r, _, _ := procOpenKey.Call(uintptr(provider), uintptr(unsafe.Pointer(&key)),
 		uintptr(unsafe.Pointer(name)), 0, 0)
-	if uint32(r) == ntStatusNotFound {
+	if meansNoKeyYet(uint32(r)) {
 		if key, err = createMachineKey(provider, name); err != nil {
 			return err
 		}
@@ -146,6 +183,12 @@ func createMachineKey(provider windows.Handle, name *uint16) (windows.Handle, er
 		uintptr(unsafe.Pointer(algorithm)),
 		uintptr(unsafe.Pointer(name)), // named, so it persists
 		0,
+		// NO NCRYPT_OVERWRITE_KEY_FLAG, AND THAT ABSENCE IS LOAD-BEARING. It is
+		// what makes it safe for meansNoKeyYet to classify a status as "no key
+		// yet": if a key of this name does exist, creation fails with NTE_EXISTS
+		// rather than replacing it. Adding the flag for convenience would mean a
+		// misread status silently mints a new key -- and a machine with a new key
+		// is a new machine, so every grant made to it is void.
 		0,
 	); r != 0 {
 		return 0, fmt.Errorf("this machine's key could not be created (0x%X)", uint32(r))
@@ -182,8 +225,25 @@ func exportPublic(key windows.Handle) ([]byte, error) {
 		uintptr(unsafe.Pointer(&need)), 0); r != 0 {
 		return nil, fmt.Errorf("this machine's public key could not be read (0x%X)", uint32(r))
 	}
+	return pointFromECCBlob(buf)
+}
+
+// pointFromECCBlob turns a BCRYPT_ECCKEY_BLOB into an X9.63 uncompressed point.
+//
+// Separated from the call that obtains the blob so it can be tested without a
+// TPM. Every check below is on data the provider handed back, so a test can
+// exercise all of them; none of it needs hardware, and requiring hardware is why
+// this went unchecked.
+func pointFromECCBlob(buf []byte) ([]byte, error) {
 	if len(buf) < 8 {
 		return nil, fmt.Errorf("the public key blob is %d bytes, too short to describe a key", len(buf))
+	}
+	// THE MAGIC, NOT JUST THE SIZE. A coordinate size of 32 does not identify a
+	// curve — several have 32-byte coordinates — so without this a blob for a
+	// different curve is assembled into a point that is not on P-256, and the
+	// first thing to notice is a signature that never verifies, far from here.
+	if magic := binary.LittleEndian.Uint32(buf[0:4]); magic != bcryptECDSAPublicP256Magic {
+		return nil, fmt.Errorf("this is not a P-256 public key blob (magic %#x)", magic)
 	}
 	size := int(binary.LittleEndian.Uint32(buf[4:8]))
 	if size != 32 || len(buf) < 8+2*size {
