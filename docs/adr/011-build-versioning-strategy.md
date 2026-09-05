@@ -1,8 +1,16 @@
 # ADR 011: Build Versioning Strategy — Auto-Increment for Development, Semantic for Release
 
 **Date:** 2026-03-07
-**Status:** Accepted
+**Status:** Accepted; the CI guidance below is superseded (2026-09-05)
 **Relates to:** ADR-004 (FFI Bridge & CI/CD Pipeline)
+
+> **The versioning decision stands. The CI service named throughout does not.**
+> The configuration this describes was removed from the repository, and the
+> `scripts/build-*` scripts are now the build. Read every instruction naming that
+> service — including *"always use Codemagic for builds"* — as a record of how
+> this was done in March 2026, not as something to follow. The signing-key
+> mismatch it warns about is still real: builds signed with different debug
+> keystores cannot upgrade each other, whoever produces them.
 
 ## The Problem This Solves
 

@@ -2,7 +2,7 @@
 #
 # Build + bundle the Identity Agent Linux desktop release.
 #
-# Mirrors the `linux-release` workflow in codemagic.yaml so both CI vendors call
+# The build steps for a Linux release, kept as a script so CI and a developer run
 # the same logic. The CALLER is responsible for installing the toolchain first:
 #   - Go 1.24.0
 #   - Flutter 3.27.3

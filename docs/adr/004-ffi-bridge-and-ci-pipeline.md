@@ -2,7 +2,9 @@
 
 **Status:** Superseded in part by ADR-037 (2026-08-18) — the Rust FFI bridge it
 describes is removed. Every platform runs the Go core; a phone embeds it via
-`gomobile`. The Go Mobile Core half of this ADR still stands.
+`gomobile`. The Go Mobile Core half of this ADR still stands. The CI/CD pipeline
+half does not (2026-09-05): the service and configuration it describes were
+removed from this repository, and the `scripts/build-*` scripts are the build.
 **Date:** 2026-02-19
 **Updated:** 2026-02-22
 **Supersedes:** None

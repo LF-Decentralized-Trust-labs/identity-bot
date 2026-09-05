@@ -2,9 +2,8 @@
 #
 # Sign + notarize the built Identity Agent macOS .app.
 #
-# Equivalent to the signing/notarization steps in codemagic.yaml's
-# `macos-release`, but uses plain `security` + `xcrun notarytool` (the
-# codemagic-cli-tools `keychain` command is not present on GitHub runners).
+# Signs and notarizes with plain `security` + `xcrun notarytool`, which are
+# present on any macOS runner and need no vendor-specific CLI.
 #
 # Required env (GitHub Actions secrets — see .github/CI_MACOS_SIGNING_SETUP.md):
 #   CM_CERTIFICATE                     base64 of the Developer ID Application .p12
