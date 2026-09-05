@@ -6,6 +6,8 @@ import (
 	"bytes"
 	"encoding/binary"
 	"testing"
+
+	"golang.org/x/sys/windows"
 )
 
 // What the provider hands back is checked, not trusted.
@@ -100,16 +102,16 @@ func TestWhatAKeyBlobMustSayBeforeItIsAKey(t *testing.T) {
 			name string
 			want bool
 		}{
-			{0x80090016, "NTE_BAD_KEYSET", true},
-			{0x8009000D, "NTE_NO_KEY", true},
-			{0x80090011, "NTE_NOT_FOUND", true},
+			{uint32(windows.NTE_BAD_KEYSET), "NTE_BAD_KEYSET", true},
+			{uint32(windows.NTE_NO_KEY), "NTE_NO_KEY", true},
+			{uint32(windows.NTE_NOT_FOUND), "NTE_NOT_FOUND", true},
 
 			// NOT first-run answers. NTE_PERM is a key that exists and cannot be
 			// opened; treating it as absence would mint a second key alongside
 			// the real one and silently change who this machine is.
-			{0x80090010, "NTE_PERM", false},
-			{0x8009000F, "NTE_EXISTS", false},
-			{0x80090029, "NTE_NOT_SUPPORTED", false},
+			{uint32(windows.NTE_PERM), "NTE_PERM", false},
+			{uint32(windows.NTE_EXISTS), "NTE_EXISTS", false},
+			{uint32(windows.NTE_NOT_SUPPORTED), "NTE_NOT_SUPPORTED", false},
 			{0, "success", false},
 		} {
 			if got := meansNoKeyYet(c.code); got != c.want {

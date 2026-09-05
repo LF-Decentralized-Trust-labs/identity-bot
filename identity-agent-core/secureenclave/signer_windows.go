@@ -59,14 +59,11 @@ const machineKeyName = "IdentityAgentMachineKey.v1"
 // Only NTE_BAD_KEYSET was handled. The other two reached the generic branch and
 // were reported as "this machine's key could not be opened", so a machine that
 // had simply never made one would refuse to act for an identity and give a
-// reason that sounds like broken hardware. Which code a provider returns is not
-// something to predict — the safe reading is that any of the three means the
-// same thing, and anything else is a real fault.
-const (
-	nteBadKeyset = 0x80090016
-	nteNoKey     = 0x8009000D
-	nteNotFound  = 0x80090011
-)
+// reason that sounds like broken hardware.
+//
+// Taken from x/sys/windows rather than transcribed. This file already imports
+// that package, and three hand-typed hex values are three chances to mistype a
+// status code in a way nothing on this platform would catch.
 
 // meansNoKeyYet reports whether the provider is saying there is no key of that
 // name, rather than that something is wrong.
@@ -80,7 +77,11 @@ const (
 // Access-denied is NTE_PERM and is deliberately NOT in this set: a key that
 // exists but cannot be opened is a fault to report, not a first run.
 func meansNoKeyYet(code uint32) bool {
-	return code == nteBadKeyset || code == nteNoKey || code == nteNotFound
+	switch code {
+	case uint32(windows.NTE_BAD_KEYSET), uint32(windows.NTE_NO_KEY), uint32(windows.NTE_NOT_FOUND):
+		return true
+	}
+	return false
 }
 
 // bcryptECDSAPublicP256Magic is the magic number at the head of a
@@ -182,6 +183,12 @@ func createMachineKey(provider windows.Handle, name *uint16) (windows.Handle, er
 		uintptr(unsafe.Pointer(algorithm)),
 		uintptr(unsafe.Pointer(name)), // named, so it persists
 		0,
+		// NO NCRYPT_OVERWRITE_KEY_FLAG, AND THAT ABSENCE IS LOAD-BEARING. It is
+		// what makes it safe for meansNoKeyYet to classify a status as "no key
+		// yet": if a key of this name does exist, creation fails with NTE_EXISTS
+		// rather than replacing it. Adding the flag for convenience would mean a
+		// misread status silently mints a new key -- and a machine with a new key
+		// is a new machine, so every grant made to it is void.
 		0,
 	); r != 0 {
 		return 0, fmt.Errorf("this machine's key could not be created (0x%X)", uint32(r))
