@@ -68,6 +68,21 @@ const (
 	nteNotFound  = 0x80090011
 )
 
+// meansNoKeyYet reports whether the provider is saying there is no key of that
+// name, rather than that something is wrong.
+//
+// SAFE TO WIDEN because creating cannot clobber. createMachineKey calls
+// NCryptCreatePersistedKey with no NCRYPT_OVERWRITE_KEY_FLAG, so if a key of
+// this name does exist, creation fails with NTE_EXISTS and ensure returns an
+// error. A status wrongly classified here therefore changes which error a
+// person sees; it cannot replace a key a grant was made to.
+//
+// Access-denied is NTE_PERM and is deliberately NOT in this set: a key that
+// exists but cannot be opened is a fault to report, not a first run.
+func meansNoKeyYet(code uint32) bool {
+	return code == nteBadKeyset || code == nteNoKey || code == nteNotFound
+}
+
 // bcryptECDSAPublicP256Magic is the magic number at the head of a
 // BCRYPT_ECCKEY_BLOB holding a P-256 public key.
 //
@@ -138,7 +153,7 @@ func (s *tpmSigner) ensure() error {
 	var key windows.Handle
 	r, _, _ := procOpenKey.Call(uintptr(provider), uintptr(unsafe.Pointer(&key)),
 		uintptr(unsafe.Pointer(name)), 0, 0)
-	if code := uint32(r); code == nteBadKeyset || code == nteNoKey || code == nteNotFound {
+	if meansNoKeyYet(uint32(r)) {
 		if key, err = createMachineKey(provider, name); err != nil {
 			return err
 		}

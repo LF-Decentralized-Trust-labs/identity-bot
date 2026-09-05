@@ -42,15 +42,27 @@ func TestWhatAKeyBlobMustSayBeforeItIsAKey(t *testing.T) {
 		}
 	})
 
-	t.Run("another curve with the same coordinate size is refused", func(t *testing.T) {
+	t.Run("a curve that is not P-256 is refused", func(t *testing.T) {
 		// THE CASE THE SIZE CHECK CANNOT CATCH, and the reason the magic is read.
-		// Several curves have 32-byte coordinates, so this blob passes every
-		// other test in the function and is not a P-256 key. Accepted, it would
-		// be assembled into a point off the curve and surface far away, as a
-		// signature that never verifies.
-		const someOtherCurveMagic = 0x314B4345
-		if _, err := pointFromECCBlob(blob(someOtherCurveMagic, 32, 64)); err == nil {
-			t.Fatal("a blob for a different curve must be refused, not assembled into a point")
+		// BCRYPT_ECDSA_PUBLIC_GENERIC_MAGIC is what a blob carries for a NIST
+		// curve other than the three named ones, and a 32-byte coordinate size
+		// does not narrow it to P-256. Accepted, it would be assembled into a
+		// point off the curve and surface far away, as a signature that never
+		// verifies against a key that looked perfectly well-formed.
+		const genericECDSAMagic = 0x50444345 // "ECDP"
+		if _, err := pointFromECCBlob(blob(genericECDSAMagic, 32, 64)); err == nil {
+			t.Fatal("a blob that does not say P-256 must be refused, not assembled into a point")
+		}
+	})
+
+	t.Run("the same curve for a different algorithm is refused", func(t *testing.T) {
+		// BCRYPT_ECDH_PUBLIC_P256_MAGIC. Same curve, same coordinates, agreed
+		// for key exchange rather than signing. Using one where the other is
+		// meant is a misuse worth refusing at the door, and the size check
+		// cannot see it either.
+		const ecdhP256Magic = 0x314B4345 // "ECK1"
+		if _, err := pointFromECCBlob(blob(ecdhP256Magic, 32, 64)); err == nil {
+			t.Fatal("a key-agreement blob must not be accepted as a signing key")
 		}
 	})
 
@@ -78,12 +90,31 @@ func TestWhatAKeyBlobMustSayBeforeItIsAKey(t *testing.T) {
 		}
 	})
 
-	t.Run("the three ways of saying there is no key yet are distinct values", func(t *testing.T) {
-		// Guards against a copy-paste that makes two of them equal, which would
-		// silently narrow first-run handling back to what it was.
-		seen := map[int]string{nteBadKeyset: "NTE_BAD_KEYSET", nteNoKey: "NTE_NO_KEY", nteNotFound: "NTE_NOT_FOUND"}
-		if len(seen) != 3 {
-			t.Fatalf("expected three distinct not-found codes, got %d", len(seen))
+	t.Run("only the provider's no-key-yet answers create a key", func(t *testing.T) {
+		// THE HALF THAT HAD NO TEST. exportPublic was split out so it could be
+		// checked; the classification that decides whether to MINT A NEW KEY was
+		// left inline, and it is the one with consequences — a machine that
+		// mints a new key has a new identity, and every grant made to it is void.
+		for _, c := range []struct {
+			code uint32
+			name string
+			want bool
+		}{
+			{0x80090016, "NTE_BAD_KEYSET", true},
+			{0x8009000D, "NTE_NO_KEY", true},
+			{0x80090011, "NTE_NOT_FOUND", true},
+
+			// NOT first-run answers. NTE_PERM is a key that exists and cannot be
+			// opened; treating it as absence would mint a second key alongside
+			// the real one and silently change who this machine is.
+			{0x80090010, "NTE_PERM", false},
+			{0x8009000F, "NTE_EXISTS", false},
+			{0x80090029, "NTE_NOT_SUPPORTED", false},
+			{0, "success", false},
+		} {
+			if got := meansNoKeyYet(c.code); got != c.want {
+				t.Errorf("%s (%#x): treated as no-key-yet=%v, want %v", c.name, c.code, got, c.want)
+			}
 		}
 	})
 }
