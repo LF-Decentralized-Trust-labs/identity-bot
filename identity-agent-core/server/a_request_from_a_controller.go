@@ -182,17 +182,25 @@ func (s *CoreServer) theControllerBehind(r *http.Request) (ControllerGrant, auth
 			"this request was signed outside the %s window", signedRequestWindow)
 	}
 
-	// The grant decides whether this machine is anybody. Checked before the
-	// signature is verified only to fail fast; neither answer is given away,
-	// because both end in the same refusal.
+	// The grant decides whether this machine is anybody, and is checked before
+	// the signature only to fail fast.
+	//
+	// Admitting still requires the signature to verify against the key the GRANT
+	// records, below — reaching this point proves nothing. What the refusal is
+	// allowed to SAY, though, does depend on proof, and that is settled
+	// separately: an unproven caller gets the same sentence it always got, and
+	// only a caller that demonstrates it holds this machine's key learns which
+	// of the reasons applies.
 	grant, live, err := s.controllers().Live(aid, now)
 	if err != nil {
 		return none, unmeasured, fmt.Errorf(
 			"which machines may act for this identity could not be read, so none were admitted: %w", err)
 	}
 	if !live {
-		return none, unmeasured, fmt.Errorf(
-			"this machine is not authorised to act for this identity, or its authorisation has ended")
+		// The refusal is the same either way; only what it SAYS depends on
+		// whether the caller can prove it is the machine it claims to be. See
+		// why_a_machine_was_not_admitted.go — nothing there can admit anybody.
+		return none, unmeasured, s.whyThisMachineWasNotAdmitted(r, aid, sig, stamp, now)
 	}
 
 	// The key is NOT decoded here any more. A machine's key is P-256 where an
@@ -203,37 +211,11 @@ func (s *CoreServer) theControllerBehind(r *http.Request) (ControllerGrant, auth
 		return none, unmeasured, fmt.Errorf("no key is recorded for this machine")
 	}
 
-	// Read the body to digest it, then put it back — the handler still needs it.
-	//
-	// A body over the limit is REFUSED, never truncated. Truncating would hand
-	// the handler a shortened body and check the signature against that same
-	// shortened copy, so the two would agree and the request would succeed while
-	// silently doing something other than what was sent — a transfer, a policy,
-	// a list, cut off at the limit with nothing reporting it.
-	// PUT IT BACK ON EVERY PATH, INCLUDING THE REFUSALS. A refusal here is not
-	// the end of the request: the caller turns it into "no controller signed
-	// this", and the middleware carries on to whatever else might stand in for
-	// the owner. If the body were left consumed, that next handler would serve a
-	// silently truncated request — the same "refused, never truncated" failure
-	// this reads the body carefully to avoid, moved one layer out. Measured
-	// before the fix: 12,582,976 bytes sent, 63 still readable afterwards.
-	var body []byte
-	if r.Body != nil {
-		body, err = io.ReadAll(io.LimitReader(r.Body, maxSignedBodyBytes+1))
-		r.Body = io.NopCloser(bytes.NewReader(body))
-		if err != nil {
-			return none, unmeasured, fmt.Errorf("read body: %w", err)
-		}
-		if int64(len(body)) > maxSignedBodyBytes {
-			return none, unmeasured, fmt.Errorf(
-				"this request is larger than the %d bytes a signed request may carry",
-				maxSignedBodyBytes)
-		}
+	signed, asserted, err := s.theStringThisMachineSigned(r, aid, stamp, now)
+	if err != nil {
+		return none, unmeasured, err
 	}
-
-	asserted := s.theAuthenticationSomebodyVouchedFor(r, aid, now)
-	ok, err := iacrypto.VerifyMachineSignature(grant.PublicKey, sig,
-		[]byte(canonicalControllerRequest(aid, r.Method, r.URL.Path, stamp, asserted, body)))
+	ok, err := iacrypto.VerifyMachineSignature(grant.PublicKey, sig, []byte(signed))
 	if err != nil {
 		return none, unmeasured, fmt.Errorf("signature: %w", err)
 	}
@@ -250,6 +232,54 @@ func (s *CoreServer) theControllerBehind(r *http.Request) (ControllerGrant, auth
 		return none, unmeasured, fmt.Errorf("this signed request has already been used")
 	}
 	return grant, asserted, nil
+}
+
+// theStringThisMachineSigned reads the request body, puts it back, and builds
+// the exact string a controller's signature covers.
+//
+// ONE PLACE KNOWS WHAT A CONTROLLER SIGNS. Two paths need it — admitting a
+// machine, and deciding how much a refusal is allowed to say — and the only
+// thing that legitimately differs between them is which key they check against.
+// Everything up to that point is the same steps in the same order, and written
+// twice it drifts: a field added to the canonical string, or a change to the
+// size limit, applied to one copy leaves the refusal path verifying a different
+// string from the admitting one. The symptom would be a machine that is admitted
+// normally and given the wrong explanation when it is not — a wrong error
+// message, which is close to the last thing anybody investigates.
+//
+// A body over the limit is REFUSED, never truncated. Truncating would hand the
+// handler a shortened body and check the signature against that same shortened
+// copy, so the two would agree and the request would succeed while silently
+// doing something other than what was sent — a transfer, a policy, a list, cut
+// off at the limit with nothing reporting it.
+//
+// PUT IT BACK ON EVERY PATH, INCLUDING THE REFUSALS. A refusal is not the end of
+// the request: the caller turns it into "no controller signed this", and the
+// middleware carries on to whatever else might stand in for the owner. If the
+// body were left consumed, that next handler would serve a silently truncated
+// request — the same failure this reads carefully to avoid, moved one layer out.
+// Measured before the fix: 12,582,976 bytes sent, 63 still readable afterwards.
+func (s *CoreServer) theStringThisMachineSigned(
+	r *http.Request, aid, stamp string, now time.Time,
+) (string, authprovider.Result, error) {
+	var body []byte
+	if r.Body != nil {
+		var err error
+		body, err = io.ReadAll(io.LimitReader(r.Body, maxSignedBodyBytes+1))
+		r.Body = io.NopCloser(bytes.NewReader(body))
+		if err != nil {
+			return "", authprovider.Result{}, fmt.Errorf("read body: %w", err)
+		}
+		if int64(len(body)) > maxSignedBodyBytes {
+			return "", authprovider.Result{}, fmt.Errorf(
+				"this request is larger than the %d bytes a signed request may carry",
+				maxSignedBodyBytes)
+		}
+	}
+
+	asserted := s.theAuthenticationSomebodyVouchedFor(r, aid, now)
+	return canonicalControllerRequest(
+		aid, r.Method, r.URL.Path, stamp, asserted, body), asserted, nil
 }
 
 // theAuthenticationSomebodyVouchedFor reads how well the person was
