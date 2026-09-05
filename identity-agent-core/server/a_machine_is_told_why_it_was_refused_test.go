@@ -140,16 +140,25 @@ func TestTellingAMachineMoreDoesNotAdmitIt(t *testing.T) {
 	s := newAuthTestServer(t)
 	aid, seed := anAuthorisedMachine(t, s, GradeEnrolled)
 
-	code, _ := theRefusalGivenTo(t, s,
+	// Asserted on the refusal itself rather than on the status code. "not 403"
+	// is also satisfied by an unrelated fault in whatever handler runs next, so
+	// a status check here would keep passing if admission broke in a new way.
+	//
+	// It cannot assert 200 either: newAuthTestServer builds a CoreServer with no
+	// DataStore, so a handler that reads one faults once the machine is let
+	// through. That is a limit of the harness rather than of the code, and it is
+	// exactly why this asserts what the middleware decided instead of what the
+	// handler managed to return.
+	_, body := theRefusalGivenTo(t, s,
 		asThatMachine(t, aid, "GET", "/api/identity", "", seed, "", time.Time{}))
-	if code == http.StatusForbidden {
-		t.Fatalf("an authorised machine must still be admitted, got %d", code)
+	if strings.Contains(body, "not_authorized") {
+		t.Fatalf("an authorised machine was refused: %s", body)
 	}
 
 	// A machine that signs perfectly well for itself and holds no grant is
 	// refused, however plainly it is told why.
 	stranger, strangerSeed := aMachineNobodyGranted(t, 0x22)
-	code, _ = theRefusalGivenTo(t, s,
+	code, _ := theRefusalGivenTo(t, s,
 		asThatMachine(t, stranger, "GET", "/api/identity", "", strangerSeed, "", time.Time{}))
 	if code != http.StatusForbidden {
 		t.Fatalf("a machine holding no grant must be refused however well it signs, got %d", code)
@@ -177,5 +186,57 @@ func TestARefusalDoesNotEatTheRequestBody(t *testing.T) {
 	n, _ := req.Body.Read(got)
 	if string(got[:n]) != body {
 		t.Errorf("the body was consumed by the refusal: %q of %d bytes readable", got[:n], len(body))
+	}
+}
+
+// A machine somebody borrowed is told its time ran out, not that it is unknown.
+//
+// THE BRANCH NOTHING REACHED. The revoked case above exercises the other one —
+// revoking deletes the grant, so it lands on "no record of it at all" — and this
+// branch could be replaced with the undifferentiated sentence without a single
+// test noticing. The two refusals need different actions from the owner: renew
+// an authorisation that lapsed, versus make one that never existed or was taken
+// away.
+func TestAMachineWhoseBorrowedTimeRanOutIsToldThat(t *testing.T) {
+	s := newAuthTestServer(t)
+	ownerSeedForTest(t, s)
+	aid, seed := aMachineNobodyGranted(t, 0x44)
+	pub := ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)
+
+	// Granted two days ago, expired yesterday. Made in the past rather than
+	// waiting for it to lapse, so the test asserts a state rather than a delay.
+	if _, err := s.controllers().Grant(ControllerGrant{
+		ControllerAID: aid,
+		PublicKey:     iacrypto.VerkeyQB64(pub),
+		Label: "a machine somebody borrowed",
+		// SCOPED, not enrolled. An enrolled grant has its expiry forced to zero --
+		// a machine somebody keeps lasts until they say otherwise -- so only a
+		// borrowed one can lapse, and writing this with the wrong grade produces a
+		// grant that never expires and a test that proves nothing.
+		Grade:     GradeScoped,
+		ExpiresAt:     time.Now().UTC().Add(-24 * time.Hour),
+	}, time.Now().UTC().Add(-48*time.Hour)); err != nil {
+		t.Fatalf("granting: %v", err)
+	}
+
+	code, body := theRefusalGivenTo(t, s,
+		asThatMachine(t, aid, "GET", "/api/identity", "", seed, "", time.Time{}))
+
+	if code != http.StatusForbidden {
+		t.Fatalf("an expired machine must be refused, got %d", code)
+	}
+	if strings.Contains(body, theVagueRefusal) {
+		t.Errorf("a machine that proved it holds its own key got the undifferentiated "+
+			"refusal: %s", body)
+	}
+	if !strings.Contains(body, "expired") {
+		t.Errorf("an authorisation that lapsed should say so, since renewing it is a "+
+			"different action from making a new one: %s", body)
+	}
+	// It must NOT be told the identity was restored from a backup — that is the
+	// other branch's story, and sending an owner to look for a restore that never
+	// happened is worse than saying nothing.
+	if strings.Contains(body, "restored from a backup") {
+		t.Errorf("an expired grant was described as a missing one: %s", body)
 	}
 }
