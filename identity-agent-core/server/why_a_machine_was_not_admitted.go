@@ -1,9 +1,7 @@
 package server
 
 import (
-	"bytes"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
 
@@ -31,10 +29,22 @@ import (
 // WHAT CHANGES IT. A machine's identifier IS its public key — the
 // non-transferable form, with no inception event and nothing published — so a
 // signature can be checked against the identifier itself, with nothing stored
-// and no grant needed. A caller that produces a valid signature over this
-// request has demonstrated it holds that machine's private half, which never
-// leaves that machine. Telling THAT caller what happened to ITS OWN
-// authorisation reveals nothing it could not already establish.
+// and no grant needed. Telling a caller that produces one what happened to that
+// machine's authorisation reveals nothing it could not already establish.
+//
+// WHAT THE CHECK ESTABLISHES, EXACTLY: a valid signature over this request
+// inside the freshness window. Usually that is the machine itself, since the
+// private half never leaves it — but a captured request replayed within the
+// window satisfies it too, because the replay guard is spent only on the
+// admitting path.
+//
+// Spending it here was considered and rejected. Anyone holding a captured
+// signature could then burn it by presenting it to a refusal first, and the
+// genuine request would fail as already used — trading a small disclosure for a
+// repeatable denial of the admitting path. So the residual stands: somebody who
+// already watched a machine sign to this agent can, for the length of the
+// window, also learn that its authorisation ended. They observed that machine
+// signing here already, and the message names nothing else.
 //
 // Anyone can of course mint an identifier and sign with it, and will be told
 // their invented machine is not authorised here — which is true, and says
@@ -93,13 +103,9 @@ func (s *CoreServer) whyThisMachineWasNotAdmitted(
 // machine its identifier names.
 //
 // Verified against the key inside the identifier rather than against a grant,
-// because the whole point is to answer for machines no grant mentions.
-//
-// The body is read and PUT BACK. A refusal is not the end of the request — the
-// caller turns it into "no controller signed this" and the middleware carries on
-// to whatever else might stand in for the owner. Leaving the body consumed here
-// would hand that next handler a silently empty request, which is the failure
-// the admitting path already reads carefully to avoid.
+// because the whole point is to answer for machines no grant mentions. That is
+// the ONLY difference from the admitting path; the string being checked comes
+// from the same place, so neither can drift from the other.
 func (s *CoreServer) thisRequestWasSignedBy(
 	r *http.Request, aid, sig, stamp string, now time.Time,
 ) bool {
@@ -112,17 +118,13 @@ func (s *CoreServer) thisRequestWasSignedBy(
 		return false
 	}
 
-	var body []byte
-	if r.Body != nil {
-		body, err = io.ReadAll(io.LimitReader(r.Body, maxSignedBodyBytes+1))
-		r.Body = io.NopCloser(bytes.NewReader(body))
-		if err != nil || int64(len(body)) > maxSignedBodyBytes {
-			return false
-		}
+	// The same string the admitting path checks, built by the same function, so
+	// the two cannot come to disagree about what a controller signs. The key is
+	// the only thing that differs here, and that difference is the whole point.
+	signed, _, err := s.theStringThisMachineSigned(r, aid, stamp, now)
+	if err != nil {
+		return false
 	}
-
-	asserted := s.theAuthenticationSomebodyVouchedFor(r, aid, now)
-	ok, err := iacrypto.VerifyMachineSignature(verkey, sig,
-		[]byte(canonicalControllerRequest(aid, r.Method, r.URL.Path, stamp, asserted, body)))
+	ok, err := iacrypto.VerifyMachineSignature(verkey, sig, []byte(signed))
 	return err == nil && ok
 }
