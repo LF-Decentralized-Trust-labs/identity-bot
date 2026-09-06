@@ -166,25 +166,28 @@ func (s *CoreServer) handleVerifyControllerOffer(w http.ResponseWriter, r *http.
 // checkControllerOffer verifies an offer's signature, freshness, and internal
 // consistency. Every branch is a refusal the owner needs, not a generic error.
 func (s *CoreServer) checkControllerOffer(offer ControllerOffer, now time.Time) error {
-	if offer.PublicKey == "" || offer.AgentOrigin == "" || offer.Timestamp == "" || offer.Signature == "" {
+	// AID is required, not optional. It travels in every real offer (this agent
+	// mints it, and the scanner refuses a link without it), and the check below
+	// is the anti-substitution one — so treating a missing AID as "nothing to
+	// check" would let an offer skip exactly the check that stops one machine
+	// being named while another is granted.
+	if offer.AID == "" || offer.PublicKey == "" || offer.AgentOrigin == "" || offer.Timestamp == "" || offer.Signature == "" {
 		return fmt.Errorf("this offer is missing part of itself, so it cannot be checked")
 	}
 
 	// The identifier IS the key. An offer whose aid does not name the same key it
 	// publishes is either a mistake or an attempt to have one approved while the
 	// other is what gets granted.
-	if offer.AID != "" {
-		fromAID, err := iacrypto.KeyFromMachineIdentifier(offer.AID)
-		if err != nil {
-			return fmt.Errorf("this offer's identifier is not a machine identifier: %w", err)
-		}
-		fromKey, err := iacrypto.KeyFromMachineVerkey(offer.PublicKey)
-		if err != nil {
-			return fmt.Errorf("this offer's key cannot be read: %w", err)
-		}
-		if string(fromAID) != string(fromKey) {
-			return fmt.Errorf("this offer's identifier and key are different keys, so it names one machine and would grant another")
-		}
+	fromAID, err := iacrypto.KeyFromMachineIdentifier(offer.AID)
+	if err != nil {
+		return fmt.Errorf("this offer's identifier is not a machine identifier: %w", err)
+	}
+	fromKey, err := iacrypto.KeyFromMachineVerkey(offer.PublicKey)
+	if err != nil {
+		return fmt.Errorf("this offer's key cannot be read: %w", err)
+	}
+	if string(fromAID) != string(fromKey) {
+		return fmt.Errorf("this offer's identifier and key are different keys, so it names one machine and would grant another")
 	}
 
 	signedAt, err := time.Parse(time.RFC3339, offer.Timestamp)

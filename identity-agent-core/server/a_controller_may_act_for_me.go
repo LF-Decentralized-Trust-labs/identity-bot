@@ -260,7 +260,17 @@ func (c *controllerGrants) Grant(g ControllerGrant, now time.Time) (ControllerGr
 	case GradeScoped:
 		switch {
 		case g.ExpiresAt.IsZero():
-			g.ExpiresAt = now.Add(scopedGrantLifetime)
+			// The default window, clamped to the cap. These two constants are
+			// equal today, but lowering the cap below the default without also
+			// lowering the default would otherwise hand out a grant longer than
+			// the cap allows, silently, because this branch is reached instead of
+			// the cap check below. Clamping enforces the "at least the default"
+			// invariant the cap's own comment states, rather than trusting it.
+			window := scopedGrantLifetime
+			if window > maxScopedGrantLifetime {
+				window = maxScopedGrantLifetime
+			}
+			g.ExpiresAt = now.Add(window)
 		case !g.ExpiresAt.After(now):
 			// Storing this would report success for an authorisation that never
 			// worked, and the owner would be told their machine was approved. A

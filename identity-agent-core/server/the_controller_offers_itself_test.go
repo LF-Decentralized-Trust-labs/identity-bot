@@ -131,6 +131,18 @@ func TestAnOfferNamingATransferableIdentityIsRefused(t *testing.T) {
 	}
 }
 
+func TestAnOfferWithNoIdentifierIsRefused(t *testing.T) {
+	now := time.Now().UTC()
+	offer, _ := aSignedOffer(t, "https://agent.example/x", now.Format(time.RFC3339))
+	// No identifier at all. It must not slip past the check that the identifier
+	// names the same key the offer publishes — a missing AID is missing part of
+	// the offer, not a licence to skip that check.
+	offer.AID = ""
+	if err := (&CoreServer{}).checkControllerOffer(offer, now); err == nil {
+		t.Fatal("an offer with no identifier must be refused")
+	}
+}
+
 func TestAnUnsignedOfferIsRefused(t *testing.T) {
 	now := time.Now().UTC()
 	offer, _ := aSignedOffer(t, "https://agent.example/x", now.Format(time.RFC3339))
