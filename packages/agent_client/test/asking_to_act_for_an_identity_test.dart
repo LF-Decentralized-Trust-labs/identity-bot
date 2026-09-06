@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:agent_client/config/agent_config.dart';
+import 'package:agent_client/services/a_controller_offering_itself.dart';
 import 'package:agent_client/services/asking_to_act_for_an_identity.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -17,29 +18,38 @@ void main() {
   const localCore = 'http://127.0.0.1:5050';
   const agent = 'https://box.example.test';
 
-  group('what this computer offers', () {
-    test('is asked of the core beside it, and never of the agent', () async {
-      final asked = <Uri>[];
+  group('a signed offer this computer can show', () {
+    test('is signed by the core beside it, and never by the agent', () async {
+      final asked = <http.Request>[];
       final asking = AskingToActForAnIdentity(
         localCoreOrigin: localCore,
         client: MockClient((req) async {
-          asked.add(req.url);
+          asked.add(req);
           return http.Response(
               jsonEncode({
                 'aid': 'BTHISMACHINE',
                 'public_key': 'DTHISMACHINE',
                 'protected_by': 'Apple Secure Enclave',
+                'agent_origin': agent,
+                'timestamp': '2026-09-05T00:00:00Z',
+                'signature': '0BSIGNATURE',
               }),
               200);
         }),
       );
 
-      final offering = await asking.whatThisComputerOffers();
+      final offer = await asking.aSignedOfferFor(agent);
 
-      expect(asked.single.toString(),
-          '$localCore/api/controller/this-machine');
-      expect(offering!.aid, 'BTHISMACHINE');
-      expect(offering.protectedBy, 'Apple Secure Enclave');
+      // Asked of the core beside this app — the only thing that can sign as
+      // this machine — and never of the agent. The agent it will act for is
+      // the body, because the signature binds the offer to it.
+      expect(asked.single.method, 'POST');
+      expect(asked.single.url.toString(), '$localCore/api/controller/offer');
+      expect(
+          (jsonDecode(asked.single.body) as Map)['agent_origin'], agent);
+      expect(offer!.aid, 'BTHISMACHINE');
+      expect(offer.protectedBy, 'Apple Secure Enclave');
+      expect(offer.signature, '0BSIGNATURE');
     });
 
     test('is null on hardware that cannot act for an identity', () async {
@@ -49,31 +59,44 @@ void main() {
         localCoreOrigin: localCore,
         client: MockClient((_) async => http.Response('no enclave', 501)),
       );
-      expect(await asking.whatThisComputerOffers(), isNull);
+      expect(await asking.aSignedOfferFor(agent), isNull);
     });
 
-    test('a machine naming no key is refused rather than shown', () async {
-      // An identifier with no key is nothing anybody could authorise, and the
-      // agent would refuse the grant. Better to fail here than to put a code on
-      // screen that cannot work.
+    test('an unsigned response is refused rather than shown', () async {
+      // The owner's device accepts no offer without a signature — there is no
+      // unsigned path — so failing here beats putting on screen a code that
+      // cannot be trusted.
       final asking = AskingToActForAnIdentity(
         localCoreOrigin: localCore,
-        client: MockClient(
-            (_) async => http.Response(jsonEncode({'aid': 'BTHIS'}), 200)),
+        client: MockClient((_) async => http.Response(
+            jsonEncode({'aid': 'BTHIS', 'public_key': 'DTHIS'}), 200)),
       );
-      expect(asking.whatThisComputerOffers(), throwsA(isA<Exception>()));
+      expect(asking.aSignedOfferFor(agent), throwsA(isA<Exception>()));
     });
 
-    test('what is scanned carries both the identifier and the key', () async {
-      const offering = AMachineOffering(
-          aid: 'BTHISMACHINE', publicKey: 'DTHISMACHINE', protectedBy: 'TPM');
-      final decoded = jsonDecode(offering.toBeScanned) as Map<String, dynamic>;
-      // Both, though they are one value in different clothes: the agent refuses
-      // a grant whose identifier and key disagree, so it can check rather than
-      // trust whoever expanded one into the other.
-      expect(decoded['aid'], 'BTHISMACHINE');
-      expect(decoded['public_key'], 'DTHISMACHINE');
-      expect(decoded['protected_by'], 'TPM');
+    test('the scannable link carries every signed field, and round-trips', () {
+      const offer = ControllerOffer(
+        aid: 'BTHISMACHINE',
+        publicKey: 'DTHISMACHINE',
+        agentOrigin: agent,
+        timestamp: '2026-09-05T00:00:00Z',
+        signature: '0BSIGNATURE',
+        protectedBy: 'TPM',
+      );
+      final link = Uri.parse(offer.toScannableLink());
+      expect(link.scheme, 'grapeid');
+      expect(link.host, 'controller');
+      // Every field the signature covers travels, because the owner's device
+      // rebuilds the exact signed string to check it — drop one and it cannot.
+      expect(link.queryParameters['aid'], 'BTHISMACHINE');
+      expect(link.queryParameters['key'], 'DTHISMACHINE');
+      expect(link.queryParameters['agent'], agent);
+      expect(link.queryParameters['ts'], '2026-09-05T00:00:00Z');
+      expect(link.queryParameters['sig'], '0BSIGNATURE');
+
+      final back = ControllerOffer.parse(offer.toScannableLink());
+      expect(back!.signature, '0BSIGNATURE');
+      expect(back.agentOrigin, agent);
     });
   });
 
@@ -338,14 +361,19 @@ void main() {
     });
   });
 
-  test('what is scanned names the Identity Agent being asked', () {
+  test('the scannable link names the Identity Agent being asked', () {
     // Without it the device holding the key posts the grant to its own core,
     // which on the ordinary arrangement is not the agent — and the computer
     // waits for a grant written somewhere else.
-    const offering = AMachineOffering(
-        aid: 'BTHIS', publicKey: 'BTHIS', agentOrigin: 'https://box.example.test');
-    final decoded = jsonDecode(offering.toBeScanned) as Map<String, dynamic>;
-    expect(decoded['agent_origin'], 'https://box.example.test');
+    const offer = ControllerOffer(
+      aid: 'BTHIS',
+      publicKey: 'DTHIS',
+      agentOrigin: 'https://box.example.test',
+      timestamp: '2026-09-05T00:00:00Z',
+      signature: '0BSIG',
+    );
+    final link = Uri.parse(offer.toScannableLink());
+    expect(link.queryParameters['agent'], 'https://box.example.test');
   });
 
   test('a wait stops when the screen that started it goes away', () async {
