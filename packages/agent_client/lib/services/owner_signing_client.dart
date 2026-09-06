@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 
 import '../crypto/keys.dart';
 import '../crypto/owner_signature.dart';
+import 'the_path_a_signature_covers.dart';
 
 /// Signing every request to your own agent, without having to remember to.
 ///
@@ -31,7 +32,8 @@ class OwnerSigningClient extends http.BaseClient {
     required this.ownerSeed,
     this.ownerAid,
     http.Client? inner,
-  }) : _inner = inner ?? http.Client();
+  })  : _inner = inner ?? http.Client(),
+        _ownsInner = inner == null;
 
   /// The origin of the agent this client owns, as scheme://host:port. Requests
   /// anywhere else are passed through untouched.
@@ -53,6 +55,10 @@ class OwnerSigningClient extends http.BaseClient {
   final String? ownerAid;
 
   final http.Client _inner;
+
+  /// Whether this wrapper created [_inner] and so may close it. A borrowed inner
+  /// belongs to the caller; closing it would break a transport still in use.
+  final bool _ownsInner;
 
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
@@ -82,11 +88,14 @@ class OwnerSigningClient extends http.BaseClient {
 
     signed.headers.addAll(OwnerSignature.headers(
       method: request.method,
-      // The path only, with no query and no host. The agent signs the same
-      // thing, and a signature over a full URL would break the moment the same
-      // agent were reached by a different name — which is exactly what happens
-      // behind a relay.
-      path: request.url.path,
+      // The path the agent will actually verify — its own, with no host and no
+      // relay mount prefix. A signature over the host breaks when a relay
+      // renames it; a signature over the mount prefix breaks because a
+      // path-mounting relay strips that prefix before the agent sees the
+      // request, so the agent verifies `/api/…` and a prefixed signature matches
+      // nothing. pathSignatureCovers removes the prefix, and leaves a bare
+      // origin's path untouched.
+      path: pathSignatureCovers(agentOrigin, request.url),
       body: request.bodyBytes,
       ownerSeed: seed,
       ownerAid: ownerAid,
@@ -110,7 +119,8 @@ class OwnerSigningClient extends http.BaseClient {
 
   @override
   void close() {
-    _inner.close();
+    // Only what this wrapper created; a borrowed inner belongs to the caller.
+    if (_ownsInner) _inner.close();
     super.close();
   }
 }

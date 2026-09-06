@@ -19,30 +19,6 @@ class _Recorder extends http.BaseClient {
 }
 
 void main() {
-  _anIdentityIsNotAComputer();
-
-  test('what a machine offers is read from the code it showed', () {
-    final m = ApprovingAMachineToActForYou.readWhatItOffers(jsonEncode({
-      // The same 32 bytes twice: B says the identifier IS a non-transferable
-      // key, D says this is a verification key. Never equal as text.
-      'aid': 'BTheLaptop',
-      'public_key': 'DTheLaptop',
-      'protected_by': 'Apple Secure Enclave',
-      'label': 'MacBook',
-    }));
-    expect(m.aid, 'BTheLaptop');
-    expect(m.publicKey, 'DTheLaptop');
-    expect(m.protectedBy, 'Apple Secure Enclave');
-    // A suggestion only. A machine that could name itself in somebody's device
-    // list could name itself something reassuring.
-    expect(m.suggestedLabel, 'MacBook');
-  });
-
-  test('a code that names no key is refused, because a grant needs both', () {
-    expect(() => ApprovingAMachineToActForYou.readWhatItOffers('{"aid":"BOnly"}'),
-        throwsA(isA<FormatException>()));
-  });
-
   test('keeping it and borrowing it send different grades', () async {
     final rec = _Recorder();
     final approving =
@@ -139,53 +115,5 @@ void main() {
 
     expect(rec.sent.single.method, 'DELETE');
     expect(rec.sent.single.url.toString(), '$_agent/api/controllers/BTheLaptop');
-  });
-}
-
-/// An identity's own discovery record is not a computer asking to act.
-///
-/// It is exactly the same shape — an identifier and a public key — and it is
-/// served to anybody who knows the identifier. Read as a machine, it reached
-/// the question "let this computer act for you" naming a PERSON, and the
-/// refusal that followed talked about a controller's identifier at somebody who
-/// had just scanned somebody else. No authority was ever granted, because the
-/// agent refuses a grant whose identifier and key disagree — but the words were
-/// wrong, and the words are what the person has.
-void _anIdentityIsNotAComputer() {
-  test('a discovery record is refused, in words about what it actually is', () {
-    // The real shape of what an agent serves at its own OOBI address.
-    final theirRecord = jsonEncode({
-      'aid': 'EBkHULb-btNlTxGi8Jhao_Y2fBI6Y9yvguWRf29gVPta',
-      'public_key': 'DTHEIRSIGNINGKEY',
-      'alias': 'somebody',
-    });
-
-    expect(
-      () => ApprovingAMachineToActForYou.readWhatItOffers(theirRecord),
-      throwsA(predicate((e) =>
-          '$e'.contains('names an identity rather than a computer'))),
-    );
-  });
-
-  test('a machine whose identifier and key are different bytes is refused', () {
-    // The `B` and the `D` say the same 32 bytes are the identifier and the
-    // verification key. Two different values wearing the two codes is a grant
-    // the agent would refuse, and refusing it here is where the words are
-    // still about what happened.
-    expect(
-      () => ApprovingAMachineToActForYou.readWhatItOffers(jsonEncode({
-        'aid': 'BTHISMACHINE',
-        'public_key': 'DSOMEOTHERKEY',
-      })),
-      throwsA(isA<FormatException>()),
-    );
-  });
-
-  test('and a machine, whose identifier carries its key, is still read', () {
-    final m = ApprovingAMachineToActForYou.readWhatItOffers(jsonEncode({
-      'aid': 'BTHISMACHINE',
-      'public_key': 'DTHISMACHINE',
-    }));
-    expect(m.aid, 'BTHISMACHINE');
   });
 }

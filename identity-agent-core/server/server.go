@@ -783,6 +783,14 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		// Read by the app on this machine so it can show the person what they
 		// are approving.
 		r.Get("/controller/this-machine", s.handleThisMachineAsAController)
+		// The signed, self-contained offer this machine shows as a QR — the
+		// same thing as this-machine but bound to an agent and a moment and
+		// signed, so a photographed offer cannot be replayed or repointed.
+		r.Post("/controller/offer", s.handleControllerOffer)
+		// Called on the OWNER's device to check a scanned offer before anybody
+		// is asked to approve it. The sole authentication of an offer; a bad one
+		// is refused here and no machine is shown to approve.
+		r.Post("/controller/verify-offer", s.handleVerifyControllerOffer)
 		// Signing a request as THIS machine, for the app on it to send to the
 		// agent it is pointed at. The only work a controller's own computer
 		// does, and it is about the controller rather than the identity.

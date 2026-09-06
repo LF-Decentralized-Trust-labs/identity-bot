@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../config/agent_config.dart';
+import 'a_controller_offering_itself.dart';
 import 'controller_signing_client.dart';
 
 /// The machine's own half of asking to act for an identity.
@@ -46,31 +47,37 @@ class AskingToActForAnIdentity {
   /// that is only ever found by somebody looking.
   bool _disposed = false;
 
-  /// What this computer would offer if somebody authorised it.
+  /// A signed, self-contained offer this computer can show as a QR, bound to
+  /// the identity at [agentOrigin].
+  ///
+  /// Asked of the core beside this app, which holds the enclave key and is the
+  /// only thing that can sign as this machine. The core mints the timestamp off
+  /// its own clock and signs the key, the agent, and that moment together, so a
+  /// photograph of the code cannot be replayed to another agent or after it goes
+  /// stale — the whole reason this replaced the bare offer it used to show.
   ///
   /// Returns null when this hardware cannot act for an identity at all — no
-  /// enclave, or one the software cannot use. That is an answer rather than a
-  /// failure, and the screen says so plainly instead of offering a button that
-  /// will not work.
-  Future<AMachineOffering?> whatThisComputerOffers() async {
-    final res = await _plain.get(Uri.parse('$_localCore/api/controller/this-machine'));
+  /// enclave, or one the software cannot use (the core answers 501). That is an
+  /// answer rather than a failure, and the screen says so plainly instead of
+  /// offering a button that will not work.
+  Future<ControllerOffer?> aSignedOfferFor(String agentOrigin) async {
+    final res = await _plain.post(
+      Uri.parse('$_localCore/api/controller/offer'),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({'agent_origin': agentOrigin}),
+    );
     if (res.statusCode == 501) return null;
     if (res.statusCode != 200) {
-      throw Exception('this computer could not say what it offers '
+      throw Exception('this computer could not sign an offer to act '
           '(${res.statusCode}): ${res.body}');
     }
-    final body = jsonDecode(res.body) as Map<String, dynamic>;
-    final aid = (body['aid'] ?? '').toString();
-    final key = (body['public_key'] ?? '').toString();
-    if (aid.isEmpty || key.isEmpty) {
-      throw Exception('this computer named no identifier and no key, so there '
-          'is nothing anybody could authorise');
+    final offer = ControllerOffer.fromJson(
+        jsonDecode(res.body) as Map<String, dynamic>);
+    if (offer.aid.isEmpty || offer.publicKey.isEmpty || offer.signature.isEmpty) {
+      throw Exception('this computer signed nothing usable, so there is '
+          'nothing anybody could authorise');
     }
-    return AMachineOffering(
-      aid: aid,
-      publicKey: key,
-      protectedBy: (body['protected_by'] ?? '').toString(),
-    );
+    return offer;
   }
 
   /// What the agent at [agentOrigin] says this machine has been granted.
@@ -287,56 +294,6 @@ class AskingToActForAnIdentity {
     _disposed = true;
     if (_ownClient) _plain.close();
   }
-}
-
-/// What a computer says about itself when it asks to act for an identity.
-class AMachineOffering {
-  const AMachineOffering({
-    required this.aid,
-    required this.publicKey,
-    this.protectedBy = '',
-    this.agentOrigin = '',
-  });
-
-  /// This machine's identifier, which IS its public key — the non-transferable
-  /// form, with no inception event and nothing published. Knowing it proves
-  /// nothing, which is why it can be shown on a screen.
-  final String aid;
-  final String publicKey;
-
-  /// What is holding the private half. Shown to the person, because "this
-  /// computer can keep a key to itself" is what makes authorising it reasonable
-  /// at all.
-  final String protectedBy;
-
-  /// WHICH IDENTITY AGENT THIS MACHINE IS ASKING, and the field without which
-  /// none of this works.
-  ///
-  /// The grant is written on the agent, by the device holding the identity's
-  /// key — so that device has to know which agent to write it on. It cannot
-  /// work that out: the person is standing at the computer, and the phone has
-  /// never seen this ceremony. Without this the phone posts the grant to its
-  /// own core, which on the ordinary arrangement is not the agent at all, and
-  /// the computer waits for a grant that was written somewhere else.
-  ///
-  /// It is a claim, not an instruction. The device receiving it looks for that
-  /// address among the machines it actually owns and refuses anything else,
-  /// so a code naming somebody else's agent gets nowhere.
-  final String agentOrigin;
-
-  /// What the owner's device reads.
-  ///
-  /// Both fields, though they are the same value in different clothes: the
-  /// agent refuses a grant whose identifier and key disagree, so sending both
-  /// lets it check rather than trust. A payload naming only the identifier
-  /// would have to be expanded by whoever received it, and the expansion is the
-  /// part worth checking.
-  String get toBeScanned => jsonEncode({
-        'aid': aid,
-        'public_key': publicKey,
-        if (protectedBy.isNotEmpty) 'protected_by': protectedBy,
-        if (agentOrigin.isNotEmpty) 'agent_origin': agentOrigin,
-      });
 }
 
 /// What an agent tells a machine it has been granted.
