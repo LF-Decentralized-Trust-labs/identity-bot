@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import 'the_path_a_signature_covers.dart';
+
 /// Reaching an Identity Agent that runs on a different machine.
 ///
 /// The Identity Agent is one application. Where its halves run is a deployment
@@ -94,10 +96,14 @@ class ControllerSigningClient extends http.BaseClient {
         headers: const {'Content-Type': 'application/json'},
         body: jsonEncode({
           'method': request.method,
-          // The path only, with no query and no host — the agent signs the same
-          // thing. A signature over a full URL breaks the moment the same agent
-          // is reached by a different name, which is what a relay does.
-          'path': request.url.path,
+          // The path the agent will actually verify — its own, with no host and
+          // no relay mount prefix. A signature over the host breaks when a relay
+          // renames it; a signature over the mount prefix breaks because a
+          // path-mounting relay strips that prefix before the agent sees the
+          // request, so the agent verifies `/api/…` and a prefixed signature
+          // matches nothing. pathSignatureCovers removes the prefix, and leaves
+          // a bare origin's path untouched.
+          'path': pathSignatureCovers(agentOrigin, request.url),
           'body_b64': base64.encode(request.bodyBytes),
           if (vouched != null) 'auth_level': vouched.level,
           if (vouched != null) 'auth_at': vouched.at.toUtc().toIso8601String(),

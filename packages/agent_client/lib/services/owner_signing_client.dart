@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 
 import '../crypto/keys.dart';
 import '../crypto/owner_signature.dart';
+import 'the_path_a_signature_covers.dart';
 
 /// Signing every request to your own agent, without having to remember to.
 ///
@@ -82,11 +83,14 @@ class OwnerSigningClient extends http.BaseClient {
 
     signed.headers.addAll(OwnerSignature.headers(
       method: request.method,
-      // The path only, with no query and no host. The agent signs the same
-      // thing, and a signature over a full URL would break the moment the same
-      // agent were reached by a different name — which is exactly what happens
-      // behind a relay.
-      path: request.url.path,
+      // The path the agent will actually verify — its own, with no host and no
+      // relay mount prefix. A signature over the host breaks when a relay
+      // renames it; a signature over the mount prefix breaks because a
+      // path-mounting relay strips that prefix before the agent sees the
+      // request, so the agent verifies `/api/…` and a prefixed signature matches
+      // nothing. pathSignatureCovers removes the prefix, and leaves a bare
+      // origin's path untouched.
+      path: pathSignatureCovers(agentOrigin, request.url),
       body: request.bodyBytes,
       ownerSeed: seed,
       ownerAid: ownerAid,

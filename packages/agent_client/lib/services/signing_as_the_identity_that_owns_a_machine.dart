@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import 'the_path_a_signature_covers.dart';
+
 /// Reaching a machine you own but are not sitting at.
 ///
 /// The machine cannot tell who is calling from the connection — its owner is
@@ -101,10 +103,14 @@ class SigningAsTheIdentityThatOwnsAMachine extends http.BaseClient {
         body: jsonEncode({
           'owner_aid': aid,
           'method': request.method,
-          // The path only, with no query and no host — the machine signs the
-          // same thing. A signature over a full URL breaks the moment the same
-          // machine is reached by a different name, which is what a relay does.
-          'path': request.url.path,
+          // The path the machine will actually verify — its own, with no host
+          // and no relay mount prefix. A signature over the host breaks when a
+          // relay renames it; a signature over the mount prefix breaks because a
+          // path-mounting relay strips that prefix before the machine sees the
+          // request, so the machine verifies `/api/…` and a prefixed signature
+          // matches nothing. pathSignatureCovers removes the prefix, and leaves
+          // a bare origin's path untouched.
+          'path': pathSignatureCovers(machineOrigin, request.url),
           'body_b64': base64.encode(request.bodyBytes),
         }),
       );
