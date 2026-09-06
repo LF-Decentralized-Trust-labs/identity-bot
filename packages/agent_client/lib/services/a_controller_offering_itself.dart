@@ -12,7 +12,7 @@ import '../config/agent_config.dart';
 /// scope is one identity asking something of another. This is two of the same
 /// person's own devices meeting — there is no counterparty to fetch from and no
 /// reason to be online, so the whole offer travels inside the QR, the same way
-/// pairing a computer does (`grapeid://pair`). The scheme is what keeps it out
+/// pairing a computer does. The scheme is what keeps it out
 /// of the Ask engine, and the line is deliberate: anything internal and
 /// device-to-device is a protocol QR, not an Ask.
 ///
@@ -69,7 +69,12 @@ class ControllerOffer {
   /// could name itself something reassuring.
   final String label;
 
-  static const scheme = 'grapeid';
+  /// The protocol's own deep-link scheme, named for the protocol rather than
+  /// any vendor — this is the reference implementation of a vendor-neutral
+  /// protocol, so the namespace minted into every offer link stays neutral. A
+  /// commercial build layered on this core may override it with its own scheme,
+  /// but the neutral name is what ships here.
+  static const scheme = 'identity-agent';
   static const host = 'controller';
 
   /// Reads the core's signed-offer response into an offer.
@@ -83,7 +88,7 @@ class ControllerOffer {
         label: (m['label'] ?? '').toString(),
       );
 
-  /// The `grapeid://controller?…` link this offer shows as a QR.
+  /// The `identity-agent://controller?…` link this offer shows as a QR.
   ///
   /// Every signed field is carried whole, because the owner's device rebuilds
   /// the exact string the core signed to check the signature — drop one and the

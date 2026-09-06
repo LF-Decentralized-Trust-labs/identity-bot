@@ -84,7 +84,7 @@ void main() {
         protectedBy: 'TPM',
       );
       final link = Uri.parse(offer.toScannableLink());
-      expect(link.scheme, 'grapeid');
+      expect(link.scheme, 'identity-agent');
       expect(link.host, 'controller');
       // Every field the signature covers travels, because the owner's device
       // rebuilds the exact signed string to check it — drop one and it cannot.

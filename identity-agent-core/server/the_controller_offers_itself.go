@@ -22,7 +22,7 @@ import (
 // It carries a signature, and that is the one thing today's raw offer lacks.
 // A bare offer is a public key and a claim; anybody who photographs it can
 // present the same bytes later, or to a different owner. Signing binds the key
-// to the agent it is offering to act for and to the moment it was made, so a
+// to the Identity Agent it is offering to act for and to the moment it was made, so a
 // captured offer cannot be replayed to another agent or after it goes stale, and
 // the timestamp cannot be edited without breaking the signature. The private key
 // that signs never leaves the enclave — which is the whole reason a controller
@@ -36,7 +36,11 @@ import (
 // controllerOfferPrefix keeps a controller offer's signed bytes from ever being
 // mistaken for a controller REQUEST's signed bytes. Different first line, so one
 // can never be replayed as the other.
-const controllerOfferPrefix = "grapeid-controller-offer-v1"
+//
+// Named for the protocol, not any vendor: it is the domain-separation tag every
+// conforming implementation signs and rebuilds to verify, so it is part of the
+// interop contract of a vendor-neutral protocol and stays neutral.
+const controllerOfferPrefix = "identity-agent-controller-offer-v1"
 
 // controllerOfferWindow is how long a freshly made offer stays acceptable.
 //
@@ -87,7 +91,7 @@ func (s *CoreServer) handleControllerOffer(w http.ResponseWriter, r *http.Reques
 	}
 	req.AgentOrigin = strings.TrimSpace(req.AgentOrigin)
 	if req.AgentOrigin == "" {
-		writeError(w, http.StatusBadRequest, "an offer needs an agent to be for",
+		writeError(w, http.StatusBadRequest, "an offer needs an Identity Agent to be for",
 			"agent_origin is where the identity this machine would act for lives, and the signature binds the offer to it")
 		return
 	}

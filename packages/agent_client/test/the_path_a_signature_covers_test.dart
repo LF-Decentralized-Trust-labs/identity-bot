@@ -12,9 +12,9 @@ void main() {
     // token, so the box routes and verifies on /api/controllers.
     expect(
       pathSignatureCovers(
-        'https://agent.grapeid.org/cl6uodq_E0n8a8sTPnIAQQ',
+        'https://agent.example/cl6uodq_E0n8a8sTPnIAQQ',
         Uri.parse(
-            'https://agent.grapeid.org/cl6uodq_E0n8a8sTPnIAQQ/api/controllers'),
+            'https://agent.example/cl6uodq_E0n8a8sTPnIAQQ/api/controllers'),
       ),
       '/api/controllers',
     );
@@ -31,16 +31,16 @@ void main() {
 
   test('a trailing slash on the origin does not leave a doubled separator', () {
     expect(
-      pathSignatureCovers('https://agent.grapeid.org/cl6uodq_E0n8a8sTPnIAQQ/',
-          Uri.parse('https://agent.grapeid.org/cl6uodq_E0n8a8sTPnIAQQ/api/kel')),
+      pathSignatureCovers('https://agent.example/cl6uodq_E0n8a8sTPnIAQQ/',
+          Uri.parse('https://agent.example/cl6uodq_E0n8a8sTPnIAQQ/api/kel')),
       '/api/kel',
     );
   });
 
   test('the prefix reached with no further path becomes root', () {
     expect(
-      pathSignatureCovers('https://agent.grapeid.org/cl6uodq_E0n8a8sTPnIAQQ',
-          Uri.parse('https://agent.grapeid.org/cl6uodq_E0n8a8sTPnIAQQ')),
+      pathSignatureCovers('https://agent.example/cl6uodq_E0n8a8sTPnIAQQ',
+          Uri.parse('https://agent.example/cl6uodq_E0n8a8sTPnIAQQ')),
       '/',
     );
   });
@@ -51,8 +51,8 @@ void main() {
     // is signed unchanged, and the agent refuses it rather than accepting a path
     // the caller did not send.
     expect(
-      pathSignatureCovers('https://agent.grapeid.org/cl6uodq_E0n8a8sTPnIAQQ',
-          Uri.parse('https://agent.grapeid.org/cl6uodq_E0n8a8sTPnIAQQ-other/x')),
+      pathSignatureCovers('https://agent.example/cl6uodq_E0n8a8sTPnIAQQ',
+          Uri.parse('https://agent.example/cl6uodq_E0n8a8sTPnIAQQ-other/x')),
       '/cl6uodq_E0n8a8sTPnIAQQ-other/x',
     );
   });
