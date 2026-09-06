@@ -32,7 +32,8 @@ class OwnerSigningClient extends http.BaseClient {
     required this.ownerSeed,
     this.ownerAid,
     http.Client? inner,
-  }) : _inner = inner ?? http.Client();
+  })  : _inner = inner ?? http.Client(),
+        _ownsInner = inner == null;
 
   /// The origin of the agent this client owns, as scheme://host:port. Requests
   /// anywhere else are passed through untouched.
@@ -54,6 +55,10 @@ class OwnerSigningClient extends http.BaseClient {
   final String? ownerAid;
 
   final http.Client _inner;
+
+  /// Whether this wrapper created [_inner] and so may close it. A borrowed inner
+  /// belongs to the caller; closing it would break a transport still in use.
+  final bool _ownsInner;
 
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
@@ -114,7 +119,8 @@ class OwnerSigningClient extends http.BaseClient {
 
   @override
   void close() {
-    _inner.close();
+    // Only what this wrapper created; a borrowed inner belongs to the caller.
+    if (_ownsInner) _inner.close();
     super.close();
   }
 }

@@ -36,7 +36,8 @@ class ControllerSigningClient extends http.BaseClient {
     required this.localCoreOrigin,
     this.authentication,
     http.Client? inner,
-  }) : _inner = inner ?? http.Client();
+  })  : _inner = inner ?? http.Client(),
+        _ownsInner = inner == null;
 
   /// The agent this app is a front end for, as scheme://host:port.
   /// Requests anywhere else are passed through untouched.
@@ -56,6 +57,13 @@ class ControllerSigningClient extends http.BaseClient {
   final Future<VouchedAuthentication?> Function()? authentication;
 
   final http.Client _inner;
+
+  /// Whether this wrapper created [_inner] and so may close it. When the inner
+  /// client was handed in — the poll wraps one shared client per attempt — it is
+  /// borrowed, and closing it would shut a transport the caller still needs. The
+  /// first successful poll did exactly that, closing the client the next call
+  /// then found already closed.
+  final bool _ownsInner;
 
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
@@ -157,7 +165,9 @@ class ControllerSigningClient extends http.BaseClient {
 
   @override
   void close() {
-    _inner.close();
+    // Only what this wrapper created. A borrowed inner belongs to the caller,
+    // which closes it — closing it here would break the caller's next request.
+    if (_ownsInner) _inner.close();
     super.close();
   }
 }
