@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import 'the_path_a_signature_covers.dart';
+
 /// Reaching a machine you own but are not sitting at.
 ///
 /// The machine cannot tell who is calling from the connection — its owner is
@@ -35,7 +37,8 @@ class SigningAsTheIdentityThatOwnsAMachine extends http.BaseClient {
     required this.localCoreOrigin,
     required this.ownerAid,
     http.Client? inner,
-  }) : _inner = inner ?? http.Client();
+  })  : _inner = inner ?? http.Client(),
+        _ownsInner = inner == null;
 
   /// The machine this device owns, as scheme://host:port. Requests anywhere
   /// else are passed through untouched.
@@ -57,6 +60,10 @@ class SigningAsTheIdentityThatOwnsAMachine extends http.BaseClient {
   final Future<String?> Function() ownerAid;
 
   final http.Client _inner;
+
+  /// Whether this wrapper created [_inner] and so may close it. A borrowed inner
+  /// belongs to the caller; closing it would break a transport still in use.
+  final bool _ownsInner;
 
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
@@ -101,10 +108,14 @@ class SigningAsTheIdentityThatOwnsAMachine extends http.BaseClient {
         body: jsonEncode({
           'owner_aid': aid,
           'method': request.method,
-          // The path only, with no query and no host — the machine signs the
-          // same thing. A signature over a full URL breaks the moment the same
-          // machine is reached by a different name, which is what a relay does.
-          'path': request.url.path,
+          // The path the machine will actually verify — its own, with no host
+          // and no relay mount prefix. A signature over the host breaks when a
+          // relay renames it; a signature over the mount prefix breaks because a
+          // path-mounting relay strips that prefix before the machine sees the
+          // request, so the machine verifies `/api/…` and a prefixed signature
+          // matches nothing. pathSignatureCovers removes the prefix, and leaves
+          // a bare origin's path untouched.
+          'path': pathSignatureCovers(machineOrigin, request.url),
           'body_b64': base64.encode(request.bodyBytes),
         }),
       );
@@ -145,7 +156,8 @@ class SigningAsTheIdentityThatOwnsAMachine extends http.BaseClient {
 
   @override
   void close() {
-    _inner.close();
+    // Only what this wrapper created; a borrowed inner belongs to the caller.
+    if (_ownsInner) _inner.close();
     super.close();
   }
 }

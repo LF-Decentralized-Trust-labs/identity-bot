@@ -58,10 +58,19 @@ const (
 
 // scopedGrantLifetime bounds a borrowed machine when nothing else says.
 //
-// Long enough to be useful for the afternoon somebody is actually at that
-// computer, short enough that forgetting to revoke it is not the same as
-// granting it forever — which is the whole reason the borrowed grade exists.
-const scopedGrantLifetime = 12 * time.Hour
+// A borrowed grant is not for a single afternoon. Setting a machine up, working
+// across it over several sittings, and coming back to it days later is the
+// ordinary shape, and a window that expires under the person mid-use is worse
+// than not having the borrowed grade at all — it turns "I am using this for a
+// while" into a ceremony they redo every few hours. So it is generous.
+//
+// The permanent grade (GradeEnrolled) is what a machine somebody KEEPS should
+// be, and it never expires. So the two grades are exactly: keep it, which is
+// forever, or borrow it, which is a bounded but roomy window. This value is an
+// interim — the borrowed default will likely settle shorter (a week is the
+// natural resting point) once the permanent path carries the machines meant to
+// last — but a short window now only gets in the way of proving anything out.
+const scopedGrantLifetime = 30 * 24 * time.Hour
 
 // maxScopedGrantLifetime is the longest a borrowed machine may be given,
 // whatever the caller asks for.
@@ -71,10 +80,10 @@ const scopedGrantLifetime = 12 * time.Hour
 // grade in name and the permanent one in effect. A bound the caller cannot
 // exceed is the only version of "it expires" that means anything.
 //
-// A week rather than a day: somebody working from a machine they do not own for
-// a few days is an ordinary thing, and a limit people routinely hit is a limit
-// people route around.
-const maxScopedGrantLifetime = 7 * 24 * time.Hour
+// At least the default, so the default a borrowed grant is given is never
+// itself refused by this cap. A machine meant to last past this belongs in the
+// permanent grade, which is what "keep it" records.
+const maxScopedGrantLifetime = 30 * 24 * time.Hour
 
 // ControllerGrant is one machine's permission to act for this identity.
 type ControllerGrant struct {
@@ -251,7 +260,17 @@ func (c *controllerGrants) Grant(g ControllerGrant, now time.Time) (ControllerGr
 	case GradeScoped:
 		switch {
 		case g.ExpiresAt.IsZero():
-			g.ExpiresAt = now.Add(scopedGrantLifetime)
+			// The default window, clamped to the cap. These two constants are
+			// equal today, but lowering the cap below the default without also
+			// lowering the default would otherwise hand out a grant longer than
+			// the cap allows, silently, because this branch is reached instead of
+			// the cap check below. Clamping enforces the "at least the default"
+			// invariant the cap's own comment states, rather than trusting it.
+			window := scopedGrantLifetime
+			if window > maxScopedGrantLifetime {
+				window = maxScopedGrantLifetime
+			}
+			g.ExpiresAt = now.Add(window)
 		case !g.ExpiresAt.After(now):
 			// Storing this would report success for an authorisation that never
 			// worked, and the owner would be told their machine was approved. A

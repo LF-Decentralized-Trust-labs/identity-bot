@@ -29,56 +29,6 @@ class ApprovingAMachineToActForYou {
   /// reason: it must be the key-holding device asking.
   final http.Client _client;
 
-  /// What a computer says about itself when it asks to act for you.
-  ///
-  /// Read from the machine directly rather than taken from what it displayed,
-  /// so a code somebody photographed off a screen cannot name a different key
-  /// than the machine holding it. The identifier IS the key, so the two cannot
-  /// disagree without the agent refusing the grant.
-  static AMachineAsking readWhatItOffers(String scanned) {
-    final data = jsonDecode(scanned) as Map<String, dynamic>;
-    final aid = (data['aid'] ?? '').toString().trim();
-    final key = (data['public_key'] ?? '').toString().trim();
-    if (aid.isEmpty || key.isEmpty) {
-      throw const FormatException(
-          'that code does not name a computer and the key it would act with');
-    }
-    // A COMPUTER IS NAMED BY ITS KEY, and that is what tells one apart from an
-    // identity. An identifier and a public key together describe a great many
-    // things — an agent's own discovery record is exactly that shape, is served
-    // to anybody who knows the identifier, and was being read as a computer
-    // asking to act. It got no further, because the agent refuses a grant whose
-    // identifier and key disagree; but the refusal talked about a controller's
-    // identifier at somebody who had scanned a person.
-    //
-    // ONE VALUE IS NOT ONE STRING, which is the trap here and the one this
-    // check was written wrong for once already. The same 32 bytes are carried
-    // twice in two different encodings: `B` says this identifier IS a
-    // non-transferable key, `D` says this is a verification key. Same bytes,
-    // two statements about what they are for — so they are never equal as
-    // text, and comparing them as text refuses every real machine.
-    //
-    // The agent decodes both and compares the bytes. Without that decoding
-    // here, comparing everything after the code is the same test: the encoding
-    // below the first character is identical.
-    if (!aid.startsWith('B') ||
-        !key.startsWith('D') ||
-        aid.length != key.length ||
-        aid.substring(1) != key.substring(1)) {
-      throw const FormatException(
-          'that code names an identity rather than a computer — a computer is '
-          'named by the very key it acts with, and these are two different '
-          'things');
-    }
-    return AMachineAsking(
-      aid: aid,
-      publicKey: key,
-      protectedBy: (data['protected_by'] ?? '').toString(),
-      suggestedLabel: (data['label'] ?? '').toString(),
-      agentOrigin: (data['agent_origin'] ?? '').toString().trim(),
-    );
-  }
-
   /// Tells the agent this machine may act, at the grade the person chose.
   ///
   /// Returns nothing useful on purpose. What matters afterwards is what the

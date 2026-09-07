@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import 'the_path_a_signature_covers.dart';
+
 /// Reaching an Identity Agent that runs on a different machine.
 ///
 /// The Identity Agent is one application. Where its halves run is a deployment
@@ -34,7 +36,8 @@ class ControllerSigningClient extends http.BaseClient {
     required this.localCoreOrigin,
     this.authentication,
     http.Client? inner,
-  }) : _inner = inner ?? http.Client();
+  })  : _inner = inner ?? http.Client(),
+        _ownsInner = inner == null;
 
   /// The agent this app is a front end for, as scheme://host:port.
   /// Requests anywhere else are passed through untouched.
@@ -54,6 +57,13 @@ class ControllerSigningClient extends http.BaseClient {
   final Future<VouchedAuthentication?> Function()? authentication;
 
   final http.Client _inner;
+
+  /// Whether this wrapper created [_inner] and so may close it. When the inner
+  /// client was handed in — the poll wraps one shared client per attempt — it is
+  /// borrowed, and closing it would shut a transport the caller still needs. The
+  /// first successful poll did exactly that, closing the client the next call
+  /// then found already closed.
+  final bool _ownsInner;
 
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
@@ -94,10 +104,14 @@ class ControllerSigningClient extends http.BaseClient {
         headers: const {'Content-Type': 'application/json'},
         body: jsonEncode({
           'method': request.method,
-          // The path only, with no query and no host — the agent signs the same
-          // thing. A signature over a full URL breaks the moment the same agent
-          // is reached by a different name, which is what a relay does.
-          'path': request.url.path,
+          // The path the agent will actually verify — its own, with no host and
+          // no relay mount prefix. A signature over the host breaks when a relay
+          // renames it; a signature over the mount prefix breaks because a
+          // path-mounting relay strips that prefix before the agent sees the
+          // request, so the agent verifies `/api/…` and a prefixed signature
+          // matches nothing. pathSignatureCovers removes the prefix, and leaves
+          // a bare origin's path untouched.
+          'path': pathSignatureCovers(agentOrigin, request.url),
           'body_b64': base64.encode(request.bodyBytes),
           if (vouched != null) 'auth_level': vouched.level,
           if (vouched != null) 'auth_at': vouched.at.toUtc().toIso8601String(),
@@ -151,7 +165,9 @@ class ControllerSigningClient extends http.BaseClient {
 
   @override
   void close() {
-    _inner.close();
+    // Only what this wrapper created. A borrowed inner belongs to the caller,
+    // which closes it — closing it here would break the caller's next request.
+    if (_ownsInner) _inner.close();
     super.close();
   }
 }
