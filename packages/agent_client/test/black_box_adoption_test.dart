@@ -4,7 +4,7 @@ import 'package:test/test.dart';
 Uri page() => Uri.parse('https://grapeid.com/provision');
 
 Uri returnLink({String? state, String box = 'https://abc.agent.grapeid.org', String? code = 'CODE123'}) {
-  return Uri.parse('grapeid://adopt').replace(queryParameters: {
+  return Uri.parse('identity-agent://adopt').replace(queryParameters: {
     if (state != null) 'state': state,
     'box_url': box,
     if (code != null) 'adoption_code': code,
