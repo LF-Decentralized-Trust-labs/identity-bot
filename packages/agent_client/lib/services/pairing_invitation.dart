@@ -64,10 +64,6 @@ class PairingInvitation {
   /// it is a single constant so an override is one substitution.
   static const scheme = 'identity-agent';
 
-  /// The scheme this code used to carry, still accepted so a link minted under
-  /// the old name keeps working through the transition.
-  static const legacyScheme = 'grapeid';
-
   /// Builds the link a computer shows, so no caller has to spell the scheme.
   ///
   /// One place emits the string, which is what keeps every emitter neutral at
@@ -101,14 +97,9 @@ class PairingInvitation {
   /// Null rather than an exception, and rather than a guess. A camera picks up
   /// whatever is in front of it — a shop's wifi poster, somebody's website —
   /// and the honest answer to most of what it sees is "that is not one of ours".
-  ///
-  /// Either scheme is accepted: the neutral name it is emitted under now, and
-  /// the old vendor name a code minted before this change still carries.
   static PairingInvitation? parse(String raw) {
     final uri = Uri.tryParse(raw.trim());
-    if (uri == null ||
-        (uri.scheme != scheme && uri.scheme != legacyScheme) ||
-        uri.host != 'pair') {
+    if (uri == null || uri.scheme != scheme || uri.host != 'pair') {
       return null;
     }
     final host = uri.queryParameters['host'] ?? '';
