@@ -3,9 +3,10 @@ package server
 import (
 	"fmt"
 	"log"
-	"net"
 	"os"
 	"strings"
+
+	"identity-agent-core/endpoint"
 )
 
 // Where the root / management surface binds.
@@ -33,30 +34,18 @@ import (
 // broken. It is off by default, loud when on, and dev/testing only — it exposes
 // the management API and MUST NOT be used as a product default.
 func rootListenAddr(port int) string {
-	if override := strings.TrimSpace(os.Getenv("AGENT_DIRECT_INGRESS_ADDR")); override != "" {
-		host := override
-		// Accept either a bare host ("0.0.0.0", "192.168.0.10") or a host:port;
-		// the port this server chose always wins, since it may have fallen back.
-		if h, _, err := net.SplitHostPort(override); err == nil {
-			host = h
-		}
-		if !isLoopbackHost(host) {
+	// The host the hatch names (bare "0.0.0.0"/"192.168.0.10" or a host:port; the
+	// port this server chose always wins, since it may have fallen back). This is
+	// the same signal the advertised address resolves on — endpoint.DirectIngressHost
+	// — so binding and advertising cannot disagree about where the agent listens.
+	if host := endpoint.DirectIngressHost(); host != "" {
+		if !endpoint.IsLoopbackHost(host) {
 			log.Printf("[identity-agent-core] WARNING: AGENT_DIRECT_INGRESS_ADDR=%s binds the root/"+
 				"management surface to a non-loopback address. This exposes the management API and is a "+
 				"developer/testing escape hatch only — never a product default. The governed path-scoped "+
-				"ingress is the supported way to be reachable off-box.", override)
+				"ingress is the supported way to be reachable off-box.", strings.TrimSpace(os.Getenv("AGENT_DIRECT_INGRESS_ADDR")))
 		}
 		return fmt.Sprintf("%s:%d", host, port)
 	}
 	return fmt.Sprintf("127.0.0.1:%d", port)
-}
-
-func isLoopbackHost(host string) bool {
-	if host == "localhost" {
-		return true
-	}
-	if ip := net.ParseIP(host); ip != nil {
-		return ip.IsLoopback()
-	}
-	return false
 }

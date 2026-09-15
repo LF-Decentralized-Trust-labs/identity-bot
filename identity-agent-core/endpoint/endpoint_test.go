@@ -76,6 +76,66 @@ func TestAnAgentWithNoProxyIsUnaffected(t *testing.T) {
 	}
 }
 
+// With no tunnel, no relay and no direct-ingress hatch, the agent binds loopback
+// only — so it must advertise localhost, NOT the LAN IP.
+//
+// Ranking the LAN IP first was a silent break: the address went into the OOBI and
+// pairing QR, but nothing was listening there, so a counterparty resolving it hit
+// connection-refused. The address published has to match where the agent actually
+// answers.
+func TestALoopbackOnlyAgentAdvertisesLocalhostNotADeadLANIP(t *testing.T) {
+	t.Setenv("AGENT_DIRECT_INGRESS_ADDR", "")
+	t.Setenv("PUBLIC_URL", "")
+
+	es := New(nil, 5050)
+	url, source := es.resolve()
+
+	if source != "localhost" {
+		t.Fatalf("a loopback-only agent published source %q (%q) — a counterparty resolving a LAN IP nothing listens on gets connection-refused",
+			source, url)
+	}
+	if url != "http://localhost:5050" {
+		t.Errorf("published %q, want http://localhost:5050", url)
+	}
+}
+
+// A loopback host in the escape hatch is still loopback: it does not make the LAN
+// IP reachable, so the agent still advertises localhost.
+func TestALoopbackIngressHatchStillAdvertisesLocalhost(t *testing.T) {
+	t.Setenv("AGENT_DIRECT_INGRESS_ADDR", "127.0.0.1")
+	t.Setenv("PUBLIC_URL", "")
+
+	es := New(nil, 5050)
+	if _, source := es.resolve(); source != "localhost" {
+		t.Fatalf("a hatch bound to loopback published source %q, want localhost", source)
+	}
+}
+
+// When the direct-ingress hatch binds the surface to a non-loopback host
+// (0.0.0.0 here), the LAN IP is genuinely reachable, so it is advertised.
+//
+// Guarded on there actually being a LAN interface: a host with none correctly
+// falls back to localhost, and asserting a LAN IP there would fail for the right
+// reason in the wrong test.
+func TestAReachableIngressHatchAdvertisesTheLANIP(t *testing.T) {
+	if detectLocalIP() == "" {
+		t.Skip("no non-loopback interface on this host; the LAN-IP branch cannot be exercised")
+	}
+	t.Setenv("AGENT_DIRECT_INGRESS_ADDR", "0.0.0.0")
+	t.Setenv("PUBLIC_URL", "")
+
+	es := New(nil, 5050)
+	url, source := es.resolve()
+
+	if !strings.HasPrefix(source, "local:") {
+		t.Fatalf("with the surface bound off-box the agent published source %q (%q) — the reachable LAN IP should win over localhost",
+			source, url)
+	}
+	if want := "http://" + detectLocalIP() + ":5050"; url != want {
+		t.Errorf("published %q, want %q", url, want)
+	}
+}
+
 // The source has to actually become "observed:proxy", because that string is
 // what the request middleware checks to decide it has already learned the
 // address and can stop looking.
