@@ -1,0 +1,62 @@
+package server
+
+import (
+	"fmt"
+	"log"
+	"net"
+	"os"
+	"strings"
+)
+
+// Where the root / management surface binds.
+//
+// This surface carries the agent's OUTBOUND tunnel/relay setup and the
+// AUTHENTICATED owner/management API. It is deliberately NOT a place
+// counterparties reach: external reach is meant to come only through a
+// manager-governed ingress — the relay's own tunnel (which reverse-proxies
+// inbound to loopback), or a separate path-scoped ingress bind for a direct
+// deployment. Binding the root surface to a public address instead makes the
+// root URL a universal correlator ("learn the main URL, ask the agent
+// anything"), which is exactly what the per-relationship URL model exists to
+// prevent.
+//
+// So the root surface binds LOOPBACK by default, in every mode. The tunnel and
+// relay transports are unaffected — both dial the local server over loopback,
+// so nothing that reaches the agent through a manager-governed path is lost.
+//
+// DEV ESCAPE HATCH — a direct/LAN deployment with no tunnel (a developer
+// pairing a phone to a computer on the same network, say) still needs the agent
+// reachable off-box. The correct home for that is a separate, path-scoped,
+// manager-governed ingress listener, which is not built yet. Until it is,
+// AGENT_DIRECT_INGRESS_ADDR lets a developer explicitly opt the WHOLE surface
+// onto a reachable address (e.g. "0.0.0.0") so that flow is not silently
+// broken. It is off by default, loud when on, and dev/testing only — it exposes
+// the management API and MUST NOT be used as a product default.
+func rootListenAddr(port int) string {
+	if override := strings.TrimSpace(os.Getenv("AGENT_DIRECT_INGRESS_ADDR")); override != "" {
+		host := override
+		// Accept either a bare host ("0.0.0.0", "192.168.0.10") or a host:port;
+		// the port this server chose always wins, since it may have fallen back.
+		if h, _, err := net.SplitHostPort(override); err == nil {
+			host = h
+		}
+		if !isLoopbackHost(host) {
+			log.Printf("[identity-agent-core] WARNING: AGENT_DIRECT_INGRESS_ADDR=%s binds the root/"+
+				"management surface to a non-loopback address. This exposes the management API and is a "+
+				"developer/testing escape hatch only — never a product default. The governed path-scoped "+
+				"ingress is the supported way to be reachable off-box.", override)
+		}
+		return fmt.Sprintf("%s:%d", host, port)
+	}
+	return fmt.Sprintf("127.0.0.1:%d", port)
+}
+
+func isLoopbackHost(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
+}

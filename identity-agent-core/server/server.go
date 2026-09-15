@@ -504,7 +504,7 @@ func (s *CoreServer) Start() error {
 	var bindErr error
 	for attempt := 0; attempt < 10; attempt++ {
 		tryPort := requestedPort + attempt
-		addr := fmt.Sprintf("0.0.0.0:%d", tryPort)
+		addr := rootListenAddr(tryPort)
 		s.listener, bindErr = net.Listen("tcp4", addr)
 		if bindErr == nil {
 			if tryPort != requestedPort {
@@ -608,7 +608,7 @@ func (s *CoreServer) Start() error {
 		s.backupService().Scheduler.StartDaily()
 	}
 
-	addr := fmt.Sprintf("0.0.0.0:%d", s.Port)
+	addr := rootListenAddr(s.Port)
 	log.Printf("[identity-agent-core] Server listening on %s", addr)
 	log.Printf("[identity-agent-core] Endpoint URL: %s (source: %s)", s.EndpointService.CurrentURL(), s.EndpointService.Source())
 	if s.KeriDriver != nil {
