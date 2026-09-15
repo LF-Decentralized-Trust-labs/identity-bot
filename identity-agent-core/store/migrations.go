@@ -829,6 +829,20 @@ ALTER TABLE adopted_agents RENAME COLUMN delegated_aid TO signs_as_aid;
 -- terminating the connection can replace, after which every forgery verifies.
 ALTER TABLE adopted_agents ADD COLUMN backup_signing_key_b64 TEXT;
 `},
+	{
+		Version:     36,
+		Description: "Persist the default ingress mode and relay operator on settings",
+		SQL: `
+-- How this agent becomes reachable from outside is now an explicit, persisted
+-- choice rather than an unconditional public-tunnel fallback. ingress_mode is
+-- one of '', 'relay', 'tunnel', 'direct'; empty means the server resolves a
+-- default from the entity type instead of pinning one at first write.
+-- relay_operator is the URL-relay base URL this instance enrolls with; empty
+-- falls back to the RELAY_BASE_URL env var. Both default to '' so existing
+-- single-row settings keep working unchanged.
+ALTER TABLE settings ADD COLUMN ingress_mode   TEXT NOT NULL DEFAULT '';
+ALTER TABLE settings ADD COLUMN relay_operator TEXT NOT NULL DEFAULT '';
+`},
 }
 
 // ApplyIdentityMigrations creates the migrations table and applies any pending migrations.

@@ -133,6 +133,22 @@ type SettingsData struct {
 	CloudflareTunnelToken string `json:"cloudflare_tunnel_token,omitempty"`
 	TunnelDomain          string `json:"tunnel_domain,omitempty"`
 	TunnelExtension       string `json:"tunnel_extension,omitempty"`
+
+	// IngressMode is the instance's default way of becoming reachable from
+	// outside: "relay" (per-relationship opaque URLs), "tunnel" (one public URL
+	// for the whole agent), or "direct" (the agent's own reachable address, a
+	// developer/testing toggle). Empty means "unset" — the server then resolves a
+	// default from the entity type rather than storing one, so an instance that
+	// has never chosen a mode is not pinned to whatever the default was on the day
+	// it was first written.
+	IngressMode string `json:"ingress_mode,omitempty"`
+
+	// RelayOperator is the base URL of the URL-relay operator this instance
+	// enrolls with when in relay mode (or when it allocates relay URLs alongside
+	// another default mode). Empty falls back to the RELAY_BASE_URL env var for
+	// back-compat. The OSS core bundles no operator, so a deployment that wants
+	// URL Relay names one here.
+	RelayOperator string `json:"relay_operator,omitempty"`
 }
 
 type PendingRequest struct {

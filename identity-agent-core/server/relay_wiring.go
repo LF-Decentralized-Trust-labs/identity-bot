@@ -56,12 +56,17 @@ func (rs *relayEnrollmentSigner) SignCanonical(enrollmentAID string, body map[st
 // relayBaseURL is the operator this agent enrolls with, or empty when no relay
 // is configured.
 //
-// Sourced from the environment for now. The OSS core bundles no relay operator,
-// so a deployment that wants URL Relay names one here; a deployment that names
-// none simply has no relay and stays on whatever the tunnel/direct path
-// provides. Persisting the operator in settings alongside the tunnel provider
-// (so the UI can select it) is deferred — see the note in loadRelayConfig.
-func relayBaseURL() string {
+// Resolution order: the persisted relay operator first, then the RELAY_BASE_URL
+// env var for back-compat. The OSS core bundles no relay operator, so a
+// deployment that wants URL Relay names one — in Settings, or via the env var —
+// and a deployment that names none simply has no relay and stays on whatever the
+// tunnel/direct path provides.
+func (s *CoreServer) relayBaseURL() string {
+	if s.DataStore != nil {
+		if saved, err := s.DataStore.GetSettings(); err == nil && saved != nil && strings.TrimSpace(saved.RelayOperator) != "" {
+			return strings.TrimRight(strings.TrimSpace(saved.RelayOperator), "/")
+		}
+	}
 	return strings.TrimRight(strings.TrimSpace(os.Getenv("RELAY_BASE_URL")), "/")
 }
 
@@ -87,7 +92,7 @@ func relayBaseURL() string {
 // registration, witness broadcast), so this is called from the start-up
 // goroutine rather than on the hot path of Start.
 func (s *CoreServer) loadRelayConfig() (relay.Config, relay.Signer, bool) {
-	base := relayBaseURL()
+	base := s.relayBaseURL()
 	if base == "" {
 		return relay.Config{}, nil, false
 	}
