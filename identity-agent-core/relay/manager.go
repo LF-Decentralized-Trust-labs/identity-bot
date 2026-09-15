@@ -61,6 +61,12 @@ type Config struct {
 	// LocalBase is where inbound requests are delivered — the agent's own HTTP
 	// server.
 	LocalBase string
+
+	// Allocation carries the optional lifetime/scope/naming parameters for this
+	// manager's allocate request. Its zero value is the historical default
+	// (opaque, persistent) — an existing caller that never sets it gets exactly
+	// today's request on the wire, so adding this field breaks nothing.
+	Allocation AllocateOptions
 }
 
 // Status is what the rest of the agent can see about one relay.
@@ -146,7 +152,7 @@ func (m *Manager) Start(parent context.Context) error {
 		return m.fail(fmt.Errorf("enroll with %s: %w", m.cfg.BaseURL, err))
 	}
 
-	alloc, err := client.Allocate(ctx, m.cfg.EnrollmentAID, m.cfg.RAID)
+	alloc, err := client.AllocateWithOptions(ctx, m.cfg.EnrollmentAID, m.cfg.RAID, m.cfg.Allocation)
 	if err != nil {
 		cancel()
 		return m.fail(fmt.Errorf("allocate from %s: %w", m.cfg.BaseURL, err))

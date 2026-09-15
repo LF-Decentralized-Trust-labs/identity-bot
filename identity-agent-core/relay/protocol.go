@@ -23,6 +23,21 @@ type AllocateResponse struct {
 	PublicHostname  string `json:"public_hostname"`
 	AllocationToken string `json:"allocation_token"`
 	TunnelEndpoint  string `json:"tunnel_endpoint"`
+
+	// ValidUntil is when the allocation expires, RFC3339. Empty (or a JSON
+	// null the operator omits) means persistent — the allocation lives until an
+	// explicit release. An operator that honors an ephemeral request echoes the
+	// concrete expiry here so the agent knows when to renew or drop it.
+	ValidUntil string `json:"valid_until,omitempty"`
+
+	// Lifetime, Scope and Naming are the resulting semantics the operator
+	// applied, echoed back so the agent can confirm what it was actually
+	// granted rather than assuming its request was honored verbatim. All three
+	// are optional: an operator that predates these fields simply omits them and
+	// the response is exactly the four fields above, as before.
+	Lifetime string `json:"lifetime,omitempty"`
+	Scope    string `json:"scope,omitempty"`
+	Naming   string `json:"naming,omitempty"`
 }
 
 type EnrollResponse struct {
