@@ -8,8 +8,9 @@ import (
 
 // A reset request must be refused unless it comes from the local owner.
 // /api/reset is irreversible — it clears identity, contacts, settings and the
-// KEL — and the server binds 0.0.0.0 with the tunnel forwarding the whole port,
-// so an ungated handler is reachable by anyone who learns the URL.
+// KEL. The root surface binds loopback, but a tunnel or relay forwards inbound
+// traffic to it, so an ungated handler is still reachable by anyone who learns
+// the URL — the owner gate, not the bind, is what protects it.
 func TestHandleResetRejectsNonLocalOwner(t *testing.T) {
 	s := &CoreServer{}
 

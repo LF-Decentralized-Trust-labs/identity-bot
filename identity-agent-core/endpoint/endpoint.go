@@ -221,8 +221,18 @@ func (es *EndpointService) resolve() (string, string) {
 		return strings.TrimRight(envURL, "/"), "env:PUBLIC_URL"
 	}
 
-	if ip := detectLocalIP(); ip != "" {
-		return fmt.Sprintf("http://%s:%d", ip, port), fmt.Sprintf("local:%s", ip)
+	// A LAN IPv4 is only worth publishing when something outside this box can
+	// actually reach the agent there. By default the root/management surface binds
+	// loopback only (see server.rootListenAddr), so nothing is listening on the
+	// LAN IP — publishing http://<LAN-IP>:port into an OOBI or pairing QR sends a
+	// counterparty to an address that answers with connection-refused, a silent
+	// break. The LAN IP is genuinely reachable only when the direct-ingress escape
+	// hatch has bound the surface to a non-loopback host (a bare LAN address, or
+	// 0.0.0.0); short of that, advertise localhost.
+	if host := DirectIngressHost(); host != "" && !IsLoopbackHost(host) {
+		if ip := detectLocalIP(); ip != "" {
+			return fmt.Sprintf("http://%s:%d", ip, port), fmt.Sprintf("local:%s", ip)
+		}
 	}
 
 	return fmt.Sprintf("http://localhost:%d", port), "localhost"
@@ -257,6 +267,37 @@ func (es *EndpointService) load() {
 	es.source = source
 	es.updatedAt = time.Now()
 	log.Printf("[endpoint] Loaded previous state: %s (source: %s)", url, source)
+}
+
+// DirectIngressHost is the host the direct-ingress escape hatch binds the whole
+// surface to, or "" when the hatch is unset.
+//
+// It reads the SAME signal server.rootListenAddr binds on —
+// AGENT_DIRECT_INGRESS_ADDR — so the address this service advertises cannot
+// disagree with where the root actually listens. Both a bare host ("0.0.0.0",
+// "192.168.0.10") and a host:port are accepted; only the host is returned.
+func DirectIngressHost() string {
+	override := strings.TrimSpace(os.Getenv("AGENT_DIRECT_INGRESS_ADDR"))
+	if override == "" {
+		return ""
+	}
+	if h, _, err := net.SplitHostPort(override); err == nil {
+		return h
+	}
+	return override
+}
+
+// IsLoopbackHost reports whether host names the loopback interface — "localhost"
+// or any address in 127.0.0.0/8 or ::1. It is the shared predicate both the
+// listen address and the advertised address decide on, so the two stay in step.
+func IsLoopbackHost(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
 }
 
 func detectLocalIP() string {
