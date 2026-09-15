@@ -4239,12 +4239,18 @@ func (s *CoreServer) loadTunnelConfig() tunnel.Config {
 		}
 		cfg.TunnelExtension = name
 
-		// Persist so the same name is used on restart.
-		s.DataStore.SaveSettings(store.SettingsData{
-			TunnelProvider:  string(tunnel.ProviderGrapeID),
-			TunnelDomain:    domain,
-			TunnelExtension: name,
-		})
+		// Persist so the same name is used on restart. Read-modify-write so this
+		// does not blank the reachability settings (ingress mode, relay operator)
+		// that share the single settings row — otherwise a Tunnel-default org that
+		// has a relay operator configured but no tunnel yet loses it on first boot.
+		toSave := &store.SettingsData{}
+		if existing, err := s.DataStore.GetSettings(); err == nil && existing != nil {
+			toSave = existing
+		}
+		toSave.TunnelProvider = string(tunnel.ProviderGrapeID)
+		toSave.TunnelDomain = domain
+		toSave.TunnelExtension = name
+		s.DataStore.SaveSettings(*toSave)
 		log.Printf("[identity-agent-core] Auto-tunnel: assigned Grape ID name '%s'", name)
 	}
 
