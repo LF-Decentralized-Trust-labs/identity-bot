@@ -30,6 +30,7 @@ import (
 	"identity-agent-core/oidc"
 	"identity-agent-core/provider"
 	"identity-agent-core/recovery"
+	"identity-agent-core/relay"
 	"identity-agent-core/sandbox"
 	"identity-agent-core/schemas"
 	"identity-agent-core/secureenclave"
@@ -55,6 +56,7 @@ type CoreServer struct {
 	AIMemory        *store.AIMemoryStore
 	KeriDriver      drivers.KeriEngine
 	TunnelManager   *tunnel.Manager
+	RelayManager    *relay.Manager
 	EndpointService *endpoint.EndpointService
 	SandboxManager  *sandbox.Manager
 	EventHub        *EventHub
@@ -644,6 +646,12 @@ func (s *CoreServer) Start() error {
 		}
 	}()
 
+	// Bring up the URL relay when one is configured. It is the single URL
+	// manager: a live relay allocation is a durable, provably-ours address, so
+	// EndpointService ranks it above the ephemeral tunnel. Absent a configured
+	// relay this returns immediately, leaving the tunnel/direct path in place.
+	go s.startRelay()
+
 	go func() {
 		if err := s.httpServer().Serve(s.listener); err != nil {
 			log.Printf("[identity-agent-core] Server stopped: %v", err)
@@ -677,6 +685,10 @@ func (s *CoreServer) Stop() {
 
 	if s.TunnelManager != nil {
 		s.TunnelManager.Disconnect()
+	}
+
+	if s.RelayManager != nil {
+		s.RelayManager.Stop()
 	}
 
 	if s.listener != nil {

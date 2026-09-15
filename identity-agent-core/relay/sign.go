@@ -6,6 +6,15 @@ import (
 	"sort"
 )
 
+// CanonicalBody produces the deterministic byte encoding a request body is
+// signed over: the JSON object with its "signature" field removed and its keys
+// sorted. It is exported so a Signer implemented outside this package signs the
+// exact bytes the operator verifies, rather than reimplementing the encoding and
+// risking a drift that would make every signature silently unverifiable.
+func CanonicalBody(v interface{}) ([]byte, error) {
+	return canonicalBody(v)
+}
+
 func canonicalBody(v interface{}) ([]byte, error) {
 	raw, err := json.Marshal(v)
 	if err != nil {
