@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -111,15 +112,47 @@ func (a *TunnelAgent) session(ctx context.Context) error {
 	}
 }
 
-func (a *TunnelAgent) handleRequest(conn *websocket.Conn, req RequestFrame) {
-	target := a.LocalBase + req.Path
-	httpReq, err := http.NewRequest(req.Method, target, nil)
+// newForwardRequest builds the HTTP request the box serves for an inbound relay
+// frame. It stamps the ingress marker so a relay-forwarded request — which
+// reaches the box over loopback — is never mistaken for the genuinely-local
+// owner (see the header note below).
+func (a *TunnelAgent) newForwardRequest(req RequestFrame) (*http.Request, error) {
+	// Carry the request body. The inbound frame delivers it base64-encoded;
+	// forwarding it with a nil body (as this once did) meant a signed POST — a
+	// controller grant, a rotation, any owner/controller action — reached the box
+	// with an empty body and failed signature verification, so nothing but GETs
+	// worked over the relay.
+	var body io.Reader
+	if req.BodyB64 != nil && *req.BodyB64 != "" {
+		raw, err := base64.RawURLEncoding.DecodeString(*req.BodyB64)
+		if err != nil {
+			return nil, err
+		}
+		body = bytes.NewReader(raw)
+	}
+	httpReq, err := http.NewRequest(req.Method, a.LocalBase+req.Path, body)
 	if err != nil {
-		a.writeErr(conn, req.StreamID, err)
-		return
+		return nil, err
 	}
 	for k, v := range req.Headers {
 		httpReq.Header.Set(k, v)
+	}
+	// The agent treats a loopback request with no forwarding marker as its
+	// genuinely-local owner (isLocalOwnerRequest), and a relay-forwarded request
+	// also arrives over loopback — so without this, anyone who learned the relay
+	// URL would be the owner, with no signature required. Set here on the box,
+	// after the client's headers are applied, so a client can neither remove nor
+	// preempt it; a client that adds a forwarding header of its own only marks
+	// itself more remote, never less.
+	httpReq.Header.Set("X-IA-Via-Ingress", "relay")
+	return httpReq, nil
+}
+
+func (a *TunnelAgent) handleRequest(conn *websocket.Conn, req RequestFrame) {
+	httpReq, err := a.newForwardRequest(req)
+	if err != nil {
+		a.writeErr(conn, req.StreamID, err)
+		return
 	}
 	resp, err := a.HTTPClient.Do(httpReq)
 	if err != nil {
