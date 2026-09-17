@@ -494,10 +494,12 @@ func (s *SQLiteStore) scanShareActions(rows *sql.Rows) ([]ShareAction, error) {
 func (s *SQLiteStore) GetSettings() (*SettingsData, error) {
 	var settings SettingsData
 	err := s.db.QueryRow(
-		`SELECT tunnel_provider, ngrok_auth_token, cloudflare_tunnel_token, tunnel_domain, tunnel_extension
+		`SELECT tunnel_provider, ngrok_auth_token, cloudflare_tunnel_token, tunnel_domain, tunnel_extension,
+		        ingress_mode, relay_operator
 		 FROM settings LIMIT 1`,
 	).Scan(&settings.TunnelProvider, &settings.NgrokAuthToken,
-		&settings.CloudflareTunnelToken, &settings.TunnelDomain, &settings.TunnelExtension)
+		&settings.CloudflareTunnelToken, &settings.TunnelDomain, &settings.TunnelExtension,
+		&settings.IngressMode, &settings.RelayOperator)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -523,10 +525,12 @@ func (s *SQLiteStore) SaveSettings(settings SettingsData) error {
 		return fmt.Errorf("failed to clear settings: %w", err)
 	}
 	if _, err := tx.Exec(
-		`INSERT INTO settings (tunnel_provider, ngrok_auth_token, cloudflare_tunnel_token, tunnel_domain, tunnel_extension)
-		 VALUES (?, ?, ?, ?, ?)`,
+		`INSERT INTO settings (tunnel_provider, ngrok_auth_token, cloudflare_tunnel_token, tunnel_domain, tunnel_extension,
+		                       ingress_mode, relay_operator)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		settings.TunnelProvider, settings.NgrokAuthToken,
 		settings.CloudflareTunnelToken, settings.TunnelDomain, settings.TunnelExtension,
+		settings.IngressMode, settings.RelayOperator,
 	); err != nil {
 		return fmt.Errorf("failed to save settings: %w", err)
 	}

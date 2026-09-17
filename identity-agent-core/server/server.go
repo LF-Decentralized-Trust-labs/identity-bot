@@ -932,6 +932,8 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 
 		r.Get("/settings/tunnel", s.handleGetTunnelSettings)
 		r.Put("/settings/tunnel", s.handlePutTunnelSettings)
+		r.Get("/settings/reachability", s.handleGetReachabilitySettings)
+		r.Put("/settings/reachability", s.handlePutReachabilitySettings)
 		r.Get("/settings/tunnel/check-name", s.handleCheckTunnelName)
 		r.Get("/settings/tunnel/grapeid-health", s.handleGrapeIdHealth)
 		r.Post("/settings/tunnel/release-name", s.handleReleaseTunnelName)
@@ -4179,6 +4181,18 @@ func (s *CoreServer) handleGetAlerts(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// envTunnelConfigured reports whether the environment explicitly selects a
+// tunnel, so a deployment that configured one only through env vars keeps
+// working after Tunnel stopped being the unconditional default. A bare
+// TUNNEL_PROVIDER=none is not "configured" — it is the opposite.
+func envTunnelConfigured() bool {
+	if p := strings.ToLower(strings.TrimSpace(os.Getenv("TUNNEL_PROVIDER"))); p != "" && tunnel.ProviderType(p) != tunnel.ProviderNone {
+		return true
+	}
+	return strings.TrimSpace(os.Getenv("NGROK_AUTHTOKEN")) != "" ||
+		strings.TrimSpace(os.Getenv("CLOUDFLARE_TUNNEL_TOKEN")) != ""
+}
+
 func (s *CoreServer) loadTunnelConfig() tunnel.Config {
 	var aid string
 	if identity, err := s.DataStore.GetIdentity(); err == nil && identity != nil {
@@ -4196,6 +4210,18 @@ func (s *CoreServer) loadTunnelConfig() tunnel.Config {
 			AID:                   aid,
 		}
 	}
+
+	// A tunnel is the ingress for Tunnel mode only. In Relay or Direct mode
+	// nothing here opens a public tunnel — which retires the old defect where the
+	// server published every agent on a public tunnel just because no provider
+	// was configured. Whether a tunnel is wanted at all is decided by the one
+	// ingress-mode resolver, plus a back-compat allowance for a deployment that
+	// still selects a tunnel purely through the environment.
+	mode := s.resolveIngressMode()
+	if mode != IngressModeTunnel && !envTunnelConfigured() {
+		return tunnel.Config{Provider: tunnel.ProviderNone, AID: aid}
+	}
+
 	cfg := tunnel.DefaultConfig()
 	cfg.AID = aid
 
@@ -4213,12 +4239,18 @@ func (s *CoreServer) loadTunnelConfig() tunnel.Config {
 		}
 		cfg.TunnelExtension = name
 
-		// Persist so the same name is used on restart.
-		s.DataStore.SaveSettings(store.SettingsData{
-			TunnelProvider:  string(tunnel.ProviderGrapeID),
-			TunnelDomain:    domain,
-			TunnelExtension: name,
-		})
+		// Persist so the same name is used on restart. Read-modify-write so this
+		// does not blank the reachability settings (ingress mode, relay operator)
+		// that share the single settings row — otherwise a Tunnel-default org that
+		// has a relay operator configured but no tunnel yet loses it on first boot.
+		toSave := &store.SettingsData{}
+		if existing, err := s.DataStore.GetSettings(); err == nil && existing != nil {
+			toSave = existing
+		}
+		toSave.TunnelProvider = string(tunnel.ProviderGrapeID)
+		toSave.TunnelDomain = domain
+		toSave.TunnelExtension = name
+		s.DataStore.SaveSettings(*toSave)
 		log.Printf("[identity-agent-core] Auto-tunnel: assigned Grape ID name '%s'", name)
 	}
 
@@ -4268,12 +4300,19 @@ func (s *CoreServer) handlePutTunnelSettings(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// SaveSettings replaces the single settings row, so preserve the reachability
+	// fields this handler does not own (ingress mode + relay operator) rather than
+	// blanking them every time a tunnel setting is changed.
 	settings := store.SettingsData{
 		TunnelProvider:        req.Provider,
 		NgrokAuthToken:        req.NgrokAuthToken,
 		CloudflareTunnelToken: req.CloudflareTunnelToken,
 		TunnelDomain:          req.TunnelDomain,
 		TunnelExtension:       req.TunnelExtension,
+	}
+	if existing, err := s.DataStore.GetSettings(); err == nil && existing != nil {
+		settings.IngressMode = existing.IngressMode
+		settings.RelayOperator = existing.RelayOperator
 	}
 
 	if err := s.DataStore.SaveSettings(settings); err != nil {
@@ -4329,6 +4368,89 @@ func (s *CoreServer) handleTunnelStatus(w http.ResponseWriter, r *http.Request) 
 	status := s.TunnelManager.GetStatus()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(status)
+}
+
+// handleGetReachabilitySettings reports how this agent becomes reachable from
+// outside: the resolved default ingress mode, whether that came from an explicit
+// choice or the per-product default, and the configured relay operator.
+//
+// resolved_mode is what the agent actually acts on; mode is the raw persisted
+// choice ("" when none was made, meaning the default is in effect). A UI shows
+// resolved_mode as the current state and mode to know whether the user has
+// overridden the default.
+func (s *CoreServer) handleGetReachabilitySettings(w http.ResponseWriter, r *http.Request) {
+	var stored store.SettingsData
+	if saved, err := s.DataStore.GetSettings(); err == nil && saved != nil {
+		stored = *saved
+	}
+
+	resolved := s.resolveIngressMode()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"mode":            stored.IngressMode,
+		"resolved_mode":   string(resolved),
+		"default_mode":    string(defaultIngressModeForEntity(s.ourEntityType())),
+		"is_default":      !validIngressMode(stored.IngressMode),
+		"entity_type":     s.ourEntityType(),
+		"relay_operator":  s.relayBaseURL(),
+		"stored_operator": stored.RelayOperator,
+	})
+}
+
+// handlePutReachabilitySettings sets the default ingress mode and/or the relay
+// operator, leaving every other setting untouched.
+//
+// Both fields are optional: a request that names only a mode keeps the existing
+// relay operator, and vice versa. An empty mode string clears the choice (back
+// to the per-product default); a mode that is not one of the three is rejected.
+func (s *CoreServer) handlePutReachabilitySettings(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Mode          *string `json:"mode"`
+		RelayOperator *string `json:"relay_operator"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request", err.Error())
+		return
+	}
+
+	if req.Mode != nil {
+		m := strings.TrimSpace(*req.Mode)
+		if m != "" && !validIngressMode(m) {
+			writeError(w, http.StatusBadRequest, "Invalid mode",
+				fmt.Sprintf("mode must be one of: relay, tunnel, direct (or empty to use the default). Got: %s", *req.Mode))
+			return
+		}
+	}
+
+	// Read-modify-write: SaveSettings replaces the single row, so start from what
+	// is stored and change only the fields this request carries.
+	var settings store.SettingsData
+	if existing, err := s.DataStore.GetSettings(); err == nil && existing != nil {
+		settings = *existing
+	}
+	if req.Mode != nil {
+		settings.IngressMode = strings.ToLower(strings.TrimSpace(*req.Mode))
+	}
+	if req.RelayOperator != nil {
+		settings.RelayOperator = strings.TrimRight(strings.TrimSpace(*req.RelayOperator), "/")
+	}
+
+	if err := s.DataStore.SaveSettings(settings); err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to save settings", err.Error())
+		return
+	}
+
+	log.Printf("[identity-agent-core] Reachability settings updated: mode=%q relay_operator=%q",
+		settings.IngressMode, settings.RelayOperator)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":         "saved",
+		"mode":           settings.IngressMode,
+		"resolved_mode":  string(s.resolveIngressMode()),
+		"relay_operator": s.relayBaseURL(),
+	})
 }
 
 func (s *CoreServer) handleCheckTunnelName(w http.ResponseWriter, r *http.Request) {
