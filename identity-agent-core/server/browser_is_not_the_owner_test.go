@@ -89,6 +89,19 @@ func TestBrowserIsNotTheLocalOwner(t *testing.T) {
 			},
 			owner: false,
 		},
+		{
+			// Our own relay forwards inbound requests to the box over loopback,
+			// so the connection looks local. The relay stamps this marker on the
+			// way in (relay/tunnel.go) exactly so a relay-forwarded request is not
+			// mistaken for the owner at the machine — otherwise anyone who learned
+			// the relay URL would be the owner, with no signature.
+			name:   "a request forwarded by the relay is not the owner",
+			remote: "127.0.0.1:52008",
+			headers: map[string]string{
+				"X-IA-Via-Ingress": "relay",
+			},
+			owner: false,
+		},
 	}
 
 	for _, c := range cases {

@@ -85,8 +85,15 @@ func hashMCPToken(tok string) string {
 
 // hasForwardingHeaders reports whether a request arrived through a tunnel/proxy —
 // in which case a loopback RemoteAddr must NOT be trusted as the local owner.
+//
+// X-IA-Via-Ingress is our own relay's marker (set in relay/tunnel.go), so a
+// relay-forwarded request — which also reaches the agent over loopback — is
+// never mistaken for the genuinely-local owner. The others are added by the
+// standard proxies/tunnels (Cloudflare, ngrok, an HTTP reverse proxy). Presence
+// of any of these means the request came from outside, so the owner must prove
+// it with a signature rather than being trusted for arriving on loopback.
 func hasForwardingHeaders(r *http.Request) bool {
-	for _, h := range []string{"X-Forwarded-For", "X-Real-Ip", "Cf-Connecting-Ip", "True-Client-Ip", "Forwarded"} {
+	for _, h := range []string{"X-Forwarded-For", "X-Real-Ip", "Cf-Connecting-Ip", "True-Client-Ip", "Forwarded", "X-IA-Via-Ingress"} {
 		if r.Header.Get(h) != "" {
 			return true
 		}
