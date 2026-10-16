@@ -41,6 +41,17 @@ func DecodeVerkey(key string) ([]byte, error) {
 			return raw, nil
 		}
 	}
+	// "B" is Ed25519N — a non-transferable Ed25519 key, same 32 raw bytes under a
+	// different code. The KERI driver mints one for an identity that will never
+	// rotate, so a decoder that claims to read "CESR qb64 from the KERI driver"
+	// has to take it. Without this branch a "B" key falls through to the base64
+	// fallbacks and decodes to the wrong 32 bytes (the pad byte is never
+	// stripped), which is a silent wrong answer rather than an error.
+	if strings.HasPrefix(key, "B") && len(key) == 44 {
+		if raw, err := decodeMatterRaw(key, "B", ed25519.PublicKeySize); err == nil {
+			return raw, nil
+		}
+	}
 	for _, dec := range []func(string) ([]byte, error){
 		base64.RawURLEncoding.DecodeString,
 		base64.StdEncoding.DecodeString,
