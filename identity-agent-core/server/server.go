@@ -68,7 +68,13 @@ type CoreServer struct {
 	AppCtx             context.Context
 	cancel             context.CancelFunc
 	listener           net.Listener
-	router             chi.Router
+	// The http.Servers are held so Stop can shut them down. Serving without a
+	// reference leaks the server and its keep-alive connections on every
+	// stop/restart — invisible on a desktop that stops once, but it accrues on
+	// mobile where the app is suspended and the core restarted over and over.
+	httpSrv   *http.Server
+	tunnelSrv *http.Server
+	router    chi.Router
 	flutterWebDir      string
 
 	// See Config.RequireOwnerAtInception.
@@ -637,8 +643,9 @@ func (s *CoreServer) Start() error {
 			log.Printf("[identity-agent-core] OOBI public URL: %s", s.EndpointService.CurrentURL())
 			provider := s.TunnelManager.Provider()
 			if provider != nil && provider.Listener() != nil {
+				s.tunnelSrv = s.httpServer()
 				go func() {
-					if err := s.httpServer().Serve(provider.Listener()); err != nil {
+					if err := s.tunnelSrv.Serve(provider.Listener()); err != nil {
 						log.Printf("[identity-agent-core] Tunnel server stopped: %v", err)
 					}
 				}()
@@ -652,8 +659,9 @@ func (s *CoreServer) Start() error {
 	// relay this returns immediately, leaving the tunnel/direct path in place.
 	go s.startRelay()
 
+	s.httpSrv = s.httpServer()
 	go func() {
-		if err := s.httpServer().Serve(s.listener); err != nil {
+		if err := s.httpSrv.Serve(s.listener); err != nil {
 			log.Printf("[identity-agent-core] Server stopped: %v", err)
 		}
 	}()
@@ -691,6 +699,20 @@ func (s *CoreServer) Stop() {
 		s.RelayManager.Stop()
 	}
 
+	// Close the HTTP servers, which closes their listeners and in-flight
+	// connections. Serving without holding a reference stranded the server and
+	// its connection goroutines on every restart — harmless on a desktop that
+	// stops once, but it accrued on mobile where the core is restarted on each
+	// resume. The bare listener close stays for the case where Serve was never
+	// reached (bind succeeded, goroutine not yet scheduled).
+	if s.httpSrv != nil {
+		s.httpSrv.Close()
+		s.httpSrv = nil
+	}
+	if s.tunnelSrv != nil {
+		s.tunnelSrv.Close()
+		s.tunnelSrv = nil
+	}
 	if s.listener != nil {
 		s.listener.Close()
 	}

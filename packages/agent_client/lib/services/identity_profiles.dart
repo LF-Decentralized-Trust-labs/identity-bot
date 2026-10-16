@@ -152,7 +152,18 @@ class IdentityProfiles {
   /// Called on resume: a no-op when the core is healthy, and otherwise it drops
   /// the stale server and starts the active profile's core again. Desktop has
   /// no embedded mobile core, so it returns at once there.
-  static Future<void> ensureActiveOneRunning() async {
+  /// Guards against overlapping rebinds. iOS can deliver `resumed` in bursts,
+  /// and two concurrent runs could both see the core unhealthy, both stop it,
+  /// and race to start — one tearing down what the other just bound. Reusing the
+  /// in-flight future collapses a burst into a single restart.
+  static Future<void>? _ensuring;
+
+  static Future<void> ensureActiveOneRunning() {
+    return _ensuring ??=
+        _ensureActiveOneRunning().whenComplete(() => _ensuring = null);
+  }
+
+  static Future<void> _ensureActiveOneRunning() async {
     final core = mobileCore;
     if (core == null) return;
     if (await core.isHealthy()) return;

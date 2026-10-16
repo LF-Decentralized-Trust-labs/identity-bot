@@ -69,14 +69,26 @@ class MobileCoreService {
   /// tears down the listener while the Go side keeps a non-nil server, so
   /// [isRunning] reports true while every request is refused.
   Future<bool> isHealthy() async {
-    try {
-      final r = await http
-          .get(Uri.parse('$baseUrl/api/health'))
-          .timeout(const Duration(seconds: 2));
-      return r.statusCode == 200;
-    } catch (_) {
-      return false;
+    // Two attempts, because the first request after a cold thaw can miss the
+    // window while the just-unfrozen process finishes its first scheduling —
+    // declaring the core dead on that single slow response would stop and
+    // restart a core that was about to answer. A busy core still answers the
+    // lightweight health route well within the timeout, so this does not mask a
+    // genuinely dead one for longer than ~2.3s.
+    for (var attempt = 0; attempt < 2; attempt++) {
+      try {
+        final r = await http
+            .get(Uri.parse('$baseUrl/api/health'))
+            .timeout(const Duration(seconds: 2));
+        if (r.statusCode == 200) return true;
+      } catch (_) {
+        // refused / timed out — try once more before giving up
+      }
+      if (attempt == 0) {
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+      }
     }
+    return false;
   }
 
   /// Returns to a state where [startCore] will actually start the core again,
