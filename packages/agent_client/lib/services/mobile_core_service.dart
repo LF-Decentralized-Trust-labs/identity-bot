@@ -62,6 +62,43 @@ class MobileCoreService {
     }
   }
 
+  /// Whether the core is ACTUALLY answering on its port right now.
+  ///
+  /// Checked over HTTP rather than [isRunning], because the signal that matters
+  /// after a long iOS suspension is the socket, not the native pointer: the OS
+  /// tears down the listener while the Go side keeps a non-nil server, so
+  /// [isRunning] reports true while every request is refused.
+  Future<bool> isHealthy() async {
+    try {
+      final r = await http
+          .get(Uri.parse('$baseUrl/api/health'))
+          .timeout(const Duration(seconds: 2));
+      return r.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Returns to a state where [startCore] will actually start the core again,
+  /// even when the native stop fails because the listener is already gone.
+  ///
+  /// [stopCore] leaves [_started] true on a failed stop, and [startCore]
+  /// short-circuits on [_started]; after a long suspension the listener is dead
+  /// while the flag says started, so a plain restart would be a silent no-op.
+  /// This drops the native server pointer (best effort) and clears the local
+  /// state unconditionally, so the next [startCore] binds a fresh listener.
+  Future<void> forceStopped() async {
+    try {
+      await _channel.invokeMethod('stopServer');
+    } catch (_) {
+      // The listener may already be gone; the point is only to get the native
+      // side to drop its server so a fresh start can bind the port.
+    }
+    _started = false;
+    _coreClient?.dispose();
+    _coreClient = null;
+  }
+
   Future<String?> getHealth() async {
     try {
       final result = await _channel.invokeMethod('getHealth');
