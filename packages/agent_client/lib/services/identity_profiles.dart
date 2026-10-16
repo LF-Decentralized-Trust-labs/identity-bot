@@ -144,6 +144,33 @@ class IdentityProfiles {
     await pointThisAppAtItsAgent();
   }
 
+  /// Re-establish the embedded core if it has stopped answering.
+  ///
+  /// iOS suspends a backgrounded app and tears down the core's listener; on
+  /// resume the Dart side still believes it is running, so the next request
+  /// fails with connection-refused until the app is force-quit and reopened.
+  /// Called on resume: a no-op when the core is healthy, and otherwise it drops
+  /// the stale server and starts the active profile's core again. Desktop has
+  /// no embedded mobile core, so it returns at once there.
+  /// Guards against overlapping rebinds. iOS can deliver `resumed` in bursts,
+  /// and two concurrent runs could both see the core unhealthy, both stop it,
+  /// and race to start — one tearing down what the other just bound. Reusing the
+  /// in-flight future collapses a burst into a single restart.
+  static Future<void>? _ensuring;
+
+  static Future<void> ensureActiveOneRunning() {
+    return _ensuring ??=
+        _ensureActiveOneRunning().whenComplete(() => _ensuring = null);
+  }
+
+  static Future<void> _ensureActiveOneRunning() async {
+    final core = mobileCore;
+    if (core == null) return;
+    if (await core.isHealthy()) return;
+    await core.forceStopped();
+    await startTheActiveOne();
+  }
+
   /// Make [profileId] the open one.
   ///
   /// Stops the Identity Agent serving whatever was open and starts it against

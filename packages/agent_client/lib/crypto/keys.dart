@@ -11,7 +11,22 @@ class AgentKeyPair {
   AgentKeyPair({required this.publicKey, required this.privateKey});
 
   String get publicKeyEncoded {
-    return 'B${base64Url.encode(publicKey).replaceAll('=', '')}';
+    // CESR qb64 for a 32-byte Ed25519 verkey under the 1-char code "B"
+    // (Ed25519N): one pad byte is prepended so the key material lands on a
+    // base64 boundary, and the code replaces the leading output char. This is
+    // the canonical encoding every correct CESR reader expects — it is the same
+    // shape OwnerSignature.blake3QB64 (code "E") and sigQB64 (code "0B") use.
+    //
+    // The earlier form, 'B' + base64(key), omitted the pad byte, so the string
+    // named in the inception's k[0] decoded — under keri-go, keripy, and this
+    // repo's own DecodeVerkey — to the WRONG 32 bytes. The key the event names
+    // was then not the key whose private half signs it, and the attach-signature
+    // step correctly refused the (valid) signature with a 400. It only surfaced
+    // once a signature over the inception was actually checked; before that the
+    // inception was stored unsigned and the mis-encoding never mattered.
+    final padded = Uint8List.fromList([0, ...publicKey]);
+    final b64 = base64Url.encode(padded).replaceAll('=', '');
+    return 'B${b64.substring(1)}';
   }
 
   String get publicKeyBase64 {
