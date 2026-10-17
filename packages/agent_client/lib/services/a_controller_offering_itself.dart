@@ -38,7 +38,14 @@ class ControllerOffer {
     required this.signature,
     this.protectedBy = '',
     this.label = '',
+    this.orgName = '',
   });
+
+  /// The organisation this computer is asking to act for, by name — so the
+  /// authorize consent can say "connect to Acme" rather than name nothing.
+  /// Display only and unverified, exactly like [label]: a wrong name would be
+  /// noticed by the owner, who is authorising their own computer.
+  final String orgName;
 
   /// This machine's identifier, which IS its public key — the non-transferable
   /// form. The agent refuses a grant whose identifier and key disagree, so both
@@ -86,6 +93,7 @@ class ControllerOffer {
         signature: (m['signature'] ?? '').toString(),
         protectedBy: (m['protected_by'] ?? '').toString(),
         label: (m['label'] ?? '').toString(),
+        orgName: (m['org_name'] ?? '').toString(),
       );
 
   /// The `identity-agent://controller?…` link this offer shows as a QR.
@@ -103,6 +111,7 @@ class ControllerOffer {
       'sig': signature,
       if (protectedBy.isNotEmpty) 'protected_by': protectedBy,
       if (label.isNotEmpty) 'label': label,
+      if (orgName.isNotEmpty) 'org_name': orgName,
     };
     return Uri(scheme: scheme, host: host, queryParameters: q).toString();
   }
@@ -139,6 +148,7 @@ class ControllerOffer {
       signature: sig,
       protectedBy: (uri.queryParameters['protected_by'] ?? '').trim(),
       label: (uri.queryParameters['label'] ?? '').trim(),
+      orgName: (uri.queryParameters['org_name'] ?? '').trim(),
     );
   }
 
