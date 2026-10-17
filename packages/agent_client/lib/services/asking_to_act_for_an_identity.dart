@@ -60,7 +60,8 @@ class AskingToActForAnIdentity {
   /// enclave, or one the software cannot use (the core answers 501). That is an
   /// answer rather than a failure, and the screen says so plainly instead of
   /// offering a button that will not work.
-  Future<ControllerOffer?> aSignedOfferFor(String agentOrigin) async {
+  Future<ControllerOffer?> aSignedOfferFor(String agentOrigin,
+      {String orgName = ''}) async {
     final res = await _plain.post(
       Uri.parse('$_localCore/api/controller/offer'),
       headers: const {'Content-Type': 'application/json'},
@@ -71,8 +72,12 @@ class AskingToActForAnIdentity {
       throw Exception('this computer could not sign an offer to act '
           '(${res.statusCode}): ${res.body}');
     }
-    final offer = ControllerOffer.fromJson(
-        jsonDecode(res.body) as Map<String, dynamic>);
+    // The org name is the front end's to supply — the core that signs the offer
+    // is pre-founding and has no name for it. Added as display only (unsigned),
+    // so the authorize consent can name what is being connected to.
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    if (orgName.isNotEmpty) body['org_name'] = orgName;
+    final offer = ControllerOffer.fromJson(body);
     if (offer.aid.isEmpty || offer.publicKey.isEmpty || offer.signature.isEmpty) {
       throw Exception('this computer signed nothing usable, so there is '
           'nothing anybody could authorise');
