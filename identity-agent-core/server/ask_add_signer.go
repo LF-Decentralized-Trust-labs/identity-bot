@@ -52,15 +52,16 @@ func (addSignerAsk) Preview(s *CoreServer, ctx AskContext) (GenericPreview, erro
 	profile, _ := s.DataStore.GetProfile()
 	details := []PreviewDetail{
 		{Label: "Organization", Value: org},
-		{Label: "Your role", Value: "Super Admin"},
+		{Label: "What you become", Value: "Its owner"},
+		{Label: "Can this change later", Value: "An owner is named when it's created; you can add more owners after"},
 	}
 	details = append(details, disclosureRows(fields, profile)...)
 	return GenericPreview{
-		T: 4, Action: "sign_org", Title: "Sign an organization into existence",
-		Subtitle:     "Signer " + org + " — you'll become its super-admin and first employee",
+		T: 4, Action: "sign_org", Title: "Declare you're the owner of " + org,
+		Subtitle:     "Sign with your phone to become " + org + "'s owner. You can add more owners later.",
 		Counterparty: p.OrgAID,
 		Details:      details,
-		Warning: "You are attesting that a real person (you) stands behind this organization. " +
+		Warning: "You're confirming a real person — you — owns " + org + ". " +
 			disclosureSummary(fields),
 	}, nil
 }
