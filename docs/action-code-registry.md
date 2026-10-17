@@ -294,8 +294,7 @@ private-use range or inside an implementation.
 - **Who mints:** an organization (during creation).
 - **Request schema:** `org_name`, `org_aid`, `org_oobi`, `site_aid`, `site_oobi`,
   `invite_token`.
-- **Preview:** "Sign {org} into existence — become its super-admin and first
-  member."
+- **Preview:** "Declare you're the owner of {org}."
 - **Outcome:** the individual signs a vouch over the org's AID (stored by the org
   as proof) and is enrolled as the active super-admin. No delegated inception —
   the org controls its own keys; the signer only attests.
