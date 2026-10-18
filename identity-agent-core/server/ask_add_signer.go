@@ -55,7 +55,8 @@ func (addSignerAsk) Preview(s *CoreServer, ctx AskContext) (GenericPreview, erro
 	}
 	profile, _ := s.DataStore.GetProfile()
 	details := []PreviewDetail{
-		{Label: "Organization", Value: org},
+		// No "Organization" row — the identity cell right below shows the org's
+		// name and logo, so repeating it here is clutter.
 		{Label: "What you become", Value: "Its owner"},
 		{Label: "Can this change later", Value: "An owner is named when it's created; you can add more owners after"},
 	}

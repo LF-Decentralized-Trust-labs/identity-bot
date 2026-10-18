@@ -289,15 +289,16 @@ private-use range or inside an implementation.
 
 ### `t = 4` · `sign_org`
 - **Summary:** an individual attests (vouches) that a real person stands behind a
-  newly created organization, becoming its founding super-admin. These
-  individuals are **signers** — they sign an organization into existence.
+  newly created organization, becoming its founding owner (the super-admin
+  role). These individuals are **signers** — they sign an organization into
+  existence.
 - **Who mints:** an organization (during creation).
 - **Request schema:** `org_name`, `org_aid`, `org_oobi`, `site_aid`, `site_oobi`,
   `invite_token`.
 - **Preview:** "Declare you're the owner of {org}."
 - **Outcome:** the individual signs a vouch over the org's AID (stored by the org
-  as proof) and is enrolled as the active super-admin. No delegated inception —
-  the org controls its own keys; the signer only attests.
+  as proof) and is enrolled as the active owner (the super-admin role). No
+  delegated inception — the org controls its own keys; the signer only attests.
 
 ---
 
