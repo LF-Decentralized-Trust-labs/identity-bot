@@ -61,8 +61,10 @@ func (addSignerAsk) Preview(s *CoreServer, ctx AskContext) (GenericPreview, erro
 	}
 	details = append(details, disclosureRows(fields, profile)...)
 	return GenericPreview{
-		T: 4, Action: "sign_org", Title: "Declare you're the owner of " + org,
-		Subtitle:     "Sign with your phone to become " + org + "'s owner. You can add more owners later.",
+		// No org name in the title — the identity cell right below shows the
+		// org's name and logo, so repeating it here is clutter.
+		T: 4, Action: "sign_org", Title: "Declare you're the owner",
+		Subtitle:     "Sign with your phone to become its owner. You can add more owners later.",
 		Counterparty: p.OrgAID,
 		// The counterparty is the organisation, named and pictured, so the signer
 		// sees the real business rather than a stand-in. The logo came over the
