@@ -162,13 +162,12 @@ func bearerFrom(r *http.Request) string {
 	return r.Header.Get("X-IA-Token")
 }
 
-// handleMintMCPToken mints a token (owner only). Scopes are capability ids the
+// handleMintMCPToken mints a token. Scopes are capability ids the
 // token may invoke; the plaintext token is returned once and only its hash is stored.
 func (s *CoreServer) handleMintMCPToken(w http.ResponseWriter, r *http.Request) {
-	if !s.isOwner(r) {
-		jsonError(w, "token management is for the owner of this agent", http.StatusForbidden)
-		return
-	}
+	// App operation — authorized by the router-wide authorize gate (owner or the
+	// owner's authorized controller). The token is bounded by its capability grant,
+	// checked at invoke time, so minting it is not a root-of-trust operation.
 	var req struct {
 		Name   string   `json:"name"`
 		Scopes []string `json:"scopes"`
@@ -215,12 +214,10 @@ func (s *CoreServer) handleMintMCPToken(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-// handleListMCPTokens lists token names + scopes (never hashes), owner only.
+// handleListMCPTokens lists token names + scopes (never hashes).
 func (s *CoreServer) handleListMCPTokens(w http.ResponseWriter, r *http.Request) {
-	if !s.isOwner(r) {
-		jsonError(w, "token management is for the owner of this agent", http.StatusForbidden)
-		return
-	}
+	// App operation — authorized by the router-wide authorize gate (owner or the
+	// owner's authorized controller); the token list is not owner-only.
 	mcpTokensMu.Lock()
 	toks := s.loadMCPTokens()
 	mcpTokensMu.Unlock()
@@ -231,12 +228,10 @@ func (s *CoreServer) handleListMCPTokens(w http.ResponseWriter, r *http.Request)
 	jsonResponse(w, map[string]any{"tokens": out})
 }
 
-// handleRevokeMCPToken deletes a token by name, local owner only.
+// handleRevokeMCPToken deletes a token by name.
 func (s *CoreServer) handleRevokeMCPToken(w http.ResponseWriter, r *http.Request) {
-	if !s.isOwner(r) {
-		jsonError(w, "token management is for the owner of this agent", http.StatusForbidden)
-		return
-	}
+	// App operation — authorized by the router-wide authorize gate (owner or the
+	// owner's authorized controller); revoking a token is not a root-of-trust operation.
 	name := chi.URLParam(r, "name")
 	mcpTokensMu.Lock()
 	defer mcpTokensMu.Unlock()

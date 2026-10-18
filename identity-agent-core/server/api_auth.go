@@ -559,6 +559,16 @@ var sessionForbidden = map[string]string{
 	// enclave would make the enclave reachable by whatever holds that cookie,
 	// which is the opposite of what keeping the key in hardware is for.
 	"POST /api/controller/sign": "asking this computer's secure hardware to sign is for the app running on it",
+
+	// --- minting durable credentials for AI agents ---
+	//
+	// Provisioning an agent and minting its token both create a bearer credential
+	// that outlives the session: the session can be ended, but a token it minted
+	// keeps working. A session is a convenience the owner grants for a while; it
+	// must not be able to leave behind permanent agent access. The owner's app on a
+	// device that holds the key does this.
+	"POST /api/mcp/agents": "provisioning an agent mints a durable token that outlives the session that made it",
+	"POST /api/mcp/tokens": "minting a token creates durable bearer access that outlives the session that made it",
 }
 
 // requiresTheKeyItself reports whether a route is one a browser session must
