@@ -21,7 +21,7 @@ import (
 // anything"), which is exactly what the per-relationship URL model exists to
 // prevent.
 //
-// So the root surface binds LOOPBACK by default, in every mode. The tunnel and
+// So the root surface binds LOOPBACK by default. The tunnel and
 // relay transports are unaffected — both dial the local server over loopback,
 // so nothing that reaches the agent through a manager-governed path is lost.
 //
@@ -33,7 +33,25 @@ import (
 // onto a reachable address (e.g. "0.0.0.0") so that flow is not silently
 // broken. It is off by default, loud when on, and dev/testing only — it exposes
 // the management API and MUST NOT be used as a product default.
+//
+// SEALED INSTANCE — a hardware-sealed instance (a confidential VM) is reached
+// only through a host reverse proxy that dials the agent over the VM's network
+// interface. The host cannot reach guest loopback across the VM boundary, and
+// the interface is reachable only from the host, which NATs every request so it
+// arrives from a non-loopback source — so the owner gate treats it as
+// remote-and-signed, and reaching the management surface through the proxy is
+// the whole point. There, binding the interface is the correct production
+// posture, not an exposure, and AGENT_SEALED_INSTANCE_INGRESS says so without
+// the hatch's warning. It rides the measured image unit, so an owner verifies
+// it in the launch measurement. See ADR-042's sealed-instance deviation note.
 func rootListenAddr(port int) string {
+	// A sealed instance binds its VM network interface so the host reverse proxy
+	// (and the provisioner) can reach it; guest loopback is unreachable from the
+	// host. Safe because the NAT makes every host-originated request remote to the
+	// owner gate — see the SEALED INSTANCE note above and ADR-042.
+	if endpoint.SealedInstanceIngress() {
+		return fmt.Sprintf("0.0.0.0:%d", port)
+	}
 	// The host the hatch names (bare "0.0.0.0"/"192.168.0.10" or a host:port; the
 	// port this server chose always wins, since it may have fallen back). This is
 	// the same signal the advertised address resolves on — endpoint.DirectIngressHost
