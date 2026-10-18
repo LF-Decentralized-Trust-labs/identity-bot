@@ -34,6 +34,10 @@ type signerPayload struct {
 	SiteAID     string `json:"site_aid"` // the org identity the signer relates to (root during onboarding)
 	SiteOOBI    string `json:"site_oobi"`
 	InviteToken string `json:"invite_token"`
+	// OrgLogo is the organisation's picture as a data URL, so the signer sees the
+	// real business rather than a stand-in. It rides here in the Ask body, which
+	// is fetched over the tunnel, and never in the scanned code.
+	OrgLogo string `json:"org_logo,omitempty"`
 }
 
 func (addSignerAsk) Preview(s *CoreServer, ctx AskContext) (GenericPreview, error) {
@@ -60,7 +64,12 @@ func (addSignerAsk) Preview(s *CoreServer, ctx AskContext) (GenericPreview, erro
 		T: 4, Action: "sign_org", Title: "Declare you're the owner of " + org,
 		Subtitle:     "Sign with your phone to become " + org + "'s owner. You can add more owners later.",
 		Counterparty: p.OrgAID,
-		Details:      details,
+		// The counterparty is the organisation, named and pictured, so the signer
+		// sees the real business rather than a stand-in. The logo came over the
+		// tunnel in the Ask body, not the scanned code.
+		CounterpartyName:   org,
+		CounterpartyAvatar: p.OrgLogo,
+		Details:            details,
 		Warning: "You're confirming a real person — you — owns " + org + ". " +
 			disclosureSummary(fields),
 	}, nil

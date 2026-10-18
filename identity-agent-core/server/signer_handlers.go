@@ -119,6 +119,14 @@ func (s *CoreServer) mintSignerAsk(orgName, orgAID, orgOOBI, inviteToken string)
 	if err != nil {
 		return "", fmt.Errorf("mint signer: %w", err)
 	}
+	// The organisation's own logo, carried in the Ask body so the signer sees the
+	// real business. It travels over the tunnel with the rest of the Ask, never
+	// in the scanned code, which stays a bare pointer. Absent is fine — the
+	// scanner then draws initials rather than a stand-in.
+	orgLogo := ""
+	if profile, perr := s.DataStore.GetProfile(); perr == nil && profile != nil {
+		orgLogo = profile.Photo
+	}
 	ask, _ := json.Marshal(map[string]interface{}{
 		"v":            "ASK1",
 		"t":            4,
@@ -129,6 +137,7 @@ func (s *CoreServer) mintSignerAsk(orgName, orgAID, orgOOBI, inviteToken string)
 		"site_oobi":    orgOOBI,
 		"invite_token": inviteToken,
 		"signer_oobi":  pwOOBI,
+		"org_logo":     orgLogo,
 	})
 	sig, serr := login.SignAsk(ask, seed)
 	if serr != nil {
