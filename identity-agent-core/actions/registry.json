@@ -81,9 +81,9 @@
     },
     {
       "code": 4,
-      "key": "sponsor_org",
-      "name": "Sponsor Organization",
-      "summary": "An individual attests (vouches) that a real person stands behind a newly created organization, becoming its founding super-admin.",
+      "key": "sign_org",
+      "name": "Sign an Organization",
+      "summary": "An individual attests (vouches) that a real person stands behind a newly created organization, becoming its founding owner (the super-admin role).",
       "who_mints": "organization",
       "status": "active",
       "version": "1.0",
@@ -95,9 +95,9 @@
         "site_oobi": { "type": "string", "required": true, "kind": "open" },
         "invite_token": { "type": "string", "required": true, "kind": "open" }
       },
-      "preview_contract": { "title": "Sponsor {org} — become its super-admin and first employee.", "conveys": ["org"] },
+      "preview_contract": { "title": "Declare you're the owner of {org}.", "conveys": ["org"] },
       "discloses": ["name", "photo"],
-      "outcome": "The individual signs a vouch over the organization's AID (stored by the counterpart as proof) and is enrolled as the active super-admin. No delegated inception — the organization controls its own keys; the sponsor only attests.",
+      "outcome": "The individual signs a vouch over the organization's AID (stored by the counterpart as proof) and is enrolled as the active owner (the super-admin role). No delegated inception — the organization controls its own keys; the signer only attests.",
       "tiers": null,
       "ui": { "share_menu": false, "icon": "", "enabled": true, "sort_order": 0, "subtitle": "" }
     }

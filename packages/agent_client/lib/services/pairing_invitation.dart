@@ -9,10 +9,19 @@ class PairingInvitation {
     this.kind = 'individual',
     this.ownerAid = '',
     this.reportTo = '',
+    this.name = '',
   });
 
   final String host;
   final String code;
+
+  /// A human name to show the scanner — the organisation's name for an org
+  /// claim, so the consent says what is being founded rather than "this
+  /// organisation". Display only, small enough to live in the link (a logo is
+  /// not — that is served, not carried). Unverified, like a controller offer's
+  /// label: the person scanning is founding their own thing and would notice a
+  /// wrong name.
+  final String name;
 
   /// The identity this machine has ALREADY been told may claim it, when
   /// somebody said so before the machine existed.
@@ -76,6 +85,7 @@ class PairingInvitation {
     String kind = 'individual',
     String ownerAid = '',
     String reportTo = '',
+    String name = '',
   }) {
     final buf = StringBuffer('$scheme://pair'
         '?host=${Uri.encodeComponent(host)}'
@@ -88,6 +98,9 @@ class PairingInvitation {
     }
     if (reportTo.isNotEmpty) {
       buf.write('&report=${Uri.encodeComponent(reportTo)}');
+    }
+    if (name.isNotEmpty) {
+      buf.write('&name=${Uri.encodeComponent(name)}');
     }
     return buf.toString();
   }
@@ -126,7 +139,13 @@ class PairingInvitation {
     if (reportUri == null || !reportUri.hasScheme || reportUri.host.isEmpty) {
       report = '';
     }
+    final name = (uri.queryParameters['name'] ?? '').trim();
     return PairingInvitation(
-        host: host, code: code, kind: kind, ownerAid: owner, reportTo: report);
+        host: host,
+        code: code,
+        kind: kind,
+        ownerAid: owner,
+        reportTo: report,
+        name: name);
   }
 }

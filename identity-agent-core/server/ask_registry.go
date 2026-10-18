@@ -41,15 +41,23 @@ type AskContext struct {
 // GenericPreview is the type-agnostic consent payload the scanner renders. No per-type logic
 // lives in the scanner — it just shows this and collects a decision.
 type GenericPreview struct {
-	T            int             `json:"t"`
-	Action       string          `json:"action"`                 // "login" | "add_contact" | …
-	Title        string          `json:"title"`                  // "Sign-in request" | "Contact request"
-	Subtitle     string          `json:"subtitle,omitempty"`     // audience / who is asking
-	Counterparty string          `json:"counterparty,omitempty"` // AID or display name
-	Details      []PreviewDetail `json:"details,omitempty"`      // fields being shared, etc.
-	TierOptions  []string        `json:"tier_options,omitempty"` // e.g. add-contact: general/trusted/professional
-	DefaultTier  string          `json:"default_tier,omitempty"`
-	Warning      string          `json:"warning,omitempty"`
+	T            int    `json:"t"`
+	Action       string `json:"action"`                 // "login" | "add_contact" | …
+	Title        string `json:"title"`                  // "Sign-in request" | "Contact request"
+	Subtitle     string `json:"subtitle,omitempty"`     // audience / who is asking
+	Counterparty string `json:"counterparty,omitempty"` // AID or display name
+	// CounterpartyName and CounterpartyAvatar describe who is asking, for the
+	// identity cell the scanner shows. Both ride in the Ask body, which is
+	// fetched over the tunnel — never in the scanned code, which stays a bare
+	// pointer. The avatar is a data URL (or empty); when empty the scanner draws
+	// initials rather than a stand-in face, so a missing logo never reads as a
+	// real one.
+	CounterpartyName   string          `json:"counterparty_name,omitempty"`
+	CounterpartyAvatar string          `json:"counterparty_avatar,omitempty"`
+	Details            []PreviewDetail `json:"details,omitempty"`      // fields being shared, etc.
+	TierOptions        []string        `json:"tier_options,omitempty"` // e.g. add-contact: general/trusted/professional
+	DefaultTier        string          `json:"default_tier,omitempty"`
+	Warning            string          `json:"warning,omitempty"`
 
 	// AskDigest is the Blake3 digest of the exact Ask bytes this preview
 	// describes. The client echoes it back on execute so the agent can prove

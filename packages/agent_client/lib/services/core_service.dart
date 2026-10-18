@@ -624,6 +624,8 @@ class ScanDecodeResult {
   final String title; // "Sign-in request", "Contact request"
   final String subtitle; // audience / who is asking
   final String counterparty; // AID or display name of the asker
+  final String counterpartyName; // clean display name of the asker, when known
+  final String counterpartyAvatar; // asker's picture as a data URL, when known
   final List<ScanPreviewDetail> details; // fields being shared, reference rows
   final List<String> tierOptions; // e.g. add-contact: general/trusted/professional
   final String defaultTier;
@@ -640,6 +642,8 @@ class ScanDecodeResult {
     this.title = '',
     this.subtitle = '',
     this.counterparty = '',
+    this.counterpartyName = '',
+    this.counterpartyAvatar = '',
     this.details = const [],
     this.tierOptions = const [],
     this.defaultTier = '',
@@ -654,6 +658,8 @@ class ScanDecodeResult {
       title: json['title']?.toString() ?? '',
       subtitle: json['subtitle']?.toString() ?? '',
       counterparty: json['counterparty']?.toString() ?? '',
+      counterpartyName: json['counterparty_name']?.toString() ?? '',
+      counterpartyAvatar: json['counterparty_avatar']?.toString() ?? '',
       details: (json['details'] as List<dynamic>?)
               ?.map((e) => ScanPreviewDetail.fromJson(e as Map<String, dynamic>))
               .toList() ??
