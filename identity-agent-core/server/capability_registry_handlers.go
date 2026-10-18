@@ -9,9 +9,11 @@ import (
 )
 
 // Capability-registry management: capabilities are data, imported as packs and
-// managed over this local API — never compiled in. All management is local-owner
-// only; remote callers only ever see the registry through the governed
-// search/describe/execute surface.
+// managed over this local API — never compiled in. Importing, enabling, disabling
+// and deleting a capability stay owner-only, because they define or arm the
+// capabilities the gateway trusts at invoke time; reading the registry is reachable
+// by the owner's authorized controller. Remote callers (agents) only ever see the
+// registry through the governed search/describe/execute surface.
 
 // handleImportCapabilityPack imports (or rolls forward) one capability pack.
 func (s *CoreServer) handleImportCapabilityPack(w http.ResponseWriter, r *http.Request) {
@@ -39,10 +41,10 @@ func (s *CoreServer) handleImportCapabilityPack(w http.ResponseWriter, r *http.R
 // handleListCapabilityRegistry is the management view: every record, disabled ones
 // included.
 func (s *CoreServer) handleListCapabilityRegistry(w http.ResponseWriter, r *http.Request) {
-	if !s.isOwner(r) {
-		jsonError(w, "capability management is local-owner only", http.StatusForbidden)
-		return
-	}
+	// App operation (read) — authorized by the router-wide authorize gate (the owner
+	// or the owner's authorized controller). Reading the registry is not owner-only;
+	// importing a pack — which defines the capabilities the gateway trusts — stays
+	// owner-only below, because that writes state the authorization decision reads.
 	if s.SandboxManager == nil {
 		jsonError(w, "sandbox not initialized", http.StatusServiceUnavailable)
 		return

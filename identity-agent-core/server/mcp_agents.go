@@ -30,10 +30,10 @@ const capabilityGrantSchemaSAID = "ECapabilityGrant__placeholder__v1"
 
 // handleProvisionAgent creates an ai_agent asset (delegated AID) + a bound token.
 func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request) {
-	if !s.isOwner(r) {
-		jsonError(w, "agent provisioning is local-owner only", http.StatusForbidden)
-		return
-	}
+	// App operation — authorized by the router-wide authorize gate (the owner, the
+	// owner's authorized controller, or a browser session). Provisioning an AI agent
+	// is not a root-of-trust operation, so it carries no extra owner-only re-check:
+	// re-checking isOwner here would lock out the controller the gate just admitted.
 	if s.assetHandler == nil {
 		jsonError(w, "asset handler not initialized", http.StatusServiceUnavailable)
 		return
@@ -143,10 +143,8 @@ type agentView struct {
 
 // handleListAgents lists the org's ai_agent assets — the workforce roster.
 func (s *CoreServer) handleListAgents(w http.ResponseWriter, r *http.Request) {
-	if !s.isOwner(r) {
-		jsonError(w, "the agent roster is for the owner", http.StatusForbidden)
-		return
-	}
+	// App operation — authorized by the router-wide authorize gate (owner or the
+	// owner's authorized controller); the agent roster is not owner-only.
 	if s.assetHandler == nil {
 		jsonError(w, "asset handler not initialized", http.StatusServiceUnavailable)
 		return
@@ -190,10 +188,8 @@ func (s *CoreServer) agentStatus(agentAID string) string {
 // handleUpdateAgentConfig updates an agent's role/prompt/brain/exposure. Identity
 // and grant are unchanged; use the provision/revoke paths for those.
 func (s *CoreServer) handleUpdateAgentConfig(w http.ResponseWriter, r *http.Request) {
-	if !s.isOwner(r) {
-		jsonError(w, "agent configuration is for the owner", http.StatusForbidden)
-		return
-	}
+	// App operation — authorized by the router-wide authorize gate (owner or the
+	// owner's authorized controller); agent configuration is not owner-only.
 	if s.assetHandler == nil {
 		jsonError(w, "asset handler not initialized", http.StatusServiceUnavailable)
 		return
@@ -229,10 +225,12 @@ func (s *CoreServer) handleUpdateAgentConfig(w http.ResponseWriter, r *http.Requ
 // a point in time. Editing one in place would make the audit trail claim the owner
 // granted something they had not yet decided to grant.
 func (s *CoreServer) handleSetAgentCapabilities(w http.ResponseWriter, r *http.Request) {
-	if !s.isOwner(r) {
-		jsonError(w, "changing an agent's capabilities is for the owner", http.StatusForbidden)
-		return
-	}
+	// App operation — authorized by the router-wide authorize gate (owner or the
+	// owner's authorized controller), at the verified level since it re-issues the
+	// agent's capability grant. The ceiling only ever limits: a capability the owner
+	// has not imported and enabled is refused at invoke regardless (defining new
+	// capabilities via pack import stays owner-only), so this grants no authority the
+	// owner has not already approved.
 	if s.assetHandler == nil {
 		jsonError(w, "asset handler not initialized", http.StatusServiceUnavailable)
 		return

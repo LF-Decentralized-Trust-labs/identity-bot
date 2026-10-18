@@ -106,6 +106,21 @@ var controllerNeedsLevel = map[string]controllerRequirement{
 	"DELETE /api/vault/credentials/{service}": {alsoRaised, authprovider.LevelVerified,
 		"removing a stored key can cut this identity off from a service it relies on"},
 
+	// --- the agents this identity delegates to ---
+	//
+	// Provisioning an agent, minting its token, and re-issuing its ceiling each
+	// create or renew a durable credential the agent then acts under — a bearer
+	// token that outlives the request, and a capability grant the gateway trusts.
+	// That is the same kind of consequential as issuing a credential above, so a
+	// controller proves the same level; an unraised live grant is not enough to
+	// leave behind standing agent access that survives the grant being revoked.
+	"POST /api/mcp/agents": {alsoRaised, authprovider.LevelVerified,
+		"provisioning an agent mints a delegated identity and a durable token it acts under"},
+	"POST /api/mcp/tokens": {alsoRaised, authprovider.LevelVerified,
+		"minting a token creates durable bearer access to this identity's governed endpoint"},
+	"PUT /api/mcp/agents/{id}/capabilities": {alsoRaised, authprovider.LevelVerified,
+		"re-issuing an agent's capability grant changes what it may do, which others rely on"},
+
 	// --- what it takes to get back in ---
 	// The duress policy is the sharpest of these: it says what must happen if
 	// the owner is being forced, so anything that could switch it off could
