@@ -230,7 +230,13 @@ func lookupBinaryPath(name string) (string, error) {
 
 func findInPath(name string) (string, error) {
 	exe, _ := os.Executable()
-	for _, dir := range searchDirs(os.Getenv("PATH"), exe) {
+	return findIn(searchDirs(os.Getenv("PATH"), exe), name)
+}
+
+// findIn returns the first dir in dirs that holds an executable file named name
+// (or name.exe on Windows). A directory that merely shares the name is skipped.
+func findIn(dirs []string, name string) (string, error) {
+	for _, dir := range dirs {
 		for _, fname := range binaryNames(name) {
 			candidate := filepath.Join(dir, fname)
 			if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
@@ -252,13 +258,16 @@ func binaryNames(name string) []string {
 
 // searchDirs is every directory a bundled or installed helper binary (such as
 // cloudflared) might live in. It is the PATH, plus the directory holding the
-// agent's own executable and a bin/ beside it — where a packaged desktop app
-// bundles its helpers — plus the usual install locations. A GUI-launched app
-// inherits a minimal PATH that excludes those install dirs, so a tunnel helper
-// installed or bundled for it is invisible to a PATH-only search; this is what
-// lets the agent found before it has an identity, from a double-clicked app.
+// Identity Agent's own executable and a bin/ beside it — where a packaged
+// desktop app bundles its helpers — plus the usual install locations. A
+// GUI-launched app inherits a minimal PATH that excludes those install dirs, so
+// a tunnel helper installed or bundled for it is invisible to a PATH-only
+// search; finding it here is what lets a double-clicked app open a quick tunnel
+// and bring its identity online.
 func searchDirs(pathEnv, exePath string) []string {
-	dirs := splitPathList(pathEnv)
+	// filepath.SplitList uses the OS PATH separator (':' on POSIX, ';' on
+	// Windows), so the PATH is parsed correctly on every platform.
+	dirs := filepath.SplitList(pathEnv)
 	if exePath != "" {
 		exeDir := filepath.Dir(exePath)
 		dirs = append(dirs, exeDir, filepath.Join(exeDir, "bin"))
@@ -274,31 +283,4 @@ var commonBinDirs = []string{
 	"/usr/local/bin",
 	"/usr/bin",
 	"/usr/local/sbin",
-}
-
-func splitPathList(path string) []string {
-	var list []string
-	for _, p := range splitPathSeparator(path) {
-		if p != "" {
-			list = append(list, p)
-		}
-	}
-	return list
-}
-
-func splitPathSeparator(path string) []string {
-	return split(path, ':')
-}
-
-func split(s string, sep byte) []string {
-	var parts []string
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == sep {
-			parts = append(parts, s[start:i])
-			start = i + 1
-		}
-	}
-	parts = append(parts, s[start:])
-	return parts
 }

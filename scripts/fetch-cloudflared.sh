@@ -16,7 +16,11 @@
 # script covers the two POSIX desktops.
 set -euo pipefail
 
-CLOUDFLARED_VERSION="${CLOUDFLARED_VERSION:-2026.6.1}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# One pinned version for every desktop build, read from a committed file so the
+# POSIX builds and the Windows build (which reads the same file) cannot drift.
+CLOUDFLARED_VERSION="${CLOUDFLARED_VERSION:-$(cat "$SCRIPT_DIR/cloudflared.version")}"
+SHA_FILE="$SCRIPT_DIR/cloudflared.sha256"
 OS="${1:?usage: fetch-cloudflared.sh <darwin|linux> <arm64|amd64|universal> <out-path>}"
 ARCH="${2:?missing arch}"
 OUT="${3:?missing out-path}"
@@ -24,6 +28,11 @@ OUT="${3:?missing out-path}"
 BASE="https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}"
 CACHE="${CLOUDFLARED_CACHE:-$HOME/.cache/cloudflared-bundle}/${CLOUDFLARED_VERSION}"
 mkdir -p "$CACHE" "$(dirname "$OUT")"
+
+sha256_of() { # file -> hex digest, via whichever tool this OS ships
+  if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | awk '{print $1}'
+  else sha256sum "$1" | awk '{print $1}'; fi
+}
 
 # fetch_one <os> <arch> <dest>: download (and extract, for darwin .tgz) one binary.
 fetch_one() {
@@ -38,6 +47,16 @@ fetch_one() {
     echo "  downloading $asset ($CLOUDFLARED_VERSION)"
     curl -fsSL -o "$cached.part" "$BASE/$asset"
     mv "$cached.part" "$cached"
+  fi
+  # Integrity, not just a version tag: a re-tagged release or a tampered download
+  # is rejected before anything is extracted, bundled or signed.
+  local want got
+  want="$(awk -v a="$asset" '$2==a {print $1}' "$SHA_FILE")"
+  [ -n "$want" ] || { echo "ERROR: no pinned checksum for $asset in $SHA_FILE" >&2; exit 1; }
+  got="$(sha256_of "$cached")"
+  if [ "$got" != "$want" ]; then
+    echo "ERROR: $asset failed its checksum (want $want, got $got) — refusing it" >&2
+    rm -f "$cached"; exit 1
   fi
   if [[ "$asset" == *.tgz ]]; then
     local td; td="$(mktemp -d)"

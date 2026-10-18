@@ -40,8 +40,13 @@ func (p *CloudflareProvider) Start(ctx context.Context, localPort int) error {
 
 	p.localPort = localPort
 
-	if _, err := exec.LookPath("cloudflared"); err != nil {
-		p.lastError = "cloudflared binary not found in PATH"
+	// Resolve the cloudflared to run, not just confirm one exists: the lookup
+	// also finds a copy bundled beside the agent (see searchDirs), which a
+	// GUI-launched app has but PATH does not. Passing the resolved path to exec
+	// is what makes that bundled binary actually run.
+	cfPath, err := LookupCloudflared()
+	if err != nil {
+		p.lastError = "cloudflared binary not found on PATH or alongside the agent"
 		return fmt.Errorf("cloudflared not found: %w", err)
 	}
 
@@ -60,7 +65,7 @@ func (p *CloudflareProvider) Start(ctx context.Context, localPort int) error {
 		log.Printf("[tunnel] Starting Cloudflare Quick Tunnel (free, no account)...")
 	}
 
-	cmd := exec.CommandContext(childCtx, "cloudflared", args...)
+	cmd := exec.CommandContext(childCtx, cfPath, args...)
 
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
