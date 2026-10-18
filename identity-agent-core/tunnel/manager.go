@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 )
@@ -227,21 +229,51 @@ func lookupBinaryPath(name string) (string, error) {
 }
 
 func findInPath(name string) (string, error) {
-	for _, dir := range splitPath() {
-		candidate := dir + "/" + name
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate, nil
+	exe, _ := os.Executable()
+	for _, dir := range searchDirs(os.Getenv("PATH"), exe) {
+		for _, fname := range binaryNames(name) {
+			candidate := filepath.Join(dir, fname)
+			if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+				return candidate, nil
+			}
 		}
 	}
-	return "", fmt.Errorf("%s not found in PATH", name)
+	return "", fmt.Errorf("%s not found on PATH or alongside the agent", name)
 }
 
-func splitPath() []string {
-	pathEnv := os.Getenv("PATH")
-	if pathEnv == "" {
-		return nil
+// binaryNames is the on-disk filenames a helper may have. On Windows an
+// executable carries a .exe suffix, so a bundled cloudflared.exe is matched too.
+func binaryNames(name string) []string {
+	if runtime.GOOS == "windows" && !strings.HasSuffix(strings.ToLower(name), ".exe") {
+		return []string{name + ".exe", name}
 	}
-	return splitPathList(pathEnv)
+	return []string{name}
+}
+
+// searchDirs is every directory a bundled or installed helper binary (such as
+// cloudflared) might live in. It is the PATH, plus the directory holding the
+// agent's own executable and a bin/ beside it — where a packaged desktop app
+// bundles its helpers — plus the usual install locations. A GUI-launched app
+// inherits a minimal PATH that excludes those install dirs, so a tunnel helper
+// installed or bundled for it is invisible to a PATH-only search; this is what
+// lets the agent found before it has an identity, from a double-clicked app.
+func searchDirs(pathEnv, exePath string) []string {
+	dirs := splitPathList(pathEnv)
+	if exePath != "" {
+		exeDir := filepath.Dir(exePath)
+		dirs = append(dirs, exeDir, filepath.Join(exeDir, "bin"))
+	}
+	dirs = append(dirs, commonBinDirs...)
+	return dirs
+}
+
+// commonBinDirs are the standard locations a helper binary is installed to but
+// that a GUI-launched process does not get on its PATH.
+var commonBinDirs = []string{
+	"/opt/homebrew/bin",
+	"/usr/local/bin",
+	"/usr/bin",
+	"/usr/local/sbin",
 }
 
 func splitPathList(path string) []string {
