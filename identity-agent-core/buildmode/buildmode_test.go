@@ -34,7 +34,4 @@ func TestDefaultBuildIsProduction(t *testing.T) {
 	if Mode() != Prod {
 		t.Fatalf("Mode() = %q, want %q", Mode(), Prod)
 	}
-	if Marker() != "" {
-		t.Fatalf("production Marker() = %q, want empty", Marker())
-	}
 }

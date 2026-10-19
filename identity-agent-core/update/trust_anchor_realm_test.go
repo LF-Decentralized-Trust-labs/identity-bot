@@ -95,6 +95,40 @@ func TestProductionAnchorRefusesADevKeyUnderTheProdKeyID(t *testing.T) {
 	}
 }
 
+// A key rotation must not introduce the other realm's reserved key id, so the
+// per-realm invariant holds after rotation, not only at the initial anchor.
+func TestRotationRefusesTheOtherRealmsKeyID(t *testing.T) {
+	_, pub := realmKeypair(0x44)
+	ta, err := NewTrustAnchor(map[string][]byte{DefaultSigningKeyID: pub})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// This is a production test build, so the other realm's id is the dev id.
+	refused := &Manifest{NextSigningKey: &NextSigningKey{
+		KeyID:     DevSigningKeyID,
+		PublicKey: EncodeBase64URL(pub),
+	}}
+	if err := ta.learnNextSigningKey(refused); err == nil {
+		t.Fatal("learning the dev realm id into a production anchor must be refused")
+	}
+	if _, ok := ta.PublicKey(DevSigningKeyID); ok {
+		t.Fatal("the refused key id must not have been added to the anchor")
+	}
+
+	// A new id within the build's own realm is fine.
+	allowed := &Manifest{NextSigningKey: &NextSigningKey{
+		KeyID:     "grape-release-2027",
+		PublicKey: EncodeBase64URL(pub),
+	}}
+	if err := ta.learnNextSigningKey(allowed); err != nil {
+		t.Fatalf("learning a same-realm next key must succeed: %v", err)
+	}
+	if _, ok := ta.PublicKey("grape-release-2027"); !ok {
+		t.Fatal("the same-realm next key should have been added")
+	}
+}
+
 // In this (production) test build, DefaultTrustAnchor anchors releases under the
 // production key id, not the dev id.
 func TestDefaultTrustAnchorUsesTheProductionRealmInAProdBuild(t *testing.T) {

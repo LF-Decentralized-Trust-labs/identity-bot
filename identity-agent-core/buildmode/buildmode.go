@@ -8,15 +8,18 @@
 // It is deliberately NOT read from an environment variable or a config file. A
 // production binary therefore cannot be turned into a development one after it
 // ships — the only way to get a development build is to build one. That is the
-// property the developer-mode trust model rests on: a production verifier trusts
-// production keys only, and a development build carries development keys only, so
-// the two cannot accept each other's software, peers, or sealed data.
+// property the developer-mode trust model rests on: a production build trusts
+// production release keys only, and a development build carries development
+// release keys only, so the two cannot verify each other's software updates. As
+// the rest of developer mode is built, the same build-time separation extends to
+// peers and sealed data; this package is the foundation they all build on, but
+// today it gates the software-update trust anchor only.
 //
-// The compiled mode is a visible marker and a convenience, not the security
+// The compiled mode is a convenience and a visible label, not the security
 // boundary itself. The boundary is the separate trust anchors each mode selects
-// (see package update's release key ids). The mode makes a development build
-// unmistakable and lets the core pick the right anchor; it does not, on its own,
-// keep a recompiled build out of production — the trust anchors do that.
+// (see package update's release key ids). The mode lets the core pick the right
+// anchor and makes a development build legible; it does not, on its own, keep a
+// recompiled build out of production — the trust anchors do that.
 package buildmode
 
 import "fmt"
@@ -63,13 +66,3 @@ func IsDev() bool { return mode == Dev }
 
 // IsProd reports whether this is a production build.
 func IsProd() bool { return mode == Prod }
-
-// Marker is a short, human-visible tag for a development build and empty in
-// production, for logs and status surfaces so a development build is
-// unmistakable.
-func Marker() string {
-	if IsDev() {
-		return "DEV"
-	}
-	return ""
-}

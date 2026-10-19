@@ -35,6 +35,16 @@ func signingKeyIDForMode(dev bool) string {
 	return DefaultSigningKeyID
 }
 
+// otherRealmSigningKeyID is the reserved release key id of the realm this build
+// is not. A key rotation must never introduce it, so the per-realm invariant —
+// a production anchor holds production ids only, a development anchor
+// development ids only — survives rotation and not just the initial anchor. A
+// legitimate rotation names a new id within its own realm; naming the other
+// realm's reserved id is a mistake or an abuse, and is refused.
+func otherRealmSigningKeyID() string {
+	return signingKeyIDForMode(!buildmode.IsDev())
+}
+
 // CompiledReleasePublicKeyHex is the release signing key this build trusts.
 //
 // EMPTY BY DEFAULT, AND THAT IS THE POINT. It is supplied at build time:

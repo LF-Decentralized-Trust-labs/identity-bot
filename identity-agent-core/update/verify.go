@@ -121,6 +121,9 @@ func (ta *TrustAnchor) learnNextSigningKey(m *Manifest) error {
 	if m.NextSigningKey == nil {
 		return nil
 	}
+	if m.NextSigningKey.KeyID == otherRealmSigningKeyID() {
+		return fmt.Errorf("next_signing_key: id %q belongs to the other build realm and will not be learned", m.NextSigningKey.KeyID)
+	}
 	raw, err := DecodeBase64URL(m.NextSigningKey.PublicKey)
 	if err != nil {
 		return fmt.Errorf("next_signing_key: %w", err)
@@ -152,6 +155,9 @@ func VerifyKeyTransition(raw []byte, ta *TrustAnchor) (*KeyTransition, error) {
 	}
 	if !ed25519.Verify(pub, canonical, sig) {
 		return nil, ErrSignatureInvalid
+	}
+	if kt.NewKeyID == otherRealmSigningKeyID() {
+		return nil, fmt.Errorf("new_key_id %q belongs to the other build realm and will not be learned", kt.NewKeyID)
 	}
 	newRaw, err := DecodeBase64URL(kt.NewPublicKey)
 	if err != nil || len(newRaw) != ed25519.PublicKeySize {
