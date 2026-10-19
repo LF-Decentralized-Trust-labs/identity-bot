@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"identity-agent-core/buildmode"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/secureenclave"
 )
@@ -101,7 +102,7 @@ func CheckBoxOfferBeforeSigning(offer BoxOffer, measurementIsAllowed func(measur
 		return fmt.Errorf("%w: nothing signed this attestation, so it is a statement with no "+
 			"author rather than one from the hardware", ErrOfferUnverified)
 	}
-	if report.DebugAllowed() {
+	if secureenclave.DebugReportRefused(report.DebugAllowed(), buildmode.IsDev()) {
 		return fmt.Errorf("%w: this machine was started in a state where its memory can be "+
 			"inspected, so nothing it holds is private", ErrOfferUnverified)
 	}
