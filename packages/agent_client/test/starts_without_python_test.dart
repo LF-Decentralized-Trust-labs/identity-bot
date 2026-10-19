@@ -1,38 +1,30 @@
-import 'dart:io';
-
 import 'package:test/test.dart';
 import 'package:agent_client/services/backend_process_service.dart';
 
-/// A build that ships no Python KERI driver must still start.
+/// keri-go is the only KERI engine, so the desktop launcher needs no Python.
 ///
-/// The backend used to demand Python before it looked for anything else. That
-/// was correct while every build shipped a Python driver, and became a refusal
-/// to start the moment one stopped: no bundled Python, so it reached for a
-/// system one, found /usr/bin/python3, could not import flask or keri, and went
-/// off to pip install them from inside a signed application bundle. What a
-/// person saw was an app that opened and vanished.
+/// The launcher once demanded Python before it looked at anything else, and the
+/// moment the Python driver stopped shipping that turned into a refusal to
+/// start: it found a system python, could not import flask or keri, and tried
+/// to pip install them from inside a signed application bundle. What a person
+/// saw was an app that opened and vanished.
 ///
-/// The driver's presence is now what decides whether Python matters, so that is
-/// what these check. `_findKeriDriverScript` is private, so this exercises the
-/// same two paths it looks in — a directory with no driver, and one with.
+/// That driver is gone — the backend runs keri-go in-process — so nothing in the
+/// launcher looks for Python at all. These lock that in: the launcher's only
+/// hard input is the backend binary, and an entity type set on it survives.
 void main() {
-  late Directory dir;
+  test('startup fails for a missing backend binary, never for missing Python', () async {
+    // The test runner is not the packaged app, so no backend binary sits beside
+    // it and startup must fail. The point is WHICH failure: the missing binary,
+    // never a hunt for Python, which the launcher no longer performs.
+    final started = await BackendProcessService.instance.start();
+    expect(started, isFalse);
 
-  setUp(() => dir = Directory.systemTemp.createTempSync('backend-'));
-  tearDown(() => dir.deleteSync(recursive: true));
-
-  test('a backend directory with no driver script has none of its paths', () {
-    // The two places the driver is looked for. Neither exists in a build that
-    // ships only the Go engine, and that is the case that must not demand
-    // Python.
-    expect(File('${dir.path}/keri-driver/server.py').existsSync(), isFalse);
-    expect(File('${dir.path}/drivers/keri-core/server.py').existsSync(), isFalse);
-  });
-
-  test('a driver placed where it is looked for is found there', () {
-    final d = Directory('${dir.path}/keri-driver')..createSync(recursive: true);
-    File('${d.path}/server.py').writeAsStringSync('# driver');
-    expect(File('${dir.path}/keri-driver/server.py').existsSync(), isTrue);
+    final err = (BackendProcessService.instance.startupError ?? '').toLowerCase();
+    expect(err, contains('backend binary'),
+        reason: 'the only hard requirement is the backend binary');
+    expect(err, isNot(contains('python')),
+        reason: 'Python is never required, so it can never be the reason to fail');
   });
 
   test('the entity type an app declares survives being set', () {

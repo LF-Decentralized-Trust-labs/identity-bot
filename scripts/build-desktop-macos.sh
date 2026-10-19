@@ -79,10 +79,8 @@ echo "--- Build Flutter macOS app ---"
 ( cd identity_agent_ui && flutter build macos --release --build-number="$BUILD_NUMBER" )
 
 # The KERI engine (keri-go) is compiled into identity-agent-core, so bundling the
-# Go backend is all that is needed to establish and run an identity. The Python
-# KERI driver is NOT bundled: it runs only under KERI_ENGINE=python, a comparison
-# hatch nothing sets in a shipped build. The driver source stays in the repo under
-# drivers/keri-core for that hatch, which installs its own deps on demand.
+# Go backend is all that is needed to establish and run an identity. There is no
+# Python involved: keri-go runs in-process and is the only KERI engine.
 echo "--- Bundle Go backend into .app ---"
 APP="identity_agent_ui/build/macos/Build/Products/Release/Identity Agent.app"
 RESOURCES="$APP/Contents/Resources"

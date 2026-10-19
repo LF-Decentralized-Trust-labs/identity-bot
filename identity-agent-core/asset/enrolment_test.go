@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"identity-agent-core/drivers"
+	"identity-agent-core/drivers/driverfake"
 )
 
 // A stand-in KERI engine that records what it was asked to delegate over.
@@ -22,7 +23,7 @@ import (
 // owner's seed. That is invisible in the response and only observable in the
 // request, so the fake captures it.
 type fakeKeri struct {
-	server       *httptest.Server
+	engine       *driverfake.Engine
 	gotPublicKey string
 	gotNextKey   string
 	gotDelegator string
@@ -36,30 +37,21 @@ type fakeKeri struct {
 func newFakeKeri(t *testing.T) *fakeKeri {
 	t.Helper()
 	f := &fakeKeri{}
-	f.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body struct {
-			PublicKey     string `json:"public_key"`
-			NextPublicKey string `json:"next_public_key"`
-			Name          string `json:"name"`
-			DelegatorName string `json:"delegator_name"`
-		}
-		json.NewDecoder(r.Body).Decode(&body)
-		f.gotPublicKey = body.PublicKey
-		f.gotNextKey = body.NextPublicKey
-		f.gotName = body.Name
-		f.gotDelegator = body.DelegatorName
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"aid":           "EDELEGATED-AID",
-			"delegator_aid": body.DelegatorName,
-			"said":          "ESAID",
-			"dip_event":     map[string]interface{}{"t": "dip"},
-			"delegator_ixn": map[string]interface{}{"t": "ixn"},
-		})
-	}))
-	t.Cleanup(f.server.Close)
+	f.engine = &driverfake.Engine{
+		CreateDelegatedInceptionFunc: func(publicKey, nextPublicKey, name, delegatorName string) (*drivers.DriverDelegatedInceptionResponse, error) {
+			f.gotPublicKey = publicKey
+			f.gotNextKey = nextPublicKey
+			f.gotName = name
+			f.gotDelegator = delegatorName
+			return &drivers.DriverDelegatedInceptionResponse{
+				AID:          "EDELEGATED-AID",
+				DelegatorAID: delegatorName,
+				Said:         "ESAID",
+				DipEvent:     map[string]interface{}{"t": "dip"},
+				DelegatorIxn: map[string]interface{}{"t": "ixn"},
+			}, nil
+		},
+	}
 	return f
 }
 
@@ -69,12 +61,10 @@ func newEnrolHandler(t *testing.T, keri *fakeKeri) *Handler {
 	if err != nil {
 		t.Fatal(err)
 	}
-	driver := drivers.NewKeriDriver()
-	driver.BaseURL = keri.server.URL
 
 	return &Handler{
 		Store:      store,
-		KeriDriver: driver,
+		KeriDriver: keri.engine,
 		RootAID:    func() string { return "EORG-ROOT" },
 		PersistDelegationAnchor: func(rootAID string, ixn map[string]interface{}) error {
 			keri.anchorsIssued.Add(1)

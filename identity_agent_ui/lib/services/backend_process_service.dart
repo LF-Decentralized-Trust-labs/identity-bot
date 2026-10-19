@@ -128,27 +128,6 @@ class BackendProcessService {
     return null;
   }
 
-  String? _findKeriDriverScript(String backendDir) {
-    final sep = Platform.pathSeparator;
-    final candidates = [
-      '$backendDir${sep}keri-driver${sep}server.py',
-      '$backendDir${sep}drivers${sep}keri-core${sep}server.py',
-    ];
-
-    for (final path in candidates) {
-      if (File(path).existsSync()) {
-        debugPrint('[BackendProcess] Found KERI driver at: $path');
-        return path;
-      }
-    }
-
-    debugPrint('[BackendProcess] KERI driver script not found. Searched:');
-    for (final path in candidates) {
-      debugPrint('  - $path');
-    }
-    return null;
-  }
-
   // Absolute, per-app writable data dir. Namespaced by the app/executable name
   // so the oss / Grape ID / Grape ID Org flavors don't collide when run together.
   String _resolveDataDir() {
@@ -182,155 +161,6 @@ class BackendProcessService {
       Directory(dataDir).createSync(recursive: true);
     } catch (_) {}
     return dataDir;
-  }
-
-  String? _findBundledPython(String backendDir) {
-    final sep = Platform.pathSeparator;
-
-    // Each desktop build bundles a relocatable interpreter under backend/python.
-    // Windows: backend\python\python.exe ; macOS/Linux: backend/python/bin/python3
-    final candidates = Platform.isWindows
-        ? [
-            '$backendDir${sep}python${sep}python.exe',
-            '$backendDir${sep}python${sep}python3.exe',
-          ]
-        : [
-            '$backendDir${sep}python${sep}bin${sep}python3',
-            '$backendDir${sep}python${sep}bin${sep}python3.11',
-          ];
-    for (final path in candidates) {
-      if (File(path).existsSync()) {
-        debugPrint('[BackendProcess] Found bundled Python at: $path');
-        return path;
-      }
-    }
-
-    return null;
-  }
-
-  String? _findBundledPythonPackages(String backendDir) {
-    final sep = Platform.pathSeparator;
-    final pkgDir = '$backendDir${sep}python-packages';
-    if (Directory(pkgDir).existsSync()) {
-      debugPrint('[BackendProcess] Found bundled Python packages at: $pkgDir');
-      return pkgDir;
-    }
-    return null;
-  }
-
-  Future<String?> _findPythonBinary(String backendDir) async {
-    final bundled = _findBundledPython(backendDir);
-    if (bundled != null) {
-      return bundled;
-    }
-
-    debugPrint('[BackendProcess] No bundled Python — searching system PATH...');
-    // GUI-launched apps inherit a minimal PATH (no /opt/homebrew, /usr/local),
-    // so bare-name lookups miss an installed Python. Search PATH names first,
-    // then well-known absolute locations. Prefer 3.11 to match bundled packages.
-    final candidates = Platform.isWindows
-        ? <String>['python', 'python3', 'py']
-        : <String>[
-            'python3.11', 'python3', 'python',
-            '/opt/homebrew/opt/python@3.11/bin/python3',
-            '/opt/homebrew/bin/python3.11',
-            '/opt/homebrew/bin/python3',
-            '/usr/local/opt/python@3.11/bin/python3',
-            '/usr/local/bin/python3.11',
-            '/usr/local/bin/python3',
-            '/usr/bin/python3',
-          ];
-
-    for (final bin in candidates) {
-      try {
-        final result = await Process.run(bin, ['--version']);
-        if (result.exitCode == 0) {
-          final version = (result.stdout as String).trim();
-          debugPrint('[BackendProcess] Found system Python: $bin ($version)');
-          _appendOutput('[startup] Found system Python: $bin ($version)');
-          return bin;
-        }
-      } catch (_) {}
-    }
-
-    debugPrint('[BackendProcess] Python not found anywhere');
-    return null;
-  }
-
-  bool _isBundledPython(String pythonBin, String backendDir) {
-    return pythonBin.startsWith(backendDir);
-  }
-
-  Future<bool> _checkPythonDeps(String pythonBin) async {
-    try {
-      final result = await Process.run(
-        pythonBin,
-        ['-c', 'import flask; import keri'],
-      );
-      if (result.exitCode == 0) {
-        debugPrint('[BackendProcess] Python deps (flask, keri) available');
-        _appendOutput('[startup] Python deps (flask, keri) verified OK');
-        return true;
-      }
-      debugPrint('[BackendProcess] Missing Python deps: ${result.stderr}');
-      _appendOutput('[startup] Missing Python deps: ${result.stderr}');
-      return false;
-    } catch (e) {
-      debugPrint('[BackendProcess] Python dep check failed: $e');
-      _appendOutput('[startup] Python dep check failed: $e');
-      return false;
-    }
-  }
-
-  Future<bool> _installPythonDeps(String pythonBin, String backendDir) async {
-    debugPrint('[BackendProcess] Installing Python dependencies...');
-    _appendOutput('[startup] Installing Python dependencies...');
-    try {
-      final sep = Platform.pathSeparator;
-      final reqCandidates = [
-        '$backendDir${sep}keri-driver${sep}requirements.txt',
-        '$backendDir${sep}drivers${sep}keri-core${sep}requirements.txt',
-      ];
-
-      for (final reqPath in reqCandidates) {
-        if (File(reqPath).existsSync()) {
-          debugPrint('[BackendProcess] Installing from: $reqPath');
-          final result = await Process.run(
-            pythonBin,
-            ['-m', 'pip', 'install', '-r', reqPath],
-            environment: Platform.environment,
-          );
-          if (result.exitCode == 0) {
-            debugPrint('[BackendProcess] Python dependencies installed from requirements.txt');
-            _appendOutput('[startup] Python deps installed from requirements.txt');
-            return true;
-          }
-          debugPrint('[BackendProcess] pip install -r failed: ${result.stderr}');
-          _appendOutput('[startup] pip install -r failed: ${result.stderr}');
-        }
-      }
-
-      debugPrint('[BackendProcess] Falling back to direct pip install...');
-      var result = await Process.run(
-        pythonBin,
-        ['-m', 'pip', 'install', 'flask', 'keri==1.1.17'],
-        environment: Platform.environment,
-      );
-
-      if (result.exitCode == 0) {
-        debugPrint('[BackendProcess] Python dependencies installed successfully');
-        _appendOutput('[startup] Python deps installed successfully');
-        return true;
-      }
-
-      debugPrint('[BackendProcess] pip install failed: ${result.stderr}');
-      _appendOutput('[startup] pip install failed: ${result.stderr}');
-      return false;
-    } catch (e) {
-      debugPrint('[BackendProcess] pip install error: $e');
-      _appendOutput('[startup] pip install error: $e');
-      return false;
-    }
   }
 
   Future<PortConflictInfo?> checkPortConflict(int port) async {
@@ -474,43 +304,6 @@ class BackendProcessService {
           'take the next free port');
     }
 
-    final pythonBin = await _findPythonBinary(backendDir);
-    if (pythonBin == null) {
-      _startupError =
-          'Python was not found in the application bundle or on this computer. '
-          'The application may not have been packaged correctly.\n\n'
-          'As a workaround, install Python 3.10+ from python.org and restart.';
-      await _writeDiagnosticLog(backendDir);
-      return false;
-    }
-
-    _appendOutput('[startup] Python: $pythonBin');
-
-    final isBundled = _isBundledPython(pythonBin, backendDir);
-    final bundledPkgDir = _findBundledPythonPackages(backendDir);
-    final hasBundledDeps = isBundled || bundledPkgDir != null;
-
-    if (hasBundledDeps) {
-      debugPrint('[BackendProcess] Using bundled dependencies — skipping dependency checks');
-      _appendOutput('[startup] Using bundled dependencies');
-    } else {
-      final depsOk = await _checkPythonDeps(pythonBin);
-      if (!depsOk) {
-        debugPrint('[BackendProcess] Attempting auto-install of Python deps...');
-        final installed = await _installPythonDeps(pythonBin, backendDir);
-        if (!installed) {
-          _startupError =
-              'Required Python packages (flask, keri) could not be installed. '
-              'Please run: $pythonBin -m pip install flask keri==1.1.17';
-          await _writeDiagnosticLog(backendDir);
-          return false;
-        }
-      }
-    }
-
-    final keriScript = _findKeriDriverScript(backendDir);
-    _appendOutput('[startup] KERI driver script: ${keriScript ?? "not found"}');
-
     try {
       final env = Map<String, String>.from(Platform.environment);
       env['PORT'] = '${AgentConfig.defaultDesktopPort}';
@@ -531,24 +324,9 @@ class BackendProcessService {
       // It decides who may witness and watch for this agent — peers are of the
       // same kind — and an agent that has not been told enrols none.
       env['IDENTITY_AGENT_ENTITY_TYPE'] = 'individual';
-      env['KERI_DRIVER_PYTHON'] = pythonBin;
-      if (keriScript != null) {
-        env['KERI_DRIVER_SCRIPT'] = keriScript;
-      }
-      if (bundledPkgDir != null) {
-        final existingPythonPath = env['PYTHONPATH'] ?? '';
-        env['PYTHONPATH'] = existingPythonPath.isEmpty
-            ? bundledPkgDir
-            : '$bundledPkgDir${Platform.isWindows ? ';' : ':'}$existingPythonPath';
-        debugPrint('[BackendProcess] PYTHONPATH set to: ${env['PYTHONPATH']}');
-      }
 
       debugPrint('[BackendProcess] Starting: $_backendPath');
       debugPrint('[BackendProcess] Working dir: $backendDir');
-      debugPrint('[BackendProcess] Python: $pythonBin');
-      if (keriScript != null) {
-        debugPrint('[BackendProcess] KERI driver: $keriScript');
-      }
 
       _backendProcess = await Process.start(
         _backendPath!,

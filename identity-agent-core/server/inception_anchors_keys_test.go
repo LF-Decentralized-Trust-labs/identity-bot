@@ -1,52 +1,49 @@
 package server
 
 import (
-	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"identity-agent-core/drivers"
+	"identity-agent-core/drivers/driverfake"
 	"identity-agent-core/iacrypto"
 )
 
-// A driver that hands back an inception event carrying whatever anchors it was
-// given, which is what keripy does. Enough to exercise what this agent sends
-// and what it does with the result, without a KERI runtime.
-func fakeInceptionDriver(t *testing.T, aid string, seen *map[string]interface{}) *drivers.KeriDriver {
+// An engine that hands back an inception event carrying whatever anchors it was
+// given, which is what a real engine does. Enough to exercise what this agent
+// sends and what it does with the result, without a KERI runtime. When seen is
+// non-nil the request is captured under the same keys the wire form used, so a
+// test can assert on what the agent committed to.
+func fakeInceptionDriver(t *testing.T, aid string, seen *map[string]interface{}) *driverfake.Engine {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/inception" {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		var req map[string]interface{}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		if seen != nil {
-			*seen = req
-		}
-		event := map[string]interface{}{
-			"v": "KERI10JSON", "t": "icp", "s": "0", "i": aid,
-			"k": []interface{}{req["public_key"]},
-		}
-		if a, ok := req["anchors"]; ok {
-			event["a"] = a
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"aid":             aid,
-			"inception_event": event,
-			"public_key":      req["public_key"],
-			"next_key_digest": "Enext",
-			"raw_bytes_b64":   "",
-		})
-	}))
-	t.Cleanup(srv.Close)
-	return drivers.NewKeriDriverAt(srv.URL)
+	return &driverfake.Engine{
+		InceptFunc: func(req drivers.InceptionRequest) (*drivers.DriverInceptionResponse, error) {
+			anchors := make([]interface{}, 0, len(req.AnchorData))
+			for _, a := range req.AnchorData {
+				anchors = append(anchors, a)
+			}
+			if seen != nil {
+				*seen = map[string]interface{}{
+					"public_key":      req.PublicKey,
+					"next_public_key": req.NextPublicKey,
+					"anchors":         anchors,
+				}
+			}
+			event := map[string]interface{}{
+				"v": "KERI10JSON", "t": "icp", "s": "0", "i": aid,
+				"k": []interface{}{req.PublicKey},
+			}
+			if len(anchors) > 0 {
+				event["a"] = anchors
+			}
+			return &drivers.DriverInceptionResponse{
+				AID:            aid,
+				InceptionEvent: event,
+				PublicKey:      req.PublicKey,
+				NextKeyDigest:  "Enext",
+			}, nil
+		},
+	}
 }
 
 // The loop that had never closed: an identity founded here commits to its own

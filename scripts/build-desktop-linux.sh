@@ -30,10 +30,8 @@ echo "--- Build Flutter Linux app ---"
 ( cd identity_agent_ui && flutter build linux --release --build-number="$BUILD_NUMBER" )
 
 # The KERI engine (keri-go) is compiled into identity-agent-core, so bundling the
-# Go backend is all that is needed to establish and run an identity. The Python
-# KERI driver is NOT bundled: it runs only under KERI_ENGINE=python, a comparison
-# hatch nothing sets in a shipped build. The driver source stays in the repo under
-# drivers/keri-core for that hatch, which installs its own deps on demand.
+# Go backend is all that is needed to establish and run an identity. There is no
+# Python involved: keri-go runs in-process and is the only KERI engine.
 echo "--- Bundle Go backend with Flutter app ---"
 BUNDLE="identity_agent_ui/build/linux/x64/release/bundle"
 mkdir -p "$BUNDLE/backend/bin"

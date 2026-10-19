@@ -2,7 +2,6 @@ package server
 
 import (
 	"crypto/ed25519"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +13,7 @@ import (
 	"identity-agent-core/asset"
 	"identity-agent-core/authprovider"
 	"identity-agent-core/drivers"
+	"identity-agent-core/drivers/driverfake"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/login"
 	"identity-agent-core/store"
@@ -961,20 +961,18 @@ func TestAnUnverifiedOwnerRowCannotVouch(t *testing.T) {
 	s := serverWithIdentity(t, "EORG")
 
 	// The identity's inception names an owner — an anchor, and nothing sealed.
-	keri := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"aid": "EORG",
-			"kel": []map[string]interface{}{{
-				"t": "icp", "i": "EORG",
-				"a": []interface{}{map[string]interface{}{
-					"i": "ETHEOWNER", "s": "0", "d": "ETHEOWNER"}},
-			}},
-		})
-	}))
-	defer keri.Close()
-	driver := drivers.NewKeriDriver()
-	driver.BaseURL = keri.URL
-	s.KeriDriver = driver
+	s.KeriDriver = &driverfake.Engine{
+		GetKelFunc: func(string) (*drivers.DriverKelResponse, error) {
+			return &drivers.DriverKelResponse{
+				AID: "EORG",
+				KEL: []map[string]interface{}{{
+					"t": "icp", "i": "EORG",
+					"a": []interface{}{map[string]interface{}{
+						"i": "ETHEOWNER", "s": "0", "d": "ETHEOWNER"}},
+				}},
+			}, nil
+		},
+	}
 
 	// The attacker writes the owner's key, exactly as the scan and contact
 	// routes do.
@@ -1074,20 +1072,18 @@ func TestAnOwnerWhoRotatesIsNotLockedOutOfTheirOwnMachine(t *testing.T) {
 	s := serverWithIdentity(t, "EMACHINE")
 
 	// The machine's inception names its owner.
-	keri := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"aid": "EMACHINE",
-			"kel": []map[string]interface{}{{
-				"t": "icp", "i": "EMACHINE",
-				"a": []interface{}{map[string]interface{}{
-					"i": "ETHEOWNER", "s": "0", "d": "ETHEOWNER"}},
-			}},
-		})
-	}))
-	defer keri.Close()
-	driver := drivers.NewKeriDriver()
-	driver.BaseURL = keri.URL
-	s.KeriDriver = driver
+	s.KeriDriver = &driverfake.Engine{
+		GetKelFunc: func(string) (*drivers.DriverKelResponse, error) {
+			return &drivers.DriverKelResponse{
+				AID: "EMACHINE",
+				KEL: []map[string]interface{}{{
+					"t": "icp", "i": "EMACHINE",
+					"a": []interface{}{map[string]interface{}{
+						"i": "ETHEOWNER", "s": "0", "d": "ETHEOWNER"}},
+				}},
+			}, nil
+		},
+	}
 
 	// Sealed at pairing: the owner's key as it was THEN.
 	old := grantFor(60, GradeEnrolled)
@@ -1131,20 +1127,18 @@ func TestAnOwnerWhoRotatesIsNotLockedOutOfTheirOwnMachine(t *testing.T) {
 func TestASealedRecordTheLogNeverNamedCannotVouch(t *testing.T) {
 	s := serverWithIdentity(t, "EMACHINE")
 
-	keri := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"aid": "EMACHINE",
-			"kel": []map[string]interface{}{{
-				"t": "icp", "i": "EMACHINE",
-				"a": []interface{}{map[string]interface{}{
-					"i": "ETHEREALOWNER", "s": "0", "d": "ETHEREALOWNER"}},
-			}},
-		})
-	}))
-	defer keri.Close()
-	driver := drivers.NewKeriDriver()
-	driver.BaseURL = keri.URL
-	s.KeriDriver = driver
+	s.KeriDriver = &driverfake.Engine{
+		GetKelFunc: func(string) (*drivers.DriverKelResponse, error) {
+			return &drivers.DriverKelResponse{
+				AID: "EMACHINE",
+				KEL: []map[string]interface{}{{
+					"t": "icp", "i": "EMACHINE",
+					"a": []interface{}{map[string]interface{}{
+						"i": "ETHEREALOWNER", "s": "0", "d": "ETHEREALOWNER"}},
+				}},
+			}, nil
+		},
+	}
 
 	// Somebody seals themselves under an identity the inception never named.
 	attacker := grantFor(70, GradeEnrolled)
@@ -1251,20 +1245,18 @@ func TestTwoRequestsRacingToSealAnOwnerCannotBothWin(t *testing.T) {
 func TestAFoundingInviteCannotSealSomebodyTheLogNeverNamed(t *testing.T) {
 	s := serverWithIdentity(t, "EMACHINE")
 
-	keri := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"aid": "EMACHINE",
-			"kel": []map[string]interface{}{{
-				"t": "icp", "i": "EMACHINE",
-				"a": []interface{}{map[string]interface{}{
-					"i": "ETHEREALOWNER", "s": "0", "d": "ETHEREALOWNER"}},
-			}},
-		})
-	}))
-	defer keri.Close()
-	driver := drivers.NewKeriDriver()
-	driver.BaseURL = keri.URL
-	s.KeriDriver = driver
+	s.KeriDriver = &driverfake.Engine{
+		GetKelFunc: func(string) (*drivers.DriverKelResponse, error) {
+			return &drivers.DriverKelResponse{
+				AID: "EMACHINE",
+				KEL: []map[string]interface{}{{
+					"t": "icp", "i": "EMACHINE",
+					"a": []interface{}{map[string]interface{}{
+						"i": "ETHEREALOWNER", "s": "0", "d": "ETHEREALOWNER"}},
+				}},
+			}, nil
+		},
+	}
 
 	stranger := grantFor(190, GradeEnrolled)
 	if _, err := s.AcceptFoundingSigner(SignerAcceptance{

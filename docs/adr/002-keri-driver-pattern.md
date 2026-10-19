@@ -2,9 +2,11 @@
 
 **Date:** 2026-02-18
 **Updated:** 2026-02-22
-**Status:** Superseded in part by ADR-037 (2026-08-18) — mobile no longer uses a
-Rust bridge for KERI. It runs the same Go core a computer runs, embedded. The
-driver pattern itself still stands.
+**Status:** Superseded by ADR-037. Mobile stopped using a Rust bridge on
+2026-08-18, and the Python `keripy` driver this ADR introduced was removed
+entirely on 2026-10-19. `keri-go`, compiled into the Go backend and run
+in-process, is the sole KERI engine on every platform; there is no Python
+fallback. This ADR is kept as the historical record of the driver pattern.
 **Supersedes:** KERI-related sections of ADR 001
 
 ## Context

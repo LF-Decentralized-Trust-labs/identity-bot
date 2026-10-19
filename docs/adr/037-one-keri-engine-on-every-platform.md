@@ -91,3 +91,21 @@ records.
 > computing it independently. The golden vectors still prove the CESR wire framing
 > agrees across engines, which is what they were built to catch. Restoring the
 > independent check wants a pure-Python ML-DSA, not a second native engine.
+
+## Amendment — the Python comparison hatch is removed (2026-10-19)
+
+The decision above left one way to run a second engine. A desktop could set
+`KERI_ENGINE=python` to start a Python `keripy` subprocess in place of the Go
+engine, as a way to compare the two. By the time that hatch existed the Go
+engine already answered every operation, so it proved the two agreed rather than
+supplying anything the Go engine lacked, and nothing depended on it.
+
+That hatch and the Python driver behind it are now gone. There is no Python
+fallback on any platform: every build, desktop and mobile, runs `keri-go`
+in-process and nothing else. Removed with it are the `KERI_ENGINE=python`
+selector, the `ENABLE_KERI_DRIVER` switch, the Python driver sources, and the
+`python_keri_driver` entry in the self-attestation component chain — `keri-go` is
+compiled into the Go backend binary and is covered by that binary's own hash.
+
+This changes nothing the decision above established. It removes the last route by
+which a second KERI engine could run at all.

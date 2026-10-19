@@ -39,9 +39,9 @@ We follow **coordinated disclosure**: we will work with you on a timeline that p
 ### In scope
 
 - The `identity-bot` / Identity Agent source code in this repository
-- The bundled Python KERI driver (`drivers/keri-core/`)
 - The Flutter UI (`identity_agent_ui/`)
-- The Go backend (`identity-agent-core/`)
+- The Go backend (`identity-agent-core/`), including the `keri-go` KERI engine
+  compiled into it
 - The sandbox marketplace runtime (Podman + compiled binary runtimes)
 - Official release binaries published by the project
 
