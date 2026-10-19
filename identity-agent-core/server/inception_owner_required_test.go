@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"identity-agent-core/drivers"
+	"identity-agent-core/keriengine"
 )
 
 // An agent that exists to serve somebody else refuses to found an identity that
@@ -37,7 +37,7 @@ func TestAnAgentThatServesSomebodyElseRefusesToFoundAnUnownedIdentity(t *testing
 	s.requireOwnerAtInception = true
 	// Non-nil so the request reaches the owner check; never called, because the
 	// refusal happens before anything is minted.
-	s.KeriDriver = &drivers.KeriDriver{}
+	s.KeriDriver = keriengine.New()
 
 	w := inceptionRequest(t, s, map[string]any{
 		"public_key":      "Dpub",

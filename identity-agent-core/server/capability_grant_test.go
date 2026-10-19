@@ -3,12 +3,11 @@ package server
 import (
 	"encoding/base64"
 	"encoding/json"
-	"net/http"
-	"net/http/httptest"
-	"net/url"
 	"testing"
 
 	"identity-agent-core/drivers"
+	"identity-agent-core/drivers/driverfake"
+	"identity-agent-core/keriengine"
 	"identity-agent-core/store"
 )
 
@@ -82,7 +81,7 @@ func TestAgentGrantFallsBackWithoutDriver(t *testing.T) {
 // invoked — the record status is checked first.)
 func TestRevokedGrantDenies(t *testing.T) {
 	s := newGrantTestServer(t)
-	s.KeriDriver = &drivers.KeriDriver{} // non-nil, not called on this path
+	s.KeriDriver = keriengine.New() // non-nil, not called on this path
 	if err := s.DataStore.SaveCredential(store.CredentialRecord{
 		SAID: "EGrantRevoked", Status: "revoked", Format: "acdc",
 		SchemaSAID: capabilityGrantSchemaSAID, HolderAID: "EAgent", IssuerAID: "ERoot",
@@ -106,36 +105,26 @@ func TestRevokedGrantDenies(t *testing.T) {
 // stored ceiling) and grant_said is recorded. Uses a fake driver so the wiring
 // is exercised independent of a live KERI keystore.
 func TestVerifiedGrantDerivesScopesFromCredential(t *testing.T) {
-	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case r.URL.Path == "/kel":
-			json.NewEncoder(w).Encode(map[string]any{
-				"aid": "ERoot", "sequence_number": 0, "event_count": 1,
-				"kel": []map[string]any{{"t": "icp", "s": "0", "d": "ERoot", "i": "ERoot"}},
-			})
-		case r.URL.Path == "/credential/verify":
-			json.NewEncoder(w).Encode(map[string]any{
-				"verified":  true,
-				"acdc_said": "EGrantOK",
-				"checks": map[string]any{
+	s := newGrantTestServer(t)
+	s.KeriDriver = &driverfake.Engine{
+		GetKelFunc: func(string) (*drivers.DriverKelResponse, error) {
+			return &drivers.DriverKelResponse{
+				AID: "ERoot", SequenceNumber: 0, EventCount: 1,
+				KEL: []map[string]interface{}{{"t": "icp", "s": "0", "d": "ERoot", "i": "ERoot"}},
+			}, nil
+		},
+		VerifyCredentialFunc: func(*drivers.DriverVerifyCredentialRequest) (*drivers.DriverVerifyCredentialResponse, error) {
+			return &drivers.DriverVerifyCredentialResponse{
+				Verified: true,
+				AcdcSaid: "EGrantOK",
+				Checks: map[string]interface{}{
 					"said_integrity": true, "issuer_in_kel": true, "kel_chain_valid": true,
 					"schema_trusted": true, "not_revoked": true, "holder_matches_subject": true,
 					"presentation_sig_valid": false, "credential_anchored": true,
 				},
-			})
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer fake.Close()
-
-	// Point NewKeriDriver at the fake server (it builds BaseURL from the port).
-	u, _ := url.Parse(fake.URL)
-	t.Setenv("KERI_DRIVER_PORT", u.Port())
-
-	s := newGrantTestServer(t)
-	s.KeriDriver = drivers.NewKeriDriver()
+			}, nil
+		},
+	}
 
 	// The grant ACDC names infra.zone.list in its attribute block; the stored
 	// token ceiling deliberately differs so we can prove the credential wins.
@@ -167,7 +156,7 @@ func TestVerifiedGrantDerivesScopesFromCredential(t *testing.T) {
 // A grant SAID that resolves to no credential denies, too.
 func TestMissingGrantDenies(t *testing.T) {
 	s := newGrantTestServer(t)
-	s.KeriDriver = &drivers.KeriDriver{}
+	s.KeriDriver = keriengine.New()
 	plaintext := "iamcp_missing"
 	seedAgentToken(t, s, plaintext, mcpToken{
 		Name: "a3", Scopes: []string{"infra.zone.list"},

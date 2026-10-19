@@ -39,10 +39,8 @@ if ($LASTEXITCODE -ne 0) { throw "flutter build windows failed" }
 Pop-Location
 
 # The KERI engine (keri-go) is compiled into identity-agent-core.exe, so bundling
-# the Go backend is all that is needed to establish and run an identity. The Python
-# KERI driver is NOT bundled: it runs only under KERI_ENGINE=python, a comparison
-# hatch nothing sets in a shipped build. The driver source stays in the repo under
-# drivers/keri-core for that hatch, which installs its own deps on demand. (keri-go
+# the Go backend is all that is needed to establish and run an identity. There is
+# no Python involved: keri-go runs in-process and is the only KERI engine. (It
 # uses pure-Go crypto, so no libsodium.dll is bundled either — that was pysodium's.)
 Write-Host "--- Bundle Go backend with Flutter app ---"
 $BUNDLE = "identity_agent_ui\build\windows\x64\runner\Release"

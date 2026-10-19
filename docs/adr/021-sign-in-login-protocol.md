@@ -113,30 +113,28 @@ The adapter (`identity-agent-core/oidc/`, mirrored in `packages/login-verify/src
 
 The protocol is exercised end-to-end by existing tests — prefer these over ad-hoc scripts.
 
-**Steel thread (challenge → assertion → verify), no KERI driver required:**
+**Steel thread (challenge → assertion → verify):**
 
 ```
 # terminal 1 — identity-agent-core:
-ENABLE_KERI_DRIVER=false PORT=5050 go run .
+PORT=5050 go run .
 # terminal 2 — packages/login-verify:
 npm install && npm run build
 IA_BASE=http://127.0.0.1:5050 node src/local-login-e2e.mjs
 ```
 
-`ENABLE_KERI_DRIVER=false` uses Go-native Ed25519, so this path needs no Python. Other
-proofs: `scripts/login_steel_thread_test.py`, `packages/login-verify/src/steel-thread.test.mjs`,
-and `go test ./login/...` (`login_flow_test.go`, `canonical_test.go`, `verify_assertion_test.go`).
+The core runs `keri-go` in-process, so this needs no Python and no external
+engine. Other proofs: `scripts/login_steel_thread_test.py`,
+`packages/login-verify/src/steel-thread.test.mjs`, and `go test ./login/...`
+(`login_flow_test.go`, `canonical_test.go`, `verify_assertion_test.go`).
 
-**Full KERI path (real inception + ACDC):** run the core *without* `ENABLE_KERI_DRIVER=false`,
-pointing at the project virtualenv:
-`KERI_DRIVER_PYTHON=drivers/keri-core/.venv-keri1117/bin/python` (see ADR-002). Using the
-system Python instead typically fails to locate `libsodium`, which surfaces as a
-`/inception` 500.
+The same run exercises the full KERI path (real inception + ACDC): `keri-go`
+performs inception, signing and credential formatting directly.
 
 **Local-run gotchas:**
 
 - Set `PUBLIC_URL=http://127.0.0.1:PORT` and set the tunnel provider to `none`
   (`PUT /api/settings/tunnel {"provider":"none"}`) so the OOBI / callback URLs are
   localhost and don't depend on a tunnel warming up.
-- When running two agents on one host, give each a distinct `PORT` **and**
-  `KERI_DRIVER_PORT` — the driver defaults to `9999` and will collide.
+- When running two agents on one host, give each a distinct `PORT` so their
+  listeners don't collide.

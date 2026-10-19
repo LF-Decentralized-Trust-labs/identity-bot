@@ -4,21 +4,22 @@ import (
 	"testing"
 )
 
-// Mobile runs with the Python driver disabled, because a phone cannot spawn a
-// subprocess. Before the engine interface existed that left the core with no
-// KERI implementation at all: every call site guarded on the driver being
-// present and answered "not available", so a phone could not create an
-// identity, rotate a key or issue a credential through the core.
+// Every core comes up with a working KERI engine, on every platform.
+//
+// There is one engine, keri-go, and it runs in-process. A phone cannot spawn a
+// subprocess, and before the engine ran in-process that left the core with no
+// KERI implementation at all: every call site guarded on a driver being present
+// and answered "not available", so a phone could not create an identity, rotate
+// a key or issue a credential through the core.
 //
 // This asserts the arrangement that fixed it, rather than leaving it to be
-// re-derived from the configuration. If it fails, mobile has silently lost KERI
-// again, and the symptom would otherwise appear as an unexplained "not
+// re-derived from the configuration. If it fails, the core has silently lost
+// KERI, and the symptom would otherwise appear as an unexplained "not
 // available" on a device.
-func TestMobileGetsAKeriEngineEvenWithTheDriverDisabled(t *testing.T) {
+func TestEveryCoreGetsAWorkingKeriEngine(t *testing.T) {
 	cfg := Config{
-		DataDir:          t.TempDir(),
-		Port:             0,
-		EnableKeriDriver: false, // exactly what mobilecore passes
+		DataDir: t.TempDir(),
+		Port:    0,
 	}
 	s, err := New(cfg)
 	if err != nil {

@@ -336,8 +336,6 @@ func (s *Service) componentTargetPath(component string) string {
 		return filepath.Join(s.dataDir, "updates", "flutter_web")
 	case "flutter_native":
 		return filepath.Join(s.dataDir, "updates", "flutter_native")
-	case "python_keri_driver":
-		return filepath.Join(s.dataDir, "updates", "python_keri_driver")
 	default:
 		return filepath.Join(s.dataDir, "updates", "components", component)
 	}

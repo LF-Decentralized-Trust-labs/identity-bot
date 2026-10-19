@@ -2,27 +2,20 @@ package drivers
 
 // What the core needs from a KERI implementation.
 //
-// Until now it needed a *KeriDriver specifically — a handle on a Python process
-// — and said so in fifty-four places. Two consequences followed from that, and
-// both are the reason this interface exists.
+// The core depends on this interface, not on any one engine. One engine
+// satisfies it — keri-go, a Go KERI library — in-process on every platform,
+// desktop and mobile alike.
 //
-// On desktop, nothing else could be substituted, so the Python runtime could
-// never be removed however good the alternative got.
+// It once needed a handle on a Python subprocess specifically, named in dozens
+// of call sites. That could never be removed on desktop however good the
+// alternative got, and on mobile it was never started at all — so every call
+// site took its nil branch and answered "not available", and a phone could
+// perform no KERI operation through the core. Depending on this interface
+// instead of on a subprocess is what let the single in-process engine replace
+// it everywhere.
 //
-// On mobile the driver is not started at all, so every one of those fifty-four
-// call sites takes its nil branch and answers "KERI driver not available". The
-// Go core on a phone cannot perform a single KERI operation; the app routes them
-// through Dart to a Rust library instead. That is not a gap anyone chose — it is
-// what happens when the only implementation is a subprocess and the platform has
-// no subprocesses.
-//
-// So the core depends on this interface, and an implementation backed by a Go
-// KERI library satisfies it on every platform, including the one that has never
-// been able to run a driver.
-//
-// The method set is deliberately the set the core CALLS, not everything the
-// driver exposes. An interface that mirrored the driver would make the driver
-// the specification, which is the arrangement being dismantled.
+// The method set is deliberately the set the core CALLS, not everything an
+// engine might expose.
 type KeriEngine interface {
 	// Identity creation and key rotation.
 	//
@@ -101,13 +94,6 @@ type KeriEngine interface {
 	GetStatus() (*DriverStatus, error)
 	ReloadIdentity(req *DriverReloadIdentityRequest) (*DriverReloadIdentityResponse, error)
 }
-
-// Ensure the Python driver satisfies the interface it was extracted from.
-//
-// If this stops compiling, the interface and the driver have diverged, which
-// means a call site somewhere is about to lose an implementation without anyone
-// noticing.
-var _ KeriEngine = (*KeriDriver)(nil)
 
 // InceptionRequest is everything an identity can be founded with.
 //

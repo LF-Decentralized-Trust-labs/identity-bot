@@ -74,19 +74,12 @@ func (r *Registry) ChainHash() (string, map[string]string, error) {
 	return hex.EncodeToString(sum[:]), digests, nil
 }
 
-// DefaultRegistry wires the standard identity-agent component chain.
-// includeKeriDriver should be false on mobile (gomobile-embedded) builds,
-// where there is no separate Python KERI driver script to hash at all —
-// registering it unconditionally there made every self-attestation run
-// fail (component "python_keri_driver": path not configured), which in
-// turn made TrustGate report a hard block on every phone regardless of
-// hardware.
-func DefaultRegistry(dataDir string, includeKeriDriver bool) *Registry {
+// DefaultRegistry wires the standard identity-agent component chain. The KERI
+// engine is compiled into the Go backend binary, so it is covered by the
+// go_backend hash rather than hashed as a component of its own.
+func DefaultRegistry(dataDir string) *Registry {
 	reg := NewRegistry()
 	reg.Register("go_backend", fileHasher(resolveBinaryPath()))
-	if includeKeriDriver {
-		reg.Register("python_keri_driver", fileHasher(resolveKeriDriverScript()))
-	}
 	if path := resolveAuthProviderBinary(); path != "" {
 		reg.Register("auth_provider", fileHasher(path))
 	}
@@ -100,28 +93,6 @@ func resolveBinaryPath() string {
 		return ""
 	}
 	return exe
-}
-
-func resolveKeriDriverScript() string {
-	if path := os.Getenv("KERI_DRIVER_SCRIPT"); path != "" {
-		return path
-	}
-	exe, err := os.Executable()
-	if err == nil {
-		candidate := filepath.Join(filepath.Dir(exe), "drivers", "keri-core", "server.py")
-		if _, statErr := os.Stat(candidate); statErr == nil {
-			return candidate
-		}
-	}
-	for _, rel := range []string{
-		"./drivers/keri-core/server.py",
-		"../drivers/keri-core/server.py",
-	} {
-		if _, statErr := os.Stat(rel); statErr == nil {
-			return rel
-		}
-	}
-	return ""
 }
 
 func resolveAuthProviderBinary() string {

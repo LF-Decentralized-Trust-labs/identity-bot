@@ -140,27 +140,6 @@ class BackendProcessService {
     return null;
   }
 
-  String? _findKeriDriverScript(String backendDir) {
-    final sep = Platform.pathSeparator;
-    final candidates = [
-      '$backendDir${sep}keri-driver${sep}server.py',
-      '$backendDir${sep}drivers${sep}keri-core${sep}server.py',
-    ];
-
-    for (final path in candidates) {
-      if (File(path).existsSync()) {
-        debugPrint('[BackendProcess] Found KERI driver at: $path');
-        return path;
-      }
-    }
-
-    debugPrint('[BackendProcess] KERI driver script not found. Searched:');
-    for (final path in candidates) {
-      debugPrint('  - $path');
-    }
-    return null;
-  }
-
   // Absolute, per-app writable data dir. Namespaced by the app/executable name
   // so the oss / Grape ID / Grape ID Org flavors don't collide when run together.
   String _resolveDataDir() {
@@ -194,172 +173,6 @@ class BackendProcessService {
       Directory(dataDir).createSync(recursive: true);
     } catch (_) {}
     return dataDir;
-  }
-
-  String? _findBundledPython(String backendDir) {
-    final sep = Platform.pathSeparator;
-
-    // Each desktop build bundles a relocatable interpreter under backend/python.
-    // Windows: backend\python\python.exe ; macOS/Linux: backend/python/bin/python3
-    final candidates = Platform.isWindows
-        ? [
-            '$backendDir${sep}python${sep}python.exe',
-            '$backendDir${sep}python${sep}python3.exe',
-          ]
-        : [
-            '$backendDir${sep}python${sep}bin${sep}python3',
-            '$backendDir${sep}python${sep}bin${sep}python3.11',
-          ];
-    for (final path in candidates) {
-      if (File(path).existsSync()) {
-        debugPrint('[BackendProcess] Found bundled Python at: $path');
-        return path;
-      }
-    }
-
-    return null;
-  }
-
-  String? _findBundledPythonPackages(String backendDir) {
-    final sep = Platform.pathSeparator;
-    final pkgDir = '$backendDir${sep}python-packages';
-    if (Directory(pkgDir).existsSync()) {
-      debugPrint('[BackendProcess] Found bundled Python packages at: $pkgDir');
-      return pkgDir;
-    }
-    return null;
-  }
-
-  Future<String?> _findPythonBinary(String backendDir) async {
-    final bundled = _findBundledPython(backendDir);
-    if (bundled != null) {
-      return bundled;
-    }
-
-    debugPrint('[BackendProcess] No bundled Python — searching system PATH...');
-    // GUI-launched apps inherit a minimal PATH (no /opt/homebrew, /usr/local),
-    // so bare-name lookups miss an installed Python. Search PATH names first,
-    // then well-known absolute locations. Prefer 3.11 to match bundled packages.
-    final candidates = Platform.isWindows
-        ? <String>['python', 'python3', 'py']
-        : <String>[
-            'python3.11', 'python3', 'python',
-            '/opt/homebrew/opt/python@3.11/bin/python3',
-            '/opt/homebrew/bin/python3.11',
-            '/opt/homebrew/bin/python3',
-            '/usr/local/opt/python@3.11/bin/python3',
-            '/usr/local/bin/python3.11',
-            '/usr/local/bin/python3',
-            '/usr/bin/python3',
-          ];
-
-    for (final bin in candidates) {
-      try {
-        // Bounded, because asking is not always cheap. /usr/bin/python3 on a Mac
-        // without the Xcode command line tools is a stub that opens an install
-        // dialog and waits for somebody to answer it — so this call can block
-        // for as long as the dialog is up, which is forever if nobody is
-        // looking. Startup then never finishes and the window never appears.
-        final result = await Process.run(bin, ['--version'])
-            .timeout(const Duration(seconds: 3));
-        if (result.exitCode == 0) {
-          final version = (result.stdout as String).trim();
-          debugPrint('[BackendProcess] Found system Python: $bin ($version)');
-          _appendOutput('[startup] Found system Python: $bin ($version)');
-          return bin;
-        }
-      } catch (_) {}
-    }
-
-    debugPrint('[BackendProcess] Python not found anywhere');
-    return null;
-  }
-
-  bool _isBundledPython(String pythonBin, String backendDir) {
-    return pythonBin.startsWith(backendDir);
-  }
-
-  Future<bool> _checkPythonDeps(String pythonBin) async {
-    try {
-      final result = await Process.run(
-        pythonBin,
-        ['-c', 'import flask; import keri'],
-      ).timeout(const Duration(seconds: 10));
-      if (result.exitCode == 0) {
-        debugPrint('[BackendProcess] Python deps (flask, keri) available');
-        _appendOutput('[startup] Python deps (flask, keri) verified OK');
-        return true;
-      }
-      debugPrint('[BackendProcess] Missing Python deps: ${result.stderr}');
-      _appendOutput('[startup] Missing Python deps: ${result.stderr}');
-      return false;
-    } catch (e) {
-      debugPrint('[BackendProcess] Python dep check failed: $e');
-      _appendOutput('[startup] Python dep check failed: $e');
-      return false;
-    }
-  }
-
-  /// Kept, and deliberately not called.
-  ///
-  /// Installing packages at startup meant reaching for pip from inside a signed
-  /// application bundle, into a Python that belongs to the operating system,
-  /// while somebody waited at a window that never opened. The backend has an
-  /// engine of its own, so a missing package is a reason to use it rather than
-  /// a reason to start installing software on somebody's computer.
-  ///
-  /// Left in place because a build that genuinely ships the Python driver may
-  /// want it back, deliberately and somewhere it can report progress.
-  // ignore: unused_element
-  Future<bool> _installPythonDeps(String pythonBin, String backendDir) async {
-    debugPrint('[BackendProcess] Installing Python dependencies...');
-    _appendOutput('[startup] Installing Python dependencies...');
-    try {
-      final sep = Platform.pathSeparator;
-      final reqCandidates = [
-        '$backendDir${sep}keri-driver${sep}requirements.txt',
-        '$backendDir${sep}drivers${sep}keri-core${sep}requirements.txt',
-      ];
-
-      for (final reqPath in reqCandidates) {
-        if (File(reqPath).existsSync()) {
-          debugPrint('[BackendProcess] Installing from: $reqPath');
-          final result = await Process.run(
-            pythonBin,
-            ['-m', 'pip', 'install', '-r', reqPath],
-            environment: Platform.environment,
-          );
-          if (result.exitCode == 0) {
-            debugPrint('[BackendProcess] Python dependencies installed from requirements.txt');
-            _appendOutput('[startup] Python deps installed from requirements.txt');
-            return true;
-          }
-          debugPrint('[BackendProcess] pip install -r failed: ${result.stderr}');
-          _appendOutput('[startup] pip install -r failed: ${result.stderr}');
-        }
-      }
-
-      debugPrint('[BackendProcess] Falling back to direct pip install...');
-      var result = await Process.run(
-        pythonBin,
-        ['-m', 'pip', 'install', 'flask', 'keri==1.1.17'],
-        environment: Platform.environment,
-      );
-
-      if (result.exitCode == 0) {
-        debugPrint('[BackendProcess] Python dependencies installed successfully');
-        _appendOutput('[startup] Python deps installed successfully');
-        return true;
-      }
-
-      debugPrint('[BackendProcess] pip install failed: ${result.stderr}');
-      _appendOutput('[startup] pip install failed: ${result.stderr}');
-      return false;
-    } catch (e) {
-      debugPrint('[BackendProcess] pip install error: $e');
-      _appendOutput('[startup] pip install error: $e');
-      return false;
-    }
   }
 
   Future<PortConflictInfo?> checkPortConflict(int port) async {
@@ -503,66 +316,6 @@ class BackendProcessService {
           'take the next free port');
     }
 
-    // Look for the Python KERI driver FIRST, because whether it is here decides
-    // whether Python matters at all.
-    //
-    // A build that ships the driver runs it, and needs a Python that can import
-    // flask and keri. A build without it uses the Go engine inside the backend
-    // and needs no Python whatsoever — so demanding one refuses to start an
-    // application that would have worked perfectly.
-    //
-    // It used to demand one unconditionally. Once the driver stopped being
-    // shipped, every desktop build stopped starting: no bundled Python, so it
-    // reached for a system one, found /usr/bin/python3, could not import flask
-    // or keri, and went off to pip install them from inside a signed .app
-    // bundle. What a person saw was an application that opened and vanished.
-    final keriScript = _findKeriDriverScript(backendDir);
-    _appendOutput('[startup] KERI driver script: ${keriScript ?? "not found"}');
-
-    String? pythonBin;
-    String? bundledPkgDir;
-    var useKeriDriver = false;
-
-    if (keriScript == null) {
-      debugPrint('[BackendProcess] No Python KERI driver — using the built-in engine');
-      _appendOutput('[startup] No Python KERI driver — using the built-in engine');
-    } else {
-      // The script being present is NOT enough. A build can carry the driver's
-      // source and no interpreter to run it — which is exactly what shipped
-      // once Python was dropped from the bundle and the .py files stayed. So
-      // the driver is used only when a Python that can actually run it exists.
-      pythonBin = await _findPythonBinary(backendDir);
-
-      if (pythonBin == null) {
-        debugPrint('[BackendProcess] Driver script present but no Python — '
-            'falling back to the built-in engine');
-        _appendOutput('[startup] No Python for the KERI driver — using the built-in engine');
-      } else {
-        final isBundled = _isBundledPython(pythonBin, backendDir);
-        bundledPkgDir = _findBundledPythonPackages(backendDir);
-        final hasBundledDeps = isBundled || bundledPkgDir != null;
-
-        if (hasBundledDeps) {
-          debugPrint('[BackendProcess] Using bundled dependencies');
-          _appendOutput('[startup] Python: $pythonBin (bundled dependencies)');
-          useKeriDriver = true;
-        } else if (await _checkPythonDeps(pythonBin)) {
-          _appendOutput('[startup] Python: $pythonBin');
-          useKeriDriver = true;
-        } else {
-          // Deliberately NOT installing anything here. This used to reach for
-          // pip from inside a signed application bundle, on a machine whose
-          // Python belongs to somebody else, while a person waited at a window
-          // that never opened. The engine in the backend can do this work, so
-          // the honest move is to use it and say so.
-          debugPrint('[BackendProcess] Python found but flask/keri unavailable — '
-              'using the built-in engine');
-          _appendOutput('[startup] Python present but its KERI packages are not '
-              '— using the built-in engine');
-        }
-      }
-    }
-
     try {
       final env = Map<String, String>.from(Platform.environment);
       env['PORT'] = '${AgentConfig.defaultDesktopPort}';
@@ -580,36 +333,10 @@ class BackendProcessService {
         debugPrint('[BackendProcess] no entity type declared — the backend will fall back '
             'to the profile, and enrols no peer witness or watcher until one is set');
       }
-      if (!useKeriDriver) {
-        // Tell the backend the driver is not here, so it does not expect one.
-        //
-        // This is not cosmetic. The backend's self-attestation hashes a list of
-        // components, and the Python driver is on that list by default. Left on
-        // when the file does not exist, hashing fails, the run is reported as
-        // "failed" rather than "unknown", and the trust gate blocks every key
-        // operation — which surfaces to a person as their device being
-        // unsupported, on hardware that supports it perfectly well.
-        env['ENABLE_KERI_DRIVER'] = 'false';
-      } else {
-        env['KERI_DRIVER_PYTHON'] = pythonBin!;
-        env['KERI_DRIVER_SCRIPT'] = keriScript!;
-      }
-      if (bundledPkgDir != null) {
-        final existingPythonPath = env['PYTHONPATH'] ?? '';
-        env['PYTHONPATH'] = existingPythonPath.isEmpty
-            ? bundledPkgDir
-            : '$bundledPkgDir${Platform.isWindows ? ';' : ':'}$existingPythonPath';
-        debugPrint('[BackendProcess] PYTHONPATH set to: ${env['PYTHONPATH']}');
-      }
 
       debugPrint('[BackendProcess] Starting: $_backendPath');
       debugPrint('[BackendProcess] Working dir: $backendDir');
-      if (useKeriDriver) {
-        debugPrint('[BackendProcess] Python: $pythonBin');
-        debugPrint('[BackendProcess] KERI driver: $keriScript');
-      } else {
-        debugPrint('[BackendProcess] engine: built in');
-      }
+      debugPrint('[BackendProcess] engine: built in (keri-go)');
 
       _backendProcess = await Process.start(
         _backendPath!,
@@ -746,11 +473,10 @@ class BackendProcessService {
     // HOW LONG TO WAIT, AND WHY IT IS NOT FIFTEEN SECONDS.
     //
     // This used to give up after 30 attempts at half a second. The backend it
-    // is waiting for routinely takes longer than that: it starts a KERI driver
-    // and waits on it, tries to raise a tunnel, and asks for an update
-    // manifest — and every one of those is SLOWER when it fails than when it
-    // succeeds. A machine with no route to the update host spends seconds in
-    // DNS before giving up.
+    // is waiting for routinely takes longer than that: it tries to raise a
+    // tunnel and asks for an update manifest — and every one of those is SLOWER
+    // when it fails than when it succeeds. A machine with no route to the update
+    // host spends seconds in DNS before giving up.
     //
     // So the app reported "Backend failed to start" while the backend was
     // starting perfectly and answered two seconds later. Measured on a Mac

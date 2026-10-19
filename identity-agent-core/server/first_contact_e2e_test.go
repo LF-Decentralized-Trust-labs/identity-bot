@@ -9,27 +9,27 @@ import (
 
 	"identity-agent-core/didcomm"
 	"identity-agent-core/drivers"
+	"identity-agent-core/drivers/driverfake"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/store"
 )
 
-// A driver that accepts a key history as sound. The validation itself is
+// An engine that accepts a key history as sound. The validation itself is
 // exercised against the real KERI library elsewhere; what this covers is what
 // this agent does with the answer.
-func acceptingKELDriver(t *testing.T) *drivers.KeriDriver {
+func acceptingKELDriver(t *testing.T) *driverfake.Engine {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/validate-kel" {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"kel_verified": true, "events_validated": 1, "current_public_key": "Dkey",
-		})
-	}))
-	t.Cleanup(srv.Close)
-	return drivers.NewKeriDriverAt(srv.URL)
+	accept := func(string, []map[string]interface{}) (*drivers.DriverValidateKELResponse, error) {
+		return &drivers.DriverValidateKELResponse{
+			KelVerified: true, EventsValidated: 1, CurrentPublicKey: "Dkey",
+		}, nil
+	}
+	return &driverfake.Engine{
+		ValidateKELFunc: accept,
+		ValidateKELBytesFunc: func(in drivers.ValidateKELInput) (*drivers.DriverValidateKELResponse, error) {
+			return accept(in.AID, nil)
+		},
+	}
 }
 
 // A stranger's inception event, committing to the keys it will actually use.

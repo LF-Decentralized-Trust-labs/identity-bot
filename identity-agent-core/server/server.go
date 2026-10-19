@@ -73,10 +73,10 @@ type CoreServer struct {
 	// reference leaks the server and its keep-alive connections on every
 	// stop/restart — invisible on a desktop that stops once, but it accrues on
 	// mobile where the app is suspended and the core restarted over and over.
-	httpSrv   *http.Server
-	tunnelSrv *http.Server
-	router    chi.Router
-	flutterWebDir      string
+	httpSrv       *http.Server
+	tunnelSrv     *http.Server
+	router        chi.Router
+	flutterWebDir string
 
 	// See Config.RequireOwnerAtInception.
 	requireOwnerAtInception bool
@@ -154,9 +154,8 @@ type CoreServer struct {
 }
 
 type Config struct {
-	DataDir          string
-	Port             int
-	EnableKeriDriver bool
+	DataDir string
+	Port    int
 	// EntityType declares whether this build serves a person or an
 	// organization: "individual" or "organization".
 	//
@@ -206,11 +205,6 @@ func DefaultConfig() Config {
 		webDir = filepath.Join("..", "identity_agent_ui", "build", "web")
 	}
 
-	enableKeri := true
-	if v := os.Getenv("ENABLE_KERI_DRIVER"); v == "false" || v == "0" {
-		enableKeri = false
-	}
-
 	// Off unless asked for. An agent that needs it sets it in code (the
 	// organisation backend does); the variable exists so a deployment can turn
 	// it on without a rebuild.
@@ -222,7 +216,6 @@ func DefaultConfig() Config {
 	return Config{
 		DataDir:                 dataDir,
 		Port:                    port,
-		EnableKeriDriver:        enableKeri,
 		EntityType:              os.Getenv("IDENTITY_AGENT_ENTITY_TYPE"),
 		FlutterWebDir:           webDir,
 		RequireOwnerAtInception: requireOwner,
@@ -362,48 +355,19 @@ func New(cfg Config) (*CoreServer, error) {
 	s.WitnessService = wsvc
 	go witness.StartHeartbeatLoop(wsvc, ctx.Done())
 
-	// Choose a KERI engine.
+	// Start the KERI engine.
 	//
-	// Two implementations satisfy the same interface. The Python driver is a
-	// subprocess: it needs a Python runtime, and on a phone it cannot run at
-	// all. The Go engine runs in-process and therefore runs everywhere.
-	//
-	// Where the driver is not enabled — which is every mobile build — the Go
-	// engine is used. That is a change in what those builds can do rather than
-	// a change of implementation: with no engine at all, every KERI call site
-	// in this package took its "not available" branch, and a phone could not
-	// perform a KERI operation through the core.
-	//
-	// The Go engine is the default everywhere, including desktop. The Python
-	// driver runs only when asked for by name.
-	//
-	// It used to be the other way round while the Go engine was being proven.
-	// It has since been proven — against the conformance vectors, against an
-	// independent implementation, and against a live witness service — and
-	// leaving a subprocess as the default meant every desktop agent still
-	// required a Python runtime to establish an identity.
-	//
-	// KERI_ENGINE=python still selects the driver, and nothing needs it. The
-	// three operations that once had no Go implementation — resolving an
-	// introduction, publishing an endpoint location, and building a credential
-	// presentation — are all answered here now, so the escape hatch exists to
-	// compare the two implementations rather than to make up a shortfall.
-	switch {
-	case cfg.EnableKeriDriver && os.Getenv("KERI_ENGINE") == "python":
-		driver := drivers.NewKeriDriver()
-		if err := driver.Start(); err != nil {
-			cancel()
-			dataStore.Close()
-			return nil, fmt.Errorf("failed to start KERI driver: %w", err)
-		}
-		s.KeriDriver = driver
-	default:
-		s.KeriDriver = keriengine.New()
-		if err := s.KeriDriver.Start(); err != nil {
-			cancel()
-			dataStore.Close()
-			return nil, fmt.Errorf("failed to start the KERI engine: %w", err)
-		}
+	// There is one engine, keri-go, and it runs in-process on every platform.
+	// A desktop once spawned a Python subprocess instead, which needed a Python
+	// runtime to found an identity and could not run on a phone at all — so
+	// every mobile KERI call site took its "not available" branch and a phone
+	// could perform no KERI operation through the core. The in-process engine
+	// removed both problems, and it is now the only implementation.
+	s.KeriDriver = keriengine.New()
+	if err := s.KeriDriver.Start(); err != nil {
+		cancel()
+		dataStore.Close()
+		return nil, fmt.Errorf("failed to start the KERI engine: %w", err)
 	}
 	// Seed the engine from what was persisted, so issuing and anchoring work
 	// after a restart without a fresh inception. Both implementations start
@@ -474,8 +438,7 @@ func New(cfg Config) (*CoreServer, error) {
 	}
 
 	s.AttestationRunner = secureenclave.NewRunner(secureenclave.RunnerConfig{
-		DataDir:          cfg.DataDir,
-		EnableKeriDriver: cfg.EnableKeriDriver,
+		DataDir: cfg.DataDir,
 	})
 	if s.UpdateService != nil {
 		s.TrustGate = secureenclave.NewTrustGate(s.AttestationRunner, s.UpdateService.Attestation())

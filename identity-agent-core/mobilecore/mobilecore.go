@@ -25,10 +25,9 @@ func StartServer(dataDir string, port int) error {
 	}
 
 	cfg := server.Config{
-		DataDir:          dataDir,
-		Port:             port,
-		EnableKeriDriver: false,
-		FlutterWebDir:    "",
+		DataDir:       dataDir,
+		Port:          port,
+		FlutterWebDir: "",
 	}
 
 	srv, err := server.New(cfg)

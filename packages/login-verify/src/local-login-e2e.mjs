@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
  * Local login E2E: minimal RP (dev relay + login-verify) + IA core login API.
- * Run with IA core on :5050 (ENABLE_KERI_DRIVER=false is fine).
+ * Run with IA core on :5050 (the core runs keri-go in-process; no Python).
  *
- *   ENABLE_KERI_DRIVER=false go run .   # in identity-agent-core
- *   node src/local-login-e2e.mjs        # in packages/login-verify
+ *   go run .                       # in identity-agent-core
+ *   node src/local-login-e2e.mjs   # in packages/login-verify
  */
 
 import express from "express";

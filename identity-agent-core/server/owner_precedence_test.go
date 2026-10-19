@@ -1,12 +1,10 @@
 package server
 
 import (
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"identity-agent-core/drivers"
+	"identity-agent-core/drivers/driverfake"
 	"identity-agent-core/store"
 )
 
@@ -27,19 +25,17 @@ func TestTheAnchoredOwnerBeatsASealedFile(t *testing.T) {
 	s := serverWithIdentity(t, "EORG")
 
 	// An identity whose inception names its real owner.
-	keri := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"aid": "EORG",
-			"kel": []map[string]interface{}{{
-				"t": "icp", "i": "EORG",
-				"a": []interface{}{map[string]interface{}{"i": "ETRUE-OWNER", "s": "0", "d": "ETRUE-OWNER"}},
-			}},
-		})
-	}))
-	defer keri.Close()
-	driver := drivers.NewKeriDriver()
-	driver.BaseURL = keri.URL
-	s.KeriDriver = driver
+	s.KeriDriver = &driverfake.Engine{
+		GetKelFunc: func(string) (*drivers.DriverKelResponse, error) {
+			return &drivers.DriverKelResponse{
+				AID: "EORG",
+				KEL: []map[string]interface{}{{
+					"t": "icp", "i": "EORG",
+					"a": []interface{}{map[string]interface{}{"i": "ETRUE-OWNER", "s": "0", "d": "ETRUE-OWNER"}},
+				}},
+			}, nil
+		},
+	}
 
 	// The real owner's key is on file, as a counterparty's would be.
 	if err := s.DataStore.SaveContact(store.ContactRecord{
@@ -85,19 +81,17 @@ func TestTheAnchoredOwnerBeatsASealedFile(t *testing.T) {
 func TestTheOwnerNamedAtFoundingCanActWithoutBeingAContact(t *testing.T) {
 	s := serverWithIdentity(t, "ETHING")
 
-	keri := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"aid": "ETHING",
-			"kel": []map[string]interface{}{{
-				"t": "icp", "i": "ETHING",
-				"a": []interface{}{map[string]interface{}{"i": "EFOUNDER", "s": "0", "d": "EFOUNDER"}},
-			}},
-		})
-	}))
-	defer keri.Close()
-	driver := drivers.NewKeriDriver()
-	driver.BaseURL = keri.URL
-	s.KeriDriver = driver
+	s.KeriDriver = &driverfake.Engine{
+		GetKelFunc: func(string) (*drivers.DriverKelResponse, error) {
+			return &drivers.DriverKelResponse{
+				AID: "ETHING",
+				KEL: []map[string]interface{}{{
+					"t": "icp", "i": "ETHING",
+					"a": []interface{}{map[string]interface{}{"i": "EFOUNDER", "s": "0", "d": "EFOUNDER"}},
+				}},
+			}, nil
+		},
+	}
 
 	// Exactly what pairing does: the owner's key, sealed, and no contact.
 	if err := s.SealOwnerAuthority(OwnerAuthority{
@@ -122,19 +116,17 @@ func TestTheOwnerNamedAtFoundingCanActWithoutBeingAContact(t *testing.T) {
 func TestASealedRecordForADifferentOwnerIsStillRefused(t *testing.T) {
 	s := serverWithIdentity(t, "ETHING")
 
-	keri := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"aid": "ETHING",
-			"kel": []map[string]interface{}{{
-				"t": "icp", "i": "ETHING",
-				"a": []interface{}{map[string]interface{}{"i": "EFOUNDER", "s": "0", "d": "EFOUNDER"}},
-			}},
-		})
-	}))
-	defer keri.Close()
-	driver := drivers.NewKeriDriver()
-	driver.BaseURL = keri.URL
-	s.KeriDriver = driver
+	s.KeriDriver = &driverfake.Engine{
+		GetKelFunc: func(string) (*drivers.DriverKelResponse, error) {
+			return &drivers.DriverKelResponse{
+				AID: "ETHING",
+				KEL: []map[string]interface{}{{
+					"t": "icp", "i": "ETHING",
+					"a": []interface{}{map[string]interface{}{"i": "EFOUNDER", "s": "0", "d": "EFOUNDER"}},
+				}},
+			}, nil
+		},
+	}
 
 	// Somebody re-seals under their own AID, the way a second signer would.
 	if err := s.SealOwnerAuthority(OwnerAuthority{

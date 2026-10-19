@@ -27,10 +27,6 @@ type RunnerConfig struct {
 	DataDir  string
 	Signer   PlatformSigner
 	Registry *Registry
-	// EnableKeriDriver mirrors server.Config.EnableKeriDriver — false on
-	// mobile, where there's no Python KERI driver script for
-	// DefaultRegistry to hash.
-	EnableKeriDriver bool
 }
 
 func NewRunner(cfg RunnerConfig) *Runner {
@@ -40,7 +36,7 @@ func NewRunner(cfg RunnerConfig) *Runner {
 	}
 	registry := cfg.Registry
 	if registry == nil {
-		registry = DefaultRegistry(cfg.DataDir, cfg.EnableKeriDriver)
+		registry = DefaultRegistry(cfg.DataDir)
 	}
 	return &Runner{
 		signer:    signer,

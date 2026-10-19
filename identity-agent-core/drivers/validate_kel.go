@@ -265,18 +265,6 @@ func DecodeRawEvents(rawB64 []string) ([][]byte, error) {
 	return out, nil
 }
 
-// ValidateKELBytes checks a log from its canonical bytes.
-//
-// The Python driver answers this in Go rather than over its HTTP link. That is
-// deliberate: validation is arithmetic over bytes the caller already holds, so
-// sending them to a subprocess would add a round trip, a serialisation, and a
-// second implementation of a security check — to compute the same answer from
-// the same bytes. It also means the check works on a phone, where there is no
-// subprocess to ask.
-func (d *KeriDriver) ValidateKELBytes(in ValidateKELInput) (*DriverValidateKELResponse, error) {
-	return ValidateKELFromBytes(in)
-}
-
 // ValidateKELInputFromRecords builds validation input out of the record shape
 // the agent publishes in an OOBI and keeps in its store.
 //
