@@ -64,8 +64,8 @@ A development-mode Identity Agent and a production one refuse each other as peer
 production witness, relay, or tunnel accepts only prod-rooted callers; development uses its own
 development-scoped instances) and for data at rest. Where a sealed instance derives its storage key from the
 hardware, it must derive it so that a debug/dev instance *cannot* derive the production key — binding the
-guest policy (including the debug marker) into the key-derivation request, so the hardware itself refuses to
-produce the production key for a debug guest, and binding a mode tag into each record's authenticated
+guest policy (including the debug marker) into the key-derivation request, so the hardware derives a
+different key for a debug guest and the production key is simply unobtainable to it, and binding a mode tag into each record's authenticated
 associated data, so a cross-mode record fails to decrypt cryptographically rather than by a check the code
 could skip.
 
