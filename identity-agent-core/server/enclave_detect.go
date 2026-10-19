@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"time"
 
-	"identity-agent-core/iacrypto"
 	"identity-agent-core/buildmode"
+	"identity-agent-core/iacrypto"
 	"identity-agent-core/secureenclave"
 	"identity-agent-core/update"
 )
