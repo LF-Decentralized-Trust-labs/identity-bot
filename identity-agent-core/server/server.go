@@ -3647,10 +3647,7 @@ func (s *CoreServer) handleResolveOobiContact(w http.ResponseWriter, r *http.Req
 	// across the two; the realm tag on the handshake makes an accidental
 	// crossing fail here rather than silently.
 	if peerRealmRefused(buildmode.Mode(), oobiData.Realm) {
-		writeError(w, http.StatusConflict, "Different realm",
-			fmt.Sprintf("this is a %s agent and %s is a %s agent, so no relationship was formed — "+
-				"a development agent and a production agent are kept apart",
-				buildmode.Mode(), oobiData.AID, realmOf(oobiData.Realm)))
+		writeError(w, http.StatusConflict, "Different realm", crossRealmMessage(oobiData.AID, oobiData.Realm))
 		return
 	}
 
@@ -3797,6 +3794,9 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
 		BackendType string `json:"backend_type"`
 		WitnessKey  string `json:"witness_key"`
 		EntityType  string `json:"entity_type"`
+		// "prod" or "dev", or absent on an agent built before the tag. Refused
+		// below before anything is recorded, the same as the other resolve paths.
+		Realm string `json:"realm,omitempty"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&oobiData); err != nil {
 		writeError(w, http.StatusBadGateway, "Invalid OOBI response", fmt.Sprintf("Could not parse response: %v", err))
@@ -3805,6 +3805,16 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
 
 	if oobiData.AID == "" {
 		writeError(w, http.StatusBadGateway, "Invalid OOBI response", "Response did not contain an AID")
+		return
+	}
+
+	// Before anything is recorded and before we introduce ourselves back. A
+	// development-realm Identity Agent and a production-realm one must not form a
+	// relationship across the two; the realm tag on the handshake makes an
+	// accidental crossing fail here rather than silently, the same gate the other
+	// resolve paths apply.
+	if peerRealmRefused(buildmode.Mode(), oobiData.Realm) {
+		writeError(w, http.StatusConflict, "Different realm", crossRealmMessage(oobiData.AID, oobiData.Realm))
 		return
 	}
 

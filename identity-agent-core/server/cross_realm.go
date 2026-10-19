@@ -1,6 +1,10 @@
 package server
 
-import "identity-agent-core/buildmode"
+import (
+	"fmt"
+
+	"identity-agent-core/buildmode"
+)
 
 // Keeping a development agent and a production agent from transacting with each
 // other by accident.
@@ -39,4 +43,16 @@ func realmOf(realm string) string {
 // rebuilding under a different linker flag.
 func peerRealmRefused(ourRealm, peerRealm string) bool {
 	return realmOf(ourRealm) != realmOf(peerRealm)
+}
+
+// crossRealmMessage is the one wording every resolve path uses to refuse a
+// cross-realm peer, kept in a single place so the paths that share this gate
+// cannot drift apart in what they say. peerRealm is normalised, so an untagged
+// peer is named as production.
+func crossRealmMessage(peerAID, peerRealm string) string {
+	return fmt.Sprintf(
+		"this Identity Agent runs in the %s realm and %s runs in the %s realm, so no "+
+			"relationship was formed — a development-realm and a production-realm Identity "+
+			"Agent are kept apart",
+		buildmode.Mode(), peerAID, realmOf(peerRealm))
 }

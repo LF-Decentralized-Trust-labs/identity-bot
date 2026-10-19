@@ -91,27 +91,29 @@ func (s *CoreServer) ensureKeriContactIs(oobiURL, expected string) (*store.Conta
 	if err := json.NewDecoder(resp.Body).Decode(&oobiData); err != nil {
 		return nil, false, fmt.Errorf("invalid oobi response: %w", err)
 	}
-	if s.WitnessService != nil {
-		s.WitnessService.RecordContactCapability(oobiData.AID, oobiData.BackendType, oobiData.WitnessKey, oobiData.EntityType)
-	}
 	if oobiData.AID == "" {
 		return nil, false, fmt.Errorf("oobi response did not contain an AID")
 	}
-	// Before anything is resolved or written. A development agent and a
-	// production agent run against disjoint infrastructure and must not form a
-	// relationship across the two; the realm tag on the handshake is what makes
-	// an accidental crossing fail here with a reason rather than silently.
+	// Before anything is recorded or written. A development-realm Identity Agent
+	// and a production-realm one run against disjoint infrastructure and must not
+	// form a relationship across the two; the realm tag on the handshake is what
+	// makes an accidental crossing fail here with a reason rather than silently.
 	if peerRealmRefused(buildmode.Mode(), oobiData.Realm) {
-		return nil, false, fmt.Errorf(
-			"this is a %s agent and %s is a %s agent, so no relationship was formed — "+
-				"a development agent and a production agent are kept apart",
-			buildmode.Mode(), oobiData.AID, realmOf(oobiData.Realm))
+		return nil, false, fmt.Errorf("%s", crossRealmMessage(oobiData.AID, oobiData.Realm))
 	}
 	// Before anything is written. See ensureKeriContactIs.
 	if expected != "" && oobiData.AID != expected {
 		return nil, false, fmt.Errorf(
 			"the address given belongs to %s, not to %s, so nothing was recorded",
 			oobiData.AID, expected)
+	}
+
+	// Remember what this contact can do for others, now that it has passed the
+	// realm and identity checks — the backend it runs decides whether it can
+	// witness, and neither this nor the witness key can be worked out later. Kept
+	// below the gates above so a cross-realm or mismatched peer records nothing.
+	if s.WitnessService != nil {
+		s.WitnessService.RecordContactCapability(oobiData.AID, oobiData.BackendType, oobiData.WitnessKey, oobiData.EntityType)
 	}
 
 	// Idempotent: if we already know this counterparty, return it without downgrading its tier.
