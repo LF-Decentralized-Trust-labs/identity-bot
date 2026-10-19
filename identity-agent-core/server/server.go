@@ -21,6 +21,7 @@ import (
 	"identity-agent-core/asset"
 	"identity-agent-core/avatar"
 	"identity-agent-core/backup"
+	"identity-agent-core/buildmode"
 	"identity-agent-core/drivers"
 	"identity-agent-core/endpoint"
 	"identity-agent-core/iacrypto"
@@ -497,6 +498,10 @@ func (s *CoreServer) Start() error {
 
 	if s.running {
 		return fmt.Errorf("server already running")
+	}
+
+	if buildmode.IsDev() {
+		log.Printf("[identity-agent-core] *** DEVELOPMENT BUILD *** — not a production build; it trusts development signing keys only and must never be used in production")
 	}
 
 	// Build the router now that all overlay routes (MountExtraRoutes) are
@@ -1143,6 +1148,7 @@ type HealthResponse struct {
 	Uptime    string `json:"uptime"`
 	Timestamp string `json:"timestamp"`
 	Mode      string `json:"mode"`
+	BuildMode string `json:"build_mode"`
 	TunnelURL string `json:"tunnel_url,omitempty"`
 }
 
@@ -1261,6 +1267,7 @@ func (s *CoreServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 		Uptime:    uptime.String(),
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 		Mode:      mode,
+		BuildMode: buildmode.Mode(),
 		TunnelURL: tunnelURL,
 	}
 
