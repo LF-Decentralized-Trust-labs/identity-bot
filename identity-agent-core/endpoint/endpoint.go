@@ -287,6 +287,29 @@ func DirectIngressHost() string {
 	return override
 }
 
+// SealedInstanceIngress reports whether this agent runs as a sealed instance
+// reached only through a host reverse proxy on its VM network interface — the
+// sealed-instance model in ADR-042 §2. On that substrate the proxy and the agent
+// do NOT share a loopback: the host reaches the guest over a NAT'd interface and
+// guest loopback is unreachable from the host, so the agent must bind the
+// interface for the proxy (and the provisioner) to reach it at all.
+//
+// This is NOT the AGENT_DIRECT_INGRESS_ADDR dev hatch. That hatch exposes the
+// whole surface onto a real LAN where a locally-trusted owner could be
+// impersonated, so it warns loudly and is never a product default. Here the
+// interface is reachable only from the host (the VM's user-mode NAT isolates it), that NAT
+// makes every host-originated request present a non-loopback source so the owner
+// gate treats it as remote-and-signed, and reaching the management surface
+// through the proxy is the whole point of a sealed instance — so binding the
+// interface is a supported production posture, not an exposure.
+//
+// Set only in the measured image's unit, so it is covered by the launch
+// measurement an owner verifies. server.rootListenAddr binds on this signal.
+func SealedInstanceIngress() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("AGENT_SEALED_INSTANCE_INGRESS")))
+	return v == "1" || v == "true"
+}
+
 // IsLoopbackHost reports whether host names the loopback interface — "localhost"
 // or any address in 127.0.0.0/8 or ::1. It is the shared predicate both the
 // listen address and the advertised address decide on, so the two stay in step.

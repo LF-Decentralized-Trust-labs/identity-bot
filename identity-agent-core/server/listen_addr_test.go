@@ -11,6 +11,7 @@ import (
 // so a public root bind would make the root URL a universal correlator.
 func TestRootListenAddrDefaultsToLoopback(t *testing.T) {
 	t.Setenv("AGENT_DIRECT_INGRESS_ADDR", "")
+	t.Setenv("AGENT_SEALED_INSTANCE_INGRESS", "")
 
 	addr := rootListenAddr(5050)
 	if addr != "127.0.0.1:5050" {
@@ -34,6 +35,7 @@ func TestRootListenAddrDefaultsToLoopback(t *testing.T) {
 // the two-listener invariant depends on, verified against a real listener.
 func TestRootListenerBindsLoopback(t *testing.T) {
 	t.Setenv("AGENT_DIRECT_INGRESS_ADDR", "")
+	t.Setenv("AGENT_SEALED_INSTANCE_INGRESS", "")
 
 	// Port 0 lets the OS choose a free port; the host is what we assert on.
 	ln, err := net.Listen("tcp4", rootListenAddr(0))
@@ -55,6 +57,7 @@ func TestRootListenerBindsLoopback(t *testing.T) {
 // off unless explicitly set. This documents that the exposure is opt-in.
 func TestDirectIngressOverrideIsOptIn(t *testing.T) {
 	t.Setenv("AGENT_DIRECT_INGRESS_ADDR", "0.0.0.0")
+	t.Setenv("AGENT_SEALED_INSTANCE_INGRESS", "")
 	if got := rootListenAddr(5050); got != "0.0.0.0:5050" {
 		t.Fatalf("explicit override should bind the requested host; got %q", got)
 	}
@@ -63,5 +66,29 @@ func TestDirectIngressOverrideIsOptIn(t *testing.T) {
 	// The server's chosen port always wins over any port in the override.
 	if got := rootListenAddr(5050); got != "192.168.0.10:5050" {
 		t.Fatalf("override host with server port expected; got %q", got)
+	}
+}
+
+// A sealed instance reached only through a host reverse proxy binds its VM
+// network interface so the proxy (and the provisioner) can reach it — the host
+// cannot reach guest loopback across the VM boundary. This is a supported
+// production posture, distinct from the dev hatch, and it binds the interface
+// without the hatch's warning (the NAT makes every host request remote to the
+// owner gate, so there is nothing to warn about).
+func TestSealedInstanceIngressBindsTheInterface(t *testing.T) {
+	t.Setenv("AGENT_DIRECT_INGRESS_ADDR", "")
+	t.Setenv("AGENT_SEALED_INSTANCE_INGRESS", "1")
+	if got := rootListenAddr(5050); got != "0.0.0.0:5050" {
+		t.Fatalf("a sealed instance must bind its VM interface; got %q", got)
+	}
+}
+
+// The sealed-instance signal is opt-in: unset, the default stays loopback, so a
+// non-sealed deployment never binds the interface by accident.
+func TestSealedInstanceIngressIsOptIn(t *testing.T) {
+	t.Setenv("AGENT_DIRECT_INGRESS_ADDR", "")
+	t.Setenv("AGENT_SEALED_INSTANCE_INGRESS", "")
+	if got := rootListenAddr(5050); got != "127.0.0.1:5050" {
+		t.Fatalf("without the sealed signal the default must stay loopback; got %q", got)
 	}
 }

@@ -77,8 +77,10 @@ An agent runs conceptually two surfaces, and only one of them is ever externally
 reachable.
 
 - The **root / management surface** carries the agent's outbound tunnel/relay setup
-  and its authenticated owner/management API. It binds **loopback only, in every
-  mode** (`rootListenAddr` in `server/listen_addr.go` returns `127.0.0.1:<port>`).
+  and its authenticated owner/management API. It binds **loopback by default**
+  (`rootListenAddr` in `server/listen_addr.go` returns `127.0.0.1:<port>`); a
+  confidential-VM instance behind a host proxy is the one exception — see the
+  sealed-instance deviation note at the end of this section.
   It is never the surface a counterparty reaches. Binding it to a public address
   would make the root URL a universal correlator, which is exactly what the
   per-relationship-URL model exists to prevent.
@@ -109,6 +111,31 @@ API; it is developer/testing only. A dedicated, path-scoped, manager-governed
 ingress listener that exposes reach *without* exposing the management surface is
 the intended home for Direct mode and is not built yet (see the partial-work note
 below).
+
+**Deviation — the sealed-instance model on a confidential-VM substrate (2026-10-18).**
+Point 2 above describes the sealed instance as a reverse proxy that "dials the
+agent's loopback port," and the invariant says the root surface binds loopback. That
+holds when the proxy and the agent share a loopback — a proxy process beside the
+agent, or a container in its network namespace. It does NOT hold when the agent runs
+inside a confidential VM: the host reverse proxy reaches the guest over the VM's
+network interface, and the guest's loopback is unreachable from the host across the
+VM boundary. An agent that bound only loopback there is unreachable by the proxy and
+by the provisioner — which is how this was found: a freshly built image booted, ran,
+and could not be provisioned.
+
+So on that substrate the invariant holds in SUBSTANCE, not literally. The root
+surface binds the VM's network interface (`AGENT_SEALED_INSTANCE_INGRESS=1`, honoured
+by `rootListenAddr`, set only in the measured image). This is neither a universal
+correlator nor the dev escape hatch, because: the interface is reachable only from
+the host (the VM's user-mode NAT isolates it); the NAT presents every host-originated
+request from a non-loopback source, so the §3 management gate classifies it as
+remote-and-signed and there is no local caller inside the guest to impersonate (the
+agent is the only thing the VM runs); and reaching the management surface through the
+host proxy by owner/controller signature is the whole point of a sealed instance —
+hiding it would break remote owner management. The signal rides the measured image,
+so an owner verifies the posture in the launch measurement. The dev hatch
+(`AGENT_DIRECT_INGRESS_ADDR`) stays a separate, loud, dev-only path for LAN exposure,
+where there IS a local caller to protect and the warning is right.
 
 ### 3. Who is the owner — the management gate
 

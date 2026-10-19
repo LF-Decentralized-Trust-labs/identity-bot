@@ -359,6 +359,15 @@ Environment=GOGC=50
 # nothing can reach it with forwarding headers of its own choosing. An agent
 # somebody can reach directly must not set this.
 Environment=TRUST_FORWARDED_HEADERS=1
+# A sealed instance is reached only through the host reverse proxy on its VM
+# network interface — the host cannot reach guest loopback across the VM
+# boundary, so the agent binds the interface. Safe here (and only here): the
+# interface is reachable only from the host (the VM's user-mode NAT isolates it),
+# the NAT makes every host-originated request arrive from a non-loopback source
+# so the owner gate treats it as remote-and-signed, and the management surface is
+# reached through the proxy by signature. Rides the measured image, so an owner
+# verifies this posture in the launch measurement.
+Environment=AGENT_SEALED_INSTANCE_INGRESS=1
 Environment="AGENT_BUILD_NAME=__BUILD_NAME__"
 Environment="IDENTITY_AGENT_ENTITY_TYPE=__ENTITY_TYPE__"
 # Plug-ins live on the encrypted state volume, not in this image.
