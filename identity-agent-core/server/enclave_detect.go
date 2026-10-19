@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"identity-agent-core/iacrypto"
+	"identity-agent-core/buildmode"
 	"identity-agent-core/secureenclave"
 	"identity-agent-core/update"
 )
@@ -344,6 +345,9 @@ func (s *CoreServer) bindingOver() string {
 
 func sealedHardwareStatus(binding, over string, certs *snpCertificateChain) *SealedHardwareInfo {
 	if !secureenclave.SNPAvailable() {
+		if buildmode.IsDev() {
+			return devSealedHardwareStatus(binding, over)
+		}
 		return nil
 	}
 	info := &SealedHardwareInfo{
@@ -406,6 +410,34 @@ func sealedHardwareStatus(binding, over string, certs *snpCertificateChain) *Sea
 			"manufacturer root you already trust — do not take this machine's word for it."
 	}
 	return info
+}
+
+// devSealedHardwareStatus is what a development build attests to when it has no
+// sealed hardware: a development report over the same binding, so the public
+// attestation endpoint is consistent with the pairing offer. Production returns
+// nil in this case; a development report's chain is the development root, not
+// AMD, and it carries the debug bit, so production refuses it either way.
+func devSealedHardwareStatus(binding, over string) *SealedHardwareInfo {
+	raw, err := secureenclave.DevAttestationReport(binding)
+	if err != nil {
+		return nil
+	}
+	parsed, err := secureenclave.ParseSNPReport(raw)
+	if err != nil {
+		return nil
+	}
+	return &SealedHardwareInfo{
+		Platform:     "sev-snp",
+		BoundTo:      bindingScheme(binding, over),
+		Report:       base64.StdEncoding.EncodeToString(raw),
+		Measurement:  hex.EncodeToString(parsed.Measurement),
+		ChipID:       parsed.ChipIDHex(),
+		DebugAllowed: parsed.DebugAllowed(),
+		ReportedTCB:  parsed.ReportedTCB,
+		ChainNote: "DEVELOPMENT attestation — signed by the development attestation root, " +
+			"not AMD, and carrying the debug bit. A production verifier refuses it. It is " +
+			"meaningful only within the development realm.",
+	}
 }
 
 func genuinenessFromState(st secureenclave.State) *GenuinenessInfo {
