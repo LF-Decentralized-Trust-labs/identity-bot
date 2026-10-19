@@ -19,6 +19,7 @@ import (
 
 	"encoding/base64"
 	"identity-agent-core/backup"
+	"identity-agent-core/buildmode"
 
 	"identity-agent-core/didcomm"
 	"identity-agent-core/iacrypto"
@@ -293,6 +294,15 @@ func (s *CoreServer) handlePairingBegin(w http.ResponseWriter, r *http.Request) 
 		offer.PublicKey, offer.NextPublicKey, offer.BackupSigningKey); berr == nil {
 		if report, rerr := snpReportForOffer(binding); rerr == nil && report != nil {
 			offer.Attestation = base64.StdEncoding.EncodeToString(report.Raw)
+		} else if buildmode.IsDev() {
+			// No sealed hardware, but a development build proves itself with a
+			// development attestation instead, so an owner can adopt a box that
+			// cannot attest. Production refuses this report (its signature is not
+			// AMD's, and it carries the debug bit).
+			if dev, derr := secureenclave.DevAttestationReport(binding); derr == nil {
+				offer.Attestation = base64.StdEncoding.EncodeToString(dev)
+				log.Printf("[identity-agent-core] *** DEVELOPMENT BUILD *** pairing offer carries a development attestation; production refuses it")
+			}
 		}
 	}
 	pairingOnce.Lock()

@@ -68,6 +68,28 @@ func devAttestationKey() *ecdsa.PrivateKey {
 	return priv
 }
 
+// devMeasurement is the fixed launch measurement a development report carries,
+// and the one a development build adds to its accepted-measurements allowlist, so
+// the two always agree. Derived from a constant for the same reason the key is:
+// no fixture to keep in sync.
+var devMeasurement = func() []byte {
+	h := sha512.Sum512([]byte("IA-DEV-LAUNCH-MEASUREMENT-V1"))
+	out := make([]byte, MeasurementSize)
+	copy(out, h[:MeasurementSize])
+	return out
+}()
+
+// DevMeasurement returns the development launch measurement (a fresh copy). A
+// development build adds it to what it will adopt; production never carries it.
+func DevMeasurement() []byte { return append([]byte(nil), devMeasurement...) }
+
+// DevAttestationReport is a development report bound to value, launched at the
+// development measurement. A development build offers this where real hardware
+// would offer a genuine report.
+func DevAttestationReport(value string) ([]byte, error) {
+	return GenerateDevSNPReport(value, devMeasurement)
+}
+
 // GenerateDevSNPReport builds a development attestation report bound to value and
 // launched at measurement, signed by the development attestation key.
 //
