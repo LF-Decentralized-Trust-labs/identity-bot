@@ -6,7 +6,6 @@
 # the same logic. The CALLER is responsible for installing the toolchain first:
 #   - Go 1.24.0
 #   - Flutter 3.27.3
-#   - Python 3.11 (for pip3)
 #   - GTK/build system deps: clang cmake ninja-build pkg-config libgtk-3-dev
 #     liblzma-dev libstdc++-12-dev libsecret-1-dev
 #
@@ -30,11 +29,15 @@ echo "--- Get Flutter packages ---"
 echo "--- Build Flutter Linux app ---"
 ( cd identity_agent_ui && flutter build linux --release --build-number="$BUILD_NUMBER" )
 
-echo "--- Bundle Go backend and KERI driver with Flutter app ---"
+# The KERI engine (keri-go) is compiled into identity-agent-core, so bundling the
+# Go backend is all that is needed to establish and run an identity. The Python
+# KERI driver is NOT bundled: it runs only under KERI_ENGINE=python, a comparison
+# hatch nothing sets in a shipped build. The driver source stays in the repo under
+# drivers/keri-core for that hatch, which installs its own deps on demand.
+echo "--- Bundle Go backend with Flutter app ---"
 BUNDLE="identity_agent_ui/build/linux/x64/release/bundle"
 mkdir -p "$BUNDLE/backend/bin"
 cp identity-agent-core/bin/identity-agent-core "$BUNDLE/backend/"
-cp -r drivers/keri-core "$BUNDLE/backend/keri-driver"
 cp -r manifests "$BUNDLE/backend/manifests"
 chmod +x "$BUNDLE/backend/identity-agent-core"
 echo "Building go-demo sandbox app..."
@@ -43,13 +46,6 @@ echo "Building go-demo sandbox app..."
 chmod +x "$BUNDLE/backend/bin/go-demo"
 echo "--- Bundle contents ---"
 ls -la "$BUNDLE/backend/"
-
-echo "--- Bundle Python packages (Linux) ---"
-PKG_DIR="$BUNDLE/backend/python-packages"
-pip3 install --target="$PKG_DIR" flask keri==1.1.17
-PYTHONPATH="$PKG_DIR" python3 -c "import flask; import keri; print('flask:', flask.__version__); print('keri:', keri.__version__)"
-find "$PKG_DIR" -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
-du -sh "$PKG_DIR"
 
 echo "--- Create tarball archive ---"
 tar -czf identity-agent-linux-x64.tar.gz -C "$BUNDLE" .
