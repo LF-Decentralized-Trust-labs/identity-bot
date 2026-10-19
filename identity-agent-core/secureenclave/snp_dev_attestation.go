@@ -47,7 +47,7 @@ const devAttestationSeed = "IA-DEV-ATTESTATION-ROOT-V1"
 // devChipIDMarker fills CHIP_ID on a development report. It must be non-zero
 // (ParseSNPReport refuses an all-zero chip id) and is deliberately legible, so a
 // development report is recognisable as one on sight.
-var devChipIDMarker = []byte("GRAPE-DEVELOPMENT-ATTESTATION-NOT-REAL-HARDWARE-DO-NOT-TRUST-0000")
+var devChipIDMarker = []byte("IA-DEV-ATTESTATION-NOT-REAL-HARDWARE-DO-NOT-TRUST-00000000000000")
 
 // devAttestationKey derives the development attestation signing key.
 //
