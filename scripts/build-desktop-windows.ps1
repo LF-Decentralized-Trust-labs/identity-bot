@@ -38,12 +38,17 @@ flutter build windows --release --build-number=$env:BUILD_NUMBER
 if ($LASTEXITCODE -ne 0) { throw "flutter build windows failed" }
 Pop-Location
 
-Write-Host "--- Bundle Go backend and KERI driver with Flutter app ---"
+# The KERI engine (keri-go) is compiled into identity-agent-core.exe, so bundling
+# the Go backend is all that is needed to establish and run an identity. The Python
+# KERI driver is NOT bundled: it runs only under KERI_ENGINE=python, a comparison
+# hatch nothing sets in a shipped build. The driver source stays in the repo under
+# drivers/keri-core for that hatch, which installs its own deps on demand. (keri-go
+# uses pure-Go crypto, so no libsodium.dll is bundled either — that was pysodium's.)
+Write-Host "--- Bundle Go backend with Flutter app ---"
 $BUNDLE = "identity_agent_ui\build\windows\x64\runner\Release"
 New-Item -ItemType Directory -Force -Path "$BUNDLE\backend" | Out-Null
 New-Item -ItemType Directory -Force -Path "$BUNDLE\backend\bin" | Out-Null
 Copy-Item "identity-agent-core\bin\identity-agent-core.exe" "$BUNDLE\backend\"
-Copy-Item -Recurse -Force "drivers\keri-core" "$BUNDLE\backend\keri-driver"
 Copy-Item -Recurse -Force "manifests" "$BUNDLE\backend\manifests"
 Write-Host "Building go-demo sandbox app..."
 Push-Location "sandbox-apps\go-demo"
@@ -55,30 +60,6 @@ if ($LASTEXITCODE -ne 0) { Write-Error "go-demo build failed!"; exit 1 }
 Pop-Location
 Write-Host "--- Bundle contents ---"
 Get-ChildItem -Recurse "$BUNDLE\backend"
-
-Write-Host "--- Bundle libsodium.dll (Windows) ---"
-$SODIUM_VERSION = "1.0.20"
-$SODIUM_URL = "https://download.libsodium.org/libsodium/releases/libsodium-${SODIUM_VERSION}-stable-msvc.zip"
-Write-Host "Downloading libsodium $SODIUM_VERSION..."
-Invoke-WebRequest -Uri $SODIUM_URL -OutFile "libsodium-msvc.zip" -UseBasicParsing
-Expand-Archive -Path "libsodium-msvc.zip" -DestinationPath "libsodium-temp" -Force
-$SODIUM_DLL = Get-ChildItem -Recurse "libsodium-temp" -Filter "libsodium.dll" |
-  Where-Object { $_.DirectoryName -like "*x64*Release*" -or $_.DirectoryName -like "*Win64*Release*" } |
-  Select-Object -First 1
-if (-not $SODIUM_DLL) {
-  $SODIUM_DLL = Get-ChildItem -Recurse "libsodium-temp" -Filter "libsodium.dll" | Select-Object -First 1
-}
-if ($SODIUM_DLL) {
-  Copy-Item $SODIUM_DLL.FullName "$BUNDLE\backend\libsodium.dll"
-  Copy-Item $SODIUM_DLL.FullName "$BUNDLE\backend\keri-driver\libsodium.dll"
-  $sizeKB = [math]::Round($SODIUM_DLL.Length / 1024)
-  Write-Host "Bundled libsodium.dll ($sizeKB KB)"
-} else {
-  Write-Error "libsodium.dll not found in archive - build cannot proceed"
-  exit 1
-}
-Remove-Item -Recurse -Force "libsodium-temp" -ErrorAction SilentlyContinue
-Remove-Item "libsodium-msvc.zip" -ErrorAction SilentlyContinue
 
 Write-Host "--- Create ZIP archive ---"
 Compress-Archive -Path "$BUNDLE\*" -DestinationPath "identity-agent-windows-x64.zip" -Force

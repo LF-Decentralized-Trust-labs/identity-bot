@@ -9,7 +9,6 @@
 # The CALLER installs the toolchain first:
 #   - Go 1.24.0
 #   - Flutter 3.27.3
-#   - Python 3.11 (for pip3)
 #
 # Env:
 #   BUILD_NUMBER  optional build number (defaults to 0)
@@ -79,12 +78,16 @@ echo "--- Get Flutter packages ---"
 echo "--- Build Flutter macOS app ---"
 ( cd identity_agent_ui && flutter build macos --release --build-number="$BUILD_NUMBER" )
 
-echo "--- Bundle Go backend and KERI driver into .app ---"
+# The KERI engine (keri-go) is compiled into identity-agent-core, so bundling the
+# Go backend is all that is needed to establish and run an identity. The Python
+# KERI driver is NOT bundled: it runs only under KERI_ENGINE=python, a comparison
+# hatch nothing sets in a shipped build. The driver source stays in the repo under
+# drivers/keri-core for that hatch, which installs its own deps on demand.
+echo "--- Bundle Go backend into .app ---"
 APP="identity_agent_ui/build/macos/Build/Products/Release/Identity Agent.app"
 RESOURCES="$APP/Contents/Resources"
 mkdir -p "$RESOURCES/backend/bin"
 cp identity-agent-core/bin/identity-agent-core "$RESOURCES/backend/"
-cp -r drivers/keri-core "$RESOURCES/backend/keri-driver"
 cp -r manifests "$RESOURCES/backend/manifests"
 chmod +x "$RESOURCES/backend/identity-agent-core"
 echo "Building go-demo sandbox app..."
@@ -92,10 +95,3 @@ echo "Building go-demo sandbox app..."
   CGO_ENABLED=0 go build -buildvcs=false -ldflags="-s -w" -o "../../$RESOURCES/backend/bin/go-demo" . )
 chmod +x "$RESOURCES/backend/bin/go-demo"
 ls -la "$RESOURCES/backend/"
-
-echo "--- Bundle Python packages (macOS) ---"
-PKG_DIR="$RESOURCES/backend/python-packages"
-pip3 install --target="$PKG_DIR" flask keri==1.1.17
-PYTHONPATH="$PKG_DIR" python3 -c "import flask; import keri; print('flask:', flask.__version__); print('keri:', keri.__version__)"
-find "$PKG_DIR" -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
-du -sh "$PKG_DIR"
