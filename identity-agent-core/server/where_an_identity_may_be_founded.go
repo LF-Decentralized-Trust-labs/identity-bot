@@ -1,6 +1,11 @@
 package server
 
-import "net/http"
+import (
+	"log"
+	"net/http"
+
+	"identity-agent-core/buildmode"
+)
 
 // Whether an identity may be brought into being on THIS machine.
 //
@@ -76,7 +81,14 @@ var mayFoundAnIdentityHere = foundingVerdictForThisPlatform
 // never produces key material it would then have to throw away.
 func (s *CoreServer) refuseIfThisComputerMayNotFound(w http.ResponseWriter) bool {
 	v := mayFoundAnIdentityHere()
-	if v.Permitted {
+	if foundingPermitted(v, buildmode.IsDev()) {
+		if !v.Permitted {
+			// Permitted only by the development-build relaxation. Loud on purpose:
+			// an identity founded on a machine that cannot attest is exactly what
+			// production refuses, so it must never be relied on as a real one. The
+			// cross-realm separation that will enforce that lands with its own code.
+			log.Printf("[identity-agent-core] *** DEVELOPMENT BUILD *** founding an identity on a machine that cannot attest (%s) — allowed only because this is a development build; this identity must never be relied on as a production identity", v.Platform)
+		}
 		return false
 	}
 	// Joined rather than concatenated, so a verdict written without an "instead"
@@ -89,4 +101,18 @@ func (s *CoreServer) refuseIfThisComputerMayNotFound(w http.ResponseWriter) bool
 	writeError(w, http.StatusForbidden,
 		"an identity cannot be created on this computer", detail)
 	return true
+}
+
+// foundingPermitted decides whether founding proceeds, given the platform's
+// verdict and whether this is a development build.
+//
+// A development build may found on a machine that cannot attest — that is the
+// point of developer mode, since the machines this is developed on are exactly
+// the ones production refuses. The resulting identity is a development-realm
+// identity that must never be relied on as a production one; the cross-realm
+// separation that will enforce that — separate trust anchors, domain
+// separation — lands with its own code. Separated from the handler so both
+// realms are testable without rebuilding with a different linker flag.
+func foundingPermitted(v foundingVerdict, dev bool) bool {
+	return v.Permitted || dev
 }
