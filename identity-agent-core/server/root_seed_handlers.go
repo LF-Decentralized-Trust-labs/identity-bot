@@ -4,10 +4,30 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"log"
 	"net/http"
 
+	"identity-agent-core/buildmode"
 	"identity-agent-core/secureenclave"
 )
+
+// rootKeyMayLiveHere decides whether a root key may be stored on this machine,
+// given the hardware's own answer and whether this is a development build.
+//
+// A production build (the default) permits a root key only on proven-usable
+// hardware — the long note at the call site says why unknown and
+// present-but-unusable do not qualify. A development build also permits it on a
+// machine with no usable key store, because the machines developer mode runs on
+// are exactly those, and a development-realm root that lives in a file is the
+// accepted property of that mode.
+//
+// The build realm is a compile-time constant rooted in a separate trust anchor,
+// so this is not the runtime escape hatch that was removed from this route: a
+// production binary cannot be told to stop checking, and the identity this
+// admits is a development-realm one that must never be relied on in production.
+func rootKeyMayLiveHere(permitted, dev bool) bool {
+	return permitted || dev
+}
 
 // One root of trust: the onboarding mnemonic. The client layer (which generates
 // and holds the mnemonic) hands its standard BIP39 seed to the local core here,
@@ -116,8 +136,9 @@ func (s *CoreServer) handleSetRootSeed(w http.ResponseWriter, r *http.Request) {
 	// A list of bad statuses fails open — a fifth status added later, or a
 	// zero-value Capability whose Status is "", matches none of them and
 	// installs the seed. Asking for the one good answer cannot do that.
-	if cap := detectKeyProtection(); !cap.RootKeyPermitted() {
-		// No way past THIS ROUTE any more, and that is the change.
+	cap := detectKeyProtection()
+	if !rootKeyMayLiveHere(cap.RootKeyPermitted(), buildmode.IsDev()) {
+		// No way past THIS ROUTE in a production build, and that is the change.
 		//
 		// There used to be one: IA_ALLOW_UNPROTECTED_ROOT_KEY, so that work
 		// could continue on a platform whose detector had never been written.
@@ -127,6 +148,13 @@ func (s *CoreServer) handleSetRootSeed(w http.ResponseWriter, r *http.Request) {
 		// and permanent: the seed is a file, whoever copies that file becomes
 		// the identity, and no rotation undoes it. An escape hatch nobody needs
 		// is one somebody will use.
+		//
+		// The development-build relaxation (rootKeyMayLiveHere) is not a
+		// reopening of that hatch. That one was a runtime variable, settable on
+		// any build including the one people rely on; the realm is a
+		// compile-time constant rooted in a separate trust anchor, absent from a
+		// production binary, and admits only a development-realm identity. A
+		// production build still refuses here.
 		//
 		// WHAT THIS DOES NOT COVER, said here because the sentence above reads
 		// like it does. This is one of five places that store a root seed and
@@ -138,11 +166,18 @@ func (s *CoreServer) handleSetRootSeed(w http.ResponseWriter, r *http.Request) {
 		// unwrapped envelope rather than refusing. So recovering onto a machine
 		// that cannot protect a key still does what this route now forbids.
 		//
-		// The way to run this software on hardware this route refuses is to fix
-		// the hardware, or to hold the identity somewhere else and control it
-		// from here. It is not to tell the Identity Agent to stop checking.
+		// The way to run a PRODUCTION build on hardware this route refuses is to
+		// fix the hardware, or to hold the identity somewhere else and control
+		// it from here. It is not to tell the Identity Agent to stop checking.
 		jsonError(w, refusalFor(cap), http.StatusPreconditionFailed)
 		return
+	}
+	if !cap.RootKeyPermitted() && buildmode.IsDev() {
+		// Permitted only by the development-build relaxation. Loud on purpose:
+		// the seed is about to be stored UNWRAPPED on a machine with no usable
+		// key store — exactly what a production build refuses — so this identity
+		// must never be relied on as a production one.
+		log.Printf("[identity-agent-core] *** DEVELOPMENT BUILD *** storing a root key on a machine with no usable hardware key store (%s) — allowed only because this is a development build; the seed is stored UNWRAPPED and this identity must never be relied on as a production identity", cap.String())
 	}
 	if !s.isOwner(r) {
 		jsonError(w, "keystore management is for the owner of this agent", http.StatusForbidden)
