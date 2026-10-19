@@ -258,6 +258,13 @@ func New(cfg Config) (*CoreServer, error) {
 		aiMemory.Close()
 		return nil, err
 	}
+	if buildmode.IsDev() {
+		// A development build also adopts a box launched at the development
+		// measurement, which a development box carries. Production's allowlist
+		// never includes it, so a production owner will not adopt a development box.
+		accepted = append(accepted, secureenclave.DevMeasurement())
+		log.Printf("[identity-agent-core] *** DEVELOPMENT BUILD *** accepting the development launch measurement for adoption")
+	}
 
 	endpointSvc := endpoint.New(dataStore, cfg.Port)
 

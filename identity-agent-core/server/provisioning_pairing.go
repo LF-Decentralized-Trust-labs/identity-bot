@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"identity-agent-core/buildmode"
 	"identity-agent-core/secureenclave"
 )
 
@@ -154,6 +155,16 @@ func (s *CoreServer) withAttestation(offer *pairingOffer) *pairingOffer {
 	}
 	out := *offer
 	if !secureenclave.SNPAvailable() {
+		// A development build still offers an attestation — a development one —
+		// so a box with no sealed hardware can be adopted through the real flow.
+		// Production refuses it; a production box with no hardware offers nothing.
+		if buildmode.IsDev() {
+			if dev, derr := secureenclave.DevAttestationReport(out.AID); derr == nil {
+				out.Attestation = base64.StdEncoding.EncodeToString(dev)
+				out.AttestationBinding = "blake3-256(IA-SNP-BIND-V1\\n" + out.AID + ")"
+				log.Printf("[provisioning] *** DEVELOPMENT BUILD *** offering a development attestation (no sealed hardware); production refuses it")
+			}
+		}
 		return &out
 	}
 	report, rerr := secureenclave.GetSNPReport(out.AID)

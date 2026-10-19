@@ -156,6 +156,16 @@ func (s *CoreServer) verifySNPChain(report []byte) error {
 	if s.snpChainVerifier != nil {
 		return s.snpChainVerifier(report)
 	}
+	if buildmode.IsDev() {
+		// A development build trusts the development attestation root instead of
+		// AMD, because a development box cannot produce an AMD-signed report. This
+		// is the ONE step whose trust root differs between dev and prod — every
+		// other check in checkOfferBeforeDelegating is identical. Production below
+		// trusts only AMD, so it refuses a development report's signature; and a
+		// development report also carries the debug bit, which production refuses
+		// before this runs.
+		return secureenclave.VerifyDevSNPReport(report)
+	}
 	s.snpVerifierOnce.Do(func() {
 		s.snpVerifier = secureenclave.NewAMDKDSVerifier(os.Getenv("AGENT_SNP_PRODUCT"))
 	})
