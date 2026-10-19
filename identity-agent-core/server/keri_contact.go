@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"identity-agent-core/backup"
+	"identity-agent-core/buildmode"
 	"identity-agent-core/drivers"
 	"identity-agent-core/secureenclave"
 	"identity-agent-core/store"
@@ -82,6 +83,10 @@ func (s *CoreServer) ensureKeriContactIs(oobiURL, expected string) (*store.Conta
 		BackendType string `json:"backend_type"`
 		WitnessKey  string `json:"witness_key"`
 		EntityType  string `json:"entity_type"`
+		// Realm is "prod" or "dev", or absent on an agent built before the tag
+		// existed. A cross-realm contact is refused below, so a development agent
+		// and a production agent do not form a relationship by accident.
+		Realm string `json:"realm,omitempty"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&oobiData); err != nil {
 		return nil, false, fmt.Errorf("invalid oobi response: %w", err)
@@ -91,6 +96,16 @@ func (s *CoreServer) ensureKeriContactIs(oobiURL, expected string) (*store.Conta
 	}
 	if oobiData.AID == "" {
 		return nil, false, fmt.Errorf("oobi response did not contain an AID")
+	}
+	// Before anything is resolved or written. A development agent and a
+	// production agent run against disjoint infrastructure and must not form a
+	// relationship across the two; the realm tag on the handshake is what makes
+	// an accidental crossing fail here with a reason rather than silently.
+	if peerRealmRefused(buildmode.Mode(), oobiData.Realm) {
+		return nil, false, fmt.Errorf(
+			"this is a %s agent and %s is a %s agent, so no relationship was formed — "+
+				"a development agent and a production agent are kept apart",
+			buildmode.Mode(), oobiData.AID, realmOf(oobiData.Realm))
 	}
 	// Before anything is written. See ensureKeriContactIs.
 	if expected != "" && oobiData.AID != expected {

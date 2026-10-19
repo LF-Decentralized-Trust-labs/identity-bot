@@ -3245,6 +3245,9 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
 						"asset_id":      a.ID,
 						"display_name":  a.DisplayName,
 						"delegator_aid": a.DelegatorAID,
+						// Which realm this agent runs in, so a resolver keeps a
+						// development peer and a production peer apart.
+						"realm": buildmode.Mode(),
 					})
 					return
 				}
@@ -3260,6 +3263,9 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
 				"oobi": fmt.Sprintf("%s/public/oobi/%s", publicURL, requestedAID),
 				"kel":  kel,
 				"type": "pairwise",
+				// Which realm this agent runs in, so a resolver keeps a
+				// development peer and a production peer apart.
+				"realm": buildmode.Mode(),
 			})
 			return
 		}
@@ -3376,6 +3382,11 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
 		// because a peer has to know before it can decide whether the two of us
 		// may witness for each other — the two kinds are kept apart.
 		"entity_type": s.ourEntityType(),
+		// Which realm this agent runs in. A resolver refuses a cross-realm
+		// contact, so a development agent and a production agent do not form a
+		// relationship by accident; absent on agents built before the tag, which
+		// a resolver reads as production.
+		"realm":       buildmode.Mode(),
 		"event_count": identity.EventCount,
 		"created":     identity.Created,
 	}
@@ -3615,6 +3626,11 @@ func (s *CoreServer) handleResolveOobiContact(w http.ResponseWriter, r *http.Req
 		JCard       *store.JCard `json:"jcard,omitempty"`
 		Photo       string       `json:"photo,omitempty"`
 		Watchers    []string     `json:"watchers"`
+		// "prod" or "dev", or absent on an agent built before the tag. A
+		// cross-realm contact is refused below, the same as on the foundational
+		// contact path, so this second resolve route cannot form a relationship
+		// across the two realms either.
+		Realm string `json:"realm,omitempty"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&oobiData); err != nil {
 		writeError(w, http.StatusBadGateway, "Invalid OOBI response", fmt.Sprintf("Could not parse response: %v", err))
@@ -3623,6 +3639,18 @@ func (s *CoreServer) handleResolveOobiContact(w http.ResponseWriter, r *http.Req
 
 	if oobiData.AID == "" {
 		writeError(w, http.StatusBadGateway, "Invalid OOBI response", "Response did not contain an AID")
+		return
+	}
+
+	// Before anything is recorded. A development agent and a production agent
+	// run against disjoint infrastructure and must not form a relationship
+	// across the two; the realm tag on the handshake makes an accidental
+	// crossing fail here rather than silently.
+	if peerRealmRefused(buildmode.Mode(), oobiData.Realm) {
+		writeError(w, http.StatusConflict, "Different realm",
+			fmt.Sprintf("this is a %s agent and %s is a %s agent, so no relationship was formed — "+
+				"a development agent and a production agent are kept apart",
+				buildmode.Mode(), oobiData.AID, realmOf(oobiData.Realm)))
 		return
 	}
 
