@@ -38,6 +38,13 @@ func (s *CoreServer) SendDIDCommMessage(fromAID, toAID, typ string, body json.Ra
 	if len(body) == 0 {
 		body = json.RawMessage("{}")
 	}
+	// A request to connect carries our realm, so a peer in the other realm
+	// refuses it. Stamped here, where the type is known, so every connect
+	// request is tagged regardless of which code built the body — the same
+	// reason the key history is attached by type below.
+	if typ == didcomm.TypeContactRequest {
+		body = withRealm(body)
+	}
 	now := time.Now().UTC()
 	jwm := &didcomm.JWM{
 		ID:          newMessageID(),

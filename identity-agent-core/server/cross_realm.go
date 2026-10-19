@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"identity-agent-core/buildmode"
@@ -55,4 +56,23 @@ func crossRealmMessage(peerAID, peerRealm string) string {
 			"relationship was formed — a development-realm and a production-realm Identity "+
 			"Agent are kept apart",
 		buildmode.Mode(), peerAID, realmOf(peerRealm))
+}
+
+// withRealm stamps this agent's realm into an outgoing connect-request body, so
+// a peer in the other realm refuses it the same way an OOBI resolver does. It is
+// applied where the message type is known, so every connect request carries the
+// tag no matter which code built the body — the same reason the key history is
+// attached by message type. A connect-request body is a JSON object; a body that
+// is not is returned untouched rather than risk dropping it.
+func withRealm(body []byte) json.RawMessage {
+	var m map[string]interface{}
+	if err := json.Unmarshal(body, &m); err != nil || m == nil {
+		return body
+	}
+	m["realm"] = buildmode.Mode()
+	raw, err := json.Marshal(m)
+	if err != nil {
+		return body
+	}
+	return raw
 }
