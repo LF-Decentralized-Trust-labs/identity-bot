@@ -6,9 +6,11 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"time"
 
+	"identity-agent-core/buildmode"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/secureenclave"
 )
@@ -56,9 +58,15 @@ func checkOfferBeforeDelegating(offer *pairingBeginResponse,
 			"offered, so the keys did not come from the machine the proof describes")
 	}
 
-	if report.DebugAllowed() {
+	if secureenclave.DebugReportRefused(report.DebugAllowed(), buildmode.IsDev()) {
 		return fmt.Errorf("this box was started in a state where whoever runs the hardware can " +
 			"read its memory, so nothing it holds would be private")
+	}
+	if report.DebugAllowed() && buildmode.IsDev() {
+		// A development owner adopts a debug-attested box on purpose. The AMD KDS
+		// chain check below still runs, so this remains a real sealed machine —
+		// only the debug refusal is relaxed, and only in a development build.
+		log.Printf("[identity-agent-core] *** DEVELOPMENT BUILD *** adopting a debug-attested box — allowed only because this is a development build; production refuses it")
 	}
 
 	if acceptableMeasurement == nil {
