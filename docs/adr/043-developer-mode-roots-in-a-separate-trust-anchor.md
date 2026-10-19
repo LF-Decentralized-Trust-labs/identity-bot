@@ -2,7 +2,7 @@
 
 **Status:** Accepted — records the decision; not yet implemented (each part lands with its own code).
 **Date:** 2026-10-18
-**Relates to:** ADR-011 (build versioning: development vs release builds), ADR-027 (hardware-gated signing key custody), ADR-028 (reporting what a machine can protect a key with), ADR-042 (how an agent is reached; the confidential-VM substrate)
+**Relates to:** ADR-011 (build versioning: development vs release builds), ADR-027 (hardware-gated signing key custody), ADR-028 (reporting what a machine can protect a key with), ADR-042 (how an Identity Agent is reached; the confidential-VM substrate)
 
 ## Context
 
