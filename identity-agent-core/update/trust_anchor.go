@@ -6,10 +6,34 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"identity-agent-core/buildmode"
 )
 
-// DefaultSigningKeyID is the compiled-in release key identifier.
+// DefaultSigningKeyID is the compiled-in release key identifier for a
+// production build.
 const DefaultSigningKeyID = "grape-release-2026"
+
+// DevSigningKeyID is the release key identifier for a development build.
+//
+// It is deliberately different from the production id. A production build's
+// trust anchor holds only the production id, so when it looks up a
+// development-signed manifest's key id it finds nothing and refuses it
+// (ErrUntrustedSigningKey); a development build refuses a production manifest the
+// same way. Distinct ids mean the two realms cannot verify each other's releases
+// even before the keys themselves differ — which they also do, since each realm
+// is built with its own compiled-in key.
+const DevSigningKeyID = "grape-dev-release-2026"
+
+// signingKeyIDForMode returns the release key id for the build realm. The
+// development realm anchors its releases under DevSigningKeyID; see it for why
+// the ids are kept distinct.
+func signingKeyIDForMode(dev bool) string {
+	if dev {
+		return DevSigningKeyID
+	}
+	return DefaultSigningKeyID
+}
 
 // CompiledReleasePublicKeyHex is the release signing key this build trusts.
 //
@@ -70,7 +94,7 @@ func DefaultTrustAnchor() (*TrustAnchor, error) {
 			ed25519.PublicKeySize, len(raw))
 	}
 	return NewTrustAnchor(map[string][]byte{
-		DefaultSigningKeyID: raw,
+		signingKeyIDForMode(buildmode.IsDev()): raw,
 	})
 }
 
