@@ -1,6 +1,11 @@
 package server
 
-import "net/http"
+import (
+	"log"
+	"net/http"
+
+	"identity-agent-core/buildmode"
+)
 
 // Whether an identity may be brought into being on THIS machine.
 //
@@ -74,9 +79,28 @@ var mayFoundAnIdentityHere = foundingVerdictForThisPlatform
 //
 // Placed before anything is read or generated, so a machine that may not found
 // never produces key material it would then have to throw away.
+// foundingPermitted decides whether founding proceeds, given the platform's
+// verdict and whether this is a development build.
+//
+// A development build may found on a machine that cannot attest — that is the
+// point of developer mode, since the machines this is developed on are exactly
+// the ones production refuses — and the resulting identity is a development-realm
+// identity that is not, and cannot become, a production one. Separated from the
+// handler so both realms are testable without rebuilding with a different linker
+// flag.
+func foundingPermitted(v foundingVerdict, dev bool) bool {
+	return v.Permitted || dev
+}
+
 func (s *CoreServer) refuseIfThisComputerMayNotFound(w http.ResponseWriter) bool {
 	v := mayFoundAnIdentityHere()
-	if v.Permitted {
+	if foundingPermitted(v, buildmode.IsDev()) {
+		if !v.Permitted {
+			// Permitted only by the development-build relaxation. Loud on purpose:
+			// an identity founded on a machine that cannot attest is exactly what
+			// production refuses, so it must never be mistaken for a real one.
+			log.Printf("[identity-agent-core] *** DEVELOPMENT BUILD *** founding an identity on a machine that cannot attest (%s) — allowed only because this is a development build; this identity is not valid in production", v.Platform)
+		}
 		return false
 	}
 	// Joined rather than concatenated, so a verdict written without an "instead"
