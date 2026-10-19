@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"identity-agent-core/buildmode"
 	"identity-agent-core/secureenclave"
 
 	"github.com/go-chi/chi/v5"
@@ -258,9 +259,12 @@ func (h *Handler) identifyEnrollingMachine(reportB64, publicKey string) (securee
 	}
 	// A guest the host may read into is not sealed in any sense that matters,
 	// however well-formed its report.
-	if parsed.DebugAllowed() {
+	if secureenclave.DebugReportRefused(parsed.DebugAllowed(), buildmode.IsDev()) {
 		return secureenclave.MachineIdentity{}, "the attestation report says debug access is " +
 			"permitted, so the host can read this machine's memory"
+	}
+	if parsed.DebugAllowed() && buildmode.IsDev() {
+		log.Printf("[identity-agent-core] *** DEVELOPMENT BUILD *** enrolling a debug-attested machine (%s) — allowed only because this is a development build; production refuses it", parsed.ChipIDHex())
 	}
 	return secureenclave.MachineIdentity{
 		Kind:  secureenclave.MachineIDSNPChip,

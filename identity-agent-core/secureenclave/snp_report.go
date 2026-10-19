@@ -86,6 +86,18 @@ type ParsedReport struct {
 // memory. A report with this set is cryptographically perfect and worth nothing.
 func (p *ParsedReport) DebugAllowed() bool { return p.Policy&policyDebugBit != 0 }
 
+// DebugReportRefused reports whether an attestation that permits debug access
+// must be refused. A debug guest's memory is readable by the host, so it is not
+// sealed in any sense that matters, and a production build always refuses it. A
+// development build accepts it, because a development box is run debug-attested
+// on purpose — precisely the state production rejects, which is one of the
+// layers keeping the two apart. The build realm is passed in rather than read here,
+// so this package stays free of build-mode coupling and is testable in both
+// realms.
+func DebugReportRefused(debugAllowed, dev bool) bool {
+	return debugAllowed && !dev
+}
+
 // Unsigned reports whether SIGNER_INFO says no key signed this report.
 func (p *ParsedReport) Unsigned() bool { return (p.SignerInfo>>2)&7 == signerNone }
 
