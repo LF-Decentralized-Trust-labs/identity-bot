@@ -172,13 +172,6 @@ func (s *CoreServer) handleSetRootSeed(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, refusalFor(cap), http.StatusPreconditionFailed)
 		return
 	}
-	if !cap.RootKeyPermitted() && buildmode.IsDev() {
-		// Permitted only by the development-build relaxation. Loud on purpose:
-		// the seed is about to be stored UNWRAPPED on a machine with no usable
-		// key store — exactly what a production build refuses — so this identity
-		// must never be relied on as a production one.
-		log.Printf("[identity-agent-core] *** DEVELOPMENT BUILD *** storing a root key on a machine with no usable hardware key store (%s) — allowed only because this is a development build; the seed is stored UNWRAPPED and this identity must never be relied on as a production identity", cap.String())
-	}
 	if !s.isOwner(r) {
 		jsonError(w, "keystore management is for the owner of this agent", http.StatusForbidden)
 		return
@@ -207,6 +200,14 @@ func (s *CoreServer) handleSetRootSeed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !cap.RootKeyPermitted() && buildmode.IsDev() {
+		// Permitted only by the development-build relaxation, and a store is now
+		// actually about to happen (owner checked, seed valid, none already
+		// established). Loud on purpose: the seed is stored UNWRAPPED on a machine
+		// with no usable key store — exactly what a production build refuses — so
+		// this identity must never be relied on as a production one.
+		log.Printf("[identity-agent-core] *** DEVELOPMENT BUILD *** storing a root key on a machine with no usable hardware key store (%s) — allowed only because this is a development build; the seed is stored UNWRAPPED and this identity must never be relied on as a production identity", cap.String())
+	}
 	if err := secureenclave.StoreRootSeed(s.DataDir, seed); err != nil {
 		jsonError(w, "failed to store root seed", http.StatusInternalServerError)
 		return
