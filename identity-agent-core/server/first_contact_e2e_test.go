@@ -110,6 +110,58 @@ func TestAStrangerCarryingProofGetsInFrontOfTheOwner(t *testing.T) {
 	}
 }
 
+// The same stranger, carrying the same proof, but from the other realm: a
+// development-realm agent reaching a production one over DIDComm. It is refused
+// before anything is kept, so a cross-realm relationship cannot form on this
+// transport either. (The test binary is a production build, so a connect request
+// tagged "dev" is the cross-realm case.)
+func TestAStrangerFromTheOtherRealmIsRefused(t *testing.T) {
+	const strangerAID = "EStrangerOtherRealm"
+	receiver := witnessWithSeed(t, 1)
+	receiver.KeriDriver = acceptingKELDriver(t)
+
+	const ourAID = "EReceiver"
+	ourKeys, err := receiver.keySetFor(ourAID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ourDID, err := ourKeys.DID()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	strangerKeys, err := didcomm.GenerateKeySet(strangerAID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kel := inceptionCommittingTo(t, strangerAID, strangerKeys)
+
+	// The one difference from the accepted case: the connect request says the
+	// sender runs in the development realm.
+	body, _ := json.Marshal(map[string]string{"alias": "A Dev Stranger", "realm": "dev"})
+	jwm := &didcomm.JWM{
+		ID: "msg-cross-realm", Type: didcomm.TypeContactRequest,
+		From: "did:keri:" + strangerAID, To: []string{"did:keri:" + ourAID},
+		Body: body,
+	}
+	env, err := didcomm.PackAuthcrypt(strangerKeys, ourDID, jwm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env.SenderKEL = kel
+
+	raw, _ := json.Marshal(env)
+	w := httptest.NewRecorder()
+	receiver.handleDIDCommInbound(w, httptest.NewRequest(http.MethodPost, "/didcomm", bytes.NewReader(raw)))
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("a cross-realm stranger was not refused with a conflict: %d %s", w.Code, w.Body.String())
+	}
+	if rec, _ := receiver.DataStore.GetContact(strangerAID); rec != nil {
+		t.Fatalf("a cross-realm stranger was recorded anyway: status %q", rec.Status)
+	}
+}
+
 // Keys that the presented history does not commit to must not open anything.
 // This is the substitution the whole scheme exists to refuse.
 func TestAStrangerCannotPresentSomebodyElsesHistory(t *testing.T) {

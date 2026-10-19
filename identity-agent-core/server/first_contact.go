@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"identity-agent-core/buildmode"
 	"identity-agent-core/didcomm"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/store"
@@ -189,6 +190,23 @@ func (s *CoreServer) tryFirstContact(w http.ResponseWriter, r *http.Request,
 		// however well they have proved who they are — being identifiable is not
 		// being known, and this agent has agreed to nothing yet.
 		jsonError(w, "a first message may only be a request to connect", http.StatusForbidden)
+		return true
+	}
+
+	// A development-realm Identity Agent and a production-realm one must not form
+	// a relationship across the two. On this transport the realm rides the
+	// connect-request body — authenticated by the envelope that carried it, the
+	// same self-reported tag the OOBI handshake uses — and an absent realm is read
+	// as production, so a peer from before the tag is unaffected. Refused here,
+	// before any key history is kept or any request reaches the owner's list.
+	var connectBody struct {
+		Realm string `json:"realm"`
+	}
+	_ = json.Unmarshal(jwm.Body, &connectBody)
+	if peerRealmRefused(buildmode.Mode(), connectBody.Realm) {
+		log.Printf("[first-contact] refused an introduction from %s: %s",
+			claimedAID, crossRealmMessage(claimedAID, connectBody.Realm))
+		jsonError(w, crossRealmMessage(claimedAID, connectBody.Realm), http.StatusConflict)
 		return true
 	}
 

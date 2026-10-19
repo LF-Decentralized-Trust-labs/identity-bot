@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 
+	"identity-agent-core/buildmode"
 	"identity-agent-core/didcomm"
 )
 
@@ -50,6 +51,15 @@ func (s *CoreServer) introduceOurselvesTo(aid, oobiURL string, body map[string]i
 	if err := s.rememberPeerAt(aid, base); err != nil {
 		return fmt.Errorf("could not establish %s as a peer: %w", aid, err)
 	}
+
+	// Carry our realm on the request, so a peer in the other realm refuses it the
+	// same way an OOBI resolver does — a development-realm and a production-realm
+	// Identity Agent are kept apart on this transport too. Set centrally here so
+	// every connect-request carries it regardless of which caller built the body.
+	if body == nil {
+		body = map[string]interface{}{}
+	}
+	body["realm"] = buildmode.Mode()
 
 	raw, merr := json.Marshal(body)
 	if merr != nil {
