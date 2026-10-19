@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"testing"
 
 	"identity-agent-core/buildmode"
@@ -32,6 +33,34 @@ func TestPeerRealmRefused(t *testing.T) {
 					c.ourRealm, c.peerRealm, got, c.refused)
 			}
 		})
+	}
+}
+
+// A connect-request body is stamped with this agent's realm while its other
+// fields are preserved, an empty object gains the realm, and a body that is not
+// an object is returned untouched rather than dropped. (The test binary is a
+// production build, so the stamped value is prod.)
+func TestWithRealm(t *testing.T) {
+	stamped := withRealm([]byte(`{"alias":"a stranger"}`))
+	var got map[string]interface{}
+	if err := json.Unmarshal(stamped, &got); err != nil {
+		t.Fatalf("stamped body did not parse: %v", err)
+	}
+	if got["realm"] != buildmode.Mode() {
+		t.Fatalf("realm = %v, want %q", got["realm"], buildmode.Mode())
+	}
+	if got["alias"] != "a stranger" {
+		t.Fatalf("stamping dropped an existing field: alias = %v", got["alias"])
+	}
+
+	empty := withRealm([]byte(`{}`))
+	if err := json.Unmarshal(empty, &got); err != nil || got["realm"] != buildmode.Mode() {
+		t.Fatalf("an empty object was not stamped: %s (err %v)", empty, err)
+	}
+
+	notObject := []byte(`"not an object"`)
+	if out := withRealm(notObject); string(out) != string(notObject) {
+		t.Fatalf("a non-object body was altered: %s", out)
 	}
 }
 
