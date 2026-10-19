@@ -43,7 +43,7 @@ func loadC2Golden(t *testing.T) c2Golden {
 func TestC2HybridSignatureGolden(t *testing.T) {
 	golden := loadC2Golden(t)
 	if golden.HybridSignature.CompositeWire == "" {
-		t.Fatal("hybrid_signature not pinned — run scripts/pin_iacrypto_c2_golden.py")
+		t.Fatal("hybrid_signature missing from golden_vectors.json — the committed golden vectors are required")
 	}
 
 	res, err := iacrypto.SignHybridMessage()

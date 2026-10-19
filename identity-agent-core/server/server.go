@@ -1218,14 +1218,14 @@ type ErrorResponse struct {
 func (s *CoreServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 	uptime := time.Since(s.StartTime).Round(time.Second)
 
-	mode := "primary_active (driver: disabled)"
+	mode := "primary_active"
 	if s.KeriDriver != nil {
-		driverStatus := "unknown"
+		engineStatus := "unknown"
 		status, err := s.KeriDriver.GetStatus()
 		if err == nil {
-			driverStatus = status.Status
+			engineStatus = status.Status
 		}
-		mode = fmt.Sprintf("primary_active (driver: %s)", driverStatus)
+		mode = fmt.Sprintf("primary_active (engine: %s)", engineStatus)
 	}
 
 	tunnelURL := s.EndpointService.CurrentURL()
@@ -1254,7 +1254,7 @@ func (s *CoreServer) handleInfo(w http.ResponseWriter, r *http.Request) {
 
 	driverInfo := DriverInfo{
 		Status:  "disabled",
-		Library: "rust-bridge (mobile)",
+		Library: "keri-go",
 		URL:     "n/a",
 	}
 

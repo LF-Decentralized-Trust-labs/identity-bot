@@ -6,7 +6,7 @@ import (
 	"identity-agent-core/drivers"
 )
 
-// KeriDriverBackend adapts the Python KERI driver for local KEL replay.
+// KeriDriverBackend adapts the keri-go KERI engine for local KEL replay.
 type KeriDriverBackend struct {
 	Driver drivers.KeriEngine
 }
