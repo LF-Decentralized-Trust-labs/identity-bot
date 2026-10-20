@@ -107,23 +107,28 @@ func TestRevokedGrantDenies(t *testing.T) {
 func TestVerifiedGrantDerivesScopesFromCredential(t *testing.T) {
 	s := newGrantTestServer(t)
 	s.KeriDriver = &driverfake.Engine{
-		GetKelFunc: func(string) (*drivers.DriverKelResponse, error) {
-			return &drivers.DriverKelResponse{
-				AID: "ERoot", SequenceNumber: 0, EventCount: 1,
-				KEL: []map[string]interface{}{{"t": "icp", "s": "0", "d": "ERoot", "i": "ERoot"}},
-			}, nil
-		},
 		VerifyCredentialFunc: func(*drivers.DriverVerifyCredentialRequest) (*drivers.DriverVerifyCredentialResponse, error) {
 			return &drivers.DriverVerifyCredentialResponse{
 				Verified: true,
 				AcdcSaid: "EGrantOK",
+				// The names the shipped engine reports. Not revoked is absent:
+				// no registry log was supplied, so the issuer's own record decides.
 				Checks: map[string]interface{}{
-					"said_integrity": true, "issuer_in_kel": true, "kel_chain_valid": true,
-					"schema_trusted": true, "not_revoked": true, "holder_matches_subject": true,
-					"presentation_sig_valid": false, "credential_anchored": true,
+					"structure": true, "schema_accepted": true, "holder": true, "issuer_kel": true,
 				},
 			}, nil
 		},
+	}
+
+	// The issuer's stored log, which is what verification reads. The fake engine
+	// does not inspect it; what is checked here is that the issuance is in it.
+	for i, d := range []string{"ERoot", "EIssuance"} {
+		if err := s.DataStore.SaveEvent(store.EventRecord{
+			AID: "ERoot", SequenceNumber: i, EventType: "ixn",
+			EventJSON: `{"d":"` + d + `"}`, RawBytesB64: "eA==", CesrSignature: "sig",
+		}); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	// The grant ACDC names infra.zone.list in its attribute block; the stored
@@ -134,7 +139,7 @@ func TestVerifiedGrantDerivesScopesFromCredential(t *testing.T) {
 	if err := s.DataStore.SaveCredential(store.CredentialRecord{
 		SAID: "EGrantOK", Status: "issued", Format: "acdc",
 		SchemaSAID: capabilityGrantSchemaSAID, HolderAID: "EAgent", IssuerAID: "ERoot",
-		AcdcJson: base64.StdEncoding.EncodeToString(acdc),
+		AcdcJson: base64.StdEncoding.EncodeToString(acdc), IxnSAID: "EIssuance",
 	}); err != nil {
 		t.Fatal(err)
 	}

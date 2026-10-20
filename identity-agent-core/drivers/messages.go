@@ -42,14 +42,18 @@ type DriverHybridInceptionResponse struct {
 }
 
 type DriverDelegatedInceptionResponse struct {
-	AID           string                 `json:"aid"`
-	DelegatorAID  string                 `json:"delegator_aid"`
-	Said          string                 `json:"said"`
-	DipEvent      map[string]interface{} `json:"dip_event"`
-	DelegatorIxn  map[string]interface{} `json:"delegator_ixn,omitempty"`
-	RawBytesB64   string                 `json:"raw_bytes_b64"`
-	PublicKey     string                 `json:"public_key"`
-	NextKeyDigest string                 `json:"next_key_digest"`
+	AID          string                 `json:"aid"`
+	DelegatorAID string                 `json:"delegator_aid"`
+	Said         string                 `json:"said"`
+	DipEvent     map[string]interface{} `json:"dip_event"`
+	DelegatorIxn map[string]interface{} `json:"delegator_ixn,omitempty"`
+	// DelegatorIxnRawBytesB64 is the delegator's approving event as KERI
+	// serialised it: the bytes the delegator signs, and the only bytes its
+	// signature and its own digest can be checked against.
+	DelegatorIxnRawBytesB64 string `json:"delegator_ixn_raw_bytes_b64,omitempty"`
+	RawBytesB64             string `json:"raw_bytes_b64"`
+	PublicKey               string `json:"public_key"`
+	NextKeyDigest           string `json:"next_key_digest"`
 }
 
 type DriverRotationResponse struct {

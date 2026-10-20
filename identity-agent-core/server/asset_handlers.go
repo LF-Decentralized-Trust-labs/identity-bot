@@ -1,13 +1,10 @@
 package server
 
 import (
-	"encoding/json"
 	"os"
-	"strconv"
-	"time"
 
 	"identity-agent-core/asset"
-	"identity-agent-core/store"
+	"identity-agent-core/drivers"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -43,30 +40,11 @@ func (s *CoreServer) initAssetHandler() error {
 // event that anchors a delegated inception in the root KEL — to the event store.
 // Without this the root KEL loses the anchor on the next reload and the whole
 // chain after it fails hash-chain verification.
-func (s *CoreServer) saveDelegationAnchor(rootAID string, ixn map[string]interface{}) error {
-	if ixn == nil {
+func (s *CoreServer) saveDelegationAnchor(rootAID string, approval *drivers.DriverDelegatedInceptionResponse) error {
+	if approval == nil || approval.DelegatorIxn == nil {
 		return nil
 	}
-	identity, err := s.DataStore.GetIdentity()
-	if err != nil || identity == nil {
-		return err
-	}
-	sn := 0
-	if sStr, ok := ixn["s"].(string); ok {
-		if n, perr := strconv.ParseInt(sStr, 16, 64); perr == nil {
-			sn = int(n)
-		}
-	}
-	ixnJSON, _ := json.Marshal(ixn)
-	return s.DataStore.SaveEvent(store.EventRecord{
-		AID:            rootAID,
-		SequenceNumber: sn,
-		EventType:      "ixn",
-		EventJSON:      string(ixnJSON),
-		PublicKey:      identity.PublicKey,
-		NextKeyDigest:  identity.NextKeyDigest,
-		Timestamp:      time.Now().UTC().Format(time.RFC3339),
-	})
+	return s.saveOwnInteraction(rootAID, approval.DelegatorIxn, approval.DelegatorIxnRawBytesB64, -1)
 }
 
 func (s *CoreServer) mountAssetRoutes(r chi.Router) {

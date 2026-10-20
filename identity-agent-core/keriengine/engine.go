@@ -333,14 +333,16 @@ func (e *Engine) CreateDelegatedInception(publicKey, nextPublicKey, name, delega
 	e.state.mu.Unlock()
 
 	return &drivers.DriverDelegatedInceptionResponse{
-		AID:           dipEvent.Identifier,
-		DelegatorAID:  delegator.AID,
-		Said:          dipEvent.SAID,
-		DipEvent:      dipBody,
-		DelegatorIxn:  ixnBody,
-		RawBytesB64:   b64(dip),
-		PublicKey:     pub,
-		NextKeyDigest: nextDigest,
+		AID:          dipEvent.Identifier,
+		DelegatorAID: delegator.AID,
+		Said:         dipEvent.SAID,
+		DipEvent:     dipBody,
+		DelegatorIxn: ixnBody,
+		RawBytesB64:  b64(dip),
+
+		DelegatorIxnRawBytesB64: b64(ixn),
+		PublicKey:               pub,
+		NextKeyDigest:           nextDigest,
 	}, nil
 }
 
@@ -366,7 +368,7 @@ func (e *Engine) ReinstateDelegatedIdentity(publicKey, nextPublicKey, name, dele
 	if err != nil {
 		return nil, err
 	}
-	approval, ok := e.approvalIn(delegator, dipEvent.Identifier, fmt.Sprintf("%x", dipEvent.SN), dipEvent.SAID)
+	approval, approvalRaw, ok := e.approvalIn(delegator, dipEvent.Identifier, fmt.Sprintf("%x", dipEvent.SN), dipEvent.SAID)
 	if !ok {
 		return nil, fmt.Errorf("the delegator's log carries no approval of %s, so it was never "+
 			"delegated and cannot be reinstated", dipEvent.Identifier)
@@ -379,14 +381,16 @@ func (e *Engine) ReinstateDelegatedIdentity(publicKey, nextPublicKey, name, dele
 		return nil, err
 	}
 	return &drivers.DriverDelegatedInceptionResponse{
-		AID:           dipEvent.Identifier,
-		DelegatorAID:  delegator.AID,
-		Said:          dipEvent.SAID,
-		DipEvent:      dipBody,
-		DelegatorIxn:  approval,
-		RawBytesB64:   b64(dip),
-		PublicKey:     pub,
-		NextKeyDigest: nextDigest,
+		AID:          dipEvent.Identifier,
+		DelegatorAID: delegator.AID,
+		Said:         dipEvent.SAID,
+		DipEvent:     dipBody,
+		DelegatorIxn: approval,
+		RawBytesB64:  b64(dip),
+
+		DelegatorIxnRawBytesB64: approvalRaw,
+		PublicKey:               pub,
+		NextKeyDigest:           nextDigest,
 	}, nil
 }
 
@@ -448,7 +452,7 @@ func (e *Engine) holdDelegatedIdentity(name, pub, nextDigest string, dip []byte,
 
 // approvalIn finds the event in the delegator's log whose seals name exactly
 // this identifier, sequence number and digest.
-func (e *Engine) approvalIn(delegator *identity, aid, sn, said string) (map[string]interface{}, bool) {
+func (e *Engine) approvalIn(delegator *identity, aid, sn, said string) (map[string]interface{}, string, bool) {
 	e.state.mu.RLock()
 	defer e.state.mu.RUnlock()
 	for _, ev := range delegator.KEL {
@@ -456,11 +460,15 @@ func (e *Engine) approvalIn(delegator *identity, aid, sn, said string) (map[stri
 		for _, raw := range seals {
 			seal, _ := raw.(map[string]interface{})
 			if seal["i"] == aid && seal["s"] == sn && seal["d"] == said {
-				return ev.Parsed, true
+				rawB64 := ""
+				if len(ev.Raw) > 0 {
+					rawB64 = b64(ev.Raw)
+				}
+				return ev.Parsed, rawB64, true
 			}
 		}
 	}
-	return nil, false
+	return nil, "", false
 }
 
 // RotateAid replaces an identity's signing key with the one it committed to.

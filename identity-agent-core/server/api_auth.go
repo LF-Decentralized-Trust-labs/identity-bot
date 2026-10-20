@@ -55,6 +55,9 @@ var publicRoutes = map[string]string{
 	"POST /_register":               "a pairwise signer registers its key so counterparties can resolve it",
 	"POST /public/_register":        "a pairwise signer registers its key so counterparties can resolve it",
 	"GET /public/credential/{said}": "a credential the user chose to publish at a shareable link",
+	// A credential names its schema by digest; a verifier fetches the document to
+	// confirm what the credential claims. Schemas are public by nature.
+	"GET /public/schemas/{said}": "a credential schema document, resolved by its identifier",
 
 	// --- carrying a request nothing in the middle can read ---
 	// Open in the same sense the message endpoint is open: what arrives is an

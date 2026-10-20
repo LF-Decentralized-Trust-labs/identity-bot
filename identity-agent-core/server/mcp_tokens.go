@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -293,9 +294,10 @@ func (s *CoreServer) applyGrantScopes(entry mcpToken, cc *sandbox.CallerContext)
 	}
 	// Credential-proven: derive the ceiling and any resource constraints from the
 	// verified grant, and record it.
-	if caps := capabilitiesFromACDC(rec.AcdcJson); len(caps) > 0 {
-		cc.Scopes = caps // source of truth = the verified credential
-	}
+	// Source of truth = the verified credential, including when it grants
+	// nothing: an empty list is an agent stripped of everything, not a cue to
+	// fall back to whatever the token remembered.
+	cc.Scopes = capabilitiesFromACDC(rec.AcdcJson)
 	cc.ResourceConstraints = resourceConstraintsFromACDC(rec.AcdcJson)
 	cc.GrantSAID = rec.SAID
 }
@@ -338,14 +340,17 @@ func (s *CoreServer) grantCredentialValid(rec *store.CredentialRecord, entry mcp
 	if issuer == "" {
 		issuer = rec.IssuerAID
 	}
-	kel, err := s.KeriDriver.GetKel(issuer)
-	if err != nil || kel == nil || len(kel.KEL) == 0 {
+	// The issuer's log as it is stored and published — with each event's bytes
+	// and signature — rather than the engine's working copy, which holds neither
+	// signature and so could only ever be reported as an unproven chain.
+	kel, err := s.storedKelForVerifying(issuer)
+	if err != nil || len(kel) == 0 {
 		log.Printf("[mcp] grant %s: issuer KEL unavailable: %v", rec.SAID, err)
 		return false
 	}
 	result, err := s.KeriDriver.VerifyCredential(&drivers.DriverVerifyCredentialRequest{
 		AcdcJson:           rec.AcdcJson,
-		IssuerKelEvents:    kel.KEL,
+		IssuerKelEvents:    kel,
 		HolderAid:          entry.AgentAID,
 		TrustedSchemaSaids: []string{capabilityGrantSchemaSAID},
 	})
@@ -357,21 +362,79 @@ func (s *CoreServer) grantCredentialValid(rec *store.CredentialRecord, entry mcp
 		log.Printf("[mcp] grant %s failed verification: %s — denying", rec.SAID, reason)
 		return false
 	}
-	// Require the structural, issuer, schema, and revocation checks. The holder
-	// presentation-binding check (presentation_sig_valid) is intentionally NOT
-	// required: the agent authenticates via its bound token, not by presenting a
-	// signed ACDC, and holder_matches_subject already binds the grant to this agent.
-	required := []string{
-		"said_integrity", "issuer_in_kel", "kel_chain_valid",
-		"schema_trusted", "not_revoked", "holder_matches_subject", "credential_anchored",
-	}
-	for _, k := range required {
+	// Every one of these must have been checked AND passed. A check the engine did
+	// not run is absent, and absent is a failure: the list names what this gate
+	// relies on, so an engine that stopped reporting one cannot pass by silence.
+	//
+	// Not required: proof that the holder presented it. The agent authenticates
+	// with its bound token rather than by presenting the credential, and "holder"
+	// already binds the grant to this agent.
+	for _, k := range []string{"structure", "schema_accepted", "holder", "issuer_kel"} {
 		if ok, _ := result.Checks[k].(bool); !ok {
 			log.Printf("[mcp] grant %s failed verification check %q (errors: %v) — denying", rec.SAID, k, result.Errors)
 			return false
 		}
 	}
+	// Revocation. A revocation the engine found in a log it was given is final.
+	// When it was given no log it reports nothing, and the answer comes from this
+	// identity's own record of what it revoked — which is authoritative here,
+	// because this identity is the issuer, and the caller has already refused a
+	// grant whose record says revoked.
+	if v, reported := result.Checks["not_revoked"]; reported && v != nil {
+		if ok, _ := v.(bool); !ok {
+			log.Printf("[mcp] grant %s is revoked in its registry — denying", rec.SAID)
+			return false
+		}
+	}
+	// Anchored: the issuer's own log carries the event that issued it. A grant
+	// whose issuance is not in the issuer's history was not issued by it.
+	if !kelCarriesEvent(kel, rec.IxnSAID) {
+		log.Printf("[mcp] grant %s: its issuance %q is not in the issuer's key log — denying", rec.SAID, rec.IxnSAID)
+		return false
+	}
+	if lapsed, when := grantHasLapsed(rec.AcdcJson, time.Now()); lapsed {
+		log.Printf("[mcp] grant %s lapsed at %s — denying", rec.SAID, when)
+		return false
+	}
 	return true
+}
+
+func kelCarriesEvent(kel []map[string]interface{}, said string) bool {
+	if said == "" {
+		return false
+	}
+	for _, ev := range kel {
+		if d, _ := ev["d"].(string); d == said {
+			return true
+		}
+	}
+	return false
+}
+
+// grantHasLapsed reports whether a grant's valid_until is past. A grant without
+// one holds until revoked; one whose valid_until cannot be read has lapsed, since
+// an unreadable limit must not become no limit.
+func grantHasLapsed(acdcJsonB64 string, now time.Time) (bool, string) {
+	raw, err := base64.StdEncoding.DecodeString(acdcJsonB64)
+	if err != nil {
+		return true, "an unreadable credential"
+	}
+	var body struct {
+		A map[string]interface{} `json:"a"`
+	}
+	if json.Unmarshal(raw, &body) != nil {
+		return true, "an unreadable credential"
+	}
+	v, present := body.A["valid_until"]
+	if !present {
+		return false, ""
+	}
+	str, _ := v.(string)
+	until, err := time.Parse(time.RFC3339, str)
+	if err != nil {
+		return true, fmt.Sprintf("an unreadable time %q", str)
+	}
+	return !now.Before(until), str
 }
 
 // capabilitiesFromACDC extracts the granted capability ids from a capability-grant

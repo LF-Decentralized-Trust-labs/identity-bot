@@ -66,7 +66,7 @@ func newEnrolHandler(t *testing.T, keri *fakeKeri) *Handler {
 		Store:      store,
 		KeriDriver: keri.engine,
 		RootAID:    func() string { return "EORG-ROOT" },
-		PersistDelegationAnchor: func(rootAID string, ixn map[string]interface{}) error {
+		PersistDelegationAnchor: func(rootAID string, _ *drivers.DriverDelegatedInceptionResponse) error {
 			keri.anchorsIssued.Add(1)
 			return nil
 		},
@@ -200,7 +200,7 @@ func TestTheEnrolledAssetIsDelegatedAndRecorded(t *testing.T) {
 func TestAnUnanchorableDelegationIsNotIssued(t *testing.T) {
 	keri := newFakeKeri(t)
 	h := newEnrolHandler(t, keri)
-	h.PersistDelegationAnchor = func(string, map[string]interface{}) error {
+	h.PersistDelegationAnchor = func(string, *drivers.DriverDelegatedInceptionResponse) error {
 		return errAnchorFailed
 	}
 	token := issueToken(t, h, "a device this agent owns", "host", "")

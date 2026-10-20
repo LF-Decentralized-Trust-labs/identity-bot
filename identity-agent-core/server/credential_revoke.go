@@ -33,31 +33,10 @@ func (s *CoreServer) handleRevokeCredential(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	telRevoked := false
-	if rec.RegistrySAID != "" && rec.IssSAID != "" && s.KeriDriver != nil {
-		resp, rerr := s.KeriDriver.RevokeCredential(rec.IssuerAID, said, rec.RegistrySAID, rec.IssSAID)
-		if rerr != nil {
-			writeError(w, http.StatusInternalServerError, "TEL revocation failed", rerr.Error())
-			return
-		}
-		// Persist the revocation anchor to the issuer KEL (the revocation proof).
-		if identity, _ := s.DataStore.GetIdentity(); identity != nil {
-			ixnJSON, _ := json.Marshal(resp.IxnEvent)
-			if serr := s.DataStore.SaveEvent(store.EventRecord{
-				AID:            rec.IssuerAID,
-				SequenceNumber: resp.SequenceNumber,
-				EventType:      "ixn",
-				EventJSON:      string(ixnJSON),
-				PublicKey:      identity.PublicKey,
-				NextKeyDigest:  identity.NextKeyDigest,
-				Timestamp:      rec.IssuedAt,
-				RawBytesB64:    resp.IxnRawBytesB64,
-			}); serr != nil {
-				log.Printf("[credential] failed to persist revocation anchor for %s: %v", said, serr)
-			}
-		}
-		telRevoked = true
-		log.Printf("[credential] TEL-revoked %s (rev %s, registry %s)", said, resp.RevSaid, rec.RegistrySAID)
+	telRevoked, err := s.revokeIssuedCredential(rec)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "TEL revocation failed", err.Error())
+		return
 	}
 
 	if err := s.DataStore.UpdateCredentialStatus(said, "revoked"); err != nil {
@@ -67,4 +46,26 @@ func (s *CoreServer) handleRevokeCredential(w http.ResponseWriter, r *http.Reque
 	log.Printf("[credential] revoked %s (schema %s, holder %s, tel=%v)", said, rec.SchemaSAID, rec.HolderAID, telRevoked)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"said": said, "status": "revoked", "tel_revoked": telRevoked})
+}
+
+// revokeIssuedCredential writes the revocation of a credential this identity
+// issued into its registry's log, and anchors it in the issuer's key log, which
+// is the proof anybody else checks. A credential issued outside a registry has
+// no log to write to, and reports false.
+//
+// It does not change the stored status; the caller does, once it has decided
+// the revocation is the one it meant.
+func (s *CoreServer) revokeIssuedCredential(rec *store.CredentialRecord) (bool, error) {
+	if rec.RegistrySAID == "" || rec.IssSAID == "" || s.KeriDriver == nil {
+		return false, nil
+	}
+	resp, err := s.KeriDriver.RevokeCredential(rec.IssuerAID, rec.SAID, rec.RegistrySAID, rec.IssSAID)
+	if err != nil {
+		return false, err
+	}
+	if serr := s.saveOwnInteraction(rec.IssuerAID, resp.IxnEvent, resp.IxnRawBytesB64, resp.SequenceNumber); serr != nil {
+		log.Printf("[credential] failed to persist revocation anchor for %s: %v", rec.SAID, serr)
+	}
+	log.Printf("[credential] TEL-revoked %s (rev %s, registry %s)", rec.SAID, resp.RevSaid, rec.RegistrySAID)
+	return true, nil
 }

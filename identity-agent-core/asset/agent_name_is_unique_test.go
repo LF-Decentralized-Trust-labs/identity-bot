@@ -10,7 +10,7 @@ import (
 func TestASecondAgentWithTheSameNameIsRefused(t *testing.T) {
 	h, _ := newAgentForTest(t, []string{"infra.zone.list"})
 	for _, name := range []string{"test-agent", " TEST-agent "} {
-		_, err := h.ProvisionAgentAsset(name, []string{"infra.zone.list"}, nil)
+		_, err := h.ProvisionAgentAsset(name, []string{"infra.zone.list"}, nil, nil)
 		if !errors.Is(err, ErrAgentNameTaken) {
 			t.Fatalf("provisioning %q again gave %v, want ErrAgentNameTaken", name, err)
 		}
@@ -21,7 +21,7 @@ func TestASecondAgentWithTheSameNameIsRefused(t *testing.T) {
 // missing root identity, since this handler has none.
 func TestADifferentNameIsNotRefusedAsTaken(t *testing.T) {
 	h, _ := newAgentForTest(t, nil)
-	_, err := h.ProvisionAgentAsset("another-agent", []string{"infra.zone.list"}, nil)
+	_, err := h.ProvisionAgentAsset("another-agent", []string{"infra.zone.list"}, nil, nil)
 	if errors.Is(err, ErrAgentNameTaken) {
 		t.Fatal("a name nobody uses was refused as taken")
 	}

@@ -5,11 +5,12 @@
 // schemas at GET /api/schemas/{said} so any KERI verifier can resolve them
 // without a central registry.
 //
-// Adding a new schema:
-//  1. Define the JSON Schema as a string constant below.
-//  2. Compute its Blake3-256 SAID (run `go run ./cmd/schema-tool` or use the
-//     /api/credential-schemas/fetch endpoint to derive it from content).
-//  3. Add an entry to Catalog map.
+// Asset grants (asset_grant.go) are built from one template and identified by
+// the Blake3-256 digest the KERI library computes over each document; they are
+// served for verifiers at /public/schemas/{said}. The schemas defined in this
+// file still carry placeholder identifiers, which prove nothing about their
+// content. A new schema is identified the way asset grants are, with
+// keri.BuildSchema, never with a hand-written identifier.
 package schemas
 
 // BuiltinSchema describes one bundled credential schema.
@@ -172,40 +173,11 @@ const employeeAuthorizationJSON = `{
   "required": ["d", "org_name", "org_aid", "employee_name", "role"]
 }`
 
-const capabilityGrantJSON = `{
-  "$id": "ECapabilityGrant__placeholder__v1",
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Capability Grant",
-  "description": "Endows a delegated agent identity with a bounded set of capabilities its issuer (the owner) authorizes it to invoke through the governed endpoint. The agent presents this credential; the gateway verifies it and derives the agent's allowed capabilities from it, so authority is credential-proven rather than a server-side list.",
-  "type": "object",
-  "properties": {
-    "d":                    { "type": "string", "description": "SAID of attribute block" },
-    "i":                    { "type": "string", "description": "Holder AID — the delegated agent this grant endows" },
-    "capabilities":         { "type": "array", "items": { "type": "string" }, "description": "The capability ids the agent is authorized to invoke (its ceiling)" },
-    "resource_constraints": { "type": "object", "description": "Optional per-capability constraints (e.g. an allowlist of resources) checked at authorization" },
-    "issued_date":          { "type": "string", "format": "date", "description": "ISO 8601 date the grant was issued" },
-    "expiry_date":          { "type": "string", "format": "date", "description": "ISO 8601 date the grant expires (omit for no expiry)" }
-  },
-  "required": ["d", "i", "capabilities"]
-}`
-
 // ── Catalog ───────────────────────────────────────────────────────────────────
 
 // Catalog is the authoritative map of SAID → BuiltinSchema for all bundled schemas.
 // The map key matches the schema's "$id" field.
 var Catalog = map[string]*BuiltinSchema{
-	"ECapabilityGrant__placeholder__v1": {
-		SAID:        "ECapabilityGrant__placeholder__v1",
-		Name:        "Capability Grant",
-		Description: "Endows a delegated agent identity with the bounded set of capabilities its owner authorizes it to invoke. Verified at the governed endpoint so authority is credential-proven.",
-		JSON:        capabilityGrantJSON,
-		Fields: []SchemaField{
-			{Key: "capabilities", Label: "Capabilities", Type: "string", Required: true, Placeholder: "capability ids the agent may invoke"},
-			{Key: "resource_constraints", Label: "Resource Constraints", Type: "string", Required: false, Placeholder: "optional per-capability limits"},
-			{Key: "issued_date", Label: "Issued Date", Type: "date", Required: false, Placeholder: ""},
-			{Key: "expiry_date", Label: "Expiry Date", Type: "date", Required: false, Placeholder: "Leave blank for no expiry"},
-		},
-	},
 	"EGuardianship__placeholder__v1": {
 		SAID:        "EGuardianship__placeholder__v1",
 		Name:        "Guardianship Credential",

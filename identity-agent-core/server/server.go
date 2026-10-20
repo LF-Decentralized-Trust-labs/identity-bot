@@ -1008,6 +1008,10 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 	// /public/credential/{said} — public credential delivery endpoint for sharing issued credentials.
 	r.Get("/public/credential/{said}", s.handlePublicCredentialServe)
 
+	// /public/schemas/{said} — the schema document itself, so a verifier can
+	// confirm what a credential issued here claims.
+	r.Get("/public/schemas/{said}", s.handlePublicSchemaServe)
+
 	// Serve did.json for owned/registered AIDs at /public/{aid}/did.json (before the SPA), so
 	// login site keys and minted pairwise signer keys resolve.
 	s.mountPublicDidWebsRoutes(r)
@@ -3105,15 +3109,18 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
 					}
 					publicURL := s.getPublicURL(r)
 					oobiURL := fmt.Sprintf("%s/public/oobi/%s", publicURL, a.PairwiseAID)
+					rawEvents, signatures := s.assetEventsAndSignatures(a, kelResp.RawEventsB64)
 					w.Header().Set("Content-Type", "application/json")
 					json.NewEncoder(w).Encode(map[string]interface{}{
-						"aid":           a.PairwiseAID,
-						"oobi":          oobiURL,
-						"kel":           kelResp.KEL,
-						"type":          "asset",
-						"asset_id":      a.ID,
-						"display_name":  a.DisplayName,
-						"delegator_aid": a.DelegatorAID,
+						"aid":             a.PairwiseAID,
+						"oobi":            oobiURL,
+						"kel":             kelResp.KEL,
+						"raw_events_b64":  rawEvents,
+						"cesr_signatures": signatures,
+						"type":            "asset",
+						"asset_id":        a.ID,
+						"display_name":    a.DisplayName,
+						"delegator_aid":   a.DelegatorAID,
 						// Which realm this agent runs in, so a resolver keeps a
 						// development peer and a production peer apart.
 						"realm": buildmode.Mode(),

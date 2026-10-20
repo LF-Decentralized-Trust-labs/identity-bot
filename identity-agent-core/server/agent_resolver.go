@@ -5,6 +5,8 @@ import (
 
 	"identity-agent-core/asset"
 	"identity-agent-core/sandbox"
+
+	"identity-agent-core/store"
 )
 
 // Agent identity resolution — the foundational primitives for treating a provisioned
@@ -153,13 +155,19 @@ func (s *CoreServer) findCapabilityGrant(aid string) *grantRef {
 	if err != nil {
 		return nil
 	}
+	var newest *store.CredentialRecord
 	for i := range creds {
 		c := creds[i]
 		if c.HolderAID == aid && c.SchemaSAID == capabilityGrantSchemaSAID && isUsableStatus(c.Status) {
-			return &grantRef{SAID: c.SAID}
+			if newest == nil || c.IssuedAt > newest.IssuedAt {
+				newest = &c
+			}
 		}
 	}
-	return nil
+	if newest == nil {
+		return nil
+	}
+	return &grantRef{SAID: newest.SAID}
 }
 
 type grantRef struct{ SAID string }

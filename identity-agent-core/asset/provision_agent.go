@@ -21,7 +21,7 @@ import (
 // The agent gets its OWN verifiable AID chained to the owner's root, so every
 // action it takes through the endpoint is provably "owner -> this agent" in the
 // signed invocation log.
-func (h *Handler) ProvisionAgentAsset(displayName string, capabilities []string, cfg *AgentConfig) (*Asset, error) {
+func (h *Handler) ProvisionAgentAsset(displayName string, capabilities []string, cfg *AgentConfig, validUntil *time.Time) (*Asset, error) {
 	displayName = strings.TrimSpace(displayName)
 	if displayName == "" {
 		return nil, fmt.Errorf("agent display name is required")
@@ -57,7 +57,7 @@ func (h *Handler) ProvisionAgentAsset(displayName string, capabilities []string,
 	}
 	// Persist the owner-root anchoring event, or the agent's delegation won't
 	// survive a KEL reload and its capability grant will never verify.
-	if err := h.persistDelegationAnchor(rootAID, resp.DelegatorIxn); err != nil {
+	if err := h.persistDelegationAnchor(rootAID, resp); err != nil {
 		return nil, fmt.Errorf("persist delegation anchor: %w", err)
 	}
 
@@ -73,6 +73,7 @@ func (h *Handler) ProvisionAgentAsset(displayName string, capabilities []string,
 		SigningIndex:    signingIndex,
 		Capabilities:    capabilities,
 		AgentConfig:     cfg,
+		GrantValidUntil: validUntil,
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}
