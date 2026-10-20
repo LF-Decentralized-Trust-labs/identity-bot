@@ -17,9 +17,25 @@ set -euo pipefail
 
 BUILD_NUMBER="${BUILD_NUMBER:-0}"
 
+# MODE selects the build realm (dev or prod). Prod is the default and is safe: it
+# trusts only the production software-update key and keeps every fail-closed gate
+# closed. MODE=dev injects the development build-mode constant (the buildmode
+# package), so the core trusts the development keys, reports itself a development
+# build on /api/health, and relaxes the gates that would otherwise refuse a
+# machine that cannot attest. A dev build must never be shipped to a user. See
+# docs/adr/043-developer-mode-roots-in-a-separate-trust-anchor.md.
+MODE="${MODE:-prod}"
+MODE_LDFLAGS=""
+case "$MODE" in
+  prod) ;;
+  dev)  MODE_LDFLAGS="-X identity-agent-core/buildmode.rawMode=dev"
+        echo "  MODE=dev — DEVELOPMENT build, not for production" ;;
+  *)    echo "  ERROR: MODE must be 'dev' or 'prod' (got '$MODE')" >&2; exit 1 ;;
+esac
+
 echo "--- Build Go backend (Linux) ---"
 ( cd identity-agent-core
-  CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/identity-agent-core .
+  CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "$MODE_LDFLAGS" -o bin/identity-agent-core .
   file bin/identity-agent-core
   ls -lh bin/identity-agent-core )
 

@@ -16,12 +16,28 @@ $ErrorActionPreference = "Stop"
 
 if (-not $env:BUILD_NUMBER) { $env:BUILD_NUMBER = "0" }
 
+# MODE selects the build realm (dev or prod). Prod is the default and is safe: it
+# trusts only the production software-update key and keeps every fail-closed gate
+# closed. MODE=dev injects the development build-mode constant (the buildmode
+# package), so the core trusts the development keys, reports itself a development
+# build on /api/health, and relaxes the gates that would otherwise refuse a
+# machine that cannot attest. A dev build must never be shipped to a user. See
+# docs/adr/043-developer-mode-roots-in-a-separate-trust-anchor.md.
+if (-not $env:MODE) { $env:MODE = "prod" }
+$ModeLdflags = ""
+switch ($env:MODE) {
+  "prod" { }
+  "dev"  { $ModeLdflags = "-X identity-agent-core/buildmode.rawMode=dev"
+           Write-Host "  MODE=dev — DEVELOPMENT build, not for production" }
+  default { throw "MODE must be 'dev' or 'prod' (got '$($env:MODE)')" }
+}
+
 Write-Host "--- Build Go backend (Windows) ---"
 $env:CGO_ENABLED = "0"
 $env:GOOS = "windows"
 $env:GOARCH = "amd64"
 Push-Location identity-agent-core
-go build -o bin\identity-agent-core.exe .
+go build -ldflags "$ModeLdflags" -o bin\identity-agent-core.exe .
 if ($LASTEXITCODE -ne 0) { throw "Go backend build failed" }
 Get-Item bin\identity-agent-core.exe
 Pop-Location

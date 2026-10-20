@@ -19,6 +19,22 @@ set -euo pipefail
 
 BUILD_NUMBER="${BUILD_NUMBER:-0}"
 
+# MODE selects the build realm (dev or prod). Prod is the default and is safe: it
+# trusts only the production software-update key and keeps every fail-closed gate
+# closed. MODE=dev injects the development build-mode constant (the buildmode
+# package), so the core trusts the development keys, reports itself a development
+# build on /api/health, and relaxes the gates that would otherwise refuse a
+# machine that cannot attest. A dev build must never be shipped to a user. See
+# docs/adr/043-developer-mode-roots-in-a-separate-trust-anchor.md.
+MODE="${MODE:-prod}"
+MODE_LDFLAGS=""
+case "$MODE" in
+  prod) ;;
+  dev)  MODE_LDFLAGS="-X identity-agent-core/buildmode.rawMode=dev"
+        echo "  MODE=dev — DEVELOPMENT build, not for production" ;;
+  *)    echo "  ERROR: MODE must be 'dev' or 'prod' (got '$MODE')" >&2; exit 1 ;;
+esac
+
 echo "--- Build the Secure Enclave shim ---"
 # WITHOUT THIS THE ENCLAVE CODE SHIPS IN NOTHING, which is the failure this
 # whole area keeps producing: the capability is written, proven on hardware, and
@@ -51,9 +67,9 @@ echo "--- Build Go backend (macOS universal) ---"
   # need one.
   export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-12.0}"
   CGO_ENABLED=1 CGO_LDFLAGS="$SEP_LDFLAGS" GOOS=darwin GOARCH=arm64 \
-    go build -tags sepblob -o bin/identity-agent-core-arm64 .
+    go build -tags sepblob -ldflags "$MODE_LDFLAGS" -o bin/identity-agent-core-arm64 .
   CGO_ENABLED=1 CGO_LDFLAGS="$SEP_LDFLAGS" GOOS=darwin GOARCH=amd64 \
-    go build -tags sepblob -o bin/identity-agent-core-amd64 .
+    go build -tags sepblob -ldflags "$MODE_LDFLAGS" -o bin/identity-agent-core-amd64 .
   lipo -create -output bin/identity-agent-core bin/identity-agent-core-arm64 bin/identity-agent-core-amd64
   file bin/identity-agent-core
   ls -lh bin/identity-agent-core
