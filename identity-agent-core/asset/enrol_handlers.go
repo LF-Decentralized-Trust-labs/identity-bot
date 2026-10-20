@@ -165,7 +165,7 @@ func (h *Handler) HandleEnrol(w http.ResponseWriter, r *http.Request) {
 	// The delegation is only real once our own KEL records it. Persisting the
 	// anchor first means a failure here leaves no asset claiming an identity
 	// nobody can verify.
-	if err := h.persistDelegationAnchor(rootAID, resp.DelegatorIxn); err != nil {
+	if err := h.persistDelegationAnchor(rootAID, resp); err != nil {
 		release()
 		h.writeJSON(w, map[string]string{
 			"error": "the delegation could not be anchored, so it was not issued: " + err.Error(),

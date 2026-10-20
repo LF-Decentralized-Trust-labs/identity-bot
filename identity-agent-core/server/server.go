@@ -1008,6 +1008,10 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 	// /public/credential/{said} — public credential delivery endpoint for sharing issued credentials.
 	r.Get("/public/credential/{said}", s.handlePublicCredentialServe)
 
+	// /public/schemas/{said} — the schema document itself, so a verifier can
+	// confirm what a credential issued here claims.
+	r.Get("/public/schemas/{said}", s.handlePublicSchemaServe)
+
 	// Serve did.json for owned/registered AIDs at /public/{aid}/did.json (before the SPA), so
 	// login site keys and minted pairwise signer keys resolve.
 	s.mountPublicDidWebsRoutes(r)
@@ -1828,18 +1832,8 @@ func (s *CoreServer) handleInteract(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339)
-	eventJSON, _ := json.Marshal(result.IxnEvent)
-	eventRecord := store.EventRecord{
-		AID:            result.AID,
-		SequenceNumber: result.SequenceNumber,
-		EventType:      "ixn",
-		EventJSON:      string(eventJSON),
-		Timestamp:      now,
-		CesrSignature:  req.CesrSignature,
-		RawBytesB64:    result.RawBytesB64,
-	}
-	if err := s.DataStore.SaveEvent(eventRecord); err != nil {
+	if err := s.saveOwnInteraction(result.AID, result.IxnEvent, result.RawBytesB64,
+		result.SequenceNumber, req.CesrSignature); err != nil {
 		log.Printf("[identity-agent-core] Warning: failed to persist IXN event: %v", err)
 	}
 
@@ -2068,19 +2062,8 @@ func (s *CoreServer) handleIssueCredential(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Persist the IXN event in the KEL (use the relationship AID when issuing via pairwise context)
-	ixnEventJSON, _ := json.Marshal(result.IxnEvent)
-	kelRecord := store.EventRecord{
-		AID:            issuerAID,
-		SequenceNumber: result.SequenceNumber,
-		EventType:      "ixn",
-		EventJSON:      string(ixnEventJSON),
-		PublicKey:      identity.PublicKey, // may need rel pub if separate, but reuse root pub state for now
-		NextKeyDigest:  identity.NextKeyDigest,
-		Timestamp:      time.Now().UTC().Format(time.RFC3339),
-		CesrSignature:  req.CesrSignature,
-		RawBytesB64:    result.IxnRawBytesB64,
-	}
-	if err := s.DataStore.SaveEvent(kelRecord); err != nil {
+	if err := s.saveOwnInteraction(issuerAID, result.IxnEvent, result.IxnRawBytesB64,
+		result.SequenceNumber, req.CesrSignature); err != nil {
 		log.Printf("[identity-agent-core] CREDENTIAL: Failed to persist IXN event for credential %s: %v", result.AcdcSaid, err)
 	}
 
@@ -3103,17 +3086,29 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
 						writeError(w, http.StatusInternalServerError, "KEL unavailable", err.Error())
 						return
 					}
+					// The log is found by name. Before it is signed with this
+					// asset's key and published as this asset's, it must be this
+					// asset's: a log held under the same name by another identity
+					// would otherwise go out signed as this one.
+					if kelResp.AID != a.PairwiseAID {
+						writeError(w, http.StatusInternalServerError, "KEL unavailable",
+							fmt.Sprintf("the log held under %q is %s's, not this asset's", a.DisplayName, kelResp.AID))
+						return
+					}
 					publicURL := s.getPublicURL(r)
 					oobiURL := fmt.Sprintf("%s/public/oobi/%s", publicURL, a.PairwiseAID)
+					rawEvents, signatures := s.assetEventsAndSignatures(a, kelResp.RawEventsB64)
 					w.Header().Set("Content-Type", "application/json")
 					json.NewEncoder(w).Encode(map[string]interface{}{
-						"aid":           a.PairwiseAID,
-						"oobi":          oobiURL,
-						"kel":           kelResp.KEL,
-						"type":          "asset",
-						"asset_id":      a.ID,
-						"display_name":  a.DisplayName,
-						"delegator_aid": a.DelegatorAID,
+						"aid":             a.PairwiseAID,
+						"oobi":            oobiURL,
+						"kel":             kelResp.KEL,
+						"raw_events_b64":  rawEvents,
+						"cesr_signatures": signatures,
+						"type":            "asset",
+						"asset_id":        a.ID,
+						"display_name":    a.DisplayName,
+						"delegator_aid":   a.DelegatorAID,
 						// Which realm this agent runs in, so a resolver keeps a
 						// development peer and a production peer apart.
 						"realm": buildmode.Mode(),
@@ -4597,6 +4592,8 @@ func (s *CoreServer) reloadIdentityIntoDriver() {
 		return
 	}
 
+	warnAboutUnprovableEvents(identity.AID, events)
+
 	// Parse each stored event_json into a KED dict and track the last SAID
 	kel := make([]map[string]interface{}, 0, len(events))
 	// Carried alongside the parsed events so an engine can verify the history
@@ -4645,6 +4642,10 @@ func (s *CoreServer) reloadIdentityIntoDriver() {
 // index), so re-running the inception regenerates the identical event — and the
 // identical AID — deterministically; the stored PairwiseAID is checked to prove
 // it. Keeps asset OOBIs (KEL + delegation proof) servable across restarts.
+//
+// A delegated asset is REINSTATED, not founded again: its approval is already in
+// the owner's log, and founding it anew appended a second approval to that log in
+// memory only, so the owner's log served afterwards ran ahead of the stored one.
 func (s *CoreServer) reviveAssetIdentity(a asset.Asset) error {
 	if s.KeriDriver == nil {
 		return fmt.Errorf("keri driver unavailable")
@@ -4658,7 +4659,7 @@ func (s *CoreServer) reviveAssetIdentity(a asset.Asset) error {
 	}
 	pubB64, nextB64 := iacrypto.VerkeyQB64(pub), iacrypto.VerkeyQB64(nextPub)
 	if a.DelegationModel == "delegated" && a.DelegatorAID != "" {
-		resp, derr := s.KeriDriver.CreateDelegatedInception(pubB64, nextB64, a.DisplayName, a.DelegatorAID)
+		resp, derr := s.KeriDriver.ReinstateDelegatedIdentity(pubB64, nextB64, a.DisplayName, a.DelegatorAID)
 		if derr != nil {
 			return fmt.Errorf("delegated re-inception: %w", derr)
 		}

@@ -54,7 +54,14 @@ func (s *CoreServer) auditRoutes(r chi.Router) {
 // is what a delegated caller carries, and a delegated caller is not the owner. Such a
 // request may still pass by proving the owner's signature, which is the one path that
 // actually demonstrates who is asking rather than where from.
+//
+// A machine the owner authorised reads it too. It proved who it is by signing the
+// request with a key the owner granted — not by where it called from — and it is
+// not an AI agent: those carry a bearer token, and are still refused below.
 func (s *CoreServer) requireOwner(w http.ResponseWriter, r *http.Request) bool {
+	if _, ok := TheControllerThatAsked(r); ok {
+		return true
+	}
 	if bearerFrom(r) != "" {
 		if s.verifyOwnerSignature(r) == nil {
 			return true

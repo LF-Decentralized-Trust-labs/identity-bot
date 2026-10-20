@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -162,13 +163,12 @@ func bearerFrom(r *http.Request) string {
 	return r.Header.Get("X-IA-Token")
 }
 
-// handleMintMCPToken mints a token (owner only). Scopes are capability ids the
+// handleMintMCPToken mints a token. Scopes are capability ids the
 // token may invoke; the plaintext token is returned once and only its hash is stored.
 func (s *CoreServer) handleMintMCPToken(w http.ResponseWriter, r *http.Request) {
-	if !s.isOwner(r) {
-		jsonError(w, "token management is for the owner of this agent", http.StatusForbidden)
-		return
-	}
+	// App operation — authorized by the router-wide authorize gate (owner or the
+	// owner's authorized controller). The token is bounded by its capability grant,
+	// checked at invoke time, so minting it is not a root-of-trust operation.
 	var req struct {
 		Name   string   `json:"name"`
 		Scopes []string `json:"scopes"`
@@ -215,12 +215,10 @@ func (s *CoreServer) handleMintMCPToken(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-// handleListMCPTokens lists token names + scopes (never hashes), owner only.
+// handleListMCPTokens lists token names + scopes (never hashes).
 func (s *CoreServer) handleListMCPTokens(w http.ResponseWriter, r *http.Request) {
-	if !s.isOwner(r) {
-		jsonError(w, "token management is for the owner of this agent", http.StatusForbidden)
-		return
-	}
+	// App operation — authorized by the router-wide authorize gate (owner or the
+	// owner's authorized controller); the token list is not owner-only.
 	mcpTokensMu.Lock()
 	toks := s.loadMCPTokens()
 	mcpTokensMu.Unlock()
@@ -231,12 +229,10 @@ func (s *CoreServer) handleListMCPTokens(w http.ResponseWriter, r *http.Request)
 	jsonResponse(w, map[string]any{"tokens": out})
 }
 
-// handleRevokeMCPToken deletes a token by name, local owner only.
+// handleRevokeMCPToken deletes a token by name.
 func (s *CoreServer) handleRevokeMCPToken(w http.ResponseWriter, r *http.Request) {
-	if !s.isOwner(r) {
-		jsonError(w, "token management is for the owner of this agent", http.StatusForbidden)
-		return
-	}
+	// App operation — authorized by the router-wide authorize gate (owner or the
+	// owner's authorized controller); revoking a token is not a root-of-trust operation.
 	name := chi.URLParam(r, "name")
 	mcpTokensMu.Lock()
 	defer mcpTokensMu.Unlock()
@@ -298,9 +294,13 @@ func (s *CoreServer) applyGrantScopes(entry mcpToken, cc *sandbox.CallerContext)
 	}
 	// Credential-proven: derive the ceiling and any resource constraints from the
 	// verified grant, and record it.
-	if caps := capabilitiesFromACDC(rec.AcdcJson); len(caps) > 0 {
-		cc.Scopes = caps // source of truth = the verified credential
-	}
+	// Source of truth = the verified credential, including when it grants
+	// nothing: an empty list is an agent stripped of everything, not a cue to
+	// fall back to whatever the token remembered.
+	//
+	// Never wider than what the token itself was given, either: if the two ever
+	// disagree, the narrower answer stands.
+	cc.Scopes = intersectScopes(capabilitiesFromACDC(rec.AcdcJson), entry.Scopes)
 	cc.ResourceConstraints = resourceConstraintsFromACDC(rec.AcdcJson)
 	cc.GrantSAID = rec.SAID
 }
@@ -333,24 +333,39 @@ func resourceConstraintsFromACDC(acdcJsonB64 string) map[string]interface{} {
 }
 
 // grantCredentialValid cryptographically verifies a capability-grant ACDC against
-// the issuer's authoritative KEL, fetched live from the KERI driver. (The store's
-// copy of the owner-root KEL can lag the anchoring event, so the driver's KEL —
-// not the store — is the source of truth for a self-issued grant.) Verification
-// confirms the ACDC is anchored in the issuer's KEL, binding it to the owner root;
-// the holder must be the agent. Returns false on any failure.
+// the issuer's key log as it is stored and published, signed, up to and
+// including the event that issued it. Later events say nothing about whether
+// this grant was issued, so a later event that cannot be verified does not
+// withdraw it; revocation is checked separately. The issuer must be the AI
+// agent's delegator, and the holder the AI agent. Returns false on any failure.
 func (s *CoreServer) grantCredentialValid(rec *store.CredentialRecord, entry mcpToken) bool {
 	issuer := entry.DelegatorAID
-	if issuer == "" {
-		issuer = rec.IssuerAID
+	if issuer == "" || rec.IssuerAID != issuer {
+		// A grant counts only from the identity that delegated the AI agent.
+		// Anybody can issue a credential naming an AI agent's identifier.
+		log.Printf("[mcp] grant %s was issued by %q, not by the AI agent's delegator %q — denying",
+			rec.SAID, rec.IssuerAID, issuer)
+		return false
 	}
-	kel, err := s.KeriDriver.GetKel(issuer)
-	if err != nil || kel == nil || len(kel.KEL) == 0 {
+	// The issuer's log as it is stored and published — with each event's bytes
+	// and signature — rather than the engine's working copy, which holds neither
+	// signature and so could only ever be reported as an unproven chain.
+	full, err := s.storedKelForVerifying(issuer)
+	if err != nil || len(full) == 0 {
 		log.Printf("[mcp] grant %s: issuer KEL unavailable: %v", rec.SAID, err)
+		return false
+	}
+	// Anchored: the issuer's own log carries the event that issued it, and that
+	// event's seal names this grant's issuance. A grant whose issuance is not in
+	// the issuer's history was not issued by it.
+	kel, anchored := kelUpToIssuance(full, rec.IxnSAID, rec.IssSAID)
+	if !anchored {
+		log.Printf("[mcp] grant %s: its issuance %q is not anchored in the issuer's key log — denying", rec.SAID, rec.IxnSAID)
 		return false
 	}
 	result, err := s.KeriDriver.VerifyCredential(&drivers.DriverVerifyCredentialRequest{
 		AcdcJson:           rec.AcdcJson,
-		IssuerKelEvents:    kel.KEL,
+		IssuerKelEvents:    kel,
 		HolderAid:          entry.AgentAID,
 		TrustedSchemaSaids: []string{capabilityGrantSchemaSAID},
 	})
@@ -362,26 +377,108 @@ func (s *CoreServer) grantCredentialValid(rec *store.CredentialRecord, entry mcp
 		log.Printf("[mcp] grant %s failed verification: %s — denying", rec.SAID, reason)
 		return false
 	}
-	// Require the structural, issuer, schema, and revocation checks. The holder
-	// presentation-binding check (presentation_sig_valid) is intentionally NOT
-	// required: the agent authenticates via its bound token, not by presenting a
-	// signed ACDC, and holder_matches_subject already binds the grant to this agent.
-	required := []string{
-		"said_integrity", "issuer_in_kel", "kel_chain_valid",
-		"schema_trusted", "not_revoked", "holder_matches_subject", "credential_anchored",
-	}
-	for _, k := range required {
+	// Every one of these must have been checked AND passed. A check the engine did
+	// not run is absent, and absent is a failure: the list names what this gate
+	// relies on, so an engine that stopped reporting one cannot pass by silence.
+	//
+	// Not required: proof that the holder presented it. The agent authenticates
+	// with its bound token rather than by presenting the credential, and "holder"
+	// already binds the grant to this agent.
+	for _, k := range []string{"structure", "schema_accepted", "holder", "issuer_kel"} {
 		if ok, _ := result.Checks[k].(bool); !ok {
 			log.Printf("[mcp] grant %s failed verification check %q (errors: %v) — denying", rec.SAID, k, result.Errors)
 			return false
 		}
 	}
+	// Revocation. No registry log is handed to the engine here, so it reports
+	// nothing, and the answer is this identity's own record of what it revoked —
+	// authoritative here, because this identity is the issuer, and the caller has
+	// already refused a grant whose record says revoked. The check below acts
+	// only if a log is ever supplied.
+	if v, reported := result.Checks["not_revoked"]; reported && v != nil {
+		if ok, _ := v.(bool); !ok {
+			log.Printf("[mcp] grant %s is revoked in its registry — denying", rec.SAID)
+			return false
+		}
+	}
+	if lapsed, when := grantHasLapsed(rec.AcdcJson, time.Now()); lapsed {
+		log.Printf("[mcp] grant %s lapsed at %s — denying", rec.SAID, when)
+		return false
+	}
 	return true
 }
 
+func intersectScopes(granted, held []string) []string {
+	have := map[string]bool{}
+	for _, h := range held {
+		have[h] = true
+	}
+	out := make([]string, 0, len(granted))
+	for _, g := range granted {
+		if have[g] {
+			out = append(out, g)
+		}
+	}
+	return out
+}
+
+// kelUpToIssuance is the issuer's log up to and including the event that
+// anchored a credential's issuance, and whether that event exists and its seal
+// names the issuance event.
+func kelUpToIssuance(kel []map[string]interface{}, anchorSAID, issSAID string) ([]map[string]interface{}, bool) {
+	if anchorSAID == "" {
+		return nil, false
+	}
+	for i, ev := range kel {
+		if d, _ := ev["d"].(string); d != anchorSAID {
+			continue
+		}
+		if issSAID != "" && !sealNames(ev, issSAID) {
+			return nil, false
+		}
+		return kel[:i+1], true
+	}
+	return nil, false
+}
+
+func sealNames(ev map[string]interface{}, said string) bool {
+	seals, _ := ev["a"].([]interface{})
+	for _, raw := range seals {
+		if seal, _ := raw.(map[string]interface{}); seal["d"] == said {
+			return true
+		}
+	}
+	return false
+}
+
+// grantHasLapsed reports whether a grant's valid_until is past. A grant without
+// one holds until revoked; one whose valid_until cannot be read has lapsed, since
+// an unreadable limit must not become no limit.
+func grantHasLapsed(acdcJsonB64 string, now time.Time) (bool, string) {
+	raw, err := base64.StdEncoding.DecodeString(acdcJsonB64)
+	if err != nil {
+		return true, "an unreadable credential"
+	}
+	var body struct {
+		A map[string]interface{} `json:"a"`
+	}
+	if json.Unmarshal(raw, &body) != nil {
+		return true, "an unreadable credential"
+	}
+	v, present := body.A["valid_until"]
+	if !present {
+		return false, ""
+	}
+	str, _ := v.(string)
+	until, err := time.Parse(time.RFC3339, str)
+	if err != nil {
+		return true, fmt.Sprintf("an unreadable time %q", str)
+	}
+	return !now.Before(until), str
+}
+
 // capabilitiesFromACDC extracts the granted capability ids from a capability-grant
-// ACDC (base64-encoded JSON). ACDC claims live in the attribute block "a"; a flat
-// top-level "capabilities" is accepted as a fallback.
+// ACDC (base64-encoded JSON), from its attribute block "a".
 func capabilitiesFromACDC(acdcJsonB64 string) []string {
 	raw, err := base64.StdEncoding.DecodeString(acdcJsonB64)
 	if err != nil {
@@ -391,12 +488,11 @@ func capabilitiesFromACDC(acdcJsonB64 string) []string {
 	if json.Unmarshal(raw, &body) != nil {
 		return nil
 	}
-	list, ok := body["capabilities"].([]interface{})
-	if !ok {
-		if attrs, ok2 := body["a"].(map[string]interface{}); ok2 {
-			list, _ = attrs["capabilities"].([]interface{})
-		}
-	}
+	// Only the attribute block. The schema accepts nothing at the top level
+	// besides the credential's own fields, so a "capabilities" found there is
+	// not part of any grant this software issues.
+	attrs, _ := body["a"].(map[string]interface{})
+	list, _ := attrs["capabilities"].([]interface{})
 	out := make([]string, 0, len(list))
 	for _, c := range list {
 		if str, ok := c.(string); ok && str != "" {

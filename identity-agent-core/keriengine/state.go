@@ -168,6 +168,23 @@ func (s *state) put(id *identity) {
 	s.identities[id.Name] = id
 }
 
+// claim holds a newly created identity under its name, unless that name already
+// holds a different identity. Callers look identities up by name, so silently
+// replacing one would make every later lookup — and every signature or log
+// served on the strength of it — answer for the wrong identity. The same
+// identity under the same name is not a conflict: that is a re-creation from
+// the same keys.
+func (s *state) claim(id *identity) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if held, ok := s.identities[id.Name]; ok && held.AID != id.AID {
+		return fmt.Errorf("the name %q already holds %s, so %s cannot be held under it",
+			id.Name, held.AID, id.AID)
+	}
+	s.identities[id.Name] = id
+	return nil
+}
+
 // normaliseKey accepts a public key in either form the wire uses and returns
 // qb64.
 //

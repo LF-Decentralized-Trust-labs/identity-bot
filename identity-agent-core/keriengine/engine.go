@@ -282,28 +282,7 @@ func (e *Engine) CreateDelegatedInception(publicKey, nextPublicKey, name, delega
 	if err != nil {
 		return nil, fmt.Errorf("the delegator: %w", err)
 	}
-	pub, err := normaliseKey(publicKey, true)
-	if err != nil {
-		return nil, fmt.Errorf("the signing key: %w", err)
-	}
-	nextPub, err := normaliseKey(nextPublicKey, true)
-	if err != nil {
-		return nil, fmt.Errorf("the next signing key: %w", err)
-	}
-	nextDigest, err := keri.NextDigest(nextPub)
-	if err != nil {
-		return nil, err
-	}
-
-	dip, err := keri.BuildDelegatedInception(keri.DelegationInput{
-		Keys:        []string{pub},
-		NextDigests: []string{nextDigest},
-		Delegator:   delegator.AID,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("building the delegated inception: %w", err)
-	}
-	dipEvent, err := keri.ParseEvent(dip)
+	pub, nextDigest, dip, dipEvent, err := delegatedInceptionOver(publicKey, nextPublicKey, delegator.AID)
 	if err != nil {
 		return nil, err
 	}
@@ -338,26 +317,9 @@ func (e *Engine) CreateDelegatedInception(publicKey, nextPublicKey, name, delega
 		return nil, err
 	}
 
-	if name == "" {
-		name = dipEvent.Identifier
-	}
-	first, err := entry(dip)
-	if err != nil {
+	if err := e.holdDelegatedIdentity(name, pub, nextDigest, dip, dipEvent); err != nil {
 		return nil, err
 	}
-	e.state.put(&identity{
-		Name:            name,
-		AID:             dipEvent.Identifier,
-		PublicKey:       pub,
-		NextKeyDigest:   nextDigest,
-		Witnesses:       dipEvent.Witnesses,
-		Toad:            witnessThreshold(dipEvent),
-		SN:              0,
-		LastSAID:        dipEvent.SAID,
-		KEL:             []kelEntry{first},
-		Registries:      map[string]*registry{},
-		HistoryVerified: true,
-	})
 
 	ixnEntry, err := entry(ixn)
 	if err != nil {
@@ -371,15 +333,141 @@ func (e *Engine) CreateDelegatedInception(publicKey, nextPublicKey, name, delega
 	e.state.mu.Unlock()
 
 	return &drivers.DriverDelegatedInceptionResponse{
-		AID:           dipEvent.Identifier,
-		DelegatorAID:  delegator.AID,
-		Said:          dipEvent.SAID,
-		DipEvent:      dipBody,
-		DelegatorIxn:  ixnBody,
-		RawBytesB64:   b64(dip),
-		PublicKey:     pub,
-		NextKeyDigest: nextDigest,
+		AID:          dipEvent.Identifier,
+		DelegatorAID: delegator.AID,
+		Said:         dipEvent.SAID,
+		DipEvent:     dipBody,
+		DelegatorIxn: ixnBody,
+		RawBytesB64:  b64(dip),
+
+		DelegatorIxnRawBytesB64: b64(ixn),
+		PublicKey:               pub,
+		NextKeyDigest:           nextDigest,
 	}, nil
+}
+
+// ReinstateDelegatedIdentity holds a delegated identity again, after a restart,
+// without approving it a second time.
+//
+// The engine's state is in memory, so a delegated identity whose keys are
+// derived rather than stored is rebuilt by producing its inception again — the
+// same keys give the same event and the same identifier. What must NOT be
+// produced again is the delegator's approval. Founding it anew appended a second
+// anchoring event to the delegator's log in memory only, so the log the engine
+// served ran ahead of the one on disk, and the two disagreed from then on.
+//
+// So the approval is looked for instead: the delegator's log, as reloaded, must
+// already carry a seal naming exactly this inception. If it does not, nothing
+// ever approved this identity and it is refused rather than reinstated.
+func (e *Engine) ReinstateDelegatedIdentity(publicKey, nextPublicKey, name, delegatorName string) (*drivers.DriverDelegatedInceptionResponse, error) {
+	delegator, err := e.state.get(delegatorName)
+	if err != nil {
+		return nil, fmt.Errorf("the delegator: %w", err)
+	}
+	pub, nextDigest, dip, dipEvent, err := delegatedInceptionOver(publicKey, nextPublicKey, delegator.AID)
+	if err != nil {
+		return nil, err
+	}
+	approval, approvalRaw, ok := e.approvalIn(delegator, dipEvent.Identifier, fmt.Sprintf("%x", dipEvent.SN), dipEvent.SAID)
+	if !ok {
+		return nil, fmt.Errorf("the delegator's log carries no approval of %s, so it was never "+
+			"delegated and cannot be reinstated", dipEvent.Identifier)
+	}
+	if err := e.holdDelegatedIdentity(name, pub, nextDigest, dip, dipEvent); err != nil {
+		return nil, err
+	}
+	dipBody, err := eventMap(dip)
+	if err != nil {
+		return nil, err
+	}
+	return &drivers.DriverDelegatedInceptionResponse{
+		AID:          dipEvent.Identifier,
+		DelegatorAID: delegator.AID,
+		Said:         dipEvent.SAID,
+		DipEvent:     dipBody,
+		DelegatorIxn: approval,
+		RawBytesB64:  b64(dip),
+
+		DelegatorIxnRawBytesB64: approvalRaw,
+		PublicKey:               pub,
+		NextKeyDigest:           nextDigest,
+	}, nil
+}
+
+// delegatedInceptionOver builds the inception of an identity delegated by the
+// given identifier, over the given keys.
+func delegatedInceptionOver(publicKey, nextPublicKey, delegatorAID string) (
+	pub, nextDigest string, dip []byte, dipEvent *keri.Event, err error,
+) {
+	pub, err = normaliseKey(publicKey, true)
+	if err != nil {
+		return "", "", nil, nil, fmt.Errorf("the signing key: %w", err)
+	}
+	nextPub, err := normaliseKey(nextPublicKey, true)
+	if err != nil {
+		return "", "", nil, nil, fmt.Errorf("the next signing key: %w", err)
+	}
+	nextDigest, err = keri.NextDigest(nextPub)
+	if err != nil {
+		return "", "", nil, nil, err
+	}
+	dip, err = keri.BuildDelegatedInception(keri.DelegationInput{
+		Keys:        []string{pub},
+		NextDigests: []string{nextDigest},
+		Delegator:   delegatorAID,
+	})
+	if err != nil {
+		return "", "", nil, nil, fmt.Errorf("building the delegated inception: %w", err)
+	}
+	dipEvent, err = keri.ParseEvent(dip)
+	if err != nil {
+		return "", "", nil, nil, err
+	}
+	return pub, nextDigest, dip, dipEvent, nil
+}
+
+func (e *Engine) holdDelegatedIdentity(name, pub, nextDigest string, dip []byte, dipEvent *keri.Event) error {
+	if name == "" {
+		name = dipEvent.Identifier
+	}
+	first, err := entry(dip)
+	if err != nil {
+		return err
+	}
+	return e.state.claim(&identity{
+		Name:            name,
+		AID:             dipEvent.Identifier,
+		PublicKey:       pub,
+		NextKeyDigest:   nextDigest,
+		Witnesses:       dipEvent.Witnesses,
+		Toad:            witnessThreshold(dipEvent),
+		SN:              0,
+		LastSAID:        dipEvent.SAID,
+		KEL:             []kelEntry{first},
+		Registries:      map[string]*registry{},
+		HistoryVerified: true,
+	})
+}
+
+// approvalIn finds the event in the delegator's log whose seals name exactly
+// this identifier, sequence number and digest.
+func (e *Engine) approvalIn(delegator *identity, aid, sn, said string) (map[string]interface{}, string, bool) {
+	e.state.mu.RLock()
+	defer e.state.mu.RUnlock()
+	for _, ev := range delegator.KEL {
+		seals, _ := ev.Parsed["a"].([]interface{})
+		for _, raw := range seals {
+			seal, _ := raw.(map[string]interface{})
+			if seal["i"] == aid && seal["s"] == sn && seal["d"] == said {
+				rawB64 := ""
+				if len(ev.Raw) > 0 {
+					rawB64 = b64(ev.Raw)
+				}
+				return ev.Parsed, rawB64, true
+			}
+		}
+	}
+	return nil, "", false
 }
 
 // RotateAid replaces an identity's signing key with the one it committed to.

@@ -55,6 +55,9 @@ var publicRoutes = map[string]string{
 	"POST /_register":               "a pairwise signer registers its key so counterparties can resolve it",
 	"POST /public/_register":        "a pairwise signer registers its key so counterparties can resolve it",
 	"GET /public/credential/{said}": "a credential the user chose to publish at a shareable link",
+	// A credential names its schema by digest; a verifier fetches the document to
+	// confirm what the credential claims. Schemas are public by nature.
+	"GET /public/schemas/{said}": "a credential schema document, resolved by its identifier",
 
 	// --- carrying a request nothing in the middle can read ---
 	// Open in the same sense the message endpoint is open: what arrives is an
@@ -559,6 +562,26 @@ var sessionForbidden = map[string]string{
 	// enclave would make the enclave reachable by whatever holds that cookie,
 	// which is the opposite of what keeping the key in hardware is for.
 	"POST /api/controller/sign": "asking this computer's secure hardware to sign is for the app running on it",
+
+	// --- minting durable credentials for AI agents ---
+	//
+	// Provisioning an agent and minting its token both create a bearer credential
+	// that outlives the session: the session can be ended, but a token it minted
+	// keeps working. A session is a convenience the owner grants for a while; it
+	// must not be able to leave behind permanent agent access. The owner's app on a
+	// device that holds the key does this.
+	"POST /api/mcp/agents": "provisioning an agent mints a durable token that outlives the session that made it",
+	"POST /api/mcp/tokens": "minting a token creates durable bearer access that outlives the session that made it",
+	// Re-issuing an agent's grant is the one place its ceiling can be changed
+	// after it exists. A session that could reach it could widen what an agent
+	// may do and leave that standing after the session ends — the same durable
+	// grant as minting, by a different door.
+	"PUT /api/mcp/agents/{id}/capabilities": "re-issuing an agent's grant can widen what it may do, and that outlives the session that changed it",
+	// An AI agent's configuration says where its model is reached and with which
+	// stored key, and whether it must run attested. A session that changed those
+	// could point the AI agent at an endpoint it controls, and the change would
+	// outlive the session.
+	"PATCH /api/mcp/agents/{id}": "changing where an AI agent's model is reached, and with which key, outlives the session that changed it",
 }
 
 // requiresTheKeyItself reports whether a route is one a browser session must

@@ -39,7 +39,11 @@ type Handler struct {
 	// without it, the anchor is lost on the next KEL reload and delegation verification
 	// breaks (the root KEL develops a sequence gap). Nil is only acceptable where no
 	// delegated inception occurs (standalone assets / tests).
-	PersistDelegationAnchor func(rootAID string, delegatorIxn map[string]interface{}) error
+	//
+	// It is handed the whole response, not only the parsed event, because the
+	// stored event must carry the bytes it was serialised as: those are what the
+	// delegator signs, and an approval nobody signed approves nothing.
+	PersistDelegationAnchor func(rootAID string, approval *drivers.DriverDelegatedInceptionResponse) error
 }
 
 func NewHandler(dataDir string, keri drivers.KeriEngine) (*Handler, error) {
@@ -54,14 +58,14 @@ func NewHandler(dataDir string, keri drivers.KeriEngine) (*Handler, error) {
 // delegated inception. A missing DelegatorIxn or an unwired callback is a hard
 // error for a delegated asset — silently skipping it is precisely what produced
 // the root-KEL sequence gap that broke delegation verification.
-func (h *Handler) persistDelegationAnchor(rootAID string, delegatorIxn map[string]interface{}) error {
-	if delegatorIxn == nil {
+func (h *Handler) persistDelegationAnchor(rootAID string, approval *drivers.DriverDelegatedInceptionResponse) error {
+	if approval == nil || approval.DelegatorIxn == nil {
 		return fmt.Errorf("driver returned no delegator anchoring event")
 	}
 	if h.PersistDelegationAnchor == nil {
 		return fmt.Errorf("no delegation-anchor persistence configured")
 	}
-	return h.PersistDelegationAnchor(rootAID, delegatorIxn)
+	return h.PersistDelegationAnchor(rootAID, approval)
 }
 
 func (h *Handler) writeJSON(w http.ResponseWriter, v interface{}, status int) {
@@ -166,7 +170,7 @@ func (h *Handler) HandleCreateAsset(w http.ResponseWriter, r *http.Request) {
 		}
 		// Persist the root's anchoring event, or the delegation won't survive a KEL
 		// reload. Fail creation rather than mint a delegated asset that can't verify.
-		if err := h.persistDelegationAnchor(rootAID, resp.DelegatorIxn); err != nil {
+		if err := h.persistDelegationAnchor(rootAID, resp); err != nil {
 			h.writeJSON(w, map[string]string{"error": "persist delegation anchor: " + err.Error()}, http.StatusInternalServerError)
 			return
 		}

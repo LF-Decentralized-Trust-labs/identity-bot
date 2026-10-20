@@ -31,7 +31,7 @@ func seedAgentToken(t *testing.T, s *CoreServer, plaintext string, tok mcpToken)
 }
 
 // capabilitiesFromACDC pulls the granted ids out of the ACDC attribute block,
-// with a flat top-level fallback, and rejects garbage.
+// and nowhere else, and rejects garbage.
 func TestCapabilitiesFromACDC(t *testing.T) {
 	acdc, _ := json.Marshal(map[string]interface{}{
 		"a": map[string]interface{}{
@@ -45,8 +45,8 @@ func TestCapabilitiesFromACDC(t *testing.T) {
 	}
 
 	flat, _ := json.Marshal(map[string]interface{}{"capabilities": []interface{}{"x.y.z"}})
-	if got := capabilitiesFromACDC(base64.StdEncoding.EncodeToString(flat)); len(got) != 1 || got[0] != "x.y.z" {
-		t.Fatalf("flat fallback failed: %v", got)
+	if got := capabilitiesFromACDC(base64.StdEncoding.EncodeToString(flat)); len(got) != 0 {
+		t.Fatalf("capabilities outside the attribute block were read: %v", got)
 	}
 
 	if got := capabilitiesFromACDC("not-base64!!!"); got != nil {
@@ -107,40 +107,45 @@ func TestRevokedGrantDenies(t *testing.T) {
 func TestVerifiedGrantDerivesScopesFromCredential(t *testing.T) {
 	s := newGrantTestServer(t)
 	s.KeriDriver = &driverfake.Engine{
-		GetKelFunc: func(string) (*drivers.DriverKelResponse, error) {
-			return &drivers.DriverKelResponse{
-				AID: "ERoot", SequenceNumber: 0, EventCount: 1,
-				KEL: []map[string]interface{}{{"t": "icp", "s": "0", "d": "ERoot", "i": "ERoot"}},
-			}, nil
-		},
 		VerifyCredentialFunc: func(*drivers.DriverVerifyCredentialRequest) (*drivers.DriverVerifyCredentialResponse, error) {
 			return &drivers.DriverVerifyCredentialResponse{
 				Verified: true,
 				AcdcSaid: "EGrantOK",
+				// The names the shipped engine reports. Not revoked is absent:
+				// no registry log was supplied, so the issuer's own record decides.
 				Checks: map[string]interface{}{
-					"said_integrity": true, "issuer_in_kel": true, "kel_chain_valid": true,
-					"schema_trusted": true, "not_revoked": true, "holder_matches_subject": true,
-					"presentation_sig_valid": false, "credential_anchored": true,
+					"structure": true, "schema_accepted": true, "holder": true, "issuer_kel": true,
 				},
 			}, nil
 		},
 	}
 
-	// The grant ACDC names infra.zone.list in its attribute block; the stored
-	// token ceiling deliberately differs so we can prove the credential wins.
+	// The issuer's stored log, which is what verification reads. The fake engine
+	// does not inspect it; what is checked here is that the issuance is in it.
+	for i, ev := range []string{`{"d":"ERoot"}`, `{"d":"EIssuance","a":[{"i":"EGrantOK","s":"0","d":"EIss"}]}`} {
+		if err := s.DataStore.SaveEvent(store.EventRecord{
+			AID: "ERoot", SequenceNumber: i, EventType: "ixn",
+			EventJSON: ev, RawBytesB64: "eA==", CesrSignature: "sig",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// The grant ACDC names infra.zone.list in its attribute block; the token
+	// remembers more, so the narrower of the two is what must come out.
 	acdc, _ := json.Marshal(map[string]any{
 		"a": map[string]any{"i": "EAgent", "capabilities": []any{"infra.zone.list"}},
 	})
 	if err := s.DataStore.SaveCredential(store.CredentialRecord{
 		SAID: "EGrantOK", Status: "issued", Format: "acdc",
 		SchemaSAID: capabilityGrantSchemaSAID, HolderAID: "EAgent", IssuerAID: "ERoot",
-		AcdcJson: base64.StdEncoding.EncodeToString(acdc),
+		AcdcJson: base64.StdEncoding.EncodeToString(acdc), IxnSAID: "EIssuance", IssSAID: "EIss",
 	}); err != nil {
 		t.Fatal(err)
 	}
 	plaintext := "iamcp_verified"
 	seedAgentToken(t, s, plaintext, mcpToken{
-		Name: "a4", Scopes: []string{"stored.ceiling.placeholder"},
+		Name: "a4", Scopes: []string{"infra.zone.list", "stored.but.not.granted"},
 		AgentAID: "EAgent", DelegatorAID: "ERoot", GrantSAID: "EGrantOK",
 	})
 

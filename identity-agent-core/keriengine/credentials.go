@@ -130,6 +130,7 @@ func (e *Engine) InceptRegistry(name string) (*drivers.DriverRegistryInceptRespo
 		IxnSaid:        ixnEvent.SAID,
 		IxnEvent:       ixnBody,
 		SequenceNumber: int(ixnEvent.SN),
+		IxnRawBytesB64: b64(ixn),
 	}, nil
 }
 

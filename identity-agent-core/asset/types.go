@@ -81,8 +81,16 @@ type Asset struct {
 	// identity and capability ceiling: its role, system prompt, which LLM brain it
 	// connects to, and how it is exposed. Nil for non-agent assets.
 	AgentConfig *AgentConfig `json:"agent_config,omitempty"`
-	CreatedAt   time.Time    `json:"created_at"`
-	UpdatedAt   time.Time    `json:"updated_at"`
+	// GrantValidUntil is when the asset's grant lapses; nil holds until revoked.
+	// Kept on the asset, not only in the credential, so re-issuing the grant
+	// carries the owner's chosen lapse forward instead of silently dropping it.
+	GrantValidUntil *time.Time `json:"grant_valid_until,omitempty"`
+	// GrantConstraints are the per-capability argument limits in the asset's
+	// grant, kept for the same reason: re-issuing the grant must carry them
+	// forward, because a grant re-issued without them is a wider grant.
+	GrantConstraints map[string]interface{} `json:"grant_constraints,omitempty"`
+	CreatedAt        time.Time              `json:"created_at"`
+	UpdatedAt        time.Time              `json:"updated_at"`
 }
 
 // AgentConfig captures what an ai_agent is and how it operates. The identity + grant
