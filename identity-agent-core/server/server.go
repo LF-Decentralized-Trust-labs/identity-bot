@@ -4645,6 +4645,10 @@ func (s *CoreServer) reloadIdentityIntoDriver() {
 // index), so re-running the inception regenerates the identical event — and the
 // identical AID — deterministically; the stored PairwiseAID is checked to prove
 // it. Keeps asset OOBIs (KEL + delegation proof) servable across restarts.
+//
+// A delegated asset is REINSTATED, not founded again: its approval is already in
+// the owner's log, and founding it anew appended a second approval to that log in
+// memory only, so the owner's log served afterwards ran ahead of the stored one.
 func (s *CoreServer) reviveAssetIdentity(a asset.Asset) error {
 	if s.KeriDriver == nil {
 		return fmt.Errorf("keri driver unavailable")
@@ -4658,7 +4662,7 @@ func (s *CoreServer) reviveAssetIdentity(a asset.Asset) error {
 	}
 	pubB64, nextB64 := iacrypto.VerkeyQB64(pub), iacrypto.VerkeyQB64(nextPub)
 	if a.DelegationModel == "delegated" && a.DelegatorAID != "" {
-		resp, derr := s.KeriDriver.CreateDelegatedInception(pubB64, nextB64, a.DisplayName, a.DelegatorAID)
+		resp, derr := s.KeriDriver.ReinstateDelegatedIdentity(pubB64, nextB64, a.DisplayName, a.DelegatorAID)
 		if derr != nil {
 			return fmt.Errorf("delegated re-inception: %w", derr)
 		}

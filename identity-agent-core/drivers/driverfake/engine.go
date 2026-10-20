@@ -19,38 +19,39 @@ import (
 
 // Engine is a drivers.KeriEngine backed by per-method func fields.
 type Engine struct {
-	InceptFunc                    func(req drivers.InceptionRequest) (*drivers.DriverInceptionResponse, error)
-	CreateInceptionFunc           func(publicKey, nextPublicKey string) (*drivers.DriverInceptionResponse, error)
-	CreateInceptionNamedFunc      func(publicKey, nextPublicKey, name string) (*drivers.DriverInceptionResponse, error)
-	CreateOwnedInceptionFunc      func(publicKey, nextPublicKey, name, ownerAID string) (*drivers.DriverInceptionResponse, error)
-	CreateDelegatedInceptionFunc  func(publicKey, nextPublicKey, name, delegatorName string) (*drivers.DriverDelegatedInceptionResponse, error)
-	RotateAidFunc                 func(name, newPublicKey, newNextPublicKey string) (*drivers.DriverRotationResponse, error)
-	RotateAidWithAnchorFunc       func(name, newPublicKey, newNextPublicKey string, anchorData []interface{}) (*drivers.DriverRotationResponse, error)
-	RotateFunc                    func(req drivers.RotationRequest) (*drivers.DriverRotationResponse, error)
-	CreateHybridInceptionFunc     func(synthetic bool, name string) (*drivers.DriverHybridInceptionResponse, error)
-	RotateToMultisigFunc          func(name string, keys, nextKeyDigests []string, isith, nsith string, anchorData []interface{}) (*drivers.DriverRotationResponse, error)
-	GenerateMultisigEventFunc     func(aids []string, threshold int, currentKeys, nextKeys []string, eventType string) (*drivers.DriverMultisigResponse, error)
-	InteractFunc                  func(name string, data []interface{}) (*drivers.DriverInteractResponse, error)
-	GetKelFunc                    func(name string) (*drivers.DriverKelResponse, error)
-	ValidateKELFunc               func(aid string, events []map[string]interface{}) (*drivers.DriverValidateKELResponse, error)
-	ValidateKELBytesFunc          func(in drivers.ValidateKELInput) (*drivers.DriverValidateKELResponse, error)
-	SignPayloadFunc               func(name, dataB64 string) (*drivers.DriverSignResponse, error)
-	VerifySignatureFunc           func(dataB64, signature, publicKey string) (*drivers.DriverVerifyResponse, error)
-	CesrEncodeFunc                func(rawSigB64 string) (*drivers.DriverCesrEncodeResponse, error)
-	FormatCredentialFunc          func(claims map[string]interface{}, schemaSaid, issuerAid string) (*drivers.DriverFormatCredentialResponse, error)
-	InceptRegistryFunc            func(name string) (*drivers.DriverRegistryInceptResponse, error)
-	IssueCredentialFunc           func(name string, claims map[string]interface{}, schemaSaid, holderAid string, edges map[string]interface{}) (*drivers.DriverIssueCredentialResponse, error)
-	IssueCredentialInRegistryFunc func(name string, claims map[string]interface{}, schemaSaid, holderAid string, edges map[string]interface{}, registrySaid string) (*drivers.DriverIssueCredentialResponse, error)
-	RevokeCredentialFunc          func(name, acdcSaid, registrySaid, issSaid string) (*drivers.DriverRevokeCredentialResponse, error)
-	VerifyCredentialFunc          func(req *drivers.DriverVerifyCredentialRequest) (*drivers.DriverVerifyCredentialResponse, error)
-	PresentCredentialFunc         func(acdcSaid, holderAid, issuerAid, schemaSaid string) (*drivers.DriverPresentCredentialResponse, error)
-	SubmitReceiptFunc             func(req *drivers.DriverSubmitReceiptRequest) (*drivers.DriverSubmitReceiptResponse, error)
-	ResolveOobiFunc               func(url string) (*drivers.DriverResolveOobiResponse, error)
-	EndpointLocationFunc          func(req *drivers.DriverEndpointLocationRequest) (*drivers.DriverEndpointResponse, error)
-	StartFunc                     func() error
-	StopFunc                      func()
-	GetStatusFunc                 func() (*drivers.DriverStatus, error)
-	ReloadIdentityFunc            func(req *drivers.DriverReloadIdentityRequest) (*drivers.DriverReloadIdentityResponse, error)
+	InceptFunc                     func(req drivers.InceptionRequest) (*drivers.DriverInceptionResponse, error)
+	CreateInceptionFunc            func(publicKey, nextPublicKey string) (*drivers.DriverInceptionResponse, error)
+	CreateInceptionNamedFunc       func(publicKey, nextPublicKey, name string) (*drivers.DriverInceptionResponse, error)
+	CreateOwnedInceptionFunc       func(publicKey, nextPublicKey, name, ownerAID string) (*drivers.DriverInceptionResponse, error)
+	CreateDelegatedInceptionFunc   func(publicKey, nextPublicKey, name, delegatorName string) (*drivers.DriverDelegatedInceptionResponse, error)
+	ReinstateDelegatedIdentityFunc func(publicKey, nextPublicKey, name, delegatorName string) (*drivers.DriverDelegatedInceptionResponse, error)
+	RotateAidFunc                  func(name, newPublicKey, newNextPublicKey string) (*drivers.DriverRotationResponse, error)
+	RotateAidWithAnchorFunc        func(name, newPublicKey, newNextPublicKey string, anchorData []interface{}) (*drivers.DriverRotationResponse, error)
+	RotateFunc                     func(req drivers.RotationRequest) (*drivers.DriverRotationResponse, error)
+	CreateHybridInceptionFunc      func(synthetic bool, name string) (*drivers.DriverHybridInceptionResponse, error)
+	RotateToMultisigFunc           func(name string, keys, nextKeyDigests []string, isith, nsith string, anchorData []interface{}) (*drivers.DriverRotationResponse, error)
+	GenerateMultisigEventFunc      func(aids []string, threshold int, currentKeys, nextKeys []string, eventType string) (*drivers.DriverMultisigResponse, error)
+	InteractFunc                   func(name string, data []interface{}) (*drivers.DriverInteractResponse, error)
+	GetKelFunc                     func(name string) (*drivers.DriverKelResponse, error)
+	ValidateKELFunc                func(aid string, events []map[string]interface{}) (*drivers.DriverValidateKELResponse, error)
+	ValidateKELBytesFunc           func(in drivers.ValidateKELInput) (*drivers.DriverValidateKELResponse, error)
+	SignPayloadFunc                func(name, dataB64 string) (*drivers.DriverSignResponse, error)
+	VerifySignatureFunc            func(dataB64, signature, publicKey string) (*drivers.DriverVerifyResponse, error)
+	CesrEncodeFunc                 func(rawSigB64 string) (*drivers.DriverCesrEncodeResponse, error)
+	FormatCredentialFunc           func(claims map[string]interface{}, schemaSaid, issuerAid string) (*drivers.DriverFormatCredentialResponse, error)
+	InceptRegistryFunc             func(name string) (*drivers.DriverRegistryInceptResponse, error)
+	IssueCredentialFunc            func(name string, claims map[string]interface{}, schemaSaid, holderAid string, edges map[string]interface{}) (*drivers.DriverIssueCredentialResponse, error)
+	IssueCredentialInRegistryFunc  func(name string, claims map[string]interface{}, schemaSaid, holderAid string, edges map[string]interface{}, registrySaid string) (*drivers.DriverIssueCredentialResponse, error)
+	RevokeCredentialFunc           func(name, acdcSaid, registrySaid, issSaid string) (*drivers.DriverRevokeCredentialResponse, error)
+	VerifyCredentialFunc           func(req *drivers.DriverVerifyCredentialRequest) (*drivers.DriverVerifyCredentialResponse, error)
+	PresentCredentialFunc          func(acdcSaid, holderAid, issuerAid, schemaSaid string) (*drivers.DriverPresentCredentialResponse, error)
+	SubmitReceiptFunc              func(req *drivers.DriverSubmitReceiptRequest) (*drivers.DriverSubmitReceiptResponse, error)
+	ResolveOobiFunc                func(url string) (*drivers.DriverResolveOobiResponse, error)
+	EndpointLocationFunc           func(req *drivers.DriverEndpointLocationRequest) (*drivers.DriverEndpointResponse, error)
+	StartFunc                      func() error
+	StopFunc                       func()
+	GetStatusFunc                  func() (*drivers.DriverStatus, error)
+	ReloadIdentityFunc             func(req *drivers.DriverReloadIdentityRequest) (*drivers.DriverReloadIdentityResponse, error)
 }
 
 var _ drivers.KeriEngine = (*Engine)(nil)
@@ -92,6 +93,13 @@ func (e *Engine) CreateDelegatedInception(publicKey, nextPublicKey, name, delega
 		return nil, unset("CreateDelegatedInception")
 	}
 	return e.CreateDelegatedInceptionFunc(publicKey, nextPublicKey, name, delegatorName)
+}
+
+func (e *Engine) ReinstateDelegatedIdentity(publicKey, nextPublicKey, name, delegatorName string) (*drivers.DriverDelegatedInceptionResponse, error) {
+	if e.ReinstateDelegatedIdentityFunc == nil {
+		return nil, unset("ReinstateDelegatedIdentity")
+	}
+	return e.ReinstateDelegatedIdentityFunc(publicKey, nextPublicKey, name, delegatorName)
 }
 
 func (e *Engine) RotateAid(name, newPublicKey, newNextPublicKey string) (*drivers.DriverRotationResponse, error) {

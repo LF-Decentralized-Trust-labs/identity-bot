@@ -3,6 +3,7 @@ package server
 import (
 	"errors"
 	"fmt"
+	"identity-agent-core/asset"
 	"net/http"
 	"strconv"
 	"strings"
@@ -119,16 +120,28 @@ func (s *CoreServer) publisherInput(r *http.Request, aid string) (didwebs.Publis
 	var kelEvents []map[string]interface{}
 	seq := 0
 	kelName := aid
+	var asAsset *asset.Asset
 	if s.assetHandler != nil {
 		for _, a := range s.assetHandler.Store.ListAssets() {
 			if a.PairwiseAID == aid {
 				kelName = a.DisplayName
+				a := a
+				asAsset = &a
 				break
 			}
 		}
 	}
 	if s.KeriDriver != nil {
-		if kel, err := s.KeriDriver.GetKel(kelName); err == nil {
+		kel, err := s.KeriDriver.GetKel(kelName)
+		if err != nil && asAsset != nil {
+			// The engine forgets every identity on a restart. An asset's is
+			// rebuilt the same way the OOBI route rebuilds it, so this route does
+			// not serve an empty log for an identity that exists.
+			if rerr := s.reviveAssetIdentity(*asAsset); rerr == nil {
+				kel, err = s.KeriDriver.GetKel(kelName)
+			}
+		}
+		if err == nil {
 			kelEvents = kel.KEL
 			seq = kel.SequenceNumber
 			// Extract pubKey from first event k[0] if still empty
@@ -139,9 +152,10 @@ func (s *CoreServer) publisherInput(r *http.Request, aid string) (didwebs.Publis
 			}
 		}
 	}
-	if pubKey == "" && identity != nil {
-		pubKey = identity.PublicKey
-	}
+	// Never the owner's key. This route publishes OTHER identities — the owner's
+	// is refused above — so a key that could not be found for this one is an
+	// error, not a cue to put the owner's key in its document, which would claim
+	// the owner's key controls an identity it does not.
 	if pubKey == "" {
 		return didwebs.PublishInput{}, fmt.Errorf("no public key for aid %s", aid)
 	}
