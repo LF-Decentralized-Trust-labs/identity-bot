@@ -14,12 +14,16 @@ require (
 	github.com/pkg/sftp v1.13.10
 	github.com/zeebo/blake3 v0.2.4
 	golang.ngrok.com/ngrok v1.13.0
-	golang.org/x/crypto v0.54.0
+	golang.org/x/crypto v0.55.0
 	golang.org/x/sys v0.47.0
 	modernc.org/sqlite v1.46.1
 )
 
-require golang.org/x/tools v0.48.0 // indirect
+require (
+	golang.org/x/mobile v0.0.0-20260813181013-1960c775504c // indirect
+	golang.org/x/mod v0.39.0 // indirect
+	golang.org/x/tools v0.49.0 // indirect
+)
 
 require (
 	github.com/armon/go-socks5 v0.0.0-20160902184237-e75332964ef5 // indirect
@@ -41,7 +45,7 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.ngrok.com/muxado/v2 v2.0.1 // indirect
 	golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546 // indirect
-	golang.org/x/net v0.57.0 // indirect
+	golang.org/x/net v0.58.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/term v0.45.0 // indirect
 	google.golang.org/protobuf v1.35.1 // indirect
@@ -51,3 +55,5 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
+
+tool golang.org/x/mobile/cmd/gobind
