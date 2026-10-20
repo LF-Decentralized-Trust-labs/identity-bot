@@ -1252,27 +1252,25 @@ func (s *CoreServer) handleInfo(w http.ResponseWriter, r *http.Request) {
 		phase = "Phase 2: Inception (Identity Active)"
 	}
 
+	// The KERI engine is compiled in and started in the constructor, so it is
+	// always present here. Report its live status rather than a placeholder.
 	driverInfo := DriverInfo{
-		Status:  "disabled",
+		Status:  "active",
 		Library: "keri-go",
-		URL:     "n/a",
+		URL:     "in-process",
 	}
-
-	if s.KeriDriver != nil {
-		status, err := s.KeriDriver.GetStatus()
-		if err == nil {
-			driverInfo.Status = status.Status
-			driverInfo.Library = status.KeriLibrary
-			// An in-process engine has no address. Reporting one would invite a
-			// reader to go looking for a service that is not there.
-			driverInfo.URL = status.ScriptPath
-			if driverInfo.URL == "" {
-				driverInfo.URL = "in-process"
-			}
-		} else {
-			driverInfo.Status = "unknown"
-			driverInfo.Library = "unknown"
+	if status, err := s.KeriDriver.GetStatus(); err == nil {
+		driverInfo.Status = status.Status
+		driverInfo.Library = status.KeriLibrary
+		// An in-process engine has no address. Reporting one would invite a
+		// reader to go looking for a service that is not there.
+		driverInfo.URL = status.ScriptPath
+		if driverInfo.URL == "" {
+			driverInfo.URL = "in-process"
 		}
+	} else {
+		driverInfo.Status = "unknown"
+		driverInfo.Library = "unknown"
 	}
 
 	resp := CoreInfoResponse{
@@ -1347,12 +1345,6 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 	existing, _ := s.DataStore.GetIdentity()
 	if existing != nil {
 		writeError(w, http.StatusConflict, "Identity already exists", "AID: "+existing.AID)
-		return
-	}
-
-	if s.KeriDriver == nil {
-		writeError(w, http.StatusServiceUnavailable, "KERI driver not available",
-			"This is the desktop KERI driver route. On mobile the embedded Go core performs inception itself")
 		return
 	}
 
@@ -1747,12 +1739,6 @@ func (s *CoreServer) handleStoreEvent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *CoreServer) handleRotation(w http.ResponseWriter, r *http.Request) {
-	if s.KeriDriver == nil {
-		writeError(w, http.StatusServiceUnavailable, "KERI driver not available",
-			"This is the desktop KERI driver route. On mobile the embedded Go core performs rotation itself")
-		return
-	}
-
 	var req struct {
 		Name             string `json:"name"`
 		NewPublicKey     string `json:"new_public_key"`
@@ -1822,12 +1808,6 @@ func (s *CoreServer) handleRotation(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *CoreServer) handleInteract(w http.ResponseWriter, r *http.Request) {
-	if s.KeriDriver == nil {
-		writeError(w, http.StatusServiceUnavailable, "KERI driver not available",
-			"This is the desktop KERI driver route. On mobile the embedded Go core produces IXN events itself")
-		return
-	}
-
 	var req struct {
 		Name          string        `json:"name"`
 		Data          []interface{} `json:"data"`
@@ -1878,12 +1858,6 @@ func (s *CoreServer) handleInteract(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *CoreServer) handleSign(w http.ResponseWriter, r *http.Request) {
-	if s.KeriDriver == nil {
-		writeError(w, http.StatusServiceUnavailable, "KERI driver not available",
-			"This is the desktop KERI driver route. On mobile the embedded Go core signs")
-		return
-	}
-
 	var req struct {
 		Name string `json:"name"`
 		Data string `json:"data"`
@@ -1915,21 +1889,6 @@ func (s *CoreServer) handleKel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if s.KeriDriver == nil {
-		events, err := s.DataStore.GetEvents(name)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "Failed to retrieve KEL from store", err.Error())
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"aid":         name,
-			"kel":         events,
-			"event_count": len(events),
-		})
-		return
-	}
-
 	result, err := s.KeriDriver.GetKel(name)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to retrieve KEL", err.Error())
@@ -1941,12 +1900,6 @@ func (s *CoreServer) handleKel(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *CoreServer) handleVerify(w http.ResponseWriter, r *http.Request) {
-	if s.KeriDriver == nil {
-		writeError(w, http.StatusServiceUnavailable, "KERI driver not available",
-			"This is the desktop KERI driver route. On mobile the embedded Go core verifies")
-		return
-	}
-
 	var req struct {
 		Data      string `json:"data"`
 		Signature string `json:"signature"`
@@ -1973,12 +1926,6 @@ func (s *CoreServer) handleVerify(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *CoreServer) handleCesrEncode(w http.ResponseWriter, r *http.Request) {
-	if s.KeriDriver == nil {
-		writeError(w, http.StatusServiceUnavailable, "KERI driver not available",
-			"This is the desktop KERI driver route. On mobile the embedded Go core handles CESR encoding")
-		return
-	}
-
 	var req struct {
 		RawSigB64 string `json:"raw_sig_b64"`
 	}
@@ -2002,12 +1949,6 @@ func (s *CoreServer) handleCesrEncode(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *CoreServer) handleFormatCredential(w http.ResponseWriter, r *http.Request) {
-	if s.KeriDriver == nil {
-		writeError(w, http.StatusServiceUnavailable, "KERI driver not available",
-			"This is the desktop KERI driver route. On mobile use the embedded Go core or a remote KERI helper for credential formatting")
-		return
-	}
-
 	var req struct {
 		Claims     map[string]interface{} `json:"claims"`
 		SchemaSaid string                 `json:"schema_said"`
@@ -2034,12 +1975,6 @@ func (s *CoreServer) handleFormatCredential(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *CoreServer) handleIssueCredential(w http.ResponseWriter, r *http.Request) {
-	if s.KeriDriver == nil {
-		writeError(w, http.StatusServiceUnavailable, "KERI driver not available",
-			"Credential issuance requires the Python KERI driver (desktop only)")
-		return
-	}
-
 	var req struct {
 		Claims        map[string]interface{} `json:"claims"`
 		SchemaSaid    string                 `json:"schema_said"`
@@ -2468,12 +2403,6 @@ func (s *CoreServer) handleFetchCredentialSchema(w http.ResponseWriter, r *http.
 }
 
 func (s *CoreServer) handlePresentCredential(w http.ResponseWriter, r *http.Request) {
-	if s.KeriDriver == nil {
-		writeError(w, http.StatusServiceUnavailable, "KERI driver not available",
-			"Credential presentation requires the Python KERI driver (desktop only)")
-		return
-	}
-
 	var req struct {
 		AcdcSaid      string `json:"acdc_said"`
 		HolderAid     string `json:"holder_aid"`
@@ -2546,12 +2475,6 @@ func (s *CoreServer) handleGetPresentations(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *CoreServer) handleVerifyCredential(w http.ResponseWriter, r *http.Request) {
-	if s.KeriDriver == nil {
-		writeError(w, http.StatusServiceUnavailable, "KERI driver not available",
-			"Credential verification requires the Python KERI driver (desktop only)")
-		return
-	}
-
 	var req struct {
 		AcdcJson           string   `json:"acdc_json"`
 		HolderAid          string   `json:"holder_aid"`
@@ -2630,12 +2553,6 @@ func (s *CoreServer) handleVerifyCredential(w http.ResponseWriter, r *http.Reque
 // Returns {valid, chain: [{...}], warnings, errors} where each chain step includes
 // the credential SAID, schema, checks map, and overall step validity.
 func (s *CoreServer) handleVerifyCredentialChain(w http.ResponseWriter, r *http.Request) {
-	if s.KeriDriver == nil {
-		writeError(w, http.StatusServiceUnavailable, "KERI driver not available",
-			"Credential verification requires the Python KERI driver (desktop only)")
-		return
-	}
-
 	var req struct {
 		// AcdcSaid: look up a credential by SAID from the local store.
 		AcdcSaid string `json:"acdc_said"`
@@ -2792,12 +2709,6 @@ func (s *CoreServer) handleVerifyCredentialChain(w http.ResponseWriter, r *http.
 }
 
 func (s *CoreServer) handleSubmitReceipt(w http.ResponseWriter, r *http.Request) {
-	if s.KeriDriver == nil {
-		writeError(w, http.StatusServiceUnavailable, "KERI driver not available",
-			"Witness receipt submission requires the Python KERI driver (desktop only)")
-		return
-	}
-
 	var req struct {
 		EventSAID        string   `json:"event_said"`
 		WitnessAID       string   `json:"witness_aid"`
@@ -2854,7 +2765,7 @@ func (s *CoreServer) handleGetKERL(w http.ResponseWriter, r *http.Request) {
 		fmt.Sscanf(t, "%d", &threshold)
 	}
 
-	// Load receipts from durable store (always available, even without the Python driver).
+	// Load receipts from the durable store (always available, independent of the KERI engine).
 	receipts, err := s.DataStore.GetWitnessReceipts(eventSAID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to read witness receipts", err.Error())
@@ -2887,12 +2798,6 @@ func (s *CoreServer) handleGetKERL(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *CoreServer) handleResolveOobi(w http.ResponseWriter, r *http.Request) {
-	if s.KeriDriver == nil {
-		writeError(w, http.StatusServiceUnavailable, "KERI driver not available",
-			"This is the desktop KERI driver route. On mobile use the embedded Go core or a remote KERI helper for OOBI resolution")
-		return
-	}
-
 	var req struct {
 		URL string `json:"url"`
 	}
@@ -2917,12 +2822,6 @@ func (s *CoreServer) handleResolveOobi(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *CoreServer) handleGenerateMultisigEvent(w http.ResponseWriter, r *http.Request) {
-	if s.KeriDriver == nil {
-		writeError(w, http.StatusServiceUnavailable, "KERI driver not available",
-			"This is the desktop KERI driver route. On mobile use the embedded Go core or a remote KERI helper for multisig event generation")
-		return
-	}
-
 	var req struct {
 		AIDs        []string `json:"aids"`
 		Threshold   int      `json:"threshold"`
@@ -4678,10 +4577,10 @@ func (s *CoreServer) handleDeletePendingRequest(w http.ResponseWriter, r *http.R
 	json.NewEncoder(w).Encode(map[string]interface{}{"deleted": true, "aid": aid})
 }
 
-// reloadIdentityIntoDriver seeds the Python KERI driver's in-memory _identities dict
-// from the persisted DB state. Called once on startup after the driver is ready.
-// This makes IssueCredential and Interact work across server restarts without
-// requiring a fresh inception event each session.
+// reloadIdentityIntoDriver seeds the in-process KERI engine's in-memory identity
+// state from the persisted DB state. Called once on startup after the engine is
+// ready. This makes IssueCredential and Interact work across server restarts
+// without requiring a fresh inception event each session.
 func (s *CoreServer) reloadIdentityIntoDriver() {
 	if s.KeriDriver == nil {
 		return
@@ -4866,7 +4765,7 @@ func oobiBase(oobiURL string) string {
 // unwrapEventJSON converts EventRecord-style dicts (with an "event_json" field containing a
 // JSON-encoded KED) to raw KED dicts. Events that are already raw KEDs are passed through unchanged.
 // This is needed because the OOBI endpoint serves EventRecord structs, so contact_kels stores
-// event_json-wrapped records, while the Python credential_verify driver expects raw KED dicts.
+// event_json-wrapped records, while the credential-verify path expects raw KED dicts.
 func unwrapEventJSON(events []map[string]interface{}) []map[string]interface{} {
 	out := make([]map[string]interface{}, 0, len(events))
 	for _, ev := range events {
