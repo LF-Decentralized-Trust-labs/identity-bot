@@ -69,6 +69,17 @@ func TestAnAgentHostEnrolsAgainstARunningIdentityAgent(t *testing.T) {
 	if err != nil || status["state"] != agentbody.StateActive || status["grade"] != agentbody.GradeHardwareAsserted {
 		t.Fatalf("status: %v %v", status, err)
 	}
+
+	// Running the same command again on the machine that is already the body
+	// says so, and is not reported as a refused string.
+	var out strings.Builder
+	h.Out = &out
+	if _, err := h.Enrol(enrolment, "computer", time.Second); err != nil {
+		t.Fatalf("re-running on the enrolled machine: %v", err)
+	}
+	if !strings.Contains(out.String(), "already the body") || strings.Contains(out.String(), "six words") {
+		t.Fatalf("re-running on the enrolled machine said: %q", out.String())
+	}
 }
 
 // enrolmentVia asks for an enrolment string the way the desktop app does, so the

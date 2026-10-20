@@ -258,6 +258,25 @@ func (h *Host) Enrol(enrolment string, placement string, wait time.Duration) (St
 	if !e.Expires.IsZero() && time.Now().After(e.Expires) {
 		return State{}, fmt.Errorf("this enrolment string expired at %s; ask for a new one", e.Expires.Local().Format(time.Kitchen))
 	}
+	// A machine that is already a body says so, before showing words or using
+	// the string. Re-running the command it enrolled with is not a stranger
+	// racing for the string, and must not be reported as one.
+	if st, err := h.loadState(); err == nil && st.IdentityAgent == e.IdentityAgent {
+		if status, serr := h.Status(); serr == nil {
+			switch {
+			case status["state"] == agentbody.StateActive && st.Agent == e.Agent:
+				fmt.Fprintf(h.out(), "This machine is already the body of %q, at grade %v. Nothing to do.\n", st.AgentName, status["grade"])
+				return st, nil
+			case status["state"] == agentbody.StatePending && st.Agent == e.Agent:
+				fmt.Fprintf(h.out(), "This machine already asked to become the body of %q and is waiting for a decision.\n"+
+					"Its six words are:\n\n    %s\n\n", st.AgentName, wordsLine(status["words"]))
+				return st, h.waitForDecision(wait)
+			case status["state"] == agentbody.StateActive:
+				return State{}, fmt.Errorf("this machine's key is already the body of %q; a machine hosting another AI agent "+
+					"uses a separate key — run this again with --data-dir pointing at a new directory", st.AgentName)
+			}
+		}
+	}
 	if err := os.MkdirAll(h.DataDir, 0o700); err != nil {
 		return State{}, err
 	}
@@ -432,4 +451,13 @@ func (h *Host) Call(method, path string, body []byte) (int, []byte, error) {
 	defer resp.Body.Close()
 	b, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	return resp.StatusCode, b, err
+}
+
+func wordsLine(v interface{}) string {
+	list, _ := v.([]interface{})
+	out := make([]string, 0, len(list))
+	for _, w := range list {
+		out = append(out, fmt.Sprint(w))
+	}
+	return strings.Join(out, " ")
 }
