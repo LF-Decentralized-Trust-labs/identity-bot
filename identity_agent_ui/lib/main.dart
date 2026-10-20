@@ -17,7 +17,7 @@ import 'package:agent_client/services/local_core_keri_service.dart';
 import 'package:agent_client/services/mobile_core_service.dart';
 import 'services/preferences_service.dart';
 import 'services/secure_key_store.dart';
-import 'services/backend_process_service.dart';
+import 'package:agent_client/services/backend_process_service.dart';
 import 'package:agent_client/config/agent_config.dart';
 import 'screens/mobile/mobile_app.dart';
 import 'screens/hosting_choice_screen.dart';
@@ -51,6 +51,12 @@ void main() async {
 
   if (!kIsWeb && BackendProcessService.isDesktopPlatform) {
     debugPrint('[Agent] Desktop platform detected — starting bundled backend in background...');
+    // This app serves an individual. The backend cannot work that out for
+    // itself — the same Go core serves the app for organizations — so the app
+    // declares it. It decides who may witness and watch for this Identity Agent:
+    // peers are of the same kind, and an Identity Agent that has not been told
+    // enrols none.
+    BackendProcessService.entityType = 'individual';
     _backendStartupFuture = BackendProcessService.instance.start().then((started) {
       debugPrint('[Agent] Backend process started: $started');
       if (!started) {

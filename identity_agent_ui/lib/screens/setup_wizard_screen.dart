@@ -9,7 +9,7 @@ import '../services/core_service.dart';
 import '../services/preferences_service.dart' show EntityType;
 import 'package:agent_client/services/root_seed_handoff.dart';
 import '../services/secure_key_store.dart';
-import '../services/backend_process_service.dart';
+import 'package:agent_client/services/backend_process_service.dart';
 import '../services/enclave_service.dart';
 import 'package:agent_client/services/setup_task_service.dart';
 import 'package:agent_client/config/agent_config.dart';
