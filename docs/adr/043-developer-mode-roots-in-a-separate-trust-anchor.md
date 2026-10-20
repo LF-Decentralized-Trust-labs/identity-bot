@@ -120,8 +120,9 @@ The core mechanism this ADR decides is now implemented in the core. Shipped:
   debug bit set, signed by a development attestation key the dev verifier trusts and a production verifier
   rejects (round-trip and prod-rejects-dev tests in `server/snp_dev_adopt_test.go`).
 - **Peer non-interoperability (§4, peer layer).** A dev and a prod Identity Agent refuse each other as
-  peers: signed events and OOBIs carry an environment realm, and a cross-realm peer or contact is refused
-  (`server/cross_realm.go`, the contact/pairing/first-contact gates).
+  peers: OOBIs and contact handshakes carry a self-reported realm tag, and a cross-realm peer or contact is
+  refused (`server/cross_realm.go`, the contact/pairing/first-contact gates). The tag rides the handshake
+  envelope, not the signed KEL events — it is self-reported, so the refusal is the enforcement, not the tag.
 
 Still to build (each lands with its own code and tests, and is not implied by this record): the turnkey
 single-input build-and-deploy pipeline and standing development-scoped infrastructure (witnesses, relays,
