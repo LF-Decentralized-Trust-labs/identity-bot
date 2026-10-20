@@ -1832,18 +1832,8 @@ func (s *CoreServer) handleInteract(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339)
-	eventJSON, _ := json.Marshal(result.IxnEvent)
-	eventRecord := store.EventRecord{
-		AID:            result.AID,
-		SequenceNumber: result.SequenceNumber,
-		EventType:      "ixn",
-		EventJSON:      string(eventJSON),
-		Timestamp:      now,
-		CesrSignature:  req.CesrSignature,
-		RawBytesB64:    result.RawBytesB64,
-	}
-	if err := s.DataStore.SaveEvent(eventRecord); err != nil {
+	if err := s.saveOwnInteraction(result.AID, result.IxnEvent, result.RawBytesB64,
+		result.SequenceNumber, req.CesrSignature); err != nil {
 		log.Printf("[identity-agent-core] Warning: failed to persist IXN event: %v", err)
 	}
 
@@ -2072,19 +2062,8 @@ func (s *CoreServer) handleIssueCredential(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Persist the IXN event in the KEL (use the relationship AID when issuing via pairwise context)
-	ixnEventJSON, _ := json.Marshal(result.IxnEvent)
-	kelRecord := store.EventRecord{
-		AID:            issuerAID,
-		SequenceNumber: result.SequenceNumber,
-		EventType:      "ixn",
-		EventJSON:      string(ixnEventJSON),
-		PublicKey:      identity.PublicKey, // may need rel pub if separate, but reuse root pub state for now
-		NextKeyDigest:  identity.NextKeyDigest,
-		Timestamp:      time.Now().UTC().Format(time.RFC3339),
-		CesrSignature:  req.CesrSignature,
-		RawBytesB64:    result.IxnRawBytesB64,
-	}
-	if err := s.DataStore.SaveEvent(kelRecord); err != nil {
+	if err := s.saveOwnInteraction(issuerAID, result.IxnEvent, result.IxnRawBytesB64,
+		result.SequenceNumber, req.CesrSignature); err != nil {
 		log.Printf("[identity-agent-core] CREDENTIAL: Failed to persist IXN event for credential %s: %v", result.AcdcSaid, err)
 	}
 
@@ -3105,6 +3084,15 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
 					}
 					if err != nil {
 						writeError(w, http.StatusInternalServerError, "KEL unavailable", err.Error())
+						return
+					}
+					// The log is found by name. Before it is signed with this
+					// asset's key and published as this asset's, it must be this
+					// asset's: a log held under the same name by another identity
+					// would otherwise go out signed as this one.
+					if kelResp.AID != a.PairwiseAID {
+						writeError(w, http.StatusInternalServerError, "KEL unavailable",
+							fmt.Sprintf("the log held under %q is %s's, not this asset's", a.DisplayName, kelResp.AID))
 						return
 					}
 					publicURL := s.getPublicURL(r)
@@ -4603,6 +4591,8 @@ func (s *CoreServer) reloadIdentityIntoDriver() {
 		log.Printf("[identity-agent-core] KERI driver reload: failed to load KEL events: %v", err)
 		return
 	}
+
+	warnAboutUnprovableEvents(identity.AID, events)
 
 	// Parse each stored event_json into a KED dict and track the last SAID
 	kel := make([]map[string]interface{}, 0, len(events))

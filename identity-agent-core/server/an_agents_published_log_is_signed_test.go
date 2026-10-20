@@ -25,11 +25,11 @@ func TestAnAgentsPublishedLogCarriesItsOwnSignature(t *testing.T) {
 	if _, err := e.CreateInceptionNamed(iacrypto.VerkeyQB64(rootPub), iacrypto.VerkeyQB64(rootNext), "owner"); err != nil {
 		t.Fatal(err)
 	}
-	dip, err := e.CreateDelegatedInception(iacrypto.VerkeyQB64(pub), iacrypto.VerkeyQB64(nextPub), "Mac Mini", "owner")
+	dip, err := e.CreateDelegatedInception(iacrypto.VerkeyQB64(pub), iacrypto.VerkeyQB64(nextPub), "Research assistant", "owner")
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := asset.Asset{PairwiseAID: dip.AID, SigningIndex: index, DisplayName: "Mac Mini"}
+	a := asset.Asset{PairwiseAID: dip.AID, SigningIndex: index, DisplayName: "Research assistant"}
 
 	rawEvents, sigs := s.assetEventsAndSignatures(a, []string{dip.RawBytesB64})
 	if sigs[0] == "" {

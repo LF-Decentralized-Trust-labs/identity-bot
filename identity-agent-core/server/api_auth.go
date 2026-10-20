@@ -577,6 +577,11 @@ var sessionForbidden = map[string]string{
 	// may do and leave that standing after the session ends — the same durable
 	// grant as minting, by a different door.
 	"PUT /api/mcp/agents/{id}/capabilities": "re-issuing an agent's grant can widen what it may do, and that outlives the session that changed it",
+	// An AI agent's configuration says where its model is reached and with which
+	// stored key, and whether it must run attested. A session that changed those
+	// could point the AI agent at an endpoint it controls, and the change would
+	// outlive the session.
+	"PATCH /api/mcp/agents/{id}": "changing where an AI agent's model is reached, and with which key, outlives the session that changed it",
 }
 
 // requiresTheKeyItself reports whether a route is one a browser session must

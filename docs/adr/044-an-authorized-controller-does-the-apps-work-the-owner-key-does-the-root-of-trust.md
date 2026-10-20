@@ -8,8 +8,8 @@
 
 An Identity Agent is often operated through a front end that is not the machine
 holding the identity's key. The owner may sit at a **controller** — a paired
-computer, or the owner's own app — that reaches a full agent running elsewhere
-(for example on always-on hardware the owner never physically touches). This is
+computer, or the owner's own app — that reaches a full Identity Agent running
+elsewhere. This is
 the ordinary case, not an edge case.
 
 The router-wide authorization gate (`authorize` in `server/api_auth.go`) already
@@ -21,15 +21,15 @@ approved. The controller model is a **deny-list**: a controller may reach any
 route that is not explicitly closed, so a route added later works for the owner's
 own front end without anyone granting it — the opposite of an allow-list, and
 deliberately so (an owner's front end should never be the one caller that cannot
-use a capability an outside agent can).
+use a capability an outside AI agent can).
 
 But a number of handlers *also* re-checked `isOwner` directly, as the first thing
 they did — a stricter, pre-gate test left over from before the router-wide gate
 existed. `isOwner` is only true for a request that originates on the machine
 itself, is sealed by the owner's own identity, or is signed with the owner key.
-A controller reaching the agent over the network is none of those. So these
+A controller reaching the Identity Agent over the network is none of those. So these
 handlers refused the owner's own authorized front end even though the gate had
-already admitted it — the owner, reaching their own agent through the very
+already admitted it — the owner, reaching their own Identity Agent through the very
 mechanism built for it, was locked out of ordinary application work: creating and
 managing a delegated AI-agent identity, minting its bounded token, reading the
 capability registry.
@@ -49,12 +49,12 @@ could do that could make itself the owner and open every other gate (the
 escalation the policy file documents).
 
 **Application operations — an authorized controller may do them.** Everything else:
-the day-to-day work of running the agent. The authorized controller reaches these
+the day-to-day work of running the Identity Agent. The authorized controller reaches these
 through the router-wide gate, and **the handler adds no second owner-only check.**
 
 Concretely, these are application operations an authorized controller may perform:
-provisioning and managing a delegated agent identity; minting, listing and revoking
-that agent's bounded token; and reading the capability registry. **Defining new
+provisioning and managing a delegated AI agent identity; minting, listing and revoking
+that AI agent's bounded token; and reading the capability registry. **Defining new
 capabilities — importing a capability pack — remains owner-only**, because a pack
 declares the host-control and egress properties the gateway reads when it authorizes
 an invocation; importing one writes authorization-decision state, so it belongs with
@@ -62,8 +62,9 @@ the root of trust.
 
 **Minting a durable credential is raised to the verified level.** A few of these
 application operations create a credential that outlives the request that made it:
-provisioning an agent and minting its bearer token, and re-issuing an agent's
-capability grant. These are reached only by a controller that has proven the verified
+provisioning an AI agent and minting its bearer token, re-issuing an AI agent's
+capability grant, and changing its configuration — which model it reaches, with which
+stored key. These are reached only by a controller that has proven the verified
 authentication level, and never by a browser session — matching how issuing a
 credential is treated, because a time-bounded session or controller compromise must
 not be able to leave behind standing access that survives it. This is a
@@ -92,9 +93,5 @@ from the one the gate enforces.
 
 ## Scope
 
-This ADR governs **who may invoke an operation**. It does not assert that every
-credential the agent issues is itself genuinely content-addressed. The built-in
-schema catalog currently uses placeholder schema identifiers, tracked separately;
-until that is resolved, a grant's *schema identity* is not a cryptographic proof,
-even though the grant's issuance and anchoring (it chains to the issuer's key event
-log and is revocable) are.
+This ADR governs **who may invoke an operation**. What an AI agent's grant contains,
+and how it is issued and verified, is ADR-045.

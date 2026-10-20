@@ -120,6 +120,8 @@ var controllerNeedsLevel = map[string]controllerRequirement{
 		"minting a token creates durable bearer access to this identity's governed endpoint"},
 	"PUT /api/mcp/agents/{id}/capabilities": {alsoRaised, authprovider.LevelVerified,
 		"re-issuing an agent's capability grant changes what it may do, which others rely on"},
+	"PATCH /api/mcp/agents/{id}": {alsoRaised, authprovider.LevelVerified,
+		"changing an AI agent's configuration decides which model it talks to and with which stored key"},
 
 	// --- what it takes to get back in ---
 	// The duress policy is the sharpest of these: it says what must happen if

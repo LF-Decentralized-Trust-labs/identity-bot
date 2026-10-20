@@ -434,7 +434,7 @@ func (e *Engine) holdDelegatedIdentity(name, pub, nextDigest string, dip []byte,
 	if err != nil {
 		return err
 	}
-	e.state.put(&identity{
+	return e.state.claim(&identity{
 		Name:            name,
 		AID:             dipEvent.Identifier,
 		PublicKey:       pub,
@@ -447,7 +447,6 @@ func (e *Engine) holdDelegatedIdentity(name, pub, nextDigest string, dip []byte,
 		Registries:      map[string]*registry{},
 		HistoryVerified: true,
 	})
-	return nil
 }
 
 // approvalIn finds the event in the delegator's log whose seals name exactly

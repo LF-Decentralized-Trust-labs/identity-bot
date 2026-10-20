@@ -12,7 +12,7 @@ import (
 func TestAProductionBuildTakesNothingAsMeasured(t *testing.T) {
 	now := time.Now().UTC()
 	got := whatThisBuildTakesAsMeasured(
-		authprovider.Unmeasured("nothing vouched"), false, now)
+		authprovider.Unmeasured("nothing vouched"), false, false, now)
 	if got.Measured {
 		t.Fatalf("a production build treated an unmeasured controller as measured: %+v", got)
 	}
@@ -26,7 +26,7 @@ func TestAProductionBuildTakesNothingAsMeasured(t *testing.T) {
 func TestADevelopmentBuildOpensVerifiedButNotHigh(t *testing.T) {
 	now := time.Now().UTC()
 	got := whatThisBuildTakesAsMeasured(
-		authprovider.Unmeasured("nothing vouched"), true, now)
+		authprovider.Unmeasured("nothing vouched"), false, true, now)
 	if got.Provider != developmentBuildProvider {
 		t.Fatalf("the stand-in is not labelled as one: %q", got.Provider)
 	}
@@ -56,11 +56,22 @@ func TestADevelopmentBuildKeepsAMeasuredLowerLevel(t *testing.T) {
 	measured := authprovider.Result{
 		Level: authprovider.LevelBasic, Measured: true, At: now, Provider: "root-identity-device",
 	}
-	got := whatThisBuildTakesAsMeasured(measured, true, now)
+	got := whatThisBuildTakesAsMeasured(measured, true, true, now)
 	if got != measured {
 		t.Fatalf("a development build replaced a real measurement: %+v", got)
 	}
 	if ok, _ := mayThisControllerDoThis("POST", "/api/mcp/agents", got, now); ok {
 		t.Fatal("a measured basic level created an AI agent")
+	}
+}
+
+// A statement that was offered and did not hold up — unvouched, or forged — is
+// not raised by the stand-in: it was an attempt, not an absence.
+func TestADevelopmentBuildDoesNotRaiseARefusedStatement(t *testing.T) {
+	now := time.Now().UTC()
+	got := whatThisBuildTakesAsMeasured(
+		authprovider.Unmeasured("not vouched for by the device that holds the key"), true, true, now)
+	if got.Measured {
+		t.Fatalf("a refused statement was taken as verified: %+v", got)
 	}
 }

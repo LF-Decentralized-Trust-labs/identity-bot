@@ -141,6 +141,11 @@ func (s *CoreServer) publisherInput(r *http.Request, aid string) (didwebs.Publis
 				kel, err = s.KeriDriver.GetKel(kelName)
 			}
 		}
+		if err == nil && kel.AID != "" && kel.AID != aid {
+			// Found by name, and it is another identity's log: publishing it
+			// would put another identity's key in this one's document.
+			return didwebs.PublishInput{}, fmt.Errorf("the log held under %q is %s's, not %s's", kelName, kel.AID, aid)
+		}
 		if err == nil {
 			kelEvents = kel.KEL
 			seq = kel.SequenceNumber

@@ -134,7 +134,9 @@ func (s *CoreServer) controllerActsForTheOwner(
 		return true
 	}
 	now := time.Now().UTC()
-	authenticated = whatThisBuildTakesAsMeasured(authenticated, buildmode.IsDev(), now)
+	offered := strings.TrimSpace(r.Header.Get(headerControllerAuthLevel)) != "" ||
+		strings.TrimSpace(r.Header.Get(headerAuthLevelVouchedBy)) != ""
+	authenticated = whatThisBuildTakesAsMeasured(authenticated, offered, buildmode.IsDev(), now)
 	if ok, why := mayThisControllerDoThis(
 		r.Method, pattern, authenticated, now); !ok {
 		denyAuthorization(w, "this machine may act for you, but "+why)

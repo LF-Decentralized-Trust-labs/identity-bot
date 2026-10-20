@@ -10,7 +10,7 @@ import (
 // The identifier is pinned. A grant names its schema by this digest, so a change
 // to the schema is a new kind of credential that every verifier has to be told
 // about — never something that should happen as a side effect of an edit here.
-const pinnedAIAgentGrantSAID = "EJHGmPIM8tckPol-T6MDzRAQ4JAtn9Cjx3hsuJ2i4Dau"
+const pinnedAIAgentGrantSAID = "ENqXDGTD_fvwwkYGtaHby3J3Oahi3LzCE-ehDJxmHrBi"
 
 func TestTheAIAgentGrantSchemaIsPinned(t *testing.T) {
 	if AIAgentGrant.Schema.SAID != pinnedAIAgentGrantSAID {
@@ -64,7 +64,7 @@ func TestEveryAssetGrantCarriesTheSharedAttributes(t *testing.T) {
 
 func TestAnAIAgentGrantRefusesWhatItsSchemaRefuses(t *testing.T) {
 	good := map[string]interface{}{
-		"i": "EAgent", "asset_type": "ai_agent", "name": "Mac Mini",
+		"i": "EAgent", "asset_type": "ai_agent", "name": "Research assistant",
 		"capabilities": []string{"system.info.read"},
 	}
 	if err := AIAgentGrant.CheckAttributes(good); err != nil {

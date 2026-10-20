@@ -5,8 +5,6 @@ import (
 
 	"identity-agent-core/asset"
 	"identity-agent-core/sandbox"
-
-	"identity-agent-core/store"
 )
 
 // Agent identity resolution — the foundational primitives for treating a provisioned
@@ -53,6 +51,13 @@ func (s *CoreServer) ResolveAgentCaller(aid string) (sandbox.CallerContext, bool
 			GrantSAID:    grant.SAID,
 			Scopes:       agent.Capabilities,
 		}, &cc)
+	} else if s.KeriDriver != nil {
+		// Where grants can be issued and verified, no usable grant means no
+		// authority. Falling back to the stored ceiling here gave a revoked AI
+		// agent its ceiling back the moment it authenticated by its own
+		// signature instead of its token. A build with no engine has no grants
+		// at all, and there the stored ceiling is the only statement there is.
+		cc.Scopes = nil
 	}
 	return cc, true
 }
@@ -91,21 +96,7 @@ func (s *CoreServer) OwnerRootAID() string {
 // (sound for credentials this agent issued; verifying a foreign-issuer presented
 // credential is a separate extension).
 func (s *CoreServer) HoldsValidCredential(aid, schema, issuer string) bool {
-	if s.DataStore == nil || aid == "" || schema == "" {
-		return false
-	}
-	creds, err := s.DataStore.GetCredentials()
-	if err != nil {
-		return false
-	}
-	for _, c := range creds {
-		if c.HolderAID == aid && c.SchemaSAID == schema && isUsableStatus(c.Status) {
-			if issuer == "" || c.IssuerAID == issuer {
-				return true
-			}
-		}
-	}
-	return false
+	return len(s.credentialsHeldBy(aid, schema, issuer, true)) > 0
 }
 
 // enrichCallerFromIdentity gives an envelope-proven caller its delegation lineage and
@@ -148,26 +139,11 @@ type assetAgentRef struct {
 
 // findCapabilityGrant returns the newest usable capability-grant credential held by aid.
 func (s *CoreServer) findCapabilityGrant(aid string) *grantRef {
-	if s.DataStore == nil || aid == "" {
+	held := s.grantsHeldBy(aid, true)
+	if len(held) == 0 {
 		return nil
 	}
-	creds, err := s.DataStore.GetCredentials()
-	if err != nil {
-		return nil
-	}
-	var newest *store.CredentialRecord
-	for i := range creds {
-		c := creds[i]
-		if c.HolderAID == aid && c.SchemaSAID == capabilityGrantSchemaSAID && isUsableStatus(c.Status) {
-			if newest == nil || c.IssuedAt > newest.IssuedAt {
-				newest = &c
-			}
-		}
-	}
-	if newest == nil {
-		return nil
-	}
-	return &grantRef{SAID: newest.SAID}
+	return &grantRef{SAID: held[0].SAID}
 }
 
 type grantRef struct{ SAID string }

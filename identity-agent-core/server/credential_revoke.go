@@ -63,7 +63,7 @@ func (s *CoreServer) revokeIssuedCredential(rec *store.CredentialRecord) (bool, 
 	if err != nil {
 		return false, err
 	}
-	if serr := s.saveOwnInteraction(rec.IssuerAID, resp.IxnEvent, resp.IxnRawBytesB64, resp.SequenceNumber); serr != nil {
+	if serr := s.saveOwnInteraction(rec.IssuerAID, resp.IxnEvent, resp.IxnRawBytesB64, resp.SequenceNumber, ""); serr != nil {
 		log.Printf("[credential] failed to persist revocation anchor for %s: %v", rec.SAID, serr)
 	}
 	log.Printf("[credential] TEL-revoked %s (rev %s, registry %s)", rec.SAID, resp.RevSaid, rec.RegistrySAID)

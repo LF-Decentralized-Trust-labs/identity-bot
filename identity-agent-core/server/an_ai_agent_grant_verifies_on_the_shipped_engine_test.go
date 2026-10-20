@@ -65,7 +65,7 @@ func grantWorld(t *testing.T) (*CoreServer, *asset.Asset) {
 	aNext, _ := keri.GenerateSigner(true)
 	aPub, _ := aSigner.PublicKey()
 	aNextPub, _ := aNext.PublicKey()
-	dip, err := e.CreateDelegatedInception(aPub, aNextPub, "Mac Mini", root.AID)
+	dip, err := e.CreateDelegatedInception(aPub, aNextPub, "Research assistant", root.AID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func grantWorld(t *testing.T) (*CoreServer, *asset.Asset) {
 		t.Fatal(err)
 	}
 	return s, &asset.Asset{
-		ID: "agent-1", DisplayName: "Mac Mini", AssetType: "ai_agent",
+		ID: "agent-1", DisplayName: "Research assistant", AssetType: "ai_agent",
 		PairwiseAID: dip.AID, DelegatorAID: root.AID,
 		Capabilities: []string{"infra.zone.list", "system.info.read"},
 	}
@@ -84,7 +84,7 @@ func grantWorld(t *testing.T) (*CoreServer, *asset.Asset) {
 // to somebody who has only the log.
 func TestTheOrganisationsOwnEventsAreSigned(t *testing.T) {
 	s, agent := grantWorld(t)
-	if _, err := s.issueCapabilityGrant(agent, nil); err != nil {
+	if _, err := s.issueCapabilityGrant(agent); err != nil {
 		t.Fatal(err)
 	}
 	events, _ := s.DataStore.GetEvents(agent.DelegatorAID)
@@ -109,7 +109,7 @@ func TestTheOrganisationsOwnEventsAreSigned(t *testing.T) {
 func scopesFor(t *testing.T, s *CoreServer, a *asset.Asset, grantSAID, token string) []string {
 	t.Helper()
 	seedAgentToken(t, s, token, mcpToken{
-		Name: a.DisplayName, Scopes: []string{"what.the.token.remembers"},
+		Name: a.DisplayName, Scopes: []string{"infra.zone.list", "system.info.read"},
 		AgentAID: a.PairwiseAID, DelegatorAID: a.DelegatorAID, GrantSAID: grantSAID,
 	})
 	return tokenAwareResolver{s}.Resolve(reqWithBearer(token)).Scopes
@@ -120,7 +120,7 @@ func scopesFor(t *testing.T, s *CoreServer, a *asset.Asset, grantSAID, token str
 // denied. Issued and verified for real, the grant now decides the agent's scopes.
 func TestAnAIAgentGrantIsIssuedAndVerifiedOnTheShippedEngine(t *testing.T) {
 	s, agent := grantWorld(t)
-	grant, err := s.issueCapabilityGrant(agent, nil)
+	grant, err := s.issueCapabilityGrant(agent)
 	if err != nil {
 		t.Fatalf("issuing the grant: %v", err)
 	}
@@ -139,12 +139,12 @@ func TestAnAIAgentGrantIsIssuedAndVerifiedOnTheShippedEngine(t *testing.T) {
 // cannot be found and used beside the new.
 func TestReissuingAGrantRevokesTheOneItReplaces(t *testing.T) {
 	s, agent := grantWorld(t)
-	first, err := s.issueCapabilityGrant(agent, nil)
+	first, err := s.issueCapabilityGrant(agent)
 	if err != nil {
 		t.Fatal(err)
 	}
 	agent.Capabilities = []string{"system.info.read"}
-	second, err := s.issueCapabilityGrant(agent, nil)
+	second, err := s.issueCapabilityGrant(agent)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +171,7 @@ func TestALapsedGrantAdmitsNothing(t *testing.T) {
 	s, agent := grantWorld(t)
 	lapsed := mustParseTime(t, "2020-01-01T00:00:00Z")
 	agent.GrantValidUntil = &lapsed
-	grant, err := s.issueCapabilityGrant(agent, nil)
+	grant, err := s.issueCapabilityGrant(agent)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,14 +183,21 @@ func TestALapsedGrantAdmitsNothing(t *testing.T) {
 // Constraints in a shape the gateway does not enforce are refused rather than
 // recorded as a limit the agent is not held to.
 func TestConstraintsTheGatewayCannotEnforceAreRefused(t *testing.T) {
-	if err := checkResourceConstraints(map[string]interface{}{
-		"zones": map[string]interface{}{"example.com": true}, "valid_days": 30.0,
-	}); err == nil {
-		t.Fatal("constraints in an unenforced shape were accepted")
+	caps := []string{"infra.dns_record.list"}
+	for name, rc := range map[string]map[string]interface{}{
+		"another shape": {"zones": map[string]interface{}{"example.com": true}, "valid_days": 30.0},
+		"an empty list": {"infra.dns_record.list": map[string]interface{}{"zone_id": []interface{}{}}},
+		"an empty map":  {"infra.dns_record.list": map[string]interface{}{}},
+		"a capability the grant does not give": {
+			"infra.dns_record.delete": map[string]interface{}{"zone_id": []interface{}{"z1"}}},
+	} {
+		if checkResourceConstraints(rc, caps) == nil {
+			t.Fatalf("constraints with %s were accepted", name)
+		}
 	}
 	if err := checkResourceConstraints(map[string]interface{}{
-		"infra.zone.list": map[string]interface{}{"zone": []interface{}{"example.com"}},
-	}); err != nil {
+		"infra.dns_record.list": map[string]interface{}{"zone_id": []interface{}{"z1"}},
+	}, caps); err != nil {
 		t.Fatalf("enforceable constraints were refused: %v", err)
 	}
 }
@@ -202,4 +209,41 @@ func mustParseTime(t *testing.T, s string) time.Time {
 		t.Fatal(err)
 	}
 	return v
+}
+
+// A grant is checked against the issuer's log up to the event that issued it.
+// An event written later that cannot be verified does not withdraw it — and
+// before this, one unsigned event anywhere in the log denied every AI agent.
+func TestALaterUnsignedEventDoesNotWithdrawAGrant(t *testing.T) {
+	s, agent := grantWorld(t)
+	grant, err := s.issueCapabilityGrant(agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, _ := s.DataStore.GetEvents(agent.DelegatorAID)
+	if err := s.DataStore.SaveEvent(store.EventRecord{
+		AID: agent.DelegatorAID, SequenceNumber: len(events), EventType: "ixn",
+		EventJSON: `{"d":"ELATER","t":"ixn"}`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := scopesFor(t, s, agent, grant, "iamcp_later"); len(got) != 2 {
+		t.Fatalf("a later unsigned event withdrew the grant: %v", got)
+	}
+}
+
+// A grant counts only from the identity that delegated the AI agent.
+func TestAGrantFromAnotherIssuerAdmitsNothing(t *testing.T) {
+	s, agent := grantWorld(t)
+	grant, err := s.issueCapabilityGrant(agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The same grant, presented for an AI agent that a different identity
+	// delegated: its issuer is not that AI agent's delegator.
+	elsewhere := *agent
+	elsewhere.DelegatorAID = "ESOMEBODYELSE"
+	if got := scopesFor(t, s, &elsewhere, grant, "iamcp_foreign"); len(got) != 0 {
+		t.Fatalf("a grant from another issuer admits %v", got)
+	}
 }

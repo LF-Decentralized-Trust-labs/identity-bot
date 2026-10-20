@@ -21,7 +21,7 @@ import (
 // The agent gets its OWN verifiable AID chained to the owner's root, so every
 // action it takes through the endpoint is provably "owner -> this agent" in the
 // signed invocation log.
-func (h *Handler) ProvisionAgentAsset(displayName string, capabilities []string, cfg *AgentConfig, validUntil *time.Time) (*Asset, error) {
+func (h *Handler) ProvisionAgentAsset(displayName string, capabilities []string, cfg *AgentConfig, validUntil *time.Time, constraints map[string]interface{}) (*Asset, error) {
 	displayName = strings.TrimSpace(displayName)
 	if displayName == "" {
 		return nil, fmt.Errorf("agent display name is required")
@@ -63,19 +63,20 @@ func (h *Handler) ProvisionAgentAsset(displayName string, capabilities []string,
 
 	now := time.Now().UTC()
 	asset := Asset{
-		ID:              id,
-		DisplayName:     displayName,
-		AssetType:       "ai_agent",
-		Origin:          "agent://" + id,
-		PairwiseAID:     resp.AID,
-		DelegationModel: "delegated",
-		DelegatorAID:    resp.DelegatorAID,
-		SigningIndex:    signingIndex,
-		Capabilities:    capabilities,
-		AgentConfig:     cfg,
-		GrantValidUntil: validUntil,
-		CreatedAt:       now,
-		UpdatedAt:       now,
+		ID:               id,
+		DisplayName:      displayName,
+		AssetType:        "ai_agent",
+		Origin:           "agent://" + id,
+		PairwiseAID:      resp.AID,
+		DelegationModel:  "delegated",
+		DelegatorAID:     resp.DelegatorAID,
+		SigningIndex:     signingIndex,
+		Capabilities:     capabilities,
+		AgentConfig:      cfg,
+		GrantValidUntil:  validUntil,
+		GrantConstraints: constraints,
+		CreatedAt:        now,
+		UpdatedAt:        now,
 	}
 	h.Store.UpsertAsset(asset)
 	return &asset, nil
@@ -94,11 +95,18 @@ var provisionMu sync.Mutex
 
 func (h *Handler) agentNameTaken(name string) bool {
 	for _, a := range h.ListAgents() {
-		if strings.EqualFold(strings.TrimSpace(a.DisplayName), name) {
+		if SameAgentName(a.DisplayName, name) {
 			return true
 		}
 	}
 	return false
+}
+
+// SameAgentName is how two AI agent names are compared everywhere: trimmed,
+// and without case, because two names a person cannot tell apart on screen
+// must not name two agents.
+func SameAgentName(a, b string) bool {
+	return strings.EqualFold(strings.TrimSpace(a), strings.TrimSpace(b))
 }
 
 // UpdateAgentConfig replaces the operational config of an existing ai_agent asset
@@ -139,8 +147,18 @@ func (h *Handler) SetAgentCapabilities(assetID string, caps []string) (*Asset, e
 	if a.AssetType != "ai_agent" {
 		return nil, fmt.Errorf("asset %s is not an ai_agent", assetID)
 	}
-	// Normalise so a ceiling cannot silently contain duplicates or blanks, either of
-	// which make a later diff of "what changed" harder to read than it should be.
+	a.Capabilities = NormaliseCapabilities(caps)
+	a.UpdatedAt = time.Now().UTC()
+	if err := h.Store.UpsertAsset(a); err != nil {
+		return nil, fmt.Errorf("persisting ceiling: %w", err)
+	}
+	return &a, nil
+}
+
+// NormaliseCapabilities trims, de-duplicates and sorts a ceiling, so it cannot
+// silently contain duplicates or blanks, either of which make a later diff of
+// "what changed" harder to read than it should be.
+func NormaliseCapabilities(caps []string) []string {
 	seen := map[string]bool{}
 	clean := make([]string, 0, len(caps))
 	for _, c := range caps {
@@ -152,10 +170,23 @@ func (h *Handler) SetAgentCapabilities(assetID string, caps []string) (*Asset, e
 		clean = append(clean, c)
 	}
 	sort.Strings(clean)
-	a.Capabilities = clean
+	return clean
+}
+
+// SetAgentGrantConstraints replaces the argument limits recorded for an AI
+// agent's grant. The grant itself is re-issued by the caller.
+func (h *Handler) SetAgentGrantConstraints(assetID string, constraints map[string]interface{}) (*Asset, error) {
+	a, ok := h.Store.GetAsset(assetID)
+	if !ok {
+		return nil, fmt.Errorf("agent not found")
+	}
+	if a.AssetType != "ai_agent" {
+		return nil, fmt.Errorf("asset %s is not an ai_agent", assetID)
+	}
+	a.GrantConstraints = constraints
 	a.UpdatedAt = time.Now().UTC()
 	if err := h.Store.UpsertAsset(a); err != nil {
-		return nil, fmt.Errorf("persisting ceiling: %w", err)
+		return nil, fmt.Errorf("persisting constraints: %w", err)
 	}
 	return &a, nil
 }

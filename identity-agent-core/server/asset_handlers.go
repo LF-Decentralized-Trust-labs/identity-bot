@@ -44,7 +44,7 @@ func (s *CoreServer) saveDelegationAnchor(rootAID string, approval *drivers.Driv
 	if approval == nil || approval.DelegatorIxn == nil {
 		return nil
 	}
-	return s.saveOwnInteraction(rootAID, approval.DelegatorIxn, approval.DelegatorIxnRawBytesB64, -1)
+	return s.saveOwnInteraction(rootAID, approval.DelegatorIxn, approval.DelegatorIxnRawBytesB64, -1, "")
 }
 
 func (s *CoreServer) mountAssetRoutes(r chi.Router) {

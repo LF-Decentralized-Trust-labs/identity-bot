@@ -31,7 +31,7 @@ func seedAgentToken(t *testing.T, s *CoreServer, plaintext string, tok mcpToken)
 }
 
 // capabilitiesFromACDC pulls the granted ids out of the ACDC attribute block,
-// with a flat top-level fallback, and rejects garbage.
+// and nowhere else, and rejects garbage.
 func TestCapabilitiesFromACDC(t *testing.T) {
 	acdc, _ := json.Marshal(map[string]interface{}{
 		"a": map[string]interface{}{
@@ -45,8 +45,8 @@ func TestCapabilitiesFromACDC(t *testing.T) {
 	}
 
 	flat, _ := json.Marshal(map[string]interface{}{"capabilities": []interface{}{"x.y.z"}})
-	if got := capabilitiesFromACDC(base64.StdEncoding.EncodeToString(flat)); len(got) != 1 || got[0] != "x.y.z" {
-		t.Fatalf("flat fallback failed: %v", got)
+	if got := capabilitiesFromACDC(base64.StdEncoding.EncodeToString(flat)); len(got) != 0 {
+		t.Fatalf("capabilities outside the attribute block were read: %v", got)
 	}
 
 	if got := capabilitiesFromACDC("not-base64!!!"); got != nil {
@@ -122,30 +122,30 @@ func TestVerifiedGrantDerivesScopesFromCredential(t *testing.T) {
 
 	// The issuer's stored log, which is what verification reads. The fake engine
 	// does not inspect it; what is checked here is that the issuance is in it.
-	for i, d := range []string{"ERoot", "EIssuance"} {
+	for i, ev := range []string{`{"d":"ERoot"}`, `{"d":"EIssuance","a":[{"i":"EGrantOK","s":"0","d":"EIss"}]}`} {
 		if err := s.DataStore.SaveEvent(store.EventRecord{
 			AID: "ERoot", SequenceNumber: i, EventType: "ixn",
-			EventJSON: `{"d":"` + d + `"}`, RawBytesB64: "eA==", CesrSignature: "sig",
+			EventJSON: ev, RawBytesB64: "eA==", CesrSignature: "sig",
 		}); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	// The grant ACDC names infra.zone.list in its attribute block; the stored
-	// token ceiling deliberately differs so we can prove the credential wins.
+	// The grant ACDC names infra.zone.list in its attribute block; the token
+	// remembers more, so the narrower of the two is what must come out.
 	acdc, _ := json.Marshal(map[string]any{
 		"a": map[string]any{"i": "EAgent", "capabilities": []any{"infra.zone.list"}},
 	})
 	if err := s.DataStore.SaveCredential(store.CredentialRecord{
 		SAID: "EGrantOK", Status: "issued", Format: "acdc",
 		SchemaSAID: capabilityGrantSchemaSAID, HolderAID: "EAgent", IssuerAID: "ERoot",
-		AcdcJson: base64.StdEncoding.EncodeToString(acdc), IxnSAID: "EIssuance",
+		AcdcJson: base64.StdEncoding.EncodeToString(acdc), IxnSAID: "EIssuance", IssSAID: "EIss",
 	}); err != nil {
 		t.Fatal(err)
 	}
 	plaintext := "iamcp_verified"
 	seedAgentToken(t, s, plaintext, mcpToken{
-		Name: "a4", Scopes: []string{"stored.ceiling.placeholder"},
+		Name: "a4", Scopes: []string{"infra.zone.list", "stored.but.not.granted"},
 		AgentAID: "EAgent", DelegatorAID: "ERoot", GrantSAID: "EGrantOK",
 	})
 

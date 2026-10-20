@@ -6,6 +6,7 @@ import (
 	"identity-agent-core/schemas"
 
 	"github.com/go-chi/chi/v5"
+	keri "github.com/grapeid/keri-go"
 )
 
 // handlePublicSchemaServe serves a credential schema exactly as its identifier
@@ -15,12 +16,19 @@ import (
 // though it did.
 func (s *CoreServer) handlePublicSchemaServe(w http.ResponseWriter, r *http.Request) {
 	said := chi.URLParam(r, "said")
-	for _, g := range schemas.AssetGrants {
-		if g.Schema.SAID == said {
-			w.Header().Set("Content-Type", "application/schema+json")
-			_, _ = w.Write([]byte(g.Schema.JSON))
-			return
-		}
+	sch := schemas.Get(said)
+	if sch == nil {
+		http.NotFound(w, r)
+		return
 	}
-	http.NotFound(w, r)
+	// Served only if the document digests to the identifier it is asked for by,
+	// which is what a placeholder identifier fails. Checked here, from the
+	// catalog every schema is registered in, so a schema made real later is
+	// served without anybody remembering to add it to a list.
+	if got, err := keri.VerifySchema([]byte(sch.JSON)); err != nil || got != said {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "application/schema+json")
+	_, _ = w.Write([]byte(sch.JSON))
 }

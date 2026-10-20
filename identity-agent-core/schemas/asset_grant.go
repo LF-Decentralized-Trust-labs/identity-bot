@@ -46,35 +46,55 @@ type AssetGrant struct {
 	kind assetGrantKind
 }
 
+// grantAttribute is one attribute of a grant's attribute block: its name, and
+// its JSON Schema definition as written into the document.
+type grantAttribute struct {
+	name       string
+	definition string
+}
+
 // assetGrantKind is what one kind of asset adds to the shared template.
 type assetGrantKind struct {
 	assetType   string
 	title       string
 	description string
-	// properties are JSON object members, in order, for the attribute block.
-	properties []string
+	// attributes are the kind's own, in order, after the shared ones.
+	attributes []grantAttribute
 	// required are the kind's own required attributes.
 	required []string
 	fields   []SchemaField
 }
 
-// sharedGrantProperties are the attributes every asset grant carries, in order.
+// sharedGrantAttributes are the attributes every asset grant carries, in order.
 // Order is part of a schema's identifier, so it is fixed here.
-func sharedGrantProperties(assetType string) []string {
-	return []string{
-		`"d": {"description": "Attributes block identifier", "type": "string"}`,
-		`"i": {"description": "The asset's identifier: the holder of this grant", "type": "string"}`,
-		`"dt": {"description": "When the grant was issued", "type": "string", "format": "date-time"}`,
-		fmt.Sprintf(`"asset_type": {"description": "The kind of asset this grant is for", "type": "string", "const": %q}`, assetType),
-		`"name": {"description": "The asset's name when the grant was issued", "type": "string"}`,
-		`"valid_until": {"description": "When the grant lapses. Absent, it holds until revoked", "type": "string", "format": "date-time"}`,
+//
+// "u" is a salt, present when the attribute block is issued private: a block
+// drawn from a small, guessable set of values — a fixed asset type, a few
+// capability ids — could otherwise be recovered from its digest by trying them.
+func sharedGrantAttributes(assetType string) []grantAttribute {
+	return []grantAttribute{
+		{"d", `{"description": "Attributes block identifier", "type": "string"}`},
+		{"u", `{"description": "Salt, when the attributes are issued private", "type": "string"}`},
+		{"i", `{"description": "The asset's identifier: the holder of this grant", "type": "string"}`},
+		{"dt", `{"description": "When the grant was issued", "type": "string", "format": "date-time"}`},
+		{"asset_type", fmt.Sprintf(`{"description": "The kind of asset this grant is for", "type": "string", "const": %q}`, assetType)},
+		{"name", `{"description": "The asset's name when the grant was issued", "type": "string"}`},
+		{"valid_until", `{"description": "When the grant lapses. Absent, it holds until revoked", "type": "string", "format": "date-time"}`},
 	}
 }
 
 var sharedGrantRequired = []string{"d", "i", "dt", "asset_type", "name"}
 
+func (k assetGrantKind) allAttributes() []grantAttribute {
+	return append(sharedGrantAttributes(k.assetType), k.attributes...)
+}
+
 func buildAssetGrant(k assetGrantKind) (*AssetGrant, error) {
-	props := append(sharedGrantProperties(k.assetType), k.properties...)
+	attrs := k.allAttributes()
+	props := make([]string, len(attrs))
+	for i, a := range attrs {
+		props[i] = fmt.Sprintf("%q: %s", a.name, a.definition)
+	}
 	required := append(append([]string{}, sharedGrantRequired...), k.required...)
 	quoted := make([]string, len(required))
 	for i, r := range required {
@@ -91,6 +111,7 @@ func buildAssetGrant(k assetGrantKind) (*AssetGrant, error) {
   "properties": {
     "v": {"description": "Credential version string", "type": "string"},
     "d": {"description": "Credential identifier", "type": "string"},
+    "u": {"description": "Salt, when the credential is issued private", "type": "string"},
     "i": {"description": "Issuer: the identity that owns the asset", "type": "string"},
     "ri": {"description": "The registry the grant is issued in, where its revocation is recorded", "type": "string"},
     "s": {"description": "Schema identifier", "type": "string"},
@@ -153,35 +174,40 @@ func mustAssetGrant(k assetGrantKind) *AssetGrant {
 
 // AIAgentGrant says what one AI agent may do.
 //
-// What it carries is only what the gateway enforces when the agent acts:
+// What it carries is only what the gateway enforces when the AI agent acts:
 //
-//   - capabilities, the full list of what the agent may invoke — its ceiling;
+//   - capabilities, the full list of what the AI agent may invoke — its ceiling;
 //   - resource_constraints, per capability, the argument values it may use.
 //
-// What it deliberately does not carry, though other agent and delegation
+// The capability ids name definitions held by the issuing Identity Agent's
+// capability registry. The grant does not pin which version of each definition
+// it meant, so a definition changed after issue changes what the grant allows.
+//
+// What it deliberately does not carry, though other AI agent and delegation
 // formats do:
 //
-//   - the role, prompt or model. Those configure the agent; they are not
+//   - the role, prompt or model. Those configure the AI agent; they are not
 //     authority, and changing them must not require a new grant;
-//   - permission to delegate onward. An AI agent cannot create agents of its
-//     own, so a field saying whether it may would assert nothing;
-//   - whom it may message, and conversation limits. Those arrive with agent
+//   - permission to delegate onward. This software offers an AI agent no way to
+//     create AI agents of its own, so a field saying whether it may would assert
+//     nothing;
+//   - whom it may message, and conversation limits. Those arrive with AI agent
 //     messaging, in a new version of this schema, because a field nothing
 //     enforces reads as a guarantee the software does not give.
 var AIAgentGrant = mustAssetGrant(assetGrantKind{
 	assetType: "ai_agent",
 	title:     "AI Agent Grant",
-	description: "What one AI agent may do, issued by the identity that owns it to the agent's " +
-		"delegated identifier. The gateway admits the agent only to the capabilities named " +
+	description: "What one AI agent may do, issued by the identity that owns it to the AI agent's " +
+		"delegated identifier. The gateway admits the AI agent only to the capabilities named " +
 		"here, within their constraints, while the grant is unrevoked and has not lapsed.",
-	properties: []string{
-		`"capabilities": {"description": "The capability ids the agent may invoke: its ceiling", "type": "array", "items": {"type": "string"}, "uniqueItems": true}`,
-		`"resource_constraints": {"description": "Per capability id, per argument, the values the agent may use", "type": "object", "additionalProperties": {"type": "object", "additionalProperties": {"type": "array", "items": {"type": "string"}}}}`,
+	attributes: []grantAttribute{
+		{"capabilities", `{"description": "The capability ids the AI agent may invoke: its ceiling", "type": "array", "items": {"type": "string"}, "uniqueItems": true}`},
+		{"resource_constraints", `{"description": "Per capability id, per argument, the values the AI agent may use. Each list names at least one value", "type": "object", "minProperties": 1, "additionalProperties": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "array", "minItems": 1, "items": {"type": "string"}}}}`},
 	},
 	required: []string{"capabilities"},
 	fields: []SchemaField{
-		{Key: "name", Label: "Agent name", Type: "string", Required: true},
-		{Key: "capabilities", Label: "Capabilities", Type: "string", Required: true, Placeholder: "capability ids the agent may invoke"},
+		{Key: "name", Label: "AI agent name", Type: "string", Required: true},
+		{Key: "capabilities", Label: "Capabilities", Type: "string", Required: true, Placeholder: "capability ids the AI agent may invoke"},
 		{Key: "resource_constraints", Label: "Resource Constraints", Type: "string", Placeholder: "optional per-capability limits"},
 		{Key: "valid_until", Label: "Valid until", Type: "date", Placeholder: "Leave blank for no expiry"},
 	},
@@ -205,8 +231,8 @@ func init() {
 // value types are the issuing code's to get right.
 func (g *AssetGrant) CheckAttributes(attrs map[string]interface{}) error {
 	declared := map[string]bool{}
-	for _, p := range append(sharedGrantProperties(g.AssetType), g.kind.properties...) {
-		declared[strings.Trim(strings.SplitN(p, ":", 2)[0], `" `)] = true
+	for _, a := range g.kind.allAttributes() {
+		declared[a.name] = true
 	}
 	for _, r := range append(append([]string{}, sharedGrantRequired...), g.kind.required...) {
 		if r == "d" || r == "dt" {

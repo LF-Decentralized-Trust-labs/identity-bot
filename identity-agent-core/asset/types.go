@@ -85,8 +85,12 @@ type Asset struct {
 	// Kept on the asset, not only in the credential, so re-issuing the grant
 	// carries the owner's chosen lapse forward instead of silently dropping it.
 	GrantValidUntil *time.Time `json:"grant_valid_until,omitempty"`
-	CreatedAt       time.Time  `json:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
+	// GrantConstraints are the per-capability argument limits in the asset's
+	// grant, kept for the same reason: re-issuing the grant must carry them
+	// forward, because a grant re-issued without them is a wider grant.
+	GrantConstraints map[string]interface{} `json:"grant_constraints,omitempty"`
+	CreatedAt        time.Time              `json:"created_at"`
+	UpdatedAt        time.Time              `json:"updated_at"`
 }
 
 // AgentConfig captures what an ai_agent is and how it operates. The identity + grant

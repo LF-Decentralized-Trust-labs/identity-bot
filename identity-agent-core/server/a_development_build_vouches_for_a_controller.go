@@ -18,9 +18,10 @@ import (
 //
 // A development build stands in for the missing measurement, and only for that:
 //
-//   - Only when nothing was measured. A statement that WAS made and vouched for
-//     is used as it is, even when it is lower than verified, because a person
-//     who was checked and fell short has not been checked "by default".
+//   - Only when no statement was offered at all. A statement that was made is
+//     used as it is — lower than verified, or refused as unvouched or forged —
+//     because a person who was checked and fell short, or a statement that did
+//     not hold up, has not been checked "by default".
 //   - Never above verified. The actions raised to high — rotating keys, exporting
 //     backups, replacing the root seed — stay out of reach, because those are the
 //     ones a development identity still needs to protect from a stray controller.
@@ -34,9 +35,9 @@ import (
 const developmentBuildProvider = "development-build-default"
 
 func whatThisBuildTakesAsMeasured(
-	measured authprovider.Result, isDevBuild bool, now time.Time,
+	measured authprovider.Result, statementOffered, isDevBuild bool, now time.Time,
 ) authprovider.Result {
-	if !isDevBuild || measured.Measured {
+	if !isDevBuild || statementOffered || measured.Measured {
 		return measured
 	}
 	return authprovider.Result{

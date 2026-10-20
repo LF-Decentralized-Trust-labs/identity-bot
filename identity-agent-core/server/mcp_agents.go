@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"identity-agent-core/asset"
@@ -67,7 +68,7 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 		jsonError(w, "valid_until is in the past, so the grant would never be in force", http.StatusBadRequest)
 		return
 	}
-	if err := checkResourceConstraints(req.ResourceConstraints); err != nil {
+	if err := checkResourceConstraints(req.ResourceConstraints, asset.NormaliseCapabilities(req.Capabilities)); err != nil {
 		jsonError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -91,7 +92,7 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 		jsonError(w, asset.ErrAgentNameTaken.Error()+" (a token is filed under it)", http.StatusConflict)
 		return
 	}
-	agent, err := s.assetHandler.ProvisionAgentAsset(req.Name, req.Capabilities, cfg, req.ValidUntil)
+	agent, err := s.assetHandler.ProvisionAgentAsset(req.Name, req.Capabilities, cfg, req.ValidUntil, req.ResourceConstraints)
 	if errors.Is(err, asset.ErrAgentNameTaken) {
 		jsonError(w, err.Error(), http.StatusConflict)
 		return
@@ -105,7 +106,7 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 	// to the agent's AID that formalizes the ceiling. The endpoint verifies it at
 	// invoke time, so authority is credential-proven rather than a server-side list.
 	// Non-fatal: on a driverless build the stored ceiling still governs.
-	grantSAID, err := s.issueCapabilityGrant(agent, req.ResourceConstraints)
+	grantSAID, err := s.issueCapabilityGrant(agent)
 	if err != nil {
 		log.Printf("[mcp] agent %s provisioned without a capability grant (%v) — falling back to the stored ceiling", agent.PairwiseAID, err)
 	}
@@ -160,7 +161,7 @@ func (s *CoreServer) anMCPTokenIsNamed(name string) bool {
 	mcpTokensMu.Lock()
 	defer mcpTokensMu.Unlock()
 	for _, t := range s.loadMCPTokens() {
-		if strings.EqualFold(strings.TrimSpace(t.Name), name) {
+		if asset.SameAgentName(t.Name, name) {
 			return true
 		}
 	}
@@ -211,20 +212,8 @@ func (s *CoreServer) handleListAgents(w http.ResponseWriter, r *http.Request) {
 // capability-grant credential status. Only the newest counts: a grant replaced
 // when the ceiling changed is revoked, and that says nothing about the agent.
 func (s *CoreServer) agentStatus(agentAID string) string {
-	creds, err := s.DataStore.GetCredentials()
-	if err != nil {
-		return "active"
-	}
-	var newest *store.CredentialRecord
-	for i := range creds {
-		c := creds[i]
-		if c.HolderAID == agentAID && c.SchemaSAID == capabilityGrantSchemaSAID {
-			if newest == nil || c.IssuedAt > newest.IssuedAt {
-				newest = &c
-			}
-		}
-	}
-	if newest != nil && newest.Status == "revoked" {
+	held := s.grantsHeldBy(agentAID, false)
+	if len(held) > 0 && !isUsableStatus(held[0].Status) {
 		return "revoked"
 	}
 	return "active"
@@ -282,15 +271,13 @@ func (s *CoreServer) handleSetAgentCapabilities(w http.ResponseWriter, r *http.R
 	}
 	id := chi.URLParam(r, "id")
 	var req struct {
-		Capabilities        []string               `json:"capabilities"`
-		ResourceConstraints map[string]interface{} `json:"resource_constraints,omitempty"`
+		Capabilities []string `json:"capabilities"`
+		// Absent keeps the constraints the grant already has; present, even
+		// as {}, replaces them. Re-issuing without them would be a wider grant.
+		ResourceConstraints *map[string]interface{} `json:"resource_constraints,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		jsonError(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
-	if err := checkResourceConstraints(req.ResourceConstraints); err != nil {
-		jsonError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	if req.Capabilities == nil {
@@ -300,26 +287,48 @@ func (s *CoreServer) handleSetAgentCapabilities(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	// One change to an AI agent's grant at a time. Two at once would each find
+	// the same grant to replace, both issue, and leave two usable grants.
+	unlock := lockAgentGrant(id)
+	defer unlock()
+
 	before, ok := s.assetHandler.Store.GetAsset(id)
 	if !ok {
 		jsonError(w, "agent not found", http.StatusNotFound)
 		return
 	}
-
-	updated, err := s.assetHandler.SetAgentCapabilities(id, req.Capabilities)
-	if err != nil {
+	candidate := before
+	candidate.Capabilities = asset.NormaliseCapabilities(req.Capabilities)
+	if req.ResourceConstraints != nil {
+		candidate.GrantConstraints = *req.ResourceConstraints
+	}
+	if err := checkResourceConstraints(candidate.GrantConstraints, candidate.Capabilities); err != nil {
 		jsonError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	// Re-issue the grant so the credential says what the record says. Non-fatal for
-	// the same reason it is at provisioning: on a driverless build the stored ceiling
-	// still governs, and refusing the whole change would leave the record un-updated
-	// on exactly the builds that cannot verify credentials anyway.
-	grantSAID, err := s.issueCapabilityGrant(updated, req.ResourceConstraints)
+	// The grant is re-issued FIRST, and nothing is changed unless it is. Updating
+	// the record and then failing to issue left the token on the old grant, so
+	// narrowing an AI agent's ceiling silently left it with the wider one. Only a
+	// build with no engine, which has no grants at all, changes the record alone.
+	grantSAID := ""
+	if s.KeriDriver != nil {
+		g, err := s.issueCapabilityGrant(&candidate)
+		if err != nil {
+			jsonError(w, "the grant could not be re-issued, so nothing was changed: "+err.Error(),
+				http.StatusBadGateway)
+			return
+		}
+		grantSAID = g
+	}
+	updated, err := s.assetHandler.SetAgentCapabilities(id, candidate.Capabilities)
+	if err == nil {
+		updated, err = s.assetHandler.SetAgentGrantConstraints(id, candidate.GrantConstraints)
+	}
 	if err != nil {
-		log.Printf("[mcp] agent %s ceiling updated without re-issuing its grant (%v) — the stored ceiling governs",
-			updated.PairwiseAID, err)
+		jsonError(w, "the grant was re-issued, but the agent record was not updated: "+err.Error(),
+			http.StatusInternalServerError)
+		return
 	}
 
 	// The token carries its own copy of the scopes, consulted on every call.
@@ -388,7 +397,7 @@ func (s *CoreServer) ensureRegistry(issuerRootAID string) (string, error) {
 	}
 	// Persist the registry-inception anchoring event to the issuer KEL so it
 	// survives reload, signed, so the registry's existence is provable.
-	if err := s.saveOwnInteraction(issuerRootAID, resp.IxnEvent, resp.IxnRawBytesB64, resp.SequenceNumber); err != nil {
+	if err := s.saveOwnInteraction(issuerRootAID, resp.IxnEvent, resp.IxnRawBytesB64, resp.SequenceNumber, ""); err != nil {
 		log.Printf("[mcp] failed to persist registry anchor for %s: %v", resp.RegistrySaid, err)
 	}
 	log.Printf("[mcp] incepted TEL registry %s for issuer %s", resp.RegistrySaid, issuerRootAID)
@@ -399,7 +408,7 @@ func (s *CoreServer) ensureRegistry(issuerRootAID string) (string, error) {
 // agent's AID, persists the credential and its anchoring KEL event (so a verifier
 // can resolve the issuer KEL), and returns the grant SAID. Requires the KERI
 // driver; on any failure the caller falls back to the stored ceiling.
-func (s *CoreServer) issueCapabilityGrant(agent *asset.Asset, resourceConstraints map[string]interface{}) (string, error) {
+func (s *CoreServer) issueCapabilityGrant(agent *asset.Asset) (string, error) {
 	if s.KeriDriver == nil {
 		return "", fmt.Errorf("keri driver unavailable")
 	}
@@ -418,8 +427,8 @@ func (s *CoreServer) issueCapabilityGrant(agent *asset.Asset, resourceConstraint
 		"name":         agent.DisplayName,
 		"capabilities": capabilities,
 	}
-	if len(resourceConstraints) > 0 {
-		claims["resource_constraints"] = resourceConstraints
+	if len(agent.GrantConstraints) > 0 {
+		claims["resource_constraints"] = agent.GrantConstraints
 	}
 	expiry := ""
 	if agent.GrantValidUntil != nil {
@@ -437,7 +446,7 @@ func (s *CoreServer) issueCapabilityGrant(agent *asset.Asset, resourceConstraint
 	if err != nil {
 		return "", fmt.Errorf("no registry to issue the grant in: %w", err)
 	}
-	superseded := s.grantsHeldBy(agentAID)
+	superseded := s.grantsHeldBy(agentAID, true)
 	result, err := s.KeriDriver.IssueCredentialInRegistry(issuerRootAID, claims, capabilityGrantSchemaSAID, agentAID, nil, registrySAID)
 	if err != nil {
 		return "", err
@@ -464,56 +473,56 @@ func (s *CoreServer) issueCapabilityGrant(agent *asset.Asset, resourceConstraint
 	}
 	// Persist the anchoring IXN event on the owner-root KEL, signed, so the
 	// issuance is part of the published, verifiable history.
-	if err := s.saveOwnInteraction(issuerRootAID, result.IxnEvent, result.IxnRawBytesB64, result.SequenceNumber); err != nil {
+	if err := s.saveOwnInteraction(issuerRootAID, result.IxnEvent, result.IxnRawBytesB64, result.SequenceNumber, ""); err != nil {
 		log.Printf("[mcp] failed to persist grant IXN event for %s: %v", result.AcdcSaid, err)
 	}
 	// The grant this one replaces is withdrawn, not left standing. A re-issue
 	// that narrows a ceiling would otherwise leave the wider grant valid beside
 	// it, and anything checking "does this agent hold a valid grant" would find
 	// the old one as readily as the new.
+	//
+	// If the revocation cannot be written to the registry, the replaced grant is
+	// still marked unusable here — this identity issued it, and its own record is
+	// what its gateway reads — and the failure is reported, never skipped.
 	for i := range superseded {
 		old := superseded[i]
+		status := "revoked"
 		if _, err := s.revokeIssuedCredential(&old); err != nil {
-			log.Printf("[mcp] grant %s superseded by %s but its revocation failed: %v", old.SAID, result.AcdcSaid, err)
-			continue
+			log.Printf("[mcp] grant %s superseded by %s: its revocation was not recorded in the registry (%v); "+
+				"it is marked superseded and no longer admits anything here", old.SAID, result.AcdcSaid, err)
+			status = "superseded"
 		}
-		if err := s.DataStore.UpdateCredentialStatus(old.SAID, "revoked"); err != nil {
-			log.Printf("[mcp] grant %s superseded by %s but not marked revoked: %v", old.SAID, result.AcdcSaid, err)
+		if err := s.DataStore.UpdateCredentialStatus(old.SAID, status); err != nil {
+			log.Printf("[mcp] grant %s superseded by %s but not marked %s: %v", old.SAID, result.AcdcSaid, status, err)
 		}
 	}
 	log.Printf("[mcp] issued capability grant %s to agent %s (%d capabilities)", result.AcdcSaid, agentAID, len(capabilities))
 	return result.AcdcSaid, nil
 }
 
-// grantsHeldBy is every usable grant this identity issued to one agent.
-func (s *CoreServer) grantsHeldBy(agentAID string) []store.CredentialRecord {
-	creds, err := s.DataStore.GetCredentials()
-	if err != nil {
-		return nil
+// checkResourceConstraints refuses constraints the gateway would not enforce as
+// written: any shape but per capability id, per argument, a list of allowed
+// values; an empty map or list, which the gateway reads as "no limit" though it
+// looks like "nothing allowed"; and a limit on a capability the grant does not
+// give, which could never apply. Accepting any of these would record a limit
+// the AI agent is not actually held to.
+func checkResourceConstraints(rc map[string]interface{}, capabilities []string) error {
+	granted := map[string]bool{}
+	for _, c := range capabilities {
+		granted[c] = true
 	}
-	var out []store.CredentialRecord
-	for _, c := range creds {
-		if c.HolderAID == agentAID && c.SchemaSAID == capabilityGrantSchemaSAID && isUsableStatus(c.Status) {
-			out = append(out, c)
-		}
-	}
-	return out
-}
-
-// checkResourceConstraints refuses constraints in any shape but the one the
-// gateway enforces: per capability id, per argument, the allowed values. A
-// constraint in another shape is not enforced, so accepting it would record a
-// limit the agent is not actually held to.
-func checkResourceConstraints(rc map[string]interface{}) error {
 	for capID, v := range rc {
+		if !granted[capID] {
+			return fmt.Errorf("resource_constraints names %q, which this grant does not give", capID)
+		}
 		args, ok := v.(map[string]interface{})
-		if !ok {
-			return fmt.Errorf("resource_constraints[%q] must map argument names to allowed values", capID)
+		if !ok || len(args) == 0 {
+			return fmt.Errorf("resource_constraints[%q] must map at least one argument name to its allowed values", capID)
 		}
 		for arg, vals := range args {
 			list, ok := vals.([]interface{})
-			if !ok {
-				return fmt.Errorf("resource_constraints[%q][%q] must be a list of allowed values", capID, arg)
+			if !ok || len(list) == 0 {
+				return fmt.Errorf("resource_constraints[%q][%q] must list at least one allowed value", capID, arg)
 			}
 			for _, x := range list {
 				if _, ok := x.(string); !ok {
@@ -523,4 +532,14 @@ func checkResourceConstraints(rc map[string]interface{}) error {
 		}
 	}
 	return nil
+}
+
+var agentGrantLocks sync.Map
+
+// lockAgentGrant serialises changes to one AI agent's grant.
+func lockAgentGrant(assetID string) (unlock func()) {
+	m, _ := agentGrantLocks.LoadOrStore(assetID, &sync.Mutex{})
+	mu := m.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
 }
