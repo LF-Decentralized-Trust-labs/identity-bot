@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"identity-agent-core/authprovider"
+	"identity-agent-core/buildmode"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/login"
 )
@@ -132,8 +133,10 @@ func (s *CoreServer) controllerActsForTheOwner(
 		denyAuthorization(w, err.Error())
 		return true
 	}
+	now := time.Now().UTC()
+	authenticated = whatThisBuildTakesAsMeasured(authenticated, buildmode.IsDev(), now)
 	if ok, why := mayThisControllerDoThis(
-		r.Method, pattern, authenticated, time.Now().UTC()); !ok {
+		r.Method, pattern, authenticated, now); !ok {
 		denyAuthorization(w, "this machine may act for you, but "+why)
 		return true
 	}
