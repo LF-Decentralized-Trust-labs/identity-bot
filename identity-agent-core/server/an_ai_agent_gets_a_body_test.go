@@ -133,6 +133,18 @@ func bodyWorld(t *testing.T) (*CoreServer, string) {
 	if _, err := s.issueCapabilityGrant(agent); err != nil {
 		t.Fatal(err)
 	}
+	mgr, err := sandbox.NewManager(sandbox.ManagerConfig{DataDir: s.DataDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(mgr.Stop)
+	s.SandboxManager = mgr
+	if err := mgr.Store().UpsertCapabilityRecord(sandbox.CapabilityRecord{
+		ID: "system.info.read", Name: "Read system information", Domain: "system",
+		ExecutorType: "external_api", Provider: "registry-native", Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	return s, agent.ID
 }
 
@@ -290,19 +302,6 @@ func TestABodySignedRequestPassesTheGateOnce(t *testing.T) {
 	m := newTestMachine(t)
 	_, out := call(t, s.handleBodyEnrol, httptest.NewRequest("POST", "/", bytes.NewReader(m.enrolRequest(t, s.testEnrolment(t, agentID), "software"))))
 	call(t, s.handleApproveBody, withRoute(httptest.NewRequest("POST", "/", nil), map[string]string{"id": agentID, "bid": out["binding_id"].(string)}))
-
-	mgr, err := sandbox.NewManager(sandbox.ManagerConfig{DataDir: s.DataDir})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(mgr.Stop)
-	s.SandboxManager = mgr
-	if err := mgr.Store().UpsertCapabilityRecord(sandbox.CapabilityRecord{
-		ID: "system.info.read", Name: "Read system information", Domain: "system",
-		ExecutorType: "external_api", Provider: "registry-native", Enabled: true,
-	}); err != nil {
-		t.Fatal(err)
-	}
 
 	router := s.buildRouter("")
 	w := httptest.NewRecorder()
