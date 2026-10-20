@@ -183,6 +183,15 @@ const (
 	HeaderHost      = "X-IA-Body-Host"
 	HeaderSignature = "X-IA-Body-Sig"
 	HeaderTimestamp = "X-IA-Body-Timestamp"
+	// HeaderNonce makes every signed request distinct, so two identical
+	// requests in one second are two requests rather than a replay — a key in
+	// software signs the same input to the same signature.
+	HeaderNonce = "X-IA-Body-Nonce"
+	// HeaderWorkItem and HeaderReason are the request's stated purpose, which
+	// the Identity Agent records. Signed, so nothing between the two can
+	// rewrite what the record says the AI agent was doing.
+	HeaderWorkItem = "X-Work-Item"
+	HeaderReason   = "X-Reason"
 )
 
 // RequestWindow is how far a body's timestamp may be from the Identity Agent's
@@ -190,16 +199,33 @@ const (
 // long a captured request is worth holding.
 const RequestWindow = 2 * time.Minute
 
-// RequestToSign is the string K signs for one request: who signs, the method,
-// the path the Identity Agent will see, the moment, and a digest of the body.
-func RequestToSign(host, method, path, timestamp string, body []byte) []byte {
+// SignedRequest is everything about one request that K's signature covers.
+type SignedRequest struct {
+	Host   string
+	Method string
+	// Target is the request target exactly as sent — the escaped path and the
+	// query — so a relay can change neither which route is reached nor its
+	// parameters without breaking the signature.
+	Target    string
+	Timestamp string
+	Nonce     string
+	Body      []byte
+	WorkItem  string
+	Reason    string
+}
+
+// Bytes is the string K signs.
+func (r SignedRequest) Bytes() []byte {
 	return []byte(strings.Join([]string{
-		"IA-BODY-REQ-V1",
-		host,
-		strings.ToUpper(method),
-		path,
-		timestamp,
-		iacrypto.Blake3QB64Must(body),
+		"IA-BODY-REQ-V2",
+		r.Host,
+		strings.ToUpper(r.Method),
+		r.Target,
+		r.Timestamp,
+		r.Nonce,
+		iacrypto.Blake3QB64Must(r.Body),
+		r.WorkItem,
+		r.Reason,
 	}, "\n"))
 }
 

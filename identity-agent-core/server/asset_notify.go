@@ -46,6 +46,27 @@ const (
 // stops here rather than at whatever the sender felt like sending.
 const maxSignedBodyBytes = 12 << 20
 
+// readSignedBody reads a signed request's body to digest it, and puts it back
+// for the handler, on every path including the refusals. Over the bound it is
+// refused rather than truncated: a truncated body would be checked against a
+// signature over the whole one and handed on cut short.
+//
+// The one reader for every request whose body a signature covers.
+func readSignedBody(r *http.Request) ([]byte, error) {
+	if r.Body == nil {
+		return nil, nil
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxSignedBodyBytes+1))
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("read body: %w", err)
+	}
+	if int64(len(body)) > maxSignedBodyBytes {
+		return nil, fmt.Errorf("this request is larger than the %d bytes a signed request may carry", maxSignedBodyBytes)
+	}
+	return body, nil
+}
+
 func (s *CoreServer) verifyAssetSignature(r *http.Request) (*asset.Asset, error) {
 	found, err := s.identifyAssetFromSignature(r)
 	if err != nil {
@@ -123,20 +144,14 @@ func (s *CoreServer) identifyAssetFromSignature(r *http.Request) (*asset.Asset, 
 		return nil, fmt.Errorf("the key recorded for this machine is unusable: %w", err)
 	}
 
-	var body []byte
-	if r.Body != nil {
-		// BOUNDED. An unauthenticated caller reaches this by naming an enrolled
-		// identifier and signing garbage — the identifier is not a secret, and
-		// the signature is not checked until after the body has been read. An
-		// unbounded read there lets anyone who knows one make this agent hold
-		// as much memory as they care to send, on a route that then refuses
-		// them. The handlers downstream cap the body at 8 MB and never see it,
-		// because this runs first.
-		body, err = io.ReadAll(io.LimitReader(r.Body, maxSignedBodyBytes))
-		if err != nil {
-			return nil, fmt.Errorf("read body: %w", err)
-		}
-		r.Body = io.NopCloser(bytes.NewReader(body))
+	// BOUNDED. An unauthenticated caller reaches this by naming an enrolled
+	// identifier and signing garbage — the identifier is not a secret, and the
+	// signature is not checked until after the body has been read. An unbounded
+	// read there lets anyone who knows one make this agent hold as much memory
+	// as they care to send, on a route that then refuses them.
+	body, err := readSignedBody(r)
+	if err != nil {
+		return nil, err
 	}
 
 	ok, err := login.VerifyString(

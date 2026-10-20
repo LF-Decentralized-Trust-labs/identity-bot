@@ -313,6 +313,14 @@ func (m *Manager) RecordGovernedEvent(caller CallerContext, capabilityID, status
 	return m.recordInvocation(caller, capabilityID, "orchestrator", nil, status, time.Now())
 }
 
+// RecordGovernanceEvent writes one signed governance event for a decision about
+// an AI agent rather than an action it took — a machine asking to become its
+// body, approved, rejected, removed. Same signing and chain as an invocation;
+// the caller's Reason says why.
+func (m *Manager) RecordGovernanceEvent(caller CallerContext, eventID, status string) int64 {
+	return m.recordInvocation(caller, eventID, "governance", nil, status, time.Now())
+}
+
 // InsertInvocationEvent persists one event; returns its row id.
 func (s *SandboxStore) InsertInvocationEvent(ev InvocationEvent) (int64, error) {
 	chain, _ := json.Marshal(ev.DelegationChain)

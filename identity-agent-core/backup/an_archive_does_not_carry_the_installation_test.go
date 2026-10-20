@@ -35,6 +35,11 @@ func TestAnArchiveDoesNotCarryWhatBelongsToTheInstallation(t *testing.T) {
 		{"controller_grants.json.tmp", "the rename window must not leak what the rule excludes"},
 
 		{"secureenclave/machine_key.sep", "a key one processor holds is useless anywhere else"},
+
+		// Which machines may speak as this identity's AI agents. A restore that
+		// carried it could bring back a body removed after the archive was made.
+		{"agent_bodies.json", "which machines are AI agents' bodies is decided after a restore, not restored"},
+		{"agent_bodies.json.tmp", "the rename window must not leak what the rule excludes"},
 	}
 
 	for _, c := range notCarried {

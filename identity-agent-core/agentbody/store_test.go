@@ -72,3 +72,18 @@ func TestOneKeyIsTheBodyOfOneAgent(t *testing.T) {
 		t.Fatal("a revoked binding was decided again")
 	}
 }
+
+// A request nobody decided on before its string ran out cannot be approved
+// later: whoever won the race for a leaked string must not be able to wait.
+func TestAnUndecidedRequestExpiresWithItsString(t *testing.T) {
+	s := NewStore(t.TempDir())
+	now := time.Now()
+	secret, _, _ := s.Invite("a1", now)
+	b, err := s.Claim(secret, pendingFor("a1", "BH"), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Decide(b.ID, "a1", StateActive, "x", "", now.Add(EnrolmentWindow+time.Second)); err == nil {
+		t.Fatal("an expired request was approved")
+	}
+}

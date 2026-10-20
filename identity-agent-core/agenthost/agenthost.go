@@ -53,6 +53,9 @@ type Host struct {
 	HTTP *http.Client
 	// Out receives what a person at the machine should read.
 	Out io.Writer
+	// WorkItem and Reason are the stated purpose sent, signed, with each call.
+	WorkItem string
+	Reason   string
 }
 
 // State is what a host remembers about its enrolment.
@@ -102,7 +105,17 @@ func (h *Host) signer() (agentbody.Signer, string) {
 		}
 		return h.Signer, agentbody.GradeSoftware
 	}
-	s := secureenclave.NewPlatformSigner(h.DataDir)
+	// On Windows the TPM key has one fixed name for the whole machine, and it is
+	// already the Identity Agent's own controller key there. A body must have a
+	// key of its own, so Windows uses a key file, at the software grade, until a
+	// per-body TPM key is built and tested. On a Mac the Secure Enclave key is
+	// kept per data directory, so the body's is its own.
+	var s secureenclave.PlatformSigner
+	if runtime.GOOS == "windows" {
+		s = secureenclave.NewSoftwareSigner(h.DataDir)
+	} else {
+		s = secureenclave.NewPlatformSigner(h.DataDir)
+	}
 	if secureenclave.UsingHardware(s) {
 		return s, agentbody.GradeHardwareAsserted
 	}
@@ -248,6 +261,13 @@ func (h *Host) Enrol(enrolment string, placement string, wait time.Duration) (St
 	if err := os.MkdirAll(h.DataDir, 0o700); err != nil {
 		return State{}, err
 	}
+	// MkdirAll leaves an existing directory as it was; the sealing keys and
+	// the key file live here, so it is tightened either way.
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(h.DataDir, 0o700); err != nil {
+			return State{}, err
+		}
+	}
 	kel, currentKey, err := h.verifiedIdentityAgent(e)
 	if err != nil {
 		return State{}, err
@@ -293,6 +313,8 @@ func (h *Host) Enrol(enrolment string, placement string, wait time.Duration) (St
 	if err != nil {
 		return State{}, fmt.Errorf("the enrolment could not be sealed: %w", err)
 	}
+	words := agentbody.Words(host)
+	fmt.Fprintf(h.out(), "\nThis machine's six words are:\n\n    %s\n\n", strings.Join(words, " "))
 	body, _ := json.Marshal(map[string]any{"sender": keys, "envelope": env})
 	resp, err := h.client().Post(strings.TrimRight(e.URL, "/")+"/api/agent-host/enrol", "application/json", bytes.NewReader(body))
 	if err != nil {
@@ -306,9 +328,10 @@ func (h *Host) Enrol(enrolment string, placement string, wait time.Duration) (St
 	}
 	_ = json.NewDecoder(resp.Body).Decode(&answer)
 	if resp.StatusCode != http.StatusAccepted {
-		return State{}, fmt.Errorf("the Identity Agent refused this enrolment: %s", answer.Error)
+		return State{}, fmt.Errorf("the Identity Agent refused this enrolment: %s\n"+
+			"If the string was already used, another machine may have used it. Tell the owner NOT to approve "+
+			"any machine waiting for %q unless it shows the words above, and to ask for a new string", answer.Error, e.AgentName)
 	}
-	words := agentbody.Words(host)
 	if strings.Join(words, " ") != strings.Join(answer.Words, " ") {
 		return State{}, fmt.Errorf("the Identity Agent shows different words for this machine's key — do not approve it")
 	}
@@ -317,8 +340,8 @@ func (h *Host) Enrol(enrolment string, placement string, wait time.Duration) (St
 	if err := h.saveState(st); err != nil {
 		return State{}, err
 	}
-	fmt.Fprintf(h.out(), "\nThis machine is asking to become the body of %q, at grade %s.\n", e.AgentName, grade)
-	fmt.Fprintf(h.out(), "Check that the Identity Agent shows exactly these six words, then approve it there:\n\n    %s\n\n", strings.Join(words, " "))
+	fmt.Fprintf(h.out(), "This machine is asking to become the body of %q, at grade %s.\n", e.AgentName, grade)
+	fmt.Fprintf(h.out(), "Approve it in the app only if it shows exactly the six words above.\n")
 	return st, h.waitForDecision(wait)
 }
 
@@ -372,18 +395,33 @@ func (h *Host) Call(method, path string, body []byte) (int, []byte, error) {
 	if err != nil {
 		return 0, nil, err
 	}
-	ts := time.Now().UTC().Format(time.RFC3339)
-	sig, err := agentbody.Sign(signer, agentbody.RequestToSign(host, method, path, ts, body))
+	req, err := http.NewRequest(method, st.IdentityAgentURL+path, bytes.NewReader(body))
 	if err != nil {
 		return 0, nil, err
 	}
-	req, err := http.NewRequest(method, st.IdentityAgentURL+path, bytes.NewReader(body))
+	ts := time.Now().UTC().Format(time.RFC3339)
+	nonceBytes := make([]byte, 18)
+	if _, err := rand.Read(nonceBytes); err != nil {
+		return 0, nil, err
+	}
+	nonce := base64.RawURLEncoding.EncodeToString(nonceBytes)
+	sig, err := agentbody.Sign(signer, agentbody.SignedRequest{
+		Host: host, Method: method, Target: req.URL.RequestURI(), Timestamp: ts, Nonce: nonce, Body: body,
+		WorkItem: h.WorkItem, Reason: h.Reason,
+	}.Bytes())
 	if err != nil {
 		return 0, nil, err
 	}
 	req.Header.Set(agentbody.HeaderHost, host)
 	req.Header.Set(agentbody.HeaderSignature, sig)
 	req.Header.Set(agentbody.HeaderTimestamp, ts)
+	req.Header.Set(agentbody.HeaderNonce, nonce)
+	if h.WorkItem != "" {
+		req.Header.Set(agentbody.HeaderWorkItem, h.WorkItem)
+	}
+	if h.Reason != "" {
+		req.Header.Set(agentbody.HeaderReason, h.Reason)
+	}
 	if len(body) > 0 {
 		req.Header.Set("Content-Type", "application/json")
 	}

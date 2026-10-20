@@ -1,7 +1,6 @@
 package server
 
 import (
-	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -9,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -16,6 +16,7 @@ import (
 	"identity-agent-core/agentbody"
 	"identity-agent-core/asset"
 	"identity-agent-core/didcomm"
+	"identity-agent-core/sandbox"
 	"identity-agent-core/schemas"
 
 	"github.com/go-chi/chi/v5"
@@ -41,8 +42,29 @@ import (
 var bodyStoreOnce sync.Map
 
 func (s *CoreServer) bodies() *agentbody.Store {
-	v, _ := bodyStoreOnce.LoadOrStore(s.DataDir, agentbody.NewStore(s.DataDir))
+	// Keyed by the absolute directory, so one directory named two ways is one
+	// store with one lock, not two writing over each other.
+	dir, err := filepath.Abs(s.DataDir)
+	if err != nil {
+		dir = s.DataDir
+	}
+	v, _ := bodyStoreOnce.LoadOrStore(dir, agentbody.NewStore(dir))
 	return v.(*agentbody.Store)
+}
+
+// recordBodyEvent writes what happened to a body into the signed record, as
+// the AI agent, naming the body and its grade — so who approved which machine,
+// and when, is provable rather than only logged.
+func (s *CoreServer) recordBodyEvent(a asset.Asset, b agentbody.Binding, event, status, why string) {
+	log.Printf("[body] %s: %s for AI agent %s (%s, words %q): %s", event, b.Host, a.PairwiseAID, b.Grade, strings.Join(b.Words, " "), why)
+	if s.SandboxManager == nil {
+		return
+	}
+	s.SandboxManager.RecordGovernanceEvent(sandbox.CallerContext{
+		CallerAID: a.PairwiseAID, DelegationChain: []string{a.PairwiseAID, a.DelegatorAID},
+		Transport: "body", BodyHost: b.Host, BodyGrade: b.Grade, BodyCredential: b.CredentialSAID,
+		Reason: why,
+	}, "agent.body."+event, status)
 }
 
 func (s *CoreServer) mountBodyRoutes(r chi.Router) {
@@ -176,7 +198,7 @@ func (s *CoreServer) handleApproveBody(w http.ResponseWriter, r *http.Request) {
 	}
 	claims := map[string]interface{}{
 		"name": a.DisplayName, "host": b.Host, "verkey": b.Verkey,
-		"keys_digest": b.KeysDigest(), "grade": b.Grade,
+		"keys_digest": b.KeysDigest(), "grade": b.Grade, "claimed_grade": b.ClaimedGrade,
 		"platform": b.Platform, "placement": b.Placement,
 	}
 	credSAID, err := s.issueAssetCredential(schemas.AIAgentBody, a.PairwiseAID, a.DelegatorAID, claims, "")
@@ -187,11 +209,19 @@ func (s *CoreServer) handleApproveBody(w http.ResponseWriter, r *http.Request) {
 	}
 	decided, err := s.bodies().Decide(b.ID, a.ID, agentbody.StateActive, whoDecided(r), credSAID, time.Now())
 	if err != nil {
+		// The credential was issued and the binding did not become live — it
+		// expired, or the record could not be written. Withdraw the credential,
+		// or the registry would show a live body the owner never got.
+		if rec, _ := s.DataStore.GetCredential(credSAID); rec != nil {
+			if _, rerr := s.revokeIssuedCredential(rec); rerr != nil {
+				log.Printf("[body] credential %s issued for a body that did not become live, and its revocation failed: %v", credSAID, rerr)
+			}
+			_ = s.DataStore.UpdateCredentialStatus(credSAID, "revoked")
+		}
 		jsonError(w, err.Error(), http.StatusConflict)
 		return
 	}
-	log.Printf("[body] %s is now a body of AI agent %s at %s (credential %s, approved by %s)",
-		decided.Host, a.PairwiseAID, decided.Grade, credSAID, decided.DecidedBy)
+	s.recordBodyEvent(a, decided, "approved", "ok", "approved by "+decided.DecidedBy)
 	writeJSONStatus(w, http.StatusOK, bodyView{Binding: decided, WordsLine: strings.Join(decided.Words, " ")})
 }
 
@@ -204,13 +234,16 @@ func (s *CoreServer) handleRejectBody(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "AI agent not found", http.StatusNotFound)
 		return
 	}
+	// Under the same lock as approving, so an approval and a rejection of one
+	// request cannot both proceed.
+	unlock := lockAgentGrant(a.ID)
+	defer unlock()
 	decided, err := s.bodies().Decide(chi.URLParam(r, "bid"), a.ID, agentbody.StateRejected, whoDecided(r), "", time.Now())
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusConflict)
 		return
 	}
-	log.Printf("[body] rejected %s as a body of AI agent %s (words %q), by %s",
-		decided.Host, a.PairwiseAID, strings.Join(decided.Words, " "), decided.DecidedBy)
+	s.recordBodyEvent(a, decided, "rejected", "denied", "the words did not match, according to "+decided.DecidedBy)
 	str, expires, err := s.enrolmentFor(r, a)
 	if err != nil {
 		jsonError(w, "rejected, but a fresh enrolment string could not be made: "+err.Error(), http.StatusServiceUnavailable)
@@ -231,27 +264,36 @@ func (s *CoreServer) handleRevokeBody(w http.ResponseWriter, r *http.Request) {
 	unlock := lockAgentGrant(a.ID)
 	defer unlock()
 	b, ok := s.bodies().Get(chi.URLParam(r, "bid"))
-	if !ok || b.AgentAssetID != a.ID || b.State != agentbody.StateActive {
-		jsonError(w, "no live body by that id for this AI agent", http.StatusNotFound)
+	if !ok || b.AgentAssetID != a.ID || (b.State != agentbody.StateActive && b.State != agentbody.StateRevoked) {
+		jsonError(w, "no body by that id for this AI agent", http.StatusNotFound)
 		return
 	}
-	// The binding is ended first, so the machine stops being admitted even if
-	// writing the revocation to the registry then fails — which is reported.
-	revoked, err := s.bodies().Revoke(b.ID, a.ID, time.Now())
-	if err != nil {
-		jsonError(w, err.Error(), http.StatusConflict)
+	// The binding is ended first, so the machine stops being admitted at once.
+	// Writing the revocation to the registry follows; if that fails, the answer
+	// says so, and asking again retries it.
+	if b.State == agentbody.StateActive {
+		var err error
+		if b, err = s.bodies().Revoke(b.ID, a.ID, time.Now()); err != nil {
+			jsonError(w, err.Error(), http.StatusConflict)
+			return
+		}
+		s.recordBodyEvent(a, b, "removed", "ok", "removed by "+whoDecided(r))
+	}
+	rec, _ := s.DataStore.GetCredential(b.CredentialSAID)
+	if rec == nil || rec.Status == "revoked" {
+		writeJSONStatus(w, http.StatusOK, map[string]any{"revoked": b, "tel_revoked": rec != nil})
 		return
 	}
-	telRevoked := false
-	if rec, _ := s.DataStore.GetCredential(b.CredentialSAID); rec != nil {
-		if telRevoked, err = s.revokeIssuedCredential(rec); err != nil {
-			log.Printf("[body] %s ended, but its revocation was not written to the registry: %v", b.Host, err)
-		}
-		if err := s.DataStore.UpdateCredentialStatus(rec.SAID, "revoked"); err != nil {
-			log.Printf("[body] %s ended, but its credential is not marked revoked: %v", b.Host, err)
-		}
+	if _, err := s.revokeIssuedCredential(rec); err != nil {
+		jsonError(w, "the machine can no longer speak as the AI agent, but the revocation could not be "+
+			"written to the registry, so others checking it would still see it live — try again: "+err.Error(),
+			http.StatusBadGateway)
+		return
 	}
-	writeJSONStatus(w, http.StatusOK, map[string]any{"revoked": revoked, "tel_revoked": telRevoked})
+	if err := s.DataStore.UpdateCredentialStatus(rec.SAID, "revoked"); err != nil {
+		log.Printf("[body] %s revoked in the registry, but not marked revoked here: %v", b.Host, err)
+	}
+	writeJSONStatus(w, http.StatusOK, map[string]any{"revoked": b, "tel_revoked": true})
 }
 
 // bodyEnrolRequest is what a machine sends to ask to become a body.
@@ -343,9 +385,13 @@ func (s *CoreServer) handleBodyEnrol(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	why := "a machine asked to become a body"
 	if clamped {
-		log.Printf("[body] %s claimed grade %q, recorded at %q: nothing has checked evidence for more",
-			b.Host, req.ClaimedGrade, grade)
+		why += fmt.Sprintf("; it claimed grade %q and was recorded at %q, because nothing has checked evidence for more",
+			req.ClaimedGrade, grade)
+	}
+	if a, ok := s.aiAgentAsset(ref.ID); ok {
+		s.recordBodyEvent(a, b, "requested", "pending", why)
 	}
 	writeJSONStatus(w, http.StatusAccepted, map[string]any{
 		"binding_id": b.ID, "state": b.State, "words": b.Words,
@@ -377,9 +423,9 @@ func checkSealingKeys(k agentbody.Keys) error {
 }
 
 // verifyBodySignature checks a request a body signed, against a given binding:
-// the signature, the timestamp window, and that the signature has not been
-// spent. The body is read and put back for the handler.
-func verifyBodySignature(r *http.Request, b agentbody.Binding, path string) error {
+// the signature over the request as sent — target, nonce, body and stated
+// purpose — the timestamp window, and that the signature has not been spent.
+func verifyBodySignature(r *http.Request, b agentbody.Binding) error {
 	ts := r.Header.Get(agentbody.HeaderTimestamp)
 	when, err := time.Parse(time.RFC3339, ts)
 	if err != nil {
@@ -389,19 +435,19 @@ func verifyBodySignature(r *http.Request, b agentbody.Binding, path string) erro
 	if d := now.Sub(when); d > agentbody.RequestWindow || d < -agentbody.RequestWindow {
 		return fmt.Errorf("the request's timestamp is outside the window this Identity Agent accepts")
 	}
-	var body []byte
-	if r.Body != nil {
-		body, err = io.ReadAll(io.LimitReader(r.Body, maxSignedBodyBytes+1))
-		r.Body = io.NopCloser(bytes.NewReader(body))
-		if err != nil {
-			return fmt.Errorf("the request body is unreadable")
-		}
-		if int64(len(body)) > maxSignedBodyBytes {
-			return fmt.Errorf("this request is larger than a signed request may carry")
-		}
+	nonce := r.Header.Get(agentbody.HeaderNonce)
+	if len(nonce) < 16 {
+		return fmt.Errorf("the request carries no nonce")
+	}
+	body, err := readSignedBody(r)
+	if err != nil {
+		return err
 	}
 	sig := r.Header.Get(agentbody.HeaderSignature)
-	msg := agentbody.RequestToSign(b.Host, r.Method, path, ts, body)
+	msg := agentbody.SignedRequest{
+		Host: b.Host, Method: r.Method, Target: r.URL.RequestURI(), Timestamp: ts, Nonce: nonce,
+		Body: body, WorkItem: r.Header.Get(agentbody.HeaderWorkItem), Reason: r.Header.Get(agentbody.HeaderReason),
+	}.Bytes()
 	if err := agentbody.Verify(b.Host, b.Verkey, sig, msg); err != nil {
 		return err
 	}
@@ -428,7 +474,7 @@ func (s *CoreServer) identifyBody(r *http.Request) (agentbody.Binding, bool, err
 	if rec, _ := s.DataStore.GetCredential(b.CredentialSAID); rec == nil || !isUsableStatus(rec.Status) {
 		return agentbody.Binding{}, true, fmt.Errorf("this body's credential is not in force")
 	}
-	if err := verifyBodySignature(r, b, r.URL.Path); err != nil {
+	if err := verifyBodySignature(r, b); err != nil {
 		return agentbody.Binding{}, true, err
 	}
 	return b, true, nil
@@ -443,7 +489,7 @@ func (s *CoreServer) handleBodyStatus(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "this machine key has not enrolled here", http.StatusNotFound)
 		return
 	}
-	if err := verifyBodySignature(r, b, r.URL.Path); err != nil {
+	if err := verifyBodySignature(r, b); err != nil {
 		jsonError(w, err.Error(), http.StatusForbidden)
 		return
 	}

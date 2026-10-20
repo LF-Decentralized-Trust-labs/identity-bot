@@ -96,7 +96,8 @@ func TestABodySignsWithEitherKindOfKey(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s identity: %v", name, err)
 		}
-		msg := RequestToSign(host, "post", "/api/mcp", "2026-10-20T00:00:00Z", []byte("{}"))
+		msg := SignedRequest{Host: host, Method: "post", Target: "/api/mcp?x=1", Timestamp: "2026-10-20T00:00:00Z",
+			Nonce: "n1", Body: []byte("{}")}.Bytes()
 		sig, err := Sign(s, msg)
 		if err != nil {
 			t.Fatalf("%s sign: %v", name, err)

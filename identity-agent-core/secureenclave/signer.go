@@ -70,6 +70,11 @@ type softwareSigner struct {
 	label    string
 }
 
+// NewSoftwareSigner is a key file in dataDir, for a program that must not use
+// this machine's one hardware key — on Windows the TPM key has a single fixed
+// name, so a second program using it would share the Identity Agent's own key.
+func NewSoftwareSigner(dataDir string) PlatformSigner { return newSoftwareSigner(dataDir) }
+
 func newSoftwareSigner(dataDir string) *softwareSigner {
 	s := &softwareSigner{
 		dataDir:  dataDir,

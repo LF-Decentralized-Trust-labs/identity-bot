@@ -691,13 +691,10 @@ func (s *CoreServer) handlePodmanSetupStatus(w http.ResponseWriter, r *http.Requ
 }
 
 func jsonResponse(w http.ResponseWriter, data interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(data)
+	writeJSONStatus(w, http.StatusOK, data)
 }
 
-// writeJSONStatus writes v as JSON with a status. It is meant to be the one JSON
-// writer: writeJSON, writeJSONOK, writeJSONResponse and scanWriteJSON are four
-// copies of the same thing without a status, and should become calls to this.
+// writeJSONStatus writes v as JSON with a status. jsonResponse is it at 200.
 func writeJSONStatus(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)

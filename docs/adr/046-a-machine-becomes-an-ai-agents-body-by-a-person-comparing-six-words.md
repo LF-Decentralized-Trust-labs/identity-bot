@@ -42,15 +42,21 @@ body only decides *where* a request may come from, and how strongly that is prov
    keys. It then seals the whole enrolment to the Identity Agent. The Identity Agent
    accepts only a sealed enrolment whose inner keys are the keys it was sealed from.
 4. **Six words, compared by a person.** Both sides derive six words from K's identifier
-   (66 bits of a Blake3 digest, BIP-39 English list). The owner compares the words in
-   their app with the words on the machine and approves or rejects. A secret used by
-   another machine shows other words. Rejecting returns a fresh string.
+   (66 bits of a Blake3 digest, BIP-39 English list). The machine shows its words
+   before it sends anything, so its person has them even if the string was used first
+   by someone else; on a refusal it tells them not to approve whatever is waiting. The
+   owner compares the words in their app with the words on the machine and approves or
+   rejects. A secret used by another machine shows other words. Rejecting returns a
+   fresh string. A request nobody decides on before the string's 15 minutes run out
+   expires and cannot be approved.
 5. **A credential.** Approving issues an *AI Agent Body* credential (ADR-045 template)
    from the owner's registry. It says K is the body of this AI agent, at a grade.
    Revoking it is an event in the registry's log.
 
-**Every request the body makes is signed by K** over the method, path, a timestamp and
-a digest of the body. Each signature is accepted once, within two minutes. The gate
+**Every request the body makes is signed by K** over the method, the request target
+exactly as sent (escaped path and query), a timestamp, a nonce, a digest of the body,
+and the purpose it states for the record. Each signature is accepted once, within two
+minutes either side, and remembered for twice that. The gate
 resolves the caller once and hands it to the handler, because a spent signature
 cannot be checked twice. A body-signed request is the AI agent's: its grant decides
 what it may do, and every recorded invocation names the body, its grade and its
@@ -62,12 +68,24 @@ claim of an attested grade is clamped to the most the machine's own report suppo
 and the clamp is recorded, until evidence for that grade is verified.
 
 **One key is the body of one AI agent.** A machine hosting several AI agents uses a key
-for each, so a signature always says which AI agent it speaks for.
+for each, so a signature always says which AI agent it speaks for. An AI agent may have
+several live bodies — long-running servers, a replacement before the old machine is
+removed — and each is removed on its own.
+
+**Every step is in the signed record.** A machine asking, an approval, a rejection and a
+removal are written as governance events, naming the AI agent, the body and its grade,
+and who decided.
+
+**Bodies are not carried in a backup.** Restoring one could bring back a body removed
+after the archive was made; a body is enrolled again after a restore.
 
 **The machine key is the platform signer the Identity Agent already uses** for its own
-controller key: the Secure Enclave on macOS (P-256), the TPM on Windows (P-256), a key
-file elsewhere (Ed25519). The `agent-host` program carries it, and on macOS it is
-built against the Secure Enclave shim, with the binary checked to contain it.
+controller key, with `agent-host`'s own data directory: the Secure Enclave on macOS
+(P-256, a key per data directory), and a key file elsewhere (Ed25519). On Windows the
+TPM key has one fixed name per machine and is already the Identity Agent's own, so a
+body uses a key file there, at the software grade, until a per-body TPM key is built
+and tested. On macOS `agent-host` is built against the Secure Enclave shim, with each
+architecture's binary checked to contain it.
 
 ## Consequences
 

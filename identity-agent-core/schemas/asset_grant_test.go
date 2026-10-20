@@ -88,7 +88,7 @@ func TestAnAIAgentGrantRefusesWhatItsSchemaRefuses(t *testing.T) {
 	}
 }
 
-const pinnedAIAgentBodySAID = "ENgVwFtQT1y4-orsWzZm_WvlvmWNTQr-1e5zyZDV32Su"
+const pinnedAIAgentBodySAID = "EBjOukYuabOuiVTRLSsE_gru3xww2CWAIAsFE6DCtVr1"
 
 func TestTheAIAgentBodySchemaIsPinned(t *testing.T) {
 	if AIAgentBody.Schema.SAID != pinnedAIAgentBodySAID {

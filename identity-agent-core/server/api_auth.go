@@ -475,8 +475,12 @@ var (
 func rememberSignature(sig string, now time.Time) (alreadyUsed bool) {
 	seenSignaturesMu.Lock()
 	defer seenSignaturesMu.Unlock()
+	// Remembered for twice the window. A timestamp is accepted up to the window
+	// on EITHER side of now, so a request stamped in the future stays valid
+	// for up to two windows after it is first used; forgetting it after one
+	// would let it be replayed in the gap.
 	for s, t := range seenSignatures {
-		if now.Sub(t) > signedRequestWindow {
+		if now.Sub(t) > 2*signedRequestWindow {
 			delete(seenSignatures, s)
 		}
 	}
@@ -596,6 +600,7 @@ var sessionForbidden = map[string]string{
 	// agent from then on — standing access that outlives the session.
 	"POST /api/mcp/agents/{id}/body-enrolment":       "an enrolment string lets a machine ask to speak as an AI agent, after the session that made it ends",
 	"POST /api/mcp/agents/{id}/bodies/{bid}/approve": "approving a body lets a machine speak as an AI agent, after the session that approved it ends",
+	"POST /api/mcp/agents/{id}/bodies/{bid}/reject":  "rejecting a body hands back a fresh enrolment string, which outlives the session that asked for it",
 }
 
 // requiresTheKeyItself reports whether a route is one a browser session must

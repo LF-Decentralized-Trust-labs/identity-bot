@@ -21,6 +21,10 @@ const (
 	StateActive   = "active"
 	StateRejected = "rejected"
 	StateRevoked  = "revoked"
+	// StateExpired is a request nobody decided on before its enrolment string
+	// ran out. It cannot be approved: an attacker who won the race for a leaked
+	// string must not be able to wait for a mistaken approval.
+	StateExpired = "expired"
 )
 
 // Binding is one machine's claim to be the body of one AI agent, from first
@@ -47,7 +51,10 @@ type Binding struct {
 	// CredentialSAID is the binding credential, once issued.
 	CredentialSAID string    `json:"credential_said,omitempty"`
 	EnrolledAt     time.Time `json:"enrolled_at"`
-	DecidedAt      time.Time `json:"decided_at,omitempty"`
+	// PendingUntil is when an undecided request expires: the end of the window
+	// its enrolment string was good for.
+	PendingUntil time.Time `json:"pending_until"`
+	DecidedAt    time.Time `json:"decided_at,omitempty"`
 	// DecidedBy is the controller or owner that approved or rejected it.
 	DecidedBy string    `json:"decided_by,omitempty"`
 	RevokedAt time.Time `json:"revoked_at,omitempty"`
@@ -93,6 +100,7 @@ func (s *Store) load() (storeFile, error) {
 	if err := json.Unmarshal(b, &f); err != nil {
 		return f, fmt.Errorf("the body store is unreadable: %w", err)
 	}
+	tidy(&f, time.Now())
 	return f, nil
 }
 
@@ -106,6 +114,26 @@ func (s *Store) save(f storeFile) error {
 		return err
 	}
 	return os.Rename(tmp, s.path)
+}
+
+// tidy expires undecided requests whose window has passed, and drops
+// invitations that can never be used again — spent, voided or expired — so the
+// file does not grow with every string ever issued. A spent invitation's
+// binding keeps its own record.
+func tidy(f *storeFile, now time.Time) {
+	for i := range f.Bindings {
+		b := &f.Bindings[i]
+		if b.State == StatePending && !b.PendingUntil.IsZero() && now.After(b.PendingUntil) {
+			b.State = StateExpired
+		}
+	}
+	kept := f.Invitations[:0]
+	for _, inv := range f.Invitations {
+		if inv.UsedAt.IsZero() && !inv.Voided && now.Before(inv.Expires) {
+			kept = append(kept, inv)
+		}
+	}
+	f.Invitations = kept
 }
 
 func digestSecret(secret string) string {
@@ -183,6 +211,7 @@ func (s *Store) Claim(secret string, b Binding, now time.Time) (Binding, error) 
 	}
 	b.State = StatePending
 	b.EnrolledAt = now.UTC()
+	b.PendingUntil = inv.Expires
 	inv.UsedAt = now.UTC()
 	inv.BindingID = b.ID
 	f.Bindings = append(f.Bindings, b)
@@ -196,8 +225,11 @@ func (s *Store) Decide(id, agentAssetID, state, by, credentialSAID string, now t
 		return Binding{}, fmt.Errorf("a binding is decided as active or rejected, not %q", state)
 	}
 	return s.update(id, agentAssetID, func(b *Binding) error {
+		if b.State == StatePending && !b.PendingUntil.IsZero() && now.After(b.PendingUntil) {
+			b.State = StateExpired
+		}
 		if b.State != StatePending {
-			return fmt.Errorf("this binding is %s, not pending", b.State)
+			return fmt.Errorf("this request is %s, not waiting for a decision", b.State)
 		}
 		b.State, b.DecidedBy, b.DecidedAt, b.CredentialSAID = state, by, now.UTC(), credentialSAID
 		return nil

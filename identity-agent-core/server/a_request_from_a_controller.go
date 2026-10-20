@@ -1,11 +1,9 @@
 package server
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -267,19 +265,9 @@ func (s *CoreServer) theControllerBehind(r *http.Request) (ControllerGrant, auth
 func (s *CoreServer) theStringThisMachineSigned(
 	r *http.Request, aid, stamp string, now time.Time,
 ) (string, authprovider.Result, error) {
-	var body []byte
-	if r.Body != nil {
-		var err error
-		body, err = io.ReadAll(io.LimitReader(r.Body, maxSignedBodyBytes+1))
-		r.Body = io.NopCloser(bytes.NewReader(body))
-		if err != nil {
-			return "", authprovider.Result{}, fmt.Errorf("read body: %w", err)
-		}
-		if int64(len(body)) > maxSignedBodyBytes {
-			return "", authprovider.Result{}, fmt.Errorf(
-				"this request is larger than the %d bytes a signed request may carry",
-				maxSignedBodyBytes)
-		}
+	body, err := readSignedBody(r)
+	if err != nil {
+		return "", authprovider.Result{}, err
 	}
 
 	asserted := s.theAuthenticationSomebodyVouchedFor(r, aid, now)

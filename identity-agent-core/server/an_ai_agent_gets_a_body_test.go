@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"encoding/base64"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -106,19 +107,22 @@ func sealedEnrolment(t *testing.T, s *CoreServer, signer, offered testMachine, e
 }
 
 // signed is a request the machine signs with its key.
-func (m testMachine) signed(t *testing.T, method, path string, body []byte) *http.Request {
+func (m testMachine) signed(t *testing.T, method, target string, body []byte) *http.Request {
 	t.Helper()
 	host, _, _ := agentbody.Identity(m)
 	ts := time.Now().UTC().Format(time.RFC3339)
-	sig, err := agentbody.Sign(m, agentbody.RequestToSign(host, method, path, ts, body))
+	nonce := "nonce-" + base64.RawURLEncoding.EncodeToString([]byte(time.Now().String()))
+	r := httptest.NewRequest(method, target, bytes.NewReader(body))
+	sig, err := agentbody.Sign(m, agentbody.SignedRequest{Host: host, Method: method, Target: r.URL.RequestURI(),
+		Timestamp: ts, Nonce: nonce, Body: body}.Bytes())
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := httptest.NewRequest(method, path, bytes.NewReader(body))
 	r.RemoteAddr = "203.0.113.9:443"
 	r.Header.Set(agentbody.HeaderHost, host)
 	r.Header.Set(agentbody.HeaderSignature, sig)
 	r.Header.Set(agentbody.HeaderTimestamp, ts)
+	r.Header.Set(agentbody.HeaderNonce, nonce)
 	return r
 }
 
@@ -177,7 +181,7 @@ func (s *CoreServer) testEnrolment(t *testing.T, agentID string) string {
 	return out["enrolment"].(string)
 }
 
-// The whole ceremony, as D-050 draws it: a string, a machine enrolling with its
+// The whole ceremony: a string, a machine enrolling with its
 // own key, the same six words on both sides, approval, a body credential, and a
 // request signed by the machine taken as the AI agent's — at the body's grade.
 func TestAMachineBecomesAnAIAgentsBody(t *testing.T) {
@@ -350,5 +354,42 @@ func TestABodySignedRequestPassesTheGateOnce(t *testing.T) {
 	router.ServeHTTP(w, m.signed(t, "GET", "/api/agent-host/binding", nil))
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"state":"active"`) {
 		t.Fatalf("the machine's status check: %d %s", w.Code, w.Body.String())
+	}
+}
+
+// A relay that can read TLS must not be able to change what a body asked for:
+// the query, or the purpose the record will state, are inside the signature.
+func TestARelayCannotChangeWhatABodySigned(t *testing.T) {
+	s, agentID := bodyWorld(t)
+	m := newTestMachine(t)
+	_, out := call(t, s.handleBodyEnrol, httptest.NewRequest("POST", "/", bytes.NewReader(m.enrolRequest(t, s, s.testEnrolment(t, agentID), "software"))))
+	call(t, s.handleApproveBody, withRoute(httptest.NewRequest("POST", "/", nil), map[string]string{"id": agentID, "bid": out["binding_id"].(string)}))
+
+	for name, tamper := range map[string]func(*http.Request){
+		"the query":   func(r *http.Request) { r.URL.RawQuery = "limit=1000" },
+		"the purpose": func(r *http.Request) { r.Header.Set(agentbody.HeaderReason, "something else") },
+		"the path":    func(r *http.Request) { r.URL.Path, r.URL.RawPath = "/api/mcp/x", "" },
+	} {
+		r := m.signed(t, "POST", "/api/mcp?limit=1", []byte(`{}`))
+		tamper(r)
+		if cc := s.resolveCaller(r); len(cc.Scopes) != 0 {
+			t.Fatalf("changing %s after signing was not noticed", name)
+		}
+	}
+	if cc := s.resolveCaller(m.signed(t, "POST", "/api/mcp?limit=1", []byte(`{}`))); len(cc.Scopes) == 0 {
+		t.Fatal("an untouched signed request with a query was refused")
+	}
+}
+
+// A request nobody decided on before its string ran out cannot be approved.
+func TestAnExpiredRequestCannotBeApproved(t *testing.T) {
+	s, agentID := bodyWorld(t)
+	m := newTestMachine(t)
+	_, out := call(t, s.handleBodyEnrol, httptest.NewRequest("POST", "/", bytes.NewReader(m.enrolRequest(t, s, s.testEnrolment(t, agentID), "software"))))
+	bid := out["binding_id"].(string)
+	b, _ := s.bodies().Get(bid)
+	// Wind the request's window into the past, as fifteen minutes would.
+	if _, err := s.bodies().Decide(bid, agentID, agentbody.StateActive, "x", "", b.PendingUntil.Add(time.Second)); err == nil {
+		t.Fatal("an expired request was approved")
 	}
 }

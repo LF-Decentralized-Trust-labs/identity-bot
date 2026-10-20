@@ -23,12 +23,13 @@ case "$(uname -s)" in
       CGO_ENABLED=1 CGO_LDFLAGS="$SEP_LDFLAGS" GOOS=darwin GOARCH=arm64 \
         go build -tags sepblob -o bin/agent-host-arm64 ./cmd/agent-host
       CGO_ENABLED=1 CGO_LDFLAGS="$SEP_LDFLAGS" GOOS=darwin GOARCH=amd64 \
-        go build -tags sepblob -o bin/agent-host-amd64 ./cmd/agent-host
-      lipo -create -output bin/agent-host bin/agent-host-arm64 bin/agent-host-amd64
-      rm -f bin/agent-host-arm64 bin/agent-host-amd64 )
+        go build -tags sepblob -o bin/agent-host-amd64 ./cmd/agent-host )
     # The flags can be wrong and the build still succeed, leaving a binary with
-    # no Secure Enclave code in it. Check the binary, not the flags.
-    bash "$SEP_OUT/sep-assert.sh" "$OUT"
+    # no Secure Enclave code in it. Check each architecture's binary, as the
+    # desktop build does, before combining them.
+    bash "$SEP_OUT/sep-assert.sh" identity-agent-core/bin/agent-host-arm64 identity-agent-core/bin/agent-host-amd64
+    lipo -create -output "$OUT" identity-agent-core/bin/agent-host-arm64 identity-agent-core/bin/agent-host-amd64
+    rm -f identity-agent-core/bin/agent-host-arm64 identity-agent-core/bin/agent-host-amd64
     ;;
   Linux)
     ( cd identity-agent-core && CGO_ENABLED=0 go build -o bin/agent-host ./cmd/agent-host )
