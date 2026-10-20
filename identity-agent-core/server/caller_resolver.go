@@ -1,11 +1,14 @@
 package server
 
 import (
+	"context"
 	"crypto/subtle"
+	"log"
 	"net"
 	"net/http"
 	"strings"
 
+	"identity-agent-core/agentbody"
 	"identity-agent-core/sandbox"
 )
 
@@ -33,10 +36,26 @@ func (loopbackCallerResolver) Resolve(r *http.Request) sandbox.CallerContext {
 // identity lands) grants scopes; a genuinely local request (loopback AND no forwarding
 // headers) is the owner; everything else is remote with no scopes.
 func (s *CoreServer) resolveCaller(r *http.Request) sandbox.CallerContext {
+	// Resolved once per request. The gate resolves the caller to decide whether
+	// to admit it, and hands the answer on; the handler reads that rather than
+	// resolving again. Resolving twice was only wasteful while every proof could
+	// be checked twice, and a body's signature is spent the first time it is
+	// checked — a second resolution would refuse the request it just admitted.
+	if cc, ok := r.Context().Value(resolvedCallerKey{}).(sandbox.CallerContext); ok {
+		return cc
+	}
 	if s.CallerResolver != nil {
 		return s.CallerResolver.Resolve(r)
 	}
 	return tokenAwareResolver{s: s}.Resolve(r)
+}
+
+// resolvedCallerKey carries the caller the gate resolved, to the handler.
+type resolvedCallerKey struct{}
+
+// withResolvedCaller is r carrying the caller already resolved for it.
+func withResolvedCaller(r *http.Request, cc sandbox.CallerContext) *http.Request {
+	return r.WithContext(context.WithValue(r.Context(), resolvedCallerKey{}, cc))
 }
 
 // Header names carrying the "why" of a governed call. They ride outside the request
@@ -127,6 +146,28 @@ func (t tokenAwareResolver) Resolve(r *http.Request) sandbox.CallerContext {
 		}
 		// An invalid token is a remote caller with no scopes — not the owner.
 		return cc
+	}
+
+	// A body of an AI agent, signing with its own key. It speaks as that AI
+	// agent, with the AI agent's grant deciding what it may do, and the record
+	// says which body it was and how strongly that body's key is held.
+	if b, present, err := t.s.identifyBody(r); present {
+		if err != nil {
+			log.Printf("[body] request from %s not admitted: %v", r.Header.Get(agentbody.HeaderHost), err)
+			return cc
+		}
+		agent, ok := t.s.ResolveAgentCaller(b.Agent)
+		if !ok {
+			return cc
+		}
+		agent.CorrelationID = cc.CorrelationID
+		agent.Transport = "body"
+		agent.AuthLevel = "body_signed"
+		agent.BodyHost = b.Host
+		agent.BodyGrade = b.Grade
+		agent.BodyCredential = b.CredentialSAID
+		applyCallerWhy(r, &agent)
+		return agent
 	}
 
 	// A machine this identity enrolled, signing as itself.

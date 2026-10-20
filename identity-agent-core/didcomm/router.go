@@ -30,6 +30,11 @@ const (
 	// must be, and one that is not is rejected on unpack.
 	TypeSealedRequest  = "sealed-request"
 	TypeSealedResponse = "sealed-response"
+
+	// A machine asking to become an AI agent's body. Sealed to the Identity
+	// Agent, because it carries a one-time secret and the machine's keys, and
+	// every path to an Identity Agent may pass a relay that can read TLS.
+	TypeBodyEnrolment = "body-enrolment"
 )
 
 var knownTypes = map[string]bool{
@@ -46,6 +51,7 @@ var knownTypes = map[string]bool{
 	TypeAgentResult:        true,
 	TypeSealedRequest:      true,
 	TypeSealedResponse:     true,
+	TypeBodyEnrolment:      true,
 }
 
 // KnownType reports whether t is a registered payload type (E-8).

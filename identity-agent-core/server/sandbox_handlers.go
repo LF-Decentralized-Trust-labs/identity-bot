@@ -52,6 +52,7 @@ func (s *CoreServer) sandboxRoutes(r chi.Router) {
 	r.Get("/mcp/agents", s.handleListAgents)
 	r.Patch("/mcp/agents/{id}", s.handleUpdateAgentConfig)
 	r.Put("/mcp/agents/{id}/capabilities", s.handleSetAgentCapabilities)
+	s.mountBodyRoutes(r)
 	r.Post("/mcp/tokens", s.handleMintMCPToken)
 	r.Get("/mcp/tokens", s.handleListMCPTokens)
 	r.Delete("/mcp/tokens/{name}", s.handleRevokeMCPToken)
@@ -690,8 +691,14 @@ func (s *CoreServer) handlePodmanSetupStatus(w http.ResponseWriter, r *http.Requ
 }
 
 func jsonResponse(w http.ResponseWriter, data interface{}) {
+	writeJSONStatus(w, http.StatusOK, data)
+}
+
+// writeJSONStatus writes v as JSON with a status. jsonResponse is it at 200.
+func writeJSONStatus(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(data)
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
 }
 
 func jsonError(w http.ResponseWriter, message string, status int) {

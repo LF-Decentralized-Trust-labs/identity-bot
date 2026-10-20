@@ -70,6 +70,13 @@ func skipReason(rel string) string {
 		// must not depend on the old device's secure element.
 		return "captured as root_seed, unwrapped"
 	}
+	if strings.HasPrefix(slashed, "agent_bodies.json") {
+		// WHICH MACHINES MAY SPEAK AS THIS IDENTITY'S AI AGENTS, not carried,
+		// for the same reason controller grants are not: a restore must not
+		// bring back a body that was removed after the archive was made. A body
+		// is re-enrolled after a restore, by a person comparing its words again.
+		return "which machines are AI agents' bodies is decided after a restore, not restored"
+	}
 	if strings.HasPrefix(slashed, "controller_grants.json") {
 		// WHICH MACHINES MAY ACT FOR THIS IDENTITY, deliberately not carried.
 		//

@@ -41,6 +41,13 @@ type InvocationEvent struct {
 	// executed under its own authority). Empty for a direct call.
 	OrchestratedBy string `json:"orchestrated_by,omitempty"`
 
+	// Which machine the caller spoke from, when it was one of an AI agent's
+	// bodies, and how strongly that machine's key is held. Recorded on every
+	// event so nobody reads a weak proof as a strong one.
+	BodyHost       string `json:"body_host,omitempty"`
+	BodyGrade      string `json:"body_grade,omitempty"`
+	BodyCredential string `json:"body_credential,omitempty"`
+
 	// ── Why this happened ──────────────────────────────────────────────
 	// GrantSAID above answers "why was this permitted". These answer the
 	// different question "what was it for", which no field previously carried:
@@ -255,6 +262,9 @@ func (m *Manager) recordInvocationDetail(caller CallerContext, capabilityID, exe
 		AuthLevel:       caller.AuthLevel,
 		ParentEventID:   caller.ParentEventID,
 		OrchestratedBy:  caller.OrchestratedBy,
+		BodyHost:        caller.BodyHost,
+		BodyGrade:       caller.BodyGrade,
+		BodyCredential:  caller.BodyCredential,
 
 		WorkItem:     caller.WorkItem,
 		Reason:       caller.Reason,
@@ -301,6 +311,14 @@ func (m *Manager) recordInvocationDetail(caller CallerContext, capabilityID, exe
 // server layer; the same signing + chokepoint as a capability invocation.
 func (m *Manager) RecordGovernedEvent(caller CallerContext, capabilityID, status string) int64 {
 	return m.recordInvocation(caller, capabilityID, "orchestrator", nil, status, time.Now())
+}
+
+// RecordGovernanceEvent writes one signed governance event for a decision about
+// an AI agent rather than an action it took — a machine asking to become its
+// body, approved, rejected, removed. Same signing and chain as an invocation;
+// the caller's Reason says why.
+func (m *Manager) RecordGovernanceEvent(caller CallerContext, eventID, status string) int64 {
+	return m.recordInvocation(caller, eventID, "governance", nil, status, time.Now())
 }
 
 // InsertInvocationEvent persists one event; returns its row id.

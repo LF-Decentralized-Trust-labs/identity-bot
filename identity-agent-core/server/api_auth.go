@@ -58,6 +58,12 @@ var publicRoutes = map[string]string{
 	// A credential names its schema by digest; a verifier fetches the document to
 	// confirm what the credential claims. Schemas are public by nature.
 	"GET /public/schemas/{said}": "a credential schema document, resolved by its identifier",
+	// A machine asking to become an AI agent's body has no standing yet: it
+	// presents a one-time secret and signs with the key it offers, and nothing
+	// is granted until a person compares six words and approves. The status
+	// route answers only the machine that signs for it.
+	"POST /api/agent-host/enrol":  "a machine asking, with a one-time secret, to become an AI agent's body",
+	"GET /api/agent-host/binding": "a machine asking, signed by its own key, whether it was approved",
 
 	// --- carrying a request nothing in the middle can read ---
 	// Open in the same sense the message endpoint is open: what arrives is an
@@ -315,8 +321,12 @@ func (s *CoreServer) authorize(routes chi.Routes) func(http.Handler) http.Handle
 			case accessPublic:
 				next.ServeHTTP(w, r)
 			case accessScoped:
-				if s.isOwner(r) || len(s.resolveCaller(r).Scopes) > 0 {
+				if s.isOwner(r) {
 					next.ServeHTTP(w, r)
+					return
+				}
+				if cc := s.resolveCaller(r); len(cc.Scopes) > 0 {
+					next.ServeHTTP(w, withResolvedCaller(r, cc))
 					return
 				}
 				// A controller acts for the owner, so it reaches these for the
@@ -465,8 +475,12 @@ var (
 func rememberSignature(sig string, now time.Time) (alreadyUsed bool) {
 	seenSignaturesMu.Lock()
 	defer seenSignaturesMu.Unlock()
+	// Remembered for twice the window. A timestamp is accepted up to the window
+	// on EITHER side of now, so a request stamped in the future stays valid
+	// for up to two windows after it is first used; forgetting it after one
+	// would let it be replayed in the gap.
 	for s, t := range seenSignatures {
-		if now.Sub(t) > signedRequestWindow {
+		if now.Sub(t) > 2*signedRequestWindow {
 			delete(seenSignatures, s)
 		}
 	}
@@ -582,6 +596,11 @@ var sessionForbidden = map[string]string{
 	// could point the AI agent at an endpoint it controls, and the change would
 	// outlive the session.
 	"PATCH /api/mcp/agents/{id}": "changing where an AI agent's model is reached, and with which key, outlives the session that changed it",
+	// An enrolment string, and approving a body, let a machine speak as an AI
+	// agent from then on — standing access that outlives the session.
+	"POST /api/mcp/agents/{id}/body-enrolment":       "an enrolment string lets a machine ask to speak as an AI agent, after the session that made it ends",
+	"POST /api/mcp/agents/{id}/bodies/{bid}/approve": "approving a body lets a machine speak as an AI agent, after the session that approved it ends",
+	"POST /api/mcp/agents/{id}/bodies/{bid}/reject":  "rejecting a body hands back a fresh enrolment string, which outlives the session that asked for it",
 }
 
 // requiresTheKeyItself reports whether a route is one a browser session must
