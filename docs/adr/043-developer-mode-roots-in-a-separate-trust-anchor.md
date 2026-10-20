@@ -1,7 +1,7 @@
 # ADR-043 — A developer mode rooted in a separate trust anchor, not a mode flag
 
-**Status:** Accepted — records the decision; not yet implemented (each part lands with its own code).
-**Date:** 2026-10-18
+**Status:** Accepted — core mechanism implemented (see *What is shipped, and what is still to build*).
+**Date:** 2026-10-18 (status updated 2026-10-19)
 **Relates to:** ADR-011 (build versioning: development vs release builds), ADR-027 (hardware-gated signing key custody), ADR-028 (reporting what a machine can protect a key with), ADR-042 (how an Identity Agent is reached; the confidential-VM substrate)
 
 ## Context
@@ -104,9 +104,27 @@ caller.
 
 ## What is shipped, and what is still to build
 
-This ADR records the decision; the mechanism is not yet implemented in the core. Shipped today: the
-confidential-VM substrate and its ingress (ADR-042), hardware-gated key custody (ADR-027), and capability
-reporting for what a machine can attest (ADR-028). Still to build: the mode-selected trust anchor, the two
-developer modes, cross-mode refusal at the service and data-at-rest layers, the domain separator in signed
-events, and authenticated provisioning. Each lands with its own code and tests, and is not implied by this
-record.
+The core mechanism this ADR decides is now implemented in the core. Shipped:
+
+- **Build-time mode (§1).** The `buildmode` package (`identity-agent-core/buildmode`) holds a
+  compile-time `prod`|`dev` constant, default prod, set with
+  `-ldflags "-X identity-agent-core/buildmode.rawMode=dev"`; it cannot be changed at runtime, and an
+  unknown value stops the process at startup.
+- **Mode-selected trust anchor (§2).** The software-update trust anchor is selected by mode — a dev
+  build trusts development release keys only and a prod build production keys only, so neither verifies
+  the other's updates (`update/trust_anchor.go`).
+- **Two developer modes (§3).** Mock/off relaxes the fail-closed gates on a machine that cannot attest
+  (founding, debug-attested adopt, root-key-at-rest stored unwrapped, enclave detection), each guarded by
+  `buildmode.IsDev()` and logged loudly. Debug-attested introduces a **dev attestation root**
+  (`secureenclave/snp_dev_attestation.go`): a dev build generates a structurally-real SNP report with the
+  debug bit set, signed by a development attestation key the dev verifier trusts and a production verifier
+  rejects (round-trip and prod-rejects-dev tests in `server/snp_dev_adopt_test.go`).
+- **Peer non-interoperability (§4, peer layer).** A dev and a prod Identity Agent refuse each other as
+  peers: signed events and OOBIs carry an environment realm, and a cross-realm peer or contact is refused
+  (`server/cross_realm.go`, the contact/pairing/first-contact gates).
+
+Still to build (each lands with its own code and tests, and is not implied by this record): the turnkey
+single-input build-and-deploy pipeline and standing development-scoped infrastructure (witnesses, relays,
+tunnels, update channel — deployment concerns, §4 service layer); per-mode data-at-rest sealing bound to
+the hardware guest policy, provable only on sealed hardware (§4 data-at-rest layer); authenticated
+provisioning (§6); and the visible development marker on mobile.
