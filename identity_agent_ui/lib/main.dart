@@ -53,8 +53,9 @@ void main() async {
     debugPrint('[Agent] Desktop platform detected — starting bundled backend in background...');
     // This app serves an individual. The backend cannot work that out for
     // itself — the same Go core serves the app for organizations — so the app
-    // declares it. It decides who may witness and watch for this agent: peers
-    // are of the same kind, and an agent that has not been told enrols none.
+    // declares it. It decides who may witness and watch for this Identity Agent:
+    // peers are of the same kind, and an Identity Agent that has not been told
+    // enrols none.
     BackendProcessService.entityType = 'individual';
     _backendStartupFuture = BackendProcessService.instance.start().then((started) {
       debugPrint('[Agent] Backend process started: $started');
