@@ -30,8 +30,9 @@ const capabilityGrantSchemaSAID = "ECapabilityGrant__placeholder__v1"
 
 // handleProvisionAgent creates an ai_agent asset (delegated AID) + a bound token.
 func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request) {
-	// App operation — authorized by the router-wide authorize gate (the owner, the
-	// owner's authorized controller, or a browser session). Provisioning an AI agent
+	// App operation — authorized by the router-wide authorize gate (the owner, or
+	// the owner's authorized controller; a browser session is refused, see
+	// sessionForbidden). Provisioning an AI agent
 	// is not a root-of-trust operation, so it carries no extra owner-only re-check:
 	// re-checking isOwner here would lock out the controller the gate just admitted.
 	if s.assetHandler == nil {

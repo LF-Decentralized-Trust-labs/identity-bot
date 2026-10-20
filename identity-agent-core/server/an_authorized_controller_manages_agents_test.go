@@ -66,3 +66,19 @@ func TestCapabilityPackImportStaysOwnerOnly(t *testing.T) {
 			rec.Code)
 	}
 }
+
+// Re-issuing a grant is where an agent's ceiling can be widened after it exists,
+// so a browser session is held to the same bar as for provisioning and minting:
+// whatever it changed would outlive the session that changed it.
+func TestABrowserSessionCannotReissueAnAgentsGrant(t *testing.T) {
+	for _, route := range []string{
+		"POST /api/mcp/agents",
+		"POST /api/mcp/tokens",
+		"PUT /api/mcp/agents/{id}/capabilities",
+	} {
+		method, pattern, _ := strings.Cut(route, " ")
+		if _, forbidden := requiresTheKeyItself(method, pattern); !forbidden {
+			t.Fatalf("a browser session can reach %s, and what it changes there outlives it", route)
+		}
+	}
+}

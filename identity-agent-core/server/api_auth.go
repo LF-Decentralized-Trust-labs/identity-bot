@@ -569,6 +569,11 @@ var sessionForbidden = map[string]string{
 	// device that holds the key does this.
 	"POST /api/mcp/agents": "provisioning an agent mints a durable token that outlives the session that made it",
 	"POST /api/mcp/tokens": "minting a token creates durable bearer access that outlives the session that made it",
+	// Re-issuing an agent's grant is the one place its ceiling can be changed
+	// after it exists. A session that could reach it could widen what an agent
+	// may do and leave that standing after the session ends — the same durable
+	// grant as minting, by a different door.
+	"PUT /api/mcp/agents/{id}/capabilities": "re-issuing an agent's grant can widen what it may do, and that outlives the session that changed it",
 }
 
 // requiresTheKeyItself reports whether a route is one a browser session must
