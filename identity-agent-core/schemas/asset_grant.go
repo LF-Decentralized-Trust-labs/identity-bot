@@ -213,13 +213,44 @@ var AIAgentGrant = mustAssetGrant(assetGrantKind{
 	},
 })
 
+// AIAgentBody says that one machine key is the body of one AI agent: requests
+// signed by that key speak as the AI agent, at the grade recorded here. It is
+// built from the same template as a grant — it, too, is a statement the owner
+// makes about an asset and can withdraw — so it shares the holder, the kind,
+// the name and the lapse, and its revocation is checked the same way.
+//
+// Revoking it stops that machine speaking as the AI agent; the AI agent and its
+// grant are untouched, and another machine can be enrolled as its body.
+var AIAgentBody = mustAssetGrant(assetGrantKind{
+	assetType: "ai_agent",
+	title:     "AI Agent Body",
+	description: "That one machine key is the body of one AI agent: requests that key signs " +
+		"speak as the AI agent, at the grade recorded here, while this is unrevoked.",
+	attributes: []grantAttribute{
+		{"host", `{"description": "The body's identifier, derived from its key", "type": "string"}`},
+		{"verkey", `{"description": "The body's signing key", "type": "string"}`},
+		{"keys_digest", `{"description": "Digest of the body's identifier, signing key and sealing keys, as the body signed it at enrolment", "type": "string"}`},
+		{"grade", `{"description": "How strongly the body's key is held, never above what was checked", "type": "string", "enum": ["software", "hardware-asserted", "hardware-attested", "attested-runtime"]}`},
+		{"platform", `{"description": "The platform the body reported, e.g. macos/arm64", "type": "string"}`},
+		{"placement", `{"description": "Where the body is: computer, vm, cloud or device", "type": "string"}`},
+	},
+	required: []string{"host", "verkey", "keys_digest", "grade"},
+	fields: []SchemaField{
+		{Key: "host", Label: "Body", Type: "string", Required: true},
+		{Key: "grade", Label: "Grade", Type: "string", Required: true},
+	},
+})
+
 // AssetGrants are every kind's grant schema, by asset type.
 var AssetGrants = map[string]*AssetGrant{
 	AIAgentGrant.AssetType: AIAgentGrant,
 }
 
+// assetCredentials are every schema built from the asset template.
+var assetCredentials = []*AssetGrant{AIAgentGrant, AIAgentBody}
+
 func init() {
-	for _, g := range AssetGrants {
+	for _, g := range assetCredentials {
 		Catalog[g.Schema.SAID] = g.Schema
 	}
 }

@@ -409,21 +409,12 @@ func (s *CoreServer) ensureRegistry(issuerRootAID string) (string, error) {
 // can resolve the issuer KEL), and returns the grant SAID. Requires the KERI
 // driver; on any failure the caller falls back to the stored ceiling.
 func (s *CoreServer) issueCapabilityGrant(agent *asset.Asset) (string, error) {
-	if s.KeriDriver == nil {
-		return "", fmt.Errorf("keri driver unavailable")
-	}
-	identity, err := s.DataStore.GetIdentity()
-	if err != nil || identity == nil {
-		return "", fmt.Errorf("no owner identity")
-	}
 	agentAID, issuerRootAID := agent.PairwiseAID, agent.DelegatorAID
 	capabilities := agent.Capabilities
 	if capabilities == nil {
 		capabilities = []string{}
 	}
 	claims := map[string]interface{}{
-		"i":            agentAID, // holder = the delegated agent
-		"asset_type":   schemas.AIAgentGrant.AssetType,
 		"name":         agent.DisplayName,
 		"capabilities": capabilities,
 	}
@@ -433,48 +424,11 @@ func (s *CoreServer) issueCapabilityGrant(agent *asset.Asset) (string, error) {
 	expiry := ""
 	if agent.GrantValidUntil != nil {
 		expiry = agent.GrantValidUntil.UTC().Format(time.RFC3339)
-		claims["valid_until"] = expiry
-	}
-	if err := schemas.AIAgentGrant.CheckAttributes(claims); err != nil {
-		return "", err
-	}
-	// Issue into the owner's registry, so the grant is revoked by an event in that
-	// registry's log, anchored in the owner's key log, which anybody can check.
-	// There is no unrevocable fallback: a grant that cannot be withdrawn is not a
-	// grant this software issues.
-	registrySAID, err := s.ensureRegistry(issuerRootAID)
-	if err != nil {
-		return "", fmt.Errorf("no registry to issue the grant in: %w", err)
 	}
 	superseded := s.grantsHeldBy(agentAID, true)
-	result, err := s.KeriDriver.IssueCredentialInRegistry(issuerRootAID, claims, capabilityGrantSchemaSAID, agentAID, nil, registrySAID)
+	grantSAID, err := s.issueAssetCredential(schemas.AIAgentGrant, agentAID, issuerRootAID, claims, expiry)
 	if err != nil {
 		return "", err
-	}
-	// Fixed-width to the nanosecond, so two grants issued in one second still
-	// order correctly as text, which is how the newest is picked.
-	now := time.Now().UTC().Format("2006-01-02T15:04:05.000000000Z07:00")
-	if err := s.DataStore.SaveCredential(store.CredentialRecord{
-		SAID:           result.AcdcSaid,
-		IssuerAID:      issuerRootAID,
-		HolderAID:      agentAID,
-		SchemaSAID:     capabilityGrantSchemaSAID,
-		AcdcJson:       result.AcdcJsonB64,
-		IxnSAID:        result.IxnSaid,
-		IssuedAt:       now,
-		Status:         "issued",
-		Format:         "acdc",
-		CredentialType: schemas.AIAgentGrant.Schema.Name,
-		ExpiryDate:     expiry,
-		RegistrySAID:   registrySAID,
-		IssSAID:        result.IssSaid,
-	}); err != nil {
-		log.Printf("[mcp] failed to persist capability grant %s: %v", result.AcdcSaid, err)
-	}
-	// Persist the anchoring IXN event on the owner-root KEL, signed, so the
-	// issuance is part of the published, verifiable history.
-	if err := s.saveOwnInteraction(issuerRootAID, result.IxnEvent, result.IxnRawBytesB64, result.SequenceNumber, ""); err != nil {
-		log.Printf("[mcp] failed to persist grant IXN event for %s: %v", result.AcdcSaid, err)
 	}
 	// The grant this one replaces is withdrawn, not left standing. A re-issue
 	// that narrows a ceiling would otherwise leave the wider grant valid beside
@@ -489,15 +443,15 @@ func (s *CoreServer) issueCapabilityGrant(agent *asset.Asset) (string, error) {
 		status := "revoked"
 		if _, err := s.revokeIssuedCredential(&old); err != nil {
 			log.Printf("[mcp] grant %s superseded by %s: its revocation was not recorded in the registry (%v); "+
-				"it is marked superseded and no longer admits anything here", old.SAID, result.AcdcSaid, err)
+				"it is marked superseded and no longer admits anything here", old.SAID, grantSAID, err)
 			status = "superseded"
 		}
 		if err := s.DataStore.UpdateCredentialStatus(old.SAID, status); err != nil {
-			log.Printf("[mcp] grant %s superseded by %s but not marked %s: %v", old.SAID, result.AcdcSaid, status, err)
+			log.Printf("[mcp] grant %s superseded by %s but not marked %s: %v", old.SAID, grantSAID, status, err)
 		}
 	}
-	log.Printf("[mcp] issued capability grant %s to agent %s (%d capabilities)", result.AcdcSaid, agentAID, len(capabilities))
-	return result.AcdcSaid, nil
+	log.Printf("[mcp] issued capability grant %s to agent %s (%d capabilities)", grantSAID, agentAID, len(capabilities))
+	return grantSAID, nil
 }
 
 // checkResourceConstraints refuses constraints the gateway would not enforce as

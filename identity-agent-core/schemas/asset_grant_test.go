@@ -22,7 +22,8 @@ func TestTheAIAgentGrantSchemaIsPinned(t *testing.T) {
 
 // A verifier holding only the document can recompute its identifier.
 func TestEveryAssetGrantSchemaMatchesItsOwnIdentifier(t *testing.T) {
-	for kind, g := range AssetGrants {
+	for _, g := range assetCredentials {
+		kind := g.Schema.Name
 		said, err := keri.VerifySchema([]byte(g.Schema.JSON))
 		if err != nil || said != g.Schema.SAID {
 			t.Fatalf("%s: the document digests to %q (%v), not %s", kind, said, err, g.Schema.SAID)
@@ -35,7 +36,8 @@ func TestEveryAssetGrantSchemaMatchesItsOwnIdentifier(t *testing.T) {
 
 // Every kind carries the shared attributes, and accepts nothing undeclared.
 func TestEveryAssetGrantCarriesTheSharedAttributes(t *testing.T) {
-	for kind, g := range AssetGrants {
+	for _, g := range assetCredentials {
+		kind := g.Schema.Name
 		var doc struct {
 			Properties struct {
 				A struct {
@@ -83,5 +85,15 @@ func TestAnAIAgentGrantRefusesWhatItsSchemaRefuses(t *testing.T) {
 		if AIAgentGrant.CheckAttributes(bad) == nil {
 			t.Fatalf("%s: accepted", name)
 		}
+	}
+}
+
+const pinnedAIAgentBodySAID = "ENgVwFtQT1y4-orsWzZm_WvlvmWNTQr-1e5zyZDV32Su"
+
+func TestTheAIAgentBodySchemaIsPinned(t *testing.T) {
+	if AIAgentBody.Schema.SAID != pinnedAIAgentBodySAID {
+		t.Fatalf("the AI agent body schema is now %s, not %s. If the change is meant, it is "+
+			"a new schema version: pin the new identifier and say so in the change.",
+			AIAgentBody.Schema.SAID, pinnedAIAgentBodySAID)
 	}
 }
