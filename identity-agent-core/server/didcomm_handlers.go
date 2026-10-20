@@ -510,7 +510,9 @@ func (s *CoreServer) handleDIDCommInbound(w http.ResponseWriter, r *http.Request
 
 // handleGetDIDCommInbox returns received messages (owner only).
 func (s *CoreServer) handleGetDIDCommInbox(w http.ResponseWriter, r *http.Request) {
-	if !s.isOwner(r) {
+	// The owner, or a machine the owner authorised, which signed this request with
+	// the key it was granted and reads the inbox on the owner's behalf.
+	if _, ok := TheControllerThatAsked(r); !ok && !s.isOwner(r) {
 		jsonError(w, "inbox is owner only", http.StatusForbidden)
 		return
 	}
