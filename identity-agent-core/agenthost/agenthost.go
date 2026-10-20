@@ -148,13 +148,20 @@ func (h *Host) saveState(st State) error {
 // named event. A relay or DNS attacker answering with another key fails here,
 // before the machine sends anything.
 func (h *Host) CheckIdentityAgent(e agentbody.Enrolment) error {
+	_, _, err := h.verifiedIdentityAgent(e)
+	return err
+}
+
+// verifiedIdentityAgent is CheckIdentityAgent, returning the verified log, as
+// parsed events, and the key it ends with.
+func (h *Host) verifiedIdentityAgent(e agentbody.Enrolment) ([]map[string]interface{}, string, error) {
 	resp, err := h.client().Get(strings.TrimRight(e.URL, "/") + "/public/oobi/" + e.IdentityAgent)
 	if err != nil {
-		return fmt.Errorf("the Identity Agent at %s could not be reached: %w", e.URL, err)
+		return nil, "", fmt.Errorf("the Identity Agent at %s could not be reached: %w", e.URL, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("the Identity Agent at %s did not publish its key log (%d)", e.URL, resp.StatusCode)
+		return nil, "", fmt.Errorf("the Identity Agent at %s did not publish its key log (%d)", e.URL, resp.StatusCode)
 	}
 	var oobi struct {
 		AID  string   `json:"aid"`
@@ -162,17 +169,17 @@ func (h *Host) CheckIdentityAgent(e agentbody.Enrolment) error {
 		Sigs []string `json:"cesr_signatures"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&oobi); err != nil {
-		return fmt.Errorf("the Identity Agent's key log is unreadable: %w", err)
+		return nil, "", fmt.Errorf("the Identity Agent's key log is unreadable: %w", err)
 	}
 	if oobi.AID != e.IdentityAgent {
-		return fmt.Errorf("the address answered as %s, not the Identity Agent the enrolment string names (%s)", oobi.AID, e.IdentityAgent)
+		return nil, "", fmt.Errorf("the address answered as %s, not the Identity Agent the enrolment string names (%s)", oobi.AID, e.IdentityAgent)
 	}
 	in := drivers.ValidateKELInput{AID: e.IdentityAgent}
 	named := false
 	for i, r := range oobi.Raw {
 		raw, err := base64.StdEncoding.DecodeString(r)
 		if err != nil {
-			return fmt.Errorf("event %d of the Identity Agent's key log is unreadable", i)
+			return nil, "", fmt.Errorf("event %d of the Identity Agent's key log is unreadable", i)
 		}
 		in.RawEvents = append(in.RawEvents, raw)
 		sig := ""
@@ -186,12 +193,43 @@ func (h *Host) CheckIdentityAgent(e agentbody.Enrolment) error {
 	}
 	res, err := drivers.ValidateKELFromBytes(in)
 	if err != nil || !res.KelVerified {
-		return fmt.Errorf("the Identity Agent's key log does not verify: %v %v", err, res.ValidationErrors)
+		return nil, "", fmt.Errorf("the Identity Agent's key log does not verify: %v %v", err, res.ValidationErrors)
 	}
 	if !named {
-		return fmt.Errorf("the Identity Agent's key log does not contain the event the enrolment string names, so it is not the Identity Agent the string was made by")
+		return nil, "", fmt.Errorf("the Identity Agent's key log does not contain the event the enrolment string names, so it is not the Identity Agent the string was made by")
 	}
-	return nil
+	events := make([]map[string]interface{}, 0, len(in.RawEvents))
+	for _, raw := range in.RawEvents {
+		var m map[string]interface{}
+		if err := json.Unmarshal(raw, &m); err != nil {
+			return nil, "", fmt.Errorf("the Identity Agent's key log is unreadable: %w", err)
+		}
+		events = append(events, m)
+	}
+	return events, res.CurrentPublicKey, nil
+}
+
+// identityAgentSealingKeys fetches the keys the enrolment is sealed to, and
+// accepts them only if they belong to the Identity Agent whose log was just
+// verified — committed to in its founding event, or signed by the key its log
+// ends with. Whoever answers the request does not get to choose them.
+func (h *Host) identityAgentSealingKeys(e agentbody.Enrolment, kel []map[string]interface{}, currentKey string) (*didcomm.DID, error) {
+	resp, err := h.client().Get(strings.TrimRight(e.URL, "/") + "/api/didcomm/did?aid=" + e.IdentityAgent)
+	if err != nil {
+		return nil, fmt.Errorf("the Identity Agent's sealing keys could not be fetched: %w", err)
+	}
+	defer resp.Body.Close()
+	var did didcomm.DID
+	if resp.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&did) != nil {
+		return nil, fmt.Errorf("the Identity Agent did not publish its sealing keys (%d)", resp.StatusCode)
+	}
+	if did.AID != e.IdentityAgent {
+		return nil, fmt.Errorf("the sealing keys offered are %s's, not the Identity Agent's", did.AID)
+	}
+	if _, err := didcomm.CheckKeysBelongTo(&did, kel, currentKey); err != nil {
+		return nil, fmt.Errorf("the sealing keys offered do not belong to the Identity Agent: %w", err)
+	}
+	return &did, nil
 }
 
 // ErrRejected is the owner saying the words did not match.
@@ -210,10 +248,15 @@ func (h *Host) Enrol(enrolment string, placement string, wait time.Duration) (St
 	if err := os.MkdirAll(h.DataDir, 0o700); err != nil {
 		return State{}, err
 	}
-	if err := h.CheckIdentityAgent(e); err != nil {
+	kel, currentKey, err := h.verifiedIdentityAgent(e)
+	if err != nil {
 		return State{}, err
 	}
-	fmt.Fprintf(h.out(), "Checked the Identity Agent %s at %s.\n", e.IdentityAgent, e.URL)
+	iaKeys, err := h.identityAgentSealingKeys(e, kel, currentKey)
+	if err != nil {
+		return State{}, err
+	}
+	fmt.Fprintf(h.out(), "Checked the Identity Agent %s at %s, and its sealing keys.\n", e.IdentityAgent, e.URL)
 
 	signer, grade := h.signer()
 	host, verkey, err := agentbody.Identity(signer)
@@ -224,12 +267,10 @@ func (h *Host) Enrol(enrolment string, placement string, wait time.Duration) (St
 	if err != nil {
 		return State{}, err
 	}
-	_, _, x, kem, err := ks.PublicMaterial()
+	keys, err := agentbody.KeysFrom(host, verkey, ks)
 	if err != nil {
 		return State{}, err
 	}
-	keys := agentbody.Keys{Host: host, Verkey: verkey,
-		X25519: base64.RawURLEncoding.EncodeToString(x), MLKEM768: base64.RawURLEncoding.EncodeToString(kem)}
 	nonceBytes := make([]byte, 24)
 	if _, err := rand.Read(nonceBytes); err != nil {
 		return State{}, err
@@ -240,10 +281,19 @@ func (h *Host) Enrol(enrolment string, placement string, wait time.Duration) (St
 	if err != nil {
 		return State{}, err
 	}
-	body, _ := json.Marshal(map[string]any{
+	inner, _ := json.Marshal(map[string]any{
 		"secret": e.Secret, "agent": e.Agent, "keys": keys, "nonce": nonce,
 		"claimed_grade": grade, "platform": platform, "placement": placement, "signature": sig,
 	})
+	env, err := didcomm.PackAuthcrypt(ks, iaKeys, &didcomm.JWM{
+		ID: nonce, Type: didcomm.TypeBodyEnrolment,
+		From: "did:keri:" + host, To: []string{"did:keri:" + e.IdentityAgent},
+		CreatedTime: time.Now().UTC().Format(time.RFC3339), Body: inner,
+	})
+	if err != nil {
+		return State{}, fmt.Errorf("the enrolment could not be sealed: %w", err)
+	}
+	body, _ := json.Marshal(map[string]any{"sender": keys, "envelope": env})
 	resp, err := h.client().Post(strings.TrimRight(e.URL, "/")+"/api/agent-host/enrol", "application/json", bytes.NewReader(body))
 	if err != nil {
 		return State{}, err

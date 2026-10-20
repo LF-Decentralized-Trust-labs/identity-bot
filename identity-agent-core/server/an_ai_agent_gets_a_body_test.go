@@ -7,7 +7,6 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -23,8 +22,12 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// testMachine is a machine with a P-256 key, as secure hardware holds one.
-type testMachine struct{ priv *ecdsa.PrivateKey }
+// testMachine is a machine with a P-256 key, as secure hardware holds one, and
+// the software sealing keys every body has beside it.
+type testMachine struct {
+	priv *ecdsa.PrivateKey
+	ks   *didcomm.KeySet
+}
 
 func newTestMachine(t *testing.T) testMachine {
 	t.Helper()
@@ -32,7 +35,12 @@ func newTestMachine(t *testing.T) testMachine {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return testMachine{p}
+	m := testMachine{priv: p}
+	host, _, _ := agentbody.Identity(m)
+	if m.ks, err = didcomm.GenerateKeySet(host); err != nil {
+		t.Fatal(err)
+	}
+	return m
 }
 func (m testMachine) PublicKey() ([]byte, error) {
 	return elliptic.MarshalCompressed(elliptic.P256(), m.priv.X, m.priv.Y), nil
@@ -55,33 +63,45 @@ func (m testMachine) keys(t *testing.T) agentbody.Keys {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ks, err := didcomm.GenerateKeySet(host)
+	k, err := agentbody.KeysFrom(host, verkey, m.ks)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, x, kem, err := ks.PublicMaterial()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return agentbody.Keys{Host: host, Verkey: verkey,
-		X25519: base64.RawURLEncoding.EncodeToString(x), MLKEM768: base64.RawURLEncoding.EncodeToString(kem)}
+	return k
 }
 
-// enrolRequest is what the machine sends for an enrolment string.
-func (m testMachine) enrolRequest(t *testing.T, enrolment, claimed string) []byte {
+// enrolRequest is what the machine sends for an enrolment string: sealed to
+// the Identity Agent, signed by the machine's key.
+func (m testMachine) enrolRequest(t *testing.T, s *CoreServer, enrolment, claimed string) []byte {
+	return sealedEnrolment(t, s, m, m, enrolment, claimed)
+}
+
+// sealedEnrolment signs as signer and offers (and seals from) offered's keys.
+func sealedEnrolment(t *testing.T, s *CoreServer, signer, offered testMachine, enrolment, claimed string) []byte {
 	t.Helper()
 	e, err := agentbody.ParseEnrolment(enrolment)
 	if err != nil {
 		t.Fatal(err)
 	}
-	k := m.keys(t)
+	k := offered.keys(t)
 	nonce := "nonce-" + strings.Repeat("x", 16)
-	sig, err := agentbody.Sign(m, agentbody.EnrolProof(e, nonce, k, claimed, "macos/arm64", "computer"))
+	sig, err := agentbody.Sign(signer, agentbody.EnrolProof(e, nonce, k, claimed, "macos/arm64", "computer"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, _ := json.Marshal(bodyEnrolRequest{Secret: e.Secret, Agent: e.Agent, Keys: k, Nonce: nonce,
+	inner, _ := json.Marshal(bodyEnrolRequest{Secret: e.Secret, Agent: e.Agent, Keys: k, Nonce: nonce,
 		ClaimedGrade: claimed, Platform: "macos/arm64", Placement: "computer", Signature: sig})
+	iaKS, err := s.keySetFor(e.IdentityAgent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	iaDID, _ := iaKS.DID()
+	env, err := didcomm.PackAuthcrypt(offered.ks, iaDID, &didcomm.JWM{ID: nonce, Type: didcomm.TypeBodyEnrolment,
+		From: "did:keri:" + k.Host, To: []string{"did:keri:" + e.IdentityAgent}, Body: inner})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(sealedBodyEnrolment{Sender: k, Envelope: env})
 	return b
 }
 
@@ -166,7 +186,7 @@ func TestAMachineBecomesAnAIAgentsBody(t *testing.T) {
 	enrolment := s.testEnrolment(t, agentID)
 
 	code, out := call(t, s.handleBodyEnrol, httptest.NewRequest("POST", "/api/agent-host/enrol",
-		bytes.NewReader(m.enrolRequest(t, enrolment, agentbody.GradeHardwareAsserted))))
+		bytes.NewReader(m.enrolRequest(t, s, enrolment, agentbody.GradeHardwareAsserted))))
 	if code != http.StatusAccepted || out["state"] != agentbody.StatePending {
 		t.Fatalf("enrolling: %d %v", code, out)
 	}
@@ -219,10 +239,10 @@ func TestAnEnrolmentStringWorksOnce(t *testing.T) {
 	s, agentID := bodyWorld(t)
 	enrolment := s.testEnrolment(t, agentID)
 	first, second := newTestMachine(t), newTestMachine(t)
-	if code, out := call(t, s.handleBodyEnrol, httptest.NewRequest("POST", "/", bytes.NewReader(first.enrolRequest(t, enrolment, "software")))); code != http.StatusAccepted {
+	if code, out := call(t, s.handleBodyEnrol, httptest.NewRequest("POST", "/", bytes.NewReader(first.enrolRequest(t, s, enrolment, "software")))); code != http.StatusAccepted {
 		t.Fatalf("first: %d %v", code, out)
 	}
-	if code, _ := call(t, s.handleBodyEnrol, httptest.NewRequest("POST", "/", bytes.NewReader(second.enrolRequest(t, enrolment, "software")))); code != http.StatusForbidden {
+	if code, _ := call(t, s.handleBodyEnrol, httptest.NewRequest("POST", "/", bytes.NewReader(second.enrolRequest(t, s, enrolment, "software")))); code != http.StatusForbidden {
 		t.Fatalf("a reused enrolment string gave %d", code)
 	}
 }
@@ -233,7 +253,7 @@ func TestABodyCannotAwardItselfAGrade(t *testing.T) {
 	s, agentID := bodyWorld(t)
 	m := newTestMachine(t)
 	code, out := call(t, s.handleBodyEnrol, httptest.NewRequest("POST", "/", bytes.NewReader(
-		m.enrolRequest(t, s.testEnrolment(t, agentID), agentbody.GradeAttestedRuntime))))
+		m.enrolRequest(t, s, s.testEnrolment(t, agentID), agentbody.GradeAttestedRuntime))))
 	if code != http.StatusAccepted || out["grade"] != agentbody.GradeHardwareAsserted || out["grade_clamped"] != true {
 		t.Fatalf("an attested claim with no evidence was recorded as %v (clamped %v)", out["grade"], out["grade_clamped"])
 	}
@@ -244,12 +264,24 @@ func TestABodyCannotAwardItselfAGrade(t *testing.T) {
 func TestAnEnrolmentMustBeSignedByTheKeyItOffers(t *testing.T) {
 	s, agentID := bodyWorld(t)
 	m, other := newTestMachine(t), newTestMachine(t)
-	var req bodyEnrolRequest
-	_ = json.Unmarshal(m.enrolRequest(t, s.testEnrolment(t, agentID), "software"), &req)
-	req.Keys = other.keys(t)
-	b, _ := json.Marshal(req)
+	b := sealedEnrolment(t, s, m, other, s.testEnrolment(t, agentID), "software")
 	if code, _ := call(t, s.handleBodyEnrol, httptest.NewRequest("POST", "/", bytes.NewReader(b))); code != http.StatusForbidden {
 		t.Fatalf("an enrolment offering a key it did not sign with gave %d", code)
+	}
+}
+
+// The enrolment carries a one-time secret and the machine's keys, so it must
+// arrive sealed to this Identity Agent; one sent in the clear is refused.
+func TestAnUnsealedEnrolmentIsRefused(t *testing.T) {
+	s, agentID := bodyWorld(t)
+	m := newTestMachine(t)
+	e, _ := agentbody.ParseEnrolment(s.testEnrolment(t, agentID))
+	plain, _ := json.Marshal(map[string]any{"secret": e.Secret, "agent": e.Agent, "keys": m.keys(t)})
+	if code, _ := call(t, s.handleBodyEnrol, httptest.NewRequest("POST", "/", bytes.NewReader(plain))); code != http.StatusBadRequest {
+		t.Fatalf("an unsealed enrolment gave %d", code)
+	}
+	if len(s.bodies().ForAgent(agentID)) != 0 {
+		t.Fatal("an unsealed enrolment was recorded")
 	}
 }
 
@@ -259,7 +291,7 @@ func TestRejectingABodyGivesAFreshString(t *testing.T) {
 	s, agentID := bodyWorld(t)
 	m := newTestMachine(t)
 	old := s.testEnrolment(t, agentID)
-	_, out := call(t, s.handleBodyEnrol, httptest.NewRequest("POST", "/", bytes.NewReader(m.enrolRequest(t, old, "software"))))
+	_, out := call(t, s.handleBodyEnrol, httptest.NewRequest("POST", "/", bytes.NewReader(m.enrolRequest(t, s, old, "software"))))
 	code, rej := call(t, s.handleRejectBody, withRoute(httptest.NewRequest("POST", "/", nil),
 		map[string]string{"id": agentID, "bid": out["binding_id"].(string)}))
 	if code != http.StatusOK || rej["enrolment"] == "" || rej["enrolment"] == old {
@@ -269,7 +301,7 @@ func TestRejectingABodyGivesAFreshString(t *testing.T) {
 		t.Fatal("a rejected machine was admitted")
 	}
 	// The rejected machine's key may try again with the fresh string.
-	if code, _ := call(t, s.handleBodyEnrol, httptest.NewRequest("POST", "/", bytes.NewReader(m.enrolRequest(t, rej["enrolment"].(string), "software")))); code != http.StatusAccepted {
+	if code, _ := call(t, s.handleBodyEnrol, httptest.NewRequest("POST", "/", bytes.NewReader(m.enrolRequest(t, s, rej["enrolment"].(string), "software")))); code != http.StatusAccepted {
 		t.Fatalf("the fresh string did not work: %d", code)
 	}
 }
@@ -279,7 +311,7 @@ func TestRejectingABodyGivesAFreshString(t *testing.T) {
 func TestARevokedBodyIsRefused(t *testing.T) {
 	s, agentID := bodyWorld(t)
 	m := newTestMachine(t)
-	_, out := call(t, s.handleBodyEnrol, httptest.NewRequest("POST", "/", bytes.NewReader(m.enrolRequest(t, s.testEnrolment(t, agentID), "software"))))
+	_, out := call(t, s.handleBodyEnrol, httptest.NewRequest("POST", "/", bytes.NewReader(m.enrolRequest(t, s, s.testEnrolment(t, agentID), "software"))))
 	bid := out["binding_id"].(string)
 	_, approved := call(t, s.handleApproveBody, withRoute(httptest.NewRequest("POST", "/", nil), map[string]string{"id": agentID, "bid": bid}))
 	code, rev := call(t, s.handleRevokeBody, withRoute(httptest.NewRequest("DELETE", "/", nil), map[string]string{"id": agentID, "bid": bid}))
@@ -300,7 +332,7 @@ func TestARevokedBodyIsRefused(t *testing.T) {
 func TestABodySignedRequestPassesTheGateOnce(t *testing.T) {
 	s, agentID := bodyWorld(t)
 	m := newTestMachine(t)
-	_, out := call(t, s.handleBodyEnrol, httptest.NewRequest("POST", "/", bytes.NewReader(m.enrolRequest(t, s.testEnrolment(t, agentID), "software"))))
+	_, out := call(t, s.handleBodyEnrol, httptest.NewRequest("POST", "/", bytes.NewReader(m.enrolRequest(t, s, s.testEnrolment(t, agentID), "software"))))
 	call(t, s.handleApproveBody, withRoute(httptest.NewRequest("POST", "/", nil), map[string]string{"id": agentID, "bid": out["binding_id"].(string)}))
 
 	router := s.buildRouter("")

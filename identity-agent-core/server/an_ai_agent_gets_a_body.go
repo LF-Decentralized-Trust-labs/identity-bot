@@ -15,6 +15,7 @@ import (
 
 	"identity-agent-core/agentbody"
 	"identity-agent-core/asset"
+	"identity-agent-core/didcomm"
 	"identity-agent-core/schemas"
 
 	"github.com/go-chi/chi/v5"
@@ -265,15 +266,49 @@ type bodyEnrolRequest struct {
 	Signature    string         `json:"signature"`
 }
 
+// sealedBodyEnrolment is how the enrolment arrives: sealed to this Identity
+// Agent's keys, which the machine first checked are this identity's, so a relay
+// between them reads neither the secret nor the machine's keys.
+type sealedBodyEnrolment struct {
+	// Sender is the machine's public keys, which the envelope is sealed from.
+	// The same keys are inside the envelope, signed by K.
+	Sender   agentbody.Keys    `json:"sender"`
+	Envelope *didcomm.Envelope `json:"envelope"`
+}
+
 func (s *CoreServer) handleBodyEnrol(w http.ResponseWriter, r *http.Request) {
-	var req bodyEnrolRequest
-	if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&req); err != nil {
-		jsonError(w, "the enrolment request is unreadable", http.StatusBadRequest)
+	var sealed sealedBodyEnrolment
+	if err := json.NewDecoder(io.LimitReader(r.Body, 128<<10)).Decode(&sealed); err != nil || sealed.Envelope == nil {
+		jsonError(w, "the enrolment must arrive sealed to this Identity Agent", http.StatusBadRequest)
 		return
 	}
 	identity, err := s.DataStore.GetIdentity()
 	if err != nil || identity == nil {
 		jsonError(w, "this Identity Agent has no identity yet", http.StatusServiceUnavailable)
+		return
+	}
+	if err := checkSealingKeys(sealed.Sender); err != nil {
+		jsonError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	ks, err := s.keySetFor(identity.AID)
+	if err != nil {
+		jsonError(w, "this Identity Agent's sealing keys are unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	msg, err := didcomm.UnpackAuthcrypt(ks, sealed.Sender.DID(), sealed.Envelope)
+	if err != nil || msg.Type != didcomm.TypeBodyEnrolment {
+		jsonError(w, "the enrolment could not be opened as one sealed to this Identity Agent by the keys it names", http.StatusForbidden)
+		return
+	}
+	var req bodyEnrolRequest
+	if err := json.Unmarshal(msg.Body, &req); err != nil {
+		jsonError(w, "the sealed enrolment is unreadable", http.StatusBadRequest)
+		return
+	}
+	// The keys inside, which K signs, are the keys it was sealed from.
+	if req.Keys != sealed.Sender {
+		jsonError(w, "the keys inside the enrolment are not the keys it was sealed from", http.StatusForbidden)
 		return
 	}
 	ref := s.findAgentAssetByAID(req.Agent)
@@ -283,10 +318,6 @@ func (s *CoreServer) handleBodyEnrol(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(req.Nonce) < 16 {
 		jsonError(w, "the enrolment needs a fresh nonce", http.StatusBadRequest)
-		return
-	}
-	if err := checkSealingKeys(req.Keys); err != nil {
-		jsonError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	// Proof of possession: the machine holds the key it is offering, and signed
@@ -333,6 +364,14 @@ func checkSealingKeys(k agentbody.Keys) error {
 	m, err := base64.RawURLEncoding.DecodeString(k.MLKEM768)
 	if err != nil || len(m) != 1184 {
 		return fmt.Errorf("the ML-KEM-768 sealing key must be 1184 bytes, base64url")
+	}
+	e, err := base64.RawURLEncoding.DecodeString(k.Ed25519)
+	if err != nil || len(e) != 32 {
+		return fmt.Errorf("the Ed25519 sealing signature key must be 32 bytes, base64url")
+	}
+	d, err := base64.RawURLEncoding.DecodeString(k.MLDSA65)
+	if err != nil || len(d) != 1952 {
+		return fmt.Errorf("the ML-DSA-65 sealing signature key must be 1952 bytes, base64url")
 	}
 	return nil
 }

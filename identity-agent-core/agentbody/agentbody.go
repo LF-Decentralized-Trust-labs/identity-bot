@@ -35,6 +35,7 @@ import (
 	"strings"
 	"time"
 
+	"identity-agent-core/didcomm"
 	"identity-agent-core/iacrypto"
 
 	"github.com/zeebo/blake3"
@@ -124,18 +125,37 @@ type Keys struct {
 	Host string `json:"host"`
 	// Verkey is K in the form signatures are checked against.
 	Verkey string `json:"verkey"`
-	// X25519 and MLKEM768 are the body's sealing keys, base64url. They live in
-	// software — secure hardware does neither — which is why K signs them.
+	// The body's sealing keys, base64url: X25519 and ML-KEM-768 to seal to it,
+	// Ed25519 and ML-DSA-65 to sign what it seals. They live in software —
+	// secure hardware does none of these — which is why K signs them.
 	X25519   string `json:"x25519"`
 	MLKEM768 string `json:"mlkem768"`
+	Ed25519  string `json:"ed25519"`
+	MLDSA65  string `json:"mldsa65"`
 }
 
 // KeysDigest is the digest that binds the sealing keys to K: K signs it inside
 // the enrolment proof, so a relay cannot swap them.
 func (k Keys) KeysDigest() string {
 	return iacrypto.Blake3QB64Must([]byte(strings.Join([]string{
-		"IA-BODY-KEYS-V1", k.Host, k.Verkey, k.X25519, k.MLKEM768,
+		"IA-BODY-KEYS-V1", k.Host, k.Verkey, k.X25519, k.MLKEM768, k.Ed25519, k.MLDSA65,
 	}, "\n")))
+}
+
+// DID is the body's sealing keys as the DIDComm layer takes them.
+func (k Keys) DID() *didcomm.DID {
+	return &didcomm.DID{AID: k.Host, Ed: k.Ed25519, Dsa: k.MLDSA65,
+		X25519: k.X25519, MlKem: k.MLKEM768, Suite: didcomm.CipherSuite}
+}
+
+// KeysFrom reads a body's public keys out of its keyset.
+func KeysFrom(host, verkey string, ks *didcomm.KeySet) (Keys, error) {
+	ed, dsa, x, kem, err := ks.PublicMaterial()
+	if err != nil {
+		return Keys{}, err
+	}
+	enc := base64.RawURLEncoding.EncodeToString
+	return Keys{Host: host, Verkey: verkey, X25519: enc(x), MLKEM768: enc(kem), Ed25519: enc(ed), MLDSA65: enc(dsa)}, nil
 }
 
 // EnrolProof is the string K signs to ask to become the body of an AI agent. It
