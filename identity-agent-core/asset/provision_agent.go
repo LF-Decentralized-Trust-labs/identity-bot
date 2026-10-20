@@ -1,9 +1,11 @@
 package asset
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"identity-agent-core/iacrypto"
@@ -20,8 +22,16 @@ import (
 // action it takes through the endpoint is provably "owner -> this agent" in the
 // signed invocation log.
 func (h *Handler) ProvisionAgentAsset(displayName string, capabilities []string, cfg *AgentConfig) (*Asset, error) {
+	displayName = strings.TrimSpace(displayName)
 	if displayName == "" {
 		return nil, fmt.Errorf("agent display name is required")
+	}
+	// Held from the name check to the stored asset, so two requests for the same
+	// name cannot both pass the check before either is stored.
+	provisionMu.Lock()
+	defer provisionMu.Unlock()
+	if h.agentNameTaken(displayName) {
+		return nil, fmt.Errorf("%w: %q", ErrAgentNameTaken, displayName)
 	}
 	rootAID := ""
 	if h.RootAID != nil {
@@ -68,6 +78,26 @@ func (h *Handler) ProvisionAgentAsset(displayName string, capabilities []string,
 	}
 	h.Store.UpsertAsset(asset)
 	return &asset, nil
+}
+
+// ErrAgentNameTaken refuses a second AI agent with a name already in use.
+//
+// The name is not only a label. The KERI engine keys the identities it holds
+// by it, and an agent's token is filed under it, so two agents sharing a name
+// would share the engine's record of one identity and revoking either token
+// by name would revoke both. Names are compared trimmed and without case,
+// because two agents a person cannot tell apart on screen are the same mistake.
+var ErrAgentNameTaken = errors.New("an AI agent with that name already exists")
+
+var provisionMu sync.Mutex
+
+func (h *Handler) agentNameTaken(name string) bool {
+	for _, a := range h.ListAgents() {
+		if strings.EqualFold(strings.TrimSpace(a.DisplayName), name) {
+			return true
+		}
+	}
+	return false
 }
 
 // UpdateAgentConfig replaces the operational config of an existing ai_agent asset

@@ -4,9 +4,11 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"identity-agent-core/asset"
@@ -71,7 +73,16 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 
 	// Mint the delegated agent AID (dip anchored to the owner root) + store the
 	// agent asset with its capability ceiling and config.
+	req.Name = strings.TrimSpace(req.Name)
+	if s.anMCPTokenIsNamed(req.Name) {
+		jsonError(w, asset.ErrAgentNameTaken.Error()+" (a token is filed under it)", http.StatusConflict)
+		return
+	}
 	agent, err := s.assetHandler.ProvisionAgentAsset(req.Name, req.Capabilities, cfg)
+	if errors.Is(err, asset.ErrAgentNameTaken) {
+		jsonError(w, err.Error(), http.StatusConflict)
+		return
+	}
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusBadRequest)
 		return
@@ -127,6 +138,20 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 		"token":         plaintext,
 		"note":          "store this token now; only its hash is kept. Every call it makes is recorded as this agent AID, chained to the owner root.",
 	})
+}
+
+// anMCPTokenIsNamed reports whether a token is already filed under this name,
+// compared as the asset store compares agent names. A token minted on its own
+// carries no agent asset, so the store's check alone would miss it.
+func (s *CoreServer) anMCPTokenIsNamed(name string) bool {
+	mcpTokensMu.Lock()
+	defer mcpTokensMu.Unlock()
+	for _, t := range s.loadMCPTokens() {
+		if strings.EqualFold(strings.TrimSpace(t.Name), name) {
+			return true
+		}
+	}
+	return false
 }
 
 // agentView is the owner-facing summary of an ai_agent asset — identity + config +
