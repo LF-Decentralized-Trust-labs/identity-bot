@@ -50,25 +50,5 @@ echo ""
 
 cd "$WORKSPACE"
 
-SODIUM_LIB=$(python3 -c "
-import ctypes, os
-for so_name in ['libsodium.so.26', 'libsodium.so.23', 'libsodium.so']:
-    try:
-        ctypes.CDLL(so_name)
-        for line in open(f'/proc/{os.getpid()}/maps'):
-            if 'sodium' in line:
-                parts = line.strip().split()
-                if len(parts) >= 6:
-                    print(os.path.dirname(parts[-1]))
-                    raise SystemExit(0)
-        break
-    except OSError:
-        continue
-" 2>/dev/null) || true
-if [ -n "$SODIUM_LIB" ]; then
-    export LD_LIBRARY_PATH="${SODIUM_LIB}:${LD_LIBRARY_PATH}"
-    echo "      libsodium: $SODIUM_LIB"
-fi
-
 export FLUTTER_WEB_DIR="$WORKSPACE/identity_agent_ui/build/web"
 exec "$BINARY"

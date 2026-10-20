@@ -124,8 +124,8 @@ IA_BASE=http://127.0.0.1:5050 node src/local-login-e2e.mjs
 ```
 
 The core runs `keri-go` in-process, so this needs no Python and no external
-engine. Other proofs: `scripts/login_steel_thread_test.py`,
-`packages/login-verify/src/steel-thread.test.mjs`, and `go test ./login/...`
+engine. Other proofs: `packages/login-verify/src/steel-thread.test.mjs`
+and `go test ./login/...`
 (`login_flow_test.go`, `canonical_test.go`, `verify_assertion_test.go`).
 
 The same run exercises the full KERI path (real inception + ACDC): `keri-go`

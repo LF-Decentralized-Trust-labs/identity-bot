@@ -26,9 +26,6 @@ def _ensure_libsodium():
     search_dirs = [
         os.path.join(repo_root, "identity_agent_ui", "build", "windows",
                      "x64", "runner", "Release", "backend"),
-        os.path.join(repo_root, "identity_agent_ui", "build", "windows",
-                     "x64", "runner", "Release", "backend", "keri-driver"),
-        os.path.join(repo_root, "drivers", "keri-core"),
         script_dir,
     ]
     for d in search_dirs:

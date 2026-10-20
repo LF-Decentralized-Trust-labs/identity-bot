@@ -32,13 +32,13 @@ def test_agent_a_info(agent_a):
     assert "capabilities" in body
 
 
-def test_agent_a_driver_active(agent_a):
-    """Python KERI driver must be running for identity operations to work."""
+def test_agent_a_engine_active(agent_a):
+    """The in-process keri-go engine must be active for identity operations to work."""
     body = requests.get(f"{agent_a}/api/health", timeout=TIMEOUT).json()
     mode = body.get("mode", "")
     assert "active" in mode, (
-        f"Driver not active. mode='{mode}'. "
-        "Ensure the Python KERI driver is running (pip install keri==1.1.17 flask)."
+        f"Engine not active. mode='{mode}'. "
+        "The keri-go engine runs in-process in the Go core; no external driver is required."
     )
 
 

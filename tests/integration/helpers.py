@@ -20,7 +20,6 @@ def _ensure_libsodium():
     for d in [
         os.path.join(repo_root, "identity_agent_ui", "build", "windows",
                      "x64", "runner", "Release", "backend"),
-        os.path.join(repo_root, "drivers", "keri-core"),
         script_dir,
     ]:
         dll = os.path.join(d, "libsodium.dll")
