@@ -41,6 +41,13 @@ type InvocationEvent struct {
 	// executed under its own authority). Empty for a direct call.
 	OrchestratedBy string `json:"orchestrated_by,omitempty"`
 
+	// Which machine the caller spoke from, when it was one of an AI agent's
+	// bodies, and how strongly that machine's key is held. Recorded on every
+	// event so nobody reads a weak proof as a strong one.
+	BodyHost       string `json:"body_host,omitempty"`
+	BodyGrade      string `json:"body_grade,omitempty"`
+	BodyCredential string `json:"body_credential,omitempty"`
+
 	// ── Why this happened ──────────────────────────────────────────────
 	// GrantSAID above answers "why was this permitted". These answer the
 	// different question "what was it for", which no field previously carried:
@@ -255,6 +262,9 @@ func (m *Manager) recordInvocationDetail(caller CallerContext, capabilityID, exe
 		AuthLevel:       caller.AuthLevel,
 		ParentEventID:   caller.ParentEventID,
 		OrchestratedBy:  caller.OrchestratedBy,
+		BodyHost:        caller.BodyHost,
+		BodyGrade:       caller.BodyGrade,
+		BodyCredential:  caller.BodyCredential,
 
 		WorkItem:     caller.WorkItem,
 		Reason:       caller.Reason,

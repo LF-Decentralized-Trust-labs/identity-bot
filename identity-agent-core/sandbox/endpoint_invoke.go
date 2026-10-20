@@ -99,6 +99,13 @@ type CallerContext struct {
 	// verified capability grant: capabilityID -> {argKey: [allowedValues]}. Enforced
 	// against the request arguments at invoke time. Empty = unconstrained.
 	ResourceConstraints map[string]interface{}
+	// BodyHost, BodyGrade and BodyCredential name the machine an AI agent spoke
+	// from, when the request was signed by one of its bodies: the body's key
+	// identifier, how strongly that key is held (never above what was checked),
+	// and the credential binding it to the AI agent. Empty otherwise.
+	BodyHost       string
+	BodyGrade      string
+	BodyCredential string
 	// OrchestratedBy is the AID of the master orchestrator that dispatched this call,
 	// when the invocation is one step of an orchestration. The step still executes
 	// under the worker's OWN authority (CallerAID + grant); OrchestratedBy records who

@@ -122,6 +122,12 @@ var controllerNeedsLevel = map[string]controllerRequirement{
 		"re-issuing an agent's capability grant changes what it may do, which others rely on"},
 	"PATCH /api/mcp/agents/{id}": {alsoRaised, authprovider.LevelVerified,
 		"changing an AI agent's configuration decides which model it talks to and with which stored key"},
+	"POST /api/mcp/agents/{id}/body-enrolment": {alsoRaised, authprovider.LevelVerified,
+		"an enrolment string lets a machine ask to become an AI agent's body"},
+	"POST /api/mcp/agents/{id}/bodies/{bid}/approve": {alsoRaised, authprovider.LevelVerified,
+		"approving a body lets a machine speak as an AI agent"},
+	"POST /api/mcp/agents/{id}/bodies/{bid}/reject": {alsoRaised, authprovider.LevelVerified,
+		"rejecting a body issues a fresh enrolment string for the AI agent"},
 
 	// --- what it takes to get back in ---
 	// The duress policy is the sharpest of these: it says what must happen if
