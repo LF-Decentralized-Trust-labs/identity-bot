@@ -64,6 +64,13 @@ var publicRoutes = map[string]string{
 	// route answers only the machine that signs for it.
 	"POST /api/agent-host/enrol":  "a machine asking, with a one-time secret, to become an AI agent's body",
 	"GET /api/agent-host/binding": "a machine asking, signed by its own key, whether it was approved",
+	// An AI agent's body sending and collecting messages. Each handler admits
+	// only a request the sealed transport opened from a live body's keys and
+	// that the body signed with its machine key; the gateway checks inside
+	// decide what that AI agent may say and to whom.
+	"POST /api/agent-host/messages": "an AI agent's body speaking in a conversation, sealed and signed by its key",
+	"GET /api/agent-host/inbox":     "an AI agent's body collecting its messages, sealed and signed by its key",
+	"GET /api/agent-host/agents":    "an AI agent's body asking which AI agents it may message, sealed and signed",
 
 	// --- carrying a request nothing in the middle can read ---
 	// Open in the same sense the message endpoint is open: what arrives is an

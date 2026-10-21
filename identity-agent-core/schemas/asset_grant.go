@@ -191,9 +191,11 @@ func mustAssetGrant(k assetGrantKind) *AssetGrant {
 //   - permission to delegate onward. This software offers an AI agent no way to
 //     create AI agents of its own, so a field saying whether it may would assert
 //     nothing;
-//   - whom it may message, and conversation limits. Those arrive with AI agent
-//     messaging, in a new version of this schema, because a field nothing
-//     enforces reads as a guarantee the software does not give.
+//   - whom it may message, and conversation limits. Messaging another AI agent
+//     is a capability like any other, agent.message.send, and whom it may
+//     message is that capability's constraint on "to" — so it needs no field
+//     of its own. Conversation limits are the Identity Agent's, applied to
+//     every conversation, and grant nothing (ADR-047).
 var AIAgentGrant = mustAssetGrant(assetGrantKind{
 	assetType: "ai_agent",
 	title:     "AI Agent Grant",
