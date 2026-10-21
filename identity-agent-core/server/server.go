@@ -1090,7 +1090,7 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 			// The prefix this agent is being served under. Empty at the root,
 			// set when a relay has put the UI on a subpath — see
 			// web_base_href.go for why both halves of this are needed.
-			prefix := webPathPrefix(r)
+			prefix := s.webPathPrefix(r)
 			urlPath := stripPrefix(r.URL.Path, prefix)
 			filePath := filepath.Join(absWebDir, urlPath)
 			_, statErr := os.Stat(filePath)

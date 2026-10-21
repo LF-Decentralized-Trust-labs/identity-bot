@@ -63,6 +63,9 @@ type Relay struct {
 	ClaimMode relayproto.Mode
 	aliases   map[string]string
 	down      bool
+	// KeepCallerPrefix, when true, passes a caller's X-Forwarded-Prefix on to
+	// a public name: a relay too lax to remove it.
+	KeepCallerPrefix bool
 	// domains maps a requested domain to its holder, and verified to whether
 	// its DNS has proved it; txt is the DNS this relay sees.
 	domains  map[string]string
@@ -331,7 +334,9 @@ func (r *Relay) forwardName(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	out := req.Clone(req.Context())
-	out.Header.Del("X-Forwarded-Prefix")
+	if !r.KeepCallerPrefix {
+		out.Header.Del("X-Forwarded-Prefix")
+	}
 	out.RequestURI = ""
 	sess.Forward(w, out, relayproto.Preamble{Allocation: name, Mode: mode, Host: req.Host})
 }

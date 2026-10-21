@@ -285,3 +285,39 @@ func TestARelayThatGivesUpSaysWhy(t *testing.T) {
 		t.Fatalf("status: %v", out)
 	}
 }
+
+// Through a relay, the page's base and the address this Identity Agent learns
+// for itself are its own record's, never what a caller's forwarding headers
+// claim.
+func TestACallerThroughARelayCannotSetTheBaseOrTheAddress(t *testing.T) {
+	t.Setenv("TRUST_FORWARDED_HEADERS", "1")
+	s, rl, _, cancel := relayWorld(t, relayproto.ModePublic)
+	rl.KeepCallerPrefix = true
+	defer cancel()
+	web := t.TempDir()
+	if err := os.WriteFile(filepath.Join(web, "index.html"), []byte(`<html><head><base href="/"></head></html>`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s.router = s.buildRouter(web)
+	go s.startRelay()
+	defer s.Stop()
+	url := s.waitForRelay(t)
+
+	req, _ := http.NewRequest("GET", url+"/", nil)
+	req.Header.Set("X-Forwarded-Prefix", "/evil")
+	req.Header.Set("X-Forwarded-Host", "evil.example")
+	req.Header.Set("X-Forwarded-Proto", "https")
+	resp, err := rl.Caller().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := make([]byte, 4096)
+	n, _ := resp.Body.Read(body)
+	resp.Body.Close()
+	if !strings.Contains(string(body[:n]), `<base href="/">`) {
+		t.Fatalf("a caller set the page's base: %s", body[:n])
+	}
+	if strings.Contains(s.EndpointService.CurrentURL(), "evil.example") {
+		t.Fatalf("a caller set this Identity Agent's address: %s", s.EndpointService.CurrentURL())
+	}
+}

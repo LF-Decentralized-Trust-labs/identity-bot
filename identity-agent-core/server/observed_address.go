@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"os"
 	"strings"
+
+	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto"
 )
 
 // Learning where this agent is actually reached from.
@@ -83,7 +85,11 @@ func firstForwarded(v string) string {
 // one nobody can resolve reliably.
 func (s *CoreServer) learnAddressFromProxy(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if trustForwardedHeaders() && s.EndpointService != nil &&
+		// Never from a request that came through a relay: there the forwarding
+		// headers are a caller's, and the relay's address is already known
+		// from this Identity Agent's own records.
+		_, relayed := relayproto.PreambleFrom(r.Context())
+		if !relayed && trustForwardedHeaders() && s.EndpointService != nil &&
 			s.EndpointService.Source() != "observed:proxy" {
 			if base := observedPublicBase(r); base != "" {
 				s.EndpointService.SetObservedURL(base)
