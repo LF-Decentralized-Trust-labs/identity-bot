@@ -128,12 +128,17 @@ There is no password and no token.
    - The time bounds how long it is worth anything at all.
 5. **The log is bounded and only ever moves forward.**
    - It may be at most 64 KiB and 256 events.
-   - The relay keeps the log of every identifier it admits. It is told each one it
-     verifies (`OnAdmit`, `OnRenew`) and reads its record back (`Enrolled`). A relay
-     that keeps no such record admits nobody: it could not tell a current key from
-     one rotated away.
+   - The relay keeps the log of every identifier it admits. It is told each one
+     (`OnAdmit`, `OnRenew`) only once the session holding it is the identifier's
+     own, and reads its record back (`Enrolled`). Its store must keep a log only
+     if it extends the one stored, so two admissions racing cannot leave the older
+     behind. A relay that keeps no such record admits nobody: it could not tell a
+     current key from one rotated away.
    - A presented log must extend the **newest** log the relay has seen for the
      identifier, whether that is its stored record or the live session's.
+   - "Extends" compares events as keri-go reads them, by sequence number, type and
+     SAID, never bytes. The same event may travel later with more attachments (a
+     witness receipt, say) or re-serialised, and that is not a new history.
    - The registry refuses a session whose log does not extend the one it would
      replace. So somebody holding a key rotated away since, and the log that named
      it, cannot displace the owner.
@@ -158,6 +163,8 @@ There is no password and no token.
   control stream (preamble mode `renew`) and challenges again. The Identity Agent
   answers with a fresh statement under the same channel binding, carrying any new
   key events.
+- **A renewal is held to what admission was.** The Identity Agent answers only a
+  renewal challenge in this protocol that names the relay it dialled.
 - **A renewal that fails closes the session at once.** It fails if the answer is
   late, does not verify, or presents a log that does not extend the session's.
 - **A renewal takes no request slot.** A session with every request slot busy can
@@ -189,7 +196,7 @@ These numbers are part of the protocol. The table says which end enforces each.
 | Read before admission, and per renewal answer | 96 KiB | relay |
 | Read from the relay during admission and renewal | 4 KiB | Identity Agent |
 | Admission or renewal exchange | 30 seconds | both |
-| Sessions per relay | 10,000 unless the relay sets its own, plus an optional budget hook | relay |
+| Sessions per relay | 10,000 unless the relay sets its own, plus an optional budget hook. Counted atomically as a session is put in place. An identifier that already holds a session may always replace it, so a full relay never locks an owner out of reconnecting. | relay |
 
 **Large bodies.** A body over 1 MiB, or of unknown length, is offered with
 `Expect: 100-continue`. That lets the Identity Agent's gate refuse a request on its

@@ -57,11 +57,14 @@ are:
   `tunnel/` package (providers include Cloudflare, ngrok, and a Chisel-based tunnel
   such as one fronted at `grapeid.org`).
 
-The default is per instance and is only a *default*. The per-product default is
-resolved by entity type in `defaultIngressModeForEntity`: an organisation, being
-public by nature, defaults to Tunnel; everything else — an individual, and the
-neutral core itself — defaults to URL Relay, for privacy by default. Direct is
-never a default. A deployment overrides the default with a persisted setting.
+The default is per instance and is only a *default*. The neutral core defaults
+every identity to URL Relay, for privacy by default (`defaultIngressModeForEntity`,
+amended by ADR-048: public or private is an identity's choice, not a property of
+its entity type). A product built on the core supplies its own per-entity default
+through `CoreServer.DefaultIngressMode`, so a product may, for example, default an
+organisation to a public address. Direct is never a default, and a product default
+of Direct is ignored. A deployment, or the identity itself, overrides the default
+with a persisted setting.
 
 Because reachability is a *manager* decision and not a global switch, the manager
 may allocate other-mode URLs on the same agent — for example an organisation on a
@@ -253,8 +256,8 @@ rather than relying on a string it handed out once (ADR-033).
 
 ## What is shipped, and what is still partial
 
-Shipped and load-bearing today: the single ingress-mode resolver and its per-entity
-defaults; the root-loopback invariant (the management surface binds `127.0.0.1` in
+Shipped and load-bearing today: the single ingress-mode resolver, its private
+default and the product's default seam; the root-loopback invariant (the management surface binds `127.0.0.1` in
 every mode); the two ingress shapes (dialled-out relay/tunnel, and the reverse-proxy
 front with opt-in trusted forwarding); the owner gate (loopback + no-forwarding-
 header + not-browser-originated, with the relay's ingress marker and body-carrying
