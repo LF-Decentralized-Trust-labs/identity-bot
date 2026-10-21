@@ -758,3 +758,17 @@ func TestTheStreamLimitHoldsAndFreesUp(t *testing.T) {
 		}
 	}
 }
+
+// The bytes a statement is signed over are pinned, so another implementation
+// of the protocol can produce them with an ordinary JSON writer.
+func TestTheSignedBytesArePinned(t *testing.T) {
+	got, err := Statement{Purpose: "relay-admission", Protocol: "iarelay/2", Service: "r&d.relay.test",
+		Nonce: "n", Exporter: "x", AID: "Eabc", Time: "2026-10-21T00:00:00Z"}.canonical()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"aid":"Eabc","exporter":"x","nonce":"n","protocol":"iarelay/2","purpose":"relay-admission","service":"r&d.relay.test","t":"2026-10-21T00:00:00Z"}`
+	if string(got) != want {
+		t.Fatalf("signed bytes\n got %s\nwant %s", got, want)
+	}
+}

@@ -51,12 +51,19 @@ type Statement struct {
 }
 
 // canonical is the exact bytes a statement is signed over: its fields as a JSON
-// object with sorted keys.
+// object with sorted keys, no whitespace, and no HTML escaping, so another
+// implementation produces the same bytes with an ordinary JSON writer.
 func (s Statement) canonical() ([]byte, error) {
-	return json.Marshal(map[string]string{
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(map[string]string{
 		"purpose": s.Purpose, "protocol": s.Protocol, "service": s.Service,
 		"nonce": s.Nonce, "exporter": s.Exporter, "aid": s.AID, "t": s.Time,
-	})
+	}); err != nil {
+		return nil, err
+	}
+	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
 }
 
 // Admission is the Identity Agent's answer to a challenge.
