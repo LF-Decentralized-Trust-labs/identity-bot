@@ -13,6 +13,8 @@ import (
 	"time"
 
 	chclient "github.com/jpillora/chisel/client"
+
+	"identity-agent-core/relay"
 )
 
 type GrapeIDProvider struct {
@@ -59,7 +61,10 @@ func (p *GrapeIDProvider) Start(ctx context.Context, localPort int) error {
 		return fmt.Errorf("grapeid tunnel extension is required")
 	}
 
-	aid := p.config.AID
+	if p.config.NameOwner == nil {
+		return fmt.Errorf("a Grape ID tunnel name is owned by the key that claims it, and this agent has no identity to claim one with")
+	}
+	aid := p.config.NameOwner.AID
 
 	resp, err := p.tryReconnect(scheme, domain, extension, aid)
 	if err != nil {
@@ -133,7 +138,10 @@ func (p *GrapeIDProvider) tryReconnect(scheme, domain, name, aid string) (*claim
 	}
 
 	reconnectURL := fmt.Sprintf("%s://%s/reconnect", scheme, domain)
-	body, _ := json.Marshal(map[string]string{"name": name, "aid": aid})
+	body, err := p.signed(map[string]interface{}{"name": name, "aid": aid}, false)
+	if err != nil {
+		return nil, err
+	}
 
 	httpClient := &http.Client{Timeout: 15 * time.Second}
 	resp, err := httpClient.Post(reconnectURL, "application/json", bytes.NewBuffer(body))
@@ -165,11 +173,10 @@ func (p *GrapeIDProvider) tryReconnect(scheme, domain, name, aid string) (*claim
 
 func (p *GrapeIDProvider) tryClaim(scheme, domain, name, aid string) (*claimResponse, error) {
 	claimURL := fmt.Sprintf("%s://%s/claim-name", scheme, domain)
-	payload := map[string]string{"name": name}
-	if aid != "" {
-		payload["aid"] = aid
+	body, err := p.signed(map[string]interface{}{"name": name, "aid": aid}, true)
+	if err != nil {
+		return nil, err
 	}
-	body, _ := json.Marshal(payload)
 
 	httpClient := &http.Client{Timeout: 15 * time.Second}
 	resp, err := httpClient.Post(claimURL, "application/json", bytes.NewBuffer(body))
@@ -218,9 +225,41 @@ func (p *GrapeIDProvider) Disconnect() error {
 	return nil
 }
 
+// Stop disconnects and keeps the name. The name is this agent's permanent
+// address, and releasing it at every shutdown handed it back to the hub, so the
+// next start could find it taken. Giving a name up is ReleaseName, said on
+// purpose.
 func (p *GrapeIDProvider) Stop() error {
-	p.tryReleaseName()
 	return p.Disconnect()
+}
+
+// ReleaseName gives the name back to the hub, so the address stops being this
+// agent's.
+func (p *GrapeIDProvider) ReleaseName() {
+	p.tryReleaseName()
+}
+
+// signed is a request body signed by the name's owner over its canonical form,
+// carrying the owner's key and key log too when claiming a name.
+func (p *GrapeIDProvider) signed(payload map[string]interface{}, claim bool) ([]byte, error) {
+	owner := p.config.NameOwner
+	if owner == nil || owner.Sign == nil {
+		return nil, fmt.Errorf("no identity to sign the request to the Grape ID hub with")
+	}
+	if claim {
+		payload["public_key_b64"] = owner.PublicKeyB64
+		payload["kel_cesr_b64"] = owner.KELCESRB64
+	}
+	canonical, err := relay.CanonicalBody(payload)
+	if err != nil {
+		return nil, err
+	}
+	sig, err := owner.Sign(canonical)
+	if err != nil {
+		return nil, err
+	}
+	payload["signature"] = sig
+	return json.Marshal(payload)
 }
 
 func (p *GrapeIDProvider) tryReleaseName() {
@@ -234,17 +273,16 @@ func (p *GrapeIDProvider) tryReleaseName() {
 	}
 
 	extension := strings.TrimSpace(p.config.TunnelExtension)
-	aid := p.config.AID
-	if extension == "" {
+	if extension == "" || p.config.NameOwner == nil {
 		return
 	}
 
 	releaseURL := fmt.Sprintf("%s://%s/release-name", scheme, domain)
-	payload := map[string]string{"name": extension}
-	if aid != "" {
-		payload["aid"] = aid
+	body, err := p.signed(map[string]interface{}{"name": extension, "aid": p.config.NameOwner.AID}, false)
+	if err != nil {
+		log.Printf("[tunnel] GrapeID release-name could not be signed: %v", err)
+		return
 	}
-	body, _ := json.Marshal(payload)
 
 	httpClient := &http.Client{Timeout: 3 * time.Second}
 	resp, err := httpClient.Post(releaseURL, "application/json", bytes.NewBuffer(body))

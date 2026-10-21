@@ -1624,6 +1624,8 @@ func PoolBase(namespace string) (int, error) {
 		return 7000001, nil
 	case "relay-enrollment":
 		return 8000001, nil
+	case "tunnel-name":
+		return 9000001, nil
 	}
 	return 0, fmt.Errorf("pairwise pool %q has no range of its own — give it one in "+
 		"PoolBase, because a pool without one shares keys with another", namespace)

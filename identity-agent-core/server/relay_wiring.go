@@ -54,10 +54,7 @@ func (rs *relayEnrollmentSigner) SignCanonical(enrollmentAID string, body map[st
 	if err != nil {
 		return "", err
 	}
-	if len(rs.seed) != ed25519.SeedSize {
-		return "", fmt.Errorf("relay enrollment key is %d bytes, expected an Ed25519 seed", len(rs.seed))
-	}
-	return base64.RawURLEncoding.EncodeToString(ed25519.Sign(ed25519.NewKeyFromSeed(rs.seed), canon)), nil
+	return signEd25519(rs.seed, canon)
 }
 
 // relayBaseURL is the operator this agent enrolls with, or empty when no relay

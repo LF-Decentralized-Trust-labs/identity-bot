@@ -4124,7 +4124,21 @@ func envTunnelConfigured() bool {
 		strings.TrimSpace(os.Getenv("CLOUDFLARE_TUNNEL_TOKEN")) != ""
 }
 
+// loadTunnelConfig is the tunnel this agent runs, with the identity that owns a
+// Grape ID tunnel name attached when that is the provider.
 func (s *CoreServer) loadTunnelConfig() tunnel.Config {
+	cfg := s.tunnelConfigFromSettings()
+	if cfg.Provider == tunnel.ProviderGrapeID {
+		owner, err := s.tunnelNameOwner()
+		if err != nil {
+			log.Printf("[tunnel] no identity to own a Grape ID tunnel name with: %v", err)
+		}
+		cfg.NameOwner = owner
+	}
+	return cfg
+}
+
+func (s *CoreServer) tunnelConfigFromSettings() tunnel.Config {
 	var aid string
 	if identity, err := s.DataStore.GetIdentity(); err == nil && identity != nil {
 		aid = identity.AID

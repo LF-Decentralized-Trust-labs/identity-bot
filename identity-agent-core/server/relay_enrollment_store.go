@@ -68,8 +68,20 @@ type storedRelayEnrollment struct {
 	AllocationToken string `json:"allocation_token,omitempty"`
 }
 
+// tunnelNameOwnerFileName records the identity that owns this agent's tunnel
+// name. The same shape as a relay enrollment, and kept the same way.
+const tunnelNameOwnerFileName = "tunnel-name-owner.json"
+
 func relayEnrollmentPath(dataDir string) string {
 	return filepath.Join(dataDir, relayEnrollmentFileName)
+}
+
+func saveRelayEnrollment(dataDir string, enr storedRelayEnrollment) error {
+	return saveRecordedIdentity(dataDir, relayEnrollmentFileName, enr)
+}
+
+func loadRelayEnrollment(dataDir string) (*storedRelayEnrollment, bool, error) {
+	return loadRecordedIdentity(dataDir, relayEnrollmentFileName)
 }
 
 // saveRelayEnrollment records the enrollment this agent has just minted.
@@ -79,7 +91,7 @@ func relayEnrollmentPath(dataDir string) string {
 // often killed rather than shut down, and a write-and-rename that never reaches
 // the disk leaves a restart re-enrolling and the public URL moving — the exact
 // failure this closes.
-func saveRelayEnrollment(dataDir string, enr storedRelayEnrollment) error {
+func saveRecordedIdentity(dataDir, fileName string, enr storedRelayEnrollment) error {
 	if dataDir == "" {
 		return fmt.Errorf("no data directory, so the relay enrollment cannot be remembered")
 	}
@@ -96,7 +108,7 @@ func saveRelayEnrollment(dataDir string, enr storedRelayEnrollment) error {
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return err
 	}
-	tmp := relayEnrollmentPath(dataDir) + ".tmp"
+	tmp := filepath.Join(dataDir, fileName) + ".tmp"
 	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
@@ -115,7 +127,7 @@ func saveRelayEnrollment(dataDir string, enr storedRelayEnrollment) error {
 		os.Remove(tmp)
 		return err
 	}
-	if err := os.Rename(tmp, relayEnrollmentPath(dataDir)); err != nil {
+	if err := os.Rename(tmp, filepath.Join(dataDir, fileName)); err != nil {
 		os.Remove(tmp)
 		return err
 	}
@@ -133,11 +145,11 @@ func saveRelayEnrollment(dataDir string, enr storedRelayEnrollment) error {
 //
 // A missing file is not an error: an agent that has never enrolled with a relay
 // is the ordinary case.
-func loadRelayEnrollment(dataDir string) (*storedRelayEnrollment, bool, error) {
+func loadRecordedIdentity(dataDir, fileName string) (*storedRelayEnrollment, bool, error) {
 	if dataDir == "" {
 		return nil, false, nil
 	}
-	raw, err := os.ReadFile(relayEnrollmentPath(dataDir))
+	raw, err := os.ReadFile(filepath.Join(dataDir, fileName))
 	if os.IsNotExist(err) {
 		return nil, false, nil
 	}
