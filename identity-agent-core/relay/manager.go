@@ -645,6 +645,13 @@ func (m *Manager) VerifyDomain(ctx context.Context, domain string) (*Allocation,
 	}
 	a := Allocation{Label: strings.ToLower(domain), URL: url, RAID: m.cfg.RAID, Mode: relayproto.ModePublic, Kind: KindDomain}
 	m.mu.Lock()
+	// Verifying a domain already held is harmless, and holds it once.
+	for _, held := range m.allocs {
+		if held.Kind == KindDomain && held.Label == a.Label {
+			m.mu.Unlock()
+			return &a, nil
+		}
+	}
 	m.allocs = append(m.allocs, a)
 	held := append([]Allocation(nil), m.allocs...)
 	fns := append([]func([]Allocation){}, m.onAllocated...)

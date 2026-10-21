@@ -172,6 +172,20 @@ func (s *CoreServer) handleReleaseRelayName(w http.ResponseWriter, r *http.Reque
 	writeJSONStatus(w, http.StatusOK, map[string]interface{}{"released": name, "relay": s.relayStatus()})
 }
 
+// releasePublicNameHeld releases name at the connected public relay, if this
+// Identity Agent holds it there.
+func (s *CoreServer) releasePublicNameHeld(ctx context.Context, name string) {
+	rm := s.currentRelay()
+	if rm == nil || rm.Config().Mode != relayproto.ModePublic || rm.Lookup(name) == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if err := rm.Release(ctx, name); err != nil {
+		log.Printf("[relay] could not release the public name %s, which the relay still holds for this Identity Agent: %v", name, err)
+	}
+}
+
 // relayDomainView is one custom domain and where it stands.
 type relayDomainView struct {
 	Domain   string `json:"domain"`
@@ -182,8 +196,37 @@ type relayDomainView struct {
 }
 
 func (s *CoreServer) publicRelayRecord() (*storedRelayEnrollment, bool) {
+	s.relayRecordMu.Lock()
+	defer s.relayRecordMu.Unlock()
 	rec, found, err := loadRelayEnrollment(s.DataDir, publicRelay.record)
 	return rec, err == nil && found
+}
+
+// updateRelayRecord changes kind's enrolment record under the lock every
+// change of it takes, so two changes cannot lose each other.
+func (s *CoreServer) updateRelayRecord(kind relayKind, change func(*storedRelayEnrollment)) error {
+	s.relayRecordMu.Lock()
+	defer s.relayRecordMu.Unlock()
+	rec, found, err := loadRelayEnrollment(s.DataDir, kind.record)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return errors.New("this Identity Agent has no enrolment with that relay")
+	}
+	change(rec)
+	return saveRelayEnrollment(s.DataDir, kind.record, *rec)
+}
+
+// withoutDomain is pending with domain's entry removed.
+func withoutDomain(pending []relay.DomainProof, domain string) []relay.DomainProof {
+	out := make([]relay.DomainProof, 0, len(pending))
+	for _, p := range pending {
+		if p.Domain != domain {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // handleListRelayDomains lists the custom domains asked for and where each
@@ -239,15 +282,11 @@ func (s *CoreServer) handleRequestRelayDomain(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusBadGateway, "The relay did not accept the domain", relayRefusal(err))
 		return
 	}
-	if rec, ok := s.publicRelayRecord(); ok {
-		kept := rec.PendingDomains[:0]
-		for _, p := range rec.PendingDomains {
-			if p.Domain != proof.Domain {
-				kept = append(kept, p)
-			}
-		}
-		rec.PendingDomains = append(kept, *proof)
-		_ = saveRelayEnrollment(s.DataDir, publicRelay.record, *rec)
+	if err := s.updateRelayRecord(publicRelay, func(rec *storedRelayEnrollment) {
+		rec.PendingDomains = append(withoutDomain(rec.PendingDomains, proof.Domain), *proof)
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "The domain was asked for, and could not be remembered", err.Error())
+		return
 	}
 	writeJSONStatus(w, http.StatusOK, relayDomainView{Domain: proof.Domain, State: "waiting_for_dns",
 		TXTName: proof.Name, TXTValue: proof.Value})
@@ -267,15 +306,10 @@ func (s *CoreServer) handleVerifyRelayDomain(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusConflict, "The domain is not proved yet", relayRefusal(err))
 		return
 	}
-	if rec, ok := s.publicRelayRecord(); ok {
-		kept := rec.PendingDomains[:0]
-		for _, p := range rec.PendingDomains {
-			if p.Domain != domain {
-				kept = append(kept, p)
-			}
-		}
-		rec.PendingDomains = kept
-		_ = saveRelayEnrollment(s.DataDir, publicRelay.record, *rec)
+	if err := s.updateRelayRecord(publicRelay, func(rec *storedRelayEnrollment) {
+		rec.PendingDomains = withoutDomain(rec.PendingDomains, domain)
+	}); err != nil {
+		log.Printf("[relay] %s is proved and served, and could not be marked so in the record: %v", domain, err)
 	}
 	writeJSONStatus(w, http.StatusOK, relayDomainView{Domain: a.Label, State: "active", URL: a.URL})
 }

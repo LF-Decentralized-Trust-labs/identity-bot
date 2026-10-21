@@ -344,14 +344,13 @@ func (s *CoreServer) runRelay(ctx context.Context, gen int) {
 	rm.Remember(e.record.Allocations)
 	rm.OnChange(func(string, bool) { s.EndpointService.Refresh() })
 	rm.OnAllocated(func(held []relay.Allocation) {
-		// Read back first: the record also holds what was asked of the relay
-		// since (a domain waiting for its DNS proof, say).
-		rec := e.record
-		if stored, found, err := loadRelayEnrollment(s.DataDir, kind.record); err == nil && found && stored.AID == rec.AID {
-			rec = *stored
-		}
-		rec.Allocations = held
-		if err := saveRelayEnrollment(s.DataDir, kind.record, rec); err != nil {
+		// Through the record's lock: the owner's routes change the same record
+		// (a domain waiting for its DNS proof, say).
+		if err := s.updateRelayRecord(kind, func(rec *storedRelayEnrollment) {
+			if rec.AID == e.record.AID {
+				rec.Allocations = held
+			}
+		}); err != nil {
 			log.Printf("[relay] WARNING: could not remember this Identity Agent's relay addresses, "+
 				"so a restart may move them: %v", err)
 		}

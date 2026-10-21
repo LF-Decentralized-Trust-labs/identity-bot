@@ -3,9 +3,9 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -205,8 +205,13 @@ func TestACustomDomainIsProvedByDNS(t *testing.T) {
 	if code != http.StatusOK || out["state"] != "active" {
 		t.Fatalf("verify: %d %v", code, out)
 	}
+	// Verifying again is harmless, and the domain is held once.
+	if code, out = asOwner(t, s, "POST", "/api/settings/reachability/domains/verify", `{"domain":"id.example.org"}`); code != http.StatusOK {
+		t.Fatalf("verifying again: %d %v", code, out)
+	}
 	_, out = asOwner(t, s, "GET", "/api/settings/reachability/domains", "")
-	if j := string(mustJSON(t, out)); !strings.Contains(j, `"active"`) || strings.Contains(j, "waiting_for_dns") {
+	if j := string(mustJSON(t, out)); !strings.Contains(j, `"active"`) || strings.Contains(j, "waiting_for_dns") ||
+		strings.Count(j, "id.example.org") != 2 { // the domain and its URL, once each
 		t.Fatalf("list after proof: %v", out)
 	}
 	if rec, ok := s.publicRelayRecord(); !ok || len(rec.PendingDomains) != 0 {
@@ -319,5 +324,26 @@ func TestACallerThroughARelayCannotSetTheBaseOrTheAddress(t *testing.T) {
 	}
 	if strings.Contains(s.EndpointService.CurrentURL(), "evil.example") {
 		t.Fatalf("a caller set this Identity Agent's address: %s", s.EndpointService.CurrentURL())
+	}
+}
+
+// Choosing a new public name gives the old one back, rather than leaving it
+// held at the relay with nothing behind it.
+func TestANewPublicNameReleasesTheOldOne(t *testing.T) {
+	s, rl, _, cancel := relayWorld(t, relayproto.ModePublic)
+	defer cancel()
+	go s.startRelay()
+	defer s.Stop()
+	waitForState(t, s, "active")
+
+	code, out := asOwner(t, s, "PUT", "/api/settings/reachability", `{"public_relay_name":"acme-two"}`)
+	if v := relayView(t, out); code != http.StatusOK || v["state"] != "active" {
+		t.Fatalf("saving a new name: %d %v", code, out)
+	}
+	if rl.Holds("acme") {
+		t.Fatal("the old name is still held")
+	}
+	if !rl.Holds("acme-two") {
+		t.Fatal("the new name is not held")
 	}
 }

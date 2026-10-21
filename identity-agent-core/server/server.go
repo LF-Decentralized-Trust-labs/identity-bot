@@ -67,8 +67,11 @@ type CoreServer struct {
 	relayGen int
 	// relayCancel ends the current generation's relay start, and
 	// relayFailure is why that generation has no relay, if it gave up.
-	relayCancel     context.CancelFunc
-	relayFailure    *relayFailure
+	relayCancel  context.CancelFunc
+	relayFailure *relayFailure
+	// relayRecordMu orders every read-modify-write of a relay enrolment
+	// record, which the relay manager and the owner's routes both change.
+	relayRecordMu   sync.Mutex
 	EndpointService *endpoint.EndpointService
 	SandboxManager  *sandbox.Manager
 	EventHub        *EventHub
@@ -4346,6 +4349,7 @@ func (s *CoreServer) handlePutReachabilitySettings(w http.ResponseWriter, r *htt
 	}
 
 	previousMode := s.resolveIngressMode()
+	previousName := s.publicRelayName()
 
 	// Read-modify-write: SaveSettings replaces the single row, so start from what
 	// is stored and change only the fields this request carries.
@@ -4373,6 +4377,12 @@ func (s *CoreServer) handlePutReachabilitySettings(w http.ResponseWriter, r *htt
 
 	log.Printf("[identity-agent-core] Reachability settings updated: mode=%q relay_operator=%q public_relay_operator=%q public_relay_name=%q",
 		settings.IngressMode, settings.RelayOperator, settings.PublicRelayOperator, settings.PublicRelayName)
+
+	// A public name given up in favour of another is released, not left held
+	// at the relay with nothing behind it.
+	if previousName != "" && settings.PublicRelayName != previousName {
+		s.releasePublicNameHeld(r.Context(), previousName)
+	}
 
 	// Saving applies it: the relay is brought up again in the new mode, at the
 	// new relay or with the new name, with no restart, and the answer says
