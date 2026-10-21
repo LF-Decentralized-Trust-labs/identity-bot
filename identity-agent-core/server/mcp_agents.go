@@ -171,14 +171,17 @@ func (s *CoreServer) anMCPTokenIsNamed(name string) bool {
 // agentView is the owner-facing summary of an ai_agent asset — identity + config +
 // status, never any secret (no token, no vault key).
 type agentView struct {
-	AssetID      string             `json:"asset_id"`
-	Name         string             `json:"name"`
-	AgentAID     string             `json:"agent_aid"`
-	DelegatorAID string             `json:"delegator_aid"`
-	Capabilities []string           `json:"capabilities"`
-	Config       *asset.AgentConfig `json:"agent_config,omitempty"`
-	Status       string             `json:"status"` // active | revoked
-	CreatedAt    time.Time          `json:"created_at"`
+	AssetID      string   `json:"asset_id"`
+	Name         string   `json:"name"`
+	AgentAID     string   `json:"agent_aid"`
+	DelegatorAID string   `json:"delegator_aid"`
+	Capabilities []string `json:"capabilities"`
+	// ResourceConstraints are the grant's per-capability argument limits — who
+	// it may message, among others — so a front end changing one keeps the rest.
+	ResourceConstraints map[string]interface{} `json:"resource_constraints,omitempty"`
+	Config              *asset.AgentConfig     `json:"agent_config,omitempty"`
+	Status              string                 `json:"status"` // active | revoked
+	CreatedAt           time.Time              `json:"created_at"`
 }
 
 // handleListAgents lists the org's ai_agent assets — the workforce roster.
@@ -194,14 +197,15 @@ func (s *CoreServer) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	out := make([]agentView, 0, len(agents))
 	for _, a := range agents {
 		out = append(out, agentView{
-			AssetID:      a.ID,
-			Name:         a.DisplayName,
-			AgentAID:     a.PairwiseAID,
-			DelegatorAID: a.DelegatorAID,
-			Capabilities: a.Capabilities,
-			Config:       a.AgentConfig,
-			Status:       s.agentStatus(a.PairwiseAID),
-			CreatedAt:    a.CreatedAt,
+			AssetID:             a.ID,
+			Name:                a.DisplayName,
+			AgentAID:            a.PairwiseAID,
+			DelegatorAID:        a.DelegatorAID,
+			Capabilities:        a.Capabilities,
+			ResourceConstraints: a.GrantConstraints,
+			Config:              a.AgentConfig,
+			Status:              s.agentStatus(a.PairwiseAID),
+			CreatedAt:           a.CreatedAt,
 		})
 	}
 	w.Header().Set("Content-Type", "application/json")
