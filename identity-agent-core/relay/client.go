@@ -254,7 +254,15 @@ func (c *Client) control(ctx context.Context, op, aid string, fields map[string]
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, maxAnswer))
 	if resp.StatusCode != http.StatusOK {
-		return &RefusedError{Op: op, Status: resp.StatusCode, Body: strings.TrimSpace(string(b))}
+		refused := &RefusedError{Op: op, Status: resp.StatusCode, Body: strings.TrimSpace(string(b))}
+		var e struct {
+			Code    string `json:"error"`
+			Message string `json:"message"`
+		}
+		if json.Unmarshal(b, &e) == nil {
+			refused.Code, refused.Message = e.Code, e.Message
+		}
+		return refused
 	}
 	if out != nil {
 		if err := json.Unmarshal(b, out); err != nil {
@@ -264,11 +272,15 @@ func (c *Client) control(ctx context.Context, op, aid string, fields map[string]
 	return nil
 }
 
-// RefusedError is a control request the relay answered with an error.
+// RefusedError is a control request the relay answered with an error. Code
+// and Message are the relay's own, when it gave them: "taken", "reserved",
+// "quota", "invalid_name", "unproven" and so on.
 type RefusedError struct {
-	Op     string
-	Status int
-	Body   string
+	Op      string
+	Status  int
+	Body    string
+	Code    string
+	Message string
 }
 
 func (e *RefusedError) Error() string { return fmt.Sprintf("%s: %d: %s", e.Op, e.Status, e.Body) }

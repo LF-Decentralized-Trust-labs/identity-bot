@@ -60,8 +60,11 @@ type CoreServer struct {
 	RelayManager    *relay.Manager
 	// relayTLS and relayClient override how a relay is reached; nil uses the
 	// system's trust store. Tests set them to trust an in-process relay.
-	relayTLS        *tls.Config
-	relayClient     *http.Client
+	relayTLS    *tls.Config
+	relayClient *http.Client
+	// relayGen counts relay starts. A start that a newer one has overtaken
+	// (the settings changed while it was enrolling) installs nothing.
+	relayGen        int
 	EndpointService *endpoint.EndpointService
 	SandboxManager  *sandbox.Manager
 	EventHub        *EventHub
@@ -939,6 +942,11 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		r.Put("/settings/tunnel", s.handlePutTunnelSettings)
 		r.Get("/settings/reachability", s.handleGetReachabilitySettings)
 		r.Put("/settings/reachability", s.handlePutReachabilitySettings)
+		r.Get("/settings/reachability/relay", s.handleRelayStatus)
+		r.Post("/settings/reachability/name/release", s.handleReleaseRelayName)
+		r.Get("/settings/reachability/domains", s.handleListRelayDomains)
+		r.Post("/settings/reachability/domains", s.handleRequestRelayDomain)
+		r.Post("/settings/reachability/domains/verify", s.handleVerifyRelayDomain)
 		r.Get("/tunnel/status", s.handleTunnelStatus)
 		r.Post("/tunnel/restart", s.handleTunnelRestart)
 
@@ -4333,6 +4341,8 @@ func (s *CoreServer) handlePutReachabilitySettings(w http.ResponseWriter, r *htt
 		}
 	}
 
+	previousMode := s.resolveIngressMode()
+
 	// Read-modify-write: SaveSettings replaces the single row, so start from what
 	// is stored and change only the fields this request carries.
 	var settings store.SettingsData
@@ -4357,8 +4367,13 @@ func (s *CoreServer) handlePutReachabilitySettings(w http.ResponseWriter, r *htt
 		return
 	}
 
-	log.Printf("[identity-agent-core] Reachability settings updated: mode=%q relay_operator=%q",
-		settings.IngressMode, settings.RelayOperator)
+	log.Printf("[identity-agent-core] Reachability settings updated: mode=%q relay_operator=%q public_relay_operator=%q public_relay_name=%q",
+		settings.IngressMode, settings.RelayOperator, settings.PublicRelayOperator, settings.PublicRelayName)
+
+	// Saving applies it: the relay is brought up again in the new mode, at the
+	// new relay or with the new name, with no restart, and the answer says
+	// what came of it.
+	s.applyReachability(previousMode)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -4366,6 +4381,7 @@ func (s *CoreServer) handlePutReachabilitySettings(w http.ResponseWriter, r *htt
 		"mode":           settings.IngressMode,
 		"resolved_mode":  string(s.resolveIngressMode()),
 		"relay_operator": s.relayBaseURL(),
+		"relay":          s.relayStatusSettled(r.Context()),
 	})
 }
 

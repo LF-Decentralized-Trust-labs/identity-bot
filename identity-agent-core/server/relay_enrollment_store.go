@@ -73,6 +73,9 @@ type storedRelayEnrollment struct {
 	// holds it, which the relay stores only a commitment to; this file is
 	// written owner-only for that reason.
 	Allocations []relay.Allocation `json:"allocations,omitempty"`
+	// PendingDomains are custom domains asked for at a public relay and
+	// waiting for their DNS proof.
+	PendingDomains []relay.DomainProof `json:"pending_domains,omitempty"`
 }
 
 func relayEnrollmentPath(dataDir, fileName string) string {

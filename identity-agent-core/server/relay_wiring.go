@@ -228,6 +228,16 @@ func (s *CoreServer) privateAddressMayReach(r *http.Request) bool {
 // It runs in its own goroutine off Start: the local server must not wait on the
 // network.
 func (s *CoreServer) startRelay() {
+	s.mu.Lock()
+	s.relayGen++
+	gen := s.relayGen
+	s.mu.Unlock()
+	s.runRelay(gen)
+}
+
+// runRelay is startRelay for one generation: if the settings change while it
+// is still enrolling, a newer start has overtaken it and it installs nothing.
+func (s *CoreServer) runRelay(gen int) {
 	var kind relayKind
 	switch s.resolveIngressMode() {
 	case IngressModeRelay:
@@ -276,8 +286,14 @@ func (s *CoreServer) startRelay() {
 	rm.Remember(e.record.Allocations)
 	rm.OnChange(func(string, bool) { s.EndpointService.Refresh() })
 	rm.OnAllocated(func(held []relay.Allocation) {
-		e.record.Allocations = held
-		if err := saveRelayEnrollment(s.DataDir, kind.record, e.record); err != nil {
+		// Read back first: the record also holds what was asked of the relay
+		// since (a domain waiting for its DNS proof, say).
+		rec := e.record
+		if stored, found, err := loadRelayEnrollment(s.DataDir, kind.record); err == nil && found && stored.AID == rec.AID {
+			rec = *stored
+		}
+		rec.Allocations = held
+		if err := saveRelayEnrollment(s.DataDir, kind.record, rec); err != nil {
 			log.Printf("[relay] WARNING: could not remember this Identity Agent's relay addresses, "+
 				"so a restart may move them: %v", err)
 		}
@@ -286,7 +302,7 @@ func (s *CoreServer) startRelay() {
 	// Installed under the lock Stop reads it with. Enrolling is slow, so the
 	// server may already have stopped; then stop what was just built.
 	s.mu.Lock()
-	if !s.running {
+	if !s.running || s.relayGen != gen {
 		s.mu.Unlock()
 		return
 	}
@@ -298,8 +314,19 @@ func (s *CoreServer) startRelay() {
 	// down, the machine just woke) is reached later without a restart.
 	backoff := 5 * time.Second
 	for {
+		s.mu.Lock()
+		current := s.relayGen == gen
+		s.mu.Unlock()
+		if !current {
+			return
+		}
 		err := rm.Start(s.AppCtx)
 		if err == nil {
+			return
+		}
+		if rm.GetStatus().State == relay.StateFailed {
+			// Trying again cannot change it; it waits for the settings to.
+			log.Printf("[relay] %s refused: %s", base, rm.GetStatus().Reason)
 			return
 		}
 		log.Printf("[relay] could not reach %s yet, trying again in %s: %v", base, backoff, err)

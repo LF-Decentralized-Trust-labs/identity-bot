@@ -63,15 +63,22 @@ type Relay struct {
 	ClaimMode relayproto.Mode
 	aliases   map[string]string
 	down      bool
-	// Binds counts bind requests answered.
-	Binds int
+	// domains maps a requested domain to its holder, and verified to whether
+	// its DNS has proved it; txt is the DNS this relay sees.
+	domains  map[string]string
+	verified map[string]bool
+	txt      map[string]string
+	// Binds counts bind requests answered, and Claims claim-name requests.
+	Binds  int
+	Claims int
 }
 
 // New starts a relay serving mode.
 func New(mode relayproto.Mode) *Relay {
 	r := &Relay{Mode: mode, enrolled: map[string][]byte{}, keys: map[string]string{},
 		commitments: map[string]string{}, names: map[string]string{}, bound: map[string]string{},
-		nonces: map[string]bool{}, aliases: map[string]string{}}
+		nonces: map[string]bool{}, aliases: map[string]string{},
+		domains: map[string]string{}, verified: map[string]bool{}, txt: map[string]string{}}
 	r.Server = httptest.NewUnstartedServer(http.HandlerFunc(r.handleCaller))
 	r.Server.TLS = &tls.Config{MinVersion: tls.VersionTLS13}
 	r.Server.StartTLS()
@@ -136,7 +143,8 @@ func (r *Relay) MisdirectedCount() int {
 // and nothing an Identity Agent connects or signs through.
 func (r *Relay) handleCaller(w http.ResponseWriter, req *http.Request) {
 	switch req.URL.Path {
-	case "/tunnel", "/allocate", "/bind", "/release", "/names/claim", "/names/release":
+	case "/tunnel", "/allocate", "/bind", "/release", "/names/claim", "/names/release",
+		"/domains/request", "/domains/verify", "/domains/release":
 		r.mu.Lock()
 		r.Misdirected++
 		r.mu.Unlock()
@@ -220,7 +228,9 @@ func (r *Relay) handle(w http.ResponseWriter, req *http.Request) {
 		r.mu.Unlock()
 		eps := map[string]string{}
 		for op, path := range map[string]string{relay.OpAllocate: "/allocate", relay.OpBind: "/bind",
-			relay.OpRelease: "/release", relay.OpClaimName: "/names/claim", relay.OpReleaseName: "/names/release"} {
+			relay.OpRelease: "/release", relay.OpClaimName: "/names/claim", relay.OpReleaseName: "/names/release",
+			relay.OpRequestDomain: "/domains/request", relay.OpVerifyDomain: "/domains/verify",
+			relay.OpReleaseDomain: "/domains/release"} {
 			eps[op] = "https://" + connect + path
 		}
 		json.NewEncoder(w).Encode(relay.ServiceDescriptor{
@@ -245,6 +255,12 @@ func (r *Relay) handle(w http.ResponseWriter, req *http.Request) {
 		return
 	case "/names/release":
 		r.control(w, req, relay.OpReleaseName, r.releaseName)
+		return
+	case "/domains/request":
+		r.control(w, req, relay.OpRequestDomain, r.requestDomain)
+		return
+	case "/domains/verify":
+		r.control(w, req, relay.OpVerifyDomain, r.verifyDomain)
 		return
 	}
 	r.forward(w, req)
@@ -297,6 +313,9 @@ func (r *Relay) forwardName(w http.ResponseWriter, req *http.Request) {
 		target = t
 	}
 	aid := r.names[target]
+	if !ok && r.verified[host] {
+		name, ok, aid = host, true, r.domains[host]
+	}
 	mode := r.Mode
 	if r.ClaimMode != "" {
 		mode = r.ClaimMode
@@ -428,20 +447,64 @@ func (r *Relay) release(w http.ResponseWriter, _ string, f map[string]string) {
 	w.Write([]byte(`{"released":true}`))
 }
 
+// reserved are names nobody may claim, as a relay keeps them.
+var reserved = map[string]bool{"login": true, "support": true, "admin": true, "www": true, "api": true}
+
+// quota is how many names one identity may hold.
+const quota = 3
+
+func refuse(w http.ResponseWriter, status int, code, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]string{"error": code, "message": msg})
+}
+
 func (r *Relay) claimName(w http.ResponseWriter, aid string, f map[string]string) {
 	name := f["name"]
 	r.mu.Lock()
+	r.Claims++
+	r.mu.Unlock()
+	if reserved[name] {
+		refuse(w, http.StatusForbidden, "reserved", "that name is reserved")
+		return
+	}
+	r.mu.Lock()
 	holder, held := r.names[name]
-	if !held {
+	count := 0
+	for _, a := range r.names {
+		if a == aid {
+			count++
+		}
+	}
+	switch {
+	case held && holder != aid:
+		r.mu.Unlock()
+		refuse(w, http.StatusConflict, "taken", "that name is held by another identity")
+		return
+	case !held && count >= quota:
+		r.mu.Unlock()
+		refuse(w, http.StatusForbidden, "quota", "an identity may hold 3 names here")
+		return
+	case !held:
 		r.names[name] = aid
 	}
 	r.mu.Unlock()
-	if held && holder != aid {
-		http.Error(w, "taken", http.StatusConflict)
-		return
-	}
 	port := r.Server.URL[strings.LastIndex(r.Server.URL, ":"):]
 	json.NewEncoder(w).Encode(map[string]string{"name": name, "public_url": fmt.Sprintf("https://%s.%s%s/", name, r.service, port)})
+}
+
+// ClaimCount is how many claim-name requests the relay has answered.
+func (r *Relay) ClaimCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.Claims
+}
+
+// HoldName gives name to another identity, as if it had claimed it first.
+func (r *Relay) HoldName(name, aid string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.names[name] = aid
 }
 
 func (r *Relay) releaseName(w http.ResponseWriter, aid string, f map[string]string) {
@@ -453,4 +516,48 @@ func (r *Relay) releaseName(w http.ResponseWriter, aid string, f map[string]stri
 	}
 	delete(r.names, f["name"])
 	w.Write([]byte(`{"released":true}`))
+}
+
+// PublishTXT puts a TXT record in the DNS this relay sees.
+func (r *Relay) PublishTXT(name, value string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.txt[name] = value
+}
+
+func (r *Relay) requestDomain(w http.ResponseWriter, aid string, f map[string]string) {
+	d := strings.ToLower(f["domain"])
+	r.mu.Lock()
+	holder, held := r.domains[d]
+	if !held {
+		r.domains[d] = aid
+	}
+	r.mu.Unlock()
+	if held && holder != aid {
+		refuse(w, http.StatusConflict, "taken", "another identity has asked for that domain")
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]any{"domain": d, "verified": false,
+		"txt_name": "_iarelay." + d, "txt_value": "iarelay-aid=" + aid})
+}
+
+func (r *Relay) verifyDomain(w http.ResponseWriter, aid string, f map[string]string) {
+	d := strings.ToLower(f["domain"])
+	r.mu.Lock()
+	holder := r.domains[d]
+	proved := r.txt["_iarelay."+d] == "iarelay-aid="+aid
+	if holder == aid && proved {
+		r.verified[d] = true
+	}
+	r.mu.Unlock()
+	switch {
+	case holder == "":
+		refuse(w, http.StatusNotFound, "not_found", "request the domain first")
+	case holder != aid:
+		refuse(w, http.StatusForbidden, "not_yours", "another identity asked for that domain")
+	case !proved:
+		refuse(w, http.StatusForbidden, "unproven", "the TXT record is not there yet")
+	default:
+		json.NewEncoder(w).Encode(map[string]any{"domain": d, "verified": true, "public_url": "https://" + d + "/"})
+	}
 }

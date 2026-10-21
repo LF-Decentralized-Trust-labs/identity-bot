@@ -106,13 +106,76 @@ type Config struct {
 
 // Status is what the rest of the Identity Agent can see about one relay.
 type Status struct {
-	Provider  string          `json:"provider"`
-	Mode      relayproto.Mode `json:"mode"`
-	Active    bool            `json:"active"`
-	URL       string          `json:"url,omitempty"`
-	Error     string          `json:"error,omitempty"`
-	CheckedAt string          `json:"checked_at,omitempty"`
+	Provider string          `json:"provider"`
+	Mode     relayproto.Mode `json:"mode"`
+	// State is "connecting" until the relay serves an address, "active" while
+	// it does, and "failed" when the relay refused something trying again
+	// will not change (a name somebody else holds, say).
+	State  State  `json:"state"`
+	Active bool   `json:"active"`
+	URL    string `json:"url,omitempty"`
+	Error  string `json:"error,omitempty"`
+	// Reason is the last failure in plain words, and ReasonCode the same as
+	// a short code a screen can act on (see the Reason* constants).
+	Reason     string `json:"reason,omitempty"`
+	ReasonCode string `json:"reason_code,omitempty"`
+	CheckedAt  string `json:"checked_at,omitempty"`
 }
+
+// State is where a relay connection is.
+type State string
+
+const (
+	StateConnecting State = "connecting"
+	StateActive     State = "active"
+	StateFailed     State = "failed"
+)
+
+// Reason codes for the last failure.
+const (
+	ReasonUnreachable = "unreachable"
+	ReasonTaken       = "taken"
+	ReasonReserved    = "reserved"
+	ReasonQuota       = "quota"
+	ReasonInvalidName = "invalid_name"
+	ReasonNoName      = "no_name"
+	ReasonWrongMode   = "wrong_mode"
+	ReasonRefused     = "refused"
+)
+
+// explain turns a failure into a reason code, plain words, and whether trying
+// again could change it.
+func explain(err error) (code, words string, permanent bool) {
+	var refused *RefusedError
+	switch {
+	case errors.As(err, &refused):
+		switch refused.Code {
+		case ReasonTaken:
+			return ReasonTaken, "That name is already held by somebody else.", true
+		case ReasonReserved:
+			return ReasonReserved, "That name is reserved by the relay and cannot be claimed.", true
+		case ReasonQuota:
+			return ReasonQuota, "This identity already holds as many names as the relay allows.", true
+		case ReasonInvalidName:
+			return ReasonInvalidName, "A name is 3 to 32 lowercase letters, digits and single inner hyphens.", true
+		}
+		msg := refused.Message
+		if msg == "" {
+			msg = refused.Body
+		}
+		return ReasonRefused, "The relay refused: " + msg, false
+	case errors.Is(err, errNoName):
+		return ReasonNoName, "A public relay gives an address only at a name or a proven domain, and none is set.", true
+	case errors.Is(err, errWrongMode):
+		return ReasonWrongMode, err.Error(), true
+	}
+	return ReasonUnreachable, "The relay cannot be reached: " + errString(err), false
+}
+
+var (
+	errNoName    = errors.New("a public relay gives an address only at a name or a proven domain, and none is set")
+	errWrongMode = errors.New("the relay serves the other kind of address")
+)
 
 // Manager keeps one Identity Agent connected to one relay, and reconnects when
 // the session drops: the network goes, the machine sleeps, the relay restarts.
@@ -134,7 +197,7 @@ type Manager struct {
 
 // NewManager prepares a relay client. Nothing happens until Start.
 func NewManager(cfg Config) *Manager {
-	return &Manager{cfg: cfg, status: Status{Provider: providerName(cfg.BaseURL), Mode: cfg.Mode}}
+	return &Manager{cfg: cfg, status: Status{Provider: providerName(cfg.BaseURL), Mode: cfg.Mode, State: StateConnecting}}
 }
 
 // OnChange registers a callback for the address appearing, changing or being
@@ -192,8 +255,8 @@ func (m *Manager) Start(parent context.Context) error {
 		return m.fail(fmt.Errorf("discover %s: %w", m.cfg.BaseURL, err))
 	}
 	if desc.Mode != m.cfg.Mode {
-		return m.fail(fmt.Errorf("%s serves %s addresses; this Identity Agent wants %s ones",
-			m.cfg.BaseURL, desc.Mode, m.cfg.Mode))
+		return m.fail(fmt.Errorf("%w: %s serves %s addresses; this Identity Agent wants %s ones",
+			errWrongMode, m.cfg.BaseURL, desc.Mode, m.cfg.Mode))
 	}
 
 	ctx, cancel := context.WithCancel(parent)
@@ -226,7 +289,11 @@ func (m *Manager) run(ctx context.Context, endpoint string) {
 		if ctx.Err() != nil {
 			return
 		}
-		m.markLost(err)
+		if m.markLost(err) {
+			// Trying again cannot change it: the name is somebody else's,
+			// say. It waits for the settings to change.
+			return
+		}
 		if time.Since(started) > steadySession {
 			backoff = minBackoff
 		}
@@ -326,7 +393,7 @@ func (m *Manager) hold(ctx context.Context) ([]Allocation, error) {
 				Kind: KindName}}, out...)
 		}
 		if len(out) == 0 {
-			return nil, fmt.Errorf("a public relay gives an address only at a name or a proven domain, and none is set")
+			return nil, errNoName
 		}
 	}
 	return out, nil
@@ -397,6 +464,7 @@ func (m *Manager) markActive(held []Allocation) {
 	m.allocs = held
 	url := held[0].URL
 	m.status.Active, m.status.URL, m.status.Error = true, url, ""
+	m.status.State, m.status.Reason, m.status.ReasonCode = StateActive, "", ""
 	m.status.CheckedAt = nowRFC3339()
 	fns := append([]func([]Allocation){}, m.onAllocated...)
 	m.mu.Unlock()
@@ -410,13 +478,20 @@ func (m *Manager) markActive(held []Allocation) {
 	}
 }
 
-// markLost records that the session is down. The address is kept, because it is
-// asked for again on reconnect, but is no longer offered as reachable.
-func (m *Manager) markLost(err error) {
+// markLost records that the session is down, and why, and reports whether
+// the reason is one trying again cannot change. The address is kept, because
+// it is asked for again on reconnect, but is no longer offered as reachable.
+func (m *Manager) markLost(err error) (permanent bool) {
+	code, words, permanent := explain(err)
 	m.mu.Lock()
 	wasActive := m.status.Active
 	m.status.Active = false
+	m.status.State = StateConnecting
+	if permanent {
+		m.status.State = StateFailed
+	}
 	m.status.Error = errString(err)
+	m.status.Reason, m.status.ReasonCode = words, code
 	m.status.CheckedAt = nowRFC3339()
 	url := m.status.URL
 	m.mu.Unlock()
@@ -426,6 +501,7 @@ func (m *Manager) markLost(err error) {
 	} else {
 		log.Printf("[relay] could not reach %s yet: %v", m.cfg.BaseURL, err)
 	}
+	return permanent
 }
 
 // Remember restores the addresses held from an earlier start, so the first
@@ -475,6 +551,7 @@ func (m *Manager) Stop() {
 	m.cancel, m.done = nil, nil
 	wasActive := m.status.Active
 	m.status.Active = false
+	m.status.State = StateConnecting
 	m.status.CheckedAt = nowRFC3339()
 	url := m.status.URL
 	m.mu.Unlock()
@@ -587,8 +664,14 @@ func (m *Manager) Config() Config {
 }
 
 func (m *Manager) fail(err error) error {
+	code, words, permanent := explain(err)
 	m.mu.Lock()
 	m.status.Active = false
+	m.status.State = StateConnecting
+	if permanent {
+		m.status.State = StateFailed
+	}
+	m.status.Reason, m.status.ReasonCode = words, code
 	m.status.Error = err.Error()
 	m.status.CheckedAt = nowRFC3339()
 	m.mu.Unlock()
