@@ -14,6 +14,7 @@ import (
 
 	"identity-agent-core/backup"
 	"identity-agent-core/endpoint"
+	"identity-agent-core/relay"
 	"identity-agent-core/secureenclave"
 )
 
@@ -326,5 +327,27 @@ func TestARelayThatIsDownAtStartIsTriedAgain(t *testing.T) {
 	defer mu.Unlock()
 	if !enrolled {
 		t.Fatalf("the relay was not tried again after it was down (%d discoveries)", discoveries)
+	}
+}
+
+// An operator verifies a signed request with the public key sent beside it,
+// both plain base64url, as an Ed25519 signature over the canonical body.
+func TestARelayRequestIsSignedTheWayAnOperatorChecksIt(t *testing.T) {
+	seed, err := backup.DerivePairwiseSeed(deterministicRootSeed(), 4, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := map[string]interface{}{"v": "x", "enrollment_aid": "EAID", "oobi": "https://a.example/oobi"}
+	sig, err := (&relayEnrollmentSigner{seed: seed}).SignCanonical("EAID", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(sig)
+	if err != nil || len(raw) != ed25519.SignatureSize {
+		t.Fatalf("not a plain Ed25519 signature: %q (%d bytes)", sig, len(raw))
+	}
+	canon, _ := relay.CanonicalBody(body)
+	if !ed25519.Verify(ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey), canon, raw) {
+		t.Fatal("the signature does not verify over the canonical body")
 	}
 }

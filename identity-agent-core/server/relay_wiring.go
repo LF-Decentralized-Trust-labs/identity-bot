@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"identity-agent-core/backup"
-	"identity-agent-core/login"
 	"identity-agent-core/relay"
 	"identity-agent-core/secureenclave"
 )
@@ -47,12 +46,18 @@ type relayEnrollmentSigner struct {
 	seed []byte
 }
 
+// SignCanonical signs in the same encoding the request carries its public key
+// in, plain base64url, so an operator verifies one with the other. A CESR
+// signature here is two bytes longer than an Ed25519 signature and is refused.
 func (rs *relayEnrollmentSigner) SignCanonical(enrollmentAID string, body map[string]interface{}) (string, error) {
 	canon, err := relay.CanonicalBody(body)
 	if err != nil {
 		return "", err
 	}
-	return login.SignString(string(canon), rs.seed)
+	if len(rs.seed) != ed25519.SeedSize {
+		return "", fmt.Errorf("relay enrollment key is %d bytes, expected an Ed25519 seed", len(rs.seed))
+	}
+	return base64.RawURLEncoding.EncodeToString(ed25519.Sign(ed25519.NewKeyFromSeed(rs.seed), canon)), nil
 }
 
 // relayBaseURL is the operator this agent enrolls with, or empty when no relay
