@@ -10,8 +10,8 @@ import (
 
 // AsUser would run the brain as a dedicated Windows user. Starting a process
 // as another Windows user needs that user's credentials held by the host,
-// which is not built yet; until it is, the brain runs as the host's own user
-// and the tool allow list is what keeps it to the host's tools.
+// which is not built yet; until it is, on a Windows machine a person also
+// uses, the brain runs as that person's user.
 type AsUser struct {
 	User string
 }

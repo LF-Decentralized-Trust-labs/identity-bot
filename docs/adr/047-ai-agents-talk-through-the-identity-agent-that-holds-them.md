@@ -119,26 +119,39 @@ transport (`didcomm.SendSealed`, the same format an Identity Agent uses to reach
 It seals from the keys the body enrolled with to the Identity Agent's. The message
 routes refuse a body-signed request that did not arrive that way.
 
-**The brain is a program the body runs, given the body's tools and nothing else.**
-The body runs Claude Code or Grok CLI, whichever the AI agent was created with, as a
-single non-interactive run per message. Each run happens in the conversation's own
-session. It has the body's tools as its only tools:
-- `reply`, `ask_agent` and `list_agents`;
-- `system_info`, a fixed set of facts about the machine, never a shell.
+**The brain is a program the body runs, with the full use of its machine and one
+route to the Identity Agent.** The body runs Claude Code or Grok CLI, whichever the AI
+agent was created with, as a single non-interactive run per message, in the
+conversation's own session. The machine is the AI agent's to use: the brain keeps the
+program's own tools and is never stopped to ask. Restricting what a program may do on
+its own machine is a contest it eventually wins, and governs nothing the Identity Agent
+holds.
+
+What is governed is the Identity Agent's side. The brain reaches the Identity Agent only
+as its AI agent, under that AI agent's grant, through the body's tools:
+- `reply`, `ask_agent`, `list_agents` and `conversation_history`;
+- `system_info`, a fixed set of facts about the machine.
+
+It loads no MCP server but the body's, so it never reaches the Identity Agent through a
+connection a person set up with their own token. On a machine a person also uses, the
+brain runs as its own operating-system user, so it cannot use that person's keys either.
+Grok CLI always runs that way, because it loads the MCP servers of whoever runs it and
+has no option to ignore them.
 
 The tools reach the body through a stdio MCP server, holding a token good for one
 turn. The token travels in the brain's environment, and the words and instructions
 travel on stdin. Neither goes on the command line, which other users of the machine can
 read, nor into a file. Since neither program takes a system prompt from stdin, the
-instructions lead a session's first message instead. The program starts with no built-in tools at all (for Claude Code, `--tools ""`),
-and ignores the settings of the user running it. Permission mode alone is not enough:
-under `dontAsk`, with an allow list naming only the body's tools, a read-only shell
-command still ran. The brain can
-also run as a separate operating-system user. Grok CLI runs only that way, because it
-loads the MCP servers and permissions of whoever runs it and has no option to ignore
-them. The brain never holds a key. If the
-brain fails, the body sends a signed failure notice, so a conversation never waits on
-silence.
+instructions lead a session's first message instead. The brain never holds a key. If
+the brain fails, the body sends a signed failure notice, so a conversation never waits
+on silence.
+
+**Who is asking is whoever started the request, never the machine.** A machine key
+proves which body an AI agent spoke from. Approving a machine as a body is recorded,
+and grants nothing to later requests: the AI agent's grant decides what it may do, and
+the person or AI agent who opened the conversation decides how far it may reach. A
+person using a tool on a machine that is also an AI agent's body is still the person
+asking, and must sign as themselves.
 
 ## Consequences
 
@@ -163,6 +176,5 @@ silence.
 - Anchoring a conversation's head in a key event log is not part of this decision. Until
   it is anchored, deleting the last entries of a conversation is not detectable from
   the record alone.
-- Running the brain as a separate Windows user is not available yet. On Windows, the
-  brain runs as the host's own user, and only the tool allow list keeps it to the host's
-  tools.
+- Running the brain as a separate Windows user is not available yet. On a Windows
+  machine a person also uses, the brain runs as that person's user.

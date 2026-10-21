@@ -62,16 +62,6 @@ var ToolNames = []string{"reply", "ask_agent", "list_agents", "conversation_hist
 // mcpServerName is what the host's tool server is called in a brain's config.
 const mcpServerName = "agenthost"
 
-// qualifiedTools are the tool names as Claude Code and Grok CLI address an MCP
-// server's tools in an allow rule.
-func qualifiedTools() []string {
-	out := make([]string, len(ToolNames))
-	for i, n := range ToolNames {
-		out[i] = "mcp__" + mcpServerName + "__" + n
-	}
-	return out
-}
-
 // Runner starts a brain's process: directly, or as another operating-system
 // user, so that a brain talked into misusing a tool still cannot reach the
 // person's own files.
@@ -85,8 +75,9 @@ type Isolated interface {
 	Isolated() bool
 }
 
-// SameUser runs the brain as the user running the host. The tool allow list
-// is then the only thing keeping it to the host's tools.
+// SameUser runs the brain as the user running the host: right on a machine
+// that is only the AI agent's, where there is nobody else's keys to keep it
+// from.
 type SameUser struct{}
 
 // Command builds the command.
@@ -158,15 +149,16 @@ func runCLI(ctx context.Context, r Runner, dir string, env []string, stdin strin
 
 // ── Claude Code ──────────────────────────────────────────────────────────────
 
-// ClaudeCode runs `claude -p` with the host's tools as its only tools.
+// ClaudeCode runs `claude -p` with the full use of its machine, and the host's
+// tools as its only way to the Identity Agent.
 //
-// --tools "" starts it with no built-in tools at all: no shell, no file
-// reading, no web. Permission mode alone is not enough — under dontAsk with an
-// allow list naming only the host's tools, a read-only shell command still ran,
-// because dontAsk refuses only what would otherwise ask. --setting-sources ""
-// ignores the settings of whoever runs it, so their allow rules and hooks do
-// not reach the brain. --strict-mcp-config loads no MCP server but the host's,
-// and dontAsk refuses anything the allow list does not name.
+// The machine is the AI agent's to use, so the brain keeps Claude Code's own
+// tools and is never stopped to ask (bypassPermissions). What it does not get
+// is any other route to the Identity Agent: --strict-mcp-config loads no MCP
+// server but the host's, so it reaches the Identity Agent only as its AI agent,
+// under that AI agent's grant — never through a connection a person set up
+// with their own token. On a machine a person also uses, the brain runs as its
+// own user so it cannot use that person's keys either.
 type ClaudeCode struct {
 	Path   string
 	Runner Runner
@@ -187,10 +179,8 @@ func (c ClaudeCode) Run(ctx context.Context, t Turn) (Outcome, error) {
 		mcpServerName: map[string]any{"command": self, "args": []string{"mcp"}},
 	}})
 	args := []string{"-p", "--output-format", "json",
-		"--tools", "", "--setting-sources", "",
 		"--mcp-config", string(mcp), "--strict-mcp-config",
-		"--allowedTools", strings.Join(qualifiedTools(), ","),
-		"--permission-mode", "dontAsk"}
+		"--permission-mode", "bypassPermissions"}
 	if t.Resume {
 		args = append(args, "--resume", t.Session)
 	} else {
@@ -254,16 +244,15 @@ func (c ClaudeCode) runner() Runner {
 
 // ── Grok CLI ─────────────────────────────────────────────────────────────────
 
-// GrokCLI runs `grok -p` with the host's tools as its only tools.
+// GrokCLI runs `grok -p` with the full use of its machine, and the host's
+// tools as its only way to the Identity Agent.
 //
-// Grok CLI loads the MCP servers and permission rules of whoever runs it, and
-// has no flag to ignore them, so it runs only as the brain's own operating-
-// system user (AsUser), whose configuration holds nothing but what the host
-// gives it. There its built-in tools are cut to one harmless one —
-// `--tools ""` names no tool and so removes nothing — subagents are refused,
-// and the host's MCP server is configured for the workspace before each turn.
-// Every remaining tool is approved without asking, because the only tools
-// that remain are the host's.
+// Grok CLI loads the MCP servers of whoever runs it and has no flag to ignore
+// them, so a person's own connections to the Identity Agent would come with
+// it. It therefore runs only as the brain's own operating-system user
+// (AsUser), whose configuration holds nothing but what the host gives it: the
+// host's MCP server, configured for the workspace before each turn. Every tool
+// is approved without asking.
 type GrokCLI struct {
 	Path   string
 	Runner Runner
@@ -290,7 +279,6 @@ func (g GrokCLI) Run(ctx context.Context, t Turn) (Outcome, error) {
 	// The prompt is read from the brain's own stdin: no file, and nothing on
 	// the command line.
 	args := []string{"--prompt-file", "/dev/stdin", "--output-format", "json",
-		"--tools", "todo_write", "--disallowed-tools", "Agent", "--disable-web-search", "--no-subagents",
 		"--always-approve"}
 	if t.Resume {
 		args = append(args, "--resume", t.Session)

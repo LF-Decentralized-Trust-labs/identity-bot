@@ -72,10 +72,10 @@ func contains(list []string, want string) bool {
 
 const secretWords = "the quarterly numbers are 42"
 
-// Claude Code is started with no built-in tools, ignoring its runner's own
-// settings, with the host's tools as its only tools and nothing else loaded —
-// and nothing secret on its command line: the words on stdin, the token in
-// its environment.
+// Claude Code is started with the full use of its machine and the host's
+// MCP server as its only one — so it reaches the Identity Agent only as its AI
+// agent — and nothing secret on its command line: the words on stdin, the
+// token in its environment.
 func TestClaudeCodeIsStartedWithOnlyTheHostsTools(t *testing.T) {
 	path, record := fakeCLI(t, `{"type":"result","subtype":"success","is_error":false,"result":"I run macOS.","session_id":"s-1","modelUsage":{"claude-opus-5-5":{}}}`)
 	brain := ClaudeCode{Path: path}
@@ -94,22 +94,16 @@ func TestClaudeCodeIsStartedWithOnlyTheHostsTools(t *testing.T) {
 	}
 	all := runs(t, record)
 	first, second := all[0], all[1]
-	if v, _ := flagValue(first, "--permission-mode"); v != "dontAsk" {
-		t.Fatalf("not started in dontAsk mode: %v", first)
+	// The machine is the brain's to use: its own tools stay, and it is never
+	// stopped to ask. Its only route to the Identity Agent is the host's.
+	if v, _ := flagValue(first, "--permission-mode"); v != "bypassPermissions" {
+		t.Fatalf("not started with the full use of its machine: %v", first)
 	}
-	// Permission mode alone let a read-only shell command run; the built-in
-	// tools are removed outright, and the runner's own settings ignored.
-	if v, ok := flagValue(first, "--tools"); !ok || v != "" {
-		t.Fatalf("the built-in tools were not removed: %v", first)
-	}
-	if v, ok := flagValue(first, "--setting-sources"); !ok || v != "" {
-		t.Fatalf("the settings of whoever runs it were not ignored: %v", first)
+	if contains(first, "--tools") || contains(first, "--allowedTools") {
+		t.Fatalf("the brain's own tools were cut down: %v", first)
 	}
 	if !contains(first, "--strict-mcp-config") {
-		t.Fatal("other MCP servers were not shut out")
-	}
-	if v, _ := flagValue(first, "--allowedTools"); v != strings.Join(qualifiedTools(), ",") {
-		t.Fatalf("allowed tools: %q", v)
+		t.Fatal("other MCP servers — a person's own connections to the Identity Agent — were not shut out")
 	}
 	if v, _ := flagValue(first, "--session-id"); v != "s-1" {
 		t.Fatal("the first turn did not start the conversation's session")
@@ -145,9 +139,8 @@ func (isolatedRunner) Command(ctx context.Context, dir string, env []string, nam
 }
 
 // Grok CLI runs only as the brain's own user — it loads the MCP servers of
-// whoever runs it, and nothing turns that off — with its built-in tools cut
-// to one harmless one, subagents refused, and nothing secret on the command
-// line.
+// whoever runs it, and nothing turns that off — with the full use of its
+// machine, and nothing secret on the command line.
 func TestGrokRunsOnlyAsItsOwnUserWithOnlyTheHostsTools(t *testing.T) {
 	path, record := fakeCLI(t, `{"text":"I run macOS.","stopReason":"end_turn","sessionId":"s-2","modelUsage":{"grok-4.7-build":{}}}`)
 	turn := Turn{Session: "s-2", Prompt: secretWords, Instructions: "You are the build server.",
@@ -167,11 +160,8 @@ func TestGrokRunsOnlyAsItsOwnUserWithOnlyTheHostsTools(t *testing.T) {
 	if add[0] != "mcp" || add[1] != "add" || contains(add, "-e") {
 		t.Fatalf("the host's tools were not configured, or the token was written into the config: %v", add)
 	}
-	if v, _ := flagValue(run, "--tools"); v != "todo_write" {
-		t.Fatalf("built-in tools were not cut down: %v", run)
-	}
-	if v, _ := flagValue(run, "--disallowed-tools"); v != "Agent" || !contains(run, "--no-subagents") {
-		t.Fatalf("subagents were not refused: %v", run)
+	if !contains(run, "--always-approve") || contains(run, "--tools") {
+		t.Fatalf("not started with the full use of its machine: %v", run)
 	}
 	if line(run, "TOKEN:") != "turn-token" {
 		t.Fatal("the token did not reach the brain's environment")

@@ -85,16 +85,13 @@ func TestAToolTokenEndsWithItsTurn(t *testing.T) {
 	}
 }
 
-// The brains are started with the host's tools as their only tools.
-func TestBrainsAreGivenOnlyTheHostsTools(t *testing.T) {
-	q := strings.Join(qualifiedTools(), ",")
-	for _, want := range []string{"mcp__agenthost__reply", "mcp__agenthost__ask_agent", "mcp__agenthost__system_info"} {
-		if !strings.Contains(q, want) {
-			t.Fatalf("%s is not allowed", want)
-		}
-	}
+// Both brains this host runs are known by name, and nothing else is.
+func TestTheHostRunsTheBrainsItNames(t *testing.T) {
 	if b, _ := BrainFor("grok", nil); b.Name() != "grok" {
 		t.Fatal("grok is not a brain this host runs")
+	}
+	if b, _ := BrainFor("claude-code", nil); b.Name() != "claude-code" {
+		t.Fatal("claude-code is not a brain this host runs")
 	}
 	if _, err := BrainFor("something-else", nil); err == nil {
 		t.Fatal("an unknown brain was accepted")

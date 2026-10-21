@@ -145,7 +145,7 @@ func brainUserSetup(user string) {
 	self, _ = filepath.EvalSymlinks(self)
 	switch runtime.GOOS {
 	case "darwin":
-		fmt.Printf(`The brain can run as its own user, so even a brain talked into misusing a tool cannot reach your files.
+		fmt.Printf(`On a machine you also use, the brain runs as its own user, so it cannot use your keys or speak as you.
 One-time setup, as an administrator (each sudo asks for your password):
 
   1. Create the user (you will be asked to choose its password; nobody needs to log in as it):
@@ -171,7 +171,7 @@ One-time setup, as an administrator (each sudo asks for your password):
          --workspace /Users/%[1]s/workspace
 `, user, me, self)
 	case "linux":
-		fmt.Printf(`The brain can run as its own user, so even a brain talked into misusing a tool cannot reach your files.
+		fmt.Printf(`On a machine you also use, the brain runs as its own user, so it cannot use your keys or speak as you.
 One-time setup, as an administrator:
 
   1. sudo useradd --create-home --shell /usr/sbin/nologin %[1]s
@@ -185,8 +185,8 @@ One-time setup, as an administrator:
        --workspace /home/%[1]s/workspace
 `, user, me, self)
 	default:
-		fmt.Println("Running the brain as a separate Windows user is not available yet. The brain runs as your own user,\n" +
-			"and the tool allow list keeps it to the host's tools.")
+		fmt.Println("Running the brain as a separate Windows user is not available yet. On a machine you also use,\n" +
+			"the brain runs as your own user.")
 	}
 	if _, err := exec.LookPath("sudo"); err != nil && runtime.GOOS != "windows" {
 		fmt.Println("\nsudo was not found on this machine; the steps above need it.")
