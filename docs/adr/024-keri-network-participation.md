@@ -1,6 +1,6 @@
 # ADR-024: KERI Network Participation — Witness, Watcher, Relay, did:webs Publisher
 
-**Status:** Accepted
+**Status:** Accepted; the relay client's transport and enrolment token are superseded by ADR-048 (2026-10-21)
 **Date:** 2026-06-19
 **Deciders:** Rob Andersen
 

@@ -1,6 +1,6 @@
 # ADR-042 — How an agent is reached, and who may manage it
 
-**Status:** Accepted
+**Status:** Accepted; §1, §3 and §5 amended by ADR-048 (2026-10-21): URL Relay carries both private and public addresses under one relay protocol; the Chisel tunnel provider goes, while development tunnels (Cloudflare, ngrok) stay; the core defaults every identity to URL Relay and a product sets its own per-entity default; the Identity Agent itself marks every relayed request
 **Date:** 2026-09-16
 **Relates to:** ADR-006 (Standardized Topology), ADR-033 (An identifier travels with an address), ADR-036 (A computer you pair with does not publish who you are), ADR-041 (One neutral scheme for the protocol's device codes)
 
@@ -57,11 +57,14 @@ are:
   `tunnel/` package (providers include Cloudflare, ngrok, and a Chisel-based tunnel
   such as one fronted at `grapeid.org`).
 
-The default is per instance and is only a *default*. The per-product default is
-resolved by entity type in `defaultIngressModeForEntity`: an organisation, being
-public by nature, defaults to Tunnel; everything else — an individual, and the
-neutral core itself — defaults to URL Relay, for privacy by default. Direct is
-never a default. A deployment overrides the default with a persisted setting.
+The default is per instance and is only a *default*. The neutral core defaults
+every identity to URL Relay, for privacy by default (`defaultIngressModeForEntity`,
+amended by ADR-048: public or private is an identity's choice, not a property of
+its entity type). A product built on the core supplies its own per-entity default
+through `CoreServer.DefaultIngressMode`, so a product may, for example, default an
+organisation to a public address. Direct is never a default, and a product default
+of Direct is ignored. A deployment, or the identity itself, overrides the default
+with a persisted setting.
 
 Because reachability is a *manager* decision and not a global switch, the manager
 may allocate other-mode URLs on the same agent — for example an organisation on a
@@ -157,6 +160,12 @@ Three properties make this sound:
   headers (`X-Forwarded-For`, `X-Real-Ip`, `Cf-Connecting-Ip`, `True-Client-Ip`,
   `Forwarded`) plus the relay's own marker — flips the request to remote
   (`hasForwardingHeaders`).
+- *Amended by ADR-048 (2026-10-21):* under the one relay protocol a relayed
+  request never reaches the agent over loopback at all. The Identity Agent serves
+  it from a relay stream, and sets `X-IA-Via-Ingress: relay` on every such request
+  itself, overwriting anything a caller sent. That the request is remote no longer
+  depends on the relay. The paragraph below describes the earlier frame protocol,
+  until the client moves onto `relayproto`.
 - **The relay stamps its own marker.** A relay-forwarded request also reaches the
   agent over loopback, so `relay/tunnel.go` sets `X-IA-Via-Ingress: relay` on the
   box, after the client's headers are applied, where a client can neither remove nor
@@ -247,8 +256,8 @@ rather than relying on a string it handed out once (ADR-033).
 
 ## What is shipped, and what is still partial
 
-Shipped and load-bearing today: the single ingress-mode resolver and its per-entity
-defaults; the root-loopback invariant (the management surface binds `127.0.0.1` in
+Shipped and load-bearing today: the single ingress-mode resolver, its private
+default and the product's default seam; the root-loopback invariant (the management surface binds `127.0.0.1` in
 every mode); the two ingress shapes (dialled-out relay/tunnel, and the reverse-proxy
 front with opt-in trusted forwarding); the owner gate (loopback + no-forwarding-
 header + not-browser-originated, with the relay's ingress marker and body-carrying

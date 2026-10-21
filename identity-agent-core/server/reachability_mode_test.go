@@ -22,10 +22,13 @@ func TestResolveIngressModeDefaultsByEntityType(t *testing.T) {
 		entity string
 		want   IngressMode
 	}{
-		{"individual", IngressModeRelay},    // privacy by default
-		{"organization", IngressModeTunnel}, // one public address
-		{"", IngressModeRelay},              // OSS core / undeclared -> relay, never Direct
-		{"nonsense", IngressModeRelay},      // unrecognised normalises to relay, not a guess into Tunnel
+		// Public or private is an identity's choice, not its kind; the core
+		// is private for everybody until a product or the identity says
+		// otherwise.
+		{"individual", IngressModeRelay},
+		{"organization", IngressModeRelay},
+		{"", IngressModeRelay},
+		{"nonsense", IngressModeRelay},
 	}
 	for _, c := range cases {
 		s := exportServer(t, t.TempDir())
@@ -50,7 +53,8 @@ func TestResolveIngressModeNeverDefaultsToDirect(t *testing.T) {
 
 func TestResolveIngressModeExplicitSettingOverridesDefault(t *testing.T) {
 	s := exportServer(t, t.TempDir())
-	s.DeclaredEntityType = "organization" // default would be tunnel
+	s.DeclaredEntityType = "organization"
+	s.DefaultIngressMode = func(string) IngressMode { return IngressModeTunnel } // a product's default
 
 	if err := s.DataStore.SaveSettings(store.SettingsData{IngressMode: "direct"}); err != nil {
 		t.Fatal(err)
@@ -248,5 +252,32 @@ func TestTunnelPutPreservesReachabilityFields(t *testing.T) {
 	saved, _ := s.DataStore.GetSettings()
 	if saved.IngressMode != "direct" || saved.RelayOperator != "https://keep.example.org" {
 		t.Fatalf("saving a tunnel setting wiped the reachability fields: %+v", saved)
+	}
+}
+
+// A product built on the core sets its own per-entity default, and an answer
+// that is not a usable default is ignored rather than acted on.
+func TestAProductSuppliesItsOwnIngressDefault(t *testing.T) {
+	s := exportServer(t, t.TempDir())
+	s.DefaultIngressMode = func(entity string) IngressMode {
+		if entity == "organization" {
+			return IngressModeTunnel
+		}
+		return IngressModeRelay
+	}
+	s.DeclaredEntityType = "organization"
+	if got := s.resolveIngressMode(); got != IngressModeTunnel {
+		t.Fatalf("the product's default was not used: %q", got)
+	}
+	s.DeclaredEntityType = "individual"
+	if got := s.resolveIngressMode(); got != IngressModeRelay {
+		t.Fatalf("individual: %q", got)
+	}
+	for _, bad := range []IngressMode{IngressModeDirect, "banana"} {
+		bad := bad
+		s.DefaultIngressMode = func(string) IngressMode { return bad }
+		if got := s.resolveIngressMode(); got != IngressModeRelay {
+			t.Fatalf("a product default of %q was acted on: %q", bad, got)
+		}
 	}
 }

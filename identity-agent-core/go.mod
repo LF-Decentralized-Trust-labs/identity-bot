@@ -20,6 +20,7 @@ require (
 )
 
 require (
+	github.com/hashicorp/yamux v0.1.2 // indirect
 	golang.org/x/mobile v0.0.0-20260813181013-1960c775504c // indirect
 	golang.org/x/mod v0.39.0 // indirect
 	golang.org/x/tools v0.49.0 // indirect

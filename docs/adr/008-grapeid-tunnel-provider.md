@@ -1,7 +1,7 @@
 # ADR 008: Grape ID Tunnel Provider — Architecture and Design
 
 **Date:** 2026-03-03
-**Status:** Accepted
+**Status:** Superseded by ADR-048 (2026-10-21). The Chisel transport cannot be contained (an admitted client may open outbound channels, and its login cannot be bound to an admission), so a stable public address is now a public allocation under the one relay protocol.
 **Relates to:** ADR-001 (Core Architecture), ADR-003 (Adaptive Architecture), ADR-006 (Standardized Topology), `docs/grapeid-hub-reconnect-spec.md`
 
 ## Context
