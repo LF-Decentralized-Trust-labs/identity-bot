@@ -56,6 +56,13 @@ type Host struct {
 	// WorkItem and Reason are the stated purpose sent, signed, with each call.
 	WorkItem string
 	Reason   string
+
+	// brainName and brainModel are the running brain's, for what the host
+	// reports with each message.
+	brainName, brainModel string
+	// bodyCredential is this body's credential, once read, for the statements
+	// it signs.
+	bodyCredential string
 }
 
 // State is what a host remembers about its enrolment.
@@ -66,6 +73,15 @@ type State struct {
 	AgentName        string    `json:"agent_name"`
 	BindingID        string    `json:"binding_id"`
 	EnrolledAt       time.Time `json:"enrolled_at"`
+	// IdentityAgentKeys are the Identity Agent's sealing keys, as checked
+	// against its key log at enrolment. Requests after enrolment are sealed to
+	// them.
+	IdentityAgentKeys *didcomm.DID `json:"identity_agent_keys,omitempty"`
+	// KeyStateSN and KeyStateSAID are the event of the Identity Agent's key
+	// log the enrolment string named. A log offered later must still hold it,
+	// so an old copy from before it cannot be passed off as current.
+	KeyStateSN   int    `json:"key_state_sn,omitempty"`
+	KeyStateSAID string `json:"key_state_said,omitempty"`
 }
 
 // DefaultDataDir is where a host keeps its key and state, per operating system.
@@ -168,13 +184,23 @@ func (h *Host) CheckIdentityAgent(e agentbody.Enrolment) error {
 // verifiedIdentityAgent is CheckIdentityAgent, returning the verified log, as
 // parsed events, and the key it ends with.
 func (h *Host) verifiedIdentityAgent(e agentbody.Enrolment) ([]map[string]interface{}, string, error) {
-	resp, err := h.client().Get(strings.TrimRight(e.URL, "/") + "/public/oobi/" + e.IdentityAgent)
+	return h.verifiedLog(e.URL, e.IdentityAgent, func(sn int, said string) bool {
+		return sn == e.KeyStateSN && said == e.KeyStateSAID
+	})
+}
+
+// verifiedLog fetches an identity's key log from the Identity Agent at url and
+// accepts it only if it is that identifier's and every event verifies — and,
+// when contains is given, only if it holds an event contains accepts. It
+// returns the log, as parsed events, and the key it ends with.
+func (h *Host) verifiedLog(url, aid string, contains func(sn int, said string) bool) ([]map[string]interface{}, string, error) {
+	resp, err := h.client().Get(strings.TrimRight(url, "/") + "/public/oobi/" + aid)
 	if err != nil {
-		return nil, "", fmt.Errorf("the Identity Agent at %s could not be reached: %w", e.URL, err)
+		return nil, "", fmt.Errorf("the Identity Agent at %s could not be reached: %w", url, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, "", fmt.Errorf("the Identity Agent at %s did not publish its key log (%d)", e.URL, resp.StatusCode)
+		return nil, "", fmt.Errorf("the Identity Agent at %s did not publish the key log of %s (%d)", url, aid, resp.StatusCode)
 	}
 	var oobi struct {
 		AID  string   `json:"aid"`
@@ -184,11 +210,11 @@ func (h *Host) verifiedIdentityAgent(e agentbody.Enrolment) ([]map[string]interf
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&oobi); err != nil {
 		return nil, "", fmt.Errorf("the Identity Agent's key log is unreadable: %w", err)
 	}
-	if oobi.AID != e.IdentityAgent {
-		return nil, "", fmt.Errorf("the address answered as %s, not the Identity Agent the enrolment string names (%s)", oobi.AID, e.IdentityAgent)
+	if oobi.AID != aid {
+		return nil, "", fmt.Errorf("the address answered as %s, not %s", oobi.AID, aid)
 	}
-	in := drivers.ValidateKELInput{AID: e.IdentityAgent}
-	named := false
+	in := drivers.ValidateKELInput{AID: aid}
+	named := contains == nil
 	for i, r := range oobi.Raw {
 		raw, err := base64.StdEncoding.DecodeString(r)
 		if err != nil {
@@ -200,13 +226,13 @@ func (h *Host) verifiedIdentityAgent(e agentbody.Enrolment) ([]map[string]interf
 			sig = oobi.Sigs[i]
 		}
 		in.CesrSignatures = append(in.CesrSignatures, sig)
-		if ev, err := keri.ParseEvent(raw); err == nil && int(ev.SN) == e.KeyStateSN && ev.SAID == e.KeyStateSAID {
+		if ev, err := keri.ParseEvent(raw); err == nil && contains != nil && contains(int(ev.SN), ev.SAID) {
 			named = true
 		}
 	}
 	res, err := drivers.ValidateKELFromBytes(in)
 	if err != nil || !res.KelVerified {
-		return nil, "", fmt.Errorf("the Identity Agent's key log does not verify: %v %v", err, res.ValidationErrors)
+		return nil, "", fmt.Errorf("the key log of %s does not verify: %v %v", aid, err, res.ValidationErrors)
 	}
 	if !named {
 		return nil, "", fmt.Errorf("the Identity Agent's key log does not contain the event the enrolment string names, so it is not the Identity Agent the string was made by")
@@ -215,7 +241,7 @@ func (h *Host) verifiedIdentityAgent(e agentbody.Enrolment) ([]map[string]interf
 	for _, raw := range in.RawEvents {
 		var m map[string]interface{}
 		if err := json.Unmarshal(raw, &m); err != nil {
-			return nil, "", fmt.Errorf("the Identity Agent's key log is unreadable: %w", err)
+			return nil, "", fmt.Errorf("the key log of %s is unreadable: %w", aid, err)
 		}
 		events = append(events, m)
 	}
@@ -227,7 +253,11 @@ func (h *Host) verifiedIdentityAgent(e agentbody.Enrolment) ([]map[string]interf
 // verified — committed to in its founding event, or signed by the key its log
 // ends with. Whoever answers the request does not get to choose them.
 func (h *Host) identityAgentSealingKeys(e agentbody.Enrolment, kel []map[string]interface{}, currentKey string) (*didcomm.DID, error) {
-	resp, err := h.client().Get(strings.TrimRight(e.URL, "/") + "/api/didcomm/did?aid=" + e.IdentityAgent)
+	return h.sealingKeysOf(e.URL, e.IdentityAgent, kel, currentKey)
+}
+
+func (h *Host) sealingKeysOf(url, aid string, kel []map[string]interface{}, currentKey string) (*didcomm.DID, error) {
+	resp, err := h.client().Get(strings.TrimRight(url, "/") + "/api/didcomm/did?aid=" + aid)
 	if err != nil {
 		return nil, fmt.Errorf("the Identity Agent's sealing keys could not be fetched: %w", err)
 	}
@@ -236,7 +266,7 @@ func (h *Host) identityAgentSealingKeys(e agentbody.Enrolment, kel []map[string]
 	if resp.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&did) != nil {
 		return nil, fmt.Errorf("the Identity Agent did not publish its sealing keys (%d)", resp.StatusCode)
 	}
-	if did.AID != e.IdentityAgent {
+	if did.AID != aid {
 		return nil, fmt.Errorf("the sealing keys offered are %s's, not the Identity Agent's", did.AID)
 	}
 	if _, err := didcomm.CheckKeysBelongTo(&did, kel, currentKey); err != nil {
@@ -355,7 +385,8 @@ func (h *Host) Enrol(enrolment string, placement string, wait time.Duration) (St
 		return State{}, fmt.Errorf("the Identity Agent shows different words for this machine's key — do not approve it")
 	}
 	st := State{IdentityAgentURL: strings.TrimRight(e.URL, "/"), IdentityAgent: e.IdentityAgent,
-		Agent: e.Agent, AgentName: e.AgentName, BindingID: answer.BindingID, EnrolledAt: time.Now().UTC()}
+		Agent: e.Agent, AgentName: e.AgentName, BindingID: answer.BindingID, EnrolledAt: time.Now().UTC(),
+		IdentityAgentKeys: iaKeys, KeyStateSN: e.KeyStateSN, KeyStateSAID: e.KeyStateSAID}
 	if err := h.saveState(st); err != nil {
 		return State{}, err
 	}
@@ -368,7 +399,7 @@ func (h *Host) Enrol(enrolment string, placement string, wait time.Duration) (St
 // enrolment stands.
 func (h *Host) Status() (map[string]any, error) {
 	var out map[string]any
-	code, b, err := h.Call("GET", "/api/agent-host/binding", nil)
+	code, b, err := h.callDirect("GET", "/api/agent-host/binding", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -403,46 +434,24 @@ func (h *Host) waitForDecision(wait time.Duration) error {
 	}
 }
 
-// Call sends one request to the Identity Agent, signed by this machine's key.
-func (h *Host) Call(method, path string, body []byte) (int, []byte, error) {
+// callDirect sends one request to the Identity Agent, signed by this machine's
+// key and not sealed: for the enrolment status only, which a machine asks
+// before it is a body the Identity Agent will take sealed requests from.
+func (h *Host) callDirect(method, path string, body []byte) (int, []byte, error) {
 	st, err := h.loadState()
 	if err != nil {
 		return 0, nil, fmt.Errorf("this machine has not enrolled: %w", err)
-	}
-	signer, _ := h.signer()
-	host, _, err := agentbody.Identity(signer)
-	if err != nil {
-		return 0, nil, err
 	}
 	req, err := http.NewRequest(method, st.IdentityAgentURL+path, bytes.NewReader(body))
 	if err != nil {
 		return 0, nil, err
 	}
-	ts := time.Now().UTC().Format(time.RFC3339)
-	nonceBytes := make([]byte, 18)
-	if _, err := rand.Read(nonceBytes); err != nil {
-		return 0, nil, err
-	}
-	nonce := base64.RawURLEncoding.EncodeToString(nonceBytes)
-	sig, err := agentbody.Sign(signer, agentbody.SignedRequest{
-		Host: host, Method: method, Target: req.URL.RequestURI(), Timestamp: ts, Nonce: nonce, Body: body,
-		WorkItem: h.WorkItem, Reason: h.Reason,
-	}.Bytes())
+	headers, err := h.signedHeaders(method, req.URL.RequestURI(), body)
 	if err != nil {
 		return 0, nil, err
 	}
-	req.Header.Set(agentbody.HeaderHost, host)
-	req.Header.Set(agentbody.HeaderSignature, sig)
-	req.Header.Set(agentbody.HeaderTimestamp, ts)
-	req.Header.Set(agentbody.HeaderNonce, nonce)
-	if h.WorkItem != "" {
-		req.Header.Set(agentbody.HeaderWorkItem, h.WorkItem)
-	}
-	if h.Reason != "" {
-		req.Header.Set(agentbody.HeaderReason, h.Reason)
-	}
-	if len(body) > 0 {
-		req.Header.Set("Content-Type", "application/json")
+	for k, v := range headers {
+		req.Header.Set(k, v)
 	}
 	resp, err := h.client().Do(req)
 	if err != nil {
@@ -451,6 +460,44 @@ func (h *Host) Call(method, path string, body []byte) (int, []byte, error) {
 	defer resp.Body.Close()
 	b, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	return resp.StatusCode, b, err
+}
+
+// signedHeaders are the headers that make a request this body's: its
+// identifier, and its signature over the request target exactly as sent, a
+// timestamp, a fresh nonce, the body and the stated purpose.
+func (h *Host) signedHeaders(method, target string, body []byte) (map[string]string, error) {
+	signer, _ := h.signer()
+	host, _, err := agentbody.Identity(signer)
+	if err != nil {
+		return nil, err
+	}
+	ts := time.Now().UTC().Format(time.RFC3339)
+	nonceBytes := make([]byte, 18)
+	if _, err := rand.Read(nonceBytes); err != nil {
+		return nil, err
+	}
+	nonce := base64.RawURLEncoding.EncodeToString(nonceBytes)
+	sig, err := agentbody.Sign(signer, agentbody.SignedRequest{
+		Host: host, Method: method, Target: target, Timestamp: ts, Nonce: nonce, Body: body,
+		WorkItem: h.WorkItem, Reason: h.Reason,
+	}.Bytes())
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]string{
+		agentbody.HeaderHost: host, agentbody.HeaderSignature: sig,
+		agentbody.HeaderTimestamp: ts, agentbody.HeaderNonce: nonce,
+	}
+	if h.WorkItem != "" {
+		out[agentbody.HeaderWorkItem] = h.WorkItem
+	}
+	if h.Reason != "" {
+		out[agentbody.HeaderReason] = h.Reason
+	}
+	if len(body) > 0 {
+		out["Content-Type"] = "application/json"
+	}
+	return out, nil
 }
 
 func wordsLine(v interface{}) string {

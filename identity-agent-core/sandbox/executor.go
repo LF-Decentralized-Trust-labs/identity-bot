@@ -87,6 +87,14 @@ func executorFor(name string) Executor {
 	return registeredExecs[name]
 }
 
+// invokable reports whether a capability of this executor type can be carried
+// out through capability invocation: the engine's own external calls, or an
+// executor a deployment registered. A reserved type with nothing registered —
+// an AI agent messaging another, which goes as a signed message — cannot.
+func invokable(executorType string) bool {
+	return executorType == "external_api" || executorFor(executorType) != nil
+}
+
 // knownExecutorType reports whether a pack may declare this executor type: either
 // the engine reserves it, or a deployment has registered an executor for it.
 func knownExecutorType(name string) bool {

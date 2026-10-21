@@ -78,6 +78,12 @@ func (m *Manager) MCPToolsList(caller CallerContext) []MCPTool {
 			if !entitled(r.asProvidedCapability()) {
 				continue
 			}
+			// A capability nothing here can execute is not offered as a tool. An
+			// AI agent's message to another is one: it travels signed by the
+			// sender's body, as a message, never as a call a tool could make.
+			if !invokable(r.ExecutorType) {
+				continue
+			}
 			desc := r.Name
 			if r.Description != "" {
 				desc = r.Name + " — " + r.Description

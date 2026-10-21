@@ -493,8 +493,24 @@ func (s *CoreServer) handleBodyStatus(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, err.Error(), http.StatusForbidden)
 		return
 	}
-	writeJSONStatus(w, http.StatusOK, map[string]any{
+	out := map[string]any{
 		"binding_id": b.ID, "state": b.State, "agent": b.Agent, "grade": b.Grade,
 		"grade_clamped": b.GradeClamped, "credential_said": b.CredentialSAID, "words": b.Words,
-	})
+	}
+	// A live body also learns how its AI agent is meant to operate: its name,
+	// role, instructions and brain. These configure the AI agent and grant
+	// nothing; what it may do is still its grant's to say. Only when the
+	// request came sealed: a machine still waiting for approval asks unsealed,
+	// and the instructions are not for whatever can read that.
+	if a, ok := s.aiAgentAsset(b.AgentAssetID); ok && b.State == agentbody.StateActive && s.sealedSender(r) == host {
+		out["agent_name"] = a.DisplayName
+		if a.AgentConfig != nil {
+			out["role"] = a.AgentConfig.Role
+			out["system_prompt"] = a.AgentConfig.SystemPrompt
+			out["brain"] = map[string]string{
+				"kind": a.AgentConfig.Brain.Kind, "provider": a.AgentConfig.Brain.Provider, "model": a.AgentConfig.Brain.Model,
+			}
+		}
+	}
+	writeJSONStatus(w, http.StatusOK, out)
 }

@@ -1,0 +1,25 @@
+{
+  "pack": "ai_agents",
+  "version": "1.0.0",
+  "publisher": "identity-agent",
+  "capabilities": [
+    {
+      "id": "agent.message.send",
+      "name": "Message another AI agent",
+      "description": "Ask another AI agent of this organisation for something, in a conversation a person started. Answering when asked needs no permission.",
+      "domain": "agent",
+      "executor_type": "ai_agent",
+      "impact": "mutating",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "to": { "type": "string", "description": "the identifier of the AI agent to ask" },
+          "text": { "type": "string", "description": "what to ask" }
+        },
+        "required": ["to", "text"]
+      },
+      "provider": "registry-native",
+      "enabled": true
+    }
+  ]
+}

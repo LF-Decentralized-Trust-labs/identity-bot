@@ -113,6 +113,14 @@ type ControllerGrant struct {
 	Grade     ControllerGrade `json:"grade"`
 	GrantedAt time.Time       `json:"granted_at"`
 
+	// Signer is the organisation signer this machine belongs to: a person
+	// speaking to an AI agent from it is recorded as that signer. Named by the
+	// device holding the key when it grants the machine, or else set at that
+	// moment to the organisation's only signer — never by a controller, which
+	// may not write what authorisation reads. A grant made before there was
+	// one signer is bound at its first use, while there is exactly one.
+	Signer string `json:"signer,omitempty"`
+
 	// ExpiresAt is zero for an enrolled machine and set for a borrowed one.
 	// Zero means "until the owner says otherwise", never "forever unchecked" —
 	// the owner can remove it, which is the only permanence a grant has.
@@ -364,4 +372,29 @@ func (c *controllerGrants) Revoke(aid string) error {
 	}
 	delete(all, strings.TrimSpace(aid))
 	return c.save(all)
+}
+
+// BindSigner records which signer a machine belongs to, the first time that
+// is needed and only while it is unambiguous — the organisation has one
+// signer. From then on the machine speaks as that signer, whoever else joins
+// or leaves. A grant that already names a signer is left as it is.
+func (c *controllerGrants) BindSigner(aid, signer string) (ControllerGrant, error) {
+	grantsLock.Lock()
+	defer grantsLock.Unlock()
+	all, err := c.load()
+	if err != nil {
+		return ControllerGrant{}, err
+	}
+	g, ok := all[strings.TrimSpace(aid)]
+	if !ok {
+		return ControllerGrant{}, fmt.Errorf("no such machine")
+	}
+	if g.Signer == "" {
+		g.Signer = signer
+		all[g.ControllerAID] = g
+		if err := c.save(all); err != nil {
+			return ControllerGrant{}, err
+		}
+	}
+	return g, nil
 }

@@ -56,6 +56,14 @@ func enforceResourceConstraints(constraints map[string]interface{}, capabilityID
 	return nil
 }
 
+// CheckResourceConstraints is enforceResourceConstraints for a governed action
+// that does not pass through capability invocation — a message between AI
+// agents, which travels as a signed message rather than as a call — so the
+// grant's limits are enforced by the same code either way.
+func CheckResourceConstraints(constraints map[string]interface{}, capabilityID string, args []byte) error {
+	return enforceResourceConstraints(constraints, capabilityID, args)
+}
+
 // Sentinel errors so the HTTP layer can map governance outcomes to status codes.
 var (
 	// ErrCapabilityNotFound: no installed plug-in offers the requested capability.

@@ -41,6 +41,7 @@ func (s *CoreServer) handleGrantController(w http.ResponseWriter, r *http.Reques
 		Label         string `json:"label"`
 		Grade         string `json:"grade"`
 		ExpiresAt     string `json:"expires_at"`
+		Signer        string `json:"signer"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "body must be JSON", err.Error())
@@ -52,6 +53,13 @@ func (s *CoreServer) handleGrantController(w http.ResponseWriter, r *http.Reques
 		PublicKey:     req.PublicKey,
 		Label:         req.Label,
 		Grade:         ControllerGrade(strings.TrimSpace(req.Grade)),
+		Signer:        strings.TrimSpace(req.Signer),
+	}
+	// A machine granted while the organisation has one signer belongs to
+	// that signer from the start, so who it speaks for is settled when it is
+	// paired rather than at its first message.
+	if g.Signer == "" {
+		g.Signer = s.onlyActiveSigner()
 	}
 	if t := strings.TrimSpace(req.ExpiresAt); t != "" {
 		parsed, err := time.Parse(time.RFC3339, t)
@@ -97,6 +105,9 @@ func onTheWire(g ControllerGrant, now time.Time) map[string]any {
 	// somebody keeps from one they borrowed.
 	if !g.ExpiresAt.IsZero() {
 		out["expires_at"] = g.ExpiresAt
+	}
+	if g.Signer != "" {
+		out["signer"] = g.Signer
 	}
 	if !live {
 		out["why_not"] = why

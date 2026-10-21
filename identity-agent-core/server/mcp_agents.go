@@ -45,9 +45,11 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 		return
 	}
 	var req struct {
-		Name                string                 `json:"name"`
-		Capabilities        []string               `json:"capabilities"`
-		ResourceConstraints map[string]interface{} `json:"resource_constraints,omitempty"`
+		Name         string   `json:"name"`
+		Capabilities []string `json:"capabilities"`
+		// Always present, even empty, so a front end can tell an Identity Agent
+		// that reports limits from one too old to.
+		ResourceConstraints map[string]interface{} `json:"resource_constraints"`
 		Role                string                 `json:"role,omitempty"`
 		SystemPrompt        string                 `json:"system_prompt,omitempty"`
 		Brain               asset.BrainConfig      `json:"brain,omitempty"`
@@ -171,14 +173,19 @@ func (s *CoreServer) anMCPTokenIsNamed(name string) bool {
 // agentView is the owner-facing summary of an ai_agent asset — identity + config +
 // status, never any secret (no token, no vault key).
 type agentView struct {
-	AssetID      string             `json:"asset_id"`
-	Name         string             `json:"name"`
-	AgentAID     string             `json:"agent_aid"`
-	DelegatorAID string             `json:"delegator_aid"`
-	Capabilities []string           `json:"capabilities"`
-	Config       *asset.AgentConfig `json:"agent_config,omitempty"`
-	Status       string             `json:"status"` // active | revoked
-	CreatedAt    time.Time          `json:"created_at"`
+	AssetID      string   `json:"asset_id"`
+	Name         string   `json:"name"`
+	AgentAID     string   `json:"agent_aid"`
+	DelegatorAID string   `json:"delegator_aid"`
+	Capabilities []string `json:"capabilities"`
+	// ResourceConstraints are the grant's per-capability argument limits — who
+	// it may message, among others — so a front end changing one keeps the rest.
+	// Always present, empty when there are none: a front end reads its absence
+	// as an Identity Agent too old to report them, and then leaves them alone.
+	ResourceConstraints map[string]interface{} `json:"resource_constraints"`
+	Config              *asset.AgentConfig     `json:"agent_config,omitempty"`
+	Status              string                 `json:"status"` // active | revoked
+	CreatedAt           time.Time              `json:"created_at"`
 }
 
 // handleListAgents lists the org's ai_agent assets — the workforce roster.
@@ -194,14 +201,15 @@ func (s *CoreServer) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	out := make([]agentView, 0, len(agents))
 	for _, a := range agents {
 		out = append(out, agentView{
-			AssetID:      a.ID,
-			Name:         a.DisplayName,
-			AgentAID:     a.PairwiseAID,
-			DelegatorAID: a.DelegatorAID,
-			Capabilities: a.Capabilities,
-			Config:       a.AgentConfig,
-			Status:       s.agentStatus(a.PairwiseAID),
-			CreatedAt:    a.CreatedAt,
+			AssetID:             a.ID,
+			Name:                a.DisplayName,
+			AgentAID:            a.PairwiseAID,
+			DelegatorAID:        a.DelegatorAID,
+			Capabilities:        a.Capabilities,
+			ResourceConstraints: nonNilConstraints(a.GrantConstraints),
+			Config:              a.AgentConfig,
+			Status:              s.agentStatus(a.PairwiseAID),
+			CreatedAt:           a.CreatedAt,
 		})
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -496,4 +504,11 @@ func lockAgentGrant(assetID string) (unlock func()) {
 	mu := m.(*sync.Mutex)
 	mu.Lock()
 	return mu.Unlock
+}
+
+func nonNilConstraints(c map[string]interface{}) map[string]interface{} {
+	if c == nil {
+		return map[string]interface{}{}
+	}
+	return c
 }
