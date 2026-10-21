@@ -1241,90 +1241,10 @@ class CoreService {
     }
   }
 
-  Future<({bool? available, bool hubError, String message, String debugUrl, int debugStatus, String debugBody})> checkGrapeIdName(String domain, String name) async {
-    final domainParam = domain.isNotEmpty ? '&domain=${Uri.encodeComponent(domain)}' : '';
-    final url = Uri.parse('$baseUrl/api/settings/tunnel/check-name?name=${Uri.encodeComponent(name)}$domainParam');
-    final debugUrl = url.toString();
-
-    try {
-      final response = await _client.get(url);
-      final rawBody = response.body.length > 500 ? '${response.body.substring(0, 500)}...' : response.body;
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body) as Map<String, dynamic>;
-        if (data['hub_error'] == true) {
-          return (
-            available: null,
-            hubError: true,
-            message: (data['message'] as String?) ?? 'Provider not responsive',
-            debugUrl: debugUrl,
-            debugStatus: response.statusCode,
-            debugBody: rawBody,
-          );
-        }
-        final isAvailable = data['available'] == true;
-        return (
-          available: isAvailable,
-          hubError: false,
-          message: '',
-          debugUrl: debugUrl,
-          debugStatus: response.statusCode,
-          debugBody: rawBody,
-        );
-      }
-      return (
-        available: null,
-        hubError: true,
-        message: 'Go Core returned HTTP ${response.statusCode}',
-        debugUrl: debugUrl,
-        debugStatus: response.statusCode,
-        debugBody: rawBody,
-      );
-    } catch (e) {
-      return (
-        available: null,
-        hubError: true,
-        message: 'Cannot reach local Go Core',
-        debugUrl: debugUrl,
-        debugStatus: 0,
-        debugBody: 'Connection error: $e',
-      );
-    }
-  }
-
-  Future<({bool reachable, String reason})> checkGrapeIdHealth(String domain) async {
-    final domainParam = domain.isNotEmpty ? '?domain=${Uri.encodeComponent(domain)}' : '';
-    final url = Uri.parse('$baseUrl/api/settings/tunnel/grapeid-health$domainParam');
-    try {
-      final response = await _client.get(url);
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body) as Map<String, dynamic>;
-        return (reachable: data['reachable'] == true, reason: (data['reason'] as String?) ?? '');
-      }
-      return (reachable: false, reason: 'Provider not responsive');
-    } catch (_) {
-      return (reachable: false, reason: 'Provider not responsive');
-    }
-  }
-
-  Future<Map<String, dynamic>> releaseTunnelName() async {
-    final response = await _client.post(
-      Uri.parse('$baseUrl/api/settings/tunnel/release-name'),
-    );
-    if (response.statusCode == 200) {
-      return jsonDecode(response.body) as Map<String, dynamic>;
-    } else {
-      final body = jsonDecode(response.body);
-      throw Exception(body['error'] ?? 'Release failed: ${response.statusCode}');
-    }
-  }
-
   Future<Map<String, dynamic>> saveTunnelSettings({
     required String provider,
     String? ngrokAuthToken,
     String? cloudflareTunnelToken,
-    String? tunnelDomain,
-    String? tunnelExtension,
   }) async {
     final response = await _client.put(
       Uri.parse('$baseUrl/api/settings/tunnel'),
@@ -1333,8 +1253,6 @@ class CoreService {
         'provider': provider,
         if (ngrokAuthToken != null) 'ngrok_auth_token': ngrokAuthToken,
         if (cloudflareTunnelToken != null) 'cloudflare_tunnel_token': cloudflareTunnelToken,
-        if (tunnelDomain != null) 'tunnel_domain': tunnelDomain,
-        if (tunnelExtension != null) 'tunnel_extension': tunnelExtension,
       }),
     );
     if (response.statusCode != 200) {
