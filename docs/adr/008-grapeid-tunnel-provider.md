@@ -2,7 +2,7 @@
 
 **Date:** 2026-03-03
 **Status:** Superseded by ADR-048 (2026-10-21). The Chisel transport cannot be contained (an admitted client may open outbound channels, and its login cannot be bound to an admission), so a stable public address is now a public allocation under the one relay protocol.
-**Relates to:** ADR-001 (Core Architecture), ADR-003 (Adaptive Architecture), ADR-006 (Standardized Topology), `docs/grapeid-hub-reconnect-spec.md`
+**Relates to:** ADR-001 (Core Architecture), ADR-003 (Adaptive Architecture), ADR-006 (Standardized Topology)
 
 ## Context
 
@@ -118,7 +118,7 @@ The hub exposes three endpoints for name lifecycle management:
 | `POST /reconnect` | Re-establish a previously claimed name | Every subsequent startup |
 | `POST /release-name` | Voluntarily give up a name | Future: explicit "release name" UI |
 
-All three accept `{"name": "...", "aid": "..."}` in the request body. See `docs/grapeid-hub-reconnect-spec.md` for the full hub-side specification.
+All three accept `{"name": "...", "aid": "..."}` in the request body. The hub-side specification was removed when ADR-048 superseded this one.
 
 The hub also exposes:
 - `GET /health` — Hub reachability probe (used by the agent's settings UI to show AVAILABLE/UNAVAILABLE badges)
@@ -247,7 +247,6 @@ The `Manager` sits between the server and the active provider. It handles:
 
 ## Related Documents
 
-- `docs/grapeid-hub-reconnect-spec.md` — Hub-side specification for `/reconnect`, `/claim-name`, and `/release-name` endpoints
 - `docs/spec-backend-migration.md` — Migration specification (includes tunnel settings portability requirements)
 - `docs/adr/003-adaptive-architecture.md` — Multi-provider tunnel system overview and URL priority for OOBI generation
 - `docs/adr/007-external-http-routing-and-platform-ports.md` — All external HTTP calls (including hub API) routed through Go backend proxy

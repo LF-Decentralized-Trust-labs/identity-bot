@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
+
+	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto"
 )
 
 // Serving the web UI from somewhere other than the root of a domain.
@@ -48,6 +51,23 @@ var baseHrefPattern = regexp.MustCompile(`(?i)(<base\s+href=")([^"]*)(")`)
 // it, and is a fallback rather than the primary answer: a static setting has to
 // be kept in step with routing by hand, which is exactly the kind of agreement
 // that quietly stops being true.
+//
+// Through a relay, the prefix is the path of the address the request came to,
+// from this Identity Agent's own record of it: a caller reaching a public
+// address could send any X-Forwarded-Prefix, and it must not decide the page's
+// base.
+func (s *CoreServer) webPathPrefix(r *http.Request) string {
+	if _, relayed := relayproto.PreambleFrom(r.Context()); relayed {
+		if addr, ok := s.relayedAddress(r); ok {
+			if u, err := url.Parse(addr); err == nil {
+				return normalisePrefix(u.Path)
+			}
+		}
+		return "/"
+	}
+	return webPathPrefix(r)
+}
+
 func webPathPrefix(r *http.Request) string {
 	prefix := r.Header.Get("X-Forwarded-Prefix")
 	if prefix == "" {

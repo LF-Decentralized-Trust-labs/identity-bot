@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -94,6 +95,11 @@ type seedEnvelope struct {
 	Wrap string `json:"wrap"`
 	Blob string `json:"blob"`
 }
+
+// ErrNoRootSeed is LoadRootSeed's answer when no root seed was ever stored
+// here. Every other failure means a seed exists and could not be read, which
+// is never a reason to make a new one: that would replace the only copy.
+var ErrNoRootSeed = errors.New("no root keystore seed has been stored here")
 
 func rootSeedPath(dataDir string) string {
 	return filepath.Join(dataDir, "secureenclave", "root_seed.key")
@@ -217,6 +223,9 @@ func announceIfStoredInTheClear(wrap string) {
 func LoadRootSeed(dataDir string) ([]byte, error) {
 	p := rootSeedPath(dataDir)
 	raw, err := os.ReadFile(p)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("%w: %w", ErrNoRootSeed, err)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("root keystore seed not available in secure storage: %w", err)
 	}

@@ -43,7 +43,8 @@ Development tunnels (Cloudflare, ngrok) stay, labelled not private.
 
 **The protocol ties neither mode to any kind of identity.** An identity may hold
 both, from different relays. Which mode an instance uses is a setting
-(`resolveIngressMode`).
+(`resolveIngressMode`): `relay` for private, `public` for public, each with its
+own relay operator setting.
 
 **Defaults.** The open-source core defaults every identity to private
 (`defaultIngressModeForEntity`), because privacy is the safe default. A product
@@ -253,29 +254,107 @@ base32 DNS label. They are never derived from an identifier.
 
 ### 7. Public names and custom domains
 
-A public allocation is either a name at the relay or the identity's own domain.
+A public address is a name at the relay, or the identity's own domain.
 - **A name** belongs to the first proven key that claims it, and only that key
   releases it. A relay limits how many names one identity may hold, and keeps a
-  reserved list of names nobody may claim.
-- **A custom domain** is activated only after a DNS TXT record proves the domain is
-  the identity's. Only then does the relay request a certificate for it. A custom
-  domain keeps an identity's `did:webs` identifier independent of any one operator.
+  reserved list of names nobody may claim (its own paths, and names such as
+  `login`, `support`, `admin`, `www` and `api`). A released name is held back
+  from anybody else for a time, so it cannot be picked up at once to
+  impersonate whoever gave it up.
+- **A custom domain** is activated only after a DNS TXT record proves the domain
+  is the identity's: `TXT _iarelay.<domain>` carrying `iarelay-aid=<identifier>`.
+  Only then does the relay request a certificate for it. A custom domain keeps an
+  identity's `did:webs` identifier independent of any one operator.
 - The management surface stays on loopback in every mode (ADR-042 §2). A public
   address reaches it only by a controller's signature.
 
-### 8. Discovery, enrolment and allocation requests
+### 8. Discovery, addresses and control requests
 
-- **What survives from ADR-024:**
-  - the discovery descriptor at `/.well-known/url-relay-service.json`, whose
-    `tunnel_endpoint` now names the `iarelay.v2` websocket;
-  - the allocate and release requests, which are already signed by the enrolment
-    key over a canonical body.
-- **What is replaced:**
-  - Enrolment is the first admission. The key event log travels with it, and there
-    is no separate enrol call and no enrolment token.
-  - An allocation token is a label in an address, never a credential that opens a
-    tunnel.
-  - The frame protocol (`IARELAY10JSON`) and its schema go.
+**Discovery.** A relay publishes `GET /.well-known/url-relay-service.json`:
+`protocol` (this protocol's version), `service` (the name its challenges and
+control requests carry), `mode`, `connect_host`, `tunnel_endpoint` (the `wss://`
+session endpoint), and `endpoints`, which maps each control `op` below to the
+URL it is sent to.
+
+**Two front doors.** A relay has a **connect host**, where Identity Agents are
+admitted and send control requests, and **caller-facing** addresses, where
+everybody else reaches them. They may be different hosts.
+- The session and every control request go to the connect host, and nowhere
+  else. `tunnel_endpoint` and every entry in `endpoints` are at it.
+- The connect host is the relay's own host or a name under it (for example
+  `connect.<relay>`). The descriptor may reach the Identity Agent through
+  whatever sits in front of callers, so an Identity Agent refuses a descriptor
+  naming a connect host outside the relay's name, or an endpoint away from the
+  connect host: anything in front of callers that rewrote it would otherwise
+  have the Identity Agent admitted, and its addresses served, by somebody else.
+- The Identity Agent's dialled-host check (§3) applies to the connect host.
+- Everything the Identity Agent publishes uses the caller-facing URLs the relay
+  returns (`public_url`), never the connect host.
+
+**Enrolment is the first admission.** The key event log travels with it
+(§3). There is no separate enrol call and no enrolment token.
+
+**Where an address is, and what reaches the Identity Agent:**
+
+| Address | Form | What the Identity Agent receives |
+|---|---|---|
+| private | a path at the private relay: `https://<private-relay>/<label>/...` | the request with `/<label>` removed from its path, and `X-Forwarded-Prefix: /<label>`. Links it writes must carry that path. |
+| public name | a host under the public relay: `https://<name>.<public-relay>/...` | the request unchanged |
+| custom domain | `https://<domain>/...` | the request unchanged |
+
+The stream's preamble names the label, name or domain. The Identity Agent
+takes what an address is, and the URL it writes about itself there, from its
+own record of the addresses it holds (§6), never from a header a caller could
+send.
+
+**Control requests.** Everything an Identity Agent asks of a relay is a JSON
+object of string fields, every one printable ASCII, signed by the key its
+enrolment identifier's log names now. Every request carries:
+
+| Field | |
+|---|---|
+| `op` | which request it is, so a signature for one cannot be used as another |
+| `relay` | the relay's `service` name, so it cannot be used at another relay |
+| `signed_by` | the enrolment identifier |
+| `t` | RFC 3339, within two minutes of the relay's clock |
+| `nonce` | 16 to 64 characters, never accepted twice |
+| `signature` | Ed25519, base64url without padding, over the request's other fields as JSON with sorted keys, no whitespace and no HTML escaping: the form an admission statement is signed in (§3), `relayproto.CanonicalBody` |
+
+The relay accepts a control request only while `signed_by` holds a live
+session, and checks it against the key that session's log names now.
+
+**Private addresses:**
+
+| `op` | Fields | Does |
+|---|---|---|
+| `allocate` | `commitment`: base64url SHA-256 of a secret of 32 or more random bytes the Identity Agent keeps | makes an address: `allocation` (a 128-bit random label) and `public_url` |
+| `bind` | `allocation`, `secret` | attaches an address to the caller's session |
+| `release` | `allocation`, `secret` | ends an address |
+
+The relay stores each label and the commitment to its secret, **never which
+identifier made it**. Which session serves which label it keeps in memory only.
+So after every admission the Identity Agent sends `bind` for each private
+address it holds; the secret proves the address is its own. An Identity Agent
+whose `bind` is refused (the relay no longer has the address, or the secret is
+not the one it was made with) no longer holds that address, and makes a new
+one.
+
+**Public addresses:**
+
+| `op` | Fields | Does |
+|---|---|---|
+| `claim-name` | `name`: 3 to 32 lowercase letters, digits and single inner hyphens | the first proven key to claim a name holds it; claiming a name one already holds is harmless |
+| `release-name` | `name` | only its holder may release it |
+| `request-domain` | `domain` | returns `txt_name` and `txt_value`, the record that proves the domain |
+| `verify-domain` | `domain` | checks the record; only then is the domain served and a certificate requested |
+| `release-domain` | `domain` | only its holder may release it |
+
+A public relay gives an address only at a name or a proven domain.
+
+**What this replaces from ADR-024:** the enrolment call and its token, the
+allocate and release bodies signed by token-bearing enrolments, and the frame
+protocol (`IARELAY10JSON`) and its schema. The discovery descriptor survives,
+reshaped as above.
 
 ### 9. Finding an address that moved
 
@@ -288,14 +367,21 @@ current state, not a string handed out once (ADR-033).
 ### 10. Proxies between the two ends
 
 The admission is bound to the TLS connection between the relay and the Identity
-Agent, so that connection must run end to end between them.
+Agent, so that connection must run end to end between them. That binds only the
+connect host (§8). Callers' traffic is ordinary HTTPS, so a relay may put a
+proxy that terminates TLS (a CDN, say) in front of its caller-facing addresses.
 
 | Proxy | Works? |
 |---|---|
-| A TCP or SNI pass-through in front of the relay (a load balancer that forwards TLS unopened) | yes |
-| A TLS-terminating front in front of the relay | no. The relay sees a different TLS connection from the Identity Agent's, and cannot admit anybody. |
+| A TLS-terminating proxy in front of the caller-facing addresses | yes |
+| A TCP or SNI pass-through in front of the connect host (a load balancer that forwards TLS unopened) | yes |
+| A TLS-terminating proxy in front of the connect host | no. The relay sees a different TLS connection from the Identity Agent's, and cannot admit anybody. A relay must never put one there. |
 | A TLS-inspecting proxy on the Identity Agent's network | no. It cannot be admitted, for the same reason. |
 | A plain HTTP CONNECT proxy on the Identity Agent's side (`HTTPS_PROXY`, honoured through `ProxyFromEnvironment`) | yes. It tunnels the TLS connection unopened. |
+
+A proxy in front of callers sees what callers send. A private address passes
+only what §6 allows, and what crosses it is what any counterparty may fetch or
+send, so this is the same exposure as any public web host.
 
 ### 11. What a relay can and cannot see
 
@@ -329,16 +415,31 @@ Agent, so that connection must run end to end between them.
 **Built in the core:** the private default and the product's default seam
 (`DefaultIngressMode`).
 
+**An instance that used the retired Chisel provider** is moved at start-up to a
+public relay address under the name it held, and the owner is shown a notice
+saying so until they next save reachability.
+
+**Built in the core client (`relay/`):** the session through `relayproto`, the
+control requests above, private addresses held by their secrets and bound again
+after every admission, public names, reconnection with backoff, and the
+Identity Agent's per-allocation rule (§6): an address is looked up in its own
+records, never trusted from the preamble, and a private one reaches only routes
+drawn from `publicRoutes`. Each mode has its own enrolment identifier and its
+own record. The earlier frame protocol and the Chisel tunnel provider are
+removed.
+
 **Not built yet:**
-- **The core client.** The core still uses `relay/` (the earlier frame protocol)
-  and the Chisel tunnel provider. Moving the client onto `relayproto` removes both.
-  `relay/` duplicates part of this package until then, and that copy is deleted in
-  the same change, not kept beside it.
-- **The Identity Agent's per-allocation rule** (§6), derived from `publicRoutes`
-  and keyed by its own record of each allocation.
-- **Public names, the reserved list and custom-domain DNS proof** (§7), in a relay
-  server.
-- **Republishing the endpoint record** when the address moves (§9).
+- **Republishing the endpoint record** when the address moves (§9). The core
+  recomputes its published address; it does not yet send a signed `/loc/scheme`
+  record to its witnesses and watchers.
+- **A reachability screen in this repository's app.** The core serves owner
+  routes for the relay's status, saving and applying reachability, releasing the
+  public name, and requesting and verifying a custom domain; the app here has no
+  screen for them yet, and offers only development tunnels.
+- **One private address per relationship.** The core holds one private address
+  and gives it to every counterparty. The protocol allows one per relationship,
+  and the client can allocate them; handing a fresh one to each new
+  relationship is not wired in.
 
 ## Consequences
 
@@ -349,8 +450,9 @@ Agent, so that connection must run end to end between them.
   identifier's current key.
 - Websockets, streaming and large bodies work through a relay, so a public address
   serves everything a directly reachable Identity Agent does.
-- **The relay must terminate TLS itself** (§10). That is a deployment constraint
-  the channel binding imposes, and the reason the binding is worth having.
+- **The relay must terminate TLS itself at its connect host** (§8, §10). That is
+  a deployment constraint the channel binding imposes, and the reason the
+  binding is worth having. Caller-facing addresses may sit behind any proxy.
 - **Sessions live in the relay's memory on one machine.** Running a relay on more
   than one machine needs inbound requests routed to the machine that holds the
   session.

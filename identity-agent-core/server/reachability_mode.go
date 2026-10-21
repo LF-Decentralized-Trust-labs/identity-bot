@@ -1,7 +1,10 @@
 package server
 
 import (
+	"log"
 	"strings"
+
+	"identity-agent-core/tunnel"
 )
 
 // How an agent becomes reachable from outside is a single, governed decision.
@@ -9,36 +12,34 @@ import (
 // There is exactly one default ingress mode per instance, and everything that
 // wires up reachability consults resolveIngressMode() for it — there is no
 // second place that decides whether to open a public tunnel or stand up a
-// relay. The three modes are:
+// relay. The modes are:
 //
-//   - IngressModeRelay  — a URL-relay operator gives per-relationship opaque
-//     URLs; the agent stays reachable through NAT via the relay's own outbound
-//     path. Privacy by default: one counterparty cannot correlate its URL with
-//     another's.
-//   - IngressModeTunnel — a tunnel provider gives ONE public URL for the whole
-//     agent. Appropriate for an entity that is public by nature and needs a
-//     single discoverable address; structurally cannot compartmentalize per
-//     relationship, so it is not-private.
-//   - IngressModeDirect — no third-party ingress. The agent answers at its own
-//     reachable address (loopback/LAN, a port-forward, or its own DNS). This is
-//     a developer/testing toggle, never a shipped product default.
+//   - IngressModeRelay  — a private address at a relay (ADR-048): unlinkable,
+//     reaching only what a relationship needs. Privacy by default.
+//   - IngressModePublic — one stable public address at a relay, a name there or
+//     the identity's own domain. Everything reaches the Identity Agent's own
+//     gate, as for any other ingress.
+//   - IngressModeTunnel — a development tunnel (Cloudflare, ngrok): one public
+//     URL from a vendor, not private. For development, not a product default.
+//   - IngressModeDirect — no third-party ingress. The Identity Agent answers at
+//     its own reachable address (loopback/LAN, a port-forward, or its own DNS).
+//     A developer/testing toggle, never a shipped product default.
 //
-// The default mode is per-instance and only a *default*: the one URL manager may
-// still allocate other-mode URLs on the same agent (for example an org on a
-// Tunnel default allocating relay URLs for confidential counterparties). This
-// resolver decides the default, not what any single allocation may be.
+// Public and private are an identity's choice, not a property of the kind of
+// identity it is.
 type IngressMode string
 
 const (
 	IngressModeRelay  IngressMode = "relay"
+	IngressModePublic IngressMode = "public"
 	IngressModeTunnel IngressMode = "tunnel"
 	IngressModeDirect IngressMode = "direct"
 )
 
-// validIngressMode reports whether v names one of the three modes.
+// validIngressMode reports whether v names one of the modes.
 func validIngressMode(v string) bool {
 	switch IngressMode(strings.ToLower(strings.TrimSpace(v))) {
-	case IngressModeRelay, IngressModeTunnel, IngressModeDirect:
+	case IngressModeRelay, IngressModePublic, IngressModeTunnel, IngressModeDirect:
 		return true
 	default:
 		return false
@@ -86,4 +87,45 @@ func (s *CoreServer) defaultIngressMode() IngressMode {
 		}
 	}
 	return defaultIngressModeForEntity(s.ourEntityType())
+}
+
+// retiredTunnelProvider is the settings value of the Chisel tunnel provider
+// ADR-048 retired.
+const retiredTunnelProvider = "grapeid"
+
+// retireTunnelHubSettings moves an instance that used the retired Chisel
+// tunnel provider onto a public relay address, keeping the name it had, and
+// leaves the owner a notice saying so. Without it such an instance would come
+// up with no address and no explanation.
+func (s *CoreServer) retireTunnelHubSettings() {
+	if s.DataStore == nil {
+		return
+	}
+	saved, err := s.DataStore.GetSettings()
+	if err != nil || saved == nil || saved.TunnelProvider != retiredTunnelProvider {
+		return
+	}
+	name := saved.RetiredTunnelName
+	saved.TunnelProvider = string(tunnel.ProviderNone)
+	saved.RetiredTunnelName = ""
+	if saved.PublicRelayName == "" {
+		saved.PublicRelayName = name
+	}
+	if mode := IngressMode(saved.IngressMode); mode == "" || mode == IngressModeTunnel {
+		saved.IngressMode = string(IngressModePublic)
+	}
+	notice := "The tunnel provider this Identity Agent used has been retired. Its public address now comes from a public relay"
+	if name != "" {
+		notice += ", keeping the name " + name
+	}
+	notice += "."
+	if s.relayOperator(publicRelay) == "" {
+		notice += " Choose a public relay in reachability settings to bring the address back."
+	}
+	saved.ReachabilityNotice = notice
+	if err := s.DataStore.SaveSettings(*saved); err != nil {
+		log.Printf("[reachability] could not move off the retired tunnel provider: %v", err)
+		return
+	}
+	log.Printf("[reachability] %s", notice)
 }

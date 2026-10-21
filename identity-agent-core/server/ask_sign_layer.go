@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"identity-agent-core/drivers"
 	"identity-agent-core/store"
@@ -193,8 +194,16 @@ func (s *CoreServer) mintPairwiseIn(pool, name string) (aid, oobi string, seed [
 // on the device they carry. A device-local seed has no phrase; it is recovered
 // from this machine's own backup archive.
 func ensureRootSeed(dataDir string) ([]byte, error) {
-	if seed, err := secureenclave.LoadRootSeed(dataDir); err == nil {
+	seed, err := secureenclave.LoadRootSeed(dataDir)
+	if err == nil {
 		return seed, nil
+	}
+	// Only a machine that has never held a seed gets one here. A seed that is
+	// there and cannot be read (a damaged file, a wrapping this build cannot
+	// open) is refused rather than replaced: replacing it would destroy the
+	// only copy of every key derived from it.
+	if !errors.Is(err, secureenclave.ErrNoRootSeed) {
+		return nil, fmt.Errorf("this machine's root seed is stored but cannot be read, and is not replaced: %w", err)
 	}
 	// Said plainly, and no longer as a warning about something missing.
 	//
@@ -210,7 +219,7 @@ func ensureRootSeed(dataDir string) ([]byte, error) {
 	log.Printf("[keystore] this machine holds a device-local root seed of its own. Its keys " +
 		"are recoverable from this machine's backup archive, and not from a seed phrase — " +
 		"there is no phrase for it")
-	seed := make([]byte, 64)
+	seed = make([]byte, 64)
 	if _, err := rand.Read(seed); err != nil {
 		return nil, err
 	}

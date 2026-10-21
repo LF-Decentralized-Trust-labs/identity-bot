@@ -430,7 +430,7 @@ class _OobiScreenState extends State<OobiScreen> {
       bannerColor = AppColors.coreInactive;
       bannerIcon = Icons.cloud_off;
       bannerLabel = 'NO EXTERNAL URL';
-      subtitle = 'No tunnel or network address available. Go to Settings and configure a Grape ID tunnel so others can reach your agent.';
+      subtitle = 'No tunnel or network address available. Reach this Identity Agent through a relay, or a development tunnel in Settings, so others can reach it.';
     }
 
     return Container(

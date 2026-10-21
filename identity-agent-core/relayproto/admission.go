@@ -50,20 +50,52 @@ type Statement struct {
 	Time     string `json:"t"`
 }
 
-// canonical is the exact bytes a statement is signed over: its fields as a JSON
-// object with sorted keys, no whitespace, and no HTML escaping, so another
-// implementation produces the same bytes with an ordinary JSON writer.
+// canonical is the exact bytes a statement is signed over: CanonicalBody of
+// its fields.
 func (s Statement) canonical() ([]byte, error) {
+	return CanonicalBody(map[string]any{
+		"purpose": s.Purpose, "protocol": s.Protocol, "service": s.Service,
+		"nonce": s.Nonce, "exporter": s.Exporter, "aid": s.AID, "t": s.Time,
+	})
+}
+
+// CanonicalBody is the exact bytes everything in this protocol is signed over:
+// an admission statement, and a control request (ADR-048 §8). It is the fields
+// as a JSON object with sorted keys, no whitespace and no HTML escaping, with
+// any "signature" field left out, so an implementation in any language
+// produces the same bytes with an ordinary JSON writer.
+//
+// Every field is a string of printable ASCII, which is what makes the form
+// unambiguous; anything else is refused rather than signed in some spelling
+// another implementation would not reproduce.
+func CanonicalBody(body map[string]any) ([]byte, error) {
+	fields := make(map[string]string, len(body))
+	for k, v := range body {
+		if k == "signature" {
+			continue
+		}
+		str, ok := v.(string)
+		if !ok || !printableASCII(str) || !printableASCII(k) {
+			return nil, fmt.Errorf("every signed field is a string of printable ASCII; %q is not", k)
+		}
+		fields[k] = str
+	}
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
-	if err := enc.Encode(map[string]string{
-		"purpose": s.Purpose, "protocol": s.Protocol, "service": s.Service,
-		"nonce": s.Nonce, "exporter": s.Exporter, "aid": s.AID, "t": s.Time,
-	}); err != nil {
+	if err := enc.Encode(fields); err != nil {
 		return nil, err
 	}
 	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
+}
+
+func printableASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] < 0x20 || s[i] > 0x7e {
+			return false
+		}
+	}
+	return true
 }
 
 // Admission is the Identity Agent's answer to a challenge.

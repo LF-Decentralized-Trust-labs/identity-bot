@@ -141,13 +141,6 @@ func (m *Manager) createProvider() Provider {
 		}
 		return NewNgrokProvider(authToken)
 
-	case ProviderGrapeID:
-		if m.config.TunnelExtension == "" {
-			log.Println("[tunnel] WARNING: grapeid selected but no tunnel extension provided")
-			return NewNoneProvider()
-		}
-		return NewGrapeIDProvider(m.config)
-
 	case ProviderNone:
 		return NewNoneProvider()
 
@@ -177,8 +170,6 @@ func DefaultConfig() Config {
 		return Config{Provider: ProviderNgrok, NgrokAuthToken: os.Getenv("NGROK_AUTHTOKEN")}
 	case ProviderCloudflare:
 		return Config{Provider: ProviderCloudflare, CloudflareTunnelToken: os.Getenv("CLOUDFLARE_TUNNEL_TOKEN")}
-	case ProviderGrapeID:
-		return Config{Provider: ProviderGrapeID, TunnelDomain: "grapeid.org"}
 	}
 
 	if os.Getenv("NGROK_AUTHTOKEN") != "" {
@@ -199,12 +190,9 @@ func DefaultConfig() Config {
 		return Config{Provider: ProviderCloudflare}
 	}
 
-	// Default to Grape ID tunneling. TunnelExtension will be auto-generated
-	// by the server on startup if not set.
-	return Config{
-		Provider:     ProviderGrapeID,
-		TunnelDomain: "grapeid.org",
-	}
+	// No development tunnel is available, so none is opened. A stable public
+	// address comes from a public relay (ADR-048), not from a tunnel.
+	return Config{Provider: ProviderNone}
 }
 
 func LookupCloudflared() (string, error) {

@@ -90,12 +90,11 @@ These settings ensure the same public URL continues working after migration.
 
 A critical invariant of migration is **URL continuity** — the same public URL must remain accessible after migration, regardless of tunnel provider.
 
-### Grape ID
+### A public relay (ADR-048)
 
-- **Name persistence:** grapeid.org stores claimed names in a PostgreSQL database. Names persist across server restarts and client reconnections.
-- **Migration process:** The target device claims the same name via `POST /claim-name`. If the source device's tunnel is still active, the name will be reported as "already taken." The source must disconnect its tunnel first, then the target can claim the name.
-- **Recommended flow:** Source device stops its tunnel → target device claims the same name → target establishes Chisel connection → same URL is now served by the target.
-- **Note:** There is currently no "transfer name" API on grapeid.org. If the source device is unreachable (lost, broken), the name cannot be released. A future `/release-name` endpoint on grapeid.org would address this.
+- **Name persistence:** a public relay keeps each claimed name and the identifier that holds it. A name survives restarts on both sides.
+- **Migration process:** a name belongs to the enrolment identifier that claimed it, so it moves with that identifier. The target device holds the same enrolment identifier (restored from the backup with the root seed it derives from), connects to the relay, and claims the name again, which is harmless for its holder. The relay then serves the name to the target's session, and the source's session is replaced (ADR-048 §4).
+- **If the source is lost:** nothing has to be released. The holder of the name is the identifier, not the device, so whichever device holds its key holds the name.
 
 ### Cloudflare (Quick Tunnels)
 

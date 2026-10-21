@@ -6,6 +6,8 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+
+	"identity-agent-core/relay"
 )
 
 // Remembering the identity this agent enrolled with a relay operator.
@@ -30,7 +32,13 @@ import (
 // seed and RelationshipIndex on demand — the same rule login follows for its
 // per-site relationship keys — so the only secret on disk stays the root seed.
 
-const relayEnrollmentFileName = "relay-enrollment.json"
+// Each mode has its own enrolment, and so its own record: a public address uses
+// an enrolment identifier of its own, never the one private addresses use
+// (ADR-048 §1).
+const (
+	relayEnrollmentFileName       = "relay-enrollment.json"
+	publicRelayEnrollmentFileName = "relay-public-enrollment.json"
+)
 
 // storedRelayEnrollment is what has to survive a restart for a relay's public
 // URL to stay stable across restarts.
@@ -60,10 +68,18 @@ type storedRelayEnrollment struct {
 	// it the AID is remembered but cannot be resolved, which to the operator is
 	// indistinguishable from it being gone.
 	KEL []map[string]interface{} `json:"kel"`
+	// Allocations are the addresses the relay granted, held again on every
+	// start so they do not change. A private address carries the secret that
+	// holds it, which the relay stores only a commitment to; this file is
+	// written owner-only for that reason.
+	Allocations []relay.Allocation `json:"allocations,omitempty"`
+	// PendingDomains are custom domains asked for at a public relay and
+	// waiting for their DNS proof.
+	PendingDomains []relay.DomainProof `json:"pending_domains,omitempty"`
 }
 
-func relayEnrollmentPath(dataDir string) string {
-	return filepath.Join(dataDir, relayEnrollmentFileName)
+func relayEnrollmentPath(dataDir, fileName string) string {
+	return filepath.Join(dataDir, fileName)
 }
 
 // saveRelayEnrollment records the enrollment this agent has just minted.
@@ -73,7 +89,7 @@ func relayEnrollmentPath(dataDir string) string {
 // often killed rather than shut down, and a write-and-rename that never reaches
 // the disk leaves a restart re-enrolling and the public URL moving — the exact
 // failure this closes.
-func saveRelayEnrollment(dataDir string, enr storedRelayEnrollment) error {
+func saveRelayEnrollment(dataDir, fileName string, enr storedRelayEnrollment) error {
 	if dataDir == "" {
 		return fmt.Errorf("no data directory, so the relay enrollment cannot be remembered")
 	}
@@ -90,7 +106,7 @@ func saveRelayEnrollment(dataDir string, enr storedRelayEnrollment) error {
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return err
 	}
-	tmp := relayEnrollmentPath(dataDir) + ".tmp"
+	tmp := relayEnrollmentPath(dataDir, fileName) + ".tmp"
 	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
@@ -109,7 +125,7 @@ func saveRelayEnrollment(dataDir string, enr storedRelayEnrollment) error {
 		os.Remove(tmp)
 		return err
 	}
-	if err := os.Rename(tmp, relayEnrollmentPath(dataDir)); err != nil {
+	if err := os.Rename(tmp, relayEnrollmentPath(dataDir, fileName)); err != nil {
 		os.Remove(tmp)
 		return err
 	}
@@ -127,11 +143,11 @@ func saveRelayEnrollment(dataDir string, enr storedRelayEnrollment) error {
 //
 // A missing file is not an error: an agent that has never enrolled with a relay
 // is the ordinary case.
-func loadRelayEnrollment(dataDir string) (*storedRelayEnrollment, bool, error) {
+func loadRelayEnrollment(dataDir, fileName string) (*storedRelayEnrollment, bool, error) {
 	if dataDir == "" {
 		return nil, false, nil
 	}
-	raw, err := os.ReadFile(relayEnrollmentPath(dataDir))
+	raw, err := os.ReadFile(relayEnrollmentPath(dataDir, fileName))
 	if os.IsNotExist(err) {
 		return nil, false, nil
 	}

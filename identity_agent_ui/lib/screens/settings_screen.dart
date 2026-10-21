@@ -34,8 +34,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
   final TextEditingController _ngrokTokenController = TextEditingController();
   final TextEditingController _cfTokenController = TextEditingController();
-  final TextEditingController _grapeIdDomainController = TextEditingController(text: 'grapeid.org');
-  final TextEditingController _grapeIdExtController = TextEditingController();
 
   String _selectedProvider = 'none';
   bool _loading = true;
@@ -49,18 +47,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _endpointUrl = '';
   String _endpointSource = '';
   
-  bool _isCheckingGrapeId = false;
-  bool? _isGrapeIdAvailable;
-  String? _grapeIdCheckError;
-  bool? _grapeIdHubAvailable;
-  bool _showCheckDebug = false;
-  String? _debugUrl;
-  int? _debugStatus;
-  String? _debugBody;
-  DateTime? _debugTime;
-  bool _grapeIdNameLocked = false;
-  String _grapeIdLockedName = '';
-  bool _isReleasingName = false;
 
   final TextEditingController _openRouterKeyController = TextEditingController();
   bool _openRouterKeySet = false;
@@ -91,29 +77,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _cloudflaredAvailable = settings['cloudflared_available'] == true;
         _hasNgrokToken = settings['has_ngrok_token'] == true;
         _hasCfToken = settings['has_cloudflare_token'] == true;
-        
-        if (settings['tunnel_domain'] != null && settings['tunnel_domain'].toString().isNotEmpty) {
-          _grapeIdDomainController.text = settings['tunnel_domain'].toString();
-        }
-        if (settings['tunnel_extension'] != null) {
-          _grapeIdExtController.text = settings['tunnel_extension'].toString();
-        }
-        final ext = (settings['tunnel_extension'] ?? '').toString().trim();
-        final provider = (settings['provider'] ?? 'none').toString();
-        if (provider == 'grapeid' && ext.isNotEmpty) {
-          _grapeIdNameLocked = true;
-          _grapeIdLockedName = ext;
-        } else {
-          _grapeIdNameLocked = false;
-          _grapeIdLockedName = '';
-        }
         if (endpointData != null) {
           _endpointUrl = endpointData['url']?.toString() ?? '';
           _endpointSource = endpointData['source']?.toString() ?? '';
         }
         _loading = false;
       });
-      _checkGrapeIdHub();
       _loadLLMSettings();
     } catch (e) {
       setState(() {
@@ -178,18 +147,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     } catch (_) {}
   }
 
-  Future<void> _checkGrapeIdHub() async {
-    final domain = _grapeIdDomainController.text.trim().isNotEmpty
-        ? _grapeIdDomainController.text.trim()
-        : 'grapeid.org';
-    final result = await _coreService.checkGrapeIdHealth(domain);
-    if (mounted) {
-      setState(() {
-        _grapeIdHubAvailable = result.reachable;
-      });
-    }
-  }
-
   Future<void> _saveSettings() async {
     setState(() {
       _saving = true;
@@ -201,8 +158,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
         provider: _selectedProvider,
         ngrokAuthToken: _ngrokTokenController.text.isNotEmpty ? _ngrokTokenController.text : null,
         cloudflareTunnelToken: _cfTokenController.text.isNotEmpty ? _cfTokenController.text : null,
-        tunnelDomain: _grapeIdDomainController.text.trim().isNotEmpty ? _grapeIdDomainController.text.trim() : null,
-        tunnelExtension: _grapeIdExtController.text.trim().isNotEmpty ? _grapeIdExtController.text.trim() : null,
       );
 
       await _loadSettings();
@@ -278,8 +233,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void dispose() {
     _ngrokTokenController.dispose();
     _cfTokenController.dispose();
-    _grapeIdDomainController.dispose();
-    _grapeIdExtController.dispose();
     _openRouterKeyController.dispose();
     _coreService.dispose();
     super.dispose();
@@ -321,7 +274,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   const SizedBox(height: 16),
                   _buildProviderSelector(),
                   const SizedBox(height: 16),
-                  if (_selectedProvider == 'grapeid') _buildGrapeIdConfig(),
                   if (_selectedProvider == 'ngrok') _buildNgrokConfig(),
                   if (_selectedProvider == 'cloudflare') _buildCloudflareConfig(),
                   const SizedBox(height: 16),
@@ -651,16 +603,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(height: 12),
           _buildProviderOption(
-            'grapeid',
-            'GRAPE ID',
-            'Custom permanent URLs via GrapeID Tunneling Hub (e.g. grapeid.org/alice).',
-            Icons.vpn_key_outlined,
-            enabled: true,
-            badge: _grapeIdHubAvailable == null ? null : (_grapeIdHubAvailable! ? 'AVAILABLE' : 'UNAVAILABLE'),
-            badgeIsError: _grapeIdHubAvailable == false,
-          ),
-          const SizedBox(height: 8),
-          _buildProviderOption(
             'cloudflare',
             'CLOUDFLARE',
             'Free quick tunnels or authenticated. Desktop only (requires cloudflared binary).',
@@ -779,479 +721,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ],
         ),
       ),
-    );
-  }
-
-  Future<void> _releaseTunnelName() async {
-    setState(() => _isReleasingName = true);
-    try {
-      await _coreService.releaseTunnelName();
-      setState(() {
-        _grapeIdNameLocked = false;
-        _grapeIdLockedName = '';
-        _grapeIdExtController.clear();
-        _isGrapeIdAvailable = null;
-        _grapeIdCheckError = null;
-        _debugTime = null;
-      });
-      await _loadSettings();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text(
-              'Name released successfully',
-              style: TextStyle(fontFamily: 'monospace'),
-            ),
-            backgroundColor: AppColors.accent.withOpacity(0.9),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Failed to release name: $e',
-              style: const TextStyle(fontFamily: 'monospace'),
-            ),
-            backgroundColor: AppColors.error.withOpacity(0.9),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _isReleasingName = false);
-    }
-  }
-
-  Future<void> _changeTunnelName() async {
-    setState(() => _isReleasingName = true);
-    try {
-      await _coreService.releaseTunnelName();
-      setState(() {
-        _grapeIdNameLocked = false;
-        _grapeIdLockedName = '';
-        _grapeIdExtController.clear();
-        _isGrapeIdAvailable = null;
-        _grapeIdCheckError = null;
-        _debugTime = null;
-      });
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Failed to release current name: $e',
-              style: const TextStyle(fontFamily: 'monospace'),
-            ),
-            backgroundColor: AppColors.error.withOpacity(0.9),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _isReleasingName = false);
-    }
-  }
-
-  Future<void> _checkGrapeIdAvailability() async {
-    final domain = _grapeIdDomainController.text.trim();
-    final ext = _grapeIdExtController.text.trim();
-    
-    if (ext.isEmpty) {
-      setState(() {
-        _isGrapeIdAvailable = null;
-        _grapeIdCheckError = null;
-      });
-      return;
-    }
-
-    setState(() {
-      _isCheckingGrapeId = true;
-      _grapeIdCheckError = null;
-    });
-
-    try {
-      final result = await _coreService.checkGrapeIdName(domain, ext);
-      setState(() {
-        _isCheckingGrapeId = false;
-        _isGrapeIdAvailable = result.available;
-        _grapeIdCheckError = result.hubError ? result.message : null;
-        _debugUrl = result.debugUrl;
-        _debugStatus = result.debugStatus;
-        _debugBody = result.debugBody;
-        _debugTime = DateTime.now();
-      });
-    } catch (e) {
-      setState(() {
-        _isCheckingGrapeId = false;
-        _isGrapeIdAvailable = null;
-        _grapeIdCheckError = 'Provider not responsive';
-        _debugBody = 'Exception: $e';
-        _debugStatus = 0;
-        _debugTime = DateTime.now();
-      });
-    }
-  }
-
-  Widget _buildGrapeIdConfig() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.border, width: 1),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'GRAPE ID TUNNEL CONFIGURATION',
-            style: TextStyle(
-              color: AppColors.textSecondary,
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 1.5,
-              fontFamily: 'monospace',
-            ),
-          ),
-          const SizedBox(height: 16),
-          const Text(
-            'DOMAIN',
-            style: TextStyle(
-              color: AppColors.textMuted,
-              fontSize: 10,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 1.0,
-              fontFamily: 'monospace',
-            ),
-          ),
-          const SizedBox(height: 6),
-          TextField(
-            controller: _grapeIdDomainController,
-            readOnly: _grapeIdNameLocked,
-            style: TextStyle(
-              color: _grapeIdNameLocked ? AppColors.textMuted : AppColors.textPrimary,
-              fontSize: 12,
-              fontFamily: 'monospace',
-            ),
-            decoration: InputDecoration(
-              hintText: 'e.g. grapeid.org, myagent.com...',
-              hintStyle: const TextStyle(color: AppColors.textMuted, fontSize: 12),
-              filled: true,
-              fillColor: _grapeIdNameLocked ? AppColors.primary.withOpacity(0.5) : AppColors.primary,
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppColors.border)),
-              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppColors.border)),
-              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppColors.accent)),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            ),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            _grapeIdNameLocked ? 'CLAIMED NAME' : 'EXTENSION (e.g. alice, cool-dragon)',
-            style: const TextStyle(
-              color: AppColors.textMuted,
-              fontSize: 10,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 1.0,
-              fontFamily: 'monospace',
-            ),
-          ),
-          const SizedBox(height: 6),
-          if (_grapeIdNameLocked) ...[
-            GestureDetector(
-              onTap: () {
-                final domain = _grapeIdDomainController.text.trim().isNotEmpty ? _grapeIdDomainController.text.trim() : 'grapeid.org';
-                final fullUrl = 'https://$domain/$_grapeIdLockedName';
-                Clipboard.setData(ClipboardData(text: fullUrl));
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(
-                      'Copied $fullUrl',
-                      style: const TextStyle(fontFamily: 'monospace'),
-                    ),
-                    duration: const Duration(seconds: 2),
-                    behavior: SnackBarBehavior.floating,
-                  ),
-                );
-              },
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                decoration: BoxDecoration(
-                  color: AppColors.primary.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: AppColors.primary.withValues(alpha: 0.2)),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.link, size: 14, color: AppColors.accent),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        '${_grapeIdDomainController.text.trim().isNotEmpty ? _grapeIdDomainController.text.trim() : "grapeid.org"}/$_grapeIdLockedName',
-                        style: const TextStyle(
-                          color: AppColors.accent,
-                          fontSize: 13,
-                          fontFamily: 'monospace',
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    const Icon(Icons.copy, size: 14, color: AppColors.textMuted),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _isReleasingName ? null : _changeTunnelName,
-                    icon: _isReleasingName
-                        ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.accent))
-                        : const Icon(Icons.edit, size: 14),
-                    label: const Text(
-                      'CHANGE NAME',
-                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, letterSpacing: 1.0, fontFamily: 'monospace'),
-                    ),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppColors.accent,
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      side: const BorderSide(color: AppColors.border),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _isReleasingName ? null : () => _confirmReleaseName(),
-                    icon: _isReleasingName
-                        ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.warning))
-                        : const Icon(Icons.link_off, size: 14),
-                    label: const Text(
-                      'RELEASE NAME',
-                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, letterSpacing: 1.0, fontFamily: 'monospace'),
-                    ),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppColors.warning,
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      side: BorderSide(color: AppColors.warning.withOpacity(0.5)),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ] else ...[
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _grapeIdExtController,
-                    style: const TextStyle(color: AppColors.textPrimary, fontSize: 12, fontFamily: 'monospace'),
-                    decoration: InputDecoration(
-                      prefixText: '/',
-                      prefixStyle: const TextStyle(color: AppColors.textMuted, fontSize: 12, fontFamily: 'monospace'),
-                      hintText: 'your-preferred-name',
-                      hintStyle: const TextStyle(color: AppColors.textMuted, fontSize: 12),
-                      filled: true,
-                      fillColor: AppColors.primary,
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppColors.border)),
-                      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppColors.border)),
-                      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppColors.accent)),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                OutlinedButton(
-                  onPressed: _isCheckingGrapeId ? null : _checkGrapeIdAvailability,
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppColors.accent,
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    side: const BorderSide(color: AppColors.border),
-                  ),
-                  child: _isCheckingGrapeId
-                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.accent))
-                      : const Text(
-                          'CHECK AVAILABILITY',
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w600,
-                            letterSpacing: 1.0,
-                            fontFamily: 'monospace',
-                          ),
-                        ),
-                ),
-              ],
-            ),
-            if (_isGrapeIdAvailable != null || _grapeIdCheckError != null) ...[
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  if (_grapeIdCheckError != null) ...[
-                    const Icon(Icons.warning_amber_outlined, size: 14, color: AppColors.warning),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        'Grape ID provider not responsive — ${_grapeIdCheckError!.toLowerCase()}. You can still save and try connecting.',
-                        style: const TextStyle(color: AppColors.warning, fontSize: 10, fontFamily: 'monospace'),
-                      ),
-                    ),
-                  ] else if (_isGrapeIdAvailable == true) ...[
-                    const Icon(Icons.check_circle_outline, size: 14, color: AppColors.coreActive),
-                    const SizedBox(width: 6),
-                    const Text(
-                      'This name is available!',
-                      style: TextStyle(color: AppColors.coreActive, fontSize: 10, fontFamily: 'monospace'),
-                    ),
-                  ] else if (_isGrapeIdAvailable == false) ...[
-                    const Icon(Icons.cancel_outlined, size: 14, color: AppColors.error),
-                    const SizedBox(width: 6),
-                    const Text(
-                      'This name is already taken. Please choose another.',
-                      style: TextStyle(color: AppColors.error, fontSize: 10, fontFamily: 'monospace'),
-                    ),
-                  ],
-                ],
-              ),
-            ],
-            if (_debugTime != null) ...[
-              const SizedBox(height: 12),
-              GestureDetector(
-                onTap: () => setState(() => _showCheckDebug = !_showCheckDebug),
-                child: Row(
-                  children: [
-                    Icon(
-                      _showCheckDebug ? Icons.expand_less : Icons.expand_more,
-                      size: 12,
-                      color: AppColors.textMuted,
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      _showCheckDebug ? 'HIDE REQUEST LOG' : 'SHOW REQUEST LOG',
-                      style: const TextStyle(
-                        color: AppColors.textMuted,
-                        fontSize: 9,
-                        letterSpacing: 1.0,
-                        fontFamily: 'monospace',
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              if (_showCheckDebug) ...[
-                const SizedBox(height: 8),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: AppColors.surfaceLight,
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: AppColors.border),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _debugRow('TIME', _debugTime != null
-                          ? '${_debugTime!.hour.toString().padLeft(2,'0')}:${_debugTime!.minute.toString().padLeft(2,'0')}:${_debugTime!.second.toString().padLeft(2,'0')}'
-                          : '—'),
-                      const SizedBox(height: 4),
-                      _debugRow('URL', _debugUrl ?? '—'),
-                      const SizedBox(height: 4),
-                      _debugRow('STATUS', _debugStatus != null
-                          ? (_debugStatus == 0 ? 'CONNECTION FAILED' : 'HTTP $_debugStatus')
-                          : '—'),
-                      const SizedBox(height: 4),
-                      _debugRow('BODY', _debugBody ?? '—'),
-                    ],
-                  ),
-                ),
-              ],
-            ],
-          ],
-        ],
-      ),
-    );
-  }
-
-  void _confirmReleaseName() {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.surface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        title: const Text(
-          'Release Name?',
-          style: TextStyle(color: AppColors.textPrimary, fontFamily: 'monospace', fontSize: 16),
-        ),
-        content: Text(
-          'This will release "$_grapeIdLockedName" on the hub and disconnect the tunnel. The name will become available for others to claim.',
-          style: const TextStyle(color: AppColors.textSecondary, fontFamily: 'monospace', fontSize: 12),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text(
-              'CANCEL',
-              style: TextStyle(color: AppColors.textMuted, fontFamily: 'monospace', fontSize: 11, letterSpacing: 1.0),
-            ),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.of(ctx).pop();
-              _releaseTunnelName();
-            },
-            child: const Text(
-              'RELEASE',
-              style: TextStyle(color: AppColors.warning, fontFamily: 'monospace', fontSize: 11, fontWeight: FontWeight.w600, letterSpacing: 1.0),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _debugRow(String label, String value) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SizedBox(
-          width: 48,
-          child: Text(
-            label,
-            style: const TextStyle(
-              color: AppColors.textMuted,
-              fontSize: 9,
-              fontFamily: 'monospace',
-              fontWeight: FontWeight.w600,
-              letterSpacing: 0.5,
-            ),
-          ),
-        ),
-        const Text(
-          ': ',
-          style: TextStyle(color: AppColors.textMuted, fontSize: 9, fontFamily: 'monospace'),
-        ),
-        Expanded(
-          child: Text(
-            value,
-            style: const TextStyle(
-              color: AppColors.textSecondary,
-              fontSize: 9,
-              fontFamily: 'monospace',
-            ),
-          ),
-        ),
-      ],
     );
   }
 
@@ -1786,8 +1255,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           SizedBox(height: 8),
           Text(
-            'Tunnels create a public HTTPS URL so your OOBI endpoints are reachable from anywhere. This lets other agents discover and verify your identity.\n\n'
-            'Grape ID: Uses a dedicated Chisel/Caddy tunneling hub assigned to a custom URL path (e.g. grapeid.org/alice).\n\n'
+            'A development tunnel gives this Identity Agent a public HTTPS URL from a tunnel vendor, so its OOBI endpoints are reachable from anywhere. It is not private, and is for development. A stable public or private address comes from a relay, which this app does not configure yet.\n\n'
             'Cloudflare: Free quick tunnels or authenticated tunnels via cloudflared binary (desktop only).\n\n'
             'ngrok: Pure in-memory tunnel via Go library. Works on desktop and mobile. Requires a free ngrok account.\n\n'
             'None: No tunnel. OOBI URLs use the PUBLIC_URL env var or the request host header.',

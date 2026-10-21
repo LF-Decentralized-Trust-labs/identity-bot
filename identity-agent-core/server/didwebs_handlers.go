@@ -93,7 +93,12 @@ func (s *CoreServer) publisherInput(r *http.Request, aid string) (didwebs.Publis
 	if idx := strings.Index(host, ":"); idx != -1 {
 		host = host[:idx]
 	}
-	if s.EndpointService != nil {
+	// Through a relay, the identifier is published at the address the request
+	// came to, path included: did:webs keeps a path as further segments of the
+	// identifier.
+	if u, ok := s.relayedAddress(r); ok {
+		host = strings.TrimPrefix(strings.TrimPrefix(u, "https://"), "http://")
+	} else if s.EndpointService != nil {
 		if u := s.EndpointService.CurrentURL(); u != "" {
 			if idx := strings.Index(u, "://"); idx != -1 {
 				u = u[idx+3:]

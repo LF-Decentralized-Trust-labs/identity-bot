@@ -92,9 +92,8 @@ reachable.
   loopback:
   1. **The agent's own dialled-out relay or tunnel.** The agent opens an outbound
      connection to the operator and the operator reverse-proxies inbound requests
-     back down it to the agent's loopback port (`relay/tunnel.go` delivers each
-     framed inbound request to `http://127.0.0.1:<port>`). Nothing external binds
-     on the agent host.
+     back down it to the agent (through `relayproto`, ADR-048, each inbound
+     request on a stream of its own). Nothing external binds on the agent host.
   2. **A reverse proxy on the host that dials the agent's loopback port** — the
      sealed-instance model. The agent is not directly reachable at all; a reverse
      proxy (for example Caddy) terminates TLS and forwards to the agent's loopback
@@ -165,11 +164,11 @@ Three properties make this sound:
   it from a relay stream, and sets `X-IA-Via-Ingress: relay` on every such request
   itself, overwriting anything a caller sent. That the request is remote no longer
   depends on the relay. The paragraph below describes the earlier frame protocol,
-  until the client moves onto `relayproto`.
+  which ADR-048 removed.
 - **The relay stamps its own marker.** A relay-forwarded request also reaches the
-  agent over loopback, so `relay/tunnel.go` sets `X-IA-Via-Ingress: relay` on the
-  box, after the client's headers are applied, where a client can neither remove nor
-  preempt it. Without this, anyone who learned the relay URL would be treated as the
+  agent over loopback, so the earlier frame client set `X-IA-Via-Ingress: relay` on
+  the box, after the client's headers are applied, where a client can neither remove
+  nor preempt it. Without this, anyone who learned the relay URL would be treated as the
   local owner with no signature required. Request bodies are carried through the
   forward (base64 in the inbound frame, decoded to a real body), so a signed POST — a
   controller grant, a rotation, any owner action — arrives with the bytes it was

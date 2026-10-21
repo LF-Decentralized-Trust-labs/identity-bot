@@ -10,7 +10,6 @@ type ProviderType string
 const (
 	ProviderCloudflare ProviderType = "cloudflare"
 	ProviderNgrok      ProviderType = "ngrok"
-	ProviderGrapeID    ProviderType = "grapeid"
 	ProviderNone       ProviderType = "none"
 )
 
@@ -26,9 +25,6 @@ type Config struct {
 	Provider              ProviderType `json:"provider"`
 	NgrokAuthToken        string       `json:"ngrok_auth_token,omitempty"`
 	CloudflareTunnelToken string       `json:"cloudflare_tunnel_token,omitempty"`
-	TunnelDomain          string       `json:"tunnel_domain,omitempty"`
-	TunnelExtension       string       `json:"tunnel_extension,omitempty"`
-	TunnelAuth            string       `json:"tunnel_auth,omitempty"`
 	AID                   string       `json:"aid,omitempty"`
 }
 
