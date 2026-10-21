@@ -2,6 +2,7 @@ package relay
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -62,6 +63,14 @@ type Config struct {
 	// server.
 	LocalBase string
 
+	// EnrollmentToken and AllocationToken are what the operator handed out the
+	// last time this enrollment came up, when they were remembered. An operator
+	// answers a second enrolment or allocation for the same AID with "already
+	// done" and no new token, so these are what lets a restarted agent carry on
+	// at the same address rather than be stranded.
+	EnrollmentToken string
+	AllocationToken string
+
 	// Allocation carries the optional lifetime/scope/naming parameters for this
 	// manager's allocate request. Its zero value is the historical default
 	// (opaque, persistent) — an existing caller that never sets it gets exactly
@@ -90,11 +99,12 @@ type Manager struct {
 	cfg    Config
 	signer Signer
 
-	mu         sync.RWMutex
-	status     Status
-	allocToken string
-	tunnel     *TunnelAgent
-	cancel     context.CancelFunc
+	mu          sync.RWMutex
+	status      Status
+	allocToken  string
+	enrollToken string
+	tunnel      *TunnelAgent
+	cancel      context.CancelFunc
 
 	// onChange fires when the public URL appears, changes or is lost. This is
 	// the hook that lets the agent republish where it currently is instead of
@@ -147,6 +157,10 @@ func (m *Manager) Start(parent context.Context) error {
 	}
 
 	enroll, err := client.Enroll(ctx, m.cfg.EnrollmentAID, m.cfg.OOBIUrl, m.cfg.PublicKeyB64)
+	if errors.Is(err, ErrAlreadyEnrolled) && m.cfg.EnrollmentToken != "" {
+		client.Token = m.cfg.EnrollmentToken
+		enroll, err = &EnrollResponse{EnrollmentAID: m.cfg.EnrollmentAID, EnrollmentToken: m.cfg.EnrollmentToken}, nil
+	}
 	if err != nil {
 		cancel()
 		return m.fail(fmt.Errorf("enroll with %s: %w", m.cfg.BaseURL, err))
@@ -156,6 +170,15 @@ func (m *Manager) Start(parent context.Context) error {
 	if err != nil {
 		cancel()
 		return m.fail(fmt.Errorf("allocate from %s: %w", m.cfg.BaseURL, err))
+	}
+	// An address this agent already holds comes back without its token, and
+	// the token is what the tunnel connects with.
+	if alloc.AllocationToken == "" {
+		alloc.AllocationToken = m.cfg.AllocationToken
+	}
+	if alloc.AllocationToken == "" {
+		cancel()
+		return m.fail(fmt.Errorf("%s says this agent already has an address there, and its token was not remembered", m.cfg.BaseURL))
 	}
 
 	// The descriptor's endpoint is the default, but an allocation may direct
@@ -179,6 +202,7 @@ func (m *Manager) Start(parent context.Context) error {
 	m.cancel = cancel
 	m.tunnel = agent
 	m.allocToken = alloc.AllocationToken
+	m.enrollToken = client.Token
 	// An allocation is a promise of an address, not yet a working one. Active
 	// stays false until the socket is actually up, and markActive announces it
 	// from there — publishing an endpoint that has been allocated but not
@@ -270,11 +294,13 @@ func (m *Manager) markActive() {
 	}
 }
 
-// Stop disconnects and releases the allocation.
+// Stop disconnects, and releases the allocation when it was only ever meant to
+// be short-lived.
 //
-// Releasing matters as a courtesy and as hygiene: an operator that is told the
-// hostname is finished with can reuse it, and an agent that vanishes without
-// saying so leaves an allocation nobody will ever collect.
+// A permanent address is kept. Its whole value is that it does not change, and
+// releasing it on every shutdown handed out a new one at every start. A
+// short-lived allocation is released as a courtesy, so the operator can reuse
+// the hostname instead of waiting for it to expire.
 func (m *Manager) Stop() {
 	m.mu.Lock()
 	cancel := m.cancel
@@ -291,7 +317,7 @@ func (m *Manager) Stop() {
 		cancel()
 	}
 
-	if token != "" {
+	if token != "" && m.cfg.Allocation.Lifetime == LifetimeEphemeral {
 		ctx, done := context.WithTimeout(context.Background(), 10*time.Second)
 		defer done()
 		client := NewClient(m.cfg.BaseURL, "", m.signer)
@@ -305,6 +331,14 @@ func (m *Manager) Stop() {
 	if url != "" {
 		m.notify(url, false)
 	}
+}
+
+// Tokens are the enrollment and allocation tokens this manager came up with, so
+// they can be remembered for the next start. Empty before Start succeeds.
+func (m *Manager) Tokens() (enrollment, allocation string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.enrollToken, m.allocToken
 }
 
 // URL is the current public address, or empty when the relay is not up.

@@ -60,6 +60,12 @@ type storedRelayEnrollment struct {
 	// it the AID is remembered but cannot be resolved, which to the operator is
 	// indistinguishable from it being gone.
 	KEL []map[string]interface{} `json:"kel"`
+	// EnrollmentToken and AllocationToken are what the operator handed out when
+	// this enrollment first came up. It answers a repeat enrolment or allocation
+	// with "already done" and no token, so without these a restarted agent
+	// could not reconnect at the address it already holds.
+	EnrollmentToken string `json:"enrollment_token,omitempty"`
+	AllocationToken string `json:"allocation_token,omitempty"`
 }
 
 func relayEnrollmentPath(dataDir string) string {

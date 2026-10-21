@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -54,11 +55,24 @@ func (c *Client) FetchDescriptor(ctx context.Context) (*ServiceDescriptor, error
 	return &d, nil
 }
 
+// ErrAlreadyEnrolled is an operator saying it already holds this enrollment.
+// The enrollment is still good; what the agent needs to go on is the token it
+// was given the first time.
+var ErrAlreadyEnrolled = errors.New("relay: this enrollment AID is already enrolled")
+
 func (c *Client) Enroll(ctx context.Context, enrollmentAID, oobiURL string, publicKeyB64 string) (*EnrollResponse, error) {
 	body := map[string]interface{}{
 		"v": JSONVersion, "enrollment_aid": enrollmentAID, "oobi": oobiURL,
 		"root_aid_enrollment": false, "public_key_b64": publicKeyB64,
 	}
+	// Signed by the key being presented: whoever enrolls an AID controls every
+	// signed operation for it afterwards, so an operator must see that the
+	// caller holds the key, not merely names it.
+	sig, err := c.Signer.SignCanonical(enrollmentAID, body)
+	if err != nil {
+		return nil, err
+	}
+	body["signature"] = sig
 	raw, _ := json.Marshal(body)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/enroll", bytes.NewReader(raw))
 	if err != nil {
@@ -71,6 +85,9 @@ func (c *Client) Enroll(ctx context.Context, enrollmentAID, oobiURL string, publ
 	}
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode == http.StatusConflict {
+		return nil, ErrAlreadyEnrolled
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("enroll %d: %s", resp.StatusCode, string(b))
 	}
