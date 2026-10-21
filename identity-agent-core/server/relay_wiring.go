@@ -63,7 +63,7 @@ type relayEnrollmentSigner struct {
 }
 
 func (rs *relayEnrollmentSigner) SignCanonical(enrollmentAID string, body map[string]interface{}) (string, error) {
-	canon, err := relay.CanonicalBody(body)
+	canon, err := relayproto.CanonicalBody(body)
 	if err != nil {
 		return "", err
 	}

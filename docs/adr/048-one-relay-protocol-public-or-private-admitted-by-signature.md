@@ -318,7 +318,7 @@ enrolment identifier's log names now. Every request carries:
 | `signed_by` | the enrolment identifier |
 | `t` | RFC 3339, within two minutes of the relay's clock |
 | `nonce` | 16 to 64 characters, never accepted twice |
-| `signature` | Ed25519, base64url without padding, over the request's other fields as JSON with sorted keys, no whitespace and no HTML escaping: the form an admission statement is signed in (§3) |
+| `signature` | Ed25519, base64url without padding, over the request's other fields as JSON with sorted keys, no whitespace and no HTML escaping: the form an admission statement is signed in (§3), `relayproto.CanonicalBody` |
 
 The relay accepts a control request only while `signed_by` holds a live
 session, and checks it against the key that session's log names now.

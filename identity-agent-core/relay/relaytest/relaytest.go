@@ -389,7 +389,7 @@ func (r *Relay) control(w http.ResponseWriter, req *http.Request, op string, fn 
 	r.mu.Unlock()
 	raw, err := base64.RawURLEncoding.DecodeString("A" + key[1:])
 	sig, serr := base64.RawURLEncoding.DecodeString(f["signature"])
-	canon, cerr := relay.CanonicalBody(body)
+	canon, cerr := relayproto.CanonicalBody(body)
 	if err != nil || serr != nil || cerr != nil || len(raw) != 33 || !ed25519.Verify(ed25519.PublicKey(raw[1:]), canon, sig) {
 		http.Error(w, "bad signature", http.StatusUnauthorized)
 		return

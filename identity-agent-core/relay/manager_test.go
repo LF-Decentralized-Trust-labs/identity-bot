@@ -57,7 +57,7 @@ func newEnrolment(t *testing.T) *enrolment {
 }
 
 func (e *enrolment) SignCanonical(_ string, body map[string]interface{}) (string, error) {
-	canon, err := relay.CanonicalBody(body)
+	canon, err := relayproto.CanonicalBody(body)
 	if err != nil {
 		return "", err
 	}

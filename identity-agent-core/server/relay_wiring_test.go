@@ -386,7 +386,7 @@ func TestARelayRequestIsSignedTheWayARelayChecksIt(t *testing.T) {
 	if err != nil || len(raw) != ed25519.SignatureSize {
 		t.Fatalf("not a plain Ed25519 signature: %q", sig)
 	}
-	canon, _ := relay.CanonicalBody(body)
+	canon, _ := relayproto.CanonicalBody(body)
 	if !ed25519.Verify(ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey), canon, raw) {
 		t.Fatal("the signature does not verify over the canonical body")
 	}
