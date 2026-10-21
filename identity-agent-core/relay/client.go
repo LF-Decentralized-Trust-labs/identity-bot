@@ -9,7 +9,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -68,11 +70,54 @@ func (c *Client) FetchDescriptor(ctx context.Context) (*ServiceDescriptor, error
 	if d.Protocol != relayproto.ProtocolVersion {
 		return nil, fmt.Errorf("the relay speaks %q; this Identity Agent speaks %q", d.Protocol, relayproto.ProtocolVersion)
 	}
-	if !strings.HasPrefix(d.TunnelEndpoint, "wss://") || d.Service == "" {
-		return nil, fmt.Errorf("the relay's descriptor names no service or no wss:// session endpoint")
+	if d.Service == "" {
+		return nil, fmt.Errorf("the relay's descriptor names no service")
+	}
+	if err := CheckConnectHost(c.BaseURL, &d); err != nil {
+		return nil, err
 	}
 	c.Descriptor = &d
 	return &d, nil
+}
+
+// CheckConnectHost holds the descriptor to one connect host under the relay's
+// own name, and every endpoint to it.
+//
+// The descriptor may arrive through a proxy in front of the relay's callers.
+// A proxy that rewrote it to send this Identity Agent somewhere else would
+// have it admitted, and its addresses served, by whoever answers there. So the
+// connect host must be the relay's own host or a name under it, and the
+// session and control endpoints must all be at that host.
+func CheckConnectHost(baseURL string, d *ServiceDescriptor) error {
+	base, err := url.Parse(baseURL)
+	if err != nil || base.Host == "" {
+		return fmt.Errorf("the relay %q is not a URL", baseURL)
+	}
+	if d.ConnectHost == "" {
+		d.ConnectHost = base.Host
+	}
+	connect := strings.ToLower(d.ConnectHost)
+	connectName := connect
+	if h, _, err := net.SplitHostPort(connect); err == nil {
+		connectName = h
+	}
+	baseName := strings.ToLower(base.Hostname())
+	if connectName != baseName && !strings.HasSuffix(connectName, "."+baseName) {
+		return fmt.Errorf("the relay at %s names %s as its connect host, which is not under its own name", baseName, connect)
+	}
+	at := func(raw, scheme string) bool {
+		u, err := url.Parse(raw)
+		return err == nil && u.Scheme == scheme && strings.ToLower(u.Host) == connect
+	}
+	if !at(d.TunnelEndpoint, "wss") {
+		return fmt.Errorf("the relay's session endpoint %q is not at its connect host %s", d.TunnelEndpoint, connect)
+	}
+	for op, ep := range d.Endpoints {
+		if !at(ep, "https") {
+			return fmt.Errorf("the relay's %s endpoint %q is not at its connect host %s", op, ep, connect)
+		}
+	}
+	return nil
 }
 
 // NewSecret makes the secret a private address is held by, and the commitment
@@ -195,7 +240,7 @@ func (c *Client) control(ctx context.Context, op, aid string, fields map[string]
 	}
 	endpoint := c.Descriptor.Endpoints[op]
 	if endpoint == "" {
-		endpoint = c.BaseURL + defaultPaths[op]
+		endpoint = "https://" + c.Descriptor.ConnectHost + defaultPaths[op]
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(raw))
 	if err != nil {

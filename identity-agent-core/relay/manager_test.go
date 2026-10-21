@@ -380,3 +380,60 @@ func TestTheProviderIsTheOperatorHost(t *testing.T) {
 		t.Fatalf("provider %q", got)
 	}
 }
+
+// An Identity Agent is admitted, and signs its requests, only at the relay's
+// connect host: never through the caller-facing door, which may sit behind a
+// proxy that terminates TLS and could not carry an admission bound to it.
+func TestTheSessionAndControlRequestsGoToTheConnectHost(t *testing.T) {
+	rl := relaytest.New(relayproto.ModePrivate)
+	defer rl.Close()
+	e := newEnrolment(t)
+	m := managerFor(t, rl, e, relayproto.ModePrivate)
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer m.Stop()
+	waitFor(t, "the relay address", func() bool { return m.URL() != "" })
+	if n := rl.MisdirectedCount(); n != 0 {
+		t.Fatalf("%d sessions or control requests went to the caller-facing door", n)
+	}
+	if !strings.HasPrefix(m.URL(), rl.URL()) {
+		t.Fatalf("the address published is %s, not at the caller-facing %s", m.URL(), rl.URL())
+	}
+}
+
+// A descriptor that names a connect host outside the relay's own name, as one
+// rewritten by a proxy in front of callers would, is refused.
+func TestAConnectHostOutsideTheRelaysNameIsRefused(t *testing.T) {
+	rl := relaytest.New(relayproto.ModePrivate)
+	defer rl.Close()
+	rl.ConnectHostOverride = "connect.elsewhere.example:443"
+	e := newEnrolment(t)
+	err := managerFor(t, rl, e, relayproto.ModePrivate).Start(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "not under its own name") {
+		t.Fatalf("a connect host outside the relay's name was accepted: %v", err)
+	}
+}
+
+// Every endpoint must be at the connect host the descriptor names.
+func TestAnEndpointAwayFromTheConnectHostIsRefused(t *testing.T) {
+	c := relay.NewClient("https://relay.example", nil)
+	srv := relaytest.New(relayproto.ModePrivate)
+	defer srv.Close()
+	c.BaseURL = srv.URL()
+	c.HTTPClient = srv.Client()
+	d, err := c.FetchDescriptor(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad := *d
+	bad.Endpoints = map[string]string{relay.OpBind: srv.URL() + "/bind"} // the caller-facing door
+	if err := relay.CheckConnectHost(c.BaseURL, &bad); err == nil {
+		t.Fatal("a control endpoint away from the connect host was accepted")
+	}
+	bad = *d
+	bad.TunnelEndpoint = "wss://" + strings.TrimPrefix(srv.URL(), "https://") + "/tunnel"
+	if err := relay.CheckConnectHost(c.BaseURL, &bad); err == nil {
+		t.Fatal("a session endpoint away from the connect host was accepted")
+	}
+}

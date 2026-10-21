@@ -2,6 +2,11 @@
 // of ADR-048 as a real relay does: the session through relayproto, the
 // discovery descriptor, and signed control requests (§8).
 //
+// Like a real deployment, it has two front doors: the caller-facing one, which
+// in production may sit behind a TLS-terminating proxy, and a connect host
+// where Identity Agents are admitted and send control requests. The
+// caller-facing door refuses both, and counts anybody who tries.
+//
 // A private address is a path, https://<relay>/<label>/...: the label is
 // stripped and named in X-Forwarded-Prefix before a request is forwarded. A
 // public name is a host, https://<name>.<relay>/..., forwarded unchanged.
@@ -29,8 +34,16 @@ import (
 
 // Relay is a running test relay.
 type Relay struct {
-	Mode   relayproto.Mode
-	Server *httptest.Server
+	Mode relayproto.Mode
+	// Server is the caller-facing door; Connect is the connect host.
+	Server  *httptest.Server
+	Connect *httptest.Server
+	// ConnectHostOverride, when set, is the connect host the descriptor
+	// advertises instead of the real one: a descriptor somebody rewrote.
+	ConnectHostOverride string
+	// Misdirected counts sessions and control requests that came to the
+	// caller-facing door.
+	Misdirected int
 
 	service string
 	cfg     *relayproto.ServiceConfig
@@ -59,9 +72,12 @@ func New(mode relayproto.Mode) *Relay {
 	r := &Relay{Mode: mode, enrolled: map[string][]byte{}, keys: map[string]string{},
 		commitments: map[string]string{}, names: map[string]string{}, bound: map[string]string{},
 		nonces: map[string]bool{}, aliases: map[string]string{}}
-	r.Server = httptest.NewUnstartedServer(http.HandlerFunc(r.handle))
+	r.Server = httptest.NewUnstartedServer(http.HandlerFunc(r.handleCaller))
 	r.Server.TLS = &tls.Config{MinVersion: tls.VersionTLS13}
 	r.Server.StartTLS()
+	r.Connect = httptest.NewUnstartedServer(http.HandlerFunc(r.handle))
+	r.Connect.TLS = &tls.Config{MinVersion: tls.VersionTLS13}
+	r.Connect.StartTLS()
 	host := strings.TrimPrefix(r.Server.URL, "https://")
 	r.service = host[:strings.LastIndex(host, ":")]
 	r.cfg = &relayproto.ServiceConfig{
@@ -101,7 +117,34 @@ func (r *Relay) TLS() *tls.Config {
 func (r *Relay) Client() *http.Client { return r.Server.Client() }
 
 // Close stops the relay and every session.
-func (r *Relay) Close() { r.Server.CloseClientConnections(); r.Server.Close() }
+func (r *Relay) Close() {
+	r.Server.CloseClientConnections()
+	r.Server.Close()
+	r.Connect.CloseClientConnections()
+	r.Connect.Close()
+}
+
+// MisdirectedCount is how many sessions and control requests came to the
+// caller-facing door.
+func (r *Relay) MisdirectedCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.Misdirected
+}
+
+// handleCaller is the caller-facing door: the descriptor and the addresses,
+// and nothing an Identity Agent connects or signs through.
+func (r *Relay) handleCaller(w http.ResponseWriter, req *http.Request) {
+	switch req.URL.Path {
+	case "/tunnel", "/allocate", "/bind", "/release", "/names/claim", "/names/release":
+		r.mu.Lock()
+		r.Misdirected++
+		r.mu.Unlock()
+		http.Error(w, "connect at the connect host", http.StatusMisdirectedRequest)
+		return
+	}
+	r.handle(w, req)
+}
 
 // Drop ends aid's live session, as a dropped network would.
 func (r *Relay) Drop(aid string) { r.cfg.Registry.Revoke(aid) }
@@ -169,14 +212,20 @@ func (r *Relay) handle(w http.ResponseWriter, req *http.Request) {
 	}
 	switch req.URL.Path {
 	case "/.well-known/url-relay-service.json":
+		connect := strings.TrimPrefix(r.Connect.URL, "https://")
+		r.mu.Lock()
+		if r.ConnectHostOverride != "" {
+			connect = r.ConnectHostOverride
+		}
+		r.mu.Unlock()
 		eps := map[string]string{}
 		for op, path := range map[string]string{relay.OpAllocate: "/allocate", relay.OpBind: "/bind",
 			relay.OpRelease: "/release", relay.OpClaimName: "/names/claim", relay.OpReleaseName: "/names/release"} {
-			eps[op] = r.Server.URL + path
+			eps[op] = "https://" + connect + path
 		}
 		json.NewEncoder(w).Encode(relay.ServiceDescriptor{
-			Protocol: relayproto.ProtocolVersion, Service: r.service, Mode: r.Mode,
-			TunnelEndpoint: "wss://" + req.Host + "/tunnel", Endpoints: eps,
+			Protocol: relayproto.ProtocolVersion, Service: r.service, Mode: r.Mode, ConnectHost: connect,
+			TunnelEndpoint: "wss://" + connect + "/tunnel", Endpoints: eps,
 		})
 		return
 	case "/tunnel":

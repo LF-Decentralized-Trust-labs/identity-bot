@@ -16,9 +16,18 @@ type ServiceDescriptor struct {
 	// Mode is the kind of address this relay hands out. An operator runs
 	// public and private service as separate deployments (ADR-048 §1).
 	Mode relayproto.Mode `json:"mode"`
-	// TunnelEndpoint is the wss:// address of the session websocket.
+	// ConnectHost is where an Identity Agent connects: the session and every
+	// control request go there, never through the caller-facing addresses. A
+	// relay may put a TLS-terminating proxy in front of callers, but never in
+	// front of this host, because admission is bound to the TLS connection
+	// (ADR-048 §10). It is the relay's own host or a name under it. Empty means
+	// the relay's own host.
+	ConnectHost string `json:"connect_host,omitempty"`
+	// TunnelEndpoint is the wss:// address of the session websocket, at the
+	// connect host.
 	TunnelEndpoint string `json:"tunnel_endpoint"`
-	// Endpoints maps each control op to the URL it is sent to.
+	// Endpoints maps each control op to the URL it is sent to, at the connect
+	// host.
 	Endpoints map[string]string `json:"endpoints"`
 }
 

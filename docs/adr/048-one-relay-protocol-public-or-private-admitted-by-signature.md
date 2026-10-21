@@ -271,10 +271,25 @@ A public address is a name at the relay, or the identity's own domain.
 ### 8. Discovery, addresses and control requests
 
 **Discovery.** A relay publishes `GET /.well-known/url-relay-service.json`:
-`protocol` (this protocol's version), `service` (the relay's name, the host name
-its challenges carry), `mode`, `tunnel_endpoint` (the `wss://` session
-endpoint), and `endpoints`, which maps each control `op` below to the URL it is
-sent to.
+`protocol` (this protocol's version), `service` (the name its challenges and
+control requests carry), `mode`, `connect_host`, `tunnel_endpoint` (the `wss://`
+session endpoint), and `endpoints`, which maps each control `op` below to the
+URL it is sent to.
+
+**Two front doors.** A relay has a **connect host**, where Identity Agents are
+admitted and send control requests, and **caller-facing** addresses, where
+everybody else reaches them. They may be different hosts.
+- The session and every control request go to the connect host, and nowhere
+  else. `tunnel_endpoint` and every entry in `endpoints` are at it.
+- The connect host is the relay's own host or a name under it (for example
+  `connect.<relay>`). The descriptor may reach the Identity Agent through
+  whatever sits in front of callers, so an Identity Agent refuses a descriptor
+  naming a connect host outside the relay's name, or an endpoint away from the
+  connect host: anything in front of callers that rewrote it would otherwise
+  have the Identity Agent admitted, and its addresses served, by somebody else.
+- The Identity Agent's dialled-host check (§3) applies to the connect host.
+- Everything the Identity Agent publishes uses the caller-facing URLs the relay
+  returns (`public_url`), never the connect host.
 
 **Enrolment is the first admission.** The key event log travels with it
 (§3). There is no separate enrol call and no enrolment token.
@@ -352,14 +367,21 @@ current state, not a string handed out once (ADR-033).
 ### 10. Proxies between the two ends
 
 The admission is bound to the TLS connection between the relay and the Identity
-Agent, so that connection must run end to end between them.
+Agent, so that connection must run end to end between them. That binds only the
+connect host (§8). Callers' traffic is ordinary HTTPS, so a relay may put a
+proxy that terminates TLS (a CDN, say) in front of its caller-facing addresses.
 
 | Proxy | Works? |
 |---|---|
-| A TCP or SNI pass-through in front of the relay (a load balancer that forwards TLS unopened) | yes |
-| A TLS-terminating front in front of the relay | no. The relay sees a different TLS connection from the Identity Agent's, and cannot admit anybody. |
+| A TLS-terminating proxy in front of the caller-facing addresses | yes |
+| A TCP or SNI pass-through in front of the connect host (a load balancer that forwards TLS unopened) | yes |
+| A TLS-terminating proxy in front of the connect host | no. The relay sees a different TLS connection from the Identity Agent's, and cannot admit anybody. A relay must never put one there. |
 | A TLS-inspecting proxy on the Identity Agent's network | no. It cannot be admitted, for the same reason. |
 | A plain HTTP CONNECT proxy on the Identity Agent's side (`HTTPS_PROXY`, honoured through `ProxyFromEnvironment`) | yes. It tunnels the TLS connection unopened. |
+
+A proxy in front of callers sees what callers send. A private address passes
+only what §6 allows, and what crosses it is what any counterparty may fetch or
+send, so this is the same exposure as any public web host.
 
 ### 11. What a relay can and cannot see
 
@@ -422,8 +444,9 @@ removed.
   identifier's current key.
 - Websockets, streaming and large bodies work through a relay, so a public address
   serves everything a directly reachable Identity Agent does.
-- **The relay must terminate TLS itself** (§10). That is a deployment constraint
-  the channel binding imposes, and the reason the binding is worth having.
+- **The relay must terminate TLS itself at its connect host** (§8, §10). That is
+  a deployment constraint the channel binding imposes, and the reason the
+  binding is worth having. Caller-facing addresses may sit behind any proxy.
 - **Sessions live in the relay's memory on one machine.** Running a relay on more
   than one machine needs inbound requests routed to the machine that holds the
   session.
