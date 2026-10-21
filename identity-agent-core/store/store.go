@@ -135,9 +135,10 @@ type SettingsData struct {
 	TunnelExtension       string `json:"tunnel_extension,omitempty"`
 
 	// IngressMode is the instance's default way of becoming reachable from
-	// outside: "relay" (per-relationship opaque URLs), "tunnel" (one public URL
-	// for the whole agent), or "direct" (the agent's own reachable address, a
-	// developer/testing toggle). Empty means "unset" — the server then resolves a
+	// outside: "relay" (private addresses, one per relationship, at a relay),
+	// "public" (one stable public address at a relay), "tunnel" (a development
+	// tunnel, not private), or "direct" (the Identity Agent's own reachable
+	// address, a developer/testing toggle). Empty means "unset" — the server then resolves a
 	// default from the entity type rather than storing one, so an instance that
 	// has never chosen a mode is not pinned to whatever the default was on the day
 	// it was first written.
@@ -149,6 +150,16 @@ type SettingsData struct {
 	// back-compat. The OSS core bundles no operator, so a deployment that wants
 	// URL Relay names one here.
 	RelayOperator string `json:"relay_operator,omitempty"`
+
+	// PublicRelayOperator is the base URL of the relay that gives this instance
+	// its public address in public mode. Empty falls back to the
+	// PUBLIC_RELAY_BASE_URL env var. A public relay is a separate deployment
+	// from a private one, so the two are configured separately.
+	PublicRelayOperator string `json:"public_relay_operator,omitempty"`
+
+	// PublicRelayName is the name asked for at the public relay. Empty lets the
+	// relay choose one.
+	PublicRelayName string `json:"public_relay_name,omitempty"`
 }
 
 type PendingRequest struct {

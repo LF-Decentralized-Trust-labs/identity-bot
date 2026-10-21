@@ -495,11 +495,11 @@ func (s *SQLiteStore) GetSettings() (*SettingsData, error) {
 	var settings SettingsData
 	err := s.db.QueryRow(
 		`SELECT tunnel_provider, ngrok_auth_token, cloudflare_tunnel_token, tunnel_domain, tunnel_extension,
-		        ingress_mode, relay_operator
+		        ingress_mode, relay_operator, public_relay_operator, public_relay_name
 		 FROM settings LIMIT 1`,
 	).Scan(&settings.TunnelProvider, &settings.NgrokAuthToken,
 		&settings.CloudflareTunnelToken, &settings.TunnelDomain, &settings.TunnelExtension,
-		&settings.IngressMode, &settings.RelayOperator)
+		&settings.IngressMode, &settings.RelayOperator, &settings.PublicRelayOperator, &settings.PublicRelayName)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -526,11 +526,11 @@ func (s *SQLiteStore) SaveSettings(settings SettingsData) error {
 	}
 	if _, err := tx.Exec(
 		`INSERT INTO settings (tunnel_provider, ngrok_auth_token, cloudflare_tunnel_token, tunnel_domain, tunnel_extension,
-		                       ingress_mode, relay_operator)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		                       ingress_mode, relay_operator, public_relay_operator, public_relay_name)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		settings.TunnelProvider, settings.NgrokAuthToken,
 		settings.CloudflareTunnelToken, settings.TunnelDomain, settings.TunnelExtension,
-		settings.IngressMode, settings.RelayOperator,
+		settings.IngressMode, settings.RelayOperator, settings.PublicRelayOperator, settings.PublicRelayName,
 	); err != nil {
 		return fmt.Errorf("failed to save settings: %w", err)
 	}
@@ -1624,6 +1624,8 @@ func PoolBase(namespace string) (int, error) {
 		return 7000001, nil
 	case "relay-enrollment":
 		return 8000001, nil
+	case "relay-public-enrollment":
+		return 9000001, nil
 	}
 	return 0, fmt.Errorf("pairwise pool %q has no range of its own — give it one in "+
 		"PoolBase, because a pool without one shares keys with another", namespace)

@@ -67,7 +67,7 @@ func TestAPoolIsAllocatedFromTheBaseItIsReadFrom(t *testing.T) {
 	for _, pool := range []string{
 		"contacts", "login", "machines", "delegated-identity",
 		"invocation-log", "messaging-keys", "witnessing",
-		"post-quantum-prerotation", "relay-enrollment",
+		"post-quantum-prerotation", "relay-enrollment", "relay-public-enrollment",
 	} {
 		base, err := PoolBase(pool)
 		if err != nil {

@@ -843,6 +843,16 @@ ALTER TABLE adopted_agents ADD COLUMN backup_signing_key_b64 TEXT;
 ALTER TABLE settings ADD COLUMN ingress_mode   TEXT NOT NULL DEFAULT '';
 ALTER TABLE settings ADD COLUMN relay_operator TEXT NOT NULL DEFAULT '';
 `},
+	{
+		Version:     37,
+		Description: "Persist the public relay operator and the public name asked for",
+		SQL: `
+-- A public address comes from a relay deployment of its own, separate from the
+-- private relay, so it is configured separately. Both default to '' so the
+-- single settings row keeps working unchanged.
+ALTER TABLE settings ADD COLUMN public_relay_operator TEXT NOT NULL DEFAULT '';
+ALTER TABLE settings ADD COLUMN public_relay_name     TEXT NOT NULL DEFAULT '';
+`},
 }
 
 // ApplyIdentityMigrations creates the migrations table and applies any pending migrations.
