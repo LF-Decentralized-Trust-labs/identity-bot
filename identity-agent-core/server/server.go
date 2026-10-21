@@ -66,6 +66,10 @@ type CoreServer struct {
 	DataDir         string
 	// DeclaredEntityType is what the build said it serves — see Config.
 	DeclaredEntityType string
+	// DefaultIngressMode, when set by a product built on the core, is its
+	// per-entity default for how an identity is reached until the identity
+	// chooses for itself. Unset, every identity defaults to URL Relay.
+	DefaultIngressMode func(entityType string) IngressMode
 	AppCtx             context.Context
 	cancel             context.CancelFunc
 	listener           net.Listener
@@ -4321,7 +4325,7 @@ func (s *CoreServer) handleGetReachabilitySettings(w http.ResponseWriter, r *htt
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"mode":            stored.IngressMode,
 		"resolved_mode":   string(resolved),
-		"default_mode":    string(defaultIngressModeForEntity(s.ourEntityType())),
+		"default_mode":    string(s.defaultIngressMode()),
 		"is_default":      !validIngressMode(stored.IngressMode),
 		"entity_type":     s.ourEntityType(),
 		"relay_operator":  s.relayBaseURL(),

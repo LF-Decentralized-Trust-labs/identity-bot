@@ -2,8 +2,6 @@ package server
 
 import (
 	"strings"
-
-	"identity-agent-core/witness"
 )
 
 // How an agent becomes reachable from outside is a single, governed decision.
@@ -47,21 +45,19 @@ func validIngressMode(v string) bool {
 	}
 }
 
-// defaultIngressModeForEntity is the per-product default when nothing is
-// persisted.
+// defaultIngressModeForEntity is the open-source core's default when nothing
+// is persisted: URL Relay, for every identity, because privacy is the safe
+// default.
 //
-//   - An organization is public by nature and needs only one public address, so
-//     it defaults to Tunnel.
-//   - Everything else — an individual, and the OSS core itself (which is the
-//     template most likely cloned into an individual-type agent) — defaults to
-//     URL Relay, for privacy by default.
+// Public and private addresses are an identity's choice, not a property of
+// the kind of identity it is (ADR-048), so the core does not decide that an
+// organisation is public. A product built on the core supplies its own
+// per-entity default through CoreServer.DefaultIngressMode, and any identity
+// can choose either mode in its settings.
 //
 // Direct is deliberately never a default: it is a developer/testing toggle a
 // deployment opts into, not something any product ships with.
-func defaultIngressModeForEntity(entityType string) IngressMode {
-	if witness.NormaliseEntityType(entityType) == witness.EntityOrganization {
-		return IngressModeTunnel
-	}
+func defaultIngressModeForEntity(string) IngressMode {
 	return IngressModeRelay
 }
 
@@ -75,6 +71,18 @@ func (s *CoreServer) resolveIngressMode() IngressMode {
 			if validIngressMode(saved.IngressMode) {
 				return IngressMode(strings.ToLower(strings.TrimSpace(saved.IngressMode)))
 			}
+		}
+	}
+	return s.defaultIngressMode()
+}
+
+// defaultIngressMode is the deploying product's per-entity default when it
+// supplied one, and the core's otherwise. A product's answer that is not a
+// valid mode, or is Direct, is ignored rather than acted on.
+func (s *CoreServer) defaultIngressMode() IngressMode {
+	if s.DefaultIngressMode != nil {
+		if m := s.DefaultIngressMode(s.ourEntityType()); validIngressMode(string(m)) && m != IngressModeDirect {
+			return m
 		}
 	}
 	return defaultIngressModeForEntity(s.ourEntityType())
