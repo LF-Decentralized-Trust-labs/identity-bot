@@ -324,7 +324,7 @@ class BackendProcessService {
       // default relative "./data" store can't be created. Point it at an
       // absolute, per-app writable location so multiple flavors (oss / Grape ID
       // / Grape ID Org) keep separate state.
-      env['AGENT_DATA_DIR'] = dataDirOverride ?? _resolveDataDir();
+      env['AGENT_DATA_DIR'] = _backendDataDir();
       debugPrint('[BackendProcess] AGENT_DATA_DIR: ${env['AGENT_DATA_DIR']}');
       if (entityType != null && entityType!.isNotEmpty) {
         env['IDENTITY_AGENT_ENTITY_TYPE'] = entityType!;
@@ -338,6 +338,7 @@ class BackendProcessService {
       debugPrint('[BackendProcess] Working dir: $backendDir');
       debugPrint('[BackendProcess] engine: built in (keri-go)');
 
+      _forgetPort();
       _backendProcess = await Process.start(
         _backendPath!,
         [],
@@ -421,13 +422,43 @@ class BackendProcessService {
   }
 
   /// Read the actual port from the .port file written by the Go backend.
-  /// Returns the discovered port, or the default if the file doesn't exist yet.
+  /// Returns the discovered port, or null if the backend has not written one yet.
   /// Exposed for the test that locks this in. The rule it protects is easy to
   /// re-break, because the wrong path looks perfectly reasonable.
   @visibleForTesting
-  int debugDiscoverActualPort(String backendDir) => _discoverActualPort(backendDir);
+  int? debugDiscoverActualPort() => _discoverActualPort();
 
-  int _discoverActualPort(String backendDir) {
+  /// Remove a .port left from an earlier run, so the only one there is the one
+  /// the backend about to start writes.
+  @visibleForTesting
+  void debugForgetPort() => _forgetPort();
+
+  /// The data directory the backend is told to use, and the .port inside it.
+  @visibleForTesting
+  String debugBackendDataDir() => _backendDataDir();
+  @visibleForTesting
+  String debugPortFilePath() => _portFilePath();
+
+  // One answer to "where does this backend keep its data", used both to tell
+  // the backend and to find the port it writes there. Two answers is how the
+  // app came to look in a folder the backend never wrote to.
+  String _backendDataDir() {
+    final override = dataDirOverride;
+    return (override != null && override.isNotEmpty) ? override : _resolveDataDir();
+  }
+
+  String _portFilePath() => '${_backendDataDir()}${Platform.pathSeparator}.port';
+
+  void _forgetPort() {
+    try {
+      final f = File(_portFilePath());
+      if (f.existsSync()) f.deleteSync();
+    } catch (e) {
+      debugPrint('[BackendProcess] Could not remove an old .port: $e');
+    }
+  }
+
+  int? _discoverActualPort() {
     // Looked for where the backend actually writes it, which is its DATA
     // directory — not a fixed path under the backend directory.
     //
@@ -444,26 +475,23 @@ class BackendProcessService {
     // or two ports along, and reported that its own backend had failed to
     // start — on a machine where the only thing wrong was that something else
     // held 5050.
-    final candidates = <String>[
-      if (dataDirOverride != null && dataDirOverride!.isNotEmpty)
-        dataDirOverride!,
-      '$backendDir${Platform.pathSeparator}data',
-    ];
-    for (final dir in candidates) {
-      final portFile = File('$dir${Platform.pathSeparator}.port');
-      try {
-        if (portFile.existsSync()) {
-          final content = portFile.readAsStringSync().trim();
-          final port = int.tryParse(content);
-          if (port != null && port > 0 && port < 65536) {
-            return port;
-          }
+    final portFile = File(_portFilePath());
+    try {
+      if (portFile.existsSync()) {
+        final port = int.tryParse(portFile.readAsStringSync().trim());
+        if (port != null && port > 0 && port < 65536) {
+          return port;
         }
-      } catch (e) {
-        debugPrint('[BackendProcess] Could not read .port in $dir: $e');
       }
+    } catch (e) {
+      debugPrint('[BackendProcess] Could not read ${portFile.path}: $e');
     }
-    return AgentConfig.defaultDesktopPort;
+    // Not the default port as a guess. Until this backend says where it is, a
+    // different program can be answering on the default — another Identity
+    // Agent app on the same machine, say — and a health check there reports
+    // somebody else's backend as this one. The app then talks to the wrong
+    // identity entirely.
+    return null;
   }
 
   Future<bool> _waitForHealthy(bool Function() hasProcessExited, {required String backendDir}) async {
@@ -496,8 +524,13 @@ class BackendProcessService {
         return false;
       }
 
-      // On each attempt, check for the .port file to discover the actual port
-      final actualPort = _discoverActualPort(backendDir);
+      // On each attempt, check for the .port file to discover the actual port.
+      // Nothing is probed until this backend has written one.
+      final actualPort = _discoverActualPort();
+      if (actualPort == null) {
+        await Future.delayed(const Duration(milliseconds: 500));
+        continue;
+      }
       if (actualPort != AgentConfig.desktopPort) {
         AgentConfig.desktopPort = actualPort;
         _appendOutput('[startup] Backend running on fallback port $actualPort');
