@@ -51,6 +51,10 @@ type Config struct {
 	// PublicKeyB64 is the verification key for EnrollmentAID.
 	PublicKeyB64 string
 
+	// KELCESRB64 is EnrollmentAID's signed key event log, base64 CESR, which an
+	// operator checks to see that PublicKeyB64 really is that identity's key.
+	KELCESRB64 string
+
 	// OOBIUrl is the agent's current OOBI, given to the operator at enrollment.
 	OOBIUrl string
 
@@ -156,7 +160,7 @@ func (m *Manager) Start(parent context.Context) error {
 		return m.fail(fmt.Errorf("discover %s: %w", m.cfg.BaseURL, err))
 	}
 
-	enroll, err := client.Enroll(ctx, m.cfg.EnrollmentAID, m.cfg.OOBIUrl, m.cfg.PublicKeyB64)
+	enroll, err := client.Enroll(ctx, m.cfg.EnrollmentAID, m.cfg.OOBIUrl, m.cfg.PublicKeyB64, m.cfg.KELCESRB64)
 	if errors.Is(err, ErrAlreadyEnrolled) && m.cfg.EnrollmentToken != "" {
 		client.Token = m.cfg.EnrollmentToken
 		enroll, err = &EnrollResponse{EnrollmentAID: m.cfg.EnrollmentAID, EnrollmentToken: m.cfg.EnrollmentToken}, nil

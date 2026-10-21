@@ -180,6 +180,7 @@ func (s *CoreServer) loadRelayConfig() (relay.Config, relay.Signer, bool) {
 		OOBIUrl:       oobi,
 		RAID:          aid,
 		LocalBase:     fmt.Sprintf("http://127.0.0.1:%d", s.Port),
+		KELCESRB64:    enrollmentKEL(aid, enr.KEL, seed),
 	}
 	return cfg, &relayEnrollmentSigner{seed: seed}, true
 }
@@ -226,6 +227,7 @@ func (s *CoreServer) reuseRelayEnrollment(base string, rootSeed []byte, stored *
 		LocalBase:       fmt.Sprintf("http://127.0.0.1:%d", s.Port),
 		EnrollmentToken: stored.EnrollmentToken,
 		AllocationToken: stored.AllocationToken,
+		KELCESRB64:      enrollmentKEL(stored.AID, stored.KEL, seed),
 	}
 	log.Printf("[relay] reusing the enrollment identity recorded for %s (%s), keeping this agent's relay URL stable",
 		base, stored.AID)
@@ -357,4 +359,16 @@ func (s *CoreServer) waitUntilReachable(ctx context.Context) bool {
 		case <-time.After(time.Second):
 		}
 	}
+}
+
+// enrollmentKEL is the enrolment identity's signed key log for the operator, or
+// empty when it cannot be produced, in which case an operator that checks keys
+// refuses the enrolment and says why.
+func enrollmentKEL(aid string, kel []map[string]interface{}, seed []byte) string {
+	stream, err := signedInceptionKEL(aid, kel, seed)
+	if err != nil {
+		log.Printf("[relay] could not produce %s's signed key log for the operator: %v", aid, err)
+		return ""
+	}
+	return base64.StdEncoding.EncodeToString(stream)
 }
