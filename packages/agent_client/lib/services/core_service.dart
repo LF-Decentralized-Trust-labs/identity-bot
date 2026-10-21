@@ -1262,6 +1262,92 @@ class CoreService {
     return jsonDecode(response.body) as Map<String, dynamic>;
   }
 
+  // ── Reachability: how this Identity Agent is reached through a relay ──
+  //
+  // Public or private is the identity's choice: mode 'relay' is a private
+  // address, 'public' a public one, each at its own relay. Every call here is
+  // the owner's.
+
+  /// The reachability settings: the mode in force, whether it is the default,
+  /// and the relays and name configured.
+  Future<Map<String, dynamic>> getReachability() =>
+      _reachability('GET', '/api/settings/reachability');
+
+  /// Saves reachability and applies it at once: the relay is brought up again
+  /// in the new mode, at the new relay or with the new name. The answer's
+  /// `relay` says what came of it (see [getRelayStatus]).
+  ///
+  /// A field left null is left as it is; an empty [mode] goes back to the
+  /// default.
+  Future<Map<String, dynamic>> saveReachability({
+    String? mode,
+    String? relayOperator,
+    String? publicRelayOperator,
+    String? publicRelayName,
+  }) =>
+      _reachability('PUT', '/api/settings/reachability', {
+        if (mode != null) 'mode': mode,
+        if (relayOperator != null) 'relay_operator': relayOperator,
+        if (publicRelayOperator != null)
+          'public_relay_operator': publicRelayOperator,
+        if (publicRelayName != null) 'public_relay_name': publicRelayName,
+      });
+
+  /// How this Identity Agent is reached through its relay right now: `mode`,
+  /// `state` (off, connecting, active or failed), `url`, `addresses`, and when
+  /// something went wrong `reason` in plain words with `reason_code` (taken,
+  /// reserved, quota, invalid_name, no_name, unreachable, ...).
+  Future<Map<String, dynamic>> getRelayStatus() =>
+      _reachability('GET', '/api/settings/reachability/relay');
+
+  /// Gives the public name back to the relay, and forgets it.
+  Future<Map<String, dynamic>> releasePublicName() =>
+      _reachability('POST', '/api/settings/reachability/name/release');
+
+  /// The custom domains asked for, each `waiting_for_dns` (with the TXT record
+  /// still to add) or `active`.
+  Future<List<Map<String, dynamic>>> listCustomDomains() async {
+    final out =
+        await _reachability('GET', '/api/settings/reachability/domains');
+    return ((out['domains'] as List?) ?? const [])
+        .cast<Map<String, dynamic>>();
+  }
+
+  /// Asks the public relay to serve [domain], and returns the exact DNS record
+  /// to add: `txt_name` and `txt_value`.
+  Future<Map<String, dynamic>> requestCustomDomain(String domain) =>
+      _reachability('POST', '/api/settings/reachability/domains',
+          {'domain': domain});
+
+  /// Asks the relay to check the DNS record. Once it holds, the answer's
+  /// `state` is `active` and `url` is the domain's address; until then this
+  /// throws, saying what the relay found.
+  Future<Map<String, dynamic>> verifyCustomDomain(String domain) =>
+      _reachability('POST', '/api/settings/reachability/domains/verify',
+          {'domain': domain});
+
+  Future<Map<String, dynamic>> _reachability(String method, String path,
+      [Map<String, dynamic>? body]) async {
+    final uri = Uri.parse('$baseUrl$path');
+    final headers = {'Content-Type': 'application/json'};
+    final encoded = body == null ? null : jsonEncode(body);
+    final response = switch (method) {
+      'GET' => await _client.get(uri),
+      'PUT' => await _client.put(uri, headers: headers, body: encoded),
+      _ => await _client.post(uri, headers: headers, body: encoded),
+    };
+    final decoded = response.body.isEmpty ? null : jsonDecode(response.body);
+    if (response.statusCode != 200) {
+      final why = decoded is Map
+          ? [decoded['error'], decoded['details']]
+              .where((v) => v != null && '$v'.isNotEmpty)
+              .join(': ')
+          : '';
+      throw Exception(why.isNotEmpty ? why : '$path: ${response.statusCode}');
+    }
+    return (decoded as Map).cast<String, dynamic>();
+  }
+
   Future<Map<String, dynamic>> getTunnelStatus() async {
     final response = await _client.get(Uri.parse('$baseUrl/api/tunnel/status'));
     if (response.statusCode == 200) {
