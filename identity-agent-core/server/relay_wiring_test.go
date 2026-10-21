@@ -4,8 +4,13 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/base64"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"identity-agent-core/backup"
 	"identity-agent-core/endpoint"
@@ -146,6 +151,7 @@ func TestStartRelayInstallsUnderTheSameLockStopReadsWith(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("RELAY_BASE_URL", base)
+	t.Setenv("PUBLIC_URL", "https://agent.example")
 
 	// The assign in startRelay happens deep inside it, after slow enrollment work,
 	// so a one-shot read tends to finish long before the assign and the dynamic
@@ -184,5 +190,70 @@ func TestStartRelayInstallsUnderTheSameLockStopReadsWith(t *testing.T) {
 		close(done)
 		wg.Wait()
 		s.Stop()
+	}
+}
+
+// A relay is enrolled only once this agent can be fetched from outside, and is
+// handed that address: a relay fetches the enrolling identity's key log, and a
+// localhost address is refused.
+func TestARelayIsEnrolledOnlyOnceThisAgentIsReachable(t *testing.T) {
+	var oobis []string
+	var mu sync.Mutex
+	relaySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/.well-known/url-relay-service.json" {
+			_, _ = w.Write([]byte(`{"protocol_version":"1.0"}`))
+			return
+		}
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		mu.Lock()
+		if o, ok := body["oobi"].(string); ok {
+			oobis = append(oobis, o)
+		}
+		mu.Unlock()
+		http.Error(w, `{"error":"stop here"}`, http.StatusBadRequest)
+	}))
+	defer relaySrv.Close()
+
+	dir := t.TempDir()
+	rootSeed := deterministicRootSeed()
+	if err := secureenclave.StoreRootSeed(dir, rootSeed); err != nil {
+		t.Fatal(err)
+	}
+	seed, err := backup.DerivePairwiseSeed(rootSeed, 4, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := saveRelayEnrollment(dir, storedRelayEnrollment{
+		BaseURL: relaySrv.URL, AID: "EREACHAID", RelationshipIndex: 4,
+		PublicKey: base64.RawURLEncoding.EncodeToString(ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("RELAY_BASE_URL", relaySrv.URL)
+	t.Setenv("PUBLIC_URL", "")
+	t.Setenv("TUNNEL_PROVIDER", "none")
+	start := func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+		defer cancel()
+		s := &CoreServer{DataDir: dir, EndpointService: endpoint.New(nil, 5050), Port: 5050,
+			AppCtx: ctx, cancel: cancel, running: true}
+		s.startRelay()
+		s.Stop()
+	}
+
+	start()
+	mu.Lock()
+	if len(oobis) != 0 {
+		t.Fatalf("enrolled while only reachable at %v", oobis)
+	}
+	mu.Unlock()
+
+	t.Setenv("PUBLIC_URL", "https://agent.example")
+	start()
+	mu.Lock()
+	defer mu.Unlock()
+	if len(oobis) == 0 || !strings.HasPrefix(oobis[0], "https://agent.example/") {
+		t.Fatalf("the relay was not given this agent's public address: %v", oobis)
 	}
 }

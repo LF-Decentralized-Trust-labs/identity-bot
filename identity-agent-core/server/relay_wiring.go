@@ -1,12 +1,14 @@
 package server
 
 import (
+	"context"
 	"crypto/ed25519"
 	"encoding/base64"
 	"fmt"
 	"log"
 	"os"
 	"strings"
+	"time"
 
 	"identity-agent-core/backup"
 	"identity-agent-core/login"
@@ -232,6 +234,16 @@ func (s *CoreServer) reuseRelayEnrollment(base string, rootSeed []byte, stored *
 // network work must not hold up the local server coming up, and a relay that is
 // slow or unreachable is reported honestly rather than blocking.
 func (s *CoreServer) startRelay() {
+	if s.relayBaseURL() == "" {
+		return
+	}
+	// A relay enrols an identity by fetching its key log from the address it is
+	// given, and that address is composed from where this agent answers now. At
+	// start-up that is localhost until the tunnel is up, which the relay rightly
+	// refuses. So wait until the agent is reachable from outside.
+	if !s.waitUntilReachable(s.AppCtx) {
+		return
+	}
 	cfg, signer, ok := s.loadRelayConfig()
 	if !ok {
 		return
@@ -272,4 +284,35 @@ func (s *CoreServer) startRelay() {
 		return
 	}
 	s.EndpointService.Refresh()
+}
+
+// waitUntilReachable waits until this agent answers at an address something
+// outside the machine can fetch from, and reports false if the context ends
+// first. A localhost or LAN address is not one.
+func (s *CoreServer) waitUntilReachable(ctx context.Context) bool {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	logged := false
+	for {
+		source := s.EndpointService.Source()
+		if source == "" {
+			// Not worked out yet, which is not the same as unreachable.
+			s.EndpointService.Refresh()
+			source = s.EndpointService.Source()
+		}
+		if source != "" && source != "localhost" && !strings.HasPrefix(source, "local:") {
+			return true
+		}
+		if !logged {
+			log.Printf("[relay] %s is configured; waiting for this agent to be reachable from outside before enrolling",
+				s.relayBaseURL())
+			logged = true
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(time.Second):
+		}
+	}
 }
