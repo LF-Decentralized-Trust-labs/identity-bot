@@ -3,6 +3,7 @@
 //	agent-host enrol <enrolment string> [--placement computer|vm|cloud|device]
 //	agent-host status
 //	agent-host run [--brain claude-code|grok] [--brain-path PATH] [--brain-user USER] [--workspace DIR]
+//	agent-host move <new address of the same Identity Agent>
 //	agent-host call <METHOD> <path> [json body]
 //	agent-host brain-user [USER]
 //	agent-host mcp
@@ -98,6 +99,15 @@ func main() {
 		if err := h.Run(ctx, agenthost.RunOptions{Brain: brain, Runner: runner, Workspace: *workspace}); err != nil {
 			fail(err)
 		}
+	case "move":
+		if len(args) != 1 {
+			usage()
+		}
+		st, err := h.Move(args[0])
+		if err != nil {
+			fail(err)
+		}
+		fmt.Printf("This machine now reaches %s at %s.\n", st.IdentityAgent, st.IdentityAgentURL)
 	case "call":
 		if len(args) < 2 {
 			usage()
@@ -181,6 +191,7 @@ func usage() {
 		"  agent-host enrol <enrolment string> [--placement computer|vm|cloud|device]\n"+
 		"  agent-host status\n"+
 		"  agent-host run [--brain claude-code|grok] [--brain-path PATH] [--brain-user USER] [--workspace DIR]\n"+
+		"  agent-host move <new address of the same Identity Agent>\n"+
 		"  agent-host call <METHOD> <path> [json body]\n"+
 		"  agent-host brain-user [USER]\n"+
 		"  agent-host mcp      (started by the brain, never by hand)")

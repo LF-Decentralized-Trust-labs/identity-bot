@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"identity-agent-core/agentbody"
@@ -92,4 +93,30 @@ func (h *Host) identityAgentKeys(st *State) (*didcomm.DID, error) {
 		return nil, err
 	}
 	return did, nil
+}
+
+// Move points this body at a new address for the same Identity Agent — after
+// the Identity Agent's public address changed. The new address is believed
+// only if it answers as the same identity, with a key log that verifies and
+// sealing keys belonging to it, so moving cannot hand this body to someone
+// else.
+func (h *Host) Move(url string) (State, error) {
+	st, err := h.loadState()
+	if err != nil {
+		return State{}, fmt.Errorf("this machine has not enrolled: %w", err)
+	}
+	url = strings.TrimRight(strings.TrimSpace(url), "/")
+	kel, current, err := h.verifiedLog(url, st.IdentityAgent, nil)
+	if err != nil {
+		return State{}, fmt.Errorf("%s is not the Identity Agent this machine enrolled with: %w", url, err)
+	}
+	did, err := h.sealingKeysOf(url, st.IdentityAgent, kel, current)
+	if err != nil {
+		return State{}, err
+	}
+	st.IdentityAgentURL, st.IdentityAgentKeys = url, did
+	if err := h.saveState(st); err != nil {
+		return State{}, err
+	}
+	return st, nil
 }

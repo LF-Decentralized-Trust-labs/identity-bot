@@ -411,3 +411,29 @@ func TestTheRecordSaysWhereItsWordsAreKept(t *testing.T) {
 		t.Fatalf("the record's setting: %s", rec.Body.String())
 	}
 }
+
+// A body follows its Identity Agent to a new address, and only its own: an
+// address answering as another Identity Agent is refused, and the body keeps
+// the address it had.
+func TestABodyMovesOnlyToItsOwnIdentityAgent(t *testing.T) {
+	w := newTalkWorld(t)
+	same := httptest.NewServer(w.s.router)
+	defer same.Close()
+	if _, err := w.hostA.Move(same.URL); err != nil {
+		t.Fatalf("moving to the same Identity Agent at a new address: %v", err)
+	}
+	if code, _, err := w.hostA.Call("GET", "/api/agent-host/agents", nil); err != nil || code != http.StatusOK {
+		t.Fatalf("the body could not speak at its new address: %d %v", code, err)
+	}
+
+	other, _ := bodyWorld(t)
+	other.router = other.buildRouter("")
+	elsewhere := httptest.NewServer(other.router)
+	defer elsewhere.Close()
+	if _, err := w.hostA.Move(elsewhere.URL); err == nil {
+		t.Fatal("the body moved to another Identity Agent")
+	}
+	if code, _, err := w.hostA.Call("GET", "/api/agent-host/agents", nil); err != nil || code != http.StatusOK {
+		t.Fatalf("a refused move changed where the body speaks: %d %v", code, err)
+	}
+}
