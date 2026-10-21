@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"time"
 
+	"identity-agent-core/agentbody"
 	"identity-agent-core/didcomm"
 )
 
@@ -35,23 +36,12 @@ import (
 // happened, roughly how large it was, and when. Traffic analysis is not
 // addressed here and cannot be addressed at this layer.
 
-// sealedRequest is an ordinary request, as carried inside an envelope.
-type sealedRequest struct {
-	Method string            `json:"method"`
-	Path   string            `json:"path"`
-	Query  string            `json:"query,omitempty"`
-	Header map[string]string `json:"header,omitempty"`
-	// BodyB64 rather than a nested object, because the body may be anything and
-	// re-encoding it would change bytes a handler is entitled to see exactly.
-	BodyB64 string `json:"body_b64,omitempty"`
-}
-
-// sealedResponse is what comes back, inside an envelope of its own.
-type sealedResponse struct {
-	Status  int               `json:"status"`
-	Header  map[string]string `json:"header,omitempty"`
-	BodyB64 string            `json:"body_b64,omitempty"`
-}
+// sealedRequest and sealedResponse are the one format every sealed request
+// uses, whichever side sends it.
+type (
+	sealedRequest  = didcomm.SealedRequest
+	sealedResponse = didcomm.SealedResponse
+)
 
 const (
 	sealedRequestType  = didcomm.TypeSealedRequest
@@ -59,7 +49,7 @@ const (
 	// sealedMaxBody bounds what one envelope may carry. An encrypted tunnel is
 	// still an unauthenticated entry point until the envelope opens, so the
 	// work done before that point has to be bounded.
-	sealedMaxBody = 8 << 20
+	sealedMaxBody = didcomm.SealedMaxBody
 )
 
 // handleSealedTransport opens an envelope, runs the request inside it, and
@@ -268,6 +258,14 @@ func (s *CoreServer) sealedParties(env *didcomm.Envelope) (*didcomm.DID, *didcom
 		}
 	}
 	if !known {
+		// An AI agent's body, sealing to this Identity Agent from the keys it
+		// enrolled with. What it may then do is decided by the routes the
+		// request inside reaches, which check its signature again.
+		if b, ok := s.bodies().LatestByHost(skid); ok && b.State == agentbody.StateActive {
+			peer, known = peerRecord{AID: skid, DID: *b.Keys.DID()}, true
+		}
+	}
+	if !known {
 		return nil, nil, fmt.Errorf("this agent has no relationship with the sender of this envelope")
 	}
 
@@ -286,7 +284,7 @@ func (s *CoreServer) sealedParties(env *didcomm.Envelope) (*didcomm.DID, *didcom
 }
 
 // sealedTransportPath is where envelopes arrive.
-const sealedTransportPath = "/api/sealed"
+const sealedTransportPath = didcomm.SealedTransportPath
 
 // sealedRemoteAddr is the address a replayed request appears to come from.
 //
