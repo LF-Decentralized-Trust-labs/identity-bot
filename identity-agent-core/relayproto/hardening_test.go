@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	keri "github.com/grapeid/keri-go"
 	"github.com/hashicorp/yamux"
 )
 
@@ -517,5 +518,100 @@ func TestAStatementMustBePrintableASCII(t *testing.T) {
 	}
 	if _, err := Answer(ch, ex, "Eé", nil, id, now); err == nil {
 		t.Fatal("signed a statement that is not printable ASCII")
+	}
+}
+
+// --- second review ---
+
+// The same history can travel with more attachments than before, as when a
+// witness receipt is added to an event. That is not a rewrite, and a relay
+// that holds the shorter form must still admit it.
+func TestALogThatGainsAReceiptStillExtendsTheOneHeld(t *testing.T) {
+	id := newIdentity(t)
+	id.rotate() // two events, so the receipt lands in the middle of the log
+	held := id.kel()
+	msgs, err := keri.ParseKELStream(held)
+	if err != nil {
+		t.Fatal(err)
+	}
+	witness, _ := keri.GenerateSigner(false)
+	wpub, _ := witness.PublicKey()
+	ev, _ := keri.ParseEvent(msgs[0])
+	sig, _ := witness.Sign([]byte(ev.SAID))
+	cigar, _ := keri.MatterQB64("0B", sig)
+	receipt, err := keri.AttachReceiptCouples([]keri.ReceiptCouple{{Witness: wpub, CigarQB64: cigar}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	grown, err := keri.ExportKEL([][]byte{append(append([]byte{}, msgs[0]...), receipt...), msgs[1]})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.HasPrefix(grown, held) {
+		t.Fatal("the test log still begins with the held bytes, so it proves nothing")
+	}
+	if !logExtends(grown, held) {
+		t.Fatal("a log whose event gained a receipt was read as a rewrite")
+	}
+	v := &Verifier{Service: "relay.test", Enrolled: func(string) ([]byte, bool) { return held, true }}
+	now := time.Now()
+	ch := NewChallenge("relay.test", now)
+	ex := bytes.Repeat([]byte{7}, ExporterLength)
+	a, _ := Answer(ch, ex, id.aid, grown, id, now)
+	if _, err := v.Verify(a, ch, ex, now); err != nil {
+		t.Fatalf("the owner was refused for a receipt on an event: %v", err)
+	}
+}
+
+func TestAFullRelayStillLetsAnOwnerReconnect(t *testing.T) {
+	r := newRelay(t, &ServiceConfig{MaxSessions: 1})
+	id := newIdentity(t)
+	r.connect(id, http.HandlerFunc(echo))
+	a, err := Dial(context.Background(), r.agentConfig(id))
+	if err != nil {
+		t.Fatalf("a full relay refused the owner's reconnect: %v", err)
+	}
+	a.Close()
+}
+
+func TestARenewalIsHeldToTheRelayAndProtocolDialled(t *testing.T) {
+	id := newIdentity(t)
+	for _, c := range []struct{ service, protocol string }{
+		{"evil.example", ProtocolVersion},
+		{"relay.test", "iarelay/1"},
+	} {
+		a := &AgentSession{cfg: &AgentConfig{AID: id.aid, KEL: id.kel, Signer: id},
+			exporter: make([]byte, ExporterLength), relay: "relay.test"}
+		c1, c2 := net.Pipe()
+		go a.renew(c2)
+		ch := NewChallenge(c.service, time.Now())
+		ch.Protocol = c.protocol
+		ch.Renewal = true
+		go json.NewEncoder(c1).Encode(ch)
+		c1.SetDeadline(time.Now().Add(2 * time.Second))
+		var ans Admission
+		if err := json.NewDecoder(c1).Decode(&ans); err == nil {
+			t.Errorf("signed a renewal for %q speaking %q", c.service, c.protocol)
+		}
+		c1.Close()
+	}
+}
+
+// The relay is told of a log only once its session is the identifier's own,
+// so a newcomer the registry refuses never reaches the record.
+func TestTheRelayRecordsALogOnlyForTheSessionItKeeps(t *testing.T) {
+	var r *relay
+	var early atomic.Bool
+	r = newRelay(t, &ServiceConfig{OnAdmit: func(v *Verified) error {
+		s, ok := r.registry.Get(v.AID)
+		if !ok || !bytes.Equal(s.KEL(), v.KEL) {
+			early.Store(true)
+		}
+		r.held.Store(v.AID, v.KEL)
+		return nil
+	}})
+	r.connect(newIdentity(t), http.HandlerFunc(echo))
+	if early.Load() {
+		t.Fatal("the relay was told of a log before the session was in place")
 	}
 }

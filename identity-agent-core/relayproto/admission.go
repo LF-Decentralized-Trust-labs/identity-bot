@@ -279,14 +279,13 @@ func (v *Verifier) keyLog(aid, presented string, live []byte) ([]byte, error) {
 	}
 	held, _ := v.Enrolled(aid)
 	if len(live) > 0 {
-		longer, shorter := live, held
-		if len(held) > len(live) {
-			longer, shorter = held, live
-		}
-		if !bytes.HasPrefix(longer, shorter) {
+		switch {
+		case logExtends(live, held):
+			held = live
+		case logExtends(held, live):
+		default:
 			return nil, fmt.Errorf("the relay's records of %q disagree with each other; refusing until that is resolved", aid)
 		}
-		held = longer
 	}
 	if presented == "" {
 		if len(held) == 0 {
@@ -301,8 +300,65 @@ func (v *Verifier) keyLog(aid, presented string, live []byte) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("the key event log is not base64url")
 	}
-	if len(held) > 0 && !bytes.HasPrefix(kel, held) {
+	if !logExtends(kel, held) {
 		return nil, fmt.Errorf("the key event log presented does not extend the one held for %q", aid)
 	}
 	return kel, nil
+}
+
+// logExtends reports whether log holds every event base holds, in the same
+// order, and possibly more after them. Events are compared as keri-go reads
+// them, by sequence number, type and SAID, never as bytes: the same event can
+// travel with more attachments than before (a witness receipt added, say) or
+// be re-serialised, and a log that does so has not changed its history. A
+// byte comparison read that as a rewrite and refused the owner for good.
+//
+// An empty base is extended by anything. A log that cannot be read extends
+// nothing.
+func logExtends(log, base []byte) bool {
+	if len(base) == 0 {
+		return true
+	}
+	if len(log) == 0 {
+		return false
+	}
+	have, err := logEvents(log)
+	if err != nil {
+		return false
+	}
+	want, err := logEvents(base)
+	if err != nil || len(have) < len(want) {
+		return false
+	}
+	for i := range want {
+		if have[i] != want[i] {
+			return false
+		}
+	}
+	return true
+}
+
+type eventID struct {
+	sn   uint64
+	ilk  string
+	said string
+}
+
+func logEvents(stream []byte) ([]eventID, error) {
+	messages, err := keri.ParseKELStream(stream)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]eventID, 0, len(messages))
+	for _, m := range messages {
+		ev, err := keri.ParseEvent(m)
+		if err != nil {
+			return nil, err
+		}
+		if ev.SAID == "" {
+			return nil, fmt.Errorf("an event in the log has no SAID")
+		}
+		out = append(out, eventID{sn: ev.SN, ilk: ev.Ilk, said: ev.SAID})
+	}
+	return out, nil
 }

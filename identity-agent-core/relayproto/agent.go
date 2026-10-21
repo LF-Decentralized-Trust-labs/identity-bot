@@ -55,6 +55,7 @@ type AgentSession struct {
 	cfg      *AgentConfig
 	mux      *yamux.Session
 	exporter []byte
+	relay    string // the host name dialled, which every challenge must name
 }
 
 // Dial connects to a relay and is admitted. It returns once admitted; call
@@ -133,7 +134,8 @@ func Dial(ctx context.Context, cfg *AgentConfig) (*AgentSession, error) {
 	if err != nil {
 		return fail(err)
 	}
-	return &AgentSession{ID: ok2.Session, ExpiresAt: exp, cfg: cfg, mux: mux, exporter: exporter}, nil
+	return &AgentSession{ID: ok2.Session, ExpiresAt: exp, cfg: cfg, mux: mux, exporter: exporter,
+		relay: u.Hostname()}, nil
 }
 
 // Close ends the session.
@@ -197,6 +199,11 @@ func (a *AgentSession) renew(st net.Conn) {
 	r := bufio.NewReader(io.LimitReader(st, MaxControlBytes))
 	var ch Challenge
 	if err := json.NewDecoder(r).Decode(&ch); err != nil || !ch.Renewal {
+		return
+	}
+	// A renewal is held to what admission was: this protocol, and the relay
+	// that was dialled.
+	if ch.Protocol != ProtocolVersion || !strings.EqualFold(ch.Service, a.relay) {
 		return
 	}
 	ans, err := Answer(ch, a.exporter, a.cfg.AID, a.cfg.KEL(), a.cfg.Signer, a.cfg.now())

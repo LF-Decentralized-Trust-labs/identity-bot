@@ -1,7 +1,6 @@
 package relayproto
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -24,14 +23,18 @@ type ServiceConfig struct {
 	// Registry holds the relay's sessions. Accept puts every admitted session
 	// in it, and checks a newcomer against the session it would replace.
 	Registry *Registry
-	// OnAdmit and OnRenew are called with every verified admission and
-	// renewal, before the session is used, so the relay can store the key
-	// event log it now holds for the identifier (Verifier.Enrolled reads it
-	// back). An error refuses the admission or ends the session.
+	// OnAdmit and OnRenew are called with every admission and renewal that
+	// has verified and become the identifier's session, so the relay can store
+	// the key event log it now holds for the identifier (Verifier.Enrolled
+	// reads it back). An error ends the session. The store must keep a log
+	// only if it extends the one already stored, so that two admissions
+	// racing cannot leave the older one behind.
 	OnAdmit func(*Verified) error
 	OnRenew func(*Verified) error
-	// MaxSessions bounds how many Identity Agents the relay holds at once;
-	// zero means DefaultMaxSessions.
+	// MaxSessions bounds how many identifiers the relay holds sessions for at
+	// once; zero means DefaultMaxSessions. An identifier that already holds a
+	// session may always replace it, so a full relay never locks an owner out
+	// of reconnecting.
 	MaxSessions int
 	// Budget, when set, is asked before each admission whether the relay has
 	// room for another session, for a relay that budgets memory its own way.
@@ -120,10 +123,6 @@ func Accept(w http.ResponseWriter, r *http.Request, cfg *ServiceConfig) (*Sessio
 		http.Error(w, err.Error(), http.StatusUpgradeRequired)
 		return nil, err
 	}
-	if cfg.Registry.Len() >= cfg.maxSessions() {
-		http.Error(w, "this relay is full", http.StatusServiceUnavailable)
-		return nil, errors.New("the relay holds its maximum number of sessions")
-	}
 	if cfg.Budget != nil {
 		if err := cfg.Budget(); err != nil {
 			http.Error(w, "this relay is full", http.StatusServiceUnavailable)
@@ -171,11 +170,6 @@ func Accept(w http.ResponseWriter, r *http.Request, cfg *ServiceConfig) (*Sessio
 	if err != nil {
 		return refuse(err)
 	}
-	if cfg.OnAdmit != nil {
-		if err := cfg.OnAdmit(v); err != nil {
-			return refuse(err)
-		}
-	}
 	s := &Session{
 		ID: randomToken(16), AID: v.AID, cfg: cfg, exporter: exporter,
 		slots: make(chan struct{}, MaxStreamsPerSession), key: v.Key, kel: v.KEL,
@@ -206,6 +200,16 @@ func Accept(w http.ResponseWriter, r *http.Request, cfg *ServiceConfig) (*Sessio
 		cfg.logf("relay admission refused aid=%q ip=%q: %v", s.AID, r.RemoteAddr, err)
 		mux.Close()
 		return nil, err
+	}
+	// Only a session that is now the identifier's own is recorded. Telling the
+	// relay earlier would let a newcomer the registry then refused leave its
+	// older log in the record.
+	if cfg.OnAdmit != nil {
+		if err := cfg.OnAdmit(v); err != nil {
+			cfg.logf("relay admission not recorded aid=%q session=%s: %v", s.AID, s.ID, err)
+			s.Close()
+			return nil, err
+		}
 	}
 	go s.refuseIdentityAgentStreams()
 	go s.keepLeased()
@@ -524,7 +528,7 @@ func NewRegistry() *Registry { return &Registry{sessions: map[string]*Session{}}
 func (g *Registry) Put(s *Session) error {
 	g.mu.Lock()
 	old := g.sessions[s.AID]
-	if err := extends(s, old); err != nil {
+	if err := g.admissible(s, old); err != nil {
 		g.mu.Unlock()
 		return err
 	}
@@ -543,11 +547,20 @@ func (g *Registry) Put(s *Session) error {
 func (g *Registry) mayReplace(s *Session) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	return extends(s, g.sessions[s.AID])
+	return g.admissible(s, g.sessions[s.AID])
+}
+
+// admissible is checked with the registry locked, so the count and the
+// replacement are decided together.
+func (g *Registry) admissible(s, old *Session) error {
+	if old == nil && s.cfg != nil && len(g.sessions) >= s.cfg.maxSessions() {
+		return errors.New("this relay holds its maximum number of sessions")
+	}
+	return extends(s, old)
 }
 
 func extends(s, old *Session) error {
-	if old != nil && old != s && !bytes.HasPrefix(s.KEL(), old.KEL()) {
+	if old != nil && old != s && !logExtends(s.KEL(), old.KEL()) {
 		return fmt.Errorf("the key event log presented for %q does not extend the live session's", s.AID)
 	}
 	return nil
