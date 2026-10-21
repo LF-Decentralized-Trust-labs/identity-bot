@@ -156,29 +156,50 @@ func (h *Host) Run(ctx context.Context, o RunOptions) error {
 			}
 			continue
 		}
-		backoff = time.Second
+		acted := false
 		for i := range deliveries {
-			h.handle(ctx, tools, brain, p, workspace, &deliveries[i], logf)
+			if h.handle(ctx, tools, brain, p, workspace, &deliveries[i], logf) {
+				acted = true
+			}
 		}
-		if o.Once && len(deliveries) == 0 {
+		if o.Once && (len(deliveries) == 0 || !acted) {
 			return nil
 		}
+		if len(deliveries) > 0 && !acted {
+			// Everything waiting is waiting on something this body could not
+			// do yet; pause rather than ask again at once.
+			select {
+			case <-time.After(backoff):
+			case <-ctx.Done():
+				return nil
+			}
+			if backoff *= 2; backoff > time.Minute {
+				backoff = time.Minute
+			}
+			continue
+		}
+		backoff = time.Second
 	}
 }
 
-// handle acts on one delivered message.
+// handle acts on one delivered message, and reports whether it left the
+// queue — acted on, or acknowledged and refused.
 func (h *Host) handle(ctx context.Context, tools *toolServer, brain Brain, p agentProfile, workspace string,
-	d *Delivery, logf func(string, ...any)) {
+	d *Delivery, logf func(string, ...any)) bool {
 	mem := h.loadMemory()
 	id := d.Entry.MessageID
 	if err := h.Check(d); err != nil {
+		var later *unreachable
+		if errors.As(err, &later) {
+			logf("[agent-host] message %s %v; trying again", id, err)
+			return false
+		}
 		// Not acted on: what arrived is not what the Identity Agent and the
 		// sender signed, and acting on it would be acting on a forgery. It is
 		// acknowledged, so it does not wait in the queue forever, and an ask
 		// gets a failure notice saying why, so nobody waits on it either.
 		logf("[agent-host] message %s refused: %v", id, err)
-		h.refuseDelivery(ctx, d, err, logf)
-		return
+		return h.refuseDelivery(ctx, d, err, logf)
 	}
 	rec := d.Record
 	// The receipt first: it proves this body received the message, and a
@@ -188,13 +209,13 @@ func (h *Host) handle(ctx context.Context, tools *toolServer, brain Brain, p age
 		var refusal *Refusal
 		if !errors.As(err, &refusal) {
 			logf("[agent-host] could not acknowledge %s (%v); it will come again", id, err)
-			return
+			return false
 		}
 		// Refused — most often a receipt already given. Carry on, once.
 		logf("[agent-host] receipt for %s: %v", id, err)
 	}
 	if _, done := mem.Seen[id]; done {
-		return
+		return true
 	}
 	mem.Seen[id] = time.Now()
 
@@ -212,7 +233,7 @@ func (h *Host) handle(ctx context.Context, tools *toolServer, brain Brain, p age
 		if cs == nil || cs.Serving == "" {
 			logf("[agent-host] an answer in %s, a conversation this body holds nothing about; not acted on", rec.Conversation)
 			_ = h.saveMemory(mem)
-			return
+			return true
 		}
 		if cs.Awaiting > 0 {
 			cs.Awaiting--
@@ -224,7 +245,7 @@ func (h *Host) handle(ctx context.Context, tools *toolServer, brain Brain, p age
 		}
 	default:
 		_ = h.saveMemory(mem)
-		return
+		return true
 	}
 	cs.LastAt = time.Now()
 	_ = h.saveMemory(mem)
@@ -292,29 +313,41 @@ func (h *Host) handle(ctx context.Context, tools *toolServer, brain Brain, p age
 	if err := h.saveMemory(mem); err != nil {
 		logf("[agent-host] could not save what this body knows about its conversations: %v", err)
 	}
+	return true
 }
 
 // refuseDelivery acknowledges a message this body would not act on, and
-// tells the asker why when it was an ask — said from what the entry claims,
-// which is all a body has when the entry does not check out.
-func (h *Host) refuseDelivery(ctx context.Context, d *Delivery, why error, logf func(string, ...any)) {
-	rec, err := agentmessage.Read(d.Entry.Envelope)
-	if err != nil {
-		return
-	}
+// tells the asker why when it was an ask — addressed from the entry as the
+// Identity Agent listed it, which is all a body has when the entry does not
+// check out. It is marked handled only once the acknowledgement has gone, so
+// it is not left waiting in the queue, and reports whether it left the queue.
+func (h *Host) refuseDelivery(ctx context.Context, d *Delivery, why error, logf func(string, ...any)) bool {
+	e := d.Entry
 	mem := h.loadMemory()
-	if _, done := mem.Seen[d.Entry.MessageID]; done {
-		return
+	if _, done := mem.Seen[e.MessageID]; done {
+		return true
 	}
-	if _, err := h.Say(ctx, agentmessage.KindReceipt, rec.Conversation, rec.From, d.Entry.MessageID, d.Entry.Hash, agentmessage.Brain{}); err != nil {
-		logf("[agent-host] could not acknowledge the refused message %s: %v", d.Entry.MessageID, err)
+	if _, err := h.Say(ctx, agentmessage.KindReceipt, e.Conversation, e.From, e.MessageID, e.Hash, agentmessage.Brain{}); err != nil {
+		var refusal *Refusal
+		if !errors.As(err, &refusal) {
+			logf("[agent-host] could not acknowledge the refused message %s: %v", e.MessageID, err)
+			return false
+		}
+		logf("[agent-host] the receipt for the refused message %s was refused: %v", e.MessageID, err)
 	}
-	if rec.Kind == agentmessage.KindAsk {
-		if _, err := h.Say(ctx, agentmessage.KindFailure, rec.Conversation, rec.From, d.Entry.MessageID,
+	if e.Kind == agentmessage.KindAsk {
+		if _, err := h.Say(ctx, agentmessage.KindFailure, e.Conversation, e.From, e.MessageID,
 			"this machine refused the message, because it did not check out: "+why.Error(), agentmessage.Brain{}); err != nil {
-			logf("[agent-host] could not say why %s was refused: %v", d.Entry.MessageID, err)
+			logf("[agent-host] could not say why %s was refused: %v", e.MessageID, err)
 		}
 	}
-	mem.Seen[d.Entry.MessageID] = time.Now()
+	mem.Seen[e.MessageID] = time.Now()
 	_ = h.saveMemory(mem)
+	return true
+}
+
+// Refuse is refuseDelivery for callers outside the run loop: acknowledging a
+// message that did not check out, and answering it with the reason.
+func (h *Host) Refuse(ctx context.Context, d *Delivery, why error) bool {
+	return h.refuseDelivery(ctx, d, why, log.Printf)
 }

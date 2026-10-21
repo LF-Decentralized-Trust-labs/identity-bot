@@ -129,8 +129,9 @@ func NewSession() string {
 // becomes the failure notice's reason.
 //
 // Nothing secret goes on the command line, which any user on the machine can
-// read while it runs and sudo writes to the system log: the words travel on
-// stdin or in a private file, and the tool token in the environment.
+// read while it runs and sudo writes to the system log, and nothing goes in a
+// file another user might find: the words and instructions travel on stdin,
+// and the tool token in the environment.
 func runCLI(ctx context.Context, r Runner, dir string, env []string, stdin string, name string, args ...string) ([]byte, error) {
 	cmd, err := r.Command(ctx, dir, env, name, args...)
 	if err != nil {
@@ -174,9 +175,9 @@ type ClaudeCode struct {
 // Name is the provider.
 func (ClaudeCode) Name() string { return "claude-code" }
 
-// Run runs one turn. The prompt goes on stdin; the tool token reaches the
-// host's MCP server through the environment it inherits; the instructions are
-// read from a private file.
+// Run runs one turn. The prompt goes on stdin, led on the first turn by the
+// instructions — the session keeps them for the turns after — and the tool
+// token reaches the host's MCP server through the environment it inherits.
 func (c ClaudeCode) Run(ctx context.Context, t Turn) (Outcome, error) {
 	self, err := executable()
 	if err != nil {
@@ -195,18 +196,11 @@ func (c ClaudeCode) Run(ctx context.Context, t Turn) (Outcome, error) {
 	} else {
 		args = append(args, "--session-id", t.Session)
 	}
-	if t.Instructions != "" {
-		file, cleanup, err := privateFile("instructions", t.Instructions)
-		if err != nil {
-			return Outcome{}, err
-		}
-		defer cleanup()
-		args = append(args, "--append-system-prompt-file", file)
-	}
 	if t.Model != "" {
 		args = append(args, "--model", t.Model)
 	}
-	out, err := runCLI(ctx, c.runner(), t.Workspace, toolsEnv(t), t.Prompt, c.path(), args...)
+	prompt := withInstructions(t)
+	out, err := runCLI(ctx, c.runner(), t.Workspace, toolsEnv(t), prompt, c.path(), args...)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -230,8 +224,18 @@ func (c ClaudeCode) Run(ctx context.Context, t Turn) (Outcome, error) {
 	}
 	return Outcome{Text: strings.TrimSpace(res.Result), Brain: agentmessage.Brain{
 		Provider: c.Name(), Model: model, Session: firstNonEmpty(res.SessionID, t.Session),
-		RunHash: runHash([]byte(t.Prompt), out),
+		RunHash: runHash([]byte(prompt), out),
 	}}, nil
+}
+
+// withInstructions is the turn's prompt, led on a session's first turn by the
+// instructions. Neither CLI can be given its system prompt from stdin, and a
+// file holding it would be a file another user might read.
+func withInstructions(t Turn) string {
+	if t.Instructions == "" || t.Resume {
+		return t.Prompt
+	}
+	return t.Instructions + "\n\n---\n\n" + t.Prompt
 }
 
 func (c ClaudeCode) path() string {
@@ -282,18 +286,10 @@ func (g GrokCLI) Run(ctx context.Context, t Turn) (Outcome, error) {
 		mcpServerName, self, "--", "mcp"); err != nil {
 		return Outcome{}, fmt.Errorf("the host's tools could not be given to Grok: %w", err)
 	}
-	prompt := t.Prompt
-	if t.Instructions != "" && !t.Resume {
-		// Grok CLI replaces rather than extends a system prompt, so the
-		// instructions lead the first message instead.
-		prompt = t.Instructions + "\n\n" + t.Prompt
-	}
-	file, cleanup, err := privateFile("prompt", prompt)
-	if err != nil {
-		return Outcome{}, err
-	}
-	defer cleanup()
-	args := []string{"--prompt-file", file, "--output-format", "json",
+	prompt := withInstructions(t)
+	// The prompt is read from the brain's own stdin: no file, and nothing on
+	// the command line.
+	args := []string{"--prompt-file", "/dev/stdin", "--output-format", "json",
 		"--tools", "todo_write", "--disallowed-tools", "Agent", "--disable-web-search", "--no-subagents",
 		"--always-approve"}
 	if t.Resume {
@@ -304,7 +300,7 @@ func (g GrokCLI) Run(ctx context.Context, t Turn) (Outcome, error) {
 	if t.Model != "" {
 		args = append(args, "--model", t.Model)
 	}
-	out, err := runCLI(ctx, g.runner(), t.Workspace, toolsEnv(t), "", g.path(), args...)
+	out, err := runCLI(ctx, g.runner(), t.Workspace, toolsEnv(t), prompt, g.path(), args...)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -360,32 +356,6 @@ func (g GrokCLI) runner() Runner {
 // command line.
 func toolsEnv(t Turn) []string {
 	return []string{envToolsURL + "=" + t.ToolsURL, envToolsToken + "=" + t.ToolsToken}
-}
-
-// privateFile writes content where the brain — possibly another user — can
-// read it and nobody else can find it: a file in a fresh directory that can be
-// entered but not listed, under a random name. The caller removes it.
-func privateFile(prefix, content string) (string, func(), error) {
-	dir, err := os.MkdirTemp("", "agent-host-")
-	if err != nil {
-		return "", nil, err
-	}
-	cleanup := func() { _ = os.RemoveAll(dir) }
-	if err := os.Chmod(dir, 0o711); err != nil {
-		cleanup()
-		return "", nil, err
-	}
-	name := make([]byte, 16)
-	if _, err := rand.Read(name); err != nil {
-		cleanup()
-		return "", nil, err
-	}
-	path := filepath.Join(dir, prefix+"-"+hex.EncodeToString(name))
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		cleanup()
-		return "", nil, err
-	}
-	return path, cleanup, nil
 }
 
 // BrainFor is the brain an AI agent was created with, by its provider.

@@ -127,7 +127,7 @@ func (h *Host) checkCountersigner(st State, did *didcomm.DID) error {
 	}
 	kel, current, err := h.verifiedLog(st.IdentityAgentURL, did.AID, nil)
 	if err != nil {
-		return err
+		return &unreachable{err}
 	}
 	if did.AID != st.IdentityAgent {
 		if len(kel) == 0 || kel[0]["di"] != st.IdentityAgent {
@@ -142,6 +142,14 @@ func (h *Host) checkCountersigner(st State, did *didcomm.DID) error {
 	checkedKeys.mu.Unlock()
 	return nil
 }
+
+// unreachable is a check that could not be made — a key log that could not be
+// fetched — as distinct from one that failed. A message is not refused for
+// it; it is tried again.
+type unreachable struct{ err error }
+
+func (u *unreachable) Error() string { return "could not be checked yet: " + u.err.Error() }
+func (u *unreachable) Unwrap() error { return u.err }
 
 // Say sends one message as this body's AI agent: signed by the machine key,
 // sealed to the Identity Agent. It returns the message id the Identity Agent

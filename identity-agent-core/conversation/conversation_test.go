@@ -17,7 +17,7 @@ func entryBuilder(t *testing.T, conv, from, to, kind string, body []byte) Build 
 	}
 	return func(seq int, prev string) (*didcomm.Envelope, agentmessage.Record, error) {
 		rec := agentmessage.Record{MessageID: NewID("m_"), Conversation: conv, Seq: seq, PrevHash: prev,
-			Kind: kind, From: from, To: to, BodyHash: agentmessage.HashBody(body), OpenedBy: "person:EROB"}
+			Kind: kind, From: from, To: to, BodyHash: agentmessage.HashBody(body), OpenedBy: "person:EP"}
 		env, err := agentmessage.Countersign(ks, rec)
 		return env, rec, err
 	}
@@ -32,12 +32,12 @@ func TestEntriesChainAndKeepTheirWords(t *testing.T) {
 	}
 	defer s.Close()
 	ctx := context.Background()
-	open := &Conversation{OpenedBy: "person:EROB", FirstAgent: "EA"}
-	e1, err := s.Append(ctx, "c1", open, []byte("hello"), []string{"EA"}, nil, entryBuilder(t, "c1", "person:EROB", "EA", agentmessage.KindAsk, []byte("hello")))
+	open := &Conversation{OpenedBy: "person:EP", FirstAgent: "EA"}
+	e1, err := s.Append(ctx, "c1", open, []byte("hello"), []string{"EA"}, nil, entryBuilder(t, "c1", "person:EP", "EA", agentmessage.KindAsk, []byte("hello")))
 	if err != nil {
 		t.Fatal(err)
 	}
-	e2, err := s.Append(ctx, "c1", nil, []byte("hi"), nil, nil, entryBuilder(t, "c1", "EA", "person:EROB", agentmessage.KindReply, []byte("hi")))
+	e2, err := s.Append(ctx, "c1", nil, []byte("hi"), nil, nil, entryBuilder(t, "c1", "EA", "person:EP", agentmessage.KindReply, []byte("hi")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,8 +67,8 @@ func TestAMessageWaitsUntilItsReceipt(t *testing.T) {
 	s, _ := OpenStore(t.TempDir())
 	defer s.Close()
 	ctx := context.Background()
-	e, err := s.Append(ctx, "c1", &Conversation{OpenedBy: "person:EROB", FirstAgent: "EA"}, []byte("x"), []string{"EA"}, nil,
-		entryBuilder(t, "c1", "person:EROB", "EA", agentmessage.KindAsk, []byte("x")))
+	e, err := s.Append(ctx, "c1", &Conversation{OpenedBy: "person:EP", FirstAgent: "EA"}, []byte("x"), []string{"EA"}, nil,
+		entryBuilder(t, "c1", "person:EP", "EA", agentmessage.KindAsk, []byte("x")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,8 +94,8 @@ func TestTheChainDoesNotForkUnderConcurrentWriters(t *testing.T) {
 	s, _ := OpenStore(t.TempDir())
 	defer s.Close()
 	ctx := context.Background()
-	if _, err := s.Append(ctx, "c1", &Conversation{OpenedBy: "person:EROB", FirstAgent: "EA"}, []byte("0"), nil, nil,
-		entryBuilder(t, "c1", "person:EROB", "EA", agentmessage.KindAsk, []byte("0"))); err != nil {
+	if _, err := s.Append(ctx, "c1", &Conversation{OpenedBy: "person:EP", FirstAgent: "EA"}, []byte("0"), nil, nil,
+		entryBuilder(t, "c1", "person:EP", "EA", agentmessage.KindAsk, []byte("0"))); err != nil {
 		t.Fatal(err)
 	}
 	var wg sync.WaitGroup
@@ -104,7 +104,7 @@ func TestTheChainDoesNotForkUnderConcurrentWriters(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			b := []byte{byte('a' + i)}
-			if _, err := s.Append(ctx, "c1", nil, b, nil, nil, entryBuilder(t, "c1", "EA", "person:EROB", agentmessage.KindReceipt, b)); err != nil {
+			if _, err := s.Append(ctx, "c1", nil, b, nil, nil, entryBuilder(t, "c1", "EA", "person:EP", agentmessage.KindReceipt, b)); err != nil {
 				t.Error(err)
 			}
 		}(i)
@@ -129,12 +129,12 @@ func TestAnEntryBuiltForAnotherPlaceIsRefused(t *testing.T) {
 	s, _ := OpenStore(t.TempDir())
 	defer s.Close()
 	ctx := context.Background()
-	if _, err := s.Append(ctx, "c1", &Conversation{OpenedBy: "person:EROB", FirstAgent: "EA"}, []byte("0"), nil, nil,
-		entryBuilder(t, "c1", "person:EROB", "EA", agentmessage.KindAsk, []byte("0"))); err != nil {
+	if _, err := s.Append(ctx, "c1", &Conversation{OpenedBy: "person:EP", FirstAgent: "EA"}, []byte("0"), nil, nil,
+		entryBuilder(t, "c1", "person:EP", "EA", agentmessage.KindAsk, []byte("0"))); err != nil {
 		t.Fatal(err)
 	}
 	wrong := func(seq int, prev string) (*didcomm.Envelope, agentmessage.Record, error) {
-		return entryBuilder(t, "c1", "EA", "person:EROB", agentmessage.KindReply, []byte("x"))(seq+5, prev)
+		return entryBuilder(t, "c1", "EA", "person:EP", agentmessage.KindReply, []byte("x"))(seq+5, prev)
 	}
 	if _, err := s.Append(ctx, "c1", nil, []byte("x"), nil, nil, wrong); err == nil {
 		t.Fatal("an entry built for another place was written")

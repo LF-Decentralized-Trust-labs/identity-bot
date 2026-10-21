@@ -55,6 +55,12 @@ func (s *CoreServer) handleGrantController(w http.ResponseWriter, r *http.Reques
 		Grade:         ControllerGrade(strings.TrimSpace(req.Grade)),
 		Signer:        strings.TrimSpace(req.Signer),
 	}
+	// A machine granted while the organisation has one signer belongs to
+	// that signer from the start, so who it speaks for is settled when it is
+	// paired rather than at its first message.
+	if g.Signer == "" {
+		g.Signer = s.onlyActiveSigner()
+	}
 	if t := strings.TrimSpace(req.ExpiresAt); t != "" {
 		parsed, err := time.Parse(time.RFC3339, t)
 		if err != nil {

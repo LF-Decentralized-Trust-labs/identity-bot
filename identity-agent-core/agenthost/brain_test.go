@@ -22,7 +22,7 @@ func fakeCLI(t *testing.T, output string) (path, record string) {
 	record = filepath.Join(dir, "record")
 	path = filepath.Join(dir, "brain")
 	script := "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\" >> " + record + "; done\n" +
-		"printf 'STDIN:%s\\n' \"$(cat)\" >> " + record + "\n" +
+		"printf 'STDIN:%s\\n' \"$(cat | tr '\\n' ' ')\" >> " + record + "\n" +
 		"printf 'TOKEN:%s\\n' \"$" + envToolsToken + "\" >> " + record + "\n" +
 		"echo '---' >> " + record + "\ncat <<'OUT'\n" + output + "\nOUT\n"
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
@@ -117,8 +117,12 @@ func TestClaudeCodeIsStartedWithOnlyTheHostsTools(t *testing.T) {
 	if v, _ := flagValue(second, "--resume"); v != "s-1" {
 		t.Fatal("the second turn did not resume the conversation's session")
 	}
-	if line(first, "STDIN:") != turn.Prompt || line(first, "TOKEN:") != "turn-token" {
-		t.Fatalf("the words or the token did not reach the brain: %v", first)
+	if !strings.HasPrefix(line(first, "STDIN:"), "You are the desk assistant.") ||
+		!strings.Contains(line(first, "STDIN:"), secretWords) || line(first, "TOKEN:") != "turn-token" {
+		t.Fatalf("the instructions, the words or the token did not reach the brain: %v", first)
+	}
+	if strings.Contains(line(second, "STDIN:"), "You are the desk assistant.") {
+		t.Fatal("the instructions were repeated on a resumed turn")
 	}
 	for _, a := range first {
 		if strings.Contains(a, secretWords) || strings.Contains(a, "turn-token") || strings.Contains(a, "desk assistant") {
@@ -127,10 +131,8 @@ func TestClaudeCodeIsStartedWithOnlyTheHostsTools(t *testing.T) {
 			}
 		}
 	}
-	if f, ok := flagValue(first, "--append-system-prompt-file"); !ok || f == "" {
-		t.Fatal("the instructions were not given from a file")
-	} else if _, err := os.Stat(f); err == nil {
-		t.Fatal("the instructions file was left behind")
+	if contains(first, "--append-system-prompt-file") || contains(first, "--append-system-prompt") {
+		t.Fatal("the instructions were given some way other than stdin")
 	}
 }
 
@@ -174,8 +176,11 @@ func TestGrokRunsOnlyAsItsOwnUserWithOnlyTheHostsTools(t *testing.T) {
 	if line(run, "TOKEN:") != "turn-token" {
 		t.Fatal("the token did not reach the brain's environment")
 	}
+	if v, _ := flagValue(run, "--prompt-file"); v != "/dev/stdin" || !strings.Contains(line(run, "STDIN:"), secretWords) {
+		t.Fatalf("the words did not go on stdin: %v", run)
+	}
 	for _, a := range run {
-		if strings.Contains(a, secretWords) {
+		if strings.Contains(a, secretWords) && !strings.HasPrefix(a, "STDIN:") {
 			t.Fatalf("the words are on the command line: %q", a)
 		}
 	}

@@ -567,3 +567,86 @@ func TestABodyReadsOnlyConversationsItIsIn(t *testing.T) {
 		t.Fatalf("the build server read a conversation it is not in: %d", code)
 	}
 }
+
+// A message a body cannot check is acknowledged — so it does not wait in the
+// queue for ever — and answered with a failure notice saying why, so the one
+// who asked is not left waiting either.
+func TestAMessageThatDoesNotCheckOutIsAnsweredWithWhy(t *testing.T) {
+	w := newTalkWorld(t)
+	conv, _ := w.openedWith(t)
+	ds, err := w.hostA.Inbox(context.Background(), false)
+	if err != nil || len(ds) != 1 {
+		t.Fatalf("collecting: %v %d", err, len(ds))
+	}
+	ds[0].Body = "something else"
+	why := w.hostA.Check(&ds[0])
+	if why == nil {
+		t.Fatal("an altered message checked out")
+	}
+	if !w.hostA.Refuse(context.Background(), &ds[0], why) {
+		t.Fatal("the refused message was not taken off the queue")
+	}
+	if left, _ := w.hostA.Inbox(context.Background(), false); len(left) != 0 {
+		t.Fatalf("the refused message is still waiting: %d", len(left))
+	}
+	entries := w.read(t, conv)
+	last := entries[len(entries)-1]
+	if last.Kind != agentmessage.KindFailure || !strings.Contains(last.Body, "did not check out") {
+		t.Fatalf("the asker was not told why: %s %q", last.Kind, last.Body)
+	}
+}
+
+// An ask that takes a conversation's last turn can still be answered.
+func TestTheLastAskCanStillBeAnswered(t *testing.T) {
+	w := newTalkWorld(t)
+	conv, _ := w.openedWith(t)
+	for i := 1; i < conversation.MaxTurns; i++ {
+		if code, out := w.personSays(t, w.a, conv, "and another thing"); code != http.StatusCreated {
+			t.Fatalf("turn %d: %d %v", i+1, code, out)
+		}
+	}
+	st, _ := mustStore(t, w)
+	c, _ := st.Get(conv)
+	if c.Turns != conversation.MaxTurns {
+		t.Fatalf("expected the conversation full, at %d turns", c.Turns)
+	}
+	d := sayTo(t, w.hostA)
+	if _, err := w.hostA.Say(context.Background(), agentmessage.KindReply, conv, d.Record.From, d.Entry.MessageID,
+		"here is the answer", agentmessage.Brain{}); err != nil {
+		t.Fatalf("the last ask could not be answered: %v", err)
+	}
+}
+
+func mustStore(t *testing.T, w *talkWorld) (*conversation.Store, error) {
+	t.Helper()
+	st, err := w.s.conversations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return st, nil
+}
+
+// A machine paired while the organisation has one signer belongs to that
+// signer from the moment it is paired.
+func TestAMachinePairedWithOneSignerBelongsToThem(t *testing.T) {
+	w := newTalkWorld(t)
+	body := `{"controller_aid":"` + w.ctlAID + `","public_key":"` + mustGrant(t, w).PublicKey + `","label":"again","grade":"enrolled"}`
+	_ = w.s.controllers().Revoke(w.ctlAID)
+	rec := httptest.NewRecorder()
+	w.s.handleGrantController(rec, httptest.NewRequest("POST", "/", strings.NewReader(body)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("granting: %d %s", rec.Code, rec.Body.String())
+	}
+	if g := mustGrant(t, w); g.Signer != "ESIGNER_alex" {
+		t.Fatalf("the machine was not bound to the only signer when paired: %q", g.Signer)
+	}
+}
+
+func mustGrant(t *testing.T, w *talkWorld) ControllerGrant {
+	t.Helper()
+	g, live, err := w.s.controllers().Live(w.ctlAID, time.Now())
+	if err != nil || !live {
+		t.Fatalf("no live grant: %v", err)
+	}
+	return g
+}

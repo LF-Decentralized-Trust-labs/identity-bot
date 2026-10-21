@@ -157,8 +157,9 @@ One-time setup, as an administrator (each sudo asks for your password):
        Grok CLI:     install it for %[1]s the same way, sign it in, and name its path in step 4 too.
                      Grok runs only this way: it has no flag to ignore the MCP servers of whoever runs it.
 
-  3. Make its workspace, which only it can use:
-       sudo -u %[1]s -H mkdir -m 700 /Users/%[1]s/workspace
+  3. Make its workspace. Mode 711 lets the host start the brain there without
+     being able to list or read what the brain keeps in it:
+       sudo -u %[1]s -H mkdir -m 711 /Users/%[1]s/workspace
 
   4. Let %[2]s start that program as %[1]s, and nothing else. SETENV lets the host pass
      each turn's tool token in the environment rather than on the command line:
@@ -177,7 +178,7 @@ One-time setup, as an administrator:
   2. Install the brain for that user and sign it in:
        sudo -u %[1]s -H sh -c 'curl -fsSL https://claude.ai/install.sh | bash'
        sudo -u %[1]s -H /home/%[1]s/.local/bin/claude      (then type /login)
-  3. sudo -u %[1]s -H mkdir -m 700 /home/%[1]s/workspace
+  3. sudo -u %[1]s -H mkdir -m 711 /home/%[1]s/workspace
   4. echo '%[2]s ALL=(%[1]s) NOPASSWD:SETENV: /home/%[1]s/.local/bin/claude' | sudo tee /etc/sudoers.d/agent-host
      sudo chmod 440 /etc/sudoers.d/agent-host
   5. %[3]s run --brain claude-code --brain-path /home/%[1]s/.local/bin/claude --brain-user %[1]s \

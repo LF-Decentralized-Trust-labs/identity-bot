@@ -36,7 +36,8 @@ import (
 // Limits on one conversation, so two AI agents cannot talk forever on
 // somebody's bill. The Identity Agent enforces them; a body cannot.
 const (
-	// MaxTurns is how many asks and replies one conversation may hold.
+	// MaxTurns is how many asks, replies and failure notices one conversation
+	// may hold. Asks stop at it; an answer to an ask already made never does.
 	MaxTurns = 40
 	// MaxDepth is how far a chain of asks may go: a person asks A (depth 0),
 	// A asks B (1), B asks C (2), C asks D (3), and no further.

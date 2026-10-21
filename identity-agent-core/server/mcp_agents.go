@@ -45,9 +45,11 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 		return
 	}
 	var req struct {
-		Name                string                 `json:"name"`
-		Capabilities        []string               `json:"capabilities"`
-		ResourceConstraints map[string]interface{} `json:"resource_constraints,omitempty"`
+		Name         string   `json:"name"`
+		Capabilities []string `json:"capabilities"`
+		// Always present, even empty, so a front end can tell an Identity Agent
+		// that reports limits from one too old to.
+		ResourceConstraints map[string]interface{} `json:"resource_constraints"`
 		Role                string                 `json:"role,omitempty"`
 		SystemPrompt        string                 `json:"system_prompt,omitempty"`
 		Brain               asset.BrainConfig      `json:"brain,omitempty"`
@@ -202,7 +204,7 @@ func (s *CoreServer) handleListAgents(w http.ResponseWriter, r *http.Request) {
 			AgentAID:            a.PairwiseAID,
 			DelegatorAID:        a.DelegatorAID,
 			Capabilities:        a.Capabilities,
-			ResourceConstraints: a.GrantConstraints,
+			ResourceConstraints: nonNilConstraints(a.GrantConstraints),
 			Config:              a.AgentConfig,
 			Status:              s.agentStatus(a.PairwiseAID),
 			CreatedAt:           a.CreatedAt,
@@ -500,4 +502,11 @@ func lockAgentGrant(assetID string) (unlock func()) {
 	mu := m.(*sync.Mutex)
 	mu.Lock()
 	return mu.Unlock
+}
+
+func nonNilConstraints(c map[string]interface{}) map[string]interface{} {
+	if c == nil {
+		return map[string]interface{}{}
+	}
+	return c
 }

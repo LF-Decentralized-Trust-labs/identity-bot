@@ -113,12 +113,12 @@ type ControllerGrant struct {
 	Grade     ControllerGrade `json:"grade"`
 	GrantedAt time.Time       `json:"granted_at"`
 
-	// Signer is the organisation signer this machine belongs to, when the
-	// identity has more than one. A person speaking to an AI agent from this
-	// machine is recorded as that signer. Set by the device holding the key when
-	// it grants the machine — never by a controller, which may not write what
-	// authorisation reads. Empty while the identity has one signer, who is then
-	// the person.
+	// Signer is the organisation signer this machine belongs to: a person
+	// speaking to an AI agent from it is recorded as that signer. Named by the
+	// device holding the key when it grants the machine, or else set at that
+	// moment to the organisation's only signer — never by a controller, which
+	// may not write what authorisation reads. A grant made before there was
+	// one signer is bound at its first use, while there is exactly one.
 	Signer string `json:"signer,omitempty"`
 
 	// ExpiresAt is zero for an enrolled machine and set for a borrowed one.

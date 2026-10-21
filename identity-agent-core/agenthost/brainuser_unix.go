@@ -44,6 +44,8 @@ func (u AsUser) Command(ctx context.Context, dir string, env []string, name stri
 		full = append(full, "--preserve-env="+strings.Join(names, ","))
 	}
 	full = append(append(full, "--", name), args...)
+	// The brain starts in its workspace, which the host can enter (mode 711)
+	// but not list, so the host can start it there without reading it.
 	cmd := exec.CommandContext(ctx, "sudo", full...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), env...)

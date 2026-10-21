@@ -174,6 +174,24 @@ func (s *CoreServer) signerOf(g ControllerGrant) (agentmessage.PersonRef, error)
 		"been tied to one of them, so the record could not say which person asked")
 }
 
+// onlyActiveSigner is the organisation's signer when it has exactly one, and
+// empty otherwise.
+func (s *CoreServer) onlyActiveSigner() string {
+	if s.assetHandler == nil {
+		return ""
+	}
+	only := ""
+	for _, e := range s.assetHandler.Store.ListEmployees() {
+		if e.IsSigner && e.Status == "active" {
+			if only != "" {
+				return ""
+			}
+			only = e.PairwiseAID
+		}
+	}
+	return only
+}
+
 // personStillStands reports whether the person who opened a conversation is
 // still someone the organisation can prove — checked on every ask made in
 // their name, not only when they opened it.
@@ -276,14 +294,14 @@ func (s *CoreServer) recordMessage(cc sandbox.CallerContext, e conversation.Entr
 // ── A person speaks ──────────────────────────────────────────────────────────
 
 func (s *CoreServer) handlePersonSays(w http.ResponseWriter, r *http.Request) {
-	a, ok := s.aiAgentAsset(chi.URLParam(r, "id"))
-	if !ok {
-		jsonError(w, "AI agent not found", http.StatusNotFound)
-		return
-	}
 	cc := sandbox.CallerContext{Remote: true, CorrelationID: requestCorrelationID(r), Transport: "controller"}
 	if g, ok := TheControllerThatAsked(r); ok {
 		cc.CallerAID = g.ControllerAID
+	}
+	a, ok := s.aiAgentAsset(chi.URLParam(r, "id"))
+	if !ok {
+		s.refuseMessage(w, cc, agentmessage.KindAsk, "AI agent not found", http.StatusNotFound)
+		return
 	}
 	person, proof, err := s.thePersonAsking(r)
 	if err != nil {
@@ -636,6 +654,10 @@ func (s *CoreServer) handleBodySays(w http.ResponseWriter, r *http.Request) {
 			refuse(conversation.ErrAlreadyAnswered.Error(), http.StatusConflict)
 			return
 		}
+		// An answer counts as a turn, but is never refused for want of one:
+		// an ask that took the last turn must still be answerable, or it would
+		// wait unanswered until the conversation closed.
+		check = stillOpen(false)
 		// An answer travels back up the chain, to the asker's depth.
 		if depth = prompt.Depth - 1; depth < 0 {
 			depth = 0
@@ -763,7 +785,9 @@ func (s *CoreServer) handleBodyInbox(w http.ResponseWriter, r *http.Request) {
 // could not check it — and is logged, so it is seen rather than retried
 // silently.
 func (s *CoreServer) deliveriesFor(ctx context.Context, store *conversation.Store, agent string) ([]delivery, error) {
-	waiting, err := store.Waiting(agent, 10)
+	// More than a body handles at once, so a few entries that cannot be
+	// handed out do not hide the rest.
+	waiting, err := store.Waiting(agent, 50)
 	if err != nil {
 		return nil, err
 	}
@@ -819,6 +843,11 @@ func (s *CoreServer) handleBodyConversationHistory(w http.ResponseWriter, r *htt
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+	if s.SandboxManager != nil {
+		reader := cc
+		reader.Reason = "read conversation " + cid
+		s.SandboxManager.RecordGovernanceEvent(reader, "agent.conversation.read", "ok")
 	}
 	type said struct {
 		Seq  int    `json:"seq"`

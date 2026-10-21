@@ -26,8 +26,9 @@ to its Identity Agent, so no machine listens for connections.
 
 **A person asks an AI agent, never the organisation.** The person must be someone the
 organisation can prove. In this version that is a signer of the organisation, speaking
-through a controller the owner paired (ADR-044). The controller grant names its signer,
-or the organisation has only one. A person's message is recorded with their
+through a controller the owner paired (ADR-044). The controller grant names its signer:
+the one the owner's device named when it paired the machine, or else the organisation's
+only signer at that moment. A person's message is recorded with their
 controller's signature over the request.
 
 **The Identity Agent owns the conversation.** It opens a conversation when a person
@@ -53,7 +54,8 @@ An ask is answered once by the party it was put to. The answer is a reply or a f
 notice, and a second one is refused. Otherwise one body could make another's brain run
 again and again.
 
-A conversation holds at most 40 asks, replies and failure notices. A chain of asks goes
+A conversation holds at most 40 asks, replies and failure notices. Asks stop there; an
+answer to an ask already made is never refused for want of a turn. A chain of asks goes
 at most three deep. It closes after 30 minutes with nothing said. A receipt is not
 something said: it neither counts as a turn nor keeps a conversation open. A receipt is
 taken only for a message still waiting for the body that sends it. These limits are
@@ -64,7 +66,9 @@ The opener's standing is checked again on every ask made in their conversation, 
 only when they opened it.
 
 Every refusal of a message from a person or a body is written to the signed governance
-record. So is every opening of a conversation's record for reading.
+record. So is a person opening a conversation's record, and a body reading one back. A
+person's later waits for news in a conversation they already opened are not recorded
+one by one.
 
 **Every message is signed twice, for two different claims:**
 1. **The sender's own statement.** A body signs it with its machine key over a
@@ -106,7 +110,9 @@ The body then sends a receipt signed by its key over the message and its entry h
 so the record proves the machine received it. Only then does it act. A message is
 delivered until its receipt arrives, and acted on once. A message that does not check
 out is acknowledged and not acted on. If it was an ask, the body sends a failure notice
-saying why, so it neither waits in the queue nor leaves the asker waiting.
+saying why, so it neither waits in the queue nor leaves the asker waiting. A check that
+could not be made at all, because a key log could not be fetched, is not a refusal: the
+message is tried again.
 
 **A body's requests are sealed.** `agent-host` carries every request inside the sealed
 transport (`didcomm.SendSealed`, the same format an Identity Agent uses to reach a peer).
@@ -121,9 +127,10 @@ session. It has the body's tools as its only tools:
 - `system_info`, a fixed set of facts about the machine, never a shell.
 
 The tools reach the body through a stdio MCP server, holding a token good for one
-turn. The token travels in the brain's environment, and the words travel on stdin or in
-a file only the brain can find. Neither goes on the command line, which other users of
-the machine can read. The program starts with no built-in tools at all (for Claude Code, `--tools ""`),
+turn. The token travels in the brain's environment, and the words and instructions
+travel on stdin. Neither goes on the command line, which other users of the machine can
+read, nor into a file. Since neither program takes a system prompt from stdin, the
+instructions lead a session's first message instead. The program starts with no built-in tools at all (for Claude Code, `--tools ""`),
 and ignores the settings of the user running it. Permission mode alone is not enough:
 under `dontAsk`, with an allow list naming only the body's tools, a read-only shell
 command still ran. The brain can
