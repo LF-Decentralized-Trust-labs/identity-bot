@@ -20,7 +20,7 @@ import (
 // somebody else and leave this agent without its address. A pairwise identity
 // rather than the root, for the same reason a relay enrolment is one: the hub
 // needs proof of who holds the name, not this agent's own identifier.
-func (s *CoreServer) tunnelNameOwner() (*tunnel.NameOwner, error) {
+func (s *CoreServer) tunnelNameOwner(domain string) (*tunnel.NameOwner, error) {
 	rootSeed, err := secureenclave.LoadRootSeed(s.DataDir)
 	if err != nil {
 		return nil, fmt.Errorf("this agent has no identity yet to own a tunnel name with")
@@ -46,7 +46,7 @@ func (s *CoreServer) tunnelNameOwner() (*tunnel.NameOwner, error) {
 			return nil, fmt.Errorf("mint the identity that owns the tunnel name: %w", merr)
 		}
 		seed = minted
-		rec = &storedRelayEnrollment{AID: aid, RelationshipIndex: idx, PublicKey: rawPublicKeyB64(seed)}
+		rec = &storedRelayEnrollment{BaseURL: domain, AID: aid, RelationshipIndex: idx, PublicKey: rawPublicKeyB64(seed)}
 		if kel, ok := getPairwiseKEL(aid); ok {
 			rec.KEL = kel
 		}

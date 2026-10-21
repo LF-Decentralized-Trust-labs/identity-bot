@@ -99,7 +99,7 @@ func saveRecordedIdentity(dataDir, fileName string, enr storedRelayEnrollment) e
 		return fmt.Errorf("refusing to record a relay enrollment with no AID")
 	}
 	if enr.BaseURL == "" {
-		return fmt.Errorf("refusing to record a relay enrollment with no operator")
+		return fmt.Errorf("refusing to record an identity without the service it belongs to")
 	}
 	raw, err := json.MarshalIndent(enr, "", "  ")
 	if err != nil {

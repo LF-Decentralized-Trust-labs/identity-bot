@@ -4129,7 +4129,11 @@ func envTunnelConfigured() bool {
 func (s *CoreServer) loadTunnelConfig() tunnel.Config {
 	cfg := s.tunnelConfigFromSettings()
 	if cfg.Provider == tunnel.ProviderGrapeID {
-		owner, err := s.tunnelNameOwner()
+		domain := cfg.TunnelDomain
+		if domain == "" {
+			domain = "grapeid.org"
+		}
+		owner, err := s.tunnelNameOwner(domain)
 		if err != nil {
 			log.Printf("[tunnel] no identity to own a Grape ID tunnel name with: %v", err)
 		}
