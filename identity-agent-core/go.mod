@@ -8,6 +8,7 @@ require (
 	github.com/go-chi/cors v1.2.2
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
+	github.com/hashicorp/yamux v0.1.2
 	github.com/hirochachacha/go-smb2 v1.1.0
 	github.com/jpillora/chisel v1.10.1
 	github.com/mr-tron/base58 v1.2.0
