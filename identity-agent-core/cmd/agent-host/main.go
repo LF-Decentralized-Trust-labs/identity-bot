@@ -13,6 +13,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -64,6 +65,13 @@ func main() {
 		st, err := h.Status()
 		if err != nil {
 			fail(err)
+		}
+		// Its AI agent's name and brain come only over the sealed transport,
+		// which a live body has.
+		if st["state"] == "active" {
+			if code, raw, err := h.Call("GET", "/api/agent-host/binding", nil); err == nil && code == 200 {
+				_ = json.Unmarshal(raw, &st)
+			}
 		}
 		fmt.Printf("state: %v\nAI agent: %v %v\ngrade: %v\nwords: %v\ncredential: %v\nbrain: %v\n",
 			st["state"], st["agent_name"], st["agent"], st["grade"], st["words"], st["credential_said"], st["brain"])
@@ -166,8 +174,10 @@ One-time setup, as an administrator (each sudo asks for your password):
        echo '%[2]s ALL=(%[1]s) NOPASSWD:SETENV: /Users/%[1]s/.local/bin/claude' | sudo tee /etc/sudoers.d/agent-host
        sudo chmod 440 /etc/sudoers.d/agent-host
 
-  5. Make sure %[1]s can run this program (%[3]s), then run the host:
-       %[3]s run --brain claude-code --brain-path /Users/%[1]s/.local/bin/claude --brain-user %[1]s \
+  5. Install this program where %[1]s can run it. The brain starts it for its tools, and
+     your own folders are closed to other users. Then run the host from there:
+       sudo mkdir -p /usr/local/bin && sudo install -m 755 %[3]s /usr/local/bin/agent-host
+       /usr/local/bin/agent-host run --brain claude-code --brain-path /Users/%[1]s/.local/bin/claude --brain-user %[1]s \
          --workspace /Users/%[1]s/workspace
 `, user, me, self)
 	case "linux":
@@ -181,8 +191,10 @@ One-time setup, as an administrator:
   3. sudo -u %[1]s -H mkdir -m 711 /home/%[1]s/workspace
   4. echo '%[2]s ALL=(%[1]s) NOPASSWD:SETENV: /home/%[1]s/.local/bin/claude' | sudo tee /etc/sudoers.d/agent-host
      sudo chmod 440 /etc/sudoers.d/agent-host
-  5. %[3]s run --brain claude-code --brain-path /home/%[1]s/.local/bin/claude --brain-user %[1]s \
-       --workspace /home/%[1]s/workspace
+  5. Install this program where %[1]s can run it (the brain starts it for its tools), and run the host from there:
+       sudo install -m 755 %[3]s /usr/local/bin/agent-host
+       /usr/local/bin/agent-host run --brain claude-code --brain-path /home/%[1]s/.local/bin/claude --brain-user %[1]s \
+         --workspace /home/%[1]s/workspace
 `, user, me, self)
 	default:
 		fmt.Println("Running the brain as a separate Windows user is not available yet. On a machine you also use,\n" +
