@@ -428,8 +428,9 @@ removed.
 - **Republishing the endpoint record** when the address moves (§9). The core
   recomputes its published address; it does not yet send a signed `/loc/scheme`
   record to its witnesses and watchers.
-- **A screen for custom domains.** The core client can request and verify one;
-  no settings screen offers it yet.
+- **A screen for custom domains.** The core serves owner routes to request one,
+  read back the DNS record that proves it, and verify it; no settings screen in
+  this repository offers them yet.
 - **One private address per relationship.** The core holds one private address
   and gives it to every counterparty. The protocol allows one per relationship,
   and the client can allocate them; handing a fresh one to each new
