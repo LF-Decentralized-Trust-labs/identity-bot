@@ -110,7 +110,7 @@ final response = await http.get(Uri.parse('https://external-service.example/api?
 | Scenario | Where does the call go? | Why |
 |---|---|---|
 | Load profile, contacts, identity | Flutter → `$baseUrl/api/...` | Backend API, always local |
-| Check Grape ID name availability | Flutter → Go proxy → hub | External URL — browser CORS, Go owns TLS |
+| Check Grape ID name availability | Flutter → Go proxy → hub | External URL — browser CORS, Go owns TLS. Retired by ADR-048, with the tunnel provider. |
 | Claim / reconnect / release Grape ID name | Go backend only | These are tunnel lifecycle ops, never from Flutter |
 | Resolve OOBI URL | Flutter → `$baseUrl/api/resolve-oobi` | External but proxied through Go |
 | Any `https://external-*.com/...` call | NEVER from Flutter | Add a Go proxy endpoint instead |
@@ -122,10 +122,10 @@ All known outbound internet calls as of 2026-03-03:
 
 | Purpose | Caller | Endpoint | Notes |
 |---|---|---|---|
-| Check Grape ID name availability | Go backend (proxy) | `GET grapeid.org/check-name?name=...` | Flutter calls `GET /api/settings/tunnel/check-name` |
-| Claim Grape ID tunnel name | Go backend (`grapeid.go`) | `POST grapeid.org/claim-name` | Triggered on tunnel Start() |
-| Reconnect Grape ID tunnel name | Go backend (`grapeid.go`) | `POST grapeid.org/reconnect` | Tried first on Start() before claim |
-| Release Grape ID tunnel name | Go backend (`grapeid.go`) | `POST grapeid.org/release-name` | Best-effort on Stop(), 3s timeout |
+| Check Grape ID name availability | Go backend (proxy) | `GET grapeid.org/check-name?name=...` | Flutter calls `GET /api/settings/tunnel/check-name`. Retired by ADR-048, with the tunnel provider. |
+| Claim Grape ID tunnel name | Go backend (`grapeid.go`) | `POST grapeid.org/claim-name` | Triggered on tunnel Start(). Retired by ADR-048, with the tunnel provider. |
+| Reconnect Grape ID tunnel name | Go backend (`grapeid.go`) | `POST grapeid.org/reconnect` | Tried first on Start() before claim. Retired by ADR-048, with the tunnel provider. |
+| Release Grape ID tunnel name | Go backend (`grapeid.go`) | `POST grapeid.org/release-name` | Best-effort on Stop(), 3s timeout. Retired by ADR-048, with the tunnel provider. |
 | Cloudflare tunnel | Go backend | `cloudflared` subprocess | Not an HTTP call — subprocess |
 | ngrok tunnel | Go backend | `golang.ngrok.com/ngrok` SDK | SDK manages connection internally |
 | OOBI resolution | Go backend (KERI driver) | External OOBI URL | Python keripy handles this on desktop |

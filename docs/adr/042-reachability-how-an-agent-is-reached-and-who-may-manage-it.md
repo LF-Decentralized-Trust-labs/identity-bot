@@ -1,6 +1,6 @@
 # ADR-042 — How an agent is reached, and who may manage it
 
-**Status:** Accepted; §1 and §5 amended by ADR-048 (2026-10-21): URL Relay and Tunnel become the public and private modes of one relay protocol, and the per-entity default is the deploying product's to set
+**Status:** Accepted; §1, §3 and §5 amended by ADR-048 (2026-10-21): URL Relay carries both private and public addresses under one relay protocol; the Chisel tunnel provider goes, while development tunnels (Cloudflare, ngrok) stay; the core defaults every identity to URL Relay and a product sets its own per-entity default; the Identity Agent itself marks every relayed request
 **Date:** 2026-09-16
 **Relates to:** ADR-006 (Standardized Topology), ADR-033 (An identifier travels with an address), ADR-036 (A computer you pair with does not publish who you are), ADR-041 (One neutral scheme for the protocol's device codes)
 
@@ -157,6 +157,12 @@ Three properties make this sound:
   headers (`X-Forwarded-For`, `X-Real-Ip`, `Cf-Connecting-Ip`, `True-Client-Ip`,
   `Forwarded`) plus the relay's own marker — flips the request to remote
   (`hasForwardingHeaders`).
+- *Amended by ADR-048 (2026-10-21):* under the one relay protocol a relayed
+  request never reaches the agent over loopback at all. The Identity Agent serves
+  it from a relay stream, and sets `X-IA-Via-Ingress: relay` on every such request
+  itself, overwriting anything a caller sent. That the request is remote no longer
+  depends on the relay. The paragraph below describes the earlier frame protocol,
+  until the client moves onto `relayproto`.
 - **The relay stamps its own marker.** A relay-forwarded request also reaches the
   agent over loopback, so `relay/tunnel.go` sets `X-IA-Via-Ingress: relay` on the
   box, after the client's headers are applied, where a client can neither remove nor
