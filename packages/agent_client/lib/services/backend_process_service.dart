@@ -324,7 +324,7 @@ class BackendProcessService {
       // default relative "./data" store can't be created. Point it at an
       // absolute, per-app writable location so multiple flavors (oss / Grape ID
       // / Grape ID Org) keep separate state.
-      env['AGENT_DATA_DIR'] = dataDirOverride ?? _resolveDataDir();
+      env['AGENT_DATA_DIR'] = _backendDataDir();
       debugPrint('[BackendProcess] AGENT_DATA_DIR: ${env['AGENT_DATA_DIR']}');
       if (entityType != null && entityType!.isNotEmpty) {
         env['IDENTITY_AGENT_ENTITY_TYPE'] = entityType!;
@@ -338,7 +338,7 @@ class BackendProcessService {
       debugPrint('[BackendProcess] Working dir: $backendDir');
       debugPrint('[BackendProcess] engine: built in (keri-go)');
 
-      _forgetPort(backendDir);
+      _forgetPort();
       _backendProcess = await Process.start(
         _backendPath!,
         [],
@@ -426,31 +426,39 @@ class BackendProcessService {
   /// Exposed for the test that locks this in. The rule it protects is easy to
   /// re-break, because the wrong path looks perfectly reasonable.
   @visibleForTesting
-  int? debugDiscoverActualPort(String backendDir) => _discoverActualPort(backendDir);
+  int? debugDiscoverActualPort() => _discoverActualPort();
 
   /// Remove a .port left from an earlier run, so the only one there is the one
   /// the backend about to start writes.
   @visibleForTesting
-  void debugForgetPort(String backendDir) => _forgetPort(backendDir);
+  void debugForgetPort() => _forgetPort();
 
-  List<String> _portFileDirs(String backendDir) => [
-        if (dataDirOverride != null && dataDirOverride!.isNotEmpty)
-          dataDirOverride!,
-        '$backendDir${Platform.pathSeparator}data',
-      ];
+  /// The data directory the backend is told to use, and the .port inside it.
+  @visibleForTesting
+  String debugBackendDataDir() => _backendDataDir();
+  @visibleForTesting
+  String debugPortFilePath() => _portFilePath();
 
-  void _forgetPort(String backendDir) {
-    for (final dir in _portFileDirs(backendDir)) {
-      try {
-        final f = File('$dir${Platform.pathSeparator}.port');
-        if (f.existsSync()) f.deleteSync();
-      } catch (e) {
-        debugPrint('[BackendProcess] Could not remove an old .port in $dir: $e');
-      }
+  // One answer to "where does this backend keep its data", used both to tell
+  // the backend and to find the port it writes there. Two answers is how the
+  // app came to look in a folder the backend never wrote to.
+  String _backendDataDir() {
+    final override = dataDirOverride;
+    return (override != null && override.isNotEmpty) ? override : _resolveDataDir();
+  }
+
+  String _portFilePath() => '${_backendDataDir()}${Platform.pathSeparator}.port';
+
+  void _forgetPort() {
+    try {
+      final f = File(_portFilePath());
+      if (f.existsSync()) f.deleteSync();
+    } catch (e) {
+      debugPrint('[BackendProcess] Could not remove an old .port: $e');
     }
   }
 
-  int? _discoverActualPort(String backendDir) {
+  int? _discoverActualPort() {
     // Looked for where the backend actually writes it, which is its DATA
     // directory — not a fixed path under the backend directory.
     //
@@ -467,19 +475,16 @@ class BackendProcessService {
     // or two ports along, and reported that its own backend had failed to
     // start — on a machine where the only thing wrong was that something else
     // held 5050.
-    for (final dir in _portFileDirs(backendDir)) {
-      final portFile = File('$dir${Platform.pathSeparator}.port');
-      try {
-        if (portFile.existsSync()) {
-          final content = portFile.readAsStringSync().trim();
-          final port = int.tryParse(content);
-          if (port != null && port > 0 && port < 65536) {
-            return port;
-          }
+    final portFile = File(_portFilePath());
+    try {
+      if (portFile.existsSync()) {
+        final port = int.tryParse(portFile.readAsStringSync().trim());
+        if (port != null && port > 0 && port < 65536) {
+          return port;
         }
-      } catch (e) {
-        debugPrint('[BackendProcess] Could not read .port in $dir: $e');
       }
+    } catch (e) {
+      debugPrint('[BackendProcess] Could not read ${portFile.path}: $e');
     }
     // Not the default port as a guess. Until this backend says where it is, a
     // different program can be answering on the default — another Identity
@@ -521,7 +526,7 @@ class BackendProcessService {
 
       // On each attempt, check for the .port file to discover the actual port.
       // Nothing is probed until this backend has written one.
-      final actualPort = _discoverActualPort(backendDir);
+      final actualPort = _discoverActualPort();
       if (actualPort == null) {
         await Future.delayed(const Duration(milliseconds: 500));
         continue;
