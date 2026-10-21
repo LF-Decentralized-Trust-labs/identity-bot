@@ -25,39 +25,41 @@ var aidSegment = regexp.MustCompile(`^[A-Za-z0-9_-]{44,}$`)
 
 // PrivateMayReach reports whether a private allocation passes a request. A
 // private address serves the identity's artifacts to the counterparty it was
-// made for, and accepts that counterparty's messages, and nothing else:
+// made for, and accepts that counterparty's messages and key registration,
+// and nothing else:
 //
-//   - GET or HEAD of /{aid}/did.json, /{aid}/kel, /{aid}/keri.cesr,
-//     /{aid}/oobi, /oobi/{aid} and /.well-known/did-configuration.json;
-//   - POST /didcomm, the identity's message endpoint.
+//   - GET or HEAD of /{aid}/did.json, /public/{aid}/did.json, /{aid}/kel,
+//     /{aid}/keri.cesr, /{aid}/oobi and /oobi/{aid};
+//   - POST /didcomm, the identity's message endpoint;
+//   - POST /_register and POST /public/_register, where a counterparty's
+//     pairwise signer registers the key it will be resolved by.
 //
-// The Identity Agent applies its own, stricter rule per allocation; a relay
-// applies this one so that a mistake on one side is not a hole.
+// Paths match exactly: no trailing slash, no other spelling. The Identity
+// Agent applies its own, stricter rule per allocation; a relay applies this
+// one so that a mistake on one side is not a hole.
 func PrivateMayReach(method, path string) bool {
-	path = strings.TrimSuffix(path, "/")
 	switch method {
 	case "POST":
-		return path == "/didcomm"
+		return path == "/didcomm" || path == "/_register" || path == "/public/_register"
 	case "GET", "HEAD":
 	default:
 		return false
 	}
-	if path == "/.well-known/did-configuration.json" {
-		return true
-	}
-	seg := strings.Split(strings.TrimPrefix(path, "/"), "/")
-	if len(seg) != 2 {
+	seg := strings.Split(path, "/")
+	if seg[0] != "" {
 		return false
 	}
-	if seg[0] == "oobi" {
+	seg = seg[1:]
+	switch {
+	case len(seg) == 2 && seg[0] == "oobi":
 		return aidSegment.MatchString(seg[1])
-	}
-	if !aidSegment.MatchString(seg[0]) {
-		return false
-	}
-	switch seg[1] {
-	case "did.json", "kel", "keri.cesr", "oobi":
-		return true
+	case len(seg) == 3 && seg[0] == "public":
+		return aidSegment.MatchString(seg[1]) && seg[2] == "did.json"
+	case len(seg) == 2 && aidSegment.MatchString(seg[0]):
+		switch seg[1] {
+		case "did.json", "kel", "keri.cesr", "oobi":
+			return true
+		}
 	}
 	return false
 }
@@ -67,8 +69,9 @@ type AllocationLimiter struct {
 	PerMinute int
 	Now       func() time.Time
 
-	mu      sync.Mutex
-	windows map[string]*window
+	mu        sync.Mutex
+	windows   map[string]*window
+	lastSweep time.Time
 }
 
 type window struct {
@@ -92,15 +95,18 @@ func (l *AllocationLimiter) Allow(allocation string) bool {
 	defer l.mu.Unlock()
 	w := l.windows[allocation]
 	if w == nil || now.Sub(w.start) >= time.Minute {
-		if len(l.windows) > 100000 {
+		w = &window{start: now}
+		l.windows[allocation] = w
+		// Forget finished windows at most once a minute, so the cost of
+		// sweeping is spread over a minute of requests, not paid by each.
+		if now.Sub(l.lastSweep) >= time.Minute {
+			l.lastSweep = now
 			for k, old := range l.windows {
 				if now.Sub(old.start) >= time.Minute {
 					delete(l.windows, k)
 				}
 			}
 		}
-		w = &window{start: now}
-		l.windows[allocation] = w
 	}
 	if w.count >= l.PerMinute {
 		return false

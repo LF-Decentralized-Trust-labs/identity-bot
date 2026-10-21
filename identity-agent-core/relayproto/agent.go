@@ -7,8 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,9 +21,10 @@ import (
 
 // AgentConfig is what an Identity Agent supplies to connect to a relay.
 type AgentConfig struct {
-	// URL is the relay's websocket endpoint, wss://.
+	// URL is the relay's websocket endpoint, wss://. Its host name is the
+	// relay's name: a challenge naming any other relay is refused.
 	URL string
-	// AID is the enrolment identifier this relay knows the agent by.
+	// AID is the enrolment identifier this relay knows the Identity Agent by.
 	AID string
 	// KEL returns the identifier's signed key event log as a CESR stream. It is
 	// asked at every admission and renewal, so a rotation reaches the relay at
@@ -31,7 +35,7 @@ type AgentConfig struct {
 	// TLS configures the connection; nil means the system defaults with a
 	// minimum of TLS 1.3.
 	TLS *tls.Config
-	// Now is the agent's clock; nil means time.Now.
+	// Now is the Identity Agent's clock; nil means time.Now.
 	Now func() time.Time
 }
 
@@ -69,6 +73,10 @@ func Dial(ctx context.Context, cfg *AgentConfig) (*AgentSession, error) {
 		Subprotocols:     []string{Subprotocol},
 		Proxy:            http.ProxyFromEnvironment,
 	}
+	u, err := url.Parse(cfg.URL)
+	if err != nil || u.Scheme != "wss" || u.Hostname() == "" {
+		return nil, fmt.Errorf("a relay is reached at a wss:// address, not %q", cfg.URL)
+	}
 	ws, resp, err := d.DialContext(ctx, cfg.URL, nil)
 	if err != nil {
 		if resp != nil {
@@ -88,13 +96,22 @@ func Dial(ctx context.Context, cfg *AgentConfig) (*AgentSession, error) {
 	if err != nil {
 		return fail(err)
 	}
+	// Until admitted, the relay may send a challenge and an answer, and
+	// nothing larger.
+	ws.SetReadLimit(MaxControlBytes)
 	ws.SetReadDeadline(time.Now().Add(HandshakeTimeout))
 	var ch Challenge
 	if err := ws.ReadJSON(&ch); err != nil {
 		return fail(fmt.Errorf("read the relay's challenge: %w", err))
 	}
 	if ch.Protocol != ProtocolVersion || ch.Renewal {
-		return fail(fmt.Errorf("the relay speaks %q; this agent speaks %q", ch.Protocol, ProtocolVersion))
+		return fail(fmt.Errorf("the relay speaks %q; this Identity Agent speaks %q", ch.Protocol, ProtocolVersion))
+	}
+	// The statement names the relay it is for. Signing one for a name other
+	// than the relay dialled would hand that relay a statement it could not
+	// otherwise get.
+	if !strings.EqualFold(ch.Service, u.Hostname()) {
+		return fail(fmt.Errorf("the relay at %s calls itself %q", u.Hostname(), ch.Service))
 	}
 	a, err := Answer(ch, exporter, cfg.AID, cfg.KEL(), cfg.Signer, cfg.now())
 	if err != nil {
@@ -125,18 +142,32 @@ func (a *AgentSession) Close() error { return a.mux.Close() }
 // Done is closed when the session ends.
 func (a *AgentSession) Done() <-chan struct{} { return a.mux.CloseChan() }
 
+// ViaRelayHeader is set on every request an Identity Agent receives through a
+// relay, overwriting anything a caller sent under that name. The Identity
+// Agent's gate treats a request carrying it as remote, whatever the relay did
+// or did not add.
+const ViaRelayHeader = "X-IA-Via-Ingress"
+
 // Serve answers the relay's streams with handler until the session ends. Each
-// stream carries exactly one request; the handler reads [PreambleFrom] to learn
-// which allocation it arrived on, and decides for itself what that allocation
-// may reach.
+// stream carries exactly one request.
+//
+// The handler reads [PreambleFrom] to learn which allocation a request arrived
+// on. It must look that allocation up in its own records to learn what it may
+// reach, and must not trust the preamble's mode: the preamble says what the
+// relay claims, and a relay is not trusted to decide what reaches the
+// Identity Agent.
 func (a *AgentSession) Serve(handler http.Handler) error {
 	ln := &streamListener{
 		session: a, conns: make(chan net.Conn), done: make(chan struct{}),
 		slots: make(chan struct{}, MaxStreamsPerSession),
 	}
 	go ln.acceptLoop()
+	marked := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Header.Set(ViaRelayHeader, "relay")
+		handler.ServeHTTP(w, r)
+	})
 	srv := &http.Server{
-		Handler:           handler,
+		Handler:           marked,
 		ReadHeaderTimeout: 30 * time.Second,
 		ConnContext: func(ctx context.Context, c net.Conn) context.Context {
 			if sc, ok := c.(*streamConn); ok {
@@ -163,7 +194,7 @@ func (a *AgentSession) Serve(handler http.Handler) error {
 func (a *AgentSession) renew(st net.Conn) {
 	defer st.Close()
 	st.SetDeadline(time.Now().Add(HandshakeTimeout))
-	r := bufio.NewReader(st)
+	r := bufio.NewReader(io.LimitReader(st, MaxControlBytes))
 	var ch Challenge
 	if err := json.NewDecoder(r).Decode(&ch); err != nil || !ch.Renewal {
 		return
@@ -194,10 +225,11 @@ func (l *streamListener) acceptLoop() {
 		if err != nil {
 			return
 		}
-		select {
-		case l.slots <- struct{}{}:
-		default:
-			st.Close() // over the limit the relay should have kept to
+		// Every stream the relay holds open counts, including ones half
+		// closed, plus one for the renewal's control stream: over that is
+		// over the limit the relay should have kept to.
+		if l.session.mux.NumStreams() > MaxStreamsPerSession+1 {
+			st.Close()
 			continue
 		}
 		go l.admitStream(st)
@@ -205,21 +237,28 @@ func (l *streamListener) acceptLoop() {
 }
 
 func (l *streamListener) admitStream(st net.Conn) {
-	release := func() { <-l.slots }
 	st.SetReadDeadline(time.Now().Add(HandshakeTimeout))
 	p, err := readPreamble(st)
 	if err != nil {
 		st.Close()
-		release()
 		return
 	}
 	st.SetReadDeadline(time.Time{})
+	// A renewal is not a request and takes no request slot. If it did, a
+	// relay with every slot busy could not renew, and the lease would end
+	// under a working session.
 	if p.Mode == modeRenew {
 		l.session.renew(st)
-		release()
 		return
 	}
-	sc := &streamConn{Conn: st, preamble: p, release: release}
+	select {
+	case l.slots <- struct{}{}:
+	default:
+		st.Close()
+		return
+	}
+	release := func() { <-l.slots }
+	sc := newStreamConn(st, p, release)
 	select {
 	case l.conns <- sc:
 	case <-l.done:

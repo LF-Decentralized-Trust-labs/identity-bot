@@ -5,13 +5,13 @@
 // so the two ends cannot drift apart.
 //
 // The shape, in one paragraph. The Identity Agent opens one websocket to the
-// relay over TLS. The relay sends a challenge, and the agent answers with a
+// relay over TLS. The relay sends a challenge, and the Identity Agent answers with a
 // statement signed by its enrolment key that names the relay, the challenge and
 // this TLS connection, plus the key event log that binds that key to its
 // identifier. Once admitted, the websocket carries a yamux session in which only
 // the relay opens streams. Each inbound request gets its own stream, which
 // starts with a preamble the relay writes (which allocation, which mode, which
-// host) and then carries ordinary HTTP. The agent serves those streams with an
+// host) and then carries ordinary HTTP. The Identity Agent serves those streams with an
 // ordinary http.Server, so upgrades, streaming, query strings and headers are
 // HTTP's own. An admission is a lease: before it runs out, the relay challenges
 // again over a control stream, and a session that cannot answer is closed.

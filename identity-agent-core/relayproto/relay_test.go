@@ -110,22 +110,35 @@ type relay struct {
 	logs     chan string
 	routes   map[string]Preamble
 	aidFor   map[string]string
+	accepted chan error
 }
 
 func newRelay(t *testing.T, cfg *ServiceConfig) *relay {
 	t.Helper()
 	r := &relay{t: t, registry: NewRegistry(), logs: make(chan string, 100),
-		routes: map[string]Preamble{}, aidFor: map[string]string{}}
+		routes: map[string]Preamble{}, aidFor: map[string]string{}, accepted: make(chan error, 1000)}
 	if cfg == nil {
 		cfg = &ServiceConfig{}
 	}
-	cfg.Verifier = &Verifier{Service: "relay.test", Enrolled: func(aid string) ([]byte, bool) {
+	cfg.Registry = r.registry
+	enrolled := func(aid string) ([]byte, bool) {
 		v, ok := r.held.Load(aid)
 		if !ok {
 			return nil, false
 		}
 		return v.([]byte), true
-	}}
+	}
+	if cfg.Verifier != nil && cfg.Verifier.Enrolled != nil {
+		enrolled = cfg.Verifier.Enrolled
+	}
+	cfg.Verifier = &Verifier{Enrolled: enrolled}
+	store := func(v *Verified) error { r.held.Store(v.AID, v.KEL); return nil }
+	if cfg.OnAdmit == nil {
+		cfg.OnAdmit = store
+	}
+	if cfg.OnRenew == nil {
+		cfg.OnRenew = store
+	}
 	cfg.Logf = func(f string, a ...any) {
 		select {
 		case r.logs <- fmt.Sprintf(f, a...):
@@ -134,15 +147,15 @@ func newRelay(t *testing.T, cfg *ServiceConfig) *relay {
 	}
 	r.cfg = cfg
 	r.tunnel = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		s, err := Accept(w, req, r.cfg)
-		if err != nil {
-			return
-		}
-		r.held.Store(s.AID, s.KEL())
-		r.registry.Put(s)
+		_, err := Accept(w, req, r.cfg)
+		r.accepted <- err
 	}))
 	r.tunnel.TLS = &tls.Config{MinVersion: tls.VersionTLS13}
 	r.tunnel.StartTLS()
+	// A relay's name is the host Identity Agents dial it at.
+	if cfg.Verifier.Service == "" {
+		cfg.Verifier.Service = "127.0.0.1"
+	}
 	r.front = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		p, ok := r.routes[req.Host]
 		if !ok {
@@ -270,10 +283,13 @@ func TestTheAllocationCannotBeClaimedByTheCaller(t *testing.T) {
 
 	var wg sync.WaitGroup
 	var wrong atomic.Int32
+	gate := make(chan struct{}, PrivateInFlightPerAllocation) // within one address's in-flight limit
 	for i := 0; i < 60; i++ {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
+			gate <- struct{}{}
+			defer func() { <-gate }()
 			host, want, path := "pub.relay.test", "pub-1", "/api/x"
 			if i%2 == 1 {
 				host, want, path = "a1b2.relay.test", "priv-7", "/oobi/"+id.aid
@@ -329,7 +345,7 @@ func TestAPrivateAllocationPassesOnlyArtifactsAndMessages(t *testing.T) {
 func TestAResponseStreamsAsItIsWritten(t *testing.T) {
 	r := newRelay(t, nil)
 	id := newIdentity(t)
-	r.route("acme.relay.test", id.aid, Preamble{Allocation: "pub-1", Mode: ModePublic})
+	r.route("acme.relay.test", id.aid, Preamble{Allocation: "pub-1", Mode: ModePublic, Host: "acme.relay.test"})
 	release := make(chan struct{})
 	r.connect(id, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		io.WriteString(w, "first\n")
@@ -361,7 +377,7 @@ func TestAResponseStreamsAsItIsWritten(t *testing.T) {
 func TestAWebsocketOpensThroughTheRelay(t *testing.T) {
 	r := newRelay(t, nil)
 	id := newIdentity(t)
-	r.route("acme.relay.test", id.aid, Preamble{Allocation: "pub-1", Mode: ModePublic})
+	r.route("acme.relay.test", id.aid, Preamble{Allocation: "pub-1", Mode: ModePublic, Host: "acme.relay.test"})
 	up := websocket.Upgrader{}
 	r.connect(id, http.HandlerFunc(func(w http.ResponseWriter, q *http.Request) {
 		c, err := up.Upgrade(w, q, nil)
@@ -379,8 +395,13 @@ func TestAWebsocketOpensThroughTheRelay(t *testing.T) {
 	}))
 	d := websocket.Dialer{}
 	h := http.Header{"Host": {"acme.relay.test"}}
-	c, _, err := d.Dial("ws"+strings.TrimPrefix(r.front.URL, "http")+"/api/ws/events", h)
+	c, resp, err := d.Dial("ws"+strings.TrimPrefix(r.front.URL, "http")+"/api/ws/events", h)
 	if err != nil {
+		b := []byte{}
+		if resp != nil {
+			b, _ = io.ReadAll(resp.Body)
+			t.Logf("status %d %s", resp.StatusCode, b)
+		}
 		t.Fatalf("the websocket did not open through the relay: %v", err)
 	}
 	defer c.Close()
@@ -396,7 +417,7 @@ func TestAWebsocketOpensThroughTheRelay(t *testing.T) {
 func TestManyRequestsAreInFlightAtOnce(t *testing.T) {
 	r := newRelay(t, nil)
 	id := newIdentity(t)
-	r.route("acme.relay.test", id.aid, Preamble{Allocation: "pub-1", Mode: ModePublic})
+	r.route("acme.relay.test", id.aid, Preamble{Allocation: "pub-1", Mode: ModePublic, Host: "acme.relay.test"})
 	var inFlight, peak atomic.Int32
 	r.connect(id, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		n := inFlight.Add(1)
@@ -434,7 +455,7 @@ func TestManyRequestsAreInFlightAtOnce(t *testing.T) {
 func TestALargeBodyWaitsForTheIdentityAgentToAcceptIt(t *testing.T) {
 	r := newRelay(t, nil)
 	id := newIdentity(t)
-	r.route("acme.relay.test", id.aid, Preamble{Allocation: "pub-1", Mode: ModePublic})
+	r.route("acme.relay.test", id.aid, Preamble{Allocation: "pub-1", Mode: ModePublic, Host: "acme.relay.test"})
 	var expect atomic.Value
 	r.connect(id, http.HandlerFunc(func(w http.ResponseWriter, q *http.Request) {
 		expect.Store(q.Header.Get("Expect"))
@@ -457,7 +478,7 @@ func TestALargeBodyWaitsForTheIdentityAgentToAcceptIt(t *testing.T) {
 func TestAReconnectReplacesTheSession(t *testing.T) {
 	r := newRelay(t, nil)
 	id := newIdentity(t)
-	r.route("acme.relay.test", id.aid, Preamble{Allocation: "pub-1", Mode: ModePublic})
+	r.route("acme.relay.test", id.aid, Preamble{Allocation: "pub-1", Mode: ModePublic, Host: "acme.relay.test"})
 	first := r.connect(id, http.HandlerFunc(echo))
 	oldSession, _ := r.registry.Get(id.aid)
 	second := r.connect(id, http.HandlerFunc(echo))
@@ -496,7 +517,7 @@ func TestRevokingAnIdentifierEndsItsSession(t *testing.T) {
 // short time. A captured one is worth nothing anywhere else.
 func TestACapturedStatementIsUselessElsewhere(t *testing.T) {
 	id := newIdentity(t)
-	v := &Verifier{Service: "relay.test"}
+	v := &Verifier{Service: "relay.test", Enrolled: func(string) ([]byte, bool) { return nil, false }}
 	now := time.Now()
 	ch := NewChallenge("relay.test", now)
 	exporter := bytes.Repeat([]byte{1}, ExporterLength)
@@ -518,7 +539,7 @@ func TestACapturedStatementIsUselessElsewhere(t *testing.T) {
 	if _, err := v.Verify(a, ch, exporter, now.Add(ClockSkew+time.Second)); err == nil {
 		t.Error("a stale statement was accepted")
 	}
-	if _, err := (&Verifier{Service: "elsewhere.test"}).Verify(a, ch, exporter, now); err == nil {
+	if _, err := (&Verifier{Service: "elsewhere.test", Enrolled: v.Enrolled}).Verify(a, ch, exporter, now); err == nil {
 		t.Error("a statement made for one relay was accepted by another")
 	}
 	forged := a
@@ -599,7 +620,7 @@ func TestAKeyLogMayOnlyBeExtended(t *testing.T) {
 func TestALeaseIsRenewedWithoutDroppingTheSession(t *testing.T) {
 	r := newRelay(t, &ServiceConfig{Lease: 1500 * time.Millisecond, RenewBefore: 1000 * time.Millisecond})
 	id := newIdentity(t)
-	r.route("acme.relay.test", id.aid, Preamble{Allocation: "pub-1", Mode: ModePublic})
+	r.route("acme.relay.test", id.aid, Preamble{Allocation: "pub-1", Mode: ModePublic, Host: "acme.relay.test"})
 	a := r.connect(id, http.HandlerFunc(echo))
 	s, _ := r.registry.Get(id.aid)
 	firstExpiry := s.ExpiresAt()
@@ -648,9 +669,14 @@ func TestPrivateMayReach(t *testing.T) {
 		{"GET", "/" + aid + "/did.json", true},
 		{"HEAD", "/" + aid + "/keri.cesr", true},
 		{"GET", "/oobi/" + aid, true},
-		{"GET", "/.well-known/did-configuration.json", true},
+		{"GET", "/public/" + aid + "/did.json", true},
+		{"POST", "/_register", true},
+		{"POST", "/public/_register", true},
+		{"GET", "/.well-known/did-configuration.json", false},
 		{"POST", "/didcomm", true},
-		{"POST", "/didcomm/", true},
+		{"POST", "/didcomm/", false},
+		{"GET", "/oobi/" + aid + "/", false},
+		{"GET", "//oobi/" + aid, false},
 		{"GET", "/didcomm", false},
 		{"POST", "/" + aid + "/did.json", false},
 		{"GET", "/api/identity", false},
@@ -718,7 +744,8 @@ func TestPreambleRoundTripAndLimits(t *testing.T) {
 func TestTheStreamLimitHoldsAndFreesUp(t *testing.T) {
 	r := newRelay(t, nil)
 	id := newIdentity(t)
-	r.route("acme.relay.test", id.aid, Preamble{Allocation: "pub-1", Mode: ModePublic})
+	r.route("acme.relay.test", id.aid, Preamble{Allocation: "pub-1", Mode: ModePublic, Host: "acme.relay.test"})
+	r.route("www.acme.relay.test", id.aid, Preamble{Allocation: "pub-2", Mode: ModePublic, Host: "www.acme.relay.test"})
 	hold := make(chan struct{})
 	var held atomic.Int32
 	r.connect(id, http.HandlerFunc(func(w http.ResponseWriter, q *http.Request) {
@@ -729,9 +756,9 @@ func TestTheStreamLimitHoldsAndFreesUp(t *testing.T) {
 		io.WriteString(w, "ok")
 	}))
 	client := &http.Client{Transport: &http.Transport{MaxConnsPerHost: 0, MaxIdleConnsPerHost: 512}}
-	get := func(path string) int {
+	get := func(host, path string) int {
 		req, _ := http.NewRequest("GET", r.front.URL+path, nil)
-		req.Host = "acme.relay.test"
+		req.Host = host
 		resp, err := client.Do(req)
 		if err != nil {
 			t.Error(err)
@@ -742,18 +769,23 @@ func TestTheStreamLimitHoldsAndFreesUp(t *testing.T) {
 		return resp.StatusCode
 	}
 	var wg sync.WaitGroup
+	// Spread over two addresses, each within its own in-flight limit.
 	for i := 0; i < MaxStreamsPerSession; i++ {
 		wg.Add(1)
-		go func() { defer wg.Done(); get("/hold") }()
+		host := "acme.relay.test"
+		if i%2 == 1 {
+			host = "www.acme.relay.test"
+		}
+		go func() { defer wg.Done(); get(host, "/hold") }()
 	}
 	r.waitFor(func() bool { return held.Load() == MaxStreamsPerSession })
-	if code := get("/x"); code != http.StatusServiceUnavailable {
+	if code := get("acme.relay.test", "/x"); code != http.StatusServiceUnavailable {
 		t.Errorf("request %d past the limit got %d", MaxStreamsPerSession+1, code)
 	}
 	close(hold)
 	wg.Wait()
 	for i := 0; i < MaxStreamsPerSession+10; i++ {
-		if code := get("/x"); code != 200 {
+		if code := get("acme.relay.test", "/x"); code != 200 {
 			t.Fatalf("request %d after the held ones finished got %d", i, code)
 		}
 	}

@@ -8,6 +8,8 @@ import (
 	"io"
 	"net"
 	"sync"
+	"sync/atomic"
+	"time"
 )
 
 // Mode is what kind of address an allocation is. Which one an identity uses is
@@ -98,16 +100,65 @@ func PreambleFrom(ctx context.Context) (Preamble, bool) {
 }
 
 // streamConn is a relay stream whose preamble has been read.
+//
+// It ends itself once nothing has moved on it, in either direction, for
+// streamIdle: a body trickled in slowly, or a response that never comes,
+// cannot hold a stream for ever. It watches rather than setting deadlines,
+// because net/http sets its own deadlines on the connection it serves (to
+// hijack one for a websocket, for instance) and must not have them moved.
 type streamConn struct {
 	net.Conn
 	preamble Preamble
 	once     sync.Once
 	release  func()
+	last     atomic.Int64 // unix nanoseconds of the last bytes moved
+	done     chan struct{}
+}
+
+func newStreamConn(c net.Conn, p Preamble, release func()) *streamConn {
+	sc := &streamConn{Conn: c, preamble: p, release: release, done: make(chan struct{})}
+	sc.last.Store(time.Now().UnixNano())
+	go sc.watch()
+	return sc
+}
+
+func (c *streamConn) watch() {
+	idle := streamIdle()
+	tick := time.NewTicker(idle / 4)
+	defer tick.Stop()
+	for {
+		select {
+		case <-c.done:
+			return
+		case now := <-tick.C:
+			if now.Sub(time.Unix(0, c.last.Load())) >= idle {
+				c.Close()
+				return
+			}
+		}
+	}
+}
+
+func (c *streamConn) Read(p []byte) (int, error) {
+	n, err := c.Conn.Read(p)
+	if n > 0 {
+		c.last.Store(time.Now().UnixNano())
+	}
+	return n, err
+}
+
+func (c *streamConn) Write(p []byte) (int, error) {
+	n, err := c.Conn.Write(p)
+	if n > 0 {
+		c.last.Store(time.Now().UnixNano())
+	}
+	return n, err
 }
 
 func (c *streamConn) Close() error {
 	err := c.Conn.Close()
 	c.once.Do(func() {
+		close(c.done)
 		if c.release != nil {
 			c.release()
 		}

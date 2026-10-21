@@ -1,6 +1,9 @@
 package relayproto
 
-import "time"
+import (
+	"sync/atomic"
+	"time"
+)
 
 // The numbers ADR-048 fixes. They are part of the protocol, not tuning: a
 // relay and an Identity Agent that disagree about them disagree about what is
@@ -59,4 +62,39 @@ const (
 	// address serves a user interface; a private one answers one counterparty.
 	PublicRequestsPerMinute  = 1200
 	PrivateRequestsPerMinute = 120
+
+	// Requests in flight on one allocation at once, by mode, so one address
+	// cannot take every stream of a session from the others.
+	PublicInFlightPerAllocation  = 128
+	PrivateInFlightPerAllocation = 16
+
+	// StreamIdleTimeout ends a stream on which nothing has moved in either
+	// direction for this long, at both ends. A long-poll answers well inside
+	// it; an inner websocket that may sit quiet sends pings more often.
+	StreamIdleTimeout = 2 * time.Minute
+	// StreamCloseTimeout is how long a stream one end has closed may wait for
+	// the other end to close it too, before it is reset. A half-closed stream
+	// still counts against MaxStreamsPerSession until then.
+	StreamCloseTimeout = 5 * time.Second
+
+	// MaxAdmissionBytes bounds anything a relay reads before an Identity Agent
+	// is admitted, and each renewal answer: a statement and a key event log at
+	// its limit, base64url, with room for the JSON around them.
+	MaxAdmissionBytes = 96 << 10
+	// MaxControlBytes bounds what an Identity Agent reads from a relay during
+	// admission and renewal: a challenge or an answer, never more.
+	MaxControlBytes = 4 << 10
+
+	// DefaultMaxSessions is how many Identity Agents a relay holds at once
+	// when it sets no limit of its own. Each session may hold
+	// MaxStreamsPerSession × StreamWindowBytes in flight, so this is a memory
+	// budget as much as a count.
+	DefaultMaxSessions = 10000
 )
+
+// streamIdleNanos is StreamIdleTimeout, held so tests can shorten it.
+var streamIdleNanos atomic.Int64
+
+func init() { streamIdleNanos.Store(int64(StreamIdleTimeout)) }
+
+func streamIdle() time.Duration { return time.Duration(streamIdleNanos.Load()) }

@@ -14,7 +14,7 @@ import (
 
 // Admission: an Identity Agent is let in on a signature, never a password.
 //
-// The relay sends a challenge. The agent signs a statement naming the relay,
+// The relay sends a challenge. The Identity Agent signs a statement naming the relay,
 // the challenge's nonce, the time, and this TLS connection's channel binding,
 // with the key its enrolment identifier's key event log currently names. The
 // relay checks that log with keri-go and the signature against it.
@@ -116,6 +116,20 @@ func ChannelBinding(cs tls.ConnectionState) ([]byte, error) {
 	return cs.ExportKeyingMaterial(ExporterLabel, nil, ExporterLength)
 }
 
+// printable refuses a statement with any field outside printable ASCII, so the
+// bytes signed have one spelling and a log line cannot be forged with them.
+func (s Statement) printable() error {
+	for name, v := range map[string]string{"purpose": s.Purpose, "protocol": s.Protocol,
+		"service": s.Service, "nonce": s.Nonce, "exporter": s.Exporter, "aid": s.AID, "t": s.Time} {
+		for i := 0; i < len(v); i++ {
+			if v[i] < 0x21 || v[i] > 0x7e {
+				return fmt.Errorf("the statement's %s is not printable ASCII", name)
+			}
+		}
+	}
+	return nil
+}
+
 // Answer signs a statement answering a challenge on a connection whose channel
 // binding is exporter.
 func Answer(ch Challenge, exporter []byte, aid string, kel []byte, signer Signer, now time.Time) (Admission, error) {
@@ -126,6 +140,9 @@ func Answer(ch Challenge, exporter []byte, aid string, kel []byte, signer Signer
 	}
 	if ch.Renewal {
 		st.Purpose = purposeRenew
+	}
+	if err := st.printable(); err != nil {
+		return Admission{}, err
 	}
 	body, err := st.canonical()
 	if err != nil {
@@ -144,10 +161,13 @@ func Answer(ch Challenge, exporter []byte, aid string, kel []byte, signer Signer
 
 // Verifier is the relay's side of admission.
 type Verifier struct {
-	// Service is the relay's own name, as its challenges carry it.
+	// Service is the relay's own name, as its challenges carry it: the host
+	// name an Identity Agent dials, which the Identity Agent checks.
 	Service string
 	// Enrolled returns the key event log the relay holds for an identifier
-	// from an earlier admission, if any.
+	// from an earlier admission, if any. It is required: a relay that keeps no
+	// record of the logs it has admitted cannot tell a current key from one
+	// rotated away, so a Verifier without it refuses everybody.
 	Enrolled func(aid string) ([]byte, bool)
 	// Standing, when set, is asked about every admission and renewal after the
 	// log has verified, so a relay that watches key state can refuse an
@@ -168,7 +188,16 @@ type Verified struct {
 // Verify checks an admission against the challenge it answers and the channel
 // binding of the connection it arrived on.
 func (v *Verifier) Verify(a Admission, ch Challenge, exporter []byte, now time.Time) (*Verified, error) {
+	return v.verify(a, ch, exporter, now, nil)
+}
+
+// verify is Verify with the log of the identifier's live session, if it has
+// one, which may be newer than the relay's stored record.
+func (v *Verifier) verify(a Admission, ch Challenge, exporter []byte, now time.Time, live []byte) (*Verified, error) {
 	st := a.Statement
+	if err := st.printable(); err != nil {
+		return nil, err
+	}
 	want := purposeAdmit
 	if ch.Renewal {
 		want = purposeRenew
@@ -195,7 +224,7 @@ func (v *Verifier) Verify(a Admission, ch Challenge, exporter []byte, now time.T
 		return nil, fmt.Errorf("the statement is not fresh")
 	}
 
-	kel, err := v.keyLog(st.AID, a.KEL)
+	kel, err := v.keyLog(st.AID, a.KEL, live)
 	if err != nil {
 		return nil, err
 	}
@@ -211,7 +240,7 @@ func (v *Verifier) Verify(a Admission, ch Challenge, exporter []byte, now time.T
 		return nil, fmt.Errorf("the key event log does not verify: %w", err)
 	}
 	if state.Identifier != st.AID {
-		return nil, fmt.Errorf("the key event log is %s's, not %s's", state.Identifier, st.AID)
+		return nil, fmt.Errorf("the key event log is %q's, not %q's", state.Identifier, st.AID)
 	}
 	if len(state.Keys) != 1 {
 		return nil, fmt.Errorf("an enrolment identifier has one signing key; this one has %d", len(state.Keys))
@@ -238,14 +267,30 @@ func (v *Verifier) Verify(a Admission, ch Challenge, exporter []byte, now time.T
 // keyLog settles which log an admission is checked against. A log the relay
 // already holds may only be extended: a presented log that does not begin with
 // it rewrites history, which is the duplicity a key event log exists to expose.
-func (v *Verifier) keyLog(aid, presented string) ([]byte, error) {
-	var held []byte
-	if v.Enrolled != nil {
-		held, _ = v.Enrolled(aid)
+//
+// The relay may know the identifier's log from two places: its stored record,
+// and the live session, which renewals keep current. Whichever is longer is
+// the newest it has seen, and that is the one a newcomer must extend. Checking
+// only the stored record let somebody holding a key rotated away since present
+// the old log, which the stale record still accepted, and displace the owner.
+func (v *Verifier) keyLog(aid, presented string, live []byte) ([]byte, error) {
+	if v.Enrolled == nil {
+		return nil, fmt.Errorf("this relay keeps no record of the key event logs it admits, so it admits nobody")
+	}
+	held, _ := v.Enrolled(aid)
+	if len(live) > 0 {
+		longer, shorter := live, held
+		if len(held) > len(live) {
+			longer, shorter = held, live
+		}
+		if !bytes.HasPrefix(longer, shorter) {
+			return nil, fmt.Errorf("the relay's records of %q disagree with each other; refusing until that is resolved", aid)
+		}
+		held = longer
 	}
 	if presented == "" {
 		if len(held) == 0 {
-			return nil, fmt.Errorf("no key event log was presented and none is held for %s", aid)
+			return nil, fmt.Errorf("no key event log was presented and none is held for %q", aid)
 		}
 		return held, nil
 	}
@@ -257,7 +302,7 @@ func (v *Verifier) keyLog(aid, presented string) ([]byte, error) {
 		return nil, fmt.Errorf("the key event log is not base64url")
 	}
 	if len(held) > 0 && !bytes.HasPrefix(kel, held) {
-		return nil, fmt.Errorf("the key event log presented does not extend the one held for %s", aid)
+		return nil, fmt.Errorf("the key event log presented does not extend the one held for %q", aid)
 	}
 	return kel, nil
 }

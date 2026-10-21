@@ -1,7 +1,7 @@
 package relayproto
 
 import (
-	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,7 +11,6 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
-	"strings"
 	"sync"
 	"time"
 
@@ -22,6 +21,21 @@ import (
 // ServiceConfig is what a relay supplies to admit Identity Agents.
 type ServiceConfig struct {
 	Verifier *Verifier
+	// Registry holds the relay's sessions. Accept puts every admitted session
+	// in it, and checks a newcomer against the session it would replace.
+	Registry *Registry
+	// OnAdmit and OnRenew are called with every verified admission and
+	// renewal, before the session is used, so the relay can store the key
+	// event log it now holds for the identifier (Verifier.Enrolled reads it
+	// back). An error refuses the admission or ends the session.
+	OnAdmit func(*Verified) error
+	OnRenew func(*Verified) error
+	// MaxSessions bounds how many Identity Agents the relay holds at once;
+	// zero means DefaultMaxSessions.
+	MaxSessions int
+	// Budget, when set, is asked before each admission whether the relay has
+	// room for another session, for a relay that budgets memory its own way.
+	Budget func() error
 	// Lease is how long one admission lasts; zero means LeaseLifetime.
 	Lease time.Duration
 	// RenewBefore is how long before a lease ends the relay challenges again;
@@ -30,8 +44,13 @@ type ServiceConfig struct {
 	// Upgrader, when set, upgrades the websocket; its Subprotocols are
 	// replaced with this protocol's.
 	Upgrader *websocket.Upgrader
-	// Logf, when set, receives one line per admission, renewal and refusal.
+	// Logf receives one line per admission, renewal, refusal and session end.
+	// Nil means the standard logger: the record of who connected is not
+	// optional.
 	Logf func(format string, args ...any)
+
+	limitersOnce            sync.Once
+	publicRate, privateRate *AllocationLimiter
 }
 
 func (c *ServiceConfig) now() time.Time { return time.Now() }
@@ -39,7 +58,28 @@ func (c *ServiceConfig) now() time.Time { return time.Now() }
 func (c *ServiceConfig) logf(format string, args ...any) {
 	if c.Logf != nil {
 		c.Logf(format, args...)
+		return
 	}
+	log.Printf(format, args...)
+}
+
+func (c *ServiceConfig) maxSessions() int {
+	if c.MaxSessions > 0 {
+		return c.MaxSessions
+	}
+	return DefaultMaxSessions
+}
+
+// rate returns the relay-wide per-allocation request limiter for a mode.
+func (c *ServiceConfig) rate(m Mode) *AllocationLimiter {
+	c.limitersOnce.Do(func() {
+		c.publicRate = NewAllocationLimiter(PublicRequestsPerMinute)
+		c.privateRate = NewAllocationLimiter(PrivateRequestsPerMinute)
+	})
+	if m == ModePrivate {
+		return c.privateRate
+	}
+	return c.publicRate
 }
 
 // Session is one admitted Identity Agent, as the relay holds it.
@@ -56,15 +96,21 @@ type Session struct {
 	key       string
 	kel       []byte
 	expiresAt time.Time
+	inFlight  map[string]int // requests in flight, per allocation
 	closed    chan struct{}
 	closeOnce sync.Once
 }
 
-// Accept upgrades a request to the relay's websocket endpoint and admits the
-// Identity Agent on it. The request must have arrived over TLS terminated by
-// this process: the admission is bound to that TLS connection, so a relay
-// behind a proxy that terminates TLS cannot use this protocol.
+// Accept upgrades a request to the relay's websocket endpoint, admits the
+// Identity Agent on it, and puts the session in the registry. The request must
+// have arrived over TLS terminated by this process: the admission is bound to
+// that TLS connection, so a relay behind a proxy that terminates TLS cannot
+// use this protocol.
 func Accept(w http.ResponseWriter, r *http.Request, cfg *ServiceConfig) (*Session, error) {
+	if cfg.Registry == nil || cfg.Verifier == nil {
+		http.Error(w, "relay misconfigured", http.StatusInternalServerError)
+		return nil, errors.New("a relay needs a Verifier and a Registry")
+	}
 	if r.TLS == nil {
 		http.Error(w, "the relay protocol runs only over TLS this relay terminates", http.StatusUpgradeRequired)
 		return nil, errors.New("request did not arrive over TLS")
@@ -73,6 +119,16 @@ func Accept(w http.ResponseWriter, r *http.Request, cfg *ServiceConfig) (*Sessio
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUpgradeRequired)
 		return nil, err
+	}
+	if cfg.Registry.Len() >= cfg.maxSessions() {
+		http.Error(w, "this relay is full", http.StatusServiceUnavailable)
+		return nil, errors.New("the relay holds its maximum number of sessions")
+	}
+	if cfg.Budget != nil {
+		if err := cfg.Budget(); err != nil {
+			http.Error(w, "this relay is full", http.StatusServiceUnavailable)
+			return nil, err
+		}
 	}
 	up := websocket.Upgrader{HandshakeTimeout: HandshakeTimeout}
 	if cfg.Upgrader != nil {
@@ -85,9 +141,11 @@ func Accept(w http.ResponseWriter, r *http.Request, cfg *ServiceConfig) (*Sessio
 	}
 	if ws.Subprotocol() != Subprotocol {
 		ws.Close()
-		return nil, fmt.Errorf("the agent did not offer %s", Subprotocol)
+		return nil, fmt.Errorf("the Identity Agent did not offer %s", Subprotocol)
 	}
 
+	// Nothing before admission may cost more than an admission at its limit.
+	ws.SetReadLimit(MaxAdmissionBytes)
 	ws.SetReadDeadline(cfg.now().Add(HandshakeTimeout))
 	ch := NewChallenge(cfg.Verifier.Service, cfg.now())
 	if err := ws.WriteJSON(ch); err != nil {
@@ -99,36 +157,59 @@ func Accept(w http.ResponseWriter, r *http.Request, cfg *ServiceConfig) (*Sessio
 		ws.Close()
 		return nil, fmt.Errorf("read the admission: %w", err)
 	}
-	v, err := cfg.Verifier.Verify(a, ch, exporter, cfg.now())
-	if err != nil {
-		cfg.logf("relay admission refused aid=%s ip=%s: %v", a.Statement.AID, r.RemoteAddr, err)
+	refuse := func(err error) (*Session, error) {
+		cfg.logf("relay admission refused aid=%q ip=%q: %v", a.Statement.AID, r.RemoteAddr, err)
 		ws.WriteJSON(Admitted{Error: err.Error()})
 		ws.Close()
 		return nil, err
 	}
+	var live []byte
+	if cur, ok := cfg.Registry.Get(a.Statement.AID); ok {
+		live = cur.KEL()
+	}
+	v, err := cfg.Verifier.verify(a, ch, exporter, cfg.now(), live)
+	if err != nil {
+		return refuse(err)
+	}
+	if cfg.OnAdmit != nil {
+		if err := cfg.OnAdmit(v); err != nil {
+			return refuse(err)
+		}
+	}
 	s := &Session{
 		ID: randomToken(16), AID: v.AID, cfg: cfg, exporter: exporter,
 		slots: make(chan struct{}, MaxStreamsPerSession), key: v.Key, kel: v.KEL,
-		expiresAt: cfg.now().Add(cfg.lease()), closed: make(chan struct{}),
+		expiresAt: cfg.now().Add(cfg.lease()), inFlight: map[string]int{},
+		closed: make(chan struct{}),
+	}
+	if err := cfg.Registry.mayReplace(s); err != nil {
+		return refuse(err)
 	}
 	if err := ws.WriteJSON(Admitted{Session: s.ID, ExpiresAt: s.expiresAt.UTC().Format(time.RFC3339)}); err != nil {
 		ws.Close()
 		return nil, err
 	}
+	// From here the websocket carries only the session. The relay is the
+	// yamux client: it is the side that opens streams. It never accepts one,
+	// so an admitted Identity Agent has no way to reach anything through the
+	// relay.
 	ws.SetReadDeadline(time.Time{})
-
-	// The relay is the yamux client: it is the side that opens streams. It
-	// never accepts one, so an admitted agent has no way to reach anything
-	// through the relay.
 	mux, err := yamux.Client(newWSConn(ws), muxConfig())
 	if err != nil {
 		ws.Close()
 		return nil, err
 	}
 	s.mux = mux
-	go s.refuseAgentStreams()
+	// Put checks again, atomically: another admission for the identifier
+	// may have landed since mayReplace.
+	if err := cfg.Registry.Put(s); err != nil {
+		cfg.logf("relay admission refused aid=%q ip=%q: %v", s.AID, r.RemoteAddr, err)
+		mux.Close()
+		return nil, err
+	}
+	go s.refuseIdentityAgentStreams()
 	go s.keepLeased()
-	cfg.logf("relay admission accepted aid=%s session=%s key=%s ip=%s", s.AID, s.ID, v.Key, r.RemoteAddr)
+	cfg.logf("relay admission accepted aid=%q session=%s key=%s ip=%q", s.AID, s.ID, v.Key, r.RemoteAddr)
 	return s, nil
 }
 
@@ -150,6 +231,7 @@ func muxConfig() *yamux.Config {
 	c := yamux.DefaultConfig()
 	c.AcceptBacklog = MaxStreamsPerSession
 	c.MaxStreamWindowSize = StreamWindowBytes
+	c.StreamCloseTimeout = StreamCloseTimeout
 	// The relay's own keep-alive, so an idle session survives proxies and
 	// NAT that drop quiet connections, and a dead one is noticed.
 	c.EnableKeepAlive = true
@@ -158,7 +240,7 @@ func muxConfig() *yamux.Config {
 	return c
 }
 
-func (s *Session) refuseAgentStreams() {
+func (s *Session) refuseIdentityAgentStreams() {
 	for {
 		st, err := s.mux.Accept()
 		if err != nil {
@@ -170,12 +252,10 @@ func (s *Session) refuseAgentStreams() {
 }
 
 // keepLeased renews the admission before each lease ends, and closes the
-// session when renewal fails or the lease runs out.
+// session as soon as a renewal fails.
 func (s *Session) keepLeased() {
 	for {
-		s.mu.Lock()
-		renewAt := s.expiresAt.Add(-s.cfg.renewBefore())
-		s.mu.Unlock()
+		renewAt := s.ExpiresAt().Add(-s.cfg.renewBefore())
 		wait := time.Until(renewAt)
 		if wait < 0 {
 			wait = 0
@@ -189,13 +269,15 @@ func (s *Session) keepLeased() {
 		case <-time.After(wait):
 		}
 		if err := s.renew(); err != nil {
-			s.cfg.logf("relay lease not renewed aid=%s session=%s: %v", s.AID, s.ID, err)
+			s.cfg.logf("relay lease not renewed aid=%q session=%s: %v", s.AID, s.ID, err)
 			s.Close()
 			return
 		}
 	}
 }
 
+// renew challenges the Identity Agent again on a control stream. The control
+// stream is not a request, so it takes no request slot.
 func (s *Session) renew() error {
 	st, err := s.mux.OpenStream()
 	if err != nil {
@@ -217,13 +299,18 @@ func (s *Session) renew() error {
 		return err
 	}
 	var a Admission
-	if err := json.NewDecoder(bufio.NewReader(st)).Decode(&a); err != nil {
+	if err := json.NewDecoder(io.LimitReader(st, MaxAdmissionBytes)).Decode(&a); err != nil {
 		return fmt.Errorf("read the renewal: %w", err)
 	}
 	if a.Statement.AID != s.AID {
-		return fmt.Errorf("the renewal is for %s, not %s", a.Statement.AID, s.AID)
+		return fmt.Errorf("the renewal is for %q, not %q", a.Statement.AID, s.AID)
 	}
-	v, err := s.cfg.Verifier.Verify(a, ch, s.exporter, s.cfg.now())
+	// The session's own log is the newest the relay has seen for this
+	// identifier; the renewal's log must extend it.
+	v, err := s.cfg.Verifier.verify(a, ch, s.exporter, s.cfg.now(), s.KEL())
+	if err == nil && s.cfg.OnRenew != nil {
+		err = s.cfg.OnRenew(v)
+	}
 	if err != nil {
 		json.NewEncoder(st).Encode(Admitted{Error: err.Error()})
 		return err
@@ -233,11 +320,11 @@ func (s *Session) renew() error {
 	s.expiresAt = s.cfg.now().Add(s.cfg.lease())
 	exp := s.expiresAt
 	s.mu.Unlock()
-	s.cfg.logf("relay lease renewed aid=%s session=%s", s.AID, s.ID)
+	s.cfg.logf("relay lease renewed aid=%q session=%s key=%s", s.AID, s.ID, v.Key)
 	return json.NewEncoder(st).Encode(Admitted{Session: s.ID, ExpiresAt: exp.UTC().Format(time.RFC3339)})
 }
 
-// KEL is the key event log the session was last admitted against.
+// KEL is the key event log the session was last admitted or renewed against.
 func (s *Session) KEL() []byte {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -261,9 +348,15 @@ func (s *Session) Close() error {
 		if s.mux != nil {
 			s.mux.Close()
 		}
+		s.cfg.logf("relay session ended aid=%q session=%s", s.AID, s.ID)
 	})
 	return nil
 }
+
+var (
+	errSessionFull    = errors.New("too many requests in flight to this Identity Agent")
+	errAllocationFull = errors.New("too many requests in flight on this address")
+)
 
 // open starts a stream for one request, carrying p.
 func (s *Session) open(ctx context.Context, p Preamble) (net.Conn, error) {
@@ -274,9 +367,18 @@ func (s *Session) open(ctx context.Context, p Preamble) (net.Conn, error) {
 	case <-s.closed:
 		return nil, errors.New("the session has ended")
 	default:
-		return nil, errors.New("too many requests in flight to this Identity Agent")
+		return nil, errSessionFull
 	}
 	release := func() { <-s.slots }
+	// A stream this end has closed lives on until the Identity Agent closes
+	// it too, or StreamCloseTimeout passes. It still costs memory, so it still
+	// counts: the slot alone would be free the moment this end closed.
+	// The renewal's control stream is opened outside this check, so a full
+	// session can still renew.
+	if s.mux.NumStreams() >= MaxStreamsPerSession {
+		release()
+		return nil, errSessionFull
+	}
 	st, err := s.mux.OpenStream()
 	if err != nil {
 		release()
@@ -287,24 +389,58 @@ func (s *Session) open(ctx context.Context, p Preamble) (net.Conn, error) {
 		release()
 		return nil, err
 	}
-	return &streamConn{Conn: st, preamble: p, release: release}, nil
+	return newStreamConn(st, p, release), nil
+}
+
+// takeAllocation counts a request against its allocation's in-flight limit.
+func (s *Session) takeAllocation(p Preamble) (func(), bool) {
+	limit := PublicInFlightPerAllocation
+	if p.Mode == ModePrivate {
+		limit = PrivateInFlightPerAllocation
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.inFlight[p.Allocation] >= limit {
+		return nil, false
+	}
+	s.inFlight[p.Allocation]++
+	return func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.inFlight[p.Allocation]--; s.inFlight[p.Allocation] <= 0 {
+			delete(s.inFlight, p.Allocation)
+		}
+	}, true
 }
 
 // Forward carries one request to the Identity Agent on the allocation p
-// names. It applies what the relay enforces itself; everything else is the
-// Identity Agent's to decide.
+// names. The relay looks up p from its own records of which allocation the
+// request's host is; it never takes any part of p from the request. Forward
+// applies what the relay enforces itself; everything else is the Identity
+// Agent's to decide.
 //
-//   - A private allocation passes only what [PrivateMayReach] allows, with a
-//     body no larger than MaxPrivateBodyBytes. The Identity Agent enforces the
-//     same and more; this is defence in depth against a relay that is wrong.
+//   - Requests per minute and requests in flight are limited per allocation,
+//     by mode, so one address cannot starve the others.
+//   - A private allocation passes only what [PrivateMayReach] allows, at its
+//     exact path, without an upgrade, with a body no larger than
+//     MaxPrivateBodyBytes. The Identity Agent applies its own rule as well;
+//     this is defence in depth against a mistake on either side.
 //   - A large body, or one of unknown length, is offered with
-//     Expect: 100-continue, so the Identity Agent can refuse the request on its
-//     headers before the body crosses the relay.
+//     Expect: 100-continue. That lets an Identity Agent refuse on headers
+//     before the body crosses; it is a courtesy, not a gate.
 //   - Each request gets its own stream and the stream is never reused, so one
 //     allocation's request can never be read as another's.
 func (s *Session) Forward(w http.ResponseWriter, r *http.Request, p Preamble) {
+	if p.Host == "" || p.Allocation == "" {
+		http.Error(w, "the relay has no record of this address", http.StatusBadGateway)
+		return
+	}
+	if p.Mode != ModePublic && p.Mode != ModePrivate {
+		http.Error(w, "the relay has no record of this address", http.StatusBadGateway)
+		return
+	}
 	if p.Mode == ModePrivate {
-		if !PrivateMayReach(r.Method, r.URL.Path) {
+		if !privateRequestAllowed(r) {
 			http.NotFound(w, r)
 			return
 		}
@@ -314,9 +450,16 @@ func (s *Session) Forward(w http.ResponseWriter, r *http.Request, p Preamble) {
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, MaxPrivateBodyBytes)
 	}
-	if p.Host == "" {
-		p.Host = r.Host
+	if !s.cfg.rate(p.Mode).Allow(p.Allocation) {
+		http.Error(w, "too many requests", http.StatusTooManyRequests)
+		return
 	}
+	done, ok := s.takeAllocation(p)
+	if !ok {
+		http.Error(w, errAllocationFull.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	defer done()
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.Out.URL.Scheme = "http"
@@ -340,13 +483,26 @@ func (s *Session) Forward(w http.ResponseWriter, r *http.Request, p Preamble) {
 		ErrorLog:      log.New(io.Discard, "", 0),
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
 			status := http.StatusBadGateway
-			if strings.Contains(err.Error(), "too many requests") {
+			if errors.Is(err, errSessionFull) {
 				status = http.StatusServiceUnavailable
 			}
 			http.Error(w, "the Identity Agent could not be reached", status)
 		},
 	}
 	proxy.ServeHTTP(w, r)
+}
+
+// privateRequestAllowed applies [PrivateMayReach] to a request as it will
+// reach the Identity Agent: its exact path, with no percent-encoding that
+// could be read two ways, and no protocol upgrade.
+func privateRequestAllowed(r *http.Request) bool {
+	if r.URL.EscapedPath() != r.URL.Path {
+		return false
+	}
+	if r.Header.Get("Upgrade") != "" {
+		return false
+	}
+	return PrivateMayReach(r.Method, r.URL.Path)
 }
 
 // Registry holds the relay's admitted sessions, one per identifier.
@@ -361,9 +517,17 @@ func NewRegistry() *Registry { return &Registry{sessions: map[string]*Session{}}
 // Put makes s the identifier's session. A session it replaces is closed, and
 // its streams with it, once s is in place, so a request is never routed to
 // neither.
-func (g *Registry) Put(s *Session) {
+//
+// A newcomer must hold the same key event log as the session it replaces, or
+// a longer one. One holding a shorter log has a key that has since been
+// rotated away and is refused, whatever the relay's stored record said.
+func (g *Registry) Put(s *Session) error {
 	g.mu.Lock()
 	old := g.sessions[s.AID]
+	if err := extends(s, old); err != nil {
+		g.mu.Unlock()
+		return err
+	}
 	g.sessions[s.AID] = s
 	g.mu.Unlock()
 	if old != nil && old != s {
@@ -373,6 +537,20 @@ func (g *Registry) Put(s *Session) {
 		<-s.Done()
 		g.remove(s)
 	}()
+	return nil
+}
+
+func (g *Registry) mayReplace(s *Session) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return extends(s, g.sessions[s.AID])
+}
+
+func extends(s, old *Session) error {
+	if old != nil && old != s && !bytes.HasPrefix(s.KEL(), old.KEL()) {
+		return fmt.Errorf("the key event log presented for %q does not extend the live session's", s.AID)
+	}
+	return nil
 }
 
 // remove forgets s only if it is still the identifier's session. A session
@@ -391,6 +569,13 @@ func (g *Registry) Get(aid string) (*Session, bool) {
 	defer g.mu.Unlock()
 	s, ok := g.sessions[aid]
 	return s, ok
+}
+
+// Len is how many sessions the registry holds.
+func (g *Registry) Len() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return len(g.sessions)
 }
 
 // Revoke ends the identifier's session at once: for a relay that sees a
