@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "identity-agent-core/contracts/relay/relay-admission.schema.json",
+  "title": "relay protocol iarelay/2 messages (ADR-048)",
+  "$defs": {
+    "challenge": {
+      "description": "Sent by the relay first, and on a renew stream before each lease ends.",
+      "type": "object",
+      "required": ["protocol", "service", "nonce", "t"],
+      "additionalProperties": false,
+      "properties": {
+        "protocol": { "const": "iarelay/2" },
+        "service": { "type": "string", "minLength": 1 },
+        "nonce": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$", "description": "32 random bytes, base64url without padding" },
+        "t": { "type": "string", "format": "date-time" },
+        "renewal": { "type": "boolean" }
+      }
+    },
+    "statement": {
+      "description": "Signed with Ed25519 over its canonical JSON: these seven keys, sorted, no whitespace.",
+      "type": "object",
+      "required": ["purpose", "protocol", "service", "nonce", "exporter", "aid", "t"],
+      "additionalProperties": false,
+      "properties": {
+        "purpose": { "enum": ["relay-admission", "relay-renewal"] },
+        "protocol": { "const": "iarelay/2" },
+        "service": { "type": "string", "minLength": 1 },
+        "nonce": { "type": "string" },
+        "exporter": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$", "description": "RFC 9266 tls-exporter value of the admission connection, base64url without padding" },
+        "aid": { "type": "string", "minLength": 1 },
+        "t": { "type": "string", "format": "date-time" }
+      }
+    },
+    "admission": {
+      "type": "object",
+      "required": ["statement", "signature"],
+      "additionalProperties": false,
+      "properties": {
+        "statement": { "$ref": "#/$defs/statement" },
+        "signature": { "type": "string", "pattern": "^[A-Za-z0-9_-]{86}$", "description": "raw Ed25519 signature, base64url without padding" },
+        "kel": { "type": "string", "maxLength": 87382, "description": "signed key event log as a CESR stream, base64url; at most 64 KiB decoded, 256 events" }
+      }
+    },
+    "admitted": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "session": { "type": "string" },
+        "expires_at": { "type": "string", "format": "date-time" },
+        "error": { "type": "string" }
+      }
+    },
+    "preamble": {
+      "description": "Written by the relay at the start of every stream as a two-byte big-endian length followed by this JSON, at most 1024 bytes.",
+      "type": "object",
+      "required": ["allocation", "mode", "host"],
+      "additionalProperties": false,
+      "properties": {
+        "allocation": { "type": "string" },
+        "mode": { "enum": ["public", "private", "renew"] },
+        "host": { "type": "string" }
+      }
+    }
+  }
+}

@@ -1,6 +1,6 @@
 # ADR-042 — How an agent is reached, and who may manage it
 
-**Status:** Accepted
+**Status:** Accepted; §1 and §5 amended by ADR-048 (2026-10-21): URL Relay and Tunnel become the public and private modes of one relay protocol, and the per-entity default is the deploying product's to set
 **Date:** 2026-09-16
 **Relates to:** ADR-006 (Standardized Topology), ADR-033 (An identifier travels with an address), ADR-036 (A computer you pair with does not publish who you are), ADR-041 (One neutral scheme for the protocol's device codes)
 
