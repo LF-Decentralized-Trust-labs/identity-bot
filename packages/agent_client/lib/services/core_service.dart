@@ -1326,26 +1326,46 @@ class CoreService {
       _reachability('POST', '/api/settings/reachability/domains/verify',
           {'domain': domain});
 
+  /// Every reachability call ends in either the core's answer or an exception
+  /// whose message a person can read: the core's own reason when it gave one,
+  /// and otherwise plain words, never a route and a status code.
   Future<Map<String, dynamic>> _reachability(String method, String path,
       [Map<String, dynamic>? body]) async {
     final uri = Uri.parse('$baseUrl$path');
     final headers = {'Content-Type': 'application/json'};
     final encoded = body == null ? null : jsonEncode(body);
-    final response = switch (method) {
-      'GET' => await _client.get(uri),
-      'PUT' => await _client.put(uri, headers: headers, body: encoded),
-      _ => await _client.post(uri, headers: headers, body: encoded),
-    };
-    final decoded = response.body.isEmpty ? null : jsonDecode(response.body);
+    final http.Response response;
+    try {
+      response = switch (method) {
+        'GET' => await _client.get(uri),
+        'PUT' => await _client.put(uri, headers: headers, body: encoded),
+        _ => await _client.post(uri, headers: headers, body: encoded),
+      };
+    } on http.ClientException {
+      throw Exception('Couldn\'t reach your Identity Agent. Is it running?');
+    }
+    Object? decoded;
+    try {
+      decoded = response.body.isEmpty ? null : jsonDecode(response.body);
+    } on FormatException {
+      decoded = null;
+    }
     if (response.statusCode != 200) {
       final why = decoded is Map
           ? [decoded['error'], decoded['details']]
               .where((v) => v != null && '$v'.isNotEmpty)
               .join(': ')
           : '';
-      throw Exception(why.isNotEmpty ? why : '$path: ${response.statusCode}');
+      throw Exception(why.isNotEmpty
+          ? why
+          : 'Your Identity Agent couldn\'t do that just now '
+              '(it answered ${response.statusCode}). Try again in a moment.');
     }
-    return (decoded as Map).cast<String, dynamic>();
+    if (decoded is! Map) {
+      throw Exception(
+          'Your Identity Agent answered with something this app could not read.');
+    }
+    return decoded.cast<String, dynamic>();
   }
 
   Future<Map<String, dynamic>> getTunnelStatus() async {

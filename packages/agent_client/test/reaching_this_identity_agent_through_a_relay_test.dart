@@ -65,4 +65,39 @@ void main() {
       throwsA(predicate((e) => '$e'.contains('the TXT record is not there yet'))),
     );
   });
+
+  // A reply with no reason, or one that is not JSON at all, still reads as
+  // words a person understands, not a route and a status code.
+  for (final (label, reply) in [
+    ('an empty failure', http.Response('', 500)),
+    ('a page instead of JSON', http.Response('<html>Bad Gateway</html>', 502)),
+  ]) {
+    test('$label becomes plain words', () async {
+      final c = CoreService(
+          baseUrl: 'http://127.0.0.1:5050',
+          inner: MockClient((_) async => reply));
+      await expectLater(
+        c.getRelayStatus(),
+        throwsA(predicate((e) =>
+            '$e'.contains('couldn\'t do that just now') &&
+            !'$e'.contains('/api/'))),
+      );
+    });
+  }
+
+  test('a success the app cannot read says so', () async {
+    final c = CoreService(
+        baseUrl: 'http://127.0.0.1:5050',
+        inner: MockClient((_) async => http.Response('not json', 200)));
+    await expectLater(c.getReachability(),
+        throwsA(predicate((e) => '$e'.contains('could not read'))));
+  });
+
+  test('an Identity Agent that is not there is named as such', () async {
+    final c = CoreService(
+        baseUrl: 'http://127.0.0.1:5050',
+        inner: MockClient((_) async => throw http.ClientException('refused')));
+    await expectLater(c.getReachability(),
+        throwsA(predicate((e) => '$e'.contains('Couldn\'t reach your Identity Agent'))));
+  });
 }
