@@ -60,10 +60,16 @@ func (c *Client) FetchDescriptor(ctx context.Context) (*ServiceDescriptor, error
 // was given the first time.
 var ErrAlreadyEnrolled = errors.New("relay: this enrollment AID is already enrolled")
 
-func (c *Client) Enroll(ctx context.Context, enrollmentAID, oobiURL string, publicKeyB64 string) (*EnrollResponse, error) {
+// Enroll registers enrollmentAID with the operator. kelCESRB64 is its signed key
+// event log as a base64 CESR stream, which an operator that binds the key to the
+// identifier checks; it is left out of the request when empty.
+func (c *Client) Enroll(ctx context.Context, enrollmentAID, oobiURL, publicKeyB64, kelCESRB64 string) (*EnrollResponse, error) {
 	body := map[string]interface{}{
 		"v": JSONVersion, "enrollment_aid": enrollmentAID, "oobi": oobiURL,
 		"root_aid_enrollment": false, "public_key_b64": publicKeyB64,
+	}
+	if kelCESRB64 != "" {
+		body["kel_cesr_b64"] = kelCESRB64
 	}
 	// Signed by the key being presented: whoever enrolls an AID controls every
 	// signed operation for it afterwards, so an operator must see that the
