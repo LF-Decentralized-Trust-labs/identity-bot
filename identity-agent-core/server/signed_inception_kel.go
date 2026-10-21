@@ -41,6 +41,13 @@ func signedInceptionKEL(aid string, kel []map[string]interface{}, seed []byte) (
 		Toad:        &t,
 		Isith:       rawJSON(ev["kt"]),
 		Nsith:       rawJSON(ev["nt"]),
+		// The library's default for a single key is to name the identity by the
+		// key itself. A recorded identity named by a digest of its inception was
+		// made the other way, and must be rebuilt the same way.
+		Derivation: "self-addressing",
+	}
+	if keys := stringsOf(ev["k"]); len(keys) == 1 && keys[0] == aid {
+		in.Derivation = "basic"
 	}
 	if a, ok := ev["a"].([]interface{}); ok {
 		for _, item := range a {

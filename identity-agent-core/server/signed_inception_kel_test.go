@@ -22,11 +22,17 @@ func TestARecordedInceptionIsSignedAsAVerifiableKeyLog(t *testing.T) {
 	event, err := keri.BuildInception(keri.InceptionInput{
 		Keys: []string{pub}, NextDigests: []string{digest},
 		Witnesses: []string{"BErokYIbJDqV1Ewr3QMHKWokln2aIVRGwTZ3E502pz_v"}, Toad: &toad,
+		// As the engine founds an Identity Agent's pairwise identities: named by
+		// a digest of the inception, not by the key.
+		Derivation: "self-addressing",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	parsed, _ := keri.ParseEvent(event)
+	if parsed.Identifier == pub {
+		t.Fatal("the fixture is not a self-addressing identity, so this proves nothing about one")
+	}
 	var recorded map[string]interface{}
 	_ = json.Unmarshal(event, &recorded)
 
