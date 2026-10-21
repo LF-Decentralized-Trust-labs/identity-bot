@@ -84,52 +84,124 @@ func (p *GrapeIDProvider) Start(ctx context.Context, localPort int) error {
 		tunnelPath = "/tunnel"
 	}
 	serverURL := fmt.Sprintf("%s://%s%s", scheme, domain, tunnelPath)
-	remoteStr := fmt.Sprintf("R:%d:localhost:%d", p.allocPort, localPort)
-
-	auth := p.config.TunnelAuth
-	if auth == "" {
-		auth = "user:secret-token"
-	}
-
-	chConfig := &chclient.Config{
-		Server:        serverURL,
-		Remotes:       []string{remoteStr},
-		Auth:          auth,
-		KeepAlive:     25 * time.Second,
-		MaxRetryCount: -1,
-	}
-
-	client, err := chclient.NewClient(chConfig)
-	if err != nil {
-		return fmt.Errorf("failed to create chisel client: %v", err)
-	}
 
 	clientCtx, cancel := context.WithCancel(ctx)
 	p.cancel = cancel
-	p.client = client
 	p.status.Active = true
 	p.status.URL = publicURL
 	p.status.Error = ""
 
-	go func() {
-		log.Printf("[tunnel] Starting GrapeID tunnel connection to %s", serverURL)
-		err := client.Start(clientCtx)
-		if err != nil {
-			log.Printf("[tunnel] GrapeID tunnel error: %v", err)
-			p.mu.Lock()
-			p.status.Error = err.Error()
-			p.status.Active = false
-			p.mu.Unlock()
-		}
-		client.Wait()
-		log.Printf("[tunnel] GrapeID tunnel connection closed")
+	go p.keepConnected(clientCtx, scheme, domain, extension, serverURL, localPort)
+	return nil
+}
 
+// keepConnected holds the tunnel open, and opens it again whenever it drops —
+// the network going away, the machine sleeping, the hub restarting.
+//
+// Each connection is admitted on a fresh statement signed by the name's key,
+// so a dropped connection is not retried with the old one: the hub would
+// refuse it as stale. It reconnects to the name first, which may move it to
+// another port, and then connects with a new statement.
+func (p *GrapeIDProvider) keepConnected(ctx context.Context, scheme, domain, name, serverURL string, localPort int) {
+	backoff := time.Second
+	for first := true; ; first = false {
+		if !first {
+			if resp, err := p.tryReconnect(scheme, domain, name, p.config.NameOwner.AID); err != nil {
+				log.Printf("[tunnel] GrapeID could not reconnect to '%s' yet: %v", name, err)
+			} else {
+				p.mu.Lock()
+				p.allocPort = resp.Port
+				p.mu.Unlock()
+			}
+		}
+		p.mu.RLock()
+		port := p.allocPort
+		p.mu.RUnlock()
+
+		started := time.Now()
+		err := p.connectOnce(ctx, serverURL, name, fmt.Sprintf("R:%d:localhost:%d", port, localPort))
+		if ctx.Err() != nil {
+			return
+		}
 		p.mu.Lock()
 		p.status.Active = false
+		if err != nil {
+			p.status.Error = err.Error()
+		}
 		p.mu.Unlock()
-	}()
+		log.Printf("[tunnel] GrapeID tunnel to '%s' dropped (%v); connecting again in %s", name, err, backoff)
 
-	return nil
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(backoff):
+		}
+		// A connection that stayed up a while was healthy; start the wait over.
+		if time.Since(started) > 2*time.Minute {
+			backoff = time.Second
+		} else if backoff < time.Minute {
+			backoff *= 2
+		}
+	}
+}
+
+// connectOnce opens one tunnel session with a freshly signed statement and
+// returns when it ends.
+func (p *GrapeIDProvider) connectOnce(ctx context.Context, serverURL, name, remote string) error {
+	headers, sig, err := p.connectionStatement(name)
+	if err != nil {
+		return err
+	}
+	client, err := chclient.NewClient(&chclient.Config{
+		Server:    serverURL,
+		Remotes:   []string{remote},
+		Auth:      strings.ToLower(name) + ":" + sig,
+		Headers:   headers,
+		KeepAlive: 25 * time.Second,
+		// One statement admits one session, so the client does not retry with
+		// it; keepConnected signs a new one.
+		MaxRetryCount: 0,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create chisel client: %v", err)
+	}
+	p.mu.Lock()
+	p.client = client
+	p.status.Active = true
+	p.status.Error = ""
+	p.mu.Unlock()
+	log.Printf("[tunnel] Starting GrapeID tunnel connection to %s", serverURL)
+	if err := client.Start(ctx); err != nil {
+		return err
+	}
+	return client.Wait()
+}
+
+// connectionStatement is the signed statement a hub admits a tunnel connection
+// on: this name, this identity, now. Signed over the same canonical form as
+// every other request to the hub, and carried in headers because the tunnel's
+// own login happens inside the connection, where the hub cannot read it. The
+// signature doubles as the login, so nothing else needs sharing.
+func (p *GrapeIDProvider) connectionStatement(name string) (http.Header, string, error) {
+	owner := p.config.NameOwner
+	// The hub knows names in lower case and checks the statement that way.
+	name = strings.ToLower(name)
+	at := time.Now().UTC().Format(time.RFC3339)
+	body := map[string]interface{}{"purpose": "tunnel-connect", "name": name, "aid": owner.AID, "t": at}
+	canonical, err := relay.CanonicalBody(body)
+	if err != nil {
+		return nil, "", err
+	}
+	sig, err := owner.Sign(canonical)
+	if err != nil {
+		return nil, "", err
+	}
+	h := http.Header{}
+	h.Set("X-Tunnel-Name", name)
+	h.Set("X-Tunnel-Aid", owner.AID)
+	h.Set("X-Tunnel-Time", at)
+	h.Set("X-Tunnel-Signature", sig)
+	return h, sig, nil
 }
 
 func (p *GrapeIDProvider) tryReconnect(scheme, domain, name, aid string) (*claimResponse, error) {

@@ -28,7 +28,6 @@ type Config struct {
 	CloudflareTunnelToken string       `json:"cloudflare_tunnel_token,omitempty"`
 	TunnelDomain          string       `json:"tunnel_domain,omitempty"`
 	TunnelExtension       string       `json:"tunnel_extension,omitempty"`
-	TunnelAuth            string       `json:"tunnel_auth,omitempty"`
 	AID                   string       `json:"aid,omitempty"`
 	// NameOwner is the identity that owns a Grape ID tunnel name. The hub binds
 	// a name to the key that claimed it and checks every later request against
