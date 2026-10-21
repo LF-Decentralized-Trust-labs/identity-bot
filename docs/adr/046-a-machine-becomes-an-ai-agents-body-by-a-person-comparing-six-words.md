@@ -94,8 +94,10 @@ architecture's binary checked to contain it.
 - Anybody holding the published logs, the body credential and its schema can check
   which machine key spoke for which AI agent, under whose approval, and at what grade.
 - The bearer token remains for tools that cannot run `agent-host`, at the lowest grade.
-- Requests after enrolment are signed, but not yet sealed: their content is readable
-  wherever TLS ends. Sealing the body's ongoing messages arrives with AI agent
-  messaging, which carries them in envelopes to the body's registered sealing keys.
+- Requests after enrolment are signed and sealed: `agent-host` carries each one inside
+  the sealed transport, from the keys the body enrolled with to the Identity Agent's,
+  so nothing between them reads the request or its answer (ADR-047, 2026-10-20). Only
+  the enrolment status a machine asks while it waits for approval travels signed and
+  unsealed, because until approval the Identity Agent takes no sealed request from it.
 - A machine's key in software, or one whose hardware report is false, is labelled only
   by its grade. Attested grades need platform evidence and are not yet verified.
