@@ -3,6 +3,7 @@ package server
 import (
 	"crypto/ed25519"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 
 	"identity-agent-core/backup"
 	"identity-agent-core/relay"
+	"identity-agent-core/secureenclave"
 )
 
 // Wiring a relay in (ADR-048).
@@ -100,6 +102,15 @@ func (s *CoreServer) publicRelayName() string {
 	return ""
 }
 
+// unclaimed reports whether this Identity Agent holds no identity yet.
+func (s *CoreServer) unclaimed() bool {
+	if s.DataStore == nil {
+		return true
+	}
+	id, err := s.DataStore.GetIdentity()
+	return err == nil && (id == nil || id.AID == "")
+}
+
 // relayEnrolment is what a relay session is made from: the enrolment
 // identifier, its signed key log and its key.
 type relayEnrolment struct {
@@ -112,10 +123,15 @@ type relayEnrolment struct {
 // one. Reusing it is what keeps the address stable across restarts: the relay
 // knows the address by the enrolment identifier.
 //
-// A machine nobody has claimed yet still gets a root seed of its own here
-// (ensureRootSeed), so it can be reached to be claimed.
+// The enrolment key derives from the root seed. A machine nobody has claimed
+// yet, and that has never held a seed, gets one of its own here so it can be
+// reached to be claimed. Any other machine uses the seed it has, and the relay
+// waits if it cannot be read: a relay is never a reason to make a new one.
 func (s *CoreServer) loadRelayEnrolment(kind relayKind, base string) (*relayEnrolment, error) {
-	rootSeed, err := ensureRootSeed(s.DataDir)
+	rootSeed, err := secureenclave.LoadRootSeed(s.DataDir)
+	if errors.Is(err, secureenclave.ErrNoRootSeed) && s.unclaimed() {
+		rootSeed, err = ensureRootSeed(s.DataDir)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("no root seed to derive an enrolment key from: %w", err)
 	}
