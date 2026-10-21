@@ -213,12 +213,14 @@ func (s *CoreServer) reuseRelayEnrollment(base string, rootSeed []byte, stored *
 	oobi := fmt.Sprintf("%s/public/oobi/%s", s.EndpointService.CurrentURL(), stored.AID)
 
 	cfg := relay.Config{
-		BaseURL:       base,
-		EnrollmentAID: stored.AID,
-		PublicKeyB64:  pubB64,
-		OOBIUrl:       oobi,
-		RAID:          stored.AID,
-		LocalBase:     fmt.Sprintf("http://127.0.0.1:%d", s.Port),
+		BaseURL:         base,
+		EnrollmentAID:   stored.AID,
+		PublicKeyB64:    pubB64,
+		OOBIUrl:         oobi,
+		RAID:            stored.AID,
+		LocalBase:       fmt.Sprintf("http://127.0.0.1:%d", s.Port),
+		EnrollmentToken: stored.EnrollmentToken,
+		AllocationToken: stored.AllocationToken,
 	}
 	log.Printf("[relay] reusing the enrollment identity recorded for %s (%s), keeping this agent's relay URL stable",
 		base, stored.AID)
@@ -283,7 +285,26 @@ func (s *CoreServer) startRelay() {
 		s.EndpointService.Refresh()
 		return
 	}
+	s.rememberRelayTokens(cfg, rm)
 	s.EndpointService.Refresh()
+}
+
+// rememberRelayTokens records the tokens the operator handed out, so the next
+// start reconnects at the same address.
+func (s *CoreServer) rememberRelayTokens(cfg relay.Config, rm *relay.Manager) {
+	enrollment, allocation := rm.Tokens()
+	if enrollment == cfg.EnrollmentToken && allocation == cfg.AllocationToken {
+		return
+	}
+	stored, found, err := loadRelayEnrollment(s.DataDir)
+	if err != nil || !found || stored.AID != cfg.EnrollmentAID {
+		return
+	}
+	stored.EnrollmentToken, stored.AllocationToken = enrollment, allocation
+	if err := saveRelayEnrollment(s.DataDir, *stored); err != nil {
+		log.Printf("[relay] WARNING: could not remember the relay's tokens, so the next start may not "+
+			"reconnect at %s: %v", rm.URL(), err)
+	}
 }
 
 // waitUntilReachable waits until this agent answers at an address something

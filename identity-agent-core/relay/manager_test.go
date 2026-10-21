@@ -126,3 +126,81 @@ func TestProviderNameIsTheOperatorHost(t *testing.T) {
 		}
 	}
 }
+
+// An operator that remembers, as a real one does: a second enrolment or
+// allocation for the same identity is answered "already done", with no token.
+func rememberingRelay(t *testing.T, released *int, signed *bool) *httptest.Server {
+	t.Helper()
+	enrolled, allocated := map[string]bool{}, map[string]bool{}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/.well-known/url-relay-service.json", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(ServiceDescriptor{V: JSONVersion, ProtocolVersion: "1.0", TunnelEndpoint: "ws://127.0.0.1:1/tunnel"})
+	})
+	mux.HandleFunc("/enroll", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]interface{}
+		json.NewDecoder(r.Body).Decode(&body)
+		if body["signature"] != nil {
+			*signed = true
+		}
+		aid, _ := body["enrollment_aid"].(string)
+		if enrolled[aid] {
+			http.Error(w, `{"error":"already_enrolled"}`, http.StatusConflict)
+			return
+		}
+		enrolled[aid] = true
+		json.NewEncoder(w).Encode(map[string]any{"enrolled": true, "enrollment_aid": aid, "enrollment_token": "tok-" + aid})
+	})
+	mux.HandleFunc("/allocate", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]interface{}
+		json.NewDecoder(r.Body).Decode(&body)
+		raid, _ := body["raid"].(string)
+		if allocated[raid] {
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(map[string]any{"error": "already_allocated",
+				"public_hostname": "k7f2pq9r.relay-a.test", "public_url": "https://k7f2pq9r.relay-a.test"})
+			return
+		}
+		allocated[raid] = true
+		json.NewEncoder(w).Encode(map[string]any{"public_url": "https://k7f2pq9r.relay-a.test",
+			"public_hostname": "k7f2pq9r.relay-a.test", "allocation_token": "alloc-" + raid})
+	})
+	mux.HandleFunc("/release", func(w http.ResponseWriter, r *http.Request) { *released++ })
+	return httptest.NewServer(mux)
+}
+
+// A restarted agent comes back at the same address: it signs its enrolment,
+// keeps a permanent address when it stops, and reconnects with the tokens it
+// remembered when the operator says it is already enrolled and allocated.
+func TestARestartedAgentKeepsItsAddress(t *testing.T) {
+	released, signed := 0, false
+	srv := rememberingRelay(t, &released, &signed)
+	defer srv.Close()
+
+	first := NewManager(testConfig(srv.URL), stubSigner{})
+	if err := first.Start(context.Background()); err != nil {
+		t.Fatalf("first start: %v", err)
+	}
+	if !signed {
+		t.Error("the enrolment was not signed")
+	}
+	url := first.GetStatus().URL
+	enrollment, allocation := first.Tokens()
+	first.Stop()
+	if released != 0 {
+		t.Fatal("stopping gave up a permanent address")
+	}
+
+	cfg := testConfig(srv.URL)
+	cfg.EnrollmentToken, cfg.AllocationToken = enrollment, allocation
+	second := NewManager(cfg, stubSigner{})
+	if err := second.Start(context.Background()); err != nil {
+		t.Fatalf("restart: %v", err)
+	}
+	defer second.Stop()
+	if got := second.GetStatus().URL; got != url {
+		t.Fatalf("the address moved on restart: %q then %q", url, got)
+	}
+	if _, a := second.Tokens(); a != allocation {
+		t.Fatalf("the restarted agent does not hold its allocation: %q", a)
+	}
+}
