@@ -1,304 +1,308 @@
 package server
 
 import (
-	"context"
 	"crypto/ed25519"
 	"encoding/base64"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"strings"
 	"time"
 
+	keri "github.com/grapeid/keri-go"
+
+	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto"
+
 	"identity-agent-core/backup"
 	"identity-agent-core/relay"
-	"identity-agent-core/secureenclave"
 )
 
-// Wiring the URL relay in.
+// Wiring a relay in (ADR-048).
 //
-// The relay package is the single control point for how this agent becomes
-// reachable at an address it can hand out and expect to still work later: it
-// enrolls a per-relay AID, signs its own requests, and allocates an opaque URL
-// bound to that enrollment. Unlike the bare tunnel — one ephemeral vendor URL
-// for the whole agent — a relay allocation is provably this agent's, which is
-// what makes it worth handing to a counterparty who has to find the agent again
-// months from now. `EndpointService` already ranks a live relay above the
-// tunnel; this is the piece that actually constructs and installs one so that
-// ranking has something to rank.
+// A relay is how an Identity Agent that only dials out stays reachable at an
+// address it can hand out and expect to still work later. It opens one session
+// to the relay, admitted on a signature by a pairwise enrolment identifier, and
+// the relay passes requests for its address down that session.
 //
-// It is deliberately NEVER the root identity that enrolls. Enrollment is
-// per-relay and uses a fresh pairwise AID derived from the root seed, so an
-// operator learns only an opaque identifier — never the user's primary
-// identity, and never a key that lets it impersonate the user or two operators
-// correlate that two enrollments are the same person.
+// The address is public (one stable address anybody may find) or private (an
+// unlinkable address for relationships). Which is the identity's choice, made
+// by the ingress mode. Each mode has its own enrolment identifier, minted for
+// that relay alone, so a relay never learns the root identity, and a public
+// address and the private ones are never tied together by their enrolment.
 
-// relayEnrollmentSigner signs relay requests with the pairwise enrollment key.
-//
-// The operator authenticates the agent by verifying this signature against the
-// public key it was given at enrollment. The signature is the same Ed25519 /
-// CESR-qb64 primitive the rest of the agent uses, computed over the relay
-// package's own canonical encoding, so the bytes signed here are exactly the
-// bytes the operator verifies.
+// relayKind is what differs between a public and a private relay.
+type relayKind struct {
+	mode relayproto.Mode
+	// pool is the pairwise key range the enrolment identifier is minted in.
+	pool string
+	// name prefixes the engine's name for the enrolment identifier.
+	name string
+	// record is the file the enrolment is remembered in.
+	record string
+	// env is the environment variable naming the operator when settings do not.
+	env string
+}
+
+var (
+	privateRelay = relayKind{mode: relayproto.ModePrivate, pool: "relay-enrollment", name: "relay",
+		record: relayEnrollmentFileName, env: "RELAY_BASE_URL"}
+	publicRelay = relayKind{mode: relayproto.ModePublic, pool: "relay-public-enrollment", name: "relay-public",
+		record: publicRelayEnrollmentFileName, env: "PUBLIC_RELAY_BASE_URL"}
+)
+
+// relayEnrollmentSigner signs allocate and release requests with the pairwise
+// enrolment key, as a plain Ed25519 signature over relay.CanonicalBody.
 type relayEnrollmentSigner struct {
-	// seed is the 32-byte Ed25519 seed for the enrollment AID. It is a
-	// throwaway relationship key, never the root seed.
+	// seed is the 32-byte Ed25519 seed for the enrolment identifier, never the
+	// root seed.
 	seed []byte
 }
 
-// SignCanonical signs in the same encoding the request carries its public key
-// in, plain base64url, so an operator verifies one with the other. A CESR
-// signature here is two bytes longer than an Ed25519 signature and is refused.
 func (rs *relayEnrollmentSigner) SignCanonical(enrollmentAID string, body map[string]interface{}) (string, error) {
 	canon, err := relay.CanonicalBody(body)
 	if err != nil {
 		return "", err
 	}
 	if len(rs.seed) != ed25519.SeedSize {
-		return "", fmt.Errorf("relay enrollment key is %d bytes, expected an Ed25519 seed", len(rs.seed))
+		return "", fmt.Errorf("relay enrolment key is %d bytes, expected an Ed25519 seed", len(rs.seed))
 	}
 	return base64.RawURLEncoding.EncodeToString(ed25519.Sign(ed25519.NewKeyFromSeed(rs.seed), canon)), nil
 }
 
-// relayBaseURL is the operator this agent enrolls with, or empty when no relay
-// is configured.
-//
-// Resolution order: the persisted relay operator first, then the RELAY_BASE_URL
-// env var for back-compat. The OSS core bundles no relay operator, so a
-// deployment that wants URL Relay names one — in Settings, or via the env var —
-// and a deployment that names none simply has no relay and stays on whatever the
-// tunnel/direct path provides.
-func (s *CoreServer) relayBaseURL() string {
+// relayBaseURL is the private relay this Identity Agent enrols with, or empty.
+func (s *CoreServer) relayBaseURL() string { return s.relayOperator(privateRelay) }
+
+// relayOperator is the relay configured for kind: the persisted setting first,
+// then the environment. The open-source core bundles no operator.
+func (s *CoreServer) relayOperator(kind relayKind) string {
 	if s.DataStore != nil {
-		if saved, err := s.DataStore.GetSettings(); err == nil && saved != nil && strings.TrimSpace(saved.RelayOperator) != "" {
-			return strings.TrimRight(strings.TrimSpace(saved.RelayOperator), "/")
+		if saved, err := s.DataStore.GetSettings(); err == nil && saved != nil {
+			v := saved.RelayOperator
+			if kind.mode == relayproto.ModePublic {
+				v = saved.PublicRelayOperator
+			}
+			if strings.TrimSpace(v) != "" {
+				return strings.TrimRight(strings.TrimSpace(v), "/")
+			}
 		}
 	}
-	return strings.TrimRight(strings.TrimSpace(os.Getenv("RELAY_BASE_URL")), "/")
+	return strings.TrimRight(strings.TrimSpace(os.Getenv(kind.env)), "/")
 }
 
-// loadRelayConfig builds the relay configuration and its signer when a relay is
-// configured, mirroring loadTunnelConfig.
-//
-// It returns ok=false (and does nothing) when no relay operator is configured,
-// or when this instance has no identity yet — a relay enrollment must be
-// provably somebody's, and the pairwise enrollment AID is derived from the root
-// seed, so there is nothing to enroll with before onboarding. In that case the
-// relay is simply absent this run and wires itself on a later start once an
-// identity exists, exactly as the tunnel does.
-//
-// The enrollment identity is DURABLE. A relay's whole value is a stable address
-// an agent can hand out and expect to keep working: the operator maps the
-// enrollment AID to an allocation, so presenting a fresh AID each start would
-// hand back a fresh allocation and a new public URL, silently breaking every
-// address already given out. So the first start mints the enrollment and records
-// it; every later start reloads and reuses the SAME AID, which keeps the
-// allocation — and therefore the URL — stable across restarts.
-//
-// Minting the enrollment AID is a real KERI operation (inception, key
-// registration, witness broadcast), so this is called from the start-up
-// goroutine rather than on the hot path of Start.
-func (s *CoreServer) loadRelayConfig() (relay.Config, relay.Signer, bool) {
-	base := s.relayBaseURL()
-	if base == "" {
-		return relay.Config{}, nil, false
-	}
-
-	// Do not force a root seed into existence just because a relay is named. An
-	// instance that has not been through onboarding has no identity to make an
-	// allocation provably its own, so the relay waits for a later start.
-	rootSeed, err := secureenclave.LoadRootSeed(s.DataDir)
-	if err != nil {
-		log.Printf("[relay] %s is configured but this instance has no identity yet — "+
-			"deferring relay enrollment until an identity exists", base)
-		return relay.Config{}, nil, false
-	}
-	// Reuse the enrollment this agent already minted for THIS operator, if one
-	// was recorded. Reusing the AID is what keeps the operator's allocation — and
-	// so the public URL — stable across restarts. Reuse re-derives its key from
-	// the root seed and needs no KERI engine, so it happens before the engine
-	// check: a recorded relay can come back up even while the engine is briefly
-	// unavailable.
-	if stored, found, lerr := loadRelayEnrollment(s.DataDir); lerr != nil {
-		// The record is present but unreadable. Say so and mint a fresh one below
-		// rather than refuse the relay entirely — a working relay at a new URL
-		// beats no relay at all, and the alternative strands the agent.
-		log.Printf("[relay] the recorded enrollment could not be read (%v) — minting a fresh one, "+
-			"which changes this agent's relay URL", lerr)
-	} else if found && stored.BaseURL == base {
-		if cfg, signer, ok := s.reuseRelayEnrollment(base, rootSeed, stored); ok {
-			return cfg, signer, true
+// publicRelayName is the name asked for at the public relay, if any.
+func (s *CoreServer) publicRelayName() string {
+	if s.DataStore != nil {
+		if saved, err := s.DataStore.GetSettings(); err == nil && saved != nil {
+			return strings.TrimSpace(saved.PublicRelayName)
 		}
-		// Falling through to a fresh mint: reuse could not re-derive the signer,
-		// which reuseRelayEnrollment has already logged.
+	}
+	return ""
+}
+
+// relayEnrolment is what a relay session is made from: the enrolment
+// identifier, its signed key log and its key.
+type relayEnrolment struct {
+	record storedRelayEnrollment
+	seed   []byte
+	kel    []byte
+}
+
+// loadRelayEnrolment reuses the enrolment recorded for this operator, or mints
+// one. Reusing it is what keeps the address stable across restarts: the relay
+// knows the address by the enrolment identifier.
+//
+// A machine nobody has claimed yet still gets a root seed of its own here
+// (ensureRootSeed), so it can be reached to be claimed.
+func (s *CoreServer) loadRelayEnrolment(kind relayKind, base string) (*relayEnrolment, error) {
+	rootSeed, err := ensureRootSeed(s.DataDir)
+	if err != nil {
+		return nil, fmt.Errorf("no root seed to derive an enrolment key from: %w", err)
+	}
+	if stored, found, lerr := loadRelayEnrollment(s.DataDir, kind.record); lerr != nil {
+		log.Printf("[relay] the recorded %s enrolment could not be read (%v); minting a fresh one, "+
+			"which changes this Identity Agent's %s address", kind.mode, lerr, kind.mode)
+	} else if found && stored.BaseURL == base {
+		if e, rerr := reuseRelayEnrolment(rootSeed, stored); rerr == nil {
+			log.Printf("[relay] reusing the %s enrolment recorded for %s (%s)", kind.mode, base, stored.AID)
+			return e, nil
+		} else {
+			log.Printf("[relay] the recorded %s enrolment cannot be used (%v); minting a fresh one, "+
+				"which changes this Identity Agent's %s address", kind.mode, rerr, kind.mode)
+		}
 	}
 
 	if s.KeriDriver == nil {
-		log.Printf("[relay] %s is configured but no KERI engine is available — "+
-			"cannot mint an enrollment identity, deferring", base)
-		return relay.Config{}, nil, false
+		return nil, fmt.Errorf("no KERI engine to mint an enrolment identifier with")
 	}
-
-	// No usable record for this operator — mint a fresh pairwise AID for THIS
-	// enrollment, in its own pool so its key range never collides with a contact
-	// or login relationship. The same AID serves as the resource being allocated
-	// for (its own did:webs / OOBI artifacts): a single foundational allocation,
-	// not yet the per-relationship fan-out the capability model calls for — see
-	// the deferral note below.
-	aid, oobi, seed, idx, err := s.mintPairwiseIn("relay-enrollment", "relay")
+	aid, _, seed, idx, err := s.mintPairwiseIn(kind.pool, kind.name)
 	if err != nil {
-		log.Printf("[relay] could not mint an enrollment identity for %s (%v) — relay not installed this run",
-			base, err)
-		return relay.Config{}, nil, false
+		return nil, fmt.Errorf("mint an enrolment identifier: %w", err)
 	}
-
-	// The public key was already derived and registered by mintPairwiseIn; read
-	// it back rather than deriving it a second time from the same seed.
 	pubB64, ok := getPairwiseKey(aid)
 	if !ok {
 		pubB64 = base64.RawURLEncoding.EncodeToString(ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey))
 	}
-
-	// Record the enrollment so the next start reuses it instead of minting
-	// another and moving the URL. Loud but non-fatal if it cannot be written:
-	// the relay still comes up this run, and the cost is a URL change at the next
-	// restart — which is exactly the state this whole change removes, so it is
-	// worth a warning rather than a refusal.
-	enr := storedRelayEnrollment{BaseURL: base, AID: aid, RelationshipIndex: idx, PublicKey: pubB64}
+	rec := storedRelayEnrollment{BaseURL: base, AID: aid, RelationshipIndex: idx, PublicKey: pubB64}
 	if kel, ok := getPairwiseKEL(aid); ok {
-		enr.KEL = kel
+		rec.KEL = kel
 	}
-	if serr := saveRelayEnrollment(s.DataDir, enr); serr != nil {
-		log.Printf("[relay] WARNING: could not record the enrollment identity, so a restart will re-enroll "+
-			"and this agent's relay URL will change: %v", serr)
+	stream, err := signedInceptionKEL(aid, rec.KEL, seed)
+	if err != nil {
+		return nil, fmt.Errorf("produce the enrolment identifier's key log: %w", err)
 	}
-
-	cfg := relay.Config{
-		BaseURL:       base,
-		EnrollmentAID: aid,
-		PublicKeyB64:  pubB64,
-		OOBIUrl:       oobi,
-		RAID:          aid,
-		LocalBase:     fmt.Sprintf("http://127.0.0.1:%d", s.Port),
-		KELCESRB64:    enrollmentKEL(aid, enr.KEL, seed),
+	if serr := saveRelayEnrollment(s.DataDir, kind.record, rec); serr != nil {
+		log.Printf("[relay] WARNING: could not record the %s enrolment, so a restart will mint another "+
+			"and this Identity Agent's address will change: %v", kind.mode, serr)
 	}
-	return cfg, &relayEnrollmentSigner{seed: seed}, true
+	return &relayEnrolment{record: rec, seed: seed, kel: stream}, nil
 }
 
-// reuseRelayEnrollment rebuilds the relay config and signer from a previously
-// recorded enrollment, so the operator's allocation and the public URL stay the
-// same across restarts.
-//
-// The signing seed is re-derived from the root seed and the recorded index — the
-// seed itself is never stored, the same rule login follows for its per-site keys.
-// The two in-memory registries that make the AID resolvable are repopulated here
-// too: both are empty after a restart, so without this the agent would remember
-// which AID it enrolled and still be unable to serve its OOBI or did.json.
-func (s *CoreServer) reuseRelayEnrollment(base string, rootSeed []byte, stored *storedRelayEnrollment) (relay.Config, relay.Signer, bool) {
-	seed, derr := backup.DerivePairwiseSeed(rootSeed, stored.RelationshipIndex, 0)
-	if derr != nil {
-		log.Printf("[relay] could not re-derive the recorded enrollment key for %s (%v) — minting a fresh one, "+
-			"which changes this agent's relay URL", base, derr)
-		return relay.Config{}, nil, false
+// reuseRelayEnrolment rebuilds an enrolment from its record. The key is
+// re-derived from the root seed, never stored, and is checked against the key
+// recorded: a root seed that changed since would otherwise sign as an
+// identifier whose log names a different key, and every admission would fail
+// with no explanation.
+func reuseRelayEnrolment(rootSeed []byte, stored *storedRelayEnrollment) (*relayEnrolment, error) {
+	seed, err := backup.DerivePairwiseSeed(rootSeed, stored.RelationshipIndex, 0)
+	if err != nil {
+		return nil, fmt.Errorf("re-derive the enrolment key: %w", err)
 	}
-
-	// Put back what makes the AID resolvable after a restart. Recompute the
-	// public key from the seed when the record predates storing it.
-	pubB64 := stored.PublicKey
-	if pubB64 == "" {
-		pubB64 = base64.RawURLEncoding.EncodeToString(ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey))
+	pubB64 := base64.RawURLEncoding.EncodeToString(ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey))
+	if stored.PublicKey != "" && stored.PublicKey != pubB64 {
+		return nil, fmt.Errorf("the key re-derived from this root seed is not the one %s was made with", stored.AID)
 	}
+	stream, err := signedInceptionKEL(stored.AID, stored.KEL, seed)
+	if err != nil {
+		return nil, fmt.Errorf("produce %s's key log: %w", stored.AID, err)
+	}
+	// Put back what makes the identifier resolvable after a restart.
 	registerPairwiseKey(stored.AID, pubB64)
 	if len(stored.KEL) > 0 {
 		registerPairwiseKEL(stored.AID, stored.KEL)
 	}
-
-	// Composed from where this agent is reachable NOW, exactly as the mint path
-	// does — storing the OOBI would pin it to wherever the agent was when it
-	// first enrolled.
-	oobi := fmt.Sprintf("%s/public/oobi/%s", s.EndpointService.CurrentURL(), stored.AID)
-
-	cfg := relay.Config{
-		BaseURL:         base,
-		EnrollmentAID:   stored.AID,
-		PublicKeyB64:    pubB64,
-		OOBIUrl:         oobi,
-		RAID:            stored.AID,
-		LocalBase:       fmt.Sprintf("http://127.0.0.1:%d", s.Port),
-		EnrollmentToken: stored.EnrollmentToken,
-		AllocationToken: stored.AllocationToken,
-		KELCESRB64:      enrollmentKEL(stored.AID, stored.KEL, seed),
-	}
-	log.Printf("[relay] reusing the enrollment identity recorded for %s (%s), keeping this agent's relay URL stable",
-		base, stored.AID)
-	return cfg, &relayEnrollmentSigner{seed: seed}, true
+	return &relayEnrolment{record: *stored, seed: seed, kel: stream}, nil
 }
 
-// startRelay wires the one URL manager in when a relay is configured: build the
-// config (which mints the enrollment identity), construct the manager, install
-// it on the endpoint service so a live relay URL outranks the tunnel, register a
-// republish hook, and start it.
+// relationshipRoutes are what a private address may reach on this Identity
+// Agent: an identity's artifacts, its message endpoint and pairwise key
+// registration. Each is drawn from publicRoutes, which a test holds.
+var relationshipRoutes = map[string]bool{
+	"GET /oobi/{aid}":            true,
+	"GET /public/oobi/{aid}":     true,
+	"GET /{aid}/oobi":            true,
+	"GET /{aid}/did.json":        true,
+	"GET /public/{aid}/did.json": true,
+	"GET /{aid}/kel":             true,
+	"GET /{aid}/keri.cesr":       true,
+	"POST /_register":            true,
+	"POST /public/_register":     true,
+	"POST /didcomm":              true,
+}
+
+// privateAddressMayReach is this Identity Agent's own rule for a request that
+// arrived on a private address (ADR-048 §6). The relay applies a rule too, but
+// a relay is not trusted to decide what reaches the Identity Agent.
+func (s *CoreServer) privateAddressMayReach(r *http.Request) bool {
+	if r.Header.Get("Upgrade") != "" {
+		return false
+	}
+	if r.URL.RawPath != "" && r.URL.RawPath != r.URL.Path {
+		return false
+	}
+	method := r.Method
+	probe := r
+	if method == http.MethodHead {
+		method = http.MethodGet
+		probe = r.Clone(r.Context())
+		probe.Method = http.MethodGet
+	}
+	// TestEveryRelationshipRouteIsPublic holds that each of these is a public
+	// route, so a private address never reaches more than a stranger may.
+	return relationshipRoutes[method+" "+matchedRoutePattern(s.router, probe)]
+}
+
+// startRelay brings up the relay the ingress mode calls for, if one is
+// configured, and keeps trying until it is reached.
 //
-// Runs in its own goroutine off Start for the same reason the tunnel does: the
-// network work must not hold up the local server coming up, and a relay that is
-// slow or unreachable is reported honestly rather than blocking.
+// It runs in its own goroutine off Start: the local server must not wait on the
+// network.
 func (s *CoreServer) startRelay() {
-	if s.relayBaseURL() == "" {
+	var kind relayKind
+	switch s.resolveIngressMode() {
+	case IngressModeRelay:
+		kind = privateRelay
+	case IngressModePublic:
+		kind = publicRelay
+	default:
 		return
 	}
-	// A relay enrols an identity by fetching its key log from the address it is
-	// given, and that address is composed from where this agent answers now. At
-	// start-up that is localhost until the tunnel is up, which the relay rightly
-	// refuses. So wait until the agent is reachable from outside.
-	if !s.waitUntilReachable(s.AppCtx) {
+	base := s.relayOperator(kind)
+	if base == "" {
+		if kind.mode == relayproto.ModePublic {
+			log.Printf("[relay] public mode is chosen but no public relay is configured")
+		}
 		return
 	}
-	cfg, signer, ok := s.loadRelayConfig()
-	if !ok {
+	e, err := s.loadRelayEnrolment(kind, base)
+	if err != nil {
+		log.Printf("[relay] %s relay %s not brought up: %v", kind.mode, base, err)
 		return
 	}
 
-	rm := relay.NewManager(cfg, signer)
-
-	// When the relay's public URL appears, changes or is lost, recompute the
-	// published endpoint so counterparties are pointed at where this agent
-	// currently answers rather than at an address that stopped working.
-	rm.OnChange(func(url string, active bool) {
-		s.EndpointService.Refresh()
+	raid, name := e.record.AID, ""
+	if kind.mode == relayproto.ModePublic {
+		// A public address is the identity's own, so it serves the identity.
+		if s.DataStore != nil {
+			if id, err := s.DataStore.GetIdentity(); err == nil && id != nil && id.AID != "" {
+				raid = id.AID
+			}
+		}
+		name = s.publicRelayName()
+	}
+	sessionSigner, err := keri.NewSoftwareSigner(e.seed, true)
+	if err != nil {
+		log.Printf("[relay] could not load the enrolment key: %v", err)
+		return
+	}
+	kel := e.kel
+	rm := relay.NewManager(relay.Config{
+		BaseURL: base, Mode: kind.mode, EnrollmentAID: e.record.AID,
+		KEL: func() []byte { return kel }, Session: sessionSigner,
+		Requests: &relayEnrollmentSigner{seed: e.seed}, RAID: raid, Name: name,
+		Handler: s.router, PrivateMayReach: s.privateAddressMayReach,
+		TLS: s.relayTLS, HTTPClient: s.relayClient,
+	})
+	rm.Remember(e.record.Allocations)
+	rm.OnChange(func(string, bool) { s.EndpointService.Refresh() })
+	rm.OnAllocated(func(held []relay.Allocation) {
+		e.record.Allocations = held
+		if err := saveRelayEnrollment(s.DataDir, kind.record, e.record); err != nil {
+			log.Printf("[relay] WARNING: could not remember this Identity Agent's relay addresses, "+
+				"so a restart may move them: %v", err)
+		}
 	})
 
-	// Install the manager under the same lock Stop reads it with. This runs in
-	// its own goroutine off Start, while Stop reads s.RelayManager under s.mu —
-	// assigning it here without the lock is a data race the race detector flags.
-	//
-	// The lock also closes the lifecycle window. Enrolling a relay is slow, so
-	// the server can be stopped before this goroutine gets here — and Stop has
-	// by then already passed the point where it stops the relay manager. If that
-	// has happened, stop the manager we just built rather than leaving it
-	// running with nothing to shut it down.
+	// Installed under the lock Stop reads it with. Enrolling is slow, so the
+	// server may already have stopped; then stop what was just built.
 	s.mu.Lock()
 	if !s.running {
 		s.mu.Unlock()
-		rm.Stop()
 		return
 	}
 	s.RelayManager = rm
 	s.mu.Unlock()
-
 	s.EndpointService.SetRelayManager(rm)
 
-	// Keep trying. A relay that cannot be reached at start-up — the network is
-	// down, the machine just woke, a new tunnel name has not reached DNS yet —
-	// is reached later, and an agent that tried once would stay on its tunnel's
-	// address until somebody restarted it.
+	// Keep trying. A relay that cannot be reached at start-up (the network is
+	// down, the machine just woke) is reached later without a restart.
 	backoff := 5 * time.Second
 	for {
 		err := rm.Start(s.AppCtx)
 		if err == nil {
-			break
+			return
 		}
-		log.Printf("[relay] could not bring up %s yet, trying again in %s: %v", cfg.BaseURL, backoff, err)
-		s.EndpointService.Refresh()
+		log.Printf("[relay] could not reach %s yet, trying again in %s: %v", base, backoff, err)
 		select {
 		case <-s.AppCtx.Done():
 			return
@@ -308,67 +312,27 @@ func (s *CoreServer) startRelay() {
 			backoff *= 2
 		}
 	}
-	s.rememberRelayTokens(cfg, rm)
-	s.EndpointService.Refresh()
 }
 
-// rememberRelayTokens records the tokens the operator handed out, so the next
-// start reconnects at the same address.
-func (s *CoreServer) rememberRelayTokens(cfg relay.Config, rm *relay.Manager) {
-	enrollment, allocation := rm.Tokens()
-	if enrollment == cfg.EnrollmentToken && allocation == cfg.AllocationToken {
-		return
+// relayedAddress is the address a request arrived at, when it came through a
+// relay: the URL this Identity Agent holds for the allocation the stream's
+// preamble names, taken from its own records. A private address is a path at
+// the relay, so links this Identity Agent writes into a response must carry
+// it; nothing a caller sends (a Host or X-Forwarded-Prefix header) decides it.
+func (s *CoreServer) relayedAddress(r *http.Request) (string, bool) {
+	p, ok := relayproto.PreambleFrom(r.Context())
+	if !ok {
+		return "", false
 	}
-	stored, found, err := loadRelayEnrollment(s.DataDir)
-	if err != nil || !found || stored.AID != cfg.EnrollmentAID {
-		return
+	s.mu.Lock()
+	rm := s.RelayManager
+	s.mu.Unlock()
+	if rm == nil {
+		return "", false
 	}
-	stored.EnrollmentToken, stored.AllocationToken = enrollment, allocation
-	if err := saveRelayEnrollment(s.DataDir, *stored); err != nil {
-		log.Printf("[relay] WARNING: could not remember the relay's tokens, so the next start may not "+
-			"reconnect at %s: %v", rm.URL(), err)
+	a := rm.Lookup(p.Allocation)
+	if a == nil || a.URL == "" {
+		return "", false
 	}
-}
-
-// waitUntilReachable waits until this agent answers at an address something
-// outside the machine can fetch from, and reports false if the context ends
-// first. A localhost or LAN address is not one.
-func (s *CoreServer) waitUntilReachable(ctx context.Context) bool {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	logged := false
-	for {
-		source := s.EndpointService.Source()
-		if source == "" {
-			// Not worked out yet, which is not the same as unreachable.
-			s.EndpointService.Refresh()
-			source = s.EndpointService.Source()
-		}
-		if source != "" && source != "localhost" && !strings.HasPrefix(source, "local:") {
-			return true
-		}
-		if !logged {
-			log.Printf("[relay] %s is configured; waiting for this agent to be reachable from outside before enrolling",
-				s.relayBaseURL())
-			logged = true
-		}
-		select {
-		case <-ctx.Done():
-			return false
-		case <-time.After(time.Second):
-		}
-	}
-}
-
-// enrollmentKEL is the enrolment identity's signed key log for the operator, or
-// empty when it cannot be produced, in which case an operator that checks keys
-// refuses the enrolment and says why.
-func enrollmentKEL(aid string, kel []map[string]interface{}, seed []byte) string {
-	stream, err := signedInceptionKEL(aid, kel, seed)
-	if err != nil {
-		log.Printf("[relay] could not produce %s's signed key log for the operator: %v", aid, err)
-		return ""
-	}
-	return base64.StdEncoding.EncodeToString(stream)
+	return strings.TrimRight(a.URL, "/"), true
 }

@@ -58,6 +58,10 @@ type CoreServer struct {
 	KeriDriver      drivers.KeriEngine
 	TunnelManager   *tunnel.Manager
 	RelayManager    *relay.Manager
+	// relayTLS and relayClient override how a relay is reached; nil uses the
+	// system's trust store. Tests set them to trust an in-process relay.
+	relayTLS        *tls.Config
+	relayClient     *http.Client
 	EndpointService *endpoint.EndpointService
 	SandboxManager  *sandbox.Manager
 	EventHub        *EventHub
@@ -935,9 +939,6 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		r.Put("/settings/tunnel", s.handlePutTunnelSettings)
 		r.Get("/settings/reachability", s.handleGetReachabilitySettings)
 		r.Put("/settings/reachability", s.handlePutReachabilitySettings)
-		r.Get("/settings/tunnel/check-name", s.handleCheckTunnelName)
-		r.Get("/settings/tunnel/grapeid-health", s.handleGrapeIdHealth)
-		r.Post("/settings/tunnel/release-name", s.handleReleaseTunnelName)
 		r.Get("/tunnel/status", s.handleTunnelStatus)
 		r.Post("/tunnel/restart", s.handleTunnelRestart)
 
@@ -2877,6 +2878,11 @@ func (es *CoreServer) getPublicURL(r *http.Request) string {
 	// machine — the one asking is the screen offering the computer for pairing
 	// — and dereferencing a service that does not exist yet turns "I do not
 	// know my address" into a crash.
+	// A request that came through a relay is answered with the address it
+	// came to, which for a private address is a path at the relay.
+	if url, ok := es.relayedAddress(r); ok {
+		return url
+	}
 	if es.EndpointService != nil {
 		if url := es.EndpointService.CurrentURL(); url != "" {
 			return url
@@ -4140,8 +4146,6 @@ func (s *CoreServer) loadTunnelConfig() tunnel.Config {
 			Provider:              tunnel.ProviderType(saved.TunnelProvider),
 			NgrokAuthToken:        saved.NgrokAuthToken,
 			CloudflareTunnelToken: saved.CloudflareTunnelToken,
-			TunnelDomain:          saved.TunnelDomain,
-			TunnelExtension:       saved.TunnelExtension,
 			AID:                   aid,
 		}
 	}
@@ -4160,35 +4164,6 @@ func (s *CoreServer) loadTunnelConfig() tunnel.Config {
 	cfg := tunnel.DefaultConfig()
 	cfg.AID = aid
 
-	// Auto-generate a Grape ID tunnel name if defaulting to GrapeID with no extension.
-	if cfg.Provider == tunnel.ProviderGrapeID && cfg.TunnelExtension == "" {
-		domain := cfg.TunnelDomain
-		if domain == "" {
-			domain = "grapeid.org"
-		}
-		name, err := tunnel.FindAvailableName(domain, 10)
-		if err != nil {
-			log.Printf("[identity-agent-core] Auto-tunnel: could not find available name: %v — falling back to no tunnel", err)
-			cfg.Provider = tunnel.ProviderNone
-			return cfg
-		}
-		cfg.TunnelExtension = name
-
-		// Persist so the same name is used on restart. Read-modify-write so this
-		// does not blank the reachability settings (ingress mode, relay operator)
-		// that share the single settings row — otherwise a Tunnel-default org that
-		// has a relay operator configured but no tunnel yet loses it on first boot.
-		toSave := &store.SettingsData{}
-		if existing, err := s.DataStore.GetSettings(); err == nil && existing != nil {
-			toSave = existing
-		}
-		toSave.TunnelProvider = string(tunnel.ProviderGrapeID)
-		toSave.TunnelDomain = domain
-		toSave.TunnelExtension = name
-		s.DataStore.SaveSettings(*toSave)
-		log.Printf("[identity-agent-core] Auto-tunnel: assigned Grape ID name '%s'", name)
-	}
-
 	return cfg
 }
 
@@ -4201,8 +4176,6 @@ func (s *CoreServer) handleGetTunnelSettings(w http.ResponseWriter, r *http.Requ
 		"status":               status,
 		"has_ngrok_token":      cfg.NgrokAuthToken != "",
 		"has_cloudflare_token": cfg.CloudflareTunnelToken != "",
-		"tunnel_domain":        cfg.TunnelDomain,
-		"tunnel_extension":     cfg.TunnelExtension,
 		"cloudflared_available": func() bool {
 			_, err := tunnel.LookupCloudflared()
 			return err == nil
@@ -4218,8 +4191,6 @@ func (s *CoreServer) handlePutTunnelSettings(w http.ResponseWriter, r *http.Requ
 		Provider              string `json:"provider"`
 		NgrokAuthToken        string `json:"ngrok_auth_token,omitempty"`
 		CloudflareTunnelToken string `json:"cloudflare_tunnel_token,omitempty"`
-		TunnelDomain          string `json:"tunnel_domain,omitempty"`
-		TunnelExtension       string `json:"tunnel_extension,omitempty"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -4229,9 +4200,9 @@ func (s *CoreServer) handlePutTunnelSettings(w http.ResponseWriter, r *http.Requ
 
 	provider := tunnel.ProviderType(req.Provider)
 	switch provider {
-	case tunnel.ProviderCloudflare, tunnel.ProviderNgrok, tunnel.ProviderGrapeID, tunnel.ProviderNone:
+	case tunnel.ProviderCloudflare, tunnel.ProviderNgrok, tunnel.ProviderNone:
 	default:
-		writeError(w, http.StatusBadRequest, "Invalid provider", fmt.Sprintf("Provider must be one of: cloudflare, ngrok, grapeid, none. Got: %s", req.Provider))
+		writeError(w, http.StatusBadRequest, "Invalid provider", fmt.Sprintf("Provider must be one of: cloudflare, ngrok, none. Got: %s", req.Provider))
 		return
 	}
 
@@ -4242,12 +4213,12 @@ func (s *CoreServer) handlePutTunnelSettings(w http.ResponseWriter, r *http.Requ
 		TunnelProvider:        req.Provider,
 		NgrokAuthToken:        req.NgrokAuthToken,
 		CloudflareTunnelToken: req.CloudflareTunnelToken,
-		TunnelDomain:          req.TunnelDomain,
-		TunnelExtension:       req.TunnelExtension,
 	}
 	if existing, err := s.DataStore.GetSettings(); err == nil && existing != nil {
 		settings.IngressMode = existing.IngressMode
 		settings.RelayOperator = existing.RelayOperator
+		settings.PublicRelayOperator = existing.PublicRelayOperator
+		settings.PublicRelayName = existing.PublicRelayName
 	}
 
 	if err := s.DataStore.SaveSettings(settings); err != nil {
@@ -4323,13 +4294,15 @@ func (s *CoreServer) handleGetReachabilitySettings(w http.ResponseWriter, r *htt
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"mode":            stored.IngressMode,
-		"resolved_mode":   string(resolved),
-		"default_mode":    string(s.defaultIngressMode()),
-		"is_default":      !validIngressMode(stored.IngressMode),
-		"entity_type":     s.ourEntityType(),
-		"relay_operator":  s.relayBaseURL(),
-		"stored_operator": stored.RelayOperator,
+		"mode":                  stored.IngressMode,
+		"resolved_mode":         string(resolved),
+		"default_mode":          string(s.defaultIngressMode()),
+		"is_default":            !validIngressMode(stored.IngressMode),
+		"entity_type":           s.ourEntityType(),
+		"relay_operator":        s.relayBaseURL(),
+		"stored_operator":       stored.RelayOperator,
+		"public_relay_operator": s.relayOperator(publicRelay),
+		"public_relay_name":     stored.PublicRelayName,
 	})
 }
 
@@ -4341,8 +4314,10 @@ func (s *CoreServer) handleGetReachabilitySettings(w http.ResponseWriter, r *htt
 // to the per-product default); a mode that is not one of the three is rejected.
 func (s *CoreServer) handlePutReachabilitySettings(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Mode          *string `json:"mode"`
-		RelayOperator *string `json:"relay_operator"`
+		Mode                *string `json:"mode"`
+		RelayOperator       *string `json:"relay_operator"`
+		PublicRelayOperator *string `json:"public_relay_operator"`
+		PublicRelayName     *string `json:"public_relay_name"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request", err.Error())
@@ -4353,7 +4328,7 @@ func (s *CoreServer) handlePutReachabilitySettings(w http.ResponseWriter, r *htt
 		m := strings.TrimSpace(*req.Mode)
 		if m != "" && !validIngressMode(m) {
 			writeError(w, http.StatusBadRequest, "Invalid mode",
-				fmt.Sprintf("mode must be one of: relay, tunnel, direct (or empty to use the default). Got: %s", *req.Mode))
+				fmt.Sprintf("mode must be one of: relay, public, tunnel, direct (or empty to use the default). Got: %s", *req.Mode))
 			return
 		}
 	}
@@ -4370,6 +4345,12 @@ func (s *CoreServer) handlePutReachabilitySettings(w http.ResponseWriter, r *htt
 	if req.RelayOperator != nil {
 		settings.RelayOperator = strings.TrimRight(strings.TrimSpace(*req.RelayOperator), "/")
 	}
+	if req.PublicRelayOperator != nil {
+		settings.PublicRelayOperator = strings.TrimRight(strings.TrimSpace(*req.PublicRelayOperator), "/")
+	}
+	if req.PublicRelayName != nil {
+		settings.PublicRelayName = strings.ToLower(strings.TrimSpace(*req.PublicRelayName))
+	}
 
 	if err := s.DataStore.SaveSettings(settings); err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to save settings", err.Error())
@@ -4385,108 +4366,6 @@ func (s *CoreServer) handlePutReachabilitySettings(w http.ResponseWriter, r *htt
 		"mode":           settings.IngressMode,
 		"resolved_mode":  string(s.resolveIngressMode()),
 		"relay_operator": s.relayBaseURL(),
-	})
-}
-
-func (s *CoreServer) handleCheckTunnelName(w http.ResponseWriter, r *http.Request) {
-	domain := r.URL.Query().Get("domain")
-	name := r.URL.Query().Get("name")
-
-	if name == "" {
-		writeError(w, http.StatusBadRequest, "Missing required parameter: name", "")
-		return
-	}
-	if domain == "" {
-		domain = "grapeid.org"
-	}
-
-	scheme := "https"
-	if strings.Contains(domain, "localhost") || strings.Contains(domain, "127.0.0.1") {
-		scheme = "http"
-	}
-
-	hubURL := fmt.Sprintf("%s://%s/check-name?name=%s", scheme, domain, name)
-	client := s.newProbeHTTPClient(8 * time.Second)
-	resp, err := client.Get(hubURL)
-	if err != nil {
-		errDetail := err.Error()
-		log.Printf("[identity-agent-core] check-name proxy failed: %v", err)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"available": nil,
-			"hub_error": true,
-			"message":   fmt.Sprintf("Provider not responsive: %s", errDetail),
-		})
-		return
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to read hub response", err.Error())
-		return
-	}
-
-	// Normalize provider-side server errors — do not let 5xx bubble up as
-	// "name taken". Return 200 with hub_error so the client can show the
-	// correct message ("provider not responsive") instead of a false negative.
-	if resp.StatusCode >= 500 {
-		log.Printf("[identity-agent-core] check-name: provider returned HTTP %d", resp.StatusCode)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"available": nil,
-			"hub_error": true,
-			"message":   fmt.Sprintf("Provider server returned HTTP %d", resp.StatusCode),
-		})
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(resp.StatusCode)
-	w.Write(body)
-}
-
-func (s *CoreServer) handleGrapeIdHealth(w http.ResponseWriter, r *http.Request) {
-	domain := r.URL.Query().Get("domain")
-	if domain == "" {
-		domain = "grapeid.org"
-	}
-
-	scheme := "https"
-	if strings.Contains(domain, "localhost") || strings.Contains(domain, "127.0.0.1") {
-		scheme = "http"
-	}
-
-	probeURL := fmt.Sprintf("%s://%s/health", scheme, domain)
-	client := s.newProbeHTTPClient(3 * time.Second)
-	resp, err := client.Get(probeURL)
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-
-	if err != nil {
-		errDetail := err.Error()
-		log.Printf("[identity-agent-core] grapeid health probe failed: %v", err)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"reachable": false,
-			"reason":    fmt.Sprintf("Provider not responsive: %s", errDetail),
-		})
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 500 {
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"reachable": false,
-			"reason":    fmt.Sprintf("Provider server returned HTTP %d", resp.StatusCode),
-		})
-		return
-	}
-
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"reachable": true,
 	})
 }
 
@@ -4717,45 +4596,6 @@ func (s *CoreServer) newProbeHTTPClient(timeout time.Duration) *http.Client {
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		},
 	}
-}
-
-func (s *CoreServer) handleReleaseTunnelName(w http.ResponseWriter, r *http.Request) {
-	if s.TunnelManager == nil {
-		writeError(w, http.StatusInternalServerError, "Tunnel manager not initialized", "")
-		return
-	}
-
-	cfg := s.TunnelManager.GetConfig()
-	if cfg.Provider != tunnel.ProviderGrapeID {
-		writeError(w, http.StatusBadRequest, "Release is only supported for Grape ID provider", "")
-		return
-	}
-	if cfg.TunnelExtension == "" {
-		writeError(w, http.StatusBadRequest, "No name is currently claimed", "")
-		return
-	}
-
-	releasedName := cfg.TunnelExtension
-	log.Printf("[identity-agent-core] Releasing tunnel name '%s' on hub", releasedName)
-
-	s.TunnelManager.Stop()
-
-	settings, err := s.DataStore.GetSettings()
-	if err == nil && settings != nil {
-		settings.TunnelExtension = ""
-		s.DataStore.SaveSettings(*settings)
-	}
-
-	s.EndpointService.Refresh()
-	log.Printf("[identity-agent-core] Tunnel name '%s' released and cleared from settings", releasedName)
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"released":        true,
-		"name":            releasedName,
-		"endpoint_url":    s.EndpointService.CurrentURL(),
-		"endpoint_source": s.EndpointService.Source(),
-	})
 }
 
 // oobiBase extracts the scheme+host+port base URL from an OOBI URL, which is

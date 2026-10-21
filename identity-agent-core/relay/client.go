@@ -3,37 +3,53 @@ package relay
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
+
+	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto"
 )
 
+// Signer signs a control request with the enrolment key, over CanonicalBody.
 type Signer interface {
 	SignCanonical(enrollmentAID string, body map[string]interface{}) (signature string, err error)
 }
 
+// Client makes the control requests an Identity Agent sends a relay beside its
+// session. None carries a token: each is signed by the enrolment identifier's
+// current key, and the relay accepts it only while that identifier holds a live
+// session (ADR-048 §8).
 type Client struct {
 	BaseURL    string
 	HTTPClient *http.Client
 	Signer     Signer
-	Token      string
+	// Descriptor is the relay's, once fetched; its service name goes in every
+	// request and its endpoints say where each op is sent.
+	Descriptor *ServiceDescriptor
 }
 
-func NewClient(baseURL string, token string, signer Signer) *Client {
+// NewClient returns a client for the relay at baseURL.
+func NewClient(baseURL string, signer Signer) *Client {
 	return &Client{
-		BaseURL:    baseURL,
-		Token:      token,
+		BaseURL:    strings.TrimRight(baseURL, "/"),
 		Signer:     signer,
 		HTTPClient: &http.Client{Timeout: 30 * time.Second},
 	}
 }
 
+// maxAnswer bounds what is read from a relay's answer. A relay is not trusted
+// to keep its answers small.
+const maxAnswer = 64 << 10
+
+// FetchDescriptor reads the relay's discovery descriptor and keeps it.
 func (c *Client) FetchDescriptor(ctx context.Context) (*ServiceDescriptor, error) {
-	url := c.BaseURL + "/.well-known/url-relay-service.json"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/.well-known/url-relay-service.json", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -46,219 +62,170 @@ func (c *Client) FetchDescriptor(ctx context.Context) (*ServiceDescriptor, error
 		return nil, fmt.Errorf("descriptor %d", resp.StatusCode)
 	}
 	var d ServiceDescriptor
-	if err := json.NewDecoder(resp.Body).Decode(&d); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxAnswer)).Decode(&d); err != nil {
 		return nil, err
 	}
-	if d.ProtocolVersion == "" || d.ProtocolVersion[0:1] != "1" {
-		return nil, fmt.Errorf("unsupported protocol_version %s", d.ProtocolVersion)
+	if d.Protocol != relayproto.ProtocolVersion {
+		return nil, fmt.Errorf("the relay speaks %q; this Identity Agent speaks %q", d.Protocol, relayproto.ProtocolVersion)
 	}
+	if !strings.HasPrefix(d.TunnelEndpoint, "wss://") || d.Service == "" {
+		return nil, fmt.Errorf("the relay's descriptor names no service or no wss:// session endpoint")
+	}
+	c.Descriptor = &d
 	return &d, nil
 }
 
-// ErrAlreadyEnrolled is an operator saying it already holds this enrollment.
-// The enrollment is still good; what the agent needs to go on is the token it
-// was given the first time.
-var ErrAlreadyEnrolled = errors.New("relay: this enrollment AID is already enrolled")
-
-// Enroll registers enrollmentAID with the operator. kelCESRB64 is its signed key
-// event log as a base64 CESR stream, which an operator that binds the key to the
-// identifier checks; it is left out of the request when empty.
-func (c *Client) Enroll(ctx context.Context, enrollmentAID, oobiURL, publicKeyB64, kelCESRB64 string) (*EnrollResponse, error) {
-	body := map[string]interface{}{
-		"v": JSONVersion, "enrollment_aid": enrollmentAID, "oobi": oobiURL,
-		"root_aid_enrollment": false, "public_key_b64": publicKeyB64,
+// NewSecret makes the secret a private address is held by, and the commitment
+// the relay stores in its place: base64url SHA-256 of the secret.
+func NewSecret() (secret, commitment string) {
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		panic("relay: no randomness: " + err.Error())
 	}
-	if kelCESRB64 != "" {
-		body["kel_cesr_b64"] = kelCESRB64
-	}
-	// Signed by the key being presented: whoever enrolls an AID controls every
-	// signed operation for it afterwards, so an operator must see that the
-	// caller holds the key, not merely names it.
-	sig, err := c.Signer.SignCanonical(enrollmentAID, body)
-	if err != nil {
-		return nil, err
-	}
-	body["signature"] = sig
-	raw, _ := json.Marshal(body)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/enroll", bytes.NewReader(raw))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.HTTPClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	b, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode == http.StatusConflict {
-		return nil, ErrAlreadyEnrolled
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("enroll %d: %s", resp.StatusCode, string(b))
-	}
-	var out EnrollResponse
-	if err := json.Unmarshal(b, &out); err != nil {
-		return nil, err
-	}
-	c.Token = out.EnrollmentToken
-	return &out, nil
+	return b64.EncodeToString(raw), Commitment(raw)
 }
 
-// Allocation lifetime values.
-const (
-	LifetimePermanent = "permanent"
-	LifetimeEphemeral = "ephemeral"
-)
-
-// Allocation scope values — what the allocated URL is for. A per-relationship
-// URL is bound to one Pairwise AID, an identity URL is shared across a persona,
-// a per-transaction URL lives only for one transaction, an agent-endpoint URL is
-// an owner's own device-reachable endpoint, and a controller-relationship URL is
-// a black box's authenticated controller relationship.
-const (
-	ScopePerRelationship        = "per-relationship"
-	ScopeIdentity               = "identity"
-	ScopePerTransaction         = "per-transaction"
-	ScopeAgentEndpoint          = "agent-endpoint"
-	ScopeControllerRelationship = "controller-relationship"
-)
-
-// Allocation naming values — how the public hostname is chosen.
-const (
-	NamingOpaque = "opaque" // a CSPRNG subdomain — the default, unlinkable
-	NamingStable = "stable" // a chosen, human-meaningful name — public personas only
-)
-
-// AllocateOptions carries the optional lifetime/scope/naming parameters of the
-// allocate request.
-//
-// The zero value means "unset", and it is load-bearing: an allocate call made
-// with the zero value puts NOTHING new on the wire. The request is then
-// byte-for-byte the fixed opaque/persistent request that shipped before these
-// fields existed, so an operator that does not understand them is unaffected and
-// every existing caller keeps working. A field is added to the wire body only
-// when it is set, which is what keeps the extension backward-compatible.
-type AllocateOptions struct {
-	// Lifetime is LifetimePermanent or LifetimeEphemeral. Empty leaves it
-	// unset, which an operator treats as the historical persistent default.
-	Lifetime string
-
-	// TTLSeconds is the requested lifetime in seconds, meaningful only when
-	// Lifetime is LifetimeEphemeral. It is omitted from the wire otherwise, and
-	// when zero.
-	TTLSeconds int
-
-	// Scope is one of the Scope* values. Empty leaves it unset.
-	Scope string
-
-	// Naming is NamingOpaque or NamingStable. Empty leaves it unset, which an
-	// operator treats as opaque — the historical default.
-	Naming string
+// Commitment is what a relay stores for a private address's secret.
+func Commitment(secret []byte) string {
+	sum := sha256.Sum256(secret)
+	return b64.EncodeToString(sum[:])
 }
 
-// applyAllocateOptions adds a field to the request body only when the
-// corresponding option is set, so an unset AllocateOptions changes nothing about
-// the request. ttl accompanies an ephemeral lifetime and is dropped otherwise.
-func applyAllocateOptions(body map[string]interface{}, opts AllocateOptions) {
-	if opts.Lifetime != "" {
-		body["lifetime"] = opts.Lifetime
+// Allocate makes a private address held by the secret behind commitment.
+func (c *Client) Allocate(ctx context.Context, aid, commitment string) (label, url string, err error) {
+	var out struct {
+		Allocation string `json:"allocation"`
+		PublicURL  string `json:"public_url"`
 	}
-	if opts.Lifetime == LifetimeEphemeral && opts.TTLSeconds > 0 {
-		body["ttl"] = opts.TTLSeconds
+	if err := c.control(ctx, OpAllocate, aid, map[string]string{"commitment": commitment}, &out); err != nil {
+		return "", "", err
 	}
-	if opts.Scope != "" {
-		body["scope"] = opts.Scope
+	if out.Allocation == "" || out.PublicURL == "" {
+		return "", "", fmt.Errorf("allocate: the relay named no address")
 	}
-	if opts.Naming != "" {
-		body["naming"] = opts.Naming
-	}
+	return out.Allocation, strings.TrimRight(out.PublicURL, "/"), nil
 }
 
-// Allocate requests a public URL for raid with the default semantics
-// (opaque naming, persistent lifetime). It is preserved unchanged for existing
-// callers; AllocateWithOptions is the same call with the lifetime/scope/naming
-// parameters exposed.
-func (c *Client) Allocate(ctx context.Context, enrollmentAID, raid string) (*AllocateResponse, error) {
-	return c.AllocateWithOptions(ctx, enrollmentAID, raid, AllocateOptions{})
+// Bind attaches a private address to this Identity Agent's session, proving it
+// is the holder by the secret. It is sent for every address after every
+// admission: a relay keeps which session serves which address only in memory.
+func (c *Client) Bind(ctx context.Context, aid, label, secret string) error {
+	return c.control(ctx, OpBind, aid, map[string]string{"allocation": label, "secret": secret}, nil)
 }
 
-// AllocateWithOptions requests a public URL for raid, carrying the optional
-// lifetime/scope/naming parameters when they are set. With the zero-value
-// AllocateOptions it is identical on the wire to Allocate.
-func (c *Client) AllocateWithOptions(ctx context.Context, enrollmentAID, raid string, opts AllocateOptions) (*AllocateResponse, error) {
-	body := map[string]interface{}{
-		"v": JSONVersion, "raid": raid, "intent": "serve-didwebs-artifacts",
-		"ttl_hint": "persistent", "signed_by": enrollmentAID,
+// Release ends a private address for good.
+func (c *Client) Release(ctx context.Context, aid, label, secret string) error {
+	return c.control(ctx, OpRelease, aid, map[string]string{"allocation": label, "secret": secret}, nil)
+}
+
+// ClaimName claims a public name. Claiming a name already held is harmless.
+func (c *Client) ClaimName(ctx context.Context, aid, name string) (url string, err error) {
+	var out struct {
+		PublicURL string `json:"public_url"`
 	}
-	applyAllocateOptions(body, opts)
-	sig, err := c.Signer.SignCanonical(enrollmentAID, body)
-	if err != nil {
-		return nil, err
+	if err := c.control(ctx, OpClaimName, aid, map[string]string{"name": name}, &out); err != nil {
+		return "", err
 	}
-	body["signature"] = sig
-	raw, _ := json.Marshal(body)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/allocate", bytes.NewReader(raw))
-	if err != nil {
-		return nil, err
+	if out.PublicURL == "" {
+		return "", fmt.Errorf("claim-name: the relay named no address")
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", c.Token)
-	resp, err := c.HTTPClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	b, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode == http.StatusConflict {
-		var existing map[string]interface{}
-		_ = json.Unmarshal(b, &existing)
-		return &AllocateResponse{
-			PublicHostname: str(existing["public_hostname"]),
-			PublicURL:      str(existing["public_url"]),
-		}, nil
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("allocate %d: %s", resp.StatusCode, string(b))
-	}
-	var out AllocateResponse
-	if err := json.Unmarshal(b, &out); err != nil {
+	return strings.TrimRight(out.PublicURL, "/"), nil
+}
+
+// ReleaseName gives up a public name.
+func (c *Client) ReleaseName(ctx context.Context, aid, name string) error {
+	return c.control(ctx, OpReleaseName, aid, map[string]string{"name": name}, nil)
+}
+
+// RequestDomain asks to serve a custom domain, and returns the DNS record that
+// proves it is this identity's.
+func (c *Client) RequestDomain(ctx context.Context, aid, domain string) (*DomainProof, error) {
+	var out DomainProof
+	if err := c.control(ctx, OpRequestDomain, aid, map[string]string{"domain": domain}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func (c *Client) Release(ctx context.Context, enrollmentAID, allocationToken string) error {
-	body := map[string]interface{}{
-		"v": JSONVersion, "allocation_token": allocationToken, "signed_by": enrollmentAID,
+// VerifyDomain asks the relay to check the DNS record and, once it holds,
+// serve the domain.
+func (c *Client) VerifyDomain(ctx context.Context, aid, domain string) (url string, err error) {
+	var out struct {
+		PublicURL string `json:"public_url"`
 	}
-	sig, err := c.Signer.SignCanonical(enrollmentAID, body)
+	if err := c.control(ctx, OpVerifyDomain, aid, map[string]string{"domain": domain}, &out); err != nil {
+		return "", err
+	}
+	return strings.TrimRight(out.PublicURL, "/"), nil
+}
+
+// ReleaseDomain stops serving a custom domain.
+func (c *Client) ReleaseDomain(ctx context.Context, aid, domain string) error {
+	return c.control(ctx, OpReleaseDomain, aid, map[string]string{"domain": domain}, nil)
+}
+
+// control signs and sends one control request. Every field is a string; the
+// request names its op, the relay it is for, a fresh time and a nonce, so it
+// can be used once, for one thing, at one relay.
+func (c *Client) control(ctx context.Context, op, aid string, fields map[string]string, out interface{}) error {
+	if c.Descriptor == nil {
+		if _, err := c.FetchDescriptor(ctx); err != nil {
+			return fmt.Errorf("%s: %w", op, err)
+		}
+	}
+	nonce := make([]byte, 18)
+	if _, err := rand.Read(nonce); err != nil {
+		return err
+	}
+	body := map[string]interface{}{
+		"op": op, "relay": c.Descriptor.Service, "signed_by": aid,
+		"t": time.Now().UTC().Format(time.RFC3339), "nonce": b64.EncodeToString(nonce),
+	}
+	for k, v := range fields {
+		body[k] = v
+	}
+	sig, err := c.Signer.SignCanonical(aid, body)
 	if err != nil {
 		return err
 	}
 	body["signature"] = sig
-	raw, _ := json.Marshal(body)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/release", bytes.NewReader(raw))
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	endpoint := c.Descriptor.Endpoints[op]
+	if endpoint == "" {
+		endpoint = c.BaseURL + defaultPaths[op]
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(raw))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", c.Token)
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
-		return err
+		return fmt.Errorf("%s: %w", op, err)
 	}
 	defer resp.Body.Close()
+	b, _ := io.ReadAll(io.LimitReader(resp.Body, maxAnswer))
 	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("release %d: %s", resp.StatusCode, string(b))
+		return &RefusedError{Op: op, Status: resp.StatusCode, Body: strings.TrimSpace(string(b))}
+	}
+	if out != nil {
+		if err := json.Unmarshal(b, out); err != nil {
+			return fmt.Errorf("%s: %w", op, err)
+		}
 	}
 	return nil
 }
 
-func str(v interface{}) string {
-	if s, ok := v.(string); ok {
-		return s
-	}
-	return ""
+// RefusedError is a control request the relay answered with an error.
+type RefusedError struct {
+	Op     string
+	Status int
+	Body   string
 }
+
+func (e *RefusedError) Error() string { return fmt.Sprintf("%s: %d: %s", e.Op, e.Status, e.Body) }
+
+var b64 = base64.RawURLEncoding

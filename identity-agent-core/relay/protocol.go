@@ -1,48 +1,56 @@
 package relay
 
-// IARELAY protocol shapes (consumer side).
-const JSONVersion = "IARELAY10JSON"
+import "github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto"
 
+// What an Identity Agent exchanges with a relay over HTTPS, beside the session
+// itself (ADR-048 §8): the discovery descriptor, and signed control requests.
+
+// ServiceDescriptor is what a relay publishes at
+// /.well-known/url-relay-service.json.
 type ServiceDescriptor struct {
-	V                  string         `json:"v"`
-	ProtocolVersion    string         `json:"protocol_version"`
-	DidWebsSpecVersion string         `json:"didwebs_spec_version"`
-	RelayAID           string         `json:"relay_aid"`
-	Apex               string         `json:"apex"`
-	TunnelEndpoint     string         `json:"tunnel_endpoint"`
-	AllocateEndpoint   string         `json:"allocate_endpoint"`
-	ReleaseEndpoint    string         `json:"release_endpoint"`
-	HeartbeatEndpoint  string         `json:"heartbeat_endpoint"`
-	HeartbeatInterval  int            `json:"heartbeat_interval_sec"`
-	PathAllowlist      []string       `json:"path_allowlist"`
-	RateLimits         map[string]int `json:"rate_limits"`
+	// Protocol is the relay protocol version, relayproto.ProtocolVersion.
+	Protocol string `json:"protocol"`
+	// Service is the relay's name, which every admission challenge and control
+	// request carries.
+	Service string `json:"service"`
+	// Mode is the kind of address this relay hands out. An operator runs
+	// public and private service as separate deployments (ADR-048 §1).
+	Mode relayproto.Mode `json:"mode"`
+	// TunnelEndpoint is the wss:// address of the session websocket.
+	TunnelEndpoint string `json:"tunnel_endpoint"`
+	// Endpoints maps each control op to the URL it is sent to.
+	Endpoints map[string]string `json:"endpoints"`
 }
 
-type AllocateResponse struct {
-	PublicURL       string `json:"public_url"`
-	PublicHostname  string `json:"public_hostname"`
-	AllocationToken string `json:"allocation_token"`
-	TunnelEndpoint  string `json:"tunnel_endpoint"`
+// Control operations. A request names its op, so a signature for one cannot
+// be used as another.
+const (
+	OpAllocate      = "allocate"
+	OpBind          = "bind"
+	OpRelease       = "release"
+	OpClaimName     = "claim-name"
+	OpReleaseName   = "release-name"
+	OpRequestDomain = "request-domain"
+	OpVerifyDomain  = "verify-domain"
+	OpReleaseDomain = "release-domain"
+)
 
-	// ValidUntil is when the allocation expires, RFC3339. Empty (or a JSON
-	// null the operator omits) means persistent — the allocation lives until an
-	// explicit release. An operator that honors an ephemeral request echoes the
-	// concrete expiry here so the agent knows when to renew or drop it.
-	ValidUntil string `json:"valid_until,omitempty"`
-
-	// Lifetime, Scope and Naming are the resulting semantics the operator
-	// applied, echoed back so the agent can confirm what it was actually
-	// granted rather than assuming its request was honored verbatim. All three
-	// are optional: an operator that predates these fields simply omits them and
-	// the response is exactly the four fields above, as before.
-	Lifetime string `json:"lifetime,omitempty"`
-	Scope    string `json:"scope,omitempty"`
-	Naming   string `json:"naming,omitempty"`
+// defaultPaths are where each op is sent when a descriptor does not say.
+var defaultPaths = map[string]string{
+	OpAllocate:      "/allocate",
+	OpBind:          "/bind",
+	OpRelease:       "/release",
+	OpClaimName:     "/names/claim",
+	OpReleaseName:   "/names/release",
+	OpRequestDomain: "/domains/request",
+	OpVerifyDomain:  "/domains/verify",
+	OpReleaseDomain: "/domains/release",
 }
 
-type EnrollResponse struct {
-	Enrolled        bool   `json:"enrolled"`
-	EnrollmentAID   string `json:"enrollment_aid"`
-	EnrollmentToken string `json:"enrollment_token"`
-	TunnelEndpoint  string `json:"tunnel_endpoint"`
+// DomainProof is the DNS record that proves a custom domain is an identity's:
+// TXT Name carrying Value.
+type DomainProof struct {
+	Domain string `json:"domain"`
+	Name   string `json:"txt_name"`
+	Value  string `json:"txt_value"`
 }

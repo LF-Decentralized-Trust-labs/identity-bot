@@ -45,7 +45,6 @@ func TestAProviderCanBeNamedOutright(t *testing.T) {
 	}{
 		{"ngrok", ProviderNgrok},
 		{"cloudflare", ProviderCloudflare},
-		{"grapeid", ProviderGrapeID},
 	} {
 		t.Setenv("TUNNEL_PROVIDER", tc.set)
 		if got := DefaultConfig().Provider; got != tc.want {

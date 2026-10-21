@@ -3,48 +3,43 @@ package relay
 import (
 	"bytes"
 	"encoding/json"
-	"sort"
+	"fmt"
 )
 
-// CanonicalBody produces the deterministic byte encoding a request body is
-// signed over: the JSON object with its "signature" field removed and its keys
-// sorted. It is exported so a Signer implemented outside this package signs the
-// exact bytes the operator verifies, rather than reimplementing the encoding and
-// risking a drift that would make every signature silently unverifiable.
-func CanonicalBody(v interface{}) ([]byte, error) {
-	return canonicalBody(v)
+// CanonicalBody is the exact bytes a control request is signed over
+// (ADR-048 §8): its fields as a JSON object with sorted keys, no whitespace and
+// no HTML escaping, with "signature" left out. It is the same form relayproto
+// signs an admission statement in, so an implementation in any language
+// produces the same bytes with an ordinary JSON writer.
+//
+// Every field is a string of printable ASCII, which is what makes the form
+// unambiguous; anything else is refused rather than signed.
+func CanonicalBody(body map[string]interface{}) ([]byte, error) {
+	fields := make(map[string]string, len(body))
+	for k, v := range body {
+		if k == "signature" {
+			continue
+		}
+		s, ok := v.(string)
+		if !ok || !printableASCII(s) || !printableASCII(k) {
+			return nil, fmt.Errorf("every field of a control request is a string of printable ASCII; %q is not", k)
+		}
+		fields[k] = s
+	}
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(fields); err != nil {
+		return nil, err
+	}
+	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
 }
 
-func canonicalBody(v interface{}) ([]byte, error) {
-	raw, err := json.Marshal(v)
-	if err != nil {
-		return nil, err
-	}
-	var m map[string]interface{}
-	if err := json.Unmarshal(raw, &m); err != nil {
-		return nil, err
-	}
-	delete(m, "signature")
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	var buf bytes.Buffer
-	buf.WriteByte('{')
-	for i, k := range keys {
-		if i > 0 {
-			buf.WriteByte(',')
+func printableASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] < 0x20 || s[i] > 0x7e {
+			return false
 		}
-		kb, _ := json.Marshal(k)
-		buf.Write(kb)
-		buf.WriteByte(':')
-		vb, err := json.Marshal(m[k])
-		if err != nil {
-			return nil, err
-		}
-		buf.Write(vb)
 	}
-	buf.WriteByte('}')
-	return buf.Bytes(), nil
+	return true
 }

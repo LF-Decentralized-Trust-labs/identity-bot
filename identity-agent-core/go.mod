@@ -9,7 +9,6 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/hirochachacha/go-smb2 v1.1.0
-	github.com/jpillora/chisel v1.10.1
 	github.com/mr-tron/base58 v1.2.0
 	github.com/pkg/sftp v1.13.10
 	github.com/zeebo/blake3 v0.2.4
@@ -27,16 +26,14 @@ require (
 )
 
 require (
-	github.com/armon/go-socks5 v0.0.0-20160902184237-e75332964ef5 // indirect
+	github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto v0.0.0
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/fsnotify/fsnotify v1.6.0 // indirect
 	github.com/geoffgarside/ber v1.1.0 // indirect
 	github.com/go-stack/stack v1.8.1 // indirect
 	github.com/grapeid/keri-go v0.1.5
 	github.com/inconshreveable/log15 v3.0.0-testing.5+incompatible // indirect
 	github.com/inconshreveable/log15/v3 v3.0.0-testing.5 // indirect
 	github.com/jpillora/backoff v1.0.0 // indirect
-	github.com/jpillora/sizestr v1.0.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.0.12 // indirect
 	github.com/kr/fs v0.1.0 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
@@ -58,3 +55,5 @@ require (
 )
 
 tool golang.org/x/mobile/cmd/gobind
+
+replace github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto => ./relayproto
