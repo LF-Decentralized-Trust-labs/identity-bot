@@ -48,8 +48,18 @@ void main() {
     expect(BackendProcessService.instance.debugDiscoverActualPort(backendDir.path), 5051);
   });
 
-  test('with nothing written anywhere it falls back to the default', () {
-    expect(BackendProcessService.instance.debugDiscoverActualPort(backendDir.path),
-        AgentConfig.defaultDesktopPort);
+  // Guessing the default port meant a health check could reach another program
+  // answering there — another Identity Agent app on the same machine — and the
+  // app then talked to that identity as if it were its own.
+  test('with nothing written it does not guess the default port', () {
+    expect(BackendProcessService.instance.debugDiscoverActualPort(backendDir.path), isNull);
+  });
+
+  test('a port left from an earlier run is forgotten before the backend starts', () {
+    File('${profile.path}${Platform.pathSeparator}.port').writeAsStringSync('${AgentConfig.defaultDesktopPort}');
+    BackendProcessService.dataDirOverride = profile.path;
+    BackendProcessService.instance.debugForgetPort(backendDir.path);
+    expect(BackendProcessService.instance.debugDiscoverActualPort(backendDir.path), isNull,
+        reason: 'only the backend about to start may say where it is');
   });
 }
