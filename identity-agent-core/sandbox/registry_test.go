@@ -140,7 +140,13 @@ func TestRegistryNativeRemoteDeniedAndAudited(t *testing.T) {
 func TestEmbeddedPackAndMCPProjection(t *testing.T) {
 	m := registryTestManager(t)
 	m.loadCapabilityPacks()
-	recs, err := m.store.ListCapabilityRecords()
+	all, err := m.store.ListCapabilityRecords()
+	var recs []CapabilityRecord
+	for _, r := range all {
+		if strings.HasPrefix(r.Provider, "registry-native") && r.Egress != nil {
+			recs = append(recs, r)
+		}
+	}
 	if err != nil || len(recs) != 5 {
 		t.Fatalf("expected 5 records from the reference pack, got %d (err %v)", len(recs), err)
 	}
@@ -160,6 +166,22 @@ func TestEmbeddedPackAndMCPProjection(t *testing.T) {
 	for _, want := range []string{"infra.zone.list", "infra.dns_record.create", ExecuteToolName} {
 		if !names[want] {
 			t.Fatalf("tools/list missing %s (have %v)", want, names)
+		}
+	}
+}
+
+// Messaging another AI agent is a capability a grant can name, and is not a
+// tool: it travels as a message the sender's body signs, never as a call.
+func TestMessagingAnotherAIAgentIsGrantableButNotATool(t *testing.T) {
+	m := registryTestManager(t)
+	m.loadCapabilityPacks()
+	rec, err := m.store.GetCapabilityRecord("agent.message.send")
+	if err != nil || rec == nil || !rec.Enabled {
+		t.Fatalf("the messaging capability is not in the registry: %v %+v", err, rec)
+	}
+	for _, tl := range m.MCPToolsList(CallerContext{Scopes: []string{"agent.message.send"}, Remote: true}) {
+		if tl.Name == "agent.message.send" {
+			t.Fatal("messaging another AI agent was offered as a tool")
 		}
 	}
 }
