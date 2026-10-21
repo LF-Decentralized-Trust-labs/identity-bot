@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"errors"
 	"encoding/base64"
 	"io"
 	"net/http"
@@ -435,5 +436,21 @@ func TestAnEndpointAwayFromTheConnectHostIsRefused(t *testing.T) {
 	bad.TunnelEndpoint = "wss://" + strings.TrimPrefix(srv.URL(), "https://") + "/tunnel"
 	if err := relay.CheckConnectHost(c.BaseURL, &bad); err == nil {
 		t.Fatal("a session endpoint away from the connect host was accepted")
+	}
+}
+
+// A manager stopped before it started stays stopped: a start racing a stop
+// never brings it back.
+func TestAStoppedManagerDoesNotStart(t *testing.T) {
+	rl := relaytest.New(relayproto.ModePrivate)
+	defer rl.Close()
+	m := managerFor(t, rl, newEnrolment(t), relayproto.ModePrivate)
+	m.Stop()
+	if err := m.Start(context.Background()); !errors.Is(err, relay.ErrStopped) {
+		t.Fatalf("a stopped manager started: %v", err)
+	}
+	time.Sleep(300 * time.Millisecond)
+	if rl.Connected(m.Config().EnrollmentAID) {
+		t.Fatal("a stopped manager connected")
 	}
 }

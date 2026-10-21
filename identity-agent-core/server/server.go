@@ -64,7 +64,11 @@ type CoreServer struct {
 	relayClient *http.Client
 	// relayGen counts relay starts. A start that a newer one has overtaken
 	// (the settings changed while it was enrolling) installs nothing.
-	relayGen        int
+	relayGen int
+	// relayCancel ends the current generation's relay start, and
+	// relayFailure is why that generation has no relay, if it gave up.
+	relayCancel     context.CancelFunc
+	relayFailure    *relayFailure
 	EndpointService *endpoint.EndpointService
 	SandboxManager  *sandbox.Manager
 	EventHub        *EventHub

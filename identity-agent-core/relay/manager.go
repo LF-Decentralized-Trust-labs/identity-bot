@@ -182,12 +182,13 @@ var (
 type Manager struct {
 	cfg Config
 
-	mu     sync.RWMutex
-	status Status
-	allocs []Allocation // the primary address first
-	cancel context.CancelFunc
-	done   chan struct{}
-	client *Client
+	mu      sync.RWMutex
+	status  Status
+	allocs  []Allocation // the primary address first
+	cancel  context.CancelFunc
+	done    chan struct{}
+	client  *Client
+	stopped bool
 
 	// onChange fires when the address appears, changes or is lost, so the
 	// Identity Agent republishes where it currently is.
@@ -243,7 +244,11 @@ func (m *Manager) Start(parent context.Context) error {
 		return fmt.Errorf("relay: nothing to answer requests with")
 	}
 	m.mu.Lock()
-	if m.cancel != nil {
+	switch {
+	case m.stopped:
+		m.mu.Unlock()
+		return ErrStopped
+	case m.cancel != nil:
 		m.mu.Unlock()
 		return fmt.Errorf("relay: already started")
 	}
@@ -262,6 +267,12 @@ func (m *Manager) Start(parent context.Context) error {
 	ctx, cancel := context.WithCancel(parent)
 	done := make(chan struct{})
 	m.mu.Lock()
+	if m.stopped {
+		// Stopped while the descriptor was being fetched.
+		m.mu.Unlock()
+		cancel()
+		return ErrStopped
+	}
 	m.cancel, m.done, m.client = cancel, done, client
 	m.mu.Unlock()
 	go func() {
@@ -543,10 +554,15 @@ func (m *Manager) Allocation() *Allocation {
 	return &a
 }
 
-// Stop ends the session. It does not give the address back: an address handed
+// ErrStopped is Start's answer once Stop has been called: a manager is
+// stopped for good, so a start racing a stop never brings it back.
+var ErrStopped = errors.New("relay: this manager has been stopped")
+
+// Stop ends the session for good. It does not give the address back: an address handed
 // to counterparties must still work after a restart. Release does that.
 func (m *Manager) Stop() {
 	m.mu.Lock()
+	m.stopped = true
 	cancel, done := m.cancel, m.done
 	m.cancel, m.done = nil, nil
 	wasActive := m.status.Active

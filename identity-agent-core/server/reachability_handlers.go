@@ -72,9 +72,14 @@ func (s *CoreServer) relayStatus() relayStatusView {
 		v.Reason, v.ReasonCode = "No relay is configured for this mode.", "no_relay"
 		return v
 	}
-	rm := s.currentRelay()
+	s.mu.Lock()
+	rm, failed := s.RelayManager, s.relayFailure
+	s.mu.Unlock()
 	if rm == nil {
 		v.State = string(relay.StateConnecting)
+		if failed != nil {
+			v.State, v.Reason, v.ReasonCode = string(relay.StateFailed), failed.reason, failed.code
+		}
 		return v
 	}
 	st := rm.GetStatus()
@@ -114,17 +119,8 @@ var relaySettleWait = 10 * time.Second
 func (s *CoreServer) applyReachability(previous IngressMode) {
 	s.mu.Lock()
 	running := s.running
-	s.relayGen++
-	gen := s.relayGen
-	old := s.RelayManager
-	s.RelayManager = nil
 	s.mu.Unlock()
-	if old != nil {
-		old.Stop()
-	}
-	if s.EndpointService != nil {
-		s.EndpointService.SetRelayManager(nil)
-	}
+	ctx, gen := s.nextRelayGeneration()
 	if !running {
 		return
 	}
@@ -134,7 +130,7 @@ func (s *CoreServer) applyReachability(previous IngressMode) {
 			log.Printf("[tunnel] restart after a reachability change: %v", err)
 		}
 	}
-	go s.runRelay(gen)
+	go s.runRelay(ctx, gen)
 }
 
 // handleRelayStatus reports how this Identity Agent is reached through its

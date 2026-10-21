@@ -3,6 +3,8 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -10,6 +12,7 @@ import (
 
 	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto"
 
+	"identity-agent-core/relay/relaytest"
 	"identity-agent-core/store"
 )
 
@@ -212,5 +215,73 @@ func TestACustomDomainIsProvedByDNS(t *testing.T) {
 	// And the domain reaches this Identity Agent.
 	if code, _ := through(t, rl.Caller(), "GET", "https://id.example.org/api/health", ""); code != http.StatusOK {
 		t.Fatalf("the domain does not reach the Identity Agent: %d", code)
+	}
+}
+
+// Switching mode while the old relay is still being reached ends the old
+// one: it never comes up later, serving the old mode's address after the
+// owner moved away from it.
+func TestSwitchingModeEndsTheOldRelayStillStarting(t *testing.T) {
+	old := relayRetryWait
+	relayRetryWait = 100 * time.Millisecond
+	defer func() { relayRetryWait = old }()
+
+	s, priv, _, cancel := relayWorld(t, relayproto.ModePrivate)
+	defer cancel()
+	pub := relaytest.New(relayproto.ModePublic)
+	defer pub.Close()
+	t.Setenv("PUBLIC_RELAY_BASE_URL", pub.URL())
+	recordedEnrolment(t, s.DataDir, publicRelay.record, pub.URL(), 5)
+	pubAID := func() string {
+		r, _, _ := loadRelayEnrollment(s.DataDir, publicRelay.record)
+		return r.AID
+	}()
+	s.relayTLS = nil // two relays, two certificates: trust both through the pool below
+	pool := priv.TLS()
+	pool.RootCAs.AddCert(pub.Server.Certificate())
+	s.relayTLS = pool
+	if err := s.DataStore.SaveSettings(store.SettingsData{IngressMode: "public", PublicRelayName: "acme"}); err != nil {
+		t.Fatal(err)
+	}
+
+	pub.Down(true) // the public relay cannot be reached yet
+	go s.startRelay()
+	defer s.Stop()
+	time.Sleep(300 * time.Millisecond)
+
+	code, out := asOwner(t, s, "PUT", "/api/settings/reachability", `{"mode":"relay"}`)
+	if v := relayView(t, out); code != http.StatusOK || v["state"] != "active" || v["mode"] != "relay" {
+		t.Fatalf("switching to private: %d %v", code, out)
+	}
+	pub.Down(false) // the public relay comes back
+	time.Sleep(1500 * time.Millisecond)
+	if pub.Connected(pubAID) {
+		t.Fatal("the old public relay came up after the owner switched to private")
+	}
+	if st := s.relayStatus(); st.Mode != "relay" || st.State != "active" {
+		t.Fatalf("status after the switch: %+v", st)
+	}
+}
+
+// A relay that gives up before it runs says so, instead of connecting for
+// ever.
+func TestARelayThatGivesUpSaysWhy(t *testing.T) {
+	s, _, _, cancel := relayWorld(t, relayproto.ModePrivate)
+	defer cancel()
+	// A claimed machine whose seed is gone: there is no enrolment key.
+	if err := os.RemoveAll(filepath.Join(s.DataDir, "secureenclave")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DataStore.SaveIdentity(store.IdentityState{AID: "ECLAIMEDIDENTITY"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(s.DataDir, relayEnrollmentFileName)); err != nil {
+		t.Fatal(err)
+	}
+	s.startRelay()
+	defer s.Stop()
+	out := waitForState(t, s, "failed")
+	if out["reason_code"] != "no_enrolment" {
+		t.Fatalf("status: %v", out)
 	}
 }

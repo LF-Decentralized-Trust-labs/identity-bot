@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/ed25519"
 	"encoding/base64"
 	"errors"
@@ -244,35 +245,76 @@ func (s *CoreServer) privateAddressMayReach(r *http.Request) bool {
 // It runs in its own goroutine off Start: the local server must not wait on the
 // network.
 func (s *CoreServer) startRelay() {
-	s.mu.Lock()
-	s.relayGen++
-	gen := s.relayGen
-	s.mu.Unlock()
-	s.runRelay(gen)
+	ctx, gen := s.nextRelayGeneration()
+	s.runRelay(ctx, gen)
 }
 
-// runRelay is startRelay for one generation: if the settings change while it
-// is still enrolling, a newer start has overtaken it and it installs nothing.
-func (s *CoreServer) runRelay(gen int) {
-	var kind relayKind
-	switch s.resolveIngressMode() {
-	case IngressModeRelay:
-		kind = privateRelay
-	case IngressModePublic:
-		kind = publicRelay
-	default:
+// relayRetryWait is the first wait before trying an unreachable relay again;
+// it doubles up to five minutes.
+var relayRetryWait = 5 * time.Second
+
+// relayFailure is why a relay generation has no relay: what a screen shows
+// when there is nothing running to ask.
+type relayFailure struct {
+	gen          int
+	code, reason string
+}
+
+// nextRelayGeneration ends whatever relay start or relay is running, and
+// begins a new generation with its own context. Anything the old generation
+// is still doing is cancelled, and it can install nothing.
+func (s *CoreServer) nextRelayGeneration() (context.Context, int) {
+	parent := s.AppCtx
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithCancel(parent)
+	s.mu.Lock()
+	if s.relayCancel != nil {
+		s.relayCancel()
+	}
+	s.relayGen++
+	gen := s.relayGen
+	s.relayCancel = cancel
+	s.relayFailure = nil
+	old := s.RelayManager
+	s.RelayManager = nil
+	if s.EndpointService != nil {
+		s.EndpointService.SetRelayManager(nil)
+	}
+	s.mu.Unlock()
+	if old != nil {
+		old.Stop()
+	}
+	return ctx, gen
+}
+
+// relayGaveUp records why generation gen has no relay, if it is still the
+// current one.
+func (s *CoreServer) relayGaveUp(gen int, code, reason string) {
+	log.Printf("[relay] not brought up: %s", reason)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.relayGen == gen {
+		s.relayFailure = &relayFailure{gen: gen, code: code, reason: reason}
+	}
+}
+
+// runRelay brings up generation gen's relay. If a newer generation begins
+// while it is still enrolling, ctx is cancelled and it installs nothing.
+func (s *CoreServer) runRelay(ctx context.Context, gen int) {
+	kind, uses := relayKindFor(s.resolveIngressMode())
+	if !uses {
 		return
 	}
 	base := s.relayOperator(kind)
 	if base == "" {
-		if kind.mode == relayproto.ModePublic {
-			log.Printf("[relay] public mode is chosen but no public relay is configured")
-		}
+		s.relayGaveUp(gen, "no_relay", "No relay is configured for this mode.")
 		return
 	}
 	e, err := s.loadRelayEnrolment(kind, base)
 	if err != nil {
-		log.Printf("[relay] %s relay %s not brought up: %v", kind.mode, base, err)
+		s.relayGaveUp(gen, "no_enrolment", "This Identity Agent could not make its relay enrolment: "+err.Error())
 		return
 	}
 
@@ -288,7 +330,7 @@ func (s *CoreServer) runRelay(gen int) {
 	}
 	sessionSigner, err := keri.NewSoftwareSigner(e.seed, true)
 	if err != nil {
-		log.Printf("[relay] could not load the enrolment key: %v", err)
+		s.relayGaveUp(gen, "no_enrolment", "The relay enrolment key could not be loaded: "+err.Error())
 		return
 	}
 	kel := e.kel
@@ -315,39 +357,37 @@ func (s *CoreServer) runRelay(gen int) {
 		}
 	})
 
-	// Installed under the lock Stop reads it with. Enrolling is slow, so the
-	// server may already have stopped; then stop what was just built.
+	// Installed under the lock Stop reads it with, and only while this is still
+	// the current generation: a newer one has stopped whatever it replaced and
+	// must not find this installed behind it.
 	s.mu.Lock()
-	if !s.running || s.relayGen != gen {
+	if !s.running || s.relayGen != gen || ctx.Err() != nil {
 		s.mu.Unlock()
+		rm.Stop()
 		return
 	}
 	s.RelayManager = rm
+	if s.EndpointService != nil {
+		s.EndpointService.SetRelayManager(rm)
+	}
 	s.mu.Unlock()
-	s.EndpointService.SetRelayManager(rm)
 
 	// Keep trying. A relay that cannot be reached at start-up (the network is
 	// down, the machine just woke) is reached later without a restart.
-	backoff := 5 * time.Second
+	backoff := relayRetryWait
 	for {
-		s.mu.Lock()
-		current := s.relayGen == gen
-		s.mu.Unlock()
-		if !current {
+		err := rm.Start(ctx)
+		if err == nil || ctx.Err() != nil || errors.Is(err, relay.ErrStopped) {
 			return
 		}
-		err := rm.Start(s.AppCtx)
-		if err == nil {
-			return
-		}
-		if rm.GetStatus().State == relay.StateFailed {
+		if st := rm.GetStatus(); st.State == relay.StateFailed {
 			// Trying again cannot change it; it waits for the settings to.
-			log.Printf("[relay] %s refused: %s", base, rm.GetStatus().Reason)
+			log.Printf("[relay] %s refused: %s", base, st.Reason)
 			return
 		}
 		log.Printf("[relay] could not reach %s yet, trying again in %s: %v", base, backoff, err)
 		select {
-		case <-s.AppCtx.Done():
+		case <-ctx.Done():
 			return
 		case <-time.After(backoff):
 		}
@@ -367,9 +407,7 @@ func (s *CoreServer) relayedAddress(r *http.Request) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	s.mu.Lock()
-	rm := s.RelayManager
-	s.mu.Unlock()
+	rm := s.currentRelay()
 	if rm == nil {
 		return "", false
 	}
