@@ -218,7 +218,8 @@ func (p ControllerProof) Verify() error {
 // established it when the message arrived.
 type PersonRef struct {
 	AID string `json:"aid"`
-	// Standing is how the organisation knows them: "signer" or "employee".
+	// Standing is how the organisation knows them: "owner" (named in its own
+	// key log), "signer" or "employee".
 	Standing string `json:"standing"`
 	// Credential is the credential that makes them an employee, or the
 	// signature with which they founded the organisation.

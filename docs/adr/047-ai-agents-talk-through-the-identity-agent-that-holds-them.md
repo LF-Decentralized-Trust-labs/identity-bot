@@ -26,7 +26,10 @@ to its Identity Agent, so no machine listens for connections.
 
 **A person asks an AI agent, never the organisation.** The person must be someone the
 organisation can prove. In this version that is a signer of the organisation, speaking
-through a controller the owner paired (ADR-044). The controller grant names its signer:
+through a controller the owner paired (ADR-044). The owner the organisation's own key
+log names counts as a signer whether or not they are on its roster, since that log is
+the strongest proof of a person it has; the record marks them as the owner, and they
+stop standing when the log names somebody else. The controller grant names its signer:
 the one the owner's device named when it paired the machine, or else the organisation's
 only signer at that moment. A person's message is recorded with their
 controller's signature over the request.

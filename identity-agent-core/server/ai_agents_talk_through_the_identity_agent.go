@@ -134,41 +134,69 @@ func (s *CoreServer) thePersonAsking(r *http.Request) (agentmessage.PersonRef, *
 	}, nil
 }
 
+// theOwner is the person this organisation answers to: the owner its own
+// inception event names, or, with no such anchor, the one sealed when it was
+// provisioned. Never the organisation itself, which is what ownerAuthority
+// falls back to when nobody was named.
+func (s *CoreServer) theOwner() (string, bool) {
+	oa, err := s.ownerAuthority()
+	if err != nil || oa == nil || oa.AID == "" {
+		return "", false
+	}
+	if s.DataStore != nil {
+		if id, _ := s.DataStore.GetIdentity(); id != nil && id.AID == oa.AID {
+			return "", false
+		}
+	}
+	return oa.AID, true
+}
+
+// signers are the people who sign for the organisation: every active signer
+// on its roster, and its owner. The owner counts whether or not founding put
+// them on the roster, because the organisation's own key log names them, which
+// is the strongest proof of a person it has. Their standing says which, so the
+// record shows what the proof is.
+func (s *CoreServer) signers() []agentmessage.PersonRef {
+	var out []agentmessage.PersonRef
+	seen := map[string]bool{}
+	if s.assetHandler != nil {
+		for _, e := range s.assetHandler.Store.ListEmployees() {
+			if e.IsSigner && e.Status == "active" {
+				out = append(out, agentmessage.PersonRef{AID: e.PairwiseAID, Standing: "signer", Credential: e.VouchSig, Name: e.Name})
+				seen[e.PairwiseAID] = true
+			}
+		}
+	}
+	if owner, ok := s.theOwner(); ok && !seen[owner] {
+		out = append(out, agentmessage.PersonRef{AID: owner, Standing: "owner", Name: "The owner"})
+	}
+	return out
+}
+
 // signerOf is the signer a controller belongs to: the one its grant names.
 // A grant that names none is bound, the first time it is needed, to the
 // organisation's only signer — so the machine keeps speaking as that person
 // whoever joins later, rather than as whoever happens to be the only signer
 // at the time of each message.
 func (s *CoreServer) signerOf(g ControllerGrant) (agentmessage.PersonRef, error) {
-	if s.assetHandler == nil {
-		return agentmessage.PersonRef{}, errNoProvablePerson
-	}
-	var signers []asset.Employee
-	for _, e := range s.assetHandler.Store.ListEmployees() {
-		if e.IsSigner && e.Status == "active" {
-			signers = append(signers, e)
-		}
-	}
-	pick := func(e asset.Employee) agentmessage.PersonRef {
-		return agentmessage.PersonRef{AID: e.PairwiseAID, Standing: "signer", Credential: e.VouchSig, Name: e.Name}
-	}
+	signers := s.signers()
 	if g.Signer != "" {
-		for _, e := range signers {
-			if e.PairwiseAID == g.Signer {
-				return pick(e), nil
+		for _, p := range signers {
+			if p.AID == g.Signer {
+				return p, nil
 			}
 		}
 		return agentmessage.PersonRef{}, fmt.Errorf("the signer this app belongs to is no longer an active signer of the organisation")
 	}
 	switch len(signers) {
 	case 0:
-		return agentmessage.PersonRef{}, fmt.Errorf("this organisation has no signer on its roster, so nobody it can " +
-			"prove is asking. A signer joins by accepting the organisation's signer invitation from their own identity")
+		return agentmessage.PersonRef{}, fmt.Errorf("this organisation has no signer on its roster and names no owner, " +
+			"so nobody it can prove is asking. A signer joins by accepting the organisation's signer invitation from their own identity")
 	case 1:
-		if _, err := s.controllers().BindSigner(g.ControllerAID, signers[0].PairwiseAID); err != nil {
+		if _, err := s.controllers().BindSigner(g.ControllerAID, signers[0].AID); err != nil {
 			return agentmessage.PersonRef{}, fmt.Errorf("which signer this app belongs to could not be recorded: %w", err)
 		}
-		return pick(signers[0]), nil
+		return signers[0], nil
 	}
 	return agentmessage.PersonRef{}, fmt.Errorf("this organisation has more than one signer, and this app has not " +
 		"been tied to one of them, so the record could not say which person asked")
@@ -177,26 +205,24 @@ func (s *CoreServer) signerOf(g ControllerGrant) (agentmessage.PersonRef, error)
 // onlyActiveSigner is the organisation's signer when it has exactly one, and
 // empty otherwise.
 func (s *CoreServer) onlyActiveSigner() string {
-	if s.assetHandler == nil {
-		return ""
+	if signers := s.signers(); len(signers) == 1 {
+		return signers[0].AID
 	}
-	only := ""
-	for _, e := range s.assetHandler.Store.ListEmployees() {
-		if e.IsSigner && e.Status == "active" {
-			if only != "" {
-				return ""
-			}
-			only = e.PairwiseAID
-		}
-	}
-	return only
+	return ""
 }
 
 // personStillStands reports whether the person who opened a conversation is
 // still someone the organisation can prove — checked on every ask made in
 // their name, not only when they opened it.
 func (s *CoreServer) personStillStands(p agentmessage.PersonRef) bool {
-	if s.assetHandler == nil || p.AID == "" {
+	if p.AID == "" {
+		return false
+	}
+	if p.Standing == "owner" {
+		owner, ok := s.theOwner()
+		return ok && owner == p.AID
+	}
+	if s.assetHandler == nil {
 		return false
 	}
 	for _, e := range s.assetHandler.Store.ListEmployees() {
@@ -207,10 +233,10 @@ func (s *CoreServer) personStillStands(p agentmessage.PersonRef) bool {
 	return false
 }
 
-// personMayUse reports whether a person may use an AI agent. A signer may use
-// every AI agent of the organisation they sign for.
+// personMayUse reports whether a person may use an AI agent. A signer or the
+// owner may use every AI agent of the organisation they sign for.
 func personMayUse(p agentmessage.PersonRef, _ asset.Asset) bool {
-	return p.Standing == "signer"
+	return p.Standing == "signer" || p.Standing == "owner"
 }
 
 // personRefFor is the person who opened a conversation, from the record.

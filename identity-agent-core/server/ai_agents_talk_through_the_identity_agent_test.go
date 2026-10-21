@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -21,6 +23,10 @@ import (
 // talkWorld is an organisation with a signer on its roster, a controller paired
 // to it, and two AI agents — "Desk assistant" and "Build server" — each allowed to
 // message the other, each enrolled with a body.
+// talkSigner is the founder: the owner the test organisation names
+// (sealTestOwner), and its one signer on the roster.
+const talkSigner = "EOWNERTESTAID"
+
 type talkWorld struct {
 	s            *CoreServer
 	srv          *httptest.Server
@@ -49,12 +55,14 @@ func newTalkWorld(t *testing.T, caps ...string) *talkWorld {
 	w := &talkWorld{s: s}
 	w.a = w.provision(t, "Desk assistant", caps)
 	w.b = w.provision(t, "Build server", caps)
+	// The founder: the owner the organisation names, and its one signer on
+	// the roster, as founding makes them.
+	w.ctlAID, w.ctlSeed = anAuthorisedMachine(t, s, GradeEnrolled)
 	if err := s.assetHandler.Store.UpsertEmployee(asset.Employee{
-		PairwiseAID: "ESIGNER_alex", Name: "Alex", Role: "Owner", Status: "active", IsSigner: true, VouchSig: "0Bvouch",
+		PairwiseAID: talkSigner, Name: "Alex", Role: "Owner", Status: "active", IsSigner: true, VouchSig: "0Bvouch",
 	}); err != nil {
 		t.Fatal(err)
 	}
-	w.ctlAID, w.ctlSeed = anAuthorisedMachine(t, s, GradeEnrolled)
 
 	// The sealed transport replays what it opens through the server's own
 	// router, as it does in production.
@@ -246,7 +254,7 @@ func TestTwoAIAgentsTalkThroughTheIdentityAgent(t *testing.T) {
 			t.Fatalf("entry %d does not carry its body's grade, stamped by the Identity Agent: %q", e.Seq, e.Record.BodyGrade)
 		}
 	}
-	if p := entries[0].Record.Person; p == nil || p.AID != "ESIGNER_alex" || p.Standing != "signer" {
+	if p := entries[0].Record.Person; p == nil || p.AID != talkSigner || p.Standing != "signer" {
 		t.Fatalf("the conversation does not name the person who opened it: %+v", p)
 	}
 	if !strings.Contains(entries[6].Body, `"architecture"`) {
@@ -341,10 +349,14 @@ func TestAnUnsealedMessageIsRefused(t *testing.T) {
 }
 
 // Nobody the organisation cannot prove opens a conversation: with no signer on
-// the roster, the paired app's request is refused, and the refusal recorded.
+// the roster and no owner named, the paired app's request is refused, and the
+// refusal recorded.
 func TestOnlyAPersonTheOrganisationCanProveOpensAConversation(t *testing.T) {
 	w := newTalkWorld(t)
-	if _, _, err := w.s.assetHandler.Store.SetEmployeeStatus("ESIGNER_alex", "revoked", ""); err != nil {
+	if _, _, err := w.s.assetHandler.Store.SetEmployeeStatus(talkSigner, "revoked", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(w.s.DataDir, ownerAuthorityFile)); err != nil {
 		t.Fatal(err)
 	}
 	code, out := w.personSays(t, w.a, "", "hello")
@@ -356,6 +368,35 @@ func TestOnlyAPersonTheOrganisationCanProveOpensAConversation(t *testing.T) {
 	if len(denied) == 0 {
 		t.Fatal("the refusal is not in the governance record")
 	}
+}
+
+// The owner the organisation names is a person it can prove, whether or not
+// founding put them on the roster: off the roster, they open a conversation as the owner, the
+// paired app becomes theirs, and when somebody else becomes the owner the AI
+// agents can no longer ask in their name.
+func TestTheOwnerTheOrganisationNamesMayAsk(t *testing.T) {
+	w := newTalkWorld(t)
+	if _, _, err := w.s.assetHandler.Store.SetEmployeeStatus(talkSigner, "revoked", ""); err != nil {
+		t.Fatal(err)
+	}
+	conv, _ := w.openedWith(t)
+	entries := w.read(t, conv)
+	if p := entries[0].Record.Person; p == nil || p.AID != talkSigner || p.Standing != "owner" {
+		t.Fatalf("the conversation was not opened by the owner: %+v", entries[0].Record.Person)
+	}
+	if g := mustGrant(t, w); g.Signer != talkSigner {
+		t.Fatalf("the paired app was not tied to the owner: %q", g.Signer)
+	}
+
+	d := sayTo(t, w.hostA)
+	if err := w.s.ReSealOwnerAuthority(OwnerAuthority{
+		AID: "EOWNER_sam", PublicKey: "DEC4FUUdUvgDKk07vt2cJUOaSGVLBGnbeGGjHvJTMUgo",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := w.hostA.Say(context.Background(), agentmessage.KindAsk, d.Record.Conversation, w.b.PairwiseAID,
+		d.Entry.MessageID, "what are you?", agentmessage.Brain{})
+	refusedWith(t, err, "no longer someone the organisation can prove")
 }
 
 // What arrives at a body is checked before it is acted on: words that are not
@@ -514,7 +555,7 @@ func TestAnAskStopsWhenTheOpenerNoLongerStands(t *testing.T) {
 	w := newTalkWorld(t)
 	w.openedWith(t)
 	d := sayTo(t, w.hostA)
-	if _, _, err := w.s.assetHandler.Store.SetEmployeeStatus("ESIGNER_alex", "revoked", ""); err != nil {
+	if _, _, err := w.s.assetHandler.Store.SetEmployeeStatus(talkSigner, "revoked", ""); err != nil {
 		t.Fatal(err)
 	}
 	_, err := w.hostA.Say(context.Background(), agentmessage.KindAsk, d.Record.Conversation, w.b.PairwiseAID,
@@ -637,7 +678,7 @@ func TestAMachinePairedWithOneSignerBelongsToThem(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("granting: %d %s", rec.Code, rec.Body.String())
 	}
-	if g := mustGrant(t, w); g.Signer != "ESIGNER_alex" {
+	if g := mustGrant(t, w); g.Signer != talkSigner {
 		t.Fatalf("the machine was not bound to the only signer when paired: %q", g.Signer)
 	}
 }
