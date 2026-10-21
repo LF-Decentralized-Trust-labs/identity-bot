@@ -1255,7 +1255,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           SizedBox(height: 8),
           Text(
-            'A development tunnel gives this Identity Agent a public HTTPS URL from a tunnel vendor, so its OOBI endpoints are reachable from anywhere. It is not private, and is for development. A stable public or private address comes from a relay, set under reachability.\n\n'
+            'A development tunnel gives this Identity Agent a public HTTPS URL from a tunnel vendor, so its OOBI endpoints are reachable from anywhere. It is not private, and is for development. A stable public or private address comes from a relay, which this app does not configure yet.\n\n'
             'Cloudflare: Free quick tunnels or authenticated tunnels via cloudflared binary (desktop only).\n\n'
             'ngrok: Pure in-memory tunnel via Go library. Works on desktop and mobile. Requires a free ngrok account.\n\n'
             'None: No tunnel. OOBI URLs use the PUBLIC_URL env var or the request host header.',

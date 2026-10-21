@@ -494,12 +494,13 @@ func (s *SQLiteStore) scanShareActions(rows *sql.Rows) ([]ShareAction, error) {
 func (s *SQLiteStore) GetSettings() (*SettingsData, error) {
 	var settings SettingsData
 	err := s.db.QueryRow(
-		`SELECT tunnel_provider, ngrok_auth_token, cloudflare_tunnel_token, tunnel_domain, tunnel_extension,
-		        ingress_mode, relay_operator, public_relay_operator, public_relay_name
+		`SELECT tunnel_provider, ngrok_auth_token, cloudflare_tunnel_token, tunnel_extension,
+		        ingress_mode, relay_operator, public_relay_operator, public_relay_name, reachability_notice
 		 FROM settings LIMIT 1`,
 	).Scan(&settings.TunnelProvider, &settings.NgrokAuthToken,
-		&settings.CloudflareTunnelToken, &settings.TunnelDomain, &settings.TunnelExtension,
-		&settings.IngressMode, &settings.RelayOperator, &settings.PublicRelayOperator, &settings.PublicRelayName)
+		&settings.CloudflareTunnelToken, &settings.RetiredTunnelName,
+		&settings.IngressMode, &settings.RelayOperator, &settings.PublicRelayOperator, &settings.PublicRelayName,
+		&settings.ReachabilityNotice)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -525,12 +526,13 @@ func (s *SQLiteStore) SaveSettings(settings SettingsData) error {
 		return fmt.Errorf("failed to clear settings: %w", err)
 	}
 	if _, err := tx.Exec(
-		`INSERT INTO settings (tunnel_provider, ngrok_auth_token, cloudflare_tunnel_token, tunnel_domain, tunnel_extension,
-		                       ingress_mode, relay_operator, public_relay_operator, public_relay_name)
+		`INSERT INTO settings (tunnel_provider, ngrok_auth_token, cloudflare_tunnel_token, tunnel_extension,
+		                       ingress_mode, relay_operator, public_relay_operator, public_relay_name, reachability_notice)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		settings.TunnelProvider, settings.NgrokAuthToken,
-		settings.CloudflareTunnelToken, settings.TunnelDomain, settings.TunnelExtension,
+		settings.CloudflareTunnelToken, settings.RetiredTunnelName,
 		settings.IngressMode, settings.RelayOperator, settings.PublicRelayOperator, settings.PublicRelayName,
+		settings.ReachabilityNotice,
 	); err != nil {
 		return fmt.Errorf("failed to save settings: %w", err)
 	}

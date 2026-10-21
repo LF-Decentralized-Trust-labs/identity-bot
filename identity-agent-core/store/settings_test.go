@@ -33,11 +33,11 @@ func TestSettingsPersistence(t *testing.T) {
 	}
 
 	// Re-save a different provider -> replaces the single row (token cleared).
-	if err := s.SaveSettings(SettingsData{TunnelProvider: "grapeid", TunnelExtension: "soft-lion"}); err != nil {
+	if err := s.SaveSettings(SettingsData{TunnelProvider: "grapeid", RetiredTunnelName: "soft-lion"}); err != nil {
 		t.Fatalf("SaveSettings overwrite: %v", err)
 	}
 	got, _ = s.GetSettings()
-	if got.TunnelProvider != "grapeid" || got.TunnelExtension != "soft-lion" || got.CloudflareTunnelToken != "" {
+	if got.TunnelProvider != "grapeid" || got.RetiredTunnelName != "soft-lion" || got.CloudflareTunnelToken != "" {
 		t.Fatalf("overwrite did not replace cleanly: %+v", got)
 	}
 

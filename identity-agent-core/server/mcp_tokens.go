@@ -87,9 +87,9 @@ func hashMCPToken(tok string) string {
 // hasForwardingHeaders reports whether a request arrived through a tunnel/proxy —
 // in which case a loopback RemoteAddr must NOT be trusted as the local owner.
 //
-// X-IA-Via-Ingress is our own relay's marker (set in relay/tunnel.go), so a
-// relay-forwarded request — which also reaches the agent over loopback — is
-// never mistaken for the genuinely-local owner. The others are added by the
+// X-IA-Via-Ingress is the relay marker the Identity Agent sets itself on every
+// request it serves from a relay stream (relayproto.AgentSession.Serve), so a
+// relay-forwarded request is never mistaken for the genuinely-local owner. The others are added by the
 // standard proxies/tunnels (Cloudflare, ngrok, an HTTP reverse proxy). Presence
 // of any of these means the request came from outside, so the owner must prove
 // it with a signature rather than being trusted for arriving on loopback.

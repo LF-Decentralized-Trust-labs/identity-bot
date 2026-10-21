@@ -347,3 +347,33 @@ func TestANewPublicNameReleasesTheOldOne(t *testing.T) {
 		t.Fatal("the new name is not held")
 	}
 }
+
+// An instance that used the retired tunnel provider comes up on a public
+// relay address under the name it had, and the owner is told why.
+func TestTheRetiredTunnelProviderMovesToAPublicRelay(t *testing.T) {
+	s, _, _, cancel := relayWorld(t, relayproto.ModePublic)
+	defer cancel()
+	s.DefaultIngressMode = nil
+	if err := s.DataStore.SaveSettings(store.SettingsData{TunnelProvider: "grapeid", RetiredTunnelName: "green-hawk",
+		IngressMode: "tunnel"}); err != nil {
+		t.Fatal(err)
+	}
+	s.retireTunnelHubSettings()
+
+	st, _ := s.DataStore.GetSettings()
+	if st.TunnelProvider != "none" || st.IngressMode != "public" || st.PublicRelayName != "green-hawk" || st.RetiredTunnelName != "" {
+		t.Fatalf("settings after the move: %+v", st)
+	}
+	go s.startRelay()
+	defer s.Stop()
+	out := waitForState(t, s, "active")
+	if !strings.Contains(out["url"].(string), "green-hawk.") || !strings.Contains(out["notice"].(string), "retired") {
+		t.Fatalf("status: %v", out)
+	}
+
+	// Once the owner saves reachability, the notice has been seen.
+	asOwner(t, s, "PUT", "/api/settings/reachability", `{"public_relay_name":"green-hawk"}`)
+	if st, _ := s.DataStore.GetSettings(); st.ReachabilityNotice != "" {
+		t.Fatal("the notice outlived the owner's choice")
+	}
+}

@@ -853,6 +853,17 @@ ALTER TABLE settings ADD COLUMN relay_operator TEXT NOT NULL DEFAULT '';
 ALTER TABLE settings ADD COLUMN public_relay_operator TEXT NOT NULL DEFAULT '';
 ALTER TABLE settings ADD COLUMN public_relay_name     TEXT NOT NULL DEFAULT '';
 `},
+	{
+		Version:     38,
+		Description: "Retire the Chisel tunnel provider: a notice for the owner, and no catalogue entry for it",
+		SQL: `
+-- The Chisel tunnel provider is gone (ADR-048). An instance that used it is
+-- moved to a public relay address at start-up, and told so through this
+-- notice until the owner next saves reachability.
+ALTER TABLE settings ADD COLUMN reachability_notice TEXT NOT NULL DEFAULT '';
+-- Nothing can be connected to it any more, so it is not offered.
+DELETE FROM service_providers WHERE id = 'sp-grapeid-tunnel';
+`},
 }
 
 // ApplyIdentityMigrations creates the migrations table and applies any pending migrations.

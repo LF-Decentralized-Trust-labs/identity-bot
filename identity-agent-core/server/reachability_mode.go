@@ -1,7 +1,10 @@
 package server
 
 import (
+	"log"
 	"strings"
+
+	"identity-agent-core/tunnel"
 )
 
 // How an agent becomes reachable from outside is a single, governed decision.
@@ -84,4 +87,45 @@ func (s *CoreServer) defaultIngressMode() IngressMode {
 		}
 	}
 	return defaultIngressModeForEntity(s.ourEntityType())
+}
+
+// retiredTunnelProvider is the settings value of the Chisel tunnel provider
+// ADR-048 retired.
+const retiredTunnelProvider = "grapeid"
+
+// retireTunnelHubSettings moves an instance that used the retired Chisel
+// tunnel provider onto a public relay address, keeping the name it had, and
+// leaves the owner a notice saying so. Without it such an instance would come
+// up with no address and no explanation.
+func (s *CoreServer) retireTunnelHubSettings() {
+	if s.DataStore == nil {
+		return
+	}
+	saved, err := s.DataStore.GetSettings()
+	if err != nil || saved == nil || saved.TunnelProvider != retiredTunnelProvider {
+		return
+	}
+	name := saved.RetiredTunnelName
+	saved.TunnelProvider = string(tunnel.ProviderNone)
+	saved.RetiredTunnelName = ""
+	if saved.PublicRelayName == "" {
+		saved.PublicRelayName = name
+	}
+	if mode := IngressMode(saved.IngressMode); mode == "" || mode == IngressModeTunnel {
+		saved.IngressMode = string(IngressModePublic)
+	}
+	notice := "The tunnel provider this Identity Agent used has been retired. Its public address now comes from a public relay"
+	if name != "" {
+		notice += ", keeping the name " + name
+	}
+	notice += "."
+	if s.relayOperator(publicRelay) == "" {
+		notice += " Choose a public relay in reachability settings to bring the address back."
+	}
+	saved.ReachabilityNotice = notice
+	if err := s.DataStore.SaveSettings(*saved); err != nil {
+		log.Printf("[reachability] could not move off the retired tunnel provider: %v", err)
+		return
+	}
+	log.Printf("[reachability] %s", notice)
 }

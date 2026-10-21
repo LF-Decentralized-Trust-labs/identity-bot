@@ -131,8 +131,10 @@ type SettingsData struct {
 	TunnelProvider        string `json:"tunnel_provider"`
 	NgrokAuthToken        string `json:"ngrok_auth_token,omitempty"`
 	CloudflareTunnelToken string `json:"cloudflare_tunnel_token,omitempty"`
-	TunnelDomain          string `json:"tunnel_domain,omitempty"`
-	TunnelExtension       string `json:"tunnel_extension,omitempty"`
+	// RetiredTunnelName is the name an instance claimed with the retired
+	// Chisel tunnel provider. It is read once, at start-up, to carry the name
+	// over to a public relay address, and then cleared. Nothing else uses it.
+	RetiredTunnelName string `json:"tunnel_extension,omitempty"`
 
 	// IngressMode is the instance's default way of becoming reachable from
 	// outside: "relay" (private addresses, one per relationship, at a relay),
@@ -160,6 +162,11 @@ type SettingsData struct {
 	// PublicRelayName is the name asked for at the public relay. Empty lets the
 	// relay choose one.
 	PublicRelayName string `json:"public_relay_name,omitempty"`
+
+	// ReachabilityNotice is something the owner should be told about how this
+	// Identity Agent is reached, such as a provider it used being retired. It
+	// is shown until the owner next saves reachability.
+	ReachabilityNotice string `json:"reachability_notice,omitempty"`
 }
 
 type PendingRequest struct {

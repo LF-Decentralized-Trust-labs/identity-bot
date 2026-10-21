@@ -559,6 +559,7 @@ func (s *CoreServer) Start() error {
 		log.Printf("[identity-agent-core] Warning: could not write .port file: %v", err)
 	}
 
+	s.retireTunnelHubSettings()
 	tunnelCfg := s.loadTunnelConfig()
 	s.TunnelManager = tunnel.NewManager(tunnelCfg, s.Port)
 	s.EndpointService.SetTunnelManager(s.TunnelManager)
@@ -4318,6 +4319,7 @@ func (s *CoreServer) handleGetReachabilitySettings(w http.ResponseWriter, r *htt
 		"stored_operator":       stored.RelayOperator,
 		"public_relay_operator": s.relayOperator(publicRelay),
 		"public_relay_name":     stored.PublicRelayName,
+		"notice":                stored.ReachabilityNotice,
 	})
 }
 
@@ -4369,6 +4371,8 @@ func (s *CoreServer) handlePutReachabilitySettings(w http.ResponseWriter, r *htt
 	if req.PublicRelayName != nil {
 		settings.PublicRelayName = strings.ToLower(strings.TrimSpace(*req.PublicRelayName))
 	}
+	// The owner has now chosen, so whatever they were told has been seen.
+	settings.ReachabilityNotice = ""
 
 	if err := s.DataStore.SaveSettings(settings); err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to save settings", err.Error())

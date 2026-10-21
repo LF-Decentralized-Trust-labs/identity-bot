@@ -40,6 +40,9 @@ type relayStatusView struct {
 	Addresses  []relayAddress `json:"addresses"`
 	Reason     string         `json:"reason,omitempty"`
 	ReasonCode string         `json:"reason_code,omitempty"`
+	// Notice is something the owner should be told about how this Identity
+	// Agent is reached, such as a provider it used being retired.
+	Notice string `json:"notice,omitempty"`
 }
 
 func (s *CoreServer) currentRelay() *relay.Manager {
@@ -62,6 +65,11 @@ func relayKindFor(mode IngressMode) (relayKind, bool) {
 func (s *CoreServer) relayStatus() relayStatusView {
 	mode := s.resolveIngressMode()
 	v := relayStatusView{Mode: string(mode), State: "off", Addresses: []relayAddress{}}
+	if s.DataStore != nil {
+		if saved, err := s.DataStore.GetSettings(); err == nil && saved != nil {
+			v.Notice = saved.ReachabilityNotice
+		}
+	}
 	kind, uses := relayKindFor(mode)
 	if !uses {
 		v.Reason = "This mode does not use a relay."

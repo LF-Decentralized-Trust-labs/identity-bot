@@ -240,7 +240,7 @@ func TestEverySectionCollectedIsAlsoRestored(t *testing.T) {
 		t.Fatalf("save credential: %v", err)
 	}
 	if err := oldStore.SaveSettings(store.SettingsData{
-		TunnelProvider: "cloudflare", TunnelDomain: "must-survive.example",
+		TunnelProvider: "cloudflare", PublicRelayName: "must-survive",
 	}); err != nil {
 		t.Fatalf("save settings: %v", err)
 	}
@@ -268,7 +268,7 @@ func TestEverySectionCollectedIsAlsoRestored(t *testing.T) {
 	if err != nil {
 		t.Fatalf("settings after restore: %v", err)
 	}
-	if settings == nil || settings.TunnelDomain != "must-survive.example" {
+	if settings == nil || settings.PublicRelayName != "must-survive" {
 		t.Errorf("settings were backed up and did not come back: %+v", settings)
 	}
 

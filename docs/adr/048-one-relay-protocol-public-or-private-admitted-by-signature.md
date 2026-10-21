@@ -415,6 +415,10 @@ send, so this is the same exposure as any public web host.
 **Built in the core:** the private default and the product's default seam
 (`DefaultIngressMode`).
 
+**An instance that used the retired Chisel provider** is moved at start-up to a
+public relay address under the name it held, and the owner is shown a notice
+saying so until they next save reachability.
+
 **Built in the core client (`relay/`):** the session through `relayproto`, the
 control requests above, private addresses held by their secrets and bound again
 after every admission, public names, reconnection with backoff, and the
@@ -428,9 +432,10 @@ removed.
 - **Republishing the endpoint record** when the address moves (§9). The core
   recomputes its published address; it does not yet send a signed `/loc/scheme`
   record to its witnesses and watchers.
-- **A screen for custom domains.** The core serves owner routes to request one,
-  read back the DNS record that proves it, and verify it; no settings screen in
-  this repository offers them yet.
+- **A reachability screen in this repository's app.** The core serves owner
+  routes for the relay's status, saving and applying reachability, releasing the
+  public name, and requesting and verifying a custom domain; the app here has no
+  screen for them yet, and offers only development tunnels.
 - **One private address per relationship.** The core holds one private address
   and gives it to every counterparty. The protocol allows one per relationship,
   and the client can allocate them; handing a fresh one to each new
