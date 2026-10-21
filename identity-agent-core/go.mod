@@ -8,7 +8,6 @@ require (
 	github.com/go-chi/cors v1.2.2
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
-	github.com/hashicorp/yamux v0.1.2
 	github.com/hirochachacha/go-smb2 v1.1.0
 	github.com/jpillora/chisel v1.10.1
 	github.com/mr-tron/base58 v1.2.0
@@ -21,6 +20,7 @@ require (
 )
 
 require (
+	github.com/hashicorp/yamux v0.1.2 // indirect
 	golang.org/x/mobile v0.0.0-20260813181013-1960c775504c // indirect
 	golang.org/x/mod v0.39.0 // indirect
 	golang.org/x/tools v0.49.0 // indirect

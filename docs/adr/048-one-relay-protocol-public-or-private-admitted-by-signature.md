@@ -324,6 +324,8 @@ Agent, so that connection must run end to end between them.
 - the relay marker;
 - allocation labels.
 
+`relayproto` is its own Go module, `github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto`, with no dependency on the rest of the core. A relay server anywhere can `go get` it, and the core will consume it from the same path.
+
 **Built in the core:** the private default and the product's default seam
 (`DefaultIngressMode`).
 
@@ -337,11 +339,6 @@ Agent, so that connection must run end to end between them.
 - **Public names, the reserved list and custom-domain DNS proof** (§7), in a relay
   server.
 - **Republishing the endpoint record** when the address moves (§9).
-- **A fetchable module path.** The core's module is named `identity-agent-core`, a
-  path `go get` cannot fetch. A relay server outside this repository consumes
-  `relayproto` as a git submodule with a `replace` directive, as other consumers of
-  the core do. Giving `relayproto` a fetchable module path of its own is the
-  follow-up that removes the need.
 
 ## Consequences
 
