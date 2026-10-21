@@ -1,0 +1,127 @@
+{
+  "about": "The bytes every service-provider protocol request is signed over, and an Ed25519 signature over them. Implementations reproduce canonical exactly from fields, and the signature from the seed.",
+  "public_key": "ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ",
+  "refused": [
+    {
+      "fields": {
+        "limit": 50
+      },
+      "name": "a number"
+    },
+    {
+      "fields": {
+        "message_ids": [
+          "m-1"
+        ]
+      },
+      "name": "a list"
+    },
+    {
+      "fields": {
+        "envelope": {
+          "a": "b"
+        }
+      },
+      "name": "a nested object"
+    },
+    {
+      "fields": {
+        "name": "café"
+      },
+      "name": "text outside printable ASCII"
+    },
+    {
+      "fields": {
+        "x": "line\nbreak"
+      },
+      "name": "a control character"
+    },
+    {
+      "fields": {
+        "naïve": "x"
+      },
+      "name": "a key outside printable ASCII"
+    }
+  ],
+  "seed_hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+  "signature_encoding": "base64url without padding",
+  "vectors": [
+    {
+      "name": "a relay control request",
+      "fields": {
+        "allocation": "abcdefghijklmnopqrstuvwxyz",
+        "nonce": "n0nce-n0nce-n0nce",
+        "op": "bind",
+        "relay": "relay.example",
+        "signed_by": "EAID",
+        "t": "2026-10-21T00:00:00Z"
+      },
+      "canonical": "{\"allocation\":\"abcdefghijklmnopqrstuvwxyz\",\"nonce\":\"n0nce-n0nce-n0nce\",\"op\":\"bind\",\"relay\":\"relay.example\",\"signed_by\":\"EAID\",\"t\":\"2026-10-21T00:00:00Z\"}",
+      "signature": "XJR92a8Nf-zbwP7kJek7GyzFd55jGUcm9dXoq2jNuQqJdPTOZLasnUSKgaHhAu-OjUgEopOvOe8UvaGdSYxBAg"
+    },
+    {
+      "name": "an admission statement",
+      "fields": {
+        "aid": "EAID",
+        "exporter": "3q2-7w",
+        "nonce": "q9Xc2V0bm9uY2U",
+        "protocol": "iarelay/2",
+        "purpose": "relay-admission",
+        "service": "connect.relay.example",
+        "t": "2026-10-21T00:00:00Z"
+      },
+      "canonical": "{\"aid\":\"EAID\",\"exporter\":\"3q2-7w\",\"nonce\":\"q9Xc2V0bm9uY2U\",\"protocol\":\"iarelay/2\",\"purpose\":\"relay-admission\",\"service\":\"connect.relay.example\",\"t\":\"2026-10-21T00:00:00Z\"}",
+      "signature": "GjNovuHJHW4ogsRQ_dsGMRjD_KBTjgWTpFoAvbCMiZBmgNARMih9TtvE_B10YudxpAyAWBC5kLBCrZ_yjp30DQ"
+    },
+    {
+      "name": "a mailbox collect request",
+      "fields": {
+        "aid": "EAID",
+        "limit": "50",
+        "v": "1"
+      },
+      "canonical": "{\"aid\":\"EAID\",\"limit\":\"50\",\"v\":\"1\"}",
+      "signature": "T0PqSMrX_2b-MVO0k0h8JzoFtsZZjY-kJus-muxwp5ToWsf3kjXbPzAqq662HBT0wUNhbzUnk67P27ztLYpWBA"
+    },
+    {
+      "name": "a mailbox acknowledgement",
+      "fields": {
+        "aid": "EAID",
+        "message_ids": "m-1 m-2 m-3",
+        "v": "1"
+      },
+      "canonical": "{\"aid\":\"EAID\",\"message_ids\":\"m-1 m-2 m-3\",\"v\":\"1\"}",
+      "signature": "clC4U2ic9Sc4uAB9btwd3DzdAEByEqVoRILgdVsAzYW5uQgAw4eFLOrqMxvHneUnb6wdNIkR4UGFg9Ia3v4kDg"
+    },
+    {
+      "name": "the signature field is left out",
+      "fields": {
+        "aid": "EAID",
+        "signature": "not signed over",
+        "v": "1"
+      },
+      "canonical": "{\"aid\":\"EAID\",\"v\":\"1\"}",
+      "signature": "f6HtmsuZZtbfBkHuxms6BgLMXn-rkz0KGo3VlwnbYGBr0f4e3qRnxynl0iRpbrfRJhJxWfe0u6KPme9mzSUwAA"
+    },
+    {
+      "name": "HTML characters are not escaped",
+      "fields": {
+        "q": "a<b>&c",
+        "url": "https://example.org/oobi?x=1&y=2"
+      },
+      "canonical": "{\"q\":\"a<b>&c\",\"url\":\"https://example.org/oobi?x=1&y=2\"}",
+      "signature": "WDXbEavvEKLKY1emfal1ghME_RpeTI6SvsmDKJNoh2jEQ0_sIhjJCQQItQQE8OiyGYyHeQCMsTLlh8v2TsKvDg"
+    },
+    {
+      "name": "keys sort by byte value",
+      "fields": {
+        "A": "upper",
+        "_": "underscore",
+        "a": "1",
+        "b": "2"
+      },
+      "canonical": "{\"A\":\"upper\",\"_\":\"underscore\",\"a\":\"1\",\"b\":\"2\"}",
+      "signature": "sXlVSGJopJvVjok48e_CBjPdggE9DWvLZ9CPudRHlCkCtY6v-jzlWegD0hz7OEQvSKAHjKmb-mULgNlXy_myAg"
+    }
+  ]
+}
