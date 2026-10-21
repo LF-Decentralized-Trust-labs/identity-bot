@@ -86,6 +86,7 @@ func (s *CoreServer) mountConversationRoutes(r chi.Router) {
 	r.Post("/mcp/agents/{id}/conversations", s.handlePersonSays)
 	r.Get("/mcp/agents/{id}/conversations", s.handleListAgentConversations)
 	r.Get("/mcp/conversations/{cid}", s.handleReadConversation)
+	r.Get("/mcp/conversation-record", s.handleConversationRecordSetting)
 	// A body, signed by its machine key and sealed to this Identity Agent.
 	r.Post("/agent-host/messages", s.handleBodySays)
 	r.Get("/agent-host/inbox", s.handleBodyInbox)
@@ -267,9 +268,6 @@ func (s *CoreServer) handlePersonSays(w http.ResponseWriter, r *http.Request) {
 	case req.To != a.PairwiseAID:
 		jsonError(w, "the message is addressed to a different AI agent from the one in the address", http.StatusBadRequest)
 		return
-	case req.BodyHash != agentmessage.HashBody(body):
-		jsonError(w, "the message's digest is not the digest of its words", http.StatusBadRequest)
-		return
 	}
 	if !personMayUse(person, a) {
 		s.refuseMessage(w, cc, agentmessage.KindAsk, "this person may not use "+a.DisplayName, http.StatusForbidden)
@@ -328,7 +326,7 @@ func (s *CoreServer) handlePersonSays(w http.ResponseWriter, r *http.Request) {
 			rec := agentmessage.Record{
 				MessageID: msgID, Conversation: convID, Seq: seq, PrevHash: prev,
 				IATime: time.Now().UTC().Format(time.RFC3339Nano), Kind: agentmessage.KindAsk,
-				From: opener, To: a.PairwiseAID, InReplyTo: req.InReplyTo, BodyHash: req.BodyHash,
+				From: opener, To: a.PairwiseAID, InReplyTo: req.InReplyTo, BodyHash: agentmessage.HashBody(body),
 				ControllerProof: proof, Person: &person, OpenedBy: opener,
 			}
 			env, err := agentmessage.Countersign(ks, rec)
@@ -725,4 +723,24 @@ func (s *CoreServer) sealedSender(r *http.Request) string {
 		return ""
 	}
 	return r.Header.Get(headerSealedFrom)
+}
+
+// handleConversationRecordSetting says where the conversation record's words
+// are kept, and where they could be. The proof — every entry's signatures and
+// hashes — always stays on this Identity Agent; only the words can move.
+func (s *CoreServer) handleConversationRecordSetting(w http.ResponseWriter, r *http.Request) {
+	store, err := s.conversations()
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	writeJSONStatus(w, http.StatusOK, map[string]any{
+		"kept": store.Contents().Kind(),
+		"choices": []map[string]any{
+			{"kind": conversation.KindOnThisIdentityAgent, "available": true},
+			// Another location receives the words only encrypted here first,
+			// addressed by the ciphertext's digest. Not built yet.
+			{"kind": "elsewhere", "available": false},
+		},
+	})
 }

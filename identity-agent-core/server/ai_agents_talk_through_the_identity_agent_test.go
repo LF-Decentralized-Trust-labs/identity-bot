@@ -97,8 +97,7 @@ func (w *talkWorld) enrolBody(t *testing.T, a *asset.Asset) *agenthost.Host {
 func (w *talkWorld) personSays(t *testing.T, a *asset.Asset, conv, text string) (int, map[string]any) {
 	t.Helper()
 	body, _ := json.Marshal(agentmessage.PersonMessage{
-		Conversation: conv, To: a.PairwiseAID, Body: text,
-		BodyHash: agentmessage.HashBody([]byte(text)), Nonce: conversation.NewID("n_"),
+		Conversation: conv, To: a.PairwiseAID, Body: text, Nonce: conversation.NewID("n_"),
 	})
 	path := "/api/mcp/agents/" + a.ID + "/conversations"
 	req := asThatMachine(t, w.ctlAID, "POST", path, string(body), w.ctlSeed, "", time.Time{})
@@ -394,5 +393,21 @@ func TestAChainOfAsksStopsAtItsDepth(t *testing.T) {
 	}
 	if !strings.Contains(stopped, "deep") {
 		t.Fatalf("the chain of asks was not stopped at its depth: %q", stopped)
+	}
+}
+
+// Where the words are kept is reported, with the choice of keeping them
+// elsewhere listed and not yet available.
+func TestTheRecordSaysWhereItsWordsAreKept(t *testing.T) {
+	s := agentWithDerivedIdentity(t)
+	rec := httptest.NewRecorder()
+	s.handleConversationRecordSetting(rec, httptest.NewRequest("GET", "/", nil))
+	var out struct {
+		Kept    string           `json:"kept"`
+		Choices []map[string]any `json:"choices"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	if out.Kept != conversation.KindOnThisIdentityAgent || len(out.Choices) != 2 || out.Choices[1]["available"] != false {
+		t.Fatalf("the record's setting: %s", rec.Body.String())
 	}
 }

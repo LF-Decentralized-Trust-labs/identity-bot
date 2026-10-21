@@ -282,8 +282,10 @@ func (r Record) CheckSenderProof() error {
 		if err := json.Unmarshal(r.ControllerProof.Request, &req); err != nil {
 			return errors.New("the signed request is unreadable")
 		}
-		if req.To != r.To || req.BodyHash != r.BodyHash || req.Conversation != r.Conversation && req.Conversation != "" ||
-			req.InReplyTo != r.InReplyTo {
+		// The person's controller signed the words themselves, so their digest
+		// is taken from what was signed, never from a digest the app supplied.
+		if req.To != r.To || HashBody([]byte(req.Body)) != r.BodyHash ||
+			req.Conversation != r.Conversation && req.Conversation != "" || req.InReplyTo != r.InReplyTo {
 			return errors.New("the record does not say what the person's controller signed")
 		}
 		return nil
@@ -292,15 +294,15 @@ func (r Record) CheckSenderProof() error {
 }
 
 // PersonMessage is what a person's controller signs to say something to an AI
-// agent. The words travel beside it; their digest is inside it.
+// agent: the words themselves, so the signature covers them directly.
 type PersonMessage struct {
 	// Conversation is empty to open a new one.
 	Conversation string `json:"conversation,omitempty"`
 	To           string `json:"to"`
 	InReplyTo    string `json:"in_reply_to,omitempty"`
-	BodyHash     string `json:"body_hash"`
 	Body         string `json:"body"`
-	Nonce        string `json:"nonce"`
+	// Nonce keeps two identical messages from being one signed request.
+	Nonce string `json:"nonce"`
 }
 
 // TypeRecord is the message type of a countersigned conversation entry.
