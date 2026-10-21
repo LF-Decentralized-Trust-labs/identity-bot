@@ -160,7 +160,9 @@ func TestStartRelayInstallsUnderTheSameLockStopReadsWith(t *testing.T) {
 	// guarantees the read coincides with the assign — an unguarded assign is then
 	// flagged, a guarded one is clean. The real Stop is still exercised afterwards.
 	for i := 0; i < 20; i++ {
-		ctx, cancel := context.WithCancel(context.Background())
+		// Bounded: the relay here never answers, and a relay that cannot be
+		// reached is retried until the agent stops.
+		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 		s := &CoreServer{
 			DataDir:         dir,
 			EndpointService: endpoint.New(nil, 5050),
@@ -255,5 +257,74 @@ func TestARelayIsEnrolledOnlyOnceThisAgentIsReachable(t *testing.T) {
 	defer mu.Unlock()
 	if len(oobis) == 0 || !strings.HasPrefix(oobis[0], "https://agent.example/") {
 		t.Fatalf("the relay was not given this agent's public address: %v", oobis)
+	}
+}
+
+// A relay that cannot be reached when the agent starts is tried again, so a
+// network that comes back, or a machine that wakes, ends up at its address
+// without anybody restarting it.
+func TestARelayThatIsDownAtStartIsTriedAgain(t *testing.T) {
+	var mu sync.Mutex
+	discoveries, enrolled := 0, false
+	relaySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch r.URL.Path {
+		case "/.well-known/url-relay-service.json":
+			discoveries++
+			if discoveries == 1 {
+				http.Error(w, "down", http.StatusServiceUnavailable)
+				return
+			}
+			_, _ = w.Write([]byte(`{"protocol_version":"1.0"}`))
+		case "/enroll":
+			enrolled = true
+			http.Error(w, `{"error":"stop here"}`, http.StatusBadRequest)
+		}
+	}))
+	defer relaySrv.Close()
+
+	dir := t.TempDir()
+	rootSeed := deterministicRootSeed()
+	if err := secureenclave.StoreRootSeed(dir, rootSeed); err != nil {
+		t.Fatal(err)
+	}
+	seed, err := backup.DerivePairwiseSeed(rootSeed, 4, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := saveRelayEnrollment(dir, storedRelayEnrollment{
+		BaseURL: relaySrv.URL, AID: "ERETRYAID", RelationshipIndex: 4,
+		PublicKey: base64.RawURLEncoding.EncodeToString(ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("RELAY_BASE_URL", relaySrv.URL)
+	t.Setenv("PUBLIC_URL", "https://agent.example")
+	t.Setenv("TUNNEL_PROVIDER", "none")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	s := &CoreServer{DataDir: dir, EndpointService: endpoint.New(nil, 5050), Port: 5050,
+		AppCtx: ctx, cancel: cancel, running: true}
+	go func() {
+		for {
+			mu.Lock()
+			done := enrolled
+			mu.Unlock()
+			if done || ctx.Err() != nil {
+				cancel()
+				return
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	}()
+	s.startRelay()
+	s.Stop()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if !enrolled {
+		t.Fatalf("the relay was not tried again after it was down (%d discoveries)", discoveries)
 	}
 }

@@ -280,10 +280,26 @@ func (s *CoreServer) startRelay() {
 
 	s.EndpointService.SetRelayManager(rm)
 
-	if err := rm.Start(s.AppCtx); err != nil {
-		log.Printf("[relay] failed to bring up %s (non-fatal): %v", cfg.BaseURL, err)
+	// Keep trying. A relay that cannot be reached at start-up — the network is
+	// down, the machine just woke, a new tunnel name has not reached DNS yet —
+	// is reached later, and an agent that tried once would stay on its tunnel's
+	// address until somebody restarted it.
+	backoff := 5 * time.Second
+	for {
+		err := rm.Start(s.AppCtx)
+		if err == nil {
+			break
+		}
+		log.Printf("[relay] could not bring up %s yet, trying again in %s: %v", cfg.BaseURL, backoff, err)
 		s.EndpointService.Refresh()
-		return
+		select {
+		case <-s.AppCtx.Done():
+			return
+		case <-time.After(backoff):
+		}
+		if backoff < 5*time.Minute {
+			backoff *= 2
+		}
 	}
 	s.rememberRelayTokens(cfg, rm)
 	s.EndpointService.Refresh()
