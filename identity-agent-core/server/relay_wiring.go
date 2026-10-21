@@ -55,7 +55,8 @@ var (
 )
 
 // relayEnrollmentSigner signs allocate and release requests with the pairwise
-// enrolment key, as a plain Ed25519 signature over relay.CanonicalBody.
+// enrolment key, as a plain Ed25519 signature over relayproto.CanonicalBody
+// (ADR-049).
 type relayEnrollmentSigner struct {
 	// seed is the 32-byte Ed25519 seed for the enrolment identifier, never the
 	// root seed.
