@@ -373,3 +373,28 @@ func (c *controllerGrants) Revoke(aid string) error {
 	delete(all, strings.TrimSpace(aid))
 	return c.save(all)
 }
+
+// BindSigner records which signer a machine belongs to, the first time that
+// is needed and only while it is unambiguous — the organisation has one
+// signer. From then on the machine speaks as that signer, whoever else joins
+// or leaves. A grant that already names a signer is left as it is.
+func (c *controllerGrants) BindSigner(aid, signer string) (ControllerGrant, error) {
+	grantsLock.Lock()
+	defer grantsLock.Unlock()
+	all, err := c.load()
+	if err != nil {
+		return ControllerGrant{}, err
+	}
+	g, ok := all[strings.TrimSpace(aid)]
+	if !ok {
+		return ControllerGrant{}, fmt.Errorf("no such machine")
+	}
+	if g.Signer == "" {
+		g.Signer = signer
+		all[g.ControllerAID] = g
+		if err := c.save(all); err != nil {
+			return ControllerGrant{}, err
+		}
+	}
+	return g, nil
+}

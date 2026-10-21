@@ -97,8 +97,8 @@ func SendSealed(ctx context.Context, client *http.Client, sender *KeySet, to *DI
 	if resp.StatusCode != http.StatusOK {
 		// The transport refused before anything was opened. Reported as itself
 		// rather than as the inner request's status, because a caller that
-		// confused "the agent said 403" with "the transport said 403" would
-		// retry the wrong thing.
+		// confused "the request was refused with 403" with "the transport
+		// refused with 403" would retry the wrong thing.
 		return nil, fmt.Errorf("the sealed transport was refused with %d: %s",
 			resp.StatusCode, bytes.TrimSpace(answer))
 	}
@@ -115,6 +115,9 @@ func SendSealed(ctx context.Context, client *http.Client, sender *KeySet, to *DI
 	}
 	if reply.Type != TypeSealedResponse {
 		return nil, fmt.Errorf("the answer is not a response to a request")
+	}
+	if reply.ID != messageID {
+		return nil, fmt.Errorf("the answer is a response to another request")
 	}
 	var out SealedResponse
 	if err := json.Unmarshal(reply.Body, &out); err != nil {

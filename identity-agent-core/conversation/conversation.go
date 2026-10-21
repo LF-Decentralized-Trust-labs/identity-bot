@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -46,6 +47,11 @@ const (
 
 // ErrNotFound means there is no such conversation or message.
 var ErrNotFound = errors.New("no such conversation or message")
+
+// ErrAlreadyAnswered means the ask already has its answer from this party. An
+// ask is answered once — otherwise one body could make another's brain run
+// again and again, on somebody's bill.
+var ErrAlreadyAnswered = errors.New("that ask has already been answered")
 
 // Conversation is one conversation's header.
 type Conversation struct {
@@ -160,6 +166,8 @@ CREATE TABLE IF NOT EXISTS deliveries (
 	PRIMARY KEY (message_id, recipient)
 );
 CREATE INDEX IF NOT EXISTS deliveries_waiting ON deliveries (recipient, state);
+CREATE UNIQUE INDEX IF NOT EXISTS one_answer_per_ask ON entries (in_reply_to, from_party)
+	WHERE kind IN ('reply', 'failure');
 CREATE TABLE IF NOT EXISTS contents (
 	ref TEXT PRIMARY KEY,
 	body BLOB NOT NULL
@@ -180,10 +188,16 @@ func NewID(prefix string) string {
 // number and the hash of the entry before it.
 type Build func(seq int, prevHash string) (*didcomm.Envelope, agentmessage.Record, error)
 
+// Check decides, inside Append's transaction, whether an entry may be added
+// to the conversation as it stands — so limits on turns, and whether it is
+// still open, cannot be raced past by two senders at once.
+type Check func(c Conversation) error
+
 // Append adds an entry to a conversation, opening it first when opening is
-// given, and queues it for deliverTo — all in one transaction. Turn counts
-// rise for asks and replies.
-func (s *Store) Append(ctx context.Context, convID string, opening *Conversation, body []byte, deliverTo []string, build Build) (Entry, error) {
+// given, and queues it for deliverTo — all in one transaction. Asks, replies
+// and failures count as turns. A receipt neither counts nor keeps the
+// conversation open: it says something arrived, not that anything was said.
+func (s *Store) Append(ctx context.Context, convID string, opening *Conversation, body []byte, deliverTo []string, check Check, build Build) (Entry, error) {
 	ref, err := s.contents.Put(ctx, body)
 	if err != nil {
 		return Entry{}, fmt.Errorf("the words could not be kept: %w", err)
@@ -207,11 +221,19 @@ func (s *Store) Append(ctx context.Context, convID string, opening *Conversation
 			return Entry{}, err
 		}
 	}
-	var seq int
-	var head string
-	if err := tx.QueryRow(`SELECT seq, head_hash FROM conversations WHERE id = ?`, convID).Scan(&seq, &head); err != nil {
+	var c Conversation
+	var created, last string
+	if err := tx.QueryRow(`SELECT id, opened_by, first_agent, turns, seq, head_hash, created_at, last_at FROM conversations WHERE id = ?`, convID).
+		Scan(&c.ID, &c.OpenedBy, &c.FirstAgent, &c.Turns, &c.Seq, &c.HeadHash, &created, &last); err != nil {
 		return Entry{}, ErrNotFound
 	}
+	c.CreatedAt, c.LastAt = unstamp(created), unstamp(last)
+	if check != nil {
+		if err := check(c); err != nil {
+			return Entry{}, err
+		}
+	}
+	seq, head := c.Seq, c.HeadHash
 	env, rec, err := build(seq+1, head)
 	if err != nil {
 		return Entry{}, err
@@ -233,14 +255,20 @@ func (s *Store) Append(ctx context.Context, convID string, opening *Conversation
 		depth, body_hash, content_ref, envelope, hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		e.Conversation, e.Seq, e.MessageID, e.Kind, e.From, e.To, e.InReplyTo, e.Depth,
 		e.BodyHash, e.ContentRef, string(envJSON), e.Hash, stamp(now)); err != nil {
+		if strings.Contains(err.Error(), "UNIQUE") && strings.Contains(err.Error(), "in_reply_to") {
+			return Entry{}, ErrAlreadyAnswered
+		}
 		return Entry{}, fmt.Errorf("the entry could not be recorded: %w", err)
 	}
-	turn := 0
-	if e.Kind == agentmessage.KindAsk || e.Kind == agentmessage.KindReply {
-		turn = 1
+	turn, lastAt := 1, stamp(now)
+	if e.Kind == agentmessage.KindReceipt {
+		turn, lastAt = 0, last
+		if opening != nil {
+			lastAt = stamp(now)
+		}
 	}
 	if _, err := tx.Exec(`UPDATE conversations SET seq = ?, head_hash = ?, turns = turns + ?, last_at = ? WHERE id = ?`,
-		e.Seq, e.Hash, turn, stamp(now), convID); err != nil {
+		e.Seq, e.Hash, turn, lastAt, convID); err != nil {
 		return Entry{}, err
 	}
 	for _, p := range []string{e.From, e.To} {
@@ -394,6 +422,23 @@ func (s *Store) Delivered(messageID, recipient, receipt string) (bool, error) {
 	return n > 0, nil
 }
 
+// IsWaiting reports whether a message is queued for recipient and not yet
+// acknowledged.
+func (s *Store) IsWaiting(messageID, recipient string) bool {
+	var n int
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM deliveries WHERE message_id = ? AND recipient = ? AND state = 'queued'`,
+		messageID, recipient).Scan(&n)
+	return n > 0
+}
+
+// Answered reports whether party has already answered an ask.
+func (s *Store) Answered(askID, party string) bool {
+	var n int
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM entries WHERE in_reply_to = ? AND from_party = ? AND kind IN ('reply', 'failure')`,
+		askID, party).Scan(&n)
+	return n > 0
+}
+
 // WasQueuedFor reports whether a message was ever queued for recipient.
 func (s *Store) WasQueuedFor(messageID, recipient string) bool {
 	var n int
@@ -401,15 +446,18 @@ func (s *Store) WasQueuedFor(messageID, recipient string) bool {
 	return n > 0
 }
 
-// Wait returns when something is queued for key — a recipient, or a
-// conversation — or ctx ends.
-func (s *Store) Wait(ctx context.Context, key string) {
+// Subscribe registers interest in key — a recipient, or a conversation —
+// and returns a channel that receives when something is added for it, and a
+// function to withdraw. Subscribe before reading, then wait: something added
+// between the read and the wait still wakes the waiter.
+func (s *Store) Subscribe(key string) (<-chan struct{}, func()) {
 	ch := make(chan struct{}, 1)
 	s.waitMu.Lock()
 	s.waiters[key] = append(s.waiters[key], ch)
 	s.waitMu.Unlock()
-	defer func() {
+	return ch, func() {
 		s.waitMu.Lock()
+		defer s.waitMu.Unlock()
 		list := s.waiters[key]
 		for i, c := range list {
 			if c == ch {
@@ -420,11 +468,6 @@ func (s *Store) Wait(ctx context.Context, key string) {
 		if len(s.waiters[key]) == 0 {
 			delete(s.waiters, key)
 		}
-		s.waitMu.Unlock()
-	}()
-	select {
-	case <-ch:
-	case <-ctx.Done():
 	}
 }
 

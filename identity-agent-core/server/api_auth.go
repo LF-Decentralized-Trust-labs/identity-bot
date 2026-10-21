@@ -68,9 +68,10 @@ var publicRoutes = map[string]string{
 	// only a request the sealed transport opened from a live body's keys and
 	// that the body signed with its machine key; the gateway checks inside
 	// decide what that AI agent may say and to whom.
-	"POST /api/agent-host/messages": "an AI agent's body speaking in a conversation, sealed and signed by its key",
-	"GET /api/agent-host/inbox":     "an AI agent's body collecting its messages, sealed and signed by its key",
-	"GET /api/agent-host/agents":    "an AI agent's body asking which AI agents it may message, sealed and signed",
+	"POST /api/agent-host/messages":           "an AI agent's body speaking in a conversation, sealed and signed by its key",
+	"GET /api/agent-host/inbox":               "an AI agent's body collecting its messages, sealed and signed by its key",
+	"GET /api/agent-host/agents":              "an AI agent's body asking which AI agents it may message, sealed and signed",
+	"GET /api/agent-host/conversations/{cid}": "an AI agent's body reading a conversation it is in, sealed and signed",
 
 	// --- carrying a request nothing in the middle can read ---
 	// Open in the same sense the message endpoint is open: what arrives is an

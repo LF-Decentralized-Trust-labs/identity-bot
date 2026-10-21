@@ -57,7 +57,7 @@ type Brain interface {
 }
 
 // ToolNames are the host's tools as a brain addresses them over MCP.
-var ToolNames = []string{"reply", "ask_agent", "list_agents", "system_info"}
+var ToolNames = []string{"reply", "ask_agent", "list_agents", "conversation_history", "system_info"}
 
 // mcpServerName is what the host's tool server is called in a brain's config.
 const mcpServerName = "agenthost"
@@ -77,6 +77,12 @@ func qualifiedTools() []string {
 // person's own files.
 type Runner interface {
 	Command(ctx context.Context, dir string, env []string, name string, args ...string) (*exec.Cmd, error)
+}
+
+// Isolated is a Runner that starts the brain as a user of its own, so the
+// brain sees only that user's files and configuration.
+type Isolated interface {
+	Isolated() bool
 }
 
 // SameUser runs the brain as the user running the host. The tool allow list
@@ -118,17 +124,21 @@ func NewSession() string {
 	return h[0:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:32]
 }
 
-// runCLI runs a brain's command and returns what it printed. A brain that
-// fails says why: its own error output, trimmed, which becomes the failure
-// notice's reason.
-func runCLI(ctx context.Context, r Runner, dir string, env []string, name string, args ...string) ([]byte, error) {
+// runCLI runs a brain's command, giving it stdin, and returns what it
+// printed. A brain that fails says why: its own error output, trimmed, which
+// becomes the failure notice's reason.
+//
+// Nothing secret goes on the command line, which any user on the machine can
+// read while it runs and sudo writes to the system log: the words travel on
+// stdin or in a private file, and the tool token in the environment.
+func runCLI(ctx context.Context, r Runner, dir string, env []string, stdin string, name string, args ...string) ([]byte, error) {
 	cmd, err := r.Command(ctx, dir, env, name, args...)
 	if err != nil {
 		return nil, err
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	cmd.Stdin = nil
+	cmd.Stdin = strings.NewReader(stdin)
 	if err := cmd.Run(); err != nil {
 		if ctx.Err() != nil {
 			return nil, fmt.Errorf("the brain did not finish in time")
@@ -149,10 +159,13 @@ func runCLI(ctx context.Context, r Runner, dir string, env []string, name string
 
 // ClaudeCode runs `claude -p` with the host's tools as its only tools.
 //
-// --permission-mode dontAsk refuses every tool not on --allowedTools, so the
-// built-in file, shell and web tools are refused by Claude Code's own
-// permission system, not by asking the model nicely. --strict-mcp-config means
-// no MCP server but the host's is loaded.
+// --tools "" starts it with no built-in tools at all: no shell, no file
+// reading, no web. Permission mode alone is not enough — under dontAsk with an
+// allow list naming only the host's tools, a read-only shell command still ran,
+// because dontAsk refuses only what would otherwise ask. --setting-sources ""
+// ignores the settings of whoever runs it, so their allow rules and hooks do
+// not reach the brain. --strict-mcp-config loads no MCP server but the host's,
+// and dontAsk refuses anything the allow list does not name.
 type ClaudeCode struct {
 	Path   string
 	Runner Runner
@@ -161,19 +174,19 @@ type ClaudeCode struct {
 // Name is the provider.
 func (ClaudeCode) Name() string { return "claude-code" }
 
-// Run runs one turn.
+// Run runs one turn. The prompt goes on stdin; the tool token reaches the
+// host's MCP server through the environment it inherits; the instructions are
+// read from a private file.
 func (c ClaudeCode) Run(ctx context.Context, t Turn) (Outcome, error) {
 	self, err := executable()
 	if err != nil {
 		return Outcome{}, err
 	}
 	mcp, _ := json.Marshal(map[string]any{"mcpServers": map[string]any{
-		mcpServerName: map[string]any{
-			"command": self, "args": []string{"mcp"},
-			"env": map[string]string{envToolsURL: t.ToolsURL, envToolsToken: t.ToolsToken},
-		},
+		mcpServerName: map[string]any{"command": self, "args": []string{"mcp"}},
 	}})
-	args := []string{"-p", t.Prompt, "--output-format", "json",
+	args := []string{"-p", "--output-format", "json",
+		"--tools", "", "--setting-sources", "",
 		"--mcp-config", string(mcp), "--strict-mcp-config",
 		"--allowedTools", strings.Join(qualifiedTools(), ","),
 		"--permission-mode", "dontAsk"}
@@ -183,12 +196,17 @@ func (c ClaudeCode) Run(ctx context.Context, t Turn) (Outcome, error) {
 		args = append(args, "--session-id", t.Session)
 	}
 	if t.Instructions != "" {
-		args = append(args, "--append-system-prompt", t.Instructions)
+		file, cleanup, err := privateFile("instructions", t.Instructions)
+		if err != nil {
+			return Outcome{}, err
+		}
+		defer cleanup()
+		args = append(args, "--append-system-prompt-file", file)
 	}
 	if t.Model != "" {
 		args = append(args, "--model", t.Model)
 	}
-	out, err := runCLI(ctx, c.runner(), t.Workspace, nil, c.path(), args...)
+	out, err := runCLI(ctx, c.runner(), t.Workspace, toolsEnv(t), t.Prompt, c.path(), args...)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -232,12 +250,16 @@ func (c ClaudeCode) runner() Runner {
 
 // ── Grok CLI ─────────────────────────────────────────────────────────────────
 
-// GrokCLI runs `grok -p` the same way: the host's tools as its only tools,
-// built-in tools removed, permission mode dontAsk.
+// GrokCLI runs `grok -p` with the host's tools as its only tools.
 //
-// Grok CLI takes MCP servers from a config file rather than a flag, so the
-// host writes the workspace's project config before each turn, with that
-// turn's token, using Grok CLI's own command so the file is in its format.
+// Grok CLI loads the MCP servers and permission rules of whoever runs it, and
+// has no flag to ignore them, so it runs only as the brain's own operating-
+// system user (AsUser), whose configuration holds nothing but what the host
+// gives it. There its built-in tools are cut to one harmless one —
+// `--tools ""` names no tool and so removes nothing — subagents are refused,
+// and the host's MCP server is configured for the workspace before each turn.
+// Every remaining tool is approved without asking, because the only tools
+// that remain are the host's.
 type GrokCLI struct {
 	Path   string
 	Runner Runner
@@ -248,12 +270,15 @@ func (GrokCLI) Name() string { return "grok" }
 
 // Run runs one turn.
 func (g GrokCLI) Run(ctx context.Context, t Turn) (Outcome, error) {
+	if r, ok := g.runner().(Isolated); !ok || !r.Isolated() {
+		return Outcome{}, errors.New("Grok CLI loads the MCP servers and permissions of whoever runs it, so it runs " +
+			"only as the brain's own user: run agent-host with --brain-user (see agent-host brain-user)")
+	}
 	self, err := executable()
 	if err != nil {
 		return Outcome{}, err
 	}
-	if _, err := runCLI(ctx, g.runner(), t.Workspace, nil, g.path(), "mcp", "add", "--scope", "project",
-		"-e", envToolsURL+"="+t.ToolsURL, "-e", envToolsToken+"="+t.ToolsToken,
+	if _, err := runCLI(ctx, g.runner(), t.Workspace, nil, "", g.path(), "mcp", "add", "--scope", "project",
 		mcpServerName, self, "--", "mcp"); err != nil {
 		return Outcome{}, fmt.Errorf("the host's tools could not be given to Grok: %w", err)
 	}
@@ -263,11 +288,14 @@ func (g GrokCLI) Run(ctx context.Context, t Turn) (Outcome, error) {
 		// instructions lead the first message instead.
 		prompt = t.Instructions + "\n\n" + t.Prompt
 	}
-	args := []string{"-p", prompt, "--output-format", "json",
-		"--permission-mode", "dontAsk", "--tools", "", "--disable-web-search", "--no-subagents"}
-	for _, q := range qualifiedTools() {
-		args = append(args, "--allow", q)
+	file, cleanup, err := privateFile("prompt", prompt)
+	if err != nil {
+		return Outcome{}, err
 	}
+	defer cleanup()
+	args := []string{"--prompt-file", file, "--output-format", "json",
+		"--tools", "todo_write", "--disallowed-tools", "Agent", "--disable-web-search", "--no-subagents",
+		"--always-approve"}
 	if t.Resume {
 		args = append(args, "--resume", t.Session)
 	} else {
@@ -276,7 +304,7 @@ func (g GrokCLI) Run(ctx context.Context, t Turn) (Outcome, error) {
 	if t.Model != "" {
 		args = append(args, "--model", t.Model)
 	}
-	out, err := runCLI(ctx, g.runner(), t.Workspace, nil, g.path(), args...)
+	out, err := runCLI(ctx, g.runner(), t.Workspace, toolsEnv(t), "", g.path(), args...)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -290,29 +318,27 @@ func (g GrokCLI) Run(ctx context.Context, t Turn) (Outcome, error) {
 	}}, nil
 }
 
-// readGrokOutput reads `grok -p --output-format json`. The format is read
-// leniently — the final text under any of the names it has used — because a
-// brain whose words cannot be read is a failed turn, and the host says so
-// rather than guessing.
+// readGrokOutput reads `grok --output-format json`: the final words under
+// "text", the session under "sessionId", and the model as the key of
+// "modelUsage". A run that stopped without finishing is a failed turn.
 func readGrokOutput(out []byte) (text, model, session string) {
-	var res map[string]any
+	var res struct {
+		Text       string         `json:"text"`
+		StopReason string         `json:"stopReason"`
+		SessionID  string         `json:"sessionId"`
+		ModelUsage map[string]any `json:"modelUsage"`
+	}
 	if err := json.Unmarshal(bytes.TrimSpace(out), &res); err != nil {
-		return strings.TrimSpace(string(out)), "", ""
+		return "", "", ""
 	}
-	for _, k := range []string{"result", "text", "content", "response", "message"} {
-		if v, ok := res[k].(string); ok && strings.TrimSpace(v) != "" {
-			text = strings.TrimSpace(v)
-			break
-		}
+	for m := range res.ModelUsage {
+		model = m
+		break
 	}
-	model, _ = res["model"].(string)
-	for _, k := range []string{"session_id", "sessionId", "session"} {
-		if v, ok := res[k].(string); ok {
-			session = v
-			break
-		}
+	if res.StopReason == "cancelled" {
+		return "", model, res.SessionID
 	}
-	return text, model, session
+	return strings.TrimSpace(res.Text), model, res.SessionID
 }
 
 func (g GrokCLI) path() string {
@@ -327,6 +353,39 @@ func (g GrokCLI) runner() Runner {
 		return g.Runner
 	}
 	return SameUser{}
+}
+
+// toolsEnv is how the host's MCP server, started by the brain, finds the
+// host's tools for this turn: in the environment it inherits, never on a
+// command line.
+func toolsEnv(t Turn) []string {
+	return []string{envToolsURL + "=" + t.ToolsURL, envToolsToken + "=" + t.ToolsToken}
+}
+
+// privateFile writes content where the brain — possibly another user — can
+// read it and nobody else can find it: a file in a fresh directory that can be
+// entered but not listed, under a random name. The caller removes it.
+func privateFile(prefix, content string) (string, func(), error) {
+	dir, err := os.MkdirTemp("", "agent-host-")
+	if err != nil {
+		return "", nil, err
+	}
+	cleanup := func() { _ = os.RemoveAll(dir) }
+	if err := os.Chmod(dir, 0o711); err != nil {
+		cleanup()
+		return "", nil, err
+	}
+	name := make([]byte, 16)
+	if _, err := rand.Read(name); err != nil {
+		cleanup()
+		return "", nil, err
+	}
+	path := filepath.Join(dir, prefix+"-"+hex.EncodeToString(name))
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		cleanup()
+		return "", nil, err
+	}
+	return path, cleanup, nil
 }
 
 // BrainFor is the brain an AI agent was created with, by its provider.

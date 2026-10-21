@@ -33,11 +33,11 @@ func TestEntriesChainAndKeepTheirWords(t *testing.T) {
 	defer s.Close()
 	ctx := context.Background()
 	open := &Conversation{OpenedBy: "person:EROB", FirstAgent: "EA"}
-	e1, err := s.Append(ctx, "c1", open, []byte("hello"), []string{"EA"}, entryBuilder(t, "c1", "person:EROB", "EA", agentmessage.KindAsk, []byte("hello")))
+	e1, err := s.Append(ctx, "c1", open, []byte("hello"), []string{"EA"}, nil, entryBuilder(t, "c1", "person:EROB", "EA", agentmessage.KindAsk, []byte("hello")))
 	if err != nil {
 		t.Fatal(err)
 	}
-	e2, err := s.Append(ctx, "c1", nil, []byte("hi"), nil, entryBuilder(t, "c1", "EA", "person:EROB", agentmessage.KindReply, []byte("hi")))
+	e2, err := s.Append(ctx, "c1", nil, []byte("hi"), nil, nil, entryBuilder(t, "c1", "EA", "person:EROB", agentmessage.KindReply, []byte("hi")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestAMessageWaitsUntilItsReceipt(t *testing.T) {
 	s, _ := OpenStore(t.TempDir())
 	defer s.Close()
 	ctx := context.Background()
-	e, err := s.Append(ctx, "c1", &Conversation{OpenedBy: "person:EROB", FirstAgent: "EA"}, []byte("x"), []string{"EA"},
+	e, err := s.Append(ctx, "c1", &Conversation{OpenedBy: "person:EROB", FirstAgent: "EA"}, []byte("x"), []string{"EA"}, nil,
 		entryBuilder(t, "c1", "person:EROB", "EA", agentmessage.KindAsk, []byte("x")))
 	if err != nil {
 		t.Fatal(err)
@@ -94,7 +94,7 @@ func TestTheChainDoesNotForkUnderConcurrentWriters(t *testing.T) {
 	s, _ := OpenStore(t.TempDir())
 	defer s.Close()
 	ctx := context.Background()
-	if _, err := s.Append(ctx, "c1", &Conversation{OpenedBy: "person:EROB", FirstAgent: "EA"}, []byte("0"), nil,
+	if _, err := s.Append(ctx, "c1", &Conversation{OpenedBy: "person:EROB", FirstAgent: "EA"}, []byte("0"), nil, nil,
 		entryBuilder(t, "c1", "person:EROB", "EA", agentmessage.KindAsk, []byte("0"))); err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func TestTheChainDoesNotForkUnderConcurrentWriters(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			b := []byte{byte('a' + i)}
-			if _, err := s.Append(ctx, "c1", nil, b, nil, entryBuilder(t, "c1", "EA", "person:EROB", agentmessage.KindReceipt, b)); err != nil {
+			if _, err := s.Append(ctx, "c1", nil, b, nil, nil, entryBuilder(t, "c1", "EA", "person:EROB", agentmessage.KindReceipt, b)); err != nil {
 				t.Error(err)
 			}
 		}(i)
@@ -129,17 +129,68 @@ func TestAnEntryBuiltForAnotherPlaceIsRefused(t *testing.T) {
 	s, _ := OpenStore(t.TempDir())
 	defer s.Close()
 	ctx := context.Background()
-	if _, err := s.Append(ctx, "c1", &Conversation{OpenedBy: "person:EROB", FirstAgent: "EA"}, []byte("0"), nil,
+	if _, err := s.Append(ctx, "c1", &Conversation{OpenedBy: "person:EROB", FirstAgent: "EA"}, []byte("0"), nil, nil,
 		entryBuilder(t, "c1", "person:EROB", "EA", agentmessage.KindAsk, []byte("0"))); err != nil {
 		t.Fatal(err)
 	}
 	wrong := func(seq int, prev string) (*didcomm.Envelope, agentmessage.Record, error) {
 		return entryBuilder(t, "c1", "EA", "person:EROB", agentmessage.KindReply, []byte("x"))(seq+5, prev)
 	}
-	if _, err := s.Append(ctx, "c1", nil, []byte("x"), nil, wrong); err == nil {
+	if _, err := s.Append(ctx, "c1", nil, []byte("x"), nil, nil, wrong); err == nil {
 		t.Fatal("an entry built for another place was written")
 	}
 	if _, err := s.Get("nope"); !errors.Is(err, ErrNotFound) {
 		t.Fatal("a missing conversation was found")
+	}
+}
+
+// An ask is answered once by each party it was put to.
+func TestAnAskIsAnsweredOnce(t *testing.T) {
+	s, _ := OpenStore(t.TempDir())
+	defer s.Close()
+	ctx := context.Background()
+	ask, err := s.Append(ctx, "c1", &Conversation{OpenedBy: "person:EP", FirstAgent: "EA"}, []byte("q"), []string{"EA"}, nil,
+		entryBuilder(t, "c1", "person:EP", "EA", agentmessage.KindAsk, []byte("q")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	answer := func(kind string, body []byte) error {
+		ks, _ := didcomm.GenerateKeySet("EIA")
+		_, err := s.Append(ctx, "c1", nil, body, nil, nil, func(seq int, prev string) (*didcomm.Envelope, agentmessage.Record, error) {
+			rec := agentmessage.Record{MessageID: NewID("m_"), Conversation: "c1", Seq: seq, PrevHash: prev,
+				Kind: kind, From: "EA", To: "person:EP", InReplyTo: ask.MessageID, BodyHash: agentmessage.HashBody(body)}
+			env, err := agentmessage.Countersign(ks, rec)
+			return env, rec, err
+		})
+		return err
+	}
+	if err := answer(agentmessage.KindReply, []byte("a")); err != nil {
+		t.Fatal(err)
+	}
+	if err := answer(agentmessage.KindFailure, []byte("b")); !errors.Is(err, ErrAlreadyAnswered) {
+		t.Fatalf("a second answer to one ask was recorded: %v", err)
+	}
+	if !s.Answered(ask.MessageID, "EA") {
+		t.Fatal("the answer is not seen")
+	}
+}
+
+// A receipt neither counts as a turn nor keeps a conversation open.
+func TestAReceiptDoesNotKeepAConversationOpen(t *testing.T) {
+	s, _ := OpenStore(t.TempDir())
+	defer s.Close()
+	ctx := context.Background()
+	if _, err := s.Append(ctx, "c1", &Conversation{OpenedBy: "person:EP", FirstAgent: "EA"}, []byte("q"), nil, nil,
+		entryBuilder(t, "c1", "person:EP", "EA", agentmessage.KindAsk, []byte("q"))); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := s.Get("c1")
+	if _, err := s.Append(ctx, "c1", nil, []byte("r"), nil, nil,
+		entryBuilder(t, "c1", "EA", "person:EP", agentmessage.KindReceipt, []byte("r"))); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := s.Get("c1")
+	if after.Turns != before.Turns || !after.LastAt.Equal(before.LastAt) {
+		t.Fatalf("a receipt counted, or moved the conversation's last activity: %+v -> %+v", before, after)
 	}
 }

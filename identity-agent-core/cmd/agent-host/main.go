@@ -154,13 +154,18 @@ One-time setup, as an administrator (each sudo asks for your password):
   2. Install the brain for that user, and sign it in:
        Claude Code:  sudo -u %[1]s -H sh -c 'curl -fsSL https://claude.ai/install.sh | bash'
                      sudo -u %[1]s -H /Users/%[1]s/.local/bin/claude      (then type /login)
-       Grok CLI:     install it for %[1]s the same way, then: sudo -u %[1]s -H <its path> login
+       Grok CLI:     install it for %[1]s the same way, sign it in, and name its path in step 4 too.
+                     Grok runs only this way: it has no flag to ignore the MCP servers of whoever runs it.
 
-  3. Let %[2]s start that program as %[1]s, and nothing else:
-       echo '%[2]s ALL=(%[1]s) NOPASSWD: /Users/%[1]s/.local/bin/claude' | sudo tee /etc/sudoers.d/agent-host
+  3. Make its workspace, which only it can use:
+       sudo -u %[1]s -H mkdir -m 700 /Users/%[1]s/workspace
+
+  4. Let %[2]s start that program as %[1]s, and nothing else. SETENV lets the host pass
+     each turn's tool token in the environment rather than on the command line:
+       echo '%[2]s ALL=(%[1]s) NOPASSWD:SETENV: /Users/%[1]s/.local/bin/claude' | sudo tee /etc/sudoers.d/agent-host
        sudo chmod 440 /etc/sudoers.d/agent-host
 
-  4. Make sure %[1]s can run this program, then run the host:
+  5. Make sure %[1]s can run this program (%[3]s), then run the host:
        %[3]s run --brain claude-code --brain-path /Users/%[1]s/.local/bin/claude --brain-user %[1]s \
          --workspace /Users/%[1]s/workspace
 `, user, me, self)
@@ -172,9 +177,10 @@ One-time setup, as an administrator:
   2. Install the brain for that user and sign it in:
        sudo -u %[1]s -H sh -c 'curl -fsSL https://claude.ai/install.sh | bash'
        sudo -u %[1]s -H /home/%[1]s/.local/bin/claude      (then type /login)
-  3. echo '%[2]s ALL=(%[1]s) NOPASSWD: /home/%[1]s/.local/bin/claude' | sudo tee /etc/sudoers.d/agent-host
+  3. sudo -u %[1]s -H mkdir -m 700 /home/%[1]s/workspace
+  4. echo '%[2]s ALL=(%[1]s) NOPASSWD:SETENV: /home/%[1]s/.local/bin/claude' | sudo tee /etc/sudoers.d/agent-host
      sudo chmod 440 /etc/sudoers.d/agent-host
-  4. %[3]s run --brain claude-code --brain-path /home/%[1]s/.local/bin/claude --brain-user %[1]s \
+  5. %[3]s run --brain claude-code --brain-path /home/%[1]s/.local/bin/claude --brain-user %[1]s \
        --workspace /home/%[1]s/workspace
 `, user, me, self)
 	default:

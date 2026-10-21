@@ -91,6 +91,7 @@ func (s *CoreServer) mountConversationRoutes(r chi.Router) {
 	r.Post("/agent-host/messages", s.handleBodySays)
 	r.Get("/agent-host/inbox", s.handleBodyInbox)
 	r.Get("/agent-host/agents", s.handleBodyListAgents)
+	r.Get("/agent-host/conversations/{cid}", s.handleBodyConversationHistory)
 }
 
 // ── Who is asking ────────────────────────────────────────────────────────────
@@ -111,8 +112,15 @@ func (s *CoreServer) thePersonAsking(r *http.Request) (agentmessage.PersonRef, *
 	if err != nil {
 		return agentmessage.PersonRef{}, nil, err
 	}
-	signed, _, err := s.theStringThisMachineSigned(r, grant.ControllerAID,
-		strings.TrimSpace(r.Header.Get(headerControllerTimestamp)), time.Now().UTC())
+	// The string the middleware verified, rebuilt as of the moment it was
+	// signed — so what is kept is exactly what the signature covers, whatever
+	// has expired since.
+	stamp := strings.TrimSpace(r.Header.Get(headerControllerTimestamp))
+	at, err := time.Parse(time.RFC3339, stamp)
+	if err != nil {
+		return agentmessage.PersonRef{}, nil, err
+	}
+	signed, _, err := s.theStringThisMachineSigned(r, grant.ControllerAID, stamp, at.UTC())
 	if err != nil {
 		return agentmessage.PersonRef{}, nil, err
 	}
@@ -126,8 +134,11 @@ func (s *CoreServer) thePersonAsking(r *http.Request) (agentmessage.PersonRef, *
 	}, nil
 }
 
-// signerOf is the signer a controller belongs to: the one its grant names, or
-// the organisation's only signer.
+// signerOf is the signer a controller belongs to: the one its grant names.
+// A grant that names none is bound, the first time it is needed, to the
+// organisation's only signer — so the machine keeps speaking as that person
+// whoever joins later, rather than as whoever happens to be the only signer
+// at the time of each message.
 func (s *CoreServer) signerOf(g ControllerGrant) (agentmessage.PersonRef, error) {
 	if s.assetHandler == nil {
 		return agentmessage.PersonRef{}, errNoProvablePerson
@@ -152,12 +163,30 @@ func (s *CoreServer) signerOf(g ControllerGrant) (agentmessage.PersonRef, error)
 	switch len(signers) {
 	case 0:
 		return agentmessage.PersonRef{}, fmt.Errorf("this organisation has no signer on its roster, so nobody it can " +
-			"prove is asking. A signer joins by founding the organisation from their Grape ID")
+			"prove is asking. A signer joins by accepting the organisation's signer invitation from their own identity")
 	case 1:
+		if _, err := s.controllers().BindSigner(g.ControllerAID, signers[0].PairwiseAID); err != nil {
+			return agentmessage.PersonRef{}, fmt.Errorf("which signer this app belongs to could not be recorded: %w", err)
+		}
 		return pick(signers[0]), nil
 	}
-	return agentmessage.PersonRef{}, fmt.Errorf("this organisation has more than one signer, and this app was not " +
-		"paired to one of them. Pair it again, naming its signer")
+	return agentmessage.PersonRef{}, fmt.Errorf("this organisation has more than one signer, and this app has not " +
+		"been tied to one of them, so the record could not say which person asked")
+}
+
+// personStillStands reports whether the person who opened a conversation is
+// still someone the organisation can prove — checked on every ask made in
+// their name, not only when they opened it.
+func (s *CoreServer) personStillStands(p agentmessage.PersonRef) bool {
+	if s.assetHandler == nil || p.AID == "" {
+		return false
+	}
+	for _, e := range s.assetHandler.Store.ListEmployees() {
+		if e.PairwiseAID == p.AID && e.Status == "active" && (p.Standing != "signer" || e.IsSigner) {
+			return true
+		}
+	}
+	return false
 }
 
 // personMayUse reports whether a person may use an AI agent. A signer may use
@@ -221,6 +250,13 @@ func (s *CoreServer) messagingKeys(aid string) (*didcomm.KeySet, *didcomm.DID, e
 
 // refuse writes a refusal to the governance record and answers with it.
 func (s *CoreServer) refuseMessage(w http.ResponseWriter, cc sandbox.CallerContext, kind, why string, status int) {
+	// The event is named from the kind only when it is one; a sender does not
+	// get to name events in the record.
+	switch kind {
+	case agentmessage.KindAsk, agentmessage.KindReply, agentmessage.KindReceipt, agentmessage.KindFailure:
+	default:
+		kind = "unrecognised"
+	}
 	log.Printf("[conversation] refused %s from %s: %s", kind, cc.CallerAID, why)
 	if s.SandboxManager != nil {
 		cc.Reason = clampWhy(why)
@@ -257,16 +293,19 @@ func (s *CoreServer) handlePersonSays(w http.ResponseWriter, r *http.Request) {
 	cc.CallerAID = agentmessage.Person(person.AID)
 	var req agentmessage.PersonMessage
 	if err := json.Unmarshal(proof.Request, &req); err != nil {
-		jsonError(w, "the message must be JSON", http.StatusBadRequest)
+		s.refuseMessage(w, cc, agentmessage.KindAsk, "the message must be JSON", http.StatusBadRequest)
 		return
 	}
 	body := []byte(req.Body)
 	switch {
 	case len(body) == 0 || len(body) > agentmessage.MaxBody:
-		jsonError(w, "the message must have words, and not too many", http.StatusBadRequest)
+		s.refuseMessage(w, cc, agentmessage.KindAsk, "the message must have words, and not too many", http.StatusBadRequest)
 		return
 	case req.To != a.PairwiseAID:
-		jsonError(w, "the message is addressed to a different AI agent from the one in the address", http.StatusBadRequest)
+		s.refuseMessage(w, cc, agentmessage.KindAsk, "the message is addressed to a different AI agent from the one in the address", http.StatusBadRequest)
+		return
+	case req.Conversation == "" && req.InReplyTo != "":
+		s.refuseMessage(w, cc, agentmessage.KindAsk, "a message that opens a conversation answers nothing in it", http.StatusBadRequest)
 		return
 	}
 	if !personMayUse(person, a) {
@@ -299,29 +338,26 @@ func (s *CoreServer) handlePersonSays(w http.ResponseWriter, r *http.Request) {
 		c, err := store.Get(convID)
 		switch {
 		case err != nil:
-			jsonError(w, "no such conversation", http.StatusNotFound)
+			s.refuseMessage(w, cc, agentmessage.KindAsk, "no such conversation", http.StatusNotFound)
 			return
 		case c.OpenedBy != opener:
 			s.refuseMessage(w, cc, agentmessage.KindAsk, "only the person who opened a conversation speaks in it", http.StatusForbidden)
 			return
-		case !c.Open(time.Now()):
-			s.refuseMessage(w, cc, agentmessage.KindAsk, "this conversation has closed; open a new one", http.StatusConflict)
-			return
-		case c.Turns >= conversation.MaxTurns:
-			s.refuseMessage(w, cc, agentmessage.KindAsk, "this conversation has used all its turns", http.StatusConflict)
+		case c.FirstAgent != a.PairwiseAID:
+			s.refuseMessage(w, cc, agentmessage.KindAsk, "a conversation is with the AI agent it was opened with", http.StatusBadRequest)
 			return
 		}
 		if req.InReplyTo != "" {
 			prior, err := store.Message(req.InReplyTo)
 			if err != nil || prior.Conversation != convID || prior.To != opener {
-				jsonError(w, "the message answered is not one addressed to this person in this conversation", http.StatusBadRequest)
+				s.refuseMessage(w, cc, agentmessage.KindAsk, "the message answered is not one addressed to this person in this conversation", http.StatusBadRequest)
 				return
 			}
 		}
 	}
 
 	msgID := conversation.NewID("m_")
-	e, err := store.Append(r.Context(), convID, opening, body, []string{a.PairwiseAID},
+	e, err := store.Append(r.Context(), convID, opening, body, []string{a.PairwiseAID}, stillOpen(true),
 		func(seq int, prev string) (*didcomm.Envelope, agentmessage.Record, error) {
 			rec := agentmessage.Record{
 				MessageID: msgID, Conversation: convID, Seq: seq, PrevHash: prev,
@@ -333,13 +369,48 @@ func (s *CoreServer) handlePersonSays(w http.ResponseWriter, r *http.Request) {
 			return env, rec, err
 		})
 	if err != nil {
-		jsonError(w, err.Error(), http.StatusInternalServerError)
+		s.refuseAppend(w, cc, agentmessage.KindAsk, err)
 		return
 	}
 	s.recordMessage(cc, e)
 	writeJSONStatus(w, http.StatusCreated, map[string]any{
 		"conversation": convID, "message_id": e.MessageID, "seq": e.Seq, "hash": e.Hash,
 	})
+}
+
+// errClosed and errNoTurnsLeft are the conversation's own limits, decided
+// inside the record's transaction.
+var (
+	errClosed      = errors.New("this conversation has closed; open a new one")
+	errNoTurnsLeft = errors.New("this conversation has used all its turns")
+)
+
+// stillOpen is the check every entry but a receipt passes: the conversation
+// is open, and has turns left.
+func stillOpen(counts bool) conversation.Check {
+	return func(c conversation.Conversation) error {
+		if c.Seq == 0 {
+			return nil // being opened by this entry
+		}
+		if !c.Open(time.Now()) {
+			return errClosed
+		}
+		if counts && c.Turns >= conversation.MaxTurns {
+			return errNoTurnsLeft
+		}
+		return nil
+	}
+}
+
+// refuseAppend answers an entry the record would not take, recording the
+// refusal when it is one of the conversation's rules rather than a fault.
+func (s *CoreServer) refuseAppend(w http.ResponseWriter, cc sandbox.CallerContext, kind string, err error) {
+	switch {
+	case errors.Is(err, errClosed), errors.Is(err, errNoTurnsLeft), errors.Is(err, conversation.ErrAlreadyAnswered):
+		s.refuseMessage(w, cc, kind, err.Error(), http.StatusConflict)
+	default:
+		jsonError(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 // entryView is an entry as a reader sees it: with its words, checked against
@@ -380,6 +451,10 @@ func (s *CoreServer) handleReadConversation(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	after, _ := strconv.Atoi(r.URL.Query().Get("after"))
+	// Subscribed before reading, so an entry added between the read and the
+	// wait still ends the wait.
+	news, done := store.Subscribe(c.ID)
+	defer done()
 	entries, err := store.Entries(c.ID, after)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
@@ -388,12 +463,26 @@ func (s *CoreServer) handleReadConversation(w http.ResponseWriter, r *http.Reque
 	// Waiting for news: return the moment something is added, or after the
 	// wait, whichever comes first.
 	if len(entries) == 0 && r.URL.Query().Get("wait") != "" {
-		ctx, cancel := context.WithTimeout(r.Context(), conversationWait)
-		store.Wait(ctx, c.ID)
-		cancel()
+		select {
+		case <-news:
+		case <-time.After(conversationWait):
+		case <-r.Context().Done():
+		}
 		if c, err = store.Get(c.ID); err == nil {
 			entries, _ = store.Entries(c.ID, after)
 		}
+	}
+	// Reading the record is itself recorded — once per opening of it, not on
+	// every wait for news.
+	if after == 0 && s.SandboxManager != nil {
+		reader := sandbox.CallerContext{Remote: true, CorrelationID: requestCorrelationID(r), Transport: "controller",
+			Reason: "read conversation " + c.ID}
+		if g, ok := TheControllerThatAsked(r); ok {
+			reader.CallerAID = g.ControllerAID
+		} else {
+			reader.CallerAID = "owner"
+		}
+		s.SandboxManager.RecordGovernanceEvent(reader, "agent.conversation.read", "ok")
 	}
 	writeJSONStatus(w, http.StatusOK, map[string]any{
 		"conversation": c, "open": c.Open(time.Now()), "entries": s.viewEntries(r.Context(), store, entries),
@@ -449,15 +538,25 @@ func (s *CoreServer) theBodyAsking(r *http.Request) (sandbox.CallerContext, agen
 	return cc, b, nil
 }
 
+// refuseBody answers a request that is not from a live body, recording the
+// refusal under whatever the request claimed to be.
+func (s *CoreServer) refuseBody(w http.ResponseWriter, r *http.Request, cc sandbox.CallerContext, err error) {
+	if cc.CallerAID == "" {
+		cc = sandbox.CallerContext{Remote: true, CorrelationID: requestCorrelationID(r), Transport: "body",
+			CallerAID: "body:" + clampWhy(r.Header.Get(agentbody.HeaderHost))}
+	}
+	s.refuseMessage(w, cc, "", err.Error(), http.StatusForbidden)
+}
+
 func (s *CoreServer) handleBodySays(w http.ResponseWriter, r *http.Request) {
 	cc, b, err := s.theBodyAsking(r)
 	if err != nil {
-		jsonError(w, err.Error(), http.StatusForbidden)
+		s.refuseBody(w, r, cc, err)
 		return
 	}
 	var req bodySays
 	if err := json.NewDecoder(io.LimitReader(r.Body, agentmessage.MaxBody+16<<10)).Decode(&req); err != nil {
-		jsonError(w, "the message is unreadable", http.StatusBadRequest)
+		s.refuseMessage(w, cc, "", "the message is unreadable", http.StatusBadRequest)
 		return
 	}
 	st := req.Statement
@@ -510,31 +609,36 @@ func (s *CoreServer) handleBodySays(w http.ResponseWriter, r *http.Request) {
 		refuse("the message this acts on was not given to this AI agent in this conversation", http.StatusForbidden)
 		return
 	}
-	if kind != agentmessage.KindReceipt && !c.Open(time.Now()) {
-		refuse("this conversation has closed", http.StatusConflict)
-		return
-	}
 
 	depth := prompt.Depth
 	var deliverTo []string
+	check := stillOpen(true)
 	switch kind {
 	case agentmessage.KindReceipt:
+		// A receipt is for a message still waiting for this body, and goes to
+		// its sender. It neither counts as a turn nor keeps the conversation
+		// open, so an old message cannot be used to reopen one.
 		if st.To != prompt.From {
 			refuse("a receipt goes to the sender of the message received", http.StatusBadRequest)
 			return
 		}
+		if !store.IsWaiting(prompt.MessageID, st.From) {
+			refuse("that message is not waiting for this body", http.StatusConflict)
+			return
+		}
+		check = nil
 	case agentmessage.KindReply, agentmessage.KindFailure:
 		if prompt.Kind != agentmessage.KindAsk || prompt.To != st.From || st.To != prompt.From {
 			refuse("a reply goes only to the sender of an ask that was addressed to the one replying", http.StatusForbidden)
 			return
 		}
+		if store.Answered(prompt.MessageID, st.From) {
+			refuse(conversation.ErrAlreadyAnswered.Error(), http.StatusConflict)
+			return
+		}
 		// An answer travels back up the chain, to the asker's depth.
 		if depth = prompt.Depth - 1; depth < 0 {
 			depth = 0
-		}
-		if kind == agentmessage.KindReply && c.Turns >= conversation.MaxTurns {
-			refuse("this conversation has used all its turns", http.StatusConflict)
-			return
 		}
 		if _, person := agentmessage.IsPerson(st.To); !person {
 			deliverTo = []string{st.To}
@@ -549,9 +653,6 @@ func (s *CoreServer) handleBodySays(w http.ResponseWriter, r *http.Request) {
 		case st.To == st.From:
 			refuse("an AI agent does not ask itself", http.StatusBadRequest)
 			return
-		case c.Turns >= conversation.MaxTurns:
-			refuse("this conversation has used all its turns", http.StatusConflict)
-			return
 		case depth > conversation.MaxDepth:
 			refuse(fmt.Sprintf("a chain of asks may go %d deep, and this would be %d", conversation.MaxDepth, depth), http.StatusConflict)
 			return
@@ -565,8 +666,13 @@ func (s *CoreServer) handleBodySays(w http.ResponseWriter, r *http.Request) {
 			refuse("this AI agent's grant does not let it message that AI agent: "+err.Error(), http.StatusForbidden)
 			return
 		}
+		// The opener's reach, as the opener stands now.
 		entries, _ := store.Entries(c.ID, 0)
 		opener, _ := personRefFor(entries, c.OpenedBy)
+		if !s.personStillStands(opener) {
+			refuse("the person who opened this conversation is no longer someone the organisation can prove", http.StatusForbidden)
+			return
+		}
 		ta, _ := s.aiAgentAsset(target.ID)
 		if !personMayUse(opener, ta) {
 			refuse("the person who opened this conversation may not reach "+ta.DisplayName, http.StatusForbidden)
@@ -581,7 +687,7 @@ func (s *CoreServer) handleBodySays(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	msgID := conversation.NewID("m_")
-	e, err := store.Append(r.Context(), c.ID, nil, body, deliverTo,
+	e, err := store.Append(r.Context(), c.ID, nil, body, deliverTo, check,
 		func(seq int, prev string) (*didcomm.Envelope, agentmessage.Record, error) {
 			rec := agentmessage.Record{
 				MessageID: msgID, Conversation: c.ID, Seq: seq, PrevHash: prev,
@@ -595,7 +701,7 @@ func (s *CoreServer) handleBodySays(w http.ResponseWriter, r *http.Request) {
 			return env, rec, err
 		})
 	if err != nil {
-		jsonError(w, err.Error(), http.StatusInternalServerError)
+		s.refuseAppend(w, cc, kind, err)
 		return
 	}
 	if kind == agentmessage.KindReceipt {
@@ -622,9 +728,9 @@ type delivery struct {
 }
 
 func (s *CoreServer) handleBodyInbox(w http.ResponseWriter, r *http.Request) {
-	_, b, err := s.theBodyAsking(r)
+	cc, b, err := s.theBodyAsking(r)
 	if err != nil {
-		jsonError(w, err.Error(), http.StatusForbidden)
+		s.refuseBody(w, r, cc, err)
 		return
 	}
 	store, err := s.conversations()
@@ -632,21 +738,39 @@ func (s *CoreServer) handleBodyInbox(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
-	waiting, err := store.Waiting(b.Agent, 10)
-	if err == nil && len(waiting) == 0 && r.URL.Query().Get("wait") != "" {
-		ctx, cancel := context.WithTimeout(r.Context(), conversationWait)
-		store.Wait(ctx, b.Agent)
-		cancel()
-		waiting, err = store.Waiting(b.Agent, 10)
+	// Subscribed before reading, so a message queued between the read and the
+	// wait still ends the wait.
+	news, done := store.Subscribe(b.Agent)
+	defer done()
+	out, err := s.deliveriesFor(r.Context(), store, b.Agent)
+	if err == nil && len(out) == 0 && r.URL.Query().Get("wait") != "" {
+		select {
+		case <-news:
+		case <-time.After(conversationWait):
+		case <-r.Context().Done():
+		}
+		out, err = s.deliveriesFor(r.Context(), store, b.Agent)
 	}
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	writeJSONStatus(w, http.StatusOK, map[string]any{"messages": out})
+}
+
+// deliveriesFor is what is waiting for an AI agent, ready to hand to its body.
+// An entry whose words are missing or altered is not handed out — the body
+// could not check it — and is logged, so it is seen rather than retried
+// silently.
+func (s *CoreServer) deliveriesFor(ctx context.Context, store *conversation.Store, agent string) ([]delivery, error) {
+	waiting, err := store.Waiting(agent, 10)
+	if err != nil {
+		return nil, err
+	}
 	identity, _ := s.DataStore.GetIdentity()
 	out := []delivery{}
 	for _, e := range waiting {
-		body, err := store.Contents().Get(r.Context(), e.ContentRef)
+		body, err := store.Contents().Get(ctx, e.ContentRef)
 		if err != nil || agentmessage.HashBody(body) != e.BodyHash {
 			log.Printf("[conversation] the words of %s are missing or altered; not delivered", e.MessageID)
 			continue
@@ -670,7 +794,64 @@ func (s *CoreServer) handleBodyInbox(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, delivery{Entry: e, Body: string(body), Countersign: did, FromName: name})
 	}
-	writeJSONStatus(w, http.StatusOK, map[string]any{"messages": out})
+	return out, nil
+}
+
+// handleBodyConversationHistory gives a body what has been said in a
+// conversation its AI agent is in — and only one it is in.
+func (s *CoreServer) handleBodyConversationHistory(w http.ResponseWriter, r *http.Request) {
+	cc, b, err := s.theBodyAsking(r)
+	if err != nil {
+		s.refuseBody(w, r, cc, err)
+		return
+	}
+	store, err := s.conversations()
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	cid := chi.URLParam(r, "cid")
+	if !store.IsParty(cid, b.Agent) {
+		s.refuseMessage(w, cc, "", "this AI agent is not in that conversation", http.StatusForbidden)
+		return
+	}
+	entries, err := store.Entries(cid, 0)
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	type said struct {
+		Seq  int    `json:"seq"`
+		Kind string `json:"kind"`
+		From string `json:"from"`
+		To   string `json:"to"`
+		Body string `json:"body"`
+	}
+	out := []said{}
+	for _, v := range s.viewEntries(r.Context(), store, entries) {
+		if v.Kind == agentmessage.KindReceipt {
+			continue
+		}
+		out = append(out, said{Seq: v.Seq, Kind: v.Kind, From: s.partyName(v.From, v.Record), To: s.partyName(v.To, v.Record), Body: v.Body})
+	}
+	writeJSONStatus(w, http.StatusOK, map[string]any{"conversation": cid, "said": out})
+}
+
+// partyName is a party as a reader knows it: a person by name, an AI agent by
+// its name here.
+func (s *CoreServer) partyName(party string, rec agentmessage.Record) string {
+	if _, person := agentmessage.IsPerson(party); person {
+		if rec.Person != nil && rec.Person.Name != "" {
+			return rec.Person.Name
+		}
+		return "a person"
+	}
+	if ref := s.findAgentAssetByAID(party); ref != nil {
+		if a, ok := s.aiAgentAsset(ref.ID); ok {
+			return a.DisplayName
+		}
+	}
+	return party
 }
 
 // handleBodyListAgents tells a body which AI agents its AI agent may ask, by
@@ -678,7 +859,7 @@ func (s *CoreServer) handleBodyInbox(w http.ResponseWriter, r *http.Request) {
 func (s *CoreServer) handleBodyListAgents(w http.ResponseWriter, r *http.Request) {
 	cc, b, err := s.theBodyAsking(r)
 	if err != nil {
-		jsonError(w, err.Error(), http.StatusForbidden)
+		s.refuseBody(w, r, cc, err)
 		return
 	}
 	type agentView struct {

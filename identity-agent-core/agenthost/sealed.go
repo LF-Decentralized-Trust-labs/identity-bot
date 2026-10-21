@@ -106,7 +106,11 @@ func (h *Host) Move(url string) (State, error) {
 		return State{}, fmt.Errorf("this machine has not enrolled: %w", err)
 	}
 	url = strings.TrimRight(strings.TrimSpace(url), "/")
-	kel, current, err := h.verifiedLog(url, st.IdentityAgent, nil)
+	var holds func(sn int, said string) bool
+	if st.KeyStateSAID != "" {
+		holds = func(sn int, said string) bool { return sn == st.KeyStateSN && said == st.KeyStateSAID }
+	}
+	kel, current, err := h.verifiedLog(url, st.IdentityAgent, holds)
 	if err != nil {
 		return State{}, fmt.Errorf("%s is not the Identity Agent this machine enrolled with: %w", url, err)
 	}

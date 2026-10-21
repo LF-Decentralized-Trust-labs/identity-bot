@@ -77,6 +77,11 @@ type State struct {
 	// against its key log at enrolment. Requests after enrolment are sealed to
 	// them.
 	IdentityAgentKeys *didcomm.DID `json:"identity_agent_keys,omitempty"`
+	// KeyStateSN and KeyStateSAID are the event of the Identity Agent's key
+	// log the enrolment string named. A log offered later must still hold it,
+	// so an old copy from before it cannot be passed off as current.
+	KeyStateSN   int    `json:"key_state_sn,omitempty"`
+	KeyStateSAID string `json:"key_state_said,omitempty"`
 }
 
 // DefaultDataDir is where a host keeps its key and state, per operating system.
@@ -381,7 +386,7 @@ func (h *Host) Enrol(enrolment string, placement string, wait time.Duration) (St
 	}
 	st := State{IdentityAgentURL: strings.TrimRight(e.URL, "/"), IdentityAgent: e.IdentityAgent,
 		Agent: e.Agent, AgentName: e.AgentName, BindingID: answer.BindingID, EnrolledAt: time.Now().UTC(),
-		IdentityAgentKeys: iaKeys}
+		IdentityAgentKeys: iaKeys, KeyStateSN: e.KeyStateSN, KeyStateSAID: e.KeyStateSAID}
 	if err := h.saveState(st); err != nil {
 		return State{}, err
 	}

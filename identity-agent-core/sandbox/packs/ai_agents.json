@@ -6,7 +6,7 @@
     {
       "id": "agent.message.send",
       "name": "Message another AI agent",
-      "description": "Ask another AI agent of the same Identity Agent something, inside a conversation a person opened. Constrain \"to\" to name which AI agents; unconstrained, any of them. The person who opened the conversation must also be allowed to reach the AI agent asked.",
+      "description": "Ask another AI agent of this organisation for something, in a conversation a person started. Answering when asked needs no permission.",
       "domain": "agent",
       "executor_type": "ai_agent",
       "impact": "mutating",

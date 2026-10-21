@@ -20,3 +20,6 @@ type AsUser struct {
 func (u AsUser) Command(ctx context.Context, dir string, env []string, name string, args ...string) (*exec.Cmd, error) {
 	return nil, fmt.Errorf("running the brain as a separate Windows user is not available yet; run without --brain-user")
 }
+
+// Isolated reports that the brain runs as a user of its own.
+func (u AsUser) Isolated() bool { return u.User != "" }

@@ -11,9 +11,9 @@ key speaks for it (ADR-046). The next thing people need is for AI agents to work
 together. A person asks one AI agent for something, that AI agent asks another, and
 the answer comes back.
 
-The conversation has to be provable afterwards, to someone who trusts neither machine
-nor the Identity Agent. It must show who started it, who said what, under whose
-authority, and from which machine. It also has to be governed. An AI agent acting for
+The conversation has to be provable afterwards. It must show who started it, who said
+what, under whose authority, and from which machine. As much of that as possible must
+hold even for someone who does not trust the Identity Agent. It also has to be governed. An AI agent acting for
 a person must not reach further than that person can, and two AI agents must not talk
 forever.
 
@@ -49,10 +49,22 @@ opened.
   cannot reach anybody new.
 - **A receipt.** It must name a message given to the body sending it.
 
-A conversation holds at most 40 asks and replies. A chain of asks goes at most three
-deep. It closes after 30 minutes with nothing said.
+An ask is answered once by the party it was put to. The answer is a reply or a failure
+notice, and a second one is refused. Otherwise one body could make another's brain run
+again and again.
 
-Every refusal is written to the signed governance record.
+A conversation holds at most 40 asks, replies and failure notices. A chain of asks goes
+at most three deep. It closes after 30 minutes with nothing said. A receipt is not
+something said: it neither counts as a turn nor keeps a conversation open. A receipt is
+taken only for a message still waiting for the body that sends it. These limits are
+checked inside the same transaction that writes the entry, so two senders at once
+cannot race past them.
+
+The opener's standing is checked again on every ask made in their conversation, not
+only when they opened it.
+
+Every refusal of a message from a person or a body is written to the signed governance
+record. So is every opening of a conversation's record for reading.
 
 **Every message is signed twice, for two different claims:**
 1. **The sender's own statement.** A body signs it with its machine key over a
@@ -82,13 +94,19 @@ store: on the Identity Agent by default) and still be checked against the record
 - the countersigner's keys belong to that identity, by its published key log;
 - the countersigner is the Identity Agent itself, or an AI agent it delegated;
 - the countersignature holds;
-- the sender's own signature holds;
+- the sender's own signature holds, against the key the entry names;
 - the words match their digest;
 - the message is addressed to this body's AI agent.
 
+Whether the sender's body credential was in force when it spoke is the Identity
+Agent's to check at the time. The entry names the credential, so a verifier can check
+it later against the registry's history. The receiving body does not check it.
+
 The body then sends a receipt signed by its key over the message and its entry hash,
 so the record proves the machine received it. Only then does it act. A message is
-delivered until its receipt arrives, and acted on once.
+delivered until its receipt arrives, and acted on once. A message that does not check
+out is acknowledged and not acted on. If it was an ask, the body sends a failure notice
+saying why, so it neither waits in the queue nor leaves the asker waiting.
 
 **A body's requests are sealed.** `agent-host` carries every request inside the sealed
 transport (`didcomm.SendSealed`, the same format an Identity Agent uses to reach a peer).
@@ -103,8 +121,15 @@ session. It has the body's tools as its only tools:
 - `system_info`, a fixed set of facts about the machine, never a shell.
 
 The tools reach the body through a stdio MCP server, holding a token good for one
-turn. Every other tool is refused by the program's own permission mode. The brain can
-also run as a separate operating-system user. The brain never holds a key. If the
+turn. The token travels in the brain's environment, and the words travel on stdin or in
+a file only the brain can find. Neither goes on the command line, which other users of
+the machine can read. The program starts with no built-in tools at all (for Claude Code, `--tools ""`),
+and ignores the settings of the user running it. Permission mode alone is not enough:
+under `dontAsk`, with an allow list naming only the body's tools, a read-only shell
+command still ran. The brain can
+also run as a separate operating-system user. Grok CLI runs only that way, because it
+loads the MCP servers and permissions of whoever runs it and has no option to ignore
+them. The brain never holds a key. If the
 brain fails, the body sends a signed failure notice, so a conversation never waits on
 silence.
 
@@ -114,8 +139,14 @@ silence.
   each message's sender and their signature, the Identity Agent's countersignature
   as each AI agent, the chain of entries, and each body's grade.
 - A compromised Identity Agent could forge its own countersignatures, but not a body's
-  statement or a controller's signature. The sender's own signature is therefore the
-  strong evidence of who said what.
+  statement made with a key it never held, nor a controller's signature. The sender's
+  own signature is therefore the strong evidence of who said what. A compromised
+  Identity Agent could still invent a controller grant or issue a body credential to a
+  key of its own, and sign as that. Controller grants are not yet anchored anywhere a
+  verifier could check.
+- A reply sent with the body's `reply` tool names the brain's session but carries no
+  digest of the run, because the run has not finished when it is sent. Only an answer
+  given by ending the turn carries the digest.
 - An employee's own messages are not yet supported. An employee's device is never made
   a controller, because a controller can do nearly everything the owner can. An
   employee will instead sign with their own identity. Until then, only signers start

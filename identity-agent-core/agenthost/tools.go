@@ -190,6 +190,27 @@ func (ts *toolServer) call(ctx context.Context, t *toolTurn, c toolCall) (string
 			fmt.Fprintf(&b, ": %s\n", ag.AID)
 		}
 		return b.String(), nil
+	case "conversation_history":
+		code, b, err := ts.h.CallContext(ctx, "GET", "/api/agent-host/conversations/"+t.Conversation, nil)
+		if err != nil {
+			return "", err
+		}
+		if code != http.StatusOK {
+			return "", fmt.Errorf("the conversation could not be read (%d)", code)
+		}
+		var out struct {
+			Said []struct {
+				Kind, From, To, Body string
+			} `json:"said"`
+		}
+		if err := json.Unmarshal(b, &out); err != nil {
+			return "", err
+		}
+		var sb strings.Builder
+		for _, m := range out.Said {
+			fmt.Fprintf(&sb, "%s (%s to %s): %s\n\n", m.From, m.Kind, m.To, m.Body)
+		}
+		return sb.String(), nil
 	case "system_info":
 		info, err := SystemInfo(ctx)
 		if err != nil {
@@ -242,6 +263,8 @@ var toolDescriptions = []map[string]any{
 			"to":   map[string]any{"type": "string", "description": "the AI agent's name, as list_agents gives it"},
 			"text": map[string]any{"type": "string", "description": "what to ask"}}, "required": []string{"to", "text"}}},
 	{"name": "list_agents", "description": "List the AI agents you may ask.",
+		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{}}},
+	{"name": "conversation_history", "description": "Everything said so far in this conversation, by whom, in order.",
 		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{}}},
 	{"name": "system_info", "description": "Facts about the machine you run on: operating system and version, hardware model, processor, memory, disk, uptime, and developer tools installed.",
 		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{}}},

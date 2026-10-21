@@ -499,8 +499,10 @@ func (s *CoreServer) handleBodyStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	// A live body also learns how its AI agent is meant to operate: its name,
 	// role, instructions and brain. These configure the AI agent and grant
-	// nothing; what it may do is still its grant's to say.
-	if a, ok := s.aiAgentAsset(b.AgentAssetID); ok && b.State == agentbody.StateActive {
+	// nothing; what it may do is still its grant's to say. Only when the
+	// request came sealed: a machine still waiting for approval asks unsealed,
+	// and the instructions are not for whatever can read that.
+	if a, ok := s.aiAgentAsset(b.AgentAssetID); ok && b.State == agentbody.StateActive && s.sealedSender(r) == host {
 		out["agent_name"] = a.DisplayName
 		if a.AgentConfig != nil {
 			out["role"] = a.AgentConfig.Role

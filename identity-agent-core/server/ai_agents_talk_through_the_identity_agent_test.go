@@ -19,13 +19,14 @@ import (
 )
 
 // talkWorld is an organisation with a signer on its roster, a controller paired
-// to it, and two AI agents — "Mac Mini" and "MacBook Pro" — each allowed to
+// to it, and two AI agents — "Desk assistant" and "Build server" — each allowed to
 // message the other, each enrolled with a body.
 type talkWorld struct {
 	s            *CoreServer
 	srv          *httptest.Server
 	a, b         *asset.Asset
 	hostA, hostB *agenthost.Host
+	machineA     testMachine
 	ctlAID       string
 	ctlSeed      []byte
 }
@@ -46,10 +47,10 @@ func newTalkWorld(t *testing.T, caps ...string) *talkWorld {
 	t.Cleanup(mgr.Stop)
 	s.SandboxManager = mgr
 	w := &talkWorld{s: s}
-	w.a = w.provision(t, "Mac Mini", caps)
-	w.b = w.provision(t, "MacBook Pro", caps)
+	w.a = w.provision(t, "Desk assistant", caps)
+	w.b = w.provision(t, "Build server", caps)
 	if err := s.assetHandler.Store.UpsertEmployee(asset.Employee{
-		PairwiseAID: "ESIGNER_rob", Name: "Rob", Role: "Owner", Status: "active", IsSigner: true, VouchSig: "0Bvouch",
+		PairwiseAID: "ESIGNER_alex", Name: "Alex", Role: "Owner", Status: "active", IsSigner: true, VouchSig: "0Bvouch",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -61,8 +62,8 @@ func newTalkWorld(t *testing.T, caps ...string) *talkWorld {
 	w.srv = httptest.NewServer(s.router)
 	t.Cleanup(w.srv.Close)
 	t.Setenv("PUBLIC_URL", w.srv.URL)
-	w.hostA = w.enrolBody(t, w.a)
-	w.hostB = w.enrolBody(t, w.b)
+	w.hostA, w.machineA = w.enrolBody(t, w.a)
+	w.hostB, _ = w.enrolBody(t, w.b)
 	return w
 }
 
@@ -78,7 +79,7 @@ func (w *talkWorld) provision(t *testing.T, name string, caps []string) *asset.A
 	return a
 }
 
-func (w *talkWorld) enrolBody(t *testing.T, a *asset.Asset) *agenthost.Host {
+func (w *talkWorld) enrolBody(t *testing.T, a *asset.Asset) (*agenthost.Host, testMachine) {
 	t.Helper()
 	m := newTestMachine(t)
 	host, _, _ := agentbody.Identity(m)
@@ -89,7 +90,7 @@ func (w *talkWorld) enrolBody(t *testing.T, a *asset.Asset) *agenthost.Host {
 		t.Fatalf("enrolling %s: %v", a.DisplayName, err)
 	}
 	<-done
-	return h
+	return h, m
 }
 
 // personSays is the signer, from their paired app, saying something to an AI
@@ -158,13 +159,13 @@ func (w *talkWorld) read(t *testing.T, conv string) []entryView {
 }
 
 // The whole of it, across a real Identity Agent and two real hosts: a signer
-// asks the Mac Mini to find out what the MacBook Pro runs; the Mac Mini's brain
-// asks the MacBook Pro; the MacBook Pro's brain answers from system_info; the
-// Mac Mini answers the person. Every entry is chained, countersigned as its
+// asks the desk assistant to find out what the build server runs; the desk assistant's brain
+// asks the build server; the build server's brain answers from system_info; the
+// desk assistant answers the person. Every entry is chained, countersigned as its
 // sender, and carries the sender's own signature.
 func TestTwoAIAgentsTalkThroughTheIdentityAgent(t *testing.T) {
 	w := newTalkWorld(t)
-	code, out := w.personSays(t, w.a, "", "find out what the MacBook Pro runs")
+	code, out := w.personSays(t, w.a, "", "find out what the build server runs")
 	if code != http.StatusCreated {
 		t.Fatalf("the person's message: %d %v", code, out)
 	}
@@ -173,12 +174,12 @@ func TestTwoAIAgentsTalkThroughTheIdentityAgent(t *testing.T) {
 	brainA := scripted{name: "test-brain", act: func(turn Turn) (string, error) {
 		switch {
 		case strings.Contains(turn.Prompt, "asks you"):
-			if text, failed := useTool(turn, "ask_agent", map[string]string{"to": "MacBook Pro", "text": "what OS and hardware are you on?"}); failed {
-				t.Errorf("asking the MacBook Pro: %s", text)
+			if text, failed := useTool(turn, "ask_agent", map[string]string{"to": "Build server", "text": "what OS and hardware are you on?"}); failed {
+				t.Errorf("asking the build server: %s", text)
 			}
 			return "", nil
 		case strings.Contains(turn.Prompt, "answered you"):
-			if text, failed := useTool(turn, "reply", map[string]string{"text": "The MacBook Pro says: " + turn.Prompt}); failed {
+			if text, failed := useTool(turn, "reply", map[string]string{"text": "The build server says: " + turn.Prompt}); failed {
 				t.Errorf("replying to the person: %s", text)
 			}
 			return "", nil
@@ -245,7 +246,7 @@ func TestTwoAIAgentsTalkThroughTheIdentityAgent(t *testing.T) {
 			t.Fatalf("entry %d does not carry its body's grade, stamped by the Identity Agent: %q", e.Seq, e.Record.BodyGrade)
 		}
 	}
-	if p := entries[0].Record.Person; p == nil || p.AID != "ESIGNER_rob" || p.Standing != "signer" {
+	if p := entries[0].Record.Person; p == nil || p.AID != "ESIGNER_alex" || p.Standing != "signer" {
 		t.Fatalf("the conversation does not name the person who opened it: %+v", p)
 	}
 	if !strings.Contains(entries[6].Body, `"architecture"`) {
@@ -269,7 +270,7 @@ func rename(kinds []string, w *talkWorld) []string {
 	return out
 }
 
-// openedWith is a conversation a person opened with the Mac Mini, and the id
+// openedWith is a conversation a person opened with the desk assistant, and the id
 // of their message.
 func (w *talkWorld) openedWith(t *testing.T) (conv, msg string) {
 	t.Helper()
@@ -316,8 +317,8 @@ func TestAnAIAgentWithoutTheGrantCannotAskAnother(t *testing.T) {
 	refusedWith(t, err, "does not let it message other AI agents")
 }
 
-// A reply goes only to whoever asked. The Mac Mini was asked by the person, so
-// it cannot "reply" to the MacBook Pro — which would reach an AI agent without
+// A reply goes only to whoever asked. The desk assistant was asked by the person, so
+// it cannot "reply" to the build server — which would reach an AI agent without
 // any grant being checked.
 func TestAReplyGoesOnlyToWhoAsked(t *testing.T) {
 	w := newTalkWorld(t)
@@ -330,8 +331,8 @@ func TestAReplyGoesOnlyToWhoAsked(t *testing.T) {
 // be readable wherever TLS ends on the way.
 func TestAnUnsealedMessageIsRefused(t *testing.T) {
 	w := newTalkWorld(t)
-	m := newTestMachine(t)
-	req := m.signed(t, "GET", "/api/agent-host/inbox", nil)
+	// The live body itself, signing correctly, but not sealing.
+	req := w.machineA.signed(t, "GET", "/api/agent-host/inbox", nil)
 	rec := httptest.NewRecorder()
 	w.s.router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "sealed") {
@@ -343,12 +344,17 @@ func TestAnUnsealedMessageIsRefused(t *testing.T) {
 // the roster, the paired app's request is refused, and the refusal recorded.
 func TestOnlyAPersonTheOrganisationCanProveOpensAConversation(t *testing.T) {
 	w := newTalkWorld(t)
-	if _, _, err := w.s.assetHandler.Store.SetEmployeeStatus("ESIGNER_rob", "revoked", ""); err != nil {
+	if _, _, err := w.s.assetHandler.Store.SetEmployeeStatus("ESIGNER_alex", "revoked", ""); err != nil {
 		t.Fatal(err)
 	}
 	code, out := w.personSays(t, w.a, "", "hello")
 	if code != http.StatusForbidden || !strings.Contains(out["error"].(string), "no signer") {
 		t.Fatalf("a conversation was opened with nobody provable asking: %d %v", code, out)
+	}
+	denied, _ := w.s.SandboxManager.Store().QueryInvocationEvents(sandbox.InvocationEventFilter{
+		CapabilityID: "agent.message.ask", ResultStatus: "denied"})
+	if len(denied) == 0 {
+		t.Fatal("the refusal is not in the governance record")
 	}
 }
 
@@ -388,8 +394,8 @@ func TestAChainOfAsksStopsAtItsDepth(t *testing.T) {
 	}
 	ctx := context.Background()
 	for i := 0; i < 6 && stopped == ""; i++ {
-		_ = w.hostA.Run(ctx, agenthost.RunOptions{Brain: ping("MacBook Pro"), Once: true, Workspace: t.TempDir()})
-		_ = w.hostB.Run(ctx, agenthost.RunOptions{Brain: ping("Mac Mini"), Once: true, Workspace: t.TempDir()})
+		_ = w.hostA.Run(ctx, agenthost.RunOptions{Brain: ping("Build server"), Once: true, Workspace: t.TempDir()})
+		_ = w.hostB.Run(ctx, agenthost.RunOptions{Brain: ping("Desk assistant"), Once: true, Workspace: t.TempDir()})
 	}
 	if !strings.Contains(stopped, "deep") {
 		t.Fatalf("the chain of asks was not stopped at its depth: %q", stopped)
@@ -435,5 +441,129 @@ func TestABodyMovesOnlyToItsOwnIdentityAgent(t *testing.T) {
 	}
 	if code, _, err := w.hostA.Call("GET", "/api/agent-host/agents", nil); err != nil || code != http.StatusOK {
 		t.Fatalf("a refused move changed where the body speaks: %d %v", code, err)
+	}
+}
+
+// sayTo is a body acting on the last message waiting for it: it takes it from
+// its inbox, acknowledges it, and returns it.
+func sayTo(t *testing.T, h *agenthost.Host) agenthost.Delivery {
+	t.Helper()
+	ds, err := h.Inbox(context.Background(), false)
+	if err != nil || len(ds) == 0 {
+		t.Fatalf("nothing waiting: %v", err)
+	}
+	d := ds[len(ds)-1]
+	if err := h.Check(&d); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.Say(context.Background(), agentmessage.KindReceipt, d.Record.Conversation, d.Record.From,
+		d.Entry.MessageID, d.Entry.Hash, agentmessage.Brain{}); err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
+
+// An ask is answered once. A body that could answer again and again could
+// make the asker's brain run again and again, on somebody's bill.
+func TestAnAskIsAnsweredOnlyOnce(t *testing.T) {
+	w := newTalkWorld(t)
+	w.openedWith(t)
+	d := sayTo(t, w.hostA)
+	ctx := context.Background()
+	if _, err := w.hostA.Say(ctx, agentmessage.KindReply, d.Record.Conversation, d.Record.From, d.Entry.MessageID, "first", agentmessage.Brain{}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := w.hostA.Say(ctx, agentmessage.KindFailure, d.Record.Conversation, d.Record.From, d.Entry.MessageID, "again", agentmessage.Brain{})
+	refusedWith(t, err, "already been answered")
+}
+
+// A receipt is for a message still waiting: an old message cannot be
+// acknowledged again to keep a conversation alive.
+func TestAReceiptIsOnlyForAMessageStillWaiting(t *testing.T) {
+	w := newTalkWorld(t)
+	w.openedWith(t)
+	d := sayTo(t, w.hostA)
+	_, err := w.hostA.Say(context.Background(), agentmessage.KindReceipt, d.Record.Conversation, d.Record.From,
+		d.Entry.MessageID, d.Entry.Hash, agentmessage.Brain{})
+	refusedWith(t, err, "not waiting")
+}
+
+// The grant's constraint on whom an AI agent may message is enforced.
+func TestAnAIAgentMessagesOnlyWhomItsGrantNames(t *testing.T) {
+	w := newTalkWorld(t)
+	if _, err := w.s.assetHandler.SetAgentGrantConstraints(w.a.ID, map[string]interface{}{
+		capabilityMessageAgent: map[string]interface{}{"to": []interface{}{"ESOMEBODY_ELSE"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	a, _ := w.s.aiAgentAsset(w.a.ID)
+	if _, err := w.s.issueCapabilityGrant(&a); err != nil {
+		t.Fatal(err)
+	}
+	w.openedWith(t)
+	d := sayTo(t, w.hostA)
+	_, err := w.hostA.Say(context.Background(), agentmessage.KindAsk, d.Record.Conversation, w.b.PairwiseAID,
+		d.Entry.MessageID, "what are you?", agentmessage.Brain{})
+	refusedWith(t, err, "does not let it message that AI agent")
+}
+
+// When a person who opened a conversation stops being someone the
+// organisation can prove, the AI agents in it can no longer ask on their
+// behalf.
+func TestAnAskStopsWhenTheOpenerNoLongerStands(t *testing.T) {
+	w := newTalkWorld(t)
+	w.openedWith(t)
+	d := sayTo(t, w.hostA)
+	if _, _, err := w.s.assetHandler.Store.SetEmployeeStatus("ESIGNER_alex", "revoked", ""); err != nil {
+		t.Fatal(err)
+	}
+	_, err := w.hostA.Say(context.Background(), agentmessage.KindAsk, d.Record.Conversation, w.b.PairwiseAID,
+		d.Entry.MessageID, "what are you?", agentmessage.Brain{})
+	refusedWith(t, err, "no longer someone the organisation can prove")
+}
+
+// A brain that fails closes the turn with a signed failure notice, so the
+// one who asked is not left waiting.
+func TestAFailedBrainSendsAFailureNotice(t *testing.T) {
+	w := newTalkWorld(t)
+	conv, _ := w.openedWith(t)
+	broken := scripted{name: "test-brain", act: func(Turn) (string, error) { return "", errors.New("usage limit reached") }}
+	if err := w.hostA.Run(context.Background(), agenthost.RunOptions{Brain: broken, Once: true, Workspace: t.TempDir()}); err != nil {
+		t.Fatal(err)
+	}
+	entries := w.read(t, conv)
+	last := entries[len(entries)-1]
+	if last.Kind != agentmessage.KindFailure || !strings.Contains(last.Body, "usage limit reached") {
+		t.Fatalf("no failure notice closed the turn: %s %q", last.Kind, last.Body)
+	}
+}
+
+// A conversation holds a bounded number of turns.
+func TestAConversationRunsOutOfTurns(t *testing.T) {
+	w := newTalkWorld(t)
+	conv, _ := w.openedWith(t)
+	var code int
+	var out map[string]any
+	for i := 0; i < conversation.MaxTurns+1; i++ {
+		if code, out = w.personSays(t, w.a, conv, "and another thing"); code != http.StatusCreated {
+			break
+		}
+	}
+	if code != http.StatusConflict || !strings.Contains(out["error"].(string), "turns") {
+		t.Fatalf("the conversation did not run out of turns: %d %v", code, out)
+	}
+}
+
+// A body can read back what has been said in a conversation it is in, and
+// not one it is not.
+func TestABodyReadsOnlyConversationsItIsIn(t *testing.T) {
+	w := newTalkWorld(t)
+	conv, _ := w.openedWith(t)
+	code, b, err := w.hostA.Call("GET", "/api/agent-host/conversations/"+conv, nil)
+	if err != nil || code != http.StatusOK || !strings.Contains(string(b), "hello") {
+		t.Fatalf("the desk assistant could not read its own conversation: %d %s %v", code, b, err)
+	}
+	if code, _, _ := w.hostB.Call("GET", "/api/agent-host/conversations/"+conv, nil); code != http.StatusForbidden {
+		t.Fatalf("the build server read a conversation it is not in: %d", code)
 	}
 }
