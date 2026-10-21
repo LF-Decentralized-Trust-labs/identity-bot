@@ -399,6 +399,25 @@ func TestTheOwnerTheOrganisationNamesMayAsk(t *testing.T) {
 	refusedWith(t, err, "no longer someone the organisation can prove")
 }
 
+// The list of AI agents always says what limits each grant carries, even when
+// there are none, so a front end can tell "no limits" from "not reported".
+func TestTheAgentListAlwaysReportsAGrantsLimits(t *testing.T) {
+	w := newTalkWorld(t)
+	rec := httptest.NewRecorder()
+	w.s.handleListAgents(rec, httptest.NewRequest("GET", "/", nil))
+	var out struct {
+		Agents []map[string]json.RawMessage `json:"agents"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || len(out.Agents) == 0 {
+		t.Fatalf("listing: %d %s", rec.Code, rec.Body.String())
+	}
+	for _, a := range out.Agents {
+		if c, ok := a["resource_constraints"]; !ok || string(c) != "{}" {
+			t.Fatalf("an AI agent with no limits did not report them as none: %s", rec.Body.String())
+		}
+	}
+}
+
 // What arrives at a body is checked before it is acted on: words that are not
 // the words the entry's digest names are refused.
 func TestABodyRefusesAMessageWhoseWordsWereChanged(t *testing.T) {

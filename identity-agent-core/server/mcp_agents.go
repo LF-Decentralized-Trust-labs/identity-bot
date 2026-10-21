@@ -180,7 +180,9 @@ type agentView struct {
 	Capabilities []string `json:"capabilities"`
 	// ResourceConstraints are the grant's per-capability argument limits — who
 	// it may message, among others — so a front end changing one keeps the rest.
-	ResourceConstraints map[string]interface{} `json:"resource_constraints,omitempty"`
+	// Always present, empty when there are none: a front end reads its absence
+	// as an Identity Agent too old to report them, and then leaves them alone.
+	ResourceConstraints map[string]interface{} `json:"resource_constraints"`
 	Config              *asset.AgentConfig     `json:"agent_config,omitempty"`
 	Status              string                 `json:"status"` // active | revoked
 	CreatedAt           time.Time              `json:"created_at"`
