@@ -43,7 +43,8 @@ Development tunnels (Cloudflare, ngrok) stay, labelled not private.
 
 **The protocol ties neither mode to any kind of identity.** An identity may hold
 both, from different relays. Which mode an instance uses is a setting
-(`resolveIngressMode`).
+(`resolveIngressMode`): `relay` for private, `public` for public, each with its
+own relay operator setting.
 
 **Defaults.** The open-source core defaults every identity to private
 (`defaultIngressModeForEntity`), because privacy is the safe default. A product
@@ -253,29 +254,92 @@ base32 DNS label. They are never derived from an identifier.
 
 ### 7. Public names and custom domains
 
-A public allocation is either a name at the relay or the identity's own domain.
+A public address is a name at the relay, or the identity's own domain.
 - **A name** belongs to the first proven key that claims it, and only that key
   releases it. A relay limits how many names one identity may hold, and keeps a
-  reserved list of names nobody may claim.
-- **A custom domain** is activated only after a DNS TXT record proves the domain is
-  the identity's. Only then does the relay request a certificate for it. A custom
-  domain keeps an identity's `did:webs` identifier independent of any one operator.
+  reserved list of names nobody may claim (its own paths, and names such as
+  `login`, `support`, `admin`, `www` and `api`). A released name is held back
+  from anybody else for a time, so it cannot be picked up at once to
+  impersonate whoever gave it up.
+- **A custom domain** is activated only after a DNS TXT record proves the domain
+  is the identity's: `TXT _iarelay.<domain>` carrying `iarelay-aid=<identifier>`.
+  Only then does the relay request a certificate for it. A custom domain keeps an
+  identity's `did:webs` identifier independent of any one operator.
 - The management surface stays on loopback in every mode (ADR-042 §2). A public
   address reaches it only by a controller's signature.
 
-### 8. Discovery, enrolment and allocation requests
+### 8. Discovery, addresses and control requests
 
-- **What survives from ADR-024:**
-  - the discovery descriptor at `/.well-known/url-relay-service.json`, whose
-    `tunnel_endpoint` now names the `iarelay.v2` websocket;
-  - the allocate and release requests, which are already signed by the enrolment
-    key over a canonical body.
-- **What is replaced:**
-  - Enrolment is the first admission. The key event log travels with it, and there
-    is no separate enrol call and no enrolment token.
-  - An allocation token is a label in an address, never a credential that opens a
-    tunnel.
-  - The frame protocol (`IARELAY10JSON`) and its schema go.
+**Discovery.** A relay publishes `GET /.well-known/url-relay-service.json`:
+`protocol` (this protocol's version), `service` (the relay's name, the host name
+its challenges carry), `mode`, `tunnel_endpoint` (the `wss://` session
+endpoint), and `endpoints`, which maps each control `op` below to the URL it is
+sent to.
+
+**Enrolment is the first admission.** The key event log travels with it
+(§3). There is no separate enrol call and no enrolment token.
+
+**Where an address is, and what reaches the Identity Agent:**
+
+| Address | Form | What the Identity Agent receives |
+|---|---|---|
+| private | a path at the private relay: `https://<private-relay>/<label>/...` | the request with `/<label>` removed from its path, and `X-Forwarded-Prefix: /<label>`. Links it writes must carry that path. |
+| public name | a host under the public relay: `https://<name>.<public-relay>/...` | the request unchanged |
+| custom domain | `https://<domain>/...` | the request unchanged |
+
+The stream's preamble names the label, name or domain. The Identity Agent
+takes what an address is, and the URL it writes about itself there, from its
+own record of the addresses it holds (§6), never from a header a caller could
+send.
+
+**Control requests.** Everything an Identity Agent asks of a relay is a JSON
+object of string fields, every one printable ASCII, signed by the key its
+enrolment identifier's log names now. Every request carries:
+
+| Field | |
+|---|---|
+| `op` | which request it is, so a signature for one cannot be used as another |
+| `relay` | the relay's `service` name, so it cannot be used at another relay |
+| `signed_by` | the enrolment identifier |
+| `t` | RFC 3339, within two minutes of the relay's clock |
+| `nonce` | 16 to 64 characters, never accepted twice |
+| `signature` | Ed25519, base64url without padding, over the request's other fields as JSON with sorted keys, no whitespace and no HTML escaping: the form an admission statement is signed in (§3) |
+
+The relay accepts a control request only while `signed_by` holds a live
+session, and checks it against the key that session's log names now.
+
+**Private addresses:**
+
+| `op` | Fields | Does |
+|---|---|---|
+| `allocate` | `commitment`: base64url SHA-256 of a secret of 32 or more random bytes the Identity Agent keeps | makes an address: `allocation` (a 128-bit random label) and `public_url` |
+| `bind` | `allocation`, `secret` | attaches an address to the caller's session |
+| `release` | `allocation`, `secret` | ends an address |
+
+The relay stores each label and the commitment to its secret, **never which
+identifier made it**. Which session serves which label it keeps in memory only.
+So after every admission the Identity Agent sends `bind` for each private
+address it holds; the secret proves the address is its own. An Identity Agent
+whose `bind` is refused (the relay no longer has the address, or the secret is
+not the one it was made with) no longer holds that address, and makes a new
+one.
+
+**Public addresses:**
+
+| `op` | Fields | Does |
+|---|---|---|
+| `claim-name` | `name`: 3 to 32 lowercase letters, digits and single inner hyphens | the first proven key to claim a name holds it; claiming a name one already holds is harmless |
+| `release-name` | `name` | only its holder may release it |
+| `request-domain` | `domain` | returns `txt_name` and `txt_value`, the record that proves the domain |
+| `verify-domain` | `domain` | checks the record; only then is the domain served and a certificate requested |
+| `release-domain` | `domain` | only its holder may release it |
+
+A public relay gives an address only at a name or a proven domain.
+
+**What this replaces from ADR-024:** the enrolment call and its token, the
+allocate and release bodies signed by token-bearing enrolments, and the frame
+protocol (`IARELAY10JSON`) and its schema. The discovery descriptor survives,
+reshaped as above.
 
 ### 9. Finding an address that moved
 
@@ -329,16 +393,25 @@ Agent, so that connection must run end to end between them.
 **Built in the core:** the private default and the product's default seam
 (`DefaultIngressMode`).
 
+**Built in the core client (`relay/`):** the session through `relayproto`, the
+control requests above, private addresses held by their secrets and bound again
+after every admission, public names, reconnection with backoff, and the
+Identity Agent's per-allocation rule (§6): an address is looked up in its own
+records, never trusted from the preamble, and a private one reaches only routes
+drawn from `publicRoutes`. Each mode has its own enrolment identifier and its
+own record. The earlier frame protocol and the Chisel tunnel provider are
+removed.
+
 **Not built yet:**
-- **The core client.** The core still uses `relay/` (the earlier frame protocol)
-  and the Chisel tunnel provider. Moving the client onto `relayproto` removes both.
-  `relay/` duplicates part of this package until then, and that copy is deleted in
-  the same change, not kept beside it.
-- **The Identity Agent's per-allocation rule** (§6), derived from `publicRoutes`
-  and keyed by its own record of each allocation.
-- **Public names, the reserved list and custom-domain DNS proof** (§7), in a relay
-  server.
-- **Republishing the endpoint record** when the address moves (§9).
+- **Republishing the endpoint record** when the address moves (§9). The core
+  recomputes its published address; it does not yet send a signed `/loc/scheme`
+  record to its witnesses and watchers.
+- **A screen for custom domains.** The core client can request and verify one;
+  no settings screen offers it yet.
+- **One private address per relationship.** The core holds one private address
+  and gives it to every counterparty. The protocol allows one per relationship,
+  and the client can allocate them; handing a fresh one to each new
+  relationship is not wired in.
 
 ## Consequences
 
