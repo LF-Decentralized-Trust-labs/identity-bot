@@ -96,8 +96,9 @@ func IsProtocolMediaType(contentType string) bool {
 // address in mode, and makes it safe to pass. It refuses a redirect, or a body
 // in any type but the protocol's, or an answer naming more than one type;
 // keeps only the headers in passedResponseHeaders; and sets
-// ProtocolResponseHeaders. A cookie passes only at a public address, and only
-// one held by that address alone. A websocket is accepted only at a public
+// ProtocolResponseHeaders. No cookie passes: the protocol uses none, and a
+// cookie filter that reads a cookie differently from a browser (a space in
+// "domain = .apex") would let one address set cookies for all of them. A websocket is accepted only at a public
 // address, where the identity's own front ends keep one open; a browser cannot
 // load a page from one.
 func CheckProtocolResponse(resp *http.Response, mode Mode) error {
@@ -128,7 +129,6 @@ func CheckProtocolResponse(resp *http.Response, mode Mode) error {
 	case !IsProtocolMediaType(types[0]):
 		return fmt.Errorf("%w: %s", ErrNotProtocol, types[0])
 	}
-	cookies := h.Values("Set-Cookie")
 	keepOnly(h, passedResponseHeaders, passedResponseHeaderPrefixes)
 	for name, v := range ProtocolResponseHeaders {
 		h.Set(name, v)
@@ -136,15 +136,6 @@ func CheckProtocolResponse(resp *http.Response, mode Mode) error {
 	h.Add("Vary", "Sec-Fetch-Mode")
 	h.Add("Vary", "Sec-Fetch-Dest")
 	h.Add("Vary", "Accept")
-	// Every private address shares one origin, so a cookie set at one would
-	// reach the others. At a public address a cookie is the address's own.
-	if mode == ModePublic {
-		for _, c := range cookies {
-			if parsed, err := http.ParseSetCookie(c); err == nil && parsed.Domain == "" {
-				h.Add("Set-Cookie", c)
-			}
-		}
-	}
 	return nil
 }
 

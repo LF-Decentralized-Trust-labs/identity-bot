@@ -145,6 +145,7 @@ func TestAProtocolAnswerIsSealedForBrowsers(t *testing.T) {
 		h.Set("Service-Worker-Allowed", "/")
 		h.Add("Set-Cookie", "a=1; Domain=relay.test")
 		h.Add("Set-Cookie", "b=2")
+		h.Add("Set-Cookie", "c=1; domain = .relay.test")
 		io.WriteString(w, `{}`)
 	}))
 	req, _ := http.NewRequest("GET", r.front.URL+"/api/health", nil)
@@ -166,7 +167,9 @@ func TestAProtocolAnswerIsSealedForBrowsers(t *testing.T) {
 	if v := strings.Join(resp.Header.Values("Vary"), ","); !strings.Contains(v, "Sec-Fetch-Mode") {
 		t.Errorf("a cache could hand this answer to a browser loading a page: Vary %q", v)
 	}
-	if c := resp.Header.Values("Set-Cookie"); len(c) != 1 || c[0] != "b=2" {
+	// None at all: a browser reads "domain = .relay.test" as the whole apex
+	// where a parser may not, so no cookie is safer than a filtered one.
+	if c := resp.Header.Values("Set-Cookie"); len(c) != 0 {
 		t.Errorf("cookies passed: %q", c)
 	}
 }
@@ -290,12 +293,8 @@ func TestOnlyTheProtocolsHeadersPass(t *testing.T) {
 				t.Errorf("%s: the protocol's %s was dropped", host, name)
 			}
 		}
-		cookies := resp.Header.Values("Set-Cookie")
-		if host == "acme.relay.test" && (len(cookies) != 1 || cookies[0] != "b=2") {
-			t.Errorf("public address: cookies %q, want its own", cookies)
-		}
-		if host == "a1b2.relay.test" && len(cookies) != 0 {
-			t.Errorf("private address: cookies passed to the shared origin: %q", cookies)
+		if cookies := resp.Header.Values("Set-Cookie"); len(cookies) != 0 {
+			t.Errorf("%s: cookies passed: %q", host, cookies)
 		}
 	}
 }

@@ -442,9 +442,9 @@ and the same way for every identity:
   `-Headers`, `-Expose-Headers`, `-Max-Age`; never `-Allow-Credentials`). Every
   other header is dropped, so anything a browser could act on (a redirect, a
   preload, a sign-in prompt, a cache lifetime, a download name) is absent by
-  construction rather than by a list of what to remove. A cookie passes only at a
-  public address and only if it is that address's own; at a private address,
-  where every address shares one origin, none passes. A protocol switch keeps
+  construction rather than by a list of what to remove. No cookie passes at any
+  address: the protocol uses none, and a filter that reads a cookie differently
+  from a browser would let one address set cookies for every other. A protocol switch keeps
   only `Upgrade`, `Connection` and the `Sec-WebSocket-` headers.
 - **Every answer is sealed for browsers and kept from caches.** The relay sets
   `X-Content-Type-Options: nosniff`,
