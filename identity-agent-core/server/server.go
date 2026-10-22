@@ -3099,6 +3099,13 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "Failed to read identity", err.Error())
 		return
 	}
+	// A private address is made for one relationship and must not be tied to
+	// the identity behind it, so there the root identity is not known: the
+	// answer is the one any unknown identifier gets (ADR-048 §6).
+	if identity != nil && identity.AID == requestedAID && s.reachedAtPrivateAddress(r) {
+		writeError(w, http.StatusNotFound, "AID not found", fmt.Sprintf("No identity found for AID: %s", requestedAID))
+		return
+	}
 	if identity == nil || identity.AID != requestedAID {
 		// check asset store for a matching pairwise AID (G-049: serve asset AIDs for login verify)
 		if s.assetHandler != nil {

@@ -394,6 +394,23 @@ func (s *CoreServer) runRelay(ctx context.Context, gen int) {
 // preamble names, taken from its own records. A private address is a path at
 // the relay, so links this Identity Agent writes into a response must carry
 // it; nothing a caller sends (a Host or X-Forwarded-Prefix header) decides it.
+// reachedAtPrivateAddress reports whether r arrived through a relay at one of
+// this Identity Agent's private addresses, by its own record of the address,
+// never the relay's word. A relayed request whose address it cannot find in
+// its records counts as private: that is the side that discloses less.
+func (s *CoreServer) reachedAtPrivateAddress(r *http.Request) bool {
+	p, ok := relayproto.PreambleFrom(r.Context())
+	if !ok {
+		return false
+	}
+	rm := s.currentRelay()
+	if rm == nil {
+		return true
+	}
+	a := rm.Lookup(p.Allocation)
+	return a == nil || a.Mode != relayproto.ModePublic
+}
+
 func (s *CoreServer) relayedAddress(r *http.Request) (string, bool) {
 	p, ok := relayproto.PreambleFrom(r.Context())
 	if !ok {
