@@ -466,6 +466,12 @@ func (m *Manager) serve(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not an address of this Identity Agent", http.StatusNotFound)
 		return
 	}
+	// A browser loading a page is the relay's to answer, with its own page;
+	// none reaches this Identity Agent through a relay (ADR-048).
+	if relayproto.IsBrowserNavigation(r) {
+		http.Error(w, "an Identity Agent address does not serve pages", http.StatusNotFound)
+		return
+	}
 	if a.Mode == relayproto.ModePrivate && (m.cfg.PrivateMayReach == nil || !m.cfg.PrivateMayReach(r)) {
 		http.Error(w, "not reachable at a private address", http.StatusNotFound)
 		return

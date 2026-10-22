@@ -4,12 +4,9 @@ import (
 	"bytes"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"regexp"
 	"strings"
-
-	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto"
 )
 
 // Serving the web UI from somewhere other than the root of a domain.
@@ -19,13 +16,14 @@ import (
 // canvaskit — is fetched relative to it. Built for the root, that base is "/".
 //
 // An agent reached directly on its own port is at the root, so this never came
-// up. An agent reached through a relay is not: it lives under a path the relay
-// assigned, and the browser is looking at something like
+// up. An agent reached through a proxy that serves it under a path is not (a
+// relay never serves the web UI: ADR-048 §12), and the browser is looking at
+// something like
 // https://host/some-prefix/. It loads index.html fine, reads <base href="/">,
 // and then asks for /main.dart.js — which is not where the app is. The result
 // is a blank page, because the shell loaded and the code never did.
 //
-// Two halves, and both are needed because a relay may forward the prefix or
+// Two halves, and both are needed because a proxy may forward the prefix or
 // strip it, and the agent cannot assume which:
 //
 //   - The base href in index.html is rewritten to the prefix actually in use,
@@ -51,23 +49,6 @@ var baseHrefPattern = regexp.MustCompile(`(?i)(<base\s+href=")([^"]*)(")`)
 // it, and is a fallback rather than the primary answer: a static setting has to
 // be kept in step with routing by hand, which is exactly the kind of agreement
 // that quietly stops being true.
-//
-// Through a relay, the prefix is the path of the address the request came to,
-// from this Identity Agent's own record of it: a caller reaching a public
-// address could send any X-Forwarded-Prefix, and it must not decide the page's
-// base.
-func (s *CoreServer) webPathPrefix(r *http.Request) string {
-	if _, relayed := relayproto.PreambleFrom(r.Context()); relayed {
-		if addr, ok := s.relayedAddress(r); ok {
-			if u, err := url.Parse(addr); err == nil {
-				return normalisePrefix(u.Path)
-			}
-		}
-		return "/"
-	}
-	return webPathPrefix(r)
-}
-
 func webPathPrefix(r *http.Request) string {
 	prefix := r.Header.Get("X-Forwarded-Prefix")
 	if prefix == "" {

@@ -183,7 +183,7 @@ func TestAPrivateAddressReachesNothingElse(t *testing.T) {
 // What a private address may reach is never more than a stranger may: every
 // relationship route is a public route.
 func TestEveryRelationshipRouteIsPublic(t *testing.T) {
-	for key := range relationshipRoutes {
+	for _, key := range relayproto.PrivateRoutes {
 		if _, ok := publicRoutes[key]; !ok {
 			t.Errorf("%s may be reached at a private address but is not a public route", key)
 		}
@@ -450,5 +450,43 @@ func TestAPrivateAddressDoesNotUpgrade(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("an upgrade on a private address was answered %d", resp.StatusCode)
+	}
+}
+
+// An address at a relay carries the protocol and never a page. A browser
+// loading one is the relay's to answer; and a script asking for HTML gets the
+// protocol's answer, not the page this Identity Agent shows a browser that
+// opens the same link directly.
+func TestARelayedRequestIsNeverAnsweredWithAPage(t *testing.T) {
+	s, rl, _, cancel := relayWorld(t, relayproto.ModePublic)
+	defer cancel()
+	aid := "E" + strings.Repeat("P", 43)
+	if err := s.DataStore.SaveIdentity(store.IdentityState{AID: aid}); err != nil {
+		t.Fatal(err)
+	}
+	go s.startRelay()
+	defer s.Stop()
+	url := s.waitForRelay(t)
+
+	ask := func(headers map[string]string) (int, string, string) {
+		req, _ := http.NewRequest("GET", url+"/public/oobi/"+aid, nil)
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+		resp, err := rl.Caller().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, resp.Header.Get("Content-Type"), string(b)
+	}
+	code, ct, body := ask(map[string]string{"Accept": "text/html", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty"})
+	if code != http.StatusOK || strings.Contains(ct, "html") || strings.Contains(body, "<html") {
+		t.Fatalf("a script asking for HTML through a relay: %d %q %.200s", code, ct, body)
+	}
+	code, _, body = ask(map[string]string{"Accept": "text/html", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document"})
+	if code == http.StatusOK || strings.Contains(body, "<html") {
+		t.Fatalf("a browser loading a page through a relay: %d %.200s", code, body)
 	}
 }

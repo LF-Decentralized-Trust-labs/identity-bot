@@ -1093,10 +1093,14 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		}
 
 		r.Get("/*", func(w http.ResponseWriter, r *http.Request) {
+			if arrivedByRelay(r) {
+				http.NotFound(w, r)
+				return
+			}
 			// The prefix this agent is being served under. Empty at the root,
-			// set when a relay has put the UI on a subpath — see
+			// set when a proxy has put the UI on a subpath — see
 			// web_base_href.go for why both halves of this are needed.
-			prefix := s.webPathPrefix(r)
+			prefix := webPathPrefix(r)
 			urlPath := stripPrefix(r.URL.Path, prefix)
 			filePath := filepath.Join(absWebDir, urlPath)
 			_, statErr := os.Stat(filePath)
@@ -1124,6 +1128,10 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		})
 	} else {
 		r.Get("/*", func(w http.ResponseWriter, r *http.Request) {
+			if arrivedByRelay(r) {
+				http.NotFound(w, r)
+				return
+			}
 			w.Header().Set("Content-Type", "text/html")
 			w.WriteHeader(200)
 			fmt.Fprintf(w, `<!DOCTYPE html>
@@ -3188,8 +3196,10 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
 
 	// Browser landing page: when a browser (not the Identity Agent app) opens an OOBI link,
 	// return a human-readable HTML page with download instructions and the OOBI URL.
+	// Never through a relay: an address there carries the protocol, not
+	// pages, and a browser that loads one is shown the relay's own page.
 	acceptHeader := r.Header.Get("Accept")
-	if strings.Contains(acceptHeader, "text/html") {
+	if strings.Contains(acceptHeader, "text/html") && !arrivedByRelay(r) {
 		action := r.URL.Query().Get("action")
 		actionLabel := "connect with you on Identity Agent"
 		if action == "add_contact" {
@@ -3347,7 +3357,7 @@ func (s *CoreServer) handlePublicCredentialServe(w http.ResponseWriter, r *http.
 	}
 
 	acceptHeader := r.Header.Get("Accept")
-	if strings.Contains(acceptHeader, "text/html") {
+	if strings.Contains(acceptHeader, "text/html") && !arrivedByRelay(r) {
 		typeName := cred.CredentialType
 		if typeName == "" {
 			typeName = "Credential"
