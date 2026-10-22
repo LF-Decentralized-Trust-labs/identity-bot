@@ -314,6 +314,7 @@ func (s *CoreServer) recordMessage(cc sandbox.CallerContext, e conversation.Entr
 	cc.WorkItem = e.Conversation
 	cc.Reason = clampWhy(fmt.Sprintf("%s %s in %s, from %s to %s", e.Kind, e.MessageID, e.Conversation, e.From, e.To))
 	s.SandboxManager.RecordGovernanceEvent(cc, "agent.message."+e.Kind, "ok")
+	s.noteRecorded()
 }
 
 // ── A person speaks ──────────────────────────────────────────────────────────

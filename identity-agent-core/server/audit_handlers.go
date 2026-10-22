@@ -267,13 +267,27 @@ func (s *CoreServer) handleVerifyAuditChain(w http.ResponseWriter, r *http.Reque
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	resp := map[string]any{"intact": len(faults) == 0, "chain_start_kept": start != nil}
+	// The anchors fix what the links cannot: the newest rows, and a chain
+	// rewritten end to end by whoever holds the signer's key.
+	anchors, err := s.checkAnchors()
+	if err != nil {
+		jsonError(w, "The log's anchors cannot be checked right now: "+err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	resp := map[string]any{
+		"intact": len(faults) == 0 && anchors.BrokenAt == 0, "chain_start_kept": start != nil,
+		"anchored_through": anchors.AnchoredThrough, "unanchored_rows": anchors.Unanchored,
+	}
 	if len(faults) > 0 {
 		resp["broken_at"] = faults[0].ID
 		resp["faults"] = faults
 		resp["detail"] = fmt.Sprintf("%d record(s) do not hold, the first at id %d: %s. "+
 			"A record has been deleted, reordered, edited or forged since it was written.",
 			len(faults), faults[0].ID, faults[0].Reason)
+	}
+	if anchors.BrokenAt != 0 {
+		resp["anchor_broken_at"] = anchors.BrokenAt
+		resp["anchor_detail"] = "An anchor no longer holds: " + anchors.Why + "."
 	}
 	writeJSON(w, resp)
 }

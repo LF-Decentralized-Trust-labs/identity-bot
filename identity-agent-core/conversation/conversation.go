@@ -334,6 +334,46 @@ func (s *Store) List(party string, limit int) ([]Conversation, error) {
 	return out, nil
 }
 
+// ChangedSince returns every conversation with an entry after t.
+func (s *Store) ChangedSince(t time.Time) ([]Conversation, error) {
+	// Compared as times, not as text: a stamp with no fraction of a second
+	// sorts after one with a fraction in the same second.
+	rows, err := s.db.Query(`SELECT id, last_at FROM conversations ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for rows.Next() {
+		var id, last string
+		if err := rows.Scan(&id, &last); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if unstamp(last).After(t) {
+			ids = append(ids, id)
+		}
+	}
+	rows.Close()
+	out := []Conversation{}
+	for _, id := range ids {
+		c, err := s.Get(id)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, nil
+}
+
+// EntryAt returns a conversation's entry at seq.
+func (s *Store) EntryAt(conv string, seq int) (Entry, error) {
+	e, err := scanEntry(s.db.QueryRow(`SELECT `+entryColumns+` FROM entries WHERE conversation = ? AND seq = ?`, conv, seq))
+	if errors.Is(err, sql.ErrNoRows) {
+		return e, ErrNotFound
+	}
+	return e, err
+}
+
 // IsParty reports whether party has been brought into a conversation: it
 // opened it, sent in it, or was sent to in it.
 func (s *Store) IsParty(conv, party string) bool {

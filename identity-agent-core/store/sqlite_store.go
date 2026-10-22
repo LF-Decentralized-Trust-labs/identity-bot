@@ -921,6 +921,58 @@ func (s *SQLiteStore) KeepRegistry(r CredentialRegistry, anchor *EventRecord) er
 	return nil
 }
 
+// KeepEvents keeps several events in one transaction: a delegation's approval
+// and the inception it approves are either both kept or neither is.
+func (s *SQLiteStore) KeepEvents(events ...EventRecord) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to keep events: %w", err)
+	}
+	defer tx.Rollback()
+	for _, ev := range events {
+		if err := saveEvent(tx, ev); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// KeepRecordAnchor keeps an anchoring interaction and what it anchors in one
+// transaction.
+func (s *SQLiteStore) KeepRecordAnchor(ev EventRecord, a RecordAnchor) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to keep the anchor: %w", err)
+	}
+	defer tx.Rollback()
+	if err := saveEvent(tx, ev); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT INTO record_anchors (seq, said, statement, digest, created_at) VALUES (?, ?, ?, ?, ?)`,
+		a.Seq, a.SAID, a.Statement, a.Digest, a.CreatedAt); err != nil {
+		return fmt.Errorf("failed to keep the anchor: %w", err)
+	}
+	return tx.Commit()
+}
+
+// GetRecordAnchors returns every anchoring of the record, oldest first.
+func (s *SQLiteStore) GetRecordAnchors() ([]RecordAnchor, error) {
+	rows, err := s.db.Query(`SELECT seq, said, statement, digest, created_at FROM record_anchors ORDER BY seq`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the record's anchors: %w", err)
+	}
+	defer rows.Close()
+	var out []RecordAnchor
+	for rows.Next() {
+		var a RecordAnchor
+		if err := rows.Scan(&a.Seq, &a.SAID, &a.Statement, &a.Digest, &a.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
 // GetCredentialTEL returns a credential's transaction log in order. An empty
 // result means nothing was kept, which is not the same as "never revoked".
 func (s *SQLiteStore) GetCredentialTEL(registrySAID, acdcSAID string) ([]CredentialTELEvent, error) {
@@ -1759,6 +1811,9 @@ func PoolBase(namespace string) (int, error) {
 		return 8000001, nil
 	case "relay-public-enrollment":
 		return 9000001, nil
+	case "record":
+		// The identity that anchors the record, delegated from this one.
+		return 10000001, nil
 	}
 	return 0, fmt.Errorf("pairwise pool %q has no range of its own — give it one in "+
 		"PoolBase, because a pool without one shares keys with another", namespace)

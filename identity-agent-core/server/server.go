@@ -173,6 +173,8 @@ type CoreServer struct {
 	CallerResolver     CallerResolver // resolves endpoint caller identity/scopes; nil = loopback default (delegated-identity injects the real one)
 	mu                 sync.Mutex
 	running            bool
+	// anchorStop ends the record's anchoring when the server stops.
+	anchorStop chan struct{}
 }
 
 type Config struct {
@@ -413,7 +415,7 @@ func New(cfg Config) (*CoreServer, error) {
 	// Seed the engine from what was persisted, so issuing and anchoring work
 	// after a restart without a fresh inception. Both implementations start
 	// empty, so both need this.
-	s.reloadIdentityIntoDriver()
+	s.reloadKeyLogs()
 
 	if s.WitnessService != nil {
 		s.WitnessService.Driver = s.KeriDriver
@@ -681,6 +683,8 @@ func (s *CoreServer) Start() error {
 	// EndpointService ranks it above the ephemeral tunnel. Absent a configured
 	// relay this returns immediately, leaving the tunnel/direct path in place.
 	go s.startRelay()
+	s.anchorStop = make(chan struct{})
+	go s.keepAnchoring(s.anchorStop)
 
 	s.httpSrv = s.httpServer()
 	go func() {
@@ -718,6 +722,10 @@ func (s *CoreServer) Stop() {
 		s.TunnelManager.Disconnect()
 	}
 
+	if s.anchorStop != nil {
+		close(s.anchorStop)
+		s.anchorStop = nil
+	}
 	if s.RelayManager != nil {
 		s.RelayManager.Stop()
 	}
@@ -4563,6 +4571,13 @@ func (s *CoreServer) handleDeletePendingRequest(w http.ResponseWriter, r *http.R
 // state from the persisted DB state. Called once on startup after the engine is
 // ready. This makes IssueCredential and Interact work across server restarts
 // without requiring a fresh inception event each session.
+// reloadKeyLogs hands the engine every key log this Identity Agent writes to:
+// its identity's, then the record identity's, which its identity approved.
+func (s *CoreServer) reloadKeyLogs() {
+	s.reloadIdentityIntoDriver()
+	s.reloadRecordIdentity()
+}
+
 func (s *CoreServer) reloadIdentityIntoDriver() {
 	if s.KeriDriver == nil {
 		return
@@ -4581,29 +4596,7 @@ func (s *CoreServer) reloadIdentityIntoDriver() {
 
 	warnAboutUnprovableEvents(identity.AID, events)
 
-	// Parse each stored event_json into a KED dict and track the last SAID
-	kel := make([]map[string]interface{}, 0, len(events))
-	// Carried alongside the parsed events so an engine can verify the history
-	// rather than only continue it. Entries are empty for events stored before
-	// the canonical bytes were kept.
-	rawEvents := make([]string, 0, len(events))
-	lastSAID := ""
-	lastSN := 0
-	for _, ev := range events {
-		var ked map[string]interface{}
-		if err := json.Unmarshal([]byte(ev.EventJSON), &ked); err != nil {
-			log.Printf("[identity-agent-core] KERI driver reload: failed to parse event sn=%d: %v", ev.SequenceNumber, err)
-			continue
-		}
-		kel = append(kel, ked)
-		rawEvents = append(rawEvents, ev.RawBytesB64)
-		if d, ok := ked["d"].(string); ok && d != "" {
-			lastSAID = d
-		}
-		if ev.SequenceNumber > lastSN {
-			lastSN = ev.SequenceNumber
-		}
-	}
+	kel, rawEvents, lastSAID, lastSN := kelFromEvents(events)
 
 	req := &drivers.DriverReloadIdentityRequest{
 		AID:            identity.AID,
@@ -4622,6 +4615,32 @@ func (s *CoreServer) reloadIdentityIntoDriver() {
 	}
 	log.Printf("[identity-agent-core] KERI driver: reloaded identity %s (sn=%d, %d KEL events)",
 		result.AID, result.SequenceNumber, result.KelEvents)
+}
+
+// kelFromEvents is a stored key log in the form an engine reloads: each event
+// parsed, the bytes it was published as beside it, and the tip. Bytes are
+// carried so an engine can verify the history rather than only continue it;
+// they are empty for events stored before the canonical bytes were kept.
+func kelFromEvents(events []store.EventRecord) ([]map[string]interface{}, []string, string, int) {
+	kel := make([]map[string]interface{}, 0, len(events))
+	raws := make([]string, 0, len(events))
+	lastSAID, lastSN := "", 0
+	for _, ev := range events {
+		var ked map[string]interface{}
+		if err := json.Unmarshal([]byte(ev.EventJSON), &ked); err != nil {
+			log.Printf("[identity-agent-core] KERI driver reload: failed to parse event %d of %s: %v", ev.SequenceNumber, ev.AID, err)
+			continue
+		}
+		kel = append(kel, ked)
+		raws = append(raws, ev.RawBytesB64)
+		if d, ok := ked["d"].(string); ok && d != "" {
+			lastSAID = d
+		}
+		if ev.SequenceNumber > lastSN {
+			lastSN = ev.SequenceNumber
+		}
+	}
+	return kel, raws, lastSAID, lastSN
 }
 
 // reviveAssetIdentity re-creates an asset's identity in the KERI driver after a

@@ -278,6 +278,20 @@ type CredentialTELEvent struct {
 	RecordedAt string `json:"recorded_at"`
 }
 
+// RecordAnchor is one anchoring of the record: what was anchored, and the
+// interaction in the record identity's key log that carries its digest.
+type RecordAnchor struct {
+	// Seq is the interaction's place in the record identity's key log, SAID
+	// its digest.
+	Seq  int    `json:"seq"`
+	SAID string `json:"said"`
+	// Statement is what was anchored, as digested; Digest is the seal the
+	// interaction carries.
+	Statement string `json:"statement"`
+	Digest    string `json:"digest"`
+	CreatedAt string `json:"created_at"`
+}
+
 // CredentialSchemaRecord caches a fetched ACDC schema by its SAID.
 type CredentialSchemaRecord struct {
 	SAID       string `json:"said"`
@@ -586,6 +600,12 @@ type Store interface {
 	SaveRegistry(r CredentialRegistry) error
 	GetRegistryByIssuer(issuerAID string) (*CredentialRegistry, error)
 	GetRegistry(registrySAID string) (*CredentialRegistry, error)
+	// KeepEvents keeps several events together or none of them.
+	KeepEvents(events ...EventRecord) error
+	// KeepRecordAnchor keeps an anchoring interaction and what it anchors
+	// together, or neither.
+	KeepRecordAnchor(ev EventRecord, a RecordAnchor) error
+	GetRecordAnchors() ([]RecordAnchor, error)
 	// A credential's transaction log, as published. Appending the same event
 	// twice keeps one copy; the log is read back in order.
 	AppendCredentialTELEvent(ev CredentialTELEvent) error

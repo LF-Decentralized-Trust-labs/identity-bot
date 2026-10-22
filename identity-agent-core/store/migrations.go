@@ -906,6 +906,21 @@ ALTER TABLE notifications ADD COLUMN sender_kel_events INTEGER NOT NULL DEFAULT 
 -- when the contact is removed; the proof must not go with it.
 ALTER TABLE notifications ADD COLUMN sender_kel        TEXT    NOT NULL DEFAULT '';
 `},
+	{
+		Version:     41,
+		Description: "Keep each anchoring of the record: what was anchored and the interaction that carries it",
+		SQL: `
+-- One row per interaction in the record identity's key log. The statement is
+-- what was digested, so a verifier recomputes the seal from it; seq is the
+-- interaction's place in that key log.
+CREATE TABLE IF NOT EXISTS record_anchors (
+    seq        INTEGER PRIMARY KEY,
+    said       TEXT NOT NULL,
+    statement  TEXT NOT NULL,
+    digest     TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT ''
+);
+`},
 }
 
 // ApplyIdentityMigrations creates the migrations table and applies any pending migrations.

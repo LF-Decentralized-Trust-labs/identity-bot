@@ -181,8 +181,8 @@ asking, and must sign as themselves.
   statement made with a key it never held, nor a controller's signature. The sender's
   own signature is therefore the strong evidence of who said what. A compromised
   Identity Agent could still invent a controller grant or issue a body credential to a
-  key of its own, and sign as that. Controller grants are not yet anchored anywhere a
-  verifier could check.
+  key of its own, and sign as that. *(Amended 2026-10-22: controller grants are now
+  anchored in the organisation's key log, ADR-044.)*
 - A reply sent with the body's `reply` tool names the brain's session but carries no
   digest of the run, because the run has not finished when it is sent. Only an answer
   given by ending the turn carries the digest.
@@ -192,8 +192,16 @@ asking, and must sign as themselves.
   conversations.
 - A person's own requests are signed but not sealed, so a relay where TLS ends can read
   the question and the answer. The bodies' legs are sealed.
-- Anchoring a conversation's head in a key event log is not part of this decision. Until
-  it is anchored, deleting the last entries of a conversation is not detectable from
-  the record alone.
+- *Amended 2026-10-22.* **The record is anchored.** A record identity, delegated from the
+  organisation and approved in its key log, writes interactions whose seal is the digest
+  of a statement naming the governance log's newest row and its hash, and the newest
+  entry of every conversation that changed since the last anchoring. It anchors at most
+  every five minutes, sooner after twenty recorded messages, and only when something
+  changed; both numbers are configurable. Each anchoring is kept with its interaction
+  before the interaction is appended. Deleting or changing anything an anchor fixes,
+  the newest rows included, is detected by checking the anchors; what was written after
+  the newest anchor is reported as not yet anchored, never as checked. A conversation
+  closes by going quiet, so its last entry is anchored by the anchoring after it, within
+  the interval.
 - Running the brain as a separate Windows user is not available yet. On a Windows
   machine a person also uses, the brain runs as that person's user.
