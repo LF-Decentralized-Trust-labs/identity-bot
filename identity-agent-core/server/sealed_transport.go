@@ -199,7 +199,7 @@ func (s *CoreServer) replaySealed(outer *http.Request, inner sealedRequest, send
 		// letting them also assert it in a header would give two answers to one
 		// question.
 		switch http.CanonicalHeaderKey(k) {
-		case "Authorization", "Cookie", "Host", "Connection", "Content-Length":
+		case "Authorization", "Cookie", "Host", "Connection", "Content-Length", LocalOwnerSecretHeader:
 			continue
 		case headerSealedFrom:
 			// Set below from the envelope, which is the only thing that

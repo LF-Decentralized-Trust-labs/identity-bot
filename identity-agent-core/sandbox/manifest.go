@@ -191,6 +191,13 @@ func (m *AppManifest) Validate() error {
 	if m.DisplayMethod != "webview" && m.DisplayMethod != "terminal" {
 		return fmt.Errorf("display_method must be 'webview' or 'terminal', got '%s'", m.DisplayMethod)
 	}
+	if m.Container != nil {
+		for hostPath := range m.Container.Volumes {
+			if !strings.HasPrefix(hostPath, "{APP_DATA}") || strings.Contains(hostPath, "..") {
+				return fmt.Errorf("volume %q: an app may mount only from {APP_DATA}, its own directory", hostPath)
+			}
+		}
+	}
 	validNetworkModes := map[string]bool{
 		"proxy_required": true,
 		"proxy_optional": true,

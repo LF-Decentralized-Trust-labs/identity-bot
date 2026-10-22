@@ -216,15 +216,7 @@ func (s *CoreServer) handleLLMProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	for key, vals := range r.Header {
-		lk := strings.ToLower(key)
-		if lk == "host" || lk == "proxy-connection" || lk == "proxy-authorization" || lk == "authorization" {
-			continue
-		}
-		for _, val := range vals {
-			upReq.Header.Add(key, val)
-		}
-	}
+	upReq.Header = headersForTheModelProvider(r.Header)
 	upReq.Header.Set("HTTP-Referer", "https://identity-agent.local")
 	upReq.Header.Set("X-Title", "Identity Agent")
 
@@ -460,4 +452,23 @@ func truncateTitle(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen-3] + "..."
+}
+
+// headersForTheModelProvider is what of a caller's request headers travels on
+// to the model provider. What proves the caller to THIS agent never does: the
+// local owner secret and the caller's credentials mean nothing to the provider
+// and everything to anyone who reads them there.
+func headersForTheModelProvider(in http.Header) http.Header {
+	out := http.Header{}
+	for key, vals := range in {
+		switch strings.ToLower(key) {
+		case "host", "proxy-connection", "proxy-authorization", "authorization",
+			"cookie", "x-ia-token", strings.ToLower(LocalOwnerSecretHeader):
+			continue
+		}
+		for _, val := range vals {
+			out.Add(key, val)
+		}
+	}
+	return out
 }

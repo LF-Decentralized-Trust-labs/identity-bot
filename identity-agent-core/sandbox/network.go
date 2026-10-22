@@ -215,11 +215,10 @@ func (ni *NetworkIsolation) ContainerCreateConfig(manifest *AppManifest, proxyUR
 			fmt.Sprintf("%s:/home/kasm-user/.pki/nssdb:rw", nssDir))
 	}
 
-	if manifest.Container != nil {
-		for hostPath, containerPath := range manifest.Container.Volumes {
-			binds = append(binds, fmt.Sprintf("%s:%s", hostPath, containerPath))
-		}
-	}
+	// A manifest's own volumes are not mounted here: only ContainerRuntime
+	// mounts them, after confining each to the app's own directory
+	// (resolveVolumeHostPath). Mounting a manifest's host path as written would
+	// hand an app the data directory, or any other file on this machine.
 	if len(binds) > 0 {
 		hostConfig["Binds"] = binds
 	}
