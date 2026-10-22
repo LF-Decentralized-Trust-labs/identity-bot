@@ -11,6 +11,13 @@ Configuration via environment variables:
   AGENT_B_URL   URL of instance B (required for two-instance tests;
                 tests are skipped if not set)
 
+  AGENT_A_DATA_DIR, AGENT_B_DATA_DIR
+                The instances' data directories. A request from this
+                computer is the owner's only with the secret the instance
+                was started with, which it writes there as
+                local-owner-secret; the tests send it to that instance.
+                Or set AGENT_A_OWNER_SECRET / AGENT_B_OWNER_SECRET directly.
+
   SKIP_RESET    Set to "1" to skip the identity reset before tests
                 (useful if you want to test against an already-initialised
                 instance without destroying its state)
@@ -27,6 +34,43 @@ import os
 # Ensure tests/integration/ is on the path so `import helpers` works regardless
 # of whether pytest is invoked from the repo root or from tests/integration/
 sys.path.insert(0, os.path.dirname(__file__))
+
+import requests
+
+
+def _owner_secret(letter):
+    """The local owner secret of instance A or B, if one was given."""
+    secret = os.environ.get(f"AGENT_{letter}_OWNER_SECRET", "").strip()
+    data_dir = os.environ.get(f"AGENT_{letter}_DATA_DIR", "")
+    if not secret and data_dir:
+        try:
+            with open(os.path.join(data_dir, "local-owner-secret")) as f:
+                secret = f.read().strip()
+        except OSError:
+            pass
+    return secret
+
+
+# Every request to an instance carries that instance's secret, and only that
+# instance's: sent anywhere else it would hand the owner's standing to a stranger.
+_SECRETS = {
+    os.environ.get("AGENT_A_URL", "http://127.0.0.1:5050").rstrip("/"): _owner_secret("A"),
+    os.environ.get("AGENT_B_URL", "").rstrip("/"): _owner_secret("B"),
+}
+_send = requests.sessions.Session.request
+
+
+def _request_as_owner(self, method, url, *args, **kwargs):
+    for base, secret in _SECRETS.items():
+        if base and secret and (url == base or url.startswith(base + "/")):
+            headers = dict(kwargs.pop("headers", None) or {})
+            headers.setdefault("X-Local-Owner-Secret", secret)
+            kwargs["headers"] = headers
+            break
+    return _send(self, method, url, *args, **kwargs)
+
+
+requests.sessions.Session.request = _request_as_owner
 
 import pytest
 import requests
