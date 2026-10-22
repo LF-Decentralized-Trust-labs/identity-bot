@@ -69,5 +69,6 @@ func (s *CoreServer) issueAssetCredential(
 	if err := s.saveOwnInteraction(issuer, result.IxnEvent, result.IxnRawBytesB64, result.SequenceNumber, ""); err != nil {
 		log.Printf("[asset] failed to persist the anchor for %s %s: %v", kind.Schema.Name, result.AcdcSaid, err)
 	}
+	s.keepOrSay(registrySAID, result.AcdcSaid, result.IssRawBytesB64, "issuance")
 	return result.AcdcSaid, nil
 }

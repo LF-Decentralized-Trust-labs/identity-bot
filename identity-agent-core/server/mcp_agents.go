@@ -399,6 +399,7 @@ func (s *CoreServer) ensureRegistry(issuerRootAID string) (string, error) {
 		RegistrySAID: resp.RegistrySaid,
 		IssuerAID:    issuerRootAID,
 		VcpJson:      string(vcpJSON),
+		VcpRawB64:    resp.VcpJsonB64,
 		CreatedAt:    now,
 	}); err != nil {
 		log.Printf("[mcp] failed to persist registry %s: %v", resp.RegistrySaid, err)
