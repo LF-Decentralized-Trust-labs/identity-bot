@@ -244,15 +244,56 @@ func TestARegistryIsKeptOnlyWithAProvableInception(t *testing.T) {
 		t.Fatal("an inception was accepted with an anchor that does not anchor it")
 	}
 
-	// A registry from before inceptions were kept.
-	old := store.CredentialRegistry{RegistrySAID: "Eold-registry", IssuerAID: rec.IssuerAID, CreatedAt: "2026-01-01T00:00:00Z"}
+	// An issuance, anchored and genuine, is still not a registry's inception.
+	kept, _ := s.DataStore.GetCredentialTEL(rec.RegistrySAID, grantSAID)
+	var issAnchor string
+	for _, e := range events {
+		if raw, _ := base64.StdEncoding.DecodeString(e.RawBytesB64); len(raw) > 0 {
+			if ev, err := keri.ParseEvent(raw); err == nil {
+				if seals, _ := ev.Seals(); len(seals) > 0 && seals[0].Identifier == grantSAID {
+					issAnchor = e.RawBytesB64
+				}
+			}
+		}
+	}
+	if err := checkRegistryInception(kept[0].RawB64, grantSAID, issAnchor); err == nil {
+		t.Fatal("a credential's issuance was accepted as a registry's inception")
+	}
+}
+
+// blankInceptionStore answers as a database written before registry
+// inceptions were kept.
+type blankInceptionStore struct{ store.Store }
+
+func (b blankInceptionStore) GetRegistry(said string) (*store.CredentialRegistry, error) {
+	r, err := b.Store.GetRegistry(said)
+	if r != nil {
+		blank := *r
+		blank.VcpRawB64 = ""
+		return &blank, err
+	}
+	return r, err
+}
+
+// A registry made before inceptions were kept is not issued into again, and
+// what was issued in it is reported as unprovable, never as in force.
+func TestARegistryWithoutAKeptInceptionIsNotTrusted(t *testing.T) {
+	s, agent := grantWorld(t)
+	owner, _ := s.DataStore.GetIdentity()
+	old := store.CredentialRegistry{RegistrySAID: "Eold-registry", IssuerAID: owner.AID, CreatedAt: "2026-01-01T00:00:00Z"}
 	if err := s.DataStore.SaveRegistry(old); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := s.ensureRegistry(rec.IssuerAID); err != nil || got == old.RegistrySAID {
-		t.Fatalf("new credentials would go into a registry that cannot be proved: %q %v", got, err)
+	grantSAID, err := s.issueCapabilityGrant(agent)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, status, err := s.credentialLog(old.RegistrySAID, grantSAID); err == nil {
+	rec, _ := s.DataStore.GetCredential(grantSAID)
+	if rec.RegistrySAID == old.RegistrySAID {
+		t.Fatal("a credential was issued into a registry whose inception cannot be proved")
+	}
+	s.DataStore = blankInceptionStore{s.DataStore}
+	if _, status, err := s.credentialLog(rec.RegistrySAID, grantSAID); err == nil {
 		t.Fatalf("a credential in a registry with no kept inception was reported as %q", status)
 	}
 }
