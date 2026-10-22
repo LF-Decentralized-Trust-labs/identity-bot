@@ -33,12 +33,25 @@ import (
 func (s *CoreServer) saveOwnInteraction(
 	aid string, ixn map[string]interface{}, rawB64 string, sn int, callerSignature string,
 ) error {
+	rec, err := s.ownInteractionRecord(aid, ixn, rawB64, sn, callerSignature)
+	if err != nil {
+		return err
+	}
+	return s.DataStore.SaveEvent(rec)
+}
+
+// ownInteractionRecord is the stored form of an interaction this identity
+// wrote, signed where this Identity Agent holds the key, for a caller that has
+// to keep it together with something else.
+func (s *CoreServer) ownInteractionRecord(
+	aid string, ixn map[string]interface{}, rawB64 string, sn int, callerSignature string,
+) (store.EventRecord, error) {
 	identity, err := s.DataStore.GetIdentity()
 	if err != nil || identity == nil {
-		return fmt.Errorf("no identity to write an event for")
+		return store.EventRecord{}, fmt.Errorf("no identity to write an event for")
 	}
 	if rawB64 == "" {
-		return fmt.Errorf("the event's serialised bytes were not supplied, so it could never be signed or checked")
+		return store.EventRecord{}, fmt.Errorf("the event's serialised bytes were not supplied, so it could never be signed or checked")
 	}
 	if sn < 0 {
 		sn = sequenceOf(ixn)
@@ -64,7 +77,7 @@ func (s *CoreServer) saveOwnInteraction(
 			}
 		}
 	}
-	return s.DataStore.SaveEvent(rec)
+	return rec, nil
 }
 
 // signOwnEventBytes signs an event's serialised bytes with this identity's

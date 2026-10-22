@@ -567,6 +567,11 @@ type Store interface {
 	// A credential's transaction log, as published. Appending the same event
 	// twice keeps one copy; the log is read back in order.
 	AppendCredentialTELEvent(ev CredentialTELEvent) error
+	// KeepCredentialEvent keeps an event and the key-log event anchoring it
+	// together, or neither.
+	KeepCredentialEvent(ev CredentialTELEvent, anchor *EventRecord) error
+	// KeepRegistry keeps a registry and its inception's anchor together, or neither.
+	KeepRegistry(r CredentialRegistry, anchor *EventRecord) error
 	GetCredentialTEL(registrySAID, acdcSAID string) ([]CredentialTELEvent, error)
 	SaveCredentialSchema(record CredentialSchemaRecord) error
 	GetCredentialSchemas() ([]CredentialSchemaRecord, error)

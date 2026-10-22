@@ -1,8 +1,16 @@
 package server
 
 import (
+	"context"
 	"encoding/base64"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"sync"
 	"testing"
+
+	"github.com/go-chi/chi/v5"
 
 	"identity-agent-core/keriengine"
 	"identity-agent-core/store"
@@ -104,5 +112,179 @@ func TestOnlyTheCredentialsOwnEventsAreKept(t *testing.T) {
 	raw[len(raw)-3] ^= 1
 	if err := s.keepCredentialEvent(rec.RegistrySAID, first, base64.StdEncoding.EncodeToString(raw)); err == nil {
 		t.Fatal("an altered issuance was kept")
+	}
+}
+
+// refusingStore keeps nothing of one kind of credential event, as a full disk
+// or a failing database would refuse it.
+type refusingStore struct {
+	store.Store
+	kind string
+}
+
+func (r refusingStore) KeepCredentialEvent(ev store.CredentialTELEvent, anchor *store.EventRecord) error {
+	if ev.Kind == r.kind {
+		return errors.New("the database refused the write")
+	}
+	return r.Store.KeepCredentialEvent(ev, anchor)
+}
+
+// A revocation that cannot be kept is not made: the request fails, the
+// credential stays as it was, and no anchor is kept for a revocation the log
+// does not hold.
+func TestARevocationThatCannotBeKeptIsNotMade(t *testing.T) {
+	s, agent := grantWorld(t)
+	grantSAID, err := s.issueCapabilityGrant(agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, _ := s.DataStore.GetCredential(grantSAID)
+	before, _ := s.DataStore.GetEvents(rec.IssuerAID)
+	s.DataStore = refusingStore{Store: s.DataStore, kind: "rev"}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/api/credentials/"+grantSAID+"/revoke", nil)
+	rc := chi.NewRouteContext()
+	rc.URLParams.Add("said", grantSAID)
+	r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rc))
+	s.handleRevokeCredential(w, r)
+
+	if w.Code == http.StatusOK {
+		t.Fatalf("a revocation that could not be kept was reported done: %s", w.Body.String())
+	}
+	after, _ := s.DataStore.GetCredential(grantSAID)
+	if after.Status == "revoked" {
+		t.Fatal("the credential was recorded as revoked with no kept revocation")
+	}
+	if events, _ := s.DataStore.GetEvents(rec.IssuerAID); len(events) != len(before) {
+		t.Fatalf("the revocation's anchor was kept without the revocation: %d events, was %d", len(events), len(before))
+	}
+	if _, status, err := s.credentialLog(rec.RegistrySAID, grantSAID); err != nil || status != keri.StatusIssued {
+		t.Fatalf("the log no longer reads as issued: %q %v", status, err)
+	}
+}
+
+// A credential recorded here as revoked whose kept log ends in its issuance is
+// not reported as issued.
+func TestARevokedCredentialIsNeverReportedIssued(t *testing.T) {
+	s, agent := grantWorld(t)
+	grantSAID, err := s.issueCapabilityGrant(agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, _ := s.DataStore.GetCredential(grantSAID)
+	if err := s.DataStore.UpdateCredentialStatus(grantSAID, "revoked"); err != nil {
+		t.Fatal(err)
+	}
+	if _, status, err := s.credentialLog(rec.RegistrySAID, grantSAID); err == nil {
+		t.Fatalf("a revoked credential's log was reported as %q", status)
+	}
+}
+
+// A revocation anchored in the issuer's key log but missing from the kept log,
+// as a crash between the two used to leave it, makes the log unprovable rather
+// than a shorter one that reads "issued".
+func TestALogMissingAnAnchoredRevocationIsRefused(t *testing.T) {
+	s, agent := grantWorld(t)
+	grantSAID, err := s.issueCapabilityGrant(agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, _ := s.DataStore.GetCredential(grantSAID)
+	resp, err := s.KeriDriver.RevokeCredential(rec.IssuerAID, rec.SAID, rec.RegistrySAID, rec.IssSAID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.saveOwnInteraction(rec.IssuerAID, resp.IxnEvent, resp.IxnRawBytesB64, resp.SequenceNumber, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, status, err := s.credentialLog(rec.RegistrySAID, grantSAID); err == nil {
+		t.Fatalf("a log missing an anchored revocation was reported as %q", status)
+	}
+}
+
+// A registry's inception is kept only if it verifies, is the registry named,
+// and is anchored by the event kept with it; and a registry made before
+// inceptions were kept is replaced for new credentials, while what was issued
+// in it is reported as unprovable.
+func TestARegistryIsKeptOnlyWithAProvableInception(t *testing.T) {
+	s, agent := grantWorld(t)
+	grantSAID, err := s.issueCapabilityGrant(agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, _ := s.DataStore.GetCredential(grantSAID)
+	reg, _ := s.DataStore.GetRegistry(rec.RegistrySAID)
+	events, _ := s.DataStore.GetEvents(rec.IssuerAID)
+	var anchor string
+	for _, e := range events {
+		if raw, _ := base64.StdEncoding.DecodeString(e.RawBytesB64); len(raw) > 0 {
+			if ev, err := keri.ParseEvent(raw); err == nil {
+				if seals, _ := ev.Seals(); len(seals) > 0 && seals[0].Identifier == reg.RegistrySAID {
+					anchor = e.RawBytesB64
+				}
+			}
+		}
+	}
+	if anchor == "" {
+		t.Fatal("the registry's anchor was not kept")
+	}
+	if err := checkRegistryInception(reg.VcpRawB64, reg.RegistrySAID, anchor); err != nil {
+		t.Fatalf("the kept inception does not check: %v", err)
+	}
+	if err := checkRegistryInception(reg.VcpRawB64, "Eanother-registry", anchor); err == nil {
+		t.Fatal("an inception was accepted as another registry's")
+	}
+	raw, _ := base64.StdEncoding.DecodeString(reg.VcpRawB64)
+	raw[len(raw)-3] ^= 1
+	if err := checkRegistryInception(base64.StdEncoding.EncodeToString(raw), reg.RegistrySAID, anchor); err == nil {
+		t.Fatal("an altered inception was accepted")
+	}
+	if err := checkRegistryInception(reg.VcpRawB64, reg.RegistrySAID, events[0].RawBytesB64); err == nil {
+		t.Fatal("an inception was accepted with an anchor that does not anchor it")
+	}
+
+	// A registry from before inceptions were kept.
+	old := store.CredentialRegistry{RegistrySAID: "Eold-registry", IssuerAID: rec.IssuerAID, CreatedAt: "2026-01-01T00:00:00Z"}
+	if err := s.DataStore.SaveRegistry(old); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.ensureRegistry(rec.IssuerAID); err != nil || got == old.RegistrySAID {
+		t.Fatalf("new credentials would go into a registry that cannot be proved: %q %v", got, err)
+	}
+	if _, status, err := s.credentialLog(old.RegistrySAID, grantSAID); err == nil {
+		t.Fatalf("a credential in a registry with no kept inception was reported as %q", status)
+	}
+}
+
+// Two revocations of one credential at once make one revocation, and both
+// callers are told it is revoked.
+func TestTwoRevocationsAtOnceMakeOne(t *testing.T) {
+	s, agent := grantWorld(t)
+	grantSAID, err := s.issueCapabilityGrant(agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, _ := s.DataStore.GetCredential(grantSAID)
+	var wg sync.WaitGroup
+	errs := make(chan error, 4)
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			copy := *rec
+			if ok, err := s.revokeIssuedCredential(&copy); err != nil || !ok {
+				errs <- fmt.Errorf("ok=%v err=%v", ok, err)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Errorf("a concurrent revocation failed: %v", err)
+	}
+	events, status, err := s.credentialLog(rec.RegistrySAID, grantSAID)
+	if err != nil || status != keri.StatusRevoked || len(events) != 2 {
+		t.Fatalf("after concurrent revocations: %d events, %q, %v", len(events), status, err)
 	}
 }
