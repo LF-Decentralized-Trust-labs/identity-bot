@@ -435,7 +435,9 @@ and the same way for every identity:
   and `X-Frame-Options: DENY`, replacing whatever the Identity Agent sent, and
   drops `Refresh`, `Link`, `Location`, `Content-Location`,
   `Service-Worker-Allowed`, `Clear-Site-Data` and any cookie scoped wider than
-  the address.
+  the address. Because one URL answers a browser with the visitor page and an
+  Identity Agent with data, the visitor page is never cached and every answer
+  varies on `Sec-Fetch-Mode`, `Sec-Fetch-Dest` and `Accept`.
 
 A public address still passes every request, not a list of routes: the
 identity's own front ends (a machine acting for its owner, ADR-042) reach it

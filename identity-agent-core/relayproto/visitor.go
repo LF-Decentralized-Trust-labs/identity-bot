@@ -36,7 +36,11 @@ func ServeVisitorPage(w http.ResponseWriter, r *http.Request, link string) {
 	h.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; form-action 'none'; base-uri 'none'")
 	h.Set("X-Frame-Options", "DENY")
 	h.Set("Referrer-Policy", "no-referrer")
-	h.Set("Cache-Control", "public, max-age=300")
+	// Never cached: the same URL answers an Identity Agent with protocol data,
+	// and a cache in front must not hand this page to it, or that data to a
+	// browser.
+	h.Set("Cache-Control", "no-store")
+	h.Set("Vary", "Sec-Fetch-Mode, Sec-Fetch-Dest, Accept")
 	if r.Method == http.MethodHead {
 		w.WriteHeader(http.StatusOK)
 		return

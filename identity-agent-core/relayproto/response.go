@@ -101,6 +101,11 @@ func CheckProtocolResponse(resp *http.Response, mode Mode) error {
 	for name, v := range ProtocolResponseHeaders {
 		h.Set(name, v)
 	}
+	// The same URL answers a browser loading a page with the relay's own page,
+	// so a cache in front must keep the two apart.
+	h.Add("Vary", "Sec-Fetch-Mode")
+	h.Add("Vary", "Sec-Fetch-Dest")
+	h.Add("Vary", "Accept")
 	if cookies := h.Values("Set-Cookie"); len(cookies) > 0 {
 		h.Del("Set-Cookie")
 		for _, c := range cookies {

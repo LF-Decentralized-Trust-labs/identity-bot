@@ -161,6 +161,9 @@ func TestAProtocolAnswerIsSealedForBrowsers(t *testing.T) {
 			t.Errorf("%s passed: %q", name, v)
 		}
 	}
+	if v := strings.Join(resp.Header.Values("Vary"), ","); !strings.Contains(v, "Sec-Fetch-Mode") {
+		t.Errorf("a cache could hand this answer to a browser loading a page: Vary %q", v)
+	}
 	if c := resp.Header.Values("Set-Cookie"); len(c) != 1 || c[0] != "b=2" {
 		t.Errorf("cookies passed: %q", c)
 	}
@@ -207,6 +210,9 @@ func TestTheVisitorPageIsTheRelaysOwn(t *testing.T) {
 		}
 		if csp := w.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "default-src 'none'") {
 			t.Errorf("CSP %q", csp)
+		}
+		if cc := w.Header().Get("Cache-Control"); cc != "no-store" {
+			t.Errorf("the visitor page may be cached: %q", cc)
 		}
 	}
 }
