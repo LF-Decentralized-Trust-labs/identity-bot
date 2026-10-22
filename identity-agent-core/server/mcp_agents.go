@@ -14,7 +14,6 @@ import (
 
 	"identity-agent-core/asset"
 	"identity-agent-core/schemas"
-	"identity-agent-core/store"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -392,31 +391,17 @@ func (s *CoreServer) ensureRegistry(issuerRootAID string) (string, error) {
 	if err != nil || identity == nil {
 		return "", fmt.Errorf("no owner identity")
 	}
-	resp, err := s.KeriDriver.InceptRegistry(issuerRootAID)
-	if err != nil {
-		return "", err
-	}
 	// The inception is checked before it is kept: it has to verify and be the
-	// registry the engine says it made. It is kept with its anchor in the
-	// issuer's key log, together or not at all, and a registry that cannot be
-	// kept is not used: nothing issued into it could be proved.
-	if err := checkRegistryInception(resp.VcpJsonB64, resp.RegistrySaid, resp.IxnRawBytesB64); err != nil {
-		return "", err
+	// registry it says it is. It is kept with its anchor in the issuer's key
+	// log, together or not at all, and a registry that cannot be kept is not
+	// used: nothing issued into it could be proved.
+	keptInside := s.engineKeepsCredentialLogs()
+	resp, err := s.KeriDriver.InceptRegistry(issuerRootAID)
+	if err == nil && !keptInside {
+		err = s.keepAfter(issuerRootAID, resp.SequenceNumber, resp.IxnRawBytesB64, resp.VcpJsonB64)
 	}
-	anchor, err := s.ownInteractionRecord(issuerRootAID, resp.IxnEvent, resp.IxnRawBytesB64, resp.SequenceNumber, "")
 	if err != nil {
-		return "", fmt.Errorf("the registry's anchor could not be kept: %w", err)
-	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	vcpJSON, _ := json.Marshal(resp.VcpEvent)
-	if err := s.DataStore.KeepRegistry(store.CredentialRegistry{
-		RegistrySAID: resp.RegistrySaid,
-		IssuerAID:    issuerRootAID,
-		VcpJson:      string(vcpJSON),
-		VcpRawB64:    resp.VcpJsonB64,
-		CreatedAt:    now,
-	}, &anchor); err != nil {
-		return "", fmt.Errorf("the registry %s could not be kept: %w", resp.RegistrySaid, err)
+		return "", fmt.Errorf("no registry was made: %w", err)
 	}
 	return resp.RegistrySaid, nil
 }

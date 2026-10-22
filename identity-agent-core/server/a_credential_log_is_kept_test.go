@@ -12,7 +12,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"identity-agent-core/drivers"
 	"identity-agent-core/keriengine"
+	"identity-agent-core/schemas"
 	"identity-agent-core/store"
 
 	keri "github.com/grapeid/keri-go"
@@ -191,6 +193,9 @@ func TestALogMissingAnAnchoredRevocationIsRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec, _ := s.DataStore.GetCredential(grantSAID)
+	// The engine with nothing to keep its events, as one that appended before
+	// the store did used to leave things after a crash.
+	s.KeriDriver.(drivers.TELCommitter).SetTELCommit(nil)
 	resp, err := s.KeriDriver.RevokeCredential(rec.IssuerAID, rec.SAID, rec.RegistrySAID, rec.IssSAID)
 	if err != nil {
 		t.Fatal(err)
@@ -327,5 +332,138 @@ func TestTwoRevocationsAtOnceMakeOne(t *testing.T) {
 	events, status, err := s.credentialLog(rec.RegistrySAID, grantSAID)
 	if err != nil || status != keri.StatusRevoked || len(events) != 2 {
 		t.Fatalf("after concurrent revocations: %d events, %q, %v", len(events), status, err)
+	}
+}
+
+// storedKELHoldsTogether checks the issuer's stored key log with keri-go and
+// that a fresh engine will load it, as one would after a restart.
+func storedKELHoldsTogether(t *testing.T, s *CoreServer, aid string) {
+	t.Helper()
+	records, err := s.DataStore.GetEvents(aid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raws := make([][]byte, 0, len(records))
+	for i, rec := range records {
+		if rec.SequenceNumber != i {
+			t.Fatalf("the stored key log skips from %d to %d", i-1, rec.SequenceNumber)
+		}
+		raw, _ := base64.StdEncoding.DecodeString(rec.RawBytesB64)
+		raws = append(raws, raw)
+	}
+	if err := keri.ValidateKEL(raws); err != nil {
+		t.Fatalf("the stored key log does not hold together: %v", err)
+	}
+	s.KeriDriver = keriengine.New()
+	s.reloadIdentityIntoDriver()
+	kel, err := s.KeriDriver.GetKel(aid)
+	if err != nil || len(kel.KEL) != len(records) {
+		t.Fatalf("a restarted engine could not load the stored key log: %v", err)
+	}
+}
+
+// A keep that fails leaves the engine where the store is, so the next event
+// chains to the last one kept: after a refused revocation and a refused
+// issuance, retried, the stored key log has no gap, loads after a restart, and
+// the restarted Identity Agent can still issue.
+func TestAFailedKeepLeavesNoGapInTheKeyLog(t *testing.T) {
+	s, agent := grantWorld(t)
+	grantSAID, err := s.issueCapabilityGrant(agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, _ := s.DataStore.GetCredential(grantSAID)
+	real := s.DataStore
+
+	s.DataStore = refusingStore{Store: real, kind: "rev"}
+	if _, err := s.revokeIssuedCredential(rec); err == nil {
+		t.Fatal("a revocation the store refused was reported made")
+	}
+	s.DataStore = real
+	if _, err := s.revokeIssuedCredential(rec); err != nil {
+		t.Fatalf("the revocation could not be retried: %v", err)
+	}
+
+	s.DataStore = refusingStore{Store: real, kind: "iss"}
+	if _, err := s.issueCapabilityGrant(agent); err == nil {
+		t.Fatal("an issuance the store refused was reported made")
+	}
+	s.DataStore = real
+	if _, err := s.issueCapabilityGrant(agent); err != nil {
+		t.Fatalf("the issuance could not be retried: %v", err)
+	}
+
+	storedKELHoldsTogether(t, s, rec.IssuerAID)
+	if _, err := s.issueCapabilityGrant(agent); err != nil {
+		t.Fatalf("after a restart the Identity Agent could not issue: %v", err)
+	}
+	if _, status, err := s.credentialLog(rec.RegistrySAID, grantSAID); err != nil || status != keri.StatusRevoked {
+		t.Fatalf("the retried revocation reads as %q, %v", status, err)
+	}
+}
+
+// Revocations of different credentials at once each build on the tip the one
+// before left, so the stored key log has no fork and no gap.
+func TestRevocationsOfDifferentCredentialsAtOnceLeaveOneChain(t *testing.T) {
+	s, agent := grantWorld(t)
+	recs := make([]*store.CredentialRecord, 0, 6)
+	for i := 0; i < 6; i++ {
+		said, err := s.issueAssetCredential(schemas.AIAgentGrant, agent.PairwiseAID, agent.DelegatorAID,
+			map[string]interface{}{"name": fmt.Sprintf("agent %d", i), "capabilities": []string{}}, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		rec, _ := s.DataStore.GetCredential(said)
+		recs = append(recs, rec)
+	}
+	var wg sync.WaitGroup
+	errs := make(chan error, len(recs))
+	for _, rec := range recs {
+		wg.Add(1)
+		go func(rec *store.CredentialRecord) {
+			defer wg.Done()
+			if _, err := s.revokeIssuedCredential(rec); err != nil {
+				errs <- err
+			}
+		}(rec)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Errorf("a concurrent revocation failed: %v", err)
+	}
+	for _, rec := range recs {
+		if _, status, err := s.credentialLog(rec.RegistrySAID, rec.SAID); err != nil || status != keri.StatusRevoked {
+			t.Fatalf("%s reads as %q, %v", rec.SAID, status, err)
+		}
+	}
+	storedKELHoldsTogether(t, s, agent.DelegatorAID)
+}
+
+// A credential's log is refused when the issuer's stored key log has a gap,
+// even though the seals of that credential are all there: such a log is not
+// the one the issuer published, and will not load again.
+func TestALogIsRefusedWhenTheIssuersKeyLogHasAGap(t *testing.T) {
+	s, agent := grantWorld(t)
+	first, err := s.issueCapabilityGrant(agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, _ := s.DataStore.GetCredential(first)
+	// An engine that appends before the store keeps anything, and a
+	// revocation the store then never receives.
+	s.KeriDriver.(drivers.TELCommitter).SetTELCommit(nil)
+	if _, err := s.KeriDriver.RevokeCredential(rec.IssuerAID, rec.SAID, rec.RegistrySAID, rec.IssSAID); err != nil {
+		t.Fatal(err)
+	}
+	// The next issuance chains to that unkept event and is itself kept.
+	said, err := s.issueAssetCredential(schemas.AIAgentGrant, agent.PairwiseAID, agent.DelegatorAID,
+		map[string]interface{}{"name": "after the gap", "capabilities": []string{}}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, _ := s.DataStore.GetCredential(said)
+	if _, status, err := s.credentialLog(next.RegistrySAID, said); err == nil {
+		t.Fatalf("a credential anchored after a gap in the issuer's key log was reported as %q", status)
 	}
 }

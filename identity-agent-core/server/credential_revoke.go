@@ -70,13 +70,13 @@ func (s *CoreServer) revokeIssuedCredential(rec *store.CredentialRecord) (bool, 
 	if s.alreadyRevoked(rec.RegistrySAID, rec.SAID) {
 		return true, nil
 	}
+	keptInside := s.engineKeepsCredentialLogs()
 	resp, err := s.KeriDriver.RevokeCredential(rec.IssuerAID, rec.SAID, rec.RegistrySAID, rec.IssSAID)
-	if err != nil {
-		return false, err
+	if err == nil && !keptInside {
+		err = s.keepAfter(rec.IssuerAID, resp.SequenceNumber, resp.IxnRawBytesB64, resp.RevRawBytesB64)
 	}
-	if err := s.keepAnchoredCredentialEvent(rec.RegistrySAID, rec.SAID, resp.RevRawBytesB64,
-		rec.IssuerAID, resp.IxnEvent, resp.IxnRawBytesB64, resp.SequenceNumber); err != nil {
-		return false, fmt.Errorf("the revocation of %s could not be kept, so it was not made: %w", rec.SAID, err)
+	if err != nil {
+		return false, fmt.Errorf("the revocation of %s was not made: %w", rec.SAID, err)
 	}
 	log.Printf("[credential] TEL-revoked %s (rev %s, registry %s)", rec.SAID, resp.RevSaid, rec.RegistrySAID)
 	return true, nil

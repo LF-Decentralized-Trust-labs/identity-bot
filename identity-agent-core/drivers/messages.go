@@ -260,6 +260,26 @@ type DriverRegistryInceptResponse struct {
 	IxnRawBytesB64 string `json:"ixn_raw_bytes_b64"`
 }
 
+// TELCommit is a registry inception, issuance or revocation together with the
+// key-log interaction that anchors it, offered for keeping before the engine
+// counts either as made.
+type TELCommit struct {
+	// AID is the identity whose key log the interaction extends.
+	AID string
+	// SN is the interaction's sequence number.
+	SN int
+	// KELRaw and TELRaw are the two events as published.
+	KELRaw []byte
+	TELRaw []byte
+}
+
+// TELCommitter is an engine that offers each registry event to be kept before
+// it appends it, so the engine never holds an event the store does not. A
+// commit that fails leaves the engine as it was.
+type TELCommitter interface {
+	SetTELCommit(func(TELCommit) error)
+}
+
 // DriverRevokeCredentialResponse is the result of revoking a registry-backed credential.
 type DriverRevokeCredentialResponse struct {
 	RevSaid        string                 `json:"rev_said"`

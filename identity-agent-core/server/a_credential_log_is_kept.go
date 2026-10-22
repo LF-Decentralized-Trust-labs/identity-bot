@@ -2,11 +2,13 @@ package server
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"log"
 	"sync"
 	"time"
 
+	"identity-agent-core/drivers"
 	"identity-agent-core/store"
 
 	keri "github.com/grapeid/keri-go"
@@ -24,9 +26,13 @@ import (
 // An event is kept together with the key-log interaction that anchors it, in
 // one transaction, before the issuance or revocation is reported as done. If
 // that fails, the issuance or revocation fails: nothing is recorded as issued
-// or revoked that cannot be proved. The engine has already made the event in
-// memory by then and is not told to forget it; the stored log, which is what
-// the engine is rebuilt from and what a verifier is handed, holds neither.
+// or revoked that cannot be proved.
+//
+// The keeping happens inside the engine, before it appends either event to
+// what it holds (drivers.TELCommitter), so a failure leaves the engine exactly
+// where the store is. Were the engine to append first, its next event would
+// chain to one the store never kept, and the stored key log would have a gap
+// that stops it ever being loaded again.
 
 // credentialEvent checks one issuance or revocation of a credential in
 // registrySAID and returns it in the form it is kept. An event that does not
@@ -54,6 +60,61 @@ func credentialEvent(registrySAID, acdcSAID, rawB64 string) (store.CredentialTEL
 		RawB64:       rawB64,
 		RecordedAt:   time.Now().UTC().Format(time.RFC3339Nano),
 	}, ev, nil
+}
+
+// engineKeepsCredentialLogs installs keepTELCommit in an engine that can keep
+// registry events before appending them, and reports whether it could. An
+// engine that cannot has each event kept after it returns.
+func (s *CoreServer) engineKeepsCredentialLogs() bool {
+	c, ok := s.KeriDriver.(drivers.TELCommitter)
+	if ok {
+		c.SetTELCommit(s.keepTELCommit)
+	}
+	return ok
+}
+
+// keepTELCommit keeps a registry inception, issuance or revocation with the
+// key-log interaction that anchors it, checked, in one transaction.
+func (s *CoreServer) keepTELCommit(c drivers.TELCommit) error {
+	ev, err := keri.VerifyTELEvent(c.TELRaw)
+	if err != nil {
+		return fmt.Errorf("the transaction-log event does not verify: %w", err)
+	}
+	var ixn map[string]interface{}
+	if err := json.Unmarshal(c.KELRaw, &ixn); err != nil {
+		return fmt.Errorf("the anchoring event does not parse: %w", err)
+	}
+	telB64, kelB64 := base64.StdEncoding.EncodeToString(c.TELRaw), base64.StdEncoding.EncodeToString(c.KELRaw)
+	if ev.Ilk != "vcp" {
+		return s.keepAnchoredCredentialEvent(ev.Registry, ev.Subject, telB64, c.AID, ixn, kelB64, c.SN)
+	}
+	if err := checkRegistryInception(telB64, ev.Subject, kelB64); err != nil {
+		return err
+	}
+	anchor, err := s.ownInteractionRecord(c.AID, ixn, kelB64, c.SN, "")
+	if err != nil {
+		return fmt.Errorf("the registry's anchor could not be kept: %w", err)
+	}
+	return s.DataStore.KeepRegistry(store.CredentialRegistry{
+		RegistrySAID: ev.Subject,
+		IssuerAID:    c.AID,
+		VcpJson:      string(c.TELRaw),
+		VcpRawB64:    telB64,
+		CreatedAt:    time.Now().UTC().Format(time.RFC3339Nano),
+	}, &anchor)
+}
+
+// keepAfter keeps what an engine without TELCommitter has just made.
+func (s *CoreServer) keepAfter(aid string, sn int, kelB64, telB64 string) error {
+	kel, err := base64.StdEncoding.DecodeString(kelB64)
+	if err != nil {
+		return err
+	}
+	tel, err := base64.StdEncoding.DecodeString(telB64)
+	if err != nil {
+		return err
+	}
+	return s.keepTELCommit(drivers.TELCommit{AID: aid, SN: sn, KELRaw: kel, TELRaw: tel})
 }
 
 // keepCredentialEvent keeps one checked event of a credential's log on its own.
@@ -164,24 +225,34 @@ func (s *CoreServer) credentialLog(registrySAID, acdcSAID string) ([]string, str
 	return out, status, nil
 }
 
-// everyAnchorIsKept matches the seals of acdcSAID in the issuer's key log one
-// for one against the kept events. A seal with no kept event is a revocation
-// (or issuance) the log is missing; a kept event with no seal was never
-// published.
+// everyAnchorIsKept checks the issuer's stored key log as one chain with
+// keri-go, every event in sequence and naming the one before it, and then
+// matches the seals of acdcSAID in it one for one against the kept events. A
+// log with a gap is not the log the issuer published; a seal with no kept
+// event is a revocation (or issuance) the credential's log is missing; a kept
+// event with no seal was never published.
 func (s *CoreServer) everyAnchorIsKept(issuerAID, acdcSAID string, kept []store.CredentialTELEvent) error {
 	records, err := s.DataStore.GetEvents(issuerAID)
 	if err != nil {
 		return fmt.Errorf("the issuer's key log could not be read: %w", err)
 	}
-	anchored := map[int]string{}
+	raws := make([][]byte, 0, len(records))
 	for _, rec := range records {
 		raw, err := base64.StdEncoding.DecodeString(rec.RawBytesB64)
 		if err != nil || len(raw) == 0 {
-			continue
+			return fmt.Errorf("event %d of the issuer's key log was not kept as published, so the "+
+				"log cannot be checked", rec.SequenceNumber)
 		}
+		raws = append(raws, raw)
+	}
+	if err := keri.ValidateKEL(raws); err != nil {
+		return fmt.Errorf("the issuer's stored key log does not hold together: %w", err)
+	}
+	anchored := map[int]string{}
+	for _, raw := range raws {
 		ev, err := keri.ParseEvent(raw)
 		if err != nil {
-			continue
+			return err
 		}
 		seals, _ := ev.Seals()
 		for _, seal := range seals {
@@ -205,14 +276,36 @@ func (s *CoreServer) everyAnchorIsKept(issuerAID, acdcSAID string, kept []store.
 }
 
 // credentialLocks serialises revocations per credential, so two at once make
-// one revocation, not two that the log can hold only one of.
-var credentialLocks sync.Map
+// one revocation, not two that the log can hold only one of. An entry lives
+// only while somebody holds or waits for it.
+var (
+	credentialLocksMu sync.Mutex
+	credentialLocks   = map[string]*credentialLock{}
+)
+
+type credentialLock struct {
+	mu      sync.Mutex
+	holders int
+}
 
 func lockCredential(said string) func() {
-	m, _ := credentialLocks.LoadOrStore(said, &sync.Mutex{})
-	mu := m.(*sync.Mutex)
-	mu.Lock()
-	return mu.Unlock
+	credentialLocksMu.Lock()
+	l := credentialLocks[said]
+	if l == nil {
+		l = &credentialLock{}
+		credentialLocks[said] = l
+	}
+	l.holders++
+	credentialLocksMu.Unlock()
+	l.mu.Lock()
+	return func() {
+		l.mu.Unlock()
+		credentialLocksMu.Lock()
+		if l.holders--; l.holders == 0 {
+			delete(credentialLocks, said)
+		}
+		credentialLocksMu.Unlock()
+	}
 }
 
 // alreadyRevoked reports whether the kept log of a credential already ends in

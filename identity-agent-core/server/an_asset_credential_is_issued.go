@@ -42,15 +42,15 @@ func (s *CoreServer) issueAssetCredential(
 	if err != nil {
 		return "", fmt.Errorf("no registry to issue in: %w", err)
 	}
-	result, err := s.KeriDriver.IssueCredentialInRegistry(issuer, claims, kind.Schema.SAID, holder, nil, registrySAID)
-	if err != nil {
-		return "", err
-	}
 	// The issuance and its anchor are kept first, together. A credential whose
 	// issuance cannot be proved is not issued.
-	if err := s.keepAnchoredCredentialEvent(registrySAID, result.AcdcSaid, result.IssRawBytesB64,
-		issuer, result.IxnEvent, result.IxnRawBytesB64, result.SequenceNumber); err != nil {
-		return "", fmt.Errorf("the issuance of %s could not be kept, so it was not issued: %w", kind.Schema.Name, err)
+	keptInside := s.engineKeepsCredentialLogs()
+	result, err := s.KeriDriver.IssueCredentialInRegistry(issuer, claims, kind.Schema.SAID, holder, nil, registrySAID)
+	if err == nil && !keptInside {
+		err = s.keepAfter(issuer, result.SequenceNumber, result.IxnRawBytesB64, result.IssRawBytesB64)
+	}
+	if err != nil {
+		return "", fmt.Errorf("%s was not issued: %w", kind.Schema.Name, err)
 	}
 	// Fixed-width to the nanosecond, so two credentials issued in one second
 	// still order correctly as text, which is how the newest is picked.
