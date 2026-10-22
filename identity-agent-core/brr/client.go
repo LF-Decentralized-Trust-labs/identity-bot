@@ -8,7 +8,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
+
+	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto"
 )
 
 // Client is the IA-side BRR HTTP client (issuer push + verifier fetch).
@@ -43,11 +46,14 @@ func (c *Client) Enroll(registryPrefix string) error {
 		IssuerAID:       c.IssuerAID,
 		IssuerPubKeyB64: base64.StdEncoding.EncodeToString(c.IssuerPub),
 	}
-	canonical, _ := json.Marshal(map[string]string{
+	canonical, err := relayproto.CanonicalBody(map[string]any{
 		"registry_prefix":       body.RegistryPrefix,
 		"issuer_aid":            body.IssuerAID,
 		"issuer_public_key_b64": body.IssuerPubKeyB64,
 	})
+	if err != nil {
+		return err
+	}
 	body.Signature = base64.RawURLEncoding.EncodeToString(ed25519.Sign(c.IssuerPriv, canonical))
 	b, _ := json.Marshal(body)
 	resp, err := c.HTTPClient.Post(c.BaseURL+"/registry/enroll", "application/json", bytes.NewReader(b))
@@ -63,21 +69,28 @@ func (c *Client) Enroll(registryPrefix string) error {
 }
 
 type EventRequest struct {
-	BlindedID      string `json:"blinded_id"`
-	EventType      string `json:"event_type"`
-	SequenceNumber int    `json:"sequence_number"`
+	BlindedID string `json:"blinded_id"`
+	EventType string `json:"event_type"`
+	// SequenceNumber is a decimal string: every signed field is a string
+	// (ADR-049).
+	SequenceNumber string `json:"sequence_number"`
 	Signature      string `json:"signature"`
 }
 
 // PushBlindedEvent sends a blinded iss/rev event (issuer never sends plaintext SAID).
 func (c *Client) PushBlindedEvent(registryPrefix, blindedID, eventType string, seq int) error {
-	req := EventRequest{BlindedID: blindedID, EventType: eventType, SequenceNumber: seq}
-	canonical, _ := json.Marshal(map[string]interface{}{
+	req := EventRequest{BlindedID: blindedID, EventType: eventType, SequenceNumber: strconv.Itoa(seq)}
+	// The registry prefix travels in the path, and is signed with the body so
+	// an event cannot be replayed into another registry.
+	canonical, err := relayproto.CanonicalBody(map[string]any{
 		"registry_prefix": registryPrefix,
 		"blinded_id":      blindedID,
 		"event_type":      eventType,
-		"sequence_number": seq,
+		"sequence_number": req.SequenceNumber,
 	})
+	if err != nil {
+		return err
+	}
 	req.Signature = base64.RawURLEncoding.EncodeToString(ed25519.Sign(c.IssuerPriv, canonical))
 	b, _ := json.Marshal(req)
 	url := fmt.Sprintf("%s/registry/%s/event", trimSlash(c.BaseURL), registryPrefix)

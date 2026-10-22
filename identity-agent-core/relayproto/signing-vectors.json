@@ -1,0 +1,150 @@
+{
+  "about": "The bytes every service-provider protocol request is signed over, and an Ed25519 signature over them. Implementations reproduce canonical exactly from fields, and the signature from the seed.",
+  "public_key": "ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ",
+  "refused": [
+    {
+      "fields": {
+        "limit": 50
+      },
+      "name": "a number"
+    },
+    {
+      "fields": {
+        "message_ids": [
+          "m-1"
+        ]
+      },
+      "name": "a list"
+    },
+    {
+      "fields": {
+        "envelope": {
+          "a": "b"
+        }
+      },
+      "name": "a nested object"
+    },
+    {
+      "fields": {
+        "name": "café"
+      },
+      "name": "text outside printable ASCII"
+    },
+    {
+      "fields": {
+        "x": "line\nbreak"
+      },
+      "name": "a control character"
+    },
+    {
+      "fields": {
+        "naïve": "x"
+      },
+      "name": "a key outside printable ASCII"
+    }
+  ],
+  "seed_hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+  "signature_encoding": "base64url without padding",
+  "vectors": [
+    {
+      "name": "a relay control request",
+      "fields": {
+        "allocation": "abcdefghijklmnopqrstuvwxyz",
+        "nonce": "n0nce-n0nce-n0nce",
+        "op": "bind",
+        "relay": "relay.example",
+        "signed_by": "EAID",
+        "t": "2026-10-21T00:00:00Z"
+      },
+      "canonical": "{\"allocation\":\"abcdefghijklmnopqrstuvwxyz\",\"nonce\":\"n0nce-n0nce-n0nce\",\"op\":\"bind\",\"relay\":\"relay.example\",\"signed_by\":\"EAID\",\"t\":\"2026-10-21T00:00:00Z\"}",
+      "signature": "XJR92a8Nf-zbwP7kJek7GyzFd55jGUcm9dXoq2jNuQqJdPTOZLasnUSKgaHhAu-OjUgEopOvOe8UvaGdSYxBAg"
+    },
+    {
+      "name": "an admission statement",
+      "fields": {
+        "aid": "EAID",
+        "exporter": "3q2-7w",
+        "nonce": "q9Xc2V0bm9uY2U",
+        "protocol": "iarelay/2",
+        "purpose": "relay-admission",
+        "service": "connect.relay.example",
+        "t": "2026-10-21T00:00:00Z"
+      },
+      "canonical": "{\"aid\":\"EAID\",\"exporter\":\"3q2-7w\",\"nonce\":\"q9Xc2V0bm9uY2U\",\"protocol\":\"iarelay/2\",\"purpose\":\"relay-admission\",\"service\":\"connect.relay.example\",\"t\":\"2026-10-21T00:00:00Z\"}",
+      "signature": "GjNovuHJHW4ogsRQ_dsGMRjD_KBTjgWTpFoAvbCMiZBmgNARMih9TtvE_B10YudxpAyAWBC5kLBCrZ_yjp30DQ"
+    },
+    {
+      "name": "a mailbox collect request",
+      "fields": {
+        "aid": "EAID",
+        "limit": "50",
+        "nonce": "n0nce-1",
+        "t": "2026-10-21T00:00:00Z",
+        "v": "IAMAILBOX11JSON"
+      },
+      "canonical": "{\"aid\":\"EAID\",\"limit\":\"50\",\"nonce\":\"n0nce-1\",\"t\":\"2026-10-21T00:00:00Z\",\"v\":\"IAMAILBOX11JSON\"}",
+      "signature": "WikGGcMP71KdrUj3_vQsvfXq-5dyvyfwRNi3HbWuimXerG-ZCXXp1rzn6aXYIkHHZDuUEpecj9bTHL9OcX6fDw"
+    },
+    {
+      "name": "a mailbox acknowledgement",
+      "fields": {
+        "aid": "EAID",
+        "message_ids": "m-1 m-2 m-3",
+        "nonce": "n0nce-2",
+        "t": "2026-10-21T00:00:00Z",
+        "v": "IAMAILBOX11JSON"
+      },
+      "canonical": "{\"aid\":\"EAID\",\"message_ids\":\"m-1 m-2 m-3\",\"nonce\":\"n0nce-2\",\"t\":\"2026-10-21T00:00:00Z\",\"v\":\"IAMAILBOX11JSON\"}",
+      "signature": "wiCb4HONpbJBg_Nwc9fbI7Rd3QwJfMnw8OD96GnDGtqhkfm5N4k_6eTELK-jUgbRVBFxTmiIDnS8J0OiuR6ZAQ"
+    },
+    {
+      "name": "the signature field is left out",
+      "fields": {
+        "aid": "EAID",
+        "signature": "not signed over",
+        "v": "IAMAILBOX11JSON"
+      },
+      "canonical": "{\"aid\":\"EAID\",\"v\":\"IAMAILBOX11JSON\"}",
+      "signature": "WPE37PirWTQxKWJoqznJ-LO2sZzoZOga_SfBhPX52GGoMZSYR66aJDHpB3bn5Wga8arPhFXX-3CR9-DLeJSiBQ"
+    },
+    {
+      "name": "a quote and a backslash are the only escapes",
+      "fields": {
+        "path": "C:\\dir\\file",
+        "q": "say \"hi\"",
+        "slash": "a/b/c"
+      },
+      "canonical": "{\"path\":\"C:\\\\dir\\\\file\",\"q\":\"say \\\"hi\\\"\",\"slash\":\"a/b/c\"}",
+      "signature": "XjQVFeHtjwI_22dPfueUePFR1PXYvmqq-8H5O6AawRqFs43TBpAo_eE-IhuEHbKrfNL4tMNZqaQOO0rFZNYlBg"
+    },
+    {
+      "name": "an empty value is kept",
+      "fields": {
+        "aid": "EAID",
+        "empty": ""
+      },
+      "canonical": "{\"aid\":\"EAID\",\"empty\":\"\"}",
+      "signature": "_o9NGL-Y6-5es5BZcLrEFz9cb2iJ-WtK7gGnZN8qVkqk-747d1yLvftsZgiQTDIQz1PslPEjgylfjMgmnoeTDw"
+    },
+    {
+      "name": "HTML characters are not escaped",
+      "fields": {
+        "q": "a<b>&c",
+        "url": "https://example.org/oobi?x=1&y=2"
+      },
+      "canonical": "{\"q\":\"a<b>&c\",\"url\":\"https://example.org/oobi?x=1&y=2\"}",
+      "signature": "WDXbEavvEKLKY1emfal1ghME_RpeTI6SvsmDKJNoh2jEQ0_sIhjJCQQItQQE8OiyGYyHeQCMsTLlh8v2TsKvDg"
+    },
+    {
+      "name": "keys sort by byte value",
+      "fields": {
+        "A": "upper",
+        "_": "underscore",
+        "a": "1",
+        "b": "2"
+      },
+      "canonical": "{\"A\":\"upper\",\"_\":\"underscore\",\"a\":\"1\",\"b\":\"2\"}",
+      "signature": "sXlVSGJopJvVjok48e_CBjPdggE9DWvLZ9CPudRHlCkCtY6v-jzlWegD0hz7OEQvSKAHjKmb-mULgNlXy_myAg"
+    }
+  ]
+}

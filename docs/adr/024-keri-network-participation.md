@@ -47,7 +47,7 @@ The flow is descriptor → enroll → allocate → serve:
 3. `Client.Allocate` (signed) requests a public URL with the intent to serve did:webs artifacts; it is idempotent (a 409 returns the existing allocation). `Client.Release` decommissions it.
 4. *(Superseded by ADR-048: the frame protocol and its schema are removed; the session is `relayproto`.)* `TunnelAgent.Run` maintained the outbound WebSocket with exponential-backoff reconnect, receives request frames (`t:"req"`), dispatches them to the local HTTP server, and streams responses back as `res` / `res_chunk` frames (32 KB chunks, base64url bodies). Its frame schema was removed with it.
 
-Allocation requests are signed over a canonical (sorted-key, signature-field-stripped) body, so the relay can authenticate the agent but cannot impersonate it. Because the protocol is open and discovery-driven, the agent is not bound to any single relay operator — `relay.grapeid.org` is one provider, not a dependency.
+Allocation requests are signed over one canonical form, set by ADR-049 (sorted keys, string fields only, no HTML escaping, signature field left out), so the relay can authenticate the agent but cannot impersonate it. Because the protocol is open and discovery-driven, the agent is not bound to any single relay operator — `relay.grapeid.org` is one provider, not a dependency.
 
 ### did:webs publisher — serve your KEL over HTTPS
 

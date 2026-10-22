@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -41,8 +42,9 @@ func newFakeBRR(t *testing.T) *httptest.Server {
 				return
 			}
 			mu.Lock()
-			if cur := state[req.BlindedID]; req.SequenceNumber >= cur.seq {
-				state[req.BlindedID] = latest{seq: req.SequenceNumber, revoked: req.EventType == "rev"}
+			seq, _ := strconv.Atoi(req.SequenceNumber)
+			if cur := state[req.BlindedID]; seq >= cur.seq {
+				state[req.BlindedID] = latest{seq: seq, revoked: req.EventType == "rev"}
 			}
 			mu.Unlock()
 			w.WriteHeader(http.StatusOK)

@@ -82,10 +82,12 @@ Layer 2 is where profile data (jCard, photo) is fetched and displayed. This sepa
 **Planned extension:** The OOBI URL will include an optional `intent` query parameter:
 
 ```
-https://grapeid.org/alice/oobi/{AID}?action=add_contact
-https://grapeid.org/alice/oobi/{AID}?action=request_payment
-https://grapeid.org/alice/oobi/{AID}                        (defaults to add_contact)
+https://alice.relay.example.org/oobi/{AID}?action=add_contact
+https://alice.relay.example.org/oobi/{AID}?action=request_payment
+https://alice.relay.example.org/oobi/{AID}                        (defaults to add_contact)
 ```
+
+*Amended 2026-10-21: the examples used a public relay's retired path form (`<relay>/alice/oobi/…`); a public name is now a subdomain of the relay, per ADR-048 §7.*
 
 The QR code displayed in the Share Menu will encode this full URL. The scanner will extract the intent and route to the appropriate Layer 2 flow. Unrecognized intents will show a "Coming Soon" dialog.
 
