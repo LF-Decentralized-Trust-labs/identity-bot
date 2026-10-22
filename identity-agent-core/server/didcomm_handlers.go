@@ -482,11 +482,21 @@ func (s *CoreServer) handleDIDCommInbound(w http.ResponseWriter, r *http.Request
 	// anyone could fill the log by posting garbage. Each message's refusal is
 	// recorded once: a captured envelope replayed over and over is one fact,
 	// and recording every copy would let whoever holds it fill the log.
+	// Kept apart from the replay cache (firstRefusal), and keyed by sender,
+	// so refusals can neither fill the cache that stops replays nor stand in
+	// for one another's.
 	refuse := func(why string, status int) {
-		if !seenBefore("refusal-recorded:"+jwm.ID, time.Now().Add(maxEnvelopeLifetime)) {
-			s.recordTraffic(skid, jwm.ID, "didcomm.message.received", "denied", jwm.Type+" to "+kid+": "+why)
+		if firstRefusal(skid, jwm.ID) {
+			s.recordTraffic(skid, jwm.ID, "", "didcomm.message.received", "denied", jwm.Type+" to "+kid+": "+why, nil)
 		}
 		jsonError(w, why, status)
+	}
+	// What the sender signed must name the parties it was authenticated as,
+	// or it could be shown later as somebody else's words, or as meant for
+	// somebody else.
+	if err := jwm.NamesParties(skid, kid); err != nil {
+		refuse(err.Error(), http.StatusForbidden)
+		return
 	}
 	exp, perr := time.Parse(time.RFC3339, jwm.ExpiresTime)
 	if perr != nil || time.Now().After(exp) {
@@ -512,8 +522,15 @@ func (s *CoreServer) handleDIDCommInbound(w http.ResponseWriter, r *http.Request
 	//
 	// skid and kid are the AUTHENTICATED header values, not anything read out of
 	// the message. A sender that could name itself could name somebody else.
-	s.storeInboundAsNotification(skid, kid, jwm, true, &receivedProof{signed: signed, sender: &peer.DID})
-	s.recordTraffic(skid, jwm.ID, "didcomm.message.received", "ok", jwm.Type+" to "+kid)
+	proof := s.proofOfReceipt(skid, &peer.DID, signed)
+	s.storeInboundAsNotification(skid, kid, jwm, true, proof)
+	// The log row commits to the proof just kept, so it cannot be swapped later.
+	var about []byte
+	if proof != nil {
+		about = receiptBinding(jwm.ID, *proof)
+	}
+	s.recordTraffic(skid, jwm.ID, s.trafficConversation(skid, jwm.Body), "didcomm.message.received", "ok",
+		jwm.Type+" to "+kid, about)
 	// The handler layer routes on type; the AI-agent handler picks up agent-* messages.
 	s.routeInboundDIDComm(kid, skid, jwm)
 	w.WriteHeader(http.StatusAccepted)

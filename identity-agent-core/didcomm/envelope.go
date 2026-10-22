@@ -211,6 +211,23 @@ func VerifySignedMessage(senderDID *DID, signed []byte) (*JWM, error) {
 	return verifySigned(pd, signed)
 }
 
+// NamesParties reports whether a message names, inside what its sender
+// signed, the sender and recipient it was authenticated as. The envelope
+// header says who sent it to whom; the signed message must say the same, or a
+// sender could sign a message that reads as somebody else's, or as meant for
+// somebody else, to anyone shown it later.
+func (j *JWM) NamesParties(fromAID, toAID string) error {
+	if j.From != "did:keri:"+fromAID {
+		return fmt.Errorf("the signed message names %q as its sender, not %s", j.From, fromAID)
+	}
+	for _, to := range j.To {
+		if to == "did:keri:"+toAID {
+			return nil
+		}
+	}
+	return fmt.Errorf("the signed message is not addressed to %s", toAID)
+}
+
 // verifySigned is the one check of a signed message, whether it has just been
 // decrypted or was kept and is being checked again.
 func verifySigned(pd *parsedDID, sjB []byte) (*JWM, error) {

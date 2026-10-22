@@ -895,6 +895,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_credential_tel_said ON credential_tel_even
 -- '' for messages received before this.
 ALTER TABLE notifications ADD COLUMN signed_message TEXT NOT NULL DEFAULT '';
 ALTER TABLE notifications ADD COLUMN sender_did     TEXT NOT NULL DEFAULT '';
+-- How the sender's keys were tied to the sender when the message arrived, and
+-- how far the sender's key history went then, so the tie can be checked again
+-- against that history rather than against whatever key the sender holds now.
+ALTER TABLE notifications ADD COLUMN sender_key_trust  TEXT    NOT NULL DEFAULT '';
+ALTER TABLE notifications ADD COLUMN sender_kel_said   TEXT    NOT NULL DEFAULT '';
+ALTER TABLE notifications ADD COLUMN sender_kel_events INTEGER NOT NULL DEFAULT 0;
 `},
 }
 

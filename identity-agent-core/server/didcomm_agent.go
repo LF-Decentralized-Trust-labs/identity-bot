@@ -75,8 +75,8 @@ func (s *CoreServer) SendDIDCommMessage(fromAID, toAID, typ string, body json.Ra
 	raw, _ := json.Marshal(env)
 	resp, err := (&http.Client{Timeout: 15 * time.Second}).Post(peer.Endpoint, "application/didcomm-envelope+json", bytes.NewReader(raw))
 	if err != nil {
-		s.recordTraffic(fromAID, jwm.ID, "didcomm.message.sent", "error",
-			fmt.Sprintf("%s to %s could not be delivered: %v", typ, toAID, err))
+		s.recordTraffic(fromAID, jwm.ID, conversationOf(body), "didcomm.message.sent", "error",
+			fmt.Sprintf("%s to %s could not be delivered: %v", typ, toAID, err), nil)
 		return jwm.ID, 0, fmt.Errorf("delivery: %w", err)
 	}
 	defer resp.Body.Close()
@@ -85,19 +85,20 @@ func (s *CoreServer) SendDIDCommMessage(fromAID, toAID, typ string, body json.Ra
 	if resp.StatusCode >= 300 {
 		status = "error"
 	}
-	s.recordTraffic(fromAID, jwm.ID, "didcomm.message.sent", status,
-		fmt.Sprintf("%s to %s, answered %d", typ, toAID, resp.StatusCode))
+	s.recordTraffic(fromAID, jwm.ID, conversationOf(body), "didcomm.message.sent", status,
+		fmt.Sprintf("%s to %s, answered %d", typ, toAID, resp.StatusCode), nil)
 	return jwm.ID, resp.StatusCode, nil
 }
 
 // recordTraffic writes one message that crossed this agent to the signed log,
-// linked by the message's own id, so what was sent and received can be shown
-// later rather than only what was done because of it.
-func (s *CoreServer) recordTraffic(caller, messageID, event, status, why string) {
+// linked by the message's own id and filed under its conversation when it has
+// one, so what was sent and received can be shown later rather than only what
+// was done because of it. about, when given, is what the row commits to.
+func (s *CoreServer) recordTraffic(caller, messageID, conversation, event, status, why string, about []byte) {
 	if s.SandboxManager == nil {
 		return
 	}
-	s.SandboxManager.RecordGovernanceEvent(sandbox.CallerContext{
-		CallerAID: caller, CorrelationID: messageID, Transport: "didcomm", Reason: clampWhy(why),
-	}, event, status)
+	s.SandboxManager.RecordGovernanceEventAbout(sandbox.CallerContext{
+		CallerAID: caller, CorrelationID: messageID, WorkItem: conversation, Transport: "didcomm", Reason: clampWhy(why),
+	}, event, status, about)
 }

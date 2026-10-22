@@ -195,3 +195,19 @@ func TestAReceivedMessageCanBeProvedLater(t *testing.T) {
 		t.Fatal("an altered message still proved itself")
 	}
 }
+
+// A message names its own sender and recipient inside what was signed, and
+// those must be the ones it was authenticated as: a sender cannot sign words
+// that read as somebody else's.
+func TestASignedMessageNamesItsParties(t *testing.T) {
+	m := mkJWM(t, "EAlice", "EBob", TypeAgentMessage, map[string]string{"text": "hi"})
+	if err := m.NamesParties("EAlice", "EBob"); err != nil {
+		t.Fatalf("a message naming its own parties was refused: %v", err)
+	}
+	if err := m.NamesParties("EMallory", "EBob"); err == nil {
+		t.Fatal("a message naming another sender was taken as the authenticated sender's")
+	}
+	if err := m.NamesParties("EAlice", "ECarol"); err == nil {
+		t.Fatal("a message addressed to somebody else was taken as addressed to this recipient")
+	}
+}
