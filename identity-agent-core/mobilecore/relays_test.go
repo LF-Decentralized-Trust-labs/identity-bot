@@ -41,3 +41,15 @@ func TestARelayIsAnHTTPSAddress(t *testing.T) {
 		}
 	}
 }
+
+// One bad address leaves neither relay named, not half of them.
+func TestABadRelayLeavesTheOtherUnset(t *testing.T) {
+	t.Setenv("RELAY_BASE_URL", "")
+	t.Setenv("PUBLIC_RELAY_BASE_URL", "")
+	if err := DeclareRelays("https://relay.example.org", "http://example.org"); err == nil {
+		t.Fatal("a plain-http public relay was accepted")
+	}
+	if got := os.Getenv("RELAY_BASE_URL"); got != "" {
+		t.Fatalf("the private relay was set although the public one was refused: %q", got)
+	}
+}

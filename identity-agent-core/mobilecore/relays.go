@@ -2,9 +2,10 @@ package mobilecore
 
 import (
 	"fmt"
-	"net/url"
 	"os"
 	"strings"
+
+	"identity-agent-core/relay"
 )
 
 // Naming the relays this Identity Agent is reached through.
@@ -17,21 +18,25 @@ import (
 //
 // Must be called before StartServer, which reads them once.
 func DeclareRelays(privateRelay, publicRelay string) error {
-	for _, r := range []struct{ env, value string }{
-		{"RELAY_BASE_URL", privateRelay},
-		{"PUBLIC_RELAY_BASE_URL", publicRelay},
-	} {
-		v := strings.TrimRight(strings.TrimSpace(r.value), "/")
-		if v == "" {
+	relays := []struct{ env, value string }{
+		{"RELAY_BASE_URL", strings.TrimRight(strings.TrimSpace(privateRelay), "/")},
+		{"PUBLIC_RELAY_BASE_URL", strings.TrimRight(strings.TrimSpace(publicRelay), "/")},
+	}
+	// Both are checked before either is set, so a bad one never leaves the
+	// other half applied.
+	for _, r := range relays {
+		if r.value == "" {
 			continue
 		}
-		if u, err := url.Parse(v); err != nil || u.Scheme != "https" || u.Host == "" {
+		if err := relay.CheckBaseURL(r.value); err != nil {
 			return fmt.Errorf("%q is not an https address of a relay", r.value)
 		}
-		if strings.TrimSpace(os.Getenv(r.env)) != "" {
+	}
+	for _, r := range relays {
+		if r.value == "" || strings.TrimSpace(os.Getenv(r.env)) != "" {
 			continue
 		}
-		if err := os.Setenv(r.env, v); err != nil {
+		if err := os.Setenv(r.env, r.value); err != nil {
 			return err
 		}
 	}
