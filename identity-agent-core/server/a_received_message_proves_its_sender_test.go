@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"identity-agent-core/asset"
 	"identity-agent-core/didcomm"
 	"identity-agent-core/drivers"
 	"identity-agent-core/drivers/driverfake"
@@ -152,7 +154,7 @@ func (m *messaging) post(t *testing.T, raw []byte) int {
 
 func refusedFor(t *testing.T, s *CoreServer, n store.Notification, why string) {
 	t.Helper()
-	_, err := s.provedSender(n)
+	_, _, err := s.provedSender(n)
 	if err == nil {
 		t.Fatalf("a message was taken as proved; want it refused because %q", why)
 	}
@@ -188,8 +190,8 @@ func TestAReceivedMessageIsKeptWithItsProofAndBothEndsLogIt(t *testing.T) {
 	if n.SenderKeyTrust != string(didcomm.KeysAnchored) || n.SenderKELEvents != 1 {
 		t.Fatalf("how the sender's keys were tied was not kept: %q at %d", n.SenderKeyTrust, n.SenderKELEvents)
 	}
-	if _, err := m.receiver.provedSender(n); err != nil {
-		t.Fatalf("the kept message does not prove its sender: %v", err)
+	if _, tie, err := m.receiver.provedSender(n); err != nil || tie != string(didcomm.KeysAnchored) {
+		t.Fatalf("the kept message does not prove its sender: %q %v", tie, err)
 	}
 	altered := n
 	altered.Payload = `{"title":"the build failed"}`
@@ -325,7 +327,7 @@ func TestARotationNeitherBreaksAnOldMessageNorLetsTheRetiredKeyVouch(t *testing.
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.receiver.provedSender(before); err != nil {
+	if _, _, err := m.receiver.provedSender(before); err != nil {
 		t.Fatalf("a genuine message stopped proving its sender when the sender rotated: %v", err)
 	}
 
@@ -338,8 +340,29 @@ func TestARotationNeitherBreaksAnOldMessageNorLetsTheRetiredKeyVouch(t *testing.
 	// position where the retired key was current: the log says where it
 	// arrived.
 	moved := after
-	moved.SenderKeyTrust, moved.SenderKELSaid, moved.SenderKELEvents = string(didcomm.KeysVouched), "Eicp", 1
+	moved.SenderKeyTrust, moved.SenderKELSaid, moved.SenderKELEvents, moved.SenderKEL = string(didcomm.KeysVouched), "Eicp", 1, before.SenderKEL
 	refusedFor(t, m.receiver, moved, "signed log has no record")
+
+	// Nor can the kept history be edited: the log committed to it.
+	var events []map[string]interface{}
+	_ = json.Unmarshal([]byte(before.SenderKEL), &events)
+	events[0]["note"] = "edited"
+	edited, _ := json.Marshal(events)
+	tampered := before
+	tampered.SenderKEL = string(edited)
+	refusedFor(t, m.receiver, tampered, "signed log has no record")
+
+	// The contact going, and its record being refetched shorter, leave the
+	// proof intact: the history it was received under is kept with it.
+	if err := m.receiver.DataStore.DeleteContact(m.senderAID); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.receiver.DataStore.SaveContactKEL(store.ContactKELRecord{AID: m.senderAID}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := m.receiver.provedSender(before); err != nil {
+		t.Fatalf("removing the contact broke a genuine message's proof: %v", err)
+	}
 }
 
 // Each check in provedSender is the first to catch its own forgery.
@@ -379,7 +402,15 @@ func TestAMessageNamingAnotherSenderIsRefused(t *testing.T) {
 
 // Recording refusals cannot fill the cache that stops replays, and one
 // sender's message ids do not stand in for another's.
+func resetRefusals(t *testing.T) {
+	t.Helper()
+	refusalsRecorded.Lock()
+	refusalsRecorded.m = map[string]*senderRefusals{}
+	refusalsRecorded.Unlock()
+}
+
 func TestRefusalsAreRecordedApartFromReplays(t *testing.T) {
+	resetRefusals(t)
 	m := newMessaging(t)
 	const second = "ESECOND"
 	ks, err := m.sender.keySetFor(second)
@@ -446,4 +477,130 @@ func TestTrafficIsFiledUnderItsConversation(t *testing.T) {
 	if rows := logged(t, m.receiver, "didcomm.message.received", long.ID); len(rows) != 1 || rows[0].WorkItem != "" {
 		t.Fatalf("a malformed conversation was written into the log: %+v", rows)
 	}
+}
+
+// One sender flooding refusals silences only itself: its refusals are recorded
+// up to its quota, then one row says the rest are not recorded until the
+// window ends, and another sender's refusals are still recorded.
+func TestOneSendersFloodOfRefusalsSilencesOnlyItself(t *testing.T) {
+	resetRefusals(t)
+	m := newMessaging(t)
+	const other = "EOTHERSENDER"
+	ks, err := m.sender.keySetFor(other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	did, _ := ks.DID()
+	didcommMu.Lock()
+	peers := m.receiver.loadPeers()
+	peers[other] = peerRecord{AID: other, DID: *did}
+	_ = m.receiver.savePeers(peers)
+	didcommMu.Unlock()
+
+	expired := time.Now().Add(-time.Minute)
+	for i := 0; i < refusalQuota+50; i++ {
+		raw := m.sealed(t, m.senderAID, fmt.Sprintf("flood-%d", i), "did:keri:"+m.senderAID, expired)
+		if code := m.post(t, raw); code != http.StatusForbidden {
+			t.Fatalf("an expired envelope was answered %d", code)
+		}
+	}
+	raw := m.sealed(t, other, "from-the-other", "did:keri:"+other, expired)
+	if code := m.post(t, raw); code != http.StatusForbidden {
+		t.Fatalf("an expired envelope was answered %d", code)
+	}
+
+	count := func(event, caller string) int {
+		rows, err := m.receiver.SandboxManager.Store().QueryInvocationEvents(sandbox.InvocationEventFilter{
+			CapabilityID: event, CallerAID: caller, Limit: 1000})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(rows)
+	}
+	if n := count("didcomm.message.received", m.senderAID); n != refusalQuota {
+		t.Fatalf("the flooding sender has %d refusals recorded; want its quota of %d", n, refusalQuota)
+	}
+	if n := count("didcomm.refusals.suppressed", m.senderAID); n != 1 {
+		t.Fatalf("%d rows say the flooding sender's refusals are suppressed; want one", n)
+	}
+	if n := count("didcomm.message.received", other); n != 1 {
+		t.Fatalf("another sender's refusal was not recorded while one sender flooded: %d", n)
+	}
+}
+
+// "Own" is this Identity Agent's word that the keys are its AI agent's, and it
+// takes more than files this agent writes: an asset row and a keyset can be
+// written for anybody's identifier, so the identifier's key history must be
+// delegated from this agent's root and approved in the root's own history.
+func TestOwnIsOnlyAnAIAgentDelegatedFromHere(t *testing.T) {
+	w := newTalkWorld(t)
+	genuine, err := w.s.keySetFor(w.a.PairwiseAID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gdid, _ := genuine.DID()
+	if err := w.s.ownAgentKeys(w.a.PairwiseAID, gdid); err != nil {
+		t.Fatalf("an AI agent this Identity Agent delegated is not taken as its own: %v", err)
+	}
+
+	// Somebody else's identifier, written in as if it were an AI agent here.
+	const victim = "EVICTIMSOMEWHEREELSE0000000000000000000000000"
+	if err := w.s.assetHandler.Store.UpsertAsset(asset.Asset{
+		ID: "forged-asset", DisplayName: "Forged", AssetType: "ai_agent", PairwiseAID: victim,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	minted, err := w.s.keySetFor(victim)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mdid, _ := minted.DID()
+	err = w.s.ownAgentKeys(victim, mdid)
+	if err == nil || !strings.Contains(err.Error(), "not delegated from this Identity Agent") {
+		t.Fatalf("a forged asset row and a minted keyset were taken as this agent's own AI agent: %v", err)
+	}
+
+	// A row pointing at a key history the engine does hold, but one that no
+	// delegation from the root opens: the root identity itself.
+	identity, _ := w.s.DataStore.GetIdentity()
+	if err := w.s.assetHandler.Store.UpsertAsset(asset.Asset{
+		ID: "forged-root", DisplayName: identity.AID, AssetType: "ai_agent", PairwiseAID: identity.AID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rootKeys, err := w.s.keySetFor(identity.AID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootDID, _ := rootKeys.DID()
+	err = w.s.ownAgentKeys(identity.AID, rootDID)
+	if err == nil || !strings.Contains(err.Error(), "not anchored") && !strings.Contains(err.Error(), "not delegated, so") {
+		t.Fatalf("an identifier whose history is not a delegation from the root was taken as an AI agent here: %v", err)
+	}
+
+	// And a message kept as the victim's, tied as "own", proves nothing.
+	jwm := &didcomm.JWM{
+		ID: "forged-own", Type: didcomm.TypeNotification,
+		From: "did:keri:" + victim, To: []string{"did:keri:" + identity.AID},
+		CreatedTime: time.Now().UTC().Format(time.RFC3339), ExpiresTime: time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+		Body: json.RawMessage(`{"title":"forged"}`),
+	}
+	rk, err := w.s.keySetFor(identity.AID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rdid, _ := rk.DID()
+	env, err := didcomm.PackAuthcrypt(minted, rdid, jwm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, signed, err := didcomm.UnpackAuthcryptKeeping(rk, mdid, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys, _ := json.Marshal(mdid)
+	refusedFor(t, w.s, store.Notification{
+		ID: jwm.ID, FromAID: victim, ToAID: identity.AID, Payload: string(jwm.Body),
+		SignedMessage: base64.StdEncoding.EncodeToString(signed), SenderDID: string(keys), SenderKeyTrust: keysOwn,
+	}, "were not tied")
 }

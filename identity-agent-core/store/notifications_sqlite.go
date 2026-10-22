@@ -24,14 +24,14 @@ import (
 // query cannot be forgotten in another.
 const notificationColumns = `id, from_aid, to_aid, kind, severity, title, body,
        payload, status, verified, received_at, read_at, expires_at, signed_message, sender_did,
-       sender_key_trust, sender_kel_said, sender_kel_events`
+       sender_key_trust, sender_kel_said, sender_kel_events, sender_kel`
 
 func scanNotification(row interface{ Scan(...interface{}) error }) (*Notification, error) {
 	var n Notification
 	var verified int
 	err := row.Scan(&n.ID, &n.FromAID, &n.ToAID, &n.Kind, &n.Severity, &n.Title,
 		&n.Body, &n.Payload, &n.Status, &verified, &n.ReceivedAt, &n.ReadAt, &n.ExpiresAt,
-		&n.SignedMessage, &n.SenderDID, &n.SenderKeyTrust, &n.SenderKELSaid, &n.SenderKELEvents)
+		&n.SignedMessage, &n.SenderDID, &n.SenderKeyTrust, &n.SenderKELSaid, &n.SenderKELEvents, &n.SenderKEL)
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +56,7 @@ func (s *SQLiteStore) SaveNotification(n Notification) error {
 	_, err := s.db.Exec(`
 INSERT INTO notifications
     (`+notificationColumns+`)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 -- A notification is written once and never rewritten by a later delivery of
 -- the same message. Two things follow, and both matter.
 --
@@ -73,7 +73,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO NOTHING`,
 		n.ID, n.FromAID, n.ToAID, n.Kind, n.Severity, n.Title, n.Body,
 		n.Payload, n.Status, boolToInt(n.Verified), n.ReceivedAt, n.ReadAt, n.ExpiresAt,
-		n.SignedMessage, n.SenderDID, n.SenderKeyTrust, n.SenderKELSaid, n.SenderKELEvents)
+		n.SignedMessage, n.SenderDID, n.SenderKeyTrust, n.SenderKELSaid, n.SenderKELEvents, n.SenderKEL)
 	if err != nil {
 		return fmt.Errorf("failed to save notification: %w", err)
 	}

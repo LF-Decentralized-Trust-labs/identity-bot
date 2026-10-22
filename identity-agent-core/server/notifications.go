@@ -69,7 +69,7 @@ func (s *CoreServer) storeInboundAsNotification(fromAID, toAID string, jwm *didc
 	}
 	if proof != nil {
 		n.SignedMessage, n.SenderDID = proof.Signed, proof.SenderDID
-		n.SenderKeyTrust, n.SenderKELSaid, n.SenderKELEvents = proof.KeyTrust, proof.KELSaid, proof.KELEvents
+		n.SenderKeyTrust, n.SenderKELSaid, n.SenderKELEvents, n.SenderKEL = proof.KeyTrust, proof.KELSaid, proof.KELEvents, proof.KEL
 	}
 
 	// A message of the notification type carries text meant for a person. Any

@@ -405,13 +405,18 @@ type Notification struct {
 	SenderDID     string `json:"sender_did,omitempty"`
 	// SenderKeyTrust is how SenderDID was tied to the sender when the message
 	// arrived (anchored in its identifier, vouched for by its key, or one of
-	// this agent's own AI agents), and SenderKELSaid and SenderKELEvents the
+	// this agent's own AI agents, which is this agent's own word), and
+	// SenderKELSaid and SenderKELEvents the
 	// last event and length of the sender's key history then. The tie is
 	// checked again against that history, so a later rotation neither breaks
 	// an old message nor lets a retired key vouch for a new one.
 	SenderKeyTrust  string `json:"sender_key_trust,omitempty"`
 	SenderKELSaid   string `json:"sender_kel_said,omitempty"`
 	SenderKELEvents int    `json:"sender_kel_events,omitempty"`
+	// SenderKEL is that history itself (JSON), cut where it stood, kept with
+	// the message because the contact's own record is replaced on refetch and
+	// removed with the contact.
+	SenderKEL string `json:"sender_kel,omitempty"`
 }
 
 // Notification severities and statuses.

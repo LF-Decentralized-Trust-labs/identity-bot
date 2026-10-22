@@ -901,6 +901,10 @@ ALTER TABLE notifications ADD COLUMN sender_did     TEXT NOT NULL DEFAULT '';
 ALTER TABLE notifications ADD COLUMN sender_key_trust  TEXT    NOT NULL DEFAULT '';
 ALTER TABLE notifications ADD COLUMN sender_kel_said   TEXT    NOT NULL DEFAULT '';
 ALTER TABLE notifications ADD COLUMN sender_kel_events INTEGER NOT NULL DEFAULT 0;
+-- The sender's key history as it stood then, cut at that point and kept with
+-- the message. The contact's own record is replaced on every refetch and goes
+-- when the contact is removed; the proof must not go with it.
+ALTER TABLE notifications ADD COLUMN sender_kel        TEXT    NOT NULL DEFAULT '';
 `},
 }
 

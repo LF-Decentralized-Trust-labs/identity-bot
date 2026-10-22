@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	keri "github.com/grapeid/keri-go"
+
 	"identity-agent-core/didcomm"
 	"identity-agent-core/sandbox"
 	"identity-agent-core/store"
@@ -23,18 +25,19 @@ import (
 //     the keys it was checked against. The signature is then checkable by
 //     anyone, without this agent's keys.
 //   - Those keys are tied to the sender's identifier through the sender's key
-//     history, as it stood when the message arrived: committed in the
-//     identifier itself, or vouched for by the key the history ended with
-//     then. Keys anybody can mint under any identifier prove nothing until
-//     something ties them to it.
+//     history, as it stood when the message arrived and kept with the message:
+//     committed in the identifier itself, or vouched for by the key the
+//     history ended with then. Keys anybody can mint under any identifier
+//     prove nothing until something ties them to it.
 //   - The signed log row written when the message arrived commits to all of
 //     it (receiptBinding). Somebody who can write the database but not the
 //     log cannot swap the kept proof for another one later.
 
-// keysOwn is the tie for one of this agent's own AI agents: its keys are
-// this agent's to know, so they are checked against what it holds rather than
-// against a key history it fetched. It proves only that this Identity Agent
-// says its own AI agent sent the message, which is all it can.
+// keysOwn is the tie for one of this agent's own AI agents: an identifier
+// whose key history is delegated from this Identity Agent's root, with keys
+// this agent holds for it. Unlike the other two it is SELF-ASSERTED: it rests
+// on this agent's own word that the keys are its AI agent's, so anything
+// showing the proof to somebody else must say so.
 const keysOwn = "own"
 
 // receivedProof is what is kept with a received message so its sender can be
@@ -46,6 +49,7 @@ type receivedProof struct {
 	KeyTrust  string
 	KELSaid   string
 	KELEvents int
+	KEL       string // the sender's key history then, as JSON
 }
 
 // proofOfReceipt builds the proof for a message that has just been unpacked
@@ -56,7 +60,7 @@ func (s *CoreServer) proofOfReceipt(senderAID string, senderDID *didcomm.DID, si
 		return nil
 	}
 	p := &receivedProof{Signed: base64.StdEncoding.EncodeToString(signed), SenderDID: string(did)}
-	p.KeyTrust, p.KELSaid, p.KELEvents = s.senderKeysAtReceipt(senderAID, senderDID)
+	p.KeyTrust, p.KELSaid, p.KELEvents, p.KEL = s.senderKeysAtReceipt(senderAID, senderDID)
 	return p
 }
 
@@ -64,31 +68,44 @@ func (s *CoreServer) proofOfReceipt(senderAID string, senderDID *didcomm.DID, si
 // this agent already holds: nothing is fetched on a sender's say-so. Keys
 // nothing ties to the sender are recorded as such; the message is still taken,
 // as it always was, but it can never be shown to have come from that sender.
-func (s *CoreServer) senderKeysAtReceipt(aid string, did *didcomm.DID) (trust, kelSaid string, kelEvents int) {
+func (s *CoreServer) senderKeysAtReceipt(aid string, did *didcomm.DID) (trust, kelSaid string, kelEvents int, kel string) {
+	untied := string(didcomm.KeysUntied)
 	if s.ownAgentKeys(aid, did) == nil {
-		return keysOwn, "", 0
+		return keysOwn, "", 0, ""
 	}
 	if s.DataStore == nil {
-		return string(didcomm.KeysUntied), "", 0
+		return untied, "", 0, ""
 	}
 	rec, err := s.DataStore.GetContactKEL(aid)
 	if err != nil || rec == nil || !rec.KelVerified || len(rec.KEL) == 0 {
-		return string(didcomm.KeysUntied), "", 0
+		return untied, "", 0, ""
 	}
 	t, err := didcomm.CheckKeysBelongTo(did, rec.KEL, rec.CurrentPublicKey)
 	if err != nil {
-		return string(didcomm.KeysUntied), "", 0
+		return untied, "", 0, ""
+	}
+	events, err := json.Marshal(rec.KEL)
+	if err != nil {
+		return untied, "", 0, ""
 	}
 	said, _ := rec.KEL[len(rec.KEL)-1]["d"].(string)
-	return string(t), said, len(rec.KEL)
+	return string(t), said, len(rec.KEL), string(events)
 }
 
 // ownAgentKeys reports whether did is the keyset this agent holds for one of
-// its own AI agents. A keyset merely held for an identifier is not enough: an
-// agent can mint one under anybody's identifier.
+// its own AI agents. Neither an asset row nor a keyset file is enough: both
+// are files this agent writes, and it can write them for anybody's
+// identifier. The identifier's key history must open with an inception
+// delegated from this Identity Agent's root and approved in the root's own
+// key history, checked with keri-go (delegatedFromHere).
 func (s *CoreServer) ownAgentKeys(aid string, did *didcomm.DID) error {
-	if s.findAgentAssetByAID(aid) == nil || !s.hasKeySet(aid) {
-		return fmt.Errorf("%s is not one of this Identity Agent's AI agents", aid)
+	// Checked first so that checking never mints: keySetFor makes a keyset
+	// for an identifier it has none for.
+	if !s.hasKeySet(aid) {
+		return fmt.Errorf("this Identity Agent holds no keys for %s", aid)
+	}
+	if err := s.delegatedFromHere(aid); err != nil {
+		return fmt.Errorf("%s is not delegated from this Identity Agent: %w", aid, err)
 	}
 	ks, err := s.keySetFor(aid)
 	if err != nil {
@@ -104,9 +121,60 @@ func (s *CoreServer) ownAgentKeys(aid string, did *didcomm.DID) error {
 	return nil
 }
 
+// delegatedFromHere checks, with keri-go, that aid's key history opens with a
+// delegated inception that this Identity Agent's root identity approved by a
+// seal in its own key history.
+func (s *CoreServer) delegatedFromHere(aid string) error {
+	root := s.OwnerRootAID()
+	if root == "" || s.KeriDriver == nil || s.assetHandler == nil {
+		return fmt.Errorf("this Identity Agent has no root identity and key engine to check with")
+	}
+	name := ""
+	for _, a := range s.assetHandler.Store.ListAssets() {
+		if a.PairwiseAID == aid {
+			name = a.DisplayName
+			kel, err := s.KeriDriver.GetKel(name)
+			if err != nil {
+				// The engine forgets identities on a restart; an asset's is
+				// rebuilt from its derived keys, as the OOBI route does.
+				if rerr := s.reviveAssetIdentity(a); rerr != nil {
+					return fmt.Errorf("its key history is not held here: %w", err)
+				}
+			} else if kel.AID != aid {
+				return fmt.Errorf("the key history held under its name is %s's", kel.AID)
+			}
+			break
+		}
+	}
+	if name == "" {
+		return fmt.Errorf("no AI agent here has that identifier")
+	}
+	kel, err := s.KeriDriver.GetKel(name)
+	if err != nil || kel.AID != aid || len(kel.RawEventsB64) == 0 {
+		return fmt.Errorf("its key history is not held here")
+	}
+	inception, err := base64.StdEncoding.DecodeString(kel.RawEventsB64[0])
+	if err != nil || len(inception) == 0 {
+		return fmt.Errorf("its inception is not readable")
+	}
+	rootKEL, err := s.KeriDriver.GetKel(root)
+	if err != nil || rootKEL.AID != root {
+		return fmt.Errorf("the root identity's key history is not held here")
+	}
+	raws := make([][]byte, 0, len(rootKEL.RawEventsB64))
+	for _, r := range rootKEL.RawEventsB64 {
+		b, err := base64.StdEncoding.DecodeString(r)
+		if err != nil || len(b) == 0 {
+			return fmt.Errorf("the root identity's key history is not readable")
+		}
+		raws = append(raws, b)
+	}
+	return keri.ValidateDelegation(inception, raws)
+}
+
 // receiptBinding is what the log row for a received message commits to: the
-// message, digests of its kept signed form and of the sender's keys, and how
-// those keys were tied to the sender. Recomputed from the kept message and
+// message, digests of its kept signed form, of the sender's keys and of the
+// sender's key history then, and how those keys were tied to the sender. Recomputed from the kept message and
 // compared with the row (sandbox.HashArgs) when the sender is shown later.
 func receiptBinding(messageID string, p receivedProof) []byte {
 	digest := func(v string) string {
@@ -115,7 +183,7 @@ func receiptBinding(messageID string, p receivedProof) []byte {
 	}
 	b, _ := json.Marshal(map[string]any{
 		"message": messageID, "signed": digest(p.Signed), "sender_keys": digest(p.SenderDID),
-		"key_trust": p.KeyTrust, "kel_said": p.KELSaid, "kel_events": p.KELEvents,
+		"key_trust": p.KeyTrust, "kel_said": p.KELSaid, "kel_events": p.KELEvents, "kel": digest(p.KEL),
 	})
 	return b
 }
@@ -125,47 +193,54 @@ func receiptBinding(messageID string, p receivedProof) []byte {
 // was kept is what was signed, naming the parties it was authenticated as;
 // that those keys were tied to the sender by its key history as it stood when
 // the message arrived; and that the signed log recorded exactly this proof
-// when it did. Returns the signed message.
+// when it did. Returns the signed message and how the keys were tied: keysOwn
+// is this agent's own word, and whatever shows the proof must label it so.
 //
 // Each check is the first to catch its own kind of forgery, and says which.
-func (s *CoreServer) provedSender(n store.Notification) (*didcomm.JWM, error) {
+func (s *CoreServer) provedSender(n store.Notification) (*didcomm.JWM, string, error) {
 	if n.SignedMessage == "" || n.SenderDID == "" {
-		return nil, fmt.Errorf("message %s was kept without its signed form, so its sender cannot be shown", n.ID)
+		return nil, "", fmt.Errorf("message %s was kept without its signed form, so its sender cannot be shown", n.ID)
 	}
 	signed, err := base64.StdEncoding.DecodeString(n.SignedMessage)
 	if err != nil {
-		return nil, fmt.Errorf("message %s: the signed form is not readable", n.ID)
+		return nil, "", fmt.Errorf("message %s: the signed form is not readable", n.ID)
 	}
 	var did didcomm.DID
 	if err := json.Unmarshal([]byte(n.SenderDID), &did); err != nil {
-		return nil, fmt.Errorf("message %s: the sender's keys are not readable", n.ID)
+		return nil, "", fmt.Errorf("message %s: the sender's keys are not readable", n.ID)
 	}
 	if did.AID != n.FromAID {
-		return nil, fmt.Errorf("message %s: kept keys are %s's, not the sender %s's", n.ID, did.AID, n.FromAID)
+		return nil, "", fmt.Errorf("message %s: kept keys are %s's, not the sender %s's", n.ID, did.AID, n.FromAID)
 	}
 	jwm, err := didcomm.VerifySignedMessage(&did, signed)
 	if err != nil {
-		return nil, fmt.Errorf("message %s: %w", n.ID, err)
+		return nil, "", fmt.Errorf("message %s: %w", n.ID, err)
 	}
 	if jwm.ID != n.ID || (n.Payload != "" && n.Payload != string(jwm.Body)) {
-		return nil, fmt.Errorf("message %s: what was kept is not what the sender signed", n.ID)
+		return nil, "", fmt.Errorf("message %s: what was kept is not what the sender signed", n.ID)
 	}
 	if err := jwm.NamesParties(n.FromAID, n.ToAID); err != nil {
-		return nil, fmt.Errorf("message %s: %w", n.ID, err)
+		return nil, "", fmt.Errorf("message %s: %w", n.ID, err)
 	}
 	if err := s.keysWereTied(n, &did); err != nil {
-		return nil, fmt.Errorf("message %s: the keys it was received with were not tied to %s: %w", n.ID, n.FromAID, err)
+		return nil, "", fmt.Errorf("message %s: the keys it was received with were not tied to %s: %w", n.ID, n.FromAID, err)
 	}
 	if err := s.receiptWasLogged(n); err != nil {
-		return nil, fmt.Errorf("message %s: %w", n.ID, err)
+		return nil, "", fmt.Errorf("message %s: %w", n.ID, err)
 	}
-	return jwm, nil
+	return jwm, n.SenderKeyTrust, nil
 }
 
 // keysWereTied checks the tie recorded at receipt, against the sender's key
-// history cut at the point it had reached then. A rotation since does not
-// break a genuine old message, and a key the sender has since retired cannot
-// vouch for keys that arrived after it was retired.
+// history as it stood then, kept with the message. A rotation since does not
+// break a genuine old message, and the contact's own record being refetched,
+// shortened or removed does not either.
+//
+// A retired key cannot vouch for keys that arrived after it was retired, but
+// only against somebody without this agent's log key: the receipt position is
+// fixed by the signed log row, and whoever can sign log rows can write a new
+// one. Anchoring the log's head in a witnessed key history, with its
+// timestamps, is what closes that, and it is a separate step.
 func (s *CoreServer) keysWereTied(n store.Notification, did *didcomm.DID) error {
 	switch n.SenderKeyTrust {
 	case keysOwn:
@@ -174,16 +249,12 @@ func (s *CoreServer) keysWereTied(n store.Notification, did *didcomm.DID) error 
 	default:
 		return fmt.Errorf("nothing tied them to the sender when the message arrived")
 	}
-	if s.DataStore == nil {
-		return fmt.Errorf("there is no record of the sender's key history here")
+	var at []map[string]interface{}
+	if err := json.Unmarshal([]byte(n.SenderKEL), &at); err != nil || n.SenderKELEvents < 1 || len(at) != n.SenderKELEvents {
+		return fmt.Errorf("the sender's key history as it stood then was not kept with the message")
 	}
-	rec, err := s.DataStore.GetContactKEL(n.FromAID)
-	if err != nil || rec == nil || n.SenderKELEvents < 1 || len(rec.KEL) < n.SenderKELEvents {
-		return fmt.Errorf("the sender's key history as it stood then is not on file")
-	}
-	at := rec.KEL[:n.SenderKELEvents]
 	if said, _ := at[len(at)-1]["d"].(string); said != n.SenderKELSaid {
-		return fmt.Errorf("the sender's key history on file is not the one the message was received under")
+		return fmt.Errorf("the key history kept with the message is not the one it was received under")
 	}
 	if s.KeriDriver == nil {
 		return fmt.Errorf("this device has no key engine to check the sender's key history with")
@@ -210,7 +281,7 @@ func (s *CoreServer) receiptWasLogged(n store.Notification) error {
 	}
 	want := sandbox.HashArgs(receiptBinding(n.ID, receivedProof{
 		Signed: n.SignedMessage, SenderDID: n.SenderDID, KeyTrust: n.SenderKeyTrust,
-		KELSaid: n.SenderKELSaid, KELEvents: n.SenderKELEvents,
+		KELSaid: n.SenderKELSaid, KELEvents: n.SenderKELEvents, KEL: n.SenderKEL,
 	}))
 	for _, r := range rows {
 		if r.ArgsHash == want {
@@ -220,41 +291,58 @@ func (s *CoreServer) receiptWasLogged(n store.Notification) error {
 	return fmt.Errorf("the signed log has no record of receiving this proof, so it was changed or made after the fact")
 }
 
-// ── Recording refusals once ─────────────────────────────────────────────────
+// ── Recording refusals once, within each sender's quota ────────────────────
 
-// maxRefusalEntries caps the memory of refusals already recorded. It is kept
-// apart from the replay cache: a peer sending refusable envelopes must not be
-// able to fill the cache that stops replays, and one sender's message ids must
-// not stand in for another's.
-const maxRefusalEntries = 10000
+// A proven sender's refused messages are recorded once each, up to a quota
+// per sender per window. The memory of them is kept apart from the replay
+// cache, so refusals cannot fill the cache that stops replays, and per sender,
+// so one sender's message ids cannot stand in for another's and one sender
+// flooding the log silences only itself.
+const (
+	refusalQuota  = 100
+	refusalWindow = time.Hour
+)
+
+type senderRefusals struct {
+	start    time.Time
+	seen     map[string]bool
+	notified bool
+}
 
 var refusalsRecorded = struct {
 	sync.Mutex
-	m map[string]time.Time
-}{m: map[string]time.Time{}}
+	m map[string]*senderRefusals
+}{m: map[string]*senderRefusals{}}
 
-// firstRefusal reports whether this sender's refusal of this message is new,
-// remembering it if so. Once full, it answers false: the refusal is still
-// made, only not recorded again, which is the direction that cannot be used
-// to fill the log.
-func firstRefusal(sender, messageID string) bool {
+// refusalToRecord says whether this sender's refusal of this message should
+// be recorded. When the sender has used its quota, it returns the end of the
+// window once, so one row can say that sender's further refusals are not
+// recorded until then; after that, nothing until the window ends.
+func refusalToRecord(sender, messageID string, now time.Time) (record bool, suppressedUntil time.Time) {
 	refusalsRecorded.Lock()
 	defer refusalsRecorded.Unlock()
-	now := time.Now()
-	for k, exp := range refusalsRecorded.m {
-		if now.After(exp) {
+	for k, r := range refusalsRecorded.m {
+		if now.Sub(r.start) >= refusalWindow {
 			delete(refusalsRecorded.m, k)
 		}
 	}
-	key := sender + "\x00" + messageID
-	if _, ok := refusalsRecorded.m[key]; ok {
-		return false
+	r := refusalsRecorded.m[sender]
+	if r == nil {
+		r = &senderRefusals{start: now, seen: map[string]bool{}}
+		refusalsRecorded.m[sender] = r
 	}
-	if len(refusalsRecorded.m) >= maxRefusalEntries {
-		return false
+	if r.seen[messageID] {
+		return false, time.Time{}
 	}
-	refusalsRecorded.m[key] = now.Add(maxEnvelopeLifetime)
-	return true
+	if len(r.seen) >= refusalQuota {
+		if r.notified {
+			return false, time.Time{}
+		}
+		r.notified = true
+		return false, r.start.Add(refusalWindow)
+	}
+	r.seen[messageID] = true
+	return true, time.Time{}
 }
 
 // ── Which conversation a row is filed under ─────────────────────────────────

@@ -482,12 +482,17 @@ func (s *CoreServer) handleDIDCommInbound(w http.ResponseWriter, r *http.Request
 	// anyone could fill the log by posting garbage. Each message's refusal is
 	// recorded once: a captured envelope replayed over and over is one fact,
 	// and recording every copy would let whoever holds it fill the log.
-	// Kept apart from the replay cache (firstRefusal), and keyed by sender,
-	// so refusals can neither fill the cache that stops replays nor stand in
-	// for one another's.
+	// Recorded within each sender's quota (refusalToRecord), apart from the
+	// replay cache.
 	refuse := func(why string, status int) {
-		if firstRefusal(skid, jwm.ID) {
+		record, suppressedUntil := refusalToRecord(skid, jwm.ID, time.Now())
+		switch {
+		case record:
 			s.recordTraffic(skid, jwm.ID, "", "didcomm.message.received", "denied", jwm.Type+" to "+kid+": "+why, nil)
+		case !suppressedUntil.IsZero():
+			s.recordTraffic(skid, "", "", "didcomm.refusals.suppressed", "denied",
+				fmt.Sprintf("%s has had %d messages refused within %s; its further refusals are not recorded until %s",
+					skid, refusalQuota, refusalWindow, suppressedUntil.UTC().Format(time.RFC3339)), nil)
 		}
 		jsonError(w, why, status)
 	}
