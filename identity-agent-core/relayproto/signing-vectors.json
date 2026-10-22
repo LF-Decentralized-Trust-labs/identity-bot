@@ -78,30 +78,53 @@
       "fields": {
         "aid": "EAID",
         "limit": "50",
-        "v": "1"
+        "nonce": "n0nce-1",
+        "t": "2026-10-21T00:00:00Z",
+        "v": "IAMAILBOX11JSON"
       },
-      "canonical": "{\"aid\":\"EAID\",\"limit\":\"50\",\"v\":\"1\"}",
-      "signature": "T0PqSMrX_2b-MVO0k0h8JzoFtsZZjY-kJus-muxwp5ToWsf3kjXbPzAqq662HBT0wUNhbzUnk67P27ztLYpWBA"
+      "canonical": "{\"aid\":\"EAID\",\"limit\":\"50\",\"nonce\":\"n0nce-1\",\"t\":\"2026-10-21T00:00:00Z\",\"v\":\"IAMAILBOX11JSON\"}",
+      "signature": "WikGGcMP71KdrUj3_vQsvfXq-5dyvyfwRNi3HbWuimXerG-ZCXXp1rzn6aXYIkHHZDuUEpecj9bTHL9OcX6fDw"
     },
     {
       "name": "a mailbox acknowledgement",
       "fields": {
         "aid": "EAID",
         "message_ids": "m-1 m-2 m-3",
-        "v": "1"
+        "nonce": "n0nce-2",
+        "t": "2026-10-21T00:00:00Z",
+        "v": "IAMAILBOX11JSON"
       },
-      "canonical": "{\"aid\":\"EAID\",\"message_ids\":\"m-1 m-2 m-3\",\"v\":\"1\"}",
-      "signature": "clC4U2ic9Sc4uAB9btwd3DzdAEByEqVoRILgdVsAzYW5uQgAw4eFLOrqMxvHneUnb6wdNIkR4UGFg9Ia3v4kDg"
+      "canonical": "{\"aid\":\"EAID\",\"message_ids\":\"m-1 m-2 m-3\",\"nonce\":\"n0nce-2\",\"t\":\"2026-10-21T00:00:00Z\",\"v\":\"IAMAILBOX11JSON\"}",
+      "signature": "wiCb4HONpbJBg_Nwc9fbI7Rd3QwJfMnw8OD96GnDGtqhkfm5N4k_6eTELK-jUgbRVBFxTmiIDnS8J0OiuR6ZAQ"
     },
     {
       "name": "the signature field is left out",
       "fields": {
         "aid": "EAID",
         "signature": "not signed over",
-        "v": "1"
+        "v": "IAMAILBOX11JSON"
       },
-      "canonical": "{\"aid\":\"EAID\",\"v\":\"1\"}",
-      "signature": "f6HtmsuZZtbfBkHuxms6BgLMXn-rkz0KGo3VlwnbYGBr0f4e3qRnxynl0iRpbrfRJhJxWfe0u6KPme9mzSUwAA"
+      "canonical": "{\"aid\":\"EAID\",\"v\":\"IAMAILBOX11JSON\"}",
+      "signature": "WPE37PirWTQxKWJoqznJ-LO2sZzoZOga_SfBhPX52GGoMZSYR66aJDHpB3bn5Wga8arPhFXX-3CR9-DLeJSiBQ"
+    },
+    {
+      "name": "a quote and a backslash are the only escapes",
+      "fields": {
+        "path": "C:\\dir\\file",
+        "q": "say \"hi\"",
+        "slash": "a/b/c"
+      },
+      "canonical": "{\"path\":\"C:\\\\dir\\\\file\",\"q\":\"say \\\"hi\\\"\",\"slash\":\"a/b/c\"}",
+      "signature": "XjQVFeHtjwI_22dPfueUePFR1PXYvmqq-8H5O6AawRqFs43TBpAo_eE-IhuEHbKrfNL4tMNZqaQOO0rFZNYlBg"
+    },
+    {
+      "name": "an empty value is kept",
+      "fields": {
+        "aid": "EAID",
+        "empty": ""
+      },
+      "canonical": "{\"aid\":\"EAID\",\"empty\":\"\"}",
+      "signature": "_o9NGL-Y6-5es5BZcLrEFz9cb2iJ-WtK7gGnZN8qVkqk-747d1yLvftsZgiQTDIQz1PslPEjgylfjMgmnoeTDw"
     },
     {
       "name": "HTML characters are not escaped",

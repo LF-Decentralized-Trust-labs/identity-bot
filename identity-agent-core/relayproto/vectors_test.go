@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/hex"
+	"os/exec"
 	"testing"
 )
 
@@ -46,5 +47,18 @@ func TestThePublishedSigningVectorsHold(t *testing.T) {
 		if _, err := CanonicalBody(r.Fields); err == nil {
 			t.Fatalf("%s was signed; it must be refused", r.Name)
 		}
+	}
+}
+
+// An implementation written from the ADR's text, in another language, agrees
+// with the vector file. Skipped where Python is not installed.
+func TestAnIndependentImplementationAgreesWithTheVectors(t *testing.T) {
+	py, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 is not installed")
+	}
+	out, err := exec.Command(py, "check_signing_vectors.py", "signing-vectors.json").CombinedOutput()
+	if err != nil {
+		t.Fatalf("the independent check disagrees:\n%s", out)
 	}
 }

@@ -32,16 +32,27 @@ repository is that form.
    the same in every language: a JSON writer that does not escape HTML writes
    such a string one way only.
 2. **Keys sort by byte value.** Upper case before `_` before lower case.
-3. **A request carries what it signs as strings.** A count is a decimal string
+3. **The only escapes are `\"` and `\\`.** With every character printable
+   ASCII, a quote and a backslash are the only characters JSON escapes. `/` is
+   written as it is, never `\/`, and an empty value is written `""`.
+4. **A request carries what it signs as strings.** A count is a decimal string
    (`"limit": "50"`). A list is one string with its items separated by single
    spaces (`"message_ids": "m-1 m-2"`). A field that cannot be written that way,
    such as a message being delivered, is not signed by the sender; it is
    carried beside the signed fields.
-4. **The signature is Ed25519 over those bytes**, by the key the identifier's
+5. **The signature is Ed25519 over those bytes**, by the key the identifier's
    key event log names now, written base64url without padding.
 
-The relay's admission statement and control requests (ADR-048 §3, §8) and the
-mailbox's signed requests use this form.
+The relay's admission statement and control requests (ADR-048 §3, §8), the
+mailbox's signed requests, and a blind revocation registry's enrolment and event
+requests (its sequence number a decimal string) use this form. The retired
+tunnel hub's name claims did not; it is not converted, because nothing uses it.
+
+The key that signs is the one `relayproto.CurrentKey` returns from the
+identifier's signed key event log: exactly one Ed25519 key, from a log that
+keri-go validates and that derives the identifier. A service enrols a single
+signer; an identifier with several keys is refused rather than enrolled as any
+one of them.
 
 ## Contract
 
@@ -50,7 +61,8 @@ bytes each is signed over, and a signature over each by a fixed key, plus inputs
 that must be refused. An implementation in another language reproduces every
 `canonical` from its `fields` and every `signature` from the seed. A Go
 implementation reads the same file through `relayproto.SigningVectors()` rather
-than keeping a copy.
+than keeping a copy. `check_signing_vectors.py`, beside it, rebuilds every vector
+from this ADR's text in Python, and the module's tests run it.
 
 ## Consequences
 

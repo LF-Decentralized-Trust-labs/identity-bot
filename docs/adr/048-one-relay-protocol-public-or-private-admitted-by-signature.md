@@ -104,11 +104,8 @@ There is no password and no token.
      relay it did not dial.
 2. The Identity Agent answers with a **statement**
    `{purpose, protocol, service, nonce, exporter, aid, t}`.
-   - Every field is printable ASCII. A statement with anything else is refused, so
-     the signed bytes have one spelling.
-   - It is signed with Ed25519 over its canonical JSON: keys sorted, no whitespace,
-     no HTML escaping. The signing key is the one the enrolment identifier's key
-     event log names now.
+   - It is signed with Ed25519 in the one signing form of ADR-049, by the key the
+     enrolment identifier's key event log names now.
    - The log travels alongside it as a CESR stream. It may be omitted when the
      relay already holds it unchanged.
    - `exporter` is the TLS connection's **RFC 9266 channel binding**
@@ -307,9 +304,9 @@ takes what an address is, and the URL it writes about itself there, from its
 own record of the addresses it holds (§6), never from a header a caller could
 send.
 
-**Control requests.** Everything an Identity Agent asks of a relay is a JSON
-object of string fields, every one printable ASCII, signed by the key its
-enrolment identifier's log names now. Every request carries:
+**Control requests.** Everything an Identity Agent asks of a relay is signed in
+the one signing form of ADR-049, by the key its enrolment identifier's log names
+now. Every request carries:
 
 | Field | |
 |---|---|
@@ -318,7 +315,7 @@ enrolment identifier's log names now. Every request carries:
 | `signed_by` | the enrolment identifier |
 | `t` | RFC 3339, within two minutes of the relay's clock |
 | `nonce` | 16 to 64 characters, never accepted twice |
-| `signature` | Ed25519, base64url without padding, over the request's other fields as JSON with sorted keys, no whitespace and no HTML escaping: the form an admission statement is signed in (§3), `relayproto.CanonicalBody` |
+| `signature` | Ed25519, base64url without padding, over the request's other fields in the form of ADR-049 (`relayproto.CanonicalBody`) |
 
 The relay accepts a control request only while `signed_by` holds a live
 session, and checks it against the key that session's log names now.
