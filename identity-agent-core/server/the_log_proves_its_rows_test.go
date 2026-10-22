@@ -122,3 +122,38 @@ func TestALogThatCannotBeCheckedIsNotCalledForged(t *testing.T) {
 		t.Fatalf("an uncheckable log was reported as %d: %s", rec.Code, body)
 	}
 }
+
+// A fresh signer stamps where its chain begins when it is created, before it
+// has signed a row, so a row forged in at that point as an old unsigned one
+// is caught; the start's hash is filled in from the first row it writes.
+func TestANewSignerStampsWhereItsChainBegins(t *testing.T) {
+	s := logWorld(t)
+	sg := &invocationSigner{s: s}
+	if _, _, err := sg.SignEvent([]byte("{}")); err != nil {
+		t.Fatalf("mint the signer: %v", err)
+	}
+	rec, _, _ := readInvocationSignerRecord(s.DataDir)
+	if rec.ChainStart == nil || rec.ChainStart.ID != 1 || rec.ChainStart.Hash != "" || !rec.ChainStart.Linked {
+		t.Fatalf("a new signer did not stamp where its chain begins: %+v", rec.ChainStart)
+	}
+	// Somebody writes a row before the signer's first, posing as an old one.
+	if _, err := s.SandboxManager.Store().InsertInvocationEvent(sandbox.InvocationEvent{
+		TS: "2026-01-01T00:00:00Z", CapabilityID: "forged", ResultStatus: "ok"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := askChain(t, s); got["intact"] != false {
+		t.Fatalf("a row forged in before the first signed row passed: %v", got)
+	}
+}
+
+// The stamped start's hash is filled in from the first row the signer writes.
+func TestTheStampedStartIsFilledInByTheFirstRow(t *testing.T) {
+	s := logWorld(t)
+	if s.SandboxManager.RecordGovernanceEvent(sandbox.CallerContext{CallerAID: "EAgent"}, "ai_agent.body.requested", "ok") == 0 {
+		t.Fatal("event not written")
+	}
+	rec, _, _ := readInvocationSignerRecord(s.DataDir)
+	if rec.ChainStart == nil || rec.ChainStart.ID != 1 || rec.ChainStart.Hash == "" || rec.ChainStart.PayloadFrom != 1 {
+		t.Fatalf("the first row did not complete the stamped start: %+v", rec.ChainStart)
+	}
+}

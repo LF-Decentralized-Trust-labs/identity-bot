@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
@@ -628,5 +629,122 @@ func TestAMissingKeyIsCannotCheckNotForged(t *testing.T) {
 	faults, err := m.Store().VerifyChain(unavailable, &k.start)
 	if !errors.Is(err, ErrCannotCheck) || len(faults) != 0 {
 		t.Fatalf("an unavailable key should be cannot-check, got %+v %v", faults, err)
+	}
+}
+
+// ── an action is recorded before it runs ───────────────────────────────────
+
+// actingManager is a logging manager with one capability a local owner may
+// run, routed to a fake executor.
+func actingManager(t *testing.T) (*Manager, *keepingSigner, *fakeInvoker) {
+	t.Helper()
+	m, k := newLoggingManager(t)
+	f := &fakeInvoker{result: &InvokeResult{CapabilityID: "act.now", Status: 200, Body: []byte(`{}`)}}
+	m.mu.Lock()
+	m.invoker = f
+	if m.manifests == nil {
+		m.manifests = map[string]*AppManifest{}
+	}
+	m.manifests["act"] = &AppManifest{ID: "act", Provides: []ProvidedCapability{{ID: "act.now"}}}
+	m.mu.Unlock()
+	return m, k, f
+}
+
+func act(m *Manager) error {
+	_, err := m.InvokeCapability(context.Background(), CallerContext{CallerAID: "local-owner"}, "act.now", []byte(`{}`))
+	return err
+}
+
+// When the record cannot be written first, the action does not run: not when
+// the signer is unavailable, and not when the log itself cannot be read.
+func TestAnActionThatCannotBeRecordedDoesNotRun(t *testing.T) {
+	t.Run("the signer is unavailable", func(t *testing.T) {
+		m, k, f := actingManager(t)
+		logEvents(t, m, "n.one")
+		k.fail = true
+		if err := act(m); !errors.Is(err, ErrNotRecorded) || f.called {
+			t.Fatalf("ran without a record: called=%v err=%v", f.called, err)
+		}
+	})
+	t.Run("the signer is unavailable before anything was signed", func(t *testing.T) {
+		m, k, f := actingManager(t)
+		k.fail = true
+		if err := act(m); !errors.Is(err, ErrNotRecorded) || f.called {
+			t.Fatalf("ran without a record: called=%v err=%v", f.called, err)
+		}
+	})
+	t.Run("the log cannot be read", func(t *testing.T) {
+		m, _, f := actingManager(t)
+		logEvents(t, m, "n.one")
+		m.Store().DB().Exec(`ALTER TABLE invocation_log RENAME TO invocation_log_gone`)
+		if err := act(m); !errors.Is(err, ErrNotRecorded) || f.called {
+			t.Fatalf("ran without a record: called=%v err=%v", f.called, err)
+		}
+	})
+	t.Run("a recorded action runs, its result after its intent", func(t *testing.T) {
+		m, k, f := actingManager(t)
+		if err := act(m); err != nil || !f.called {
+			t.Fatalf("a recordable action did not run: %v", err)
+		}
+		events, _ := m.Store().QueryInvocationEvents(InvocationEventFilter{CapabilityID: "act.now"})
+		if len(events) != 2 || events[1].ResultStatus != "started" || events[0].IntentEventID != events[1].ID {
+			t.Fatalf("want an intent row then its result, got %+v", events)
+		}
+		if faults, err := m.Store().VerifyChain(k.keys, &k.start); err != nil || len(faults) != 0 {
+			t.Fatalf("%+v %v", faults, err)
+		}
+	})
+}
+
+// A row whose record is gone is a fault at that row, not a stop to the log:
+// actions are still recorded and run, and the rows after it verify.
+func TestAMissingRecordIsAFaultNotAStop(t *testing.T) {
+	m, k, f := actingManager(t)
+	logEvents(t, m, "o.one", "o.two")
+	m.Store().DB().Exec(`UPDATE invocation_log SET event_json = NULL WHERE id = 2`)
+	if err := act(m); err != nil || !f.called {
+		t.Fatalf("a missing record stopped the log: %v", err)
+	}
+	logEvents(t, m, "o.after")
+	faults, err := m.Store().VerifyChain(k.keys, &k.start)
+	if err != nil {
+		t.Fatalf("a missing record made the check fail outright: %v", err)
+	}
+	if len(faults) != 1 || faults[0].ID != 2 {
+		t.Fatalf("want one fault, at the missing row, got %+v", faults)
+	}
+	if events, err := m.Store().QueryInvocationEvents(InvocationEventFilter{}); err != nil || len(events) != 5 {
+		t.Fatalf("the missing row should still be listed: %d %v", len(events), err)
+	}
+}
+
+// Rows written while signed bytes are always kept must keep them; a record
+// may name each key once, spelled as written.
+func TestTheSignedBytesCannotBeDroppedAndKeysCannotRepeat(t *testing.T) {
+	m, k := newLoggingManager(t)
+	logEvents(t, m, "p.one", "p.two", "p.three", "p.four")
+	if k.start.PayloadFrom != 1 {
+		t.Fatalf("a chain begun now keeps signed bytes from its first row: %+v", k.start)
+	}
+	db := m.Store().DB()
+	db.Exec(`UPDATE invocation_log SET signed_payload = '' WHERE id = 2`)
+	db.Exec(`UPDATE invocation_log SET event_json = replace(event_json, '{"ts"', '{"capability_id":"p.other","ts"') WHERE id = 3`)
+	db.Exec(`UPDATE invocation_log SET event_json = replace(event_json, '"reason"', '"Reason"') WHERE id = 4`)
+	faults, err := m.Store().VerifyChain(k.keys, &k.start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	why := map[int64]string{}
+	for _, f := range faults {
+		why[f.ID] += f.Reason + "; "
+	}
+	if !strings.Contains(why[2], "bytes its signature covers are missing") {
+		t.Errorf("a row whose signed bytes were dropped passed: %q", why[2])
+	}
+	if !strings.Contains(why[3], "twice") {
+		t.Errorf("a record with a key given twice passed: %q", why[3])
+	}
+	if !strings.Contains(why[4], "not written with") {
+		t.Errorf("a record with a key in another case passed: %q", why[4])
 	}
 }

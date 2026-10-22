@@ -34,7 +34,7 @@ type InvocationEvent struct {
 	GrantSAID       string   `json:"grant_said,omitempty"`
 	CapabilityID    string   `json:"capability_id"`
 	ArgsHash        string   `json:"args_hash,omitempty"`
-	ResultStatus    string   `json:"result_status"` // ok | denied | error
+	ResultStatus    string   `json:"result_status"` // ok | denied | error | started (recorded before an action runs)
 	DurationMs      int64    `json:"duration_ms"`
 	Transport       string   `json:"transport,omitempty"`
 	ExecutorType    string   `json:"executor_type,omitempty"`
@@ -105,6 +105,10 @@ type InvocationEvent struct {
 	// reproducing how this code encodes an event. Empty on rows written before
 	// it was kept.
 	SignedPayload string `json:"-"`
+
+	// IntentEventID is the "about to run" row this result follows: a governed
+	// action is recorded before it runs, and its result after.
+	IntentEventID int64 `json:"intent_event_id,omitempty"`
 }
 
 // Cost is what an invocation consumed. Deliberately not a currency amount: an LLM
@@ -126,10 +130,11 @@ type Cost struct {
 // because these are outputs of the invocation, not inputs to it — and separate from a
 // widening parameter list because every one of them is optional.
 type EventDetail struct {
-	StatusReason string
-	Cost         *Cost
-	Outcome      string
-	ResultBody   []byte
+	IntentEventID int64
+	StatusReason  string
+	Cost          *Cost
+	Outcome       string
+	ResultBody    []byte
 }
 
 // EventSigner signs an invocation event's canonical JSON. The server layer injects an
@@ -139,13 +144,20 @@ type EventSigner interface {
 	SignEvent(payload []byte) (signerAID, signature string, err error)
 }
 
-// ChainStart is the first row of the log's signed chain: its id and the hash of
-// the record as stored. It is kept outside the database, so somebody who can
-// rewrite the database cannot move where the chain begins and pass the signed
-// rows off as rows from before signing existed.
+// ChainStart is where the log's signed chain begins: the first row id it
+// covers, and the hash of that row as stored once it exists. It is kept outside
+// the database, so somebody who can rewrite the database cannot move where the
+// chain begins and pass the signed rows off as rows from before signing
+// existed. A signer stamps it when it is created, before it signs anything, so
+// on a fresh installation no row ever goes uncovered; Hash is filled in when
+// the first row is written.
 type ChainStart struct {
 	ID   int64  `json:"id"`
-	Hash string `json:"hash"`
+	Hash string `json:"hash,omitempty"`
+	// PayloadFrom is the first row that must keep the exact bytes its signature
+	// covers. Rows from it on are checked over those bytes only; a row there
+	// without them fails. Zero when not known.
+	PayloadFrom int64 `json:"payload_from,omitempty"`
 	// Linked is true when every row from the start on was written linked to the
 	// one before it, which holds for every chain begun by this code. It is false
 	// only for a start recorded after an upgrade, on a log signed before links
@@ -154,10 +166,17 @@ type ChainStart struct {
 }
 
 // ChainKeeper is an EventSigner that remembers where its chain begins.
+// KeepChainStart keeps a start once; after that it only fills in the hash of a
+// start stamped before its first row existed.
 type ChainKeeper interface {
 	ChainStart() (start ChainStart, kept bool, err error)
 	KeepChainStart(ChainStart) error
 }
+
+// ErrNotRecorded means a governed action was refused because its record could
+// not be written first. An action nobody can account for afterwards does not
+// run.
+var ErrNotRecorded = errors.New("the action was not run because it could not be recorded")
 
 // ErrCannotCheck means the log cannot be checked right now, for example because
 // the signer's key cannot be derived. It is never evidence that the log was
@@ -192,7 +211,7 @@ func (m *Manager) EnsureChainStart() error {
 		return err
 	}
 	var id int64
-	var stored string
+	var stored sql.NullString
 	err := m.store.db.QueryRow(`SELECT id, event_json FROM invocation_log
 		WHERE signature IS NOT NULL AND signature != '' ORDER BY id ASC LIMIT 1`).Scan(&id, &stored)
 	if err == sql.ErrNoRows {
@@ -201,7 +220,26 @@ func (m *Manager) EnsureChainStart() error {
 	if err != nil {
 		return err
 	}
-	return keeper.KeepChainStart(ChainStart{ID: id, Hash: HashRecord([]byte(stored))})
+	// Rows written from now on keep their signed bytes; earlier ones never did.
+	next, err := m.store.NextEventID()
+	if err != nil {
+		return err
+	}
+	return keeper.KeepChainStart(ChainStart{ID: id, Hash: linkTo(stored), PayloadFrom: next})
+}
+
+// NextEventID is the id the next row will be given, or one below it: ids are
+// never reused, so every row written from now on has at least this id.
+func (s *SandboxStore) NextEventID() (int64, error) {
+	var next int64
+	err := s.db.QueryRow(`SELECT MAX(
+		COALESCE((SELECT MAX(id) FROM invocation_log), 0),
+		COALESCE((SELECT seq FROM sqlite_sequence WHERE name = 'invocation_log'), 0)) + 1`).Scan(&next)
+	if err != nil {
+		// sqlite_sequence does not exist until the first row is written.
+		err = s.db.QueryRow(`SELECT COALESCE(MAX(id), 0) + 1 FROM invocation_log`).Scan(&next)
+	}
+	return next, err
 }
 
 // SetEventSigner injects the event-signing identity (server layer, at startup).
@@ -236,6 +274,20 @@ func (m *Manager) getEventSigner() EventSigner {
 // before it, exactly as it was stored. Anything checking the log elsewhere
 // computes links with this.
 func HashRecord(stored []byte) string { return hashArgs(stored) }
+
+// missingRecordLink is what the row after a missing record links to: a fixed
+// value, so a missing row is a fault in the log rather than a stop to it, and
+// the rows after it can still be written and checked.
+var missingRecordLink = HashRecord([]byte("null"))
+
+// linkTo is the link to a stored record, or missingRecordLink when there is
+// none.
+func linkTo(stored sql.NullString) string {
+	if !stored.Valid || stored.String == "" {
+		return missingRecordLink
+	}
+	return HashRecord([]byte(stored.String))
+}
 
 // hashArgs content-addresses the caller's arguments for the audit record.
 func hashArgs(args []byte) string {
@@ -322,13 +374,29 @@ func (m *Manager) recordInvocation(caller CallerContext, capabilityID, executorT
 // last row and must still be the last row when this one lands, or two concurrent
 // invocations both chain onto the same predecessor and the chain silently forks.
 func (m *Manager) recordInvocationDetail(caller CallerContext, capabilityID, executorType string, args []byte, status string, start time.Time, d EventDetail) int64 {
-	if m.store == nil {
-		return 0
+	id, err := m.writeEvent(newEvent(caller, capabilityID, executorType, args, status, start, d), false)
+	if err != nil {
+		log.Printf("[audit] EVENT NOT WRITTEN for %s (caller %s, status %s): %v",
+			capabilityID, caller.CallerAID, status, err)
 	}
-	m.auditMu.Lock()
-	defer m.auditMu.Unlock()
+	return id
+}
 
-	ev := InvocationEvent{
+// recordIntent writes the "about to run" row a governed action needs before it
+// runs: who asked, for what, with which arguments. Unlike a result row, it
+// fails rather than degrade: when a signer is configured the row must be
+// linked and signed, and when it cannot be written the action must not run.
+// Recording only afterwards would let an action happen with no record at all
+// whenever writing the record failed, and somebody able to break the log
+// could then act unrecorded.
+func (m *Manager) recordIntent(caller CallerContext, capabilityID, executorType string, args []byte, start time.Time) (int64, error) {
+	ev := newEvent(caller, capabilityID, executorType, args, "started", start, EventDetail{StatusReason: "about to run"})
+	ev.DurationMs = 0
+	return m.writeEvent(ev, true)
+}
+
+func newEvent(caller CallerContext, capabilityID, executorType string, args []byte, status string, start time.Time, d EventDetail) InvocationEvent {
+	return InvocationEvent{
 		TS:              start.UTC().Format(time.RFC3339Nano),
 		CallerAID:       caller.CallerAID,
 		DelegationChain: caller.DelegationChain,
@@ -347,75 +415,84 @@ func (m *Manager) recordInvocationDetail(caller CallerContext, capabilityID, exe
 		BodyGrade:       caller.BodyGrade,
 		BodyCredential:  caller.BodyCredential,
 
-		WorkItem:     caller.WorkItem,
-		Reason:       caller.Reason,
-		StatusReason: d.StatusReason,
-		Cost:         d.Cost,
-		Outcome:      d.Outcome,
-		ArgsPreview:  previewArgs(args),
-		ResultHash:   hashArgs(d.ResultBody),
+		WorkItem:      caller.WorkItem,
+		Reason:        caller.Reason,
+		StatusReason:  d.StatusReason,
+		Cost:          d.Cost,
+		Outcome:       d.Outcome,
+		ArgsPreview:   previewArgs(args),
+		ResultHash:    hashArgs(d.ResultBody),
+		IntentEventID: d.IntentEventID,
 	}
-	// Once the signed chain has begun, every row from there on must be linked
-	// and signed. A row that is not would mark an honest log broken for good,
-	// and is exactly the shape a rewrite would use to pass a forged row off as
-	// an old one. So such an event is not written, and that is said loudly.
+}
+
+// writeEvent links, signs and writes one row, and returns its id. With no
+// store wired there is no log, and nothing is written.
+//
+// Once the signed chain has begun, every row from there on must be linked and
+// signed. A row that is not would mark an honest log broken for good, and is
+// exactly the shape a rewrite would use to pass a forged row off as an old one,
+// so such a row is not written and the reason is returned. strict holds a row
+// to that whenever a signer is configured, even before the chain has begun.
+func (m *Manager) writeEvent(ev InvocationEvent, strict bool) (int64, error) {
+	if m.store == nil {
+		return 0, nil
+	}
+	m.auditMu.Lock()
+	defer m.auditMu.Unlock()
+
+	signer := m.getEventSigner()
 	begun := m.chainBegun()
-	refuse := func(why string) int64 {
-		log.Printf("[audit] EVENT NOT WRITTEN for %s (caller %s, status %s): %s",
-			capabilityID, caller.CallerAID, status, why)
-		return 0
-	}
+	must := begun || (strict && signer != nil)
 	// Chain to the previous record before signing, so the signature covers the link.
 	if prev, err := m.store.LastEventHash(); err == nil {
 		ev.PrevHash = prev
-	} else if begun {
-		return refuse(fmt.Sprintf("could not read the previous record to link to: %v", err))
+	} else if must {
+		return 0, fmt.Errorf("could not read the previous record to link to: %w", err)
 	} else {
 		log.Printf("[audit] UNCHAINED invocation event for %s: could not read previous record: %v",
-			capabilityID, err)
+			ev.CapabilityID, err)
 	}
 	// Sign the canonical event JSON (signature fields empty in the signed payload),
 	// and keep the signed bytes beside the record.
-	signer := m.getEventSigner()
 	switch {
 	case signer == nil && begun:
-		return refuse("no signer")
+		return 0, fmt.Errorf("no signer")
 	case signer != nil:
 		payload, err := json.Marshal(ev)
 		if err != nil {
-			if begun {
-				return refuse(fmt.Sprintf("could not encode the event to sign it: %v", err))
+			if must {
+				return 0, fmt.Errorf("could not encode the event to sign it: %w", err)
 			}
 			break
 		}
 		aid, sig, serr := signer.SignEvent(payload)
 		if serr != nil {
-			if begun {
-				return refuse(fmt.Sprintf("could not sign it: %v", serr))
+			if must {
+				return 0, fmt.Errorf("could not sign it: %w", serr)
 			}
-			log.Printf("[audit] UNSIGNED invocation event for %s: signer error: %v", capabilityID, serr)
+			log.Printf("[audit] UNSIGNED invocation event for %s: signer error: %v", ev.CapabilityID, serr)
 			break
 		}
 		ev.SignerAID, ev.Signature, ev.SignedPayload = aid, sig, string(payload)
 	}
 	id, err := m.store.InsertInvocationEvent(ev)
 	if err != nil {
-		log.Printf("[audit] FAILED to write invocation event for %s (caller %s, status %s): %v",
-			capabilityID, caller.CallerAID, status, err)
-		return 0
+		return 0, err
 	}
-	// The first signed row is where the chain begins: keep it outside the
-	// database, so it cannot be moved later.
-	if ev.Signature != "" && !begun {
-		if keeper, ok := signer.(ChainKeeper); ok {
+	// The first signed row is where the chain begins: keep it, or fill in the
+	// hash of a start stamped before the row existed, outside the database so it
+	// cannot be moved later.
+	if keeper, ok := signer.(ChainKeeper); ok && ev.Signature != "" {
+		if kept, has, cerr := keeper.ChainStart(); cerr == nil && (!has || kept.Hash == "") {
 			if stored, herr := m.store.eventJSON(id); herr != nil {
 				log.Printf("[audit] could not read back the first signed record to keep where the chain begins: %v", herr)
-			} else if kerr := keeper.KeepChainStart(ChainStart{ID: id, Hash: HashRecord(stored), Linked: true}); kerr != nil {
+			} else if kerr := keeper.KeepChainStart(ChainStart{ID: id, Hash: HashRecord(stored), Linked: true, PayloadFrom: id}); kerr != nil {
 				log.Printf("[audit] could not keep where the log's chain begins: %v", kerr)
 			}
 		}
 	}
-	return id
+	return id, nil
 }
 
 // RecordGovernedEvent writes one signed governance event for an action that is not a
@@ -464,11 +541,14 @@ func (s *SandboxStore) InsertInvocationEvent(ev InvocationEvent) (int64, error) 
 
 // eventJSON is one row's record exactly as stored.
 func (s *SandboxStore) eventJSON(id int64) ([]byte, error) {
-	var stored string
+	var stored sql.NullString
 	if err := s.db.QueryRow(`SELECT event_json FROM invocation_log WHERE id = ?`, id).Scan(&stored); err != nil {
 		return nil, err
 	}
-	return []byte(stored), nil
+	if !stored.Valid {
+		return nil, fmt.Errorf("row %d has no record", id)
+	}
+	return []byte(stored.String), nil
 }
 
 // LastEventHash returns the hash of the most recent event's signed record — the value
@@ -479,8 +559,12 @@ func (s *SandboxStore) eventJSON(id int64) ([]byte, error) {
 // to what was actually written rather than to a re-derivation of it. That matters: a
 // verifier walking the log re-hashes the stored bytes, so any edit to a row — including
 // swapping in a differently-signed version — breaks the next row's link.
+//
+// A row whose record is missing links on as missingRecordLink: the gap is
+// reported by VerifyChain at that row, and the log goes on rather than
+// stopping every later event at it.
 func (s *SandboxStore) LastEventHash() (string, error) {
-	var stored string
+	var stored sql.NullString
 	err := s.db.QueryRow(`SELECT event_json FROM invocation_log ORDER BY id DESC LIMIT 1`).Scan(&stored)
 	if err == sql.ErrNoRows {
 		return "", nil
@@ -488,7 +572,7 @@ func (s *SandboxStore) LastEventHash() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return HashRecord([]byte(stored)), nil
+	return linkTo(stored), nil
 }
 
 // EventKeys returns the public key an event signer's identity signs with, or an
@@ -542,7 +626,8 @@ func (s *SandboxStore) VerifyChain(keys EventKeys, start *ChainStart) ([]ChainFa
 	sawStart := false
 	for rows.Next() {
 		var id, durationMs int64
-		var stored, payload string
+		var stored sql.NullString
+		var payload string
 		var cols eventColumns
 		var costAmount sql.NullFloat64
 		if err := rows.Scan(&id, &stored, &payload, &cols.ts, &cols.callerAID, &cols.capabilityID,
@@ -552,15 +637,24 @@ func (s *SandboxStore) VerifyChain(keys EventKeys, start *ChainStart) ([]ChainFa
 		}
 		cols.durationMs = durationMs
 		cols.costAmount = costAmount
-		storedHash := HashRecord([]byte(stored))
-		ev, rerr := decodeEvent([]byte(stored))
+		storedHash := linkTo(stored)
+		if start != nil && id == start.ID {
+			sawStart = true
+		}
+		if !stored.Valid || stored.String == "" {
+			// A missing record is a fault at its own row, and the log goes on:
+			// the row after it links to missingRecordLink.
+			fault(id, "the record is missing")
+			prevHash = storedHash
+			continue
+		}
+		ev, rerr := decodeEvent([]byte(stored.String))
 		if rerr != nil {
 			fault(id, "the record cannot be read: "+rerr.Error())
 			prevHash = storedHash
 			continue
 		}
-		if start != nil && id == start.ID {
-			sawStart = true
+		if start != nil && id == start.ID && start.Hash != "" {
 			if storedHash != start.Hash {
 				fault(id, "the record the signed chain begins with is not the one kept when it began")
 			}
@@ -572,7 +666,7 @@ func (s *SandboxStore) VerifyChain(keys EventKeys, start *ChainStart) ([]ChainFa
 		} else if ev.PrevHash != "" || ev.Signature != "" {
 			signedFromHere = true
 		}
-		if start != nil && id > start.ID && !sawStart {
+		if start != nil && start.Hash != "" && id > start.ID && !sawStart {
 			fault(start.ID, "the record the signed chain begins with is missing")
 			sawStart = true
 		}
@@ -583,7 +677,8 @@ func (s *SandboxStore) VerifyChain(keys EventKeys, start *ChainStart) ([]ChainFa
 			fault(id, "the record does not follow from the one before it")
 		}
 		if signedFromHere || ev.Signature != "" {
-			why, cerr := verifyEventSignature(ev, []byte(payload), keys)
+			mustKeepPayload := start != nil && start.PayloadFrom > 0 && id >= start.PayloadFrom
+			why, cerr := verifyEventSignature(ev, []byte(payload), mustKeepPayload, keys)
 			if cerr != nil {
 				return nil, cerr
 			}
@@ -599,20 +694,92 @@ func (s *SandboxStore) VerifyChain(keys EventKeys, start *ChainStart) ([]ChainFa
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	if start != nil && !sawStart {
+	if start != nil && start.Hash != "" && !sawStart {
 		fault(start.ID, "the record the signed chain begins with is missing")
 	}
 	return faults, nil
 }
 
-// decodeEvent reads a stored record, refusing fields an event does not have:
-// a record carrying extra fields was not written by this log.
+// decodeEvent reads a stored record, refusing anything this log never writes:
+// a field an event does not have, a key spelled in another case, or a key
+// given twice. Go's decoder would otherwise take any of those quietly, so two
+// different records could read as the same event.
 func decodeEvent(stored []byte) (InvocationEvent, error) {
 	var ev InvocationEvent
+	if err := checkKeys(stored); err != nil {
+		return ev, err
+	}
 	dec := json.NewDecoder(bytes.NewReader(stored))
 	dec.DisallowUnknownFields()
-	err := dec.Decode(&ev)
-	return ev, err
+	if err := dec.Decode(&ev); err != nil {
+		return ev, err
+	}
+	if dec.More() {
+		return ev, fmt.Errorf("more than one record")
+	}
+	return ev, nil
+}
+
+var (
+	eventKeys = jsonKeys(reflect.TypeOf(InvocationEvent{}))
+	costKeys  = jsonKeys(reflect.TypeOf(Cost{}))
+)
+
+// jsonKeys is the exact set of keys a struct is written with.
+func jsonKeys(t reflect.Type) map[string]bool {
+	keys := map[string]bool{}
+	for i := 0; i < t.NumField(); i++ {
+		name, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
+		if name != "" && name != "-" {
+			keys[name] = true
+		}
+	}
+	return keys
+}
+
+// checkKeys refuses a record whose keys are not exactly the ones an event is
+// written with, once each.
+func checkKeys(stored []byte) error {
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(stored, &top); err != nil {
+		return err
+	}
+	if err := exactKeysOnce(stored, eventKeys); err != nil {
+		return err
+	}
+	if c, ok := top["cost"]; ok && string(c) != "null" {
+		return exactKeysOnce(c, costKeys)
+	}
+	return nil
+}
+
+// exactKeysOnce reads one JSON object's own keys in order and refuses any not
+// in allowed, or any given twice.
+func exactKeysOnce(obj []byte, allowed map[string]bool) error {
+	dec := json.NewDecoder(bytes.NewReader(obj))
+	if t, err := dec.Token(); err != nil || t != json.Delim('{') {
+		return fmt.Errorf("not an object")
+	}
+	seen := map[string]bool{}
+	for dec.More() {
+		t, err := dec.Token()
+		if err != nil {
+			return err
+		}
+		key, _ := t.(string)
+		if !allowed[key] {
+			return fmt.Errorf("a key it was not written with: %q", key)
+		}
+		if seen[key] {
+			return fmt.Errorf("the key %q twice", key)
+		}
+		seen[key] = true
+		var skip json.RawMessage
+		if err := dec.Decode(&skip); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // eventColumns are the columns a reader filters and totals on.
@@ -657,9 +824,15 @@ func (c eventColumns) disagreeWith(ev InvocationEvent) string {
 // say what the record says; otherwise over the event with its signer and
 // signature left empty, encoded as recordInvocation encodes it. Returns why
 // it fails, or "", or an error wrapping ErrCannotCheck.
-func verifyEventSignature(ev InvocationEvent, kept []byte, keys EventKeys) (string, error) {
+//
+// mustKeep says the row was written after signed bytes were always kept, so
+// re-encoding is no substitute: without them the row fails.
+func verifyEventSignature(ev InvocationEvent, kept []byte, mustKeep bool, keys EventKeys) (string, error) {
 	if ev.Signature == "" || ev.SignerAID == "" {
 		return "the record is not signed", nil
+	}
+	if mustKeep && len(kept) == 0 {
+		return "the bytes its signature covers are missing", nil
 	}
 	if keys == nil {
 		return "", fmt.Errorf("%w: no signer keys were given", ErrCannotCheck)
@@ -701,7 +874,7 @@ type InvocationEventFilter struct {
 	// they usually actually have: not "what did this caller do" but "what was done
 	// for this task, by whoever did it".
 	WorkItem string
-	// ResultStatus is ok | denied | error. Anything else matches nothing rather than
+	// ResultStatus is ok | denied | error | started. Anything else matches nothing rather than
 	// being ignored, so a typo shows up as an empty result instead of silently
 	// widening the query back to everything.
 	ResultStatus string
@@ -791,22 +964,25 @@ func (s *SandboxStore) QueryInvocationEvents(f InvocationEventFilter) ([]Invocat
 	var out []InvocationEvent
 	for rows.Next() {
 		var id int64
-		var evJSON string
+		var evJSON sql.NullString
 		if err := rows.Scan(&id, &evJSON); err != nil {
 			return nil, err
 		}
 		var ev InvocationEvent
-		if json.Unmarshal([]byte(evJSON), &ev) == nil {
-			ev.ID = id
-			out = append(out, ev)
+		if !evJSON.Valid || json.Unmarshal([]byte(evJSON.String), &ev) != nil {
+			// Shown, not dropped: a record that cannot be read is itself
+			// something a reader of the log needs to see.
+			ev = InvocationEvent{StatusReason: "this record is missing or cannot be read"}
 		}
+		ev.ID = id
+		out = append(out, ev)
 	}
 	return out, rows.Err()
 }
 
 // GetInvocationEvent returns one event by row id.
 func (s *SandboxStore) GetInvocationEvent(id int64) (InvocationEvent, error) {
-	var stored string
+	var stored sql.NullString
 	err := s.db.QueryRow(`SELECT event_json FROM invocation_log WHERE id = ?`, id).Scan(&stored)
 	if err == sql.ErrNoRows {
 		return InvocationEvent{}, fmt.Errorf("no invocation event with id %d", id)
@@ -815,7 +991,10 @@ func (s *SandboxStore) GetInvocationEvent(id int64) (InvocationEvent, error) {
 		return InvocationEvent{}, err
 	}
 	var ev InvocationEvent
-	if err := json.Unmarshal([]byte(stored), &ev); err != nil {
+	if !stored.Valid {
+		return InvocationEvent{}, fmt.Errorf("event %d is missing its record", id)
+	}
+	if err := json.Unmarshal([]byte(stored.String), &ev); err != nil {
 		return InvocationEvent{}, fmt.Errorf("event %d is not readable: %w", id, err)
 	}
 	ev.ID = id
@@ -835,10 +1014,12 @@ func (s *SandboxStore) SummariseInvocations(since string) (InvocationSummary, er
 		ByExecutor: map[string]int64{},
 		CostByUnit: map[string]float64{},
 	}
-	where := ""
+	// An "about to run" row is the first half of one action, not an action of
+	// its own, so the totals count results only.
+	where := " WHERE COALESCE(result_status, '') != 'started'"
 	var args []any
 	if since != "" {
-		where = " WHERE ts >= ?"
+		where += " AND ts >= ?"
 		args = append(args, since)
 	}
 

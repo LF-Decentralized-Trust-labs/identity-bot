@@ -283,7 +283,7 @@ func (s *CoreServer) handleVerifyAuditChain(w http.ResponseWriter, r *http.Reque
 // looking like a legitimate query.
 func normaliseStatus(v string) string {
 	switch strings.ToLower(strings.TrimSpace(v)) {
-	case "ok", "denied", "error":
+	case "ok", "denied", "error", "started":
 		return strings.ToLower(strings.TrimSpace(v))
 	}
 	return ""

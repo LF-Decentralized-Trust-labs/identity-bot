@@ -77,8 +77,10 @@ func (sg *invocationSigner) ChainStart() (sandbox.ChainStart, bool, error) {
 	return *rec.ChainStart, true, nil
 }
 
-// KeepChainStart implements sandbox.ChainKeeper. A start is kept once and
-// never moved.
+// KeepChainStart implements sandbox.ChainKeeper. A start is kept once; after
+// that the only change is filling in the hash of a start stamped when the
+// signer was created, from the first row it signed, which can only be at or
+// after the stamped id.
 func (sg *invocationSigner) KeepChainStart(start sandbox.ChainStart) error {
 	sg.mu.Lock()
 	defer sg.mu.Unlock()
@@ -90,7 +92,11 @@ func (sg *invocationSigner) KeepChainStart(start sandbox.ChainStart) error {
 		return fmt.Errorf("invocation signer: no signer on record to keep the chain start with")
 	}
 	if rec.ChainStart != nil {
-		return nil
+		if rec.ChainStart.Hash != "" || start.ID < rec.ChainStart.ID {
+			return nil
+		}
+		rec.ChainStart.ID, rec.ChainStart.Hash = start.ID, start.Hash
+		return writeInvocationSignerRecord(sg.s.DataDir, rec)
 	}
 	rec.ChainStart = &start
 	return writeInvocationSignerRecord(sg.s.DataDir, rec)
@@ -140,7 +146,18 @@ func (sg *invocationSigner) init() error {
 	if ierr != nil || icp.AID == "" {
 		return fmt.Errorf("invocation signer: mint inception: %w", ierr)
 	}
-	if werr := writeInvocationSignerRecord(sg.s.DataDir, invocationSignerRecord{AID: icp.AID, Index: idx}); werr != nil {
+	// The chain begins with this signer: stamp where, before it signs anything,
+	// so no row it writes is ever outside the chain, even if the process stops
+	// between writing the first row and recording it.
+	rec := invocationSignerRecord{AID: icp.AID, Index: idx}
+	if sg.s.SandboxManager != nil && sg.s.SandboxManager.Store() != nil {
+		next, nerr := sg.s.SandboxManager.Store().NextEventID()
+		if nerr != nil {
+			return fmt.Errorf("invocation signer: find where its chain begins: %w", nerr)
+		}
+		rec.ChainStart = &sandbox.ChainStart{ID: next, Linked: true, PayloadFrom: next}
+	}
+	if werr := writeInvocationSignerRecord(sg.s.DataDir, rec); werr != nil {
 		return fmt.Errorf("invocation signer: persist record: %w", werr)
 	}
 	sg.aid = icp.AID
