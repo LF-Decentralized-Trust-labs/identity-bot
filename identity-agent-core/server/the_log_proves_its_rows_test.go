@@ -28,8 +28,7 @@ func logWorld(t *testing.T) *CoreServer {
 
 func askChain(t *testing.T, s *CoreServer) map[string]any {
 	t.Helper()
-	req := httptest.NewRequest("GET", "/api/activity/chain", nil)
-	req.RemoteAddr = "127.0.0.1:5000"
+	req := local("GET", "/api/activity/chain", "")
 	rec := httptest.NewRecorder()
 	s.handleVerifyAuditChain(rec, req)
 	if rec.Code != http.StatusOK {
@@ -113,8 +112,7 @@ func TestALogThatCannotBeCheckedIsNotCalledForged(t *testing.T) {
 	}
 	// The key cannot be derived without the root seed.
 	os.RemoveAll(filepath.Join(s.DataDir, "secureenclave"))
-	req := httptest.NewRequest("GET", "/api/activity/chain", nil)
-	req.RemoteAddr = "127.0.0.1:5000"
+	req := local("GET", "/api/activity/chain", "")
 	rec := httptest.NewRecorder()
 	s.handleVerifyAuditChain(rec, req)
 	body := rec.Body.String()
