@@ -202,20 +202,12 @@ func reuseRelayEnrolment(rootSeed []byte, stored *storedRelayEnrollment) (*relay
 	return &relayEnrolment{record: *stored, seed: seed, kel: stream}, nil
 }
 
-// relationshipRoutes are what a private address may reach on this Identity
-// Agent: an identity's artifacts, its message endpoint and pairwise key
-// registration. Each is drawn from publicRoutes, which a test holds.
-var relationshipRoutes = map[string]bool{
-	"GET /oobi/{aid}":            true,
-	"GET /public/oobi/{aid}":     true,
-	"GET /{aid}/oobi":            true,
-	"GET /{aid}/did.json":        true,
-	"GET /public/{aid}/did.json": true,
-	"GET /{aid}/kel":             true,
-	"GET /{aid}/keri.cesr":       true,
-	"POST /_register":            true,
-	"POST /public/_register":     true,
-	"POST /didcomm":              true,
+// arrivedByRelay reports whether r reached this Identity Agent through a
+// relay. An address at a relay carries the protocol and never a page, so
+// nothing that answers in HTML answers it.
+func arrivedByRelay(r *http.Request) bool {
+	_, ok := relayproto.PreambleFrom(r.Context())
+	return ok
 }
 
 // privateAddressMayReach is this Identity Agent's own rule for a request that
@@ -237,7 +229,7 @@ func (s *CoreServer) privateAddressMayReach(r *http.Request) bool {
 	}
 	// TestEveryRelationshipRouteIsPublic holds that each of these is a public
 	// route, so a private address never reaches more than a stranger may.
-	return relationshipRoutes[method+" "+matchedRoutePattern(s.router, probe)]
+	return relayproto.IsPrivateRoute(method + " " + matchedRoutePattern(s.router, probe))
 }
 
 // startRelay brings up the relay the ingress mode calls for, if one is

@@ -3,7 +3,6 @@ package relayproto
 import (
 	"crypto/rand"
 	"encoding/base32"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -19,49 +18,6 @@ func NewAllocationToken() string {
 		panic("relayproto: no randomness: " + err.Error())
 	}
 	return strings.ToLower(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(buf))
-}
-
-var aidSegment = regexp.MustCompile(`^[A-Za-z0-9_-]{44,}$`)
-
-// PrivateMayReach reports whether a private allocation passes a request. A
-// private address serves the identity's artifacts to the counterparty it was
-// made for, and accepts that counterparty's messages and key registration,
-// and nothing else:
-//
-//   - GET or HEAD of /{aid}/did.json, /public/{aid}/did.json, /{aid}/kel,
-//     /{aid}/keri.cesr, /{aid}/oobi and /oobi/{aid};
-//   - POST /didcomm, the identity's message endpoint;
-//   - POST /_register and POST /public/_register, where a counterparty's
-//     pairwise signer registers the key it will be resolved by.
-//
-// Paths match exactly: no trailing slash, no other spelling. The Identity
-// Agent applies its own, stricter rule per allocation; a relay applies this
-// one so that a mistake on one side is not a hole.
-func PrivateMayReach(method, path string) bool {
-	switch method {
-	case "POST":
-		return path == "/didcomm" || path == "/_register" || path == "/public/_register"
-	case "GET", "HEAD":
-	default:
-		return false
-	}
-	seg := strings.Split(path, "/")
-	if seg[0] != "" {
-		return false
-	}
-	seg = seg[1:]
-	switch {
-	case len(seg) == 2 && seg[0] == "oobi":
-		return aidSegment.MatchString(seg[1])
-	case len(seg) == 3 && seg[0] == "public":
-		return aidSegment.MatchString(seg[1]) && seg[2] == "did.json"
-	case len(seg) == 2 && aidSegment.MatchString(seg[0]):
-		switch seg[1] {
-		case "did.json", "kel", "keri.cesr", "oobi":
-			return true
-		}
-	}
-	return false
 }
 
 // AllocationLimiter counts requests per allocation in fixed one-minute windows.

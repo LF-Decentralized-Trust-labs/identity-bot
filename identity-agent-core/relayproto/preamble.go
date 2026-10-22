@@ -99,6 +99,14 @@ func PreambleFrom(ctx context.Context) (Preamble, bool) {
 	return p, ok
 }
 
+// ContextWithPreamble is ctx carrying p, as a request that arrived on a relay
+// stream does. It lets an Identity Agent exercise its own rules for relayed
+// requests (in its tests, say) without a relay that applies the same rules
+// first. It grants nothing: only code in the same process can call it.
+func ContextWithPreamble(ctx context.Context, p Preamble) context.Context {
+	return context.WithValue(ctx, preambleKey{}, p)
+}
+
 // streamConn is a relay stream whose preamble has been read.
 //
 // It ends itself once nothing has moved on it, in either direction, for

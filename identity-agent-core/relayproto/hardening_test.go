@@ -292,7 +292,7 @@ func TestAHalfClosedStreamStillCounts(t *testing.T) {
 		if err != nil {
 			return
 		}
-		buf.WriteString("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+		buf.WriteString("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 2\r\n\r\nok")
 		buf.Flush()
 		mu.Lock()
 		kept = append(kept, c) // answered, never closed

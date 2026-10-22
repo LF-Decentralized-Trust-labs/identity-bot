@@ -425,10 +425,16 @@ func (s *Session) takeAllocation(p Preamble) (func(), bool) {
 //
 //   - Requests per minute and requests in flight are limited per allocation,
 //     by mode, so one address cannot starve the others.
-//   - A private allocation passes only what [PrivateMayReach] allows, at its
-//     exact path, without an upgrade, with a body no larger than
-//     MaxPrivateBodyBytes. The Identity Agent applies its own rule as well;
-//     this is defence in depth against a mistake on either side.
+//   - A browser loading a page never reaches the Identity Agent at either kind
+//     of address ([IsBrowserNavigation]).
+//   - A private allocation passes only [PrivateRoutes], at their exact path,
+//     without an upgrade, with a body no larger than MaxPrivateBodyBytes. The
+//     Identity Agent applies the same list itself; this is defence in depth
+//     against a mistake on either side.
+//   - An answer passes only as protocol data ([CheckProtocolResponse]): no
+//     page, no redirect, only the headers the protocol uses, and with the
+//     headers that stop a browser reading it as anything else or a cache
+//     keeping it. No informational (1xx) answer passes but a protocol switch.
 //   - A large body, or one of unknown length, is offered with
 //     Expect: 100-continue. That lets an Identity Agent refuse on headers
 //     before the body crosses; it is a courtesy, not a gate.
@@ -443,11 +449,11 @@ func (s *Session) Forward(w http.ResponseWriter, r *http.Request, p Preamble) {
 		http.Error(w, "the relay has no record of this address", http.StatusBadGateway)
 		return
 	}
+	if !requestAllowed(r, p.Mode) {
+		http.NotFound(w, r)
+		return
+	}
 	if p.Mode == ModePrivate {
-		if !privateRequestAllowed(r) {
-			http.NotFound(w, r)
-			return
-		}
 		if r.ContentLength > MaxPrivateBodyBytes {
 			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
 			return
@@ -483,9 +489,14 @@ func (s *Session) Forward(w http.ResponseWriter, r *http.Request, p Preamble) {
 			ExpectContinueTimeout:  10 * time.Second,
 			MaxResponseHeaderBytes: 64 << 10,
 		},
-		FlushInterval: -1, // stream responses as they are written
-		ErrorLog:      log.New(io.Discard, "", 0),
+		ModifyResponse: func(resp *http.Response) error { return CheckProtocolResponse(resp, p.Mode) },
+		FlushInterval:  -1, // stream responses as they are written
+		ErrorLog:       log.New(io.Discard, "", 0),
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
+			if errors.Is(err, ErrNotProtocol) {
+				http.Error(w, "the Identity Agent's answer was not protocol data, so the relay did not pass it", http.StatusBadGateway)
+				return
+			}
 			status := http.StatusBadGateway
 			if errors.Is(err, errSessionFull) {
 				status = http.StatusServiceUnavailable
@@ -493,21 +504,25 @@ func (s *Session) Forward(w http.ResponseWriter, r *http.Request, p Preamble) {
 			http.Error(w, "the Identity Agent could not be reached", status)
 		},
 	}
-	proxy.ServeHTTP(w, r)
+	proxy.ServeHTTP(noInterimAnswers{w}, r)
 }
 
-// privateRequestAllowed applies [PrivateMayReach] to a request as it will
-// reach the Identity Agent: its exact path, with no percent-encoding that
-// could be read two ways, and no protocol upgrade.
-func privateRequestAllowed(r *http.Request) bool {
-	if r.URL.EscapedPath() != r.URL.Path {
-		return false
+// noInterimAnswers passes no informational (1xx) answer from an Identity
+// Agent, other than a protocol switch. Such an answer reaches the caller
+// before the agent's final answer is checked, so its headers (an early hint's
+// preload, say) would pass unchecked.
+type noInterimAnswers struct{ http.ResponseWriter }
+
+func (w noInterimAnswers) WriteHeader(code int) {
+	if code >= 100 && code < 200 && code != http.StatusSwitchingProtocols {
+		return
 	}
-	if r.Header.Get("Upgrade") != "" {
-		return false
-	}
-	return PrivateMayReach(r.Method, r.URL.Path)
+	w.ResponseWriter.WriteHeader(code)
 }
+
+// Unwrap lets the proxy flush and take over the connection (for a websocket)
+// through http.ResponseController.
+func (w noInterimAnswers) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 // Registry holds the relay's admitted sessions, one per identifier.
 type Registry struct {
