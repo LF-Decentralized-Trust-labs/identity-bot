@@ -377,3 +377,45 @@ func TestTheRetiredTunnelProviderMovesToAPublicRelay(t *testing.T) {
 		t.Fatal("the notice outlived the owner's choice")
 	}
 }
+
+// An instance set to be reached publicly with no name to be reached at is told
+// so in plain words, in both status endpoints, and the relay says the same.
+// A product can make public the default before the owner has chosen a name.
+func TestAPublicAddressWithNoNameTellsTheOwner(t *testing.T) {
+	s, _, _, cancel := relayWorld(t, relayproto.ModePublic)
+	defer cancel()
+	if err := s.DataStore.SaveSettings(store.SettingsData{IngressMode: "public"}); err != nil {
+		t.Fatal(err)
+	}
+	s.noticeMissingPublicName()
+
+	go s.startRelay()
+	defer s.Stop()
+	out := waitForState(t, s, "failed")
+	if out["notice"] != noPublicNameNotice {
+		t.Fatalf("relay status notice: %v", out["notice"])
+	}
+	if reason, _ := out["reason"].(string); !strings.HasPrefix(reason, "Choose a name for your public address") {
+		t.Fatalf("relay status reason: %q", reason)
+	}
+	_, settings := asOwner(t, s, "GET", "/api/settings/reachability", "")
+	if settings["notice"] != noPublicNameNotice {
+		t.Fatalf("reachability settings notice: %v", settings["notice"])
+	}
+
+	// Choosing a name is the owner having seen it.
+	asOwner(t, s, "PUT", "/api/settings/reachability", `{"public_relay_name":"acme"}`)
+	if st, _ := s.DataStore.GetSettings(); st.ReachabilityNotice != "" {
+		t.Fatal("the notice outlived the owner's choice")
+	}
+}
+
+// An instance that already has a name is left alone.
+func TestAPublicAddressWithANameGetsNoNotice(t *testing.T) {
+	s, _, _, cancel := relayWorld(t, relayproto.ModePublic)
+	defer cancel()
+	s.noticeMissingPublicName()
+	if st, _ := s.DataStore.GetSettings(); st != nil && st.ReachabilityNotice != "" {
+		t.Fatalf("notice with a name set: %q", st.ReachabilityNotice)
+	}
+}

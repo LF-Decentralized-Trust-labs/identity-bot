@@ -165,7 +165,7 @@ func explain(err error) (code, words string, permanent bool) {
 		}
 		return ReasonRefused, "The relay refused: " + msg, false
 	case errors.Is(err, errNoName):
-		return ReasonNoName, "A public relay gives an address only at a name or a proven domain, and none is set.", true
+		return ReasonNoName, "Choose a name for your public address. A public relay gives an address only at a name or a proven domain, and none is set.", true
 	case errors.Is(err, errWrongMode):
 		return ReasonWrongMode, err.Error(), true
 	}

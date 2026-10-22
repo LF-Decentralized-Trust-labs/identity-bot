@@ -129,3 +129,31 @@ func (s *CoreServer) retireTunnelHubSettings() {
 	}
 	log.Printf("[reachability] %s", notice)
 }
+
+// noPublicNameNotice is what an owner is told when this Identity Agent is set
+// to be reached at a public address but has nothing to be reached at.
+const noPublicNameNotice = "Choose a name for your public address. Until you do, nobody outside this network can reach this Identity Agent."
+
+// noticeMissingPublicName leaves the owner a notice when the resolved mode is
+// public and there is neither a name to claim nor an address already held,
+// such as a proven domain. A product can make public the default before the
+// owner has chosen a name, and without this the relay only fails quietly in
+// the status of a screen nobody has opened.
+func (s *CoreServer) noticeMissingPublicName() {
+	if s.DataStore == nil || s.resolveIngressMode() != IngressModePublic || s.publicRelayName() != "" {
+		return
+	}
+	if rec, ok, err := loadRelayEnrollment(s.DataDir, publicRelayEnrollmentFileName); err == nil && ok && len(rec.Allocations) > 0 {
+		return
+	}
+	saved, err := s.DataStore.GetSettings()
+	if err != nil || saved == nil || saved.ReachabilityNotice != "" {
+		return
+	}
+	saved.ReachabilityNotice = noPublicNameNotice
+	if err := s.DataStore.SaveSettings(*saved); err != nil {
+		log.Printf("[reachability] could not leave the no-name notice: %v", err)
+		return
+	}
+	log.Printf("[reachability] %s", noPublicNameNotice)
+}

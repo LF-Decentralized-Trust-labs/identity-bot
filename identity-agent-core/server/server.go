@@ -560,6 +560,7 @@ func (s *CoreServer) Start() error {
 	}
 
 	s.retireTunnelHubSettings()
+	s.noticeMissingPublicName()
 	tunnelCfg := s.loadTunnelConfig()
 	s.TunnelManager = tunnel.NewManager(tunnelCfg, s.Port)
 	s.EndpointService.SetTunnelManager(s.TunnelManager)
