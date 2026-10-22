@@ -4,6 +4,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httptrace"
+	"net/textproto"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -214,5 +216,162 @@ func TestTheVisitorPageIsTheRelaysOwn(t *testing.T) {
 		if cc := w.Header().Get("Cache-Control"); cc != "no-store" {
 			t.Errorf("the visitor page may be cached: %q", cc)
 		}
+	}
+}
+
+// Browsers too old to say what they are loading still name both HTML types
+// when they load a page; a client that merely lists HTML among others does
+// not, and reaches the Identity Agent.
+func TestOnlyABrowsersPageAcceptIsAPageLoad(t *testing.T) {
+	for accept, want := range map[string]bool{
+		"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8":                       true,
+		"text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8": true,
+		// Java's HttpURLConnection, asking for did.json.
+		"text/html, image/gif, image/jpeg, *; q=.2, */*; q=.2": false,
+		"text/html;q=0, application/xhtml+xml":                 false,
+		"text/html":                                            false,
+		"application/json, text/plain, */*":                    false,
+	} {
+		r := httptest.NewRequest("GET", "/x/did.json", nil)
+		r.Header.Set("Accept", accept)
+		if got := IsBrowserNavigation(r); got != want {
+			t.Errorf("Accept %q: page load %v, want %v", accept, got, want)
+		}
+	}
+}
+
+// Only the headers the protocol uses pass. Everything else an Identity Agent
+// sends is dropped, whether or not anybody thought of it: a cache lifetime, a
+// sign-in prompt, a download name, credentials across origins.
+func TestOnlyTheProtocolsHeadersPass(t *testing.T) {
+	r := newRelay(t, nil)
+	id := newIdentity(t)
+	r.route("acme.relay.test", id.aid, Preamble{Allocation: "pub-1", Mode: ModePublic, Host: "acme.relay.test"})
+	r.route("a1b2.relay.test", id.aid, Preamble{Allocation: "priv-1", Mode: ModePrivate, Host: "a1b2.relay.test"})
+	r.connect(id, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		h := w.Header()
+		h.Set("Content-Type", "application/json")
+		h.Set("Cache-Control", "public, max-age=31536000, immutable")
+		h.Set("CDN-Cache-Control", "max-age=31536000")
+		h.Set("Cloudflare-CDN-Cache-Control", "max-age=31536000")
+		h.Set("Surrogate-Control", "max-age=31536000")
+		h.Set("Expires", "Thu, 01 Jan 2099 00:00:00 GMT")
+		h.Set("WWW-Authenticate", `Basic realm="sign in"`)
+		h.Set("Proxy-Authenticate", `Basic realm="sign in"`)
+		h.Set("Content-Disposition", `attachment; filename="invoice.html"`)
+		h.Set("Access-Control-Allow-Origin", "*")
+		h.Set("Access-Control-Allow-Credentials", "true")
+		h.Set("Alt-Svc", `h3=":443"`)
+		h.Set("Strict-Transport-Security", "max-age=63072000")
+		h.Set("X-Keri-Keystate-Seq", "3")
+		h.Add("Set-Cookie", "b=2")
+		w.WriteHeader(http.StatusUnauthorized)
+		io.WriteString(w, `{}`)
+	}))
+	for _, host := range []string{"acme.relay.test", "a1b2.relay.test"} {
+		req, _ := http.NewRequest("GET", r.front.URL+"/oobi/"+id.aid, nil)
+		resp := r.do(host, req)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("%s: status %d", host, resp.StatusCode)
+		}
+		if cc := resp.Header.Get("Cache-Control"); cc != "private, no-store" {
+			t.Errorf("%s: a cache may keep the answer: Cache-Control %q", host, cc)
+		}
+		for _, name := range []string{"CDN-Cache-Control", "Cloudflare-CDN-Cache-Control", "Surrogate-Control",
+			"Expires", "WWW-Authenticate", "Proxy-Authenticate", "Content-Disposition",
+			"Access-Control-Allow-Credentials", "Alt-Svc", "Strict-Transport-Security"} {
+			if v := resp.Header.Get(name); v != "" {
+				t.Errorf("%s: %s passed: %q", host, name, v)
+			}
+		}
+		for _, name := range []string{"Access-Control-Allow-Origin", "X-Keri-Keystate-Seq"} {
+			if resp.Header.Get(name) == "" {
+				t.Errorf("%s: the protocol's %s was dropped", host, name)
+			}
+		}
+		cookies := resp.Header.Values("Set-Cookie")
+		if host == "acme.relay.test" && (len(cookies) != 1 || cookies[0] != "b=2") {
+			t.Errorf("public address: cookies %q, want its own", cookies)
+		}
+		if host == "a1b2.relay.test" && len(cookies) != 0 {
+			t.Errorf("private address: cookies passed to the shared origin: %q", cookies)
+		}
+	}
+}
+
+// An answer naming two types is refused: browsers differ in which they
+// believe, so a page could hide behind a protocol type.
+func TestAnAnswerWithTwoTypesIsRefused(t *testing.T) {
+	r := newRelay(t, nil)
+	id := newIdentity(t)
+	r.route("acme.relay.test", id.aid, Preamble{Allocation: "pub-1", Mode: ModePublic, Host: "acme.relay.test"})
+	r.connect(id, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header()["Content-Type"] = []string{"application/json", "text/html"}
+		io.WriteString(w, "<form>password</form>")
+	}))
+	req, _ := http.NewRequest("GET", r.front.URL+"/oobi/"+id.aid, nil)
+	resp := r.do("acme.relay.test", req)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadGateway || strings.Contains(string(body), "<form") {
+		t.Fatalf("status %d, types %q, body %q", resp.StatusCode, resp.Header.Values("Content-Type"), body)
+	}
+}
+
+// An informational answer reaches the caller before the final answer is
+// checked, so none passes: an early hint's preload or cookie never arrives.
+func TestNoEarlyAnswerPasses(t *testing.T) {
+	r := newRelay(t, nil)
+	id := newIdentity(t)
+	r.route("acme.relay.test", id.aid, Preamble{Allocation: "pub-1", Mode: ModePublic, Host: "acme.relay.test"})
+	r.connect(id, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Link", "<https://elsewhere.test/x.css>; rel=preload")
+		w.Header().Set("Set-Cookie", "a=1; Domain=relay.test")
+		w.WriteHeader(http.StatusEarlyHints)
+		w.Header().Del("Link")
+		w.Header().Del("Set-Cookie")
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{}`)
+	}))
+	var early []int
+	req, _ := http.NewRequest("GET", r.front.URL+"/oobi/"+id.aid, nil)
+	req = req.WithContext(httptrace.WithClientTrace(req.Context(), &httptrace.ClientTrace{
+		Got1xxResponse: func(code int, _ textproto.MIMEHeader) error { early = append(early, code); return nil },
+	}))
+	resp := r.do("acme.relay.test", req)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	if len(early) != 0 {
+		t.Errorf("early answers passed: %v", early)
+	}
+}
+
+// A protocol switch at a public address keeps only what the switch needs.
+func TestAProtocolSwitchCarriesOnlyItsOwnHeaders(t *testing.T) {
+	resp := &http.Response{StatusCode: http.StatusSwitchingProtocols, Header: http.Header{
+		"Upgrade":              {"websocket"},
+		"Connection":           {"Upgrade"},
+		"Sec-Websocket-Accept": {"x"},
+		"Set-Cookie":           {"a=1"},
+		"Link":                 {"<https://elsewhere.test/>; rel=preload"},
+	}}
+	if err := CheckProtocolResponse(resp, ModePublic); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"Upgrade", "Connection", "Sec-Websocket-Accept"} {
+		if resp.Header.Get(name) == "" {
+			t.Errorf("%s dropped from a protocol switch", name)
+		}
+	}
+	for _, name := range []string{"Set-Cookie", "Link"} {
+		if v := resp.Header.Get(name); v != "" {
+			t.Errorf("%s passed on a protocol switch: %q", name, v)
+		}
+	}
+	if err := CheckProtocolResponse(&http.Response{StatusCode: http.StatusSwitchingProtocols, Header: http.Header{}}, ModePrivate); err == nil {
+		t.Error("a private address passed a protocol switch")
 	}
 }

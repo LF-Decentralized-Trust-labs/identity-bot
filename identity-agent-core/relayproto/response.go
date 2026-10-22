@@ -28,24 +28,48 @@ var ProtocolMediaTypes = []string{
 
 // ProtocolResponseHeaders are set on every answer a relay passes, replacing
 // whatever the Identity Agent sent: no type sniffing, nothing loaded or run,
-// and no framing.
+// no framing, and nothing a cache in front may keep. The same URL answers a
+// browser loading a page with the relay's own page, and a cache that ignores
+// Vary (as content delivery networks commonly do) must never hand one in
+// place of the other.
 var ProtocolResponseHeaders = map[string]string{
 	"X-Content-Type-Options":  "nosniff",
 	"Content-Security-Policy": "default-src 'none'; sandbox; frame-ancestors 'none'",
 	"X-Frame-Options":         "DENY",
+	"Cache-Control":           "private, no-store",
 }
 
-// droppedResponseHeaders are never passed from an Identity Agent: each can
-// send a browser somewhere, preload something, or widen what a script may
-// control.
-var droppedResponseHeaders = []string{
-	"Refresh",
-	"Link",
-	"Location",
-	"Content-Location",
-	"Service-Worker-Allowed",
-	"Clear-Site-Data",
+// passedResponseHeaders are the only headers of an Identity Agent's answer a
+// relay passes; every other header is dropped. Anything a browser could act
+// on (a redirect, a preload, a sign-in prompt, a cache lifetime, a download
+// name) is absent because it is not here, not because it was thought of.
+var passedResponseHeaders = []string{
+	"Content-Type",
+	"Content-Length",
+	"Content-Encoding",
+	"Etag",
+	"Last-Modified",
+	"Date",
+	"Vary",
+	"Retry-After",
+	// A relying party's page may call a public identity's sign-in routes, and
+	// read their answers, from its own origin. Never with credentials.
+	"Access-Control-Allow-Origin",
+	"Access-Control-Allow-Methods",
+	"Access-Control-Allow-Headers",
+	"Access-Control-Expose-Headers",
+	"Access-Control-Max-Age",
 }
+
+// passedResponseHeaderPrefixes pass a whole family: the protocol's own
+// key-state headers.
+var passedResponseHeaderPrefixes = []string{"X-Keri-"}
+
+// passedUpgradeHeaders are what a relay passes on a protocol switch, and
+// nothing else.
+var passedUpgradeHeaders = []string{"Upgrade", "Connection"}
+
+var passedUpgradeHeaderPrefixes = []string{"Sec-Websocket-"}
 
 // ErrNotProtocol is why a relay refused an Identity Agent's answer.
 var ErrNotProtocol = errors.New("the Identity Agent answered with something other than protocol data")
@@ -69,12 +93,13 @@ func IsProtocolMediaType(contentType string) bool {
 }
 
 // CheckProtocolResponse applies the rule to an Identity Agent's answer at an
-// address in mode, and makes it safe to pass: it refuses a redirect, or a body
-// in any type but the protocol's; then drops the headers a page could use and
-// sets ProtocolResponseHeaders. It also drops a cookie scoped wider than the
-// address it came from. A websocket is accepted only at a public address,
-// where the identity's own front ends keep one open; a browser cannot load a
-// page from one.
+// address in mode, and makes it safe to pass. It refuses a redirect, or a body
+// in any type but the protocol's, or an answer naming more than one type;
+// keeps only the headers in passedResponseHeaders; and sets
+// ProtocolResponseHeaders. A cookie passes only at a public address, and only
+// one held by that address alone. A websocket is accepted only at a public
+// address, where the identity's own front ends keep one open; a browser cannot
+// load a page from one.
 func CheckProtocolResponse(resp *http.Response, mode Mode) error {
 	switch {
 	case resp.StatusCode == http.StatusSwitchingProtocols:
@@ -84,30 +109,36 @@ func CheckProtocolResponse(resp *http.Response, mode Mode) error {
 	case resp.StatusCode >= 300 && resp.StatusCode < 400 && resp.StatusCode != http.StatusNotModified:
 		return fmt.Errorf("%w: a redirect", ErrNotProtocol)
 	}
-	ct := resp.Header.Get("Content-Type")
+	h := resp.Header
 	if resp.StatusCode == http.StatusSwitchingProtocols {
 		// What follows is the websocket's, not a body.
-	} else if ct == "" {
+		keepOnly(h, passedUpgradeHeaders, passedUpgradeHeaderPrefixes)
+		return nil
+	}
+	// Exactly one type. Browsers differ in which of two they believe, so a
+	// second one is how a page would hide behind a protocol type.
+	types := h.Values("Content-Type")
+	switch {
+	case len(types) > 1:
+		return fmt.Errorf("%w: more than one Content-Type", ErrNotProtocol)
+	case len(types) == 0 || types[0] == "":
 		if hasBody(resp) {
 			return fmt.Errorf("%w: a body with no type", ErrNotProtocol)
 		}
-	} else if !IsProtocolMediaType(ct) {
-		return fmt.Errorf("%w: %s", ErrNotProtocol, ct)
+	case !IsProtocolMediaType(types[0]):
+		return fmt.Errorf("%w: %s", ErrNotProtocol, types[0])
 	}
-	h := resp.Header
-	for _, name := range droppedResponseHeaders {
-		h.Del(name)
-	}
+	cookies := h.Values("Set-Cookie")
+	keepOnly(h, passedResponseHeaders, passedResponseHeaderPrefixes)
 	for name, v := range ProtocolResponseHeaders {
 		h.Set(name, v)
 	}
-	// The same URL answers a browser loading a page with the relay's own page,
-	// so a cache in front must keep the two apart.
 	h.Add("Vary", "Sec-Fetch-Mode")
 	h.Add("Vary", "Sec-Fetch-Dest")
 	h.Add("Vary", "Accept")
-	if cookies := h.Values("Set-Cookie"); len(cookies) > 0 {
-		h.Del("Set-Cookie")
+	// Every private address shares one origin, so a cookie set at one would
+	// reach the others. At a public address a cookie is the address's own.
+	if mode == ModePublic {
 		for _, c := range cookies {
 			if parsed, err := http.ParseSetCookie(c); err == nil && parsed.Domain == "" {
 				h.Add("Set-Cookie", c)
@@ -115,6 +146,31 @@ func CheckProtocolResponse(resp *http.Response, mode Mode) error {
 		}
 	}
 	return nil
+}
+
+// keepOnly deletes every header in h not named in names or starting with one
+// of prefixes. Names are compared in canonical form.
+func keepOnly(h http.Header, names, prefixes []string) {
+	for name := range h {
+		if !headerPassed(name, names, prefixes) {
+			delete(h, name)
+		}
+	}
+}
+
+func headerPassed(name string, names, prefixes []string) bool {
+	name = http.CanonicalHeaderKey(name)
+	for _, n := range names {
+		if name == http.CanonicalHeaderKey(n) {
+			return true
+		}
+	}
+	for _, p := range prefixes {
+		if strings.HasPrefix(name, http.CanonicalHeaderKey(p)) {
+			return true
+		}
+	}
+	return false
 }
 
 func hasBody(resp *http.Response) bool {

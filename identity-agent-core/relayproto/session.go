@@ -432,8 +432,9 @@ func (s *Session) takeAllocation(p Preamble) (func(), bool) {
 //     Identity Agent applies the same list itself; this is defence in depth
 //     against a mistake on either side.
 //   - An answer passes only as protocol data ([CheckProtocolResponse]): no
-//     page, no redirect, and with the headers that stop a
-//     browser reading it as anything else.
+//     page, no redirect, only the headers the protocol uses, and with the
+//     headers that stop a browser reading it as anything else or a cache
+//     keeping it. No informational (1xx) answer passes but a protocol switch.
 //   - A large body, or one of unknown length, is offered with
 //     Expect: 100-continue. That lets an Identity Agent refuse on headers
 //     before the body crosses; it is a courtesy, not a gate.
@@ -503,8 +504,25 @@ func (s *Session) Forward(w http.ResponseWriter, r *http.Request, p Preamble) {
 			http.Error(w, "the Identity Agent could not be reached", status)
 		},
 	}
-	proxy.ServeHTTP(w, r)
+	proxy.ServeHTTP(noInterimAnswers{w}, r)
 }
+
+// noInterimAnswers passes no informational (1xx) answer from an Identity
+// Agent, other than a protocol switch. Such an answer reaches the caller
+// before the agent's final answer is checked, so its headers (an early hint's
+// preload, say) would pass unchecked.
+type noInterimAnswers struct{ http.ResponseWriter }
+
+func (w noInterimAnswers) WriteHeader(code int) {
+	if code >= 100 && code < 200 && code != http.StatusSwitchingProtocols {
+		return
+	}
+	w.ResponseWriter.WriteHeader(code)
+}
+
+// Unwrap lets the proxy flush and take over the connection (for a websocket)
+// through http.ResponseController.
+func (w noInterimAnswers) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 // Registry holds the relay's admitted sessions, one per identifier.
 type Registry struct {

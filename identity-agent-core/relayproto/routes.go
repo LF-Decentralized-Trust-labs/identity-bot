@@ -3,6 +3,7 @@ package relayproto
 import (
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -118,7 +119,10 @@ func requestAllowed(r *http.Request, mode Mode) bool {
 // page instead.
 //
 // A browser says what it is loading in Sec-Fetch-Dest and Sec-Fetch-Mode. One
-// too old to send them is recognised by asking for HTML. An Identity Agent, a
+// too old to send them is recognised by what it accepts when loading a page:
+// every such browser names both text/html and application/xhtml+xml. A client
+// that merely includes text/html among many types (Java's default Accept, for
+// one) is not a browser loading a page, and is passed. An Identity Agent, a
 // relying party's script and a command-line client send neither.
 func IsBrowserNavigation(r *http.Request) bool {
 	switch r.Header.Get("Sec-Fetch-Dest") {
@@ -129,7 +133,36 @@ func IsBrowserNavigation(r *http.Request) bool {
 	case "navigate", "nested-navigate":
 		return true
 	case "":
-		return strings.Contains(strings.ToLower(r.Header.Get("Accept")), "text/html")
+		accepted := acceptedTypes(r.Header.Values("Accept"))
+		return accepted["text/html"] && accepted["application/xhtml+xml"]
 	}
 	return false
+}
+
+// acceptedTypes is the set of media types an Accept header asks for with a
+// quality above zero.
+func acceptedTypes(values []string) map[string]bool {
+	out := map[string]bool{}
+	for _, v := range values {
+		for _, part := range strings.Split(v, ",") {
+			fields := strings.Split(part, ";")
+			mt := strings.ToLower(strings.TrimSpace(fields[0]))
+			if mt == "" {
+				continue
+			}
+			wanted := true
+			for _, f := range fields[1:] {
+				k, val, _ := strings.Cut(strings.TrimSpace(f), "=")
+				if strings.EqualFold(strings.TrimSpace(k), "q") {
+					if q, err := strconv.ParseFloat(strings.TrimSpace(val), 64); err == nil && q <= 0 {
+						wanted = false
+					}
+				}
+			}
+			if wanted {
+				out[mt] = true
+			}
+		}
+	}
+	return out
 }
