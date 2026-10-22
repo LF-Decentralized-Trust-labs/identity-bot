@@ -886,6 +886,16 @@ CREATE TABLE IF NOT EXISTS credential_tel_events (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_credential_tel_said ON credential_tel_events(said);
 `},
+	{
+		Version:     40,
+		Description: "Keep each received message's signed form and its sender's keys, so the sender's signature can be checked again later",
+		SQL: `
+-- The envelope's contents were kept and the sender's signature over them was
+-- thrown away, so nobody could later show who sent a message. Both default to
+-- '' for messages received before this.
+ALTER TABLE notifications ADD COLUMN signed_message TEXT NOT NULL DEFAULT '';
+ALTER TABLE notifications ADD COLUMN sender_did     TEXT NOT NULL DEFAULT '';
+`},
 }
 
 // ApplyIdentityMigrations creates the migrations table and applies any pending migrations.

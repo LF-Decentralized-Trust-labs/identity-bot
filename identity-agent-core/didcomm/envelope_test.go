@@ -2,6 +2,7 @@ package didcomm
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -159,4 +160,38 @@ func TestKeySetPersistence(t *testing.T) {
 		t.Fatalf("restored keyset cannot decrypt: %v", err)
 	}
 	_ = bobDID
+}
+
+// A received message can be shown later, to somebody without the recipient's
+// key, to have come from its sender: the signed form kept from the envelope
+// verifies against the sender's keys, and fails if a byte of it changes or if
+// it is checked against anybody else's.
+func TestAReceivedMessageCanBeProvedLater(t *testing.T) {
+	alice, _ := GenerateKeySet("EAlice")
+	bob, _ := GenerateKeySet("EBob")
+	aliceDID, _ := alice.DID()
+	bobDID, _ := bob.DID()
+	sent := mkJWM(t, "EAlice", "EBob", TypeAgentMessage, map[string]string{"text": "ship it"})
+	env, err := PackAuthcrypt(alice, bobDID, sent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, signed, err := UnpackAuthcryptKeeping(bob, aliceDID, env)
+	if err != nil || got.ID != sent.ID || len(signed) == 0 {
+		t.Fatalf("unpack: %v %+v %d", err, got, len(signed))
+	}
+
+	again, err := VerifySignedMessage(aliceDID, signed)
+	if err != nil || again.ID != sent.ID || string(again.Body) != string(got.Body) {
+		t.Fatalf("the kept message does not prove itself: %v", err)
+	}
+	if _, err := VerifySignedMessage(bobDID, signed); err == nil {
+		t.Fatal("a message was proved to come from somebody who did not sign it")
+	}
+	i := strings.Index(string(signed), "ship it")
+	altered := append([]byte(nil), signed...)
+	altered[i] = 'S'
+	if _, err := VerifySignedMessage(aliceDID, altered); err == nil {
+		t.Fatal("an altered message still proved itself")
+	}
 }

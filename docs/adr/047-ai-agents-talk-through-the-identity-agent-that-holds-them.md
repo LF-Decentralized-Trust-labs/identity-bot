@@ -73,6 +73,12 @@ record. So is a person opening a conversation's record, and a body reading one b
 person's later waits for news in a conversation they already opened are not recorded
 one by one.
 
+*Amended 2026-10-22.* Every message the record takes is written to the signed governance
+record as well, and so is every handing of a message to a body, so the log shows what
+was sent and delivered and not only what was refused. Each of these rows, and each
+refusal that names a conversation, is filed under that conversation as its work item,
+so one conversation's whole history is read from the log by asking for it.
+
 **Every message is signed twice, for two different claims:**
 1. **The sender's own statement.** A body signs it with its machine key over a
    fixed, line-separated string. The string covers the conversation, the kind of

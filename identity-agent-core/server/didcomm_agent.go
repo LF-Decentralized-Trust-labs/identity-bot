@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"identity-agent-core/didcomm"
+	"identity-agent-core/sandbox"
 )
 
 // SendDIDCommMessage packs an authcrypt envelope from a local AID to a registered peer
@@ -74,9 +75,29 @@ func (s *CoreServer) SendDIDCommMessage(fromAID, toAID, typ string, body json.Ra
 	raw, _ := json.Marshal(env)
 	resp, err := (&http.Client{Timeout: 15 * time.Second}).Post(peer.Endpoint, "application/didcomm-envelope+json", bytes.NewReader(raw))
 	if err != nil {
+		s.recordTraffic(fromAID, jwm.ID, "didcomm.message.sent", "error",
+			fmt.Sprintf("%s to %s could not be delivered: %v", typ, toAID, err))
 		return jwm.ID, 0, fmt.Errorf("delivery: %w", err)
 	}
 	defer resp.Body.Close()
 	io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+	status := "ok"
+	if resp.StatusCode >= 300 {
+		status = "error"
+	}
+	s.recordTraffic(fromAID, jwm.ID, "didcomm.message.sent", status,
+		fmt.Sprintf("%s to %s, answered %d", typ, toAID, resp.StatusCode))
 	return jwm.ID, resp.StatusCode, nil
+}
+
+// recordTraffic writes one message that crossed this agent to the signed log,
+// linked by the message's own id, so what was sent and received can be shown
+// later rather than only what was done because of it.
+func (s *CoreServer) recordTraffic(caller, messageID, event, status, why string) {
+	if s.SandboxManager == nil {
+		return
+	}
+	s.SandboxManager.RecordGovernanceEvent(sandbox.CallerContext{
+		CallerAID: caller, CorrelationID: messageID, Transport: "didcomm", Reason: clampWhy(why),
+	}, event, status)
 }

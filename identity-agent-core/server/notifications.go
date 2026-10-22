@@ -1,7 +1,9 @@
 package server
 
 import (
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -52,7 +54,15 @@ type notificationBody struct {
 // are the AUTHENTICATED header values. They are passed in rather than read from
 // the message body on purpose: a sender that could name itself in a field the
 // core trusted could put anyone's identifier there.
-func (s *CoreServer) storeInboundAsNotification(fromAID, toAID string, jwm *didcomm.JWM, verified bool) {
+// receivedProof is what lets a received message be shown, later and to
+// somebody else, to have come from its sender: the sender's signed message as
+// it was inside the envelope, and the sender's keys it was checked against.
+type receivedProof struct {
+	signed []byte
+	sender *didcomm.DID
+}
+
+func (s *CoreServer) storeInboundAsNotification(fromAID, toAID string, jwm *didcomm.JWM, verified bool, proof *receivedProof) {
 	n := store.Notification{
 		ID:         jwm.ID,
 		FromAID:    fromAID,
@@ -65,6 +75,12 @@ func (s *CoreServer) storeInboundAsNotification(fromAID, toAID string, jwm *didc
 	}
 	if len(jwm.Body) > 0 {
 		n.Payload = string(jwm.Body)
+	}
+	if proof != nil && len(proof.signed) > 0 && proof.sender != nil {
+		if did, err := json.Marshal(proof.sender); err == nil {
+			n.SignedMessage = base64.StdEncoding.EncodeToString(proof.signed)
+			n.SenderDID = string(did)
+		}
 	}
 
 	// A message of the notification type carries text meant for a person. Any
@@ -162,4 +178,32 @@ func (s *CoreServer) unreadNotifications() []store.Notification {
 		return []store.Notification{}
 	}
 	return list
+}
+
+// provedSender checks a kept message again: the sender's signature over its
+// signed form, against the keys it was received with, and that what was kept
+// as the message is what was signed. Returns the signed message.
+func provedSender(n store.Notification) (*didcomm.JWM, error) {
+	if n.SignedMessage == "" || n.SenderDID == "" {
+		return nil, fmt.Errorf("message %s was kept without its signed form, so its sender cannot be shown", n.ID)
+	}
+	signed, err := base64.StdEncoding.DecodeString(n.SignedMessage)
+	if err != nil {
+		return nil, fmt.Errorf("message %s: the signed form is not readable", n.ID)
+	}
+	var did didcomm.DID
+	if err := json.Unmarshal([]byte(n.SenderDID), &did); err != nil {
+		return nil, fmt.Errorf("message %s: the sender's keys are not readable", n.ID)
+	}
+	if did.AID != n.FromAID {
+		return nil, fmt.Errorf("message %s: kept keys are %s's, not the sender %s's", n.ID, did.AID, n.FromAID)
+	}
+	jwm, err := didcomm.VerifySignedMessage(&did, signed)
+	if err != nil {
+		return nil, fmt.Errorf("message %s: %w", n.ID, err)
+	}
+	if jwm.ID != n.ID || (n.Payload != "" && n.Payload != string(jwm.Body)) {
+		return nil, fmt.Errorf("message %s: what was kept is not what the sender signed", n.ID)
+	}
+	return jwm, nil
 }

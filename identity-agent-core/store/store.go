@@ -395,6 +395,14 @@ type Notification struct {
 	ReceivedAt string `json:"received_at"`
 	ReadAt     string `json:"read_at,omitempty"`
 	ExpiresAt  string `json:"expires_at,omitempty"`
+	// SignedMessage is the sender's signed message as it was inside the
+	// envelope (base64), and SenderDID the sender's keys when it arrived. With
+	// both, the sender's signature can be checked again later by anybody,
+	// without this agent's keys. The fields above are what the message said;
+	// these are the proof that the sender said it. Empty for a notification
+	// that did not arrive signed.
+	SignedMessage string `json:"signed_message,omitempty"`
+	SenderDID     string `json:"sender_did,omitempty"`
 }
 
 // Notification severities and statuses.
