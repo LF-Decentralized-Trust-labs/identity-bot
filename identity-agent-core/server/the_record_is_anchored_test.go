@@ -42,8 +42,7 @@ func writeRows(t *testing.T, s *CoreServer, n int) {
 
 func chainSays(t *testing.T, s *CoreServer) map[string]any {
 	t.Helper()
-	req := httptest.NewRequest("GET", "/api/activity/chain", nil)
-	req.RemoteAddr = "127.0.0.1:5000"
+	req := local("GET", "/api/activity/chain", "")
 	rec := httptest.NewRecorder()
 	s.handleVerifyAuditChain(rec, req)
 	if rec.Code != http.StatusOK {
@@ -238,4 +237,21 @@ func TestNothingIsWrittenIntoALogWhoseKeyIsElsewhere(t *testing.T) {
 	if after, _ := s.DataStore.GetEvents(owner.AID); len(after) != len(before) {
 		t.Fatal("an event was written into a key log whose key is elsewhere")
 	}
+}
+
+// Messages a conversation takes count towards the next anchoring.
+func TestAConversationsMessagesBringOnAnAnchoring(t *testing.T) {
+	w := newTalkWorld(t)
+	w.s.SandboxManager.SetEventSigner(&invocationSigner{s: w.s})
+	was := anchorEvery
+	anchorEvery = 1
+	t.Cleanup(func() { anchorEvery = was })
+	w.openedWith(t)
+	for i := 0; i < 100; i++ {
+		if anchors, _ := w.s.DataStore.GetRecordAnchors(); len(anchors) > 0 {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("a message the conversation took did not bring on an anchoring")
 }
