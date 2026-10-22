@@ -419,3 +419,68 @@ func TestAPublicAddressWithANameGetsNoNotice(t *testing.T) {
 		t.Fatalf("notice with a name set: %q", st.ReachabilityNotice)
 	}
 }
+
+// A name the relay refuses is not kept: kept, it was asked for again at every
+// start and refused every time, while the save had cleared the notice that
+// should have said so.
+func TestARefusedNameIsForgottenAndTheOwnerTold(t *testing.T) {
+	s, rl, _, cancel := relayWorld(t, relayproto.ModePublic)
+	defer cancel()
+	rl.HoldName("taken-one", "EOTHERIDENTITY")
+	go s.startRelay()
+	defer s.Stop()
+	waitForState(t, s, "active")
+
+	code, out := asOwner(t, s, "PUT", "/api/settings/reachability", `{"public_relay_name":"taken-one"}`)
+	v := relayView(t, out)
+	if code != http.StatusOK || v["reason_code"] != "taken" {
+		t.Fatalf("saving a taken name: %d %v", code, out)
+	}
+	st, _ := s.DataStore.GetSettings()
+	if st.PublicRelayName != "" {
+		t.Fatalf("the refused name was kept: %q", st.PublicRelayName)
+	}
+	if !strings.Contains(st.ReachabilityNotice, "taken-one") || !strings.Contains(st.ReachabilityNotice, "already held") {
+		t.Fatalf("notice: %q", st.ReachabilityNotice)
+	}
+	if n, _ := v["notice"].(string); n != st.ReachabilityNotice {
+		t.Fatalf("the answer's notice %q is not the one kept %q", n, st.ReachabilityNotice)
+	}
+}
+
+// Clearing the name of a public address brings the no-name notice back rather
+// than leaving the owner unreachable and untold.
+func TestClearingThePublicNameTellsTheOwner(t *testing.T) {
+	s, _, _, cancel := relayWorld(t, relayproto.ModePublic)
+	defer cancel()
+	go s.startRelay()
+	defer s.Stop()
+	waitForState(t, s, "active")
+
+	asOwner(t, s, "PUT", "/api/settings/reachability", `{"public_relay_name":""}`)
+	if st, _ := s.DataStore.GetSettings(); st.ReachabilityNotice != noPublicNameNotice {
+		t.Fatalf("notice: %q", st.ReachabilityNotice)
+	}
+}
+
+// A name that can never be had, and a relay address that is not https, are
+// refused before anything is saved.
+func TestImpossibleSettingsAreRefusedBeforeSaving(t *testing.T) {
+	s, _, _, cancel := relayWorld(t, relayproto.ModePublic)
+	defer cancel()
+	for _, body := range []string{
+		`{"public_relay_name":"Not A Name"}`,
+		`{"public_relay_name":"ac--me"}`,
+		`{"public_relay_operator":"http://relay.example.org"}`,
+		`{"relay_operator":"relay.example.org"}`,
+	} {
+		code, out := asOwner(t, s, "PUT", "/api/settings/reachability", body)
+		if code != http.StatusBadRequest {
+			t.Fatalf("%s: %d %v", body, code, out)
+		}
+	}
+	if st, _ := s.DataStore.GetSettings(); st.PublicRelayName != "acme" || st.PublicRelayOperator != "" || st.RelayOperator != "" {
+		t.Fatalf("settings changed: %+v", st)
+	}
+}
+

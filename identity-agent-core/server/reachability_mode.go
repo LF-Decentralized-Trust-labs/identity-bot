@@ -4,6 +4,7 @@ import (
 	"log"
 	"strings"
 
+	"identity-agent-core/relay"
 	"identity-agent-core/tunnel"
 )
 
@@ -156,4 +157,46 @@ func (s *CoreServer) noticeMissingPublicName() {
 		return
 	}
 	log.Printf("[reachability] %s", noPublicNameNotice)
+}
+
+// nameRefusals are the relay's answers that mean the name itself cannot be had.
+var nameRefusals = map[string]bool{
+	relay.ReasonTaken: true, relay.ReasonReserved: true,
+	relay.ReasonInvalidName: true, relay.ReasonQuota: true,
+}
+
+// forgetRefusedName runs after reachability is saved and applied. A public name
+// the relay refused is not kept: kept, it would be asked for again at every
+// start and refused every time, while the notice that should say so had been
+// cleared by the save. It is forgotten, the relay is left with no name, and the
+// owner is told why. A public address with no name at all gets the no-name
+// notice back. It reports whether it changed anything.
+func (s *CoreServer) forgetRefusedName(v relayStatusView) bool {
+	if s.DataStore == nil || IngressMode(v.Mode) != IngressModePublic {
+		return false
+	}
+	saved, err := s.DataStore.GetSettings()
+	if err != nil || saved == nil {
+		return false
+	}
+	var notice string
+	switch {
+	case nameRefusals[v.ReasonCode] && saved.PublicRelayName != "":
+		notice = "The relay would not give you the name " + saved.PublicRelayName + ": " + v.Reason +
+			" Choose another name for your public address."
+		saved.PublicRelayName = ""
+	case v.ReasonCode == relay.ReasonNoName && saved.PublicRelayName == "":
+		notice = noPublicNameNotice
+	default:
+		return false
+	}
+	if saved.ReachabilityNotice == notice {
+		return false
+	}
+	saved.ReachabilityNotice = notice
+	if err := s.DataStore.SaveSettings(*saved); err != nil {
+		log.Printf("[reachability] could not record the refused name: %v", err)
+		return false
+	}
+	return true
 }

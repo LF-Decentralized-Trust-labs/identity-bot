@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto"
 	"identity-agent-core/asset"
 	"identity-agent-core/avatar"
 	"identity-agent-core/backup"
@@ -4351,6 +4352,23 @@ func (s *CoreServer) handlePutReachabilitySettings(w http.ResponseWriter, r *htt
 		}
 	}
 
+	// Refused before anything is saved, by the same rules the relay applies,
+	// so a name or an address that can never work is never stored and retried.
+	if req.PublicRelayName != nil {
+		if n := strings.ToLower(strings.TrimSpace(*req.PublicRelayName)); n != "" && !relayproto.ValidName(n) {
+			writeError(w, http.StatusBadRequest, "Invalid name", relayproto.NameRule)
+			return
+		}
+	}
+	for _, op := range []*string{req.RelayOperator, req.PublicRelayOperator} {
+		if op != nil && strings.TrimSpace(*op) != "" {
+			if err := relay.CheckBaseURL(*op); err != nil {
+				writeError(w, http.StatusBadRequest, "Invalid relay address", "A relay's address must start with https://.")
+				return
+			}
+		}
+	}
+
 	previousMode := s.resolveIngressMode()
 	previousName := s.publicRelayName()
 
@@ -4393,6 +4411,10 @@ func (s *CoreServer) handlePutReachabilitySettings(w http.ResponseWriter, r *htt
 	// new relay or with the new name, with no restart, and the answer says
 	// what came of it.
 	s.applyReachability(previousMode)
+	status := s.relayStatusSettled(r.Context())
+	if s.forgetRefusedName(status) {
+		status = s.relayStatus()
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -4400,7 +4422,7 @@ func (s *CoreServer) handlePutReachabilitySettings(w http.ResponseWriter, r *htt
 		"mode":           settings.IngressMode,
 		"resolved_mode":  string(s.resolveIngressMode()),
 		"relay_operator": s.relayBaseURL(),
-		"relay":          s.relayStatusSettled(r.Context()),
+		"relay":          status,
 	})
 }
 
