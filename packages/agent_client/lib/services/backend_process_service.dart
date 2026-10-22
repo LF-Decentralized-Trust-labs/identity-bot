@@ -315,6 +315,15 @@ class BackendProcessService {
 
     final backendDir = File(_backendPath!).parent.path;
 
+    // A core already running on this profile's data is used, never joined by
+    // a second one: two cores on one data directory corrupt it.
+    final already = await useACoreAlreadyRunningHere();
+    if (already == true) return true;
+    if (already == false) {
+      _appendOutput('[startup] $_startupError');
+      return false;
+    }
+
     _portConflict = null;
     const defaultPort = AgentConfig.defaultDesktopPort;
 
@@ -413,6 +422,17 @@ class BackendProcessService {
       });
 
       final healthy = await _waitForHealthy(() => processExited, backendDir: backendDir);
+      // Answering is not enough: the core on that port must prove it holds the
+      // secret this app gave it before the app sends that secret anywhere.
+      if (healthy && !await LocalOwnerSecret.proveTheCoreAt(AgentConfig.coreBaseUrl)) {
+        _startupError = 'The Identity Agent answering on port ${AgentConfig.desktopPort} '
+            'did not prove it is the one this app started. Another program may be '
+            'holding the port.';
+        _appendOutput('[startup] $_startupError');
+        await stop();
+        await _writeDiagnosticLog(backendDir);
+        return false;
+      }
       if (!healthy) {
         if (processExited && exitCode != null && exitCode != 0) {
           // _startupError already set by exitCode.then callback with backend output
@@ -451,6 +471,47 @@ class BackendProcessService {
     final secret = LocalOwnerSecret.mint();
     env[LocalOwnerSecret.environmentVariable] = secret;
     LocalOwnerSecret.use(secret);
+  }
+
+  /// Whether a core is already running on this profile's data directory, and
+  /// if so whether this app can act as its owner.
+  ///
+  /// Returns null when none is running, true when one is and it proved it holds
+  /// the secret it wrote (this app then uses it), and false when one is running
+  /// that this app cannot act for: a core started before it wrote a secret, or
+  /// one whose file is stale. Starting a second core on the same data then
+  /// would corrupt it, so the person is told to quit the running one instead.
+  Future<bool?> useACoreAlreadyRunningHere() async {
+    final port = _discoverActualPort();
+    if (port == null || !await _answersHealth(port)) return null;
+    final previous = AgentConfig.desktopPort;
+    AgentConfig.desktopPort = port;
+    if (adoptRunningCoresSecret() &&
+        await LocalOwnerSecret.proveTheCoreAt(AgentConfig.coreBaseUrl)) {
+      _appendOutput('[startup] Using the Identity Agent already running on port $port');
+      return true;
+    }
+    AgentConfig.desktopPort = previous;
+    _startupError = 'An Identity Agent is already running on this profile\'s data '
+        '(port $port), and this app cannot act as its owner. Quit it, or restart '
+        'this computer, and open the app again.';
+    return false;
+  }
+
+  Future<bool> _answersHealth(int port) async {
+    final client = HttpClient()..connectionTimeout = const Duration(milliseconds: 600);
+    try {
+      final req = await client
+          .getUrl(Uri.parse('http://127.0.0.1:$port/api/health'))
+          .timeout(const Duration(milliseconds: 800));
+      final resp = await req.close().timeout(const Duration(milliseconds: 800));
+      await resp.drain<void>();
+      return resp.statusCode == 200;
+    } catch (_) {
+      return false;
+    } finally {
+      client.close(force: true);
+    }
   }
 
   /// Takes up the secret of a core this app did not start, from the file the

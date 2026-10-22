@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'backend_process_service.dart';
 import 'core_service.dart';
+import '../config/agent_config.dart';
 import 'the_owner_at_this_computer.dart';
 
 class MobileCoreService {
@@ -61,7 +62,18 @@ class MobileCoreService {
       if (result is Map) {
         _port = result['port'] ?? defaultPort;
       }
+      // The port the core actually bound, which is not always the one asked
+      // for: every request to this computer's core goes there.
+      AgentConfig.mobilePort = _port;
       _started = true;
+      // Nothing carries the secret until the core on that port proves it holds
+      // it. A program holding the port in its place gets nothing.
+      if (!await waitForReady() ||
+          !await LocalOwnerSecret.proveTheCoreAt(baseUrl)) {
+        await forceStopped();
+        throw Exception('The Identity Agent on port $_port did not prove it is '
+            'the one this app started.');
+      }
       _coreClient = CoreService(baseUrl: baseUrl);
     } on PlatformException catch (e) {
       throw Exception('Failed to start Go Core: ${e.message}');

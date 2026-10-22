@@ -32,7 +32,13 @@ class AgentConfig {
   /// The actual port the backend is running on (may differ from default
   /// if port 5050 was occupied and the backend auto-selected a fallback).
   static int desktopPort = defaultDesktopPort;
-  static const int mobilePort = 8642;
+  static const int defaultMobilePort = 8642;
+
+  /// The port the phone's embedded core actually bound. Set by
+  /// MobileCoreService from what the native side reports, because the core
+  /// takes the next free port when the default is held, and a request sent to
+  /// the default then reaches whoever holds it.
+  static int mobilePort = defaultMobilePort;
 
   static String get coreBaseUrl {
     const envUrl = String.fromEnvironment('CORE_URL', defaultValue: '');
