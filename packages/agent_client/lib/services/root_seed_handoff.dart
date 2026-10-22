@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import '../config/agent_config.dart';
 import '../crypto/bip39.dart';
+import 'the_owner_at_this_computer.dart';
 
 /// One root of trust: the mnemonic. The client generates and holds the phrase;
 /// the local core derives every HD key (pairwise contacts, login relationships,
@@ -61,7 +62,7 @@ class RootSeedHandoff {
       return false;
     }
 
-    final c = client ?? http.Client();
+    final c = ProvingThisComputer.over(client);
     try {
       final seed = Bip39.mnemonicToSeed(mnemonic);
       final resp = await c

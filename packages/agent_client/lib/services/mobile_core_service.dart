@@ -3,10 +3,15 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'backend_process_service.dart';
 import 'core_service.dart';
+import 'the_owner_at_this_computer.dart';
 
 class MobileCoreService {
   static const _channel = MethodChannel('com.identityagent/mobilecore');
   static const int defaultPort = 8642;
+
+  /// Every request to the core goes through the one transport, which carries
+  /// the secret this app started the core with.
+  static final http.Client _http = ProvingThisComputer();
 
   int _port = defaultPort;
   bool _started = false;
@@ -26,7 +31,11 @@ class MobileCoreService {
   /// from the same [BackendProcessService.environmentDefaults] a desktop app
   /// sets, so an app names its relays once for every platform; the native side
   /// passes them to `mobilecore.DeclareRelays` before `StartServer`.
-  static Map<String, Object> startArguments({String? dataDir, int? port}) {
+  ///
+  /// [localOwnerSecret] is what makes this app, and no other app on the phone,
+  /// the owner of the core it starts (`mobilecore.DeclareLocalOwnerSecret`).
+  static Map<String, Object> startArguments(
+      {String? dataDir, int? port, String? localOwnerSecret}) {
     final defaults = BackendProcessService.environmentDefaults;
     final privateRelay = defaults['RELAY_BASE_URL'] ?? '';
     final publicRelay = defaults['PUBLIC_RELAY_BASE_URL'] ?? '';
@@ -35,6 +44,8 @@ class MobileCoreService {
       'port': port ?? defaultPort,
       if (privateRelay.isNotEmpty) 'privateRelay': privateRelay,
       if (publicRelay.isNotEmpty) 'publicRelay': publicRelay,
+      if (localOwnerSecret != null && localOwnerSecret.isNotEmpty)
+        'localOwnerSecret': localOwnerSecret,
     };
   }
 
@@ -42,8 +53,10 @@ class MobileCoreService {
     if (_started) return;
 
     try {
-      final result = await _channel.invokeMethod(
-          'startServer', startArguments(dataDir: dataDir, port: port));
+      final secret = LocalOwnerSecret.mint();
+      final result = await _channel.invokeMethod('startServer',
+          startArguments(dataDir: dataDir, port: port, localOwnerSecret: secret));
+      LocalOwnerSecret.use(secret);
 
       if (result is Map) {
         _port = result['port'] ?? defaultPort;
@@ -92,7 +105,7 @@ class MobileCoreService {
     // genuinely dead one for longer than ~2.3s.
     for (var attempt = 0; attempt < 2; attempt++) {
       try {
-        final r = await http
+        final r = await _http
             .get(Uri.parse('$baseUrl/api/health'))
             .timeout(const Duration(seconds: 2));
         if (r.statusCode == 200) return true;
@@ -158,7 +171,7 @@ class MobileCoreService {
     final deadline = DateTime.now().add(timeout);
     while (DateTime.now().isBefore(deadline)) {
       try {
-        final response = await http
+        final response = await _http
             .get(
               Uri.parse('$baseUrl/api/health'),
             )
@@ -178,7 +191,7 @@ class MobileCoreService {
     String? nextKeyDigest,
     int eventCount = 1,
   }) async {
-    final response = await http.post(
+    final response = await _http.post(
       Uri.parse('$baseUrl/api/store/identity'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({
@@ -204,7 +217,7 @@ class MobileCoreService {
     String? publicKey,
     String? nextKeyDigest,
   }) async {
-    final response = await http.post(
+    final response = await _http.post(
       Uri.parse('$baseUrl/api/store/event'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({

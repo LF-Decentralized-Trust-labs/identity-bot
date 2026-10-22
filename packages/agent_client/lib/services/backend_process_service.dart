@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:agent_client/config/agent_config.dart';
+import 'the_owner_at_this_computer.dart';
 
 class PortConflictInfo {
   final String pid;
@@ -346,6 +347,7 @@ class BackendProcessService {
       // / Grape ID Org) keep separate state.
       env['AGENT_DATA_DIR'] = _backendDataDir();
       debugPrint('[BackendProcess] AGENT_DATA_DIR: ${env['AGENT_DATA_DIR']}');
+      ownTheCoreAboutToStart(env);
       if (entityType != null && entityType!.isNotEmpty) {
         env['IDENTITY_AGENT_ENTITY_TYPE'] = entityType!;
         debugPrint('[BackendProcess] entity type: $entityType');
@@ -437,6 +439,33 @@ class BackendProcessService {
       _startupError = 'Failed to start backend: $e';
       _isRunning = false;
       await _writeDiagnosticLog(backendDir);
+      return false;
+    }
+  }
+
+  /// What makes this app, and no other program on this computer, the owner of
+  /// the core it is about to start with [env]. Chosen here so the app holds it
+  /// before the core answers anything; every request to the core carries it.
+  @visibleForTesting
+  static void ownTheCoreAboutToStart(Map<String, String> env) {
+    final secret = LocalOwnerSecret.mint();
+    env[LocalOwnerSecret.environmentVariable] = secret;
+    LocalOwnerSecret.use(secret);
+  }
+
+  /// Takes up the secret of a core this app did not start, from the file the
+  /// core wrote into its data directory, so this app is that core's owner.
+  /// For an app that attaches to a core already running rather than starting
+  /// one. Returns whether a secret was found.
+  bool adoptRunningCoresSecret() {
+    try {
+      final f = File('${_backendDataDir()}${Platform.pathSeparator}${LocalOwnerSecret.fileName}');
+      if (!f.existsSync()) return false;
+      final secret = f.readAsStringSync().trim();
+      if (secret.isEmpty) return false;
+      LocalOwnerSecret.use(secret);
+      return true;
+    } catch (_) {
       return false;
     }
   }

@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import '../crypto/keys.dart';
 import '../crypto/owner_signature.dart';
 import 'the_path_a_signature_covers.dart';
+import 'the_owner_at_this_computer.dart';
 
 /// Signing every request to your own agent, without having to remember to.
 ///
@@ -32,7 +33,7 @@ class OwnerSigningClient extends http.BaseClient {
     required this.ownerSeed,
     this.ownerAid,
     http.Client? inner,
-  })  : _inner = inner ?? http.Client(),
+  })  : _inner = ProvingThisComputer.over(inner),
         _ownsInner = inner == null;
 
   /// The origin of the agent this client owns, as scheme://host:port. Requests
