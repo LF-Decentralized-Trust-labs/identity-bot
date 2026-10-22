@@ -195,8 +195,9 @@ func TestExecuteReturnsAuditEventID(t *testing.T) {
 	if err := json.Unmarshal([]byte(out.Text), &wrapped); err != nil || wrapped.AuditEventID == 0 {
 		t.Fatalf("execute must return the audit event id, got %s", out.Text)
 	}
-	events, err := m.store.QueryInvocationEvents(InvocationEventFilter{CapabilityID: "svc.thing.get"})
-	if err != nil || len(events) != 1 || events[0].ID != wrapped.AuditEventID {
+	// The action's result row, which follows the row written before it ran.
+	events, err := m.store.QueryInvocationEvents(InvocationEventFilter{CapabilityID: "svc.thing.get", ResultStatus: "ok"})
+	if err != nil || len(events) != 1 || events[0].ID != wrapped.AuditEventID || events[0].IntentEventID == 0 {
 		t.Fatalf("audit_event_id must reference the written event: %v %+v", err, events)
 	}
 }

@@ -60,6 +60,11 @@ func TestTheExclusionDoesNotReachTheIdentitysOwnData(t *testing.T) {
 		"secureenclave/root_seed.key",
 		"contacts.json",
 		"credentials.json",
+		// The log signer's record: which key signed the log and where its
+		// chain begins. A restore without it would make every signed row look
+		// forged.
+		"invocation_signer.json",
+		"sandbox.db",
 	}
 
 	for _, f := range carried {

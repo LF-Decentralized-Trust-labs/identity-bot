@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -190,6 +191,15 @@ func (m *Manager) InvokeCapability(ctx context.Context, caller CallerContext, ca
 			EventDetail{StatusReason: "resource constraint: " + err.Error()})
 		return nil, fmt.Errorf("%w: %s", ErrDenied, err.Error())
 	}
+	// The action is recorded before it runs. If that record cannot be written
+	// (no signature, an unreadable previous row, the database refusing), the
+	// action does not run: an action the log cannot account for is the one
+	// thing the log exists to rule out.
+	intentID, err := m.recordIntent(caller, capabilityID, executorType, body, start)
+	if err != nil {
+		log.Printf("[audit] REFUSED %s for %s: the record could not be written first: %v", capabilityID, caller.CallerAID, err)
+		return nil, fmt.Errorf("%w: %v", ErrNotRecorded, err)
+	}
 	// One screen = one driver: host_control invocations serialize per capability
 	// so concurrent callers queue instead of interleaving primitives.
 	if capDef.HostControl {
@@ -198,7 +208,6 @@ func (m *Manager) InvokeCapability(ctx context.Context, caller CallerContext, ca
 		defer l.Unlock()
 	}
 	var res *InvokeResult
-	var err error
 	if rec != nil && rec.ExecutorType == "external_api" {
 		res, err = m.invokeExternalAPI(ctx, rec, body)
 	} else if rec != nil {
@@ -216,12 +225,12 @@ func (m *Manager) InvokeCapability(ctx context.Context, caller CallerContext, ca
 	}
 	if err != nil {
 		m.recordInvocationDetail(caller, capabilityID, executorType, body, "error", start,
-			EventDetail{StatusReason: "executor: " + err.Error()})
+			EventDetail{IntentEventID: intentID, StatusReason: "executor: " + err.Error()})
 		return nil, err
 	}
 	out := auth.FilterEgress(ctx, caller, capDef, res)
 	status := "ok"
-	detail := EventDetail{}
+	detail := EventDetail{IntentEventID: intentID}
 	if out != nil {
 		// ResultHash is taken from the FILTERED body — the bytes the caller actually
 		// received. Hashing the pre-filter result would commit to something no party

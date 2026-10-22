@@ -238,6 +238,17 @@ ALTER TABLE invocation_log ADD COLUMN prev_hash TEXT;
 CREATE INDEX IF NOT EXISTS idx_invocation_log_work_item ON invocation_log(work_item);
 `,
 	},
+	{
+		Version:     6,
+		Description: "Invocation log: the exact bytes each event's signature covers",
+		// Kept so anybody can check a signature over the bytes that were signed,
+		// in any language, rather than having to reproduce how this code encodes
+		// an event. Empty on rows written before this column existed; those are
+		// checked by re-encoding, as they always were.
+		SQL: `
+ALTER TABLE invocation_log ADD COLUMN signed_payload TEXT NOT NULL DEFAULT '';
+`,
+	},
 }
 
 func ensureMigrationsTable(db *sql.DB) error {

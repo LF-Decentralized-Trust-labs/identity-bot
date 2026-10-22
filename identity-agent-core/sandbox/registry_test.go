@@ -92,9 +92,10 @@ func TestRegistryNativeInvokeGovernedAndAudited(t *testing.T) {
 		t.Fatalf("credential was not injected at egress (got %q)", gotAuth)
 	}
 
+	// Two rows: what was about to run, then what happened.
 	events, err := m.store.QueryInvocationEvents(InvocationEventFilter{CapabilityID: "testsvc.dns.list"})
-	if err != nil || len(events) != 1 {
-		t.Fatalf("expected 1 audit event, got %d (err %v)", len(events), err)
+	if err != nil || len(events) != 2 || events[1].ResultStatus != "started" || events[0].IntentEventID != events[1].ID {
+		t.Fatalf("expected an intent row and its result, got %+v (err %v)", events, err)
 	}
 	ev := events[0]
 	if ev.ResultStatus != "ok" || ev.CallerAID != "local-owner" || ev.CorrelationID != "corr-1" {
