@@ -418,33 +418,50 @@ Instead, the relay checks what kind of thing an answer is, never what it says,
 and the same way for every identity:
 - **A browser loading a page never reaches the Identity Agent.** A request that
   says it is loading a document or a frame (`Sec-Fetch-Dest`, `Sec-Fetch-Mode`,
-  or, from a browser too old to send those, `Accept: text/html`) is answered by
+  or, from a browser too old to send those, an `Accept` naming both `text/html`
+  and `application/xhtml+xml`, as every such browser does when loading a page
+  and other clients do not) is answered by
   the relay itself, at either kind of address, with one short page that is the
   same at every address: what the address is, and where to get an Identity
   Agent. The operator chooses that link; the default is this project. The page
   carries nothing the Identity Agent sent.
-- **An answer passes only as protocol data:** a body typed `application/json`
-  or any `application/...+json`, `application/cesr`, `application/octet-stream`,
-  or `text/plain` (a refusal), or no body at all. A page, a script, an image, a
-  document, a redirect or a body with no type is refused, and the caller gets the
-  relay's own error. A websocket may open only at a public address, where an
+- **An answer passes only as protocol data:** a body with exactly one
+  `Content-Type`, which is `application/json` or any `application/...+json`,
+  `application/cesr`, `application/octet-stream` or `text/plain`, or no body at
+  all. A page, a script, an image, a document, a redirect, a body with no type,
+  or an answer naming two types (browsers differ in which they believe) is
+  refused, and the caller gets the relay's own error. No informational (1xx)
+  answer passes but a protocol switch, since it would reach the caller before
+  the final answer is checked. A websocket may open only at a public address, where an
   identity's own front ends keep one; a browser cannot load a page from one.
-- **Every answer is sealed for browsers.** The relay sets
+- **Only the protocol's headers pass.** Of an Identity Agent's answer the relay
+  keeps `Content-Type`, `Content-Length`, `Content-Encoding`, `ETag`,
+  `Last-Modified`, `Date`, `Vary`, `Retry-After`, the `X-Keri-` key-state
+  headers, and the cross-origin headers a relying party's page needs to call a
+  public identity's sign-in routes (`Access-Control-Allow-Origin`, `-Methods`,
+  `-Headers`, `-Expose-Headers`, `-Max-Age`; never `-Allow-Credentials`). Every
+  other header is dropped, so anything a browser could act on (a redirect, a
+  preload, a sign-in prompt, a cache lifetime, a download name) is absent by
+  construction rather than by a list of what to remove. A cookie passes only at a
+  public address and only if it is that address's own; at a private address,
+  where every address shares one origin, none passes. A protocol switch keeps
+  only `Upgrade`, `Connection` and the `Sec-WebSocket-` headers.
+- **Every answer is sealed for browsers and kept from caches.** The relay sets
   `X-Content-Type-Options: nosniff`,
-  `Content-Security-Policy: default-src 'none'; sandbox; frame-ancestors 'none'`
-  and `X-Frame-Options: DENY`, replacing whatever the Identity Agent sent, and
-  drops `Refresh`, `Link`, `Location`, `Content-Location`,
-  `Service-Worker-Allowed`, `Clear-Site-Data` and any cookie scoped wider than
-  the address. Because one URL answers a browser with the visitor page and an
-  Identity Agent with data, the visitor page is never cached and every answer
-  varies on `Sec-Fetch-Mode`, `Sec-Fetch-Dest` and `Accept`.
+  `Content-Security-Policy: default-src 'none'; sandbox; frame-ancestors 'none'`,
+  `X-Frame-Options: DENY` and `Cache-Control: private, no-store`. One URL
+  answers a browser with the visitor page and an Identity Agent with data, and a
+  cache in front of the relay may ignore `Vary` (content delivery networks
+  commonly do), so neither the visitor page nor any answer may be kept; every
+  answer also varies on `Sec-Fetch-Mode`, `Sec-Fetch-Dest` and `Accept`.
 
 A public address still passes every request, not a list of routes: the
 identity's own front ends (a machine acting for its owner, ADR-042) reach it
 there, and what bounds a dishonest Identity Agent is what it may answer, not
-what it may be asked. The Identity Agent applies the same rule to itself: it
-never answers a request that arrived through a relay with a page, and it does not
-serve its web app there.
+what it may be asked. The Identity Agent applies the same rule to itself, so a
+relay that applies none still carries no page from it: every answer it gives a
+relayed request passes through `CheckProtocolResponse` before any of it is
+sent, a page load is refused, and it does not serve its web app there.
 
 What this does not do: it cannot make what an Identity Agent says true. Someone
 can still send false data through an address, as they can in any message. That
@@ -453,7 +470,8 @@ with it, not for the relay.
 
 `relayproto` holds the rule (`IsBrowserNavigation`, `CheckProtocolResponse`,
 `ServeVisitorPage`) and applies it in `Session.Forward`, so every relay built on
-it enforces it.
+it enforces it; the core client applies the same functions in its own handler
+for relayed requests.
 
 ## What is built, and what is not
 
@@ -489,8 +507,8 @@ saying so until they next save reachability.
 control requests above, private addresses held by their secrets and bound again
 after every admission, public names, reconnection with backoff, and the
 Identity Agent's per-allocation rule (§6): an address is looked up in its own
-records, never trusted from the preamble, and a private one reaches only routes
-drawn from `publicRoutes`. Each mode has its own enrolment identifier and its
+records, never trusted from the preamble, and a private one reaches only
+`relayproto.PrivateRoutes`. Each mode has its own enrolment identifier and its
 own record. The earlier frame protocol and the Chisel tunnel provider are
 removed.
 
@@ -520,6 +538,14 @@ removed.
 - **An Identity Agent's web app is not reachable through a relay** (§12). An
   owner reaches it on the machine, or drives the identity from an app acting for
   it.
+- **Nothing that needs a browser to load a page works at a relay address**
+  (§12). A sign-in flow that sends a person's browser to the Identity Agent and
+  redirects it back (an OpenID Connect authorisation page, say) cannot run there,
+  and an identity's own custom domain served through a relay shows the visitor
+  page to browsers too. Such a flow needs an address that is not a relay's.
+- **A cache in front of a relay keeps nothing** (§12), including artifacts that
+  would be safe to cache. That is the price of one URL answering both a browser
+  and an Identity Agent.
 - **The relay must terminate TLS itself at its connect host** (§8, §10). That is
   a deployment constraint the channel binding imposes, and the reason the
   binding is worth having. Caller-facing addresses may sit behind any proxy.
