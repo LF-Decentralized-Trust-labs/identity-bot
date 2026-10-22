@@ -374,10 +374,13 @@ func TestAResponseStreamsAsItIsWritten(t *testing.T) {
 	}
 }
 
-func TestAWebsocketOpensThroughTheRelay(t *testing.T) {
+// A websocket opens through a public address, where an identity's own front
+// ends keep one, and never through a private one.
+func TestAWebsocketOpensOnlyThroughAPublicAddress(t *testing.T) {
 	r := newRelay(t, nil)
 	id := newIdentity(t)
 	r.route("acme.relay.test", id.aid, Preamble{Allocation: "pub-1", Mode: ModePublic, Host: "acme.relay.test"})
+	r.route("a1b2.relay.test", id.aid, Preamble{Allocation: "priv-1", Mode: ModePrivate, Host: "a1b2.relay.test"})
 	up := websocket.Upgrader{}
 	r.connect(id, http.HandlerFunc(func(w http.ResponseWriter, q *http.Request) {
 		c, err := up.Upgrade(w, q, nil)
@@ -393,16 +396,14 @@ func TestAWebsocketOpensThroughTheRelay(t *testing.T) {
 			c.WriteMessage(kind, append([]byte("echo:"), msg...))
 		}
 	}))
-	d := websocket.Dialer{}
-	h := http.Header{"Host": {"acme.relay.test"}}
-	c, resp, err := d.Dial("ws"+strings.TrimPrefix(r.front.URL, "http")+"/api/ws/events", h)
+	dial := func(host string) (*websocket.Conn, error) {
+		d := websocket.Dialer{}
+		c, _, err := d.Dial("ws"+strings.TrimPrefix(r.front.URL, "http")+"/oobi/"+id.aid, http.Header{"Host": {host}})
+		return c, err
+	}
+	c, err := dial("acme.relay.test")
 	if err != nil {
-		b := []byte{}
-		if resp != nil {
-			b, _ = io.ReadAll(resp.Body)
-			t.Logf("status %d %s", resp.StatusCode, b)
-		}
-		t.Fatalf("the websocket did not open through the relay: %v", err)
+		t.Fatalf("the websocket did not open through the public address: %v", err)
 	}
 	defer c.Close()
 	for _, m := range []string{"one", "two"} {
@@ -411,6 +412,10 @@ func TestAWebsocketOpensThroughTheRelay(t *testing.T) {
 		if err != nil || string(got) != "echo:"+m {
 			t.Fatalf("got %q, %v", got, err)
 		}
+	}
+	if c, err := dial("a1b2.relay.test"); err == nil {
+		c.Close()
+		t.Error("a websocket opened through a private address")
 	}
 }
 
