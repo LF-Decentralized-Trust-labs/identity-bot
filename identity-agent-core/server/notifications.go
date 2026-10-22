@@ -51,8 +51,9 @@ type notificationBody struct {
 // Called only after the envelope has been unpacked and verified, so from and to
 // are the AUTHENTICATED header values. They are passed in rather than read from
 // the message body on purpose: a sender that could name itself in a field the
-// core trusted could put anyone's identifier there.
-func (s *CoreServer) storeInboundAsNotification(fromAID, toAID string, jwm *didcomm.JWM, verified bool) {
+// core trusted could put anyone's identifier there. proof, when the message
+// arrived signed, is kept with it (see receivedProof).
+func (s *CoreServer) storeInboundAsNotification(fromAID, toAID string, jwm *didcomm.JWM, verified bool, proof *receivedProof) {
 	n := store.Notification{
 		ID:         jwm.ID,
 		FromAID:    fromAID,
@@ -65,6 +66,10 @@ func (s *CoreServer) storeInboundAsNotification(fromAID, toAID string, jwm *didc
 	}
 	if len(jwm.Body) > 0 {
 		n.Payload = string(jwm.Body)
+	}
+	if proof != nil {
+		n.SignedMessage, n.SenderDID = proof.Signed, proof.SenderDID
+		n.SenderKeyTrust, n.SenderKELSaid, n.SenderKELEvents, n.SenderKEL = proof.KeyTrust, proof.KELSaid, proof.KELEvents, proof.KEL
 	}
 
 	// A message of the notification type carries text meant for a person. Any

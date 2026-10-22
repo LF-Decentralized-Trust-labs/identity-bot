@@ -471,25 +471,51 @@ func (s *CoreServer) handleDIDCommInbound(w http.ResponseWriter, r *http.Request
 		jsonError(w, "recipient keyset error", http.StatusInternalServerError)
 		return
 	}
-	jwm, err := didcomm.UnpackAuthcrypt(rcpt, &peer.DID, &env)
+	jwm, signed, err := didcomm.UnpackAuthcryptKeeping(rcpt, &peer.DID, &env)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusUnauthorized) // signature_invalid / key_agreement_failed / body_hash_mismatch
 		return
 	}
 	// Replay + freshness (R-1, R-2 / E-6, E-7).
+	// From here the sender is proven, so a refusal is worth recording: it is
+	// something a known party sent. Failures before this point are not, or
+	// anyone could fill the log by posting garbage. Each message's refusal is
+	// recorded once: a captured envelope replayed over and over is one fact,
+	// and recording every copy would let whoever holds it fill the log.
+	// Recorded within each sender's quota (refusalToRecord), apart from the
+	// replay cache.
+	refuse := func(why string, status int) {
+		record, suppressedUntil := refusalToRecord(skid, jwm.ID, time.Now())
+		switch {
+		case record:
+			s.recordTraffic(skid, jwm.ID, "", "didcomm.message.received", "denied", jwm.Type+" to "+kid+": "+why, nil)
+		case !suppressedUntil.IsZero():
+			s.recordTraffic(skid, "", "", "didcomm.refusals.suppressed", "denied",
+				fmt.Sprintf("%s has had %d messages refused within %s; its further refusals are not recorded until %s",
+					skid, refusalQuota, refusalWindow, suppressedUntil.UTC().Format(time.RFC3339)), nil)
+		}
+		jsonError(w, why, status)
+	}
+	// What the sender signed must name the parties it was authenticated as,
+	// or it could be shown later as somebody else's words, or as meant for
+	// somebody else.
+	if err := jwm.NamesParties(skid, kid); err != nil {
+		refuse(err.Error(), http.StatusForbidden)
+		return
+	}
 	exp, perr := time.Parse(time.RFC3339, jwm.ExpiresTime)
 	if perr != nil || time.Now().After(exp) {
-		jsonError(w, "envelope_expired", http.StatusForbidden)
+		refuse("envelope_expired", http.StatusForbidden)
 		return
 	}
 	// A sender does not get to decide how long we remember it for. See
 	// maxEnvelopeLifetime.
 	if exp.After(time.Now().Add(maxEnvelopeLifetime)) {
-		jsonError(w, "envelope_lifetime_too_long", http.StatusForbidden)
+		refuse("envelope_lifetime_too_long", http.StatusForbidden)
 		return
 	}
 	if seenBefore(jwm.ID, exp) {
-		jsonError(w, "replay_detected", http.StatusConflict)
+		refuse("replay_detected", http.StatusConflict)
 		return
 	}
 	// Store the received message.
@@ -501,7 +527,15 @@ func (s *CoreServer) handleDIDCommInbound(w http.ResponseWriter, r *http.Request
 	//
 	// skid and kid are the AUTHENTICATED header values, not anything read out of
 	// the message. A sender that could name itself could name somebody else.
-	s.storeInboundAsNotification(skid, kid, jwm, true)
+	proof := s.proofOfReceipt(skid, &peer.DID, signed)
+	s.storeInboundAsNotification(skid, kid, jwm, true, proof)
+	// The log row commits to the proof just kept, so it cannot be swapped later.
+	var about []byte
+	if proof != nil {
+		about = receiptBinding(jwm.ID, *proof)
+	}
+	s.recordTraffic(skid, jwm.ID, s.trafficConversation(skid, jwm.Body), "didcomm.message.received", "ok",
+		jwm.Type+" to "+kid, about)
 	// The handler layer routes on type; the AI-agent handler picks up agent-* messages.
 	s.routeInboundDIDComm(kid, skid, jwm)
 	w.WriteHeader(http.StatusAccepted)

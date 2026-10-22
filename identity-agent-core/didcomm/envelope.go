@@ -153,35 +153,84 @@ func PackAuthcrypt(sender *KeySet, rcpt *DID, jwm *JWM) (*Envelope, error) {
 	}, nil
 }
 
-// UnpackAuthcrypt decrypts + verifies an authcrypt envelope. senderDID is resolved from
-// the envelope's skid by the caller.
-func UnpackAuthcrypt(rcpt *KeySet, senderDID *DID, env *Envelope) (*JWM, error) {
+// UnpackAuthcryptKeeping decrypts + verifies an authcrypt envelope, and also
+// returns the sender's signed message as it was inside the envelope, so it can
+// be kept and checked again by VerifySignedMessage.
+func UnpackAuthcryptKeeping(rcpt *KeySet, senderDID *DID, env *Envelope) (*JWM, []byte, error) {
 	if env.Mode != "authcrypt" {
-		return nil, fmt.Errorf("not an authcrypt envelope")
+		return nil, nil, fmt.Errorf("not an authcrypt envelope")
 	}
 	if env.Protected.Skid == "" || env.Protected.Skid != senderDID.AID {
-		return nil, errors.New("skid mismatch")
+		return nil, nil, errors.New("skid mismatch")
 	}
 	if len(env.Recipients) == 0 || env.Recipients[0].Header.Kid != rcpt.AID {
-		return nil, errors.New("unknown_recipient_aid")
+		return nil, nil, errors.New("unknown_recipient_aid")
 	}
 	pd, err := senderDID.parse()
 	if err != nil {
-		return nil, fmt.Errorf("sender DID: %w", err)
+		return nil, nil, fmt.Errorf("sender DID: %w", err)
 	}
 	ct, err := b64.DecodeString(env.Ciphertext)
 	if err != nil {
-		return nil, errors.New("bad ciphertext")
+		return nil, nil, errors.New("bad ciphertext")
 	}
 	nonce, err := b64.DecodeString(env.IV)
 	if err != nil {
-		return nil, errors.New("bad iv")
+		return nil, nil, errors.New("bad iv")
 	}
 	aad := []byte(env.Protected.Skid + "|" + rcpt.AID)
 	sjB, err := authDecrypt(rcpt, pd, env.Protected.Apu, nonce, ct, aad)
 	if err != nil {
-		return nil, err // key_agreement_failed
+		return nil, nil, err // key_agreement_failed
 	}
+	jwm, err := verifySigned(pd, sjB)
+	if err != nil {
+		return nil, nil, err
+	}
+	return jwm, sjB, nil
+}
+
+// UnpackAuthcrypt decrypts + verifies an authcrypt envelope. senderDID is resolved from
+// the envelope's skid by the caller.
+func UnpackAuthcrypt(rcpt *KeySet, senderDID *DID, env *Envelope) (*JWM, error) {
+	jwm, _, err := UnpackAuthcryptKeeping(rcpt, senderDID, env)
+	return jwm, err
+}
+
+// VerifySignedMessage checks a message kept by UnpackAuthcryptKeeping against
+// the sender's keys, with nobody's private key: the sender's signature over
+// the message, and the body against its digest. This is what lets a received
+// message be proved to somebody else later. The encrypted envelope cannot do
+// that, because opening it takes the recipient's key, and anyone holding that
+// key could have made one.
+func VerifySignedMessage(senderDID *DID, signed []byte) (*JWM, error) {
+	pd, err := senderDID.parse()
+	if err != nil {
+		return nil, fmt.Errorf("sender DID: %w", err)
+	}
+	return verifySigned(pd, signed)
+}
+
+// NamesParties reports whether a message names, inside what its sender
+// signed, the sender and recipient it was authenticated as. The envelope
+// header says who sent it to whom; the signed message must say the same, or a
+// sender could sign a message that reads as somebody else's, or as meant for
+// somebody else, to anyone shown it later.
+func (j *JWM) NamesParties(fromAID, toAID string) error {
+	if j.From != "did:keri:"+fromAID {
+		return fmt.Errorf("the signed message names %q as its sender, not %s", j.From, fromAID)
+	}
+	for _, to := range j.To {
+		if to == "did:keri:"+toAID {
+			return nil
+		}
+	}
+	return fmt.Errorf("the signed message is not addressed to %s", toAID)
+}
+
+// verifySigned is the one check of a signed message, whether it has just been
+// decrypted or was kept and is being checked again.
+func verifySigned(pd *parsedDID, sjB []byte) (*JWM, error) {
 	var sj signedJWM
 	if err := json.Unmarshal(sjB, &sj); err != nil {
 		return nil, errors.New("bad signed jwm")

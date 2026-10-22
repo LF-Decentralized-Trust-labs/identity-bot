@@ -512,6 +512,18 @@ func (m *Manager) RecordGovernanceEvent(caller CallerContext, eventID, status st
 	return m.recordInvocation(caller, eventID, "governance", nil, status, time.Now())
 }
 
+// RecordGovernanceEventAbout is RecordGovernanceEvent with what the event is
+// about committed in the signed row's argument digest (HashArgs), so anything
+// kept elsewhere about it can later be checked against the log: changing it
+// after the fact no longer matches the row that was signed when it happened.
+func (m *Manager) RecordGovernanceEventAbout(caller CallerContext, eventID, status string, about []byte) int64 {
+	return m.recordInvocation(caller, eventID, "governance", about, status, time.Now())
+}
+
+// HashArgs is the digest the log keeps of an event's arguments, for a reader
+// recomputing it from what the event was about.
+func HashArgs(args []byte) string { return hashArgs(args) }
+
 // InsertInvocationEvent persists one event; returns its row id.
 func (s *SandboxStore) InsertInvocationEvent(ev InvocationEvent) (int64, error) {
 	chain, _ := json.Marshal(ev.DelegationChain)

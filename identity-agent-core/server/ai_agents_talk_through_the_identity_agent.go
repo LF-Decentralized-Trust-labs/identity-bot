@@ -313,6 +313,9 @@ func (s *CoreServer) recordMessage(cc sandbox.CallerContext, e conversation.Entr
 	if s.SandboxManager == nil {
 		return
 	}
+	// The conversation is the piece of work every one of its messages is for,
+	// so the log is read per conversation by asking for that.
+	cc.WorkItem = e.Conversation
 	cc.Reason = clampWhy(fmt.Sprintf("%s %s in %s, from %s to %s", e.Kind, e.MessageID, e.Conversation, e.From, e.To))
 	s.SandboxManager.RecordGovernanceEvent(cc, "agent.message."+e.Kind, "ok")
 }
@@ -340,6 +343,9 @@ func (s *CoreServer) handlePersonSays(w http.ResponseWriter, r *http.Request) {
 		s.refuseMessage(w, cc, agentmessage.KindAsk, "the message must be JSON", http.StatusBadRequest)
 		return
 	}
+	// Filed under the conversation it names only if this person opened it: a
+	// refusal must not land in somebody else's conversation.
+	cc.WorkItem = s.partyConversation(req.Conversation, agentmessage.Person(person.AID))
 	body := []byte(req.Body)
 	switch {
 	case len(body) == 0 || len(body) > agentmessage.MaxBody:
@@ -624,6 +630,10 @@ func (s *CoreServer) handleBodySays(w http.ResponseWriter, r *http.Request) {
 		refuse("the statement is not signed by this body: "+err.Error(), http.StatusForbidden)
 		return
 	}
+	// Signed by this body: from here a refusal is filed under the conversation
+	// it names, if its AI agent is in it. Not before, and not otherwise, or a
+	// caller could put rows into a conversation it is not part of.
+	cc.WorkItem = s.partyConversation(st.Conversation, st.From)
 	if when, _ := time.Parse(time.RFC3339, st.HostTime); time.Since(when) > agentbody.RequestWindow || time.Until(when) > agentbody.RequestWindow {
 		refuse("the statement's time is outside the window this Identity Agent accepts", http.StatusForbidden)
 		return
@@ -802,6 +812,17 @@ func (s *CoreServer) handleBodyInbox(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+	// Each message handed to the body is a delivery, recorded the first time
+	// it is handed to this machine. A message still waiting is handed out again
+	// on the next collection; the receipt, not the delivery, is what says the
+	// body took it.
+	for _, d := range out {
+		dc := cc
+		dc.WorkItem = d.Entry.Conversation
+		dc.Reason = clampWhy(fmt.Sprintf("%s %s in %s, to %s at %s", d.Entry.Kind, d.Entry.MessageID,
+			d.Entry.Conversation, b.Agent, b.Host))
+		s.recordDeliveryOnce(dc, d.Entry.MessageID, b.Host)
 	}
 	writeJSONStatus(w, http.StatusOK, map[string]any{"messages": out})
 }

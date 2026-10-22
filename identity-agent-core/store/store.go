@@ -395,6 +395,28 @@ type Notification struct {
 	ReceivedAt string `json:"received_at"`
 	ReadAt     string `json:"read_at,omitempty"`
 	ExpiresAt  string `json:"expires_at,omitempty"`
+	// SignedMessage is the sender's signed message as it was inside the
+	// envelope (base64), and SenderDID the sender's keys when it arrived. With
+	// both, the sender's signature can be checked again later by anybody,
+	// without this agent's keys. The fields above are what the message said;
+	// these are the proof that the sender said it. Empty for a notification
+	// that did not arrive signed.
+	SignedMessage string `json:"signed_message,omitempty"`
+	SenderDID     string `json:"sender_did,omitempty"`
+	// SenderKeyTrust is how SenderDID was tied to the sender when the message
+	// arrived (anchored in its identifier, vouched for by its key, or one of
+	// this agent's own AI agents, which is this agent's own word), and
+	// SenderKELSaid and SenderKELEvents the
+	// last event and length of the sender's key history then. The tie is
+	// checked again against that history, so a later rotation neither breaks
+	// an old message nor lets a retired key vouch for a new one.
+	SenderKeyTrust  string `json:"sender_key_trust,omitempty"`
+	SenderKELSaid   string `json:"sender_kel_said,omitempty"`
+	SenderKELEvents int    `json:"sender_kel_events,omitempty"`
+	// SenderKEL is that history itself (JSON), cut where it stood, kept with
+	// the message because the contact's own record is replaced on refetch and
+	// removed with the contact.
+	SenderKEL string `json:"sender_kel,omitempty"`
 }
 
 // Notification severities and statuses.

@@ -2,6 +2,7 @@ package didcomm
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -159,4 +160,54 @@ func TestKeySetPersistence(t *testing.T) {
 		t.Fatalf("restored keyset cannot decrypt: %v", err)
 	}
 	_ = bobDID
+}
+
+// A received message can be shown later, to somebody without the recipient's
+// key, to have come from its sender: the signed form kept from the envelope
+// verifies against the sender's keys, and fails if a byte of it changes or if
+// it is checked against anybody else's.
+func TestAReceivedMessageCanBeProvedLater(t *testing.T) {
+	alice, _ := GenerateKeySet("EAlice")
+	bob, _ := GenerateKeySet("EBob")
+	aliceDID, _ := alice.DID()
+	bobDID, _ := bob.DID()
+	sent := mkJWM(t, "EAlice", "EBob", TypeAgentMessage, map[string]string{"text": "ship it"})
+	env, err := PackAuthcrypt(alice, bobDID, sent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, signed, err := UnpackAuthcryptKeeping(bob, aliceDID, env)
+	if err != nil || got.ID != sent.ID || len(signed) == 0 {
+		t.Fatalf("unpack: %v %+v %d", err, got, len(signed))
+	}
+
+	again, err := VerifySignedMessage(aliceDID, signed)
+	if err != nil || again.ID != sent.ID || string(again.Body) != string(got.Body) {
+		t.Fatalf("the kept message does not prove itself: %v", err)
+	}
+	if _, err := VerifySignedMessage(bobDID, signed); err == nil {
+		t.Fatal("a message was proved to come from somebody who did not sign it")
+	}
+	i := strings.Index(string(signed), "ship it")
+	altered := append([]byte(nil), signed...)
+	altered[i] = 'S'
+	if _, err := VerifySignedMessage(aliceDID, altered); err == nil {
+		t.Fatal("an altered message still proved itself")
+	}
+}
+
+// A message names its own sender and recipient inside what was signed, and
+// those must be the ones it was authenticated as: a sender cannot sign words
+// that read as somebody else's.
+func TestASignedMessageNamesItsParties(t *testing.T) {
+	m := mkJWM(t, "EAlice", "EBob", TypeAgentMessage, map[string]string{"text": "hi"})
+	if err := m.NamesParties("EAlice", "EBob"); err != nil {
+		t.Fatalf("a message naming its own parties was refused: %v", err)
+	}
+	if err := m.NamesParties("EMallory", "EBob"); err == nil {
+		t.Fatal("a message naming another sender was taken as the authenticated sender's")
+	}
+	if err := m.NamesParties("EAlice", "ECarol"); err == nil {
+		t.Fatal("a message addressed to somebody else was taken as addressed to this recipient")
+	}
 }
