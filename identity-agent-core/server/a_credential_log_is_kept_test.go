@@ -25,7 +25,7 @@ import (
 // stored log does not, and keri-go says it ends in "revoked".
 func TestARevocationCanStillBeProvedAfterARestart(t *testing.T) {
 	s, agent := grantWorld(t)
-	grantSAID, err := s.issueCapabilityGrant(agent)
+	grantSAID, err := s.issueCapabilityGrant(agent, authority{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestARevocationCanStillBeProvedAfterARestart(t *testing.T) {
 // A credential with no kept log is never reported as in force.
 func TestACredentialWithNoKeptLogIsNotCalledValid(t *testing.T) {
 	s, agent := grantWorld(t)
-	grantSAID, err := s.issueCapabilityGrant(agent)
+	grantSAID, err := s.issueCapabilityGrant(agent, authority{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestACredentialWithNoKeptLogIsNotCalledValid(t *testing.T) {
 // proof of it.
 func TestOnlyTheCredentialsOwnEventsAreKept(t *testing.T) {
 	s, agent := grantWorld(t)
-	first, err := s.issueCapabilityGrant(agent)
+	first, err := s.issueCapabilityGrant(agent, authority{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func (r refusingStore) KeepCredentialEvent(ev store.CredentialTELEvent, anchor *
 // does not hold.
 func TestARevocationThatCannotBeKeptIsNotMade(t *testing.T) {
 	s, agent := grantWorld(t)
-	grantSAID, err := s.issueCapabilityGrant(agent)
+	grantSAID, err := s.issueCapabilityGrant(agent, authority{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +170,7 @@ func TestARevocationThatCannotBeKeptIsNotMade(t *testing.T) {
 // not reported as issued.
 func TestARevokedCredentialIsNeverReportedIssued(t *testing.T) {
 	s, agent := grantWorld(t)
-	grantSAID, err := s.issueCapabilityGrant(agent)
+	grantSAID, err := s.issueCapabilityGrant(agent, authority{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +188,7 @@ func TestARevokedCredentialIsNeverReportedIssued(t *testing.T) {
 // than a shorter one that reads "issued".
 func TestALogMissingAnAnchoredRevocationIsRefused(t *testing.T) {
 	s, agent := grantWorld(t)
-	grantSAID, err := s.issueCapabilityGrant(agent)
+	grantSAID, err := s.issueCapabilityGrant(agent, authority{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +214,7 @@ func TestALogMissingAnAnchoredRevocationIsRefused(t *testing.T) {
 // in it is reported as unprovable.
 func TestARegistryIsKeptOnlyWithAProvableInception(t *testing.T) {
 	s, agent := grantWorld(t)
-	grantSAID, err := s.issueCapabilityGrant(agent)
+	grantSAID, err := s.issueCapabilityGrant(agent, authority{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,7 +289,7 @@ func TestARegistryWithoutAKeptInceptionIsNotTrusted(t *testing.T) {
 	if err := s.DataStore.SaveRegistry(old); err != nil {
 		t.Fatal(err)
 	}
-	grantSAID, err := s.issueCapabilityGrant(agent)
+	grantSAID, err := s.issueCapabilityGrant(agent, authority{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,7 +307,7 @@ func TestARegistryWithoutAKeptInceptionIsNotTrusted(t *testing.T) {
 // callers are told it is revoked.
 func TestTwoRevocationsAtOnceMakeOne(t *testing.T) {
 	s, agent := grantWorld(t)
-	grantSAID, err := s.issueCapabilityGrant(agent)
+	grantSAID, err := s.issueCapabilityGrant(agent, authority{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -374,7 +374,7 @@ func storedKELHoldsTogether(t *testing.T, s *CoreServer, aid string) {
 // the restarted Identity Agent can still issue.
 func TestAFailedKeepLeavesNoGapInTheKeyLog(t *testing.T) {
 	s, agent := grantWorld(t)
-	grantSAID, err := s.issueCapabilityGrant(agent)
+	grantSAID, err := s.issueCapabilityGrant(agent, authority{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -391,16 +391,16 @@ func TestAFailedKeepLeavesNoGapInTheKeyLog(t *testing.T) {
 	}
 
 	s.DataStore = refusingStore{Store: real, kind: "iss"}
-	if _, err := s.issueCapabilityGrant(agent); err == nil {
+	if _, err := s.issueCapabilityGrant(agent, authority{}); err == nil {
 		t.Fatal("an issuance the store refused was reported made")
 	}
 	s.DataStore = real
-	if _, err := s.issueCapabilityGrant(agent); err != nil {
+	if _, err := s.issueCapabilityGrant(agent, authority{}); err != nil {
 		t.Fatalf("the issuance could not be retried: %v", err)
 	}
 
 	storedKELHoldsTogether(t, s, rec.IssuerAID)
-	if _, err := s.issueCapabilityGrant(agent); err != nil {
+	if _, err := s.issueCapabilityGrant(agent, authority{}); err != nil {
 		t.Fatalf("after a restart the Identity Agent could not issue: %v", err)
 	}
 	if _, status, err := s.credentialLog(rec.RegistrySAID, grantSAID); err != nil || status != keri.StatusRevoked {
@@ -415,7 +415,7 @@ func TestRevocationsOfDifferentCredentialsAtOnceLeaveOneChain(t *testing.T) {
 	recs := make([]*store.CredentialRecord, 0, 6)
 	for i := 0; i < 6; i++ {
 		said, err := s.issueAssetCredential(schemas.AIAgentGrant, agent.PairwiseAID, agent.DelegatorAID,
-			map[string]interface{}{"name": fmt.Sprintf("agent %d", i), "capabilities": []string{}}, "")
+			map[string]interface{}{"name": fmt.Sprintf("agent %d", i), "capabilities": []string{}}, "", authority{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -451,7 +451,7 @@ func TestRevocationsOfDifferentCredentialsAtOnceLeaveOneChain(t *testing.T) {
 // the one the issuer published, and will not load again.
 func TestALogIsRefusedWhenTheIssuersKeyLogHasAGap(t *testing.T) {
 	s, agent := grantWorld(t)
-	first, err := s.issueCapabilityGrant(agent)
+	first, err := s.issueCapabilityGrant(agent, authority{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -464,7 +464,7 @@ func TestALogIsRefusedWhenTheIssuersKeyLogHasAGap(t *testing.T) {
 	}
 	// The next issuance chains to that unkept event and is itself kept.
 	said, err := s.issueAssetCredential(schemas.AIAgentGrant, agent.PairwiseAID, agent.DelegatorAID,
-		map[string]interface{}{"name": "after the gap", "capabilities": []string{}}, "")
+		map[string]interface{}{"name": "after the gap", "capabilities": []string{}}, "", authority{})
 	if err != nil {
 		t.Fatal(err)
 	}

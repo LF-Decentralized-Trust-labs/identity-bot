@@ -121,6 +121,12 @@ type ControllerGrant struct {
 	// one signer is bound at its first use, while there is exactly one.
 	Signer string `json:"signer,omitempty"`
 
+	// CredentialSAID is the Controller Grant credential this identity issued
+	// for the machine: the same authorisation, anchored in its key log, so it
+	// can be shown to anybody and named by what is done from the machine.
+	// Empty for a grant made before machines were given one.
+	CredentialSAID string `json:"credential_said,omitempty"`
+
 	// ExpiresAt is zero for an enrolled machine and set for a borrowed one.
 	// Zero means "until the owner says otherwise", never "forever unchecked" —
 	// the owner can remove it, which is the only permanence a grant has.
@@ -372,6 +378,35 @@ func (c *controllerGrants) Revoke(aid string) error {
 	}
 	delete(all, strings.TrimSpace(aid))
 	return c.save(all)
+}
+
+// SetCredential records the credential issued for a machine's grant.
+func (c *controllerGrants) SetCredential(aid, said string) error {
+	grantsLock.Lock()
+	defer grantsLock.Unlock()
+	all, err := c.load()
+	if err != nil {
+		return err
+	}
+	g, ok := all[strings.TrimSpace(aid)]
+	if !ok {
+		return fmt.Errorf("no such machine")
+	}
+	g.CredentialSAID = said
+	all[g.ControllerAID] = g
+	return c.save(all)
+}
+
+// Get returns a machine's grant, live or not.
+func (c *controllerGrants) Get(aid string) (ControllerGrant, bool, error) {
+	grantsLock.Lock()
+	defer grantsLock.Unlock()
+	all, err := c.load()
+	if err != nil {
+		return ControllerGrant{}, false, err
+	}
+	g, ok := all[strings.TrimSpace(aid)]
+	return g, ok, nil
 }
 
 // BindSigner records which signer a machine belongs to, the first time that

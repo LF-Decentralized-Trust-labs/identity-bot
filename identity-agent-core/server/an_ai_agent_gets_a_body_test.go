@@ -154,7 +154,7 @@ func bodyWorld(t *testing.T) (*CoreServer, string) {
 	if err := s.assetHandler.Store.UpsertAsset(*agent); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.issueCapabilityGrant(agent); err != nil {
+	if _, err := s.issueCapabilityGrant(agent, authority{}); err != nil {
 		t.Fatal(err)
 	}
 	mgr, err := sandbox.NewManager(sandbox.ManagerConfig{DataDir: s.DataDir})

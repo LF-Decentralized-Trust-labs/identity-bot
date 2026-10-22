@@ -63,6 +63,11 @@ type assetGrantKind struct {
 	// required are the kind's own required attributes.
 	required []string
 	fields   []SchemaField
+	// edges admits an edges block: the credentials this one rests on, such as
+	// the grant of whoever authorised it. A schema without it is the first
+	// version of the template, kept so credentials issued under it still
+	// resolve and verify.
+	edges bool
 }
 
 // sharedGrantAttributes are the attributes every asset grant carries, in order.
@@ -86,7 +91,14 @@ func sharedGrantAttributes(assetType string) []grantAttribute {
 var sharedGrantRequired = []string{"d", "i", "dt", "asset_type", "name"}
 
 func (k assetGrantKind) allAttributes() []grantAttribute {
-	return append(sharedGrantAttributes(k.assetType), k.attributes...)
+	attrs := append(sharedGrantAttributes(k.assetType), k.attributes...)
+	if k.edges {
+		// The request that authorised the credential, exactly as the person's
+		// device signed it, beside the edge to their own grant: the edge says
+		// whose authority this rests on, the request shows they used it.
+		attrs = append(attrs, grantAttribute{"request", `{"description": "The request that authorised this, as it was signed: the signing machine, the exact string it signed, and the signature", "type": "object", "properties": {"signer": {"type": "string"}, "signed": {"type": "string"}, "signature": {"type": "string"}}, "required": ["signer", "signed", "signature"], "additionalProperties": false}`})
+	}
+	return attrs
 }
 
 func buildAssetGrant(k assetGrantKind) (*AssetGrant, error) {
@@ -96,6 +108,17 @@ func buildAssetGrant(k assetGrantKind) (*AssetGrant, error) {
 		props[i] = fmt.Sprintf("%q: %s", a.name, a.definition)
 	}
 	required := append(append([]string{}, sharedGrantRequired...), k.required...)
+	version, edgesProperty := "1.0.0", ""
+	if k.edges {
+		version = "1.1.0"
+		edgesProperty = `,
+    "e": {
+      "oneOf": [
+        {"description": "Edges block identifier", "type": "string"},
+        {"description": "Edges: the credentials this one rests on, each by its identifier and schema", "type": "object"}
+      ]
+    }`
+	}
 	quoted := make([]string, len(required))
 	for i, r := range required {
 		quoted[i] = fmt.Sprintf("%q", r)
@@ -107,7 +130,7 @@ func buildAssetGrant(k assetGrantKind) (*AssetGrant, error) {
   "description": %q,
   "type": "object",
   "credentialType": %q,
-  "version": "1.0.0",
+  "version": %q,
   "properties": {
     "v": {"description": "Credential version string", "type": "string"},
     "d": {"description": "Credential identifier", "type": "string"},
@@ -128,12 +151,12 @@ func buildAssetGrant(k assetGrantKind) (*AssetGrant, error) {
           "required": [%s]
         }
       ]
-    }
+    }%s
   },
   "additionalProperties": false,
   "required": ["v", "d", "i", "ri", "s", "a"]
-}`, k.title, k.description, credentialTypeName(k.title),
-		strings.Join(props, ",\n            "), strings.Join(quoted, ", "))
+}`, k.title, k.description, credentialTypeName(k.title), version,
+		strings.Join(props, ",\n            "), strings.Join(quoted, ", "), edgesProperty)
 
 	built, err := keri.BuildSchema(keri.SchemaInput{Schema: []byte(doc)})
 	if err != nil {
@@ -196,7 +219,7 @@ func mustAssetGrant(k assetGrantKind) *AssetGrant {
 //     message is that capability's constraint on "to" — so it needs no field
 //     of its own. Conversation limits are the Identity Agent's, applied to
 //     every conversation, and grant nothing (ADR-047).
-var AIAgentGrant = mustAssetGrant(assetGrantKind{
+var aiAgentGrantKind = assetGrantKind{
 	assetType: "ai_agent",
 	title:     "AI Agent Grant",
 	description: "What one AI agent may do, issued by the identity that owns it to the AI agent's " +
@@ -213,7 +236,15 @@ var AIAgentGrant = mustAssetGrant(assetGrantKind{
 		{Key: "resource_constraints", Label: "Resource Constraints", Type: "string", Placeholder: "optional per-capability limits"},
 		{Key: "valid_until", Label: "Valid until", Type: "date", Placeholder: "Leave blank for no expiry"},
 	},
-})
+}
+
+// AIAgentGrant is issued with an edge to the grant of whoever authorised it,
+// and AIAgentGrantV1, the first version, without one. Credentials issued under
+// the first version still resolve and are still honoured.
+var (
+	AIAgentGrant   = mustAssetGrant(withEdges(aiAgentGrantKind))
+	AIAgentGrantV1 = mustAssetGrant(aiAgentGrantKind)
+)
 
 // AIAgentBody says that one machine key is the body of one AI agent: requests
 // signed by that key speak as the AI agent, at the grade recorded here. It is
@@ -223,7 +254,7 @@ var AIAgentGrant = mustAssetGrant(assetGrantKind{
 //
 // Revoking it stops that machine speaking as the AI agent; the AI agent and its
 // grant are untouched, and another machine can be enrolled as its body.
-var AIAgentBody = mustAssetGrant(assetGrantKind{
+var aiAgentBodyKind = assetGrantKind{
 	assetType: "ai_agent",
 	title:     "AI Agent Body",
 	description: "That one machine key is the body of one AI agent: requests that key signs " +
@@ -242,21 +273,63 @@ var AIAgentBody = mustAssetGrant(assetGrantKind{
 		{Key: "host", Label: "Body", Type: "string", Required: true},
 		{Key: "grade", Label: "Grade", Type: "string", Required: true},
 	},
-})
+}
+
+// AIAgentBody is issued with an edge to the grant of whoever approved the
+// machine; AIAgentBodyV1, the first version, has none and is still honoured.
+var (
+	AIAgentBody   = mustAssetGrant(withEdges(aiAgentBodyKind))
+	AIAgentBodyV1 = mustAssetGrant(aiAgentBodyKind)
+)
+
+// ControllerGrant says that one machine may act for the identity that issued
+// it, as which of that identity's signers, at what grade and until when. A
+// device paired to act for an identity was a line in a file only that identity
+// could read, so nothing outside it could show a machine had been authorised.
+// Issued into the identity's registry, the grant is anchored in its key log and
+// its withdrawal is an event anybody can check, and what a person does from
+// that machine can name it as the authority it rests on.
+var ControllerGrant = mustAssetGrant(withEdges(assetGrantKind{
+	assetType: "controller",
+	title:     "Controller Grant",
+	description: "That one machine may act for the identity that issued this, as the signer named " +
+		"here, at the grade named here, while this is unrevoked and has not lapsed.",
+	attributes: []grantAttribute{
+		{"public_key", `{"description": "The machine's key, which its identifier names and its requests are checked against", "type": "string"}`},
+		{"label", `{"description": "Which machine this is, as the person who paired it named it", "type": "string"}`},
+		{"grade", `{"description": "enrolled for a machine the person keeps, scoped for one they borrowed", "type": "string", "enum": ["enrolled", "scoped"]}`},
+		{"signer", `{"description": "The signer this machine acts as, when the identity has signers", "type": "string"}`},
+	},
+	required: []string{"public_key", "label", "grade"},
+	fields: []SchemaField{
+		{Key: "label", Label: "Machine", Type: "string", Required: true},
+		{Key: "grade", Label: "Grade", Type: "string", Required: true},
+	},
+}))
+
+func withEdges(k assetGrantKind) assetGrantKind {
+	k.edges = true
+	return k
+}
 
 // AssetGrants are every kind's grant schema, by asset type.
 var AssetGrants = map[string]*AssetGrant{
 	AIAgentGrant.AssetType: AIAgentGrant,
 }
 
-// assetCredentials are every schema built from the asset template.
-var assetCredentials = []*AssetGrant{AIAgentGrant, AIAgentBody}
+// assetCredentials are every schema built from the asset template, current
+// and first versions alike, so every one issued can be resolved.
+var assetCredentials = []*AssetGrant{AIAgentGrant, AIAgentGrantV1, AIAgentBody, AIAgentBodyV1, ControllerGrant}
 
 func init() {
 	for _, g := range assetCredentials {
 		Catalog[g.Schema.SAID] = g.Schema
 	}
 }
+
+// HasEdges reports whether credentials of this schema may name the
+// credentials they rest on.
+func (g *AssetGrant) HasEdges() bool { return g.kind.edges }
 
 // CheckAttributes refuses an attribute block this grant's schema would refuse:
 // a required attribute missing, an attribute the schema does not declare, or the

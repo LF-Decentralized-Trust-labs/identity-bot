@@ -10,7 +10,12 @@ import (
 // The identifier is pinned. A grant names its schema by this digest, so a change
 // to the schema is a new kind of credential that every verifier has to be told
 // about — never something that should happen as a side effect of an edit here.
-const pinnedAIAgentGrantSAID = "ENqXDGTD_fvwwkYGtaHby3J3Oahi3LzCE-ehDJxmHrBi"
+//
+// Version 1.1.0 admits an edge to the grant of whoever authorised the AI agent,
+// and the request they signed.
+// The first version keeps its identifier, so grants issued under it still
+// resolve; TestTheFirstVersionsKeepTheirIdentifiers holds it to that.
+const pinnedAIAgentGrantSAID = "EFBzVtE4re52WTSdcrTU0m9K1He0I_yGFUPW0_VnNcCl"
 
 func TestTheAIAgentGrantSchemaIsPinned(t *testing.T) {
 	if AIAgentGrant.Schema.SAID != pinnedAIAgentGrantSAID {
@@ -88,7 +93,33 @@ func TestAnAIAgentGrantRefusesWhatItsSchemaRefuses(t *testing.T) {
 	}
 }
 
-const pinnedAIAgentBodySAID = "EBjOukYuabOuiVTRLSsE_gru3xww2CWAIAsFE6DCtVr1"
+const pinnedAIAgentBodySAID = "EP4vfQ-HeN4wPPBhOsvpp_wYPOPPhjoLTPxXbejwSX0j"
+
+const pinnedControllerGrantSAID = "EFEFZGF9FY-McUog829fuApbUiLwuG7-lNfXR93riOGX"
+
+func TestTheControllerGrantSchemaIsPinned(t *testing.T) {
+	if ControllerGrant.Schema.SAID != pinnedControllerGrantSAID {
+		t.Fatalf("the controller grant schema is now %s, not %s. If the change is meant, it is "+
+			"a new schema version: pin the new identifier and say so in the change.",
+			ControllerGrant.Schema.SAID, pinnedControllerGrantSAID)
+	}
+}
+
+// The first versions are what every grant and body credential issued before
+// edges carries, so their identifiers must never move.
+func TestTheFirstVersionsKeepTheirIdentifiers(t *testing.T) {
+	if AIAgentGrantV1.Schema.SAID != "ENqXDGTD_fvwwkYGtaHby3J3Oahi3LzCE-ehDJxmHrBi" {
+		t.Fatalf("the first AI agent grant schema moved to %s", AIAgentGrantV1.Schema.SAID)
+	}
+	if AIAgentBodyV1.Schema.SAID != "EBjOukYuabOuiVTRLSsE_gru3xww2CWAIAsFE6DCtVr1" {
+		t.Fatalf("the first AI agent body schema moved to %s", AIAgentBodyV1.Schema.SAID)
+	}
+	for _, said := range []string{AIAgentGrantV1.Schema.SAID, AIAgentBodyV1.Schema.SAID} {
+		if Catalog[said] == nil {
+			t.Fatalf("%s is no longer served, so credentials issued under it cannot be resolved", said)
+		}
+	}
+}
 
 func TestTheAIAgentBodySchemaIsPinned(t *testing.T) {
 	if AIAgentBody.Schema.SAID != pinnedAIAgentBodySAID {

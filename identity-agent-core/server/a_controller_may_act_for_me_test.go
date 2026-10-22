@@ -375,7 +375,8 @@ func TestABorrowedMachineCannotBeGrantedPastOrForever(t *testing.T) {
 // comparing that date against now reads the machine as long dead, on the very
 // response the granting device acts on.
 func TestGrantingAndListingDescribeAMachineTheSameWay(t *testing.T) {
-	s := newAuthTestServer(t)
+	// One that can anchor the grant in its key log, as every real one can.
+	s, _ := grantWorld(t)
 	r := s.buildRouter("")
 
 	w := httptest.NewRecorder()

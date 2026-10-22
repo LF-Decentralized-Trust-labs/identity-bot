@@ -63,6 +63,11 @@ func newTalkWorld(t *testing.T, caps ...string) *talkWorld {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// Granted as a real one is: anchored. Its signer is settled at first use.
+	g, _, _ := s.controllers().Get(w.ctlAID)
+	if _, err := s.grantController(g, time.Now().UTC()); err != nil {
+		t.Fatalf("anchoring the controller's grant: %v", err)
+	}
 
 	// The sealed transport replays what it opens through the server's own
 	// router, as it does in production.
@@ -81,7 +86,7 @@ func (w *talkWorld) provision(t *testing.T, name string, caps []string) *asset.A
 	if err != nil {
 		t.Fatalf("provisioning %s: %v", name, err)
 	}
-	if _, err := w.s.issueCapabilityGrant(a); err != nil {
+	if _, err := w.s.issueCapabilityGrant(a, authority{}); err != nil {
 		t.Fatalf("granting %s: %v", name, err)
 	}
 	return a
@@ -557,7 +562,7 @@ func TestAnAIAgentMessagesOnlyWhomItsGrantNames(t *testing.T) {
 		t.Fatal(err)
 	}
 	a, _ := w.s.aiAgentAsset(w.a.ID)
-	if _, err := w.s.issueCapabilityGrant(&a); err != nil {
+	if _, err := w.s.issueCapabilityGrant(&a, authority{}); err != nil {
 		t.Fatal(err)
 	}
 	w.openedWith(t)

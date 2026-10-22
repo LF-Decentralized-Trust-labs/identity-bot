@@ -17,8 +17,11 @@ import (
 //
 // One path for every asset credential, so a rule added for one kind — a check,
 // a signature, a lapse — reaches all of them.
+//
+// by is who authorised it, written into the credential where its schema admits
+// it: an edge to their machine's Controller Grant and the request they signed.
 func (s *CoreServer) issueAssetCredential(
-	kind *schemas.AssetGrant, holder, issuer string, claims map[string]interface{}, expiry string,
+	kind *schemas.AssetGrant, holder, issuer string, claims map[string]interface{}, expiry string, by authority,
 ) (string, error) {
 	if s.KeriDriver == nil {
 		return "", fmt.Errorf("keri driver unavailable")
@@ -31,6 +34,7 @@ func (s *CoreServer) issueAssetCredential(
 	if expiry != "" {
 		claims["valid_until"] = expiry
 	}
+	edges := by.name(kind, claims)
 	if err := kind.CheckAttributes(claims); err != nil {
 		return "", err
 	}
@@ -45,7 +49,7 @@ func (s *CoreServer) issueAssetCredential(
 	// The issuance and its anchor are kept first, together. A credential whose
 	// issuance cannot be proved is not issued.
 	keptInside := s.engineKeepsCredentialLogs()
-	result, err := s.KeriDriver.IssueCredentialInRegistry(issuer, claims, kind.Schema.SAID, holder, nil, registrySAID)
+	result, err := s.KeriDriver.IssueCredentialInRegistry(issuer, claims, kind.Schema.SAID, holder, edges, registrySAID)
 	if err == nil && !keptInside {
 		err = s.keepAfter(issuer, result.SequenceNumber, result.IxnRawBytesB64, result.IssRawBytesB64)
 	}

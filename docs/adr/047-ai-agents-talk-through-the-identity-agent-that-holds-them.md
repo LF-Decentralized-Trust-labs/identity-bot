@@ -83,6 +83,12 @@ it. A refusal is filed under the conversation it names only when the caller's
 signature has been checked and the caller is a party to that conversation; otherwise
 it is filed under none, so nobody can write rows into a conversation they are not in.
 
+*Amended 2026-10-22.* A person's message keeps, beside the controller's signed request,
+the identifier of that controller's Controller Grant (ADR-044, ADR-045), inside what the
+Identity Agent countersigns. The grant names the signer, and is anchored in the
+organisation's key log, so who opened a conversation is shown by a credential anybody can
+check.
+
 **Every message is signed twice, for two different claims:**
 1. **The sender's own statement.** A body signs it with its machine key over a
    fixed, line-separated string. The string covers the conversation, the kind of

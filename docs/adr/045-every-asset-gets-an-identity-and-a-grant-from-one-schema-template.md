@@ -138,6 +138,20 @@ is used only by a build with no KERI engine.
 - Grant schemas are served at `/public/schemas/{said}`, exactly as their identifiers were
   computed over. Only schemas whose document digests to their identifier are served.
 
+### Who authorised it (amended 2026-10-22)
+
+Version 1.1.0 of the template lets a credential name the credentials it rests on, in an
+edges block, and carry the `request` that authorised it exactly as it was signed: the
+signing machine, the string, the signature. The AI Agent Grant and AI Agent Body are issued
+at 1.1.0. When the request came from an authorised controller (ADR-044), each carries an
+edge `authorised_by` to that controller's Controller Grant, and the controller's signed
+request. A request made with the identity's own key has nothing between it and the issuer
+and names nothing further. Credentials issued under 1.0.0 keep their identifiers, are still
+served, and are still honoured.
+
+A third kind is built from the template: the **Controller Grant**, held by a machine
+authorised to act for the identity (ADR-044).
+
 ## Consequences
 
 - A verifier holding only what was published can check an asset's whole chain: the owner's

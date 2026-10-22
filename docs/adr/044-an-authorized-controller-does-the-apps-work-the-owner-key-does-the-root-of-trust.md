@@ -77,6 +77,16 @@ checks on application operations are removed. This makes the handlers consistent
 the gate and removes a second copy of the authority policy that would otherwise drift
 from the one the gate enforces.
 
+*Amended 2026-10-22.* **A controller's grant is a credential as well as a record.** When a
+machine is granted, the identity also issues it a Controller Grant (ADR-045) into its own
+registry: the machine's key, label, grade, the signer it acts as, and its expiry. The
+issuance is anchored in the identity's key log, so that the machine was authorised, and as
+whom, can be shown to anybody without asking this Identity Agent. A grant that cannot be
+anchored is not made. Removing the machine also revokes its credential; the machine stops at
+once even when that revocation cannot be written. Settling which signer a machine acts as
+re-issues its credential to say so. What is done from the machine names this credential
+(ADR-045, ADR-047).
+
 ## Consequences
 
 - The owner's authorized controller can do the application's work without the owner

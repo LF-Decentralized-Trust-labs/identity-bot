@@ -370,7 +370,7 @@ func (s *CoreServer) grantCredentialValid(rec *store.CredentialRecord, entry mcp
 		AcdcJson:           rec.AcdcJson,
 		IssuerKelEvents:    kel,
 		HolderAid:          entry.AgentAID,
-		TrustedSchemaSaids: []string{capabilityGrantSchemaSAID},
+		TrustedSchemaSaids: capabilityGrantSchemaSAIDs,
 	})
 	if err != nil || result == nil {
 		reason := "not verified"

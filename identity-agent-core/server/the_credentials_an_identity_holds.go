@@ -16,7 +16,19 @@ import (
 // issue times as text, which misorders two formats within a second — and a
 // difference between copies is how a revoked grant gets found by one of them.
 func (s *CoreServer) credentialsHeldBy(holder, schema, issuer string, usableOnly bool) []store.CredentialRecord {
-	if s.DataStore == nil || holder == "" || schema == "" {
+	return s.credentialsOfAnyHeldBy(holder, []string{schema}, issuer, usableOnly)
+}
+
+// credentialsOfAnyHeldBy is credentialsHeldBy for a credential that has more
+// than one schema version still honoured.
+func (s *CoreServer) credentialsOfAnyHeldBy(holder string, schemaSAIDs []string, issuer string, usableOnly bool) []store.CredentialRecord {
+	wanted := map[string]bool{}
+	for _, said := range schemaSAIDs {
+		if said != "" {
+			wanted[said] = true
+		}
+	}
+	if s.DataStore == nil || holder == "" || len(wanted) == 0 {
 		return nil
 	}
 	creds, err := s.DataStore.GetCredentials()
@@ -25,7 +37,7 @@ func (s *CoreServer) credentialsHeldBy(holder, schema, issuer string, usableOnly
 	}
 	var out []store.CredentialRecord
 	for _, c := range creds {
-		if c.HolderAID != holder || c.SchemaSAID != schema {
+		if c.HolderAID != holder || !wanted[c.SchemaSAID] {
 			continue
 		}
 		if issuer != "" && c.IssuerAID != issuer {
@@ -45,7 +57,7 @@ func (s *CoreServer) credentialsHeldBy(holder, schema, issuer string, usableOnly
 // grantsHeldBy is the AI agent grants this identity issued to one AI agent,
 // newest first.
 func (s *CoreServer) grantsHeldBy(agentAID string, usableOnly bool) []store.CredentialRecord {
-	return s.credentialsHeldBy(agentAID, capabilityGrantSchemaSAID, s.OwnerRootAID(), usableOnly)
+	return s.credentialsOfAnyHeldBy(agentAID, capabilityGrantSchemaSAIDs, s.OwnerRootAID(), usableOnly)
 }
 
 // issuedAt reads a credential's issue time in either format it has been

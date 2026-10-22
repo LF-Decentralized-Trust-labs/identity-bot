@@ -24,6 +24,11 @@ import (
 // invoke time.
 var capabilityGrantSchemaSAID = schemas.AIAgentGrant.Schema.SAID
 
+// capabilityGrantSchemaSAIDs are every version of the grant schema still
+// honoured: the current one, and the first, which grants issued before edges
+// carry.
+var capabilityGrantSchemaSAIDs = []string{capabilityGrantSchemaSAID, schemas.AIAgentGrantV1.Schema.SAID}
+
 // Provisioning an AI-agent identity (the IA-mediated model). One
 // local-owner call: mint a delegated agent AID chained to the owner root, bind
 // an MCP token to it, and set the token's capability ceiling. The agent then
@@ -41,6 +46,12 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 	// re-checking isOwner here would lock out the controller the gate just admitted.
 	if s.assetHandler == nil {
 		jsonError(w, "asset handler not initialized", http.StatusServiceUnavailable)
+		return
+	}
+	// Who asked, read before the body is: the request is kept as it was signed.
+	by, err := s.authorityOf(r)
+	if err != nil {
+		jsonError(w, "who asked for this AI agent could not be read from the request: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 	var req struct {
@@ -107,7 +118,7 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 	// to the agent's AID that formalizes the ceiling. The endpoint verifies it at
 	// invoke time, so authority is credential-proven rather than a server-side list.
 	// Non-fatal: on a driverless build the stored ceiling still governs.
-	grantSAID, err := s.issueCapabilityGrant(agent)
+	grantSAID, err := s.issueCapabilityGrant(agent, by)
 	if err != nil {
 		log.Printf("[mcp] agent %s provisioned without a capability grant (%v) — falling back to the stored ceiling", agent.PairwiseAID, err)
 	}
@@ -276,6 +287,12 @@ func (s *CoreServer) handleSetAgentCapabilities(w http.ResponseWriter, r *http.R
 		jsonError(w, "asset handler not initialized", http.StatusServiceUnavailable)
 		return
 	}
+	// Who asked, read before the body is: the request is kept as it was signed.
+	by, err := s.authorityOf(r)
+	if err != nil {
+		jsonError(w, "who asked for this change could not be read from the request: "+err.Error(), http.StatusBadRequest)
+		return
+	}
 	id := chi.URLParam(r, "id")
 	var req struct {
 		Capabilities []string `json:"capabilities"`
@@ -320,7 +337,7 @@ func (s *CoreServer) handleSetAgentCapabilities(w http.ResponseWriter, r *http.R
 	// build with no engine, which has no grants at all, changes the record alone.
 	grantSAID := ""
 	if s.KeriDriver != nil {
-		g, err := s.issueCapabilityGrant(&candidate)
+		g, err := s.issueCapabilityGrant(&candidate, by)
 		if err != nil {
 			jsonError(w, "the grant could not be re-issued, so nothing was changed: "+err.Error(),
 				http.StatusBadGateway)
@@ -410,7 +427,7 @@ func (s *CoreServer) ensureRegistry(issuerRootAID string) (string, error) {
 // agent's AID, persists the credential and its anchoring KEL event (so a verifier
 // can resolve the issuer KEL), and returns the grant SAID. Requires the KERI
 // driver; on any failure the caller falls back to the stored ceiling.
-func (s *CoreServer) issueCapabilityGrant(agent *asset.Asset) (string, error) {
+func (s *CoreServer) issueCapabilityGrant(agent *asset.Asset, by authority) (string, error) {
 	agentAID, issuerRootAID := agent.PairwiseAID, agent.DelegatorAID
 	capabilities := agent.Capabilities
 	if capabilities == nil {
@@ -428,7 +445,7 @@ func (s *CoreServer) issueCapabilityGrant(agent *asset.Asset) (string, error) {
 		expiry = agent.GrantValidUntil.UTC().Format(time.RFC3339)
 	}
 	superseded := s.grantsHeldBy(agentAID, true)
-	grantSAID, err := s.issueAssetCredential(schemas.AIAgentGrant, agentAID, issuerRootAID, claims, expiry)
+	grantSAID, err := s.issueAssetCredential(schemas.AIAgentGrant, agentAID, issuerRootAID, claims, expiry, by)
 	if err != nil {
 		return "", err
 	}

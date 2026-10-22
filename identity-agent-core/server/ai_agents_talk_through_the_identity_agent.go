@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -112,15 +111,12 @@ func (s *CoreServer) thePersonAsking(r *http.Request) (agentmessage.PersonRef, *
 	if err != nil {
 		return agentmessage.PersonRef{}, nil, err
 	}
-	// The string the middleware verified, rebuilt as of the moment it was
-	// signed — so what is kept is exactly what the signature covers, whatever
-	// has expired since.
-	stamp := strings.TrimSpace(r.Header.Get(headerControllerTimestamp))
-	at, err := time.Parse(time.RFC3339, stamp)
-	if err != nil {
-		return agentmessage.PersonRef{}, nil, err
+	// Settling the signer re-issues the machine's grant, so the grant named is
+	// read again rather than taken from before.
+	if g, ok, err := s.controllers().Get(grant.ControllerAID); err == nil && ok {
+		grant.CredentialSAID = g.CredentialSAID
 	}
-	signed, _, err := s.theStringThisMachineSigned(r, grant.ControllerAID, stamp, at.UTC())
+	signed, sig, err := s.theRequestAsSigned(r, grant)
 	if err != nil {
 		return agentmessage.PersonRef{}, nil, err
 	}
@@ -130,7 +126,7 @@ func (s *CoreServer) thePersonAsking(r *http.Request) (agentmessage.PersonRef, *
 	}
 	return person, &agentmessage.ControllerProof{
 		Controller: grant.ControllerAID, PublicKey: grant.PublicKey, SignedString: signed,
-		Signature: strings.TrimSpace(r.Header.Get(headerControllerSig)), Request: body,
+		Signature: sig, Request: body, ControllerGrant: grant.CredentialSAID,
 	}, nil
 }
 
@@ -193,7 +189,7 @@ func (s *CoreServer) signerOf(g ControllerGrant) (agentmessage.PersonRef, error)
 		return agentmessage.PersonRef{}, fmt.Errorf("this organisation has no signer on its roster and names no owner, " +
 			"so nobody it can prove is asking. A signer joins by accepting the organisation's signer invitation from their own identity")
 	case 1:
-		if _, err := s.controllers().BindSigner(g.ControllerAID, signers[0].AID); err != nil {
+		if _, err := s.bindSigner(g.ControllerAID, signers[0].AID); err != nil {
 			return agentmessage.PersonRef{}, fmt.Errorf("which signer this app belongs to could not be recorded: %w", err)
 		}
 		return signers[0], nil

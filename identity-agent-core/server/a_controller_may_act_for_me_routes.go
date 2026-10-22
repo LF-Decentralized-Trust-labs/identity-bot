@@ -72,7 +72,7 @@ func (s *CoreServer) handleGrantController(w http.ResponseWriter, r *http.Reques
 	}
 
 	now := time.Now().UTC()
-	granted, err := s.controllers().Grant(g, now)
+	granted, err := s.grantController(g, now)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error(), "")
 		return
@@ -153,7 +153,7 @@ func (s *CoreServer) handleRevokeController(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, "which controller", "")
 		return
 	}
-	if err := s.controllers().Revoke(aid); err != nil {
+	if err := s.revokeController(aid); err != nil {
 		writeError(w, http.StatusInternalServerError,
 			fmt.Sprintf("could not revoke %s", aid), err.Error())
 		return

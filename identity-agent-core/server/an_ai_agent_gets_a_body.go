@@ -201,7 +201,12 @@ func (s *CoreServer) handleApproveBody(w http.ResponseWriter, r *http.Request) {
 		"keys_digest": b.KeysDigest(), "grade": b.Grade, "claimed_grade": b.ClaimedGrade,
 		"platform": b.Platform, "placement": b.Placement,
 	}
-	credSAID, err := s.issueAssetCredential(schemas.AIAgentBody, a.PairwiseAID, a.DelegatorAID, claims, "")
+	by, err := s.authorityOf(r)
+	if err != nil {
+		jsonError(w, "who approved this machine could not be read from the request: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	credSAID, err := s.issueAssetCredential(schemas.AIAgentBody, a.PairwiseAID, a.DelegatorAID, claims, "", by)
 	if err != nil {
 		jsonError(w, "the body credential could not be issued, so the body was not approved: "+err.Error(),
 			http.StatusBadGateway)
