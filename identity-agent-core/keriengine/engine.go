@@ -63,6 +63,9 @@ func NewWithSecretStore(secrets keri.SecretStore) *Engine {
 // The engine is one of the implementations the core selects between.
 var _ drivers.KeriEngine = (*Engine)(nil)
 
+// It keeps an event before appending it when asked to.
+var _ drivers.KELKeeper = (*Engine)(nil)
+
 // Start records that the engine is running.
 //
 // Nothing is spawned and nothing can fail. The method exists because the
@@ -326,6 +329,13 @@ func (e *Engine) inceptWith(publicKey, nextPublicKey, name string, data []json.R
 // approved it — and returning one alone would let a caller publish an identity
 // claiming an authority that was never granted.
 func (e *Engine) CreateDelegatedInception(publicKey, nextPublicKey, name, delegatorName string) (*drivers.DriverDelegatedInceptionResponse, error) {
+	return e.CreateDelegatedInceptionKept(publicKey, nextPublicKey, name, delegatorName, nil)
+}
+
+// CreateDelegatedInceptionKept is CreateDelegatedInception, offering the
+// delegator's approval and the new inception to keep before either is held. A
+// keep that fails leaves both logs as they were.
+func (e *Engine) CreateDelegatedInceptionKept(publicKey, nextPublicKey, name, delegatorName string, keep func(drivers.KELKeep) error) (*drivers.DriverDelegatedInceptionResponse, error) {
 	delegator, release, err := e.holdForWriting(delegatorName)
 	if err != nil {
 		return nil, fmt.Errorf("the delegator: %w", err)
@@ -366,12 +376,25 @@ func (e *Engine) CreateDelegatedInception(publicKey, nextPublicKey, name, delega
 		return nil, err
 	}
 
-	if err := e.holdDelegatedIdentity(name, pub, nextDigest, dip, dipEvent); err != nil {
-		return nil, err
-	}
-
 	ixnEntry, err := entry(ixn)
 	if err != nil {
+		return nil, err
+	}
+	if keep != nil {
+		// The name must be free before anything is kept, or the store would
+		// hold a delegation the engine then refuses to.
+		heldAs := name
+		if heldAs == "" {
+			heldAs = dipEvent.Identifier
+		}
+		if held, err := e.state.get(heldAs); err == nil && held.AID != dipEvent.Identifier {
+			return nil, fmt.Errorf("the name %q already holds %s", heldAs, held.AID)
+		}
+		if err := keep(drivers.KELKeep{AID: delegator.AID, SN: int(ixnEvent.SN), Raw: ixn, Delegated: dip}); err != nil {
+			return nil, fmt.Errorf("the delegation was not kept, so it was not made: %w", err)
+		}
+	}
+	if err := e.holdDelegatedIdentity(name, pub, nextDigest, dip, dipEvent); err != nil {
 		return nil, err
 	}
 	// The delegator's log only advances once its approval is recorded.
@@ -731,6 +754,12 @@ func (e *Engine) RotateToMultisig(name string, keys, nextKeyDigests []string, is
 
 // Interact anchors data in an identity's key log.
 func (e *Engine) Interact(name string, data []interface{}) (*drivers.DriverInteractResponse, error) {
+	return e.InteractKept(name, data, nil)
+}
+
+// InteractKept is Interact, offering the event to keep before it is appended.
+// A keep that fails leaves the log as it was.
+func (e *Engine) InteractKept(name string, data []interface{}, keep func(drivers.KELKeep) error) (*drivers.DriverInteractResponse, error) {
 	id, release, err := e.holdForWriting(name)
 	if err != nil {
 		return nil, err
@@ -765,6 +794,11 @@ func (e *Engine) Interact(name string, data []interface{}) (*drivers.DriverInter
 	next, err := entry(raw)
 	if err != nil {
 		return nil, err
+	}
+	if keep != nil {
+		if err := keep(drivers.KELKeep{AID: id.AID, SN: int(ev.SN), Raw: raw}); err != nil {
+			return nil, fmt.Errorf("the interaction was not kept, so it was not made: %w", err)
+		}
 	}
 	e.state.mu.Lock()
 	id.SN = int(ev.SN)

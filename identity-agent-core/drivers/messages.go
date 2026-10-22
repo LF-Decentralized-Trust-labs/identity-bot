@@ -273,6 +273,28 @@ type TELCommit struct {
 	TELRaw []byte
 }
 
+// KELKeep is an event an engine is about to append to an identity's key log,
+// offered to be kept first.
+type KELKeep struct {
+	// AID is the identity whose key log the event extends, SN its place there.
+	AID string
+	SN  int
+	// Raw is the event as published.
+	Raw []byte
+	// Delegated is set for a delegated inception: the new identity's inception,
+	// which Raw, the delegator's interaction, approves.
+	Delegated []byte
+}
+
+// KELKeeper is an engine that offers an event to be kept before it appends it.
+// The keep is the caller's, per call; a keep that fails leaves the engine as it
+// was, so it never holds an event the store does not and the next event cannot
+// chain to one that was never kept.
+type KELKeeper interface {
+	InteractKept(name string, data []interface{}, keep func(KELKeep) error) (*DriverInteractResponse, error)
+	CreateDelegatedInceptionKept(publicKey, nextPublicKey, name, delegatorName string, keep func(KELKeep) error) (*DriverDelegatedInceptionResponse, error)
+}
+
 // TELCommitter is an engine that offers each registry event to be kept before
 // it appends it, so the engine never holds an event the store does not. A
 // commit that fails leaves the engine as it was.
