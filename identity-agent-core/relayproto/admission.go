@@ -2,6 +2,7 @@ package relayproto
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/tls"
 	"encoding/base64"
@@ -260,22 +261,13 @@ func (v *Verifier) verify(a Admission, ch Challenge, exporter []byte, now time.T
 	if err != nil {
 		return nil, err
 	}
-	messages, err := keri.ParseKELStream(kel)
+	key, err := CurrentKey(st.AID, kel)
 	if err != nil {
-		return nil, fmt.Errorf("the key event log is not readable: %w", err)
+		return nil, err
 	}
-	if len(messages) > MaxKELEvents {
-		return nil, fmt.Errorf("the key event log has %d events; the limit is %d", len(messages), MaxKELEvents)
-	}
-	state, err := keri.ValidateSignedKEL(messages)
+	keyQB64, err := keri.MatterQB64(keri.CodeEd25519, key)
 	if err != nil {
-		return nil, fmt.Errorf("the key event log does not verify: %w", err)
-	}
-	if state.Identifier != st.AID {
-		return nil, fmt.Errorf("the key event log is %q's, not %q's", state.Identifier, st.AID)
-	}
-	if len(state.Keys) != 1 {
-		return nil, fmt.Errorf("an enrolment identifier has one signing key; this one has %d", len(state.Keys))
+		return nil, err
 	}
 	sig, err := b64.DecodeString(a.Signature)
 	if err != nil {
@@ -285,15 +277,15 @@ func (v *Verifier) verify(a Admission, ch Challenge, exporter []byte, now time.T
 	if err != nil {
 		return nil, err
 	}
-	if err := keri.VerifySignature(state.Keys[0], body, sig); err != nil {
-		return nil, fmt.Errorf("the statement is not signed by the key the log names now: %w", err)
+	if !ed25519.Verify(key, body, sig) {
+		return nil, fmt.Errorf("the statement is not signed by the key the log names now")
 	}
 	if v.Standing != nil {
-		if err := v.Standing(st.AID, state.Keys); err != nil {
+		if err := v.Standing(st.AID, []string{keyQB64}); err != nil {
 			return nil, err
 		}
 	}
-	return &Verified{AID: st.AID, Key: state.Keys[0], KEL: kel}, nil
+	return &Verified{AID: st.AID, Key: keyQB64, KEL: kel}, nil
 }
 
 // keyLog settles which log an admission is checked against. A log the relay
