@@ -476,7 +476,9 @@ func (m *Manager) serve(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not reachable at a private address", http.StatusNotFound)
 		return
 	}
-	m.cfg.Handler.ServeHTTP(w, r)
+	answer := newProtocolOnly(w, r, a.Mode)
+	m.cfg.Handler.ServeHTTP(answer, r)
+	answer.finish()
 }
 
 // Lookup is the address this Identity Agent holds under label, from its own
