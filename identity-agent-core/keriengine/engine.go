@@ -791,6 +791,33 @@ func (e *Engine) GetKel(name string) (*drivers.DriverKelResponse, error) {
 	if err != nil {
 		return nil, err
 	}
+	return e.kelOf(id), nil
+}
+
+// GetKelByAID returns the key log of the identity held with this identifier,
+// whatever name it is held under. Read only: an identity the engine does not
+// hold is an error, never a reason to make one.
+func (e *Engine) GetKelByAID(aid string) (*drivers.DriverKelResponse, error) {
+	e.state.mu.RLock()
+	var found *identity
+	for _, id := range e.state.identities {
+		if id.AID != aid {
+			continue
+		}
+		if found != nil && found != id {
+			e.state.mu.RUnlock()
+			return nil, fmt.Errorf("%s is held twice, under %q and %q", aid, found.Name, id.Name)
+		}
+		found = id
+	}
+	e.state.mu.RUnlock()
+	if found == nil {
+		return nil, fmt.Errorf("no identity %s is held", aid)
+	}
+	return e.kelOf(found), nil
+}
+
+func (e *Engine) kelOf(id *identity) *drivers.DriverKelResponse {
 	e.state.mu.RLock()
 	defer e.state.mu.RUnlock()
 
@@ -815,7 +842,7 @@ func (e *Engine) GetKel(name string) (*drivers.DriverKelResponse, error) {
 		RawEventsB64:   rawB64,
 		SequenceNumber: id.SN,
 		EventCount:     len(id.KEL),
-	}, nil
+	}
 }
 
 // ReloadIdentity restores an identity the agent already has on record.

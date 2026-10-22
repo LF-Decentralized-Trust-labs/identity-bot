@@ -13,6 +13,7 @@ import (
 	keri "github.com/grapeid/keri-go"
 
 	"identity-agent-core/didcomm"
+	"identity-agent-core/drivers"
 	"identity-agent-core/sandbox"
 	"identity-agent-core/store"
 )
@@ -34,10 +35,11 @@ import (
 //     log cannot swap the kept proof for another one later.
 
 // keysOwn is the tie for one of this agent's own AI agents: an identifier
-// whose key history is delegated from this Identity Agent's root, with keys
-// this agent holds for it. Unlike the other two it is SELF-ASSERTED: it rests
-// on this agent's own word that the keys are its AI agent's, so anything
-// showing the proof to somebody else must say so.
+// whose key history opens with an inception delegated from this Identity
+// Agent's root, approved in the root's own history, with keys this agent
+// holds for it. Unlike the other two it is SELF-ASSERTED: it rests on this
+// agent's own word that the keys are its AI agent's, so anything showing the
+// proof to somebody else must say so.
 const keysOwn = "own"
 
 // receivedProof is what is kept with a received message so its sender can be
@@ -65,13 +67,16 @@ func (s *CoreServer) proofOfReceipt(senderAID string, senderDID *didcomm.DID, si
 }
 
 // senderKeysAtReceipt says how a sender's keys are tied to it now, from what
-// this agent already holds: nothing is fetched on a sender's say-so. Keys
-// nothing ties to the sender are recorded as such; the message is still taken,
-// as it always was, but it can never be shown to have come from that sender.
+// this agent already holds: nothing is fetched on a sender's say-so, and
+// nothing is written. It returns the evidence to keep with the message: the
+// sender's key history then, or for one of this agent's own AI agents the
+// delegation evidence (ownEvidence). Keys nothing ties to the sender are
+// recorded as such; the message is still taken, as it always was, but it can
+// never be shown to have come from that sender.
 func (s *CoreServer) senderKeysAtReceipt(aid string, did *didcomm.DID) (trust, kelSaid string, kelEvents int, kel string) {
 	untied := string(didcomm.KeysUntied)
-	if s.ownAgentKeys(aid, did) == nil {
-		return keysOwn, "", 0, ""
+	if evidence, err := s.ownAgentAtArrival(aid, did); err == nil {
+		return keysOwn, "", 0, evidence
 	}
 	if s.DataStore == nil {
 		return untied, "", 0, ""
@@ -92,84 +97,106 @@ func (s *CoreServer) senderKeysAtReceipt(aid string, did *didcomm.DID) (trust, k
 	return string(t), said, len(rec.KEL), string(events)
 }
 
-// ownAgentKeys reports whether did is the keyset this agent holds for one of
-// its own AI agents. Neither an asset row nor a keyset file is enough: both
-// are files this agent writes, and it can write them for anybody's
-// identifier. The identifier's key history must open with an inception
-// delegated from this Identity Agent's root and approved in the root's own
-// key history, checked with keri-go (delegatedFromHere).
-func (s *CoreServer) ownAgentKeys(aid string, did *didcomm.DID) error {
-	// Checked first so that checking never mints: keySetFor makes a keyset
-	// for an identifier it has none for.
-	if !s.hasKeySet(aid) {
-		return fmt.Errorf("this Identity Agent holds no keys for %s", aid)
+// ownEvidence is what is kept with a message from one of this agent's own AI
+// agents: the agent's delegated inception and the root's key history as they
+// were when it arrived (the engine's original bytes, base64). With the keys
+// kept beside it (SenderDID), it is checked again from these alone, so the AI
+// agent being removed or rotated later does not break a genuine old proof.
+type ownEvidence struct {
+	Inception string   `json:"inception"`
+	RootKEL   []string `json:"root_kel"`
+}
+
+// kelHolder is an engine that can find a key history by identifier, not only
+// by the name it is held under. A name can be reused or renamed; the
+// identifier cannot.
+type kelHolder interface {
+	GetKelByAID(aid string) (*drivers.DriverKelResponse, error)
+}
+
+// ownAgentAtArrival reports whether did is the keyset this agent holds for one
+// of its own AI agents, and returns the evidence to keep if so. Neither an
+// asset row nor a keyset file is enough: both are files this agent writes, and
+// it can write them for anybody's identifier. The identifier must be an AI
+// agent here, held with keys equal to did, and its key history must open with
+// an inception delegated from this Identity Agent's root and approved in the
+// root's own history (keri-go). Read only: a key history the engine does not
+// already hold is a refusal, never a reason to make one.
+func (s *CoreServer) ownAgentAtArrival(aid string, did *didcomm.DID) (string, error) {
+	if s.findAgentAssetByAID(aid) == nil {
+		return "", fmt.Errorf("%s is not one of this Identity Agent's AI agents", aid)
 	}
-	if err := s.delegatedFromHere(aid); err != nil {
-		return fmt.Errorf("%s is not delegated from this Identity Agent: %w", aid, err)
+	// Before keySetFor, which makes a keyset for an identifier it has none for.
+	if !s.hasKeySet(aid) {
+		return "", fmt.Errorf("this Identity Agent holds no keys for %s", aid)
 	}
 	ks, err := s.keySetFor(aid)
 	if err != nil {
-		return err
+		return "", err
 	}
-	own, err := ks.DID()
+	held, err := ks.DID()
 	if err != nil {
-		return err
+		return "", err
 	}
-	if own.Ed != did.Ed || own.Dsa != did.Dsa || own.X25519 != did.X25519 || own.MlKem != did.MlKem {
-		return fmt.Errorf("the kept keys are not the ones this Identity Agent holds for %s", aid)
+	if held.Ed != did.Ed || held.Dsa != did.Dsa || held.X25519 != did.X25519 || held.MlKem != did.MlKem {
+		return "", fmt.Errorf("the keys are not the ones this Identity Agent holds for %s", aid)
 	}
-	return nil
+	root := s.OwnerRootAID()
+	engine, ok := s.KeriDriver.(kelHolder)
+	if root == "" || !ok {
+		return "", fmt.Errorf("this Identity Agent has no root identity and key engine to check with")
+	}
+	kel, err := engine.GetKelByAID(aid)
+	if err != nil || len(kel.RawEventsB64) == 0 {
+		return "", fmt.Errorf("the key history of %s is not held here", aid)
+	}
+	rootKEL, err := engine.GetKelByAID(root)
+	if err != nil {
+		return "", fmt.Errorf("the root identity's key history is not held here")
+	}
+	e := ownEvidence{Inception: kel.RawEventsB64[0], RootKEL: rootKEL.RawEventsB64}
+	if err := s.delegatedFromHere(aid, e); err != nil {
+		return "", err
+	}
+	b, err := json.Marshal(e)
+	return string(b), err
 }
 
-// delegatedFromHere checks, with keri-go, that aid's key history opens with a
-// delegated inception that this Identity Agent's root identity approved by a
+// delegatedFromHere checks, with keri-go, that the evidence shows aid opening
+// with a delegated inception that this Identity Agent's root approved by a
 // seal in its own key history.
-func (s *CoreServer) delegatedFromHere(aid string) error {
+func (s *CoreServer) delegatedFromHere(aid string, e ownEvidence) error {
 	root := s.OwnerRootAID()
-	if root == "" || s.KeriDriver == nil || s.assetHandler == nil {
-		return fmt.Errorf("this Identity Agent has no root identity and key engine to check with")
+	if root == "" {
+		return fmt.Errorf("this Identity Agent has no root identity to check with")
 	}
-	name := ""
-	for _, a := range s.assetHandler.Store.ListAssets() {
-		if a.PairwiseAID == aid {
-			name = a.DisplayName
-			kel, err := s.KeriDriver.GetKel(name)
-			if err != nil {
-				// The engine forgets identities on a restart; an asset's is
-				// rebuilt from its derived keys, as the OOBI route does.
-				if rerr := s.reviveAssetIdentity(a); rerr != nil {
-					return fmt.Errorf("its key history is not held here: %w", err)
-				}
-			} else if kel.AID != aid {
-				return fmt.Errorf("the key history held under its name is %s's", kel.AID)
-			}
-			break
-		}
-	}
-	if name == "" {
-		return fmt.Errorf("no AI agent here has that identifier")
-	}
-	kel, err := s.KeriDriver.GetKel(name)
-	if err != nil || kel.AID != aid || len(kel.RawEventsB64) == 0 {
-		return fmt.Errorf("its key history is not held here")
-	}
-	inception, err := base64.StdEncoding.DecodeString(kel.RawEventsB64[0])
+	inception, err := base64.StdEncoding.DecodeString(e.Inception)
 	if err != nil || len(inception) == 0 {
-		return fmt.Errorf("its inception is not readable")
+		return fmt.Errorf("the inception of %s is not readable", aid)
 	}
-	rootKEL, err := s.KeriDriver.GetKel(root)
-	if err != nil || rootKEL.AID != root {
-		return fmt.Errorf("the root identity's key history is not held here")
+	ev, err := keri.ParseEvent(inception)
+	if err != nil || ev.Identifier != aid {
+		return fmt.Errorf("the inception kept is not %s's", aid)
 	}
-	raws := make([][]byte, 0, len(rootKEL.RawEventsB64))
-	for _, r := range rootKEL.RawEventsB64 {
+	raws := make([][]byte, 0, len(e.RootKEL))
+	for _, r := range e.RootKEL {
 		b, err := base64.StdEncoding.DecodeString(r)
 		if err != nil || len(b) == 0 {
 			return fmt.Errorf("the root identity's key history is not readable")
 		}
 		raws = append(raws, b)
 	}
-	return keri.ValidateDelegation(inception, raws)
+	if len(raws) == 0 {
+		return fmt.Errorf("no root key history was kept")
+	}
+	first, err := keri.ParseEvent(raws[0])
+	if err != nil || first.Identifier != root {
+		return fmt.Errorf("the root key history kept is not this Identity Agent's")
+	}
+	if err := keri.ValidateDelegation(inception, raws); err != nil {
+		return fmt.Errorf("%s is not delegated from this Identity Agent: %w", aid, err)
+	}
+	return nil
 }
 
 // receiptBinding is what the log row for a received message commits to: the
@@ -244,7 +271,13 @@ func (s *CoreServer) provedSender(n store.Notification) (*didcomm.JWM, string, e
 func (s *CoreServer) keysWereTied(n store.Notification, did *didcomm.DID) error {
 	switch n.SenderKeyTrust {
 	case keysOwn:
-		return s.ownAgentKeys(n.FromAID, did)
+		// From what was kept: the keys were bound by the log row on arrival,
+		// and the delegation is checked again from the bytes kept with them.
+		var e ownEvidence
+		if err := json.Unmarshal([]byte(n.SenderKEL), &e); err != nil {
+			return fmt.Errorf("the delegation evidence was not kept with the message")
+		}
+		return s.delegatedFromHere(n.FromAID, e)
 	case string(didcomm.KeysAnchored), string(didcomm.KeysVouched):
 	default:
 		return fmt.Errorf("nothing tied them to the sender when the message arrived")
