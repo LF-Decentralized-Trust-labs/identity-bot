@@ -508,20 +508,55 @@ func resolveVolumeHostPath(dataDir, appID, hostPath string) (string, error) {
 	if appID == "" || strings.ContainsAny(appID, `/\`) || appID == "." || appID == ".." {
 		return "", fmt.Errorf("volume %q: the app has no usable id to keep its files under", hostPath)
 	}
-	root, err := filepath.Abs(filepath.Join(dataDir, "sandbox-volumes", appID))
+	base, err := filepath.Abs(dataDir)
 	if err != nil {
 		return "", err
 	}
-	resolved := filepath.Clean(root + strings.TrimPrefix(hostPath, appDataToken))
+	rel := filepath.Clean(filepath.Join("sandbox-volumes", appID, strings.TrimPrefix(hostPath, appDataToken)))
+	root := filepath.Join(base, "sandbox-volumes", appID)
+	resolved := filepath.Join(base, rel)
 	if resolved != root && !strings.HasPrefix(resolved, root+string(filepath.Separator)) {
 		return "", fmt.Errorf("volume %q resolves outside the app's own directory", hostPath)
 	}
-	// Created so Podman never fails on a missing source, readable by this user
-	// alone like the rest of the data directory.
-	if err := os.MkdirAll(resolved, 0o700); err != nil {
+	// A string that stays inside is not enough: the app writes into what it
+	// mounts, and a link it plants there (app/link -> the data directory)
+	// would turn a later mount of app/link into the data directory itself.
+	// So every component below the data directory is walked without following
+	// links: a link anywhere is refused, and what is missing is created one
+	// level at a time, readable by this user alone like the rest of the data
+	// directory.
+	cur := base
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		cur = filepath.Join(cur, part)
+		fi, err := os.Lstat(cur)
+		switch {
+		case os.IsNotExist(err):
+			if err := os.Mkdir(cur, 0o700); err != nil {
+				return "", err
+			}
+		case err != nil:
+			return "", err
+		case fi.Mode()&os.ModeSymlink != 0:
+			return "", fmt.Errorf("volume %q passes through a link (%s), which an app may not mount", hostPath, cur)
+		case !fi.IsDir():
+			return "", fmt.Errorf("volume %q: %s is not a directory", hostPath, cur)
+		}
+	}
+	// And the real path, once every link above the data directory is followed
+	// too, must still be inside the real root.
+	realBase, err := filepath.EvalSymlinks(base)
+	if err != nil {
 		return "", err
 	}
-	return resolved, nil
+	real, err := filepath.EvalSymlinks(resolved)
+	if err != nil {
+		return "", err
+	}
+	realRoot := filepath.Join(realBase, "sandbox-volumes", appID)
+	if real != realRoot && !strings.HasPrefix(real, realRoot+string(filepath.Separator)) {
+		return "", fmt.Errorf("volume %q resolves outside the app's own directory", hostPath)
+	}
+	return real, nil
 }
 
 func (d *ContainerRuntime) removeContainer(ctx context.Context) error {

@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -26,9 +27,9 @@ func TestAnAppMountsOnlyItsOwnDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := filepath.Join(dataDir, "sandbox-volumes", "notes", "cache")
-	if abs, _ := filepath.Abs(want); got != abs {
-		t.Fatalf("mounted %s, want %s", got, abs)
+	want, _ := filepath.EvalSymlinks(filepath.Join(dataDir, "sandbox-volumes", "notes", "cache"))
+	if got != want {
+		t.Fatalf("mounted %s, want %s", got, want)
 	}
 	if _, err := resolveVolumeHostPath(dataDir, "../x", "{APP_DATA}"); err == nil {
 		t.Error("an app id that climbs out of its directory was used")
@@ -54,5 +55,32 @@ func TestTheProxyLogRedactsTheLocalOwnerSecret(t *testing.T) {
 	h := map[string][]string{"X-Local-Owner-Secret": {"the-secret-0123456789abcdefghijkl"}}
 	if got := flattenHeaders(h)["X-Local-Owner-Secret"]; got != "[REDACTED]" {
 		t.Fatalf("logged as %q", got)
+	}
+}
+
+// An app writes into what it mounts. A link it plants there, pointing at the
+// data directory, must not turn a later mount of that link into the data
+// directory itself.
+func TestALinkAnAppPlantedCannotBeMounted(t *testing.T) {
+	dataDir := t.TempDir()
+	if _, err := resolveVolumeHostPath(dataDir, "notes", "{APP_DATA}"); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dataDir, "sandbox-volumes", "notes", "link")
+	if err := os.Symlink(dataDir, link); err != nil {
+		t.Skip("cannot make a link here:", err)
+	}
+	for _, host := range []string{"{APP_DATA}/link", "{APP_DATA}/link/keystore"} {
+		if p, err := resolveVolumeHostPath(dataDir, "notes", host); err == nil {
+			t.Errorf("%q through a planted link was mounted as %s", host, p)
+		}
+	}
+	// A link replacing the app's own directory is refused the same way.
+	os.RemoveAll(filepath.Join(dataDir, "sandbox-volumes", "other"))
+	if err := os.Symlink(dataDir, filepath.Join(dataDir, "sandbox-volumes", "other")); err != nil {
+		t.Fatal(err)
+	}
+	if p, err := resolveVolumeHostPath(dataDir, "other", "{APP_DATA}"); err == nil {
+		t.Errorf("an app directory that is a link was mounted as %s", p)
 	}
 }
