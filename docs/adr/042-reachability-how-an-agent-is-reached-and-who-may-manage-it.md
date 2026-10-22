@@ -1,6 +1,6 @@
 # ADR-042 — How an agent is reached, and who may manage it
 
-**Status:** Accepted; §1, §3 and §5 amended by ADR-048 (2026-10-21): URL Relay carries both private and public addresses under one relay protocol; the Chisel tunnel provider goes, while development tunnels (Cloudflare, ngrok) stay; the core defaults every identity to URL Relay and a product sets its own per-entity default; the Identity Agent itself marks every relayed request
+**Status:** Accepted; §1, §3 and §5 amended by ADR-048 (2026-10-21): URL Relay carries both private and public addresses under one relay protocol; the Chisel tunnel provider goes, while development tunnels (Cloudflare, ngrok) stay; the core defaults every identity to URL Relay and a product sets its own per-entity default; the Identity Agent itself marks every relayed request; §3 amended 2026-10-22: a request from this computer is the owner's only with the secret the core was started with
 **Date:** 2026-09-16
 **Relates to:** ADR-006 (Standardized Topology), ADR-033 (An identifier travels with an address), ADR-036 (A computer you pair with does not publish who you are), ADR-041 (One neutral scheme for the protocol's device codes)
 
@@ -180,6 +180,38 @@ Three properties make this sound:
   `isBrowserOriginated` rejects any request carrying `Origin` or the `Sec-Fetch-*`
   family — forbidden header names a page's script cannot set or remove — which a
   native client on the machine never sends.
+- *Amended 2026-10-22:* **being on this computer is not enough.** Every program on
+  a desktop, and every app on a phone, reaches loopback the same way, so a local
+  request is the owner's only when it also carries the secret the core was started
+  with (`X-Local-Owner-Secret`). The app that starts the core chooses it and hands it
+  over (`IDENTITY_AGENT_LOCAL_OWNER_SECRET` on a desktop,
+  `mobilecore.DeclareLocalOwnerSecret` on a phone); a core started by hand mints one.
+  Either way it is written to `local-owner-secret` in the data directory, readable by
+  that user alone, for local tools. The connection test above still decides whether
+  a request is local (`isLocalConnection`); only the owner test adds the secret, so a
+  signed program on the machine keeps its local standing and an unsigned one without
+  the secret is treated as remote. Sealed and signed owner requests are unchanged.
+  The limit: a program running as the same operating-system user can read the file
+  or the starting process's environment, so a program that must not act as the owner
+  has to run as a different user.
+  - **The secret is sent only to a core that proved it holds it.** Another program
+    can hold the port the app expects (on a phone any app may take it first). Before
+    sending the secret anywhere, the app asks `GET /api/local-owner/proof?nonce=…`,
+    answered to anyone with an HMAC-SHA256, keyed by the secret, of the nonce and the
+    port the core is listening on (`server.LocalOwnerProof`). Binding the port means a
+    program on the expected port cannot pass the question to the real core on another
+    port and hand back its answer. A phone app records the port the core actually
+    bound rather than assuming the default.
+  - **It never leaves the core.** Read from the environment once and removed there,
+    and withheld from every process the core starts (`childenv`); never forwarded to a
+    model provider or through the sandbox proxy, and redacted in its logs; never in a
+    backup. A sandboxed app's volumes are confined to its own directory, so none can
+    mount the data directory.
+  - **Windows.** A file's mode means little there; the folder decides who may read it.
+    A data directory inside the user's profile inherits an access list only that user
+    can read. The core warns loudly when it is anywhere else.
+  - A websocket to the core carries the secret as a header like any other request
+    (native clients); a browser cannot, and is never the owner.
 
 **What this gives a sealed instance behind a reverse proxy.** The proxy adds a
 forwarding header and the instance is not directly reachable, so *every* request is
@@ -188,7 +220,10 @@ loopback-owner shortcut simply cannot be reached on such a deployment, which is 
 it is safe there to trust the proxy's forwarding headers (they are guaranteed to be
 overwritten by something in front).
 
-**The honest limitation.** The gate keys on the *presence of a forwarding header*.
+**The honest limitation.** *(Amended 2026-10-22: an unmarked forwarder over loopback
+no longer yields the owner, because it does not hold the local owner secret; it can
+still make a request look local, which matters for the local standing a signed caller
+has.)* The gate keys on the *presence of a forwarding header*.
 An ingress that reached the agent over loopback **without** adding one would look
 local. This is why every supported reachability path adds one: a reverse proxy adds
 `X-Forwarded-*`, the relay adds its `X-IA-Via-Ingress` marker, and a managed tunnel

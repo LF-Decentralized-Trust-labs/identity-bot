@@ -22,7 +22,7 @@ import (
 
 func offerServer(t *testing.T, dir string) *CoreServer {
 	t.Helper()
-	return &CoreServer{DataDir: dir, EndpointService: endpoint.New(nil, 5050)}
+	return &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: dir, EndpointService: endpoint.New(nil, 5050)}
 }
 
 func TestThePublishedPairingIdentitySurvivesARestart(t *testing.T) {

@@ -133,9 +133,12 @@ func isBrowserOriginated(r *http.Request) bool {
 	return r.Header.Get("Sec-Fetch-Dest") != ""
 }
 
-// isLocalOwnerRequest: genuinely local = loopback connection, no forwarding
-// headers, and not issued by a web page.
-func isLocalOwnerRequest(r *http.Request) bool {
+// isLocalConnection reports whether r was made by a program on this computer:
+// a loopback connection, no forwarding headers, and not issued by a web page.
+// That says where the request came from and nothing about who sent it; being
+// the owner also takes the secret the core was started with
+// (CoreServer.isLocalOwnerRequest).
+func isLocalConnection(r *http.Request) bool {
 	host, _, _ := net.SplitHostPort(r.RemoteAddr)
 	return sandbox.IsLoopbackHost(host) &&
 		!hasForwardingHeaders(r) &&

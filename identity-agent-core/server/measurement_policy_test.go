@@ -70,7 +70,7 @@ func TestBlankEntriesAreIgnoredRatherThanRefused(t *testing.T) {
 // parsed, bound to the offered keys and checked for debug mode, and then
 // measured against nothing at all.
 func TestNoPolicyRefusesRatherThanAcceptsAnything(t *testing.T) {
-	s := &CoreServer{}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret}
 	if s.acceptableMeasurement(make([]byte, 48)) {
 		t.Fatal("an agent with no measurement policy accepted a measurement, which would " +
 			"let any sealed box be adopted regardless of what it launched")
@@ -80,7 +80,7 @@ func TestNoPolicyRefusesRatherThanAcceptsAnything(t *testing.T) {
 func TestOnlyTheListedMeasurementsAreAccepted(t *testing.T) {
 	listed, _ := hex.DecodeString(aMeasurement(0x55))
 	other, _ := hex.DecodeString(aMeasurement(0x66))
-	s := &CoreServer{AcceptedMeasurements: [][]byte{listed}}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, AcceptedMeasurements: [][]byte{listed}}
 
 	if !s.acceptableMeasurement(listed) {
 		t.Error("the listed measurement was refused")

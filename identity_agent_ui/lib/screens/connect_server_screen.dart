@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../theme/app_theme.dart';
+import 'package:agent_client/services/the_owner_at_this_computer.dart';
 
 enum _ConnectPhase { intro, enterUrl, processing, connected }
 
@@ -70,7 +70,7 @@ class _ConnectServerScreenState extends State<ConnectServerScreen> {
         _statusMessage = 'Checking server health...';
       });
 
-      final healthResponse = await http
+      final healthResponse = await ProvingThisComputer.shared
           .get(Uri.parse('$normalizedUrl/api/health'))
           .timeout(const Duration(seconds: 10));
 
@@ -104,7 +104,7 @@ class _ConnectServerScreenState extends State<ConnectServerScreen> {
         _statusMessage = 'Server found ($agent v$version). Fetching OOBI...';
       });
 
-      final oobiResponse = await http
+      final oobiResponse = await ProvingThisComputer.shared
           .get(Uri.parse('$normalizedUrl/api/oobi'))
           .timeout(const Duration(seconds: 10));
 
@@ -137,7 +137,7 @@ class _ConnectServerScreenState extends State<ConnectServerScreen> {
         _statusMessage = 'OOBI found. Resolving identity ($aid)...';
       });
 
-      final resolveResponse = await http
+      final resolveResponse = await ProvingThisComputer.shared
           .get(Uri.parse(oobiUrl))
           .timeout(const Duration(seconds: 15));
 

@@ -1,4 +1,5 @@
 import 'package:http/http.dart' as http;
+import 'the_owner_at_this_computer.dart';
 
 /// Carrying a browser session on every request, without having to remember to.
 ///
@@ -21,7 +22,7 @@ import 'package:http/http.dart' as http;
 /// a confusing "signed in but refused".
 class BrowserSessionClient extends http.BaseClient {
   BrowserSessionClient({required this.agentOrigin, http.Client? inner})
-      : _inner = inner ?? http.Client();
+      : _inner = ProvingThisComputer.over(inner);
 
   /// The origin this session belongs to, as scheme://host:port. Requests
   /// anywhere else pass through untouched.

@@ -112,8 +112,8 @@ func TestBrowserIsNotTheLocalOwner(t *testing.T) {
 			for k, v := range c.headers {
 				r.Header.Set(k, v)
 			}
-			if got := isLocalOwnerRequest(r); got != c.owner {
-				t.Fatalf("isLocalOwnerRequest = %v, want %v", got, c.owner)
+			if got := isLocalConnection(r); got != c.owner {
+				t.Fatalf("isLocalConnection = %v, want %v", got, c.owner)
 			}
 		})
 	}

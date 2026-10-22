@@ -70,6 +70,20 @@ func skipReason(rel string) string {
 		// must not depend on the old device's secure element.
 		return "captured as root_seed, unwrapped"
 	}
+	if strings.HasPrefix(slashed, "local-owner-secret") {
+		// What makes a request from this computer the owner's, for one start of
+		// this core on this computer. A new one is chosen at every start, so a
+		// copy is useless after a restore and a disclosure while it travels.
+		// HasPrefix also covers the .tmp it is written through.
+		return "belongs to one start of the core on this computer"
+	}
+	if strings.HasPrefix(slashed, "mcp_tokens.json") {
+		// The AI agents' bearer tokens, stored hashed, not carried for the same
+		// reason bodies and controller grants are not: a restore must not bring
+		// back a token revoked after the archive was made. Tokens are minted
+		// again after a restore, by the owner provisioning each agent.
+		return "which tokens may act is decided after a restore, not restored"
+	}
 	if strings.HasPrefix(slashed, "agent_bodies.json") {
 		// WHICH MACHINES MAY SPEAK AS THIS IDENTITY'S AI AGENTS, not carried,
 		// for the same reason controller grants are not: a restore must not

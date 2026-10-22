@@ -10,7 +10,7 @@ import (
 // from. Among the actions that skipped it was the invitation that decides who
 // owns an organisation.
 func TestAnUnsignedAskIsRefused(t *testing.T) {
-	s := &CoreServer{DataDir: t.TempDir()}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 
 	for _, c := range []struct{ name, ask string }{
 		{"add contact, unsigned", `{"v":"ASK1","t":2}`},
@@ -33,7 +33,7 @@ func TestAnUnsignedAskIsRefused(t *testing.T) {
 // An action this agent does not know cannot state how it authenticates itself,
 // so there is no way to decide whether it did.
 func TestAnUnknownActionIsRefused(t *testing.T) {
-	s := &CoreServer{DataDir: t.TempDir()}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 	if err := s.verifyAskSignature([]byte(`{"v":"ASK1","t":9999,"sig":"AAAA","signer_oobi":"https://x"}`)); err == nil {
 		t.Fatal("an unknown action was accepted")
 	}
@@ -47,7 +47,7 @@ func TestAnUnknownActionIsRefused(t *testing.T) {
 // the site's own address publishes, plus a delegation anchor where claimed.
 // It has to say so in code rather than by omission.
 func TestLoginDeclaresThatItVerifiesItself(t *testing.T) {
-	s := &CoreServer{DataDir: t.TempDir()}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 	if err := s.verifyAskSignature([]byte(`{"v":"ASK1","t":1}`)); err != nil {
 		t.Fatalf("login was refused: %v", err)
 	}

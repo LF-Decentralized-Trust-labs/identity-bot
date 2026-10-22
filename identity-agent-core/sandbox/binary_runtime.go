@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"identity-agent-core/childenv"
 	"io"
 	"log"
 	"os"
@@ -129,7 +130,7 @@ pathFound:
 		"IDENTITY_AGENT_API": true, "DISPLAY_PORT": true,
 	}
 
-	env := os.Environ()
+	env := childenv.Environ()
 	if b.manifest.Binary.Environment != nil {
 		for k, v := range b.manifest.Binary.Environment {
 			if reservedKeys[k] {

@@ -243,5 +243,5 @@ func serverWithIdentity(t *testing.T, aid string) *CoreServer {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	return &CoreServer{DataDir: dir, DataStore: ds}
+	return &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: dir, DataStore: ds}
 }

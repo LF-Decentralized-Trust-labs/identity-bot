@@ -19,7 +19,7 @@ import (
 
 func newAuthTestServer(t *testing.T) *CoreServer {
 	t.Helper()
-	return &CoreServer{DataDir: t.TempDir()}
+	return &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 }
 
 // remote builds a request that did not originate on this machine — the shape a
@@ -34,6 +34,7 @@ func remote(method, path string, body string) *http.Request {
 func local(method, path string, body string) *http.Request {
 	r := httptest.NewRequest(method, path, strings.NewReader(body))
 	r.RemoteAddr = "127.0.0.1:51000"
+	r.Header.Set(LocalOwnerSecretHeader, testOwnerSecret)
 	return r
 }
 
@@ -344,7 +345,7 @@ func TestUnsealedAgentFallsBackToItsOwnIdentity(t *testing.T) {
 	}); err != nil {
 		t.Skipf("cannot save identity: %v", err)
 	}
-	s := &CoreServer{DataDir: dir, DataStore: ds}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: dir, DataStore: ds}
 
 	authority, err := s.ownerAuthority()
 	if err != nil {
@@ -426,7 +427,7 @@ func TestNoHandlerUsesLoopbackAsTheOwnerTest(t *testing.T) {
 		// one: deciding whether a caller is local is what a resolver is FOR, and
 		// the result is recorded as a fact about the connection rather than used
 		// as an ownership test.
-		if name == "api_auth.go" || name == "mcp_tokens.go" || name == "caller_resolver.go" {
+		if name == "api_auth.go" || name == "mcp_tokens.go" || name == "caller_resolver.go" || name == "the_owner_at_this_computer.go" {
 			continue
 		}
 		// The one route where being local is not standing in for being the
@@ -467,7 +468,7 @@ func TestNoHandlerUsesLoopbackAsTheOwnerTest(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read %s: %v", name, err)
 		}
-		for _, banned := range []string{"isLocalOwnerRequest(r)", "isLocalhost(r)"} {
+		for _, banned := range []string{"isLocalOwnerRequest(r)", "isLocalConnection(r)", "isLocalhost(r)"} {
 			if strings.Contains(string(src), banned) {
 				t.Errorf("%s calls %s — use s.isOwner(r) so an owner who is not at "+
 					"the keyboard can still prove it by signing the request", name, banned)

@@ -16,7 +16,7 @@ import (
 
 func auditTestServer(t *testing.T) *CoreServer {
 	t.Helper()
-	return &CoreServer{DataDir: t.TempDir()}
+	return &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 }
 
 func auditRequest(target string, remoteAddr string, headers map[string]string) *http.Request {
@@ -54,7 +54,8 @@ func TestAuditRefusesTokenBearingLoopbackCaller(t *testing.T) {
 func TestAuditAllowsOwnerOnLoopbackWithoutToken(t *testing.T) {
 	s := auditTestServer(t)
 	w := httptest.NewRecorder()
-	if !s.requireOwner(w, auditRequest("/api/activity/invocations", "127.0.0.1:54321", nil)) {
+	if !s.requireOwner(w, auditRequest("/api/activity/invocations", "127.0.0.1:54321",
+		map[string]string{LocalOwnerSecretHeader: testOwnerSecret})) {
 		t.Fatalf("the local owner should be allowed, got %d", w.Code)
 	}
 }

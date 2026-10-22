@@ -21,6 +21,7 @@ func TestOfferingThisComputerSaysWhereToReachIt(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/pairing/offer-this-computer", nil)
 	req.RemoteAddr = "127.0.0.1:5050"
+	req.Header.Set(LocalOwnerSecretHeader, testOwnerSecret)
 	req.Host = "192.168.0.24:5050"
 	s.handleOfferThisComputer(rec, req)
 	if rec.Code != http.StatusOK {
@@ -55,6 +56,7 @@ func TestAFreshAgentWithNoEndpointServiceStillOffersItself(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/pairing/offer-this-computer", nil)
 	req.RemoteAddr = "127.0.0.1:5050"
+	req.Header.Set(LocalOwnerSecretHeader, testOwnerSecret)
 	s.handleOfferThisComputer(rec, req)
 
 	if rec.Code != http.StatusOK {

@@ -22,6 +22,7 @@ func TestAnIdentityElsewhereIsCheckedAgainstItsPublishedHistory(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/api/verify/identity-elsewhere",
 			strings.NewReader(body))
 		req.RemoteAddr = "127.0.0.1:1234"
+		req.Header.Set(LocalOwnerSecretHeader, testOwnerSecret)
 		rec := httptest.NewRecorder()
 		s.handleVerifyAnIdentityElsewhere(rec, req)
 		var out verifyIdentityResponse
@@ -63,6 +64,7 @@ func TestAnIdentityElsewhereIsCheckedAgainstItsPublishedHistory(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/api/verify/identity-elsewhere",
 			strings.NewReader(`{"aid":"ESOMEBODY","oobi_url":"https://x.test/oobi"}`))
 		req.RemoteAddr = "127.0.0.1:1234"
+		req.Header.Set(LocalOwnerSecretHeader, testOwnerSecret)
 		rec := httptest.NewRecorder()
 		s.handleVerifyAnIdentityElsewhere(rec, req)
 		if rec.Code != http.StatusNotImplemented {
@@ -81,6 +83,7 @@ func TestAnIdentityElsewhereIsCheckedAgainstItsPublishedHistory(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/api/verify/identity-elsewhere",
 				strings.NewReader(body))
 			req.RemoteAddr = "127.0.0.1:1234"
+			req.Header.Set(LocalOwnerSecretHeader, testOwnerSecret)
 			rec := httptest.NewRecorder()
 			s.handleVerifyAnIdentityElsewhere(rec, req)
 			if rec.Code != http.StatusBadRequest {

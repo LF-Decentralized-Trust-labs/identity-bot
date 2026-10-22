@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import 'the_path_a_signature_covers.dart';
+import 'the_owner_at_this_computer.dart';
 
 /// Reaching an Identity Agent that runs on a different machine.
 ///
@@ -36,7 +37,7 @@ class ControllerSigningClient extends http.BaseClient {
     required this.localCoreOrigin,
     this.authentication,
     http.Client? inner,
-  })  : _inner = inner ?? http.Client(),
+  })  : _inner = ProvingThisComputer.over(inner),
         _ownsInner = inner == null;
 
   /// The agent this app is a front end for, as scheme://host:port.

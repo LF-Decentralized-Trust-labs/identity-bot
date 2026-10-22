@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
+import 'a_socket_to_the_agent.dart';
+
 class AgentEvent {
   final String type;
   final String timestamp;
@@ -112,7 +114,7 @@ class EventService {
 
     try {
       _channel?.sink.close();
-      _channel = WebSocketChannel.connect(uri);
+      _channel = connectToTheAgent(uri);
 
       _channel!.stream.listen(
         (data) {

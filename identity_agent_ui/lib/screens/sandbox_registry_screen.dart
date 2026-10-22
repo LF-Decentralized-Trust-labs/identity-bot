@@ -1,12 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import '../theme/app_theme.dart';
 import 'package:agent_client/config/agent_config.dart';
 import 'package:agent_client/models/sandbox_app.dart';
 import 'sandbox_viewer.dart';
+import 'package:agent_client/services/the_owner_at_this_computer.dart';
 
 class SandboxRegistryScreen extends StatefulWidget {
   final String? serverUrl;
@@ -51,11 +51,11 @@ class _SandboxRegistryScreenState extends State<SandboxRegistryScreen> {
   Future<void> _loadData() async {
     setState(() { _loading = true; _error = null; });
     try {
-      final healthRes = await http.get(Uri.parse('$_baseUrl/api/sandbox/health'));
+      final healthRes = await ProvingThisComputer.shared.get(Uri.parse('$_baseUrl/api/sandbox/health'));
       if (healthRes.statusCode == 200) {
         _healthInfo = jsonDecode(healthRes.body);
       }
-      final appsRes = await http.get(Uri.parse('$_baseUrl/api/apps'));
+      final appsRes = await ProvingThisComputer.shared.get(Uri.parse('$_baseUrl/api/apps'));
       if (appsRes.statusCode == 200) {
         final List<dynamic> data = jsonDecode(appsRes.body);
         _apps = data.map((e) => SandboxApp.fromJson(e)).toList();
@@ -72,7 +72,7 @@ class _SandboxRegistryScreenState extends State<SandboxRegistryScreen> {
   Future<void> _refreshStatuses() async {
     for (final app in _apps) {
       try {
-        final res = await http.get(Uri.parse('$_baseUrl/api/apps/${app.id}/status'));
+        final res = await ProvingThisComputer.shared.get(Uri.parse('$_baseUrl/api/apps/${app.id}/status'));
         if (res.statusCode == 200) {
           setState(() { _statuses[app.id] = AppStatus.fromJson(jsonDecode(res.body)); });
         }
@@ -85,7 +85,7 @@ class _SandboxRegistryScreenState extends State<SandboxRegistryScreen> {
     if (installingApps.isEmpty) return;
     for (final app in installingApps) {
       try {
-        final res = await http.get(Uri.parse('$_baseUrl/api/apps/${app.id}/install-progress'));
+        final res = await ProvingThisComputer.shared.get(Uri.parse('$_baseUrl/api/apps/${app.id}/install-progress'));
         if (res.statusCode == 200) {
           final data = jsonDecode(res.body);
           final prog = _InstallProgress.fromJson(data);
@@ -100,7 +100,7 @@ class _SandboxRegistryScreenState extends State<SandboxRegistryScreen> {
 
   Future<void> _reloadApps() async {
     try {
-      final appsRes = await http.get(Uri.parse('$_baseUrl/api/apps'));
+      final appsRes = await ProvingThisComputer.shared.get(Uri.parse('$_baseUrl/api/apps'));
       if (appsRes.statusCode == 200) {
         final List<dynamic> data = jsonDecode(appsRes.body);
         setState(() { _apps = data.map((e) => SandboxApp.fromJson(e)).toList(); });
@@ -111,7 +111,7 @@ class _SandboxRegistryScreenState extends State<SandboxRegistryScreen> {
   Future<void> _installApp(SandboxApp app) async {
     try {
       setState(() { _installProgress[app.id] = _InstallProgress(status: 'starting', progress: 0, done: false); });
-      await http.post(Uri.parse('$_baseUrl/api/apps/${app.id}/install'));
+      await ProvingThisComputer.shared.post(Uri.parse('$_baseUrl/api/apps/${app.id}/install'));
       await _reloadApps();
     } catch (e) {
       _showError('Install failed: $e');
@@ -120,7 +120,7 @@ class _SandboxRegistryScreenState extends State<SandboxRegistryScreen> {
 
   Future<void> _launchApp(SandboxApp app) async {
     try {
-      final res = await http.post(Uri.parse('$_baseUrl/api/apps/${app.id}/launch'));
+      final res = await ProvingThisComputer.shared.post(Uri.parse('$_baseUrl/api/apps/${app.id}/launch'));
       if (res.statusCode != 200) {
         _showError('Launch failed: ${res.body}');
         return;
@@ -135,7 +135,7 @@ class _SandboxRegistryScreenState extends State<SandboxRegistryScreen> {
 
   Future<void> _stopApp(SandboxApp app) async {
     try {
-      await http.post(Uri.parse('$_baseUrl/api/apps/${app.id}/stop'));
+      await ProvingThisComputer.shared.post(Uri.parse('$_baseUrl/api/apps/${app.id}/stop'));
       await _reloadApps();
       await _refreshStatuses();
     } catch (e) {
@@ -167,7 +167,7 @@ class _SandboxRegistryScreenState extends State<SandboxRegistryScreen> {
     );
     if (confirmed != true) return;
     try {
-      await http.delete(Uri.parse('$_baseUrl/api/apps/${app.id}'));
+      await ProvingThisComputer.shared.delete(Uri.parse('$_baseUrl/api/apps/${app.id}'));
       setState(() { _installProgress.remove(app.id); });
       await _reloadApps();
     } catch (e) {
@@ -183,7 +183,7 @@ class _SandboxRegistryScreenState extends State<SandboxRegistryScreen> {
 
   Future<void> _openWindow(SandboxApp app) async {
     try {
-      final res = await http.get(Uri.parse('$_baseUrl/api/apps/${app.id}/status'));
+      final res = await ProvingThisComputer.shared.get(Uri.parse('$_baseUrl/api/apps/${app.id}/status'));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         final instanceData = data['instance'];
@@ -200,7 +200,7 @@ class _SandboxRegistryScreenState extends State<SandboxRegistryScreen> {
 
   Future<void> _openBrowser(SandboxApp app) async {
     try {
-      final res = await http.get(Uri.parse('$_baseUrl/api/apps/${app.id}/display'));
+      final res = await ProvingThisComputer.shared.get(Uri.parse('$_baseUrl/api/apps/${app.id}/display'));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         final displayUrl = data['display_url'] as String?;
@@ -728,7 +728,7 @@ class _SandboxRegistryScreenState extends State<SandboxRegistryScreen> {
     });
 
     try {
-      final res = await http.post(
+      final res = await ProvingThisComputer.shared.post(
         Uri.parse('$_baseUrl/api/sandbox/podman/setup'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'action': action}),
@@ -753,7 +753,7 @@ class _SandboxRegistryScreenState extends State<SandboxRegistryScreen> {
     _setupPollTimer?.cancel();
     _setupPollTimer = Timer.periodic(const Duration(seconds: 2), (timer) async {
       try {
-        final res = await http.get(Uri.parse('$_baseUrl/api/sandbox/podman/setup-status'));
+        final res = await ProvingThisComputer.shared.get(Uri.parse('$_baseUrl/api/sandbox/podman/setup-status'));
         if (res.statusCode == 200) {
           final data = jsonDecode(res.body) as Map<String, dynamic>;
           final status = data['status'] as String? ?? '';

@@ -24,7 +24,7 @@ func agentWithDerivedIdentity(t *testing.T) *CoreServer {
 	if err != nil {
 		t.Skipf("data store unavailable: %v", err)
 	}
-	s := &CoreServer{DataDir: dir, DataStore: ds, EventHub: NewEventHub()}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: dir, DataStore: ds, EventHub: NewEventHub()}
 
 	rootSeed, err := ensureRootSeed(dir)
 	if err != nil {
@@ -56,7 +56,7 @@ func agentWithNoIdentity(t *testing.T) *CoreServer {
 	if err != nil {
 		t.Skipf("data store unavailable: %v", err)
 	}
-	return &CoreServer{DataDir: dir, DataStore: ds, EventHub: NewEventHub()}
+	return &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: dir, DataStore: ds, EventHub: NewEventHub()}
 }
 
 // startedEngine returns a running KERI engine, skipping if none is available.

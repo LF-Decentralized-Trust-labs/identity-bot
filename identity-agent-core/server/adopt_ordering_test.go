@@ -101,7 +101,7 @@ func TestNoMeasurementPolicyRefusesRatherThanAccepts(t *testing.T) {
 	if err := checkOfferBeforeDelegating(offerWithReport(t, true, 0x11), nil, chainAlwaysGenuine); err == nil {
 		t.Fatal("a box was adopted with no statement of acceptable software")
 	}
-	s := &CoreServer{}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret}
 	if s.acceptableMeasurement([]byte{0x11}) {
 		t.Error("an empty policy accepted a measurement")
 	}

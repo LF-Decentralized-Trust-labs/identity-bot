@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import '../config/agent_config.dart';
 import 'a_controller_offering_itself.dart';
 import 'controller_signing_client.dart';
+import 'the_owner_at_this_computer.dart';
 
 /// The machine's own half of asking to act for an identity.
 ///
@@ -26,7 +27,7 @@ class AskingToActForAnIdentity {
     String? localCoreOrigin,
     http.Client? client,
   })  : _localCore = localCoreOrigin ?? AgentConfig.coreBaseUrl,
-        _plain = client ?? http.Client(),
+        _plain = ProvingThisComputer.over(client),
         _ownClient = client == null;
 
   /// The core on THIS computer. Never the agent: the key that names this

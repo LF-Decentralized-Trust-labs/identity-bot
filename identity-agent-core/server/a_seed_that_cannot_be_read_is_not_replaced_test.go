@@ -53,7 +53,7 @@ func TestAMachineWithNoSeedGetsOne(t *testing.T) {
 // else.
 func TestARelayDoesNotMakeASeedForAClaimedMachine(t *testing.T) {
 	dir := t.TempDir()
-	s := &CoreServer{DataDir: dir, DataStore: testDataStore(t, dir)}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: dir, DataStore: testDataStore(t, dir)}
 	if err := s.DataStore.SaveIdentity(store.IdentityState{AID: "ECLAIMEDIDENTITY"}); err != nil {
 		t.Fatal(err)
 	}

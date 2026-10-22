@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import '../config/agent_config.dart';
 import 'which_half_this_app_is_running.dart';
+import 'the_owner_at_this_computer.dart';
 
 /// Deciding, once, which half of the application this installation is running.
 ///
@@ -67,7 +68,7 @@ Future<void> tellThisComputerWhichHalfItIsRunning({
   required String agentOrigin,
   http.Client? using,
 }) async {
-  final client = using ?? http.Client();
+  final client = ProvingThisComputer.over(using);
   final url = Uri.parse('${AgentConfig.coreBaseUrl}/api/controller/front-end-for');
   try {
     if (agentOrigin.isNotEmpty) {

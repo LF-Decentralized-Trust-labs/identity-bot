@@ -25,9 +25,10 @@ func StartServer(dataDir string, port int) error {
 	}
 
 	cfg := server.Config{
-		DataDir:       dataDir,
-		Port:          port,
-		FlutterWebDir: "",
+		DataDir:          dataDir,
+		Port:             port,
+		FlutterWebDir:    "",
+		LocalOwnerSecret: declaredLocalOwnerSecret,
 	}
 
 	srv, err := server.New(cfg)

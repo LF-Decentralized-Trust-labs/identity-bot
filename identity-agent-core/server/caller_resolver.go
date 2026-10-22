@@ -231,13 +231,16 @@ func (t tokenAwareResolver) Resolve(r *http.Request) sandbox.CallerContext {
 		// its requests was denied where signing nothing had been allowed. Being
 		// able to say who you are should not take away standing you had for
 		// being where you are.
-		if isLocalOwnerRequest(r) {
+		if isLocalConnection(r) {
 			cc.Remote = false
 		}
 		return cc
 	}
 
-	if isLocalOwnerRequest(r) {
+	// From this computer and carrying the secret the core was started with:
+	// the owner. From this computer without it: a program that is merely
+	// here, which is as remote as any stranger.
+	if t.s.isLocalOwnerRequest(r) {
 		cc.Remote = false
 		cc.CallerAID = "local-owner"
 	}

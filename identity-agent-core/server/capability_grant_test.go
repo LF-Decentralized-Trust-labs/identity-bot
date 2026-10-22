@@ -17,7 +17,7 @@ func newGrantTestServer(t *testing.T) *CoreServer {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &CoreServer{DataDir: t.TempDir(), DataStore: st}
+	return &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir(), DataStore: st}
 }
 
 func seedAgentToken(t *testing.T, s *CoreServer, plaintext string, tok mcpToken) {

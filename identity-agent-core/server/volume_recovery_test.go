@@ -37,6 +37,7 @@ func TestAVolumeWithNoOwnerKeysIsRefused(t *testing.T) {
 // ownerless has no way forward at all.
 func TestAdoptionSurvivesRecoveryFailing(t *testing.T) {
 	s := &CoreServer{
+		localOwnerSecret: testOwnerSecret,
 		volumeRecovery: func([]string) error {
 			return os.ErrPermission
 		},
@@ -52,6 +53,7 @@ func TestAdoptionSurvivesRecoveryFailing(t *testing.T) {
 func TestRecoveryIsAttemptedWithTheOwnersKeys(t *testing.T) {
 	var got []string
 	s := &CoreServer{
+		localOwnerSecret: testOwnerSecret,
 		volumeRecovery: func(keys []string) error {
 			got = keys
 			return nil

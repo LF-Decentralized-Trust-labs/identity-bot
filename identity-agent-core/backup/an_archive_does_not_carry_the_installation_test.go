@@ -40,6 +40,16 @@ func TestAnArchiveDoesNotCarryWhatBelongsToTheInstallation(t *testing.T) {
 		// carried it could bring back a body removed after the archive was made.
 		{"agent_bodies.json", "which machines are AI agents' bodies is decided after a restore, not restored"},
 		{"agent_bodies.json.tmp", "the rename window must not leak what the rule excludes"},
+
+		// What makes a request from this computer the owner's. Chosen anew at
+		// every start, so a copy is worth nothing restored and is a disclosure
+		// while it travels.
+		{"local-owner-secret", "it belongs to one start of the core on this computer"},
+		{"local-owner-secret.tmp", "the rename window must not leak what the rule excludes"},
+
+		// The AI agents' tokens. A restore must not bring back one revoked after
+		// the archive was made.
+		{"mcp_tokens.json", "which tokens may act is decided after a restore, not restored"},
 	}
 
 	for _, c := range notCarried {

@@ -18,7 +18,7 @@ import (
 
 func ownerServer(t *testing.T, ownerAID string) *CoreServer {
 	t.Helper()
-	s := &CoreServer{DataDir: t.TempDir()}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 	if ownerAID == "" {
 		return s
 	}

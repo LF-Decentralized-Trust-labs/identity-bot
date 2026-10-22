@@ -14,7 +14,7 @@ import (
 
 func ceremonyServer(t *testing.T) *CoreServer {
 	t.Helper()
-	return &CoreServer{DataDir: t.TempDir()}
+	return &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 }
 
 func collecting(names ...string) *OwnerCeremony {

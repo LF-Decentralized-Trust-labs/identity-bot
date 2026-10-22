@@ -26,7 +26,7 @@ func exportServer(t *testing.T, dir string) *CoreServer {
 		t.Skipf("data store unavailable: %v", err)
 	}
 	t.Cleanup(func() { ds.Close() })
-	return &CoreServer{DataDir: dir, DataStore: ds}
+	return &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: dir, DataStore: ds}
 }
 
 // Taking a backup must not require anybody to hand over their recovery phrase.

@@ -101,6 +101,7 @@ func adoptFrom(t *testing.T, s *CoreServer, url string) *httptest.ResponseRecord
 	body := `{"box_url":"` + url + `","adoption_code":"code"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/pairing/adopt", strings.NewReader(body))
 	req.RemoteAddr = "127.0.0.1:1234"
+	req.Header.Set(LocalOwnerSecretHeader, testOwnerSecret)
 	rec := httptest.NewRecorder()
 	s.handlePairingAdopt(rec, req)
 	return rec
@@ -236,6 +237,7 @@ func TestAdoptionUsesTheIdentityMintedBeforeTheMachineExisted(t *testing.T) {
 	body := `{"box_url":"` + box.URL + `","adoption_code":"code","owner_aid":"` + minted.AID + `"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/pairing/adopt", strings.NewReader(body))
 	req.RemoteAddr = "127.0.0.1:1234"
+	req.Header.Set(LocalOwnerSecretHeader, testOwnerSecret)
 	got := httptest.NewRecorder()
 	s.handlePairingAdopt(got, req)
 	if got.Code != http.StatusOK {
@@ -260,6 +262,7 @@ func TestAdoptionRefusesAnOwnerIdentityItNeverMinted(t *testing.T) {
 	body := `{"box_url":"` + box.URL + `","adoption_code":"code","owner_aid":"ESOMETHINGWEDIDNOTMINT"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/pairing/adopt", strings.NewReader(body))
 	req.RemoteAddr = "127.0.0.1:1234"
+	req.Header.Set(LocalOwnerSecretHeader, testOwnerSecret)
 	got := httptest.NewRecorder()
 	s.handlePairingAdopt(got, req)
 
@@ -382,6 +385,7 @@ func TestWhatYouNowOwnIsRecordedAsAComputerOrAnOrganisation(t *testing.T) {
 		body += `}`
 		req := httptest.NewRequest(http.MethodPost, "/api/pairing/adopt", strings.NewReader(body))
 		req.RemoteAddr = "127.0.0.1:1234"
+		req.Header.Set(LocalOwnerSecretHeader, testOwnerSecret)
 		rec := httptest.NewRecorder()
 		s.handlePairingAdopt(rec, req)
 		if rec.Code != http.StatusOK {
@@ -415,6 +419,7 @@ func TestAKindNobodyRecognisesIsRefused(t *testing.T) {
 	body := `{"box_url":"` + box.URL + `","adoption_code":"code","kind":"toaster"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/pairing/adopt", strings.NewReader(body))
 	req.RemoteAddr = "127.0.0.1:1234"
+	req.Header.Set(LocalOwnerSecretHeader, testOwnerSecret)
 	rec := httptest.NewRecorder()
 	s.handlePairingAdopt(rec, req)
 

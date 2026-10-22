@@ -12,7 +12,7 @@ import (
 // traffic to it, so an ungated handler is still reachable by anyone who learns
 // the URL — the owner gate, not the bind, is what protects it.
 func TestHandleResetRejectsNonLocalOwner(t *testing.T) {
-	s := &CoreServer{}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret}
 
 	cases := []struct {
 		name       string
@@ -57,8 +57,9 @@ func TestHandleResetAllowsLocalOwnerPastTheGate(t *testing.T) {
 		}
 	}()
 
-	s := &CoreServer{} // nil DataStore: panics iff the gate allowed the request through
+	s := &CoreServer{localOwnerSecret: testOwnerSecret} // nil DataStore: panics iff the gate allowed the request through
 	req := httptest.NewRequest(http.MethodPost, "/api/reset", nil)
 	req.RemoteAddr = "127.0.0.1:51000"
+	req.Header.Set(LocalOwnerSecretHeader, testOwnerSecret)
 	s.handleReset(httptest.NewRecorder(), req)
 }

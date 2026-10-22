@@ -32,8 +32,9 @@ func notifyTestServer(t *testing.T) *CoreServer {
 		t.Fatal(err)
 	}
 	return &CoreServer{
-		DataDir:      dir,
-		assetHandler: &asset.Handler{Store: store},
+		localOwnerSecret: testOwnerSecret,
+		DataDir:          dir,
+		assetHandler:     &asset.Handler{Store: store},
 	}
 }
 

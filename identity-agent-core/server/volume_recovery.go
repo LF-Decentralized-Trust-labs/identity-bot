@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"identity-agent-core/childenv"
 	"os"
 	"os/exec"
 	"strings"
@@ -45,7 +46,9 @@ func addVolumeRecoveryVia(device string, keysB64 []string) error {
 	}
 
 	args := append([]string{"add-owner-recovery", device}, keysB64...)
-	out, err := exec.Command(self, args...).CombinedOutput()
+	cmd := exec.Command(self, args...)
+	cmd.Env = childenv.Environ()
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%w (%s)", err, strings.TrimSpace(string(out)))
 	}

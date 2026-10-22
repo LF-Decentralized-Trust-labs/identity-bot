@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import '../crypto/owner_signature.dart';
 import 'the_agent_this_app_talks_to.dart';
+import 'the_owner_at_this_computer.dart';
 
 class BackupDestination {
   final String id;
@@ -806,11 +807,12 @@ class RecoveryHolderSetup {
       'policy': {'wait_hours': waitHours, 'require_approval': requireApproval},
     }));
 
-    // A plain client, deliberately. This asks SOMEBODY ELSE'S machine, not
-    // this identity's agent, and it carries its own owner signature below. A
-    // client built for the agent would pass this through untouched anyway,
+    // Not the agent's client, deliberately. This asks SOMEBODY ELSE'S machine,
+    // not this identity's agent, and it carries its own owner signature below.
+    // A client built for the agent would pass this through untouched anyway,
     // which would work and would say the wrong thing about what is going on.
-    final resp = await http.post(
+    // The bare transport adds nothing to a request for another machine.
+    final resp = await ProvingThisComputer.shared.post(
       Uri.parse('${url.replaceAll(RegExp(r'/+$'), '')}$path'),
       headers: {
         'Content-Type': 'application/json',

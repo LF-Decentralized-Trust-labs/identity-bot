@@ -33,7 +33,7 @@ func TestPairingStopsAnsweringOncePaired(t *testing.T) {
 	if err := ds.SaveIdentity(store.IdentityState{AID: "EPAIREDALREADY", PublicKey: "DKEY"}); err != nil {
 		t.Skipf("cannot save identity: %v", err)
 	}
-	s := &CoreServer{DataDir: dir, DataStore: ds}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: dir, DataStore: ds}
 
 	w := httptest.NewRecorder()
 	s.handleProvisioningPairing(w, httptest.NewRequest(http.MethodGet, "/api/provisioning/pairing", nil))
@@ -50,7 +50,7 @@ func TestPairingDisclosesNothingBeyondThePairwiseOffer(t *testing.T) {
 	pairingOnce.offer = &pairingOffer{AID: "EPAIRWISE", OOBI: "https://box.example/public/oobi/EPAIRWISE"}
 	pairingOnce.Unlock()
 
-	s := &CoreServer{DataDir: t.TempDir()}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 	w := httptest.NewRecorder()
 	s.handleProvisioningPairing(w, httptest.NewRequest(http.MethodGet, "/api/provisioning/pairing", nil))
 	if w.Code != http.StatusOK {
@@ -158,7 +158,7 @@ func TestPairingMintsOnce(t *testing.T) {
 	pairingOnce.offer = &pairingOffer{AID: "EFIRST", OOBI: "https://box.example/public/oobi/EFIRST"}
 	pairingOnce.Unlock()
 
-	s := &CoreServer{DataDir: t.TempDir()}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 	var seen []string
 	for i := 0; i < 3; i++ {
 		w := httptest.NewRecorder()
@@ -183,7 +183,7 @@ func TestPairingOfferOmitsAttestationOutsideASealedVM(t *testing.T) {
 	pairingOnce.offer = &pairingOffer{AID: "EPAIRWISE", OOBI: "https://box.example/public/oobi/EPAIRWISE"}
 	pairingOnce.Unlock()
 
-	s := &CoreServer{DataDir: t.TempDir()}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 	w := httptest.NewRecorder()
 	s.handleProvisioningPairing(w, httptest.NewRequest(http.MethodGet, "/api/provisioning/pairing", nil))
 
@@ -209,7 +209,7 @@ func TestAttestationIsBoundToTheAdvertisedAID(t *testing.T) {
 	}
 	pairingOnce.Unlock()
 
-	s := &CoreServer{DataDir: t.TempDir()}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 	w := httptest.NewRecorder()
 	s.handleProvisioningPairing(w, httptest.NewRequest(http.MethodGet, "/api/provisioning/pairing", nil))
 

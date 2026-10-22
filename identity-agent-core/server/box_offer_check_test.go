@@ -142,7 +142,7 @@ func TestADebuggableMachineIsRefused(t *testing.T) {
 // compute a value that cannot match and read the mismatch as tampering.
 func TestThePublishedSchemeDescribesTheBindingActuallyUsed(t *testing.T) {
 	box, _ := offerFor(t)
-	s := &CoreServer{}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret}
 
 	// With no identity of its own, the old description still applies.
 	if got := bindingScheme("something", s.bindingOver()); got == "" ||

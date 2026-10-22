@@ -52,6 +52,7 @@ func ask(t *testing.T, h http.Handler, method, path string) *httptest.ResponseRe
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(method, path, nil)
 	req.RemoteAddr = "127.0.0.1:1234"
+	req.Header.Set(LocalOwnerSecretHeader, testOwnerSecret)
 	h.ServeHTTP(rec, req)
 	return rec
 }
@@ -382,6 +383,7 @@ func TestTheRealRouterRefusesWhatBelongsToTheAgent(t *testing.T) {
 	// what makes this prove the middleware ran rather than something else.
 	req := httptest.NewRequest(http.MethodGet, "/api/credentials", nil)
 	req.RemoteAddr = "127.0.0.1:1234"
+	req.Header.Set(LocalOwnerSecretHeader, testOwnerSecret)
 	rec := httptest.NewRecorder()
 	real.ServeHTTP(rec, req)
 
@@ -407,7 +409,7 @@ func TestTheRealRouterRefusesWhatBelongsToTheAgent(t *testing.T) {
 // is only reachable in a test is the shape of guard that gets removed by
 // accident and takes nothing with it.
 func TestAMachineThatCannotSignIsNotMadeAFrontEnd(t *testing.T) {
-	s := &CoreServer{DataDir: t.TempDir()}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 	if secureenclave.UsingHardware(secureenclave.NewPlatformSigner(s.DataDir)) {
 		t.Skip("this machine can hold a key, so it is allowed to be a front end")
 	}
@@ -417,6 +419,7 @@ func TestAMachineThatCannotSignIsNotMadeAFrontEnd(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/controller/front-end-for",
 		strings.NewReader(body))
 	req.RemoteAddr = "127.0.0.1:54321"
+	req.Header.Set(LocalOwnerSecretHeader, testOwnerSecret)
 	rec := httptest.NewRecorder()
 	s.buildRouter("").ServeHTTP(rec, req)
 

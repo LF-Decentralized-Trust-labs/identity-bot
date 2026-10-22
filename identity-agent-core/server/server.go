@@ -49,6 +49,9 @@ import (
 
 type CoreServer struct {
 	DataStore store.Store
+	// localOwnerSecret is what a request from this computer must carry to be
+	// the owner's (the_owner_at_this_computer.go).
+	localOwnerSecret string
 	// Providers is the registry of operators this agent can draw services from.
 	// Loaded once at startup; the owner may add to it at runtime.
 	Providers *provider.Registry
@@ -206,6 +209,12 @@ type Config struct {
 	// unowned identity, and on a hosted instance that is the difference between
 	// a property you can attest to and one you hope the client honoured.
 	RequireOwnerAtInception bool
+
+	// LocalOwnerSecret is what a request from this computer must carry to be
+	// the owner's (the_owner_at_this_computer.go). The app that starts the
+	// core sets it; left empty, the core mints one. Either way it is written
+	// to DataDir for local tools.
+	LocalOwnerSecret string
 }
 
 func DefaultConfig() Config {
@@ -238,6 +247,7 @@ func DefaultConfig() Config {
 		EntityType:              os.Getenv("IDENTITY_AGENT_ENTITY_TYPE"),
 		FlutterWebDir:           webDir,
 		RequireOwnerAtInception: requireOwner,
+		LocalOwnerSecret:        takeLocalOwnerSecretFromEnv(),
 	}
 }
 
@@ -278,6 +288,17 @@ func New(cfg Config) (*CoreServer, error) {
 		log.Printf("[identity-agent-core] *** DEVELOPMENT BUILD *** accepting the development launch measurement for adoption")
 	}
 
+	// Whoever started this process may have handed the secret over in the
+	// environment; it goes no further than here.
+	_ = os.Unsetenv(LocalOwnerSecretEnv)
+	localOwnerSecret, err := establishLocalOwnerSecret(cfg.DataDir, cfg.LocalOwnerSecret)
+	if err != nil {
+		cancel()
+		dataStore.Close()
+		aiMemory.Close()
+		return nil, err
+	}
+
 	endpointSvc := endpoint.New(dataStore, cfg.Port)
 
 	eventHub := NewEventHub()
@@ -297,6 +318,7 @@ func New(cfg Config) (*CoreServer, error) {
 		Port:               cfg.Port,
 		DataDir:            cfg.DataDir,
 		DeclaredEntityType: cfg.EntityType,
+		localOwnerSecret:   localOwnerSecret,
 		AppCtx:             ctx,
 		cancel:             cancel,
 	}
@@ -801,6 +823,9 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/health", s.handleHealth)
+		// The core proves it holds the local owner secret before an app sends
+		// it (the_owner_at_this_computer.go).
+		r.Get("/local-owner/proof", s.handleLocalOwnerProof)
 		r.Get("/info", s.handleInfo)
 		r.Get("/identity", s.handleIdentity)
 		r.Get("/security/enclave", s.handleSecurityEnclave)

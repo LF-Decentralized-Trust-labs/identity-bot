@@ -24,13 +24,14 @@ func vaultTestServer(t *testing.T) *CoreServer {
 	mgr.SetVaultKeyProvider(func() ([]byte, error) {
 		return []byte("0123456789abcdef0123456789abcdef"), nil
 	})
-	return &CoreServer{DataDir: dir, SandboxManager: mgr}
+	return &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: dir, SandboxManager: mgr}
 }
 
 func postCredential(s *CoreServer, body map[string]any, remote bool) *httptest.ResponseRecorder {
 	b, _ := json.Marshal(body)
 	req := httptest.NewRequest(http.MethodPost, "/api/vault/credentials", bytes.NewReader(b))
 	req.RemoteAddr = "127.0.0.1:9999"
+	req.Header.Set(LocalOwnerSecretHeader, testOwnerSecret)
 	if remote {
 		req.Header.Set("X-Forwarded-For", "203.0.113.9")
 	}
@@ -68,6 +69,7 @@ func TestSetVaultCredentialWithDomains(t *testing.T) {
 	// List names only, never keys.
 	req := httptest.NewRequest(http.MethodGet, "/api/vault/credentials", nil)
 	req.RemoteAddr = "127.0.0.1:9999"
+	req.Header.Set(LocalOwnerSecretHeader, testOwnerSecret)
 	lw := httptest.NewRecorder()
 	s.handleListVaultCredentials(lw, req)
 	if !strings.Contains(lw.Body.String(), "cloudflare") || strings.Contains(lw.Body.String(), "cf-token") {

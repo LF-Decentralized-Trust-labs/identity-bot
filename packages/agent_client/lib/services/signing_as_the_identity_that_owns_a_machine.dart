@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import 'the_path_a_signature_covers.dart';
+import 'the_owner_at_this_computer.dart';
 
 /// Reaching a machine you own but are not sitting at.
 ///
@@ -37,7 +38,7 @@ class SigningAsTheIdentityThatOwnsAMachine extends http.BaseClient {
     required this.localCoreOrigin,
     required this.ownerAid,
     http.Client? inner,
-  })  : _inner = inner ?? http.Client(),
+  })  : _inner = ProvingThisComputer.over(inner),
         _ownsInner = inner == null;
 
   /// The machine this device owns, as scheme://host:port. Requests anywhere
@@ -178,7 +179,7 @@ Future<String?> Function() theIdentityThatAdopted(
   http.Client? using,
 }) {
   return () async {
-    final client = using ?? http.Client();
+    final client = ProvingThisComputer.over(using);
     try {
       final res = await client.get(Uri.parse('$localCoreOrigin/api/agents'));
       if (res.statusCode != 200) return null;

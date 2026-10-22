@@ -1,9 +1,9 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import '../../theme/app_theme.dart';
 import '../../services/core_service.dart';
 import 'package:agent_client/config/agent_config.dart';
+import 'package:agent_client/services/the_owner_at_this_computer.dart';
 
 class HistoryScreen extends StatefulWidget {
   final String? serverUrl;
@@ -55,7 +55,7 @@ class _HistoryScreenState extends State<HistoryScreen> with SingleTickerProvider
       try {
         final uri = Uri.parse('$_baseUrl/api/kel')
             .replace(queryParameters: {'name': aid});
-        final resp = await http.get(uri);
+        final resp = await ProvingThisComputer.shared.get(uri);
         if (resp.statusCode == 200) {
           final body = json.decode(resp.body) as Map<String, dynamic>;
           events = List<Map<String, dynamic>>.from(body['events'] ?? []);

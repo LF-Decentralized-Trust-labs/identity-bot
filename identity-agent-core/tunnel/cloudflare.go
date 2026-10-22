@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"identity-agent-core/childenv"
 	"log"
 	"net"
 	"net/http"
@@ -66,6 +67,7 @@ func (p *CloudflareProvider) Start(ctx context.Context, localPort int) error {
 	}
 
 	cmd := exec.CommandContext(childCtx, cfPath, args...)
+	cmd.Env = childenv.Environ()
 
 	stderr, err := cmd.StderrPipe()
 	if err != nil {

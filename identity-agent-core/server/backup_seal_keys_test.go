@@ -24,7 +24,7 @@ func seedOnDisk(t *testing.T) *CoreServer {
 	if err := secureenclave.StoreRootSeed(dir, seed); err != nil {
 		t.Fatalf("store root seed: %v", err)
 	}
-	return &CoreServer{DataDir: dir}
+	return &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: dir}
 }
 
 // What the owner sends must be the PUBLIC half and nothing else. Sending the
@@ -57,7 +57,7 @@ func TestOwnerPublishesOnlyThePublicHalf(t *testing.T) {
 // A device with no root seed has nothing to derive from, and must say so
 // rather than publish something useless.
 func TestDerivingWithoutARootSeedFails(t *testing.T) {
-	s := &CoreServer{DataDir: t.TempDir()}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 	if _, err := s.ownerBackupSealPublicKeys(); err == nil {
 		t.Fatal("a device with no root seed produced a recovery key")
 	}
@@ -74,7 +74,7 @@ func TestMalformedRecoveryKeysAreRefused(t *testing.T) {
 	}
 	for name, keys := range cases {
 		t.Run(name, func(t *testing.T) {
-			s := &CoreServer{DataDir: t.TempDir()}
+			s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 			if err := s.recordBackupSealKeys(keys); err == nil {
 				t.Fatal("a bad recovery key was accepted")
 			}
@@ -85,7 +85,7 @@ func TestMalformedRecoveryKeysAreRefused(t *testing.T) {
 // Validation happens before anything is written, so a list with one bad key
 // leaves no partial state behind.
 func TestABadKeyStoresNothing(t *testing.T) {
-	s := &CoreServer{DataDir: t.TempDir()}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 	good := backup.EncodeB64(make([]byte, backup.X25519KeyLen))
 
 	if err := s.recordBackupSealKeys([]string{good, "!!!!"}); err == nil {
@@ -109,7 +109,7 @@ func TestWhatTheOwnerSendsTheDeviceAccepts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	device := &CoreServer{DataDir: t.TempDir()}
+	device := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 	if err := device.recordBackupSealKeys(keys); err != nil {
 		t.Fatalf("the device refused what the owner sent: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestWhatTheOwnerSendsTheDeviceAccepts(t *testing.T) {
 // legitimately owned — but it must be obvious in the log, because such a device
 // cannot back up without being handed a phrase later.
 func TestAdoptionWithoutARecoveryKeyIsNotSilent(t *testing.T) {
-	s := &CoreServer{DataDir: t.TempDir()}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 	err := s.recordBackupSealKeys(nil)
 	if err == nil {
 		t.Fatal("an empty list should be refused rather than stored as success")

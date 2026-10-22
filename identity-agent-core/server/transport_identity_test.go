@@ -98,7 +98,7 @@ func TestTheAttestationBindsToTheTransportKey(t *testing.T) {
 // And an agent with no key of its own still attests, bound to what it has.
 // Losing attestation entirely would be worse than binding to an identifier.
 func TestAnAgentWithoutATransportKeyStillBindsToSomething(t *testing.T) {
-	s := &CoreServer{}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret}
 	// No transport identity and no store: the binding is empty rather than a
 	// panic, and the caller decides what an empty binding means.
 	_ = s.attestationBinding()

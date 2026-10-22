@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import 'attestation_verifier.dart';
 import 'snp_report.dart';
+import '../services/the_owner_at_this_computer.dart';
 
 /// What an agent is running on, as this client was able to establish it — not
 /// as the agent described itself.
@@ -64,7 +65,7 @@ class SealedMachineCheck {
   SealedMachineCheck({
     required this.verifier,
     http.Client? client,
-  }) : _client = client ?? http.Client();
+  }) : _client = ProvingThisComputer.over(client);
 
   final AttestationVerifier verifier;
   final http.Client _client;

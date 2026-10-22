@@ -27,7 +27,7 @@ func postEnvelope(t *testing.T, s *CoreServer, body string) *httptest.ResponseRe
 // identifier appears in published addresses, so anyone who read one could
 // otherwise make this agent mint keys and write files on demand.
 func TestAnEnvelopeFromAStrangerIsRefused(t *testing.T) {
-	s := &CoreServer{DataDir: t.TempDir()}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 	env := `{"mode":"authcrypt","protected":{"skid":"EUNKNOWNSENDER"},"recipients":[{"header":{"kid":"EUS"}}],"ciphertext":"x","iv":"y"}`
 	rec := postEnvelope(t, s, env)
 	if rec.Code != http.StatusForbidden {
@@ -37,7 +37,7 @@ func TestAnEnvelopeFromAStrangerIsRefused(t *testing.T) {
 
 // An envelope with no sender is refused rather than treated as anonymous.
 func TestAnEnvelopeThatNamesNoSenderIsRefused(t *testing.T) {
-	s := &CoreServer{DataDir: t.TempDir()}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 	rec := postEnvelope(t, s, `{"mode":"authcrypt","protected":{},"ciphertext":"x"}`)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status %d, want 403 when the envelope names no sender", rec.Code)
@@ -45,7 +45,7 @@ func TestAnEnvelopeThatNamesNoSenderIsRefused(t *testing.T) {
 }
 
 func TestSomethingThatIsNotAnEnvelopeIsRefused(t *testing.T) {
-	s := &CoreServer{DataDir: t.TempDir()}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 	for _, body := range []string{"", "not json", "[]", "null"} {
 		rec := postEnvelope(t, s, body)
 		if rec.Code == http.StatusOK {
@@ -58,7 +58,7 @@ func TestSomethingThatIsNotAnEnvelopeIsRefused(t *testing.T) {
 // key", "corrupt", and "not addressed to us" are three different facts, and
 // telling a prober which one they achieved is telling them how to proceed.
 func TestOpeningFailuresDoNotSayWhichFailure(t *testing.T) {
-	s := &CoreServer{DataDir: t.TempDir()}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 	rec := postEnvelope(t, s, `{"mode":"authcrypt","protected":{"skid":"EA"},"recipients":[{"header":{"kid":"EB"}}],"ciphertext":"x"}`)
 	body := rec.Body.String()
 	for _, leak := range []string{"signature", "key_agreement", "body_hash", "decrypt"} {
@@ -70,7 +70,7 @@ func TestOpeningFailuresDoNotSayWhichFailure(t *testing.T) {
 
 // A request that carries another would let one envelope make the agent recurse.
 func TestASealedRequestCannotCarryAnother(t *testing.T) {
-	s := &CoreServer{DataDir: t.TempDir()}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 	_, err := s.replaySealed(
 		httptest.NewRequest(http.MethodPost, "/", nil),
 		sealedRequest{Method: "POST", Path: sealedTransportPath},
@@ -82,7 +82,7 @@ func TestASealedRequestCannotCarryAnother(t *testing.T) {
 }
 
 func TestARequestWithNoPathIsRefused(t *testing.T) {
-	s := &CoreServer{DataDir: t.TempDir()}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 	for _, path := range []string{"", "api/health", "http://elsewhere/x"} {
 		if _, err := s.replaySealed(httptest.NewRequest(http.MethodPost, "/", nil),
 			sealedRequest{Method: "GET", Path: path}, "EPEER"); err == nil {
@@ -95,7 +95,7 @@ func TestARequestWithNoPathIsRefused(t *testing.T) {
 // be reachable one way and not the other — which is how a forgotten
 // authorisation check becomes a way in.
 func TestTheCarriedRequestMeetsTheOrdinaryRouter(t *testing.T) {
-	s := &CoreServer{DataDir: t.TempDir()}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 	reached := false
 	mux := chi.NewRouter()
 	mux.Get("/api/probe", func(w http.ResponseWriter, r *http.Request) {
@@ -123,7 +123,7 @@ func TestTheCarriedRequestMeetsTheOrdinaryRouter(t *testing.T) {
 // established who the caller is; letting them also claim it in a header would
 // give two answers to one question, and the weaker one is attacker-chosen.
 func TestCredentialsInsideTheEnvelopeAreDropped(t *testing.T) {
-	s := &CoreServer{DataDir: t.TempDir()}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 	var got http.Header
 	mux := chi.NewRouter()
 	mux.Get("/api/probe", func(w http.ResponseWriter, r *http.Request) {
@@ -157,7 +157,7 @@ func TestCredentialsInsideTheEnvelopeAreDropped(t *testing.T) {
 // handler is entitled to see exactly — a signature over a body being the case
 // that matters.
 func TestTheBodyIsCarriedByteForByte(t *testing.T) {
-	s := &CoreServer{DataDir: t.TempDir()}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 	want := []byte("{\"a\":1,  \"b\":\t2}\n")
 	var got []byte
 	mux := chi.NewRouter()

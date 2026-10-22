@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../config/agent_config.dart';
+import 'the_owner_at_this_computer.dart';
 
 class UpdateSettings {
   final String channel;
@@ -152,7 +153,7 @@ class UpdateService {
       // machine it is only the front end for, and offer to update software it
       // does not run.
       : baseUrl = baseUrl ?? AgentConfig.coreBaseUrl,
-        _client = client ?? http.Client();
+        _client = ProvingThisComputer.over(client);
 
   Future<UpdateStatus> getStatus() async {
     final response = await _client.get(Uri.parse('$baseUrl/api/updates/status'));

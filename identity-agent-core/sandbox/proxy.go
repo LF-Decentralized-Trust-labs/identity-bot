@@ -512,6 +512,9 @@ func (pm *ProxyManager) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	// Stripped before injection, and never forwarded: the token authenticates the
 	// caller TO this proxy and means nothing to the destination.
 	outReq.Header.Del("Proxy-Authorization")
+	// Nor does the secret that makes a local request the owner's, should a
+	// caller on this machine send it through the proxy.
+	outReq.Header.Del("X-Local-Owner-Secret")
 	pm.applyCredentialsFor(outReq, appID, instanceID, route, callerHow)
 
 	if pm.tracer != nil && pm.tracer.IsEnabled() {
@@ -1102,12 +1105,13 @@ func (pm *ProxyManager) handleDNSLog(query DNSQuery) {
 }
 
 var sensitiveHeaders = map[string]bool{
-	"Authorization":       true,
-	"Cookie":              true,
-	"Set-Cookie":          true,
-	"Proxy-Authorization": true,
-	"X-Api-Key":           true,
-	"X-Auth-Token":        true,
+	"Authorization":        true,
+	"Cookie":               true,
+	"Set-Cookie":           true,
+	"Proxy-Authorization":  true,
+	"X-Api-Key":            true,
+	"X-Auth-Token":         true,
+	"X-Local-Owner-Secret": true,
 }
 
 func flattenHeaders(h http.Header) map[string]string {

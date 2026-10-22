@@ -46,6 +46,7 @@ func TestAComputerThatCannotProveItsSoftwareMayNotFoundAnIdentity(t *testing.T) 
 	req := httptest.NewRequest(http.MethodPost, "/api/inception",
 		strings.NewReader(`{"public_key":"D1","next_public_key":"D2"}`))
 	req.RemoteAddr = "127.0.0.1:1234"
+	req.Header.Set(LocalOwnerSecretHeader, testOwnerSecret)
 	rec := httptest.NewRecorder()
 	s.handleInception(rec, req)
 
@@ -70,6 +71,7 @@ func TestAMachineThatCanProveItselfIsNotStopped(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/inception",
 		strings.NewReader(`{"public_key":"D1","next_public_key":"D2"}`))
 	req.RemoteAddr = "127.0.0.1:1234"
+	req.Header.Set(LocalOwnerSecretHeader, testOwnerSecret)
 	rec := httptest.NewRecorder()
 	s.handleInception(rec, req)
 
@@ -154,6 +156,7 @@ func TestEveryWayAnIdentityCanBeginIsRefusedOnAMachineThatMayNotFound(t *testing
 
 			req := httptest.NewRequest(door.method, door.path, strings.NewReader(door.body))
 			req.RemoteAddr = "127.0.0.1:1234"
+			req.Header.Set(LocalOwnerSecretHeader, testOwnerSecret)
 			rec := httptest.NewRecorder()
 			door.call(s, rec, req)
 
@@ -193,6 +196,7 @@ func TestAComputerThatMayNotFoundIsRefusedWhileBeingPaired(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/pairing/complete",
 		strings.NewReader(body))
 	req.RemoteAddr = "127.0.0.1:1234"
+	req.Header.Set(LocalOwnerSecretHeader, testOwnerSecret)
 	rec := httptest.NewRecorder()
 	machine.handlePairingComplete(rec, req)
 
@@ -227,6 +231,7 @@ func TestAnIdentityThatAlreadyExistsGoesOnWorking(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/api/store/event",
 				strings.NewReader(body))
 			req.RemoteAddr = "127.0.0.1:1234"
+			req.Header.Set(LocalOwnerSecretHeader, testOwnerSecret)
 			rec := httptest.NewRecorder()
 			s.handleStoreEvent(rec, req)
 

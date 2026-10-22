@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../config/agent_config.dart';
+import 'the_owner_at_this_computer.dart';
 
 /// A controller's signed, offline offer to act for an identity — the protocol
 /// QR two of one person's own devices exchange.
@@ -178,7 +179,7 @@ Future<void> verifyControllerOffer(
   String? localCoreOrigin,
 }) async {
   final core = localCoreOrigin ?? AgentConfig.coreBaseUrl;
-  final c = client ?? http.Client();
+  final c = ProvingThisComputer.over(client);
   try {
     final res = await c.post(
       Uri.parse('$core/api/controller/verify-offer'),

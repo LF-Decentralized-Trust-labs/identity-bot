@@ -1,6 +1,6 @@
 import 'dart:convert';
-import 'package:http/http.dart' as http;
 import 'package:agent_client/config/agent_config.dart';
+import 'package:agent_client/services/the_owner_at_this_computer.dart';
 
 class BackupDestination {
   final String id;
@@ -128,7 +128,7 @@ class BackupService {
   static String get _base => '${AgentConfig.coreBaseUrl}/api/backup';
 
   static Future<BackupStatus> getStatus() async {
-    final resp = await http.get(Uri.parse('$_base/status'));
+    final resp = await ProvingThisComputer.shared.get(Uri.parse('$_base/status'));
     if (resp.statusCode != 200) {
       throw Exception('Backup status failed: ${resp.statusCode}');
     }
@@ -136,13 +136,13 @@ class BackupService {
   }
 
   static Future<BackupConfig> getConfig() async {
-    final resp = await http.get(Uri.parse('$_base/config'));
+    final resp = await ProvingThisComputer.shared.get(Uri.parse('$_base/config'));
     if (resp.statusCode != 200) throw Exception('Load config failed');
     return BackupConfig.fromJson(jsonDecode(resp.body) as Map<String, dynamic>);
   }
 
   static Future<void> saveConfig(BackupConfig config) async {
-    final resp = await http.put(
+    final resp = await ProvingThisComputer.shared.put(
       Uri.parse('$_base/config'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode(config.toJson()),
@@ -166,7 +166,7 @@ class BackupService {
     List<String>? tiers,
     String? destPath,
   }) async {
-    final resp = await http.post(
+    final resp = await ProvingThisComputer.shared.post(
       Uri.parse('$_base/export'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({
@@ -183,7 +183,7 @@ class BackupService {
   }
 
   static Future<void> addDestination(BackupDestination dest) async {
-    final resp = await http.post(
+    final resp = await ProvingThisComputer.shared.post(
       Uri.parse('$_base/destinations'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({'destination': dest.toJson()}),

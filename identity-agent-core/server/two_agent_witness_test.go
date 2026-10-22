@@ -70,7 +70,7 @@ func startPeer(t *testing.T, name string) *peerAgent {
 	_ = dir
 
 	// The route an agent actually serves, on the handler it actually uses.
-	core := &CoreServer{WitnessService: svc}
+	core := &CoreServer{localOwnerSecret: testOwnerSecret, WitnessService: svc}
 	r := chi.NewRouter()
 	r.Post("/api/witness/event", core.handleWitnessEvent)
 	srv := httptest.NewServer(r)
