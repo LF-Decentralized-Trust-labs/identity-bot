@@ -329,6 +329,12 @@ func TestTwoRevocationsAtOnceMakeOne(t *testing.T) {
 	for err := range errs {
 		t.Errorf("a concurrent revocation failed: %v", err)
 	}
+	credentialLocksMu.Lock()
+	left := len(credentialLocks)
+	credentialLocksMu.Unlock()
+	if left != 0 {
+		t.Errorf("%d per-credential locks were left behind", left)
+	}
 	events, status, err := s.credentialLog(rec.RegistrySAID, grantSAID)
 	if err != nil || status != keri.StatusRevoked || len(events) != 2 {
 		t.Fatalf("after concurrent revocations: %d events, %q, %v", len(events), status, err)
