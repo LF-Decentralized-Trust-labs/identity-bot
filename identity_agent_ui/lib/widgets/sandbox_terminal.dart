@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
+import 'package:agent_client/services/a_socket_to_the_agent.dart';
 
 class SandboxTerminal extends StatefulWidget {
   final String instanceId;
@@ -52,7 +53,7 @@ class _SandboxTerminalState extends State<SandboxTerminal> {
     final uri = Uri.parse('$wsUrl/api/ws/terminal/${widget.instanceId}');
 
     try {
-      _channel = WebSocketChannel.connect(uri);
+      _channel = connectToTheAgent(uri);
       setState(() => _connected = true);
 
       _channel!.stream.listen(

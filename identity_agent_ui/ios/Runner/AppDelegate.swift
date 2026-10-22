@@ -54,7 +54,10 @@ import Mobilecore
           if let error = error {
             result(FlutterError(code: "START_FAILED", message: error.localizedDescription, details: nil))
           } else {
-            result(["status": "started", "port": port])
+            // The port the core actually bound, not the one asked for: it takes
+            // the next free one when that is held, and the app must talk to it
+            // there, never to whoever holds the one it asked for.
+            result(["status": "started", "port": Int(MobilecoreGetPort())])
           }
         }
 

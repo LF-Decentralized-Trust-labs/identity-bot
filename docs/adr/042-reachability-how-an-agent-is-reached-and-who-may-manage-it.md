@@ -194,6 +194,24 @@ Three properties make this sound:
   The limit: a program running as the same operating-system user can read the file
   or the starting process's environment, so a program that must not act as the owner
   has to run as a different user.
+  - **The secret is sent only to a core that proved it holds it.** Another program
+    can hold the port the app expects (on a phone any app may take it first). Before
+    sending the secret anywhere, the app asks `GET /api/local-owner/proof?nonce=…`,
+    answered to anyone with an HMAC-SHA256, keyed by the secret, of the nonce and the
+    port the core is listening on (`server.LocalOwnerProof`). Binding the port means a
+    program on the expected port cannot pass the question to the real core on another
+    port and hand back its answer. A phone app records the port the core actually
+    bound rather than assuming the default.
+  - **It never leaves the core.** Read from the environment once and removed there,
+    and withheld from every process the core starts (`childenv`); never forwarded to a
+    model provider or through the sandbox proxy, and redacted in its logs; never in a
+    backup. A sandboxed app's volumes are confined to its own directory, so none can
+    mount the data directory.
+  - **Windows.** A file's mode means little there; the folder decides who may read it.
+    A data directory inside the user's profile inherits an access list only that user
+    can read. The core warns loudly when it is anywhere else.
+  - A websocket to the core carries the secret as a header like any other request
+    (native clients); a browser cannot, and is never the owner.
 
 **What this gives a sealed instance behind a reverse proxy.** The proxy adds a
 forwarding header and the instance is not directly reachable, so *every* request is

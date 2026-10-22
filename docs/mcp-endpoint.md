@@ -51,10 +51,13 @@ with `{name, scopes}`, where scopes are capability ids), listed with `GET`, and
 revoked with `DELETE /api/mcp/tokens/{name}`. A token's plaintext is returned
 exactly once at minting; the agent stores only a hash.
 
-Requests from the agent's own loopback interface (with no proxy-forwarding
-headers) are treated as the local owner. Everything else is a remote caller and
-must present a valid token; a remote caller without one — or outside its scopes —
-is denied by default.
+A request is the local owner's only when it comes from the agent's own loopback
+interface (with no proxy-forwarding headers) **and** carries the secret the core
+was started with, in `X-Local-Owner-Secret` (ADR-042 §3). The core writes that
+secret to `local-owner-secret` in its data directory, readable by the user it runs
+as. Any other caller, including another program on the same machine, is a remote
+caller and must present a valid token; a remote caller without one — or outside
+its scopes — is denied by default.
 
 ## Governance: what every caller gets, and never gets
 
