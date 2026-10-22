@@ -38,6 +38,18 @@ import Mobilecore
             NSLog("[mobilecore] could not declare entity type: %@",
                   declareError.localizedDescription)
           }
+          // The secret that makes this app, and no other app on the phone,
+          // the owner of the core it starts. The Dart side chose it and sends
+          // it with every request. Without it nothing on the phone is the
+          // owner, so a failure here is reported rather than ignored.
+          if let secret = args["localOwnerSecret"] as? String {
+            var secretError: NSError?
+            MobilecoreDeclareLocalOwnerSecret(secret, &secretError)
+            if let secretError = secretError {
+              result(FlutterError(code: "START_FAILED", message: secretError.localizedDescription, details: nil))
+              return
+            }
+          }
           MobilecoreStartServer(dataDir, Int(port), &error)
           if let error = error {
             result(FlutterError(code: "START_FAILED", message: error.localizedDescription, details: nil))

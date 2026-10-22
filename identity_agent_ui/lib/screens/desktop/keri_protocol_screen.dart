@@ -1,11 +1,11 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:http/http.dart' as http;
 import '../../theme/app_theme.dart';
 import '../../services/core_service.dart';
 import 'package:agent_client/services/keri_service.dart';
 import 'package:agent_client/config/agent_config.dart';
+import 'package:agent_client/services/the_owner_at_this_computer.dart';
 
 /// KERI Protocol settings screen.
 ///
@@ -73,7 +73,7 @@ class _KeriProtocolScreenState extends State<KeriProtocolScreen> {
       List<Map<String, dynamic>> kelEvents = [];
       try {
         final uri = Uri.parse('$_baseUrl/api/kel').replace(queryParameters: {'name': aid});
-        final resp = await http.get(uri);
+        final resp = await ProvingThisComputer.shared.get(uri);
         if (resp.statusCode == 200) {
           final body = json.decode(resp.body) as Map<String, dynamic>;
           kelEvents = List<Map<String, dynamic>>.from(body['events'] ?? []);

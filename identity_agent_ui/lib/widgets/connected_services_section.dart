@@ -1,9 +1,9 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 
 import '../theme/app_theme.dart';
+import 'package:agent_client/services/the_owner_at_this_computer.dart';
 
 /// Connected Services — the credential intake for governed capabilities.
 ///
@@ -38,7 +38,7 @@ const _presets = [
 ];
 
 class _ConnectedServicesSectionState extends State<ConnectedServicesSection> {
-  final _client = http.Client();
+  final _client = ProvingThisComputer();
   final _serviceController = TextEditingController();
   final _keyController = TextEditingController();
   final _domainsController = TextEditingController();

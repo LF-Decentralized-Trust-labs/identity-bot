@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:agent_client/config/agent_config.dart';
+import 'package:agent_client/services/the_owner_at_this_computer.dart';
 
 class HealthResponse {
   final String status;
@@ -569,7 +570,7 @@ class CoreService {
 
   CoreService({String? baseUrl})
       : baseUrl = baseUrl ?? AgentConfig.coreBaseUrl,
-        _client = http.Client();
+        _client = ProvingThisComputer();
 
   Future<HealthResponse> getHealth() async {
     final response = await _client.get(
@@ -621,7 +622,7 @@ class CoreService {
     required String cesrSignature,
   }) async {
     try {
-      final resp = await http.post(
+      final resp = await ProvingThisComputer.shared.post(
         Uri.parse('$baseUrl/api/events/signature'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({

@@ -56,6 +56,14 @@ class MainActivity: FlutterActivity() {
                             )
                         }
 
+                        // The secret that makes this app, and no other app on
+                        // the phone, the owner of the core it starts. The Dart
+                        // side chose it and sends it with every request; a bad
+                        // one throws, and the start is reported as failed.
+                        call.argument<String>("localOwnerSecret")?.let {
+                            mobilecore.Mobilecore.declareLocalOwnerSecret(it)
+                        }
+
                         mobilecore.Mobilecore.startServer(dataDir, port.toLong())
                         result.success(mapOf("status" to "started", "port" to port))
                     } catch (e: Exception) {

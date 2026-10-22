@@ -1,11 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import '../theme/app_theme.dart';
 import 'package:agent_client/models/sandbox_app.dart';
 import '../widgets/sandbox_webview.dart';
 import '../widgets/sandbox_terminal.dart';
+import 'package:agent_client/services/the_owner_at_this_computer.dart';
 
 class SandboxViewer extends StatefulWidget {
   final SandboxApp app;
@@ -50,7 +50,7 @@ class _SandboxViewerState extends State<SandboxViewer> with SingleTickerProvider
 
   Future<void> _loadDisplayUrl() async {
     try {
-      final res = await http.get(
+      final res = await ProvingThisComputer.shared.get(
         Uri.parse('${widget.serverUrl}/api/apps/${widget.app.id}/display'),
       );
       if (res.statusCode == 200) {
@@ -62,28 +62,28 @@ class _SandboxViewerState extends State<SandboxViewer> with SingleTickerProvider
 
   Future<void> _refreshAll() async {
     try {
-      final statusRes = await http.get(
+      final statusRes = await ProvingThisComputer.shared.get(
         Uri.parse('${widget.serverUrl}/api/apps/${widget.app.id}/status'),
       );
       if (statusRes.statusCode == 200) {
         setState(() => _status = AppStatus.fromJson(jsonDecode(statusRes.body)));
       }
 
-      final logsRes = await http.get(
+      final logsRes = await ProvingThisComputer.shared.get(
         Uri.parse('${widget.serverUrl}/api/apps/${widget.app.id}/logs?limit=50'),
       );
       if (logsRes.statusCode == 200) {
         setState(() => _proxyLogs = jsonDecode(logsRes.body));
       }
 
-      final heldRes = await http.get(
+      final heldRes = await ProvingThisComputer.shared.get(
         Uri.parse('${widget.serverUrl}/api/apps/${widget.app.id}/logs/held'),
       );
       if (heldRes.statusCode == 200) {
         setState(() => _heldRequests = jsonDecode(heldRes.body));
       }
 
-      final resRes = await http.get(
+      final resRes = await ProvingThisComputer.shared.get(
         Uri.parse('${widget.serverUrl}/api/apps/${widget.app.id}/resources'),
       );
       if (resRes.statusCode == 200) {
@@ -94,7 +94,7 @@ class _SandboxViewerState extends State<SandboxViewer> with SingleTickerProvider
 
   Future<void> _approveLog(int logId) async {
     try {
-      await http.post(
+      await ProvingThisComputer.shared.post(
         Uri.parse('${widget.serverUrl}/api/apps/${widget.app.id}/logs/$logId/approve'),
       );
       _refreshAll();
@@ -103,7 +103,7 @@ class _SandboxViewerState extends State<SandboxViewer> with SingleTickerProvider
 
   Future<void> _blockLog(int logId) async {
     try {
-      await http.post(
+      await ProvingThisComputer.shared.post(
         Uri.parse('${widget.serverUrl}/api/apps/${widget.app.id}/logs/$logId/block'),
       );
       _refreshAll();
@@ -112,7 +112,7 @@ class _SandboxViewerState extends State<SandboxViewer> with SingleTickerProvider
 
   Future<void> _approveResource(int reqId) async {
     try {
-      await http.post(
+      await ProvingThisComputer.shared.post(
         Uri.parse('${widget.serverUrl}/api/apps/${widget.app.id}/resources/$reqId/approve'),
       );
       _refreshAll();
@@ -121,7 +121,7 @@ class _SandboxViewerState extends State<SandboxViewer> with SingleTickerProvider
 
   Future<void> _denyResource(int reqId) async {
     try {
-      await http.post(
+      await ProvingThisComputer.shared.post(
         Uri.parse('${widget.serverUrl}/api/apps/${widget.app.id}/resources/$reqId/deny'),
       );
       _refreshAll();
