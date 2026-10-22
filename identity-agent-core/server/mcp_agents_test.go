@@ -11,6 +11,7 @@ import (
 func reqWithBearer(token string) *http.Request {
 	r := httptest.NewRequest(http.MethodPost, "/api/mcp", nil)
 	r.RemoteAddr = "127.0.0.1:5000"
+	r.Header.Set(LocalOwnerSecretHeader, testOwnerSecret)
 	r.Header.Set("Authorization", "Bearer "+token)
 	return r
 }
@@ -19,7 +20,7 @@ func reqWithBearer(token string) *http.Request {
 // agent's real delegated AID with its lineage to the owner root — not
 // "token:<name>" — so the audit event proves owner -> agent.
 func TestAgentBoundTokenResolvesToDelegatedIdentity(t *testing.T) {
-	s := &CoreServer{DataDir: t.TempDir()}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 
 	// Seed a bound token directly (provisioning itself needs the KERI driver;
 	// this isolates the resolver's identity binding).
@@ -58,7 +59,7 @@ func TestAgentBoundTokenResolvesToDelegatedIdentity(t *testing.T) {
 // A plain (non-agent) token still resolves to token:<name> with no chain —
 // backward compatible.
 func TestPlainTokenUnchanged(t *testing.T) {
-	s := &CoreServer{DataDir: t.TempDir()}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 	plaintext := "iamcp_plain"
 	mcpTokensMu.Lock()
 	s.saveMCPTokens([]mcpToken{{

@@ -41,7 +41,7 @@ func signedEnvelopeRequest(t *testing.T, priv ed25519.PrivateKey, aid, method st
 }
 
 func TestEnvelopeAbsentIsNoOp(t *testing.T) {
-	s := &CoreServer{DataDir: t.TempDir()}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 	r := httptest.NewRequest("POST", "/api/mcp", nil)
 	caller := sandbox.CallerContext{CallerAID: "EAgent", AuthLevel: "bearer"}
 	if err := s.verifyRequestEnvelope(r, "tools/call", []byte("{}"), &caller); err != nil {
@@ -56,7 +56,7 @@ func TestEnvelopeAbsentIsNoOp(t *testing.T) {
 }
 
 func TestEnvelopeValidVerifies(t *testing.T) {
-	s := &CoreServer{DataDir: t.TempDir()}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 	priv := registerSigner(t, "EAgentValid")
 	params := []byte(`{"capability_id":"infra.zone.list"}`)
 	nonce := "nonce-valid-1"
@@ -77,7 +77,7 @@ func TestEnvelopeValidVerifies(t *testing.T) {
 }
 
 func TestEnvelopeStaleRejected(t *testing.T) {
-	s := &CoreServer{DataDir: t.TempDir()}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 	priv := registerSigner(t, "EAgentStale")
 	params := []byte("{}")
 	nonce := "nonce-stale"
@@ -94,7 +94,7 @@ func TestEnvelopeStaleRejected(t *testing.T) {
 }
 
 func TestEnvelopeReplayRejected(t *testing.T) {
-	s := &CoreServer{DataDir: t.TempDir()}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 	priv := registerSigner(t, "EAgentReplay")
 	params := []byte("{}")
 	nonce := "nonce-replay-once"
@@ -117,7 +117,7 @@ func TestEnvelopeReplayRejected(t *testing.T) {
 }
 
 func TestEnvelopeTamperedRejected(t *testing.T) {
-	s := &CoreServer{DataDir: t.TempDir()}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 	priv := registerSigner(t, "EAgentTamper")
 	params := []byte(`{"capability_id":"infra.zone.list"}`)
 	nonce := "nonce-tamper"
@@ -135,7 +135,7 @@ func TestEnvelopeTamperedRejected(t *testing.T) {
 }
 
 func TestEnvelopeSignerMismatchRejected(t *testing.T) {
-	s := &CoreServer{DataDir: t.TempDir()}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 	priv := registerSigner(t, "EAgentReal")
 	params := []byte("{}")
 	nonce := "nonce-mismatch"

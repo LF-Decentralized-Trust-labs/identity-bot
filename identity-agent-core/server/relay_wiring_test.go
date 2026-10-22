@@ -91,7 +91,7 @@ func relayWorld(t *testing.T, mode relayproto.Mode) (*CoreServer, *relaytest.Rel
 	}
 	rec := recordedEnrolment(t, dir, kind.record, rl.URL(), 4)
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &CoreServer{DataDir: dir, DataStore: testDataStore(t, dir), EndpointService: endpoint.New(nil, 5050), Port: 5050,
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: dir, DataStore: testDataStore(t, dir), EndpointService: endpoint.New(nil, 5050), Port: 5050,
 		AppCtx: ctx, cancel: cancel, running: true, relayTLS: rl.TLS(), relayClient: rl.Client()}
 	if mode == relayproto.ModePublic {
 		s.DefaultIngressMode = func(string) IngressMode { return IngressModePublic }
@@ -266,7 +266,7 @@ func TestARestartedIdentityAgentKeepsItsAddress(t *testing.T) {
 
 	ctx, cancel2 := context.WithCancel(context.Background())
 	defer cancel2()
-	again := &CoreServer{DataDir: s.DataDir, DataStore: s.DataStore, EndpointService: endpoint.New(nil, 5050), Port: 5050,
+	again := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: s.DataDir, DataStore: s.DataStore, EndpointService: endpoint.New(nil, 5050), Port: 5050,
 		AppCtx: ctx, cancel: cancel2, running: true, relayTLS: rl.TLS(), relayClient: rl.Client()}
 	again.router = again.buildRouter("")
 	go again.startRelay()
@@ -422,11 +422,11 @@ func TestAnIdentifierPublishedAtAPrivateAddressNamesItsPath(t *testing.T) {
 // relay itself added.
 func TestTheRelayMarkerAloneMakesARequestRemote(t *testing.T) {
 	r := local("GET", "/api/contacts", "")
-	if !isLocalOwnerRequest(r) {
-		t.Fatal("a plain local request is not the owner, so this test proves nothing")
+	if !isLocalConnection(r) {
+		t.Fatal("a plain local request is not from this computer, so this test proves nothing")
 	}
 	r.Header.Set(relayproto.ViaRelayHeader, "relay")
-	if isLocalOwnerRequest(r) {
+	if isLocalConnection(r) {
 		t.Fatal("a request carrying the relay marker was taken for the owner")
 	}
 }

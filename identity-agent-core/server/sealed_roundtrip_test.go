@@ -25,8 +25,8 @@ import (
 // which is what pairing establishes.
 func twoAgents(t *testing.T) (caller *CoreServer, callerAID string, responder *CoreServer, responderAID string) {
 	t.Helper()
-	caller = &CoreServer{DataDir: t.TempDir()}
-	responder = &CoreServer{DataDir: t.TempDir()}
+	caller = &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
+	responder = &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 	callerAID, responderAID = "ECALLER", "ERESPONDER"
 
 	for _, pair := range []struct {

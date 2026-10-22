@@ -141,11 +141,11 @@ func TestTheDoorCannotCarryItself(t *testing.T) {
 // registered peer's request would be served as the owner. The deployment that
 // made it exploitable is the one this transport exists for.
 func TestASealedRequestIsNeverTreatedAsLocal(t *testing.T) {
-	s := &CoreServer{DataDir: t.TempDir()}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 	var sawOwner bool
 	mux := chi.NewRouter()
 	mux.Get("/api/probe", func(w http.ResponseWriter, r *http.Request) {
-		sawOwner = isLocalOwnerRequest(r)
+		sawOwner = isLocalConnection(r)
 		w.WriteHeader(http.StatusOK)
 	})
 	s.router = mux
@@ -153,6 +153,7 @@ func TestASealedRequestIsNeverTreatedAsLocal(t *testing.T) {
 	// The outer connection arrives on loopback, exactly as it does behind a tunnel.
 	outer := httptest.NewRequest(http.MethodPost, sealedTransportPath, nil)
 	outer.RemoteAddr = "127.0.0.1:41000"
+	outer.Header.Set(LocalOwnerSecretHeader, testOwnerSecret)
 
 	if _, err := s.replaySealed(outer, sealedRequest{
 		Method: "GET", Path: "/api/probe",
@@ -167,7 +168,7 @@ func TestASealedRequestIsNeverTreatedAsLocal(t *testing.T) {
 
 // And the sender must not be able to name themselves.
 func TestAPeerCannotAssertWhoSentTheRequest(t *testing.T) {
-	s := &CoreServer{DataDir: t.TempDir()}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 	var saw string
 	mux := chi.NewRouter()
 	mux.Get("/api/probe", func(w http.ResponseWriter, r *http.Request) {

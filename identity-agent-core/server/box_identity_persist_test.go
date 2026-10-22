@@ -14,7 +14,7 @@ import (
 func TestTheIdentitySurvivesARestart(t *testing.T) {
 	dir := t.TempDir()
 
-	first := &CoreServer{DataDir: dir}
+	first := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: dir}
 	made, err := first.ensureBoxIdentity("EOWNER")
 	if err != nil {
 		t.Fatal(err)
@@ -25,7 +25,7 @@ func TestTheIdentitySurvivesARestart(t *testing.T) {
 	}
 
 	// A different process, same disk — which is what a restart is.
-	second := &CoreServer{DataDir: dir}
+	second := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: dir}
 	back, err := second.ensureBoxIdentity("EOWNER")
 	if err != nil {
 		t.Fatal(err)
@@ -56,7 +56,7 @@ func TestTheIdentitySurvivesARestart(t *testing.T) {
 // signed; a replacement is not a repair.
 func TestAskingAgainDoesNotMintASecondIdentity(t *testing.T) {
 	dir := t.TempDir()
-	s := &CoreServer{DataDir: dir}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: dir}
 	first, err := s.ensureBoxIdentity("EOWNER")
 	if err != nil {
 		t.Fatal(err)
@@ -77,7 +77,7 @@ func TestAskingAgainDoesNotMintASecondIdentity(t *testing.T) {
 // identifier counterparties hold.
 func TestAHalfWrittenIdentityIsReportedRatherThanReplaced(t *testing.T) {
 	dir := t.TempDir()
-	s := &CoreServer{DataDir: dir}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: dir}
 	made, err := s.ensureBoxIdentity("EOWNER")
 	if err != nil {
 		t.Fatal(err)
@@ -91,7 +91,7 @@ func TestAHalfWrittenIdentityIsReportedRatherThanReplaced(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	fresh := &CoreServer{DataDir: dir}
+	fresh := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: dir}
 	loaded, err := fresh.loadBoxIdentity()
 	if err == nil {
 		t.Fatal("a truncated identity file was read as absent or valid, which would lead to " +
@@ -109,7 +109,7 @@ func TestAHalfWrittenIdentityIsReportedRatherThanReplaced(t *testing.T) {
 // A machine that has never been provisioned has no identity, and that is an
 // ordinary state rather than a fault.
 func TestNoIdentityYetIsNotAnError(t *testing.T) {
-	s := &CoreServer{DataDir: t.TempDir()}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 	got, err := s.loadBoxIdentity()
 	if err != nil {
 		t.Fatalf("a machine with no identity reported a fault: %v", err)
@@ -121,7 +121,7 @@ func TestNoIdentityYetIsNotAnError(t *testing.T) {
 
 // Private keys on disk must not be readable by other users on the machine.
 func TestTheIdentityFileIsNotWorldReadable(t *testing.T) {
-	s := &CoreServer{DataDir: t.TempDir()}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 	if _, err := s.ensureBoxIdentity("EOWNER"); err != nil {
 		t.Fatal(err)
 	}

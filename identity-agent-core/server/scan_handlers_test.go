@@ -19,7 +19,7 @@ func TestBuildAskContextPreservesPath(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	s := &CoreServer{}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret}
 	ctx, err := s.buildAskContext(srv.URL + "/green-oak-87/i/tok123")
 	if err != nil {
 		t.Fatalf("buildAskContext: %v", err)

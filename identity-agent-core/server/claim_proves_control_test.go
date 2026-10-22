@@ -53,7 +53,8 @@ func pairableComputer(t *testing.T) (*CoreServer, *httptest.Server, string) {
 
 	rec := httptest.NewRecorder()
 	offerReq := httptest.NewRequest(http.MethodPost, "/api/pairing/offer-this-computer", nil)
-	offerReq.RemoteAddr = "127.0.0.1:5050" // somebody sitting at it
+	offerReq.RemoteAddr = "127.0.0.1:5050"
+	offerReq.Header.Set(LocalOwnerSecretHeader, testOwnerSecret) // somebody sitting at it
 	machine.handleOfferThisComputer(rec, offerReq)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("could not offer the computer: %d %s", rec.Code, rec.Body.String())
@@ -97,6 +98,7 @@ func claimAs(t *testing.T, owner *CoreServer, url, code, ownerAID string) *httpt
 	body += `}`
 	req := httptest.NewRequest(http.MethodPost, "/api/pairing/adopt", strings.NewReader(body))
 	req.RemoteAddr = "127.0.0.1:1234"
+	req.Header.Set(LocalOwnerSecretHeader, testOwnerSecret)
 	rec := httptest.NewRecorder()
 	owner.handlePairingAdopt(rec, req)
 	return rec

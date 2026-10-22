@@ -23,7 +23,7 @@ func signingServer(t *testing.T) *CoreServer {
 	if err != nil {
 		t.Skipf("data store unavailable: %v", err)
 	}
-	return &CoreServer{DataDir: dir, DataStore: ds}
+	return &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: dir, DataStore: ds}
 }
 
 // ownerRequest builds a request this agent will treat as its owner's.
@@ -34,6 +34,7 @@ func signingServer(t *testing.T) *CoreServer {
 func ownerRequest(method, path string, body io.Reader, _ *CoreServer) *http.Request {
 	r := httptest.NewRequest(method, path, body)
 	r.RemoteAddr = "127.0.0.1:54321"
+	r.Header.Set(LocalOwnerSecretHeader, testOwnerSecret)
 	return r
 }
 

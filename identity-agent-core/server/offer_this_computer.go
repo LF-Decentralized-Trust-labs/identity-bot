@@ -91,7 +91,7 @@ func newPairingCode() (string, error) {
 
 // handleOfferThisComputer offers the machine this request came from.
 func (s *CoreServer) handleOfferThisComputer(w http.ResponseWriter, r *http.Request) {
-	if !isLocalOwnerRequest(r) {
+	if !s.isLocalOwnerRequest(r) {
 		writeError(w, http.StatusForbidden, "Not from this computer",
 			"the code is shown on this machine's own screen, so it is only handed to "+
 				"something running on it — being able to reach it over the network is not "+
@@ -149,7 +149,7 @@ func (s *CoreServer) handleOfferThisComputer(w http.ResponseWriter, r *http.Requ
 // Local-only for the same reason as the offer itself: this reports on a secret
 // shown on that machine's screen.
 func (s *CoreServer) handleThisComputersPairingState(w http.ResponseWriter, r *http.Request) {
-	if !isLocalOwnerRequest(r) {
+	if !s.isLocalOwnerRequest(r) {
 		writeError(w, http.StatusForbidden, "Not from this computer",
 			"what this computer is showing on its own screen is not reported over the network")
 		return

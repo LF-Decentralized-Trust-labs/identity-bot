@@ -18,7 +18,7 @@ func avatarTestServer(t *testing.T) *CoreServer {
 	if err != nil {
 		t.Skipf("data store unavailable: %v", err)
 	}
-	return &CoreServer{DataDir: dir, DataStore: ds}
+	return &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: dir, DataStore: ds}
 }
 
 // The guarantee: after identity creation there is always an avatar, with no

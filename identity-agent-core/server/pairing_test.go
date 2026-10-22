@@ -36,7 +36,7 @@ func TestPairingByDelegationIsRefused(t *testing.T) {
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/pairing/complete", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
-	(&CoreServer{}).handlePairingComplete(rec, req)
+	(&CoreServer{localOwnerSecret: testOwnerSecret}).handlePairingComplete(rec, req)
 
 	if rec.Code == http.StatusOK {
 		t.Fatal("a delegated pairing was accepted; a paired computer must found its own root")

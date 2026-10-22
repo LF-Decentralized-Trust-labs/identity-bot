@@ -226,7 +226,8 @@ func TestSigningLocallyDoesNotMakeYouRemote(t *testing.T) {
 	key := enrolledMachine(t, s, aid)
 
 	req := signedAs(t, key, aid, http.MethodGet, "/api/identity")
-	req.RemoteAddr = "127.0.0.1:51000" // the same machine, signing anyway
+	req.RemoteAddr = "127.0.0.1:51000"
+	req.Header.Set(LocalOwnerSecretHeader, testOwnerSecret) // the same machine, signing anyway
 
 	cc := s.resolveCaller(req)
 	if cc.CallerAID != aid {

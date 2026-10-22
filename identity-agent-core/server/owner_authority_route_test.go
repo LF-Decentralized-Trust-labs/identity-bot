@@ -22,6 +22,7 @@ func TestAnAgentReportsTheOwnerItWasSealedTo(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/owners/authority", nil)
 	req.RemoteAddr = "127.0.0.1:1234"
+	req.Header.Set(LocalOwnerSecretHeader, testOwnerSecret)
 	s.handleOwnerAuthority(rec, req)
 
 	if rec.Code != http.StatusOK {
@@ -53,6 +54,7 @@ func TestAnUnclaimedAgentSaysSoRatherThanFailing(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/owners/authority", nil)
 	req.RemoteAddr = "127.0.0.1:1234"
+	req.Header.Set(LocalOwnerSecretHeader, testOwnerSecret)
 	s.handleOwnerAuthority(rec, req)
 
 	if rec.Code != http.StatusOK {

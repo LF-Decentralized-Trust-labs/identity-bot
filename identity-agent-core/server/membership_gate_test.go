@@ -22,7 +22,7 @@ func TestMembershipResolverGateChain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("asset handler: %v", err)
 	}
-	s := &CoreServer{}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret}
 	s.assetHandler = h
 	if err := h.Store.UpsertAsset(asset.Asset{
 		ID: "a1", PairwiseAID: "ESite",

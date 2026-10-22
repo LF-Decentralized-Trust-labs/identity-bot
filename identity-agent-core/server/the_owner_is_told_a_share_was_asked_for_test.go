@@ -44,6 +44,6 @@ func TestTheOwnerIsToldWhereTheyWillSeeIt(t *testing.T) {
 // a delivery problem into a broken recovery, which is the wrong trade by a
 // distance.
 func TestAFailedNotificationDoesNotBreakAnything(t *testing.T) {
-	s := &CoreServer{} // no store at all
+	s := &CoreServer{localOwnerSecret: testOwnerSecret} // no store at all
 	s.tellTheOwnerAShareWasAskedFor("EAnything")
 }

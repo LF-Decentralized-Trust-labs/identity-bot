@@ -19,7 +19,7 @@ import (
 // which is what a host resuming an instance needs.
 
 func TestAChallengeMustBeLongEnoughToBeUnguessable(t *testing.T) {
-	s := &CoreServer{}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret}
 	if _, err := s.challengedAttestation("short"); err == nil {
 		t.Fatal("a five-character challenge was accepted, so a caller could be " +
 			"answered with a report somebody prepared in advance")
@@ -27,7 +27,7 @@ func TestAChallengeMustBeLongEnoughToBeUnguessable(t *testing.T) {
 }
 
 func TestAChallengeIsBounded(t *testing.T) {
-	s := &CoreServer{}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret}
 	if _, err := s.challengedAttestation(strings.Repeat("a", 513)); err == nil {
 		t.Error("an oversized challenge was accepted")
 	}

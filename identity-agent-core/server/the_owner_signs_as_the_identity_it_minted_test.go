@@ -33,6 +33,7 @@ func askToSignAs(t *testing.T, s *CoreServer, body string) *httptest.ResponseRec
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/api/machines/owner/sign", strings.NewReader(body))
 	req.RemoteAddr = "127.0.0.1:1234"
+	req.Header.Set(LocalOwnerSecretHeader, testOwnerSecret)
 	rec := httptest.NewRecorder()
 	s.handleSignAsAMachineOwner(rec, req)
 	return rec

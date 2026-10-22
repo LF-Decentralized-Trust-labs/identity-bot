@@ -27,7 +27,7 @@ func TestAcceptsASignatureProducedByTheDartClient(t *testing.T) {
 	}
 	pub := ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)
 
-	s := &CoreServer{DataDir: t.TempDir()}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 	if err := s.SealOwnerAuthority(OwnerAuthority{
 		AID:       "EDARTCLIENT",
 		PublicKey: base64.RawURLEncoding.EncodeToString(pub),

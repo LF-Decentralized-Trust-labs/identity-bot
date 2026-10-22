@@ -8,7 +8,7 @@ import (
 )
 
 func TestKeriSelfTestEndpoint(t *testing.T) {
-	s := &CoreServer{}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret}
 	w := httptest.NewRecorder()
 	s.handleKeriSelfTest(w, httptest.NewRequest(http.MethodGet, "/api/keri/selftest", nil))
 

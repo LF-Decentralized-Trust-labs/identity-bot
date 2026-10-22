@@ -22,7 +22,7 @@ func serverWithAsset(t *testing.T, a asset.Asset) *CoreServer {
 	if err := store.UpsertAsset(a); err != nil {
 		t.Fatalf("save asset: %v", err)
 	}
-	return &CoreServer{DataDir: dir, assetHandler: &asset.Handler{Store: store}}
+	return &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: dir, assetHandler: &asset.Handler{Store: store}}
 }
 
 func TestSelfRegisteredKeyCannotOverrideOurOwnAsset(t *testing.T) {

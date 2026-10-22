@@ -11,7 +11,8 @@ import (
 
 func TestHandleVerificationBadgeLocalhostOnly(t *testing.T) {
 	s := &CoreServer{
-		LinkVerifier: linkverifier.New(nil, linkverifier.Config{}),
+		localOwnerSecret: testOwnerSecret,
+		LinkVerifier:     linkverifier.New(nil, linkverifier.Config{}),
 	}
 	req := httptest.NewRequest(http.MethodGet, "/api/verification/badge?url=https://example.com", nil)
 	req.RemoteAddr = "192.168.1.1:1234"
@@ -24,10 +25,12 @@ func TestHandleVerificationBadgeLocalhostOnly(t *testing.T) {
 
 func TestHandleVerificationBadgeLoopback(t *testing.T) {
 	s := &CoreServer{
-		LinkVerifier: linkverifier.New(nil, linkverifier.Config{}),
+		localOwnerSecret: testOwnerSecret,
+		LinkVerifier:     linkverifier.New(nil, linkverifier.Config{}),
 	}
 	req := httptest.NewRequest(http.MethodGet, "/api/verification/badge?url=https://example.invalid&flow=badge", nil)
 	req.RemoteAddr = "127.0.0.1:1234"
+	req.Header.Set(LocalOwnerSecretHeader, testOwnerSecret)
 	w := httptest.NewRecorder()
 	s.handleVerificationBadge(w, req)
 	if w.Code != http.StatusOK {

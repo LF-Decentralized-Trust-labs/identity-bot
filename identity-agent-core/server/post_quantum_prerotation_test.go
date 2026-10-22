@@ -12,7 +12,7 @@ import (
 // this field; if it were hardcoded true, it would say so on an agent that never
 // made the commitment.
 func TestPostQuantumPreRotationReportsHonestly(t *testing.T) {
-	s := &CoreServer{DataDir: t.TempDir()}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 
 	// No root seed in an empty data directory, so nothing can be derived.
 	digests, pq := s.postQuantumPreRotation("DAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8g")

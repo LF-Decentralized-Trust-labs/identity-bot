@@ -24,7 +24,7 @@ func ownerDID(t *testing.T, aid string) *didcomm.DID {
 // encryption keys, so the first private request between them was refused for
 // exactly the pair the feature exists to serve.
 func TestAdoptionLeavesTheOwnerReachablePrivately(t *testing.T) {
-	s := &CoreServer{DataDir: t.TempDir()}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 	did := ownerDID(t, "EOWNER")
 
 	if err := s.rememberPeerFromAdoption(did, "https://owner.example"); err != nil {
@@ -50,7 +50,7 @@ func TestAdoptionLeavesTheOwnerReachablePrivately(t *testing.T) {
 // identity is either a mistake or somebody installing their own keys in place
 // of the owner's, and overwriting quietly makes the second case invisible.
 func TestASecondAdoptionCannotReplaceTheOwnersKeys(t *testing.T) {
-	s := &CoreServer{DataDir: t.TempDir()}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 	if err := s.rememberPeerFromAdoption(ownerDID(t, "EOWNER"), "https://owner.example"); err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestASecondAdoptionCannotReplaceTheOwnersKeys(t *testing.T) {
 // Keys that cannot be used must be refused as they arrive, not when the owner
 // is next trying to do something.
 func TestUnusableOwnerKeysAreRefusedOnArrival(t *testing.T) {
-	s := &CoreServer{DataDir: t.TempDir()}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 	good := ownerDID(t, "EOWNER")
 
 	for name, did := range map[string]*didcomm.DID{
@@ -85,7 +85,7 @@ func TestUnusableOwnerKeysAreRefusedOnArrival(t *testing.T) {
 // dropped response is an ordinary thing, and refusing it would strand a box
 // that is otherwise correctly adopted.
 func TestRepeatingTheSameKeysIsNotAnError(t *testing.T) {
-	s := &CoreServer{DataDir: t.TempDir()}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 	did := ownerDID(t, "EOWNER")
 	if err := s.rememberPeerFromAdoption(did, "https://owner.example"); err != nil {
 		t.Fatal(err)

@@ -21,7 +21,7 @@ func TestTheSignerRouteGoesWhereTheRosterGoes(t *testing.T) {
 		} else {
 			_ = os.Unsetenv("OVERLAY_OWNS_ORG_ROUTES")
 		}
-		s := &CoreServer{}
+		s := &CoreServer{localOwnerSecret: testOwnerSecret}
 		r := chi.NewRouter()
 		func() {
 			// Neither mounts without an asset handler; that is not what is

@@ -35,7 +35,7 @@ func orgServer(t *testing.T) (*CoreServer, string) {
 	}); err != nil {
 		t.Skipf("cannot save identity: %v", err)
 	}
-	return &CoreServer{DataDir: dir, DataStore: ds}, dir
+	return &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: dir, DataStore: ds}, dir
 }
 
 // Before anybody signs, the agent falls back to itself. That is the state the

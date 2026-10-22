@@ -395,6 +395,7 @@ func TestARefusedSignInCannotBeRetried(t *testing.T) {
 func TestTheWidgetEndpointWithholdsIdentityWithoutTheSecret(t *testing.T) {
 	const token = "session-widget"
 	s := &CoreServer{
+		localOwnerSecret: testOwnerSecret,
 		challengeStatus: map[string]map[string]interface{}{
 			token: {
 				"status":       "complete",

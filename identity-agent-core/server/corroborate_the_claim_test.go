@@ -184,6 +184,7 @@ func TestOnlyAMachineThatCanAlwaysReachAWitnessRefusesForNotReaching(t *testing.
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/pairing/offer-this-computer", nil)
 	req.RemoteAddr = "127.0.0.1:5050"
+	req.Header.Set(LocalOwnerSecretHeader, testOwnerSecret)
 	s.handleOfferThisComputer(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("could not offer the computer: %s", rec.Body.String())

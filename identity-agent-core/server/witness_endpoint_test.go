@@ -22,7 +22,7 @@ func witnessWithStore(t *testing.T) *CoreServer {
 	if err != nil {
 		t.Skipf("data store unavailable: %v", err)
 	}
-	return &CoreServer{DataDir: dir, DataStore: ds}
+	return &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: dir, DataStore: ds}
 }
 
 func postEndpointRecord(t *testing.T, s *CoreServer, body map[string]any) *httptest.ResponseRecorder {

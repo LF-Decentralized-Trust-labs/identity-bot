@@ -17,13 +17,14 @@ import (
 
 func rootSeedServer(t *testing.T) *CoreServer {
 	t.Helper()
-	return &CoreServer{DataDir: t.TempDir()}
+	return &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 }
 
 func postSeed(s *CoreServer, seedB64 string, remote bool) *httptest.ResponseRecorder {
 	body, _ := json.Marshal(map[string]string{"seed_b64": seedB64})
 	req := httptest.NewRequest(http.MethodPost, "/api/keystore/root-seed", bytes.NewReader(body))
 	req.RemoteAddr = "127.0.0.1:9999"
+	req.Header.Set(LocalOwnerSecretHeader, testOwnerSecret)
 	if remote {
 		req.Header.Set("X-Forwarded-For", "203.0.113.9")
 	}
@@ -98,6 +99,7 @@ func TestRootSeedStatus(t *testing.T) {
 	get := func() map[string]any {
 		req := httptest.NewRequest(http.MethodGet, "/api/keystore/root-seed", nil)
 		req.RemoteAddr = "127.0.0.1:9999"
+		req.Header.Set(LocalOwnerSecretHeader, testOwnerSecret)
 		w := httptest.NewRecorder()
 		s.handleRootSeedStatus(w, req)
 		var out map[string]any
@@ -172,6 +174,7 @@ func TestAPairedComputerRefusesARootSeed(t *testing.T) {
 	body := []byte(`{"seed_b64":"` + base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{3}, 64)) + `"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/keystore/root-seed", bytes.NewReader(body))
 	req.RemoteAddr = "127.0.0.1:5050"
+	req.Header.Set(LocalOwnerSecretHeader, testOwnerSecret)
 	rec := httptest.NewRecorder()
 	s.handleSetRootSeed(rec, req)
 
@@ -196,6 +199,7 @@ func TestAComputerThatIsTheIdentityStillTakesItsOwnSeed(t *testing.T) {
 	body := []byte(`{"seed_b64":"` + base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{4}, 64)) + `"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/keystore/root-seed", bytes.NewReader(body))
 	req.RemoteAddr = "127.0.0.1:5050"
+	req.Header.Set(LocalOwnerSecretHeader, testOwnerSecret)
 	rec := httptest.NewRecorder()
 	s.handleSetRootSeed(rec, req)
 

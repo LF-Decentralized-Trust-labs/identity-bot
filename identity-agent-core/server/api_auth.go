@@ -420,7 +420,7 @@ func denyAuthorization(w http.ResponseWriter, detail string) {
 // provisioning, or by sending it inside an envelope only the owner's identity
 // could have sealed.
 func (s *CoreServer) isOwner(r *http.Request) bool {
-	if isLocalOwnerRequest(r) {
+	if s.isLocalOwnerRequest(r) {
 		return true
 	}
 	if s.isSealedOwnerRequest(r) {

@@ -148,14 +148,14 @@ func TestTheDerivationSurvivesARestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &CoreServer{DataDir: dir, DataStore: ds}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: dir, DataStore: ds}
 	_, committedNext := foundLikePairingDoes(t, s, 42)
 
 	reopened, err := store.NewSQLiteStore(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	restarted := &CoreServer{DataDir: dir, DataStore: reopened}
+	restarted := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: dir, DataStore: reopened}
 
 	keys, err := restarted.ownRotationKeys()
 	if err != nil {
