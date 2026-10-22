@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"identity-agent-core/childenv"
 	"log"
 	"os"
 	"os/exec"
@@ -70,6 +71,7 @@ func NewContainerRuntime(manifest *AppManifest, instance *Instance, store *Sandb
 
 func runPodmanCmd(ctx context.Context, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "podman", args...)
+	cmd.Env = childenv.Environ()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return out, fmt.Errorf("podman %s failed: %w\noutput: %s", args[0], err, string(out))
@@ -79,6 +81,7 @@ func runPodmanCmd(ctx context.Context, args ...string) ([]byte, error) {
 
 func PullImage(ctx context.Context, image string, callback PullProgressCallback) error {
 	cmd := exec.CommandContext(ctx, "podman", "pull", "--quiet=false", image)
+	cmd.Env = childenv.Environ()
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		return fmt.Errorf("failed to create pipe: %w", err)
@@ -455,7 +458,10 @@ func (d *ContainerRuntime) createContainer(ctx context.Context) error {
 
 	if d.manifest.Container != nil {
 		for hostPath, containerPath := range d.manifest.Container.Volumes {
-			resolvedHost := d.expandVolumePath(hostPath)
+			resolvedHost, err := resolveVolumeHostPath(d.dataDir, d.manifest.ID, hostPath)
+			if err != nil {
+				return err
+			}
 			args = append(args, "-v", fmt.Sprintf("%s:%s", resolvedHost, containerPath))
 		}
 	}
@@ -483,23 +489,39 @@ func (d *ContainerRuntime) stopContainer(ctx context.Context) error {
 	return err
 }
 
-// expandVolumePath resolves template tokens in manifest volume host paths.
-// Supported tokens:
+// appDataToken is the only place a manifest may mount from: the app's own
+// directory, <data dir>/sandbox-volumes/<app id>.
+const appDataToken = "{APP_DATA}"
+
+// resolveVolumeHostPath turns a manifest volume's host path into the directory
+// to mount, or refuses it.
 //
-//	{DATA_DIR}  → the agent's data directory (AGENT_DATA_DIR env / ./data default)
-//
-// The resolved directory is created if it does not exist, so Podman never
-// fails on a missing mount source.
-func (d *ContainerRuntime) expandVolumePath(hostPath string) string {
-	expanded := strings.ReplaceAll(hostPath, "{DATA_DIR}", d.dataDir)
-	// Ensure the directory exists so Podman doesn't error on a missing source.
-	// Ignore the error — if it fails, Podman will surface a clearer message.
-	if !strings.Contains(expanded, ".") { // rough heuristic: likely a directory, not a file
-		_ = os.MkdirAll(expanded, 0755)
-	} else {
-		_ = os.MkdirAll(filepath.Dir(expanded), 0755)
+// A manifest is written by whoever published the app, so where it may mount
+// from is not its to choose. The data directory holds the identity's keys and
+// the secret that makes a local request the owner's; any other host path is
+// somebody's files. So an app mounts only from its own directory under the
+// data directory, named {APP_DATA}, and nothing that resolves outside it.
+func resolveVolumeHostPath(dataDir, appID, hostPath string) (string, error) {
+	if !strings.HasPrefix(hostPath, appDataToken) {
+		return "", fmt.Errorf("volume %q: an app may mount only from %s, its own directory", hostPath, appDataToken)
 	}
-	return expanded
+	if appID == "" || strings.ContainsAny(appID, `/\`) || appID == "." || appID == ".." {
+		return "", fmt.Errorf("volume %q: the app has no usable id to keep its files under", hostPath)
+	}
+	root, err := filepath.Abs(filepath.Join(dataDir, "sandbox-volumes", appID))
+	if err != nil {
+		return "", err
+	}
+	resolved := filepath.Clean(root + strings.TrimPrefix(hostPath, appDataToken))
+	if resolved != root && !strings.HasPrefix(resolved, root+string(filepath.Separator)) {
+		return "", fmt.Errorf("volume %q resolves outside the app's own directory", hostPath)
+	}
+	// Created so Podman never fails on a missing source, readable by this user
+	// alone like the rest of the data directory.
+	if err := os.MkdirAll(resolved, 0o700); err != nil {
+		return "", err
+	}
+	return resolved, nil
 }
 
 func (d *ContainerRuntime) removeContainer(ctx context.Context) error {

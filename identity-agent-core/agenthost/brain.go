@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"identity-agent-core/childenv"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -84,7 +85,7 @@ type SameUser struct{}
 func (SameUser) Command(ctx context.Context, dir string, env []string, name string, args ...string) (*exec.Cmd, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), env...)
+	cmd.Env = append(childenv.Environ(), env...)
 	return cmd, nil
 }
 
