@@ -454,3 +454,33 @@ func TestAStoppedManagerDoesNotStart(t *testing.T) {
 		t.Fatal("a stopped manager connected")
 	}
 }
+
+// A relay address that is not https is never used, whatever set it: the rule
+// is checked where every path to a relay passes, and the reason is plain.
+func TestAPlainHTTPRelayIsNeverUsed(t *testing.T) {
+	rl := relaytest.New(relayproto.ModePublic)
+	defer rl.Close()
+	e := newEnrolment(t)
+	plain := relay.NewManager(relay.Config{
+		BaseURL: strings.Replace(rl.URL(), "https://", "http://", 1), Mode: relayproto.ModePublic,
+		EnrollmentAID: e.aid, KEL: func() []byte { return e.kel }, Session: e.keri, Requests: e,
+		RAID: e.aid, Name: "acme", Handler: identityAgent(), HTTPClient: rl.Client(),
+	})
+	err := plain.Start(context.Background())
+	if !errors.Is(err, relay.ErrNotHTTPS) {
+		t.Fatalf("started against a plain-http relay: %v", err)
+	}
+	if st := plain.GetStatus(); st.State != relay.StateFailed || st.ReasonCode != relay.ReasonNotHTTPS {
+		t.Fatalf("status: %+v", st)
+	}
+	for _, ok := range []string{"https://relay.example.org", "https://relay.example.org/api"} {
+		if relay.CheckBaseURL(ok) != nil {
+			t.Fatalf("%q refused", ok)
+		}
+	}
+	for _, bad := range []string{"http://relay.example.org", "relay.example.org", "https://", "ftp://x"} {
+		if relay.CheckBaseURL(bad) == nil {
+			t.Fatalf("%q accepted", bad)
+		}
+	}
+}

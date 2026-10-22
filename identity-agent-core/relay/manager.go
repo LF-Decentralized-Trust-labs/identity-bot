@@ -141,6 +141,7 @@ const (
 	ReasonNoName      = "no_name"
 	ReasonWrongMode   = "wrong_mode"
 	ReasonRefused     = "refused"
+	ReasonNotHTTPS    = "not_https"
 )
 
 // explain turns a failure into a reason code, plain words, and whether trying
@@ -165,9 +166,11 @@ func explain(err error) (code, words string, permanent bool) {
 		}
 		return ReasonRefused, "The relay refused: " + msg, false
 	case errors.Is(err, errNoName):
-		return ReasonNoName, "A public relay gives an address only at a name or a proven domain, and none is set.", true
+		return ReasonNoName, "Choose a name for your public address. A public relay gives an address only at a name or a proven domain, and none is set.", true
 	case errors.Is(err, errWrongMode):
 		return ReasonWrongMode, err.Error(), true
+	case errors.Is(err, ErrNotHTTPS):
+		return ReasonNotHTTPS, "A relay's address must start with https://.", true
 	}
 	return ReasonUnreachable, "The relay cannot be reached: " + errString(err), false
 }
@@ -175,7 +178,23 @@ func explain(err error) (code, words string, permanent bool) {
 var (
 	errNoName    = errors.New("a public relay gives an address only at a name or a proven domain, and none is set")
 	errWrongMode = errors.New("the relay serves the other kind of address")
+
+	// ErrNotHTTPS is a relay address that is not https. Everything sent to a
+	// relay is either signed or carried over the session, and both depend on
+	// the relay's certificate, so a plain-http relay is never used.
+	ErrNotHTTPS = errors.New("a relay's address must start with https://")
 )
+
+// CheckBaseURL is the one rule for a relay's address: an https URL with a
+// host. Every path to a relay passes through it, in Start, and settings use it
+// to refuse an address before it is saved.
+func CheckBaseURL(raw string) error {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Scheme != "https" || u.Host == "" {
+		return fmt.Errorf("%w: %q", ErrNotHTTPS, raw)
+	}
+	return nil
+}
 
 // Manager keeps one Identity Agent connected to one relay, and reconnects when
 // the session drops: the network goes, the machine sleeps, the relay restarts.
@@ -233,6 +252,9 @@ func (m *Manager) newClient() *Client {
 func (m *Manager) Start(parent context.Context) error {
 	if m.cfg.BaseURL == "" {
 		return fmt.Errorf("relay: no operator configured")
+	}
+	if err := CheckBaseURL(m.cfg.BaseURL); err != nil {
+		return m.fail(err)
 	}
 	if m.cfg.EnrollmentAID == "" || m.cfg.KEL == nil || m.cfg.Session == nil || m.cfg.Requests == nil {
 		return fmt.Errorf("relay: an enrolment identifier, its key log and its signers are required")

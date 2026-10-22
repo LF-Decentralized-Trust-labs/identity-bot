@@ -48,7 +48,27 @@ class BackendProcessService {
   /// them when it changed.
   static String? dataDirOverride;
 
+  /// Settings a product gives its backend through the environment, such as
+  /// which relays it is reached through (`RELAY_BASE_URL`,
+  /// `PUBLIC_RELAY_BASE_URL`). Set this before [start].
+  ///
+  /// Each applies only when the environment does not already name it, so
+  /// whoever runs the app can always point it somewhere else. The core bundles
+  /// no operator of its own; this is where an app that does says so.
+  static Map<String, String> environmentDefaults = const {};
+
   BackendProcessService._();
+
+  /// The environment the backend starts with: [base] with each of
+  /// [environmentDefaults] that [base] does not already give a value.
+  @visibleForTesting
+  static Map<String, String> withEnvironmentDefaults(Map<String, String> base) {
+    final env = Map<String, String>.from(base);
+    environmentDefaults.forEach((name, value) {
+      if ((env[name] ?? '').trim().isEmpty) env[name] = value;
+    });
+    return env;
+  }
 
   static BackendProcessService get instance {
     _instance ??= BackendProcessService._();
@@ -317,7 +337,7 @@ class BackendProcessService {
     }
 
     try {
-      final env = Map<String, String>.from(Platform.environment);
+      final env = withEnvironmentDefaults(Platform.environment);
       env['PORT'] = '${AgentConfig.defaultDesktopPort}';
       env['HOST'] = '0.0.0.0';
       // The backend's working dir is inside the read-only .app bundle, so its

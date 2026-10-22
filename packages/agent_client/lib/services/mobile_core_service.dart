@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
+import 'backend_process_service.dart';
 import 'core_service.dart';
 
 class MobileCoreService {
@@ -21,14 +22,28 @@ class MobileCoreService {
     return _coreClient!;
   }
 
+  /// What the app's native side is given to start the core. The relays come
+  /// from the same [BackendProcessService.environmentDefaults] a desktop app
+  /// sets, so an app names its relays once for every platform; the native side
+  /// passes them to `mobilecore.DeclareRelays` before `StartServer`.
+  static Map<String, Object> startArguments({String? dataDir, int? port}) {
+    final defaults = BackendProcessService.environmentDefaults;
+    final privateRelay = defaults['RELAY_BASE_URL'] ?? '';
+    final publicRelay = defaults['PUBLIC_RELAY_BASE_URL'] ?? '';
+    return {
+      if (dataDir != null) 'dataDir': dataDir,
+      'port': port ?? defaultPort,
+      if (privateRelay.isNotEmpty) 'privateRelay': privateRelay,
+      if (publicRelay.isNotEmpty) 'publicRelay': publicRelay,
+    };
+  }
+
   Future<void> startCore({String? dataDir, int? port}) async {
     if (_started) return;
 
     try {
-      final result = await _channel.invokeMethod('startServer', {
-        if (dataDir != null) 'dataDir': dataDir,
-        'port': port ?? defaultPort,
-      });
+      final result = await _channel.invokeMethod(
+          'startServer', startArguments(dataDir: dataDir, port: port));
 
       if (result is Map) {
         _port = result['port'] ?? defaultPort;
@@ -138,13 +153,16 @@ class MobileCoreService {
     }
   }
 
-  Future<bool> waitForReady({Duration timeout = const Duration(seconds: 10)}) async {
+  Future<bool> waitForReady(
+      {Duration timeout = const Duration(seconds: 10)}) async {
     final deadline = DateTime.now().add(timeout);
     while (DateTime.now().isBefore(deadline)) {
       try {
-        final response = await http.get(
-          Uri.parse('$baseUrl/api/health'),
-        ).timeout(const Duration(seconds: 2));
+        final response = await http
+            .get(
+              Uri.parse('$baseUrl/api/health'),
+            )
+            .timeout(const Duration(seconds: 2));
         if (response.statusCode == 200) {
           return true;
         }
@@ -173,7 +191,8 @@ class MobileCoreService {
 
     if (response.statusCode != 201) {
       final body = jsonDecode(response.body);
-      throw Exception(body['error'] ?? 'Store identity failed: ${response.statusCode}');
+      throw Exception(
+          body['error'] ?? 'Store identity failed: ${response.statusCode}');
     }
   }
 
@@ -200,7 +219,8 @@ class MobileCoreService {
 
     if (response.statusCode != 201) {
       final body = jsonDecode(response.body);
-      throw Exception(body['error'] ?? 'Store event failed: ${response.statusCode}');
+      throw Exception(
+          body['error'] ?? 'Store event failed: ${response.statusCode}');
     }
   }
 

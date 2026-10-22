@@ -410,7 +410,16 @@ send, so this is the same exposure as any public web host.
 `relayproto` is its own Go module, `github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto`, with no dependency on the rest of the core. A relay server anywhere can `go get` it, and the core will consume it from the same path.
 
 **Built in the core:** the private default and the product's default seam
-(`DefaultIngressMode`).
+(`DefaultIngressMode`). The core bundles no relay operator; a product names its
+relays through `RELAY_BASE_URL` and `PUBLIC_RELAY_BASE_URL`, which a desktop app
+sets with `BackendProcessService.environmentDefaults` and a phone app with
+`mobilecore.DeclareRelays` before start. The environment, and a relay chosen in
+settings, still win.
+
+**An instance set to public with no name to be reached at** (no public name and
+no address already held) is shown a notice at start-up asking the owner to
+choose one, and the relay status gives the same reason, until they next save
+reachability.
 
 **An instance that used the retired Chisel provider** is moved at start-up to a
 public relay address under the name it held, and the owner is shown a notice

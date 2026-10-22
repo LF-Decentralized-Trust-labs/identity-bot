@@ -377,3 +377,110 @@ func TestTheRetiredTunnelProviderMovesToAPublicRelay(t *testing.T) {
 		t.Fatal("the notice outlived the owner's choice")
 	}
 }
+
+// An instance set to be reached publicly with no name to be reached at is told
+// so in plain words, in both status endpoints, and the relay says the same.
+// A product can make public the default before the owner has chosen a name.
+func TestAPublicAddressWithNoNameTellsTheOwner(t *testing.T) {
+	s, _, _, cancel := relayWorld(t, relayproto.ModePublic)
+	defer cancel()
+	if err := s.DataStore.SaveSettings(store.SettingsData{IngressMode: "public"}); err != nil {
+		t.Fatal(err)
+	}
+	s.noticeMissingPublicName()
+
+	go s.startRelay()
+	defer s.Stop()
+	out := waitForState(t, s, "failed")
+	if out["notice"] != noPublicNameNotice {
+		t.Fatalf("relay status notice: %v", out["notice"])
+	}
+	if reason, _ := out["reason"].(string); !strings.HasPrefix(reason, "Choose a name for your public address") {
+		t.Fatalf("relay status reason: %q", reason)
+	}
+	_, settings := asOwner(t, s, "GET", "/api/settings/reachability", "")
+	if settings["notice"] != noPublicNameNotice {
+		t.Fatalf("reachability settings notice: %v", settings["notice"])
+	}
+
+	// Choosing a name is the owner having seen it.
+	asOwner(t, s, "PUT", "/api/settings/reachability", `{"public_relay_name":"acme"}`)
+	if st, _ := s.DataStore.GetSettings(); st.ReachabilityNotice != "" {
+		t.Fatal("the notice outlived the owner's choice")
+	}
+}
+
+// An instance that already has a name is left alone.
+func TestAPublicAddressWithANameGetsNoNotice(t *testing.T) {
+	s, _, _, cancel := relayWorld(t, relayproto.ModePublic)
+	defer cancel()
+	s.noticeMissingPublicName()
+	if st, _ := s.DataStore.GetSettings(); st != nil && st.ReachabilityNotice != "" {
+		t.Fatalf("notice with a name set: %q", st.ReachabilityNotice)
+	}
+}
+
+// A name the relay refuses is not kept: kept, it was asked for again at every
+// start and refused every time, while the save had cleared the notice that
+// should have said so.
+func TestARefusedNameIsForgottenAndTheOwnerTold(t *testing.T) {
+	s, rl, _, cancel := relayWorld(t, relayproto.ModePublic)
+	defer cancel()
+	rl.HoldName("taken-one", "EOTHERIDENTITY")
+	go s.startRelay()
+	defer s.Stop()
+	waitForState(t, s, "active")
+
+	code, out := asOwner(t, s, "PUT", "/api/settings/reachability", `{"public_relay_name":"taken-one"}`)
+	v := relayView(t, out)
+	if code != http.StatusOK || v["reason_code"] != "taken" {
+		t.Fatalf("saving a taken name: %d %v", code, out)
+	}
+	st, _ := s.DataStore.GetSettings()
+	if st.PublicRelayName != "" {
+		t.Fatalf("the refused name was kept: %q", st.PublicRelayName)
+	}
+	if !strings.Contains(st.ReachabilityNotice, "taken-one") || !strings.Contains(st.ReachabilityNotice, "already held") {
+		t.Fatalf("notice: %q", st.ReachabilityNotice)
+	}
+	if n, _ := v["notice"].(string); n != st.ReachabilityNotice {
+		t.Fatalf("the answer's notice %q is not the one kept %q", n, st.ReachabilityNotice)
+	}
+}
+
+// Clearing the name of a public address brings the no-name notice back rather
+// than leaving the owner unreachable and untold.
+func TestClearingThePublicNameTellsTheOwner(t *testing.T) {
+	s, _, _, cancel := relayWorld(t, relayproto.ModePublic)
+	defer cancel()
+	go s.startRelay()
+	defer s.Stop()
+	waitForState(t, s, "active")
+
+	asOwner(t, s, "PUT", "/api/settings/reachability", `{"public_relay_name":""}`)
+	if st, _ := s.DataStore.GetSettings(); st.ReachabilityNotice != noPublicNameNotice {
+		t.Fatalf("notice: %q", st.ReachabilityNotice)
+	}
+}
+
+// A name that can never be had, and a relay address that is not https, are
+// refused before anything is saved.
+func TestImpossibleSettingsAreRefusedBeforeSaving(t *testing.T) {
+	s, _, _, cancel := relayWorld(t, relayproto.ModePublic)
+	defer cancel()
+	for _, body := range []string{
+		`{"public_relay_name":"Not A Name"}`,
+		`{"public_relay_name":"ac--me"}`,
+		`{"public_relay_operator":"http://relay.example.org"}`,
+		`{"relay_operator":"relay.example.org"}`,
+	} {
+		code, out := asOwner(t, s, "PUT", "/api/settings/reachability", body)
+		if code != http.StatusBadRequest {
+			t.Fatalf("%s: %d %v", body, code, out)
+		}
+	}
+	if st, _ := s.DataStore.GetSettings(); st.PublicRelayName != "acme" || st.PublicRelayOperator != "" || st.RelayOperator != "" {
+		t.Fatalf("settings changed: %+v", st)
+	}
+}
+
