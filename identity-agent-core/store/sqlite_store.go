@@ -955,6 +955,20 @@ func (s *SQLiteStore) KeepRecordAnchor(ev EventRecord, a RecordAnchor) error {
 	return tx.Commit()
 }
 
+// GetLatestRecordAnchor returns the newest anchoring, or nil.
+func (s *SQLiteStore) GetLatestRecordAnchor() (*RecordAnchor, error) {
+	var a RecordAnchor
+	err := s.db.QueryRow(`SELECT seq, said, statement, digest, created_at FROM record_anchors ORDER BY seq DESC LIMIT 1`).
+		Scan(&a.Seq, &a.SAID, &a.Statement, &a.Digest, &a.CreatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the record's newest anchor: %w", err)
+	}
+	return &a, nil
+}
+
 // GetRecordAnchors returns every anchoring of the record, oldest first.
 func (s *SQLiteStore) GetRecordAnchors() ([]RecordAnchor, error) {
 	rows, err := s.db.Query(`SELECT seq, said, statement, digest, created_at FROM record_anchors ORDER BY seq`)

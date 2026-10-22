@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto"
@@ -175,6 +176,14 @@ type CoreServer struct {
 	running            bool
 	// anchorStop ends the record's anchoring when the server stops.
 	anchorStop chan struct{}
+	// grantsMu holds machines' grants still while a credential is issued on
+	// one: revoking, re-issuing or replacing a grant takes it exclusively.
+	grantsMu sync.RWMutex
+	// record is the state of the record's anchoring.
+	record recordState
+	// edgesSince is when the first credential naming who authorised it was
+	// issued here; see issuedUnderFirstVersionTooLate.
+	edgesSince atomic.Value
 }
 
 type Config struct {
@@ -415,7 +424,7 @@ func New(cfg Config) (*CoreServer, error) {
 	// Seed the engine from what was persisted, so issuing and anchoring work
 	// after a restart without a fresh inception. Both implementations start
 	// empty, so both need this.
-	s.reloadKeyLogs()
+	s.prepareKeyLogs()
 
 	if s.WitnessService != nil {
 		s.WitnessService.Driver = s.KeriDriver
@@ -4571,6 +4580,14 @@ func (s *CoreServer) handleDeletePendingRequest(w http.ResponseWriter, r *http.R
 // state from the persisted DB state. Called once on startup after the engine is
 // ready. This makes IssueCredential and Interact work across server restarts
 // without requiring a fresh inception event each session.
+// prepareKeyLogs is what start-up does with the key logs: hand them back to
+// the engine, then give any machine paired before machines were given grants
+// its grant.
+func (s *CoreServer) prepareKeyLogs() {
+	s.reloadKeyLogs()
+	s.backfillControllerGrants()
+}
+
 // reloadKeyLogs hands the engine every key log this Identity Agent writes to:
 // its identity's, then the record identity's, which its identity approved.
 func (s *CoreServer) reloadKeyLogs() {

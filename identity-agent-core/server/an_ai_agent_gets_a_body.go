@@ -201,11 +201,13 @@ func (s *CoreServer) handleApproveBody(w http.ResponseWriter, r *http.Request) {
 		"keys_digest": b.KeysDigest(), "grade": b.Grade, "claimed_grade": b.ClaimedGrade,
 		"platform": b.Platform, "placement": b.Placement,
 	}
-	by, err := s.authorityOf(r)
+	by, release, err := s.authorityOf(r)
 	if err != nil {
-		jsonError(w, "who approved this machine could not be read from the request: "+err.Error(), http.StatusBadRequest)
+		jsonError(w, "who approved this machine: "+err.Error(), http.StatusForbidden)
 		return
 	}
+	defer release()
+	by.About = b.ID
 	credSAID, err := s.issueAssetCredential(schemas.AIAgentBody, a.PairwiseAID, a.DelegatorAID, claims, "", by)
 	if err != nil {
 		jsonError(w, "the body credential could not be issued, so the body was not approved: "+err.Error(),
@@ -476,7 +478,7 @@ func (s *CoreServer) identifyBody(r *http.Request) (agentbody.Binding, bool, err
 	}
 	// The binding is live only while its credential is: a body revoked in the
 	// registry but somehow still marked active here is refused.
-	if rec, _ := s.DataStore.GetCredential(b.CredentialSAID); rec == nil || !isUsableStatus(rec.Status) {
+	if rec, _ := s.DataStore.GetCredential(b.CredentialSAID); rec == nil || !isUsableStatus(rec.Status) || s.issuedUnderFirstVersionTooLate(rec) {
 		return agentbody.Binding{}, true, fmt.Errorf("this body's credential is not in force")
 	}
 	if err := verifyBodySignature(r, b); err != nil {

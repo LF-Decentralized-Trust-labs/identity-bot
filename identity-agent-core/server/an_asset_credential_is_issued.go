@@ -76,5 +76,16 @@ func (s *CoreServer) issueAssetCredential(
 	}); err != nil {
 		log.Printf("[asset] failed to persist %s %s: %v", kind.Schema.Name, result.AcdcSaid, err)
 	}
+	// The rule anybody will apply to it later, applied now: a credential that
+	// does not rest on the request it carries is withdrawn, not handed out.
+	if err := s.checkAuthorisation(result.AcdcSaid, by); err != nil {
+		if rec, _ := s.DataStore.GetCredential(result.AcdcSaid); rec != nil {
+			if _, rerr := s.revokeIssuedCredential(rec); rerr != nil {
+				log.Printf("[asset] %s %s does not rest on its request and its revocation failed: %v", kind.Schema.Name, result.AcdcSaid, rerr)
+			}
+			_ = s.DataStore.UpdateCredentialStatus(result.AcdcSaid, "revoked")
+		}
+		return "", fmt.Errorf("%s was not issued: it does not rest on the request that asked for it: %w", kind.Schema.Name, err)
+	}
 	return result.AcdcSaid, nil
 }

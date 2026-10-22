@@ -1,18 +1,25 @@
 package server
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"identity-agent-core/conversation"
 	"identity-agent-core/drivers"
+	"identity-agent-core/iacrypto"
 	"identity-agent-core/keriengine"
+	"identity-agent-core/login"
 	"identity-agent-core/sandbox"
+	"identity-agent-core/store"
 
 	keri "github.com/grapeid/keri-go"
 )
@@ -21,6 +28,7 @@ import (
 func recordWorld(t *testing.T) *CoreServer {
 	t.Helper()
 	s, _ := grantWorld(t)
+	s.DeclaredEntityType = "organization"
 	m, err := sandbox.NewManager(sandbox.ManagerConfig{DataDir: s.DataDir, ManifestsDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -231,8 +239,11 @@ func TestNothingIsWrittenIntoALogWhoseKeyIsElsewhere(t *testing.T) {
 	if _, err := s.identitySigningSeed(); err == nil {
 		t.Fatal("the key still reads as held here")
 	}
-	if anchored, err := s.anchorRecord(); err == nil || anchored {
-		t.Fatalf("the record was anchored under a key this Identity Agent does not hold: %v", err)
+	if anchored, _ := s.anchorRecord(); anchored {
+		t.Fatal("the record was anchored under a key this Identity Agent does not hold")
+	}
+	if got := chainSays(t, s); got["anchoring_unavailable"] == nil || got["unanchored_rows"] != float64(1) {
+		t.Fatalf("a record nothing can anchor is not reported so: %v", got)
 	}
 	if after, _ := s.DataStore.GetEvents(owner.AID); len(after) != len(before) {
 		t.Fatal("an event was written into a key log whose key is elsewhere")
@@ -254,4 +265,342 @@ func TestAConversationsMessagesBringOnAnAnchoring(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatal("a message the conversation took did not bring on an anchoring")
+}
+
+// anchoredTwice is a record anchored over rows 1-3, then over rows 4-5.
+func anchoredTwice(t *testing.T) (*CoreServer, int64) {
+	t.Helper()
+	s := recordWorld(t)
+	writeRows(t, s, 3)
+	if ok, err := s.anchorRecord(); err != nil || !ok {
+		t.Fatalf("first anchoring: %v %v", ok, err)
+	}
+	first, _, _ := s.SandboxManager.Store().Head()
+	writeRows(t, s, 2)
+	if ok, err := s.anchorRecord(); err != nil || !ok {
+		t.Fatalf("second anchoring: %v %v", ok, err)
+	}
+	if got := chainSays(t, s); got["intact"] != true {
+		t.Fatalf("the record does not hold before anything is touched: %v", got)
+	}
+	return s, first
+}
+
+func recordDB(t *testing.T, s *CoreServer) *sql.DB {
+	t.Helper()
+	db, err := sql.Open("sqlite", filepath.Join(s.DataDir, "identity.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	return db
+}
+
+func mustBreak(t *testing.T, s *CoreServer, what string) {
+	t.Helper()
+	if got := chainSays(t, s); got["intact"] != false || got["anchor_broken_at"] == nil {
+		t.Fatalf("%s went unnoticed: %v", what, got)
+	}
+}
+
+// Removing the newest anchoring and every row after the first leaves the
+// record identity's key log sealing a statement that is gone.
+func TestRemovingTheNewestAnchorAndItsRowsIsCaught(t *testing.T) {
+	s, first := anchoredTwice(t)
+	db := recordDB(t, s)
+	if _, err := db.Exec(`DELETE FROM record_anchors WHERE seq = (SELECT MAX(seq) FROM record_anchors)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SandboxManager.Store().DB().Exec(`DELETE FROM invocation_log WHERE id > ?`, first); err != nil {
+		t.Fatal(err)
+	}
+	mustBreak(t, s, "removing the newest anchoring and the rows it fixed")
+}
+
+// Removing the newest anchoring together with its interaction leaves the key
+// log shorter than the tip kept outside the database.
+func TestTrimmingTheRecordIdentitysKeyLogIsCaught(t *testing.T) {
+	s, first := anchoredTwice(t)
+	rec, _ := s.loadRecordIdentity()
+	db := recordDB(t, s)
+	db.Exec(`DELETE FROM record_anchors WHERE seq = (SELECT MAX(seq) FROM record_anchors)`)
+	if _, err := db.Exec(`DELETE FROM kel WHERE aid = ? AND seq_num = (SELECT MAX(seq_num) FROM kel WHERE aid = ?)`, rec.AID, rec.AID); err != nil {
+		t.Fatal(err)
+	}
+	s.SandboxManager.Store().DB().Exec(`DELETE FROM invocation_log WHERE id > ?`, first)
+	mustBreak(t, s, "trimming the record identity's key log")
+}
+
+// A statement changed after it was anchored no longer digests to its seal.
+func TestAChangedStatementIsCaught(t *testing.T) {
+	s, _ := anchoredTwice(t)
+	db := recordDB(t, s)
+	// Still a statement that names real rows; only what was digested changed.
+	if _, err := db.Exec(`UPDATE record_anchors SET statement = replace(statement, '"at":"', '"at":"1') WHERE seq = 1`); err != nil {
+		t.Fatal(err)
+	}
+	mustBreak(t, s, "a changed statement")
+}
+
+// A statement and digest both replaced, consistently with each other, are not
+// what the key log seals.
+func TestAStatementTheKeyLogDoesNotSealIsCaught(t *testing.T) {
+	s, _ := anchoredTwice(t)
+	db := recordDB(t, s)
+	// A statement naming the same, real rows, with a digest that matches it,
+	// but not the one the key log sealed.
+	var st string
+	db.QueryRow(`SELECT statement FROM record_anchors WHERE seq = 1`).Scan(&st)
+	st = strings.Replace(st, `"at":"`, `"at":"1`, 1)
+	d, _ := iacrypto.Blake3QB64([]byte(st))
+	if _, err := db.Exec(`UPDATE record_anchors SET statement = ?, digest = ? WHERE seq = 1`, st, d); err != nil {
+		t.Fatal(err)
+	}
+	mustBreak(t, s, "a statement the key log does not seal")
+}
+
+// A record identity's key log that has been altered does not verify.
+func TestAnAlteredRecordKeyLogIsCaught(t *testing.T) {
+	s, _ := anchoredTwice(t)
+	rec, _ := s.loadRecordIdentity()
+	db := recordDB(t, s)
+	// The event as it was, signed by a key that is not the record identity's.
+	var b64 string
+	db.QueryRow(`SELECT raw_bytes_b64 FROM kel WHERE aid = ? AND seq_num = 1`, rec.AID).Scan(&b64)
+	raw, _ := base64.StdEncoding.DecodeString(b64)
+	_, other, _ := ed25519.GenerateKey(rand.Reader)
+	forged, _ := signEventBytes(raw, other.Seed())
+	if _, err := db.Exec(`UPDATE kel SET cesr_signature = ? WHERE aid = ? AND seq_num = 1`, forged, rec.AID); err != nil {
+		t.Fatal(err)
+	}
+	mustBreak(t, s, "an altered record key log")
+}
+
+// A record identity this identity's key log does not approve is not one.
+func TestARecordIdentityWithoutItsApprovalIsCaught(t *testing.T) {
+	s, _ := anchoredTwice(t)
+	rec, _ := s.loadRecordIdentity()
+	owner, _ := s.DataStore.GetIdentity()
+	events, _ := s.DataStore.GetEvents(owner.AID)
+	db := recordDB(t, s)
+	for _, ev := range events {
+		if containsSealFor(t, ev.RawBytesB64, rec.AID) {
+			if _, err := db.Exec(`DELETE FROM kel WHERE aid = ? AND seq_num = ?`, owner.AID, ev.SequenceNumber); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	mustBreak(t, s, "a record identity nobody approved")
+}
+
+// With nothing anchored every row is counted unanchored and the report says
+// why, rather than calling the record checked.
+func TestNothingAnchoredIsNeverReportedAsChecked(t *testing.T) {
+	s := recordWorld(t)
+	writeRows(t, s, 4)
+	got := chainSays(t, s)
+	if got["anchoring_unavailable"] == nil || got["unanchored_rows"] != float64(4) || got["anchored_through"] != float64(0) {
+		t.Fatalf("a record with no anchors reads as %v", got)
+	}
+}
+
+// An individual's Identity Agent with no AI agent writes nothing into its key
+// log on its own.
+func TestAnIndividualWithNoAIAgentAnchorsNothing(t *testing.T) {
+	s := recordWorld(t)
+	s.DeclaredEntityType = "individual"
+	writeRows(t, s, 2)
+	owner, _ := s.DataStore.GetIdentity()
+	before, _ := s.DataStore.GetEvents(owner.AID)
+	if ok, err := s.anchorRecord(); ok || err != nil {
+		t.Fatalf("an individual with no AI agent anchored: %v %v", ok, err)
+	}
+	if after, _ := s.DataStore.GetEvents(owner.AID); len(after) != len(before) {
+		t.Fatal("an individual's key log was written to unasked")
+	}
+}
+
+// A record identity left pending by a stop is finished if its inception was
+// kept, and removed if not.
+func TestARecordIdentityLeftPartlyMadeIsRepaired(t *testing.T) {
+	s := recordWorld(t)
+	if err := s.saveRecordIdentity(recordIdentityRecord{AID: "Enever-kept", Index: 10000001, Pending: true}); err != nil {
+		t.Fatal(err)
+	}
+	s.repairRecordIdentity()
+	if _, ok := s.loadRecordIdentity(); ok {
+		t.Fatal("a record identity never kept was left in place")
+	}
+	writeRows(t, s, 1)
+	if ok, err := s.anchorRecord(); err != nil || !ok {
+		t.Fatalf("anchoring after the repair: %v %v", ok, err)
+	}
+	rec, _ := s.loadRecordIdentity()
+	rec.Pending = true
+	s.saveRecordIdentity(rec)
+	s.repairRecordIdentity()
+	if got, ok := s.loadRecordIdentity(); !ok || got.Pending {
+		t.Fatal("a record identity whose inception was kept was not finished")
+	}
+}
+
+// A conversation entry is anchored by its sequence: entries added after an
+// anchoring are counted unanchored until the next.
+func TestConversationEntriesAreAnchoredBySequence(t *testing.T) {
+	w := newTalkWorld(t)
+	w.s.DeclaredEntityType = "organization"
+	w.s.SandboxManager.SetEventSigner(&invocationSigner{s: w.s})
+	conv, _ := w.openedWith(t)
+	if ok, err := w.s.anchorRecord(); err != nil || !ok {
+		t.Fatalf("anchoring: %v %v", ok, err)
+	}
+	if got := chainSays(t, w.s); got["unanchored_entries"] != float64(0) {
+		t.Fatalf("after anchoring: %v", got)
+	}
+	if code, out := w.personSays(t, w.a, conv, "and another"); code != http.StatusCreated {
+		t.Fatalf("second message: %d %v", code, out)
+	}
+	if got := chainSays(t, w.s); got["unanchored_entries"] != float64(1) {
+		t.Fatalf("a new entry is not counted unanchored: %v", got)
+	}
+	if ok, err := w.s.anchorRecord(); err != nil || !ok {
+		t.Fatalf("anchoring again: %v %v", ok, err)
+	}
+	if got := chainSays(t, w.s); got["unanchored_entries"] != float64(0) || got["intact"] != true {
+		t.Fatalf("the new entry was not anchored: %v", got)
+	}
+}
+
+// A conversation's last entry is anchored before it can close by going quiet.
+func TestTheRecordIsAnchoredBeforeAQuietConversationCloses(t *testing.T) {
+	was := anchorInterval
+	anchorInterval = 2 * conversation.IdleClose
+	t.Cleanup(func() { anchorInterval = was })
+	if anchorTick() > conversation.IdleClose/2 {
+		t.Fatalf("anchoring every %s would let a conversation close unanchored", anchorTick())
+	}
+}
+
+// With no witnesses named, the report says the anchors are not held outside.
+func TestAnchorsWithNoWitnessesSaySo(t *testing.T) {
+	s := recordWorld(t)
+	writeRows(t, s, 1)
+	s.anchorRecord()
+	if got := chainSays(t, s); got["anchoring_external"] != false {
+		t.Fatalf("anchors with no witnesses read as held outside: %v", got)
+	}
+}
+
+// A receipt counts only from a witness the record identity names, verified
+// against that witness's key, once per witness, and enough of them.
+func TestOnlyNamedWitnessesReceiptsCount(t *testing.T) {
+	s := recordWorld(t)
+	keys := make([]ed25519.PrivateKey, 3)
+	names := make([]string, 3)
+	for i := range keys {
+		pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+		keys[i], names[i] = priv, iacrypto.NonTransferableAIDQB64(pub)
+	}
+	said := "Ethe-event"
+	sign := func(i int) string {
+		sig, _ := login.SignString(said, keys[i].Seed())
+		return sig
+	}
+	s.DataStore.SaveWitnessReceipt(store.WitnessReceiptRecord{EventSAID: said, WitnessAID: names[0], CesrSignature: sign(0)})
+	if witnessedEnough(s.DataStore, said, names, 2) {
+		t.Fatal("one receipt met a threshold of two")
+	}
+	s.DataStore.SaveWitnessReceipt(store.WitnessReceiptRecord{EventSAID: said, WitnessAID: names[1], CesrSignature: sign(2)})
+	if witnessedEnough(s.DataStore, said, names, 2) {
+		t.Fatal("a receipt signed by another witness's key counted")
+	}
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	stranger := iacrypto.NonTransferableAIDQB64(pub)
+	strangerSig, _ := login.SignString(said, priv.Seed())
+	s.DataStore.SaveWitnessReceipt(store.WitnessReceiptRecord{EventSAID: said, WitnessAID: stranger, CesrSignature: strangerSig})
+	if witnessedEnough(s.DataStore, said, names, 2) {
+		t.Fatal("a receipt from a witness the record identity does not name counted")
+	}
+	s.DataStore.SaveWitnessReceipt(store.WitnessReceiptRecord{EventSAID: said, WitnessAID: names[2], CesrSignature: sign(2)})
+	if !witnessedEnough(s.DataStore, said, names, 2) {
+		t.Fatal("two named witnesses' receipts did not meet a threshold of two")
+	}
+}
+
+// An anchoring the record identity's key log does not seal is not one.
+func TestAnAnchorNobodySealedIsCaught(t *testing.T) {
+	s, _ := anchoredTwice(t)
+	db := recordDB(t, s)
+	if _, err := db.Exec(`INSERT INTO record_anchors (seq, said, statement, digest, created_at) SELECT 99, said, statement, digest, created_at FROM record_anchors WHERE seq = 1`); err != nil {
+		t.Fatal(err)
+	}
+	mustBreak(t, s, "an anchoring nobody sealed")
+}
+
+// A record identity is the delegated identity it claims to be, of this
+// identity, and of nobody else.
+func TestARecordIdentityIsDelegatedByThisIdentity(t *testing.T) {
+	dip := map[string]interface{}{"t": "dip", "di": "EOrg", "i": "ERec"}
+	if !delegatedBy(dip, "EOrg", "ERec") {
+		t.Fatal("the organisation's own delegation was refused")
+	}
+	for _, bad := range []map[string]interface{}{
+		{"t": "icp", "di": "EOrg", "i": "ERec"},
+		{"t": "dip", "di": "EOther", "i": "ERec"},
+		{"t": "dip", "di": "EOrg", "i": "EElse"},
+	} {
+		if delegatedBy(bad, "EOrg", "ERec") {
+			t.Fatalf("%v was taken as the organisation's delegation of the record identity", bad)
+		}
+	}
+}
+
+// Where the organisation names witnesses, the record identity names the same
+// ones, and an anchoring counts as held outside only once enough of them have
+// receipted it.
+func TestAnchorsAreHeldOutsideOnceTheirWitnessesReceiptThem(t *testing.T) {
+	keys := make([]ed25519.PrivateKey, 3)
+	names := make([]string, 3)
+	for i := range keys {
+		pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+		keys[i], names[i] = priv, iacrypto.NonTransferableAIDQB64(pub)
+	}
+	s, _ := foundedWith(t, agentWithDerivedIdentity(t), names, 2)
+	s.DeclaredEntityType = "organization"
+	m, err := sandbox.NewManager(sandbox.ManagerConfig{DataDir: s.DataDir, ManifestsDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(m.Stop)
+	s.SandboxManager = m
+	m.SetEventSigner(&invocationSigner{s: s})
+	writeRows(t, s, 2)
+	if ok, err := s.anchorRecord(); err != nil || !ok {
+		t.Fatalf("anchoring: %v %v", ok, err)
+	}
+	rec, _ := s.loadRecordIdentity()
+	events, _ := s.DataStore.GetEvents(rec.AID)
+	var dip struct {
+		B  []string `json:"b"`
+		Bt string   `json:"bt"`
+	}
+	json.Unmarshal([]byte(events[0].EventJSON), &dip)
+	if len(dip.B) != 3 || dip.Bt != "2" {
+		t.Fatalf("the record identity does not name the organisation's witnesses: %+v", dip)
+	}
+	got := chainSays(t, s)
+	if got["anchoring_external"] != true || got["awaiting_witnesses"] != float64(1) || got["witnessed_through"] != float64(0) {
+		t.Fatalf("an anchoring nobody has receipted reads as %v", got)
+	}
+	var ixn map[string]interface{}
+	json.Unmarshal([]byte(events[1].EventJSON), &ixn)
+	said, _ := ixn["d"].(string)
+	for i := 0; i < 2; i++ {
+		sig, _ := login.SignString(said, keys[i].Seed())
+		s.DataStore.SaveWitnessReceipt(store.WitnessReceiptRecord{EventSAID: said, WitnessAID: names[i], CesrSignature: sig})
+	}
+	got = chainSays(t, s)
+	if got["awaiting_witnesses"] != float64(0) || got["witnessed_through"] != got["anchored_through"] {
+		t.Fatalf("an anchoring two of its witnesses receipted reads as %v", got)
+	}
 }

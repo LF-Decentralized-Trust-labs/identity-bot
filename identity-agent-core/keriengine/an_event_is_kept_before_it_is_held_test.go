@@ -2,11 +2,14 @@ package keriengine
 
 import (
 	"bytes"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/base64"
 	"errors"
 	"testing"
 
 	"identity-agent-core/drivers"
+	"identity-agent-core/iacrypto"
 
 	keri "github.com/grapeid/keri-go"
 )
@@ -56,7 +59,7 @@ func TestADelegationIsMadeOnlyOnceKept(t *testing.T) {
 		t.Fatal(err)
 	}
 	pub, next := newKey(t), newKey(t)
-	if _, err := e.CreateDelegatedInceptionKept(pub, next, "rec", "root", func(drivers.KELKeep) error { return errors.New("disk full") }); err == nil {
+	if _, err := e.CreateDelegatedInceptionKept(pub, next, "rec", "root", nil, 0, func(drivers.KELKeep) error { return errors.New("disk full") }); err == nil {
 		t.Fatal("a delegation that could not be kept was made")
 	}
 	if kel, _ := e.GetKel("root"); kel.EventCount != 1 {
@@ -66,7 +69,7 @@ func TestADelegationIsMadeOnlyOnceKept(t *testing.T) {
 		t.Fatal("a failed keep left a delegated identity held")
 	}
 	var kept drivers.KELKeep
-	d, err := e.CreateDelegatedInceptionKept(pub, next, "rec", "root", func(k drivers.KELKeep) error { kept = k; return nil })
+	d, err := e.CreateDelegatedInceptionKept(pub, next, "rec", "root", nil, 0, func(k drivers.KELKeep) error { kept = k; return nil })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,5 +77,46 @@ func TestADelegationIsMadeOnlyOnceKept(t *testing.T) {
 	dip, _ := base64.StdEncoding.DecodeString(d.RawBytesB64)
 	if !bytes.Equal(kept.Raw, ixn) || !bytes.Equal(kept.Delegated, dip) {
 		t.Fatal("the keep was not given the approval and the inception that were made")
+	}
+}
+
+func aWitnessPrefix(t *testing.T) string {
+	t.Helper()
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return iacrypto.NonTransferableAIDQB64(pub)
+}
+
+// A delegated identity can name the same witnesses as its delegator, and a
+// reload keeps an identity's witnesses even when its last event is an
+// interaction, which names none.
+func TestWitnessesSurviveADelegationAndAReload(t *testing.T) {
+	e := New()
+	ws := []string{aWitnessPrefix(t), aWitnessPrefix(t), aWitnessPrefix(t)}
+	if _, err := e.Incept(drivers.InceptionRequest{PublicKey: newKey(t), NextPublicKey: newKey(t), Name: "root", Witnesses: ws, Toad: 2}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.Interact("root", []interface{}{map[string]interface{}{"d": ws[0]}}); err != nil {
+		t.Fatal(err)
+	}
+	kel, _ := e.GetKel("root")
+	again := New()
+	if _, err := again.ReloadIdentity(&drivers.DriverReloadIdentityRequest{AID: kel.AID, KEL: kel.KEL, RawEventsB64: kel.RawEventsB64}); err != nil {
+		t.Fatal(err)
+	}
+	got, toad, err := again.WitnessConfig(kel.AID)
+	if err != nil || len(got) != 3 || toad != 2 {
+		t.Fatalf("after a reload the identity names %v at %d", got, toad)
+	}
+	d, err := again.CreateDelegatedInceptionKept(newKey(t), newKey(t), "rec", kel.AID, got, toad, func(drivers.KELKeep) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	dip, _ := base64.StdEncoding.DecodeString(d.RawBytesB64)
+	ev, err := keri.ParseEvent(dip)
+	if err != nil || len(ev.Witnesses) != 3 || !ev.HasTOAD || ev.TOAD != 2 {
+		t.Fatalf("the delegated inception does not name the delegator's witnesses: %+v %v", ev, err)
 	}
 }

@@ -334,35 +334,22 @@ func (s *Store) List(party string, limit int) ([]Conversation, error) {
 	return out, nil
 }
 
-// ChangedSince returns every conversation with an entry after t.
-func (s *Store) ChangedSince(t time.Time) ([]Conversation, error) {
-	// Compared as times, not as text: a stamp with no fraction of a second
-	// sorts after one with a fraction in the same second.
-	rows, err := s.db.Query(`SELECT id, last_at FROM conversations ORDER BY id`)
+// Heads returns every conversation's newest entry: its sequence and hash.
+func (s *Store) Heads() (map[string]Conversation, error) {
+	rows, err := s.db.Query(`SELECT id, seq, head_hash FROM conversations`)
 	if err != nil {
 		return nil, err
 	}
-	var ids []string
+	defer rows.Close()
+	out := map[string]Conversation{}
 	for rows.Next() {
-		var id, last string
-		if err := rows.Scan(&id, &last); err != nil {
-			rows.Close()
+		var c Conversation
+		if err := rows.Scan(&c.ID, &c.Seq, &c.HeadHash); err != nil {
 			return nil, err
 		}
-		if unstamp(last).After(t) {
-			ids = append(ids, id)
-		}
+		out[c.ID] = c
 	}
-	rows.Close()
-	out := []Conversation{}
-	for _, id := range ids {
-		c, err := s.Get(id)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, c)
-	}
-	return out, nil
+	return out, rows.Err()
 }
 
 // EntryAt returns a conversation's entry at seq.

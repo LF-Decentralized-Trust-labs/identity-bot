@@ -329,19 +329,35 @@ func (e *Engine) inceptWith(publicKey, nextPublicKey, name string, data []json.R
 // approved it — and returning one alone would let a caller publish an identity
 // claiming an authority that was never granted.
 func (e *Engine) CreateDelegatedInception(publicKey, nextPublicKey, name, delegatorName string) (*drivers.DriverDelegatedInceptionResponse, error) {
-	return e.CreateDelegatedInceptionKept(publicKey, nextPublicKey, name, delegatorName, nil)
+	return e.CreateDelegatedInceptionKept(publicKey, nextPublicKey, name, delegatorName, nil, 0, nil)
+}
+
+// WitnessConfig is the witnesses an identity names now and how many must
+// receipt each of its events.
+func (e *Engine) WitnessConfig(name string) ([]string, int, error) {
+	id, err := e.state.get(name)
+	if err != nil {
+		return nil, 0, err
+	}
+	e.state.mu.RLock()
+	defer e.state.mu.RUnlock()
+	return append([]string(nil), id.Witnesses...), id.Toad, nil
 }
 
 // CreateDelegatedInceptionKept is CreateDelegatedInception, offering the
 // delegator's approval and the new inception to keep before either is held. A
 // keep that fails leaves both logs as they were.
-func (e *Engine) CreateDelegatedInceptionKept(publicKey, nextPublicKey, name, delegatorName string, keep func(drivers.KELKeep) error) (*drivers.DriverDelegatedInceptionResponse, error) {
+//
+// witnesses and toad, when witnesses is not empty, are written into the
+// delegated inception: the witnesses it names and how many must receipt each of
+// its events.
+func (e *Engine) CreateDelegatedInceptionKept(publicKey, nextPublicKey, name, delegatorName string, witnesses []string, toad int, keep func(drivers.KELKeep) error) (*drivers.DriverDelegatedInceptionResponse, error) {
 	delegator, release, err := e.holdForWriting(delegatorName)
 	if err != nil {
 		return nil, fmt.Errorf("the delegator: %w", err)
 	}
 	defer release()
-	pub, nextDigest, dip, dipEvent, err := delegatedInceptionOver(publicKey, nextPublicKey, delegator.AID)
+	pub, nextDigest, dip, dipEvent, err := delegatedInceptionOver(publicKey, nextPublicKey, delegator.AID, witnesses, toad)
 	if err != nil {
 		return nil, err
 	}
@@ -436,7 +452,7 @@ func (e *Engine) ReinstateDelegatedIdentity(publicKey, nextPublicKey, name, dele
 	if err != nil {
 		return nil, fmt.Errorf("the delegator: %w", err)
 	}
-	pub, nextDigest, dip, dipEvent, err := delegatedInceptionOver(publicKey, nextPublicKey, delegator.AID)
+	pub, nextDigest, dip, dipEvent, err := delegatedInceptionOver(publicKey, nextPublicKey, delegator.AID, nil, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -468,7 +484,9 @@ func (e *Engine) ReinstateDelegatedIdentity(publicKey, nextPublicKey, name, dele
 
 // delegatedInceptionOver builds the inception of an identity delegated by the
 // given identifier, over the given keys.
-func delegatedInceptionOver(publicKey, nextPublicKey, delegatorAID string) (
+// witnesses and toad, when witnesses is not empty, are the witnesses the
+// delegated identity names and how many must receipt each of its events.
+func delegatedInceptionOver(publicKey, nextPublicKey, delegatorAID string, witnesses []string, toad int) (
 	pub, nextDigest string, dip []byte, dipEvent *keri.Event, err error,
 ) {
 	pub, err = normaliseKey(publicKey, true)
@@ -483,11 +501,16 @@ func delegatedInceptionOver(publicKey, nextPublicKey, delegatorAID string) (
 	if err != nil {
 		return "", "", nil, nil, err
 	}
-	dip, err = keri.BuildDelegatedInception(keri.DelegationInput{
+	in := keri.DelegationInput{
 		Keys:        []string{pub},
 		NextDigests: []string{nextDigest},
 		Delegator:   delegatorAID,
-	})
+	}
+	if len(witnesses) > 0 {
+		in.Witnesses = witnesses
+		in.Toad = &toad
+	}
+	dip, err = keri.BuildDelegatedInception(in)
 	if err != nil {
 		return "", "", nil, nil, fmt.Errorf("building the delegated inception: %w", err)
 	}
@@ -947,7 +970,25 @@ func (e *Engine) ReloadIdentity(req *drivers.DriverReloadIdentityRequest) (*driv
 			return nil, err
 		}
 		sn, lastSAID = int(ev.SN), ev.SAID
-		witnesses, toad = ev.Witnesses, witnessThreshold(ev)
+	}
+	// The witnesses in force are what the establishment events say, read in
+	// order: an inception names them, a rotation amends them. An interaction
+	// names none, so reading them off the last event alone forgot an
+	// identity's witnesses whenever its last event was an interaction.
+	for _, e := range entries {
+		if e.Raw == nil {
+			continue
+		}
+		ev, err := keri.ParseEvent(e.Raw)
+		if err != nil {
+			return nil, err
+		}
+		switch ev.Ilk {
+		case "icp", "dip":
+			witnesses, toad = ev.Witnesses, witnessThreshold(ev)
+		case "rot", "drt":
+			witnesses, toad = witnessesAfter(witnesses, ev), witnessThreshold(ev)
+		}
 	}
 	if lastSAID == "" {
 		return nil, fmt.Errorf("reloading %s needs the digest of its most recent event; "+

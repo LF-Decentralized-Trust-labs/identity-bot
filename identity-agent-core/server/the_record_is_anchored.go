@@ -1,19 +1,23 @@
 package server
 
 import (
+	"context"
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"identity-agent-core/backup"
+	"identity-agent-core/conversation"
 	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/secureenclave"
@@ -25,24 +29,35 @@ import (
 // The governance log and every conversation are chains: each row names the
 // hash of the one before it, and each row is signed. That catches a row
 // edited, removed or reordered in the middle. It cannot catch the newest rows
-// being removed, because nothing after them names them; nor a whole chain
-// rewritten and re-signed by whoever holds the signer's key.
+// being removed, because nothing after them names them.
 //
 // So the heads are anchored. A record identity, delegated from this identity
-// and approved in its key log, writes an interaction whose seal is the digest
-// of a statement naming the log's newest row and its hash, and the newest
-// entry of every conversation that changed since the last anchoring. Anything
-// before an anchor is then fixed: a verifier finds the statement's digest in
-// the record identity's key log and checks the rows it names are still there
-// and unchanged. What was written after the newest anchor is not yet fixed,
-// and is reported as such, never as checked.
+// and approved in its key log, writes interactions whose seal is the digest of
+// a statement naming the log's newest row and its hash, and the newest entry
+// of every conversation that grew since it was last anchored. The record
+// identity's key log is the authority: every interaction in it must have its
+// statement, every statement must be sealed in it, and every row and entry a
+// statement names must still be there unchanged.
 //
-// A dedicated identity rather than this identity's own log, because anchoring
-// is frequent and this identity's log governs everything: it should carry its
-// approvals, not a stream of digests.
+// WHAT THIS PROVES, AND TO WHOM. The record identity names the same witnesses
+// as this identity, and each anchoring is sent to them for receipts. Once an
+// anchoring is receipted, removing it, or anything it fixes, contradicts what
+// the witnesses hold: anybody who asks them can tell, whoever controls this
+// Identity Agent's database. Where this identity names no witnesses there is
+// nobody outside to contradict it, and the report says so: the anchors then
+// stop someone who can edit the record's rows but holds neither the record
+// identity's key nor the place its key log's tip is kept outside the
+// database. They do not stop someone who controls this Identity Agent
+// entirely, who can rewrite the record and anchor it again.
 //
-// Anchoring runs at most every anchorInterval, sooner once anchorEvery
-// messages have been recorded, and only when something changed.
+// What was written after the newest anchoring is not fixed by anything yet,
+// and is reported as unanchored, never as checked.
+//
+// Anchoring runs where it is wanted: for an organisation, and for any Identity
+// Agent that holds AI agents. It runs at most every anchorInterval, sooner once
+// anchorEvery messages have been recorded, and always within half the time a
+// quiet conversation takes to close, so a conversation's last entry is anchored
+// before it closes.
 
 const recordIdentityFile = "record_identity.json"
 
@@ -65,10 +80,30 @@ func intFromEnv(name string, def int) int {
 	return def
 }
 
-// recordIdentityRecord is where the record identity's keys come from.
+// recordState is the record's anchoring, held by the server.
+type recordState struct {
+	// mu serialises making the record identity and anchoring: two anchorings
+	// at once would build on the same tip of its log.
+	mu sync.Mutex
+	// recorded counts messages since the last anchoring.
+	recorded atomic.Int64
+	// anchoredSeq is each conversation's newest anchored entry, read from the
+	// anchors once and kept up to date. Sequences, not times: a clock that
+	// steps, or an entry stamped before it is committed, cannot hide one.
+	anchoredSeq map[string]int
+}
+
+// recordIdentityRecord is where the record identity's keys come from, and the
+// tip of its key log as last anchored. Kept outside the database, so emptying
+// the database's newest anchors leaves a tip they no longer reach.
 type recordIdentityRecord struct {
 	AID   string `json:"aid"`
 	Index int    `json:"index"`
+	// Pending is set while the identity is being made, and cleared once its
+	// inception is kept. One found pending at start is finished or removed.
+	Pending bool   `json:"pending,omitempty"`
+	TipSN   int    `json:"tip_sn"`
+	TipSAID string `json:"tip_said"`
 }
 
 // anchorStatement is what one anchoring fixes. Its digest is the seal.
@@ -89,15 +124,43 @@ type anchoredConversation struct {
 	Head string `json:"head"`
 }
 
-// recordMu serialises creating the record identity and anchoring: two
-// anchorings at once would build on the same tip of its log.
-var recordMu sync.Mutex
-
-// recorded counts messages since the last anchoring.
-var recorded atomic.Int64
-
 func (s *CoreServer) recordIdentityPath() string {
 	return filepath.Join(s.DataDir, recordIdentityFile)
+}
+
+func (s *CoreServer) loadRecordIdentity() (recordIdentityRecord, bool) {
+	var rec recordIdentityRecord
+	b, err := os.ReadFile(s.recordIdentityPath())
+	if err != nil || json.Unmarshal(b, &rec) != nil || rec.AID == "" {
+		return rec, false
+	}
+	return rec, true
+}
+
+func (s *CoreServer) saveRecordIdentity(rec recordIdentityRecord) error {
+	b, _ := json.Marshal(rec)
+	tmp := s.recordIdentityPath() + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, s.recordIdentityPath())
+}
+
+// anchorsItsRecord reports whether this Identity Agent anchors its record: an
+// organisation does, and so does any Identity Agent that holds AI agents. An
+// individual's phone with no AI agent writes nothing into its key log unasked.
+func (s *CoreServer) anchorsItsRecord() bool {
+	if strings.EqualFold(s.ourEntityType(), "organization") || strings.EqualFold(s.ourEntityType(), "organisation") {
+		return true
+	}
+	if s.assetHandler != nil {
+		for _, a := range s.assetHandler.Store.ListAssets() {
+			if a.AssetType == "ai_agent" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // recordKeys derives the record identity's signing seed and the two public
@@ -120,55 +183,76 @@ func (s *CoreServer) recordKeys(index int) ([]byte, string, string, error) {
 	return seed, iacrypto.VerkeyQB64(pub), iacrypto.VerkeyQB64(nextPub), nil
 }
 
-func (s *CoreServer) loadRecordIdentity() (recordIdentityRecord, bool) {
-	var rec recordIdentityRecord
-	b, err := os.ReadFile(s.recordIdentityPath())
-	if err != nil || json.Unmarshal(b, &rec) != nil || rec.AID == "" {
-		return rec, false
+// repairRecordIdentity finishes or removes a record identity left pending by
+// a stop part way through making it: kept if its inception reached the
+// database, removed if it did not.
+func (s *CoreServer) repairRecordIdentity() {
+	rec, ok := s.loadRecordIdentity()
+	if !ok || !rec.Pending || s.DataStore == nil {
+		return
 	}
-	return rec, true
+	events, _ := s.DataStore.GetEvents(rec.AID)
+	if len(events) > 0 {
+		rec.Pending = false
+		if err := s.saveRecordIdentity(rec); err != nil {
+			log.Printf("[record] the record identity %s could not be marked made: %v", rec.AID, err)
+		}
+		return
+	}
+	if err := os.Remove(s.recordIdentityPath()); err != nil {
+		log.Printf("[record] a record identity that was never kept could not be removed: %v", err)
+	}
 }
 
 // recordIdentity is the record identity and its signing seed, made the first
-// time it is needed. Callers hold recordMu.
-func (s *CoreServer) recordIdentity() (string, []byte, error) {
+// time it is needed. Callers hold s.record.mu.
+func (s *CoreServer) recordIdentity() (recordIdentityRecord, []byte, error) {
+	s.repairRecordIdentity()
 	if rec, ok := s.loadRecordIdentity(); ok {
 		seed, _, _, err := s.recordKeys(rec.Index)
-		return rec.AID, seed, err
+		return rec, seed, err
 	}
 	keeper, ok := s.KeriDriver.(drivers.KELKeeper)
 	if !ok || s.DataStore == nil {
-		return "", nil, fmt.Errorf("this Identity Agent cannot keep a key log, so it cannot anchor its record")
+		return recordIdentityRecord{}, nil, fmt.Errorf("this Identity Agent cannot keep a key log, so it cannot anchor its record")
 	}
 	owner, err := s.DataStore.GetIdentity()
 	if err != nil || owner == nil {
-		return "", nil, fmt.Errorf("this Identity Agent has no identity to anchor its record under")
+		return recordIdentityRecord{}, nil, fmt.Errorf("this Identity Agent has no identity to anchor its record under")
 	}
 	// The approval is an event in this identity's own key log. Where its key
 	// lives on another device, that device has to sign it, and this Identity
 	// Agent writes nothing there it could not sign.
 	if _, err := s.identitySigningSeed(); err != nil {
-		return "", nil, fmt.Errorf("the identity's key is not held here, so the record identity cannot be approved here: %w", err)
+		return recordIdentityRecord{}, nil, errKeyElsewhere
+	}
+	witnesses, toad, err := keeper.WitnessConfig(owner.AID)
+	if err != nil {
+		return recordIdentityRecord{}, nil, fmt.Errorf("this identity's witnesses: %w", err)
 	}
 	index, err := s.DataStore.AllocateNextRelationshipIndex("record")
 	if err != nil {
-		return "", nil, err
+		return recordIdentityRecord{}, nil, err
 	}
 	seed, pub, nextPub, err := s.recordKeys(index)
 	if err != nil {
-		return "", nil, err
+		return recordIdentityRecord{}, nil, err
 	}
-	var aid string
+	var rec recordIdentityRecord
+	var dipRecord store.EventRecord
 	keep := func(k drivers.KELKeep) error {
 		approval, dip, err := s.delegationRecords(owner.AID, k, pub, seed)
 		if err != nil {
 			return err
 		}
-		aid = dip.AID
-		// Where the keys come from is written first, so an identity kept in
-		// the log is never one this Identity Agent cannot sign as.
-		b, _ := json.Marshal(recordIdentityRecord{AID: aid, Index: index})
-		if err := os.WriteFile(s.recordIdentityPath(), b, 0o600); err != nil {
+		dipRecord = dip
+		var parsed map[string]interface{}
+		_ = json.Unmarshal(k.Delegated, &parsed)
+		said, _ := parsed["d"].(string)
+		rec = recordIdentityRecord{AID: dip.AID, Index: index, Pending: true, TipSN: 0, TipSAID: said}
+		// Marked pending before the inception is kept, and cleared after, so a
+		// stop in between is finished or undone at the next start.
+		if err := s.saveRecordIdentity(rec); err != nil {
 			return err
 		}
 		if err := s.DataStore.KeepEvents(approval, dip); err != nil {
@@ -177,11 +261,28 @@ func (s *CoreServer) recordIdentity() (string, []byte, error) {
 		}
 		return nil
 	}
-	if _, err := keeper.CreateDelegatedInceptionKept(pub, nextPub, "", owner.AID, keep); err != nil {
-		return "", nil, fmt.Errorf("the record identity could not be made: %w", err)
+	if _, err := keeper.CreateDelegatedInceptionKept(pub, nextPub, "", owner.AID, witnesses, toad, keep); err != nil {
+		return recordIdentityRecord{}, nil, fmt.Errorf("the record identity could not be made: %w", err)
 	}
-	log.Printf("[record] record identity %s made, approved in %s's key log", aid, owner.AID)
-	return aid, seed, nil
+	rec.Pending = false
+	if err := s.saveRecordIdentity(rec); err != nil {
+		log.Printf("[record] the record identity %s was made but could not be marked so: %v", rec.AID, err)
+	}
+	s.witness(rec.AID, dipRecord, witnesses, toad)
+	log.Printf("[record] record identity %s made, approved in %s's key log, witnessed by %d", rec.AID, owner.AID, len(witnesses))
+	return rec, seed, nil
+}
+
+// witness sends one of the record identity's events to the witnesses it
+// names, for receipts. Nothing to do where it names none.
+func (s *CoreServer) witness(aid string, ev store.EventRecord, witnesses []string, toad int) {
+	if len(witnesses) == 0 || s.WitnessService == nil {
+		return
+	}
+	raw, _ := base64.StdEncoding.DecodeString(ev.RawBytesB64)
+	if err := s.WitnessService.BroadcastToDesignated(context.Background(), aid, raw, ev.CesrSignature, witnesses, toad); err != nil {
+		log.Printf("[record] event %d of %s could not be sent to its witnesses: %v", ev.SequenceNumber, aid, err)
+	}
 }
 
 // delegationRecords are the stored forms of a delegation: the delegator's
@@ -214,6 +315,7 @@ func (s *CoreServer) delegationRecords(delegator string, k drivers.KELKeep, pub 
 // reloadRecordIdentity hands the record identity's stored key log back to the
 // engine after a restart, so the next anchoring chains to the last one kept.
 func (s *CoreServer) reloadRecordIdentity() {
+	s.repairRecordIdentity()
 	rec, ok := s.loadRecordIdentity()
 	if !ok || s.KeriDriver == nil || s.DataStore == nil {
 		return
@@ -236,48 +338,77 @@ func (s *CoreServer) reloadRecordIdentity() {
 	}
 }
 
-// anchorRecord anchors the log's head and the heads of the conversations that
-// changed since the last anchoring. It reports whether it anchored anything.
+// anchoredSeqs is each conversation's newest anchored entry. Callers hold
+// s.record.mu.
+func (s *CoreServer) anchoredSeqs() (map[string]int, error) {
+	if s.record.anchoredSeq != nil {
+		return s.record.anchoredSeq, nil
+	}
+	anchors, err := s.DataStore.GetRecordAnchors()
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]int{}
+	for _, a := range anchors {
+		var st anchorStatement
+		if json.Unmarshal([]byte(a.Statement), &st) != nil {
+			continue
+		}
+		for _, c := range st.Conversations {
+			if c.Seq > out[c.ID] {
+				out[c.ID] = c.Seq
+			}
+		}
+	}
+	s.record.anchoredSeq = out
+	return out, nil
+}
+
+// anchorRecord anchors the log's head and the newest entry of every
+// conversation that grew since it was last anchored. It reports whether it
+// anchored anything.
 func (s *CoreServer) anchorRecord() (bool, error) {
-	if s.SandboxManager == nil || s.SandboxManager.Store() == nil || s.DataStore == nil {
+	if s.SandboxManager == nil || s.SandboxManager.Store() == nil || s.DataStore == nil || !s.anchorsItsRecord() {
 		return false, nil
 	}
-	recordMu.Lock()
-	defer recordMu.Unlock()
-	recorded.Store(0)
+	s.record.mu.Lock()
+	defer s.record.mu.Unlock()
+	s.record.recorded.Store(0)
 
-	anchors, err := s.DataStore.GetRecordAnchors()
+	anchored, err := s.anchoredSeqs()
 	if err != nil {
 		return false, err
 	}
 	var last anchorStatement
-	var since time.Time
-	if len(anchors) > 0 {
-		if err := json.Unmarshal([]byte(anchors[len(anchors)-1].Statement), &last); err != nil {
+	if latest, err := s.DataStore.GetLatestRecordAnchor(); err != nil {
+		return false, err
+	} else if latest != nil {
+		if err := json.Unmarshal([]byte(latest.Statement), &last); err != nil {
 			return false, fmt.Errorf("the last anchoring is unreadable: %w", err)
 		}
-		since, _ = time.Parse(time.RFC3339Nano, last.At)
 	}
 	row, head, err := s.SandboxManager.Store().Head()
 	if err != nil {
 		return false, err
 	}
-	now := time.Now().UTC()
-	st := anchorStatement{Log: anchoredLog{Row: row, Head: head}, At: now.Format(time.RFC3339Nano)}
+	st := anchorStatement{Log: anchoredLog{Row: row, Head: head}, At: time.Now().UTC().Format(time.RFC3339Nano)}
 	if convs, err := s.conversations(); err == nil {
-		changed, err := convs.ChangedSince(since)
+		heads, err := convs.Heads()
 		if err != nil {
 			return false, err
 		}
-		for _, c := range changed {
-			st.Conversations = append(st.Conversations, anchoredConversation{ID: c.ID, Seq: c.Seq, Head: c.HeadHash})
+		for _, c := range heads {
+			if c.Seq > anchored[c.ID] {
+				st.Conversations = append(st.Conversations, anchoredConversation{ID: c.ID, Seq: c.Seq, Head: c.HeadHash})
+			}
 		}
 	}
-	if row == 0 || (row == last.Log.Row && head == last.Log.Head && len(st.Conversations) == 0) {
+	if len(st.Conversations) == 0 && (row == 0 || (row == last.Log.Row && head == last.Log.Head)) {
 		return false, nil
 	}
+	sortConversations(st.Conversations)
 
-	aid, seed, err := s.recordIdentity()
+	rec, seed, err := s.recordIdentity()
 	if err != nil {
 		return false, err
 	}
@@ -290,6 +421,8 @@ func (s *CoreServer) anchorRecord() (bool, error) {
 		return false, err
 	}
 	pub := iacrypto.VerkeyQB64(ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey))
+	var kept store.EventRecord
+	var said string
 	keep := func(k drivers.KELKeep) error {
 		sig, err := signEventBytes(k.Raw, seed)
 		if err != nil {
@@ -299,27 +432,46 @@ func (s *CoreServer) anchorRecord() (bool, error) {
 		if err := json.Unmarshal(k.Raw, &ixn); err != nil {
 			return err
 		}
-		said, _ := ixn["d"].(string)
-		return s.DataStore.KeepRecordAnchor(store.EventRecord{
-			AID: aid, SequenceNumber: k.SN, EventType: "ixn", EventJSON: string(k.Raw),
-			Timestamp: now.Format(time.RFC3339), RawBytesB64: base64.StdEncoding.EncodeToString(k.Raw),
+		said, _ = ixn["d"].(string)
+		kept = store.EventRecord{
+			AID: rec.AID, SequenceNumber: k.SN, EventType: "ixn", EventJSON: string(k.Raw),
+			Timestamp: time.Now().UTC().Format(time.RFC3339), RawBytesB64: base64.StdEncoding.EncodeToString(k.Raw),
 			PublicKey: pub, CesrSignature: sig,
-		}, store.RecordAnchor{Seq: k.SN, SAID: said, Statement: string(statement), Digest: digest, CreatedAt: st.At})
+		}
+		return s.DataStore.KeepRecordAnchor(kept, store.RecordAnchor{Seq: k.SN, SAID: said, Statement: string(statement), Digest: digest, CreatedAt: st.At})
 	}
 	keeper, ok := s.KeriDriver.(drivers.KELKeeper)
 	if !ok {
 		return false, fmt.Errorf("this Identity Agent cannot keep a key log, so it cannot anchor its record")
 	}
-	if _, err := keeper.InteractKept(aid, []interface{}{map[string]interface{}{"d": digest}}, keep); err != nil {
+	if _, err := keeper.InteractKept(rec.AID, []interface{}{map[string]interface{}{"d": digest}}, keep); err != nil {
 		return false, fmt.Errorf("the record could not be anchored: %w", err)
+	}
+	for _, c := range st.Conversations {
+		anchored[c.ID] = c.Seq
+	}
+	rec.TipSN, rec.TipSAID = kept.SequenceNumber, said
+	if err := s.saveRecordIdentity(rec); err != nil {
+		log.Printf("[record] the record identity's tip could not be kept outside the database: %v", err)
+	}
+	if witnesses, toad, err := keeper.WitnessConfig(rec.AID); err == nil {
+		s.witness(rec.AID, kept, witnesses, toad)
 	}
 	return true, nil
 }
 
+func sortConversations(cs []anchoredConversation) {
+	for i := 1; i < len(cs); i++ {
+		for j := i; j > 0 && cs[j].ID < cs[j-1].ID; j-- {
+			cs[j], cs[j-1] = cs[j-1], cs[j]
+		}
+	}
+}
+
 // noteRecorded counts one recorded message, anchoring once enough have been.
 func (s *CoreServer) noteRecorded() {
-	if recorded.Add(1) >= int64(anchorEvery) {
-		recorded.Store(0)
+	if s.record.recorded.Add(1) >= int64(anchorEvery) {
+		s.record.recorded.Store(0)
 		go func() {
 			if _, err := s.anchorRecord(); err != nil {
 				log.Printf("[record] anchoring: %v", err)
@@ -328,16 +480,26 @@ func (s *CoreServer) noteRecorded() {
 	}
 }
 
-// keepAnchoring anchors the record every anchorInterval until stop closes.
+// anchorTick is how often the record is anchored: the interval, or half the
+// time a quiet conversation takes to close if that is sooner, so the last
+// entry of a conversation is anchored before it closes.
+func anchorTick() time.Duration {
+	if half := conversation.IdleClose / 2; half < anchorInterval {
+		return half
+	}
+	return anchorInterval
+}
+
+// keepAnchoring anchors the record every anchorTick until stop closes.
 func (s *CoreServer) keepAnchoring(stop <-chan struct{}) {
-	t := time.NewTicker(anchorInterval)
+	t := time.NewTicker(anchorTick())
 	defer t.Stop()
 	for {
 		select {
 		case <-stop:
 			return
 		case <-t.C:
-			if _, err := s.anchorRecord(); err != nil {
+			if _, err := s.anchorRecord(); err != nil && !errors.Is(err, errKeyElsewhere) {
 				log.Printf("[record] anchoring: %v", err)
 			}
 		}
@@ -346,105 +508,243 @@ func (s *CoreServer) keepAnchoring(stop <-chan struct{}) {
 
 // anchorCheck is what the anchors show about the record.
 type anchorCheck struct {
+	// Unavailable says why nothing is anchored, when nothing is.
+	Unavailable string
 	// AnchoredThrough is the newest log row an anchor fixes; Unanchored the
-	// rows written since, which no anchor yet covers.
-	AnchoredThrough int64
-	Unanchored      int64
-	// BrokenAt is the place in the record identity's key log of the first
-	// anchor that no longer holds, and Why says what failed. Zero when every
-	// anchor holds.
+	// rows written since, and UnanchoredEntries the conversation entries no
+	// anchor fixes yet.
+	AnchoredThrough   int64
+	Unanchored        int64
+	UnanchoredEntries int
+	// External reports whether the record identity names witnesses, so that
+	// receipted anchors are held outside this Identity Agent too.
+	// WitnessedThrough is the newest log row fixed by an anchor its witnesses
+	// have receipted; AwaitingWitnesses the anchors not yet receipted enough.
+	External          bool
+	WitnessedThrough  int64
+	AwaitingWitnesses int
+	// BrokenAt is the place in the record identity's key log where the record
+	// first stops holding, and Why says what failed. Zero when it holds.
 	BrokenAt int
 	Why      string
 }
 
-// checkAnchors checks every anchoring: the statement digests to the seal, the
-// record identity's key log carries that seal at that place, signed, and every
-// row and conversation entry the statement names is still there, unchanged.
+// checkAnchors checks the record against its anchors, with the record
+// identity's key log as the authority.
 func (s *CoreServer) checkAnchors() (anchorCheck, error) {
 	var out anchorCheck
 	if s.DataStore == nil || s.SandboxManager == nil || s.SandboxManager.Store() == nil {
 		return out, nil
 	}
-	anchors, err := s.DataStore.GetRecordAnchors()
-	if err != nil || len(anchors) == 0 {
+	rows := s.SandboxManager.Store()
+	heads := map[string]conversation.Conversation{}
+	convs, cerr := s.conversations()
+	if cerr == nil {
+		if h, err := convs.Heads(); err == nil {
+			heads = h
+		}
+	}
+	unanchored := func(through int64, anchored map[string]int) (anchorCheck, error) {
+		n, err := rows.RowsAfter(through)
+		out.Unanchored = n
+		for id, c := range heads {
+			out.UnanchoredEntries += c.Seq - anchored[id]
+		}
 		return out, err
 	}
-	rec, ok := s.loadRecordIdentity()
-	if !ok {
-		return anchorCheck{BrokenAt: anchors[0].Seq, Why: "there are anchors but no record identity to have made them"}, nil
+
+	rec, made := s.loadRecordIdentity()
+	if !made || rec.Pending {
+		switch {
+		case !s.anchorsItsRecord():
+			out.Unavailable = "this Identity Agent anchors its record once it is an organisation's or holds an AI agent"
+		case func() bool { _, err := s.identitySigningSeed(); return err != nil }():
+			out.Unavailable = "the identity's key is held on another device, and nothing is anchored here"
+		default:
+			out.Unavailable = "nothing has been anchored yet"
+		}
+		return unanchored(0, map[string]int{})
 	}
+	broken := func(at int, why string) (anchorCheck, error) {
+		out.BrokenAt, out.Why = at, why
+		if at == 0 {
+			out.BrokenAt = -1
+		}
+		return out, nil
+	}
+
+	// The record identity: its key log verifies, it was delegated by this
+	// identity, and this identity's key log approves exactly its inception.
 	events, err := s.DataStore.GetEvents(rec.AID)
 	if err != nil {
 		return out, err
 	}
-	kel := map[int]store.EventRecord{}
+	if len(events) == 0 {
+		return broken(0, "the record identity's key log is gone")
+	}
 	in := drivers.ValidateKELInput{AID: rec.AID}
+	kel := make([]map[string]interface{}, 0, len(events))
 	for _, ev := range events {
-		kel[ev.SequenceNumber] = ev
 		raw, _ := base64.StdEncoding.DecodeString(ev.RawBytesB64)
 		in.RawEvents = append(in.RawEvents, raw)
 		in.CesrSignatures = append(in.CesrSignatures, ev.CesrSignature)
+		var parsed map[string]interface{}
+		_ = json.Unmarshal(raw, &parsed)
+		kel = append(kel, parsed)
 	}
 	if got, err := drivers.ValidateKELFromBytes(in); err != nil || !got.KelVerified {
-		return anchorCheck{BrokenAt: anchors[0].Seq, Why: "the record identity's key log does not verify"}, nil
+		return broken(0, "the record identity's key log does not verify")
 	}
-	convs, _ := s.conversations()
-	rows := s.SandboxManager.Store()
-	for _, a := range anchors {
-		broken := func(why string) (anchorCheck, error) {
-			return anchorCheck{BrokenAt: a.Seq, Why: why}, nil
-		}
-		if d, _ := iacrypto.Blake3QB64([]byte(a.Statement)); d != a.Digest {
-			return broken("what was anchored no longer digests to its seal")
-		}
-		ev, ok := kel[a.Seq]
-		if !ok || !carriesSeal(ev.RawBytesB64, a.Digest) {
-			return broken("the record identity's key log does not carry this anchor")
-		}
-		var st anchorStatement
-		if err := json.Unmarshal([]byte(a.Statement), &st); err != nil {
-			return broken("what was anchored is unreadable")
-		}
-		if h, there, err := rows.RowHash(st.Log.Row); err != nil {
-			return out, err
-		} else if !there || h != st.Log.Head {
-			return broken(fmt.Sprintf("log row %d, which this anchor fixes, has been removed or changed", st.Log.Row))
-		}
-		for _, c := range st.Conversations {
-			if convs == nil {
-				return broken("the conversations this anchor fixes cannot be read")
-			}
-			e, err := convs.EntryAt(c.ID, c.Seq)
-			if err != nil || e.Hash != c.Head {
-				return broken(fmt.Sprintf("entry %d of conversation %s, which this anchor fixes, has been removed or changed", c.Seq, c.ID))
-			}
-		}
-		out.AnchoredThrough = st.Log.Row
+	owner, err := s.DataStore.GetIdentity()
+	if err != nil || owner == nil {
+		return out, fmt.Errorf("no identity to check the record identity against")
 	}
-	n, err := rows.RowsAfter(out.AnchoredThrough)
+	dip := kel[0]
+	dipSAID, _ := dip["d"].(string)
+	if !delegatedBy(dip, owner.AID, rec.AID) {
+		return broken(0, "the record identity was not delegated by this identity")
+	}
+	if !approves(s.DataStore, owner.AID, rec.AID, dipSAID) {
+		return broken(0, "this identity's key log does not approve the record identity")
+	}
+	// The tip kept outside the database must still be in the key log: the
+	// newest anchors cannot be emptied out of the database unnoticed.
+	if rec.TipSN >= len(kel) || kel[rec.TipSN]["d"] != rec.TipSAID {
+		return broken(rec.TipSN, "the record identity's key log is shorter than the tip last anchored")
+	}
+
+	anchors, err := s.DataStore.GetRecordAnchors()
 	if err != nil {
 		return out, err
 	}
-	out.Unanchored = n
-	return out, nil
+	bySeq := map[int]store.RecordAnchor{}
+	for _, a := range anchors {
+		bySeq[a.Seq] = a
+	}
+	witnesses, toad := stringsOf(dip["b"]), thresholdOf(dip["bt"])
+	out.External = len(witnesses) > 0
+	anchoredSeq := map[string]int{}
+	for sn := 1; sn < len(kel); sn++ {
+		ev := kel[sn]
+		said, _ := ev["d"].(string)
+		a, ok := bySeq[sn]
+		switch {
+		case ev["t"] != "ixn":
+			return broken(sn, "the record identity's key log holds something other than anchors")
+		case !ok:
+			return broken(sn, "the record identity's key log seals an anchoring whose statement is gone")
+		case a.SAID != said || !sealsDigest(ev, a.Digest):
+			return broken(sn, "the anchoring's statement is not the one its key log seals")
+		}
+		delete(bySeq, sn)
+		if d, _ := iacrypto.Blake3QB64([]byte(a.Statement)); d != a.Digest {
+			return broken(sn, "what was anchored no longer digests to its seal")
+		}
+		var st anchorStatement
+		if err := json.Unmarshal([]byte(a.Statement), &st); err != nil {
+			return broken(sn, "what was anchored is unreadable")
+		}
+		if h, there, err := rows.RowHash(st.Log.Row); err != nil {
+			return out, err
+		} else if st.Log.Row > 0 && (!there || h != st.Log.Head) {
+			return broken(sn, fmt.Sprintf("log row %d, which an anchor fixes, has been removed or changed", st.Log.Row))
+		}
+		for _, c := range st.Conversations {
+			if cerr != nil {
+				return broken(sn, "the conversations an anchor fixes cannot be read")
+			}
+			e, err := convs.EntryAt(c.ID, c.Seq)
+			if err != nil || e.Hash != c.Head {
+				return broken(sn, fmt.Sprintf("entry %d of conversation %s, which an anchor fixes, has been removed or changed", c.Seq, c.ID))
+			}
+			if c.Seq > anchoredSeq[c.ID] {
+				anchoredSeq[c.ID] = c.Seq
+			}
+		}
+		if st.Log.Row > out.AnchoredThrough {
+			out.AnchoredThrough = st.Log.Row
+		}
+		if out.External {
+			if witnessedEnough(s.DataStore, said, witnesses, toad) {
+				out.WitnessedThrough = out.AnchoredThrough
+			} else {
+				out.AwaitingWitnesses++
+			}
+		}
+	}
+	for sn := range bySeq {
+		return broken(sn, "an anchoring is not sealed in the record identity's key log")
+	}
+	return unanchored(out.AnchoredThrough, anchoredSeq)
 }
 
-// carriesSeal reports whether a stored interaction's seals include digest.
-func carriesSeal(rawB64, digest string) bool {
-	raw, err := base64.StdEncoding.DecodeString(rawB64)
+// delegatedBy reports whether an inception is the delegated inception of aid
+// by delegator.
+func delegatedBy(dip map[string]interface{}, delegator, aid string) bool {
+	return dip["t"] == "dip" && dip["di"] == delegator && dip["i"] == aid
+}
+
+// approves reports whether the delegator's stored key log seals exactly this
+// delegated inception.
+func approves(ds store.Store, delegator, aid, dipSAID string) bool {
+	events, err := ds.GetEvents(delegator)
 	if err != nil {
 		return false
 	}
-	var ev struct {
-		A []map[string]interface{} `json:"a"`
+	for _, ev := range events {
+		raw, _ := base64.StdEncoding.DecodeString(ev.RawBytesB64)
+		var parsed struct {
+			A []map[string]interface{} `json:"a"`
+		}
+		if json.Unmarshal(raw, &parsed) != nil {
+			continue
+		}
+		for _, seal := range parsed.A {
+			if seal["i"] == aid && seal["s"] == "0" && seal["d"] == dipSAID {
+				return true
+			}
+		}
 	}
-	if json.Unmarshal(raw, &ev) != nil {
-		return false
-	}
-	for _, seal := range ev.A {
-		if seal["d"] == digest {
+	return false
+}
+
+// sealsDigest reports whether an interaction's seals include digest.
+func sealsDigest(ev map[string]interface{}, digest string) bool {
+	seals, _ := ev["a"].([]interface{})
+	for _, raw := range seals {
+		if seal, ok := raw.(map[string]interface{}); ok && seal["d"] == digest {
 			return true
 		}
 	}
 	return false
+}
+
+// witnessedEnough reports whether enough of the designated witnesses have
+// returned a receipt for an event that verifies against their keys.
+func witnessedEnough(ds store.Store, eventSAID string, witnesses []string, toad int) bool {
+	receipts, err := ds.GetWitnessReceipts(eventSAID)
+	if err != nil {
+		return false
+	}
+	designated := map[string]bool{}
+	for _, w := range witnesses {
+		designated[w] = true
+	}
+	seen := map[string]bool{}
+	for _, r := range receipts {
+		if designated[r.WitnessAID] && !seen[r.WitnessAID] && drivers.VerifyReceipt(r.WitnessAID, eventSAID, r.CesrSignature) == nil {
+			seen[r.WitnessAID] = true
+		}
+	}
+	need := toad
+	if need <= 0 {
+		need = len(witnesses)
+	}
+	return len(seen) >= need
+}
+
+func thresholdOf(v interface{}) int {
+	s, _ := v.(string)
+	n, _ := strconv.ParseInt(s, 16, 64)
+	return int(n)
 }

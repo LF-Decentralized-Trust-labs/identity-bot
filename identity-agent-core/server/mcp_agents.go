@@ -49,11 +49,12 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 		return
 	}
 	// Who asked, read before the body is: the request is kept as it was signed.
-	by, err := s.authorityOf(r)
+	by, release, err := s.authorityOf(r)
 	if err != nil {
-		jsonError(w, "who asked for this AI agent could not be read from the request: "+err.Error(), http.StatusBadRequest)
+		jsonError(w, "who asked for this AI agent: "+err.Error(), http.StatusForbidden)
 		return
 	}
+	defer release()
 	var req struct {
 		Name         string   `json:"name"`
 		Capabilities []string `json:"capabilities"`
@@ -288,12 +289,14 @@ func (s *CoreServer) handleSetAgentCapabilities(w http.ResponseWriter, r *http.R
 		return
 	}
 	// Who asked, read before the body is: the request is kept as it was signed.
-	by, err := s.authorityOf(r)
+	by, release, err := s.authorityOf(r)
 	if err != nil {
-		jsonError(w, "who asked for this change could not be read from the request: "+err.Error(), http.StatusBadRequest)
+		jsonError(w, "who asked for this change: "+err.Error(), http.StatusForbidden)
 		return
 	}
+	defer release()
 	id := chi.URLParam(r, "id")
+	by.About = id
 	var req struct {
 		Capabilities []string `json:"capabilities"`
 		// Absent keeps the constraints the grant already has; present, even

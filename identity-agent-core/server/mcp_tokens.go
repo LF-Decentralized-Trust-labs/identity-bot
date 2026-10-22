@@ -342,6 +342,10 @@ func resourceConstraintsFromACDC(acdcJsonB64 string) map[string]interface{} {
 // withdraw it; revocation is checked separately. The issuer must be the AI
 // agent's delegator, and the holder the AI agent. Returns false on any failure.
 func (s *CoreServer) grantCredentialValid(rec *store.CredentialRecord, entry mcpToken) bool {
+	if s.issuedUnderFirstVersionTooLate(rec) {
+		log.Printf("[mcp] grant %s names nobody who authorised it, though it was issued after grants began to — denying", rec.SAID)
+		return false
+	}
 	issuer := entry.DelegatorAID
 	if issuer == "" || rec.IssuerAID != issuer {
 		// A grant counts only from the identity that delegated the AI agent.

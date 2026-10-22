@@ -606,6 +606,8 @@ type Store interface {
 	// together, or neither.
 	KeepRecordAnchor(ev EventRecord, a RecordAnchor) error
 	GetRecordAnchors() ([]RecordAnchor, error)
+	// GetLatestRecordAnchor is the newest anchoring, or nil when there is none.
+	GetLatestRecordAnchor() (*RecordAnchor, error)
 	// A credential's transaction log, as published. Appending the same event
 	// twice keeps one copy; the log is read back in order.
 	AppendCredentialTELEvent(ev CredentialTELEvent) error

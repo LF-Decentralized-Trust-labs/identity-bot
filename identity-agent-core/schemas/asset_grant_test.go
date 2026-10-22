@@ -15,7 +15,7 @@ import (
 // and the request they signed.
 // The first version keeps its identifier, so grants issued under it still
 // resolve; TestTheFirstVersionsKeepTheirIdentifiers holds it to that.
-const pinnedAIAgentGrantSAID = "EFBzVtE4re52WTSdcrTU0m9K1He0I_yGFUPW0_VnNcCl"
+const pinnedAIAgentGrantSAID = "ELleIFUA_tuTPcVimZErskIq9p30S6Mlhn3nQLEIcQYa"
 
 func TestTheAIAgentGrantSchemaIsPinned(t *testing.T) {
 	if AIAgentGrant.Schema.SAID != pinnedAIAgentGrantSAID {
@@ -93,9 +93,9 @@ func TestAnAIAgentGrantRefusesWhatItsSchemaRefuses(t *testing.T) {
 	}
 }
 
-const pinnedAIAgentBodySAID = "EP4vfQ-HeN4wPPBhOsvpp_wYPOPPhjoLTPxXbejwSX0j"
+const pinnedAIAgentBodySAID = "EC3fK_JbeyaTT6E1LfdFClTQMjFT2mgpVISVybrPqyI_"
 
-const pinnedControllerGrantSAID = "EFEFZGF9FY-McUog829fuApbUiLwuG7-lNfXR93riOGX"
+const pinnedControllerGrantSAID = "EA_okuOByHM5ZNM5KoPLWhcu6OjgyhKmiwOf2Z83YGh3"
 
 func TestTheControllerGrantSchemaIsPinned(t *testing.T) {
 	if ControllerGrant.Schema.SAID != pinnedControllerGrantSAID {

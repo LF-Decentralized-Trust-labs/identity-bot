@@ -1,66 +1,121 @@
 package server
 
 import (
+	"encoding/base64"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"strings"
 	"time"
 
+	"identity-agent-core/authorisation"
 	"identity-agent-core/schemas"
+	"identity-agent-core/store"
+
+	keri "github.com/grapeid/keri-go"
 )
 
 // Whoever authorised a credential is named in it.
 //
-// An AI agent's grant and the credential that makes a machine its body were
-// issued by the identity and named nobody: who created the AI agent, or who
-// compared the six words and approved the machine, was a local field at best.
-// Anything the AI agent then did traced back to the identity and stopped.
+// An AI agent's grant and the credential that makes a machine its body carry
+// the request that authorised them, exactly as it was signed, with its body,
+// and what it named as the thing it acts on. A request a machine made for a
+// signer also carries an edge to that machine's Controller Grant, which names
+// the signer and is anchored in the identity's key log. authorisation.Check is
+// the rule anybody applies to them later; this Identity Agent applies it to
+// each one it issues, and withdraws one that fails.
 //
-// Now each such credential carries an edge to the Controller Grant of the
-// machine the request came from, and the request itself as that machine signed
-// it. The Controller Grant names the signer the machine acts as and is anchored
-// in the identity's key log, so the chain runs from what was done, through the
-// person who authorised it and the machine they used, to the identity's own
-// keys, and every link can be checked without asking this Identity Agent.
+// What this shows, and what it does not. The Controller Grant is issued by
+// this Identity Agent, on the word of the device that paired the machine; an
+// Identity Agent run by someone who controls it could issue one to a key of
+// its own. What cannot be made up afterwards is the machine's own signature
+// over the request: it shows that the holder of that machine key asked for
+// exactly this, at that time, under a grant the identity's key log shows was
+// issued and not yet revoked.
 //
-// A request made with the identity's own key, by the device holding it, has
-// no machine between it and the identity: the issuer is the authority, and
-// there is nothing further to name.
+// A request made with the identity's own key carries that signature instead.
+// One made on the device that holds the key, with no signature, carries none:
+// the issuer is the authority, and authorisation.Check says so rather than
+// reporting it checked.
 
-// authority is who authorised a credential: the Controller Grant of the
-// machine the request came from, and the request as the machine signed it.
-// The zero value is the identity's own key.
+// authority is who authorised a credential.
 type authority struct {
-	// ControllerGrant is the machine's Controller Grant credential, when it
-	// has one. A grant made before machines were given one leaves this empty
-	// and the request still recorded.
+	// ControllerGrant is the Controller Grant of the machine the request came
+	// from. Empty for an owner-signed request, and for a machine whose grant
+	// is waiting for the device that holds the identity's key.
 	ControllerGrant string
-	Request         *signedRequest
+	// Request is the request as it was signed. Nil when the identity's own
+	// device asked without signing.
+	Request *signedRequest
+	// About is what the request named as the thing it acts on.
+	About string
 }
 
-// signedRequest is a request exactly as the machine that made it signed it.
+// signedRequest is a request exactly as it was signed, with its body.
 type signedRequest struct {
+	Kind      string `json:"kind"`
 	Signer    string `json:"signer"`
 	Signed    string `json:"signed"`
 	Signature string `json:"signature"`
+	Body      string `json:"body"`
 }
 
-// authorityOf is who authorised the request r: the controller that signed it,
-// if one did.
-func (s *CoreServer) authorityOf(r *http.Request) (authority, error) {
-	grant, ok := TheControllerThatAsked(r)
-	if !ok {
-		return authority{}, nil
-	}
-	signed, sig, err := s.theRequestAsSigned(r, grant)
+// authorityOf is who authorised r, read before the handler reads the body.
+// For a machine's request it also holds the machine's grant against being
+// revoked, re-issued or replaced until release is called, so a credential is
+// never issued on a grant withdrawn while it was being issued.
+func (s *CoreServer) authorityOf(r *http.Request) (authority, func(), error) {
+	release := func() {}
+	body, err := readSignedBody(r)
 	if err != nil {
-		return authority{}, err
+		return authority{}, release, err
 	}
-	return authority{
-		ControllerGrant: grant.CredentialSAID,
-		Request:         &signedRequest{Signer: grant.ControllerAID, Signed: signed, Signature: sig},
-	}, nil
+	if grant, ok := TheControllerThatAsked(r); ok {
+		s.grantsMu.RLock()
+		release = s.grantsMu.RUnlock
+		current, had, err := s.controllers().Get(grant.ControllerAID)
+		switch {
+		case err != nil:
+			release()
+			return authority{}, func() {}, err
+		case !had:
+			release()
+			return authority{}, func() {}, fmt.Errorf("this machine's grant has been removed")
+		}
+		if current.CredentialSAID == "" && !current.CredentialPending {
+			release()
+			return authority{}, func() {}, fmt.Errorf("this machine's grant is not anchored yet, so what it asks for could not be shown to rest on it")
+		}
+		if current.CredentialSAID != "" {
+			if err := s.grantStillStands(current.CredentialSAID); err != nil {
+				release()
+				return authority{}, func() {}, err
+			}
+		}
+		signed, sig, err := s.theRequestAsSigned(r, grant)
+		if err != nil {
+			release()
+			return authority{}, func() {}, err
+		}
+		return authority{
+			ControllerGrant: current.CredentialSAID,
+			Request:         &signedRequest{Kind: "controller", Signer: grant.ControllerAID, Signed: signed, Signature: sig, Body: string(body)},
+		}, release, nil
+	}
+	// Admitted by the identity's own key, the request kept as it was signed.
+	if sig := strings.TrimSpace(r.Header.Get(headerOwnerSig)); sig != "" {
+		owner := ""
+		if oa, err := s.ownerAuthority(); err == nil && oa != nil {
+			owner = oa.AID
+		}
+		stamp := strings.TrimSpace(r.Header.Get(headerOwnerTimestamp))
+		return authority{Request: &signedRequest{
+			Kind: "owner", Signer: owner, Signature: sig, Body: string(body),
+			Signed: canonicalRequestString(r.Method, r.URL.Path, stamp, body),
+		}}, release, nil
+	}
+	return authority{}, release, nil
 }
 
 // theRequestAsSigned is the string a controller signed for r and its
@@ -79,16 +134,36 @@ func (s *CoreServer) theRequestAsSigned(r *http.Request, grant ControllerGrant) 
 	return signed, strings.TrimSpace(r.Header.Get(headerControllerSig)), nil
 }
 
+// grantStillStands refuses a Controller Grant that has been revoked.
+func (s *CoreServer) grantStillStands(said string) error {
+	rec, err := s.DataStore.GetCredential(said)
+	if err != nil || rec == nil {
+		return fmt.Errorf("this machine's grant is not on record")
+	}
+	if rec.Status != "issued" {
+		return fmt.Errorf("this machine's grant has been withdrawn")
+	}
+	_, status, err := s.credentialLog(rec.RegistrySAID, said)
+	if err != nil || status != keri.StatusIssued {
+		return fmt.Errorf("this machine's grant is not in force in the registry")
+	}
+	return nil
+}
+
 // name writes the authority into a credential about to be issued: an edge to
-// the Controller Grant and the signed request among its attributes. A schema
-// that admits neither is left as it is.
+// the Controller Grant, and the signed request and what it named among its
+// attributes. A schema that admits neither is left as it is.
 func (a authority) name(kind *schemas.AssetGrant, claims map[string]interface{}) map[string]interface{} {
 	if !kind.HasEdges() {
 		return nil
 	}
+	if a.About != "" {
+		claims["about"] = a.About
+	}
 	if a.Request != nil {
 		claims["request"] = map[string]interface{}{
-			"signer": a.Request.Signer, "signed": a.Request.Signed, "signature": a.Request.Signature,
+			"kind": a.Request.Kind, "signer": a.Request.Signer, "signed": a.Request.Signed,
+			"signature": a.Request.Signature, "body": a.Request.Body,
 		}
 	}
 	if a.ControllerGrant == "" {
@@ -99,43 +174,146 @@ func (a authority) name(kind *schemas.AssetGrant, claims map[string]interface{})
 	}
 }
 
-// grantController records that a machine may act for this identity and issues
-// its Controller Grant, anchored in the identity's key log. A machine whose
-// grant cannot be anchored is not granted: what it did could never be shown to
-// rest on anybody's authority. A grant it replaces has its credential revoked.
-func (s *CoreServer) grantController(g ControllerGrant, now time.Time) (ControllerGrant, error) {
-	before, had, err := s.controllers().Get(g.ControllerAID)
-	if err != nil {
-		return ControllerGrant{}, err
+// checkAuthorisation applies authorisation.Check to a credential just issued.
+func (s *CoreServer) checkAuthorisation(said string, by authority) error {
+	if by.Request == nil {
+		return nil
 	}
-	granted, err := s.controllers().Grant(g, now)
-	if err != nil {
-		return ControllerGrant{}, err
+	rec, err := s.DataStore.GetCredential(said)
+	if err != nil || rec == nil {
+		return fmt.Errorf("the credential is not on record")
 	}
-	said, err := s.issueControllerGrant(granted)
+	acdc, err := base64.StdEncoding.DecodeString(rec.AcdcJson)
 	if err != nil {
-		// Not granted after all. The machine had no grant, or the one it had
-		// is put back as it was.
-		if had {
-			if _, rerr := s.controllers().Grant(before, before.GrantedAt); rerr != nil {
-				log.Printf("[controller] %s: the earlier grant could not be put back: %v", g.ControllerAID, rerr)
-			}
-		} else if rerr := s.controllers().Revoke(g.ControllerAID); rerr != nil {
-			log.Printf("[controller] %s: an unanchored grant could not be removed: %v", g.ControllerAID, rerr)
+		return err
+	}
+	in := authorisation.Input{Credential: acdc}
+	switch by.Request.Kind {
+	case "controller":
+		if by.ControllerGrant == "" {
+			return nil // waiting for the device that holds the key; nothing to name
 		}
-		return ControllerGrant{}, fmt.Errorf("the machine's grant could not be anchored, so it was not granted: %w", err)
+		grant, err := s.DataStore.GetCredential(by.ControllerGrant)
+		if err != nil || grant == nil {
+			return fmt.Errorf("the machine's grant is not on record")
+		}
+		if in.Grant, err = base64.StdEncoding.DecodeString(grant.AcdcJson); err != nil {
+			return err
+		}
+		events, _, err := s.credentialLog(grant.RegistrySAID, grant.SAID)
+		if err != nil {
+			return err
+		}
+		for _, ev := range events {
+			raw, _ := base64.StdEncoding.DecodeString(ev)
+			in.GrantLog = append(in.GrantLog, raw)
+		}
+	case "owner":
+		oa, err := s.ownerAuthority()
+		if err != nil || oa == nil {
+			return fmt.Errorf("the identity's owner is not known")
+		}
+		in.OwnerKey = oa.PublicKey
 	}
-	if err := s.controllers().SetCredential(granted.ControllerAID, said); err != nil {
-		return ControllerGrant{}, err
+	if err := authorisation.Check(in); err != nil && !errors.Is(err, authorisation.ErrNoRequest) {
+		return err
 	}
-	granted.CredentialSAID = said
-	if had && before.CredentialSAID != "" && before.CredentialSAID != said {
-		s.withdrawControllerGrant(before.CredentialSAID)
-	}
-	return granted, nil
+	return nil
 }
 
-// issueControllerGrant issues the credential for a grant already recorded.
+// issuedUnderFirstVersionTooLate reports whether rec is an AI agent grant or
+// body credential issued under the first version of the template after this
+// Identity Agent began issuing the version that names who authorised it. Such a
+// credential could only have been issued to avoid naming anybody, and is not
+// honoured. One issued before is.
+func (s *CoreServer) issuedUnderFirstVersionTooLate(rec *store.CredentialRecord) bool {
+	if rec == nil || (rec.SchemaSAID != schemas.AIAgentGrantV1.Schema.SAID && rec.SchemaSAID != schemas.AIAgentBodyV1.Schema.SAID) {
+		return false
+	}
+	since, ok := s.firstEdgedIssuance()
+	if !ok {
+		return false
+	}
+	return issuedAt(*rec).After(since)
+}
+
+// firstEdgedIssuance is when this Identity Agent first issued an AI agent
+// grant or body credential under the version that names who authorised it.
+// Found once and remembered: it never moves.
+func (s *CoreServer) firstEdgedIssuance() (time.Time, bool) {
+	if t, ok := s.edgesSince.Load().(time.Time); ok {
+		return t, true
+	}
+	creds, err := s.DataStore.GetCredentials()
+	if err != nil {
+		return time.Time{}, false
+	}
+	var first time.Time
+	for _, c := range creds {
+		if c.SchemaSAID != schemas.AIAgentGrant.Schema.SAID && c.SchemaSAID != schemas.AIAgentBody.Schema.SAID {
+			continue
+		}
+		if t := issuedAt(c); !t.IsZero() && (first.IsZero() || t.Before(first)) {
+			first = t
+		}
+	}
+	if first.IsZero() {
+		return time.Time{}, false
+	}
+	s.edgesSince.Store(first)
+	return first, true
+}
+
+// errKeyElsewhere is an identity whose key this Identity Agent does not hold.
+var errKeyElsewhere = errors.New("the identity's key is held on another device")
+
+// grantController records that a machine may act for this identity, with its
+// Controller Grant anchored in the identity's key log. The grant becomes
+// visible only once its credential is issued, so nothing the machine asks for
+// meanwhile can be issued without an edge. A grant it replaces has its
+// credential withdrawn; if that cannot be done the new credential is withdrawn
+// instead and nothing changes, so a machine never has two grants in force.
+//
+// Where the identity's key is held on another device, the grant is recorded
+// with its credential pending on that device, and nothing is written into the
+// key log here.
+func (s *CoreServer) grantController(g ControllerGrant, now time.Time) (ControllerGrant, error) {
+	s.grantsMu.Lock()
+	defer s.grantsMu.Unlock()
+	checked, err := s.controllers().Check(g, now)
+	if err != nil {
+		return ControllerGrant{}, err
+	}
+	before, had, err := s.controllers().Get(checked.ControllerAID)
+	if err != nil {
+		return ControllerGrant{}, err
+	}
+	said, err := s.issueControllerGrant(checked)
+	if errors.Is(err, errKeyElsewhere) {
+		checked.CredentialPending = true
+		if err := s.controllers().Put(checked); err != nil {
+			return ControllerGrant{}, err
+		}
+		return checked, nil
+	}
+	if err != nil {
+		return ControllerGrant{}, fmt.Errorf("the machine's grant could not be anchored, so it was not granted: %w", err)
+	}
+	if had && before.CredentialSAID != "" && before.CredentialSAID != said {
+		if err := s.withdrawControllerGrant(before.CredentialSAID); err != nil {
+			s.withdrawOrSay(said)
+			return ControllerGrant{}, fmt.Errorf("the machine's earlier grant could not be withdrawn, so it was not re-granted: %w", err)
+		}
+	}
+	checked.CredentialSAID = said
+	if err := s.controllers().Put(checked); err != nil {
+		s.withdrawOrSay(said)
+		return ControllerGrant{}, err
+	}
+	return checked, nil
+}
+
+// issueControllerGrant issues the credential for a grant.
 func (s *CoreServer) issueControllerGrant(g ControllerGrant) (string, error) {
 	if s.DataStore == nil || s.KeriDriver == nil {
 		return "", fmt.Errorf("this Identity Agent has no key log to anchor the grant in")
@@ -143,6 +321,11 @@ func (s *CoreServer) issueControllerGrant(g ControllerGrant) (string, error) {
 	identity, err := s.DataStore.GetIdentity()
 	if err != nil || identity == nil {
 		return "", fmt.Errorf("this Identity Agent has no identity to grant for")
+	}
+	// Issuing writes an interaction into the identity's key log, which only
+	// the holder of its key may sign.
+	if _, err := s.identitySigningSeed(); err != nil {
+		return "", errKeyElsewhere
 	}
 	claims := map[string]interface{}{
 		"name": g.Label, "label": g.Label, "public_key": g.PublicKey, "grade": string(g.Grade),
@@ -162,6 +345,8 @@ func (s *CoreServer) issueControllerGrant(g ControllerGrant) (string, error) {
 // withdrawal: someone removing a stolen laptop must never be told to wait for
 // a key log.
 func (s *CoreServer) revokeController(aid string) error {
+	s.grantsMu.Lock()
+	defer s.grantsMu.Unlock()
 	g, had, err := s.controllers().Get(aid)
 	if err != nil {
 		return err
@@ -170,47 +355,107 @@ func (s *CoreServer) revokeController(aid string) error {
 		return err
 	}
 	if had && g.CredentialSAID != "" {
-		s.withdrawControllerGrant(g.CredentialSAID)
+		s.withdrawOrSay(g.CredentialSAID)
 	}
 	return nil
 }
 
-// bindSigner records which signer a machine acts as, and re-issues its
-// Controller Grant to say so: the credential is what shows, to anybody, whose
-// authority the machine carries.
+// bindSigner records which signer a machine acts as, re-issuing its Controller
+// Grant to say so. The new credential is issued and the old one withdrawn
+// before anything is recorded; if either fails nothing changes and the next
+// attempt starts again.
 func (s *CoreServer) bindSigner(aid, signer string) (ControllerGrant, error) {
-	before, _, err := s.controllers().Get(aid)
+	s.grantsMu.Lock()
+	defer s.grantsMu.Unlock()
+	g, had, err := s.controllers().Get(aid)
 	if err != nil {
 		return ControllerGrant{}, err
 	}
-	g, err := s.controllers().BindSigner(aid, signer)
-	if err != nil || g.Signer == before.Signer || g.CredentialSAID == "" {
+	if !had {
+		return ControllerGrant{}, fmt.Errorf("no such machine")
+	}
+	if g.Signer != "" {
+		return g, nil
+	}
+	bound := g
+	bound.Signer = signer
+	if g.CredentialSAID != "" {
+		said, err := s.issueControllerGrant(bound)
+		if err != nil {
+			return g, fmt.Errorf("the machine's grant could not be re-issued to name its signer: %w", err)
+		}
+		if err := s.withdrawControllerGrant(g.CredentialSAID); err != nil {
+			s.withdrawOrSay(said)
+			return g, fmt.Errorf("the machine's grant could not be withdrawn to name its signer: %w", err)
+		}
+		bound.CredentialSAID = said
+	}
+	if err := s.controllers().Put(bound); err != nil {
+		if bound.CredentialSAID != g.CredentialSAID {
+			s.withdrawOrSay(bound.CredentialSAID)
+		}
 		return g, err
 	}
-	said, err := s.issueControllerGrant(g)
-	if err != nil {
-		return g, fmt.Errorf("the machine now acts as %s, but its grant could not be re-issued to say so: %w", signer, err)
-	}
-	if err := s.controllers().SetCredential(aid, said); err != nil {
-		return g, err
-	}
-	s.withdrawControllerGrant(g.CredentialSAID)
-	g.CredentialSAID = said
-	return g, nil
+	return bound, nil
 }
 
-// withdrawControllerGrant revokes a Controller Grant credential, saying so when
-// the revocation cannot be written to the registry.
-func (s *CoreServer) withdrawControllerGrant(said string) {
+// withdrawControllerGrant revokes a Controller Grant credential in the
+// registry and marks it revoked.
+func (s *CoreServer) withdrawControllerGrant(said string) error {
 	rec, err := s.DataStore.GetCredential(said)
 	if err != nil || rec == nil {
-		log.Printf("[controller] grant credential %s is not on record, so it could not be withdrawn", said)
-		return
+		return fmt.Errorf("grant credential %s is not on record", said)
 	}
 	if _, err := s.revokeIssuedCredential(rec); err != nil {
-		log.Printf("[controller] grant credential %s: its revocation was not recorded in the registry: %v", said, err)
+		return err
 	}
-	if err := s.DataStore.UpdateCredentialStatus(said, "revoked"); err != nil {
-		log.Printf("[controller] grant credential %s not marked revoked: %v", said, err)
+	return s.DataStore.UpdateCredentialStatus(said, "revoked")
+}
+
+// withdrawOrSay withdraws a Controller Grant credential, saying so when it
+// cannot, and marks it unusable here whatever the registry says.
+func (s *CoreServer) withdrawOrSay(said string) {
+	if err := s.withdrawControllerGrant(said); err != nil {
+		log.Printf("[controller] grant credential %s: its revocation was not recorded in the registry: %v", said, err)
+		_ = s.DataStore.UpdateCredentialStatus(said, "revoked")
+	}
+}
+
+// backfillControllerGrants issues a Controller Grant for every machine paired
+// before machines were given one, so none goes on authorising credentials that
+// cannot name it. Where the identity's key is not held here they are marked
+// pending on the device that holds it.
+func (s *CoreServer) backfillControllerGrants() {
+	if s.DataStore == nil || s.KeriDriver == nil {
+		return
+	}
+	all, err := s.controllers().All()
+	if err != nil {
+		log.Printf("[controller] machines paired earlier could not be read to give them grants: %v", err)
+		return
+	}
+	for _, g := range all {
+		if g.CredentialSAID != "" || g.CredentialPending {
+			continue
+		}
+		if live, _ := g.Live(time.Now()); !live {
+			continue
+		}
+		s.grantsMu.Lock()
+		said, err := s.issueControllerGrant(g)
+		switch {
+		case errors.Is(err, errKeyElsewhere):
+			g.CredentialPending = true
+			err = s.controllers().Put(g)
+		case err == nil:
+			g.CredentialSAID = said
+			if err = s.controllers().Put(g); err != nil {
+				s.withdrawOrSay(said)
+			}
+		}
+		s.grantsMu.Unlock()
+		if err != nil {
+			log.Printf("[controller] machine %s paired earlier could not be given a grant: %v", g.ControllerAID, err)
+		}
 	}
 }

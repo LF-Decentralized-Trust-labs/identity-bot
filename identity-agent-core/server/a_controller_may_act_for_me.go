@@ -126,6 +126,11 @@ type ControllerGrant struct {
 	// can be shown to anybody and named by what is done from the machine.
 	// Empty for a grant made before machines were given one.
 	CredentialSAID string `json:"credential_said,omitempty"`
+	// CredentialPending is a grant recorded where the identity's key is not
+	// held: its credential is an event in the identity's key log, which only
+	// the device holding the key can sign, so it waits for that device. Nothing
+	// is written into the key log unsigned meanwhile.
+	CredentialPending bool `json:"credential_pending,omitempty"`
 
 	// ExpiresAt is zero for an enrolled machine and set for a borrowed one.
 	// Zero means "until the owner says otherwise", never "forever unchecked" —
@@ -224,6 +229,16 @@ func (c *controllerGrants) save(all map[string]ControllerGrant) error {
 // Replaces any grant for the same identity rather than adding a second: two
 // live grants for one controller would mean revoking one and being surprised.
 func (c *controllerGrants) Grant(g ControllerGrant, now time.Time) (ControllerGrant, error) {
+	g, err := c.Check(g, now)
+	if err != nil {
+		return ControllerGrant{}, err
+	}
+	return g, c.Put(g)
+}
+
+// Check is everything Grant refuses, without recording anything: the grant as
+// it would be recorded, or why it cannot be.
+func (c *controllerGrants) Check(g ControllerGrant, now time.Time) (ControllerGrant, error) {
 	g.ControllerAID = strings.TrimSpace(g.ControllerAID)
 	g.PublicKey = strings.TrimSpace(g.PublicKey)
 	g.Label = strings.TrimSpace(g.Label)
@@ -302,18 +317,19 @@ func (c *controllerGrants) Grant(g ControllerGrant, now time.Time) (ControllerGr
 			"%q is neither a machine somebody keeps nor one they borrowed", g.Grade)
 	}
 	g.GrantedAt = now
+	return g, nil
+}
 
+// Put records a grant Check has passed, replacing any for the same machine.
+func (c *controllerGrants) Put(g ControllerGrant) error {
 	grantsLock.Lock()
 	defer grantsLock.Unlock()
 	all, err := c.load()
 	if err != nil {
-		return ControllerGrant{}, err
+		return err
 	}
 	all[g.ControllerAID] = g
-	if err := c.save(all); err != nil {
-		return ControllerGrant{}, err
-	}
-	return g, nil
+	return c.save(all)
 }
 
 // Live returns the grant for an identity, if one stands.

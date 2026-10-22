@@ -267,8 +267,13 @@ func (s *CoreServer) handleVerifyAuditChain(w http.ResponseWriter, r *http.Reque
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	// The anchors fix what the links cannot: the newest rows, and a chain
-	// rewritten end to end by whoever holds the signer's key.
+	// The links catch a row changed in the middle. The anchors fix what links
+	// cannot: the newest rows, which nothing after them names. What an anchor
+	// proves depends on who else holds it. Receipted by the witnesses this
+	// identity names, removing it contradicts them; with no witnesses it holds
+	// against someone who can edit the record's rows but not against someone
+	// who controls this Identity Agent entirely. Rows and entries no anchor
+	// fixes yet are counted, never reported as checked.
 	anchors, err := s.checkAnchors()
 	if err != nil {
 		jsonError(w, "The log's anchors cannot be checked right now: "+err.Error(), http.StatusServiceUnavailable)
@@ -277,6 +282,12 @@ func (s *CoreServer) handleVerifyAuditChain(w http.ResponseWriter, r *http.Reque
 	resp := map[string]any{
 		"intact": len(faults) == 0 && anchors.BrokenAt == 0, "chain_start_kept": start != nil,
 		"anchored_through": anchors.AnchoredThrough, "unanchored_rows": anchors.Unanchored,
+		"unanchored_entries": anchors.UnanchoredEntries,
+		"anchoring_external": anchors.External, "witnessed_through": anchors.WitnessedThrough,
+		"awaiting_witnesses": anchors.AwaitingWitnesses,
+	}
+	if anchors.Unavailable != "" {
+		resp["anchoring_unavailable"] = anchors.Unavailable
 	}
 	if len(faults) > 0 {
 		resp["broken_at"] = faults[0].ID

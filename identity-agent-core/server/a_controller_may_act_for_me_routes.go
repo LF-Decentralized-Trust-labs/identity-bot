@@ -109,6 +109,12 @@ func onTheWire(g ControllerGrant, now time.Time) map[string]any {
 	if g.Signer != "" {
 		out["signer"] = g.Signer
 	}
+	if g.CredentialSAID != "" {
+		out["credential"] = g.CredentialSAID
+	}
+	if g.CredentialPending {
+		out["credential"] = "pending on the device that holds the identity's key"
+	}
 	if !live {
 		out["why_not"] = why
 	}

@@ -1,6 +1,8 @@
 package server
 
 import (
+	"context"
+	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -14,6 +16,7 @@ import (
 	"identity-agent-core/authprovider"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/schemas"
+	"identity-agent-core/store"
 
 	keri "github.com/grapeid/keri-go"
 )
@@ -222,5 +225,310 @@ func TestTyingAMachineToItsSignerReissuesItsGrant(t *testing.T) {
 	}
 	if got := statusOf(t, w.s, granted.CredentialSAID); got != keri.StatusRevoked {
 		t.Fatalf("the grant that named nobody still stands: %q", got)
+	}
+}
+
+func credentialsOf(t *testing.T, s *CoreServer, holder string) []store.CredentialRecord {
+	t.Helper()
+	all, _ := s.DataStore.GetCredentials()
+	var out []store.CredentialRecord
+	for _, c := range all {
+		if c.HolderAID == holder {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func testOwnerSeed() []byte {
+	seed := make([]byte, ed25519.SeedSize)
+	for i := range seed {
+		seed[i] = byte(i + 1)
+	}
+	return seed
+}
+
+// A request the identity's own key signed is kept as the authority, and the
+// credential rests on it.
+func TestAnOwnersSignedRequestIsKeptAsTheAuthority(t *testing.T) {
+	w := newTalkWorld(t)
+	resetSeenSignatures(t)
+	req := signed(t, "PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities", `{"capabilities":["`+capabilityMessageAgent+`"]}`, testOwnerSeed(), time.Now())
+	rec := httptest.NewRecorder()
+	w.s.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("the owner's change: %d %s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		GrantSAID string `json:"grant_said"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	attrs, _ := acdcOf(t, w.s, out.GrantSAID)["a"].(map[string]interface{})
+	r, _ := attrs["request"].(map[string]interface{})
+	if r["kind"] != "owner" || r["body"] == "" {
+		t.Fatalf("the owner's request is not kept as the authority: %v", attrs["request"])
+	}
+}
+
+// A credential that does not rest on the request it carries is not issued.
+func TestACredentialThatDoesNotRestOnItsRequestIsNotIssued(t *testing.T) {
+	w := newTalkWorld(t)
+	before := 0
+	for _, c := range credentialsOf(t, w.s, w.a.PairwiseAID) {
+		if isUsableStatus(c.Status) {
+			before++
+		}
+	}
+	stamp := time.Now().UTC().Format(time.RFC3339)
+	bogus := authority{Request: &signedRequest{Kind: "owner", Signer: "EOWNERTESTAID", Body: `{"capabilities":[]}`,
+		Signed:    canonicalRequestString("PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities", stamp, []byte(`{"capabilities":[]}`)),
+		Signature: "0Bnot-a-signature"}, About: w.a.ID}
+	if _, err := w.s.issueCapabilityGrant(w.a, bogus); err == nil {
+		t.Fatal("a grant resting on a request nobody signed was issued")
+	}
+	after := 0
+	for _, c := range credentialsOf(t, w.s, w.a.PairwiseAID) {
+		if isUsableStatus(c.Status) {
+			after++
+		}
+	}
+	if after != before {
+		t.Fatalf("usable grants went from %d to %d", before, after)
+	}
+}
+
+// A grant or body credential issued under the first version after this
+// Identity Agent began naming who authorised them is not honoured; one issued
+// before is.
+func TestAFirstVersionCredentialIssuedAfterwardsIsNotHonoured(t *testing.T) {
+	s, agent := grantWorld(t)
+	early, err := s.issueAssetCredential(schemas.AIAgentGrantV1, agent.PairwiseAID, agent.DelegatorAID,
+		map[string]interface{}{"name": "early", "capabilities": []string{}}, "", authority{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.issueCapabilityGrant(agent, authority{}); err != nil {
+		t.Fatal(err)
+	}
+	late, err := s.issueAssetCredential(schemas.AIAgentGrantV1, agent.PairwiseAID, agent.DelegatorAID,
+		map[string]interface{}{"name": "late", "capabilities": []string{}}, "", authority{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, _ := s.DataStore.GetCredential(early)
+	l, _ := s.DataStore.GetCredential(late)
+	if s.issuedUnderFirstVersionTooLate(e) {
+		t.Fatal("a first-version grant issued before the change was refused")
+	}
+	if !s.issuedUnderFirstVersionTooLate(l) {
+		t.Fatal("a first-version grant issued after the change was honoured")
+	}
+	if s.grantCredentialValid(l, mcpToken{AgentAID: agent.PairwiseAID, DelegatorAID: agent.DelegatorAID}) {
+		t.Fatal("the gateway honoured a first-version grant issued after the change")
+	}
+}
+
+// Machines paired before machines were given grants are given one at start.
+func TestMachinesPairedEarlierAreGivenGrants(t *testing.T) {
+	s, _ := grantWorld(t)
+	g := aGrant(GradeEnrolled)
+	if _, err := s.controllers().Grant(g, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	s.prepareKeyLogs()
+	got, _, _ := s.controllers().Get(g.ControllerAID)
+	if got.CredentialSAID == "" {
+		t.Fatal("a machine paired earlier was not given a grant")
+	}
+	if statusOf(t, s, got.CredentialSAID) != keri.StatusIssued {
+		t.Fatal("the grant given is not in force")
+	}
+}
+
+// Settling a machine's signer, when its grant cannot be re-issued, changes
+// nothing and is tried again next time.
+func TestSettlingASignerIsTriedAgainWhenItsGrantCannotBeReissued(t *testing.T) {
+	w := newTalkWorld(t)
+	g := aGrant(GradeEnrolled)
+	granted, err := w.s.grantController(g, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := w.s.KeriDriver
+	w.s.KeriDriver = nil
+	if _, err := w.s.bindSigner(g.ControllerAID, talkSigner); err == nil {
+		t.Fatal("a signer was settled with no grant to say so")
+	}
+	if now, _, _ := w.s.controllers().Get(g.ControllerAID); now.Signer != "" || now.CredentialSAID != granted.CredentialSAID {
+		t.Fatalf("a failed settling changed the grant: %+v", now)
+	}
+	w.s.KeriDriver = engine
+	bound, err := w.s.bindSigner(g.ControllerAID, talkSigner)
+	if err != nil || bound.Signer != talkSigner || bound.CredentialSAID == granted.CredentialSAID {
+		t.Fatalf("settling the signer again: %+v %v", bound, err)
+	}
+}
+
+// Granting a machine again replaces its grant and withdraws the earlier one;
+// a re-grant that fails leaves the earlier one in force.
+func TestReGrantingAMachine(t *testing.T) {
+	s, _ := grantWorld(t)
+	g := aGrant(GradeEnrolled)
+	first, err := s.grantController(g, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := s.grantController(g, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.CredentialSAID == first.CredentialSAID || statusOf(t, s, first.CredentialSAID) != keri.StatusRevoked {
+		t.Fatal("a re-grant left the earlier grant in force")
+	}
+	engine := s.KeriDriver
+	s.KeriDriver = nil
+	if _, err := s.grantController(g, time.Now().UTC()); err == nil {
+		t.Fatal("a re-grant with nothing to anchor it in succeeded")
+	}
+	s.KeriDriver = engine
+	if now, _, _ := s.controllers().Get(g.ControllerAID); now.CredentialSAID != second.CredentialSAID {
+		t.Fatal("a failed re-grant replaced the grant in force")
+	}
+	if statusOf(t, s, second.CredentialSAID) != keri.StatusIssued {
+		t.Fatal("a failed re-grant withdrew the grant in force")
+	}
+}
+
+// A re-grant whose earlier grant cannot be withdrawn changes nothing, so a
+// machine never has two grants in force.
+func TestAMachineNeverHasTwoGrantsInForce(t *testing.T) {
+	s, _ := grantWorld(t)
+	g := aGrant(GradeEnrolled)
+	first, err := s.grantController(g, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DataStore.DeleteCredential(first.CredentialSAID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.grantController(g, time.Now().UTC()); err == nil {
+		t.Fatal("a machine was re-granted while its earlier grant could not be withdrawn")
+	}
+	for _, c := range credentialsOf(t, s, g.ControllerAID) {
+		if isUsableStatus(c.Status) {
+			t.Fatalf("the new grant %s was left in force beside the earlier one", c.SAID)
+		}
+	}
+	if now, _, _ := s.controllers().Get(g.ControllerAID); now.CredentialSAID != first.CredentialSAID {
+		t.Fatal("the grant on record changed")
+	}
+}
+
+// Where the identity's key is held elsewhere, a machine is recorded with its
+// grant pending on that device, and nothing is written into the key log.
+func TestAMachineIsGrantedWithItsCredentialPendingWhereTheKeyIsElsewhere(t *testing.T) {
+	s, _ := grantWorld(t)
+	owner, _ := s.DataStore.GetIdentity()
+	before, _ := s.DataStore.GetEvents(owner.AID)
+	elsewhere, _ := keri.GenerateSigner(true)
+	owner.PublicKey, _ = elsewhere.PublicKey()
+	s.DataStore.SaveIdentity(*owner)
+	g, err := s.grantController(aGrant(GradeEnrolled), time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !g.CredentialPending || g.CredentialSAID != "" {
+		t.Fatalf("the grant is not marked pending: %+v", g)
+	}
+	if after, _ := s.DataStore.GetEvents(owner.AID); len(after) != len(before) {
+		t.Fatal("an event was written into a key log whose key is elsewhere")
+	}
+}
+
+// A machine whose grant has been withdrawn, or is not yet anchored,
+// authorises nothing.
+func TestAMachineWithoutAGrantInForceAuthorisesNothing(t *testing.T) {
+	w := newTalkWorld(t)
+	asked := 0
+	put := func() int {
+		// Each request its own, so none is refused as one already used.
+		asked++
+		req := asThatMachine(t, w.ctlAID, "PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities",
+			`{"capabilities":["`+capabilityMessageAgent+`"]}`, w.ctlSeed, authprovider.LevelVerified,
+			time.Now().Add(-time.Duration(asked)*time.Second))
+		rec := httptest.NewRecorder()
+		w.s.router.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	ctl, _, _ := w.s.controllers().Get(w.ctlAID)
+	unanchored := ctl
+	unanchored.CredentialSAID = ""
+	w.s.controllers().Put(unanchored)
+	if code := put(); code != http.StatusForbidden {
+		t.Fatalf("a machine whose grant is not anchored was answered %d", code)
+	}
+	w.s.controllers().Put(ctl)
+	if err := w.s.withdrawControllerGrant(ctl.CredentialSAID); err != nil {
+		t.Fatal(err)
+	}
+	if code := put(); code != http.StatusForbidden {
+		t.Fatalf("a machine whose grant was withdrawn was answered %d", code)
+	}
+}
+
+// While a credential is being issued on a machine's grant, the grant cannot
+// be revoked under it.
+func TestAGrantIsHeldWhileACredentialIsIssuedOnIt(t *testing.T) {
+	w := newTalkWorld(t)
+	req := asThatMachine(t, w.ctlAID, "PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities",
+		`{"capabilities":[]}`, w.ctlSeed, authprovider.LevelVerified, time.Now())
+	grant, _, _ := w.s.controllers().Get(w.ctlAID)
+	req = req.WithContext(context.WithValue(req.Context(), controllerContextKey{}, grant))
+	_, held, err := w.s.authorityOf(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() { w.s.revokeController(w.ctlAID); close(done) }()
+	select {
+	case <-done:
+		t.Fatal("the grant was revoked while a credential was being issued on it")
+	case <-time.After(100 * time.Millisecond):
+	}
+	held()
+	<-done
+}
+
+// A browser session can issue no authority over an AI agent.
+func TestASessionIssuesNoAuthority(t *testing.T) {
+	for _, route := range []string{"POST /api/mcp/agents", "PUT /api/mcp/agents/{id}/capabilities", "POST /api/mcp/agents/{id}/bodies/{bid}/approve"} {
+		if _, refused := sessionForbidden[route]; !refused {
+			t.Fatalf("a browser session may reach %s", route)
+		}
+	}
+}
+
+// Settling a signer when the machine's earlier grant cannot be withdrawn
+// changes nothing and leaves no second grant in force.
+func TestSettlingASignerNeverLeavesTwoGrantsInForce(t *testing.T) {
+	w := newTalkWorld(t)
+	g := aGrant(GradeEnrolled)
+	granted, err := w.s.grantController(g, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.s.DataStore.DeleteCredential(granted.CredentialSAID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.s.bindSigner(g.ControllerAID, talkSigner); err == nil {
+		t.Fatal("a signer was settled while the earlier grant could not be withdrawn")
+	}
+	for _, c := range credentialsOf(t, w.s, g.ControllerAID) {
+		if isUsableStatus(c.Status) {
+			t.Fatalf("the re-issued grant %s was left in force", c.SAID)
+		}
+	}
+	if now, _, _ := w.s.controllers().Get(g.ControllerAID); now.Signer != "" || now.CredentialSAID != granted.CredentialSAID {
+		t.Fatalf("the grant on record changed: %+v", now)
 	}
 }

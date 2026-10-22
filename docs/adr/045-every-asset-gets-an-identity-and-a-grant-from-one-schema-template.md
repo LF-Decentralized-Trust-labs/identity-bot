@@ -141,13 +141,33 @@ is used only by a build with no KERI engine.
 ### Who authorised it (amended 2026-10-22)
 
 Version 1.1.0 of the template lets a credential name the credentials it rests on, in an
-edges block, and carry the `request` that authorised it exactly as it was signed: the
-signing machine, the string, the signature. The AI Agent Grant and AI Agent Body are issued
-at 1.1.0. When the request came from an authorised controller (ADR-044), each carries an
-edge `authorised_by` to that controller's Controller Grant, and the controller's signed
-request. A request made with the identity's own key has nothing between it and the issuer
-and names nothing further. Credentials issued under 1.0.0 keep their identifiers, are still
-served, and are still honoured.
+edges block, and carry the `request` that authorised it exactly as it was signed: whether a
+machine or the identity's own key signed it, the signer, the exact string, the signature,
+and the request's body, whose digest the string carries. `about` records what the request
+named as the thing it acts on: the AI agent whose grant changes, or the machine being
+approved as its body. The AI Agent Grant and AI Agent Body are issued at 1.1.0. A request a
+machine made carries an edge `authorised_by` to that machine's Controller Grant (ADR-044).
+One made on the device that holds the identity's key, without a signature, carries no
+request: the issuer is the authority, and a verifier reports that rather than a check.
+
+**The verifier's rule** (the open `authorisation.Check`, applied by the Identity Agent to
+everything it issues and by anyone to an exported record):
+
+1. The credential verifies against its own identifier, so nothing in it changed.
+2. The string carries the digest of the body kept, names the signer, and the signature over
+   it verifies: for a machine, against the key its Controller Grant names; for the
+   identity, against the key its own key log named.
+3. For a machine: the edge names exactly the Controller Grant given, which is a Controller
+   Grant, held by the signer.
+4. What was issued is what was asked: the same capabilities and limits, the same AI agent
+   (by `about` or, when it is being created, by name), the same machine.
+5. The request was made after the machine was granted, before its grant lapsed, and no
+   later than the credential's issue (within five minutes of clock difference); and the
+   grant's transaction log shows it was not revoked before the credential was issued.
+
+Credentials issued under 1.0.0 keep their identifiers and are still served. Those issued
+before this Identity Agent issued its first 1.1.0 AI Agent Grant or Body are still honoured;
+any issued after are not, since one could only have been issued to avoid naming anybody.
 
 A third kind is built from the template: the **Controller Grant**, held by a machine
 authorised to act for the identity (ADR-044).

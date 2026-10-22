@@ -182,7 +182,11 @@ asking, and must sign as themselves.
   own signature is therefore the strong evidence of who said what. A compromised
   Identity Agent could still invent a controller grant or issue a body credential to a
   key of its own, and sign as that. *(Amended 2026-10-22: controller grants are now
-  anchored in the organisation's key log, ADR-044.)*
+  issued as credentials anchored in the organisation's key log, ADR-044. That records
+  when the organisation said a machine was authorised and as whom; it does not stop an
+  Identity Agent whose operator controls it from issuing one to its own key. Each
+  credential issued on a machine's grant carries the machine's own signature over the
+  request, which cannot be made up afterwards, ADR-045.)*
 - A reply sent with the body's `reply` tool names the brain's session but carries no
   digest of the run, because the run has not finished when it is sent. Only an answer
   given by ending the turn carries the digest.
@@ -193,15 +197,26 @@ asking, and must sign as themselves.
 - A person's own requests are signed but not sealed, so a relay where TLS ends can read
   the question and the answer. The bodies' legs are sealed.
 - *Amended 2026-10-22.* **The record is anchored.** A record identity, delegated from the
-  organisation and approved in its key log, writes interactions whose seal is the digest
-  of a statement naming the governance log's newest row and its hash, and the newest
-  entry of every conversation that changed since the last anchoring. It anchors at most
-  every five minutes, sooner after twenty recorded messages, and only when something
-  changed; both numbers are configurable. Each anchoring is kept with its interaction
-  before the interaction is appended. Deleting or changing anything an anchor fixes,
-  the newest rows included, is detected by checking the anchors; what was written after
-  the newest anchor is reported as not yet anchored, never as checked. A conversation
-  closes by going quiet, so its last entry is anchored by the anchoring after it, within
-  the interval.
+  organisation and approved in its key log, writes interactions sealing the digest of a
+  statement that names the governance log's newest row and its hash, and the newest entry
+  of every conversation that grew since it was last anchored, by sequence. The record
+  identity's key log is the authority: each of its interactions must have its statement,
+  each statement must be sealed there, and each row and entry a statement names must
+  still be there, unchanged. Its tip is also kept outside the database. Anchoring runs for
+  an organisation and for any Identity Agent holding AI agents, at most every five minutes,
+  sooner after twenty recorded messages, and within half the time a quiet conversation
+  takes to close, so its last entry is anchored before it closes. Each anchoring is kept
+  with its interaction before the interaction is appended.
+
+  **What it proves depends on the witnesses.** The record identity names the organisation's
+  witnesses and threshold, and its events are sent to them for receipts. Once an anchoring
+  is receipted, removing it or anything it fixes contradicts what the witnesses hold, which
+  anybody can check by asking them. An organisation that names no witnesses has nobody
+  outside to contradict it: the anchors then hold against someone who can edit the
+  record's rows but has neither the record identity's key nor the tip kept outside the
+  database, and not against someone who controls the Identity Agent entirely. The check
+  reports which applies, how far the witnesses have receipted, and how many rows and
+  entries no anchor fixes yet; nothing anchored is reported as unavailable, never as
+  checked.
 - Running the brain as a separate Windows user is not available yet. On a Windows
   machine a person also uses, the brain runs as that person's user.

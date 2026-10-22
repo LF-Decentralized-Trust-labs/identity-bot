@@ -22,6 +22,13 @@ import (
 func grantWorld(t *testing.T) (*CoreServer, *asset.Asset) {
 	t.Helper()
 	s := agentWithDerivedIdentity(t) // the organisation's key is derivable here
+	return foundedWith(t, s, nil, 0)
+}
+
+// foundedWith founds the organisation in s, naming witnesses when given, and
+// delegates an AI agent from it.
+func foundedWith(t *testing.T, s *CoreServer, witnesses []string, toad int) (*CoreServer, *asset.Asset) {
+	t.Helper()
 	e := keriengine.New()
 	s.KeriDriver = e
 
@@ -33,7 +40,9 @@ func grantWorld(t *testing.T) (*CoreServer, *asset.Asset) {
 	next, _ := keri.GenerateSigner(true)
 	nextPub, _ := next.PublicKey()
 	founding := keriengine.New()
-	root, err := founding.CreateInceptionNamed(owner.PublicKey, nextPub, "owner")
+	root, err := founding.Incept(drivers.InceptionRequest{
+		PublicKey: owner.PublicKey, NextPublicKey: nextPub, Name: "owner", Witnesses: witnesses, Toad: toad,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

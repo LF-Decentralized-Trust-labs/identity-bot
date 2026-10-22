@@ -376,6 +376,53 @@ func (s *Service) BroadcastEvent(ctx context.Context, signerAID string, rawEvent
 	return nil
 }
 
+// BroadcastToDesignated sends an event to the witnesses an identity's own key
+// log designates, found by their keys among this agent's witnesses and the
+// bootstrap pool, and keeps the receipts they return. Used for an identity
+// that names its delegator's witnesses rather than ones chosen for it here.
+func (s *Service) BroadcastToDesignated(ctx context.Context, signerAID string, rawEvent []byte, cesrSig string, designated []string, threshold int) error {
+	var event map[string]interface{}
+	if err := json.Unmarshal(rawEvent, &event); err != nil {
+		return fmt.Errorf("the event to broadcast is not readable: %w", err)
+	}
+	if cesrSig == "" {
+		return fmt.Errorf("refusing to broadcast an unsigned event for %s", signerAID)
+	}
+	known := map[string]witnessTarget{}
+	if contacts, err := s.Contacts.GetContacts(); err == nil {
+		for _, c := range contacts {
+			if meta, _ := s.Store.GetContactMeta(c.AID); meta != nil && meta.WitnessKey != "" {
+				known[meta.WitnessKey] = witnessTarget{AID: c.AID, URL: c.OobiURL, WitnessKey: meta.WitnessKey}
+			}
+		}
+	}
+	for _, b := range BootstrapPool() {
+		if _, ok := known[b.WitnessKey]; !ok {
+			known[b.WitnessKey] = witnessTarget{AID: b.AID, WitnessKey: b.WitnessKey, URL: b.URL, Commercial: true}
+		}
+	}
+	said := eventSAID(event)
+	seq, _ := eventSeq(event)
+	now := NowRFC3339()
+	_ = s.Store.SaveFinalization(FinalizationState{
+		EventSAID: said, SignerAID: signerAID, SequenceNum: seq,
+		State: FinalizePending, Threshold: threshold, StartedAt: now, UpdatedAt: now,
+	})
+	body, _ := json.Marshal(map[string]interface{}{
+		"aid": signerAID, "event_b64": base64.StdEncoding.EncodeToString(rawEvent), "cesr_signature": cesrSig,
+	})
+	for _, key := range designated {
+		w, ok := known[key]
+		if !ok {
+			log.Printf("[witness] %s designates %s, which this agent has no address for", signerAID, key)
+			continue
+		}
+		go s.postWithRetry(ctx, witnessEventURL(w), body, said, key)
+	}
+	go s.finalizeLoop(said, threshold)
+	return nil
+}
+
 type witnessTarget struct {
 	AID string
 	URL string

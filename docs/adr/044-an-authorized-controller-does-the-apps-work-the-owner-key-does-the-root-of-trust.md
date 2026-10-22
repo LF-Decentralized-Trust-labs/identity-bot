@@ -78,14 +78,25 @@ the gate and removes a second copy of the authority policy that would otherwise 
 from the one the gate enforces.
 
 *Amended 2026-10-22.* **A controller's grant is a credential as well as a record.** When a
-machine is granted, the identity also issues it a Controller Grant (ADR-045) into its own
+machine is granted, the identity issues it a Controller Grant (ADR-045) into its own
 registry: the machine's key, label, grade, the signer it acts as, and its expiry. The
-issuance is anchored in the identity's key log, so that the machine was authorised, and as
-whom, can be shown to anybody without asking this Identity Agent. A grant that cannot be
-anchored is not made. Removing the machine also revokes its credential; the machine stops at
-once even when that revocation cannot be written. Settling which signer a machine acts as
-re-issues its credential to say so. What is done from the machine names this credential
-(ADR-045, ADR-047).
+issuance is anchored in the identity's key log. The grant is recorded only once its
+credential is, so nothing the machine asks for meanwhile is issued without naming it. A
+grant that cannot be anchored is not made. Where the identity's key is held on another
+device the grant is recorded with its credential pending on that device, and nothing is
+written into the key log here. Re-granting a machine, or settling which signer it acts
+as, issues a new credential and withdraws the old one first; if the old one cannot be
+withdrawn nothing changes, so a machine never has two grants in force. Removing the
+machine revokes its credential; the machine stops at once even when that revocation cannot
+be written. Machines paired before this are given grants at start. A credential is issued
+on a machine's grant only while the grant is in force in the registry, and the grant
+cannot be revoked while one is being issued on it.
+
+What a Controller Grant shows: that this Identity Agent, at that time, recorded the machine
+as authorised and as whom, in a log anybody can check. It is issued on the word of the
+device that paired the machine, so an Identity Agent whose operator controls it could issue
+one to a key of its own. What cannot be made up afterwards is the machine's own signature
+over each request, which every credential issued on it carries (ADR-045).
 
 ## Consequences
 
