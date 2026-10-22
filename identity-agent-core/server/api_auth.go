@@ -229,6 +229,11 @@ var publicRoutes = map[string]string{
 
 	// --- liveness and the app shell ---
 	"GET /api/health": "liveness probe — reveals nothing",
+	// Answered to anyone, because the app asking has not yet decided this is
+	// its core. It reveals a MAC of the asker's nonce bound to this core's own
+	// port, which neither discloses the secret nor helps a program on another
+	// port pass as this core.
+	"GET /api/local-owner/proof": "proves this core holds the local owner secret, before an app sends it",
 
 	// The one endpoint that must answer before an owner exists. A freshly
 	// provisioned instance has no identity and no owner, so it cannot be

@@ -131,3 +131,83 @@ func TestTheSecretIsSettledAndWrittenForThisUserAlone(t *testing.T) {
 		t.Fatal("a short secret was accepted")
 	}
 }
+
+// The core proves it holds the secret, bound to the port it is listening on,
+// without sending the secret; a program on another port relaying the question
+// to the real core hands back a proof for the wrong port.
+func TestTheCoreProvesItHoldsTheSecretOnItsOwnPort(t *testing.T) {
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, Port: 8643}
+	router := s.buildRouter("")
+	nonce := "a-fresh-nonce-0123456789"
+	r := httptest.NewRequest(http.MethodGet, "/api/local-owner/proof?nonce="+nonce, nil)
+	r.RemoteAddr = "203.0.113.9:51000" // answered to anyone: no secret needed to ask
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", w.Code, w.Body)
+	}
+	body := w.Body.String()
+	if strings.Contains(body, testOwnerSecret) {
+		t.Fatal("the proof carried the secret")
+	}
+	if !strings.Contains(body, LocalOwnerProof(testOwnerSecret, nonce, 8643)) {
+		t.Fatalf("not the proof for this core's port: %s", body)
+	}
+	if LocalOwnerProof(testOwnerSecret, nonce, 8642) == LocalOwnerProof(testOwnerSecret, nonce, 8643) {
+		t.Fatal("a proof made on one port passes for another")
+	}
+	if LocalOwnerProof("another-secret-0123456789abcdefghij", nonce, 8643) == LocalOwnerProof(testOwnerSecret, nonce, 8643) {
+		t.Fatal("a proof does not depend on the secret")
+	}
+	short := httptest.NewRequest(http.MethodGet, "/api/local-owner/proof?nonce=x", nil)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, short)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("a short nonce was answered: %d", w.Code)
+	}
+}
+
+// The secret handed over in the environment is read once and removed, so no
+// process started afterwards inherits it.
+func TestTheSecretIsTakenOutOfTheEnvironment(t *testing.T) {
+	t.Setenv(LocalOwnerSecretEnv, testOwnerSecret)
+	cfg := DefaultConfig()
+	if cfg.LocalOwnerSecret != testOwnerSecret {
+		t.Fatalf("not read: %q", cfg.LocalOwnerSecret)
+	}
+	if v, ok := os.LookupEnv(LocalOwnerSecretEnv); ok {
+		t.Fatalf("still in the environment: %q", v)
+	}
+}
+
+// On Windows, a data directory outside the user's profile is called out,
+// because the folder, not the file's mode, decides who may read the secret.
+func TestAWindowsDataDirectoryOutsideTheProfileIsCalledOut(t *testing.T) {
+	env := func(home string) func(string) string {
+		return func(k string) string {
+			if k == "USERPROFILE" {
+				return home
+			}
+			return ""
+		}
+	}
+	home := t.TempDir()
+	if msg := windowsSecretExposure("windows", filepath.Join(home, "AppData", "agent"), env(home)); msg != "" {
+		t.Fatalf("a directory in the profile was called out: %s", msg)
+	}
+	if msg := windowsSecretExposure("windows", t.TempDir(), env(home)); msg == "" {
+		t.Fatal("a directory outside the profile was not called out")
+	}
+	if msg := windowsSecretExposure("darwin", "/shared", env(home)); msg != "" {
+		t.Fatal("only Windows relies on the folder for this")
+	}
+}
+
+// The proof is computed the same way by every client; this vector is also
+// asserted by agent_client (the_owner_at_this_computer_test.dart).
+func TestTheLocalOwnerProofMatchesTheSharedVector(t *testing.T) {
+	got := LocalOwnerProof("a-local-owner-secret-for-these-tests-0123456789", "nonce-0123456789abcdef", 8642)
+	if got != "v4KtBBsqnFrVNMHOCMoDC4LK5nUKJW5J-k_5dHCW0U0" {
+		t.Fatalf("proof %s", got)
+	}
+}

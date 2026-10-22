@@ -247,7 +247,7 @@ func DefaultConfig() Config {
 		EntityType:              os.Getenv("IDENTITY_AGENT_ENTITY_TYPE"),
 		FlutterWebDir:           webDir,
 		RequireOwnerAtInception: requireOwner,
-		LocalOwnerSecret:        os.Getenv(LocalOwnerSecretEnv),
+		LocalOwnerSecret:        takeLocalOwnerSecretFromEnv(),
 	}
 }
 
@@ -288,6 +288,9 @@ func New(cfg Config) (*CoreServer, error) {
 		log.Printf("[identity-agent-core] *** DEVELOPMENT BUILD *** accepting the development launch measurement for adoption")
 	}
 
+	// Whoever started this process may have handed the secret over in the
+	// environment; it goes no further than here.
+	_ = os.Unsetenv(LocalOwnerSecretEnv)
 	localOwnerSecret, err := establishLocalOwnerSecret(cfg.DataDir, cfg.LocalOwnerSecret)
 	if err != nil {
 		cancel()
@@ -815,6 +818,9 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/health", s.handleHealth)
+		// The core proves it holds the local owner secret before an app sends
+		// it (the_owner_at_this_computer.go).
+		r.Get("/local-owner/proof", s.handleLocalOwnerProof)
 		r.Get("/info", s.handleInfo)
 		r.Get("/identity", s.handleIdentity)
 		r.Get("/security/enclave", s.handleSecurityEnclave)
