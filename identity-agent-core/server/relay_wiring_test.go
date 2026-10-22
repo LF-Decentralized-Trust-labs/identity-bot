@@ -490,3 +490,57 @@ func TestARelayedRequestIsNeverAnsweredWithAPage(t *testing.T) {
 		t.Fatalf("a browser loading a page through a relay: %d %.200s", code, body)
 	}
 }
+
+// A private address is made for one relationship, so it must not confirm the
+// identity behind it: asked for the root identity's OOBI, it answers exactly
+// as it does for an identifier it has never heard of.
+func TestAPrivateAddressDoesNotKnowTheRootIdentity(t *testing.T) {
+	s, rl, _, cancel := relayWorld(t, relayproto.ModePrivate)
+	defer cancel()
+	root := "E" + strings.Repeat("R", 43)
+	if err := s.DataStore.SaveIdentity(store.IdentityState{AID: root}); err != nil {
+		t.Fatal(err)
+	}
+	go s.startRelay()
+	defer s.Stop()
+	url := s.waitForRelay(t)
+
+	ask := func(aid string) (int, string) {
+		resp, err := rl.Caller().Get(url + "/oobi/" + aid)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, strings.ReplaceAll(string(b), aid, "<aid>")
+	}
+	stranger := "E" + strings.Repeat("S", 43)
+	rootCode, rootBody := ask(root)
+	strangerCode, strangerBody := ask(stranger)
+	if rootCode != http.StatusNotFound || rootCode != strangerCode || rootBody != strangerBody {
+		t.Fatalf("a private address told the root identity apart: root %d %q, stranger %d %q",
+			rootCode, rootBody, strangerCode, strangerBody)
+	}
+}
+
+// A public address is the identity's own, so it still serves the root
+// identity's OOBI.
+func TestAPublicAddressServesTheRootIdentity(t *testing.T) {
+	s, rl, _, cancel := relayWorld(t, relayproto.ModePublic)
+	defer cancel()
+	root := "E" + strings.Repeat("R", 43)
+	if err := s.DataStore.SaveIdentity(store.IdentityState{AID: root}); err != nil {
+		t.Fatal(err)
+	}
+	go s.startRelay()
+	defer s.Stop()
+	url := s.waitForRelay(t)
+	resp, err := rl.Caller().Get(url + "/oobi/" + root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("the public address refused the identity it is for: %d", resp.StatusCode)
+	}
+}
