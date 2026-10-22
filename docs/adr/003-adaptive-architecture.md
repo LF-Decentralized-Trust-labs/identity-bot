@@ -252,7 +252,7 @@ The `getPublicURL()` function resolves the agent's externally-reachable URL in t
 
 | Variable | What it does | Which mode uses it |
 |---|---|---|
-| `CORE_URL` | URL of the local Go backend (default: `http://localhost:5050`) | Desktop Mode |
+| `CORE_URL` | URL of the local Go backend (default: `http://127.0.0.1:5050`; an IP literal, never `localhost`, because the app sends its owner secret only to the exact address the core proved itself at, per ADR-042 §3) | Desktop Mode |
 | `PUBLIC_URL` | Explicit public URL override for OOBI generation | Desktop Mode |
 | `NGROK_AUTHTOKEN` | ngrok auth token for automatic tunnel creation | Desktop Mode (optional) |
 | `TUNNEL_PROVIDER` | Which tunnel provider to use (`cloudflare` or `ngrok`) | Desktop Mode (optional) |

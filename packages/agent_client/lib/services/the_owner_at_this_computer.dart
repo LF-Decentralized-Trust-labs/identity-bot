@@ -73,6 +73,11 @@ class LocalOwnerSecret {
     final secret = _current;
     final at = Uri.tryParse(origin);
     if (kIsWeb || secret == null || secret.isEmpty || at == null) return false;
+    // An IP literal, never a name. "localhost" may resolve to ::1 as well as
+    // 127.0.0.1, and the core listens on one of them only: a program on the
+    // other, on the same port, could pass the question through and be taken
+    // for the core.
+    if (!_loopbackLiterals.contains(at.host)) return false;
     final r = Random.secure();
     final nonce = base64Url
         .encode(List<int>.generate(24, (_) => r.nextInt(256)))
@@ -96,15 +101,15 @@ class LocalOwnerSecret {
     }
   }
 
-  /// Whether a request to [url] goes to the core that proved itself.
+  static const _loopbackLiterals = {'127.0.0.1', '::1'};
+
+  /// Whether a request to [url] goes to the core that proved itself: the same
+  /// address, exactly as proven, and the same port. 127.0.0.1 and ::1 are
+  /// different listeners, and so is a name that resolves to either.
   static bool isTheProvenCore(Uri url) {
     final p = _proven;
     if (p == null) return false;
-    const loopback = {'127.0.0.1', 'localhost', '::1', '[::1]'};
-    return loopback.contains(url.host) &&
-        loopback.contains(p.host) &&
-        url.port == p.port &&
-        url.scheme == p.scheme;
+    return url.host == p.host && url.port == p.port && url.scheme == p.scheme;
   }
 
   /// The header to send to [url]: the secret if [url] is the proven core.

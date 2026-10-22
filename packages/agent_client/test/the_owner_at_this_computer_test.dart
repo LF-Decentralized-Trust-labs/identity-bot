@@ -90,6 +90,23 @@ void main() {
     expect(sent.map(carried), everyElement(isNull));
   });
 
+  test('the other loopback address, or a name, is not the proven core',
+      () async {
+    final network = coreHolding(_secret, corePort, sent);
+    expect(await LocalOwnerSecret.proveTheCoreAt(core, using: network), isTrue);
+    final c = ProvingThisComputer(network);
+    // A process on ::1 at the core's port is a different listener; so is
+    // whatever "localhost" happens to resolve to.
+    await c.get(Uri.parse('http://[::1]:$corePort/api/identity'));
+    await c.get(Uri.parse('http://localhost:$corePort/api/identity'));
+    expect(sent.skip(1).map(carried), everyElement(isNull));
+    expect(
+        await LocalOwnerSecret.proveTheCoreAt('http://localhost:$corePort',
+            using: network),
+        isFalse,
+        reason: 'a core is proven at an address, never at a name');
+  });
+
   test('a request anywhere but the proven core never carries it', () async {
     final network = coreHolding(_secret, corePort, sent);
     await LocalOwnerSecret.proveTheCoreAt(core, using: network);
