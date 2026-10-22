@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"identity-agent-core/drivers"
@@ -30,6 +31,15 @@ type Engine struct {
 	secrets keri.SecretStore
 	// http is how OOBIs are fetched. Replaceable so a test needs no network.
 	http HTTPClient
+
+	// writing holds one lock per identity, taken from reading its tip to
+	// appending the event built on it. Without it two events built at once on
+	// the same tip both chain to it, and the log forks.
+	writing sync.Map
+	// telCommit keeps a registry event and its anchor before the engine
+	// appends them; see drivers.TELCommitter.
+	commitMu  sync.Mutex
+	telCommit func(drivers.TELCommit) error
 }
 
 // SetHTTPClient replaces how this engine fetches introductions.
@@ -59,6 +69,44 @@ var _ drivers.KeriEngine = (*Engine)(nil)
 // interface carries it, and the interface carries it because the other
 // implementation is a subprocess that genuinely has to be started — a core that
 // had to know which kind it held would defeat the substitution.
+// SetTELCommit installs the function that keeps a registry event and its
+// anchor before the engine appends them.
+func (e *Engine) SetTELCommit(f func(drivers.TELCommit) error) {
+	e.commitMu.Lock()
+	e.telCommit = f
+	e.commitMu.Unlock()
+}
+
+// commit offers a registry event and its anchor for keeping. With nothing
+// installed there is nothing to offer them to.
+func (e *Engine) commit(aid string, sn uint64, kel, tel []byte) error {
+	e.commitMu.Lock()
+	f := e.telCommit
+	e.commitMu.Unlock()
+	if f == nil {
+		return nil
+	}
+	return f(drivers.TELCommit{AID: aid, SN: int(sn), KELRaw: kel, TELRaw: tel})
+}
+
+// holdForWriting returns the identity named and holds it against every other
+// event built on its log until the returned function is called. The identity
+// is read again once held, because a reload may have replaced it meanwhile.
+func (e *Engine) holdForWriting(name string) (*identity, func(), error) {
+	id, err := e.state.get(name)
+	if err != nil {
+		return nil, nil, err
+	}
+	m, _ := e.writing.LoadOrStore(id.AID, &sync.Mutex{})
+	mu := m.(*sync.Mutex)
+	mu.Lock()
+	if id, err = e.state.get(name); err != nil {
+		mu.Unlock()
+		return nil, nil, err
+	}
+	return id, mu.Unlock, nil
+}
+
 func (e *Engine) Start() error {
 	e.started = time.Now()
 	return nil
@@ -278,10 +326,11 @@ func (e *Engine) inceptWith(publicKey, nextPublicKey, name string, data []json.R
 // approved it — and returning one alone would let a caller publish an identity
 // claiming an authority that was never granted.
 func (e *Engine) CreateDelegatedInception(publicKey, nextPublicKey, name, delegatorName string) (*drivers.DriverDelegatedInceptionResponse, error) {
-	delegator, err := e.state.get(delegatorName)
+	delegator, release, err := e.holdForWriting(delegatorName)
 	if err != nil {
 		return nil, fmt.Errorf("the delegator: %w", err)
 	}
+	defer release()
 	pub, nextDigest, dip, dipEvent, err := delegatedInceptionOver(publicKey, nextPublicKey, delegator.AID)
 	if err != nil {
 		return nil, err
@@ -492,10 +541,11 @@ func (e *Engine) RotateAidWithAnchor(name, newPublicKey, newNextPublicKey string
 func (e *Engine) Rotate(req drivers.RotationRequest) (*drivers.DriverRotationResponse, error) {
 	name, newPublicKey, newNextPublicKey, anchorData :=
 		req.Name, req.NewPublicKey, req.NewNextPublicKey, req.AnchorData
-	id, err := e.state.get(name)
+	id, release, err := e.holdForWriting(name)
 	if err != nil {
 		return nil, err
 	}
+	defer release()
 	newPub, err := normaliseKey(newPublicKey, true)
 	if err != nil {
 		return nil, fmt.Errorf("the new signing key: %w", err)
@@ -595,10 +645,11 @@ func (e *Engine) Rotate(req drivers.RotationRequest) (*drivers.DriverRotationRes
 // The next-key digests are supplied already digested, because the keys they
 // commit to belong to the other members and must not be revealed here.
 func (e *Engine) RotateToMultisig(name string, keys, nextKeyDigests []string, isith, nsith string, anchorData []interface{}) (*drivers.DriverRotationResponse, error) {
-	id, err := e.state.get(name)
+	id, release, err := e.holdForWriting(name)
 	if err != nil {
 		return nil, err
 	}
+	defer release()
 	if len(keys) == 0 {
 		return nil, fmt.Errorf("a multisig rotation needs at least one key")
 	}
@@ -680,10 +731,11 @@ func (e *Engine) RotateToMultisig(name string, keys, nextKeyDigests []string, is
 
 // Interact anchors data in an identity's key log.
 func (e *Engine) Interact(name string, data []interface{}) (*drivers.DriverInteractResponse, error) {
-	id, err := e.state.get(name)
+	id, release, err := e.holdForWriting(name)
 	if err != nil {
 		return nil, err
 	}
+	defer release()
 	anchors, err := rawData(data)
 	if err != nil {
 		return nil, err

@@ -70,6 +70,17 @@ func (s *SQLiteStore) DB() *sql.DB {
 // ── Events / KEL ─────────────────────────────────────────────────────────────
 
 func (s *SQLiteStore) SaveEvent(record EventRecord) error {
+	return saveEvent(s.db, record)
+}
+
+// sqlExecer is what a write needs, so the same statement runs alone or inside a
+// transaction with others it must land with.
+type sqlExecer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+	QueryRow(query string, args ...any) *sql.Row
+}
+
+func saveEvent(ex sqlExecer, record EventRecord) error {
 	// The signature and the canonical bytes are written, and were not.
 	//
 	// Both columns existed and neither was in the statement, so a signature
@@ -81,7 +92,7 @@ func (s *SQLiteStore) SaveEvent(record EventRecord) error {
 	// Written by upsert rather than insert, because a signature necessarily
 	// arrives AFTER the event it covers: there are no bytes to sign until the
 	// event exists. A plain insert made attaching one impossible.
-	_, err := s.db.Exec(`
+	_, err := ex.Exec(`
 		INSERT INTO kel (aid, seq_num, event_type, event_json, public_key,
 		                 next_key_digest, timestamp, cesr_signature, raw_bytes_b64)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -783,26 +794,32 @@ func (s *SQLiteStore) GetCredentials() ([]CredentialRecord, error) {
 	return s.GetCredentialsFiltered("", "")
 }
 
-// SaveRegistry persists a credential registry (TEL) record.
+// SaveRegistry persists a credential registry (TEL) record. The published
+// inception bytes, once kept, are never overwritten with nothing.
 func (s *SQLiteStore) SaveRegistry(r CredentialRegistry) error {
-	_, err := s.db.Exec(`
-		INSERT INTO credential_registries (registry_said, issuer_aid, vcp_json, created_at)
-		VALUES (?, ?, ?, ?)
-		ON CONFLICT(registry_said) DO UPDATE SET vcp_json = excluded.vcp_json`,
-		r.RegistrySAID, r.IssuerAID, r.VcpJson, r.CreatedAt)
+	return saveRegistry(s.db, r)
+}
+
+func saveRegistry(ex sqlExecer, r CredentialRegistry) error {
+	_, err := ex.Exec(`
+		INSERT INTO credential_registries (registry_said, issuer_aid, vcp_json, vcp_raw_b64, created_at)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(registry_said) DO UPDATE SET
+			vcp_json    = excluded.vcp_json,
+			vcp_raw_b64 = CASE WHEN excluded.vcp_raw_b64 = '' THEN credential_registries.vcp_raw_b64 ELSE excluded.vcp_raw_b64 END`,
+		r.RegistrySAID, r.IssuerAID, r.VcpJson, r.VcpRawB64, r.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("failed to save registry: %w", err)
 	}
 	return nil
 }
 
-// GetRegistryByIssuer returns the (single) registry for an issuer AID, or nil.
-func (s *SQLiteStore) GetRegistryByIssuer(issuerAID string) (*CredentialRegistry, error) {
+const registryCols = `registry_said, issuer_aid, vcp_json, vcp_raw_b64, created_at`
+
+func (s *SQLiteStore) getRegistryWhere(where string, arg string) (*CredentialRegistry, error) {
 	var r CredentialRegistry
-	err := s.db.QueryRow(
-		`SELECT registry_said, issuer_aid, vcp_json, created_at FROM credential_registries WHERE issuer_aid = ? LIMIT 1`,
-		issuerAID,
-	).Scan(&r.RegistrySAID, &r.IssuerAID, &r.VcpJson, &r.CreatedAt)
+	err := s.db.QueryRow(`SELECT `+registryCols+` FROM credential_registries WHERE `+where+` LIMIT 1`, arg).
+		Scan(&r.RegistrySAID, &r.IssuerAID, &r.VcpJson, &r.VcpRawB64, &r.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -810,6 +827,120 @@ func (s *SQLiteStore) GetRegistryByIssuer(issuerAID string) (*CredentialRegistry
 		return nil, fmt.Errorf("failed to get registry: %w", err)
 	}
 	return &r, nil
+}
+
+// GetRegistryByIssuer returns the registry an issuer issues into, or nil. An
+// issuer whose first registry predates kept inceptions has a newer one beside
+// it, and the newer one, whose inception can be proved, is the one returned.
+func (s *SQLiteStore) GetRegistryByIssuer(issuerAID string) (*CredentialRegistry, error) {
+	return s.getRegistryWhere("issuer_aid = ? ORDER BY (vcp_raw_b64 != '') DESC, created_at DESC", issuerAID)
+}
+
+// GetRegistry returns a registry by its identifier, or nil.
+func (s *SQLiteStore) GetRegistry(registrySAID string) (*CredentialRegistry, error) {
+	return s.getRegistryWhere("registry_said = ?", registrySAID)
+}
+
+// AppendCredentialTELEvent keeps one event of a credential's transaction log.
+// The same event appended again is kept once. A different event at a place
+// already taken is refused: a credential's log does not fork, and quietly
+// keeping either copy would make the other unprovable.
+func (s *SQLiteStore) AppendCredentialTELEvent(ev CredentialTELEvent) error {
+	return s.KeepCredentialEvent(ev, nil)
+}
+
+// KeepCredentialEvent keeps a credential's transaction-log event and, when
+// given, the key-log event that anchors it, in one transaction: both are kept
+// or neither is. An anchor kept without its event would prove a revocation
+// nobody can be shown; an event kept without its anchor proves nothing.
+func (s *SQLiteStore) KeepCredentialEvent(ev CredentialTELEvent, anchor *EventRecord) error {
+	if ev.RegistrySAID == "" || ev.AcdcSAID == "" || ev.SAID == "" || ev.RawB64 == "" {
+		return fmt.Errorf("a transaction-log event needs its registry, credential, digest and bytes")
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to keep the credential's log event: %w", err)
+	}
+	defer tx.Rollback()
+	if err := appendCredentialTELEvent(tx, ev); err != nil {
+		return err
+	}
+	if anchor != nil {
+		if err := saveEvent(tx, *anchor); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to keep the credential's log event: %w", err)
+	}
+	return nil
+}
+
+// appendCredentialTELEvent claims the event's place in the log and then reads
+// back who holds it, inside the caller's transaction, so two writers cannot
+// both find the place empty.
+func appendCredentialTELEvent(ex sqlExecer, ev CredentialTELEvent) error {
+	if _, err := ex.Exec(`
+		INSERT INTO credential_tel_events (registry_said, acdc_said, seq, said, kind, raw_b64, recorded_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(registry_said, acdc_said, seq) DO NOTHING`,
+		ev.RegistrySAID, ev.AcdcSAID, ev.Seq, ev.SAID, ev.Kind, ev.RawB64, ev.RecordedAt); err != nil {
+		return fmt.Errorf("failed to keep the credential's log event: %w", err)
+	}
+	var said string
+	if err := ex.QueryRow(`SELECT said FROM credential_tel_events WHERE registry_said = ? AND acdc_said = ? AND seq = ?`,
+		ev.RegistrySAID, ev.AcdcSAID, ev.Seq).Scan(&said); err != nil {
+		return fmt.Errorf("failed to read the credential's log: %w", err)
+	}
+	if said != ev.SAID {
+		return fmt.Errorf("credential %s already has event %s at %d in its log, not %s",
+			ev.AcdcSAID, said, ev.Seq, ev.SAID)
+	}
+	return nil
+}
+
+// KeepRegistry keeps a registry and the key-log event that anchors its
+// inception in one transaction, for the same reason as KeepCredentialEvent.
+func (s *SQLiteStore) KeepRegistry(r CredentialRegistry, anchor *EventRecord) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to save registry: %w", err)
+	}
+	defer tx.Rollback()
+	if err := saveRegistry(tx, r); err != nil {
+		return err
+	}
+	if anchor != nil {
+		if err := saveEvent(tx, *anchor); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to save registry: %w", err)
+	}
+	return nil
+}
+
+// GetCredentialTEL returns a credential's transaction log in order. An empty
+// result means nothing was kept, which is not the same as "never revoked".
+func (s *SQLiteStore) GetCredentialTEL(registrySAID, acdcSAID string) ([]CredentialTELEvent, error) {
+	rows, err := s.db.Query(`
+		SELECT registry_said, acdc_said, seq, said, kind, raw_b64, recorded_at
+		FROM credential_tel_events WHERE registry_said = ? AND acdc_said = ? ORDER BY seq`,
+		registrySAID, acdcSAID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the credential's log: %w", err)
+	}
+	defer rows.Close()
+	var out []CredentialTELEvent
+	for rows.Next() {
+		var ev CredentialTELEvent
+		if err := rows.Scan(&ev.RegistrySAID, &ev.AcdcSAID, &ev.Seq, &ev.SAID, &ev.Kind, &ev.RawB64, &ev.RecordedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, ev)
+	}
+	return out, rows.Err()
 }
 
 func (s *SQLiteStore) GetCredentialsFiltered(role, status string) ([]CredentialRecord, error) {

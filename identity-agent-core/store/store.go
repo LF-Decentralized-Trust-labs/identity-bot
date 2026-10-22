@@ -252,7 +252,30 @@ type CredentialRegistry struct {
 	RegistrySAID string `json:"registry_said"`
 	IssuerAID    string `json:"issuer_aid"`
 	VcpJson      string `json:"vcp_json,omitempty"`
-	CreatedAt    string `json:"created_at"`
+	// VcpRawB64 is the registry's inception event as it was published. The
+	// parsed form in VcpJson cannot stand in for it: re-serialising an event
+	// changes its field order, so it digests to a different identifier and the
+	// registry's log chains to nothing. Empty for a registry made before the
+	// bytes were kept.
+	VcpRawB64 string `json:"vcp_raw_b64,omitempty"`
+	CreatedAt string `json:"created_at"`
+}
+
+// CredentialTELEvent is one event in a credential's transaction log, kept as
+// the bytes it was published as, so the log can be handed to a verifier after
+// a restart. The engine holds a credential's log only in memory; without this
+// a revocation made yesterday could not be proved today.
+type CredentialTELEvent struct {
+	RegistrySAID string `json:"registry_said"`
+	AcdcSAID     string `json:"acdc_said"`
+	// Seq is the event's place in the credential's log: 0 for the issuance,
+	// 1 for a revocation.
+	Seq int `json:"seq"`
+	// SAID is the event's own digest; Kind is its type ("iss" or "rev").
+	SAID       string `json:"said"`
+	Kind       string `json:"kind"`
+	RawB64     string `json:"raw_b64"`
+	RecordedAt string `json:"recorded_at"`
 }
 
 // CredentialSchemaRecord caches a fetched ACDC schema by its SAID.
@@ -540,6 +563,16 @@ type Store interface {
 	DeleteCredential(said string) error
 	SaveRegistry(r CredentialRegistry) error
 	GetRegistryByIssuer(issuerAID string) (*CredentialRegistry, error)
+	GetRegistry(registrySAID string) (*CredentialRegistry, error)
+	// A credential's transaction log, as published. Appending the same event
+	// twice keeps one copy; the log is read back in order.
+	AppendCredentialTELEvent(ev CredentialTELEvent) error
+	// KeepCredentialEvent keeps an event and the key-log event anchoring it
+	// together, or neither.
+	KeepCredentialEvent(ev CredentialTELEvent, anchor *EventRecord) error
+	// KeepRegistry keeps a registry and its inception's anchor together, or neither.
+	KeepRegistry(r CredentialRegistry, anchor *EventRecord) error
+	GetCredentialTEL(registrySAID, acdcSAID string) ([]CredentialTELEvent, error)
 	SaveCredentialSchema(record CredentialSchemaRecord) error
 	GetCredentialSchemas() ([]CredentialSchemaRecord, error)
 	GetCredentialSchema(said string) (*CredentialSchemaRecord, error)

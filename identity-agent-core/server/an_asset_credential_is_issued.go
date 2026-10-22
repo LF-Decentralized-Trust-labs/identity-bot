@@ -42,9 +42,15 @@ func (s *CoreServer) issueAssetCredential(
 	if err != nil {
 		return "", fmt.Errorf("no registry to issue in: %w", err)
 	}
+	// The issuance and its anchor are kept first, together. A credential whose
+	// issuance cannot be proved is not issued.
+	keptInside := s.engineKeepsCredentialLogs()
 	result, err := s.KeriDriver.IssueCredentialInRegistry(issuer, claims, kind.Schema.SAID, holder, nil, registrySAID)
+	if err == nil && !keptInside {
+		err = s.keepAfter(issuer, result.SequenceNumber, result.IxnRawBytesB64, result.IssRawBytesB64)
+	}
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%s was not issued: %w", kind.Schema.Name, err)
 	}
 	// Fixed-width to the nanosecond, so two credentials issued in one second
 	// still order correctly as text, which is how the newest is picked.
@@ -65,9 +71,6 @@ func (s *CoreServer) issueAssetCredential(
 		IssSAID:        result.IssSaid,
 	}); err != nil {
 		log.Printf("[asset] failed to persist %s %s: %v", kind.Schema.Name, result.AcdcSaid, err)
-	}
-	if err := s.saveOwnInteraction(issuer, result.IxnEvent, result.IxnRawBytesB64, result.SequenceNumber, ""); err != nil {
-		log.Printf("[asset] failed to persist the anchor for %s %s: %v", kind.Schema.Name, result.AcdcSaid, err)
 	}
 	return result.AcdcSaid, nil
 }

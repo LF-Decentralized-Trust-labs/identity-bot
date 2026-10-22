@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 
@@ -55,16 +56,27 @@ func (s *CoreServer) handleRevokeCredential(w http.ResponseWriter, r *http.Reque
 //
 // It does not change the stored status; the caller does, once it has decided
 // the revocation is the one it meant.
+//
+// The revocation and its anchor are kept together before this returns. If they
+// cannot be, the revocation fails and the caller leaves the credential as it
+// was: nothing is recorded as revoked that cannot be proved revoked. Two
+// revocations of one credential at once make one: the second finds the first
+// already kept and reports it.
 func (s *CoreServer) revokeIssuedCredential(rec *store.CredentialRecord) (bool, error) {
 	if rec.RegistrySAID == "" || rec.IssSAID == "" || s.KeriDriver == nil {
 		return false, nil
 	}
-	resp, err := s.KeriDriver.RevokeCredential(rec.IssuerAID, rec.SAID, rec.RegistrySAID, rec.IssSAID)
-	if err != nil {
-		return false, err
+	defer lockCredential(rec.SAID)()
+	if s.alreadyRevoked(rec.RegistrySAID, rec.SAID) {
+		return true, nil
 	}
-	if serr := s.saveOwnInteraction(rec.IssuerAID, resp.IxnEvent, resp.IxnRawBytesB64, resp.SequenceNumber, ""); serr != nil {
-		log.Printf("[credential] failed to persist revocation anchor for %s: %v", rec.SAID, serr)
+	keptInside := s.engineKeepsCredentialLogs()
+	resp, err := s.KeriDriver.RevokeCredential(rec.IssuerAID, rec.SAID, rec.RegistrySAID, rec.IssSAID)
+	if err == nil && !keptInside {
+		err = s.keepAfter(rec.IssuerAID, resp.SequenceNumber, resp.IxnRawBytesB64, resp.RevRawBytesB64)
+	}
+	if err != nil {
+		return false, fmt.Errorf("the revocation of %s was not made: %w", rec.SAID, err)
 	}
 	log.Printf("[credential] TEL-revoked %s (rev %s, registry %s)", rec.SAID, resp.RevSaid, rec.RegistrySAID)
 	return true, nil

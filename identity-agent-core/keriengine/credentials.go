@@ -53,10 +53,11 @@ func (e *Engine) FormatCredential(claims map[string]interface{}, schemaSaid, iss
 // is a registry nothing vouches for: a verifier has no way to tell it from one
 // invented after the fact to backdate an issuance.
 func (e *Engine) InceptRegistry(name string) (*drivers.DriverRegistryInceptResponse, error) {
-	id, err := e.state.get(name)
+	id, release, err := e.holdForWriting(name)
 	if err != nil {
 		return nil, err
 	}
+	defer release()
 
 	// A registry needs a nonce, or two registries founded by the same issuer
 	// would have the same identifier — and an issuance into one would read as
@@ -107,6 +108,9 @@ func (e *Engine) InceptRegistry(name string) (*drivers.DriverRegistryInceptRespo
 	if err != nil {
 		return nil, err
 	}
+	if err := e.commit(id.AID, ixnEvent.SN, ixn, vcp); err != nil {
+		return nil, err
+	}
 
 	e.state.mu.Lock()
 	if id.Registries == nil {
@@ -155,10 +159,11 @@ func (e *Engine) IssueCredentialInRegistry(name string, claims map[string]interf
 }
 
 func (e *Engine) issue(name string, claims map[string]interface{}, schemaSaid, holderAid string, edges map[string]interface{}, registrySaid string) (*drivers.DriverIssueCredentialResponse, error) {
-	id, err := e.state.get(name)
+	id, release, err := e.holdForWriting(name)
 	if err != nil {
 		return nil, err
 	}
+	defer release()
 	if schemaSaid == "" {
 		return nil, fmt.Errorf("a credential needs the identifier of the schema it satisfies")
 	}
@@ -251,9 +256,17 @@ func (e *Engine) issue(name string, claims map[string]interface{}, schemaSaid, h
 	if err != nil {
 		return nil, err
 	}
+	if registrySaid != "" {
+		if err := e.commit(id.AID, ixnEvent.SN, ixn, issRaw); err != nil {
+			return nil, err
+		}
+	}
 
 	e.state.mu.Lock()
 	if registrySaid != "" {
+		if id.Registries == nil {
+			id.Registries = map[string]*registry{}
+		}
 		reg := id.Registries[registrySaid]
 		if reg == nil {
 			reg = &registry{SAID: registrySaid, TEL: map[string][][]byte{}, IssuanceSAID: map[string]string{}}
@@ -283,10 +296,11 @@ func (e *Engine) issue(name string, claims map[string]interface{}, schemaSaid, h
 
 // RevokeCredential records that a credential is no longer valid.
 func (e *Engine) RevokeCredential(name, acdcSaid, registrySaid, issSaid string) (*drivers.DriverRevokeCredentialResponse, error) {
-	id, err := e.state.get(name)
+	id, release, err := e.holdForWriting(name)
 	if err != nil {
 		return nil, err
 	}
+	defer release()
 	if acdcSaid == "" || registrySaid == "" {
 		return nil, fmt.Errorf("revoking needs both the credential and the registry it was issued into")
 	}
@@ -346,6 +360,9 @@ func (e *Engine) RevokeCredential(name, acdcSaid, registrySaid, issSaid string) 
 	}
 	ixnEntry, err := entry(ixn)
 	if err != nil {
+		return nil, err
+	}
+	if err := e.commit(id.AID, ixnEvent.SN, ixn, rev); err != nil {
 		return nil, err
 	}
 

@@ -864,6 +864,28 @@ ALTER TABLE settings ADD COLUMN reachability_notice TEXT NOT NULL DEFAULT '';
 -- Nothing can be connected to it any more, so it is not offered.
 DELETE FROM service_providers WHERE id = 'sp-grapeid-tunnel';
 `},
+	{
+		Version:     39,
+		Description: "Keep credential transaction logs as published, so revocation can be proved after a restart",
+		SQL: `
+-- The registry's inception event as published. vcp_json holds a re-serialised
+-- copy, which digests differently and cannot be verified.
+ALTER TABLE credential_registries ADD COLUMN vcp_raw_b64 TEXT NOT NULL DEFAULT '';
+-- Each issuance and revocation, as published, in order per credential. Kept
+-- when a credential record is deleted: the log is the proof of what happened
+-- to it, and is what a verifier asks for.
+CREATE TABLE IF NOT EXISTS credential_tel_events (
+    registry_said TEXT NOT NULL,
+    acdc_said     TEXT NOT NULL,
+    seq           INTEGER NOT NULL,
+    said          TEXT NOT NULL,
+    kind          TEXT NOT NULL,
+    raw_b64       TEXT NOT NULL,
+    recorded_at   TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (registry_said, acdc_said, seq)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_credential_tel_said ON credential_tel_events(said);
+`},
 }
 
 // ApplyIdentityMigrations creates the migrations table and applies any pending migrations.

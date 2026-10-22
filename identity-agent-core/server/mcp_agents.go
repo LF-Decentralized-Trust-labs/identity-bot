@@ -14,7 +14,6 @@ import (
 
 	"identity-agent-core/asset"
 	"identity-agent-core/schemas"
-	"identity-agent-core/store"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -380,7 +379,10 @@ func (s *CoreServer) handleSetAgentCapabilities(w http.ResponseWriter, r *http.R
 // anchored in the issuer KEL) on first use and persisting it. One registry per issuer.
 func (s *CoreServer) ensureRegistry(issuerRootAID string) (string, error) {
 	if reg, err := s.DataStore.GetRegistryByIssuer(issuerRootAID); err == nil && reg != nil {
-		return reg.RegistrySAID, nil
+		if reg.VcpRawB64 != "" {
+			return reg.RegistrySAID, nil
+		}
+		noteRegistryWithoutInception(reg)
 	}
 	if s.KeriDriver == nil {
 		return "", fmt.Errorf("keri driver unavailable")
@@ -389,26 +391,18 @@ func (s *CoreServer) ensureRegistry(issuerRootAID string) (string, error) {
 	if err != nil || identity == nil {
 		return "", fmt.Errorf("no owner identity")
 	}
+	// The inception is checked before it is kept: it has to verify and be the
+	// registry it says it is. It is kept with its anchor in the issuer's key
+	// log, together or not at all, and a registry that cannot be kept is not
+	// used: nothing issued into it could be proved.
+	keptInside := s.engineKeepsCredentialLogs()
 	resp, err := s.KeriDriver.InceptRegistry(issuerRootAID)
+	if err == nil && !keptInside {
+		err = s.keepAfter(issuerRootAID, resp.SequenceNumber, resp.IxnRawBytesB64, resp.VcpJsonB64)
+	}
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("no registry was made: %w", err)
 	}
-	now := time.Now().UTC().Format(time.RFC3339)
-	vcpJSON, _ := json.Marshal(resp.VcpEvent)
-	if err := s.DataStore.SaveRegistry(store.CredentialRegistry{
-		RegistrySAID: resp.RegistrySaid,
-		IssuerAID:    issuerRootAID,
-		VcpJson:      string(vcpJSON),
-		CreatedAt:    now,
-	}); err != nil {
-		log.Printf("[mcp] failed to persist registry %s: %v", resp.RegistrySaid, err)
-	}
-	// Persist the registry-inception anchoring event to the issuer KEL so it
-	// survives reload, signed, so the registry's existence is provable.
-	if err := s.saveOwnInteraction(issuerRootAID, resp.IxnEvent, resp.IxnRawBytesB64, resp.SequenceNumber, ""); err != nil {
-		log.Printf("[mcp] failed to persist registry anchor for %s: %v", resp.RegistrySaid, err)
-	}
-	log.Printf("[mcp] incepted TEL registry %s for issuer %s", resp.RegistrySaid, issuerRootAID)
 	return resp.RegistrySaid, nil
 }
 
