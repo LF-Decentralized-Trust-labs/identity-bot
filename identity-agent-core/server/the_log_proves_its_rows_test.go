@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"identity-agent-core/keriengine"
@@ -85,5 +86,39 @@ func TestCheckingTheLogNeverMintsASigner(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(s.DataDir, "invocation_signer.json")); !os.IsNotExist(err) {
 		t.Fatalf("looking up a key created a signer: %v", err)
+	}
+}
+
+// Where the signed chain begins is kept in the signer's own file, outside the
+// database the log lives in, from the first event this agent signs.
+func TestTheChainStartIsKeptOutsideTheDatabase(t *testing.T) {
+	s := logWorld(t)
+	if s.SandboxManager.RecordGovernanceEvent(sandbox.CallerContext{CallerAID: "EAgent"}, "ai_agent.body.requested", "ok") == 0 {
+		t.Fatal("event not written")
+	}
+	rec, found, err := readInvocationSignerRecord(s.DataDir)
+	if err != nil || !found || rec.ChainStart == nil || rec.ChainStart.ID != 1 || !rec.ChainStart.Linked {
+		t.Fatalf("the chain start was not kept with the signer: %+v found=%v err=%v", rec.ChainStart, found, err)
+	}
+	if got := askChain(t, s); got["chain_start_kept"] != true || got["intact"] != true {
+		t.Fatalf("the check did not use the kept start: %v", got)
+	}
+}
+
+// A log that cannot be checked is reported as that, never as forged.
+func TestALogThatCannotBeCheckedIsNotCalledForged(t *testing.T) {
+	s := logWorld(t)
+	if s.SandboxManager.RecordGovernanceEvent(sandbox.CallerContext{CallerAID: "EAgent"}, "ai_agent.body.requested", "ok") == 0 {
+		t.Fatal("event not written")
+	}
+	// The key cannot be derived without the root seed.
+	os.RemoveAll(filepath.Join(s.DataDir, "secureenclave"))
+	req := httptest.NewRequest("GET", "/api/activity/chain", nil)
+	req.RemoteAddr = "127.0.0.1:5000"
+	rec := httptest.NewRecorder()
+	s.handleVerifyAuditChain(rec, req)
+	body := rec.Body.String()
+	if rec.Code != http.StatusServiceUnavailable || strings.Contains(body, "forged") {
+		t.Fatalf("an uncheckable log was reported as %d: %s", rec.Code, body)
 	}
 }

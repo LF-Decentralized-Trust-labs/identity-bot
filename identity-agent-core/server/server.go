@@ -423,6 +423,11 @@ func New(cfg Config) (*CoreServer, error) {
 	} else {
 		s.SandboxManager = sbxMgr
 		s.SandboxManager.SetEventSigner(&invocationSigner{s: s})
+		// A log signed before where its chain begins was kept outside the
+		// database gets that start now, once, from the first signed row.
+		if err := s.SandboxManager.EnsureChainStart(); err != nil {
+			log.Printf("[identity-agent-core] could not record where the log's signed chain begins: %v", err)
+		}
 		// The endpoint uses the structural authorizer by default (host-control never
 		// remote; a remote caller must hold the capability in its grant). An overlay
 		// may inject a richer authorizer via SetAuthorizer.

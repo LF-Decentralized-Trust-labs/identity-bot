@@ -1,6 +1,8 @@
 package server
 
 import (
+	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -246,16 +248,32 @@ func (s *CoreServer) handleVerifyAuditChain(w http.ResponseWriter, r *http.Reque
 	if st == nil {
 		return
 	}
-	brokenAt, reason, err := st.VerifyChain(s.invocationSignerKey)
+	var start *sandbox.ChainStart
+	if kept, ok, kerr := (&invocationSigner{s: s}).ChainStart(); kerr != nil {
+		jsonError(w, "The log cannot be checked right now: where its signed chain begins cannot be read: "+kerr.Error(),
+			http.StatusServiceUnavailable)
+		return
+	} else if ok {
+		start = &kept
+	}
+	faults, err := st.VerifyChain(s.invocationSignerKey, start)
+	if errors.Is(err, sandbox.ErrCannotCheck) {
+		// Not checkable is not tampered: say which, so nobody is told their log
+		// was forged because a key was locked.
+		jsonError(w, "The log cannot be checked right now: "+err.Error(), http.StatusServiceUnavailable)
+		return
+	}
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	resp := map[string]any{"intact": brokenAt == 0}
-	if brokenAt != 0 {
-		resp["broken_at"] = brokenAt
-		resp["detail"] = "The record at this id does not hold: " + reason + ". " +
-			"A record has been deleted, reordered, edited or forged since it was written."
+	resp := map[string]any{"intact": len(faults) == 0, "chain_start_kept": start != nil}
+	if len(faults) > 0 {
+		resp["broken_at"] = faults[0].ID
+		resp["faults"] = faults
+		resp["detail"] = fmt.Sprintf("%d record(s) do not hold, the first at id %d: %s. "+
+			"A record has been deleted, reordered, edited or forged since it was written.",
+			len(faults), faults[0].ID, faults[0].Reason)
 	}
 	writeJSON(w, resp)
 }
