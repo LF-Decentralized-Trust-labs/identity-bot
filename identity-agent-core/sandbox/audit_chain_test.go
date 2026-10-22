@@ -1,7 +1,11 @@
 package sandbox
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -110,24 +114,57 @@ func TestPreviewArgsHandlesNonObjects(t *testing.T) {
 
 // ── hash chain ──────────────────────────────────────────────────────────────
 
+// testSigner signs events the way recordInvocation does: the event with no
+// signer or signature, encoded, signed, base64url.
+type testSigner struct {
+	aid  string
+	priv ed25519.PrivateKey
+}
+
+func newTestSigner(t *testing.T) *testSigner {
+	t.Helper()
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &testSigner{aid: "ELogSigner", priv: priv}
+}
+
+func (ts *testSigner) keys(aid string) (ed25519.PublicKey, error) {
+	if aid != ts.aid {
+		return nil, fmt.Errorf("unknown signer %s", aid)
+	}
+	return ts.priv.Public().(ed25519.PublicKey), nil
+}
+
+func (ts *testSigner) sign(ev InvocationEvent) InvocationEvent {
+	payload, _ := json.Marshal(ev)
+	ev.SignerAID = ts.aid
+	ev.Signature = base64.RawURLEncoding.EncodeToString(ed25519.Sign(ts.priv, payload))
+	return ev
+}
+
+// appendChained writes a chained, signed event, as recordInvocation does.
+func appendChained(t *testing.T, store *SandboxStore, ts *testSigner, capability string) {
+	t.Helper()
+	prev, err := store.LastEventHash()
+	if err != nil {
+		t.Fatalf("last hash: %v", err)
+	}
+	ev := ts.sign(InvocationEvent{TS: "2026-07-31T00:00:00Z", CapabilityID: capability, ResultStatus: "ok", PrevHash: prev})
+	if _, err := store.InsertInvocationEvent(ev); err != nil {
+		t.Fatalf("insert %s: %v", capability, err)
+	}
+}
+
 func TestChainDetectsDeletionAndTampering(t *testing.T) {
 	store := newTestSandboxStore(t)
-
-	// Write three chained events the way recordInvocationDetail does.
-	var prev string
+	ts := newTestSigner(t)
 	for _, cap := range []string{"a.one", "a.two", "a.three"} {
-		ev := InvocationEvent{TS: "2026-07-31T00:00:00Z", CapabilityID: cap, ResultStatus: "ok", PrevHash: prev}
-		if _, err := store.InsertInvocationEvent(ev); err != nil {
-			t.Fatalf("insert %s: %v", cap, err)
-		}
-		var err error
-		if prev, err = store.LastEventHash(); err != nil {
-			t.Fatalf("last hash: %v", err)
-		}
+		appendChained(t, store, ts, cap)
 	}
-
-	if broken, err := store.VerifyChain(); err != nil || broken != 0 {
-		t.Fatalf("fresh chain should verify, got broken=%d err=%v", broken, err)
+	if broken, why, err := store.VerifyChain(ts.keys); err != nil || broken != 0 {
+		t.Fatalf("fresh chain should verify, got broken=%d (%s) err=%v", broken, why, err)
 	}
 
 	// Delete the middle row. Every remaining signature is still valid over its own
@@ -135,24 +172,16 @@ func TestChainDetectsDeletionAndTampering(t *testing.T) {
 	if _, err := store.db.Exec(`DELETE FROM invocation_log WHERE capability_id = 'a.two'`); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	broken, err := store.VerifyChain()
-	if err != nil {
-		t.Fatalf("verify: %v", err)
-	}
-	if broken == 0 {
-		t.Fatal("deleting a row went undetected — the chain is not doing its job")
+	if broken, _, err := store.VerifyChain(ts.keys); err != nil || broken == 0 {
+		t.Fatalf("deleting a row went undetected (err %v)", err)
 	}
 }
 
 func TestChainDetectsEditedRow(t *testing.T) {
 	store := newTestSandboxStore(t)
-	var prev string
+	ts := newTestSigner(t)
 	for _, cap := range []string{"b.one", "b.two"} {
-		ev := InvocationEvent{TS: "2026-07-31T00:00:00Z", CapabilityID: cap, ResultStatus: "ok", PrevHash: prev}
-		if _, err := store.InsertInvocationEvent(ev); err != nil {
-			t.Fatalf("insert: %v", err)
-		}
-		prev, _ = store.LastEventHash()
+		appendChained(t, store, ts, cap)
 	}
 	// Rewrite the first row's stored record — e.g. changing a denial into a success.
 	var stored string
@@ -168,32 +197,115 @@ func TestChainDetectsEditedRow(t *testing.T) {
 	if _, err := store.db.Exec(`UPDATE invocation_log SET event_json = ? WHERE id = (SELECT MIN(id) FROM invocation_log)`, string(edited)); err != nil {
 		t.Fatalf("update: %v", err)
 	}
-
-	broken, err := store.VerifyChain()
-	if err != nil {
-		t.Fatalf("verify: %v", err)
+	if broken, _, err := store.VerifyChain(ts.keys); err != nil || broken == 0 {
+		t.Fatalf("editing a stored record went undetected (err %v)", err)
 	}
-	if broken == 0 {
-		t.Fatal("editing a stored record went undetected")
+}
+
+// Somebody who can write to the database rewrites a row AND every link after
+// it, so the chain is whole again. Only the signature can tell.
+func TestARewrittenChainFailsOnItsSignature(t *testing.T) {
+	store := newTestSandboxStore(t)
+	ts := newTestSigner(t)
+	for _, cap := range []string{"d.one", "d.two", "d.three"} {
+		appendChained(t, store, ts, cap)
+	}
+	rows, err := store.db.Query(`SELECT id, event_json FROM invocation_log ORDER BY id ASC`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type row struct {
+		id int64
+		ev InvocationEvent
+	}
+	var all []row
+	for rows.Next() {
+		var r row
+		var stored string
+		rows.Scan(&r.id, &stored)
+		json.Unmarshal([]byte(stored), &r.ev)
+		all = append(all, r)
+	}
+	rows.Close()
+	// Turn the first denial-free record into something else, keep its old
+	// signature, and re-link everything after it.
+	prev := ""
+	for i := range all {
+		if i == 0 {
+			all[i].ev.ResultStatus = "denied"
+		}
+		all[i].ev.PrevHash = prev
+		b, _ := json.Marshal(all[i].ev)
+		if _, err := store.db.Exec(`UPDATE invocation_log SET event_json = ? WHERE id = ?`, string(b), all[i].id); err != nil {
+			t.Fatal(err)
+		}
+		prev = hashArgs(b)
+	}
+	broken, why, err := store.VerifyChain(ts.keys)
+	if err != nil || broken != all[0].id {
+		t.Fatalf("a re-linked rewrite was not caught at its first row: broken=%d (%s) err=%v", broken, why, err)
+	}
+}
+
+// A row that drops its signature, or its link, after the chain has begun is
+// how a rewrite would try to look like an old row.
+func TestARowCannotLeaveTheChainOnceItHasBegun(t *testing.T) {
+	for name, strip := range map[string]func(*InvocationEvent){
+		"signature": func(ev *InvocationEvent) { ev.Signature, ev.SignerAID = "", "" },
+		"link":      func(ev *InvocationEvent) { ev.PrevHash = "" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			store := newTestSandboxStore(t)
+			ts := newTestSigner(t)
+			appendChained(t, store, ts, "e.one")
+			prev, _ := store.LastEventHash()
+			// Signed after stripping, by the log's own key, so only the missing
+			// part can fail it.
+			ev := InvocationEvent{TS: "2026-07-31T00:00:00Z", CapabilityID: "e.two", ResultStatus: "ok", PrevHash: prev}
+			strip(&ev)
+			if name == "link" {
+				ev = ts.sign(ev)
+			}
+			if _, err := store.InsertInvocationEvent(ev); err != nil {
+				t.Fatal(err)
+			}
+			if broken, _, err := store.VerifyChain(ts.keys); err != nil || broken == 0 {
+				t.Fatalf("a chained log accepted a row without its %s (err %v)", name, err)
+			}
+		})
+	}
+}
+
+// A row signed by a key that is not the log's signer fails.
+func TestARowSignedByAnotherKeyFails(t *testing.T) {
+	store := newTestSandboxStore(t)
+	ts := newTestSigner(t)
+	appendChained(t, store, ts, "f.one")
+	impostor := newTestSigner(t) // same AID, different key
+	prev, _ := store.LastEventHash()
+	ev := impostor.sign(InvocationEvent{TS: "2026-07-31T00:00:00Z", CapabilityID: "f.two", ResultStatus: "ok", PrevHash: prev})
+	if _, err := store.InsertInvocationEvent(ev); err != nil {
+		t.Fatal(err)
+	}
+	if broken, _, err := store.VerifyChain(ts.keys); err != nil || broken == 0 {
+		t.Fatalf("a row signed by another key verified (err %v)", err)
 	}
 }
 
 func TestChainToleratesPreChainRows(t *testing.T) {
-	// Rows written before the chain existed carry no PrevHash. Reporting those as
-	// tampering would make the check fire on every real log and be ignored.
+	// Rows written before the chain existed carry no PrevHash and no signature.
+	// Reporting those as tampering would make the check fire on every real log
+	// and be ignored.
 	store := newTestSandboxStore(t)
 	for _, cap := range []string{"c.old1", "c.old2"} {
 		if _, err := store.InsertInvocationEvent(InvocationEvent{TS: "2026-01-01T00:00:00Z", CapabilityID: cap, ResultStatus: "ok"}); err != nil {
 			t.Fatalf("insert: %v", err)
 		}
 	}
-	// Then a chained row on top.
-	prev, _ := store.LastEventHash()
-	if _, err := store.InsertInvocationEvent(InvocationEvent{TS: "2026-07-31T00:00:00Z", CapabilityID: "c.new", ResultStatus: "ok", PrevHash: prev}); err != nil {
-		t.Fatalf("insert: %v", err)
-	}
-	if broken, err := store.VerifyChain(); err != nil || broken != 0 {
-		t.Fatalf("pre-chain rows must not read as tampering, got broken=%d err=%v", broken, err)
+	ts := newTestSigner(t)
+	appendChained(t, store, ts, "c.new")
+	if broken, why, err := store.VerifyChain(ts.keys); err != nil || broken != 0 {
+		t.Fatalf("pre-chain rows must not read as tampering, got broken=%d (%s) err=%v", broken, why, err)
 	}
 }
 

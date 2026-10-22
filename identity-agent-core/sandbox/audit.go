@@ -1,7 +1,9 @@
 package sandbox
 
 import (
+	"crypto/ed25519"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -157,6 +159,11 @@ func (m *Manager) getEventSigner() EventSigner {
 }
 
 // hashArgs content-addresses the caller's arguments for the audit record.
+// HashRecord is the link one event's PrevHash names: the hash of the record
+// before it, exactly as it was stored. Anything checking the log elsewhere
+// computes links with this.
+func HashRecord(stored []byte) string { return hashArgs(stored) }
+
 func hashArgs(args []byte) string {
 	if len(args) == 0 {
 		return ""
@@ -365,40 +372,90 @@ func (s *SandboxStore) LastEventHash() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return hashArgs([]byte(stored)), nil
+	return HashRecord([]byte(stored)), nil
 }
 
-// VerifyChain walks the log oldest-first and reports the id of the first event whose
-// PrevHash does not match its predecessor's stored record. Returns 0 when the chain is
-// intact. A deleted or reordered row shows up here; nothing else in the system notices.
-func (s *SandboxStore) VerifyChain() (brokenAt int64, err error) {
+// EventKeys returns the public key an event signer's identity signs with, or an
+// error when the identity is not one this log knows.
+type EventKeys func(signerAID string) (ed25519.PublicKey, error)
+
+// VerifyChain walks the log oldest-first and reports the id of the first event
+// that does not hold, with why. Returns 0 when the log is intact.
+//
+// Two things are checked, because each catches what the other cannot. The link:
+// each event names the hash of the stored record before it, so a deleted,
+// reordered or edited row breaks the next row's link. The signature: each event
+// is signed by the log's signer, so a row rewritten together with every link
+// after it, which keeps the chain whole, still fails. Checking only the links
+// left that rewrite undetectable to anybody who could write to the database.
+//
+// Rows written before the chain existed carry no link and no signature, and
+// were never claimed to be chained or signed, so the leading run of them is
+// skipped. Once one row
+// carries a link, every later row must carry one and a signature: a row that
+// drops its link or its signature is how a rewrite would try to hide.
+func (s *SandboxStore) VerifyChain(keys EventKeys) (brokenAt int64, reason string, err error) {
 	rows, err := s.db.Query(`SELECT id, event_json FROM invocation_log ORDER BY id ASC`)
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	defer rows.Close()
 	var prevHash string
-	first := true
+	chained := false
 	for rows.Next() {
 		var id int64
 		var stored string
 		if err := rows.Scan(&id, &stored); err != nil {
-			return 0, err
+			return 0, "", err
 		}
 		var ev InvocationEvent
 		if err := json.Unmarshal([]byte(stored), &ev); err != nil {
-			return id, nil // an unreadable record is a broken record
+			return id, "the record cannot be read", nil
 		}
-		// Rows written before the chain existed carry no PrevHash. Skip them rather
-		// than reporting a break: they were never claimed to be chained, and treating
-		// a pre-chain row as tampering would make the check useless on any real log.
-		if !first && ev.PrevHash != "" && ev.PrevHash != prevHash {
-			return id, nil
+		// The first chained row links to nothing, so a link alone cannot mark
+		// where the chain begins; a signature does. Rows from before the chain
+		// carry neither.
+		if ev.PrevHash != "" || ev.Signature != "" {
+			chained = true
 		}
-		prevHash = hashArgs([]byte(stored))
-		first = false
+		if chained {
+			if ev.PrevHash != prevHash {
+				return id, "the record does not follow from the one before it", nil
+			}
+			if why := verifyEventSignature(ev, keys); why != "" {
+				return id, why, nil
+			}
+		}
+		prevHash = HashRecord([]byte(stored))
 	}
-	return 0, rows.Err()
+	return 0, "", rows.Err()
+}
+
+// verifyEventSignature checks an event's signature over the same bytes the
+// signer signed: the event with its signer and signature left empty, encoded
+// as recordInvocation encodes it. Returns why it fails, or "".
+func verifyEventSignature(ev InvocationEvent, keys EventKeys) string {
+	if ev.Signature == "" || ev.SignerAID == "" {
+		return "the record is not signed"
+	}
+	if keys == nil {
+		return "no signer keys were given to check the record's signature"
+	}
+	pub, err := keys(ev.SignerAID)
+	if err != nil {
+		return fmt.Sprintf("the record's signer %s cannot be checked: %v", ev.SignerAID, err)
+	}
+	sig, err := base64.RawURLEncoding.DecodeString(ev.Signature)
+	if err != nil {
+		return "the record's signature is not readable"
+	}
+	signed := ev
+	signed.SignerAID, signed.Signature = "", ""
+	payload, err := json.Marshal(signed)
+	if err != nil || !ed25519.Verify(pub, payload, sig) {
+		return "the record's signature does not verify"
+	}
+	return ""
 }
 
 // InvocationEventFilter narrows QueryInvocationEvents; zero values mean "any".

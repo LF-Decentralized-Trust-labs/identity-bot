@@ -246,7 +246,7 @@ func (s *CoreServer) handleVerifyAuditChain(w http.ResponseWriter, r *http.Reque
 	if st == nil {
 		return
 	}
-	brokenAt, err := st.VerifyChain()
+	brokenAt, reason, err := st.VerifyChain(s.invocationSignerKey)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -254,8 +254,8 @@ func (s *CoreServer) handleVerifyAuditChain(w http.ResponseWriter, r *http.Reque
 	resp := map[string]any{"intact": brokenAt == 0}
 	if brokenAt != 0 {
 		resp["broken_at"] = brokenAt
-		resp["detail"] = "The record at this id does not follow from the one before it. " +
-			"A record has been deleted, reordered or edited since it was written."
+		resp["detail"] = "The record at this id does not hold: " + reason + ". " +
+			"A record has been deleted, reordered, edited or forged since it was written."
 	}
 	writeJSON(w, resp)
 }

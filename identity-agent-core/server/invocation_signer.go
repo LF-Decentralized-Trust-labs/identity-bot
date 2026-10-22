@@ -101,3 +101,27 @@ func (sg *invocationSigner) SignEvent(payload []byte) (string, string, error) {
 	sig := ed25519.Sign(sg.key, payload)
 	return sg.aid, base64.RawURLEncoding.EncodeToString(sig), nil
 }
+
+// invocationSignerKey returns the public key of this agent's log signer when aid
+// is that signer, for checking the log's signatures. It only reads: checking a
+// log must never be what mints a signer, or a log with no signer would come back
+// signed by one created to check it.
+func (s *CoreServer) invocationSignerKey(aid string) (ed25519.PublicKey, error) {
+	var rec invocationSignerRecord
+	data, err := os.ReadFile(filepath.Join(s.DataDir, "invocation_signer.json"))
+	if err != nil || json.Unmarshal(data, &rec) != nil || rec.AID == "" {
+		return nil, fmt.Errorf("this agent has no log signer on record")
+	}
+	if rec.AID != aid {
+		return nil, fmt.Errorf("not this agent's log signer (%s)", rec.AID)
+	}
+	rootSeed, err := secureenclave.LoadRootSeed(s.DataDir)
+	if err != nil {
+		return nil, fmt.Errorf("root seed unavailable: %w", err)
+	}
+	seed, err := backup.DerivePairwiseSeed(rootSeed, rec.Index, 0)
+	if err != nil {
+		return nil, err
+	}
+	return ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey), nil
+}
