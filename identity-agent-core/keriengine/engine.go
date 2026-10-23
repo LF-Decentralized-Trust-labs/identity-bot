@@ -69,16 +69,15 @@ func (e *Engine) signed(id *identity, raw []byte) (string, error) {
 	e.state.mu.RLock()
 	key := id.PublicKey
 	e.state.mu.RUnlock()
+	if key == "" {
+		return "", verifiedBy(id.AID, key, raw, "")
+	}
 	sig, err := f(id.AID, key, raw)
 	if err != nil {
 		return "", fmt.Errorf("the event was not signed by %s, so it is not appended: %w", id.AID, err)
 	}
-	sigRaw, err := keri.MatterRaw(keri.CodeEd25519Sig, sig, 64)
-	if err != nil {
-		return "", fmt.Errorf("the signature over an event of %s is unreadable, so it is not appended: %w", id.AID, err)
-	}
-	if err := keri.VerifySignature(key, raw, sigRaw); err != nil {
-		return "", fmt.Errorf("an event of %s not signed by its current key is not appended: %w", id.AID, err)
+	if err := verifiedBy(id.AID, key, raw, sig); err != nil {
+		return "", err
 	}
 	return sig, nil
 }
@@ -127,18 +126,75 @@ func (e *Engine) SetTELCommit(f func(drivers.TELCommit) error) {
 
 // commit offers a registry event and its anchor for keeping. With nothing
 // installed there is nothing to offer them to.
-func (e *Engine) commit(id *identity, sn uint64, kel, tel []byte) error {
+func (e *Engine) commit(id *identity, sn uint64, kel, tel []byte) (string, error) {
 	sig, err := e.signed(id, kel)
 	if err != nil {
-		return err
+		return "", err
 	}
 	e.commitMu.Lock()
 	f := e.telCommit
 	e.commitMu.Unlock()
 	if f == nil {
-		return nil
+		return sig, nil
 	}
-	return f(drivers.TELCommit{AID: id.AID, SN: int(sn), KELRaw: kel, TELRaw: tel, Signature: sig})
+	return sig, f(drivers.TELCommit{AID: id.AID, SN: int(sn), KELRaw: kel, TELRaw: tel, Signature: sig})
+}
+
+// extend appends raw to id's key log: the one place an event other than a
+// rotation joins a key log, and it does so only with a signature by id's
+// current key over exactly raw, checked here whatever the caller checked.
+// also runs, under the same lock, for what else the event changes.
+func (e *Engine) extend(id *identity, raw []byte, sig string, also func()) error {
+	e.state.mu.RLock()
+	key := id.PublicKey
+	e.state.mu.RUnlock()
+	if err := verifiedBy(id.AID, key, raw, sig); err != nil {
+		return err
+	}
+	return e.appendEvent(id, raw, also)
+}
+
+// extendByRotation appends a rotation to id's key log. A rotation is signed
+// by its new keys, which the callers of this engine do not yet hand it, so
+// it is the one event appended without a signature checked here.
+func (e *Engine) extendByRotation(id *identity, raw []byte, also func()) error {
+	return e.appendEvent(id, raw, also)
+}
+
+func (e *Engine) appendEvent(id *identity, raw []byte, also func()) error {
+	ev, err := keri.ParseEvent(raw)
+	if err != nil {
+		return err
+	}
+	next, err := entry(raw)
+	if err != nil {
+		return err
+	}
+	e.state.mu.Lock()
+	defer e.state.mu.Unlock()
+	if also != nil {
+		also()
+	}
+	id.SN = int(ev.SN)
+	id.LastSAID = ev.SAID
+	id.KEL = append(id.KEL, next)
+	return nil
+}
+
+// verifiedBy checks sig is aid's current key's signature over raw.
+func verifiedBy(aid, key string, raw []byte, sig string) error {
+	if key == "" {
+		return fmt.Errorf("the key in force for %s is not known here (its log was restored without the "+
+			"bytes it was published as, and no key was given with it), so nothing is appended to it", aid)
+	}
+	sigRaw, err := keri.MatterRaw(keri.CodeEd25519Sig, sig, 64)
+	if err != nil {
+		return fmt.Errorf("the signature over an event of %s is unreadable, so it is not appended: %w", aid, err)
+	}
+	if err := keri.VerifySignature(key, raw, sigRaw); err != nil {
+		return fmt.Errorf("an event of %s not signed by its current key is not appended: %w", aid, err)
+	}
+	return nil
 }
 
 // holdForWriting returns the identity named and holds it against every other
@@ -441,10 +497,6 @@ func (e *Engine) CreateDelegatedInceptionKept(publicKey, nextPublicKey, name, de
 		return nil, err
 	}
 
-	ixnEntry, err := entry(ixn)
-	if err != nil {
-		return nil, err
-	}
 	approvalSig, err := e.signed(delegator, ixn)
 	if err != nil {
 		return nil, err
@@ -467,11 +519,9 @@ func (e *Engine) CreateDelegatedInceptionKept(publicKey, nextPublicKey, name, de
 		return nil, err
 	}
 	// The delegator's log only advances once its approval is recorded.
-	e.state.mu.Lock()
-	delegator.SN = int(ixnEvent.SN)
-	delegator.LastSAID = ixnEvent.SAID
-	delegator.KEL = append(delegator.KEL, ixnEntry)
-	e.state.mu.Unlock()
+	if err := e.extend(delegator, ixn, approvalSig, nil); err != nil {
+		return nil, err
+	}
 
 	return &drivers.DriverDelegatedInceptionResponse{
 		AID:          dipEvent.Identifier,
@@ -723,22 +773,17 @@ func (e *Engine) Rotate(req drivers.RotationRequest) (*drivers.DriverRotationRes
 		return nil, err
 	}
 
-	next, err := entry(raw)
-	if err != nil {
+	if err := e.extendByRotation(id, raw, func() {
+		id.PublicKey = newPub
+		id.NextKeyDigest = newNextDigest
+		// The witness set now in force, read back off the event rather than
+		// recomputed here. The event is what everyone else will read, so
+		// anything this engine believes that the event does not say is wrong.
+		id.Witnesses = witnessesAfter(id.Witnesses, ev)
+		id.Toad = witnessThreshold(ev)
+	}); err != nil {
 		return nil, err
 	}
-	e.state.mu.Lock()
-	id.PublicKey = newPub
-	id.NextKeyDigest = newNextDigest
-	id.SN = int(ev.SN)
-	id.LastSAID = ev.SAID
-	id.KEL = append(id.KEL, next)
-	// The witness set now in force, read back off the event rather than
-	// recomputed here. The event is what everyone else will read, so anything
-	// this engine believes that the event does not say is simply wrong.
-	id.Witnesses = witnessesAfter(id.Witnesses, ev)
-	id.Toad = witnessThreshold(ev)
-	e.state.mu.Unlock()
 
 	return &drivers.DriverRotationResponse{
 		AID:              id.AID,
@@ -804,6 +849,20 @@ func (e *Engine) RotateToMultisig(name string, keys, nextKeyDigests []string, is
 	if err != nil {
 		return nil, fmt.Errorf("building the multisig rotation: %w", err)
 	}
+	// The keys must carry the one the previous event committed to, as a
+	// single-key rotation's must; the keys of owners joining ride along.
+	e.state.mu.RLock()
+	committed := id.NextKeyDigest
+	e.state.mu.RUnlock()
+	met := false
+	for _, k := range normalised {
+		if d, err := keri.NextDigest(k); err == nil && d == committed {
+			met = true
+		}
+	}
+	if !met {
+		return nil, fmt.Errorf("none of the multisig rotation's keys is the one the identity committed to (%s)", committed)
+	}
 	ev, err := keri.ParseEvent(raw)
 	if err != nil {
 		return nil, err
@@ -813,17 +872,12 @@ func (e *Engine) RotateToMultisig(name string, keys, nextKeyDigests []string, is
 		return nil, err
 	}
 
-	next, err := entry(raw)
-	if err != nil {
+	if err := e.extendByRotation(id, raw, func() {
+		id.PublicKey = normalised[0]
+		id.NextKeyDigest = nextKeyDigests[0]
+	}); err != nil {
 		return nil, err
 	}
-	e.state.mu.Lock()
-	id.PublicKey = normalised[0]
-	id.NextKeyDigest = nextKeyDigests[0]
-	id.SN = int(ev.SN)
-	id.LastSAID = ev.SAID
-	id.KEL = append(id.KEL, next)
-	e.state.mu.Unlock()
 
 	return &drivers.DriverRotationResponse{
 		AID:              id.AID,
@@ -879,10 +933,6 @@ func (e *Engine) InteractKept(name string, data []interface{}, keep func(drivers
 		return nil, err
 	}
 
-	next, err := entry(raw)
-	if err != nil {
-		return nil, err
-	}
 	sig, err := e.signed(id, raw)
 	if err != nil {
 		return nil, err
@@ -892,11 +942,9 @@ func (e *Engine) InteractKept(name string, data []interface{}, keep func(drivers
 			return nil, fmt.Errorf("the interaction was not kept, so it was not made: %w", err)
 		}
 	}
-	e.state.mu.Lock()
-	id.SN = int(ev.SN)
-	id.LastSAID = ev.SAID
-	id.KEL = append(id.KEL, next)
-	e.state.mu.Unlock()
+	if err := e.extend(id, raw, sig, nil); err != nil {
+		return nil, err
+	}
 
 	return &drivers.DriverInteractResponse{
 		AID:            id.AID,
@@ -1072,8 +1120,11 @@ func (e *Engine) ReloadIdentity(req *drivers.DriverReloadIdentityRequest) (*driv
 			"without it the next event cannot name its predecessor", req.AID)
 	}
 
+	// Taken from the log only where the whole log was checked; a log handed
+	// over without the bytes it was published as says nothing reliable about
+	// its keys, and the key the caller holds for it is used instead.
 	pub := req.PublicKey
-	if keyInForce != "" {
+	if complete && keyInForce != "" {
 		pub = keyInForce
 	}
 	if pub != "" {

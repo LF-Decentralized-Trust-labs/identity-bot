@@ -177,27 +177,22 @@ func (e *Engine) appendPreparedRegistry(id *identity, p *drivers.PreparedRegistr
 	if err != nil {
 		return nil, err
 	}
-	ixnEntry, err := entry(ixn)
+	sig, err := e.commit(id, ixnEvent.SN, ixn, vcp)
 	if err != nil {
 		return nil, err
 	}
-	if err := e.commit(id, ixnEvent.SN, ixn, vcp); err != nil {
+	if err := e.extend(id, ixn, sig, func() {
+		if id.Registries == nil {
+			id.Registries = map[string]*registry{}
+		}
+		id.Registries[registrySAID] = &registry{
+			SAID:         registrySAID,
+			TEL:          map[string][][]byte{},
+			IssuanceSAID: map[string]string{},
+		}
+	}); err != nil {
 		return nil, err
 	}
-
-	e.state.mu.Lock()
-	if id.Registries == nil {
-		id.Registries = map[string]*registry{}
-	}
-	id.Registries[registrySAID] = &registry{
-		SAID:         registrySAID,
-		TEL:          map[string][][]byte{},
-		IssuanceSAID: map[string]string{},
-	}
-	id.SN = int(ixnEvent.SN)
-	id.LastSAID = ixnEvent.SAID
-	id.KEL = append(id.KEL, ixnEntry)
-	e.state.mu.Unlock()
 
 	return &drivers.DriverRegistryInceptResponse{
 		RegistrySaid:   registrySAID,
@@ -378,14 +373,17 @@ func (e *Engine) appendPrepared(id *identity, p *drivers.PreparedIssuance) (*dri
 	if err != nil || string(want) != string(p.IxnRaw) {
 		return nil, fmt.Errorf("the prepared interaction does not anchor the prepared issuance")
 	}
+	var sig string
 	if p.Registry != "" {
 		issEvent, err := keri.VerifyTELEvent(p.IssRaw)
 		if err != nil || issEvent.SAID != p.IssSAID || issEvent.Subject != p.AcdcSAID {
 			return nil, fmt.Errorf("the prepared issuance event is not this credential's")
 		}
-		if err := e.commit(id, ixnEvent.SN, p.IxnRaw, p.IssRaw); err != nil {
+		if sig, err = e.commit(id, ixnEvent.SN, p.IxnRaw, p.IssRaw); err != nil {
 			return nil, err
 		}
+	} else if sig, err = e.signed(id, p.IxnRaw); err != nil {
+		return nil, err
 	}
 	acdcBody, err := eventMap(p.AcdcRaw)
 	if err != nil {
@@ -395,12 +393,10 @@ func (e *Engine) appendPrepared(id *identity, p *drivers.PreparedIssuance) (*dri
 	if err != nil {
 		return nil, err
 	}
-	ixnEntry, err := entry(p.IxnRaw)
-	if err != nil {
-		return nil, err
-	}
-	e.state.mu.Lock()
-	if p.Registry != "" {
+	if err := e.extend(id, p.IxnRaw, sig, func() {
+		if p.Registry == "" {
+			return
+		}
 		if id.Registries == nil {
 			id.Registries = map[string]*registry{}
 		}
@@ -411,11 +407,9 @@ func (e *Engine) appendPrepared(id *identity, p *drivers.PreparedIssuance) (*dri
 		}
 		reg.TEL[p.AcdcSAID] = append(reg.TEL[p.AcdcSAID], p.IssRaw)
 		reg.IssuanceSAID[p.AcdcSAID] = p.IssSAID
+	}); err != nil {
+		return nil, err
 	}
-	id.SN = int(ixnEvent.SN)
-	id.LastSAID = ixnEvent.SAID
-	id.KEL = append(id.KEL, ixnEntry)
-	e.state.mu.Unlock()
 
 	return &drivers.DriverIssueCredentialResponse{
 		AID:            id.AID,
@@ -564,21 +558,17 @@ func (e *Engine) appendPreparedRevocation(id *identity, p *drivers.PreparedRevoc
 	if err != nil {
 		return nil, err
 	}
-	ixnEntry, err := entry(p.IxnRaw)
+	sig, err := e.commit(id, ixnEvent.SN, p.IxnRaw, p.RevRaw)
 	if err != nil {
 		return nil, err
 	}
-	if err := e.commit(id, ixnEvent.SN, p.IxnRaw, p.RevRaw); err != nil {
+	if err := e.extend(id, p.IxnRaw, sig, func() {
+		if reg := id.Registries[p.Registry]; reg != nil {
+			reg.TEL[p.AcdcSAID] = append(reg.TEL[p.AcdcSAID], p.RevRaw)
+		}
+	}); err != nil {
 		return nil, err
 	}
-	e.state.mu.Lock()
-	if reg := id.Registries[p.Registry]; reg != nil {
-		reg.TEL[p.AcdcSAID] = append(reg.TEL[p.AcdcSAID], p.RevRaw)
-	}
-	id.SN = int(ixnEvent.SN)
-	id.LastSAID = ixnEvent.SAID
-	id.KEL = append(id.KEL, ixnEntry)
-	e.state.mu.Unlock()
 	return &drivers.DriverRevokeCredentialResponse{
 		RevSaid:        p.RevSAID,
 		RevEvent:       revBody,
