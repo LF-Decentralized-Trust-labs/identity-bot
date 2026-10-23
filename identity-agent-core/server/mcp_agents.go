@@ -106,7 +106,7 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 		return
 	}
 	agent, err := s.assetHandler.ProvisionAgentAsset(req.Name, req.Capabilities, cfg, req.ValidUntil, req.ResourceConstraints)
-	if errors.Is(err, asset.ErrAgentNameTaken) {
+	if errors.Is(err, asset.ErrAgentNameTaken) || errors.Is(err, asset.ErrKeyElsewhere) {
 		jsonError(w, err.Error(), http.StatusConflict)
 		return
 	}

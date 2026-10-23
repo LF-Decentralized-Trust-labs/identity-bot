@@ -296,6 +296,9 @@ func (s *CoreServer) applyGrantScopes(entry mcpToken, cc *sandbox.CallerContext)
 		// The owner revoked (or expired) the grant — hard deny.
 		log.Printf("[mcp] agent %s grant %s status=%q — denying", entry.AgentAID, entry.GrantSAID, rec.Status)
 		cc.Scopes = nil
+		if grantLapsed(*rec) {
+			cc.NoScopesBecause = "this AI agent's grant has expired"
+		}
 		return
 	}
 	if !s.grantCredentialValid(rec, entry) {
@@ -306,6 +309,9 @@ func (s *CoreServer) applyGrantScopes(entry mcpToken, cc *sandbox.CallerContext)
 		// anchor is persisted at provisioning); a failure here is a real problem
 		// that must surface as a denial, not a silent fallback.
 		cc.Scopes = nil
+		if grantLapsed(*rec) {
+			cc.NoScopesBecause = "this AI agent's grant has expired"
+		}
 		return
 	}
 	// Credential-proven: derive the ceiling and any resource constraints from the
@@ -520,4 +526,32 @@ func capabilitiesFromACDC(acdcJsonB64 string) []string {
 		}
 	}
 	return out
+}
+
+// grantLapsed reports whether a grant ended by lapsing rather than being
+// withdrawn: marked expired, or past the end it states.
+func grantLapsed(rec store.CredentialRecord) bool {
+	if rec.Status == "expired" {
+		return true
+	}
+	if rec.ExpiryDate == "" {
+		return false
+	}
+	end, err := time.Parse(time.RFC3339, rec.ExpiryDate)
+	return err == nil && !end.After(time.Now())
+}
+
+// agentGrantLapsed reports whether an AI agent's newest grant has lapsed.
+func (s *CoreServer) agentGrantLapsed(aid string) bool {
+	held := s.grantsHeldBy(aid, false)
+	if len(held) == 0 {
+		return false
+	}
+	newest := held[0]
+	for _, c := range held[1:] {
+		if issuedAt(c).After(issuedAt(newest)) {
+			newest = c
+		}
+	}
+	return grantLapsed(newest)
 }

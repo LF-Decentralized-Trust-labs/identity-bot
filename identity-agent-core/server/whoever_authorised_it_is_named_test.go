@@ -409,26 +409,6 @@ func TestAMachineNeverHasTwoGrantsInForce(t *testing.T) {
 	}
 }
 
-// Where the identity's key is held elsewhere, a machine is recorded with its
-// grant pending on that device, and nothing is written into the key log.
-func TestAMachineIsGrantedWithItsCredentialPendingWhereTheKeyIsElsewhere(t *testing.T) {
-	s, _ := grantWorld(t)
-	owner, _ := s.DataStore.GetIdentity()
-	before, _ := s.DataStore.GetEvents(owner.AID)
-	elsewhere, _ := keri.GenerateSigner(true)
-	owner.PublicKey, _ = elsewhere.PublicKey()
-	s.DataStore.SaveIdentity(*owner)
-	g, err := s.grantController(aGrant(GradeEnrolled), time.Now().UTC(), authority{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !g.CredentialPending || g.CredentialSAID != "" {
-		t.Fatalf("the grant is not marked pending: %+v", g)
-	}
-	if after, _ := s.DataStore.GetEvents(owner.AID); len(after) != len(before) {
-		t.Fatal("an event was written into a key log whose key is elsewhere")
-	}
-}
 
 // A machine whose grant has been withdrawn authorises nothing, and nor does
 // one paired before machines were given grants, which is not given one by
@@ -688,11 +668,13 @@ func TestAGrantIsNotIssuedUnsignedWhereTheKeyIsElsewhere(t *testing.T) {
 		t.Fatal(err)
 	}
 	before, _ := s.DataStore.GetEvents(owner.AID)
-	if _, err := s.issueCapabilityGrant(agent, authority{About: agent.ID}); !errors.Is(err, errKeyElsewhere) {
+	if _, err := s.issueCapabilityGrant(agent, authority{About: agent.ID}); !errors.Is(err, errKeyElsewhere) && !errors.Is(err, errNeedsSignedRequest) {
 		t.Fatalf("issuing where the key is elsewhere: %v", err)
 	}
-	if g, err := s.grantController(aGrant(GradeEnrolled), time.Now().UTC(), authority{}); err != nil || !g.CredentialPending {
-		t.Fatalf("a machine granted where the key is elsewhere: %+v %v", g, err)
+	// Asked for without a signed request, there is nothing to show the
+	// device that holds the key as the authority for it: refused.
+	if _, err := s.grantController(aGrant(GradeEnrolled), time.Now().UTC(), authority{}); err == nil {
+		t.Fatal("a machine was granted, where the key is elsewhere, with no request behind it")
 	}
 	after, _ := s.DataStore.GetEvents(owner.AID)
 	if len(after) != len(before) {
@@ -888,23 +870,6 @@ func TestTheOwnerApprovesAnEarlierAIAgent(t *testing.T) {
 	}
 }
 
-// Approved where the identity's key is another device's, a machine waits for
-// that device, as one paired there now does, and says so.
-func TestAnApprovalWhereTheKeyIsElsewhereWaitsForThatDevice(t *testing.T) {
-	s, _ := grantWorld(t)
-	owner, _ := s.DataStore.GetIdentity()
-	elsewhere, _ := keri.GenerateSigner(true)
-	owner.PublicKey, _ = elsewhere.PublicKey()
-	s.DataStore.SaveIdentity(*owner)
-	g := aGrant(GradeEnrolled)
-	s.controllers().Grant(g, time.Now().UTC())
-	if _, err := s.grantController(g, time.Now().UTC(), authority{}); err != nil {
-		t.Fatal(err)
-	}
-	if m, _ := awaiting(t, s); m[g.ControllerAID] != "the device that holds the identity's key" {
-		t.Fatalf("the approved machine does not say what it waits for: %v", m)
-	}
-}
 
 // The list of what awaits approval is served where the apps ask for it.
 func TestTheApprovalListIsServed(t *testing.T) {
@@ -1011,5 +976,47 @@ func TestACredentialThatFailsItsCheckWritesNothing(t *testing.T) {
 	// Issued and withdrawn, it would be on record, revoked.
 	if after, _ := w.s.DataStore.GetCredentials(); len(after) != len(before) {
 		t.Fatalf("a credential that failed its check was issued (%d more on record)", len(after)-len(before))
+	}
+}
+
+// An AI agent whose grant has lapsed is told it has expired, not that it
+// awaits approval.
+func TestAnAIAgentWithALapsedGrantIsToldItExpired(t *testing.T) {
+	w := newTalkWorld(t)
+	held := credentialsOf(t, w.s, w.a.PairwiseAID)
+	if len(held) == 0 {
+		t.Fatal("the AI agent holds no grant")
+	}
+	for _, c := range held {
+		w.s.DataStore.UpdateCredentialStatus(c.SAID, "expired")
+	}
+	cc, _ := w.s.ResolveAgentCaller(w.a.PairwiseAID)
+	if !strings.Contains(cc.NoScopesBecause, "expired") {
+		t.Fatalf("an AI agent with a lapsed grant is told %q", cc.NoScopesBecause)
+	}
+	tok := mcpToken{AgentAID: w.a.PairwiseAID, AssetID: w.a.ID, GrantSAID: held[0].SAID}
+	cc = sandbox.CallerContext{Scopes: []string{capabilityMessageAgent}}
+	w.s.applyGrantScopes(tok, &cc)
+	if !strings.Contains(cc.NoScopesBecause, "expired") {
+		t.Fatalf("a token whose grant lapsed is told %q", cc.NoScopesBecause)
+	}
+}
+
+// A machine is granted as speaking for an active signer of the identity, or
+// for none: never for somebody who is not one.
+func TestAMachineSpeaksOnlyForAnActiveSigner(t *testing.T) {
+	w := newTalkWorld(t)
+	g := grantFor(7, GradeEnrolled)
+	g.Signer = "ENotASigner0000000000000000000000000000000000"
+	if _, err := w.s.grantController(g, time.Now().UTC(), authority{}); err == nil {
+		t.Fatal("a machine was granted as speaking for somebody who is not a signer")
+	}
+	signers := w.s.signers()
+	if len(signers) == 0 {
+		t.Fatal("the world has no signer")
+	}
+	g.Signer = signers[0].AID
+	if _, err := w.s.grantController(g, time.Now().UTC(), authority{}); err != nil {
+		t.Fatalf("a machine speaking for an active signer: %v", err)
 	}
 }

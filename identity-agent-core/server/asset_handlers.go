@@ -32,6 +32,7 @@ func (s *CoreServer) initAssetHandler() error {
 	// Persist each delegated inception's owner-root anchoring event to the root KEL,
 	// so the delegation survives a KEL reload and the delegated AID keeps verifying.
 	h.PersistDelegationAnchor = s.saveDelegationAnchor
+	h.KeyHeldHere = s.identityKeyHeldHere
 	s.assetHandler = h
 	return nil
 }

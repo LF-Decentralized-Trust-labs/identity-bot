@@ -258,7 +258,12 @@ func (s *CoreServer) checkAuthorisationOf(acdc []byte, issuer, registry, said st
 		}
 		in.OwnerKey = oa.PublicKey
 	}
-	if err := authorisation.Check(in); err != nil && !errors.Is(err, authorisation.ErrNoRequest) {
+	// Asked for by a signed request, the credential must carry it: one that
+	// carries none rests on nothing that asked for it.
+	if err := authorisation.Check(in); err != nil {
+		if errors.Is(err, authorisation.ErrNoRequest) {
+			return fmt.Errorf("the credential does not carry the request that asked for it")
+		}
 		return err
 	}
 	return nil
@@ -327,6 +332,11 @@ func (s *CoreServer) grantController(g ControllerGrant, now time.Time, by author
 	if err != nil {
 		return ControllerGrant{}, err
 	}
+	// The signer a machine speaks as is one of this identity's active
+	// signers, whether the owner named it or it was settled for them.
+	if checked.Signer != "" && !s.isActiveSigner(checked.Signer) {
+		return ControllerGrant{}, fmt.Errorf("%s is not an active signer of this identity", checked.Signer)
+	}
 	before, had, err := s.controllers().Get(checked.ControllerAID)
 	if err != nil {
 		return ControllerGrant{}, err
@@ -393,6 +403,9 @@ func (s *CoreServer) issueControllerGrant(g ControllerGrant, by authority) (stri
 // withdrawal: someone removing a stolen laptop must never be told to wait for
 // a key log.
 func (s *CoreServer) revokeController(aid string) error {
+	// A grant waiting for the device that holds the key is withdrawn with
+	// the machine, so signing it later grants nothing.
+	defer s.withdrawWaitingFor(aid)
 	s.grantsMu.Lock()
 	defer s.grantsMu.Unlock()
 	g, had, err := s.controllers().Get(aid)
@@ -530,7 +543,7 @@ func (s *CoreServer) handleGrantsAwaitingApproval(w http.ResponseWriter, r *http
 			m := onTheWire(g, now)
 			// A mark that the grant waits for another device is believed only
 			// where the key really is elsewhere.
-			m["awaiting"] = awaitingWhat(g.CredentialPending && !keyHere)
+			m["awaiting"] = s.awaitingFor(g.ControllerAID, g.CredentialPending && !keyHere)
 			machines = append(machines, m)
 		}
 	}
@@ -556,7 +569,7 @@ func (s *CoreServer) handleGrantsAwaitingApproval(w http.ResponseWriter, r *http
 			agents = append(agents, map[string]any{
 				"asset_id": a.ID, "name": a.DisplayName, "agent_aid": a.PairwiseAID,
 				"capabilities": a.Capabilities, "resource_constraints": nonNilConstraints(a.GrantConstraints),
-				"awaiting": awaitingWhat(s.agentGrantPendingFor(a.ID)),
+				"awaiting": s.awaitingFor(a.PairwiseAID, s.agentGrantPendingFor(a.ID)),
 			})
 		}
 	}
@@ -570,6 +583,22 @@ func awaitingWhat(pending bool) string {
 		return "the device that holds the identity's key"
 	}
 	return "the owner's approval"
+}
+
+// awaitingFor is what holder's grant waits for, saying so when the device
+// that holds the key refused it, or it waited too long, so the owner asks
+// again.
+func (s *CoreServer) awaitingFor(holder string, pending bool) string {
+	if !pending {
+		return awaitingWhat(false)
+	}
+	switch s.waitingStateOf(holder) {
+	case SigningStatusRefused:
+		return "the device that holds the identity's key refused it: ask again"
+	case SigningStatusExpired:
+		return "the device that holds the identity's key did not sign it in time and it expired: ask again"
+	}
+	return awaitingWhat(true)
 }
 
 // awaitingPhrase is the same, as it is said of an AI agent.
@@ -588,4 +617,14 @@ func sameMoment(stated string, at time.Time) bool {
 	}
 	t, err := time.Parse(time.RFC3339, stated)
 	return err == nil && t.Equal(at)
+}
+
+// isActiveSigner reports whether aid is one of this identity's active signers.
+func (s *CoreServer) isActiveSigner(aid string) bool {
+	for _, p := range s.signers() {
+		if p.AID == aid {
+			return true
+		}
+	}
+	return false
 }

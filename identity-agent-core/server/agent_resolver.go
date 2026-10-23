@@ -58,7 +58,11 @@ func (s *CoreServer) ResolveAgentCaller(aid string) (sandbox.CallerContext, bool
 		// signature instead of its token. A build with no engine has no grants
 		// at all, and there the stored ceiling is the only statement there is.
 		cc.Scopes = nil
-		cc.NoScopesBecause = "this AI agent is " + awaitingPhrase(s.agentGrantPendingFor(agent.ID))
+		if s.agentGrantLapsed(aid) {
+			cc.NoScopesBecause = "this AI agent's grant has expired"
+		} else {
+			cc.NoScopesBecause = "this AI agent is " + awaitingPhrase(s.agentGrantPendingFor(agent.ID))
+		}
 	}
 	return cc, true
 }

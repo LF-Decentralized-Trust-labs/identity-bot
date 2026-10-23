@@ -50,6 +50,9 @@ func (h *Handler) ProvisionAgentAsset(displayName string, capabilities []string,
 	if err != nil {
 		return nil, fmt.Errorf("derive agent key: %w", err)
 	}
+	if err := h.mayDelegate(); err != nil {
+		return nil, err
+	}
 	resp, err := h.KeriDriver.CreateDelegatedInception(
 		iacrypto.VerkeyQB64(pub), iacrypto.VerkeyQB64(nextPub), displayName, rootAID)
 	if err != nil {
