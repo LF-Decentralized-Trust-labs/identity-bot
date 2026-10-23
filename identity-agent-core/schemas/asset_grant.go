@@ -97,7 +97,7 @@ func (k assetGrantKind) allAttributes() []grantAttribute {
 		// device signed it, beside the edge to their own grant: the edge says
 		// whose authority this rests on, the request shows they used it.
 		attrs = append(attrs,
-			grantAttribute{"request", `{"description": "The request that authorised this, as it was signed: who signed it (a machine acting for a signer, or the identity's own key), the exact string signed, the signature, and the request's body, whose digest the string carries", "type": "object", "properties": {"kind": {"type": "string", "enum": ["controller", "owner"]}, "signer": {"type": "string"}, "signed": {"type": "string"}, "signature": {"type": "string"}, "body": {"type": "string"}}, "required": ["kind", "signer", "signed", "signature", "body"], "additionalProperties": false}`},
+			grantAttribute{"request", `{"description": "The request that authorised this, as it was signed: who signed it (a machine acting for a signer, or the identity's own key), the exact string signed, which carries the digest of the request's body, the signature, and what the request asked for, taken from that body. The body itself is not here: it can hold what is nobody else's business, and is kept with the issuer's record", "type": "object", "properties": {"kind": {"type": "string", "enum": ["controller", "owner"]}, "signer": {"type": "string"}, "signed": {"type": "string"}, "signature": {"type": "string"}, "asked": {"type": "object"}}, "required": ["kind", "signer", "signed", "signature", "asked"], "additionalProperties": false}`},
 			grantAttribute{"about", `{"description": "What the authorising request named as the thing it acts on: the asset whose grant changes, or the machine waiting to become its body", "type": "string"}`})
 	}
 	return attrs

@@ -121,7 +121,18 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 	// Non-fatal: on a driverless build the stored ceiling still governs.
 	grantSAID, err := s.issueCapabilityGrant(agent, by)
 	if err != nil {
-		log.Printf("[mcp] agent %s provisioned without a capability grant (%v) — falling back to the stored ceiling", agent.PairwiseAID, err)
+		// With an engine, a grant that cannot be issued, or does not rest on
+		// the request that asked for it, ends the provisioning: an AI agent
+		// with no grant would otherwise act on a ceiling nobody can show was
+		// authorised. Only a build with no engine has no grants at all.
+		if s.KeriDriver != nil {
+			if derr := s.assetHandler.Store.DeleteAsset(agent.ID); derr != nil {
+				log.Printf("[mcp] agent %s was not granted and could not be removed: %v", agent.PairwiseAID, derr)
+			}
+			jsonError(w, "the AI agent was not created: its grant could not be issued: "+err.Error(), http.StatusForbidden)
+			return
+		}
+		log.Printf("[mcp] agent %s provisioned on a build with no engine, so with no grant: the stored ceiling governs", agent.PairwiseAID)
 	}
 
 	// Bind an MCP token to the agent identity. Token name = the agent's asset id

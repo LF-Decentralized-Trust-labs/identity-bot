@@ -5,6 +5,7 @@ import (
 	"log"
 	"time"
 
+	"identity-agent-core/iacrypto"
 	"identity-agent-core/schemas"
 	"identity-agent-core/store"
 )
@@ -33,6 +34,14 @@ func (s *CoreServer) issueAssetCredential(
 	claims["asset_type"] = kind.AssetType
 	if expiry != "" {
 		claims["valid_until"] = expiry
+	}
+	// One request authorises one credential.
+	var requestDigest string
+	if by.Request != nil && kind.HasEdges() {
+		requestDigest = iacrypto.Blake3QB64Must([]byte(by.Request.Signed))
+		if used, err := s.DataStore.CredentialRequestUsed(requestDigest); err != nil || used {
+			return "", fmt.Errorf("this request already authorised a credential, and authorises no other")
+		}
 	}
 	edges := by.name(kind, claims)
 	if err := kind.CheckAttributes(claims); err != nil {
@@ -76,16 +85,30 @@ func (s *CoreServer) issueAssetCredential(
 	}); err != nil {
 		log.Printf("[asset] failed to persist %s %s: %v", kind.Schema.Name, result.AcdcSaid, err)
 	}
+	// The request is kept with the credential; a request that has authorised
+	// another meanwhile is refused here.
+	if requestDigest != "" {
+		if err := s.DataStore.KeepCredentialRequest(result.AcdcSaid, requestDigest, by.Request.Body); err != nil {
+			s.withdrawIssued(result.AcdcSaid)
+			return "", fmt.Errorf("%s was not issued: %w", kind.Schema.Name, err)
+		}
+	}
 	// The rule anybody will apply to it later, applied now: a credential that
 	// does not rest on the request it carries is withdrawn, not handed out.
 	if err := s.checkAuthorisation(result.AcdcSaid, by); err != nil {
-		if rec, _ := s.DataStore.GetCredential(result.AcdcSaid); rec != nil {
-			if _, rerr := s.revokeIssuedCredential(rec); rerr != nil {
-				log.Printf("[asset] %s %s does not rest on its request and its revocation failed: %v", kind.Schema.Name, result.AcdcSaid, rerr)
-			}
-			_ = s.DataStore.UpdateCredentialStatus(result.AcdcSaid, "revoked")
-		}
+		s.withdrawIssued(result.AcdcSaid)
 		return "", fmt.Errorf("%s was not issued: it does not rest on the request that asked for it: %w", kind.Schema.Name, err)
 	}
 	return result.AcdcSaid, nil
+}
+
+// withdrawIssued revokes a credential just issued that is not to be handed
+// out, and marks it so whatever the registry says.
+func (s *CoreServer) withdrawIssued(said string) {
+	if rec, _ := s.DataStore.GetCredential(said); rec != nil {
+		if _, err := s.revokeIssuedCredential(rec); err != nil {
+			log.Printf("[asset] %s was issued and is not to be used, and its revocation failed: %v", said, err)
+		}
+		_ = s.DataStore.UpdateCredentialStatus(said, "revoked")
+	}
 }

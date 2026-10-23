@@ -969,6 +969,35 @@ func (s *SQLiteStore) GetLatestRecordAnchor() (*RecordAnchor, error) {
 	return &a, nil
 }
 
+// KeepCredentialRequest keeps the request a credential was issued on. A
+// request already used for another credential is refused.
+func (s *SQLiteStore) KeepCredentialRequest(credentialSAID, requestDigest, body string) error {
+	if _, err := s.db.Exec(`INSERT INTO credential_requests (credential_said, request_digest, body) VALUES (?, ?, ?)`,
+		credentialSAID, requestDigest, body); err != nil {
+		return fmt.Errorf("the request could not be kept, or already authorised another credential: %w", err)
+	}
+	return nil
+}
+
+// CredentialRequestUsed reports whether a request already authorised a
+// credential.
+func (s *SQLiteStore) CredentialRequestUsed(requestDigest string) (bool, error) {
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM credential_requests WHERE request_digest = ?`, requestDigest).Scan(&n)
+	return n > 0, err
+}
+
+// GetCredentialRequestBody returns the body of the request a credential was
+// issued on.
+func (s *SQLiteStore) GetCredentialRequestBody(credentialSAID string) (string, bool, error) {
+	var body string
+	err := s.db.QueryRow(`SELECT body FROM credential_requests WHERE credential_said = ?`, credentialSAID).Scan(&body)
+	if err == sql.ErrNoRows {
+		return "", false, nil
+	}
+	return body, err == nil, err
+}
+
 // GetRecordAnchors returns every anchoring of the record, oldest first.
 func (s *SQLiteStore) GetRecordAnchors() ([]RecordAnchor, error) {
 	rows, err := s.db.Query(`SELECT seq, said, statement, digest, created_at FROM record_anchors ORDER BY seq`)

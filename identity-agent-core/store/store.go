@@ -608,6 +608,10 @@ type Store interface {
 	GetRecordAnchors() ([]RecordAnchor, error)
 	// GetLatestRecordAnchor is the newest anchoring, or nil when there is none.
 	GetLatestRecordAnchor() (*RecordAnchor, error)
+	// The request a credential was issued on: one request, one credential.
+	KeepCredentialRequest(credentialSAID, requestDigest, body string) error
+	CredentialRequestUsed(requestDigest string) (bool, error)
+	GetCredentialRequestBody(credentialSAID string) (string, bool, error)
 	// A credential's transaction log, as published. Appending the same event
 	// twice keeps one copy; the log is read back in order.
 	AppendCredentialTELEvent(ev CredentialTELEvent) error

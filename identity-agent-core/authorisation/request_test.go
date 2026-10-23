@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -33,6 +34,10 @@ type world struct {
 	said    string
 	log     [][]byte
 	issued  time.Time
+	// body is the body of the request last signed, which the issuer keeps.
+	body string
+	// issuer, when set, issues what is built next instead of the organisation.
+	issuer string
 }
 
 func newWorld(t *testing.T) *world {
@@ -58,7 +63,11 @@ func (w *world) build(schema, holder string, at time.Time, attrs map[string]inte
 		data[k] = v
 	}
 	raw, _ := json.Marshal(data)
-	in := keri.CredentialInput{SchemaSAID: schema, Issuer: org, Recipient: holder, Registry: registry, Data: raw}
+	issuer := w.issuer
+	if issuer == "" {
+		issuer = org
+	}
+	in := keri.CredentialInput{SchemaSAID: schema, Issuer: issuer, Recipient: holder, Registry: registry, Data: raw}
 	if edges != nil {
 		in.Source, _ = json.Marshal(edges)
 	}
@@ -81,7 +90,12 @@ func (w *world) signs(method, path, body string, at time.Time) map[string]interf
 	if err != nil {
 		w.t.Fatal(err)
 	}
-	return map[string]interface{}{"kind": "controller", "signer": w.machine, "signed": signed, "signature": sig, "body": body}
+	asked, err := Asked(body)
+	if err != nil {
+		w.t.Fatal(err)
+	}
+	w.body = body
+	return map[string]interface{}{"kind": "controller", "signer": w.machine, "signed": signed, "signature": sig, "asked": asked}
 }
 
 func (w *world) edge() map[string]interface{} {
@@ -99,7 +113,7 @@ func (w *world) aGrant(req map[string]interface{}, capabilities []string, about 
 }
 
 func (w *world) check(cred []byte) error {
-	return Check(Input{Credential: cred, Grant: w.grant, GrantLog: w.log})
+	return Check(Input{Credential: cred, Grant: w.grant, GrantLog: w.log, Body: w.body, HaveBody: true})
 }
 
 func ago(d time.Duration) time.Time { return time.Now().UTC().Add(-d) }
@@ -121,9 +135,16 @@ func TestARequestThatHoldsPasses(t *testing.T) {
 func TestTheRequestMustBeTheOneSigned(t *testing.T) {
 	w := newWorld(t)
 	req := w.signs("PUT", "/api/mcp/agents/agent-1/capabilities", capBody, ago(time.Minute))
-	req["body"] = `{"capabilities":["system.info.read","infra.zone.list"]}`
-	if err := w.check(w.aGrant(req, []string{"system.info.read", "infra.zone.list"}, "agent-1")); err == nil {
+	wider := `{"capabilities":["system.info.read","infra.zone.list"]}`
+	req["asked"], _ = Asked(wider)
+	cred := w.aGrant(req, []string{"system.info.read", "infra.zone.list"}, "agent-1")
+	w.body = wider
+	if err := w.check(cred); err == nil {
 		t.Fatal("a body other than the one signed was accepted")
+	}
+	w.body = capBody
+	if err := w.check(cred); err == nil {
+		t.Fatal("a credential asking for more than the signed body asked for was accepted")
 	}
 }
 
@@ -151,7 +172,7 @@ func TestTheEdgeMustNameTheGrantGiven(t *testing.T) {
 	other := newWorld(t)
 	req := w.signs("PUT", "/api/mcp/agents/agent-1/capabilities", capBody, ago(time.Minute))
 	cred := w.aGrant(req, []string{"system.info.read"}, "agent-1")
-	if err := Check(Input{Credential: cred, Grant: other.grant, GrantLog: other.log}); err == nil {
+	if err := Check(Input{Credential: cred, Grant: other.grant, GrantLog: other.log, Body: w.body, HaveBody: true}); err == nil {
 		t.Fatal("a grant other than the one the edge names was accepted")
 	}
 }
@@ -181,7 +202,18 @@ func TestTheRequestMustComeBeforeTheIssueAndAfterTheGrant(t *testing.T) {
 	if err := w.check(w.aGrant(late, []string{"system.info.read"}, "agent-1")); err == nil {
 		t.Fatal("a request made after the credential was issued was accepted")
 	}
-	early := w.signs("PUT", "/api/mcp/agents/agent-1/capabilities", capBody, w.issued.Add(-2*Skew))
+	stale := w.signs("PUT", "/api/mcp/agents/agent-1/capabilities", capBody, ago(2*Skew))
+	if err := w.check(w.aGrant(stale, []string{"system.info.read"}, "agent-1")); err == nil {
+		t.Fatal("a request made long before the credential was issued was accepted")
+	}
+	// A grant dated after the request it is said to have authorised.
+	w.issued = time.Now().UTC().Add(time.Hour)
+	w.grant, w.said = w.build(schemas.ControllerGrant.Schema.SAID, w.machine, w.issued, map[string]interface{}{
+		"asset_type": "controller", "name": "the laptop", "label": "the laptop", "public_key": w.key, "grade": "enrolled",
+	}, nil)
+	iss, _ := keri.BuildIssuance(keri.IssuanceInput{CredentialSAID: w.said, Registry: registry, DT: w.issued.Format(telTime)})
+	w.log = [][]byte{iss}
+	early := w.signs("PUT", "/api/mcp/agents/agent-1/capabilities", capBody, ago(time.Minute))
 	if err := w.check(w.aGrant(early, []string{"system.info.read"}, "agent-1")); err == nil {
 		t.Fatal("a request made before the machine was granted was accepted")
 	}
@@ -194,12 +226,12 @@ func TestARevokedGrantAuthorisesNothingIssuedAfter(t *testing.T) {
 	cred := w.aGrant(req, []string{"system.info.read"}, "agent-1")
 	revokedEarlier, _ := keri.BuildRevocation(keri.RevocationInput{CredentialSAID: w.said, Registry: registry, PriorISSSAID: iss.SAID,
 		DT: ago(30 * time.Second).Add(-time.Minute).Format(telTime)})
-	if err := Check(Input{Credential: cred, Grant: w.grant, GrantLog: [][]byte{w.log[0], revokedEarlier}}); err == nil {
+	if err := Check(Input{Credential: cred, Grant: w.grant, GrantLog: [][]byte{w.log[0], revokedEarlier}, Body: w.body, HaveBody: true}); err == nil {
 		t.Fatal("a credential issued after its grant was revoked was accepted")
 	}
 	revokedLater, _ := keri.BuildRevocation(keri.RevocationInput{CredentialSAID: w.said, Registry: registry, PriorISSSAID: iss.SAID,
 		DT: time.Now().UTC().Add(time.Hour).Format(telTime)})
-	if err := Check(Input{Credential: cred, Grant: w.grant, GrantLog: [][]byte{w.log[0], revokedLater}}); err != nil {
+	if err := Check(Input{Credential: cred, Grant: w.grant, GrantLog: [][]byte{w.log[0], revokedLater}, Body: w.body, HaveBody: true}); err != nil {
 		t.Fatalf("a grant revoked after the credential was issued withdrew it: %v", err)
 	}
 }
@@ -228,15 +260,16 @@ func TestAnOwnersRequestIsCheckedAgainstTheOwnersKey(t *testing.T) {
 	signed := strings.Join([]string{"IA-REQ-V1", "PUT", "/api/mcp/agents/agent-1/capabilities", ago(time.Minute).Format(time.RFC3339),
 		iacrypto.Blake3QB64Must([]byte(capBody))}, "\n")
 	sig, _ := login.SignString(signed, priv.Seed())
-	req := map[string]interface{}{"kind": "owner", "signer": org, "signed": signed, "signature": sig, "body": capBody}
+	asked, _ := Asked(capBody)
+	req := map[string]interface{}{"kind": "owner", "signer": org, "signed": signed, "signature": sig, "asked": asked}
 	acdc, _ := w.build(schemas.AIAgentGrant.Schema.SAID, agentAID, time.Now().UTC(), map[string]interface{}{
 		"asset_type": "ai_agent", "name": "Research assistant", "capabilities": []string{"system.info.read"}, "request": req, "about": "agent-1",
 	}, nil)
-	if err := Check(Input{Credential: acdc, OwnerKey: iacrypto.VerkeyQB64(pub)}); err != nil {
+	if err := Check(Input{Credential: acdc, OwnerKey: iacrypto.VerkeyQB64(pub), Body: capBody, HaveBody: true}); err != nil {
 		t.Fatalf("the owner's own request was refused: %v", err)
 	}
 	other, _, _ := ed25519.GenerateKey(rand.Reader)
-	if err := Check(Input{Credential: acdc, OwnerKey: iacrypto.VerkeyQB64(other)}); err == nil {
+	if err := Check(Input{Credential: acdc, OwnerKey: iacrypto.VerkeyQB64(other), Body: capBody, HaveBody: true}); err == nil {
 		t.Fatal("an owner's request was accepted against another key")
 	}
 }
@@ -268,7 +301,9 @@ func TestTheSignedStringMustNameItsSigner(t *testing.T) {
 	signed := strings.Join([]string{"IA-CONTROLLER-REQ-V1", other.machine, "PUT", "/api/mcp/agents/agent-1/capabilities",
 		ago(time.Minute).Format(time.RFC3339), "", "", "0", iacrypto.Blake3QB64Must([]byte(capBody))}, "\n")
 	sig, _ := login.SignString(signed, w.seed)
-	req := map[string]interface{}{"kind": "controller", "signer": w.machine, "signed": signed, "signature": sig, "body": capBody}
+	asked, _ := Asked(capBody)
+	w.body = capBody
+	req := map[string]interface{}{"kind": "controller", "signer": w.machine, "signed": signed, "signature": sig, "asked": asked}
 	if err := w.check(w.aGrant(req, []string{"system.info.read"}, "agent-1")); err == nil {
 		t.Fatal("a string naming another machine was accepted from this one")
 	}
@@ -283,7 +318,7 @@ func TestAnotherGrantOfTheSameMachineIsNotTheOneNamed(t *testing.T) {
 		"asset_type": "controller", "name": "the laptop", "label": "the laptop", "public_key": w.key, "grade": "enrolled",
 	}, nil)
 	iss, _ := keri.BuildIssuance(keri.IssuanceInput{CredentialSAID: said, Registry: registry, DT: w.issued.Format(telTime)})
-	if err := Check(Input{Credential: cred, Grant: second, GrantLog: [][]byte{iss}}); err == nil {
+	if err := Check(Input{Credential: cred, Grant: second, GrantLog: [][]byte{iss}, Body: w.body, HaveBody: true}); err == nil {
 		t.Fatal("a grant other than the one the edge names was accepted")
 	}
 }
@@ -328,5 +363,95 @@ func TestARequestAfterTheGrantLapsedAuthorisesNothing(t *testing.T) {
 	req := w.signs("PUT", "/api/mcp/agents/agent-1/capabilities", capBody, ago(time.Minute))
 	if err := w.check(w.aGrant(req, []string{"system.info.read"}, "agent-1")); err == nil {
 		t.Fatal("a request made after the grant lapsed was accepted")
+	}
+}
+
+// A grant issued by someone other than the credential's issuer authorises
+// nothing it issued.
+func TestTheGrantMustBeTheIssuersOwn(t *testing.T) {
+	w := newWorld(t)
+	w.issuer = "EAnotherIssuer0123456789ABCDEFGHIJKLMNOPQRS"
+	w.grant, w.said = w.build(schemas.ControllerGrant.Schema.SAID, w.machine, w.issued, map[string]interface{}{
+		"asset_type": "controller", "name": "the laptop", "label": "the laptop", "public_key": w.key, "grade": "enrolled",
+	}, nil)
+	w.issuer = ""
+	iss, _ := keri.BuildIssuance(keri.IssuanceInput{CredentialSAID: w.said, Registry: registry, DT: w.issued.Format(telTime)})
+	w.log = [][]byte{iss}
+	req := w.signs("PUT", "/api/mcp/agents/agent-1/capabilities", capBody, ago(time.Minute))
+	if err := w.check(w.aGrant(req, []string{"system.info.read"}, "agent-1")); err == nil {
+		t.Fatal("a grant issued by someone else was accepted")
+	}
+}
+
+// Without the body, everything else is checked and the link to what was
+// signed is reported as not shown.
+func TestWithoutTheBodyTheLinkToWhatWasSignedIsNotShown(t *testing.T) {
+	w := newWorld(t)
+	req := w.signs("PUT", "/api/mcp/agents/agent-1/capabilities", capBody, ago(time.Minute))
+	cred := w.aGrant(req, []string{"system.info.read"}, "agent-1")
+	if err := Check(Input{Credential: cred, Grant: w.grant, GrantLog: w.log}); !errors.Is(err, ErrBodyWithheld) {
+		t.Fatalf("a check without the body read as %v", err)
+	}
+	if d, err := RequestDigest(cred); err != nil || d != iacrypto.Blake3QB64Must([]byte(req["signed"].(string))) {
+		t.Fatalf("the request's digest: %q %v", d, err)
+	}
+}
+
+// keyLog is an issuer's key log in which each given transaction event is
+// sealed by its own interaction, in the order given.
+func keyLog(t *testing.T, events ...[]byte) [][]byte {
+	t.Helper()
+	var out [][]byte
+	for i, raw := range events {
+		ev, err := keri.VerifyTELEvent(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := json.Marshal(map[string]interface{}{"t": "ixn", "s": strconv.FormatInt(int64(i+1), 16),
+			"a": []map[string]interface{}{{"i": ev.Subject, "s": strconv.FormatInt(int64(ev.SN), 16), "d": ev.SAID}}})
+		out = append(out, b)
+	}
+	return out
+}
+
+// With the issuer's key log, the order of issue and revocation is read from
+// where each is anchored, whatever times the events assert.
+func TestTheKeyLogDecidesTheOrder(t *testing.T) {
+	w := newWorld(t)
+	req := w.signs("PUT", "/api/mcp/agents/agent-1/capabilities", capBody, ago(time.Minute))
+	cred := w.aGrant(req, []string{"system.info.read"}, "agent-1")
+	c, _ := keri.VerifyCredential(cred)
+	credIss, _ := keri.BuildIssuance(keri.IssuanceInput{CredentialSAID: c.SAID, Registry: registry, DT: time.Now().UTC().Format(telTime)})
+	gIss, _ := keri.VerifyTELEvent(w.log[0])
+	// Revoked, by its own say-so, an hour after the credential, but anchored
+	// before it.
+	rev, _ := keri.BuildRevocation(keri.RevocationInput{CredentialSAID: w.said, Registry: registry, PriorISSSAID: gIss.SAID,
+		DT: time.Now().UTC().Add(time.Hour).Format(telTime)})
+	check := func(kel [][]byte) error {
+		return Check(Input{Credential: cred, Grant: w.grant, GrantLog: [][]byte{w.log[0], rev}, Body: w.body, HaveBody: true,
+			IssuerKEL: kel, CredentialLog: [][]byte{credIss}})
+	}
+	if err := check(keyLog(t, w.log[0], rev, credIss)); err == nil {
+		t.Fatal("a credential anchored after its grant's revocation was accepted")
+	}
+	if err := check(keyLog(t, w.log[0], credIss, rev)); err != nil {
+		t.Fatalf("a credential anchored before its grant's revocation was refused: %v", err)
+	}
+	if err := check(keyLog(t, credIss, w.log[0], rev)); err == nil {
+		t.Fatal("a credential anchored before its grant was issued was accepted")
+	}
+	if err := check(keyLog(t, w.log[0], rev)); err == nil {
+		t.Fatal("a credential whose issue is not anchored was accepted")
+	}
+}
+
+// What the credential says was asked for may not add to what the body asked.
+func TestTheCredentialMayNotAddToWhatWasAsked(t *testing.T) {
+	w := newWorld(t)
+	req := w.signs("PUT", "/api/mcp/agents/agent-1/capabilities", capBody, ago(time.Minute))
+	asked := req["asked"].(map[string]json.RawMessage)
+	asked["nonce"] = json.RawMessage(`"n-added-later"`)
+	if err := w.check(w.aGrant(req, []string{"system.info.read"}, "agent-1")); err == nil {
+		t.Fatal("a credential claiming more was asked than the body asked was accepted")
 	}
 }

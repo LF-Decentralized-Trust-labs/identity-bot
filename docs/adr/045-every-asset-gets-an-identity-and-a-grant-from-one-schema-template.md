@@ -143,7 +143,11 @@ is used only by a build with no KERI engine.
 Version 1.1.0 of the template lets a credential name the credentials it rests on, in an
 edges block, and carry the `request` that authorised it exactly as it was signed: whether a
 machine or the identity's own key signed it, the signer, the exact string, the signature,
-and the request's body, whose digest the string carries. `about` records what the request
+and `asked`: what the body asked for, and nothing else of it (the name, capabilities,
+resource constraints and a nonce, if given). The body itself is not in the credential,
+which anybody can fetch: a body can carry a system prompt, a model's address or the name of
+a stored key. It is kept with the Identity Agent's record and goes in its export, and its
+digest is in the signed string. `about` records what the request
 named as the thing it acts on: the AI agent whose grant changes, or the machine being
 approved as its body. The AI Agent Grant and AI Agent Body are issued at 1.1.0. A request a
 machine made carries an edge `authorised_by` to that machine's Controller Grant (ADR-044).
@@ -154,16 +158,38 @@ request: the issuer is the authority, and a verifier reports that rather than a 
 everything it issues and by anyone to an exported record):
 
 1. The credential verifies against its own identifier, so nothing in it changed.
-2. The string carries the digest of the body kept, names the signer, and the signature over
-   it verifies: for a machine, against the key its Controller Grant names; for the
-   identity, against the key its own key log named.
+2. The string names the signer, and the signature over it verifies: for a machine, against
+   the key its Controller Grant names; for the identity, against the key its own key log
+   named.
 3. For a machine: the edge names exactly the Controller Grant given, which is a Controller
-   Grant, held by the signer.
+   Grant, held by the signer, and issued by the credential's own issuer.
 4. What was issued is what was asked: the same capabilities and limits, the same AI agent
    (by `about` or, when it is being created, by name), the same machine.
-5. The request was made after the machine was granted, before its grant lapsed, and no
-   later than the credential's issue (within five minutes of clock difference); and the
-   grant's transaction log shows it was not revoked before the credential was issued.
+5. Given the body, its digest is the one the string carries, and `asked` is exactly what
+   the body asked for. Without the body the check stops there and says so: it never reports
+   a credential's link to its request as shown when it was not.
+6. The request was made after the machine was granted, before its grant lapsed, and within
+   five minutes of clock difference either side of the credential's issue. Given the
+   issuer's key log and the credential's own log, the grant's revocation is ordered against
+   the credential's issue by where each is anchored in that key log, not by the times they
+   state; without them, by the time its transaction log states.
+7. One request authorises one credential. The Identity Agent refuses to issue a second on a
+   request it has used; a verifier holding several credentials refuses any two carrying the
+   same request (`authorisation.RequestDigest`).
+
+The credential the Identity Agent issues for a new AI agent is issued to the identifier it
+minted for it, so the identity's own anchored issuance is what ties the request to that one
+AI agent; rule 7 keeps the request from being used for a second.
+
+**What a verifier must add** to `authorisation.Check` when checking an exported record
+rather than inside the Identity Agent: validate the issuer's key log and pass it, with the
+credential's and the grant's own logs, so ordering is by anchoring; take each body from the
+export and pass it, so rule 5 is shown; and apply rule 7 across everything it holds.
+
+**Credentials issued while a grant is pending.** Where the identity's key is on another
+device, a machine's grant is recorded with its credential pending there. A credential
+issued on that machine's request meanwhile carries no edge, so it fails this check until it
+is reissued once the grant's credential exists. That is reported, not hidden.
 
 Credentials issued under 1.0.0 keep their identifiers and are still served. Those issued
 before this Identity Agent issued its first 1.1.0 AI Agent Grant or Body are still honoured;

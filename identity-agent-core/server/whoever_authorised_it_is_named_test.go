@@ -15,6 +15,7 @@ import (
 	"identity-agent-core/agenthost"
 	"identity-agent-core/authprovider"
 	"identity-agent-core/iacrypto"
+	"identity-agent-core/sandbox"
 	"identity-agent-core/schemas"
 	"identity-agent-core/store"
 
@@ -331,6 +332,7 @@ func TestAFirstVersionCredentialIssuedAfterwardsIsNotHonoured(t *testing.T) {
 // Machines paired before machines were given grants are given one at start.
 func TestMachinesPairedEarlierAreGivenGrants(t *testing.T) {
 	s, _ := grantWorld(t)
+	s.DeclaredEntityType = "organization"
 	g := aGrant(GradeEnrolled)
 	if _, err := s.controllers().Grant(g, time.Now().UTC()); err != nil {
 		t.Fatal(err)
@@ -531,4 +533,162 @@ func TestSettlingASignerNeverLeavesTwoGrantsInForce(t *testing.T) {
 	if now, _, _ := w.s.controllers().Get(g.ControllerAID); now.Signer != "" || now.CredentialSAID != granted.CredentialSAID {
 		t.Fatalf("the grant on record changed: %+v", now)
 	}
+}
+
+// An AI agent provisioned from a machine is granted on the request, and the
+// grant, which anybody can fetch, keeps what was asked for and nothing else
+// the request carried: no prompt, no model address, no stored key's name.
+func TestAPublishedGrantCarriesNoPrivateConfiguration(t *testing.T) {
+	w := newTalkWorld(t)
+	body := `{"name":"Ledger clerk","capabilities":["` + capabilityMessageAgent + `"],"system_prompt":"SECRET-PROMPT",` +
+		`"brain":{"kind":"local","model":"m","endpoint":"http://10.0.0.9:1234","credential_ref":"vault-key-7"},"nonce":"n-1"}`
+	req := asThatMachine(t, w.ctlAID, "POST", "/api/mcp/agents", body, w.ctlSeed, authprovider.LevelVerified, time.Now())
+	rec := httptest.NewRecorder()
+	w.s.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK && rec.Code != http.StatusCreated {
+		t.Fatalf("provisioning: %d %s", rec.Code, rec.Body.String())
+	}
+	var out map[string]interface{}
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	said, _ := out["grant_said"].(string)
+	if said == "" {
+		t.Fatalf("no grant was issued: %s", rec.Body.String())
+	}
+	pub := httptest.NewRecorder()
+	w.s.router.ServeHTTP(pub, remote("GET", "/public/credential/"+said, ""))
+	served := pub.Body.String()
+	if c, _ := w.s.DataStore.GetCredential(said); c != nil {
+		raw, _ := base64.StdEncoding.DecodeString(c.AcdcJson)
+		served += string(raw)
+	}
+	for _, private := range []string{"SECRET-PROMPT", "10.0.0.9", "vault-key-7", "system_prompt"} {
+		if strings.Contains(served, private) {
+			t.Fatalf("the grant gives away %q", private)
+		}
+	}
+	attrs, _ := acdcOf(t, w.s, said)["a"].(map[string]interface{})
+	asked, _ := attrs["request"].(map[string]interface{})["asked"].(map[string]interface{})
+	if asked["nonce"] != "n-1" || asked["name"] != "Ledger clerk" {
+		t.Fatalf("the grant does not keep what was asked for: %v", asked)
+	}
+	if kept, ok, _ := w.s.DataStore.GetCredentialRequestBody(said); !ok || kept != body {
+		t.Fatal("the full request was not kept with this Identity Agent's record")
+	}
+}
+
+// One request authorises one credential.
+func TestARequestAuthorisesOneCredential(t *testing.T) {
+	w := newTalkWorld(t)
+	resetSeenSignatures(t)
+	body := `{"capabilities":["` + capabilityMessageAgent + `"]}`
+	stamp := time.Now().UTC().Format(time.RFC3339)
+	path := "/api/mcp/agents/" + w.a.ID + "/capabilities"
+	sig, _ := SignOwnerRequest("PUT", path, stamp, []byte(body), testOwnerSeed())
+	by := authority{About: w.a.ID, Request: &signedRequest{Kind: "owner", Signer: "EOWNERTESTAID", Body: body,
+		Signed: canonicalRequestString("PUT", path, stamp, []byte(body)), Signature: sig}}
+	if _, err := w.s.issueCapabilityGrant(w.a, by); err != nil {
+		t.Fatalf("the first credential on the request: %v", err)
+	}
+	held := len(credentialsOf(t, w.s, w.a.PairwiseAID))
+	if _, err := w.s.issueCapabilityGrant(w.a, by); err == nil {
+		t.Fatal("one request authorised a second credential")
+	}
+	if now := len(credentialsOf(t, w.s, w.a.PairwiseAID)); now != held {
+		t.Fatal("a second credential was issued on the request before being refused")
+	}
+}
+
+// Where grants can be issued, an AI agent whose grant cannot be issued is not
+// created, and no token is minted for it.
+func TestAnAIAgentWhoseGrantCannotBeIssuedIsNotCreated(t *testing.T) {
+	w := newTalkWorld(t)
+	resetSeenSignatures(t)
+	// The owner's request, its digest already spent on another credential, so
+	// the grant it asks for is refused while everything before it succeeds.
+	body := `{"name":"Ungranted","capabilities":["` + capabilityMessageAgent + `"]}`
+	at := time.Now()
+	req := signed(t, "POST", "/api/mcp/agents", body, testOwnerSeed(), at)
+	spent := canonicalRequestString("POST", "/api/mcp/agents", at.UTC().Format(time.RFC3339), []byte(body))
+	if err := w.s.DataStore.KeepCredentialRequest("Eanother-credential", iacrypto.Blake3QB64Must([]byte(spent)), body); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	w.s.router.ServeHTTP(rec, req)
+	if rec.Code < 400 {
+		t.Fatalf("an AI agent with no grant was created: %d %s", rec.Code, rec.Body.String())
+	}
+	for _, a := range w.s.assetHandler.Store.ListAssets() {
+		if a.DisplayName == "Ungranted" {
+			t.Fatal("the AI agent was left in place")
+		}
+	}
+	if w.s.anMCPTokenIsNamed("Ungranted") {
+		t.Fatal("a token was minted for it")
+	}
+}
+
+// A request carrying a signature that does not hold creates no AI agent and
+// mints no token.
+func TestABadlySignedRequestCreatesNoAIAgent(t *testing.T) {
+	w := newTalkWorld(t)
+	req := local("POST", "/api/mcp/agents", `{"name":"Unwanted","capabilities":[]}`)
+	req.Header.Set(headerOwnerSig, "0Bjunk")
+	req.Header.Set(headerOwnerTimestamp, time.Now().UTC().Format(time.RFC3339))
+	rec := httptest.NewRecorder()
+	w.s.router.ServeHTTP(rec, req)
+	if rec.Code < 400 {
+		t.Fatalf("a badly signed request created an AI agent: %d %s", rec.Code, rec.Body.String())
+	}
+	for _, a := range w.s.assetHandler.Store.ListAssets() {
+		if a.DisplayName == "Unwanted" {
+			t.Fatal("the AI agent was left in place")
+		}
+	}
+	if w.s.anMCPTokenIsNamed("Unwanted") {
+		t.Fatal("a token was minted for it")
+	}
+}
+
+// Where grants can be issued, an AI agent's token with no grant may do nothing.
+func TestAnAIAgentWithNoGrantMayDoNothing(t *testing.T) {
+	s, agent := grantWorld(t)
+	cc := sandbox.CallerContext{Scopes: []string{"system.info.read"}}
+	s.applyGrantScopes(mcpToken{AgentAID: agent.PairwiseAID, DelegatorAID: agent.DelegatorAID}, &cc)
+	if len(cc.Scopes) != 0 {
+		t.Fatalf("an AI agent with no grant kept %v", cc.Scopes)
+	}
+}
+
+// An individual's Identity Agent holding no AI agent gives earlier machines no
+// grants, so writes nothing into its key log at start.
+func TestAnIndividualWithNoAIAgentIsNotBackFilled(t *testing.T) {
+	s, _ := grantWorld(t)
+	s.DeclaredEntityType = "individual"
+	g := aGrant(GradeEnrolled)
+	s.controllers().Grant(g, time.Now().UTC())
+	s.prepareKeyLogs()
+	if got, _, _ := s.controllers().Get(g.ControllerAID); got.CredentialSAID != "" {
+		t.Fatal("an individual with no AI agent was given a grant credential at start")
+	}
+}
+
+// A back-fill that failed is tried again on the next anchoring tick.
+func TestABackFillIsTriedAgain(t *testing.T) {
+	s, _ := grantWorld(t)
+	s.DeclaredEntityType = "organization"
+	g := aGrant(GradeEnrolled)
+	s.controllers().Grant(g, time.Now().UTC())
+	was := anchorInterval
+	anchorInterval = 20 * time.Millisecond
+	t.Cleanup(func() { anchorInterval = was })
+	stop := make(chan struct{})
+	go s.keepAnchoring(stop)
+	defer close(stop)
+	for i := 0; i < 100; i++ {
+		if got, _, _ := s.controllers().Get(g.ControllerAID); got.CredentialSAID != "" {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("a machine with no grant was not given one on a later tick")
 }

@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -161,9 +162,16 @@ func (a authority) name(kind *schemas.AssetGrant, claims map[string]interface{})
 		claims["about"] = a.About
 	}
 	if a.Request != nil {
+		// What was asked for, not the body: the credential is public, and a
+		// body can carry a system prompt, a model's address or a stored key's
+		// name. The body is kept with this Identity Agent's record.
+		asked, err := authorisation.Asked(a.Request.Body)
+		if err != nil {
+			asked = map[string]json.RawMessage{}
+		}
 		claims["request"] = map[string]interface{}{
 			"kind": a.Request.Kind, "signer": a.Request.Signer, "signed": a.Request.Signed,
-			"signature": a.Request.Signature, "body": a.Request.Body,
+			"signature": a.Request.Signature, "asked": asked,
 		}
 	}
 	if a.ControllerGrant == "" {
@@ -187,7 +195,22 @@ func (s *CoreServer) checkAuthorisation(said string, by authority) error {
 	if err != nil {
 		return err
 	}
-	in := authorisation.Input{Credential: acdc}
+	in := authorisation.Input{Credential: acdc, Body: by.Request.Body, HaveBody: true}
+	// The issuer's key log and this credential's own log, so the order of
+	// issue and revocation is read from where each is anchored.
+	if events, err := s.DataStore.GetEvents(rec.IssuerAID); err == nil {
+		for _, ev := range events {
+			if raw, err := base64.StdEncoding.DecodeString(ev.RawBytesB64); err == nil && len(raw) > 0 {
+				in.IssuerKEL = append(in.IssuerKEL, raw)
+			}
+		}
+	}
+	if own, _, err := s.credentialLog(rec.RegistrySAID, said); err == nil {
+		for _, ev := range own {
+			raw, _ := base64.StdEncoding.DecodeString(ev)
+			in.CredentialLog = append(in.CredentialLog, raw)
+		}
+	}
 	switch by.Request.Kind {
 	case "controller":
 		if by.ControllerGrant == "" {
@@ -424,9 +447,11 @@ func (s *CoreServer) withdrawOrSay(said string) {
 // backfillControllerGrants issues a Controller Grant for every machine paired
 // before machines were given one, so none goes on authorising credentials that
 // cannot name it. Where the identity's key is not held here they are marked
-// pending on the device that holds it.
+// pending on the device that holds it. It runs where AI agents act, as
+// anchoring does: an individual's phone with none writes nothing. Run at start
+// and on every anchoring tick, so one that fails is tried again.
 func (s *CoreServer) backfillControllerGrants() {
-	if s.DataStore == nil || s.KeriDriver == nil {
+	if s.DataStore == nil || s.KeriDriver == nil || !s.anchorsItsRecord() {
 		return
 	}
 	all, err := s.controllers().All()

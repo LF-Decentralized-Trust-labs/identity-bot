@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -46,6 +47,65 @@ type Input struct {
 	// owner-signed request was made. Needed for a request the identity's own
 	// key signed.
 	OwnerKey string
+	// Body is the request's body, from the issuer's record or an export. The
+	// credential does not carry it, because it can hold what is nobody else's
+	// business. Without it, what the request asked for cannot be tied to what
+	// was signed, and Check says so with ErrBodyWithheld.
+	Body     string
+	HaveBody bool
+	// IssuerKEL is the issuer's key log, as published, and CredentialLog the
+	// credential's own transaction log. With them, the order in which the grant
+	// was issued, the credential was issued and the grant was revoked is read
+	// from where each is anchored in the issuer's key log, which the issuer
+	// cannot rearrange, rather than from the times the events assert. The
+	// caller validates the key log itself (its signatures and its witnesses)
+	// before relying on it.
+	IssuerKEL     [][]byte
+	CredentialLog [][]byte
+}
+
+// ErrBodyWithheld is a check that held in every respect it could, without the
+// request's body: the signature, the signer, the grant, the times, and that
+// what the credential says was asked for is what was issued. What it could not
+// show is that what was asked for is what was signed. Given the body, Check
+// shows that too.
+var ErrBodyWithheld = errors.New("the request's body was not given, so what it asked for is not tied to what was signed")
+
+// askedFields are what a credential keeps of its request's body: what was
+// asked for, and nothing else the body may carry.
+var askedFields = []string{"name", "capabilities", "resource_constraints", "nonce"}
+
+// Asked is what a request's body asked for, as a credential keeps it. The one
+// definition the issuer uses to write it and a verifier uses to check it.
+func Asked(body string) (map[string]json.RawMessage, error) {
+	out := map[string]json.RawMessage{}
+	if strings.TrimSpace(body) == "" {
+		return out, nil
+	}
+	var all map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(body), &all); err != nil {
+		return nil, fmt.Errorf("the request's body is unreadable: %w", err)
+	}
+	for _, f := range askedFields {
+		if v, ok := all[f]; ok {
+			out[f] = v
+		}
+	}
+	return out, nil
+}
+
+// RequestDigest identifies a credential's request. One request authorises one
+// credential: a verifier holding several refuses a digest that appears twice.
+func RequestDigest(credential []byte) (string, error) {
+	var cred acdc
+	if err := json.Unmarshal(credential, &cred); err != nil {
+		return "", err
+	}
+	var req request
+	if err := json.Unmarshal(cred.A["request"], &req); err != nil || req.Signed == "" {
+		return "", ErrNoRequest
+	}
+	return iacrypto.Blake3QB64Must([]byte(req.Signed)), nil
 }
 
 // ErrNoRequest is a credential that carries no authorising request: one the
@@ -55,15 +115,16 @@ type Input struct {
 var ErrNoRequest = errors.New("the credential carries no authorising request")
 
 type request struct {
-	Kind      string `json:"kind"`
-	Signer    string `json:"signer"`
-	Signed    string `json:"signed"`
-	Signature string `json:"signature"`
-	Body      string `json:"body"`
+	Kind      string                     `json:"kind"`
+	Signer    string                     `json:"signer"`
+	Signed    string                     `json:"signed"`
+	Signature string                     `json:"signature"`
+	Asked     map[string]json.RawMessage `json:"asked"`
 }
 
 type acdc struct {
 	SAID   string                     `json:"d"`
+	Issuer string                     `json:"i"`
 	Schema string                     `json:"s"`
 	A      map[string]json.RawMessage `json:"a"`
 	E      map[string]json.RawMessage `json:"e"`
@@ -133,9 +194,6 @@ func Check(in Input) error {
 	default:
 		return fmt.Errorf("a request of kind %q is not one this check knows", req.Kind)
 	}
-	if iacrypto.Blake3QB64Must([]byte(req.Body)) != digest {
-		return fmt.Errorf("the body kept is not the body that was signed")
-	}
 	at, err := time.Parse(time.RFC3339, stamp)
 	if err != nil {
 		return fmt.Errorf("the request's time is unreadable")
@@ -143,7 +201,31 @@ func Check(in Input) error {
 	if at.After(issuedAt.Add(Skew)) {
 		return fmt.Errorf("the request was made after the credential was issued")
 	}
-	return checkAskedFor(cred, method, path, req.Body)
+	if at.Before(issuedAt.Add(-Skew)) {
+		return fmt.Errorf("the request was made long before the credential was issued")
+	}
+	if err := checkAskedFor(cred, method, path, req.Asked); err != nil {
+		return err
+	}
+	if !in.HaveBody {
+		return ErrBodyWithheld
+	}
+	if iacrypto.Blake3QB64Must([]byte(in.Body)) != digest {
+		return fmt.Errorf("the body given is not the body that was signed")
+	}
+	fromBody, err := Asked(in.Body)
+	if err != nil {
+		return err
+	}
+	if len(fromBody) != len(req.Asked) {
+		return fmt.Errorf("what the credential says was asked for is not what the signed body asked for")
+	}
+	for k, v := range fromBody {
+		if !sameJSON(v, req.Asked[k]) {
+			return fmt.Errorf("what the credential says was asked for is not what the signed body asked for")
+		}
+	}
+	return nil
 }
 
 // checkGrant checks a machine's request against its Controller Grant.
@@ -176,6 +258,9 @@ func checkGrant(in Input, cred acdc, req request, stamp string, issuedAt time.Ti
 	if grant.Schema != schemas.ControllerGrant.Schema.SAID {
 		return fmt.Errorf("the grant given is not a Controller Grant")
 	}
+	if grant.Issuer != cred.Issuer {
+		return fmt.Errorf("the machine's grant was issued by %s, the credential by %s", grant.Issuer, cred.Issuer)
+	}
 	holder, key := stringAttr(grant.A, "i"), stringAttr(grant.A, "public_key")
 	if holder != req.Signer {
 		return fmt.Errorf("the request was signed by %s, but the grant is %s's", req.Signer, holder)
@@ -200,6 +285,9 @@ func checkGrant(in Input, cred acdc, req request, stamp string, issuedAt time.Ti
 	if _, err := keri.CredentialStatus(g.SAID, in.GrantLog); err != nil {
 		return fmt.Errorf("the grant's log: %w", err)
 	}
+	if len(in.IssuerKEL) > 0 {
+		return checkKELOrder(in, g.SAID, cred.SAID)
+	}
 	for _, ev := range in.GrantLog {
 		e, err := keri.VerifyTELEvent(ev)
 		if err != nil {
@@ -215,14 +303,72 @@ func checkGrant(in Input, cred acdc, req request, stamp string, issuedAt time.Ti
 	return nil
 }
 
-// checkAskedFor checks that what the request asked for is what was issued.
-func checkAskedFor(cred acdc, method, path, body string) error {
-	var asked map[string]json.RawMessage
-	if body != "" {
-		if err := json.Unmarshal([]byte(body), &asked); err != nil {
-			return fmt.Errorf("the request's body is unreadable: %w", err)
+// checkKELOrder reads, from where each is anchored in the issuer's key log,
+// that the grant was issued before the credential and not revoked before it.
+func checkKELOrder(in Input, grantSAID, credSAID string) error {
+	place := func(log [][]byte, subject string) (iss, rev int, err error) {
+		iss, rev = -1, -1
+		for _, raw := range log {
+			ev, err := keri.VerifyTELEvent(raw)
+			if err != nil {
+				return 0, 0, err
+			}
+			at, ok := anchoredAt(in.IssuerKEL, subject, ev.SN, ev.SAID)
+			if !ok {
+				return 0, 0, fmt.Errorf("the %s of %s is not anchored in the issuer's key log", ev.Ilk, subject)
+			}
+			if ev.Ilk == "rev" {
+				rev = at
+			} else {
+				iss = at
+			}
+		}
+		return iss, rev, nil
+	}
+	gIss, gRev, err := place(in.GrantLog, grantSAID)
+	if err != nil {
+		return err
+	}
+	if len(in.CredentialLog) == 0 {
+		return fmt.Errorf("the credential's own log is needed to place its issue in the issuer's key log")
+	}
+	cIss, _, err := place(in.CredentialLog, credSAID)
+	if err != nil {
+		return err
+	}
+	if gIss < 0 || cIss < 0 || gIss >= cIss {
+		return fmt.Errorf("the machine's grant was not issued before the credential")
+	}
+	if gRev >= 0 && gRev < cIss {
+		return fmt.Errorf("the machine's grant was revoked before the credential was issued")
+	}
+	return nil
+}
+
+// anchoredAt is the place in the key log of the event that seals subject's
+// transaction event sn with digest said.
+func anchoredAt(kel [][]byte, subject string, sn int, said string) (int, bool) {
+	want := strconv.FormatInt(int64(sn), 16)
+	for _, raw := range kel {
+		var ev struct {
+			S string                   `json:"s"`
+			A []map[string]interface{} `json:"a"`
+		}
+		if json.Unmarshal(raw, &ev) != nil {
+			continue
+		}
+		for _, seal := range ev.A {
+			if seal["i"] == subject && seal["s"] == want && seal["d"] == said {
+				n, err := strconv.ParseInt(ev.S, 16, 64)
+				return int(n), err == nil
+			}
 		}
 	}
+	return 0, false
+}
+
+// checkAskedFor checks that what the request asked for is what was issued.
+func checkAskedFor(cred acdc, method, path string, asked map[string]json.RawMessage) error {
 	about := stringAttr(cred.A, "about")
 	segments := strings.Split(strings.Trim(path, "/"), "/")
 	switch cred.Schema {
