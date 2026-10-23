@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
@@ -26,6 +27,7 @@ type delegation struct {
 	e                     *keriengine.Engine
 	org, delegate         string
 	orgSeed, delegateSeed []byte
+	orgPub                string
 	icpB64, approvalB64   string
 	dipB64                string
 }
@@ -61,8 +63,8 @@ func newDelegation(t *testing.T) *delegation {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agreeToWitness(t, w, mc, icp.AID, true)
-	return &delegation{w: w, mc: mc, wkey: wkey, e: e, org: icp.AID, delegate: d.AID, orgSeed: orgSeed, delegateSeed: recSeed,
+	agreeToWitness(t, w, mc, icp.AID, true, orgPub, orgSeed)
+	return &delegation{w: w, mc: mc, orgPub: orgPub, wkey: wkey, e: e, org: icp.AID, delegate: d.AID, orgSeed: orgSeed, delegateSeed: recSeed,
 		icpB64: icp.RawBytesB64, approvalB64: base64.StdEncoding.EncodeToString(approval.Raw), dipB64: d.RawBytesB64}
 }
 
@@ -289,7 +291,7 @@ func TestAWitnessWithNoTipIsSentNothing(t *testing.T) {
 // witnessed.
 func TestADelegatorThatDidNotAskHasNoDelegatesWitnessed(t *testing.T) {
 	d := newDelegation(t)
-	agreeToWitness(t, d.w, d.mc, d.org, false)
+	agreeToWitness(t, d.w, d.mc, d.org, false, d.orgPub, d.orgSeed)
 	d.approved(t)
 	if _, err := d.send(d.delegate, d.dipB64, d.delegateSeed); err == nil {
 		t.Fatal("a delegate was witnessed for a delegator that did not ask")
@@ -314,5 +316,48 @@ func TestAWitnessRequestSaysWhetherItCoversDelegates(t *testing.T) {
 		if sent["covers_delegates"] != asks {
 			t.Fatalf("a request that asks=%v says %v", asks, sent["covers_delegates"])
 		}
+	}
+}
+
+// Coverage of a delegator's delegates changes, either way, only on the
+// delegator's own fresh signature: unsigned, signed by another key, or stale,
+// a request leaves it as it was.
+func TestOnlyTheDelegatorChangesWhetherItsDelegatesAreCovered(t *testing.T) {
+	d := newDelegation(t) // agreed, covering its delegates
+	_, otherSeed := func() (string, []byte) {
+		_, priv, _ := ed25519.GenerateKey(rand.Reader)
+		return "", priv.Seed()
+	}()
+	for name, req := range map[string]WitnessRequest{
+		"unsigned":       {RequesterAID: d.org, BackendType: BackendDesktop, CoversDelegates: false},
+		"another key":    signedRequest(d.org, false, otherSeed, time.Now()),
+		"stale":          signedRequest(d.org, false, d.orgSeed, time.Now().Add(-time.Hour)),
+		"another's name": signedRequest(d.delegate, false, d.orgSeed, time.Now()),
+	} {
+		d.w.ProcessInboundRequest(context.Background(), req)
+		if !d.w.CoversDelegatesOf(d.org) {
+			t.Fatalf("a request %s cleared the coverage", name)
+		}
+	}
+	d.w.ProcessInboundRequest(context.Background(), signedRequest(d.org, false, d.orgSeed, time.Now()))
+	if d.w.CoversDelegatesOf(d.org) {
+		t.Fatal("the delegator's own signed request did not clear its coverage")
+	}
+	unsigned := WitnessRequest{RequesterAID: d.org, BackendType: BackendDesktop, CoversDelegates: true}
+	d.w.ProcessInboundRequest(context.Background(), unsigned)
+	if d.w.CoversDelegatesOf(d.org) {
+		t.Fatal("an unsigned request switched coverage on")
+	}
+}
+
+// An identity already witnessed for, asking again, is not refused for want of
+// capacity: it takes no more.
+func TestAskingAgainTakesNoMoreCapacity(t *testing.T) {
+	d := newDelegation(t)
+	for i := 0; i < MaxOutgoingWitnessing; i++ {
+		d.w.Store.SaveContactMeta(ContactMeta{ContactAID: fmt.Sprintf("EFull%d", i), WitnessingFor: true, BackendType: BackendDesktop})
+	}
+	if res := d.w.ProcessInboundRequest(context.Background(), signedRequest(d.org, true, d.orgSeed, time.Now())); !res.Accepted {
+		t.Fatalf("an identity already witnessed for, asking again, was refused: %s", res.Reason)
 	}
 }

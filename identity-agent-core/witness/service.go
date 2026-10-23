@@ -46,6 +46,9 @@ type Service struct {
 	// AskToCoverDelegates says whether this agent's witness requests ask for
 	// the identities it delegates to be witnessed too.
 	AskToCoverDelegates func() bool
+	// SignAsRequester signs a witness request as this agent's identity, with
+	// its current key, where this agent holds it.
+	SignAsRequester func(statement string) (string, error)
 	// FetchTip asks a witness how far it holds an identity's key log. Replaceable
 	// so a test needs no network.
 	FetchTip    func(ctx context.Context, url string) (TipAnswer, error)
@@ -1302,6 +1305,16 @@ func (s *Service) agreeToDelegates(requester string, covers bool) {
 // CoversDelegatesOf reports whether delegator's agreement asked for the
 // identities it delegates to be witnessed too.
 func (s *Service) CoversDelegatesOf(delegator string) bool { return s.delegatorCovered(delegator) }
+
+// DelegatesWitnessedFor reports whether this witness will witness the
+// identities delegator delegates: its agreement asked, and the operator has not
+// switched delegate witnessing off.
+func (s *Service) DelegatesWitnessedFor(delegator string) bool {
+	if v, _ := s.Store.GetConfig(ConfigDelegates); strings.EqualFold(strings.TrimSpace(v), "off") {
+		return false
+	}
+	return s.delegatorCovered(delegator)
+}
 
 func (s *Service) delegatorCovered(delegator string) bool {
 	covered := map[string]bool{}

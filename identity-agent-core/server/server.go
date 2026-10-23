@@ -178,6 +178,9 @@ type CoreServer struct {
 	anchorStop chan struct{}
 	// anchorStopMu guards anchorStop, which Stop closes while workers read it.
 	anchorStopMu sync.Mutex
+	// signedElsewhere holds, while a waiting grant is appended, the signature
+	// the device holding the identity's key made over its interaction.
+	signedElsewhere sync.Map
 	// grantsMu holds machines' grants still while a credential is issued on
 	// one: revoking, re-issuing or replacing a grant takes it exclusively.
 	grantsMu sync.RWMutex
@@ -405,6 +408,13 @@ func New(cfg Config) (*CoreServer, error) {
 	// An Identity Agent that anchors its record through a delegated record
 	// identity asks its witnesses to witness that identity too.
 	wsvc.AskToCoverDelegates = s.anchorsItsRecord
+	wsvc.SignAsRequester = func(statement string) (string, error) {
+		seed, err := s.identitySigningSeed()
+		if err != nil {
+			return "", err
+		}
+		return login.SignString(statement, seed)
+	}
 	wsvc.OurWitnessAID = func() (string, error) {
 		_, aid, err := s.witnessSigningKey()
 		return aid, err

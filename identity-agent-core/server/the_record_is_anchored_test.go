@@ -963,8 +963,8 @@ func TestARealWitnessWitnessesTheRecord(t *testing.T) {
 
 	// The witness agrees to witness for the organisation, the ordinary way.
 	owner, _ := s.DataStore.GetIdentity()
-	peer.svc.Contacts.SaveContact(store.ContactRecord{AID: owner.AID, Status: "accepted", ContactCategory: "trusted"})
-	if res := peer.svc.ProcessInboundRequest(context.Background(), witness.WitnessRequest{RequesterAID: owner.AID, BackendType: witness.BackendDesktop, CoversDelegates: true}); !res.Accepted {
+	peer.svc.Contacts.SaveContact(store.ContactRecord{AID: owner.AID, Status: "accepted", ContactCategory: "trusted", PublicKey: owner.PublicKey})
+	if res := peer.svc.ProcessInboundRequest(context.Background(), signedWitnessRequest(t, s, owner.AID, true)); !res.Accepted {
 		t.Fatalf("the witness did not agree to witness for the organisation: %s", res.Reason)
 	}
 
@@ -1058,15 +1058,108 @@ func TestAWitnessRequestCarriesWhetherItCoversDelegates(t *testing.T) {
 		s := recordWorld(t)
 		sq := s.DataStore.(*store.SQLiteStore)
 		s.WitnessService = witness.NewService(witness.NewSQLiteStore(sq.DB()), sq, s.KeriDriver, witness.BackendDesktop)
-		s.DataStore.SaveContact(store.ContactRecord{AID: "ERequester0000000000000000000000000000000000", Status: "accepted", ContactCategory: "trusted"})
-		body := fmt.Sprintf(`{"requester_aid":"ERequester0000000000000000000000000000000000","backend_type":"desktop","covers_delegates":%v}`, asks)
+		owner, _ := s.DataStore.GetIdentity()
+		// The requester is this identity, asking itself: what matters is
+		// that the flag is carried, signed, through the route.
+		s.DataStore.SaveContact(store.ContactRecord{AID: owner.AID, Status: "accepted", ContactCategory: "trusted", PublicKey: owner.PublicKey})
+		req := signedWitnessRequest(t, s, owner.AID, asks)
+		body := fmt.Sprintf(`{"requester_aid":%q,"backend_type":"desktop","covers_delegates":%v,"stamp":%q,"signature":%q}`,
+			owner.AID, asks, req.Stamp, req.Signature)
 		rec := httptest.NewRecorder()
 		s.handleWitnessRequest(rec, httptest.NewRequest("POST", "/api/witness/request", strings.NewReader(body)))
 		if rec.Code != http.StatusOK {
 			t.Fatalf("the request: %d %s", rec.Code, rec.Body.String())
 		}
-		if got := s.WitnessService.CoversDelegatesOf("ERequester0000000000000000000000000000000000"); got != asks {
-			t.Fatalf("a request asking=%v is recorded as covering delegates=%v", asks, got)
+		if got := s.WitnessService.CoversDelegatesOf(owner.AID); got != asks {
+			t.Fatalf("a signed request asking=%v is recorded as covering delegates=%v", asks, got)
 		}
+	}
+}
+
+// signedWitnessRequest is a witness request signed as s's identity.
+func signedWitnessRequest(t *testing.T, s *CoreServer, aid string, covers bool) witness.WitnessRequest {
+	t.Helper()
+	seed, err := s.identitySigningSeed()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stamp := time.Now().UTC().Format(time.RFC3339)
+	sig, _ := login.SignString(witness.RequestStatement(aid, covers, stamp), seed)
+	return witness.WitnessRequest{RequesterAID: aid, BackendType: witness.BackendDesktop, CoversDelegates: covers, Stamp: stamp, Signature: sig}
+}
+
+// Witnesses enrolled before delegates were asked about are asked, by the
+// signed agreement request, once the record identity is made; one whose
+// operator will not witness delegates is reported.
+func TestEnrolledWitnessesAreAskedToCoverTheRecord(t *testing.T) {
+	willing, unwilling := startPeer(t, "willing"), startPeer(t, "unwilling")
+	unwilling.svc.Store.SetConfig(witness.ConfigDelegates, "off")
+	s, _ := foundedWith(t, agentWithDerivedIdentity(t), []string{willing.witnessKey, unwilling.witnessKey}, 1)
+	s.DeclaredEntityType = "organization"
+	m, err := sandbox.NewManager(sandbox.ManagerConfig{DataDir: s.DataDir, ManifestsDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(m.Stop)
+	s.SandboxManager = m
+	m.SetEventSigner(&invocationSigner{s: s})
+	sq := s.DataStore.(*store.SQLiteStore)
+	s.WitnessService = witness.NewService(witness.NewSQLiteStore(sq.DB()), sq, s.KeriDriver, witness.BackendDesktop)
+	s.WitnessService.AskToCoverDelegates = s.anchorsItsRecord
+	s.WitnessService.SignAsRequester = func(statement string) (string, error) {
+		seed, err := s.identitySigningSeed()
+		if err != nil {
+			return "", err
+		}
+		return login.SignString(statement, seed)
+	}
+	owner, _ := s.DataStore.GetIdentity()
+	s.WitnessService.OurAID = func() string { return owner.AID }
+	for i, p := range []*peerAgent{willing, unwilling} {
+		aid := fmt.Sprintf("EPeer%d00000000000000000000000000000000000000", i)
+		s.DataStore.SaveContact(store.ContactRecord{AID: aid, OobiURL: p.base, Status: "accepted", ContactCategory: "trusted"})
+		s.WitnessService.Store.SaveContactMeta(witness.ContactMeta{ContactAID: aid, WitnessKey: p.witnessKey})
+		// Enrolled already, without delegates.
+		p.svc.Contacts.SaveContact(store.ContactRecord{AID: owner.AID, Status: "accepted", ContactCategory: "trusted", PublicKey: owner.PublicKey})
+		if res := p.svc.ProcessInboundRequest(context.Background(), signedWitnessRequest(t, s, owner.AID, false)); !res.Accepted {
+			t.Fatalf("enrolling: %s", res.Reason)
+		}
+	}
+	writeRows(t, s, 2)
+	if ok, err := s.anchorRecord(); err != nil || !ok {
+		t.Fatalf("anchoring: %v %v", ok, err)
+	}
+	for i := 0; i < 200 && (!willing.svc.CoversDelegatesOf(owner.AID) || len(s.witnessesDeclining()) == 0); i++ {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !willing.svc.CoversDelegatesOf(owner.AID) {
+		t.Fatal("an enrolled witness was not asked to cover the record identity")
+	}
+	declining := s.witnessesDeclining()
+	if _, ok := declining[unwilling.witnessKey]; !ok || len(declining) != 1 {
+		t.Fatalf("the witnesses reported declining: %v", declining)
+	}
+	if got := chainSays(t, s); got["witnesses_declining_record"] == nil {
+		t.Fatalf("the check does not report the declining witness: %v", got)
+	}
+
+	// Its operator allows delegates later. After a restart, the next
+	// anchoring asks again, and it agrees.
+	unwilling.svc.Store.SetConfig(witness.ConfigDelegates, "")
+	// As enrolled before delegates were asked about: agreed, not covering.
+	unwilling.svc.ProcessInboundRequest(context.Background(), signedWitnessRequest(t, s, owner.AID, false))
+	if unwilling.svc.CoversDelegatesOf(owner.AID) {
+		t.Fatal("the coverage was not cleared")
+	}
+	s.record.coverAsked.Store(false)
+	writeRows(t, s, 1)
+	if ok, err := s.anchorRecord(); err != nil || !ok {
+		t.Fatalf("anchoring again: %v %v", ok, err)
+	}
+	for i := 0; i < 200 && !unwilling.svc.CoversDelegatesOf(owner.AID); i++ {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !unwilling.svc.CoversDelegatesOf(owner.AID) {
+		t.Fatal("the next anchoring after a restart did not ask again")
 	}
 }

@@ -75,6 +75,7 @@ func startPeer(t *testing.T, name string) *peerAgent {
 	r.Post("/api/witness/event", core.handleWitnessEvent)
 	r.Get("/api/witness/kel/{signer_aid}", core.handleWitnessKel)
 	r.Get("/api/witness/kel/{signer_aid}/tip", core.handleWitnessKelTip)
+	r.Post("/api/witness/request", core.handleWitnessRequest)
 	srv := httptest.NewServer(r)
 	t.Cleanup(srv.Close)
 

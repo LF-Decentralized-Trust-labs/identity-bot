@@ -103,6 +103,13 @@ type recordState struct {
 	witnessKick chan struct{}
 	witnessMu   sync.Mutex
 	witnessJob  witnessJob
+
+	// coverAsked is whether this run has asked the identity's witnesses to
+	// witness the record identity, by consent; declined, the ones that would
+	// not and why.
+	coverAsked atomic.Bool
+	declinedMu sync.Mutex
+	declined   map[string]string
 }
 
 type witnessJob struct {
@@ -412,6 +419,7 @@ func (s *CoreServer) recordIdentity() (recordIdentityRecord, []byte, error) {
 		log.Printf("[record] the record identity %s was made but could not be marked so: %v", rec.AID, err)
 	}
 	s.witnessRecord(owner.AID, rec.AID, witnesses, toad)
+	s.askWitnessesToCoverTheRecord(witnesses, true)
 	log.Printf("[record] record identity %s made, approved in %s's key log, witnessed by %d", rec.AID, owner.AID, len(witnesses))
 	return rec, seed, nil
 }
@@ -653,6 +661,7 @@ func (s *CoreServer) anchorRecord() (bool, error) {
 		log.Printf("[record] the record identity's tip could not be kept outside the database: %v", err)
 	}
 	if witnesses, toad, err := keeper.WitnessConfig(rec.AID); err == nil {
+		s.askWitnessesToCoverTheRecord(witnesses, false)
 		if owner, err := s.DataStore.GetIdentity(); err == nil && owner != nil {
 			s.witnessRecord(owner.AID, rec.AID, witnesses, toad)
 		}
@@ -1005,4 +1014,43 @@ func thresholdOf(v interface{}) int {
 	s, _ := v.(string)
 	n, _ := strconv.ParseInt(s, 16, 64)
 	return int(n)
+}
+
+// askWitnessesToCoverTheRecord asks the identity's witnesses, by the ordinary
+// signed agreement request, to witness the record identity it delegates, and
+// keeps which declined. Asked when the record identity is made, and once
+// after each start, so a witness enrolled before delegates were asked about is
+// asked. Where the identity's key is elsewhere the request cannot be signed,
+// and a witness changes no coverage on an unsigned one.
+func (s *CoreServer) askWitnessesToCoverTheRecord(witnesses []string, made bool) {
+	if len(witnesses) == 0 || s.WitnessService == nil {
+		return
+	}
+	if !made && s.record.coverAsked.Swap(true) {
+		return
+	}
+	s.record.coverAsked.Store(true)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		declined := s.WitnessService.AskToCoverDelegatesOf(ctx, witnesses)
+		for key, why := range declined {
+			log.Printf("[record] witness %s will not witness the record identity: %s", key, why)
+		}
+		s.record.declinedMu.Lock()
+		s.record.declined = declined
+		s.record.declinedMu.Unlock()
+	}()
+}
+
+// witnessesDeclining are the identity's witnesses that would not witness the
+// record identity, and why.
+func (s *CoreServer) witnessesDeclining() map[string]string {
+	s.record.declinedMu.Lock()
+	defer s.record.declinedMu.Unlock()
+	out := map[string]string{}
+	for k, v := range s.record.declined {
+		out[k] = v
+	}
+	return out
 }

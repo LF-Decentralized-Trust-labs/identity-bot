@@ -127,6 +127,18 @@ switch delegate witnessing off (`witness.delegates` = `off`) or cap how many del
 delegator may have witnessed (`witness.delegates_max`). A request that does not ask covers
 no delegate.
 
+The request route is open, so the request carries a `stamp` and the requester's
+`signature`, by its current key, over `witness-request/v1`, its identifier, whether it
+covers its delegates, and the stamp. A witness changes whether a requester's delegates are
+covered, either way, only on a request whose signature verifies against the requester's
+current key (from the key log the witness holds, or else the key its contact resolved) and
+whose stamp is within five minutes; anything else may ask to be witnessed and changes no
+coverage. The answer says whether the requester's delegates are now covered
+(`covers_delegates`). An identity already witnessed for, asking again, takes no more
+capacity. An Identity Agent that anchors its record asks its witnesses when its record
+identity is made, and again once after each start, and reports the ones that will not
+cover it.
+
 An event the witness already holds is answered with the receipt it gave, so a controller
 sending its key log from where it thinks the witness stopped carries on; something else at
 the same place is refused as a conflicting history. Sequence numbers are read as KERI

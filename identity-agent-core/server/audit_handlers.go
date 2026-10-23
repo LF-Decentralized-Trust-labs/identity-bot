@@ -287,6 +287,9 @@ func (s *CoreServer) handleVerifyAuditChain(w http.ResponseWriter, r *http.Reque
 		"awaiting_witnesses": anchors.AwaitingWitnesses,
 		"witnesses_answered": anchors.WitnessesAnswered,
 	}
+	if declining := s.witnessesDeclining(); len(declining) > 0 {
+		resp["witnesses_declining_record"] = declining
+	}
 	if anchors.WitnessesAnswered > 0 {
 		resp["witness_confirmed_tip"] = anchors.WitnessTip
 	}

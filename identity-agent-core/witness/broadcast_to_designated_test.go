@@ -246,7 +246,7 @@ func TestAWitnessTakesOnADelegateOnlyFromItsApproval(t *testing.T) {
 		_, err := witness.ReceiveEvent(aid, raw, sig)
 		return err
 	}
-	agreeToWitness(t, witness, mc, icp.AID, true)
+	agreeToWitness(t, witness, mc, icp.AID, true, orgPub, orgSeed)
 	if err := send(icp.AID, icp.RawBytesB64, orgSeed); err != nil {
 		t.Fatal(err)
 	}
@@ -282,10 +282,17 @@ func TestAWitnessTakesOnADelegateOnlyFromItsApproval(t *testing.T) {
 
 // agreeToWitness has the witness agree to witness for aid by the ordinary
 // request, covering its delegates or not.
-func agreeToWitness(t *testing.T, w *Service, mc *memContacts, aid string, coversDelegates bool) {
+func agreeToWitness(t *testing.T, w *Service, mc *memContacts, aid string, coversDelegates bool, pub string, seed []byte) {
 	t.Helper()
-	_ = mc.SaveContact(store.ContactRecord{AID: aid, Status: "accepted", ContactCategory: "trusted"})
-	if res := w.ProcessInboundRequest(context.Background(), WitnessRequest{RequesterAID: aid, BackendType: BackendDesktop, CoversDelegates: coversDelegates}); !res.Accepted {
+	_ = mc.SaveContact(store.ContactRecord{AID: aid, Status: "accepted", ContactCategory: "trusted", PublicKey: pub})
+	if res := w.ProcessInboundRequest(context.Background(), signedRequest(aid, coversDelegates, seed, time.Now())); !res.Accepted {
 		t.Fatalf("the witness did not agree: %s", res.Reason)
 	}
+}
+
+// signedRequest is a witness request as the requester signs it.
+func signedRequest(aid string, covers bool, seed []byte, at time.Time) WitnessRequest {
+	stamp := at.UTC().Format(time.RFC3339)
+	sig, _ := login.SignString(RequestStatement(aid, covers, stamp), seed)
+	return WitnessRequest{RequesterAID: aid, BackendType: BackendDesktop, CoversDelegates: covers, Stamp: stamp, Signature: sig}
 }

@@ -146,7 +146,9 @@ func (s *CoreServer) handleWitnessRequest(w http.ResponseWriter, r *http.Request
 		EventJSON     string `json:"event_json"`
 		// CoversDelegates asks for the identities the requester delegates to
 		// be witnessed too.
-		CoversDelegates bool `json:"covers_delegates"`
+		CoversDelegates bool   `json:"covers_delegates"`
+		Stamp           string `json:"stamp"`
+		Signature       string `json:"signature"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid witness request body", err.Error())
@@ -166,15 +168,18 @@ func (s *CoreServer) handleWitnessRequest(w http.ResponseWriter, r *http.Request
 	}
 	result := s.WitnessService.ProcessInboundRequest(ctx, witness.WitnessRequest{
 		RequesterAID: req.RequesterAID, RequesterOOBI: req.RequesterOOBI, BackendType: req.BackendType,
-		CoversDelegates: req.CoversDelegates,
+		CoversDelegates: req.CoversDelegates, Stamp: req.Stamp, Signature: req.Signature,
 	})
 	status := "declined"
 	if result.Accepted {
 		status = "accepted"
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
+	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status": status, "reason": result.Reason, "task_id": result.TaskID,
+		// Whether, after this, the identities the requester delegates are
+		// witnessed too.
+		"covers_delegates": result.Accepted && s.WitnessService.DelegatesWitnessedFor(req.RequesterAID),
 	})
 }
 

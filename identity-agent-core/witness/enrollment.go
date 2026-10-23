@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"identity-agent-core/login"
 	"identity-agent-core/store"
 )
 
@@ -20,6 +21,64 @@ type WitnessRequest struct {
 	// requester delegates too. Not assumed: a request that does not ask
 	// covers none.
 	CoversDelegates bool
+	// Stamp and Signature are the requester's signature, by its current key,
+	// over who it is, whether it covers its delegates, and when it asked
+	// (RequestStatement). Coverage is changed, either way, only by a request
+	// that carries one that holds and is fresh: the route is open, and
+	// anybody could otherwise switch it on or off for anyone.
+	Stamp     string
+	Signature string
+}
+
+// RequestStatement is what a requester signs in a witness request.
+func RequestStatement(requester string, covers bool, stamp string) string {
+	return fmt.Sprintf("witness-request/v1\n%s\n%v\n%s", requester, covers, stamp)
+}
+
+// requestFreshness is how far a signed witness request's stamp may be from
+// now.
+const requestFreshness = 5 * time.Minute
+
+// signedByRequester reports whether req carries the requester's own fresh
+// signature, checked against its current key: the newest establishment event
+// this witness holds for it, or else the key its contact record resolved.
+func (s *Service) signedByRequester(req WitnessRequest) bool {
+	if req.Signature == "" || req.Stamp == "" {
+		return false
+	}
+	at, err := time.Parse(time.RFC3339, req.Stamp)
+	if err != nil || time.Since(at) > requestFreshness || time.Until(at) > requestFreshness {
+		return false
+	}
+	key := ""
+	if held, err := s.Store.GetKelEvents(req.RequesterAID); err == nil {
+		for _, e := range held {
+			var ev map[string]interface{}
+			if json.Unmarshal([]byte(e.EventJSON), &ev) != nil {
+				continue
+			}
+			switch ev["t"] {
+			case "icp", "rot", "dip", "drt":
+				if keys, ok := ev["k"].([]interface{}); ok && len(keys) > 0 {
+					key, _ = keys[0].(string)
+				}
+			}
+		}
+	}
+	if key == "" {
+		if c, _ := s.Contacts.GetContact(req.RequesterAID); c != nil {
+			key = c.PublicKey
+		}
+	}
+	if key == "" {
+		return false
+	}
+	pub, err := login.DecodeVerkey(key)
+	if err != nil {
+		return false
+	}
+	ok, err := login.VerifyString(RequestStatement(req.RequesterAID, req.CoversDelegates, req.Stamp), req.Signature, pub)
+	return err == nil && ok
 }
 
 // AcceptCallback is the accept POST-back body.
@@ -65,6 +124,10 @@ func (s *Service) EvaluateInboundRequest(req WitnessRequest) (bool, string) {
 	if !IsBackendEligible(s.BackendType) {
 		return false, "local_backend_ineligible"
 	}
+	// One already witnessed for, asking again, takes no more capacity.
+	if meta, _ := s.Store.GetContactMeta(req.RequesterAID); meta != nil && meta.WitnessingFor {
+		return true, ""
+	}
 	outgoing, _ := s.Store.CountWitnessingFor()
 	if outgoing >= MaxOutgoingWitnessing {
 		return false, "capacity_full"
@@ -94,7 +157,9 @@ func (s *Service) ProcessInboundRequest(ctx context.Context, req WitnessRequest)
 			reason = "enroll_failed"
 			detail = err.Error()
 		} else {
-			s.agreeToDelegates(req.RequesterAID, req.CoversDelegates)
+			if s.signedByRequester(req) {
+				s.agreeToDelegates(req.RequesterAID, req.CoversDelegates)
+			}
 			taskStatus = "completed"
 			detail = fmt.Sprintf("Now witnessing key events for %s", req.RequesterAID[:12])
 		}
