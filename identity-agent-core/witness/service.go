@@ -43,6 +43,9 @@ type Service struct {
 	HTTPClient  *http.Client
 	PostEvent   EventPoster
 	delegatesMu sync.Mutex
+	// confirmed is, by identity and witness, the furthest place a witness
+	// has confirmed holding: by its signed tip, or its receipt.
+	confirmed sync.Map
 	// AskToCoverDelegates says whether this agent's witness requests ask for
 	// the identities it delegates to be witnessed too.
 	AskToCoverDelegates func() bool
@@ -577,6 +580,16 @@ func (s *Service) BroadcastEvent(ctx context.Context, signerAID string, rawEvent
 // witness is asked only for its tip, and one whose tip is not known is sent
 // nothing this time.
 func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []SignedEvent, designated []string, threshold int) {
+	if len(events) == 0 {
+		return
+	}
+	localTip := -1
+	if raw, err := base64.StdEncoding.DecodeString(events[len(events)-1].RawBytesB64); err == nil {
+		var ev map[string]interface{}
+		if json.Unmarshal(raw, &ev) == nil {
+			localTip, _ = eventSeq(ev)
+		}
+	}
 	known := s.designatedTargets(designated)
 	// Each event's receipts are counted against its threshold, so each has a
 	// finalisation to count them on.
@@ -603,6 +616,11 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 			log.Printf("[witness] %s designates %s, which this agent has no address for", signerAID, key)
 			continue
 		}
+		// A witness that has already confirmed holding the log as far as it
+		// goes here is not asked again until there is more to send.
+		if localTip >= 0 && s.confirmedTip(signerAID, key) >= localTip {
+			continue
+		}
 		wg.Add(1)
 		go func(key string, w witnessTarget) {
 			defer wg.Done()
@@ -616,6 +634,7 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 			if !ok {
 				return
 			}
+			s.confirm(signerAID, key, tip.SN)
 			from := tip.SN + 1
 			for _, e := range events {
 				raw, err := base64.StdEncoding.DecodeString(e.RawBytesB64)
@@ -640,6 +659,9 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 				}
 				if sig, wit, verr := receiptFromResponse(resp, said); verr == nil && wit == key {
 					s.onReceipt(said, key, sig)
+					if sn, err := eventSeq(ev); err == nil {
+						s.confirm(signerAID, key, sn)
+					}
 				}
 			}
 		}(key, w)
@@ -1364,4 +1386,24 @@ func (s *Service) dropDelegatesOf(delegator string) {
 		log.Printf("[witness] stopped witnessing %s, delegated by %s, which this agent no longer witnesses", aid, delegator)
 	}
 	s.saveDelegateMap(m)
+}
+
+func (s *Service) confirmedTip(aid, witnessKey string) int {
+	if v, ok := s.confirmed.Load(aid + "|" + witnessKey); ok {
+		return v.(int)
+	}
+	return -1
+}
+
+func (s *Service) confirm(aid, witnessKey string, sn int) {
+	key := aid + "|" + witnessKey
+	for {
+		v, loaded := s.confirmed.LoadOrStore(key, sn)
+		if !loaded {
+			return
+		}
+		if v.(int) >= sn || s.confirmed.CompareAndSwap(key, v, sn) {
+			return
+		}
+	}
 }

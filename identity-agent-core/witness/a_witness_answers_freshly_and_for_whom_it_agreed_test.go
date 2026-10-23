@@ -390,3 +390,47 @@ func TestASignedRequestCannotBeReplayed(t *testing.T) {
 		t.Fatal("the same request, replayed, was acted on again")
 	}
 }
+
+// A witness that has confirmed holding the log as far as it goes is not asked
+// again until there is more to send.
+func TestAWitnessUpToDateIsNotAskedAgain(t *testing.T) {
+	d := newDelegation(t)
+	sender, mc := testService(t)
+	mc.contacts["EWitness"] = store.ContactRecord{AID: "EWitness", OobiURL: "http://w.test", IsWitness: true}
+	_ = sender.Store.SaveContactMeta(ContactMeta{ContactAID: "EWitness", WitnessKey: d.wkey})
+	asked := 0
+	sender.FetchTip = func(_ context.Context, url string) (TipAnswer, error) {
+		asked++
+		_, nonce, _ := strings.Cut(url, "?nonce=")
+		return d.w.KelTip(d.org, nonce)
+	}
+	sender.PostEvent = func(_ context.Context, _ string, body []byte) (map[string]interface{}, error) {
+		var req struct {
+			AID   string `json:"aid"`
+			Event string `json:"event_b64"`
+			Sig   string `json:"cesr_signature"`
+		}
+		_ = json.Unmarshal(body, &req)
+		raw, _ := base64.StdEncoding.DecodeString(req.Event)
+		return d.w.ReceiveEvent(req.AID, raw, req.Sig)
+	}
+	signed := func(rawB64 string) SignedEvent {
+		raw, _ := base64.StdEncoding.DecodeString(rawB64)
+		sig, _ := login.SignString(string(raw), d.orgSeed)
+		return SignedEvent{RawBytesB64: rawB64, CesrSignature: sig}
+	}
+	log := []SignedEvent{signed(d.icpB64), signed(d.approvalB64)}
+	sender.BringUpToDate(context.Background(), d.org, log, []string{d.wkey}, 1)
+	if asked != 1 {
+		t.Fatalf("asked %d times bringing it up to date", asked)
+	}
+	sender.BringUpToDate(context.Background(), d.org, log, []string{d.wkey}, 1)
+	if asked != 1 {
+		t.Fatal("a witness already up to date was asked again")
+	}
+	log = append(log, signed(d.interaction(t, "org", d.org, 1)))
+	sender.BringUpToDate(context.Background(), d.org, log, []string{d.wkey}, 1)
+	if asked != 2 {
+		t.Fatal("a witness was not asked once there was more to send")
+	}
+}

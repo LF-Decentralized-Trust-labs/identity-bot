@@ -148,7 +148,9 @@ writes them, in hexadecimal.
 `GET /witness/kel/{aid}/tip?nonce=…` answers how far the witness holds an identity's key
 log: the newest event's place and digest, signed by the witness's own key together with
 the asker's nonce, so the answer is fresh and the witness's own. A controller asks this
-before sending, and sends only what the witness lacks.
+before sending, and sends only what the witness lacks; a witness that has confirmed holding
+the log as far as it goes, by its tip or its receipts, is not asked again until there is
+more to send.
 
 ### Task Types
 
