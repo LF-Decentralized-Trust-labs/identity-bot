@@ -2,10 +2,13 @@ package server
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	keri "github.com/grapeid/keri-go"
+	"identity-agent-core/iacrypto"
+	"identity-agent-core/recovery"
 	"identity-agent-core/sandbox"
 	"net/http"
 	"net/http/httptest"
@@ -925,5 +928,91 @@ func TestAGrantWhoseWithdrawalCannotBeAskedStaysWithdrawing(t *testing.T) {
 	c.requester.s.withdrawOrSay("Egrant-in-no-registry-here")
 	if r, _ := c.requester.s.DataStore.GetCredential("Egrant-in-no-registry-here"); r.Status != credentialStatusWithdrawing {
 		t.Fatalf("a grant still in the published record reads %q here", r.Status)
+	}
+}
+
+// Issuing a credential outside a registry where the key is on another device
+// writes nothing: not through the API, not unsigned.
+func TestIssuingOutsideARegistryWhereTheKeyIsElsewhereWritesNothing(t *testing.T) {
+	c := newTwoCores(t)
+	owner, _ := c.requester.s.DataStore.GetIdentity()
+	before, _ := c.requester.s.DataStore.GetEvents(owner.AID)
+	rec := httptest.NewRecorder()
+	c.requester.s.router.ServeHTTP(rec, local("POST", "/api/credential/issue",
+		`{"claims":{"role":"engineer"},"schema_said":"EBdXt3gIXOf2BBWNHdSXCJnFJL5OuQPyM5K0neuniccM"}`))
+	if rec.Code < 400 {
+		t.Fatalf("an issuance where the key is elsewhere was answered %d %s", rec.Code, rec.Body.String())
+	}
+	if after, _ := c.requester.s.DataStore.GetEvents(owner.AID); len(after) != len(before) {
+		t.Fatal("an issuance where the key is elsewhere wrote into the key log")
+	}
+	if _, err := c.requester.s.KeriDriver.IssueCredential(owner.AID, map[string]interface{}{"role": "engineer"},
+		"EBdXt3gIXOf2BBWNHdSXCJnFJL5OuQPyM5K0neuniccM", "", nil); err == nil {
+		t.Fatal("the engine issued outside a registry where the key is elsewhere")
+	}
+	if kel, _ := c.requester.s.KeriDriver.GetKel(owner.AID); kel.EventCount != len(before) {
+		t.Fatalf("the engine's key log holds %d events, not %d", kel.EventCount, len(before))
+	}
+	if unsigned := c.requester.s.unsignedOwnEvents(); len(unsigned) != 0 {
+		t.Fatalf("unsigned events here: %v", unsigned)
+	}
+}
+
+// Every rotation of this identity where its key is on another device is
+// refused, and writes nothing: the rotation route, a recovery's rotation,
+// and changing who owns it.
+func TestNoRotationIsMadeWhereTheKeyIsElsewhere(t *testing.T) {
+	c := newTwoCores(t)
+	owner, _ := c.requester.s.DataStore.GetIdentity()
+	before, _ := c.requester.s.DataStore.GetEvents(owner.AID)
+	k1, k2 := testRotationKeys(t)
+	for _, call := range []struct{ path, body string }{
+		{"/api/rotation", `{"name":"` + owner.AID + `","new_public_key":"` + k1 + `","new_next_public_key":"` + k2 + `"}`},
+		{"/api/owners/ceremony", `{"invite":["Sam"],"own_public_key":"` + k1 + `","own_next_public_key":"` + k2 + `"}`},
+		{"/api/recovery/sessions/any/rotation", `{"name":"` + owner.AID + `","new_public_key":"` + k1 + `","new_next_public_key":"` + k2 + `"}`},
+	} {
+		rec := httptest.NewRecorder()
+		c.requester.s.router.ServeHTTP(rec, local("POST", call.path, call.body))
+		if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "not made here") {
+			t.Fatalf("%s was answered %d %s", call.path, rec.Code, rec.Body.String())
+		}
+	}
+	if _, err := c.requester.s.rotateCarryingTheCommitment(owner.AID, k1, k2); !errors.Is(err, errKeyElsewhere) {
+		t.Fatalf("a rotation carrying the commitment: %v", err)
+	}
+	if err := c.requester.s.mayRotateHere(owner.AID); err == nil {
+		t.Fatal("a recovery rotation would be made here")
+	}
+	if after, _ := c.requester.s.DataStore.GetEvents(owner.AID); len(after) != len(before) {
+		t.Fatal("a refused rotation wrote into the key log")
+	}
+	// Where the key is held, the same check lets a rotation through.
+	if err := c.device.mayRotateHere(owner.AID); err != nil {
+		t.Fatalf("a rotation where the key is held: %v", err)
+	}
+}
+
+func testRotationKeys(t *testing.T) (string, string) {
+	t.Helper()
+	a, _ := signingPair(t, 81)
+	b, _ := signingPair(t, 82)
+	return iacrypto.VerkeyQB64(ed25519.NewKeyFromSeed(a).Public().(ed25519.PublicKey)),
+		iacrypto.VerkeyQB64(ed25519.NewKeyFromSeed(b).Public().(ed25519.PublicKey))
+}
+
+// Break-glass root rotation, switched on, is refused whole and plainly before
+// anything is made, since its events are not yet signed by their keys.
+func TestBreakGlassRootRotationIsRefusedPlainly(t *testing.T) {
+	aMachineThatMayFound(t)
+	prior := recovery.RootAIDRotationEnabled
+	recovery.RootAIDRotationEnabled = true
+	t.Cleanup(func() { recovery.RootAIDRotationEnabled = prior })
+	s := agentWithDerivedIdentity(t)
+	s.KeriDriver = keriengine.New()
+	s.engineSigns()
+	rec := httptest.NewRecorder()
+	s.handleRecoveryRootAIDRotation(rec, local("POST", "/api/recovery/root-aid-rotation", `{}`))
+	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "neither is yet signed by its key") {
+		t.Fatalf("break-glass root rotation was answered %d %s", rec.Code, rec.Body.String())
 	}
 }

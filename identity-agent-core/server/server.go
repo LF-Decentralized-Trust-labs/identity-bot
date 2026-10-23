@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -1881,6 +1882,10 @@ func (s *CoreServer) handleRotation(w http.ResponseWriter, r *http.Request) {
 	// differs, every rotation re-commits under whatever the code is by then.
 	// A commitment made once at founding would have no such second chance.
 	result, err := s.rotateCarryingTheCommitment(req.Name, req.NewPublicKey, req.NewNextPublicKey)
+	if errors.Is(err, errKeyElsewhere) {
+		writeError(w, http.StatusConflict, "Rotate on the device that holds the key", err.Error())
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Rotation failed", err.Error())
 		return

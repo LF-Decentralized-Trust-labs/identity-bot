@@ -160,6 +160,9 @@ func (s *CoreServer) recordPostQuantumCommitment(pq *iacrypto.PostQuantumNextKey
 // is a far smaller harm than refusing a rotation somebody may be performing
 // because they have just been compromised.
 func (s *CoreServer) rotateCarryingTheCommitment(name, newPublicKey, newNextPublicKey string) (*drivers.DriverRotationResponse, error) {
+	if err := s.mayRotateHere(name); err != nil {
+		return nil, err
+	}
 	// The generation the identity is rotating INTO, so the commitment made here
 	// is not the one the founding event already made.
 	generation := 1
@@ -174,4 +177,30 @@ func (s *CoreServer) rotateCarryingTheCommitment(name, newPublicKey, newNextPubl
 	// and the next threshold is one. Two would mean an unusable post-quantum
 	// commitment leaves the identity unable to rotate again at all.
 	return s.KeriDriver.RotateToMultisig(name, []string{newPublicKey}, digests, "1", "1", nil)
+}
+
+// errRotationElsewhere is a rotation of this identity asked for where its key
+// is on another device.
+var errRotationElsewhere = fmt.Errorf("%w: a rotation of this identity is not made here", errKeyElsewhere)
+
+// mayRotateHere refuses a rotation of this identity where its key is on
+// another device. The rotation would be appended here unsigned and the key
+// logs would no longer agree; a rotation there is made on that device.
+func (s *CoreServer) mayRotateHere(name string) error {
+	if s.DataStore == nil || s.KeriDriver == nil {
+		return nil
+	}
+	identity, err := s.DataStore.GetIdentity()
+	if err != nil || identity == nil {
+		return nil
+	}
+	if name != identity.AID {
+		if kel, err := s.KeriDriver.GetKel(name); err != nil || kel == nil || kel.AID != identity.AID {
+			return nil
+		}
+	}
+	if s.keyIsElsewhere() {
+		return errRotationElsewhere
+	}
+	return nil
 }

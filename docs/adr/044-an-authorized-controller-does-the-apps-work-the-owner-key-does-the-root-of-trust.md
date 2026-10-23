@@ -134,7 +134,11 @@ new keys, which this Identity Agent does not hold (the owner's device, a recover
 client, or each owner in a multi-owner change), and today each of those signs it only
 after it is appended. Guarding rotations needs the rotation built, signed by the new keys
 and only then appended, which changes those apps; until then a rotation is appended
-unsigned, as before this decision. An Identity Agent whose key log holds events written by an earlier version
+unsigned, as before this decision, except that where the identity's key is on another
+device no rotation of it is made here at all (the rotation route, a recovery's rotation,
+or changing who owns it): it would be appended unsigned and the key logs would split.
+Break-glass root rotation, whose events are not signed by their keys either, is refused
+whole until they are. An Identity Agent whose key log holds events written by an earlier version
 without the key, which the device never had, asks the device for nothing and says so. Only one
 interaction waits for the device at a time, as each extends the same tip; another is kept
 and built once the one before it is appended, refused or expired. When a signature comes back it must be over the request's own

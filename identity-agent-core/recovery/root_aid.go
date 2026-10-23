@@ -323,6 +323,13 @@ func RootAIDRotationAvailable() bool {
 	return RootAIDRotationEnabled
 }
 
+// RootAIDRotationSigned reports whether the events break-glass root rotation
+// writes can be signed by their keys. They cannot yet: it rotates the old
+// root and writes the new root's first interaction, and neither key is one
+// this Identity Agent signs with, so either would be refused, part way
+// through. It is refused whole, before anything is made, until they can.
+var RootAIDRotationSigned = false
+
 // ContinuityProofInput is the continuity payload before assembly.
 type ContinuityProofInput struct {
 	OldRootAID                 string
