@@ -88,12 +88,19 @@ written into the key log here. Re-granting a machine, or settling which signer i
 as, issues a new credential and withdraws the old one first; if the old one cannot be
 withdrawn nothing changes, so a machine never has two grants in force. Removing the
 machine revokes its credential; the machine stops at once even when that revocation cannot
-be written. Machines paired before this are given grants at start,
-and again on every anchoring, every five minutes, so one that fails is tried again; a
-machine with none is given its grant when it next asks for something, so it is never
-refused for want of one. AI agents provisioned before every AI agent was given a grant
-are given one the same way, on this Identity Agent's own authority. An Identity Agent
-with no paired machine and no AI agent writes nothing for them. A credential is issued
+be written. Machines paired, and AI agents
+provisioned, before this are given grants afterwards, but never from what a file says
+now. The first time this version runs where the identity's key is held, it writes one
+interaction into the identity's key log sealing what existed then without a grant:
+each such machine and AI agent exactly as it stood. The interaction carries a marker
+seal anybody can recompute, so it is found without the list, and it is never taken
+twice. An Identity Agent that started without an identity seals that nothing predates
+grants. A grant is given afterwards, at start, on every anchoring, or when a machine
+next asks, only to one that matches that list exactly; anything added or widened since,
+or a list that no longer matches its seal, is given nothing until the identity grants
+it the ordinary way. Where the identity's key is held on another device nothing is
+sealed or issued, and no event is written unsigned. A machine whose row no longer
+says what its grant credential says is neither acted on nor re-issued from. A credential is issued
 on a machine's grant only while the grant is in force in the registry, and the grant
 cannot be revoked while one is being issued on it.
 

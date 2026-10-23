@@ -98,6 +98,10 @@ func (s *CoreServer) authorityOf(r *http.Request) (authority, func(), error) {
 				release()
 				return authority{}, func() {}, err
 			}
+			if err := s.rowIsItsGrant(current); err != nil {
+				release()
+				return authority{}, func() {}, err
+			}
 		}
 		signed, sig, err := s.theRequestAsSigned(r, grant)
 		if err != nil {
@@ -408,6 +412,10 @@ func (s *CoreServer) bindSigner(aid, signer string) (ControllerGrant, error) {
 	bound := g
 	bound.Signer = signer
 	if g.CredentialSAID != "" {
+		// Re-issued from what the grant says, never from a row changed since.
+		if err := s.rowIsItsGrant(g); err != nil {
+			return g, err
+		}
 		said, err := s.issueControllerGrant(bound)
 		if err != nil {
 			return g, fmt.Errorf("the machine's grant could not be re-issued to name its signer: %w", err)
@@ -460,6 +468,11 @@ func (s *CoreServer) backfillControllerGrants() {
 	if s.DataStore == nil || s.KeriDriver == nil {
 		return
 	}
+	// What existed before grants is sealed the first time this runs, before
+	// anything is given one.
+	if _, ok := s.earlierGrantsSnapshot(); !ok {
+		return
+	}
 	all, err := s.controllers().All()
 	if err != nil {
 		log.Printf("[controller] machines paired earlier could not be read to give them grants: %v", err)
@@ -486,6 +499,12 @@ func (s *CoreServer) grantIfMissing(controllerAID string) error {
 		return err
 	}
 	if live, _ := g.Live(time.Now()); !live {
+		return nil
+	}
+	// Only a machine that stood exactly so when what existed before grants
+	// was sealed; one added or changed since waits for the identity to grant
+	// it the ordinary way.
+	if snap, ok := s.earlierGrantsSnapshot(); !ok || !snap.machineIsInSnapshot(g) {
 		return nil
 	}
 	said, err := s.issueControllerGrant(g)
@@ -531,6 +550,11 @@ func (s *CoreServer) backfillAgentGrant(assetID string) {
 	if !ok {
 		return
 	}
+	// Only an AI agent that stands exactly as it did when what existed before
+	// grants was sealed: never one added since, never one widened since.
+	if snap, ok := s.earlierGrantsSnapshot(); !ok || !snap.agentInSnapshot(agent) {
+		return
+	}
 	said, err := s.issueCapabilityGrant(&agent, authority{About: assetID})
 	if err != nil {
 		if !errors.Is(err, errKeyElsewhere) {
@@ -549,4 +573,30 @@ func (s *CoreServer) backfillAgentGrant(assetID string) {
 	if err := s.saveMCPTokens(toks); err != nil {
 		log.Printf("[mcp] AI agent %s was given grant %s, but its token could not be updated: %v", agent.PairwiseAID, said, err)
 	}
+}
+
+// rowIsItsGrant checks a machine's row against the grant credential it holds:
+// the same machine, key, label and grade. The row is a file; the grant is what
+// the identity signed, and a row that no longer says what was granted is not
+// acted on or re-issued from.
+func (s *CoreServer) rowIsItsGrant(g ControllerGrant) error {
+	rec, err := s.DataStore.GetCredential(g.CredentialSAID)
+	if err != nil || rec == nil {
+		return fmt.Errorf("this machine's grant is not on record")
+	}
+	raw, err := base64.StdEncoding.DecodeString(rec.AcdcJson)
+	if err != nil {
+		return fmt.Errorf("this machine's grant is unreadable")
+	}
+	var acdc struct {
+		A map[string]interface{} `json:"a"`
+	}
+	if json.Unmarshal(raw, &acdc) != nil || acdc.A == nil {
+		return fmt.Errorf("this machine's grant is unreadable")
+	}
+	str := func(k string) string { v, _ := acdc.A[k].(string); return v }
+	if str("i") != g.ControllerAID || str("public_key") != g.PublicKey || str("grade") != string(g.Grade) || str("label") != g.Label {
+		return fmt.Errorf("this machine's record no longer says what its grant does")
+	}
+	return nil
 }

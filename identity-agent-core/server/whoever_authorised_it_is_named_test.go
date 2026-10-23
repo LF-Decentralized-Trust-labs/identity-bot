@@ -5,8 +5,11 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -680,15 +683,20 @@ func TestAnIndividualsEarlierDesktopCanCreateAnAIAgent(t *testing.T) {
 	}
 }
 
-// An Identity Agent with no machines and no AI agents writes nothing into its
-// key log at start.
-func TestNothingIsBackFilledWhereNothingIsPaired(t *testing.T) {
+// What existed before grants is sealed in the identity's key log once, and
+// only once, however often the Identity Agent starts.
+func TestWhatExistedBeforeGrantsIsSealedOnce(t *testing.T) {
 	s, _ := grantWorld(t)
 	owner, _ := s.DataStore.GetIdentity()
 	before, _ := s.DataStore.GetEvents(owner.AID)
 	s.prepareKeyLogs()
-	if after, _ := s.DataStore.GetEvents(owner.AID); len(after) != len(before) {
-		t.Fatal("an Identity Agent with nothing paired wrote into its key log at start")
+	s.prepareKeyLogs()
+	after, _ := s.DataStore.GetEvents(owner.AID)
+	if len(after) != len(before)+1 {
+		t.Fatalf("sealing what existed before grants wrote %d events", len(after)-len(before))
+	}
+	if taken, _, _ := s.anchoredEarlierGrants(owner.AID); !taken {
+		t.Fatal("the snapshot is not found in the key log")
 	}
 }
 
@@ -750,4 +758,229 @@ func TestABackFillIsTriedAgain(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatal("a machine with no grant was not given one on a later tick")
+}
+
+// The reviewer's attack: somebody who can write the data directory, holding
+// no key, clears an AI agent's grant from its token and widens what it may do.
+// Nothing they wrote becomes a grant.
+func TestAWidenedAIAgentIsNotGrantedFromItsFiles(t *testing.T) {
+	w := newTalkWorld(t)
+	rec := httptest.NewRecorder()
+	w.s.router.ServeHTTP(rec, local("POST", "/api/mcp/agents", `{"name":"Narrow","capabilities":["`+capabilityMessageAgent+`"]}`))
+	var made map[string]interface{}
+	json.Unmarshal(rec.Body.Bytes(), &made)
+	id, _ := made["asset_id"].(string)
+	if id == "" {
+		t.Fatalf("provisioning: %d %s", rec.Code, rec.Body.String())
+	}
+	w.s.backfillControllerGrants() // the snapshot is sealed
+	a, _ := w.s.assetHandler.Store.GetAsset(id)
+	a.Capabilities = append(a.Capabilities, "infra.dns_record.create")
+	w.s.assetHandler.Store.UpsertAsset(a)
+	mcpTokensMu.Lock()
+	toks := w.s.loadMCPTokens()
+	for i := range toks {
+		if toks[i].AssetID == id {
+			toks[i].GrantSAID = ""
+			toks[i].Scopes = append(toks[i].Scopes, "infra.dns_record.create")
+		}
+	}
+	w.s.saveMCPTokens(toks)
+	mcpTokensMu.Unlock()
+	held := len(credentialsOf(t, w.s, a.PairwiseAID))
+	w.s.backfillControllerGrants()
+	if now := len(credentialsOf(t, w.s, a.PairwiseAID)); now != held {
+		t.Fatal("a grant was issued from what the files say")
+	}
+	for _, tok := range w.s.loadMCPTokens() {
+		if tok.AssetID != id {
+			continue
+		}
+		cc := sandbox.CallerContext{Scopes: tok.Scopes}
+		w.s.applyGrantScopes(tok, &cc)
+		if tok.GrantSAID != "" || len(cc.Scopes) != 0 {
+			t.Fatalf("the widened AI agent may do %v under grant %q", cc.Scopes, tok.GrantSAID)
+		}
+	}
+}
+
+// A machine row added to the controllers file after the snapshot is given no
+// grant, by the back-fill or when it asks.
+func TestAnAddedMachineRowIsNotGranted(t *testing.T) {
+	w := newTalkWorld(t)
+	w.s.backfillControllerGrants() // the snapshot is sealed
+	ctl, _, _ := w.s.controllers().Get(w.ctlAID)
+	w.s.controllers().Revoke(w.ctlAID)
+	added := ctl
+	added.CredentialSAID = ""
+	w.s.controllers().Put(added)
+	w.s.backfillControllerGrants()
+	if got, _, _ := w.s.controllers().Get(w.ctlAID); got.CredentialSAID != "" {
+		t.Fatal("a machine row added to the file was given a grant")
+	}
+	req := asThatMachine(t, w.ctlAID, "PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities",
+		`{"capabilities":["`+capabilityMessageAgent+`"]}`, w.ctlSeed, authprovider.LevelVerified, time.Now())
+	rec := httptest.NewRecorder()
+	w.s.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("a machine row added to the file was answered %d", rec.Code)
+	}
+	if got, _, _ := w.s.controllers().Get(w.ctlAID); got.CredentialSAID != "" {
+		t.Fatal("a machine row added to the file was given a grant when it asked")
+	}
+}
+
+// The list kept beside the database, removed or edited, matches nothing the
+// key log sealed: nothing is granted, and no second snapshot is taken.
+func TestAnAlteredSnapshotListGrantsNothing(t *testing.T) {
+	for _, alter := range []string{"removed", "edited"} {
+		t.Run(alter, func(t *testing.T) {
+			s, _ := grantWorld(t)
+			s.DeclaredEntityType = "organization"
+			g := aGrant(GradeEnrolled)
+			s.controllers().Grant(g, time.Now().UTC())
+			owner, _ := s.DataStore.GetIdentity()
+			path := filepath.Join(s.DataDir, earlierGrantsFile)
+			// Seal a snapshot that does not hold the machine, then alter the
+			// list so it would.
+			s.controllers().Revoke(g.ControllerAID)
+			if _, ok := s.earlierGrantsSnapshot(); !ok {
+				t.Fatal("no snapshot was sealed")
+			}
+			s.controllers().Grant(g, time.Now().UTC())
+			got, _, _ := s.controllers().Get(g.ControllerAID)
+			if alter == "removed" {
+				os.Remove(path)
+			} else {
+				os.WriteFile(path, []byte(`{"identity":"`+owner.AID+`","controllers":[`+asJSON(machineAsItStands(got))+`],"agents":[]}`), 0o600)
+			}
+			before, _ := s.DataStore.GetEvents(owner.AID)
+			s.backfillControllerGrants()
+			if now, _, _ := s.controllers().Get(g.ControllerAID); now.CredentialSAID != "" {
+				t.Fatal("a machine was granted on an altered list")
+			}
+			if after, _ := s.DataStore.GetEvents(owner.AID); len(after) != len(before) {
+				t.Fatal("a second snapshot was sealed")
+			}
+		})
+	}
+}
+
+// Started without an identity, an Identity Agent seals that nothing predates
+// grants, whatever its files hold by the time it has one.
+func TestAFreshIdentityAgentOwesNoGrantAfterwards(t *testing.T) {
+	s, _ := grantWorld(t)
+	s.startedWithoutIdentity = true
+	g := aGrant(GradeEnrolled)
+	s.controllers().Grant(g, time.Now().UTC())
+	s.backfillControllerGrants()
+	if got, _, _ := s.controllers().Get(g.ControllerAID); got.CredentialSAID != "" {
+		t.Fatal("a fresh Identity Agent granted a machine from its file")
+	}
+}
+
+func asJSON(v interface{}) string {
+	raw, _ := json.Marshal(v)
+	return string(raw)
+}
+
+// An AI agent the snapshot sealed, widened since, is given no grant: never
+// more than it had when the snapshot was taken.
+func TestAnEarlierAIAgentWidenedSinceIsNotGranted(t *testing.T) {
+	w := newTalkWorld(t)
+	rec := httptest.NewRecorder()
+	w.s.router.ServeHTTP(rec, local("POST", "/api/mcp/agents", `{"name":"Earlier","capabilities":["`+capabilityMessageAgent+`"]}`))
+	var made map[string]interface{}
+	json.Unmarshal(rec.Body.Bytes(), &made)
+	id, _ := made["asset_id"].(string)
+	mcpTokensMu.Lock()
+	toks := w.s.loadMCPTokens()
+	for i := range toks {
+		if toks[i].AssetID == id {
+			toks[i].GrantSAID = ""
+		}
+	}
+	w.s.saveMCPTokens(toks)
+	mcpTokensMu.Unlock()
+	if snap, ok := w.s.earlierGrantsSnapshot(); !ok || len(snap.Agents) != 1 {
+		t.Fatalf("the earlier AI agent was not sealed: %+v", snap)
+	}
+	a, _ := w.s.assetHandler.Store.GetAsset(id)
+	a.Capabilities = append(a.Capabilities, "infra.dns_record.create")
+	w.s.assetHandler.Store.UpsertAsset(a)
+	w.s.backfillControllerGrants()
+	for _, tok := range w.s.loadMCPTokens() {
+		if tok.AssetID == id && tok.GrantSAID != "" {
+			t.Fatal("an AI agent widened since the snapshot was given a grant")
+		}
+	}
+}
+
+// A machine the snapshot sealed, changed since, is given no grant.
+func TestAnEarlierMachineChangedSinceIsNotGranted(t *testing.T) {
+	s, _ := grantWorld(t)
+	g := aGrant(GradeEnrolled)
+	s.controllers().Grant(g, time.Now().UTC())
+	if snap, ok := s.earlierGrantsSnapshot(); !ok || len(snap.Controllers) != 1 {
+		t.Fatalf("the earlier machine was not sealed: %+v", snap)
+	}
+	got, _, _ := s.controllers().Get(g.ControllerAID)
+	got.Grade = GradeScoped
+	s.controllers().Put(got)
+	s.backfillControllerGrants()
+	if now, _, _ := s.controllers().Get(g.ControllerAID); now.CredentialSAID != "" {
+		t.Fatal("a machine changed since the snapshot was given a grant")
+	}
+}
+
+// A granted machine's row changed since its grant is not acted on, and no
+// grant is re-issued from it.
+func TestAGrantedMachinesRowEditedSinceIsRefused(t *testing.T) {
+	w := newTalkWorld(t)
+	resetSeenSignatures(t)
+	ctl, _, _ := w.s.controllers().Get(w.ctlAID)
+	edited := ctl
+	edited.Label = "renamed in the file"
+	w.s.controllers().Put(edited)
+	req := asThatMachine(t, w.ctlAID, "PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities",
+		`{"capabilities":["`+capabilityMessageAgent+`"]}`, w.ctlSeed, authprovider.LevelVerified, time.Now())
+	rec := httptest.NewRecorder()
+	w.s.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("a machine whose row was changed since its grant was answered %d", rec.Code)
+	}
+	w.s.controllers().Put(ctl)
+	edited = ctl
+	edited.Grade = GradeScoped
+	edited.Signer = ""
+	w.s.controllers().Put(edited)
+	if _, err := w.s.bindSigner(ctl.ControllerAID, "Esigner"); err == nil {
+		t.Fatal("a grant was re-issued from a row changed since")
+	}
+}
+
+// Where the identity's key is another device's, issuing a grant writes nothing
+// into its key log and says why, rather than appending an event nobody signed.
+func TestAGrantIsNotIssuedUnsignedWhereTheKeyIsElsewhere(t *testing.T) {
+	s, agent := grantWorld(t)
+	owner, _ := s.DataStore.GetIdentity()
+	elsewhere, _ := keri.GenerateSigner(true)
+	owner.PublicKey, _ = elsewhere.PublicKey()
+	if err := s.DataStore.SaveIdentity(*owner); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := s.DataStore.GetEvents(owner.AID)
+	if _, err := s.issueCapabilityGrant(agent, authority{About: agent.ID}); !errors.Is(err, errKeyElsewhere) {
+		t.Fatalf("issuing where the key is elsewhere: %v", err)
+	}
+	s.backfillControllerGrants()
+	after, _ := s.DataStore.GetEvents(owner.AID)
+	if len(after) != len(before) {
+		t.Fatal("an event was written into a key log whose key is elsewhere")
+	}
+	for _, ev := range after {
+		if ev.CesrSignature == "" {
+			t.Fatalf("event %d of the identity's key log is unsigned", ev.SequenceNumber)
+		}
+	}
 }

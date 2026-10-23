@@ -27,8 +27,17 @@ func (s *CoreServer) issueAssetCredential(
 	if s.KeriDriver == nil {
 		return "", fmt.Errorf("keri driver unavailable")
 	}
-	if identity, err := s.DataStore.GetIdentity(); err != nil || identity == nil {
+	identity, err := s.DataStore.GetIdentity()
+	if err != nil || identity == nil {
 		return "", fmt.Errorf("no owner identity")
+	}
+	// Issuing as the identity writes into its key log, which only the holder
+	// of its key may sign. Where that is another device nothing is written
+	// here, rather than an event nobody signed.
+	if issuer == identity.AID {
+		if _, err := s.identitySigningSeed(); err != nil {
+			return "", errKeyElsewhere
+		}
 	}
 	claims["i"] = holder
 	claims["asset_type"] = kind.AssetType

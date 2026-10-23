@@ -178,7 +178,11 @@ type CoreServer struct {
 	anchorStop chan struct{}
 	// grantsMu holds machines' grants still while a credential is issued on
 	// one: revoking, re-issuing or replacing a grant takes it exclusively.
-	grantsMu sync.RWMutex
+	earlierGrantsMu sync.Mutex
+	// startedWithoutIdentity is an Identity Agent with no identity when it
+	// started, so with nothing made before grants were given at pairing.
+	startedWithoutIdentity bool
+	grantsMu               sync.RWMutex
 	// record is the state of the record's anchoring.
 	record recordState
 	// edgesSince is when the first credential naming who authorised it was
@@ -424,6 +428,11 @@ func New(cfg Config) (*CoreServer, error) {
 	// Seed the engine from what was persisted, so issuing and anchoring work
 	// after a restart without a fresh inception. Both implementations start
 	// empty, so both need this.
+	// An Identity Agent that starts with no identity has nothing that
+	// predates grants: whatever it later holds was made by this version.
+	if id, err := s.DataStore.GetIdentity(); err == nil && id == nil {
+		s.startedWithoutIdentity = true
+	}
 	s.prepareKeyLogs()
 
 	if s.WitnessService != nil {
