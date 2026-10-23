@@ -1864,3 +1864,23 @@ func PoolBase(namespace string) (int, error) {
 	return 0, fmt.Errorf("pairwise pool %q has no range of its own — give it one in "+
 		"PoolBase, because a pool without one shares keys with another", namespace)
 }
+
+func (s *SQLiteStore) SavePendingIssuance(signingRequestID, body string) error {
+	_, err := s.db.Exec(`INSERT INTO pending_issuances (signing_request_id, body, created_at) VALUES (?, ?, ?)`,
+		signingRequestID, body, time.Now().UTC().Format(time.RFC3339))
+	return err
+}
+
+func (s *SQLiteStore) GetPendingIssuance(signingRequestID string) (string, bool, error) {
+	var body string
+	err := s.db.QueryRow(`SELECT body FROM pending_issuances WHERE signing_request_id = ?`, signingRequestID).Scan(&body)
+	if err == sql.ErrNoRows {
+		return "", false, nil
+	}
+	return body, err == nil, err
+}
+
+func (s *SQLiteStore) DeletePendingIssuance(signingRequestID string) error {
+	_, err := s.db.Exec(`DELETE FROM pending_issuances WHERE signing_request_id = ?`, signingRequestID)
+	return err
+}

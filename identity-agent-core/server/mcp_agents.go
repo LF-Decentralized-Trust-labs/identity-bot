@@ -371,12 +371,22 @@ func (s *CoreServer) handleSetAgentCapabilities(w http.ResponseWriter, r *http.R
 	// narrowing an AI agent's ceiling silently left it with the wider one. Only a
 	// build with no engine, which has no grants at all, changes the record alone.
 	grantSAID := ""
+	grantPending := false
 	if s.KeriDriver != nil {
+		// Where the key is on another device, an AI agent whose grant is
+		// already issued is not re-granted: the grant it replaces could not be
+		// withdrawn here, and both would stand. Refused before anything is
+		// built or asked for.
+		if !s.identityKeyHeldHere() && s.agentHasIssuedGrant(id) {
+			jsonError(w, "the grant could not be re-issued, so nothing was changed: "+errKeyElsewhere.Error()+
+				", and this AI agent's current grant could not be withdrawn here", http.StatusConflict)
+			return
+		}
 		g, err := s.issueCapabilityGrant(&candidate, by)
-		if errors.Is(err, errKeyElsewhere) && s.agentGrantPending(id) {
-			// Its grant already waits for the device that holds the key; the
-			// change is recorded and waits with it.
-			err = nil
+		if errors.Is(err, errKeyElsewhere) {
+			// Its grant waits for the device that holds the key, which has
+			// been asked to sign it; the change is recorded and waits with it.
+			err, grantPending = nil, true
 		}
 		if err != nil {
 			jsonError(w, "the grant could not be re-issued, so nothing was changed: "+err.Error(),
@@ -404,6 +414,9 @@ func (s *CoreServer) handleSetAgentCapabilities(w http.ResponseWriter, r *http.R
 			toks[i].Scopes = updated.Capabilities
 			if grantSAID != "" {
 				toks[i].GrantSAID = grantSAID
+			}
+			if grantPending {
+				toks[i].GrantPending = true
 			}
 			touched++
 		}
@@ -564,21 +577,35 @@ func nonNilConstraints(c map[string]interface{}) map[string]interface{} {
 	return c
 }
 
-// agentGrantPending reports whether an AI agent's grant waits for the device
-// that holds the identity's key: it has a token with a pending grant and none
+// agentHasIssuedGrant reports whether an AI agent holds a grant already
 // issued.
-func (s *CoreServer) agentGrantPending(assetID string) bool {
+func (s *CoreServer) agentHasIssuedGrant(assetID string) bool {
 	mcpTokensMu.Lock()
 	defer mcpTokensMu.Unlock()
-	pending := false
 	for _, t := range s.loadMCPTokens() {
-		if t.AssetID != assetID {
-			continue
+		if t.AssetID == assetID && t.GrantSAID != "" {
+			return true
 		}
-		if t.GrantSAID != "" {
-			return false
-		}
-		pending = pending || t.GrantPending
 	}
-	return pending
+	return false
+}
+
+// identityKeyHeldHere reports whether this Identity Agent holds the
+// identity's key, so can sign what it writes into the identity's key log.
+func (s *CoreServer) identityKeyHeldHere() bool {
+	_, err := s.identitySigningSeed()
+	return err == nil
+}
+
+// agentGrantPendingFor reports whether an AI agent's grant waits for the
+// device that holds the identity's key.
+func (s *CoreServer) agentGrantPendingFor(assetID string) bool {
+	mcpTokensMu.Lock()
+	defer mcpTokensMu.Unlock()
+	for _, t := range s.loadMCPTokens() {
+		if t.AssetID == assetID && t.GrantSAID == "" && t.GrantPending {
+			return true
+		}
+	}
+	return false
 }

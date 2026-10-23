@@ -1,5 +1,7 @@
 package drivers
 
+import "errors"
+
 // Message types exchanged with a KERI engine.
 //
 // These are the shapes the engine returns and the few request shapes the core
@@ -271,6 +273,35 @@ type TELCommit struct {
 	// KELRaw and TELRaw are the two events as published.
 	KELRaw []byte
 	TELRaw []byte
+}
+
+// PreparedIssuance is a credential issued into a registry, built but not yet
+// appended: the credential, its issuance event, and the interaction in the
+// issuer's key log that anchors it, which whoever holds the issuer's key
+// signs. Prior and SN are where the interaction extends the key log; it can
+// be appended only while that is still the tip.
+type PreparedIssuance struct {
+	Issuer   string `json:"issuer"`
+	Registry string `json:"registry"`
+	AcdcRaw  []byte `json:"acdc_raw"`
+	AcdcSAID string `json:"acdc_said"`
+	IssRaw   []byte `json:"iss_raw"`
+	IssSAID  string `json:"iss_said"`
+	IxnRaw   []byte `json:"ixn_raw"`
+	IxnSAID  string `json:"ixn_said"`
+	SN       int    `json:"sn"`
+	Prior    string `json:"prior"`
+}
+
+// ErrStalePreparation is a prepared issuance whose key log has moved on since
+// it was built: its interaction no longer extends the tip.
+var ErrStalePreparation = errors.New("the key log has moved on since this issuance was prepared")
+
+// PreparedIssuer is an engine that can build an issuance and append it later,
+// exactly as built, so it can be checked, or signed elsewhere, in between.
+type PreparedIssuer interface {
+	PrepareCredentialInRegistry(name string, claims map[string]interface{}, schemaSaid, holderAid string, edges map[string]interface{}, registrySaid string) (*PreparedIssuance, error)
+	AppendPreparedIssuance(name string, p *PreparedIssuance) (*DriverIssueCredentialResponse, error)
 }
 
 // KELKeep is an event an engine is about to append to an identity's key log,

@@ -5,6 +5,7 @@ import (
 	"log"
 	"time"
 
+	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/schemas"
 	"identity-agent-core/store"
@@ -33,10 +34,12 @@ func (s *CoreServer) issueAssetCredential(
 	}
 	// Issuing as the identity writes into its key log, which only the holder
 	// of its key may sign. Where that is another device nothing is written
-	// here, rather than an event nobody signed.
+	// here: a grant is prepared for that device to sign, and anything else
+	// says why it cannot be done here.
+	keyHere := true
 	if issuer == identity.AID {
 		if _, err := s.identitySigningSeed(); err != nil {
-			return "", errKeyElsewhere
+			keyHere = false
 		}
 	}
 	claims["i"] = holder
@@ -59,21 +62,67 @@ func (s *CoreServer) issueAssetCredential(
 	// Issue into the owner's registry, so the credential is revoked by an event
 	// in that registry's log, anchored in the owner's key log, which anybody can
 	// check. There is no unrevocable fallback: a credential that cannot be
-	// withdrawn is not one this software issues for an asset.
-	registrySAID, err := s.ensureRegistry(issuer)
-	if err != nil {
-		return "", fmt.Errorf("no registry to issue in: %w", err)
+	// withdrawn is not one this software issues for an asset. Where the key is
+	// elsewhere a registry not yet made cannot be made here either.
+	var registrySAID string
+	if keyHere {
+		if registrySAID, err = s.ensureRegistry(issuer); err != nil {
+			return "", fmt.Errorf("no registry to issue in: %w", err)
+		}
+	} else if reg, err := s.DataStore.GetRegistryByIssuer(issuer); err == nil && reg != nil && reg.VcpRawB64 != "" {
+		registrySAID = reg.RegistrySAID
+	} else {
+		return "", errKeyElsewhere
 	}
-	// The issuance and its anchor are kept first, together. A credential whose
-	// issuance cannot be proved is not issued.
-	keptInside := s.engineKeepsCredentialLogs()
-	result, err := s.KeriDriver.IssueCredentialInRegistry(issuer, claims, kind.Schema.SAID, holder, edges, registrySAID)
-	if err == nil && !keptInside {
-		err = s.keepAfter(issuer, result.SequenceNumber, result.IxnRawBytesB64, result.IssRawBytesB64)
+	preparer, canPrepare := s.KeriDriver.(drivers.PreparedIssuer)
+	if !canPrepare {
+		if !keyHere {
+			return "", errKeyElsewhere
+		}
+		// The issuance and its anchor are kept first, together. A credential
+		// whose issuance cannot be proved is not issued.
+		keptInside := s.engineKeepsCredentialLogs()
+		result, err := s.KeriDriver.IssueCredentialInRegistry(issuer, claims, kind.Schema.SAID, holder, edges, registrySAID)
+		if err == nil && !keptInside {
+			err = s.keepAfter(issuer, result.SequenceNumber, result.IxnRawBytesB64, result.IssRawBytesB64)
+		}
+		if err != nil {
+			return "", fmt.Errorf("%s was not issued: %w", kind.Schema.Name, err)
+		}
+		return s.finishIssuance(kind, result, holder, issuer, expiry, registrySAID, requestDigest, by)
 	}
+	// Built first and checked against the request it rests on before anything
+	// is written, so a credential that does not rest on its request never
+	// reaches the key log, rather than being issued and withdrawn.
+	prepared, err := preparer.PrepareCredentialInRegistry(issuer, claims, kind.Schema.SAID, holder, edges, registrySAID)
 	if err != nil {
 		return "", fmt.Errorf("%s was not issued: %w", kind.Schema.Name, err)
 	}
+	if err := s.checkAuthorisationOf(prepared.AcdcRaw, issuer, "", "", by); err != nil {
+		return "", fmt.Errorf("%s was not issued: it does not rest on the request that asked for it: %w", kind.Schema.Name, err)
+	}
+	if !keyHere {
+		if kind != schemas.AIAgentGrant && kind != schemas.ControllerGrant {
+			return "", errKeyElsewhere
+		}
+		if _, err := s.awaitSignature(kind, prepared, claims, edges, holder, expiry, requestDigest, by); err != nil {
+			return "", err
+		}
+		return "", errKeyElsewhere
+	}
+	s.engineKeepsCredentialLogs()
+	result, err := preparer.AppendPreparedIssuance(issuer, prepared)
+	if err != nil {
+		return "", fmt.Errorf("%s was not issued: %w", kind.Schema.Name, err)
+	}
+	return s.finishIssuance(kind, result, holder, issuer, expiry, registrySAID, requestDigest, by)
+}
+
+// finishIssuance records a credential just appended: the credential, the
+// request it was issued on, and the check of it against that request with the
+// order of events read from the key log.
+func (s *CoreServer) finishIssuance(kind *schemas.AssetGrant, result *drivers.DriverIssueCredentialResponse,
+	holder, issuer, expiry, registrySAID, requestDigest string, by authority) (string, error) {
 	// Fixed-width to the nanosecond, so two credentials issued in one second
 	// still order correctly as text, which is how the newest is picked.
 	now := time.Now().UTC().Format("2006-01-02T15:04:05.000000000Z07:00")
@@ -102,8 +151,8 @@ func (s *CoreServer) issueAssetCredential(
 			return "", fmt.Errorf("%s was not issued: %w", kind.Schema.Name, err)
 		}
 	}
-	// The rule anybody will apply to it later, applied now: a credential that
-	// does not rest on the request it carries is withdrawn, not handed out.
+	// The rule anybody will apply to it later, applied now with the order of
+	// events read from where each is anchored.
 	if err := s.checkAuthorisation(result.AcdcSaid, by); err != nil {
 		s.withdrawIssued(result.AcdcSaid)
 		return "", fmt.Errorf("%s was not issued: it does not rest on the request that asked for it: %w", kind.Schema.Name, err)

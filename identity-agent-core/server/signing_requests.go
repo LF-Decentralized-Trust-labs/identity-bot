@@ -4,7 +4,9 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"identity-agent-core/drivers"
 	"log"
 	"net/http"
 	"time"
@@ -233,6 +235,25 @@ func (s *CoreServer) handleFulfilSigningRequest(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusConflict, "already resolved",
 			"this request was "+req.Status)
 		return
+	}
+
+	// A grant waiting for this signature is appended with it first, so a
+	// signature that does not hold, or a grant that no longer can be, leaves
+	// the request as it was rather than marking it signed.
+	if req.Kind == signingKindGrant {
+		if err := s.completeWaitingGrant(id, body.Signature); err != nil {
+			status := http.StatusConflict
+			if errors.Is(err, errGrantSignature) {
+				status = http.StatusBadRequest
+			}
+			if errors.Is(err, drivers.ErrStalePreparation) {
+				req.Status = SigningStatusRefused
+				req.ResolvedAt = time.Now().UTC().Format(time.RFC3339)
+				_ = s.DataStore.SaveSigningRequest(*req)
+			}
+			writeError(w, status, "the grant was not issued", err.Error())
+			return
+		}
 	}
 
 	req.Signature = body.Signature

@@ -612,6 +612,12 @@ type Store interface {
 	KeepCredentialRequest(credentialSAID, requestDigest, body string) error
 	CredentialRequestUsed(requestDigest string) (bool, error)
 	GetCredentialRequestBody(credentialSAID string) (string, bool, error)
+	// SavePendingIssuance, GetPendingIssuance and DeletePendingIssuance keep
+	// an issuance prepared for the device that holds the identity's key, by
+	// the signing request that asks it to sign.
+	SavePendingIssuance(signingRequestID, body string) error
+	GetPendingIssuance(signingRequestID string) (string, bool, error)
+	DeletePendingIssuance(signingRequestID string) error
 	// A credential's transaction log, as published. Appending the same event
 	// twice keeps one copy; the log is read back in order.
 	AppendCredentialTELEvent(ev CredentialTELEvent) error

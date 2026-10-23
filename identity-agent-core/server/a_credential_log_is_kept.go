@@ -140,7 +140,13 @@ func (s *CoreServer) keepAnchoredCredentialEvent(
 	if err := anchorsEvent(ixnRawB64, acdcSAID, ev); err != nil {
 		return err
 	}
-	anchor, err := s.ownInteractionRecord(issuer, ixn, ixnRawB64, sn, "")
+	// Signed on the device that holds the key, when it was: that signature,
+	// checked against the identity's current key before the append.
+	signature := ""
+	if v, ok := s.signedElsewhere.Load(ixnRawB64); ok {
+		signature, _ = v.(string)
+	}
+	anchor, err := s.ownInteractionRecord(issuer, ixn, ixnRawB64, sn, signature)
 	if err != nil {
 		return err
 	}

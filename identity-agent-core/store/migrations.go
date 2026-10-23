@@ -935,6 +935,19 @@ CREATE TABLE IF NOT EXISTS credential_requests (
     body            TEXT NOT NULL
 );
 `},
+	{
+		Version:     43,
+		Description: "Keep each issuance prepared for the device that holds the identity's key",
+		SQL: `
+-- An issuance built where the identity's key is not held, waiting for the
+-- device that holds it to sign its anchoring interaction. Keyed by the
+-- signing request that asks for that signature.
+CREATE TABLE IF NOT EXISTS pending_issuances (
+    signing_request_id TEXT PRIMARY KEY,
+    body               TEXT NOT NULL,
+    created_at         TEXT NOT NULL DEFAULT ''
+);
+`},
 }
 
 // ApplyIdentityMigrations creates the migrations table and applies any pending migrations.
