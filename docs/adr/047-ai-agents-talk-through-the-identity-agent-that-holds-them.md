@@ -217,16 +217,19 @@ asking, and must sign as themselves.
   appended.
 
   **What it proves depends on the witnesses.** The record identity names the
-  organisation's witnesses and threshold. Each witness is brought up to date in order:
-  first with the organisation's own key log, which carries its approval of the record
-  identity, then with the record identity's. A witness that witnesses for the
+  organisation's witnesses and threshold. Each witness is brought up to date in order,
+  by one worker at a time that always sends the newest: first with the organisation's
+  own key log, which carries its approval of the record identity, then with the record
+  identity's, each from where the witness says it stopped. A witness that witnesses for the
   organisation, by the ordinary agreement, takes the record identity on from that
   approval, and from no other. Once an anchoring is receipted, removing it or anything
   it fixes, or restoring an older tip, contradicts what the witnesses hold. The check
   asks the record identity's witnesses, all at once and for at most two seconds, how far
   they hold its key log, while no anchoring can extend it. It believes an answer only
-  when the key log verifies and its newest event carries that witness's own receipt; a witness that does not serve its key log with the
-  signed events and its receipt is treated as not answering. It
+  when it is signed by that witness's own key together with the nonce it was asked
+  with, so a replayed or forwarded answer counts for nothing; a bootstrap witness is
+  asked at its pinned address, whatever a contact says; a witness that does not answer
+  so is treated as not answering. It
   reports whether the tip is confirmed by witnesses or rests on this Identity Agent's
   word alone; a witness holding more than is here, or something else, is the record
   trimmed or rewritten, and the record is broken. An organisation that names no

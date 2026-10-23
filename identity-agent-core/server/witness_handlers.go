@@ -20,6 +20,7 @@ func (s *CoreServer) mountWitnessRoutes(r chi.Router) {
 	}
 	r.Post("/witness/event", s.handleWitnessEvent)
 	r.Get("/witness/kel/{signer_aid}", s.handleWitnessKel)
+	r.Get("/witness/kel/{signer_aid}/tip", s.handleWitnessKelTip)
 	r.Get("/witness/status", s.handleWitnessStatus)
 	r.Post("/witness/endpoint", s.handleWitnessEndpointRecord)
 	r.Get("/witness/endpoint/{controller_aid}", s.handleWitnessEndpointLookup)
@@ -91,14 +92,28 @@ func (s *CoreServer) handleWitnessKel(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "kel not found", err.Error())
 		return
 	}
-	// The events as published and signed, and this witness's receipt of the
-	// newest, so whoever asks can check the answer rather than believe it.
-	proof, _ := s.WitnessService.KelProof(signerAID)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"aid": signerAID, "kel": kel, "count": len(kel),
-		"events": proof.Events, "tip_receipt": proof.TipReceipt,
 	})
+}
+
+// handleWitnessKelTip answers how far this witness holds an identity's key log,
+// signed with its key together with the asker's nonce, so the answer is fresh
+// and its own.
+func (s *CoreServer) handleWitnessKelTip(w http.ResponseWriter, r *http.Request) {
+	nonce := r.URL.Query().Get("nonce")
+	if nonce == "" || len(nonce) > 128 {
+		writeError(w, http.StatusBadRequest, "a nonce is required", "")
+		return
+	}
+	tip, err := s.WitnessService.KelTip(chi.URLParam(r, "signer_aid"), nonce)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "the tip could not be signed", err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(tip)
 }
 
 func (s *CoreServer) handleWitnessStatus(w http.ResponseWriter, r *http.Request) {

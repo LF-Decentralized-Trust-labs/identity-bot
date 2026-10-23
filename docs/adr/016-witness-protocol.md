@@ -113,6 +113,26 @@ Receives the accept/decline response from a remote Identity Agent to a witness r
 3. If `decision == "declined"`: update task to `failed` with `detail = reason`.
 4. Emit a WebSocket event to notify connected UI.
 
+### Identities a witnessed identity delegated (amended 2026-10-22)
+
+An agent that witnesses for an identity, by the request above, also witnesses an identity
+that identity delegated, from its delegated inception, when the key log it holds for the
+delegator approves exactly that inception, and only once the inception's own signature
+holds. It witnesses the delegate only while it still witnesses the delegator: when it
+stops, by withdrawal or otherwise, it stops witnessing the delegates too. The operator can
+switch this off (`witness.delegates` = `off`) or cap how many delegates one delegator may
+have witnessed (`witness.delegates_max`); it is on, uncapped, by default.
+
+An event the witness already holds is answered with the receipt it gave, so a controller
+sending its key log from where it thinks the witness stopped carries on; something else at
+the same place is refused as a conflicting history. Sequence numbers are read as KERI
+writes them, in hexadecimal.
+
+`GET /witness/kel/{aid}/tip?nonce=…` answers how far the witness holds an identity's key
+log: the newest event's place and digest, signed by the witness's own key together with
+the asker's nonce, so the answer is fresh and the witness's own. A controller asks this
+before sending, and sends only what the witness lacks.
+
 ### Task Types
 
 | `type` | Created by | Resolved by |

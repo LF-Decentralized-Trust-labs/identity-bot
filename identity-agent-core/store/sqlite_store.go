@@ -28,7 +28,10 @@ func NewSQLiteStore(dir string) (*SQLiteStore, error) {
 	}
 
 	dbPath := filepath.Join(dir, "identity.db")
-	db, err := sql.Open("sqlite", dbPath)
+	// The wait for a busy database is set on every connection the pool opens,
+	// not only the first: a PRAGMA run once applies to one connection, and
+	// every other then fails at once while another writes.
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, fmt.Errorf("failed to open identity.db: %w", err)
 	}

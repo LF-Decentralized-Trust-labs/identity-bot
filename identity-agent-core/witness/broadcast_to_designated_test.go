@@ -145,8 +145,9 @@ func TestARealDelegatedInceptionIsWitnessed(t *testing.T) {
 		raw, _ := base64.StdEncoding.DecodeString(req.Event)
 		return witness.ReceiveEvent(req.AID, raw, req.Sig)
 	}
-	sender.FetchKel = func(_ context.Context, _ string) (KelReply, error) {
-		return witness.KelProof(d.AID)
+	sender.FetchTip = func(_ context.Context, url string) (TipAnswer, error) {
+		_, nonce, _ := strings.Cut(url, "?nonce=")
+		return witness.KelTip(d.AID, nonce)
 	}
 	for _, ev := range [][]byte{dip, ixnRaw} {
 		sig, _ := login.SignString(string(ev), recSeed)

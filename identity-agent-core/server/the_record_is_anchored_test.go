@@ -730,14 +730,24 @@ func TestTheWitnessesAreAskedForTheRecordsTip(t *testing.T) {
 		s.WitnessService.Store.SaveContactMeta(witness.ContactMeta{ContactAID: aid, WitnessKey: name})
 	}
 	var held []store.EventRecord
-	answerAs := func(i int) witness.KelReply { return witnessAnswer(held, keys[i], names[i]) }
+	answerAs := func(i int, url string) witness.TipAnswer { return witnessTip(url, held, keys[i], names[i]) }
+	// Asked from several goroutines at once: the check asks every witness
+	// together, and the witnessing worker asks too.
+	var answerMu sync.Mutex
 	answer := answerAs
-	s.WitnessService.FetchKel = func(_ context.Context, url string) (witness.KelReply, error) {
+	setAnswer := func(f func(int, string) witness.TipAnswer) {
+		answerMu.Lock()
+		answer = f
+		answerMu.Unlock()
+	}
+	s.WitnessService.FetchTip = func(_ context.Context, url string) (witness.TipAnswer, error) {
 		i := 0
 		if strings.Contains(url, "w1.test") {
 			i = 1
 		}
-		return answer(i), nil
+		answerMu.Lock()
+		defer answerMu.Unlock()
+		return answer(i, url), nil
 	}
 	var postedMu sync.Mutex
 	posted := map[string]bool{}
@@ -779,39 +789,46 @@ func TestTheWitnessesAreAskedForTheRecordsTip(t *testing.T) {
 		t.Fatalf("with no witness answering the check reads %v", got)
 	}
 	// Both hold what is here.
+	answerMu.Lock()
 	held = events
+	answerMu.Unlock()
 	got = chainSays(t, s)
 	if got["witnesses_answered"] != float64(2) || got["witness_confirmed_tip"] != float64(len(events)-1) || got["anchor_broken_at"] != nil {
 		t.Fatalf("with the witnesses confirming the tip the check reads %v", got)
 	}
-	// An answer that does not check out is no answer: a tip receipted by
-	// another key, or an event whose signature does not hold.
+	// An answer that does not check out is no answer: one signed by another
+	// key, or one replayed from an earlier question.
 	_, otherPriv, _ := ed25519.GenerateKey(rand.Reader)
-	answer = func(i int) witness.KelReply {
-		reply := answerAs(i)
-		sig, _ := login.SignString(reply.TipReceipt.EventSAID, otherPriv.Seed())
-		reply.TipReceipt.CesrSignature = sig
-		return reply
-	}
+	setAnswer(func(i int, url string) witness.TipAnswer {
+		a := answerAs(i, url)
+		a.Signature, _ = login.SignString(witness.TipStatement(a.AID, a.Nonce, a.SN, a.SAID), otherPriv.Seed())
+		return a
+	})
 	if got := chainSays(t, s); got["witnesses_answered"] != float64(0) {
-		t.Fatalf("a tip receipted by another key was believed: %v", got)
+		t.Fatalf("a tip signed by another key was believed: %v", got)
 	}
-	answer = func(i int) witness.KelReply {
-		reply := answerAs(i)
-		reply.Events[len(reply.Events)-1].CesrSignature = reply.Events[0].CesrSignature
-		return reply
-	}
+	replayed := map[int]witness.TipAnswer{}
+	setAnswer(func(i int, url string) witness.TipAnswer {
+		if a, ok := replayed[i]; ok {
+			return a
+		}
+		replayed[i] = answerAs(i, url)
+		return replayed[i]
+	})
+	chainSays(t, s)
 	if got := chainSays(t, s); got["witnesses_answered"] != float64(0) {
-		t.Fatalf("a key log whose signature does not hold was believed: %v", got)
+		t.Fatalf("a replayed answer was believed: %v", got)
 	}
-	answer = answerAs
+	setAnswer(answerAs)
 	// They hold one event more than is left here.
 	writeRows(t, s, 1)
 	if ok, err := s.anchorRecord(); err != nil || !ok {
 		t.Fatalf("anchoring again: %v %v", ok, err)
 	}
 	events, _ = s.DataStore.GetEvents(rec.AID)
+	answerMu.Lock()
 	held = events
+	answerMu.Unlock()
 	last := events[len(events)-1]
 	recordDB(t, s).Exec(`DELETE FROM kel WHERE aid = ? AND seq_num = ?`, rec.AID, last.SequenceNumber)
 	recordDB(t, s).Exec(`DELETE FROM record_anchors WHERE seq = (SELECT MAX(seq) FROM record_anchors)`)
@@ -857,10 +874,10 @@ func TestCheckingWhileAnchoringRaisesNoFalseAlarm(t *testing.T) {
 	rec, _ := s.loadRecordIdentity()
 	// The witness is slow to answer, and answers with whatever has been
 	// appended by then, so an anchoring may land while the check waits.
-	s.WitnessService.FetchKel = func(context.Context, string) (witness.KelReply, error) {
+	s.WitnessService.FetchTip = func(_ context.Context, url string) (witness.TipAnswer, error) {
 		time.Sleep(5 * time.Millisecond)
 		events, _ := s.DataStore.GetEvents(rec.AID)
-		return witnessAnswer(events, keys[0], names[0]), nil
+		return witnessTip(url, events, keys[0], names[0]), nil
 	}
 	done := make(chan struct{})
 	go func() {
@@ -905,22 +922,22 @@ func TestFailedAttemptsDoNotMoveTheRecordIdentity(t *testing.T) {
 	}
 }
 
-// witnessAnswer is what a witness holding these events answers: each as
-// published and signed, and its own receipt of the newest.
-func witnessAnswer(events []store.EventRecord, key ed25519.PrivateKey, name string) witness.KelReply {
-	var reply witness.KelReply
-	for _, ev := range events {
-		reply.Events = append(reply.Events, witness.SignedEvent{RawBytesB64: ev.RawBytesB64, CesrSignature: ev.CesrSignature})
-	}
+// witnessTip is what a witness holding these events answers when asked at
+// url: its tip, signed with its key together with the nonce it was asked with.
+func witnessTip(url string, events []store.EventRecord, key ed25519.PrivateKey, name string) witness.TipAnswer {
+	path, query, _ := strings.Cut(url, "?")
+	aid := strings.TrimSuffix(path[strings.Index(path, "/witness/kel/")+len("/witness/kel/"):], "/tip")
+	nonce := strings.TrimPrefix(query, "nonce=")
+	a := witness.TipAnswer{AID: aid, Nonce: nonce, SN: -1, WitnessAID: name}
 	if len(events) > 0 {
 		raw, _ := base64.StdEncoding.DecodeString(events[len(events)-1].RawBytesB64)
 		var last map[string]interface{}
 		json.Unmarshal(raw, &last)
-		said, _ := last["d"].(string)
-		sig, _ := login.SignString(said, key.Seed())
-		reply.TipReceipt = &witness.TipReceipt{EventSAID: said, WitnessAID: name, CesrSignature: sig}
+		a.SAID, _ = last["d"].(string)
+		a.SN = events[len(events)-1].SequenceNumber
 	}
-	return reply
+	a.Signature, _ = login.SignString(witness.TipStatement(a.AID, a.Nonce, a.SN, a.SAID), key.Seed())
+	return a
 }
 
 // End to end, with a real witness reached over HTTP: the witness agrees to
@@ -961,8 +978,8 @@ func TestARealWitnessWitnessesTheRecord(t *testing.T) {
 	events, _ := s.DataStore.GetEvents(rec.AID)
 	ownerEvents, _ := s.DataStore.GetEvents(owner.AID)
 	held := func(aid string) int {
-		proof, _ := peer.svc.KelProof(aid)
-		return len(proof.Events)
+		events, _ := peer.svc.Store.GetKelEvents(aid)
+		return len(events)
 	}
 	for i := 0; i < 300 && (held(rec.AID) < len(events) || held(owner.AID) < len(ownerEvents)); i++ {
 		time.Sleep(20 * time.Millisecond)

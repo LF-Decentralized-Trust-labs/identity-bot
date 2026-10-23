@@ -95,6 +95,20 @@ type recordState struct {
 	// anchors once and kept up to date. Sequences, not times: a clock that
 	// steps, or an entry stamped before it is committed, cannot hide one.
 	anchoredSeq map[string]int
+
+	// One witnessing worker at a time: a request while it runs is coalesced
+	// into one more pass, which reads the key logs as they are then, so the
+	// newest anchoring is always sent and never overtaken by an older one.
+	witnessOnce sync.Once
+	witnessKick chan struct{}
+	witnessMu   sync.Mutex
+	witnessJob  witnessJob
+}
+
+type witnessJob struct {
+	owner, record string
+	witnesses     []string
+	toad          int
 }
 
 // recordIdentityRecord is where the record identity's keys come from, and the
@@ -411,13 +425,35 @@ func (s *CoreServer) witnessRecord(ownerAID, recordAID string, witnesses []strin
 	if len(witnesses) == 0 || s.WitnessService == nil {
 		return
 	}
-	owner, record := s.signedEventsOf(ownerAID), s.signedEventsOf(recordAID)
-	go func() {
+	s.record.witnessMu.Lock()
+	s.record.witnessJob = witnessJob{owner: ownerAID, record: recordAID, witnesses: witnesses, toad: toad}
+	s.record.witnessMu.Unlock()
+	s.record.witnessOnce.Do(func() {
+		s.record.witnessKick = make(chan struct{}, 1)
+		go s.keepWitnessing()
+	})
+	select {
+	case s.record.witnessKick <- struct{}{}:
+	default: // a pass is already due, and will read the newest
+	}
+}
+
+// keepWitnessing runs one witnessing pass per request, one at a time.
+func (s *CoreServer) keepWitnessing() {
+	for {
+		select {
+		case <-s.anchorStop:
+			return
+		case <-s.record.witnessKick:
+		}
+		s.record.witnessMu.Lock()
+		job := s.record.witnessJob
+		s.record.witnessMu.Unlock()
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-		defer cancel()
-		s.WitnessService.BringUpToDate(ctx, ownerAID, owner, witnesses, toad)
-		s.WitnessService.BringUpToDate(ctx, recordAID, record, witnesses, toad)
-	}()
+		s.WitnessService.BringUpToDate(ctx, job.owner, s.signedEventsOf(job.owner), job.witnesses, job.toad)
+		s.WitnessService.BringUpToDate(ctx, job.record, s.signedEventsOf(job.record), job.witnesses, job.toad)
+		cancel()
+	}
 }
 
 // signedEventsOf is an identity's key log as published and signed.

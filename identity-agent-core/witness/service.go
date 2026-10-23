@@ -3,12 +3,14 @@ package witness
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -35,14 +37,15 @@ type EventPoster func(ctx context.Context, witnessURL string, body []byte) (map[
 
 // Service is the IA-side witness engine.
 type Service struct {
-	Store      Store
-	Contacts   ContactStore
-	Driver     drivers.KeriEngine
-	HTTPClient *http.Client
-	PostEvent  EventPoster
-	// FetchKel reads the key log a witness holds for an identity. Replaceable
+	Store       Store
+	Contacts    ContactStore
+	Driver      drivers.KeriEngine
+	HTTPClient  *http.Client
+	PostEvent   EventPoster
+	delegatesMu sync.Mutex
+	// FetchTip asks a witness how far it holds an identity's key log. Replaceable
 	// so a test needs no network.
-	FetchKel    func(ctx context.Context, url string) (KelReply, error)
+	FetchTip    func(ctx context.Context, url string) (TipAnswer, error)
 	OurAID      func() string
 	OurOOBI     func() string
 	BackendType string
@@ -99,36 +102,28 @@ func NewService(st Store, contacts ContactStore, driver drivers.KeriEngine, back
 		finalizeWg:  make(map[string]chan struct{}),
 	}
 	s.PostEvent = s.defaultPostEvent
-	s.FetchKel = s.defaultFetchKel
+	s.FetchTip = s.defaultFetchTip
 	return s
 }
 
-func (s *Service) defaultFetchKel(ctx context.Context, url string) (KelReply, error) {
+func (s *Service) defaultFetchTip(ctx context.Context, url string) (TipAnswer, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return KelReply{}, err
+		return TipAnswer{}, err
 	}
 	resp, err := s.HTTPClient.Do(req)
 	if err != nil {
-		return KelReply{}, err
+		return TipAnswer{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		return KelReply{}, fmt.Errorf("witness GET %d", resp.StatusCode)
+		return TipAnswer{}, fmt.Errorf("witness GET %d", resp.StatusCode)
 	}
-	var out KelReply
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&out); err != nil {
-		return KelReply{}, err
+	var out TipAnswer
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<16)).Decode(&out); err != nil {
+		return TipAnswer{}, err
 	}
 	return out, nil
-}
-
-// KelReply is a witness's answer for an identity's key log: each event as its
-// controller published and signed it, and the witness's own receipt of the
-// newest, so the answer can be checked rather than believed.
-type KelReply struct {
-	Events     []SignedEvent `json:"events"`
-	TipReceipt *TipReceipt   `json:"tip_receipt,omitempty"`
 }
 
 // SignedEvent is a key event as published, with its controller's signature.
@@ -137,72 +132,74 @@ type SignedEvent struct {
 	CesrSignature string `json:"cesr_signature"`
 }
 
-// TipReceipt is a witness's receipt of the newest event it holds.
-type TipReceipt struct {
-	EventSAID     string `json:"event_said"`
-	WitnessAID    string `json:"witness_aid"`
-	CesrSignature string `json:"cesr_signature"`
+// TipAnswer is a witness's answer to how far it holds an identity's key log:
+// the newest event's place and digest (-1 and empty when it holds nothing),
+// signed by the witness's key together with the nonce it was asked with.
+type TipAnswer struct {
+	AID        string `json:"aid"`
+	Nonce      string `json:"nonce"`
+	SN         int    `json:"sn"`
+	SAID       string `json:"said"`
+	WitnessAID string `json:"witness_aid"`
+	Signature  string `json:"signature"`
 }
 
-// KelProof is this witness's answer for aid's key log, as KelReply.
-func (s *Service) KelProof(aid string) (KelReply, error) {
-	kel, err := s.Store.GetKelEvents(aid)
+// TipStatement is what a witness signs in a TipAnswer.
+func TipStatement(aid, nonce string, sn int, said string) string {
+	return fmt.Sprintf("witness-kel-tip/v1\n%s\n%s\n%d\n%s", aid, nonce, sn, said)
+}
+
+// KelTip is this witness's signed answer for how far it holds aid's key log.
+func (s *Service) KelTip(aid, nonce string) (TipAnswer, error) {
+	if s.SignReceipt == nil {
+		return TipAnswer{}, fmt.Errorf("this agent has no witnessing key")
+	}
+	out := TipAnswer{AID: aid, Nonce: nonce, SN: -1}
+	if kel, err := s.Store.GetKelEvents(aid); err == nil && len(kel) > 0 {
+		last := kel[len(kel)-1]
+		out.SN, out.SAID = last.SequenceNum, last.EventSAID
+	}
+	wit, sig, err := s.SignReceipt(TipStatement(aid, nonce, out.SN, out.SAID))
 	if err != nil {
-		return KelReply{}, err
+		return TipAnswer{}, err
 	}
-	var out KelReply
-	for _, e := range kel {
-		out.Events = append(out.Events, SignedEvent{RawBytesB64: e.RawBytesB64, CesrSignature: e.CesrSignature})
-	}
-	if len(kel) > 0 {
-		if rct, err := s.Store.GetIssuedReceipt(aid, kel[len(kel)-1].EventSAID); err == nil && rct != nil {
-			out.TipReceipt = &TipReceipt{EventSAID: rct.EventSAID, WitnessAID: rct.WitnessAID, CesrSignature: rct.CesrSignature}
-		}
-	}
+	out.WitnessAID, out.Signature = wit, sig
 	return out, nil
 }
 
-// heldTipOf checks a witness's answer and returns the tip it shows: the key
-// log must verify as aid's, and its newest event must carry the receipt of
-// the witness asked. An answer that does not check out is no answer.
-func heldTipOf(aid, witnessKey string, reply KelReply) (HeldTip, bool) {
-	if len(reply.Events) == 0 || reply.TipReceipt == nil {
+// askTip asks one witness for its tip with a fresh nonce, and believes the
+// answer only when it carries that nonce and is signed by that witness's key.
+func (s *Service) askTip(ctx context.Context, w witnessTarget, key, aid string) (HeldTip, bool) {
+	nonceBytes := make([]byte, 16)
+	if _, err := rand.Read(nonceBytes); err != nil {
 		return HeldTip{}, false
 	}
-	in := drivers.ValidateKELInput{AID: aid}
-	for _, e := range reply.Events {
-		raw, err := base64.StdEncoding.DecodeString(e.RawBytesB64)
-		if err != nil || len(raw) == 0 || e.CesrSignature == "" {
-			return HeldTip{}, false
-		}
-		in.RawEvents = append(in.RawEvents, raw)
-		in.CesrSignatures = append(in.CesrSignatures, e.CesrSignature)
-	}
-	if res, err := drivers.ValidateKELFromBytes(in); err != nil || !res.KelVerified {
+	nonce := base64.RawURLEncoding.EncodeToString(nonceBytes)
+	url := witnessBase(w.URL) + witnessPathPrefix(w.Commercial) + "/witness/kel/" + aid + "/tip?nonce=" + nonce
+	answer, err := s.FetchTip(ctx, url)
+	if err != nil {
 		return HeldTip{}, false
 	}
-	var last map[string]interface{}
-	if json.Unmarshal(in.RawEvents[len(in.RawEvents)-1], &last) != nil {
+	return heldTipOf(aid, key, nonce, answer)
+}
+
+// heldTipOf checks a witness's answer: for this identity, with this nonce,
+// signed by the witness asked.
+func heldTipOf(aid, witnessKey, nonce string, a TipAnswer) (HeldTip, bool) {
+	if a.AID != aid || a.Nonce != nonce || a.WitnessAID != witnessKey || (a.SN >= 0) == (a.SAID == "") {
 		return HeldTip{}, false
 	}
-	said, _ := last["d"].(string)
-	sn, err := eventSeq(last)
-	if err != nil || said == "" {
+	if drivers.VerifyReceipt(witnessKey, TipStatement(aid, nonce, a.SN, a.SAID), a.Signature) != nil {
 		return HeldTip{}, false
 	}
-	rct := reply.TipReceipt
-	if rct.EventSAID != said || rct.WitnessAID != witnessKey ||
-		drivers.VerifyReceipt(witnessKey, said, rct.CesrSignature) != nil {
-		return HeldTip{}, false
-	}
-	return HeldTip{SN: sn, SAID: said}, true
+	return HeldTip{SN: a.SN, SAID: a.SAID}, true
 }
 
 // KelHeldBy asks each designated witness how far the key log it holds for aid
 // goes, and returns, by witness key, the sequence number and digest of the
 // newest event each holds. A witness that cannot be reached, holds nothing, or
-// answers with a key log that does not verify or a tip it has not receipted,
-// is left out.
+// does not sign, with its own key, the tip together with the nonce it was
+// asked with, is left out: so an answer is fresh and the witness's own.
 func (s *Service) KelHeldBy(ctx context.Context, aid string, designated []string) map[string]HeldTip {
 	known := s.designatedTargets(designated)
 	out := map[string]HeldTip{}
@@ -216,13 +213,8 @@ func (s *Service) KelHeldBy(ctx context.Context, aid string, designated []string
 		wg.Add(1)
 		go func(key string, w witnessTarget) {
 			defer wg.Done()
-			url := witnessBase(w.URL) + witnessPathPrefix(w.Commercial) + "/witness/kel/" + aid
-			reply, err := s.FetchKel(ctx, url)
-			if err != nil {
-				return
-			}
-			tip, ok := heldTipOf(aid, key, reply)
-			if !ok {
+			tip, ok := s.askTip(ctx, w, key, aid)
+			if !ok || tip.SN < 0 {
 				return
 			}
 			mu.Lock()
@@ -244,16 +236,18 @@ type HeldTip struct {
 // among this agent's witnesses and the bootstrap pool.
 func (s *Service) designatedTargets(designated []string) map[string]witnessTarget {
 	known := map[string]witnessTarget{}
+	// A bootstrap witness's address is pinned: a contact naming the same key
+	// does not redirect where it is asked.
+	for _, b := range BootstrapPool() {
+		known[b.WitnessKey] = witnessTarget{AID: b.AID, WitnessKey: b.WitnessKey, URL: b.URL, Commercial: true}
+	}
 	if contacts, err := s.Contacts.GetContacts(); err == nil {
 		for _, c := range contacts {
 			if meta, _ := s.Store.GetContactMeta(c.AID); meta != nil && meta.WitnessKey != "" {
-				known[meta.WitnessKey] = witnessTarget{AID: c.AID, URL: c.OobiURL, WitnessKey: meta.WitnessKey}
+				if _, pinned := known[meta.WitnessKey]; !pinned {
+					known[meta.WitnessKey] = witnessTarget{AID: c.AID, URL: c.OobiURL, WitnessKey: meta.WitnessKey}
+				}
 			}
-		}
-	}
-	for _, b := range BootstrapPool() {
-		if _, ok := known[b.WitnessKey]; !ok {
-			known[b.WitnessKey] = witnessTarget{AID: b.AID, WitnessKey: b.WitnessKey, URL: b.URL, Commercial: true}
 		}
 	}
 	return known
@@ -352,17 +346,29 @@ func (s *Service) ReceiveEvent(signerAID string, rawEvent []byte, cesrSig string
 		return nil, fmt.Errorf("unsigned_event")
 	}
 	meta, _ := s.Store.GetContactMeta(signerAID)
-	enrolAs := ""
-	if meta == nil || !meta.WitnessingFor {
+	enrolAs, enrolUnder := "", ""
+	if meta != nil && meta.WitnessingFor {
+		// A delegate is witnessed only while its delegator is.
+		if delegator := s.delegateOf(signerAID); delegator != "" {
+			if dm, _ := s.Store.GetContactMeta(delegator); dm == nil || !dm.WitnessingFor {
+				s.dropDelegatesOf(delegator)
+				return nil, fmt.Errorf("not_witnessing")
+			}
+		}
+	} else {
 		// An identity delegated by one this agent witnesses for is witnessed
 		// too, from its inception, when the delegator's key log this agent
 		// holds approves exactly that inception: the delegator has already
-		// said it is theirs, in the log this agent agreed to witness.
+		// said it is theirs, in the log this agent agreed to witness. The
+		// operator can switch this off or cap it.
 		delegator, ok := s.delegatorApproves(event)
 		if !ok {
 			return nil, fmt.Errorf("not_witnessing")
 		}
-		enrolAs = BackendDesktop
+		if !s.delegatesAccepted(delegator) {
+			return nil, fmt.Errorf("not_witnessing: delegates not accepted")
+		}
+		enrolAs, enrolUnder = BackendDesktop, delegator
 		if dm, _ := s.Store.GetContactMeta(delegator); dm != nil && dm.BackendType != "" {
 			enrolAs = dm.BackendType
 		}
@@ -372,11 +378,14 @@ func (s *Service) ReceiveEvent(signerAID string, rawEvent []byte, cesrSig string
 		return nil, fmt.Errorf("invalid_sequence")
 	}
 	last, _ := s.Store.LastKelSeq(signerAID)
+	if last >= 0 && seq <= last {
+		// One already held is answered with its receipt, so somebody sending
+		// a key log again from where they think this witness stopped carries
+		// on. Something else at that place is a conflicting history.
+		return s.alreadyHeld(signerAID, seq, eventSAID(event))
+	}
 	if last >= 0 && seq != last+1 {
 		return nil, fmt.Errorf("sequence_gap")
-	}
-	if last >= 0 && seq <= last {
-		return nil, fmt.Errorf("duplicate_sequence")
 	}
 
 	if err := s.verifyEventChain(signerAID, rawEvent, cesrSig, seq); err != nil {
@@ -386,6 +395,7 @@ func (s *Service) ReceiveEvent(signerAID string, rawEvent []byte, cesrSig string
 		if err := s.enrollWitnessingFor(signerAID, enrolAs); err != nil {
 			return nil, err
 		}
+		s.recordDelegate(signerAID, enrolUnder)
 	}
 
 	now := NowRFC3339()
@@ -558,8 +568,8 @@ func (s *Service) BroadcastEvent(ctx context.Context, signerAID string, rawEvent
 // return. A witness refuses an event that does not follow the last one it
 // holds, so a key log some of whose events never reached its witnesses has to
 // be sent from where each witness stopped, not one event at a time. Each
-// witness is asked how far it holds the log; one whose answer does not check
-// out is sent the whole of it.
+// witness is asked only for its tip; one whose answer does not check out is
+// sent the whole log, and answers what it already holds with its receipt.
 func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []SignedEvent, designated []string, threshold int) {
 	known := s.designatedTargets(designated)
 	// Each event's receipts are counted against its threshold, so each has a
@@ -591,11 +601,8 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 		go func(key string, w witnessTarget) {
 			defer wg.Done()
 			from := 0
-			kelURL := witnessBase(w.URL) + witnessPathPrefix(w.Commercial) + "/witness/kel/" + signerAID
-			if reply, err := s.FetchKel(ctx, kelURL); err == nil {
-				if tip, ok := heldTipOf(signerAID, key, reply); ok {
-					from = tip.SN + 1
-				}
+			if tip, ok := s.askTip(ctx, w, key, signerAID); ok {
+				from = tip.SN + 1
 			}
 			for _, e := range events {
 				raw, err := base64.StdEncoding.DecodeString(e.RawBytesB64)
@@ -1195,4 +1202,106 @@ func (s *Service) delegatorApproves(event map[string]interface{}) (string, bool)
 		}
 	}
 	return "", false
+}
+
+// alreadyHeld answers an event this witness already holds at seq: with its
+// receipt when it is the same event, as a conflict when it is not.
+func (s *Service) alreadyHeld(signerAID string, seq int, said string) (map[string]interface{}, error) {
+	held, err := s.Store.GetKelEvents(signerAID)
+	if err != nil {
+		return nil, err
+	}
+	for _, e := range held {
+		if e.SequenceNum != seq {
+			continue
+		}
+		if e.EventSAID != said {
+			return nil, fmt.Errorf("duplicate_sequence")
+		}
+		rct, _ := s.Store.GetIssuedReceipt(signerAID, said)
+		if rct == nil {
+			return nil, fmt.Errorf("duplicate_sequence: held without a receipt")
+		}
+		var receipt map[string]interface{}
+		_ = json.Unmarshal([]byte(rct.ReceiptJSON), &receipt)
+		return map[string]interface{}{
+			"event_said": said, "witness_aid": rct.WitnessAID, "sequence_number": seq,
+			"receipt": receipt, "cesr_signature": rct.CesrSignature,
+		}, nil
+	}
+	return nil, fmt.Errorf("duplicate_sequence")
+}
+
+// The operator's settings for witnessing the identities an identity this
+// agent witnesses for has delegated: on by default; "off" stops it, and a
+// number caps how many one delegator may have witnessed.
+const (
+	ConfigDelegates    = "witness.delegates"
+	ConfigDelegatesMax = "witness.delegates_max"
+	configDelegateOf   = "witness.delegate_of"
+)
+
+func (s *Service) delegateMap() map[string]string {
+	out := map[string]string{}
+	if raw, err := s.Store.GetConfig(configDelegateOf); err == nil && raw != "" {
+		_ = json.Unmarshal([]byte(raw), &out)
+	}
+	return out
+}
+
+func (s *Service) saveDelegateMap(m map[string]string) {
+	raw, _ := json.Marshal(m)
+	_ = s.Store.SetConfig(configDelegateOf, string(raw))
+}
+
+// delegateOf is the delegator a delegate is witnessed under, or "".
+func (s *Service) delegateOf(aid string) string {
+	return s.delegateMap()[aid]
+}
+
+func (s *Service) recordDelegate(aid, delegator string) {
+	s.delegatesMu.Lock()
+	defer s.delegatesMu.Unlock()
+	m := s.delegateMap()
+	m[aid] = delegator
+	s.saveDelegateMap(m)
+}
+
+// delegatesAccepted reports whether another delegate of delegator may be
+// witnessed under the operator's settings.
+func (s *Service) delegatesAccepted(delegator string) bool {
+	if v, _ := s.Store.GetConfig(ConfigDelegates); strings.EqualFold(strings.TrimSpace(v), "off") {
+		return false
+	}
+	v, _ := s.Store.GetConfig(ConfigDelegatesMax)
+	max, err := strconv.Atoi(strings.TrimSpace(v))
+	if v == "" || err != nil || max < 0 {
+		return true
+	}
+	n := 0
+	for _, d := range s.delegateMap() {
+		if d == delegator {
+			n++
+		}
+	}
+	return n < max
+}
+
+// dropDelegatesOf stops witnessing every identity delegator delegated.
+func (s *Service) dropDelegatesOf(delegator string) {
+	s.delegatesMu.Lock()
+	defer s.delegatesMu.Unlock()
+	m := s.delegateMap()
+	for aid, d := range m {
+		if d != delegator {
+			continue
+		}
+		if meta, _ := s.Store.GetContactMeta(aid); meta != nil && meta.WitnessingFor {
+			meta.WitnessingFor = false
+			_ = s.Store.SaveContactMeta(*meta)
+		}
+		delete(m, aid)
+		log.Printf("[witness] stopped witnessing %s, delegated by %s, which this agent no longer witnesses", aid, delegator)
+	}
+	s.saveDelegateMap(m)
 }
