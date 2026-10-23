@@ -118,7 +118,7 @@ func (s *CoreServer) thePersonAsking(r *http.Request) (agentmessage.PersonRef, *
 			if err := s.rowIsItsGrant(current); err != nil {
 				return agentmessage.PersonRef{}, nil, err
 			}
-		case !current.CredentialPending || s.identityKeyHeldHere():
+		case !current.CredentialPending || !s.keyIsElsewhere():
 			return agentmessage.PersonRef{}, nil, fmt.Errorf("this machine was paired before machines were given grants, and awaits the owner's approval")
 		}
 		grant = current

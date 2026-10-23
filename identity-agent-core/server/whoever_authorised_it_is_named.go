@@ -86,7 +86,7 @@ func (s *CoreServer) authorityOf(r *http.Request) (authority, func(), error) {
 		}
 		// A mark that the grant waits for another device is believed only
 		// where the key really is elsewhere.
-		if current.CredentialSAID == "" && (!current.CredentialPending || s.identityKeyHeldHere()) {
+		if current.CredentialSAID == "" && (!current.CredentialPending || !s.keyIsElsewhere()) {
 			release()
 			return authority{}, func() {}, fmt.Errorf("this machine was paired before machines were given grants, and needs the owner's approval before what it asks for can rest on it")
 		}
@@ -344,8 +344,10 @@ func (s *CoreServer) grantController(g ControllerGrant, now time.Time, by author
 	// A machine already granted is not re-granted where the key is on
 	// another device: its grant could not be withdrawn here, and both would
 	// stand.
-	if had && before.CredentialSAID != "" && !s.identityKeyHeldHere() {
-		return ControllerGrant{}, fmt.Errorf("%w, and this machine's current grant could not be withdrawn here", errKeyElsewhere)
+	if had && before.CredentialSAID != "" {
+		if err := s.keyCanSign(); err != nil {
+			return ControllerGrant{}, fmt.Errorf("%w, and this machine's current grant could not be withdrawn here", err)
+		}
 	}
 	by.About = checked.ControllerAID
 	said, err := s.issueControllerGrant(checked, by)
@@ -440,8 +442,10 @@ func (s *CoreServer) bindSigner(aid, signer string) (ControllerGrant, error) {
 	}
 	bound := g
 	bound.Signer = signer
-	if g.CredentialSAID != "" && !s.identityKeyHeldHere() {
-		return g, fmt.Errorf("%w, and this machine's grant could not be re-issued to name its signer", errKeyElsewhere)
+	if g.CredentialSAID != "" {
+		if err := s.keyCanSign(); err != nil {
+			return g, fmt.Errorf("%w, and this machine's grant could not be re-issued to name its signer", err)
+		}
 	}
 	if g.CredentialSAID != "" {
 		// Re-issued from what the grant says, never from a row changed since.
@@ -530,7 +534,7 @@ func (s *CoreServer) rowIsItsGrant(g ControllerGrant) error {
 // handleGrantsAwaitingApproval lists them, so an app can ask the owner.
 func (s *CoreServer) handleGrantsAwaitingApproval(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
-	keyHere := s.identityKeyHeldHere()
+	keyHere := !s.keyIsElsewhere()
 	machines := []map[string]any{}
 	if all, err := s.controllers().All(); err == nil {
 		for _, g := range all {

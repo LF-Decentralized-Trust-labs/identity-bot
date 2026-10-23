@@ -157,7 +157,7 @@ func (h *Handler) HandleEnrol(w http.ResponseWriter, r *http.Request) {
 	// half stays where it was made and never reaches this agent.
 	if err := h.mayDelegate(); err != nil {
 		release()
-		h.writeJSON(w, map[string]string{"error": err.Error()}, http.StatusConflict)
+		h.writeJSON(w, map[string]string{"error": err.Error()}, delegationRefusalStatus(err))
 		return
 	}
 	resp, err := h.KeriDriver.CreateDelegatedInception(

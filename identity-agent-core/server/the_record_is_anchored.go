@@ -364,8 +364,8 @@ func (s *CoreServer) recordIdentity() (recordIdentityRecord, []byte, error) {
 	// The approval is an event in this identity's own key log. Where its key
 	// lives on another device, that device has to sign it, and this Identity
 	// Agent writes nothing there it could not sign.
-	if _, err := s.identitySigningSeed(); err != nil {
-		return recordIdentityRecord{}, nil, errKeyElsewhere
+	if err := s.keyCanSign(); err != nil {
+		return recordIdentityRecord{}, nil, err
 	}
 	if found, err := s.approvedRecordIdentities(owner.AID); err != nil {
 		return recordIdentityRecord{}, nil, err
@@ -799,8 +799,10 @@ func (s *CoreServer) checkAnchors() (anchorCheck, error) {
 		switch {
 		case !s.anchorsItsRecord():
 			out.Unavailable = "this Identity Agent anchors its record once it is an organisation's or holds an AI agent"
-		case func() bool { _, err := s.identitySigningSeed(); return err != nil }():
+		case s.keyIsElsewhere():
 			out.Unavailable = "the identity's key is held on another device, and nothing is anchored here"
+		case s.keyCanSign() != nil:
+			out.Unavailable = "the identity's key is held here and cannot be read right now, so nothing is anchored"
 		default:
 			out.Unavailable = "nothing has been anchored yet"
 		}

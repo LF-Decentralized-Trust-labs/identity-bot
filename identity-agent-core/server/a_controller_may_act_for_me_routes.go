@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -81,6 +82,10 @@ func (s *CoreServer) handleGrantController(w http.ResponseWriter, r *http.Reques
 
 	now := time.Now().UTC()
 	granted, err := s.grantController(g, now, by)
+	if errors.Is(err, errKeyUnavailable) {
+		writeError(w, http.StatusServiceUnavailable, err.Error(), "")
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error(), "")
 		return

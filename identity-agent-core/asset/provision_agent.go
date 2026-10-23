@@ -44,14 +44,14 @@ func (h *Handler) ProvisionAgentAsset(displayName string, capabilities []string,
 		return nil, fmt.Errorf("keri driver required to mint the delegated agent AID")
 	}
 
+	if err := h.mayDelegate(); err != nil {
+		return nil, err
+	}
 	id := genID()
 	signingIndex := signingIndexForID(id)
 	pub, nextPub, err := deriveAssetKeypair(h.dataDir, signingIndex)
 	if err != nil {
 		return nil, fmt.Errorf("derive agent key: %w", err)
-	}
-	if err := h.mayDelegate(); err != nil {
-		return nil, err
 	}
 	resp, err := h.KeriDriver.CreateDelegatedInception(
 		iacrypto.VerkeyQB64(pub), iacrypto.VerkeyQB64(nextPub), displayName, rootAID)

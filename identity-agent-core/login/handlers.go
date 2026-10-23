@@ -3,12 +3,10 @@ package login
 import (
 	"bytes"
 	"crypto/ed25519"
-	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -224,19 +222,10 @@ func (h *Handler) getOrCreateRelationship(siteAID string, bundle *ChallengeBundl
 	if rel, ok := h.Store.Get(siteAID); ok {
 		return &rel, nil
 	}
-	rootSeed, rerr := secureenclave.LoadRootSeed(h.dataDir)
+	// The one stored, never replaced when it cannot be read.
+	rootSeed, rerr := secureenclave.EnsureRootSeed(h.dataDir)
 	if rerr != nil {
-		// FALLBACK ONLY: canonical path is the onboarding handoff installing the
-		// mnemonic-derived seed (POST /api/keystore/root-seed). A random root is
-		// device-local — recoverable from backup archives, never the phrase.
-		log.Printf("[keystore] WARNING: bootstrapping a random DEVICE-LOCAL root seed (no onboarding seed handoff yet) — HD-derived keys will not be recoverable from the seed phrase alone")
-		rootSeed = make([]byte, 64)
-		if _, re := rand.Read(rootSeed); re != nil {
-			return nil, fmt.Errorf("failed to bootstrap root seed: %w", re)
-		}
-		if serr := secureenclave.StoreRootSeed(h.dataDir, rootSeed); serr != nil {
-			return nil, fmt.Errorf("failed to store root seed securely: %w", serr)
-		}
+		return nil, rerr
 	}
 	loginIdx := h.Store.AllocateNextRelationshipIndex()
 

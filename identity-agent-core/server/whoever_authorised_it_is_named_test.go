@@ -409,7 +409,6 @@ func TestAMachineNeverHasTwoGrantsInForce(t *testing.T) {
 	}
 }
 
-
 // A machine whose grant has been withdrawn authorises nothing, and nor does
 // one paired before machines were given grants, which is not given one by
 // asking.
@@ -869,7 +868,6 @@ func TestTheOwnerApprovesAnEarlierAIAgent(t *testing.T) {
 		t.Fatal("the approved AI agent is still listed as awaiting")
 	}
 }
-
 
 // The list of what awaits approval is served where the apps ask for it.
 func TestTheApprovalListIsServed(t *testing.T) {

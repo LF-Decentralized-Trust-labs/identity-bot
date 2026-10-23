@@ -110,6 +110,10 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 		jsonError(w, err.Error(), http.StatusConflict)
 		return
 	}
+	if errors.Is(err, asset.ErrKeyUnavailable) {
+		jsonError(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusBadRequest)
 		return
@@ -377,9 +381,9 @@ func (s *CoreServer) handleSetAgentCapabilities(w http.ResponseWriter, r *http.R
 		// already issued is not re-granted: the grant it replaces could not be
 		// withdrawn here, and both would stand. Refused before anything is
 		// built or asked for.
-		if !s.identityKeyHeldHere() && s.agentHasIssuedGrant(id) {
-			jsonError(w, "the grant could not be re-issued, so nothing was changed: "+errKeyElsewhere.Error()+
-				", and this AI agent's current grant could not be withdrawn here", http.StatusConflict)
+		if kerr := s.keyCanSign(); kerr != nil && s.agentHasIssuedGrant(id) {
+			jsonError(w, "the grant could not be re-issued, so nothing was changed: "+kerr.Error()+
+				", and this AI agent's current grant could not be withdrawn here", keyErrorStatus(kerr))
 			return
 		}
 		g, err := s.issueCapabilityGrant(&candidate, by)
@@ -387,6 +391,10 @@ func (s *CoreServer) handleSetAgentCapabilities(w http.ResponseWriter, r *http.R
 			// Its grant waits for the device that holds the key, which has
 			// been asked to sign it; the change is recorded and waits with it.
 			err, grantPending = nil, true
+		}
+		if errors.Is(err, errKeyUnavailable) {
+			jsonError(w, "the grant could not be re-issued, so nothing was changed: "+err.Error(), http.StatusServiceUnavailable)
+			return
 		}
 		if err != nil {
 			jsonError(w, "the grant could not be re-issued, so nothing was changed: "+err.Error(),
@@ -608,4 +616,14 @@ func (s *CoreServer) agentGrantPendingFor(assetID string) bool {
 		}
 	}
 	return false
+}
+
+// keyErrorStatus is how a failure to sign as the identity is answered: the
+// key held elsewhere is a conflict to resolve there; a key held here and
+// unreadable right now is this machine's fault, and temporary.
+func keyErrorStatus(err error) int {
+	if errors.Is(err, errKeyUnavailable) {
+		return http.StatusServiceUnavailable
+	}
+	return http.StatusConflict
 }

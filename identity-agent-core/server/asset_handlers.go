@@ -1,6 +1,8 @@
 package server
 
 import (
+	"errors"
+	"fmt"
 	"os"
 
 	"identity-agent-core/asset"
@@ -32,7 +34,16 @@ func (s *CoreServer) initAssetHandler() error {
 	// Persist each delegated inception's owner-root anchoring event to the root KEL,
 	// so the delegation survives a KEL reload and the delegated AID keeps verifying.
 	h.PersistDelegationAnchor = s.saveDelegationAnchor
-	h.KeyHeldHere = s.identityKeyHeldHere
+	h.KeyCheck = func() error {
+		switch err := s.keyCanSign(); {
+		case err == nil:
+			return nil
+		case errors.Is(err, errKeyElsewhere):
+			return asset.ErrKeyElsewhere
+		default:
+			return fmt.Errorf("%w: %v", asset.ErrKeyUnavailable, err)
+		}
+	}
 	s.assetHandler = h
 	return nil
 }

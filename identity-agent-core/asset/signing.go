@@ -2,9 +2,7 @@ package asset
 
 import (
 	"crypto/ed25519"
-	"crypto/rand"
 	"hash/crc32"
-	"log"
 
 	"identity-agent-core/backup"
 	"identity-agent-core/secureenclave"
@@ -20,26 +18,10 @@ func signingIndexForID(id string) int {
 	return assetIndexBase + int(crc32.ChecksumIEEE([]byte(id))&0x0FFFFFFF)
 }
 
-// ensureRootSeed loads the controller root seed from secure storage. The canonical
-// path is the onboarding handoff (POST /api/keystore/root-seed installs the
-// mnemonic-derived BIP39 seed, so the seed phrase alone recovers every HD key).
-// FALLBACK ONLY: a core that mints before any handoff (headless/dev, never
-// interactively onboarded) bootstraps a random device-local root — those HD keys
-// are then recoverable only from backup archives, never the phrase.
+// ensureRootSeed is the controller root seed (secureenclave.EnsureRootSeed):
+// the one stored, never replaced when it cannot be read.
 func ensureRootSeed(dataDir string) ([]byte, error) {
-	root, err := secureenclave.LoadRootSeed(dataDir)
-	if err == nil {
-		return root, nil
-	}
-	log.Printf("[keystore] WARNING: bootstrapping a random DEVICE-LOCAL root seed (no onboarding seed handoff yet) — HD-derived keys will not be recoverable from the seed phrase alone")
-	root = make([]byte, 64)
-	if _, re := rand.Read(root); re != nil {
-		return nil, re
-	}
-	if serr := secureenclave.StoreRootSeed(dataDir, root); serr != nil {
-		return nil, serr
-	}
-	return root, nil
+	return secureenclave.EnsureRootSeed(dataDir)
 }
 
 // AssetSigningSeed re-derives an asset's Ed25519 signing seed from the controller root seed

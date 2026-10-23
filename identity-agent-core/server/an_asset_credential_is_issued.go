@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -38,8 +39,13 @@ func (s *CoreServer) issueAssetCredential(
 	// says why it cannot be done here.
 	keyHere := true
 	if issuer == identity.AID {
-		if _, err := s.identitySigningSeed(); err != nil {
+		switch err := s.keyCanSign(); {
+		case errors.Is(err, errKeyElsewhere):
 			keyHere = false
+		case err != nil:
+			// Held here and unreadable right now: reported, and nothing is
+			// asked of another device, since there is none.
+			return "", err
 		}
 	}
 	claims["i"] = holder
