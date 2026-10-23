@@ -652,12 +652,26 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 		}
 	}
 	known := s.designatedTargets(designated)
+	// Only events past what every witness has confirmed can still be sent, so
+	// only those are looked at here.
+	lowest := localTip
+	for _, key := range designated {
+		if c := s.confirmedTip(signerAID, key); c < lowest {
+			lowest = c
+		}
+	}
+	if localTip >= 0 && lowest >= localTip {
+		return
+	}
 	// Each event's receipts are counted against its threshold, so each has a
 	// finalisation to count them on.
 	for _, e := range events {
 		raw, _ := base64.StdEncoding.DecodeString(e.RawBytesB64)
 		var ev map[string]interface{}
 		if json.Unmarshal(raw, &ev) != nil {
+			continue
+		}
+		if sn, err := eventSeq(ev); err == nil && sn <= lowest {
 			continue
 		}
 		said := eventSAID(ev)

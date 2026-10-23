@@ -478,3 +478,57 @@ func TestAWitnessHandsBackAnEventItHolds(t *testing.T) {
 		t.Fatal("a witness handed back an event it does not hold")
 	}
 }
+
+// countingStore counts the finalisations looked up.
+type countingStore struct {
+	Store
+	looked int
+}
+
+func (c *countingStore) GetFinalization(said string) (*FinalizationState, error) {
+	c.looked++
+	return c.Store.GetFinalization(said)
+}
+
+// A pass looks only at events past what the witnesses have confirmed.
+func TestAPassLooksOnlyAtWhatIsNotConfirmed(t *testing.T) {
+	d := newDelegation(t)
+	sender, mc := testService(t)
+	counting := &countingStore{Store: sender.Store}
+	sender.Store = counting
+	mc.contacts["EWitness"] = store.ContactRecord{AID: "EWitness", OobiURL: "http://w.test", IsWitness: true}
+	_ = sender.Store.SaveContactMeta(ContactMeta{ContactAID: "EWitness", WitnessKey: d.wkey})
+	sender.FetchTip = func(_ context.Context, url string) (TipAnswer, error) {
+		_, nonce, _ := strings.Cut(url, "?nonce=")
+		return d.w.KelTip(d.org, nonce)
+	}
+	sender.PostEvent = func(_ context.Context, _ string, body []byte) (map[string]interface{}, error) {
+		var req struct {
+			AID   string `json:"aid"`
+			Event string `json:"event_b64"`
+			Sig   string `json:"cesr_signature"`
+		}
+		_ = json.Unmarshal(body, &req)
+		raw, _ := base64.StdEncoding.DecodeString(req.Event)
+		return d.w.ReceiveEvent(req.AID, raw, req.Sig)
+	}
+	signed := func(rawB64 string) SignedEvent {
+		raw, _ := base64.StdEncoding.DecodeString(rawB64)
+		sig, _ := login.SignString(string(raw), d.orgSeed)
+		return SignedEvent{RawBytesB64: rawB64, CesrSignature: sig}
+	}
+	log := []SignedEvent{signed(d.icpB64), signed(d.approvalB64)}
+	sender.BringUpToDate(context.Background(), d.org, log, []string{d.wkey}, 1)
+	log = append(log, signed(d.interaction(t, "org", d.org, 1)))
+	before := counting.looked
+	sender.BringUpToDate(context.Background(), d.org, log, []string{d.wkey}, 1)
+	// One for the new event, and one as its receipt is counted.
+	if n := counting.looked - before; n != 2 {
+		t.Fatalf("a pass with one new event looked up %d finalisations", n)
+	}
+	before = counting.looked
+	sender.BringUpToDate(context.Background(), d.org, log, []string{d.wkey}, 1)
+	if n := counting.looked - before; n != 0 {
+		t.Fatalf("a pass with nothing new looked up %d finalisations", n)
+	}
+}
