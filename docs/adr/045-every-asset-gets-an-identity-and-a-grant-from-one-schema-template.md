@@ -172,7 +172,9 @@ everything it issues and by anyone to an exported record):
    five minutes of clock difference either side of the credential's issue. Given the
    issuer's key log and the credential's own log, the grant's revocation is ordered against
    the credential's issue by where each is anchored in that key log, not by the times they
-   state; without them, by the time its transaction log states.
+   state; without them, by the time its transaction log states. `Check` does not validate
+   the issuer's key log: a verifier must validate it, its signatures and its witnesses'
+   receipts, before passing it, or the order it shows proves nothing.
 7. One request authorises one credential. The Identity Agent refuses to issue a second on a
    request it has used; a verifier holding several credentials refuses any two carrying the
    same request (`authorisation.RequestDigest`).

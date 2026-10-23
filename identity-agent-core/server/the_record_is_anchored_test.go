@@ -729,9 +729,15 @@ func TestTheWitnessesAreAskedForTheRecordsTip(t *testing.T) {
 		s.DataStore.SaveContact(store.ContactRecord{AID: aid, OobiURL: "http://w" + fmt.Sprint(i) + ".test", Status: "active"})
 		s.WitnessService.Store.SaveContactMeta(witness.ContactMeta{ContactAID: aid, WitnessKey: name})
 	}
-	var held []map[string]interface{}
-	s.WitnessService.FetchKel = func(context.Context, string) ([]map[string]interface{}, error) {
-		return held, nil
+	var held []store.EventRecord
+	answerAs := func(i int) witness.KelReply { return witnessAnswer(held, keys[i], names[i]) }
+	answer := answerAs
+	s.WitnessService.FetchKel = func(_ context.Context, url string) (witness.KelReply, error) {
+		i := 0
+		if strings.Contains(url, "w1.test") {
+			i = 1
+		}
+		return answer(i), nil
 	}
 	var postedMu sync.Mutex
 	posted := map[string]bool{}
@@ -766,15 +772,6 @@ func TestTheWitnessesAreAskedForTheRecordsTip(t *testing.T) {
 	}
 	postedMu.Unlock()
 	events, _ := s.DataStore.GetEvents(rec.AID)
-	asHeld := func(n int) []map[string]interface{} {
-		var out []map[string]interface{}
-		for _, ev := range events[:n] {
-			var m map[string]interface{}
-			json.Unmarshal([]byte(ev.EventJSON), &m)
-			out = append(out, m)
-		}
-		return out
-	}
 
 	// Nobody answers: local only.
 	got := chainSays(t, s)
@@ -782,22 +779,45 @@ func TestTheWitnessesAreAskedForTheRecordsTip(t *testing.T) {
 		t.Fatalf("with no witness answering the check reads %v", got)
 	}
 	// Both hold what is here.
-	held = asHeld(len(events))
+	held = events
 	got = chainSays(t, s)
 	if got["witnesses_answered"] != float64(2) || got["witness_confirmed_tip"] != float64(len(events)-1) || got["anchor_broken_at"] != nil {
 		t.Fatalf("with the witnesses confirming the tip the check reads %v", got)
 	}
+	// An answer that does not check out is no answer: a tip receipted by
+	// another key, or an event whose signature does not hold.
+	_, otherPriv, _ := ed25519.GenerateKey(rand.Reader)
+	answer = func(i int) witness.KelReply {
+		reply := answerAs(i)
+		sig, _ := login.SignString(reply.TipReceipt.EventSAID, otherPriv.Seed())
+		reply.TipReceipt.CesrSignature = sig
+		return reply
+	}
+	if got := chainSays(t, s); got["witnesses_answered"] != float64(0) {
+		t.Fatalf("a tip receipted by another key was believed: %v", got)
+	}
+	answer = func(i int) witness.KelReply {
+		reply := answerAs(i)
+		reply.Events[len(reply.Events)-1].CesrSignature = reply.Events[0].CesrSignature
+		return reply
+	}
+	if got := chainSays(t, s); got["witnesses_answered"] != float64(0) {
+		t.Fatalf("a key log whose signature does not hold was believed: %v", got)
+	}
+	answer = answerAs
 	// They hold one event more than is left here.
 	writeRows(t, s, 1)
 	if ok, err := s.anchorRecord(); err != nil || !ok {
 		t.Fatalf("anchoring again: %v %v", ok, err)
 	}
 	events, _ = s.DataStore.GetEvents(rec.AID)
-	held = asHeld(len(events))
+	held = events
 	last := events[len(events)-1]
 	recordDB(t, s).Exec(`DELETE FROM kel WHERE aid = ? AND seq_num = ?`, rec.AID, last.SequenceNumber)
 	recordDB(t, s).Exec(`DELETE FROM record_anchors WHERE seq = (SELECT MAX(seq) FROM record_anchors)`)
-	rec.TipSN, rec.TipSAID = last.SequenceNumber-1, asHeld(len(events) - 1)[len(events)-2]["d"].(string)
+	var prior map[string]interface{}
+	json.Unmarshal([]byte(events[len(events)-2].EventJSON), &prior)
+	rec.TipSN, rec.TipSAID = last.SequenceNumber-1, prior["d"].(string)
 	seed, _, _, _ := s.recordKeys(rec.Index)
 	signTip(&rec, seed)
 	s.saveRecordIdentity(rec)
@@ -837,16 +857,10 @@ func TestCheckingWhileAnchoringRaisesNoFalseAlarm(t *testing.T) {
 	rec, _ := s.loadRecordIdentity()
 	// The witness is slow to answer, and answers with whatever has been
 	// appended by then, so an anchoring may land while the check waits.
-	s.WitnessService.FetchKel = func(context.Context, string) ([]map[string]interface{}, error) {
+	s.WitnessService.FetchKel = func(context.Context, string) (witness.KelReply, error) {
 		time.Sleep(5 * time.Millisecond)
 		events, _ := s.DataStore.GetEvents(rec.AID)
-		var out []map[string]interface{}
-		for _, ev := range events {
-			var m map[string]interface{}
-			json.Unmarshal([]byte(ev.EventJSON), &m)
-			out = append(out, m)
-		}
-		return out, nil
+		return witnessAnswer(events, keys[0], names[0]), nil
 	}
 	done := make(chan struct{})
 	go func() {
@@ -888,5 +902,86 @@ func TestFailedAttemptsDoNotMoveTheRecordIdentity(t *testing.T) {
 	}
 	if got := chainSays(t, s); got["anchor_broken_at"] != nil {
 		t.Fatalf("the record identity was not found after failed attempts: %v", got)
+	}
+}
+
+// witnessAnswer is what a witness holding these events answers: each as
+// published and signed, and its own receipt of the newest.
+func witnessAnswer(events []store.EventRecord, key ed25519.PrivateKey, name string) witness.KelReply {
+	var reply witness.KelReply
+	for _, ev := range events {
+		reply.Events = append(reply.Events, witness.SignedEvent{RawBytesB64: ev.RawBytesB64, CesrSignature: ev.CesrSignature})
+	}
+	if len(events) > 0 {
+		raw, _ := base64.StdEncoding.DecodeString(events[len(events)-1].RawBytesB64)
+		var last map[string]interface{}
+		json.Unmarshal(raw, &last)
+		said, _ := last["d"].(string)
+		sig, _ := login.SignString(said, key.Seed())
+		reply.TipReceipt = &witness.TipReceipt{EventSAID: said, WitnessAID: name, CesrSignature: sig}
+	}
+	return reply
+}
+
+// End to end, with a real witness reached over HTTP: the witness agrees to
+// witness for the organisation through the ordinary request, is brought up to
+// date with the organisation's key log in order, takes the record identity on
+// from the organisation's approval, receipts its anchorings, and confirms its
+// tip when the check asks.
+func TestARealWitnessWitnessesTheRecord(t *testing.T) {
+	peer := startPeer(t, "witness")
+	s, _ := foundedWith(t, agentWithDerivedIdentity(t), []string{peer.witnessKey}, 1)
+	s.DeclaredEntityType = "organization"
+	m, err := sandbox.NewManager(sandbox.ManagerConfig{DataDir: s.DataDir, ManifestsDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(m.Stop)
+	s.SandboxManager = m
+	m.SetEventSigner(&invocationSigner{s: s})
+	sq := s.DataStore.(*store.SQLiteStore)
+	s.WitnessService = witness.NewService(witness.NewSQLiteStore(sq.DB()), sq, s.KeriDriver, witness.BackendDesktop)
+	s.DataStore.SaveContact(store.ContactRecord{AID: "EWitnessPeer", OobiURL: peer.base, Status: "accepted"})
+	s.WitnessService.Store.SaveContactMeta(witness.ContactMeta{ContactAID: "EWitnessPeer", WitnessKey: peer.witnessKey})
+
+	// The witness agrees to witness for the organisation, the ordinary way.
+	owner, _ := s.DataStore.GetIdentity()
+	peer.svc.Contacts.SaveContact(store.ContactRecord{AID: owner.AID, Status: "accepted", ContactCategory: "trusted"})
+	if res := peer.svc.ProcessInboundRequest(context.Background(), witness.WitnessRequest{RequesterAID: owner.AID, BackendType: witness.BackendDesktop}); !res.Accepted {
+		t.Fatalf("the witness did not agree to witness for the organisation: %s", res.Reason)
+	}
+
+	for i := 0; i < 2; i++ {
+		writeRows(t, s, 2)
+		if ok, err := s.anchorRecord(); err != nil || !ok {
+			t.Fatalf("anchoring: %v %v", ok, err)
+		}
+	}
+	rec, _ := s.loadRecordIdentity()
+	events, _ := s.DataStore.GetEvents(rec.AID)
+	ownerEvents, _ := s.DataStore.GetEvents(owner.AID)
+	held := func(aid string) int {
+		proof, _ := peer.svc.KelProof(aid)
+		return len(proof.Events)
+	}
+	for i := 0; i < 300 && (held(rec.AID) < len(events) || held(owner.AID) < len(ownerEvents)); i++ {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if held(owner.AID) != len(ownerEvents) {
+		t.Fatalf("the witness holds %d of the organisation's %d events", held(owner.AID), len(ownerEvents))
+	}
+	if held(rec.AID) != len(events) {
+		t.Fatalf("the witness holds %d of the record identity's %d events", held(rec.AID), len(events))
+	}
+	got := chainSays(t, s)
+	for i := 0; i < 100 && got["witnessed_through"] != got["anchored_through"]; i++ {
+		time.Sleep(20 * time.Millisecond)
+		got = chainSays(t, s)
+	}
+	if got["witnesses_answered"] != float64(1) || got["witness_confirmed_tip"] != float64(len(events)-1) {
+		t.Fatalf("the check does not report the witness confirming the tip: %v", got)
+	}
+	if got["anchor_broken_at"] != nil || got["witnessed_through"] != got["anchored_through"] {
+		t.Fatalf("the record reads as %v", got)
 	}
 }

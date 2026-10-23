@@ -91,9 +91,13 @@ func (s *CoreServer) handleWitnessKel(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "kel not found", err.Error())
 		return
 	}
+	// The events as published and signed, and this witness's receipt of the
+	// newest, so whoever asks can check the answer rather than believe it.
+	proof, _ := s.WitnessService.KelProof(signerAID)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"aid": signerAID, "kel": kel, "count": len(kel),
+		"events": proof.Events, "tip_receipt": proof.TipReceipt,
 	})
 }
 

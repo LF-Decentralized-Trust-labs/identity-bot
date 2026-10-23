@@ -145,8 +145,8 @@ func TestARealDelegatedInceptionIsWitnessed(t *testing.T) {
 		raw, _ := base64.StdEncoding.DecodeString(req.Event)
 		return witness.ReceiveEvent(req.AID, raw, req.Sig)
 	}
-	sender.FetchKel = func(_ context.Context, _ string) ([]map[string]interface{}, error) {
-		return witness.GetKelReplica(d.AID)
+	sender.FetchKel = func(_ context.Context, _ string) (KelReply, error) {
+		return witness.KelProof(d.AID)
 	}
 	for _, ev := range [][]byte{dip, ixnRaw} {
 		sig, _ := login.SignString(string(ev), recSeed)
@@ -215,5 +215,66 @@ func TestAWitnessFollowsAKeyLogPastItsSixteenthEvent(t *testing.T) {
 	held, _ := witness.GetKelReplica(icp.AID)
 	if sn, _ := eventSeq(held[len(held)-1]); sn != 17 || held[len(held)-1]["d"] != last {
 		t.Fatalf("the witness holds the key log to %d", sn)
+	}
+}
+
+// A witness takes on a delegated identity only from the approval it holds in
+// the delegator's key log, and only once the inception's own signature holds.
+func TestAWitnessTakesOnADelegateOnlyFromItsApproval(t *testing.T) {
+	witness, _ := testService(t)
+	wpub, wpriv, _ := ed25519.GenerateKey(rand.Reader)
+	wkey := iacrypto.NonTransferableAIDQB64(wpub)
+	witness.SignReceipt = func(said string) (string, string, error) {
+		sig, err := login.SignString(said, wpriv.Seed())
+		return wkey, sig, err
+	}
+	e := keriengine.New()
+	key := func() (string, []byte) {
+		pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+		return iacrypto.VerkeyQB64(pub), priv.Seed()
+	}
+	orgPub, orgSeed := key()
+	orgNext, _ := key()
+	icp, err := e.CreateInceptionNamed(orgPub, orgNext, "org")
+	if err != nil {
+		t.Fatal(err)
+	}
+	send := func(aid, rawB64 string, seed []byte) error {
+		raw, _ := base64.StdEncoding.DecodeString(rawB64)
+		sig, _ := login.SignString(string(raw), seed)
+		_, err := witness.ReceiveEvent(aid, raw, sig)
+		return err
+	}
+	_ = witness.Store.SaveContactMeta(ContactMeta{ContactAID: icp.AID, WitnessingFor: true, BackendType: BackendDesktop})
+	if err := send(icp.AID, icp.RawBytesB64, orgSeed); err != nil {
+		t.Fatal(err)
+	}
+	recPub, recSeed := key()
+	recNext, _ := key()
+	var approval drivers.KELKeep
+	d, err := e.CreateDelegatedInceptionKept(recPub, recNext, "", "org", []string{wkey}, 1, func(k drivers.KELKeep) error {
+		approval = k
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Before the witness holds the approval, the inception is refused.
+	if err := send(d.AID, d.RawBytesB64, recSeed); err == nil {
+		t.Fatal("a delegate was witnessed before its approval was held")
+	}
+	if err := send(icp.AID, base64.StdEncoding.EncodeToString(approval.Raw), orgSeed); err != nil {
+		t.Fatalf("the approval: %v", err)
+	}
+	// Signed by another key, the inception is refused and enrols nobody.
+	_, otherSeed := key()
+	if err := send(d.AID, d.RawBytesB64, otherSeed); err == nil {
+		t.Fatal("a badly signed delegated inception was witnessed")
+	}
+	if meta, _ := witness.Store.GetContactMeta(d.AID); meta != nil && meta.WitnessingFor {
+		t.Fatal("a badly signed delegated inception enrolled its identity")
+	}
+	if err := send(d.AID, d.RawBytesB64, recSeed); err != nil {
+		t.Fatalf("an approved delegate was refused: %v", err)
 	}
 }

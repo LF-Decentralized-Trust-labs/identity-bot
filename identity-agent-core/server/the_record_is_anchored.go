@@ -25,6 +25,7 @@ import (
 	"identity-agent-core/login"
 	"identity-agent-core/secureenclave"
 	"identity-agent-core/store"
+	"identity-agent-core/witness"
 )
 
 // The record is anchored in a key log.
@@ -366,13 +367,11 @@ func (s *CoreServer) recordIdentity() (recordIdentityRecord, []byte, error) {
 		return recordIdentityRecord{}, nil, err
 	}
 	var rec recordIdentityRecord
-	var dipRecord, approvalRecord store.EventRecord
 	keep := func(k drivers.KELKeep) error {
 		approval, dip, err := s.delegationRecords(owner.AID, k, pub, seed)
 		if err != nil {
 			return err
 		}
-		dipRecord, approvalRecord = dip, approval
 		var parsed map[string]interface{}
 		_ = json.Unmarshal(k.Delegated, &parsed)
 		said, _ := parsed["d"].(string)
@@ -398,25 +397,40 @@ func (s *CoreServer) recordIdentity() (recordIdentityRecord, []byte, error) {
 	if err := s.saveRecordIdentity(rec); err != nil {
 		log.Printf("[record] the record identity %s was made but could not be marked so: %v", rec.AID, err)
 	}
-	// The approval goes to this identity's witnesses, and the inception to the
-	// same ones, so a witness that checks a delegation against its approval
-	// finds it.
-	s.witness(owner.AID, approvalRecord, witnesses, toad)
-	s.witness(rec.AID, dipRecord, witnesses, toad)
+	s.witnessRecord(owner.AID, rec.AID, witnesses, toad)
 	log.Printf("[record] record identity %s made, approved in %s's key log, witnessed by %d", rec.AID, owner.AID, len(witnesses))
 	return rec, seed, nil
 }
 
-// witness sends one of the record identity's events to the witnesses it
-// names, for receipts. Nothing to do where it names none.
-func (s *CoreServer) witness(aid string, ev store.EventRecord, witnesses []string, toad int) {
+// witnessRecord brings the record identity's witnesses up to date: first with
+// this identity's own key log, so they hold its approval of the record
+// identity, in order, then with the record identity's. A witness that holds
+// the approval witnesses the record identity from its inception. Nothing to
+// do where it names none.
+func (s *CoreServer) witnessRecord(ownerAID, recordAID string, witnesses []string, toad int) {
 	if len(witnesses) == 0 || s.WitnessService == nil {
 		return
 	}
-	raw, _ := base64.StdEncoding.DecodeString(ev.RawBytesB64)
-	if err := s.WitnessService.BroadcastToDesignated(context.Background(), aid, raw, ev.CesrSignature, witnesses, toad); err != nil {
-		log.Printf("[record] event %d of %s could not be sent to its witnesses: %v", ev.SequenceNumber, aid, err)
+	owner, record := s.signedEventsOf(ownerAID), s.signedEventsOf(recordAID)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		s.WitnessService.BringUpToDate(ctx, ownerAID, owner, witnesses, toad)
+		s.WitnessService.BringUpToDate(ctx, recordAID, record, witnesses, toad)
+	}()
+}
+
+// signedEventsOf is an identity's key log as published and signed.
+func (s *CoreServer) signedEventsOf(aid string) []witness.SignedEvent {
+	events, err := s.DataStore.GetEvents(aid)
+	if err != nil {
+		return nil
 	}
+	out := make([]witness.SignedEvent, 0, len(events))
+	for _, ev := range events {
+		out = append(out, witness.SignedEvent{RawBytesB64: ev.RawBytesB64, CesrSignature: ev.CesrSignature})
+	}
+	return out
 }
 
 // delegationRecords are the stored forms of a delegation: the delegator's
@@ -592,7 +606,9 @@ func (s *CoreServer) anchorRecord() (bool, error) {
 		log.Printf("[record] the record identity's tip could not be kept outside the database: %v", err)
 	}
 	if witnesses, toad, err := keeper.WitnessConfig(rec.AID); err == nil {
-		s.witness(rec.AID, kept, witnesses, toad)
+		if owner, err := s.DataStore.GetIdentity(); err == nil && owner != nil {
+			s.witnessRecord(owner.AID, rec.AID, witnesses, toad)
+		}
 	}
 	return true, nil
 }

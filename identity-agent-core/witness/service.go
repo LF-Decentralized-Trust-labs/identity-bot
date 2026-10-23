@@ -42,7 +42,7 @@ type Service struct {
 	PostEvent  EventPoster
 	// FetchKel reads the key log a witness holds for an identity. Replaceable
 	// so a test needs no network.
-	FetchKel    func(ctx context.Context, url string) ([]map[string]interface{}, error)
+	FetchKel    func(ctx context.Context, url string) (KelReply, error)
 	OurAID      func() string
 	OurOOBI     func() string
 	BackendType string
@@ -103,32 +103,106 @@ func NewService(st Store, contacts ContactStore, driver drivers.KeriEngine, back
 	return s
 }
 
-func (s *Service) defaultFetchKel(ctx context.Context, url string) ([]map[string]interface{}, error) {
+func (s *Service) defaultFetchKel(ctx context.Context, url string) (KelReply, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, err
+		return KelReply{}, err
 	}
 	resp, err := s.HTTPClient.Do(req)
 	if err != nil {
-		return nil, err
+		return KelReply{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("witness GET %d", resp.StatusCode)
+		return KelReply{}, fmt.Errorf("witness GET %d", resp.StatusCode)
 	}
-	var out struct {
-		KEL []map[string]interface{} `json:"kel"`
-	}
+	var out KelReply
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&out); err != nil {
-		return nil, err
+		return KelReply{}, err
 	}
-	return out.KEL, nil
+	return out, nil
+}
+
+// KelReply is a witness's answer for an identity's key log: each event as its
+// controller published and signed it, and the witness's own receipt of the
+// newest, so the answer can be checked rather than believed.
+type KelReply struct {
+	Events     []SignedEvent `json:"events"`
+	TipReceipt *TipReceipt   `json:"tip_receipt,omitempty"`
+}
+
+// SignedEvent is a key event as published, with its controller's signature.
+type SignedEvent struct {
+	RawBytesB64   string `json:"raw_bytes_b64"`
+	CesrSignature string `json:"cesr_signature"`
+}
+
+// TipReceipt is a witness's receipt of the newest event it holds.
+type TipReceipt struct {
+	EventSAID     string `json:"event_said"`
+	WitnessAID    string `json:"witness_aid"`
+	CesrSignature string `json:"cesr_signature"`
+}
+
+// KelProof is this witness's answer for aid's key log, as KelReply.
+func (s *Service) KelProof(aid string) (KelReply, error) {
+	kel, err := s.Store.GetKelEvents(aid)
+	if err != nil {
+		return KelReply{}, err
+	}
+	var out KelReply
+	for _, e := range kel {
+		out.Events = append(out.Events, SignedEvent{RawBytesB64: e.RawBytesB64, CesrSignature: e.CesrSignature})
+	}
+	if len(kel) > 0 {
+		if rct, err := s.Store.GetIssuedReceipt(aid, kel[len(kel)-1].EventSAID); err == nil && rct != nil {
+			out.TipReceipt = &TipReceipt{EventSAID: rct.EventSAID, WitnessAID: rct.WitnessAID, CesrSignature: rct.CesrSignature}
+		}
+	}
+	return out, nil
+}
+
+// heldTipOf checks a witness's answer and returns the tip it shows: the key
+// log must verify as aid's, and its newest event must carry the receipt of
+// the witness asked. An answer that does not check out is no answer.
+func heldTipOf(aid, witnessKey string, reply KelReply) (HeldTip, bool) {
+	if len(reply.Events) == 0 || reply.TipReceipt == nil {
+		return HeldTip{}, false
+	}
+	in := drivers.ValidateKELInput{AID: aid}
+	for _, e := range reply.Events {
+		raw, err := base64.StdEncoding.DecodeString(e.RawBytesB64)
+		if err != nil || len(raw) == 0 || e.CesrSignature == "" {
+			return HeldTip{}, false
+		}
+		in.RawEvents = append(in.RawEvents, raw)
+		in.CesrSignatures = append(in.CesrSignatures, e.CesrSignature)
+	}
+	if res, err := drivers.ValidateKELFromBytes(in); err != nil || !res.KelVerified {
+		return HeldTip{}, false
+	}
+	var last map[string]interface{}
+	if json.Unmarshal(in.RawEvents[len(in.RawEvents)-1], &last) != nil {
+		return HeldTip{}, false
+	}
+	said, _ := last["d"].(string)
+	sn, err := eventSeq(last)
+	if err != nil || said == "" {
+		return HeldTip{}, false
+	}
+	rct := reply.TipReceipt
+	if rct.EventSAID != said || rct.WitnessAID != witnessKey ||
+		drivers.VerifyReceipt(witnessKey, said, rct.CesrSignature) != nil {
+		return HeldTip{}, false
+	}
+	return HeldTip{SN: sn, SAID: said}, true
 }
 
 // KelHeldBy asks each designated witness how far the key log it holds for aid
 // goes, and returns, by witness key, the sequence number and digest of the
-// newest event each holds. A witness that cannot be reached, or holds
-// nothing, is left out.
+// newest event each holds. A witness that cannot be reached, holds nothing, or
+// answers with a key log that does not verify or a tip it has not receipted,
+// is left out.
 func (s *Service) KelHeldBy(ctx context.Context, aid string, designated []string) map[string]HeldTip {
 	known := s.designatedTargets(designated)
 	out := map[string]HeldTip{}
@@ -143,19 +217,16 @@ func (s *Service) KelHeldBy(ctx context.Context, aid string, designated []string
 		go func(key string, w witnessTarget) {
 			defer wg.Done()
 			url := witnessBase(w.URL) + witnessPathPrefix(w.Commercial) + "/witness/kel/" + aid
-			kel, err := s.FetchKel(ctx, url)
-			if err != nil || len(kel) == 0 {
-				return
-			}
-			// Each entry is the event as the witness holds it.
-			last := kel[len(kel)-1]
-			said, _ := last["d"].(string)
-			sn, err := eventSeq(last)
+			reply, err := s.FetchKel(ctx, url)
 			if err != nil {
 				return
 			}
+			tip, ok := heldTipOf(aid, key, reply)
+			if !ok {
+				return
+			}
 			mu.Lock()
-			out[key] = HeldTip{SN: sn, SAID: said}
+			out[key] = tip
 			mu.Unlock()
 		}(key, w)
 	}
@@ -281,8 +352,20 @@ func (s *Service) ReceiveEvent(signerAID string, rawEvent []byte, cesrSig string
 		return nil, fmt.Errorf("unsigned_event")
 	}
 	meta, _ := s.Store.GetContactMeta(signerAID)
+	enrolAs := ""
 	if meta == nil || !meta.WitnessingFor {
-		return nil, fmt.Errorf("not_witnessing")
+		// An identity delegated by one this agent witnesses for is witnessed
+		// too, from its inception, when the delegator's key log this agent
+		// holds approves exactly that inception: the delegator has already
+		// said it is theirs, in the log this agent agreed to witness.
+		delegator, ok := s.delegatorApproves(event)
+		if !ok {
+			return nil, fmt.Errorf("not_witnessing")
+		}
+		enrolAs = BackendDesktop
+		if dm, _ := s.Store.GetContactMeta(delegator); dm != nil && dm.BackendType != "" {
+			enrolAs = dm.BackendType
+		}
 	}
 	seq, err := eventSeq(event)
 	if err != nil {
@@ -298,6 +381,11 @@ func (s *Service) ReceiveEvent(signerAID string, rawEvent []byte, cesrSig string
 
 	if err := s.verifyEventChain(signerAID, rawEvent, cesrSig, seq); err != nil {
 		return nil, fmt.Errorf("rejected: %w", err)
+	}
+	if enrolAs != "" {
+		if err := s.enrollWitnessingFor(signerAID, enrolAs); err != nil {
+			return nil, err
+		}
 	}
 
 	now := NowRFC3339()
@@ -463,6 +551,80 @@ func (s *Service) BroadcastEvent(ctx context.Context, signerAID string, rawEvent
 	}
 	go s.finalizeLoop(said, threshold)
 	return nil
+}
+
+// BringUpToDate sends each designated witness, in order, every event of
+// signerAID's key log it does not hold yet, and keeps the receipts they
+// return. A witness refuses an event that does not follow the last one it
+// holds, so a key log some of whose events never reached its witnesses has to
+// be sent from where each witness stopped, not one event at a time. Each
+// witness is asked how far it holds the log; one whose answer does not check
+// out is sent the whole of it.
+func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []SignedEvent, designated []string, threshold int) {
+	known := s.designatedTargets(designated)
+	// Each event's receipts are counted against its threshold, so each has a
+	// finalisation to count them on.
+	for _, e := range events {
+		raw, _ := base64.StdEncoding.DecodeString(e.RawBytesB64)
+		var ev map[string]interface{}
+		if json.Unmarshal(raw, &ev) != nil {
+			continue
+		}
+		said := eventSAID(ev)
+		if f, _ := s.Store.GetFinalization(said); f == nil {
+			seq, _ := eventSeq(ev)
+			now := NowRFC3339()
+			_ = s.Store.SaveFinalization(FinalizationState{
+				EventSAID: said, SignerAID: signerAID, SequenceNum: seq,
+				State: FinalizePending, Threshold: threshold, StartedAt: now, UpdatedAt: now,
+			})
+		}
+	}
+	var wg sync.WaitGroup
+	for _, key := range designated {
+		w, ok := known[key]
+		if !ok {
+			log.Printf("[witness] %s designates %s, which this agent has no address for", signerAID, key)
+			continue
+		}
+		wg.Add(1)
+		go func(key string, w witnessTarget) {
+			defer wg.Done()
+			from := 0
+			kelURL := witnessBase(w.URL) + witnessPathPrefix(w.Commercial) + "/witness/kel/" + signerAID
+			if reply, err := s.FetchKel(ctx, kelURL); err == nil {
+				if tip, ok := heldTipOf(signerAID, key, reply); ok {
+					from = tip.SN + 1
+				}
+			}
+			for _, e := range events {
+				raw, err := base64.StdEncoding.DecodeString(e.RawBytesB64)
+				if err != nil {
+					return
+				}
+				var ev map[string]interface{}
+				if json.Unmarshal(raw, &ev) != nil {
+					return
+				}
+				if sn, err := eventSeq(ev); err != nil || sn < from {
+					continue
+				}
+				body, _ := json.Marshal(map[string]interface{}{
+					"aid": signerAID, "event_b64": e.RawBytesB64, "cesr_signature": e.CesrSignature,
+				})
+				said := eventSAID(ev)
+				resp, err := s.PostEvent(ctx, witnessEventURL(w), body)
+				if err != nil {
+					log.Printf("[witness] %s did not take event %s of %s: %v", key, said, signerAID, err)
+					return
+				}
+				if sig, wit, verr := receiptFromResponse(resp, said); verr == nil && wit == key {
+					s.onReceipt(said, key, sig)
+				}
+			}
+		}(key, w)
+	}
+	wg.Wait()
 }
 
 // BroadcastToDesignated sends an event to the witnesses an identity's own key
@@ -993,4 +1155,44 @@ func (s *Service) PublishEndpointRecord(ctx context.Context, signerAID string, r
 	log.Printf("[witness] endpoint record for %s published to %d/%d witnesses",
 		signerAID, delivered, len(witnesses))
 	return nil
+}
+
+// delegatorApproves is the delegator of a delegated inception, when this agent
+// witnesses for that delegator and holds, in its key log, the approval of
+// exactly this inception.
+func (s *Service) delegatorApproves(event map[string]interface{}) (string, bool) {
+	if event["t"] != "dip" {
+		return "", false
+	}
+	delegator, _ := event["di"].(string)
+	aid, _ := event["i"].(string)
+	said := eventSAID(event)
+	if delegator == "" || aid == "" || said == "" {
+		return "", false
+	}
+	dm, _ := s.Store.GetContactMeta(delegator)
+	if dm == nil || !dm.WitnessingFor {
+		return "", false
+	}
+	held, err := s.Store.GetKelEvents(delegator)
+	if err != nil {
+		return "", false
+	}
+	for _, e := range held {
+		raw, err := base64.StdEncoding.DecodeString(e.RawBytesB64)
+		if err != nil {
+			continue
+		}
+		var ev map[string]interface{}
+		if json.Unmarshal(raw, &ev) != nil {
+			continue
+		}
+		seals, _ := ev["a"].([]interface{})
+		for _, x := range seals {
+			if seal, ok := x.(map[string]interface{}); ok && seal["i"] == aid && seal["s"] == "0" && seal["d"] == said {
+				return delegator, true
+			}
+		}
+	}
+	return "", false
 }

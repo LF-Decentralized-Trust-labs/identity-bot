@@ -172,6 +172,22 @@ func (s *SQLiteStore) SaveIssuedReceipt(r IssuedReceipt) error {
 	return err
 }
 
+func (s *SQLiteStore) GetIssuedReceipt(signerAID, eventSAID string) (*IssuedReceipt, error) {
+	var r IssuedReceipt
+	err := s.db.QueryRow(`
+		SELECT signer_aid, event_said, sequence_num, witness_aid, receipt_json, cesr_signature, issued_at
+		FROM witness_receipts_issued WHERE signer_aid = ? AND event_said = ?
+		ORDER BY issued_at DESC LIMIT 1`, signerAID, eventSAID).Scan(
+		&r.SignerAID, &r.EventSAID, &r.SequenceNum, &r.WitnessAID, &r.ReceiptJSON, &r.CesrSignature, &r.IssuedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &r, nil
+}
+
 func (s *SQLiteStore) GetFinalization(eventSAID string) (*FinalizationState, error) {
 	row := s.db.QueryRow(`
 		SELECT event_said, signer_aid, sequence_num, state, receipt_count, threshold, started_at, updated_at
